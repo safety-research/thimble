@@ -6,7 +6,7 @@
 // stopped says so on its row, with the records it read rather than all it would have read.
 import { act, useState } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
-import { labelStatus, outcomeText, stoppedText } from '../../src/files/labels.ts'
+import { labelStatus, noValueText, outcomeText, stoppedText } from '../../src/files/labels.ts'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { useLabelRuns, useLabelSide } from '../../src/files/ViewSide.tsx'
 import type { Concept, ConceptRun } from '../../src/lib/types.ts'
@@ -54,6 +54,7 @@ const labelsOf = (all: Concept[]): FilesLabels => ({
 interface Call {
   method: string
   path: string
+  body?: unknown
 }
 let calls: Call[] = []
 
@@ -69,7 +70,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const path = new URL(String(url), 'http://thimble.test').pathname
     const method = init?.method ?? 'GET'
-    calls.push({ method, path })
+    calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined })
     const answer = (status: number, json: unknown) => new Response(JSON.stringify(json), { status, headers: { 'content-type': 'application/json' } })
     if (path.endsWith('/apply/cancel')) return answer(200, { ok: true, cancelling: true })
     if (path.endsWith('/apply') && method === 'POST') return answer(202, { status: 'running', run_id: 'r3' })
@@ -181,9 +182,57 @@ describe('a run that quitting Claude Code stopped (bug hunt H3)', () => {
     expect(stoppedText((s as Extract<typeof s, { state: 'done' }>).stoppedAt!, 'record')).toBe('stopped at 8,447 of 14,591 records when Claude Code quit')
     const el = await mount(<Side start={labelsOf([halfway])} />)
     const row = el.querySelector('[data-anchor="concept:q1"]')!
-    expect(row.querySelector('.files-label-stopped')?.textContent).toBe('stopped at 8,447 of 14,591 records when Claude Code quitRun again')
-    await act(async () => button(row, 'Run again')!.click())
+    expect(row.querySelector('.files-label-stopped')?.textContent).toBe('stopped at 8,447 of 14,591 records when Claude Code quitRun again on all 14,591')
+    await act(async () => button(row, 'Run again on all 14,591')!.click())
     await settle()
-    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/q1/apply'))).toHaveLength(1)
+    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/q1/apply')).map((c) => c.body)).toEqual([{}])
+  })
+})
+
+describe('Run again after a stop (bug hunt I3)', () => {
+  // it started over at record 0 and labeled the 7,527 records the stopped run had read again, with no word of it
+  const STOPPED = { ts: '2026-10-17T18:24:45Z', paths: ['*'], total: 29555, matched_total: 29555, labeled: 7527, failed: 0, matches: 276, status: 'done', stopped: true }
+  const stopped = { ...label('s1', 'kills another process'), last_run: STOPPED, counts: { match: 276, 'no match': 7251 }, n_labeled: 7527 } as unknown as Concept
+
+  test('goes on with the records the stopped run never read while its definition stands, and says so', async () => {
+    const el = await mount(<Side start={labelsOf([{ ...stopped, resume: { read: 7527, left: 22028, total: 29555 } } as Concept])} />)
+    const row = el.querySelector('[data-anchor="concept:s1"]')!
+    expect(row.querySelector('.files-label-stopped')?.textContent).toBe('stopped at 7,527 of 29,555 recordsLabel the other 22,028')
+    await act(async () => button(row, 'Label the other 22,028')!.click())
+    await settle()
+    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/s1/apply')).map((c) => c.body)).toEqual([{ resume: true }])
+  })
+
+  test('labels every record again once its definition changed, and says so', async () => {
+    const el = await mount(<Side start={labelsOf([{ ...stopped, resume: null } as Concept])} />)
+    const row = el.querySelector('[data-anchor="concept:s1"]')!
+    await act(async () => button(row, 'Run again on all 29,555')!.click())
+    await settle()
+    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/s1/apply')).map((c) => c.body)).toEqual([{}])
+  })
+})
+
+describe('one count for a label everywhere (bug hunt I10)', () => {
+  // the terminal, main's card and read_ref count the records a label gave a value, as its rows hold them; the Labels
+  // pane counted a stopped run's records read (9 of 370, the terminal 9 + 391 after a trial) and a code label's every
+  // record (1,521 of 71,298, the terminal 8,496)
+  test("a stopped run after a trial counts the label's records with a value, the trial's among them", () => {
+    const STOPPED = { ts: '2026-10-17T19:21:55Z', paths: ['*'], total: 1521, matched_total: 1521, labeled: 370, failed: 0, matches: 9, status: 'done', stopped: true }
+    const s = labelStatus({ ...label('t1', 'claims task done'), last_run: STOPPED, counts: { match: 9, 'no match': 391 } } as unknown as Concept)!
+    const done = s as Extract<typeof s, { state: 'done' }>
+    expect(outcomeText(done)).toBe('9 of 400 records')
+    expect(stoppedText(done.stoppedAt!, 'record')).toBe('stopped at 370 of 1,521 records')
+  })
+
+  test("a code label's records its code returned None for are no part of its total, and its row says so", async () => {
+    const DONE = { ts: '2026-10-17T19:19:53Z', paths: ['*/transcript.jsonl'], total: 71298, matched_total: 71298, labeled: 8496, failed: 0, skipped: 62802, matches: 1521, status: 'done' }
+    const code = { ...label('c1', 'assistant text message'), kind: 'code', last_run: DONE, counts: { match: 1521, 'no match': 6975 } } as unknown as Concept
+    const s = labelStatus(code)! as Extract<ReturnType<typeof labelStatus>, { state: 'done' }>
+    expect(outcomeText(s)).toBe('1,521 of 8,496 records')
+    expect(noValueText(s)).toBe('62,802 records got no value from its code')
+    const el = await mount(<Side start={labelsOf([code])} />)
+    expect(el.querySelector('[data-anchor="concept:c1"] .files-label-none')?.textContent).toBe('62,802 records got no value from its code')
+    // a prompt label's records with no words
+    expect(noValueText(labelStatus({ ...code, kind: 'prompt' } as Concept) as typeof s)).toBe('62,802 records had no words to read')
   })
 })

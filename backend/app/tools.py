@@ -2776,8 +2776,15 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         line += f" {s['none']}" + (" Its counts from earlier runs are cleared." if s.get("dropped") else "")
     if s.get("failed"):
         line += f" {s['failed']} {unit}(s) failed{sofar}: {s.get('message') or 'no reason given'}."
-    if s.get("skipped"):  # units with no words (a transcript's blank lines), which a prompt label does not ask about
-        line += f" It skipped {s['skipped']:,} blank {unit}(s)."
+    if s.get("skipped"):
+        # units that got no value, which no count holds, so the counts add up to the units that got one, as every place
+        # counts them (bug hunt I10: "blank" read as empty records, and main's card counted 8,496 where the browser
+        # said 71,298): a code label's that its code returned None for, a prompt label's that held no words
+        n = int(s["skipped"])
+        valued = sum(int(v) for v in applied.values()) if applied else 0
+        why = "its code returned None for them" if kind == "code" else "they hold no words to read"
+        line += (f" {n:,} {unit}(s) got no value, as {why}; the counts leave them out"
+                 f"{f', and are of the {valued:,} {unit}(s) that got one' if valued else ''}.")
     if (s.get("cut") or {}).get("line"):
         line += f" {s['cut']['line']}."
     values = (concepts.find_concept(ctx.ws, s["concept"]) or {}).get("labels") or [None]

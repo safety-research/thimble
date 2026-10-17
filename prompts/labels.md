@@ -46,6 +46,8 @@ The analyst described a label in their own words, and thimble applies the label 
 
 Give two or a few short values, the positive first and the negative last, such as "match" and "no match". Name the label in a few words taken from the description. Label the records of files unless the description is about cards or report sentences. For records, mark span when the value rests on some words of the record, record when it rests on the whole record, and file when it rests on the whole file.
 
+The records thimble reads from a file by default may not be the records that the description names. For example, a chat transcript can keep its messages under one key of the file. When the files show other places of records below and the description names the records at one of them, give `records`: a glob of the files, then `#` and that place, such as `*.json#/messages`. Do not give `records` when the default records are the records that the description names.
+
 The analyst asked for: {{description}}
 
 {{records}}
@@ -55,3 +57,11 @@ The analyst asked for: {{description}}
 The label would apply to {{paths}}. The first records of {{path}}, each cut at {{cut}} characters:
 
 {{lines}}
+
+{{places}}
+
+## places
+
+Some of these files are JSON documents. By default, thimble reads {{default}} as the records of each of them. They also hold these places of records:
+
+{{list}}

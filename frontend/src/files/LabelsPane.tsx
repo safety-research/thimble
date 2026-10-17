@@ -19,8 +19,8 @@ import { TipButton } from '../components/Tooltip'
 import { useDemo } from '../lib/demo'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
-import type { Concept, ConceptRun } from '../lib/types'
-import { classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, outcomeText, progressText, stoppedText, unitWord, type LabelFilter, type LabelStatus } from './labels'
+import type { Concept, ConceptRun, LabelResume } from '../lib/types'
+import { againWords, classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, noValueText, outcomeText, progressText, stoppedText, unitWord, type LabelFilter, type LabelStatus } from './labels'
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { LabelMark } from './LabelMark'
 import { LabelPalette } from './LabelPalette'
@@ -37,7 +37,8 @@ interface Props {
   /** the runs the pane has seen per label: running ones, and the last record of one that ended */
   runs: ReadonlyMap<string, ConceptRun>
   /** apply a label again after a failed run; resolves once the server has answered */
-  onRetry: (id: string) => Promise<void>
+  /** apply the label again: after a failure, or after a stop, with `resume` going on with the units it never read */
+  onRetry: (id: string, resume?: boolean) => Promise<void>
   /** stop a label's run; resolves once the server has answered */
   onStop: (id: string) => Promise<void>
   /** the label whose row comes into view once the list holds it (a run the analyst just started), then `onRevealed` */
@@ -198,7 +199,7 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
         )}
       </div>
       {files && <LabelPalette label={k} anchor={paletteAt} open={picking} onClose={() => setPicking(false)} onPick={(value, n) => labels.setColour(k.id, value, n)} />}
-      {status && <LabelStatusLine status={status} name={k.name} marked={byHand} onRetry={() => onRetry(k.id)} />}
+      {status && <LabelStatusLine status={status} name={k.name} marked={byHand} resume={k.resume ?? null} onRetry={(resume) => onRetry(k.id, resume)} />}
       {!status && files && byHand > 0 && (
         <div className="files-label-status">
           <span className="files-label-marked">
@@ -250,7 +251,7 @@ function FilterButton({ pressed, label, onClick }: { pressed: boolean; label: st
  * stopped run stopped with Run again, how many the analyst marked by hand (in a view, the Files reader or the label's
  * card) and how many whole files it read only in part (ReadCutLine), each on a line of its own, or its failure with
  * Retry. */
-function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelStatus; name: string; marked: number; onRetry: () => Promise<void> }) {
+function LabelStatusLine({ status: s, name, marked, resume, onRetry }: { status: LabelStatus; name: string; marked: number; resume: LabelResume | null; onRetry: (resume?: boolean) => Promise<void> }) {
   const [retrying, setRetrying] = useState(false)
   if (s.state === 'running') {
     const share = s.total ? Math.min(1, s.done / s.total) : null
@@ -297,22 +298,26 @@ function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelSt
         </>
       )}
       {failed && <span className="files-label-failed">{failed}</span>}
+      {/* the units it gave no value, which its counts leave out (bug hunt I10) */}
+      {noValueText(s) && <span className="files-label-none">{noValueText(s)}</span>}
       {/* a run that was stopped, by the analyst or by quitting Claude Code, says how far it got, and runs again on its
           line (bug hunt H3: a run the quit stopped at 8,447 of 14,591 records read as finished) */}
       {s.stopped && (
         <span className="files-label-stopped">
           <span className="files-label-stopped-text">{stoppedText(s.stoppedAt ?? { read: s.total ?? 0, of: null, quit: false }, s.unit)}</span>
+          {/* its words say whether it goes on with the units the stopped run never read or labels every unit again (bug
+              hunt I3) */}
           <Button
             size="sm"
             className="files-label-retry"
-            aria-label={`Run ${name} again`}
+            aria-label={`${againWords(resume, s.stoppedAt, s.sample)} of ${name}`}
             busy={retrying}
             onClick={() => {
               setRetrying(true)
-              void onRetry().finally(() => setRetrying(false))
+              void onRetry(Boolean(resume)).finally(() => setRetrying(false))
             }}
           >
-            Run again
+            {againWords(resume, s.stoppedAt, s.sample)}
           </Button>
         </span>
       )}

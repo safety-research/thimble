@@ -400,3 +400,128 @@ test('each label color has the name show_label takes for it, and the wheel holds
   expect(COLOR_NAMES.length).toBe(LABEL_HUES.length + PICKED_HUES.length)
   expect(LABEL_WHEEL.flat().sort((a, b) => a - b)).toEqual(Array.from({ length: 18 }, (_, i) => i + 1))
 })
+
+// bug hunt round 8: a label's run goes on in whichever process started it (main's apply_label in the server or the
+// shim, the browser's Run again); `thimble state` gives it as the label's `run`, which every place reads
+
+/** The label as `thimble state` gives it while a run of it goes on in another process, after a run that stopped. */
+function runningElsewhere(w: World, run: Record<string, unknown>, extra: Record<string, unknown> = {}): void {
+  const stopped = { ts: '2026-10-17T18:24:45Z', paths: ['revisions.jsonl'], total: 14591, matched_total: 14591, labeled: 7527, failed: 0, status: 'done', stopped: true, version: 1 }
+  w.states.labels = [{ ...LABEL, kind: 'prompt', last_run: stopped, applications: [stopped], run: { status: 'running', run_id: 'r2', ...run }, label_stats: { n_labeled: 7600, counts: { none: 7300, 'proxy-link': 300 } }, ...extra }] as never
+}
+
+test("the panel's stop of a run main started goes as the browser's Stop run (`label-stop`), and says on a red row when it did not stop (bug hunt I1)", { timeoutMs: 30_000 }, async ($, on) => {
+  // the stop of a run main's chat followed went to `act stop {agent}`, which looked for a subagent; the act's false
+  // answer was never shown
+  const w = world(on)
+  runningElsewhere(w, { done: 2459, total: 14591 })
+  w.states.agents = { rows: [{ name: 'thimble:labels', label: `label ${LABEL.name}`, state: 'running', kind: 'agent', chat: 'c9', role: 'labels' }], line: '', text: '' } as never
+  let pane = await labelPanel($, w)
+  let text = shown(await pane.drawn())
+  expect(text).toContain('◌ labeling 2,459 of 14,591')
+  expect(text).toContain('s to stop')
+  w.answers = { 'label-stop': { label: LABEL.id, stopping: false, reason: 'no run of this label is going' } }
+  pane = await press($, w, pane, 'hk-stop')
+  expect(w.acts).toContainEqual({ kind: 'label-stop', payload: { label: LABEL.id } })
+  expect(w.acts.some(a => a.kind === 'stop')).toBe(false)
+  expect(shown(await pane.drawn())).toContain('× not stopped: no run of this label is going')
+  // a stop that stops says so until the run ends
+  w.answers = { 'label-stop': { label: LABEL.id, stopping: true } }
+  pane = await press($, w, pane, 'lb-stop')
+  text = shown(await pane.drawn())
+  expect(text).toContain('◌ stopping after the current record')
+  expect(text).not.toContain('× not stopped')
+  await pane.unmount()
+})
+
+test('a run going on in another process shows in the panel as running, its count live and of its own size, with no `run on all` (bug hunts I2, I4)', { timeoutMs: 30_000 }, async ($, on) => {
+  // a Run again from the browser read `stopped at 7,527 of 29,555` with `run on all` for its whole run; a run within
+  // another label counted against the whole glob (`301 of 29,555` for 4,556)
+  const w = world(on)
+  runningElsewhere(w, { done: 301, total: 4556, matched_total: 4556 })
+  let pane = await labelPanel($, w)
+  let text = shown(await pane.drawn())
+  expect(text).toContain('◌ labeling 301 of 4,556')
+  expect(text).not.toContain('stopped at')
+  expect(text).not.toContain('14,591 records')
+  expect(await pane.find({ type: 'Button', key: 'lb-all' })).toBeUndefined()
+  expect(await pane.find({ type: 'Button', key: 'lb-stop' })).toBeDefined()
+  await pane.unmount()
+  // the next read of the label: the count as the run has it now
+  runningElsewhere(w, { done: 943, total: 4556, matched_total: 4556 })
+  w.stamps.set(`${WS}/concepts`, 9)
+  await w.clock.advance(1100)
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  text = shown(await pane.drawn())
+  expect(text).toContain('◌ labeling 943 of 4,556')
+  await pane.unmount()
+})
+
+test('a run stopped part way under the definition it has now offers `label the other N`, which goes on with it (`label-run {resume}`); `run on all` labels every record again (bug hunt I3)', { timeoutMs: 30_000 }, async ($, on) => {
+  const w = world(on)
+  runningElsewhere(w, {}, { run: null, resume: { read: 7527, left: 7064, total: 14591 } })
+  let pane = await labelPanel($, w)
+  const text = shown(await pane.drawn())
+  expect(text).toContain('stopped at 7,527 of 14,591')
+  expect(await pane.find({ type: 'Button', key: 'lb-resume' })).toMatchObject({ text: 'label the other 7,064' })
+  expect(await pane.find({ type: 'Button', key: 'lb-all' })).toMatchObject({ text: 'run on all 14,591 records' })
+  w.labelRun = { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 14591, failed: 0, counts: { none: 14000, 'proxy-link': 591 } } }
+  pane = await press($, w, pane, 'lb-resume')
+  expect(w.acts.filter(a => a.kind === 'label-run').at(-1)).toEqual({ kind: 'label-run', payload: { label: LABEL.id, resume: true } })
+  expect(shown(await pane.drawn())).toContain('labeled the other 7,064: none 14,000 · proxy-link 591')
+  await pane.unmount()
+  // no `resume` (its definition changed since the stop): only the run on every record
+  runningElsewhere(w, {}, { run: null, resume: null })
+  w.stamps.set(`${WS}/concepts`, 10)
+  await w.clock.advance(1100)
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(await pane.find({ type: 'Button', key: 'lb-resume' })).toBeUndefined()
+  await pane.unmount()
+})
+
+test("a run's count in the panel follows its run file each second, and a run whose file went has ended there, before the label is read again (bug hunt I1)", { timeoutMs: 30_000 }, async ($, on) => {
+  // the panel's count stood behind the card's, and `◌ labeling … stop` stayed half a minute after the stop, as the
+  // refresh pass reads every card before the panel
+  const w = world(on)
+  runningElsewhere(w, { done: 2459, total: 14591, matched_total: 14591, run_id: 'r2' })
+  let pane = await labelPanel($, w)
+  expect(shown(await pane.drawn())).toContain('◌ labeling 2,459 of 14,591')
+  await pane.unmount()
+  const run = `${WS}/labels/${LABEL.id}.run.json`
+  w.files.set(run, JSON.stringify({ concept: LABEL.id, run_id: 'r2', status: 'running', done: 5584, total: 14591, matched_total: 14591, counts: { none: 5300, 'proxy-link': 284 }, pid: 1, beat: w.clock.now() / 1000 }))
+  w.stamps.set(run, 2)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  let text = shown(await pane.drawn())
+  expect(text).toContain('◌ labeling 5,584 of 14,591')
+  // its counts as the run's file has them, as the browser and `thimble state` read them (bug hunt I2)
+  expect(text).toMatch(/proxy-link\s+━+\s+284/)
+  expect(text).toMatch(/none\s+━+\s+5,300/)
+  await pane.unmount()
+  // the run ends: its file goes, and the panel no longer says it runs, though no read of the label says so yet
+  w.files.delete(run)
+  w.stamps.delete(run)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  text = shown(await pane.drawn())
+  expect(text).not.toContain('◌ labeling')
+  expect(text).not.toContain('s to stop')
+  await pane.unmount()
+})
+
+test("a run stopped after a trial says its counts are the label's records with a value, the trial's among them (bug hunt I10)", { timeoutMs: 30_000 }, async ($, on) => {
+  // the panel said `stopped after 370: claims done 9 · does not 391`, 400 records under `stopped at 370`, where the
+  // browser counted 370
+  const w = world(on)
+  let pane = await labelPanel($, w)
+  w.labelRun = { ok: true, label: LABEL.id, summary: { status: 'done', stopped: true, labeled: 370, failed: 0, counts: { 'proxy-link': 9, none: 391 } } }
+  pane = await press($, w, pane, 'lb-all')
+  expect(shown(await pane.drawn())).toContain("stopped after 370; the label's 400 with a value: proxy-link 9 · none 391")
+  // a run whose records are the label's says its counts plainly
+  w.labelRun = { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 400, failed: 0, counts: { 'proxy-link': 9, none: 391 } } }
+  pane = await press($, w, pane, 'lb-all')
+  expect(shown(await pane.drawn())).toContain('ran on all 400: proxy-link 9 · none 391')
+  await pane.unmount()
+})

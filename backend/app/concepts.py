@@ -1157,14 +1157,14 @@ def verdicts_applied(ws: Path, concept_id: str, counts: dict[str, int]) -> tuple
 
 def concept_stats(ws: Path, concept: dict) -> dict:
     """{n_labeled, n_reviewed, n_marked, counts} from the stats stored on the concept while their key matches the labels
-    file, else from the store. While a run appends, the stored (pre-run) stats stand."""
+    file, else from the store. While a run appends they come from the store too, in the process that runs it as in
+    every other, so every place counts the rows as they stand (bug hunt I2: the server gave the counts from before the
+    run while `thimble state` gave the rows so far)."""
     stored = concept.get("label_stats")
     key = _file_key(labels_file(ws, concept["id"]))
     if key is None:
         return label_stats([])
-    if _applying(ws.name, concept["id"]) or (stored is not None and tuple(stored["key"]) == key):
-        if stored is None:
-            return label_stats([])
+    if stored is not None and tuple(stored["key"]) == key:
         marked = stored["n_reviewed"] if stored["n_marked"] is None else stored["n_marked"]
         return {"n_labeled": stored["n_labeled"], "n_reviewed": stored["n_reviewed"], "n_marked": marked, "counts": dict(stored["counts"])}
     return _stats(ws, concept["id"])
@@ -1217,7 +1217,9 @@ def with_stats(ws: Path, concept: dict) -> dict:
     est = cal["agreed"] / cal["n"] if cal.get("n") else None
     return {**{k: v for k, v in concept.items() if k not in ("label_stats", "taught", "teaching")}, **concept_stats(ws, concept),
             "est_precision": est,
-            "run": _runs.get((ws.name, concept["id"]))}
+            "run": current_run(ws.name, concept["id"]),
+            # what its Run again goes on with after a stop, None when it labels every unit again (resumable)
+            "resume": resumable(ws, concept)}
 
 
 # --------------------------------------------------------------------------- units (what gets labelled)
@@ -2200,7 +2202,178 @@ def _progress(c: str, concept_id: str, **fields: Any) -> dict:
     event = "done" if state["status"] in ("done", "error") else "progress"
     for q in _subs.get(key, ()):
         q.put_nowait((event, json.dumps(state)))
+    _share(c, concept_id, state)
     return state
+
+
+# --------------------------------------------------------------------------- one run state for every process
+#
+# A label's run is a task of the process that started it: thimble's server, the session's MCP shim, or a `thimble act
+# label-run` beside the session. Every other process knows of it from its run file (run_file), which the run writes as
+# it goes (its run record, its process and a `beat`) and removes as it ends, so `thimble state` (which the terminal
+# reads), the server and through it the browser and main's tools give one run state and one set of counts (bug hunt
+# I2: a Run again in the browser read as stopped in the terminal for its whole run). A file whose beat is older than
+# RUN_STALE_S is a run whose process ended without removing it. A stop from any process is the label's stop file
+# (request_stop), which the run's process watches (_watch_runs), as it watches for the label's definition gone (a delete
+# from another process; bug hunt I1: the terminal's stop of a run main started reached nothing). Its beat carries the
+# label's counts as its rows stand then (_counts_now), which the terminal draws while the run goes on.
+
+RUN_FILE_EVERY_S = 1.0  # a run's file is written at most this often as it goes (at once when it begins)
+RUN_BEAT_S = 2.0  # and at least this often, with its latest record
+RUN_STALE_S = 15.0  # a run file not written for this long is no run
+STOP_POLL_S = 0.5  # how often a run's process looks for its stop file
+RUN_FILE_DROP = ("summary", "failures", "cut")  # what of a run record stays in its own process
+RUN_SHAPE = ("run_id", "total", "matched_total", "phase")  # a change of these is written at once
+_shared: dict[tuple[str, str], dict] = {}  # the runs this process holds: {path, ws, state, at}
+_shared_lock = threading.Lock()
+_watcher: threading.Thread | None = None
+
+
+def run_file(ws: Path, concept_id: str) -> Path:
+    """The run file of the label's run going on in some process (module note above)."""
+    return ws / "labels" / f"{concept_id}.run.json"
+
+
+def stop_file(ws: Path, concept_id: str) -> Path:
+    """The file that asks the label's run to stop after its current unit, in whichever process it runs (request_stop)."""
+    return concepts_dir(ws) / f"{concept_id}.stop"
+
+
+def _write_run_file(p: Path, state: dict) -> None:
+    rec = {**{k: v for k, v in state.items() if k not in RUN_FILE_DROP}, "pid": os.getpid(), "beat": time.time()}
+    p.parent.mkdir(exist_ok=True)  # the workspace's labels folder; a workspace gone is no place to write
+    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(rec, default=str), "utf-8")
+    os.replace(tmp, p)
+
+
+def _share(c: str, concept_id: str, state: dict) -> None:
+    """The run record `state` written for the other processes: at once when the run begins or its size or phase
+    changes (RUN_SHAPE), else at most every RUN_FILE_EVERY_S (the watcher writes the latest with its beat), removed once
+    the run ended. Never raises."""
+    key = (c, concept_id)
+    try:
+        with _shared_lock:
+            held = _shared.get(key)
+            if state.get("status") != "running":
+                if held is not None:
+                    del _shared[key]
+                    _drop_run_file(held["path"])
+                return
+            if held is None:
+                ws = config.workspace_dir(c)
+                held = _shared[key] = {"path": run_file(ws, concept_id), "ws": ws, "state": state, "at": 0.0, "shape": None}
+            held["state"] = state
+            now = time.monotonic()
+            shape = tuple(state.get(k) for k in RUN_SHAPE)
+            if now - held["at"] < RUN_FILE_EVERY_S and shape == held["shape"]:
+                return
+            held["at"], held["shape"] = now, shape
+            _write_run_file(held["path"], state)
+        _start_watcher()
+    except Exception:  # noqa: BLE001 — the run goes on; the other processes see it later or not at all
+        log.debug("the run file of %s/%s was not written", c, concept_id, exc_info=True)
+
+
+def _drop_run_file(p: Path) -> None:
+    """Remove a run file this process wrote; one another process wrote since is that process's run."""
+    try:
+        if json.loads(p.read_text("utf-8")).get("pid") != os.getpid():
+            return
+    except (OSError, ValueError, AttributeError):
+        pass
+    p.unlink(missing_ok=True)
+
+
+def _start_watcher() -> None:
+    global _watcher
+    with _shared_lock:
+        if _watcher is not None and _watcher.is_alive():
+            return
+        _watcher = threading.Thread(target=_watch_runs, name="label-runs-watch", daemon=True)
+        _watcher.start()
+
+
+def _watch_runs() -> None:
+    """The runs this process holds, every STOP_POLL_S: a stop file, or the label's definition gone, sets the run's
+    cancel flag, so it stops after its current unit as the browser's Stop stops it, and the stop file goes; every
+    RUN_BEAT_S each run's file is written again with its latest record. Ends once the process holds no run."""
+    global _watcher
+    last_beat = time.monotonic()
+    while True:
+        time.sleep(STOP_POLL_S)
+        with _shared_lock:
+            held = list(_shared.items())
+            if not held:
+                _watcher = None
+                return
+        beat = time.monotonic() - last_beat >= RUN_BEAT_S
+        for key, h in held:
+            try:
+                stop = stop_file(h["ws"], key[1])
+                if stop.exists() or not _concept_file(h["ws"], key[1]).is_file():
+                    _cancel_event(*key).set()
+                    stop.unlink(missing_ok=True)
+                if beat:
+                    counts = _counts_now(h["ws"], key[1])
+                    with _shared_lock:
+                        if _shared.get(key) is h:
+                            h["at"] = time.monotonic()
+                            _write_run_file(h["path"], {**h["state"], **({"counts": counts} if counts is not None else {})})
+            except Exception:  # noqa: BLE001
+                log.debug("the run of %s/%s was not watched", *key, exc_info=True)
+        if beat:
+            last_beat = time.monotonic()
+
+
+def _counts_now(ws: Path, concept_id: str) -> dict | None:
+    """The label's counts as its rows stand now, each record the analyst set to another value under that value (as
+    thimble.labels() and the terminal read them), which a run's file carries with its beat, so the terminal draws the
+    counts of a run going on as fast as its progress; None when they cannot be read. Blocking."""
+    try:
+        return verdicts_applied(ws, concept_id, dict(_stats(ws, concept_id).get("counts") or {}))[0]
+    except Exception:  # noqa: BLE001
+        log.debug("the counts of %s were not read for its run file", concept_id, exc_info=True)
+        return None
+
+
+def live_run(c: str, concept_id: str) -> dict | None:
+    """The run of the label going on in another process, as its run file has it (module note above), else None."""
+    if (c, concept_id) in _shared:
+        return None
+    try:
+        rec = json.loads(run_file(config.workspace_dir(c), concept_id).read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(rec, dict) or rec.get("status") != "running" or rec.get("pid") == os.getpid():
+        return None
+    beat = rec.get("beat")
+    if isinstance(beat, bool) or not isinstance(beat, (int, float)) or time.time() - beat > RUN_STALE_S:
+        return None
+    return {k: v for k, v in rec.items() if k not in ("pid", "beat")}
+
+
+def current_run(c: str, concept_id: str) -> dict | None:
+    """The label's run record as every process gives it: the run this process holds while it runs, else the one another
+    process holds (live_run), else the last one that ended here, or None."""
+    state = _runs.get((c, concept_id))
+    if state is not None and state.get("status") == "running":
+        return state
+    return live_run(c, concept_id) or state
+
+
+def request_stop(c: str, concept_id: str) -> bool:
+    """Ask the label's run to stop after its current unit, in whichever process it runs: its cancel flag here, else its
+    stop file (_watch_runs). The rows written so far stay. False when no run of the label is going."""
+    if _applying(c, concept_id):
+        _cancel_event(c, concept_id).set()
+        return True
+    if live_run(c, concept_id) is None:
+        return False
+    p = stop_file(_ws(c), concept_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_now(), "utf-8")
+    return True
 
 
 # --------------------------------------------------------------------------- classifiers
@@ -3655,22 +3828,37 @@ def _write_units(units_file: Path, units: Iterable[Unit]) -> None:
 
 def _record_application(ws: Path, concept_id: str, app: dict, calibration: dict | None = None,
                         label_stats: dict | None = None, taught: dict[str, str] | None = None,
-                        merge: bool = False) -> dict | None:
+                        merge: bool = False, resume: bool = False) -> dict | None:
     """Append a run summary to the stored concept (re-read: it may have changed meanwhile) and, after a completed
     run, store the recomputed calibration, the rows it wrote for its examples (`taught`, which ends its `teaching`) and
     the labels file's stats with its key and step its revision, since the run changed its rows (note_change). With
     `merge`, a run again over the units the last run could not label (start_again): the last run's record takes in what
     it labeled and how many units are still without a value, with the run itself under `again`. A run again that failed
     changed no row: the last run stays as it was, the failure under its `again` (`status` error and its `message`), so
-    the label shows no failed run of its own and a later run again still takes its values into that run (bug hunt E8)."""
+    the label shows no failed run of its own and a later run again still takes its values into that run (bug hunt E8).
+    With `resume`, a run that went on with the units a stopped run never read (resumable): that run's record becomes
+    this one's with the units both read, `since` the start of the first, and a resume that failed leaves it as it was,
+    the failure under its `resumed` (bug hunt I3)."""
     concept = read_concept(ws, concept_id)
     if concept is None:
         return None
     last = concept["applications"][-1] if concept["applications"] else None
     merge = merge and isinstance(last, dict) and last.get("status") == "done"
+    resume = resume and not merge and isinstance(last, dict) and last.get("status") == "done" and bool(last.get("stopped"))
     if app.get("status") == "done":
         note_change(concept, "ran", ran_text(concept["unit"], app.get("total"), again=merge))
-    if merge and app.get("status") != "done":
+    if resume and app.get("status") != "done":
+        assert isinstance(last, dict)
+        tried = {k: app.get(k) for k in ("ts", "labeled", "failed", "created_by", "status", "message")}
+        concept["applications"] = [*concept["applications"][:-1], {**last, "resumed": tried}]
+    elif resume:
+        assert isinstance(last, dict)
+        both = {k: int(last.get(k) or 0) + int(app.get(k) or 0) for k in ("labeled", "failed", "matches", "refused")}
+        merged = {**app, **{k: v for k, v in both.items() if k != "refused" or v},
+                  "since": last.get("since") or last.get("ts"), **({"cut": last["cut"]} if last.get("cut") and not app.get("cut") else {})}
+        merged.pop("resumed", None)
+        concept["applications"] = [*concept["applications"][:-1], merged]
+    elif merge and app.get("status") != "done":
         assert isinstance(last, dict)
         tried = {k: app.get(k) for k in ("ts", "total", "labeled", "failed", "created_by", "status", "message")}
         concept["applications"] = [*concept["applications"][:-1], {**last, "again": tried}]
@@ -3696,6 +3884,47 @@ def _record_application(ws: Path, concept_id: str, app: dict, calibration: dict 
         concept["label_stats"] = label_stats
     write_concept(ws, concept)
     return concept
+
+
+def resumable(ws: Path, concept: dict) -> dict | None:
+    """What a Run again after a stop goes on with (bug hunt I3: it labeled the records the stopped run had read again):
+    {read, left, total} when the label's last run was a prompt label's run stopped part way under the definition the
+    label has now (its version, its `within` and the revision of the label it runs within), over its whole scope (no
+    sample) and over files the label still applies to (a run of the same definition over more files adds them to its
+    glob: define_concept); None when a Run again labels every unit again. A resume runs over that run's files
+    (resume_paths)."""
+    apps = concept.get("applications") or []
+    last = apps[-1] if apps else None
+    if concept.get("kind") != "prompt" or not isinstance(last, dict) or last.get("status") != "done" or not last.get("stopped"):
+        return None
+    if last.get("version") != concept.get("version") or last.get("limit"):
+        return None
+    within = concept.get("within") or None
+    if (last.get("within") or None) != within or (within and last.get("within_rev") != _rev_of(ws, within["label"])):
+        return None
+    if concept.get("unit") in FILE_UNITS and not set(_patterns(last.get("paths"))) <= set(glob_patterns(concept.get("glob"))):
+        return None
+    read, total = stopped_at(last)
+    if total is None or read >= total:
+        return None
+    return {"read": read, "left": total - read, "total": total}
+
+
+def resume_paths(ws: Path, concept: dict, paths: list[str]) -> list[str]:
+    """The files a Run again with `resume` runs over: the stopped run's when it goes on with it (resumable), else
+    `paths`."""
+    if concept.get("unit") in FILE_UNITS and resumable(ws, concept) is not None:
+        return _patterns(concept["applications"][-1].get("paths"))
+    return paths
+
+
+def _read_by(ws: Path, concept: dict, stopped: dict) -> set[str]:
+    """The units the stopped run `stopped` (and the runs it went on from) read: those it labeled, the rows written since
+    it began, and those it could not label. Blocking (a thread)."""
+    st = _store_ready(ws, concept["id"])
+    since = str(stopped.get("since") or stopped.get("ts") or "")
+    read = st.model_refs_since(since) if st is not None and since else set()
+    return read | {labels_store.canon_ref(r) for r in unlabeled_refs(ws, concept)}
 
 
 def _again_scope(concept: dict, whole: int | None) -> int | None:
@@ -3745,13 +3974,16 @@ async def _trial_takeaways_stale(c: str, ws: Path, concept_id: str) -> None:
 
 async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, limit: int | None = None, created_by: str = "user",
                     *, comment: bool = True, run_id: str | None = None, started: str | None = None,
-                    sources: list[dict] | None = None, again: bool = False, by: str | None = None) -> dict:
+                    sources: list[dict] | None = None, again: bool = False, by: str | None = None,
+                    resume: bool = False) -> dict:
     """Apply a concept over its unit's scope, write the label rows and return the run summary. start_apply runs this as a
     task. One run at a time per concept. A prompt kind always carries the analyst's latest values as few-shot examples
     (few_shot_examples), and the agreement it reports leaves those values out (held_out). With `again`, a prompt label
     runs only over the units its last run could not label (unlabeled_refs), and that run's record takes in what this one
     labeled (_record_application `merge`). `by` names who ran it for the reruns of its readers (changed_by): the
-    analyst's runs (`created_by` user) need none.
+    analyst's runs (`created_by` user) need none. With `resume`, a Run again after a stop goes on with the units the
+    stopped run never read when its definition has not changed since (resumable), and that run's record takes in this
+    one (_record_application `resume`); otherwise it labels every unit again.
     Raises HTTPException for a missing concept, a bad regex, no matching files or a fatal error."""
     ws, concept = load_concept(c, concept_id)
     again_refs: set[str] | None = None
@@ -3760,6 +3992,14 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
         if not found:
             raise HTTPException(409, AGAIN_NONE)
         again_refs, limit = set(found), None
+    # the stopped run this one goes on from, its units' refs read (_read_by) and the units it could not label
+    resumed: dict | None = None
+    if resume and not again and resumable(ws, concept) is not None:
+        last = concept["applications"][-1]
+        if concept["unit"] not in FILE_UNITS or sorted(_patterns(paths)) == sorted(_patterns(last.get("paths"))):
+            resumed, limit = last, None
+    read_before: set[str] = set()
+    unlabeled_before: list[str] = []
     if concept["trial"] and not limit and not again:
         # a trial becomes a label once it runs on everything, and its card's takeaway, written for the sample, is stale
         concept["trial"] = False
@@ -3851,6 +4091,11 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                     units = [units[i] for i in spread(len(units), limit)]
                 total = len(units)
             _progress(c, concept_id, total=total, matched_total=matched)
+            if resumed is not None:
+                # the units the stopped run read are not read again; its count goes on from where it stopped
+                unlabeled_before = await asyncio.to_thread(unlabeled_refs, ws, concept)
+                read_before = await asyncio.to_thread(_read_by, ws, concept, resumed)
+                _progress(c, concept_id, done=int(resumed.get("labeled") or 0) + int(resumed.get("failed") or 0))
             # files that keep no unit to label: the run says why, and the counts of earlier runs go
             none: str | None = None
             dropped = False
@@ -3860,7 +4105,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             # what the kinds below run over: the sampled records of a trial or the records `within` names, else the
             # whole scope
             sampled = unit == "record" and (bool(limit) or bool(within) or again_refs is not None)
-            if none is None and unit == "record" and not sampled:
+            if none is None and unit == "record" and not sampled and resumed is None:
                 # a file read by another reader than lines gets rows of its own refs: what an earlier run left on its
                 # lines goes first, so no cover of those lines counts records the file no longer has
                 await asyncio.to_thread(_clear_files, out, [s["path"] for s in sources if s["path"] not in index["files"]
@@ -3904,6 +4149,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                     stream = (u for u in stream if u.ref in again_refs)
                 if unit == "record":
                     stream = iter(await asyncio.to_thread(picked_as_changes, corpus_dir, units)) if sampled else as_changes(stream)
+                if read_before:
+                    stream = (u for u in stream if labels_store.canon_ref(u.ref) not in read_before)
                 labeled, failed, message = await _apply_prompt(c, concept, stream, out, cancel, files=[s["path"] for s in sources],
                                                                comment=comment, cap=cap)
             else:
@@ -3914,7 +4161,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             _record_application(ws, concept_id, {"ts": started, "paths": patterns, "total": total, "matched_total": matched,
                                                  "labeled": 0, "failed": total or 0, "status": "error", "message": str(e.detail),
                                                  "created_by": created_by, "version": version, "within": within,
-                                                 "within_rev": within_rev}, merge=again_refs is not None)
+                                                 "within_rev": within_rev}, merge=again_refs is not None,
+                                 resume=resumed is not None)
             _label_notice(c, concept, error=str(e.detail))
             raise
         except asyncio.CancelledError:
@@ -3922,7 +4170,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             if key in _quit_stops:
                 _keep_quit_stop(c, ws, concept, again_refs is None and {
                     "ts": started, "paths": patterns, "total": total, "matched_total": matched, "created_by": created_by,
-                    "version": version, "limit": limit, "within": within, "within_rev": within_rev})
+                    "version": version, "limit": limit, "within": within, "within_rev": within_rev},
+                    resume=resumed is not None)
             raise
         except Exception as e:  # noqa: BLE001
             log.exception("apply failed")
@@ -3934,7 +4183,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             _record_application(ws, concept_id, {"ts": started, "paths": patterns, "total": total, "matched_total": matched,
                                                  "labeled": 0, "failed": total or 0, "status": "error", "message": msg,
                                                  "created_by": created_by, "version": version, "within": within,
-                                                 "within_rev": within_rev}, merge=again_refs is not None)
+                                                 "within_rev": within_rev}, merge=again_refs is not None,
+                                 resume=resumed is not None)
             _label_notice(c, concept, error=msg)
             raise HTTPException(502, f"apply failed: {msg}") from e
         try:
@@ -3960,10 +4210,11 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             _quit_stops.discard(key)
             merge = again_refs is not None
             concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats), taught,
-                                           merge=merge)
+                                           merge=merge, resume=resumed is not None)
                        or {**concept, "calibration": calibration})
-            await asyncio.to_thread(_keep_unlabeled, ws, concept, _unlabeled_now.pop(key, []))
-            if merge and concept.get("applications"):  # the run it ran again for, with what this one labeled taken in
+            await asyncio.to_thread(_keep_unlabeled, ws, concept, unlabeled_before + _unlabeled_now.pop(key, []))
+            if (merge or resumed is not None) and concept.get("applications"):
+                # the run it ran again for, or went on from, with what this one labeled taken in
                 app = concept["applications"][-1]
             summary = {**app, "run_id": run_id, "concept": concept_id, "name": concept["name"], "unit": concept["unit"],
                        "kind": concept["kind"], "labels_path": str(out),
@@ -3971,9 +4222,10 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             if not out.exists():
                 labels_store.remove(out)
             whole = not cancel.is_set() and not limit and not failed and state.get("files_total") is not None
-            _progress(c, concept_id, status="done", done=labeled + failed + skipped, labeled=labeled, failed=failed, message=message,
+            read_first = int(resumed.get("labeled") or 0) + int(resumed.get("failed") or 0) if resumed is not None else 0
+            _progress(c, concept_id, status="done", done=read_first + labeled + failed + skipped, labeled=labeled, failed=failed, message=message,
                       eta_s=None, phase=None, files_done=state["files_total"] if whole else state.get("files_done", 0), summary=summary)
-            _label_notice(c, concept, failed=failed if not cancel.is_set() else 0, total=app.get("total", total),
+            _label_notice(c, concept, failed=int(app.get("failed") or 0) if not cancel.is_set() else 0, total=app.get("total", total),
                           message=message, failures=state.get("failures"), none=none)
         except asyncio.CancelledError:
             _progress(c, concept_id, status="error", message="cancelled", eta_s=None, phase=None)
@@ -3997,6 +4249,9 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
 def _apply_finished(key: tuple[str, str], task: asyncio.Task) -> None:
     if _tasks.get(key) is task:
         _tasks.pop(key, None)
+    if (_runs.get(key) or {}).get("status") == "running" and key not in _tasks:
+        # cancelled before it began: its run record and its run file must not say it runs
+        _progress(*key, status="error", message="cancelled", eta_s=None, phase=None)
     if not task.cancelled():
         exc = task.exception()
         if exc is not None and not isinstance(exc, HTTPException):
@@ -4040,12 +4295,13 @@ def stop_workspace(c: str) -> int:
     return n
 
 
-def _keep_quit_stop(c: str, ws: Path, concept: dict, run: dict | bool) -> None:
+def _keep_quit_stop(c: str, ws: Path, concept: dict, run: dict | bool, *, resume: bool = False) -> None:
     """Main's quit stopped a run of label `concept` part way (stop_workspace): `run` (the run's scope, False for a run
     again, whose last run stays as it was) is kept on the label as a stopped run, as the analyst's Stop keeps one, with
     the units it read (`stopped`, `stopped_by` quit), so the browser, the terminal and read_ref say where it stopped and
     offer to run it again; a notice says so, until the label's next run ends (bug hunt H3: the browser showed the
-    partial counts as final, and main had to guess). Never raises."""
+    partial counts as final, and main had to guess). `resume`: the run went on from a stopped run, whose record takes it
+    in (_record_application). Never raises."""
     from . import notices  # noqa: PLC0415
 
     key = (c, str(concept["id"]))
@@ -4058,8 +4314,10 @@ def _keep_quit_stop(c: str, ws: Path, concept: dict, run: dict | bool) -> None:
         app = {**run, "labeled": labeled, "failed": failed, **({"skipped": skipped} if skipped else {}),
                "matches": int(state.get("matches") or 0), "status": "done", "message": None, "stopped": True,
                "stopped_by": STOPPED_BY_QUIT}
-        if _record_application(ws, key[1], app) is None:
+        kept = _record_application(ws, key[1], app, resume=resume)
+        if kept is None:
             return
+        app = kept["applications"][-1] if resume and kept.get("applications") else app
         _notify(c, key[1], "applied")
         notices.post(c, kind="label", key=f"label:{key[1]}", agent=f"Label: {concept['name']}",
                      text=LABEL_QUIT_TEXT.format(name=concept["name"], **stopped_words(concept["unit"], app)),
@@ -4135,15 +4393,17 @@ def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int 
 
 async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, limit: int | None = None, created_by: str = "user",
                       *, comment: bool = True, sources: list[dict] | None = None, again: bool = False,
-                      by: str | None = None) -> dict:
+                      by: str | None = None, resume: bool = False) -> dict:
     """Begin an apply in the background and return its run record at once: 404 no such concept, 400 no matching files, 409 an
-    apply of this concept is already running (`detail.run_id` names it). `sources` are the files scope_sources already found;
-    `by` names who runs it (run_apply)."""
+    apply of this concept is already running, in this process or another (`detail.run_id` names it). `sources` are the
+    files scope_sources already found; `by` names who runs it and `resume` asks to go on with a stopped run (run_apply)."""
     ws, concept = load_concept(c, concept_id)
     key = (c, concept_id)
-    live = running_apply(c, concept_id)
+    live = running_apply(c, concept_id) or live_run(c, concept_id)
     if live is not None:
         raise _already_running(live)
+    # a stop asked of a run that ended before it saw it is not a stop of this one
+    stop_file(ws, concept_id).unlink(missing_ok=True)
     patterns = _patterns(paths)
     limit = int(limit) if limit else None
     if concept["unit"] in FILE_UNITS:
@@ -4160,15 +4420,20 @@ async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, l
         patterns, sources = [], []
     if running_apply(c, concept_id) is not None:
         raise _already_running(_runs.get(key) or {})
+    if (live := live_run(c, concept_id)) is not None:
+        raise _already_running(live)
     run_id, started = _new_id(), _now()
     _cancel_event(c, concept_id).clear()
     record = _run_record(c, concept_id, run_id, started, created_by, patterns, sources)
     task = asyncio.get_running_loop().create_task(
         run_apply(c, concept_id, patterns, limit, created_by, comment=comment, run_id=run_id, started=started,
-                  sources=sources, again=again, by=by),
+                  sources=sources, again=again, by=by, resume=resume),
         name=f"thimble-apply-{concept_id}")
     _tasks[key] = task
     task.add_done_callback(partial(_apply_finished, key))
+    # the pages read the label again, so a card or a list that showed it stopped follows the run (bug hunt I2: a Run
+    # again from the Labels pane left the canvas card on `Stopped at` for the whole run)
+    _notify(c, concept_id, "started", rows=False)
     return record
 
 
@@ -4238,6 +4503,9 @@ async def cancel_workspace(c: str) -> list[str]:
     for table in (_runs, _cancels, _locks):
         for key in [k for k in list(table) if k[0] == c]:
             table.pop(key, None)
+    with _shared_lock:
+        for key in [k for k in list(_shared) if k[0] == c]:
+            _drop_run_file(_shared.pop(key)["path"])
     return out
 
 
@@ -4676,12 +4944,12 @@ def resolve_concept_ref(corpus: Path | str, ref: str) -> dict:
     excerpt += f"\n{card['n_labeled']} labeled" + (f" ({counts})" if counts else "") + f"; {est}"
     if moved:
         excerpt += f"\nthese counts apply the analyst's verdicts: {moved} {card['unit']}(s) the analyst set to another value count under that value"
-    if _applying(name, card["id"]):
-        run = _runs.get((name, card["id"])) or {}
+    run = card.get("run") or {}
+    if run.get("status") == "running":  # in this process or another (current_run)
         total = run.get("total")
         so_far = f"{run.get('done', 0):,} of {total:,}" if isinstance(total, int) else f"{run.get('done', 0):,}"
-        excerpt += (f"\nan apply is running ({so_far} {card['unit']}s so far; these counts are from before it — read this "
-                    f"ref again once it ends)")
+        excerpt += (f"\nan apply is running ({so_far} {card['unit']}s so far; these counts are of the rows so far — read "
+                    f"this ref again once it ends)")
     elif stop := stopped_part_way(card):
         excerpt += f"\n{stop}; run the label again to label all of them"
     return {"ref": ref, "kind": "concept", "concept_id": card["id"], "record": card, "excerpt": excerpt[:refs.EXCERPT_MAX],
@@ -4733,8 +5001,8 @@ def _resolve_value(name: str, card: dict, value: str, ref: str) -> dict:
     excerpt += f" by the label {card['name']}"
     if (card.get("verdicts") or {}).get("set"):
         excerpt += ", with the analyst's verdicts"
-    if _applying(name, card["id"]):
-        excerpt += "; an apply is running, so this count is from before it"
+    if (card.get("run") or {}).get("status") == "running":  # in this process or another (current_run)
+        excerpt += "; an apply is running, so this count is of the rows so far"
     elif stop := stopped_part_way(card):
         excerpt += f"; {stop}"
     return {"ref": ref, "kind": "concept", "concept_id": card["id"], "excerpt": excerpt[:refs.EXCERPT_MAX],
@@ -4793,6 +5061,7 @@ def define_concept(c: str, name: str, description: str = "", kind: str = "prompt
         concept["rev"], concept["changes"] = prior["rev"], prior["changes"]
         note_change(concept, "redefined", redefined_text(prior["labels"], concept["labels"]))
         _stop_apply((c, prior["id"]))
+        request_stop(c, prior["id"])  # a run of it in another process stops too
         lf = labels_file(ws, prior["id"])
         if lf.exists():
             lf.unlink()
@@ -4832,6 +5101,18 @@ def _live_counts(ws: Path, concept_id: str) -> dict:
         return st.stats()["counts"] if st is not None else {}
     except Exception:  # noqa: BLE001
         return {}
+
+
+def label_of_chat(c: str, meta: dict) -> str | None:
+    """The id of the label whose run the chat `meta` follows (a `labels` chat apply_scoped starts, which runs no Claude
+    Code agent): its `concept`, else the label its title `label <name>` names; None for any other chat."""
+    if meta.get("role") != "labels":
+        return None
+    if meta.get("concept"):
+        return str(meta["concept"])
+    title = str(meta.get("title") or "")
+    found = find_concept(_ws(c), title.removeprefix("label ")) if title.startswith("label ") else None
+    return str(found["id"]) if found else None
 
 
 def _follow(c: str, concept: dict) -> Callable[[Any], Any]:
@@ -4948,7 +5229,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
             from . import agents
 
             if not cardrun.in_runner():  # a card runner writes no chat: main's sandbox keeps chats/ read-only
-                agents.start_agent(c, "labels", f"label {concept['name']}", _follow(c, concept))
+                # `concept` names the label whose run a stop of the chat stops (label_of_chat)
+                agents.start_agent(c, "labels", f"label {concept['name']}", _follow(c, concept), concept=concept["id"])
         except Exception:  # noqa: BLE001
             log.debug("the labels agent chat was not started", exc_info=True)
     chosen = _filter_to(c, scope, concept) if filter else None
@@ -5421,6 +5703,7 @@ class ApplyBody(BaseModel):
     comment: bool = True
     created_by: str = "user"
     wait: bool = False  # true: answer with the summary once the run ends, or the run so far past APPLY_WAIT_S
+    resume: bool = False  # a Run again after a stop: go on with the units the stopped run never read (resumable)
 
 
 class VerdictBody(BaseModel):
@@ -5699,7 +5982,8 @@ async def _ran_from_browser(c: str, ws: Path, concept: dict, created_by: str, ra
 @router.post("/ws/{c}/concepts/{concept_id}/apply")
 async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Response) -> dict:
     """Start an apply: 202 with the run record (409 while one runs), or with `wait: true` the summary once the run ends (202
-    with `partial: true` past APPLY_WAIT_S). File units run over `paths`, else the label's glob. The label is the analyst's:
+    with `partial: true` past APPLY_WAIT_S). File units run over `paths`, else the label's glob. With `resume` (a Run
+    again after a stop) it goes on with the units the stopped run never read when the label's `resume` says it can. The label is the analyst's:
     a new label gets its card, and main hears of a version it has not heard of (tell_main), and of a trial run on
     everything once it ends (`label_done`)."""
     ws, concept = load_concept(c, concept_id)
@@ -5708,7 +5992,9 @@ async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Respon
         raise HTTPException(400, "paths is required: corpus-relative globs or a directory (e.g. ['*/board.jsonl'], 'agents'; '*' is the whole dataset)")
     ran_before = bool(concept["applications"])
     whole_trial = bool(concept["trial"]) and not body.limit
-    record = await start_apply(c, concept_id, paths, body.limit, body.created_by, comment=body.comment)
+    if body.resume:
+        paths = await asyncio.to_thread(resume_paths, ws, concept, paths)
+    record = await start_apply(c, concept_id, paths, body.limit, body.created_by, comment=body.comment, resume=body.resume)
     await _ran_from_browser(c, ws, concept, body.created_by, ran_before)
     if whole_trial:
         # the analyst ran a trial on everything: main hears when it ends, as of its own runs (bug hunt G3)
@@ -5733,21 +6019,19 @@ async def again_route(c: str, concept_id: str) -> dict:
 
 @router.get("/ws/{c}/concepts/{concept_id}/apply/runs")
 def apply_runs_route(c: str, concept_id: str) -> list[dict]:
-    """The concept's run record this server knows: the running one, else the last one that ended here."""
+    """The concept's run record: the running one, in this server or another process (current_run), else the last one
+    that ended here."""
     load_concept(c, concept_id)
-    state = _runs.get((c, concept_id))
+    state = current_run(c, concept_id)
     return [state] if state else []
 
 
 @router.post("/ws/{c}/concepts/{concept_id}/apply/cancel")
 def cancel_apply_route(c: str, concept_id: str) -> dict:
-    """Stop the concept's running apply after the current unit, chunk or batch; the rows written so far stay."""
+    """Stop the concept's running apply after the current unit, chunk or batch, in this server or in the process that
+    runs it (request_stop); the rows written so far stay."""
     load_concept(c, concept_id)
-    state = _runs.get((c, concept_id))
-    running = bool(state and state.get("status") == "running")
-    if running:
-        _cancel_event(c, concept_id).set()
-    return {"ok": True, "cancelling": running}
+    return {"ok": True, "cancelling": request_stop(c, concept_id)}
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/events")
@@ -6027,6 +6311,9 @@ def glob_route(c: str, pattern: str = "", unit: str = "") -> dict:
 SAMPLE_RECORDS = 6     # records of the first file a draft reads
 SAMPLE_CUT = 700       # characters of each of them
 DRAFT_OVER = {"files": "files", "canvas": "cards", "report": "sentences"}  # a draft's scope as the edit card's Over
+PLACES_FILES = 50      # files a draft with no Applies to of the analyst's looks in for places of records (record_places)
+PLACES_PARSE_MAX = 32 * 1024 * 1024  # bytes of a JSON document it parses to find them
+PLACES_SHOWN = 4       # places it names, the most records first
 
 
 class DraftBody(BaseModel):
@@ -6034,14 +6321,61 @@ class DraftBody(BaseModel):
     paths: list[str] = Field(default_factory=list)  # the globs the label would apply to (the new-label card's Applies to)
 
 
-def sample_records(c: str, paths: list[str]) -> dict[str, str]:
+def record_places(corpus_dir: Path, sources: list[dict]) -> dict[str, str] | None:
+    """The slots of labels.md's `places` part (bug hunt I8: a draft over chat transcripts, each one JSON document whose
+    messages are the entries of one object, read only each file's system prompt, the records thimble reads by default):
+    among the first PLACES_FILES of `sources` that are JSON documents, the records thimble reads by default (`default`)
+    and the other places that hold several objects (`list`, the most records first: the place, what it holds, in how
+    many files, and its first item cut at SAMPLE_CUT characters). None when no such place is there. Blocking."""
+    default: dict[str, int] = {}
+    places: dict[str, dict] = {}
+    for src in sources[:PLACES_FILES]:
+        rel = src["path"]
+        if src.get("under"):
+            continue
+        try:
+            p = config.safe_corpus_path(corpus_dir, rel)
+            if records.reader_of(p, rel) != "json" or p.stat().st_size > PLACES_PARSE_MAX:
+                continue
+            doc = json.loads(p.read_bytes())
+            idx = records.json_index(p)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        read = {f"#{q.rsplit('/', 1)[0] or q}" for q in (idx.pointers if idx is not None else [])}
+        for q in read:
+            default[q] = default.get(q, 0) + 1
+        for k, v in doc.items():
+            items = list(v.values()) if isinstance(v, dict) else v if isinstance(v, list) else []
+            place = f"#/{records.pointer_escape(str(k))}"
+            if len(items) < 2 or place in read or not any(isinstance(x, (dict, list)) for x in items):
+                continue
+            g = places.setdefault(place, {"what": "entries of an object" if isinstance(v, dict) else "items of an array",
+                                          "n": 0, "files": 0, "example": rel,
+                                          "first": " ".join(json.dumps(items[0], ensure_ascii=False).split())[:SAMPLE_CUT]})
+            g["n"] += len(items)
+            g["files"] += 1
+    if not places:
+        return None
+    shown = sorted(places.items(), key=lambda kv: -kv[1]["n"])[:PLACES_SHOWN]
+    lines = [f"- `{q}`: {g['n']:,} {g['what']}, in {g['files']:,} file{'' if g['files'] == 1 else 's'} such as "
+             f"{g['example']}. Its first: {g['first']}" for q, g in shown]
+    return {"default": ", ".join(f"the items under `{q}`" for q in sorted(default)) or "each file's lines",
+            "list": "\n".join(lines)}
+
+
+def sample_records(c: str, paths: list[str], places: bool = False) -> dict[str, str]:
     """The slots of labels.md's `records` part for a draft: the files the globs name (the first few and how many), the
-    first of them and its first SAMPLE_RECORDS non-empty lines, each cut at SAMPLE_CUT characters. Empty `lines` when no
+    first of them and its first SAMPLE_RECORDS non-empty lines, each cut at SAMPLE_CUT characters; with `places`, the
+    other places of records the files hold (record_places), for a draft that chooses its records. Empty `lines` when no
     file matches or the first is binary. Blocking (a thread)."""
     corpus_dir = config.corpus_dir(c)
     found = match_paths(corpus_dir, _patterns(paths)) if paths else []
     if not found:
-        return {"paths": "no file yet", "path": "", "cut": str(SAMPLE_CUT), "lines": ""}
+        return {"paths": "no file yet", "path": "", "cut": str(SAMPLE_CUT), "lines": "", "places": ""}
+    where = record_places(corpus_dir, found) if places else None
+    shown_places = labels_part("places", **where) if where else ""
     names = ", ".join(s["path"] for s in found[:5]) + (f" and {len(found) - 5} more files" if len(found) > 5 else "")
     first = found[0]["path"]
     p = config.safe_corpus_path(corpus_dir, first)
@@ -6062,7 +6396,7 @@ def sample_records(c: str, paths: list[str]) -> dict[str, str]:
                     lines.append(text[:SAMPLE_CUT])
                 if len(lines) >= SAMPLE_RECORDS:
                     break
-    return {"paths": names, "path": first, "cut": str(SAMPLE_CUT), "lines": "\n".join(lines)}
+    return {"paths": names, "path": first, "cut": str(SAMPLE_CUT), "lines": "\n".join(lines), "places": shown_places}
 
 
 def draft_tool() -> Any:
@@ -6081,6 +6415,9 @@ def draft_tool() -> Any:
                 "text": {"type": "string", "description": "The pattern, the function or the definition."},
                 "values": {"type": "array", "items": {"type": "string"}, "minItems": 2},
                 "marks": {"type": "string", "enum": list(MARKS)},
+                "records": {"type": "string", "description": "The files and the place of their records, such as "
+                                                              "*.json#/messages, when they are not the records thimble "
+                                                              "reads by default."},
             },
             "required": ["name", "scope", "kind", "text", "values"],
             "additionalProperties": False,
@@ -6120,7 +6457,7 @@ async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
     from . import model_call, prompts, tasks  # noqa: PLC0415
 
     records = inp.get("records") if isinstance(inp.get("records"), dict) else {}
-    slots = {k: str(records.get(k) or "") for k in ("paths", "path", "cut", "lines")}
+    slots = {k: str(records.get(k) or "") for k in ("paths", "path", "cut", "lines", "places")}
     with prompts.custom(tasks.files(c, "labels")):
         prompt = labels_part("draft", description=str(inp.get("description") or ""),
                              records=labels_part("records", **slots) if slots["lines"] else "")
@@ -6147,14 +6484,19 @@ async def draft_route(c: str, body: DraftBody) -> dict:
     """Label from prompt, the new-label card's top row: the labels model defines a label from the analyst's description
     (labels.md `draft`), reading the first records of the files it would apply to, and the route answers the draft
     (draft_of) without storing anything. No paths is every file (`*`, as the card's Applies to says by default), so a
-    drafted label over files always names what it runs over (0.9.0 bug hunt D1). 400 for an empty description; 422 for
-    a draft that could not run; 429 or 502 when the call gave none."""
+    drafted label over files always names what it runs over (0.9.0 bug hunt D1). While the card's Applies to is still
+    that default, the model is shown the places of records the files hold besides those thimble reads by default
+    (record_places), and the records it names (`records`, such as `*.json#/messages`) are what the label applies to when
+    they hold records (bug hunt I8: a label of chat messages ran on each transcript's system prompt alone); paths the
+    analyst gave stay. 400 for an empty description; 422 for a draft that could not run; 429 or 502 when the call gave
+    none."""
     text = " ".join(body.text.split())
     if not text:
         raise HTTPException(400, "describe the label")
     paths = [p for given in body.paths for p in glob_patterns(given)] or ["*"]
+    chooses = paths == ["*"]
     try:
-        records = await asyncio.to_thread(sample_records, c, paths)
+        records = await asyncio.to_thread(sample_records, c, paths, chooses)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
     from . import tasks  # noqa: PLC0415
@@ -6163,7 +6505,19 @@ async def draft_route(c: str, body: DraftBody) -> dict:
                             schema=draft_tool().input_schema)
     if call.status != "ok":
         raise _call_failed(call)
+    if chooses and records.get("places"):
+        paths = await asyncio.to_thread(drafted_records, c, (call.output or {}).get("records")) or paths
     return draft_of(call.output, paths)
+
+
+def drafted_records(c: str, chosen: Any) -> list[str] | None:
+    """The globs a draft named as its records (`records`), when they match files that hold records; else None. Blocking."""
+    patterns = glob_patterns(chosen) if isinstance(chosen, str) else []
+    if not patterns:
+        return None
+    corpus_dir = config.corpus_dir(c)
+    sources = match_paths(corpus_dir, patterns)
+    return patterns if sources and units_at_least(corpus_dir, sources, "record", 1)[0] > 0 else None
 
 
 @router.get("/ws/{c}/filters")

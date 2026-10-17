@@ -35,7 +35,7 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { bareCard, cardTag, cardWords, chipPlace, cid, claimFields, questionOf, citations, clip, curlyQuotes, decodeLabel, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
+import { bareCard, cardTag, cardWords, chipPlace, cid, claimFields, questionOf, citations, clip, curlyQuotes, decodeLabel, isChip, labelRef, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, FLAG, labelHex, paintLines, passageTint } from './paint'
@@ -674,13 +674,22 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     const name = opts.in === 'report' ? 'this card' : opts.order ? `card ${opts.order}` : 'the card'
     return <Text color={COLORS.problem} wrap="wrap">{`× ${name} cannot be drawn: ${tc.error || 'the card is not in this workspace'}`}</Text>
   }
+  // a label whose run is going says so from its run, in whichever process runs it (cell.ts labelCard), its count as the
+  // run's file says it this second (term.ts runsLane)
   let data = await withQuotes(cx, tc.data as CardData, tc.takeaway)
-  // a label whose run is going (a chat follows it): `◌ labeling`, with the records labeled so far once its bars show
-  // them, never `not run yet` or `stopped at` (live check term-fix9, quirk 4)
-  if (data.kind === 'label' && data.label && labelRunning((await cx.agents()) ?? [], data.label.name)) {
-    const lb = data.label
+  const fresh = data.kind === 'label' && data.label ? (await cx.labelRuns()).live[data.label.slug] : undefined
+  if (fresh && data.label) {
     const n = (x: number) => x.toLocaleString('en-US')
-    data = { ...data, note: (data.rows ?? []).length && lb.labeled ? `◌ labeling ${n(lb.labeled)}${lb.total > lb.labeled ? ` of ${n(lb.total)}` : ''}` : '◌ labeling' }
+    const note = fresh.done ? `◌ labeling ${n(fresh.done)}${fresh.total !== null && fresh.total >= fresh.done ? ` of ${n(fresh.total)}` : ''}` : '◌ labeling'
+    // its bars as the run's file counts the rows this second
+    const counts = fresh.counts
+    const values = counts ? [...data.label.values, ...Object.keys(counts).filter(k => !data.label!.values.includes(k))] : []
+    const rows = counts ? values.map(v => ({ label: v, value: counts[v] ?? 0, group: '' })) : null
+    const sum = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0
+    data = { ...data, note, ...(rows && sum ? { rows, total: sum, label: { ...data.label, labeled: sum } } : {}) }
+  } else if (data.label?.runId && data.note?.startsWith('◌') && (await cx.labelRuns()).ended.includes(data.label.runId)) {
+    // the run it read ended: no word that it runs until the card is read again
+    data = { ...data, note: '' }
   }
   const meta = { ...(tc.busy ? { busy: tc.busy } : {}), ...(tc.error ? { error: tc.error } : {}) }
   const inner = Math.max(10, w - 4)

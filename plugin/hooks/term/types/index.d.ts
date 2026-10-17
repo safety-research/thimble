@@ -204,6 +204,10 @@ export type TermThreadRow = { id: string; title: string; anchor: string; anchorT
 /** The label panel's state: the parts opened, by `<label>:<part>`; the kind picked in `type` and not yet saved, by
  *  label; and each label's run started from the panel (its size, 0 for every record) and its last word. */
 export type TermLabelUi = { open: string[]; kind: Record<string, string>; runs: Record<string, { limit: number; at: number }>; said: Record<string, string> }
+/** The labels' runs going on in any process, by label, as their run files say them (term.ts runsLane): the units each
+ *  has read of its own size, and the label's counts as its rows stood at the run's last beat; and the runs seen to end
+ *  in this session, by run id. */
+export type TermLabelRuns = { live: Record<string, { run_id: string; done: number; total: number | null; matched_total: number | null; counts?: Record<string, number> }>; ended: string[] }
 
 /** The file browser: the folders folded or unfolded against their default, the folders shown whole, the row the keys
  *  chose; the words of its find (`query`) and the row of what it found that the keys chose (`found`). */
@@ -276,6 +280,8 @@ declare module 'claude-code' {
       homeUi: ChatHomeUi
       // the label panel: its parts opened (`<label>:counts`, `:examples`, `:cards`), the kind picked and not yet saved
       labelUi: TermLabelUi
+      // the labels' runs going on in any process, from their run files (term.ts runsLane)
+      labelRuns: TermLabelRuns
       // the file browser: the folders folded or unfolded against their default, and the file the keys chose
       filesUi: TermFilesUi
       // what `thimble state` said last for a surface the panel shows, by the surface and its arguments

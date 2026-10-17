@@ -83,7 +83,9 @@ async def test_blank_lines_are_skipped_quietly_and_said_once(data_tmp, classify)
     run = label("confused")["applications"][-1]
     assert run["labeled"] == 4 and run["failed"] == 0 and run["skipped"] == 4, run
     assert "failed" not in text and "no readable text" not in text, text
-    assert text.count("It skipped 4 blank record(s).") == 1, text
+    # the counts leave them out, and say of how many records they are (bug hunt I10)
+    said = "4 record(s) got no value, as they hold no words to read; the counts leave them out, and are of the 4 record(s) that got one."
+    assert text.count(said) == 1, text
     assert notice("confused") is None, "a blank line is no failure"
 
 
@@ -103,3 +105,23 @@ async def test_failures_say_each_reason_once_with_counts_that_add_up(data_tmp, c
     # the tool's result says each reason once too, with its count
     failed = text[text.index("5 record(s) failed:"):]
     assert failed.count("overloaded:") == 1 and "(3)" in failed and "(2)" in failed, text
+
+
+async def test_a_code_label_s_records_its_code_returned_none_for_are_said_apart_from_its_counts(data_tmp, monkeypatch):
+    """Bug hunt I10: apply_label called the records a code label's code returned None for "blank", main's card counted
+    the 8,496 that got a value while the browser counted all 71,298. Every place counts the records that got a value,
+    and main reads why the others got none and how many the counts are of."""
+
+    async def scoped(c, **kw):
+        return {"concept": "k1", "name": kw["name"], "unit": "record", "total": 71298, "counts": {"yes": 1521, "no": 6975},
+                "failed": 0, "skipped": 62802, "message": None, "partial": False, "none": None, "dropped": False,
+                "cell": None, "filter": None, "labels_path": "", "unchanged": False, "stale": [], "cut": None}
+
+    monkeypatch.setattr(concepts, "apply_scoped", scoped)
+    r = await tools.call(CORPUS, "apply_label", {"scope": "files", "paths": ["talk/*.md"], "name": "assistant text",
+                                                 "predicate": {"kind": "code", "text": "def label(u):\n    return None"}},
+                         actor="analyst", notebook=None, terminal=False)
+    assert not r.is_error, r.text
+    assert "blank" not in r.text
+    assert ("62,802 record(s) got no value, as its code returned None for them; the counts leave them out, and are of the "
+            "8,496 record(s) that got one.") in r.text, r.text

@@ -40,7 +40,12 @@ export type ThimbleCell = {
  *  (`matched_total`), those labeled, its sample size (`limit`, none for every record), when it began. */
 /** A run of a label as the concept keeps it; `cut`, the whole files or runs a prompt label read only in part, with the
  *  line that says it (backend concepts.read_cut). */
-export type LabelRun = { total?: number; matched_total?: number | null; labeled?: number; status?: string; paths?: string[]; limit?: number | null; ts?: string; cut?: { n?: number; line?: string } | null }
+export type LabelRun = { total?: number; matched_total?: number | null; labeled?: number; failed?: number; skipped?: number; status?: string; paths?: string[]; limit?: number | null; ts?: string; stopped?: boolean; cut?: { n?: number; line?: string } | null }
+
+/** A label's run going on, in whichever process runs it (`thimble state`'s `run`, backend concepts.current_run): its
+ *  units read so far (`done`) of its own size (`total`, null while it is counted); any other status is a run that
+ *  ended. */
+export type LabelLiveRun = { status?: string; done?: number; total?: number | null; matched_total?: number | null; labeled?: number; failed?: number; skipped?: number; limit?: number | null; run_id?: string }
 
 /** A label (`thimble state label <id>`, the concept route's shape), with a page of its rows when the backend gives
  *  one (`rows`, as GET /concepts/<id>/rows?text=1 answers). */
@@ -60,6 +65,11 @@ export type ThimbleLabel = {
   spec?: string
   applications?: LabelRun[]
   last_run?: LabelRun | null
+  /** its run going on, in any process (bug hunt I2) */
+  run?: LabelLiveRun | null
+  /** what its Run again goes on with after a stop: the units the stopped run read and those it never read, of its
+   *  scope's; null when a run labels every unit again (the definition changed since: backend concepts.resumable) */
+  resume?: { read: number; left: number; total: number } | null
   rows?: { ref?: string; label?: string; rationale?: string; analyst?: unknown; text?: string; confidence?: number; match?: string }[]
   /** its revision, which steps whenever its rows or its definition change (concepts.note_change) */
   rev?: number
@@ -641,8 +651,11 @@ export function labelCard(cell: ThimbleCell, label: ThimbleLabel | null): CardDa
   const info = { slug: label.id, name: label.name ?? label.id, kind: label.kind ?? '', values, labeled, total, trial: Boolean(label.trial), paths, ...(colors ? { colors } : {}) }
   // a label with no run says so, as home and its panel do, with no bars and no counts (live check term-fix8, quirk 8:
   // the card a stopped thread left showed yes 0, no 0 and all 0); one whose run stopped part way shows the counts it has,
-  // and says where it stopped (live check term-fix9, quirk 4; bug hunt H3)
-  const st = labelState(label, [])
+  // and says where it stopped (live check term-fix9, quirk 4; bug hunt H3); one whose run goes on, in any process, shows
+  // the counts so far and how far it has read of its own size (`◌ labeling 301 of 4,556`, as the browser counts it: bug
+  // hunts I2, I4)
+  const st = labelState(label)
+  if (st.running) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows: labeled ? rows : [], total: labeled, examples, note: labelStateWords(st), label: { ...info, total: st.total ?? labeled, ...(label.run?.run_id ? { runId: label.run.run_id } : {}) } }
   if (!run && !st.stopped) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows: [], examples: [], note: 'not run yet', label: { ...info, total: st.total ?? labeled } }
   if (!run || st.stopped) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows, total: labeled, examples, note: labelStateWords(st), label: { ...info, total: st.total ?? labeled } }
   return {

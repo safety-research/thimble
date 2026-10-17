@@ -356,6 +356,9 @@ export interface Concept {
   /** GET /concepts carries these too: the last kept run (the Files pane's outcome line) and the live run record */
   last_run?: ConceptApplication | null
   run?: ConceptRun | null
+  /** what a Run again after a stop goes on with: the units the stopped run read and those it never read, of its scope's;
+   * null when a run labels every unit again, as its definition changed since (backend concepts.resumable, bug hunt I3) */
+  resume?: LabelResume | null
   /** how many times what a card reads from the label has changed (backend concepts.py, Revisions), and the last of
    * those changes in words */
   rev?: number
@@ -1866,12 +1869,21 @@ export interface ConceptCoverage {
   offset: number
 }
 
+/** What a label's Run again after a stop goes on with (Concept `resume`). */
+export interface LabelResume {
+  read: number
+  left: number
+  total: number
+}
+
 /** POST /concepts/{id}/apply */
 export interface ApplyBody {
   paths?: string[]
   limit?: number | null
   comment?: boolean
   wait?: boolean
+  /** a Run again after a stop: go on with the units the stopped run never read, when the label's `resume` says it can */
+  resume?: boolean
 }
 
 /** POST /concepts/{id}/labels: the analyst's verdict on one unit. */

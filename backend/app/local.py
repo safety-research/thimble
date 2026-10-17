@@ -43,7 +43,6 @@ import json
 import logging
 import os
 import sys
-import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -660,6 +659,12 @@ def _scope_total(c: str, label: dict[str, Any]) -> int | None:
     try:
         corpus_dir = config.corpus_dir(c)
         sources = concepts.match_paths(corpus_dir, concepts.glob_patterns(label.get("glob")))
+        within = label.get("within")
+        if sources and isinstance(within, dict) and within.get("label"):
+            # a label within another runs over the records that label gave its value, not over its whole glob (bug
+            # hunt I4: `◌ labeling 301 of 29,555` for a run over 4,556)
+            found = concepts.within_refs(config.workspace_dir(c), sources, within, SCOPE_COUNT_MAX)
+            return sum(len(refs) for refs in found.values())
         return concepts.units_at_least(corpus_dir, sources, str(label["unit"]), SCOPE_COUNT_MAX)[0] if sources else None
     except Exception:  # noqa: BLE001 — a scope that cannot be counted is said without its size
         log.debug("scope not counted", exc_info=True)
@@ -1122,7 +1127,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id>]; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
-             "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?, again?}, label-stop {label}, "
+             "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?, again?, resume?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
              "stop {agent}, view-accept {slug}, view-reject {slug}, view-dismiss {slug}, view-proposals-off {}, "
              "view-propose-now {notice?}, view-retry {slug, notice?}, view-term-page {slug}, notice-dismiss {id}, sign-out {slug}")
@@ -1312,7 +1317,8 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     nothing and waits for nothing, and the answer says so (`unchanged`), so main is not asked to run what apply_label
     would answer with the old rows (bug hunt B31). With `again`, a prompt label runs only over the units its last run
     could not label (a label notice's act, concepts.start_again), and main hears of it once it ends (`label_done`), as it
-    does of a trial run on everything."""
+    does of a trial run on everything. With `resume`, a run that was stopped goes on with the units it never read, as the
+    browser's Run again does, when the label's `resume` says it can (concepts.resumable)."""
     from . import cardrun, concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -1321,7 +1327,8 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise StateError(f"no label {payload.get('label')!r}")
     cid = str(found["id"])
     again = payload.get("again") is True
-    limit = _int(str(payload["limit"]), 0, "limit") if payload.get("limit") not in (None, "") and not again else 0
+    resume = payload.get("resume") is True and not again
+    limit = _int(str(payload["limit"]), 0, "limit") if payload.get("limit") not in (None, "") and not again and not resume else 0
     if limit < 0:
         raise StateError("limit must be 1 or more, or left out for every record")
     files = found["unit"] in concepts.FILE_UNITS
@@ -1336,14 +1343,14 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         cardrun.mirror(c)
         return {"label": cid, "deferred": True, "command": cardrun.command("label", cid)}
     ran_before = bool(found["applications"])
-    stop = _label_stop_file(c, cid)
-    stop.unlink(missing_ok=True)
     told = None
     if again:
         await concepts.start_again(c, cid, "user")
         told = concepts.tell_when_done(c, cid)
     else:
-        await concepts.start_apply(c, cid, paths, limit or None, "user")
+        if resume:
+            paths = await asyncio.to_thread(concepts.resume_paths, ws, found, paths)
+        await concepts.start_apply(c, cid, paths, limit or None, "user", resume=resume)
         cards = await asyncio.to_thread(concepts._label_cards, ws, cid)
         card = dict(cards[0][1]) if cards else None
         if card is None and not ran_before:
@@ -1352,40 +1359,33 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         if found["trial"] and not limit:  # a trial run on everything: main hears when it ends (bug hunt G3)
             told = concepts.tell_when_done(c, cid, whole_trial=True)
     # `label-stop` from another process asks this run to stop after its current unit, as the browser's Stop does; so does
-    # `label-delete` from another process, which removes the label's file
-    ended = threading.Event()
-    defined = concepts._concept_file(ws, cid)
-
-    def watch() -> None:
-        while not ended.wait(LABEL_STOP_POLL_S):
-            if stop.exists() or not defined.is_file():
-                concepts._cancel_event(c, cid).set()
-                stop.unlink(missing_ok=True)
-                return
-
-    threading.Thread(target=watch, name=f"label-stop-{cid}", daemon=True).start()
-    try:
-        summary = await concepts.wait_apply(c, cid, float("inf"))
-    finally:
-        ended.set()
+    # `label-delete` from another process, which removes the label's file: this process watches for both while the run
+    # goes on, as every process that runs a label does (concepts._watch_runs)
+    summary = await concepts.wait_apply(c, cid, float("inf"))
     if told is not None:  # this process ends with the run: main's `label_done` goes out first
         with contextlib.suppress(Exception):
             await asyncio.wait_for(asyncio.shield(told), LABEL_DONE_WAIT_S)
     return {"label": cid, "summary": summary}
 
 
-LABEL_STOP_POLL_S = 0.5
 LABEL_DONE_WAIT_S = 30.0  # how long a `label-run` with `again`, or of a trial on everything, waits for its `label_done`
 
 
 def _label_stop_file(c: str, cid: str) -> Path:
-    """The file that asks a running `label-run` of label `cid` to stop (`label-stop`); the run's process watches for it."""
-    return config.workspace_dir(c) / "concepts" / f"{cid}.stop"
+    """The file that asks a run of label `cid` to stop (`label-stop`); the run's process watches for it."""
+    from . import concepts  # noqa: PLC0415
+
+    return concepts.stop_file(config.workspace_dir(c), cid)
+
+
+# what `label-stop` answers when no run of the label is going (the label panel says it on its `×` row)
+LABEL_NOT_RUNNING = "no run of this label is going"
 
 
 async def _act_label_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Stop a label's run that `label-run` started, after its current unit; the rows written so far stay (the browser's
-    Stop, concepts.cancel_apply_route). The run lives in that act's own process, which watches for the stop file."""
+    """Stop a label's run after its current unit, whichever process runs it (main's apply_label in the server or the
+    session's shim, a `label-run`, the browser's Run again); the rows written so far stay (the browser's Stop,
+    concepts.cancel_apply_route). {stopping: true}, or {stopping: false, reason} when no run of it is going."""
     from . import concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -1393,9 +1393,8 @@ async def _act_label_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     if found is None:
         raise StateError(f"no label {payload.get('label')!r}")
     cid = str(found["id"])
-    stop = _label_stop_file(c, cid)
-    stop.parent.mkdir(parents=True, exist_ok=True)
-    stop.write_text(_now(), "utf-8")
+    if not concepts.request_stop(c, cid):
+        return {"label": cid, "stopping": False, "reason": LABEL_NOT_RUNNING}
     return {"label": cid, "stopping": True}
 
 
@@ -1488,11 +1487,17 @@ async def _act_seen(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Stop one of thimble's agents, by its chat or its agent id, through the hooks module (subagents.stop), as the
-    browser's Stop does."""
-    from . import agents, subagents  # noqa: PLC0415
+    browser's Stop does. The chat that follows a label's run is no agent: its stop stops that run, wherever it runs
+    (concepts.request_stop; bug hunt I1: it went to the module and answered that the module was not loaded)."""
+    from . import agents, concepts, subagents  # noqa: PLC0415
 
     who = _text(payload, "agent").removeprefix("chat:").removeprefix("thread:")
     meta = agents.meta_or_none(c, who) if agents.ID_RE.match(who) else None
+    if meta is not None and meta.get("role") == "labels":
+        cid = concepts.label_of_chat(c, meta)
+        if cid is None or not concepts.request_stop(c, cid):
+            return {"stopped": False, "kind": "not-running", "reason": LABEL_NOT_RUNNING}
+        return {"stopped": True, "label": cid}
     # an agent's chat names its agent; a side thread's, the fork of main that answers it
     fork = (meta or {}).get("fork") if isinstance((meta or {}).get("fork"), dict) else {}
     agent_id = str((meta or {}).get("agent_id") or fork.get("agent_id") or who)

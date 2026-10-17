@@ -250,12 +250,19 @@ const UNIT_WORDS: Record<string, [string, string]> = { record: ['record', 'recor
 /** A label's unit as a count says it: records, files (a file label's unit, `agent`), runs, cards or sentences. */
 export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?? [unit, `${unit}s`])[n === 1 ? 0 : 1]
 
+/** The units a run read that got no value (backend `skipped`), which no count holds: those a code label's code returned
+ * None for, or those a prompt label found no words in. */
+export interface NoValue {
+  n: number
+  code: boolean
+}
+
 /** Where a label over files stands, for its row in the Labels pane: an apply running (done of total units, or of the
  * files while they are indexed and the total is not known), the last run's outcome (its total null when the run kept
  * none it can state; `sample` for a trial, run on a sample of its units), or a failed run with its message. */
 export type LabelStatus =
   | { state: 'running'; done: number; total: number | null; unit: string }
-  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null; sample?: boolean; stopped?: boolean; stoppedAt?: StoppedAt }
+  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null; sample?: boolean; stopped?: boolean; stoppedAt?: StoppedAt; none?: NoValue }
   | { state: 'error'; message: string }
 
 /** Where a run that was stopped stopped: the units it read, of how many it would have read (null when the run kept no
@@ -278,6 +285,14 @@ export function stoppedText(st: StoppedAt, unit: string): string {
   return `stopped${at}${st.quit ? ' when Claude Code quit' : ''}`
 }
 
+/** What a stopped run's Run again says it does (bug hunt I3): go on with the units the stopped run never read while the
+ * label's definition stands (`resume`, "Label the other 22,028"), else label every unit again ("Run again on all
+ * 29,555", or with no count when the run kept none or was a sample's). Pure. */
+export function againWords(resume: { left: number } | null | undefined, st: StoppedAt | null | undefined, sample = false): string {
+  if (resume && resume.left > 0) return `Label the other ${resume.left.toLocaleString()}`
+  return st?.of != null && !sample ? `Run again on all ${st.of.toLocaleString()}` : 'Run again on all'
+}
+
 /** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
  * (0 for a run whose files were never counted). Pure. */
 const statedTotal = (total: number | null | undefined, matches: number): number | null =>
@@ -293,7 +308,7 @@ const later = (a: string | null | undefined, b: string | null | undefined): bool
  * on the label. A run that ended after the kept one stands in for it until the list is read again (a failed run sends
  * no `concepts` event). The kept run's count is matchedCount over the label's counts; before counts are known, the
  * run's `matches`. `cut` is the whole files or runs that run read only in part. */
-export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'last_run' | 'run' | 'trial'>, live?: ConceptRun | null): LabelStatus | null {
+export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'last_run' | 'run' | 'trial'> & { kind?: string }, live?: ConceptRun | null): LabelStatus | null {
   const sample = k.trial ? { sample: true } : {}
   const run = live ?? k.run ?? null
   if (run?.status === 'running') {
@@ -313,9 +328,24 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   }
   if (!last) return null
   if (last.status === 'error') return { state: 'error', message: last.message || 'the run failed' }
-  const total = last.stopped ? last.labeled + last.failed + (last.skipped ?? 0) : last.total ?? last.matched_total ?? last.labeled
+  const read = last.labeled + last.failed + (last.skipped ?? 0)
+  // the units with a value, as the label's counts hold them, the terminal, main's card and read_ref count them: those of
+  // earlier runs it kept among them, and none its run left with no value (bug hunt I10: 9 of 370 here and 9 + 391 in the
+  // terminal after a trial; 1,521 of 71,298 here and of 8,496 there for a code label that returns None)
+  const valued = k.counts ? Object.values(k.counts).reduce((a, b) => a + (b ?? 0), 0) : 0
+  const total = valued > 0 ? valued : last.stopped ? read : last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
-  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null, ...sample, ...(last.stopped ? { stopped: true, stoppedAt: stoppedAt(total, last.total, last.stopped_by) } : {}) }
+  const none = last.skipped ? { none: { n: last.skipped, code: k.kind === 'code' } } : {}
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null, ...sample, ...none, ...(last.stopped ? { stopped: true, stoppedAt: stoppedAt(read, last.total, last.stopped_by) } : {}) }
+}
+
+/** The units a run gave no value, as the label row says them under its outcome: "62,802 records got no value from its
+ * code" (a code label's code returned None for them), "4 records had no words to read" (a prompt label's); '' for none.
+ * Pure. */
+export function noValueText(s: Extract<LabelStatus, { state: 'done' }>): string {
+  if (!s.none?.n) return ''
+  const n = `${s.none.n.toLocaleString()} ${unitWord(s.unit, s.none.n)}`
+  return s.none.code ? `${n} got no value from its code` : `${n} had no words to read`
 }
 
 /** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, a trial's as

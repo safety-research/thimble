@@ -150,6 +150,20 @@ test("a label card: its counts as bars in the label's order; the records it carr
   expect((set.rows as BarRow[]).map(r => [r.label, r.value])).toEqual([['proxy-link', 5190], ['none', 9401]])
 })
 
+test("a label card while a run of it goes on, in any process: the counts so far and how far the run has read of its own size (bug hunts I2, I4)", () => {
+  // the card under main's answer read `◌ labeling 301 of 29,555`, the whole glob, for a run within another label over
+  // 4,556 records; and `stopped at 7,527 of 29,555` through a Run again from the browser
+  const stopped = { total: 29555, matched_total: 29555, labeled: 7527, failed: 0, status: 'done', stopped: true, paths: ['revisions.jsonl'] }
+  const within = labelCard(of('l0label0'), { ...LABEL, kind: 'prompt', last_run: null, applications: [], scope_total: 29555, label_stats: { n_labeled: 290, counts: { none: 280, 'proxy-link': 10 } }, run: { status: 'running', done: 301, total: 4556, matched_total: 4556 } } as never)
+  expect(within.note).toBe('◌ labeling 301 of 4,556')
+  expect(within.label).toMatchObject({ total: 4556 })
+  expect((within.rows as BarRow[]).map(r => [r.label, r.value])).toEqual([['proxy-link', 10], ['none', 280]])
+  const again = labelCard(of('l0label0'), { ...LABEL, kind: 'prompt', last_run: stopped, applications: [stopped], run: { status: 'running', done: 7600, total: 29555 } } as never)
+  expect(again.note).toBe('◌ labeling 7,600 of 29,555')
+  // a run that ended is no run going on
+  expect(labelCard(of('l0label0'), { ...LABEL, last_run: stopped, applications: [stopped], run: { status: 'done', done: 7527, total: 29555 } } as never).note).toBe('stopped at 7,527 of 29,555')
+})
+
 test("a card's takeaway as thimble's links check left it: linked and contradicted citations by value and ref", () => {
   const links = linksOf({ id: 'x', verification: { links: { status: 'partial', checked: true, resolved: [{ value: '4579', ref: 'card:x#pages/TOTAL' }], broken: [{ value: '12', ref: 'a.csv#row=1', why: 'the place shows 13', source: '13' }], typed: [{ value: '14,591', ref: 'card:x@out1#L2', line: 4, why: 'typed in the code, line 4, not computed' }] } } } as ThimbleCell)
   expect(links).toEqual({ pending: false, checked: true, ok: ['4579|card:x#pages/TOTAL'], broken: [{ key: '12|a.csv#row=1', why: 'the place shows 13', source: '13' }], typed: [{ key: '14,591|card:x@out1#L2', why: 'typed in the code, line 4, not computed' }] })
