@@ -256,7 +256,7 @@ async function listedSince(cx: Ctx, home: string, sid: string, since: number): P
 }
 
 /** Waits for `p` at most `ms` (a timer of the session's, not a sleep of the hook's), then gives up with null. */
-function bounded<T>(cx: Ctx, p: Promise<T>, ms: number): Promise<T | null> {
+export function bounded<T>(cx: Ctx, p: Promise<T>, ms: number): Promise<T | null> {
   return new Promise(resolve => {
     let done = false
     const t = cx.later(ms, () => {
