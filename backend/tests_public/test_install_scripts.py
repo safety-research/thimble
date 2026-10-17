@@ -524,6 +524,8 @@ def test_a_re_run_with_nothing_to_do_says_so_in_one_line_and_one_that_changes_so
     where = tree.resolve()
     first = install()
     assert "\nInstalling\n" in first and f"\nDone: thimble 0.0.1 is installed in {where}\n" in first, first
+    assert "installer · Dev install: thimble runs from this folder\n" in first, "in plain words"
+    assert f"  your workspaces       {where}/workspaces (the cards, labels and reports thimble makes)\n" in first, first
     assert install().strip() == (f"thimble 0.0.1 is installed in {where} and up to date: nothing needed doing.\n"
                                  "Next: run claude in a folder with your files. thimble is on in every session.\n"
                                  "  /thimble browser opens the same session in the browser workbench.\n"

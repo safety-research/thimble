@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# scripts/install.sh — install thimble: a git checkout in place (a Dev install), or an unzipped release, copied into
-# ~/.thimble/app (a Global install).
+# scripts/install.sh — install thimble: a git clone, which thimble runs from (a Dev install), or an unzipped release,
+# copied into ~/.thimble/app (a Global install).
 #
 #   scripts/install.sh [--dry-run] [--verbose] [--browser bundled|system|off] [--dir DIR] [--dev]
 #                      [--python PATH] [--deps-only] [--require-pinned] [--marketplace-name NAME]
@@ -31,7 +31,7 @@
 #   --verbose              also print each command it runs and its output; with --dry-run, every step's commands
 #   --no-plugin            for thimble's own release tests only: add nothing to Claude Code (no marketplace, no
 #                          plugin). An install adds the plugin the way claude plugin install does; turn it off with /plugin
-#   --dir DIR              where the tree goes (default: this checkout, in place; $THIMBLE_HOME/app for a release)
+#   --dir DIR              where the tree goes (default: this clone itself; $THIMBLE_HOME/app for a release)
 #   --dev                  also install the backend's test extras (a checkout always gets them)
 #   --python PATH          use the virtual environment of the python at PATH as backend/.venv: install.sh checks that it
 #                          holds what backend/pyproject.toml asks for and installs nothing into it
@@ -1222,8 +1222,9 @@ plan() {  # what the question, the plugin, the link and the startup files find, 
 }
 
 title() {  # the installer's first line
-  local what
-  if [ "$checkout" = 1 ]; then what="Dev install: this checkout, in place"; else what="Global install"; fi
+  local what="Global install"
+  if [ "$checkout" = 1 ] && [ "$in_place" = 1 ]; then what="Dev install: thimble runs from this folder"
+  elif [ "$checkout" = 1 ]; then what="Dev install"; fi
   printf '%s\n' "thimble $version installer · $what$( [ "$dry" = 1 ] && echo ' · dry run, nothing is changed')"
 }
 
@@ -1266,7 +1267,7 @@ opening() {  # the one screen before the questions: what install.sh found, what 
   card_found
   show ""
   heading_q "Installs"
-  if [ "$in_place" = 1 ]; then row "thimble $version" "$(tilde "$dir")" "in place"
+  if [ "$in_place" = 1 ]; then row "thimble $version" "$(tilde "$dir")" "runs from here; nothing is copied"
   else row "thimble $version" "$(tilde "$dir")" "$(size_of "$src")"; fi
   if [ -n "$byo" ]; then row "Python packages" "your environment $(tilde "$byo_prefix")" "nothing installed into it"
   elif [ -e "$venv" ]; then row "Python packages" "$(tilde "$venv")" "there already; updated if needed"
@@ -1288,6 +1289,8 @@ opening() {  # the one screen before the questions: what install.sh found, what 
     esac
   fi
   row "settings and logs" "$(tilde "$home")"
+  # where thimble keeps what it makes as you work (config.WORKSPACES_DIR): inside the install, a clone's own folder
+  row "your workspaces" "$(tilde "${THIMBLE_WORKSPACES_DIR:-$dir/workspaces}")" "the cards, labels and reports thimble makes"
   if [ "$deps_only" = 0 ]; then
     show ""
     heading_q "Your Claude Code setup"
