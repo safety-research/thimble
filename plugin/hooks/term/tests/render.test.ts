@@ -83,6 +83,27 @@ test("a turn's card is drawn once, under the turn's last reply, in its border wi
   expect(w.calls.filter(c => c[2] === 'resolve').length).toBe(1)
 })
 
+test("a card made before a subagent's turn started is drawn under the answer too: only main's own turn starts it over", { timeoutMs: 30_000 }, async ($, on) => {
+  // README capture 10-17: four checks started while main made its second card, and only that card was drawn
+  const w = world(on)
+  await start($, w)
+  const reply = (uuid: string, text: string) => $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] } } as never).catch(() => undefined)
+  await $.turn.start({ text: 'How many pages?', turnId: 't1' } as never)
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u1', question: 'q', code: 'df' } as never)
+  await $.turn.start({ text: 'Check the passages.', turnId: 't2', agentId: 'a1' } as never)
+  await reply('r0', 'One card is done.')
+  w.toolText = 'card:b0bar000\n[out0: chart]'
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u2', question: 'q', code: 'df' } as never)
+  await reply('r1', 'Both cards.')
+  await $.turn.complete({ turnId: 't1', answer: 'Both cards.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(300)
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Both cards.', false))) as unknown as M
+  expect(await ui.find({ type: 'Client', key: 'card-t0-ff73e071' })).toBeDefined()
+  expect(await ui.find({ type: 'Client', key: 'card-t1-b0bar000' })).toBeDefined()
+  await ui.unmount()
+})
+
 test("a list item has no dot of its own in the margin, as Claude Code draws a list; a paragraph keeps its dot", { timeoutMs: 30_000 }, async ($, on) => {
   // README capture 10-17: `· - dse: 13,403`, a dot beside the item's `-`
   const w = world(on)
