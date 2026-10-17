@@ -227,6 +227,32 @@ def test_doctor_names_the_readme_s_tested_version_and_marks_a_folder_claude_code
     assert check.ok and check.line == "thimble's agents start once a claude session runs here", check
 
 
+def test_doctor_in_thimble_s_own_folder_fails_no_check_about_trusting_it(home, monkeypatch, tmp_path):
+    """Bug hunt J1: at the end of an install Claude ran thimble doctor in the clone it installed, and its checklist said
+    "Claude Code doesn't trust this folder yet" about a folder the analyst never opens. Claude Code loads thimble's
+    plugin from its own copy, and thimble's agents run in the analyst's session in the folder of their data, so in
+    thimble's own files (the install's folder, an unzipped release) and in a folder thimble opens for no data (the home
+    folder) the line says where they run, with ✓. A data folder Claude Code does not trust is still marked !."""
+    monkeypatch.setattr(cli, "modules_off", lambda cwd, given="": "")
+    release = tmp_path / "download" / "thimble-9.9.9"
+    (release / "scripts").mkdir(parents=True)
+    (release / "scripts" / "install.sh").write_text("#!/bin/bash\n")
+    (release / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (release / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble"}))
+    for folder in (config.REPO_ROOT, release):  # the config trusts no folder
+        check = cli._agents_check(folder)
+        assert check.ok and check.line == cli.AGENTS_INSTALL_FOLDER, (folder, check)
+    me = tmp_path / "me"
+    me.mkdir()
+    monkeypatch.setenv("HOME", str(me))
+    check = cli._agents_check(me)
+    assert check.ok and check.line == cli.AGENTS_NO_DATA_FOLDER, check
+    notes = me / "field-notes"
+    notes.mkdir()
+    assert cli._agents_check(notes).line == "Claude Code doesn't trust this folder yet"
+    assert all(len(f"✓ {line}") <= cli.CHECK_LINE_MAX for line in (cli.AGENTS_INSTALL_FOLDER, cli.AGENTS_NO_DATA_FOLDER))
+
+
 def test_fix_and_revert_run_only_in_a_development_install(home, monkeypatch, capsys):
     """`thimble fix` and `thimble revert` change thimble's own code, which a release install cannot: each says so and
     exits 1 before it asks or touches anything, and /thimble fix says the same to the session."""
