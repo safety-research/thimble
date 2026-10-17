@@ -47,6 +47,7 @@ layout, the page on a damaged copy of the files) are the browser's alone."""
 from __future__ import annotations
 
 import asyncio
+import atexit
 import bisect
 import colorsys
 import contextlib
@@ -61,6 +62,7 @@ import operator
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -74,7 +76,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
-from . import config, corpus_tree, headless, investigation, refs, userconf, view_calls, view_indexes, view_libs
+from . import config, corpus_tree, headless, investigation, procs, refs, userconf, view_calls, view_indexes, view_libs
 from .records import is_record_ref as is_record
 from .view_host import shown_whole
 from .ledger import atomic_write_text, read_json, unlinked, write_json, write_json_once
@@ -154,6 +156,9 @@ SIBLING_SAMPLE = 200  # of a claimed folder's paths, those looked for in a folde
 # the checks: sample lines per claimed file, files sampled, keys followed, cited records read per key
 CHECK_LINES, CHECK_FILES, CHECK_KEYS, CHECK_KEY_REFS = 3, 3, 3, 30
 SHOT_TIMEOUT_S, SHOT_STATE_S = 30.0, 30.0  # a headless run's time: the browser's start, then each state's
+# how long a headless run's process gets to exit once its stdin is closed, and once the server's stop sent it SIGTERM,
+# before it and its browser are killed (_shot_ended, shutdown)
+SHOT_EXIT_S, SHOT_STOP_S = 10.0, 3.0
 # a request of the headless page still unanswered is waited for this long (scripts/view_shot.mjs ANSWER_MS), and the
 # run's time grows by the time its requests take to answer
 ANSWER_WAIT_S = 600.0
@@ -3814,6 +3819,8 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
                                               default=str))
     cmd = ["node", str(SHOT_SCRIPT), "--frame", str(frame_file), "--states", str(states_file), "--viewport",
            f"{width}x{height}", *(["--media", media] if media else [])]
+    if _stopping():
+        return failed(SHOTS_STOPPED)
     try:
         proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(config.REPO_ROOT), stdin=asyncio.subprocess.PIPE,
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -3821,6 +3828,7 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
                                                     env={**os.environ, **({userconf.BROWSER_ENV: path} if path else {})})
     except OSError as e:
         return failed(f"the headless browser could not start: {e}")
+    _shots.add(proc)
     results: list[dict[str, Any]] | None = None
     launch_error = ""  # the run's own error when the browser did not start
     answering = [0.0, 0]  # seconds spent answering the page's requests, and the requests being answered now
@@ -3886,11 +3894,7 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
             talk.cancel()
         with contextlib.suppress(Exception):
             proc.stdin.close()  # type: ignore[union-attr]
-        try:
-            await asyncio.wait_for(proc.wait(), 10)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
+        await _shot_ended(proc)
     err = (await proc.stderr.read()).decode("utf-8", "replace") if results is None and proc.stderr else ""
     if gone := headless.why_missing(launch_error + err):
         headless.mark_missing(headless.PAGES, gone)
@@ -3908,6 +3912,74 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
             r["png"] = str(s["out"])
         out.append(r)
     return out
+
+
+# The headless runs end with the server: its stop (shutdown) sends each one under way SIGTERM, which view_shot.mjs
+# answers by exiting, its browser with it, and kills what is left after SHOT_STOP_S; none starts once the server stops
+# (notebook.stopping). A run whose task is cancelled while it ends is killed at once (_shot_ended), and an exit that
+# skips the lifespan kills them from an atexit hook.
+_shots: set[asyncio.subprocess.Process] = set()  # the headless runs under way (_shoot_in)
+SHOTS_STOPPED = "the server is stopping, so the page was not loaded"
+
+
+def _stopping() -> bool:
+    """Whether the server is stopping for good (notebook.stopping), when no headless run starts."""
+    from . import notebook  # noqa: PLC0415 — the kernel machinery loads lazily
+
+    return notebook.stopping()
+
+
+def _kill_shot(pid: int, sig: int) -> None:
+    """`sig` to a headless run's node process, only while its command line names SHOT_SCRIPT, and with SIGKILL to each
+    process below it too: the browser it started, which Playwright puts in a session of its own, so a signal to node's
+    group misses it and it outlives a node that is killed."""
+    if str(SHOT_SCRIPT) not in " ".join(procs.argv(pid)):
+        return
+    for p in [pid, *(procs.descendants(pid) if sig == signal.SIGKILL else [])]:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(p, sig)
+
+
+async def _shot_ended(proc: asyncio.subprocess.Process) -> None:
+    """A headless run's process collected once its stdin is closed, which view_shot.mjs exits at; past SHOT_EXIT_S it is
+    killed with its browser, and at once when the wait is cancelled (the server stopping)."""
+    try:
+        await asyncio.wait_for(proc.wait(), SHOT_EXIT_S)
+    except TimeoutError:
+        _kill_shot(proc.pid, signal.SIGKILL)
+        await proc.wait()
+    except BaseException:
+        _kill_shot(proc.pid, signal.SIGKILL)
+        raise
+    finally:
+        _shots.discard(proc)
+
+
+async def shutdown() -> None:
+    """main's lifespan hook: the headless runs under way end with the server."""
+    running = [p for p in _shots if p.returncode is None]
+    for p in running:
+        _kill_shot(p.pid, signal.SIGTERM)
+
+    async def ended(p: asyncio.subprocess.Process) -> None:
+        try:
+            await asyncio.wait_for(p.wait(), SHOT_STOP_S)
+        except TimeoutError:
+            _kill_shot(p.pid, signal.SIGKILL)
+
+    await asyncio.gather(*(ended(p) for p in running), return_exceptions=True)
+
+
+def _kill_shots_at_exit() -> None:
+    """The interpreter exits with headless runs still listed (an exit that skipped the lifespan): each is killed with
+    its browser, as shutdown would."""
+    for p in list(_shots):
+        with contextlib.suppress(Exception):
+            _kill_shot(p.pid, signal.SIGKILL)
+    _shots.clear()
+
+
+atexit.register(_kill_shots_at_exit)
 
 
 def _state_labels(ctx: dict[str, Any]) -> dict[str, Any]:
