@@ -74,3 +74,35 @@ def test_a_thread_named_in_any_script_asks_main_to_fork_under_a_name_claude_code
     r = client.post(f"/api/ws/{CORPUS}/chats", json={"title": "Café マージ担当", "text": "which did agent-04 merge?"})
     assert r.status_code == 201
     assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", q.get_nowait()["meta"]["name"])
+
+
+def test_a_side_thread_is_named_by_its_question_and_one_named_by_its_answer_s_first_words_takes_its_question(client):
+    """Bug hunt D7: a thread asked about an answer was named by the answer's first words (`the-chart-is-on`) in the
+    thread list, its chip and its canvas group. It is named by its question, cut at a word; an older thread takes its
+    question when the chats are read, its group follows, and its old name still finds it."""
+    from app import notebook, threads
+
+    Listener(CORPUS)
+    answer = "The chart is on the card. It covers only the merge requests the bots opened during a sweep."
+    question = "did any reviewer bot approve a merge request sooner than its test suite could finish running?"
+    r = client.post(f"/api/ws/{CORPUS}/chats", json={"anchor_text": answer, "surface": "terminal", "element": "answer",
+                                                     "text": question})
+    assert r.status_code == 201
+    title = r.json()["title"]
+    assert title == "did any reviewer bot approve a merge request sooner than…"
+    assert len(title) <= agents.QUESTION_TITLE_CHARS
+    group = agents.group_for(CORPUS, agents.read_meta(CORPUS, r.json()["id"]))
+    assert notebook.read_notebook(agents._ws(CORPUS), group)["title"] == f"main/{title}"
+    # a thread named by the first words of its answer before, with its cards' group
+    old = agents.new_thread(CORPUS, None, "I ran the sweep check over every page.")
+    assert old["title"] == "i-ran-the-sweep"
+    asked = "what did bot-07 write on the [[welcome page|pages.jsonl#L3]]?"
+    agents.append(agents.paths(CORPUS, old["id"])[1], {"type": "user", "text": asked})
+    old_group = agents.group_for(CORPUS, agents.read_meta(CORPUS, old["id"]))
+    agents._retitled.clear()
+    listed = {m["id"]: m for m in client.get(f"/api/ws/{CORPUS}/chats").json()}
+    assert listed[old["id"]]["title"] == "what did bot-07 write on the welcome page?"
+    assert listed[r.json()["id"]]["title"] == title
+    renamed = "main/what did bot-07 write on the welcome page?"
+    assert notebook.read_notebook(agents._ws(CORPUS), old_group)["title"] == renamed
+    assert [m["id"] for m in threads.find_threads(CORPUS, "main/i-ran-the-sweep")] == [old["id"]]

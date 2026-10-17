@@ -46,7 +46,7 @@ import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './rep
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
-import { PANEL, cardDeleted, cardMade, keepKeys, liveCards, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
+import { PANEL, cardDeleted, cardMade, keepKeys, keysBack, liveCards, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
 import { turns } from './turns'
 import { registerBand } from './band'
 import { registerPanelViews } from './views'
@@ -1044,6 +1044,8 @@ export const register: Register = (on, options) => {
     const closed = await next(e)
     if (e.id === PANEL) {
       rt.panelFocus = ''
+      // typing that went to the prompt ends with the pane: opened again, the panel has its keys
+      keysBack()
       rt.waiting = false
       await $.state.set(pendingRef, null).catch(() => undefined)
       await $.state.set(panelA, null).catch(() => undefined)
@@ -1060,9 +1062,9 @@ export const register: Register = (on, options) => {
   // onto a neighbour (↑, ↓, Tab) is that key for the list, and the ring stays unless the key moved it off the list
   // (relayMoveKey); a move onto a neighbour from elsewhere lands on the middle one. Every move draws the panel again, so its hint row names the keys where the ring is.
   on('ui.focus', { requestId: PANEL }, async ($, e, next) => {
-    // the person moving the ring while the panel's typing went to the prompt (panel.tsx typeThrough): the panel has its
-    // keys again
-    if (rt.sc && rt.typeThrough && e.origin.kind === 'person') rt.typeThrough = false
+    // the person moving the ring while the panel's typing went to the prompt (panel.tsx typeThrough), or the relay's
+    // field taking it as the pane takes the keys from the prompt (a click on the pane): the panel has its keys again
+    if (rt.sc && rt.typeThrough && (e.origin.kind === 'person' || rt.typeAway)) keysBack()
     const how = rt.sc ? relayMove(rt.panelFocus, e.element) : ''
     if (how === 'up' || how === 'down') {
       const to = await relayMoveKey(how).catch(() => '')
@@ -1117,6 +1119,9 @@ export const register: Register = (on, options) => {
     if (!rt.sc) return next(e)
     const cx = cxOf($)
     const inPanel = e.component === 'Pane' && e.requestId === PANEL
+    // a press on the panel once the prompt had the keys is a click, as no hotkey presses there: the panel has its keys
+    // again, and the Button acts rather than typing its letter into the prompt (panel.tsx typedOr)
+    if (inPanel && rt.typeThrough && rt.typeAway) keysBack()
     await navOrigin(cx, inPanel)
     // a press on one of the panel's own acts keeps the panel's keys (bug hunt B28; term.ts keepKeys)
     if (inPanel) keepKeys(cx)

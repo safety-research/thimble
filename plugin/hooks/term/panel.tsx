@@ -53,7 +53,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, readThread, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
+import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, keysBack, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, readThread, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, runReads, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
 import { featuresOf, openComments, openSection } from './band'
 import { openChecks } from './checksview'
@@ -514,10 +514,11 @@ export async function onGesture(cx: Ctx, _gesture: Gesture, t: Target): Promise<
 
 /** Hotkeys with no label of their own (rule 26: the key-hint row says them): plain Buttons in a Box no row tall. Each
  *  is kept by its letter too, for the list's keys (listKeysEl), whose field takes the letters while it holds the ring;
- *  none is drawn while the panel's typing goes to the prompt (typeThrough), so the next letter reaches it. */
+ *  none is drawn while the panel's typing goes to the prompt and the pane still holds the keys (keysHidden), so the
+ *  next letter reaches the prompt. */
 export function hiddenKeys(cx: Ctx, e: PaneEvent, keys: Key[]): RenderElement | null {
   for (const k of keys) hotkeysDrawing.set(k.hotkey, k.onPress)
-  if (!keys.length || e.surface === 'mobile' || rt.typeThrough) return null
+  if (!keys.length || e.surface === 'mobile' || keysHidden()) return null
   const { Box, Button } = cx.els(e)
   return (
     <Box key="hidden-keys" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -540,7 +541,7 @@ function typedOr(cx: Ctx, hotkey: string, onPress: () => void): () => void {
 function hotkeyOf(cx: Ctx, hotkey: string | null, onPress: () => void): { hotkey?: string; onPress: () => void } {
   if (!hotkey) return { onPress }
   hotkeysDrawing.set(hotkey, onPress)
-  return rt.typeThrough ? { onPress: typedOr(cx, hotkey, onPress) } : { hotkey, onPress: typedOr(cx, hotkey, onPress) }
+  return keysHidden() ? { onPress: typedOr(cx, hotkey, onPress) } : { hotkey, onPress: typedOr(cx, hotkey, onPress) }
 }
 
 /** What a step of the path says: a lower-case kind word and its name, or the name alone after the list it is in. */
@@ -887,12 +888,20 @@ export function relayValue(): string {
 }
 
 /** A change of the relay's Input: each key typed is the panel's hotkey by its letter or digit, Space or Backspace for
- *  the list where its hint names them, else typing meant for the prompt (typeThrough). The Input is drawn again with
- *  the other mark, so its next change starts afresh. */
+ *  the list where its hint names them, else typing meant for the prompt (typeThrough), as is every key after it until
+ *  the person gives the panel its keys back. A change of several characters at once is typing, not keys: a paste, or
+ *  letters that came faster than the panel drew, all of it for the prompt (bug hunt D8: a burst's `o` opened the
+ *  browser). The Input is drawn again with the other mark, so its next change starts afresh. */
 export async function relayInput(cx: Ctx, value: string): Promise<void> {
   const typed = relayTyped(value, relayLast)
   relayLast = value
   relayFlip = true
+  const text = typed.filter(ch => ch !== 'backspace')
+  if (!rt.typeThrough && text.length > 1) {
+    await typeThrough(cx, text.join(''))
+    await cx.bumpPanel()
+    return
+  }
   for (const ch of typed) {
     if (rt.typeThrough) {
       if (ch !== 'backspace') await cx.fill(ch)
@@ -957,6 +966,14 @@ export function panelHasKeys(): boolean {
   return paneFocused && !rt.typeThrough
 }
 
+/** Whether the panel draws neither its list's keys nor its hotkeys: its typing goes to the prompt (typeThrough) while
+ *  the pane still holds the keys, so the next key, which nothing of the panel's takes, reaches the prompt. Once the
+ *  prompt has the keys they are drawn again, for a click that gives the pane the keys to put the ring on the relay; a
+ *  key that still reaches them goes to the prompt (relayInput, typedOr) until then (bug hunt D8). */
+function keysHidden(): boolean {
+  return rt.typeThrough && paneFocused
+}
+
 /** The pane's body rows as the drawing measured them, 0 when not known (a list is then drawn whole). */
 export function paneRows(): number {
   return bodyRows
@@ -980,9 +997,12 @@ export async function relaySubmit(cx: Ctx): Promise<void> {
 /** A key the panel does not bind, typed while its list held the keys: it goes to the prompt, as Claude Code sends a
  *  pane's unbound letter there. Until the prompt has the keys (the next key the person types, which no element and no
  *  hotkey of the panel takes now) the panel draws neither the relay nor its hotkeys, and its hint row says to click it
- *  for its keys; a move of its ring or a click gives them back (register.tsx, term.ts takeKeys). */
+ *  for its keys. A key that reaches the relay or a hotkey after that (one typed before the panel drew again) goes to the
+ *  prompt too, until the person gives the panel its keys back: a move of its ring, a click, or the pane given the keys
+ *  once the prompt had them (register.tsx, term.ts takeKeys, drawPanel). */
 async function typeThrough(cx: Ctx, ch: string): Promise<void> {
   rt.typeThrough = true
+  rt.typeAway = false
   rt.panelFocus = NO_RING
   await cx.fill(ch)
 }
@@ -1080,7 +1100,7 @@ export function wheelWindow(by: number): boolean {
 }
 
 function listKeysEl(cx: Ctx, e: PaneEvent): RenderElement | null {
-  if (!listRelay || e.surface === 'mobile' || rt.typeThrough) return null
+  if (!listRelay || e.surface === 'mobile' || keysHidden()) return null
   const { Box, Button, Input } = cx.els(e)
   const key = (k: string) => () => void relayKey(k)
   if (relayFlip) {
@@ -2424,7 +2444,14 @@ function slugOf(text: string): string {
   return (text.slice(0, 80).match(/[A-Za-z0-9]+/g) ?? []).slice(0, 4).join('-').toLowerCase()
 }
 
-type AboutRow = { anchor: string; anchorText: string; title?: string; element?: string }
+type AboutRow = { anchor: string; anchorText: string; title?: string; element?: string; question?: string }
+
+/** Whether a thread's title is its first question, as thimble names a thread asked with no title of its own
+ *  (agents.question_title: one line, cut at a word with `…`), rather than the words of what it was asked about. */
+function askedTitle(title: string, question: string | undefined): boolean {
+  const q = (question ?? '').replace(/\[\[([^|\]]*)\|[^\]]*\]\]/g, '$1').replace(/\s+/g, ' ').trim()
+  return Boolean(q) && (title === q || (title.endsWith('…') && q.startsWith(title.slice(0, -1))))
+}
 
 /** A citation's words as a thread's subject: in quotation marks, as someone's words are; a value alone (`4579`) as it
  *  is written. */
@@ -2448,7 +2475,7 @@ export async function anchorName(cx: Ctx, row: AboutRow | undefined): Promise<st
   // a citation's words in quotation marks; a chip by its place in words (`agent-chat.jsonl line 2`), as its thread was
   // titled (gestures.tsx targetLabel)
   const chip = { raw: `[[${a}]]`, ref: a, display: null }
-  if (t && t !== slug && !t.startsWith(`${slug}-`)) return t === chipName(chip) || t === chipLabel(chip) ? t : subjectWords(t)
+  if (t && t !== slug && !t.startsWith(`${slug}-`) && !askedTitle(t, row.question)) return t === chipName(chip) || t === chipLabel(chip) ? t : subjectWords(t)
   return /^(?:card|cell):/.test(a) ? placeName(cx, a) : placeWords(a)
 }
 
@@ -4283,9 +4310,11 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   // the keys as the pane's props and the engine's record say: a pane either says is without them names none of its keys
   // (an open the engine refused the keys, live check term-fix6, new quirk 4)
   paneFocused = pe.props.isFocused !== false && (await cx.panes()).find(x => x.id === PANEL)?.isFocused !== false
-  // typing meant for the prompt ends once the prompt has the keys: the relay is drawn again for the next time the pane
-  // takes them (relayInput, typeThrough)
-  if (!paneFocused) rt.typeThrough = false
+  // typing meant for the prompt goes on while the prompt has the keys: a key the relay's field took before then still
+  // goes there (bug hunt D8). It ends once the pane has the keys again after that: the person gave them (a click on the
+  // pane, ctrl+x tab)
+  if (rt.typeThrough && !paneFocused) rt.typeAway = true
+  else if (rt.typeThrough && rt.typeAway) keysBack()
   bodyRows = pe.props.scroll?.bodyRows || 0
   // the list this drawing draws, read off its drawing (lines.tsx), for the relay in its title row (listKeysEl)
   takeListKeys()

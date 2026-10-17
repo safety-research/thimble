@@ -193,6 +193,41 @@ test('keys · home · a word typed while home holds the keys reaches the prompt 
   expect(s.hint).toBe(UNFOCUSED_HINT)
 })
 
+test('keys · home · typing faster than the panel draws: once a key went to the prompt every key does, until the panel is given its keys back; a paste reaches the prompt whole; a single key stays a shortcut', { timeoutMs: 30_000 }, async ($, on) => {
+  // bug hunt D8: a question sent in one burst while home held the keys reached main as `what's ging on`: a later `o`
+  // came to the relay's field after the prompt had the keys and opened the browser
+  const w = world(on)
+  const browser = () => w.toasts.filter(t => t.startsWith("starting thimble's page")).length
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  await takesKeys($)
+  await type($, w, SHORT, 'w')
+  expect(w.filled).toEqual(['w'])
+  // the prompt has the keys, and the pane is drawn without them; the relay's field took `o` before that, and its change
+  // comes now: it goes to the prompt too
+  w.paneFocused = false
+  const away = (await $.ui.mount({ ...(paneOf(SHORT) as object), props: { ...(paneOf(SHORT) as { props: object }).props, isFocused: false } } as never)) as unknown as M
+  await away.input({ key: RELAY.pick, text: `${await relayText(away)}o`, kind: 'change' })
+  await w.clock.settle()
+  await away.unmount()
+  expect(w.filled).toEqual(['w', 'o'])
+  expect(browser()).toBe(0)
+  // a click gives the pane the keys again: the relay's field takes the ring, and its keys are the panel's
+  w.paneFocused = true
+  await takesKeys($)
+  const s = await seen($, SHORT, 'home')
+  expect(s.relay && s.hotkeys).toBe(true)
+  expect(s.hint).not.toBe(UNFOCUSED_HINT)
+  // one key is the panel's shortcut
+  await type($, w, SHORT, 'o')
+  expect(browser()).toBe(1)
+  // a paste is one change of several letters: all of it goes to the prompt, its first `o` no shortcut
+  await type($, w, SHORT, 'open the wiki')
+  expect(w.filled.slice(2).join('')).toBe('open the wiki')
+  expect(browser()).toBe(1)
+})
+
 // ------------------------------------------------------------------------------------------------ a terminal view
 //
 // A view built in terminal mode (term: true) is drawn by its program (hooks/viewhost.ts), which thimble's view host

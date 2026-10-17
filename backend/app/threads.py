@@ -296,7 +296,11 @@ def event(c: str, payload: dict[str, Any], event_id: str) -> tuple[str, dict[str
         raise HTTPException(400, f"{thread_id} is not a thread")
     _, log_path = agents.paths(c, thread_id)
     by = agents.TERMINAL if payload.get("by") == agents.TERMINAL else agents.BROWSER  # message_thread's, from the terminal
+    first = not first_question(c, thread_id)
     agents.append(log_path, {"type": "user", "ts": _now(), "text": text, "by": by, "event": event_id})
+    # a thread made with no question is named by its first one, as one made with it is (agents.new_thread)
+    if first:
+        agents.name_by_question(c, meta, text)
     waits = awaiting_fork(c, thread_id)
     agents.set_running(c, thread_id, True)
     if waits:
@@ -775,13 +779,13 @@ def view_names(chats: list[dict]) -> dict[str, str]:
 
 def _names(meta: dict, views: dict[str, str] | None = None) -> set[str]:
     """What names a chat in the thread tree, lower case: its title, the analyst's name for it, a ticket's slug as
-    the tree shows it (group-board-by-round), a view build's or review's tree name (view_names), and a thread's fork
-    name."""
+    the tree shows it (group-board-by-round), a view build's or review's tree name (view_names), a thread's fork
+    name, and the name a thread had before its question named it (agents.retitle_threads)."""
     title = str(meta.get("title") or "")
     words = re.findall(r"[^\W_]+", _TICKET_PREFIX_RE.sub("", title))
     view = (views or {}).get(str(meta.get("id"))) or (str(meta.get("view") or "") if meta.get("role") == "dev" else "")
     return {n.lower() for n in (title, str(meta.get("name") or ""), "-".join(words[:4]), view,
-                                str(meta.get(FORK_NAME_KEY) or "")) if n.strip()}
+                                str(meta.get(FORK_NAME_KEY) or ""), str(meta.get(agents.SLUG_KEY) or "")) if n.strip()}
 
 
 def find_threads(c: str, name: str) -> list[dict]:

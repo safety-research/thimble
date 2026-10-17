@@ -58,9 +58,13 @@ export const rt = {
   // the field the view shown last starts its ring on in place of the list's keys, '' for those: the labels list's entry
   // box while the list holds no label (bug hunt C2), which giveKeys gives the ring after an open
   startRing: '',
-  // a key the panel does not bind went to the prompt (panel.tsx typeThrough): until the prompt has the keys the panel
-  // draws neither its list's keys nor its hotkeys, so the next key reaches the prompt
+  // a key the panel does not bind went to the prompt (panel.tsx typeThrough): every key that still reaches the panel
+  // goes there too until the person gives the panel its keys back (keysBack); while the pane holds the keys it draws
+  // neither its list's keys nor its hotkeys, so the next key reaches the prompt
   typeThrough: false,
+  // the pane was drawn without the keys since the typing went to the prompt: a ring, a press or a drawing with the keys
+  // after that is the person's giving the panel its keys back (bug hunt D8)
+  typeAway: false,
   // when home was last seen before the open that shows it now (ms): a card made since is new on it
   homeSince: 0,
   // a link to a label whose name no read gave yet was drawn (reply.tsx chipOf): the session's timer reads the labels
@@ -784,12 +788,19 @@ export async function takeKeys(cx: Ctx): Promise<void> {
   // typing that went to the prompt ends with a click on the panel: its list's keys are drawn again, and the ring goes
   // onto them as after an open (giveKeys)
   if (rt.typeThrough) {
-    rt.typeThrough = false
+    keysBack()
     rt.panelFocus = NO_RING
   }
   await cx.open({ id: PANEL, title: paneTitle(p), focus: true, columns: panelColumns() }).catch(() => undefined)
   await cx.bumpPanel()
   giveKeys(cx, paneTitle(p))
+}
+
+/** Typing that went to the prompt (panel.tsx typeThrough) ends: the person gave the panel its keys back, so the keys
+ *  that reach it are its own again. */
+export function keysBack(): void {
+  rt.typeThrough = false
+  rt.typeAway = false
 }
 
 // the panel's opens so far (placePanel): an act that opened a view asked for the keys itself

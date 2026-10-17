@@ -339,21 +339,24 @@ def ensure_main(c: str) -> dict:
 
 def new_thread(c: str, anchor: str | None, anchor_text: str | None, title: str | None = None, *,
                surface: str | None = None, element: str | None = None, selector: str | None = None,
-               image: str | None = None, parent: str | None = None, comment: str | None = None) -> dict:
+               image: str | None = None, parent: str | None = None, comment: str | None = None,
+               question: str | None = None) -> dict:
     """A thread born from a ⌘-click or ⌘-drag: `anchor` is what was pointed at (refs joined by ','), with its visible text,
     surface, element kind, CSS selector and a captured PNG. `parent` is the chat the analyst was reading (thread_parent).
     `comment` is the id of the comment whose reply field opened it, kept as `anchor_comment` (comments.thread_comment), so its
     anchor line names the comment as well as its passage or step. Its first message is a browser event of kind `thread`,
-    which main answers by forking."""
+    which main answers by forking. With no `title`, it is named by its first `question` (question_title), as the
+    terminal names it, else by the first words of what was pointed at."""
     from . import comments, threads  # noqa: PLC0415
 
     ensure_main(c)
     cid = secrets.token_hex(4)
     clean = lambda v, n=200: (str(v or "").strip()[:n] or None)  # noqa: E731
-    named = (title or "").strip() or _title_from(anchor, anchor_text)
+    asked = "" if (title or "").strip() else question_title(question)
+    named = (title or "").strip() or asked or _title_from(anchor, anchor_text)
     # the terminal names a thread by its first question and its subject by the citation's or the passage's words, which
     # a -2 would change; its fork's name is kept apart from other threads' all the same (threads.fork_name)
-    named = named if surface == "terminal" else _unique_title(c, named)
+    named = named if surface == "terminal" or asked else _unique_title(c, named)
     meta = _defaults({"id": cid, "kind": KIND_THREAD, "role": "thread", "title": named,
                       "created_at": _now(), "parent": thread_parent(c, parent, anchor, element), "anchor": clean(anchor, 4000),
                       "anchor_text": clean(anchor_text, ANCHOR_TEXT_CHARS), "anchor_surface": clean(surface, 40),
@@ -421,6 +424,76 @@ def _title_from(anchor: str | None, text: str | None) -> str:
         return "-".join(w.lower() for w in words[:4])
     a = (anchor or "").split(":", 1)[0]
     return {"cell": "card"}.get(a, a) or "thread"  # a card's anchor may be written as `cell:`
+
+
+QUESTION_TITLE_CHARS = 60  # of a thread's first question as its title (question_title)
+_CITED_WORDS_RE = re.compile(r"\[\[([^|\]]*)\|[^\]]*\]\]")
+
+
+def question_title(text: str | None) -> str:
+    """A side thread's first question as its title: on one line, a citation as its words, cut at a word to
+    QUESTION_TITLE_CHARS with '…'; '' for none."""
+    plain = " ".join(_CITED_WORDS_RE.sub(r"\1", str(text or "")).split())
+    if len(plain) <= QUESTION_TITLE_CHARS:
+        return plain
+    cut = plain[: QUESTION_TITLE_CHARS - 1]
+    word = cut.rsplit(" ", 1)[0]
+    return (word if len(word) > QUESTION_TITLE_CHARS // 2 else cut).rstrip(" ,;:.") + "…"
+
+
+SLUG_KEY = "slug"  # on a thread's meta: the name it had before its question named it (retitle_threads)
+_retitled: set[str] = set()
+
+
+def _anchor_slug(meta: dict) -> bool:
+    """Whether a thread's title is the one new_thread made from the first words of what was pointed at
+    (`the-chart-is-on`, `-2` for another thread on the same words), as threads were named before 0.9.0."""
+    title = str(meta.get("title") or "")
+    base = _title_from(meta.get("anchor"), meta.get("anchor_text"))
+    return bool(title) and (title == base or re.fullmatch(re.escape(base) + r"-\d+", title) is not None)
+
+
+def name_by_question(c: str, meta: dict, question: str) -> bool:
+    """A thread named by the first words of what it was asked about (_anchor_slug) takes `question`, its first, as its
+    title (question_title), its canvas group following while it keeps the name the thread gave it, and keeps its old
+    name as SLUG_KEY; whether it was renamed. A thread the analyst named, or one already named otherwise, stays."""
+    title = question_title(question)
+    old = str(meta.get("title") or "")
+    if meta.get("kind") != KIND_THREAD or meta.get("name") or not title or title == old or not _anchor_slug(meta):
+        return False
+
+    def retitle(m: dict) -> None:
+        if str(m.get("title") or "") == old:
+            m.update({"title": title, SLUG_KEY: old})
+
+    changed = change_meta(c, str(meta["id"]), retitle)
+    if changed.get("title") != title:
+        return False
+    if changed.get("group"):
+        _rename_group(c, str(changed["group"]), f"main/{old}", f"main/{title}")
+    _notify(c, str(meta["id"]))
+    return True
+
+
+def retitle_threads(c: str) -> list[str]:
+    """Threads named by the first words of what they were asked about take their first question as their title, as
+    new ones are named, and their canvas group follows while it keeps the name the thread gave it; the old name stays on
+    the meta (SLUG_KEY), where it still names the thread (threads.find_threads), as its fork's name does. Once per
+    workspace folder in a process, on the first read of the chats or the canvas; the ids of the threads renamed."""
+    from . import threads  # noqa: PLC0415 — threads imports this module
+
+    try:
+        key = str(chats_dir(c))
+    except (ValueError, HTTPException):
+        return []
+    if key in _retitled:
+        return []
+    _retitled.add(key)
+    done = [str(m["id"]) for m in list_chats(c)
+            if m.get("kind") == KIND_THREAD and name_by_question(c, m, threads.first_question(c, str(m["id"])))]
+    if done:
+        log.info("%s: %d threads named by their first question: %s", c, len(done), ", ".join(done))
+    return done
 
 
 _meta_texts: dict[str, tuple[tuple[int, int, int], str]] = {}  # meta file -> ((inode, mtime_ns, size), its text)
@@ -818,6 +891,7 @@ class ChatUpdate(BaseModel):
 
 @router.get("/ws/{c}/chats")
 async def list_route(c: str) -> list[dict]:
+    retitle_threads(c)
     return list_chats(c)
 
 
@@ -867,7 +941,7 @@ async def create_route(c: str, body: NewThread) -> dict:
     if text and not events.reachable(c):
         raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     meta = new_thread(c, body.anchor, body.anchor_text, body.title, surface=body.surface, element=body.element,
-                      selector=body.selector, image=body.image, parent=body.parent, comment=body.comment)
+                      selector=body.selector, image=body.image, parent=body.parent, comment=body.comment, question=text)
     if not text:
         return meta
     await threads.warm(c, meta)
