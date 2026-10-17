@@ -8,8 +8,9 @@
 // - what the panel asks of `thimble state label` (`--rows`, the records of a value its `… N more` asked for);
 // - the label deleted last, whose delete the labels list offers to undo (`thimble act label-undelete`);
 // - each label's records with no category fit and those it is unsure of (`thimble state label-unsure --label <id> --n
-//   <n>`, SPEC-v2 C8), no-fit first, then unsure by confidence, which the labels list and the label editor show first,
-//   UNSURE_PAGE more at each `↓ more`.
+//   <n>`, SPEC-v2 C8), no-fit first, then unsure by confidence, which the label editor shows first, UNSURE_PAGE more at
+//   each `↓ more`; home and the labels list draw their counts in each label's bar (home.ts labelBlocks);
+// - the values whose records fit no category (noFitValues).
 import { COLORS, LABEL_HUES, PICKED_HUES } from './paint'
 
 /** The label colors by the names show_label takes, in the palette's order: `blue` is color 1, `cyan` 12, then red,
@@ -93,6 +94,17 @@ export let labelGone: { id: string; name: string; error?: string } | null = null
 
 export function setLabelGone(gone: { id: string; name: string; error?: string } | null): void {
   labelGone = gone
+}
+
+/** The values that say nothing (backend concepts.QUIET_VALUES). */
+const QUIET_VALUES = new Set(['no', 'none', 'other', 'no match', 'not', 'neither', 'n/a', 'unknown'])
+
+/** The values whose records fit no category, as the label's no-fit count takes them (backend concepts.no_fit_values):
+ *  the values that say nothing (`other`, `none`) of a label with two or more that say something; none of a label with
+ *  one (`yes` and `no`), whose quiet value is an answer. */
+export function noFitValues(values: readonly string[]): Set<string> {
+  const quiet = (v: string) => QUIET_VALUES.has(v.toLowerCase())
+  return new Set(values.filter(v => !quiet(v)).length > 1 ? values.filter(quiet) : [])
 }
 
 /** A label's record with no category fit (value none, off its list, or failed) or one it is unsure of (C8). */

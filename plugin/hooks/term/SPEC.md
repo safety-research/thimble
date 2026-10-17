@@ -616,8 +616,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   ▸ Orientation                                                                           9 cards
 
   Labels (1)
-  ● edit purpose                                                            ██████████▌█████▌███   30
-    prompt · a sample of 30 · revisions.jsonl  ● links or data 15  ● message to agents 8  ● other 7
+  ● edit purpose   prompt · a sample of 30 · revisions.jsonl         █████████████▒▒██████▒████████░░  30
+    ● links or data      15   ● message to agents   7   ● other               6
+    ▒ unsure              3   ░ no fit              2
   ↑↓ to choose · Enter to open · x to close
 ```
 
@@ -634,11 +635,18 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - Card groups by thimble's group, with their card count at R; the newest group is open, the others folded. A side
   thread's group is named by the thread's first question (`in the thread "…"`), never its title, which is a slug. A group's
   cards are at A2 with their kind word at R.
-- Labels: each label's `●` in its color (as the label panel's), its name, a bar of its values' shares in their hues
-  with the total, and a dim secondary row of its kind, run and values. The bar takes 20 cells where the row has room;
-  in a narrower pane it takes what the name leaves (the whole name, up to 24 cells of it), and under 6 cells it is
-  left out, so the name stays whole. A label with no run (one a stopped thread left)
-  has a dim `○`, `not run yet` at R and no bar, as its panel says. A run going says `◌ labeling 3,000 of 4,579`, and a
+- Labels (Matt, 2026-10-17: "a colored bar of their distribution and subcategories like we see in the detail view"):
+  each label's `●` in its color (as the label panel's), its name, its kind, run and files dim in a column after the
+  longest name where they fit (fewer of them, else none), a stacked bar of its values in their hues, every label's bar
+  at the same column and of the same width (0.3 of the row, at most 40 cells, less where the names would keep fewer
+  than 16), and its total right-aligned in one column at R. Under it, its legend at A2: each value's `●`, its name and
+  its count dim in aligned columns, as many as fit in two rows, then `+N more` (unsure and no fit stay, then the values
+  with the most records); a value is cut only at a word. The records the label is unsure of are `▒` at the end of the
+  values that answer, in their hues (shared by their counts: the counts do not say which value each has), `▒ unsure N`
+  in the legend; the records no category fit and no value names (no value, or a failed one) are `░` in gray, `░ no
+  fit N`; a quiet value that fits no category (`other`) keeps its name and its gray. The records themselves are in the
+  label's panel, a press away. A label with no run (one a stopped thread left) has a dim `○`, `not run yet` where the
+  bar and total stand and no legend, as its panel says. A run going says `◌ labeling 3,000 of 4,579`, and a
   first run that stopped part way (a quit) `stopped at 3,150 of 4,579`, alike on home, the labels list, the label panel
   and the label card.
 - No Files section (Matt, 2026-10-16): the terminal has no file browser. Coverage lists the files, what Claude read
@@ -1080,8 +1088,8 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
 - The hint row: `↑↓ to choose · Enter to press or edit` (Claude Code's ring walks every field, choice and action;
   Enter presses one or gives a field the keyboard), `s to stop` while a run goes, then the way's. The letters r, n, k,
   f, e, d and l stay bound, unnamed.
-- The labels list (`home › labels`): one row per label (glyph, name, its kind and last run dim at R), 1-9 the first
-  nine, then under the second rule the field `describe a new label`, whose words go to main, which makes the label
+- The labels list (`home › labels`): each label as home draws it (its name row with its bar and total, its legend,
+  four rows of it at most), 1-9 the first nine, then under the second rule the field `describe a new label`, whose words go to main, which makes the label
   with a trial. `l` in a label's panel opens the list in place of the label's step (`home › labels`), the label it came
   from chosen; b then goes where the path shows, home. A document's `l` does the same for the documents list.
 - The scope's records (`14,591 records`, `run on all 14,591`): the last full run's count, else the scope's size thimble

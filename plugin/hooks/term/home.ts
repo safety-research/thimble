@@ -1,6 +1,6 @@
 // The home panel (/thimble, and the title row's first step): one panel listing what this session read and what this
 // folder's sessions made, in SPEC-v2 J4's order: coverage (what Claude read or searched of the data files),
-// citations (the problems first), labels with their counts and their records of no fit or unsure, side threads (those
+// citations (the problems first), labels with the distribution of their values, side threads (those
 // with answers not yet read first), views (built, building, proposed), the checks' open comments on answers, cards
 // grouped by the question that made them, and documents. Each heading opens its section's view, each row the panel that
 // shows it. A section of a feature that is off is left out. The terminal has no file browser (Matt, 10-16): Coverage
@@ -18,6 +18,7 @@ import { lineWidth, valueColour, width } from './draw'
 import { FRESH, MARGIN_W, fitTo, headingLine, hintLines, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
 import { cutMiddle, quoted } from './lib'
+import { noFitValues } from './labels'
 
 export type SectionId = 'coverage' | 'citations' | 'checks' | 'views' | 'reports' | 'threads' | 'cards' | 'labels'
 
@@ -98,8 +99,9 @@ export function groupCards(groups: readonly HomeCardGroup[], all: readonly HomeC
 type Glyph = { mark: string; fg?: string }
 
 /** One row of a section: its glyph (or fold marker) at A0, its name at A2 (or A4 under a folder), its metadata dim
- *  against the right edge, `new` in green there, a bar before the figure; a secondary row at A2; what a click does. A
- *  row with `kids` folds (`fold`: its key, `open`: shown open). */
+ *  against the right edge, `new` in green there; a secondary row at A2; what a click does. A row with `kids` folds
+ *  (`fold`: its key, `open`: shown open). A label's row is laid out with the section's other labels (`label`,
+ *  labelBlocks). */
 export type HomeRow = {
   key: string
   glyph: Glyph | null
@@ -112,8 +114,8 @@ export type HomeRow = {
   middle?: boolean
   fresh?: boolean
   right?: Seg[]
-  bar?: { n: number; fg: string }[]
   meta?: Seg[]
+  label?: HomeLabel
   kids?: HomeRow[]
   fold?: string
   open?: boolean
@@ -301,31 +303,6 @@ function cardsSection(groups: readonly HomeCardGroup[], ui: HomeUi): HomeSection
   }
 }
 
-/** The cells a label's bar takes at most, and the fewest it is drawn in: a narrower bar is left out. */
-const BAR_W = 20
-const BAR_MIN = 6
-/** The cells of a row's name a bar leaves it at least, or the whole name when it is shorter: a name is cut at a word,
- *  so a bar that left it fewer cells cut most names to their first word. */
-const NAME_KEEP = 24
-
-/** A label's counts, each value with its colour as the label panel draws it (draw.ts valueColour): the bar's parts,
- *  their cells set when the row is laid out at its width (barCells). */
-function countBar(values: readonly string[], counts: Record<string, number>, colors?: Record<string, number>): { n: number; fg: string }[] {
-  return values.map(v => ({ n: counts[v] ?? 0, fg: valueColour(values, v, colors)! })).filter(x => x.n > 0)
-}
-
-/** A bar's parts in `w` cells by their counts, the cells left over given to the largest remainders, so the bar is `w`
- *  wide. */
-function barCells(parts: readonly { n: number; fg: string }[], w: number): { n: number; fg: string }[] {
-  const total = parts.reduce((k, p) => k + p.n, 0)
-  if (!total || w <= 0) return []
-  const cells = parts.map(p => (p.n * w) / total)
-  const out = cells.map(c => Math.floor(c))
-  const order = cells.map((c, i) => ({ i, r: c - Math.floor(c) })).sort((a, b) => b.r - a.r)
-  for (let k = 0, left = w - out.reduce((a, b) => a + b, 0); k < left; k++) out[order[k % order.length]!.i]!++
-  return parts.map((p, i) => ({ n: out[i]!, fg: p.fg })).filter(x => x.n > 0)
-}
-
 /** A label's color, as the label panel's ● beside its name shows it: its first value's (its class's color when it has
  *  `colors`), else the first series hue. */
 export function labelHue(values: readonly string[], colors?: Record<string, number>): string {
@@ -342,43 +319,200 @@ function labelsSection(ls: readonly HomeLabel[]): HomeSection {
     news: ls.filter(l => l.fresh).length,
     summary: joined(countBy(ls.map(l => (l.running ? 'running' : l.ran === false ? (l.state?.startsWith('stopped') ? 'stopped' : 'not run yet') : l.trial ? 'on a sample' : 'on every record')), ['on every record', 'on a sample', 'running', 'stopped', 'not run yet'])),
     pane: { kind: 'pane', view: 'labels', title: 'Labels' },
-    rows: ls.map(l => {
-      const labeled = l.values.reduce((k, v) => k + (l.counts[v] ?? 0), 0)
-      // a label with no run says so, as its panel does, with no bar and no counts (live check term-fix7, new quirk 6:
-      // home showed `yes 0 · no 0` and 0 for a label a stopped thread left)
-      // one whose first run is going says so (no counts yet)
-      if (l.ran === false && !labeled)
-        return {
-          key: `label:${l.slug}`,
-          glyph: l.running ? WORKING : NOT_STARTED,
-          title: l.name,
-          fresh: l.fresh,
-          right: rightOf([l.running ? 'labeling' : 'not run yet'], l.fresh),
-          meta: joined([l.kind, l.paths.join(', ')]),
-          act: { op: 'open', open: { kind: 'label', name: l.name } },
-        }
-      // a legend: each value's ● in its hue, its word and count dim as the rest of the secondary row
-      const legend: Seg[] = []
-      l.values.forEach((v, i) => {
-        if (i) legend.push(dim('  '))
-        legend.push({ s: '● ', fg: valueColour(l.values, v, l.colors) }, dim(`${v} ${num(l.counts[v] ?? 0)}`))
-      })
-      // what its runs say: a run going (`◌ labeling 3,000 of 4,579`), a first run stopped part way (`stopped at 3,150 of
-      // 4,579`), else what the last run covered (live check term-fix9, quirk 4)
-      const runWords = l.state || (l.trial ? `a sample of ${num(labeled)}` : 'every record')
-      return {
-        key: `label:${l.slug}`,
-        // its ● in the label's color, as the label panel draws it beside its name
-        glyph: l.running ? WORKING : { mark: '●', fg: labelHue(l.values, l.colors) },
-        title: l.name,
-        fresh: l.fresh,
-        bar: countBar(l.values, l.counts, l.colors),
-        right: [{ s: num(labeled) }, ...(l.fresh ? [{ s: '  ' }, { s: 'new', fg: FRESH }] : [])],
-        meta: [...joined([l.kind, runWords, l.paths.join(', '), l.noFit ? `${num(l.noFit)} no fit` : '', l.unsure ? `${num(l.unsure)} unsure` : '']), dim('  '), ...legend],
-        act: { op: 'open', open: { kind: 'label', name: l.name } },
-      }
-    }),
+    // each label's rows are its distribution (labelBlocks), laid out with the others' so their bars stand in one column
+    rows: ls.map(l => ({ key: `label:${l.slug}`, glyph: null, title: l.name, fresh: l.fresh, label: l, act: { op: 'open', open: { kind: 'label', name: l.name } } })),
   }
+}
+
+// ------------------------------------------------------------------------------------------------ a label's distribution
+
+/** A part of a label's distribution, as its bar and its legend draw it: a value's records (`█` in the value's color), or
+ *  the records no category fit that no value names (`░`, gray: no value, or a failed one). */
+export type LabelPart = { name: string; n: number; fg: string; mark: string }
+
+/** The bar's marks: a value's records, its unsure share, the records no category fit and no value names. */
+export const VALUE_MARK = '█'
+export const UNSURE_MARK = '▒'
+export const NO_FIT_MARK = '░'
+
+/** A label's distribution: each value with its count and color (its values in their order, then any value off its
+ *  list), then `no fit` for the records no category fit that no value names (the label's no-fit count less the records
+ *  of its no-fit values, labels.ts noFitValues). `unsure`: the records it is unsure of, which are among its values that
+ *  answer (the others are no fit), and `answers` those values. */
+export function labelParts(l: HomeLabel): { parts: LabelPart[]; unsure: number; answers: Set<string>; total: number } {
+  const off = Object.keys(l.counts).filter(k => !l.values.includes(k))
+  const quiet = noFitValues(l.values)
+  const values = [...l.values, ...off]
+  const parts: LabelPart[] = values.map(v => ({ name: v, n: l.counts[v] ?? 0, fg: valueColour(l.values, v, l.colors) ?? COLORS.dim, mark: VALUE_MARK }))
+  const named = values.filter(v => quiet.has(v) || off.includes(v)).reduce((k, v) => k + (l.counts[v] ?? 0), 0)
+  const rest = Math.max(0, (l.noFit ?? 0) - named)
+  if (rest) parts.push({ name: 'no fit', n: rest, fg: COLORS.dim, mark: NO_FIT_MARK })
+  const answers = new Set(l.values.filter(v => !quiet.has(v)))
+  const answered = [...answers].reduce((k, v) => k + (l.counts[v] ?? 0), 0)
+  const shown = parts.filter(p => p.n > 0)
+  return { parts: shown, unsure: Math.min(l.unsure ?? 0, answered), answers, total: shown.reduce((k, p) => k + p.n, 0) }
+}
+
+/** `n` cells shared by `weights`, the cells left over given to the largest remainders; with `floor1`, every non-zero
+ *  weight gets a cell while there are cells for each, taken back from the largest. */
+function shareCells(weights: readonly number[], n: number, floor1 = false): number[] {
+  const total = weights.reduce((k, x) => k + x, 0)
+  if (!total || n <= 0) return weights.map(() => 0)
+  const exact = weights.map(x => (x * n) / total)
+  const out = exact.map(c => Math.floor(c))
+  const order = exact.map((c, i) => ({ i, r: c - Math.floor(c) })).filter(x => x.r > 0).sort((a, b) => b.r - a.r)
+  for (let k = 0, left = n - out.reduce((a, b) => a + b, 0); k < left && order.length; k++) out[order[k % order.length]!.i]!++
+  if (floor1 && weights.filter(x => x > 0).length <= n)
+    weights.forEach((x, i) => {
+      if (x <= 0 || out[i]) return
+      out[i] = 1
+      const big = out.reduce((b, c, j) => (c > out[b]! ? j : b), 0)
+      out[big]!--
+    })
+  return out
+}
+
+/** A label's bar in `w` cells: each part in its color by its share of the total, at least one cell each; the records
+ *  the label is unsure of drawn `▒` at the end of the values that answer, shared by their counts (the counts do not say
+ *  which value each has). */
+export function labelBar(d: ReturnType<typeof labelParts>, w: number): Line {
+  const cells = shareCells(d.parts.map(p => p.n), w, true)
+  const answering = d.parts.map((p, i) => (d.answers.has(p.name) && p.mark === VALUE_MARK ? cells[i]! : 0))
+  const answered = d.parts.reduce((k, p) => k + (d.answers.has(p.name) && p.mark === VALUE_MARK ? p.n : 0), 0)
+  const hatch = d.unsure && answered ? Math.max(1, Math.round((answering.reduce((a, b) => a + b, 0) * d.unsure) / answered)) : 0
+  const unsure = shareCells(answering, Math.min(hatch, answering.reduce((a, b) => a + b, 0)))
+  const out: Line = []
+  d.parts.forEach((p, i) => {
+    const u = Math.min(unsure[i]!, cells[i]!)
+    if (cells[i]! - u) out.push({ s: p.mark.repeat(cells[i]! - u), fg: p.fg })
+    if (u) out.push({ s: UNSURE_MARK.repeat(u), fg: p.fg })
+  })
+  return out
+}
+
+/** A label laid out as its rows: its name row (glyph, name, its kind and scope dim where they fit, its bar, its total)
+ *  and its legend rows. */
+export type LabelBlock = { name: Line; legend: Line[] }
+
+/** The legend rows a label takes at most; what does not fit is `+N more`. */
+export const LEGEND_ROWS = 2
+/** The cells of a bar: BAR_SHARE of the row, at least BAR_MIN, at most BAR_MAX; under BAR_MIN no bar. */
+const BAR_SHARE = 0.3
+const BAR_MAX = 40
+const BAR_MIN = 8
+/** The fewest cells of a label's name a bar leaves it (a shorter name, all of it). */
+const NAME_KEEP = 16
+/** The cells between legend entries. */
+const LEGEND_GAP = 3
+
+/** Words cut at a word to `n` cells with `…`; a first word longer than `n` cut where it must. */
+function wordCut(s: string, n: number): string {
+  if (width(s) <= n) return s
+  const words = s.split(/(\s+)/)
+  let out = ''
+  for (const x of words) {
+    if (width(out + x) > n - 1) break
+    out += x
+  }
+  out = out.trimEnd()
+  if (out) return `${out}…`
+  let head = ''
+  for (const ch of s) {
+    if (width(head + ch) > n - 1) break
+    head += ch
+  }
+  return `${head}…`
+}
+
+/** The fewest cells a legend's names keep before more values go to `+N more`. */
+const LEGEND_NAME_MIN = 8
+
+/** A label's legend: each value's ● in its color, its name, its count, then `▒ unsure` (the records it is unsure of,
+ *  among its values) and `░ no fit`, in columns of one width, as many to a row as fit, `rows` rows at most, then `+N
+ *  more`. When they do not all fit, `unsure` and `no fit` stay and then the values with the most records, in their
+ *  order. The names' column is the width that shows the most values, a value cut at a word counting as none; of two
+ *  that show as many, the wider. */
+function legendLines(d: ReturnType<typeof labelParts>, w: number, rows = LEGEND_ROWS): Line[] {
+  const item = (p: LabelPart) => ({ mark: p.mark === VALUE_MARK ? '●' : p.mark, fg: p.fg, name: p.name, n: p.n })
+  const items = [...d.parts.filter(p => p.mark === VALUE_MARK).map(item), ...(d.unsure ? [{ mark: UNSURE_MARK, fg: COLORS.dim, name: 'unsure', n: d.unsure }] : []), ...d.parts.filter(p => p.mark !== VALUE_MARK).map(item)]
+  if (!items.length) return []
+  // the order they stay in: unsure and no fit, then by their counts
+  const rank = items.map((x, i) => ({ i, first: x.mark !== '●', n: x.n })).sort((a, b) => Number(b.first) - Number(a.first) || b.n - a.n || a.i - b.i)
+  const keep = (k: number) => {
+    const kept = new Set(rank.slice(0, k).map(r => r.i))
+    return items.filter((_, i) => kept.has(i))
+  }
+  const room = w - 2
+  const cw = Math.max(...items.map(x => num(x.n).length))
+  const longest = Math.min(Math.max(...items.map(x => width(x.name))), Math.max(1, room - 4 - cw))
+  const perOf = (nw: number) => Math.max(1, Math.floor((room + LEGEND_GAP) / (2 + nw + 2 + cw + LEGEND_GAP)))
+  const shownOf = (per: number) => (items.length <= per * rows ? items.length : per * rows - 1)
+  let nw = longest
+  let best = -1
+  for (let x = longest; x >= Math.min(longest, LEGEND_NAME_MIN); x--) {
+    const shown = shownOf(perOf(x))
+    const score = shown - keep(shown).filter(i => width(i.name) > x).length
+    if (score > best) [nw, best] = [x, score]
+  }
+  const per = perOf(nw)
+  const shown = keep(shownOf(per))
+  const more = `+${num(items.length - shown.length)} more`
+  const out: Line[] = []
+  for (let r = 0; r * per < shown.length; r++) {
+    const l: Line = [{ s: '  ' }]
+    shown.slice(r * per, (r + 1) * per).forEach((x, k) => {
+      if (k) l.push({ s: ' '.repeat(LEGEND_GAP) })
+      const name = wordCut(x.name, nw)
+      l.push({ s: `${x.mark} `, fg: x.fg }, { s: name }, { s: ' '.repeat(nw - width(name) + 2) }, { s: num(x.n).padStart(cw), fg: COLORS.dim })
+    })
+    out.push(l)
+  }
+  // what is left, in the last row's free slot (a row of its own when one value fills a row)
+  if (shown.length < items.length) {
+    const last = out.at(-1)
+    if (!last || (lineWidth(last) + LEGEND_GAP + width(more) > w && out.length < rows)) out.push([{ s: '  ' }, { s: more, fg: COLORS.dim }])
+    else last.push({ s: ' '.repeat(LEGEND_GAP) }, { s: more, fg: COLORS.dim })
+  }
+  return out
+}
+
+/** What a label's run says beside its name, when its counts are not of a whole run: a run going, a first run stopped
+ *  part way, a sample. */
+function runNote(l: HomeLabel, total: number): string {
+  if (l.state) return l.state.replace(/^◌ /, '')
+  return l.trial ? `a sample of ${num(total)}` : ''
+}
+
+/** Labels laid out together in `w` cells (home's Labels section and the labels list): each its name row and its
+ *  legend (legendLines, `rows` rows at most). The name row: its glyph and name, its kind, run and files dim in a column
+ *  after the longest name where they fit (fewer of them, else none), its bar at the same column and of the same width
+ *  as every other's, its total against the right edge in one column, then `new` while it is new. A label with no counts
+ *  says `not run yet` (or `labeling`) where the bar and total stand, with no legend. */
+export function labelBlocks(ls: readonly HomeLabel[], w: number, rows = LEGEND_ROWS): LabelBlock[] {
+  const ds = ls.map(labelParts)
+  const nw = ls.some(l => l.fresh) ? NEW_W : 0
+  const tw = Math.max(1, ...ds.map(d => (d.total ? num(d.total).length : 0)))
+  const longest = Math.max(1, ...ls.map(l => width(l.name)))
+  // BAR_SHARE of the row, less where the names would keep fewer than NAME_KEEP cells; none under BAR_MIN
+  const bw = Math.min(BAR_MAX, Math.round(w * BAR_SHARE), w - 2 - Math.min(NAME_KEEP, longest) - 2 - 2 - tw - nw)
+  const barW = bw >= BAR_MIN ? bw : 0
+  // the cells right of the names, the same on every row: the bar, the total, `new`
+  const right = (barW ? barW + 2 : 0) + tw + nw
+  const nameW = Math.max(1, Math.min(longest, w - 2 - 2 - right))
+  return ls.map((l, i) => {
+    const d = ds[i]!
+    const glyph: Seg = l.running ? { s: '◌' } : d.total ? { s: '●', fg: labelHue(l.values, l.colors) } : { s: '○', fg: COLORS.dim }
+    // `new` after the total, or its cells blank in a section where some label is new
+    const fresh: Line = l.fresh ? [{ s: '  ' }, { s: 'new', fg: FRESH }] : nw ? [{ s: ' '.repeat(nw) }] : []
+    // at the bar's place: the bar and the total, or the words that say why there is none
+    const tail: Line = d.total ? [...(barW ? [...labelBar(d, barW), { s: '  ' }] : []), { s: num(d.total).padStart(tw) }, ...fresh] : [dim(l.running ? 'labeling' : 'not run yet'), ...fresh]
+    const name = wordCut(l.name, Math.max(1, Math.min(nameW, w - 2 - 2 - lineWidth(tail))))
+    const note = d.total ? runNote(l, d.total) : ''
+    const room = w - 2 - nameW - 2 - 2 - Math.max(right, lineWidth(tail))
+    const meta = [[l.kind, note, l.paths.join(', ')], [l.kind, note], [note], [l.kind]].map(m => m.filter(Boolean).join(' · ')).find(m => m && width(m) <= room) ?? ''
+    const left: Line = [glyph, { s: ' ' }, { s: name }, ...(meta ? [{ s: ' '.repeat(nameW - width(name) + 2) }, dim(meta)] : [])]
+    return { name: [...left, { s: ' '.repeat(Math.max(2, w - lineWidth(left) - lineWidth(tail))) }, ...tail], legend: d.total ? legendLines(d, w, rows) : [] }
+  })
 }
 
 /** Coverage (SPEC-v2 J5): this session's coverage line, its heading opening the Coverage view. */
@@ -490,21 +624,16 @@ function glyphSeg(g: Glyph | null): Seg[] {
 /** The fewest cells of a row's title kept beside its full right part (itemLine). */
 const TITLE_MIN = 32
 
-/** An item's line at `x`: its glyph hanging, its name, its bar and figure against the right edge. The bar takes what
- *  the name leaves (NAME_KEEP cells of it, or all of a shorter one), up to BAR_W cells, and is left out under BAR_MIN:
- *  in a narrow pane the name stays readable (live check term-fix10, new quirk 6: `● age…  ████████████████████  1,900`). */
+/** An item's line at `x`: its glyph hanging, its name, its metadata against the right edge. */
 function itemLine(row: HomeRow, x: number, w: number): Line {
   const lead: Line = [...(x ? [{ s: ' '.repeat(x) }] : []), ...glyphSeg(row.glyph)]
-  const barRoom = w - lineWidth(lead) - Math.min(NAME_KEEP, width(row.title)) - lineWidth(row.after ?? []) - 2 - lineWidth(row.right ?? []) - 2
-  const barW = Math.min(BAR_W, barRoom)
-  const bar: Line = row.bar?.length && barW >= BAR_MIN ? [...barCells(row.bar, barW).map(b => ({ s: '█'.repeat(b.n), fg: b.fg })), { s: '  ' }] : []
   const left: Line = [...lead, { s: row.title }, ...(row.after ?? [])]
   // the full right part (a thread's subject) whenever the title keeps TITLE_MIN cells beside it, the title cut at a word
   // to make room; else the shorter right part (live check term-fix6, quirk 10: `about 602` was left out beside a long
   // question)
-  const full: Line = [...bar, ...(row.right ?? [])]
+  const full: Line = row.right ?? []
   const room = w - lineWidth(full) - 2 - (lineWidth(left) - width(row.title))
-  const chosen = row.short && lineWidth(left) + 2 + lineWidth(full) > w && room < Math.min(TITLE_MIN, width(row.title)) ? [...bar, ...row.short] : full
+  const chosen = row.short && lineWidth(left) + 2 + lineWidth(full) > w && room < Math.min(TITLE_MIN, width(row.title)) ? row.short : full
   // the right part never takes the title's first cells: it is cut where it would leave the title fewer than 12
   const keep = Math.min(width(row.title), 12) + lineWidth(left) - width(row.title)
   const right = lineWidth(chosen) + 2 + keep > w ? fitTo(chosen, Math.max(0, w - 2 - keep)) : chosen
@@ -534,7 +663,16 @@ function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void
   }
   const whole = ui.more.includes(sec.id) || sec.rows.length <= FIRST + 1
   const shown = whole ? sec.rows : sec.rows.slice(0, FIRST)
+  // the labels shown, laid out together: their bars in one column
+  const labeled = shown.filter(r => r.label)
+  const blocks = new Map(labelBlocks(labeled.map(r => r.label!), w).map((b, i) => [labeled[i]!.key, b]))
   for (const r of shown) {
+    const b = blocks.get(r.key)
+    if (b) {
+      out.push(b.name, { x0: 0, x1: w, row: true, act: r.act, pick: r.key })
+      for (const l of b.legend) out.push(l, { x0: 0, x1: w, row: true, act: r.act })
+      continue
+    }
     out.push(itemLine(r, 0, w), { x0: 0, x1: w, row: true, act: r.act, pick: r.key })
     if (r.meta?.length) out.push([{ s: '  ' }, ...fitTo(r.meta, w - 2)], { x0: 0, x1: w, row: true, act: r.act })
     if (r.kids && r.open) {

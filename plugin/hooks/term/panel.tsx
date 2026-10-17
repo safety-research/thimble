@@ -18,7 +18,7 @@
 //             when it is the only one), its chat drawn as Claude Code draws one, the ask field
 //   label     a label after the browser's label editor: its name, type and scope; its prompt (or pattern or code) to edit;
 //             run on a sample or on all; counts, examples (its records of no fit and unsure first) and cards folded.
-//             labels: every label, its records of no category fit and those it is unsure of under it
+//             labels: every label with its values' distribution: a bar and a legend with counts, as home's Labels
 //   docs      the documents; doc, one document drawn as main's chat draws a reply, its figures as cards, its comments
 //             under the passages they are on (report.ts), read only: the browser workbench edits documents
 //   file      a file's lines at a place, to verify a citation, a label's records or a card's source: filesview.tsx,
@@ -28,7 +28,7 @@
 //   views     the views, one row each; view, one view as one line (the browser draws views)
 import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderElement, TextProps } from 'claude-code'
 
-import type { ChatNavStep, ChatThread, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
+import type { ChatNavStep, ChatThread, LabelUnsure, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, actionEl, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
 import { SCRIPT_ASK, SPIN, chipLook, chipName, citeLabel, firstCode, literalAt, plainCites, quoteSpan, quotedWords, scriptQuestion, showsValue, wrapAround } from './cite'
@@ -37,7 +37,7 @@ import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
-import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelHue } from './home'
+import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelBlocks, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
 import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
 import type { Citation } from './lib'
@@ -1164,45 +1164,50 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
     cells.map(cardOf),
   )
   const labelsRaw = await surfaceValue(cx, 'labels')
-  // a run the session's own process holds shows only as the chat that follows it (lib.ts labelRunning)
-  const agents = (await cx.agents()) ?? []
-  const labels: HomeLabel[] = labelsRaw?.ok
-    ? labelsOf(labelsRaw.value).map(l => {
-        // its runs as the labels list, its panel and its card say them (lib.ts labelState)
-        const st = labelState(l, agents)
-        // made since home was last seen, as a card is new (openHome)
-        const made = Date.parse(str((l as { ts?: unknown }).ts)) || 0
-        const colors = classColors(l.classes)
-        return {
-          slug: l.id,
-          name: l.name ?? l.id,
-          kind: l.kind ?? '',
-          trial: Boolean(l.trial),
-          // as thimble.labels() reads the rows: a record the analyst set to another value under that value
-          counts: l.verdicts?.counts ?? l.label_stats?.counts ?? {},
-          values: l.labels ?? Object.keys(l.label_stats?.counts ?? {}),
-          paths: (l.glob ?? '').split(/,\s*/).filter(Boolean),
-          running: st.running,
-          ran: st.ran,
-          state: labelStateWords(st),
-          ...(rt.homeSince && made > rt.homeSince ? { fresh: true } : {}),
-          // its values' colors as its classes have them, as its panel draws them
-          ...(colors ? { colors } : {}),
-        }
-      })
-    : []
+  const raw = labelsRaw?.ok ? labelsOf(labelsRaw.value) : []
+  const labels = await homeLabels(cx, raw)
+  // made since home was last seen, as a card is new (openHome)
+  raw.forEach((x, i) => {
+    const made = Date.parse(str((x as { ts?: unknown }).ts)) || 0
+    if (rt.homeSince && made > rt.homeSince) labels[i]!.fresh = true
+  })
   // 0.9.0 (SPEC-v2 J4): this session's coverage, its citations, the checks' comments on answers, each while its feature
-  // is on; the labels' records of no fit and unsure
+  // is on
   const f = await featuresOf(cx)
-  const unsure = new Map((await cx.labelUnsure()).map(u => [u.id, u]))
-  for (const l of labels) {
-    const u = f.labels ? unsure.get(l.slug) : undefined
-    if (u) Object.assign(l, { noFit: u.noFit, unsure: u.unsure })
-  }
   const coverage = f.coverage ? noControls((await cx.coverageSummary())?.line ?? '') : null
   const cites: HomeCite[] | null = f.citationMarks ? (await citeItems(cx)).map(c => ({ key: c.key, value: noControls(c.value), place: noControls(citePlace(c.ref)), verdict: c.verdict, why: c.why, ref: c.ref, ...(c.card ? { card: c.card, n: c.n } : {}) })) : null
   const comments: HomeComment[] | null = f.checks ? (await openComments(cx)).map(c => ({ id: c.id, check: noControls(c.checkName), colour: hueOf(c.color || 2), quote: noControls(c.quote) })) : null
   return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels }
+}
+
+/** The labels as home and the labels list draw them (home.ts labelBlocks): each with its values' counts and colors, its
+ *  runs in words, and its records of no fit and unsure counted while labels are on. */
+async function homeLabels(cx: Ctx, ls: readonly ThimbleLabel[]): Promise<HomeLabel[]> {
+  // a run the session's own process holds shows only as the chat that follows it (lib.ts labelRunning)
+  const agents = (await cx.agents()) ?? []
+  const unsure = (await featuresOf(cx)).labels ? new Map((await cx.labelUnsure()).map(u => [u.id, u])) : new Map<string, LabelUnsure>()
+  return ls.map(l => {
+    // its runs as the labels list, its panel and its card say them (lib.ts labelState)
+    const st = labelState(l, agents)
+    const colors = classColors(l.classes)
+    const u = unsure.get(l.id)
+    return {
+      slug: l.id,
+      name: l.name ?? l.id,
+      kind: l.kind ?? '',
+      trial: Boolean(l.trial),
+      // as thimble.labels() reads the rows: a record the analyst set to another value under that value
+      counts: l.verdicts?.counts ?? l.label_stats?.counts ?? {},
+      values: l.labels ?? Object.keys(l.label_stats?.counts ?? {}),
+      paths: (l.glob ?? '').split(/,\s*/).filter(Boolean),
+      running: st.running,
+      ran: st.ran,
+      state: labelStateWords(st),
+      // its values' colors as its classes have them, as its panel draws them
+      ...(colors ? { colors } : {}),
+      ...(u ? { noFit: u.noFit, unsure: u.unsure } : {}),
+    }
+  })
 }
 
 /** When a card was made (ms), as the canvas lists it. */
@@ -3378,24 +3383,27 @@ function wantUnsure(cx: Ctx, id: string): void {
   cx.later(0, () => void readUnsure(cx, id).then(() => cx.bumpPanel()).finally(() => unsureAsked.delete(id)))
 }
 
-/** `↓ more` under a label: UNSURE_PAGE more of its unsure records. */
+/** `… N more` under the records the label panel lists first: UNSURE_PAGE more of them. */
 async function moreUnsure(cx: Ctx, id: string): Promise<void> {
   unsureShown.set(id, (unsureShown.get(id) ?? UNSURE_PAGE) + UNSURE_PAGE)
   await readUnsure(cx, id)
   await cx.bumpPanel()
 }
 
-/** The unsure records the panel shows read again (the labels changed): every label's on the labels list, the one
- *  label's in its editor (band.tsx refreshSummary calls it). */
+/** The unsure records the panel shows read again (the labels changed): the one label's in its editor (band.tsx
+ *  refreshSummary calls it); the labels list draws only their counts. */
 export async function refreshUnsure(cx: Ctx): Promise<void> {
   const p = await cx.panel()
-  const ids = p?.view === 'labels' ? (await cx.labelUnsure()).map(u => u.id) : p?.view === 'label' && p.label ? [p.label] : []
+  const ids = p?.view === 'label' && p.label ? [p.label] : []
   for (const id of ids) await readUnsure(cx, id)
   if (ids.length) await cx.bumpPanel()
 }
 
-/** The labels (SPEC.md, "The label panel", the labels list): one row per label, its kind and last run dim at R,
- *  `❯` on the chosen one; under the second rule `describe a new label`, whose words go to main. */
+/** The legend rows a label takes in the labels list, which has the room home leaves to other sections. */
+const LIST_LEGEND_ROWS = 4
+
+/** The labels (SPEC.md, "The label panel", the labels list): each label as home draws it, its name, its bar and total
+ *  and its legend, `❯` on the chosen one; under the second rule `describe a new label`, whose words go to main. */
 async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Button, Input, Text } = cx.els(e)
@@ -3404,46 +3412,23 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const ls = (got?.ok ? labelsOf(got.value) : []) as LabelFull[]
   const body: RenderElement[] = [...headerEls(els, { title: 'Labels', cols, sub: subLine([plural(ls.length, 'label')]) })]
   const pick = ls.find(x => x.id === labelPick)?.id ?? ls[0]?.id ?? ''
-  const agents = (await cx.agents()) ?? []
-  // under each label, its records with no category fit, then those it is unsure of (SPEC-v2 J6): UNSURE_PAGE at first,
-  // `↓ N more` for the next; a click on one opens its place
-  const unsureOn = (await featuresOf(cx)).labels
-  const counts = new Map((await cx.labelUnsure()).map(u => [u.id, u]))
+  // each label as home draws it (home.ts labelBlocks): its name row, its bar in the column every bar takes, its total,
+  // then its legend, each value with its count, then the records it is unsure of and those no category fit; those
+  // records are in its panel, a press away (SPEC-v2 J6)
+  const blocks = labelBlocks(await homeLabels(cx, ls), cols, LIST_LEGEND_ROWS)
   const lines: Line[] = []
   const hits: LineHit[] = []
   let pickAt = -1
-  for (const l of ls) {
-    const n = Object.values(l.label_stats?.counts ?? {}).reduce((a, b) => a + b, 0)
-    // its runs as home, its panel and its card say them (lib.ts labelState): `◌ labeling 3,000 of 4,579` while a run
-    // goes, `stopped at 3,150 of 4,579`, `not run yet`, else what its last run covered (live check term-fix9, quirk 4)
-    const st = labelState(l, agents)
-    const run = labelStateWords(st).replace(/^◌ /, '') || (l.trial ? `a sample of ${num(n)}` : `all ${num(n)}`)
-    const u = unsureOn ? counts.get(l.id) : undefined
-    // the facts that leave the name its first 20 cells (or all of a shorter one): every fact, then the unsure counts
-    // alone (the rows under it say them too), then none
-    const tally = [...(u?.noFit ? [`${num(u.noFit)} no fit`] : []), ...(u?.unsure ? [`${num(u.unsure)} unsure`] : [])].join(' · ')
-    const keep = Math.min(20, width(l.name ?? l.id))
-    const facts = [[`${l.kind ?? ''} · ${run}`, tally].filter(Boolean).join(' · '), `${l.kind ?? ''} · ${run}`, ''].find(f => !f || cols - 4 - width(f) - 2 >= keep) ?? ''
+  ls.forEach((l, i) => {
+    const b = blocks[i]!
+    // a blank row between labels, which have the room here that home leaves to its other sections
+    if (i) lines.push([])
     if (l.id === pick) pickAt = lines.length
-    hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => openLabel(cx, l.id, l.name ?? l.id) })
-    lines.push(pointed(spread([st.running ? { s: '◌' } : st.ran || st.stopped ? { s: '●' } : dim('○'), { s: ' ' }, { s: l.name ?? l.id }], [dim(facts)], cols), l.id === pick))
-    if (!u || !(u.noFit + u.unsure)) continue
-    const got = await surfaceValue(cx, unsureKey(l.id))
-    if (!got) wantUnsure(cx, l.id)
-    const un = got?.ok ? unsureOf(got.value) : null
-    const vw = Math.min(16, Math.max(0, ...(un?.rows ?? []).map(r => width(r.value ?? ''))))
-    for (const r of un?.rows ?? []) {
-      const lead = `  ${unsureWords(r).padEnd(13)}${vw ? `${clip(r.value ?? '', vw).padEnd(vw)}  ` : ''}`
-      hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => openCite(cx, r.ref, null) })
-      lines.push(pointed([dim(lead), { s: clip(demojibake(noControls(r.text)).replace(/\s+/g, ' '), Math.max(10, cols - width(lead))) }], false))
+    for (const [k, line] of [b.name, ...b.legend].entries()) {
+      hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => openLabel(cx, l.id, l.name ?? l.id) })
+      lines.push(pointed(line, k === 0 && l.id === pick))
     }
-    const left = (un?.total ?? 0) - (un?.rows.length ?? 0)
-    if (un && left > 0) {
-      const words = `↓ ${num(left)} more`
-      hits.push({ y: lines.length, x0: MARGIN_W + 4, x1: MARGIN_W + 4 + width(words), row: false, run: () => moreUnsure(cx, l.id) })
-      lines.push(pointed([{ s: '    ' }, dim(words)], false))
-    }
-  }
+  })
   if (!ls.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
   const step = (d: number) => {
     const at = ls.findIndex(x => x.id === pick)
