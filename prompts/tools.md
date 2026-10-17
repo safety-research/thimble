@@ -629,7 +629,7 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
 
 ## read_call
 
-Get a part of your task: its text and its pictures. When you have a part that you did not answer, you get that part again. Else you get the next part.
+thimble's card check reads the card it checks. Get a part of your task: its text and its pictures. When you have a part that you did not answer, you get that part again. Else you get the next part.
 
 ```json
 {
@@ -640,7 +640,7 @@ Get a part of your task: its text and its pictures. When you have a part that yo
 
 ## send_answer
 
-Send your answer to a part of your task. The answer must agree with the schema in your task. When it does not agree, the result gives the errors. Then correct the answer and send it again. When it agrees, the result gives your next part, if there is one.
+thimble's card check sends what it found about the card it checks. Send your answer to a part of your task. The answer must agree with the schema in your task. When it does not agree, the result gives the errors. Then correct the answer and send it again. When it agrees, the result gives your next part, if there is one.
 
 ```json
 {
