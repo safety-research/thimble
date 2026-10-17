@@ -742,10 +742,10 @@ async def review_task(c: str, inp: dict[str, Any], *, model: str | None = None, 
     lend, and the call fails. The task's prompt part,
     the `review` section of prompts/view-review.md, is the reviewer's registered prompt, which an extension's prompt
     still changes (view_tools.reviewer_definition)."""
-    from . import model as model_mod  # noqa: PLC0415
+    from .call_result import CallResult  # noqa: PLC0415
 
-    return model_mod.CallResult(status="error", detail="thimble's view review runs as a subagent, with no one-call "
-                                                       "reading to run")
+    return CallResult(status="error",
+                      detail="thimble's view review runs as a subagent, with no one-call reading to run")
 
 
 # --------------------------------------------------------------------------- routes

@@ -57,7 +57,7 @@ def fit(monkeypatch) -> dict:
     """The check on whether a view fits, in place: it answers `answer`, and keeps the prompts it got in `asked`."""
     got: dict = {"asked": [], "answer": {"status": "ok", "output": {"fits": True, "reason": "Each record says who did a task."}}}
 
-    async def ask(c: str, text: str) -> model.CallResult:
+    async def ask(c: str, text: str, **_kw) -> model.CallResult:
         got["asked"].append(text)
         return model.CallResult(**got["answer"])
 
@@ -240,3 +240,18 @@ async def test_the_add_question_and_settings_name_what_runs_outside_the_sandbox(
     monkeypatch.setattr(extensions, "kernels_wrapped", lambda c: True)
     row = next(r for r in extensions.public(CORPUS)["extensions"] if r["name"] == "servers")
     assert row["sandboxed"] is True
+
+
+def test_a_view_fit_that_failed_for_want_of_a_session_is_asked_again_once_one_runs(monkeypatch):
+    """A decision that failed because no Claude Code session ran thimble here (view_fit.decide's `no_session`) stands
+    while none runs, and is asked again at the next refresh once one does; another failure stands RETRY_S."""
+    from datetime import datetime, timezone
+
+    from app import module_bridge
+
+    failed = {"key": "k", "error": "no Claude Code session runs thimble in this folder", "no_session": True,
+              "ts": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    monkeypatch.setattr(module_bridge, "live", lambda c: False)
+    assert not extensions._stale(failed, "mini")
+    monkeypatch.setattr(module_bridge, "live", lambda c: True)
+    assert extensions._stale(failed, "mini") and not extensions._stale({**failed, "no_session": False}, "mini")

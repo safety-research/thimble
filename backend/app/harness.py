@@ -431,8 +431,17 @@ def _images(run: Run, paths: Any) -> list[tuple[bytes, str]]:
     return out
 
 
+ASK_TITLE = "thimble {who}: ask"  # an ask's agent's line in Claude Code's task list
+ASK_DONE = "thimble answered {who}"  # the reason in main's terminal when the terminal UI drops its hand-back
+
+
 async def ask(run: Run, payload: dict[str, Any]) -> Any:
-    from . import model  # noqa: PLC0415 — model binds the SDK at first use
+    """A program's `ask`: one structured call on its role's Settings row, as a subagent of the analyst's Claude Code
+    session (agent_call.structured), whose answer is the request's result: the text of a plain ask, else the object
+    that fits its `schema`. HarnessError when the call gives no answer, such as with no session running thimble in the
+    folder (its fix in the error)."""
+    from . import agent_call  # noqa: PLC0415
+    from .call_result import ToolSpec  # noqa: PLC0415
 
     prompt = str(payload.get("prompt") or "")
     if not prompt.strip():
@@ -440,11 +449,14 @@ async def ask(run: Run, payload: dict[str, Any]) -> Any:
     schema = payload.get("schema")
     plain = not isinstance(schema, dict)
     images = await asyncio.to_thread(_images, run, payload["images"]) if payload.get("images") else []
-    spec = model.ToolSpec("answer", "Give your answer with this tool.", ANSWER_TOOL if plain else schema)
+    spec = ToolSpec("answer", "Give your answer with this tool.", ANSWER_TOOL if plain else schema)
     role = config.call_settings(run.c, run.job.model_role)
-    res = await model.structured(prompt, tool=spec, model=str(payload.get("model") or role["model"]),
-                                 effort=role["effort"], speed=role["speed"], refusal=role["refusal"],
-                                 cwd=str(run.job.work), images=images)
+    part = getattr(run, "part", None)
+    who = f"{part.extension}'s program" if part is not None and getattr(part, "extension", "") else "a program"
+    res = await agent_call.structured(run.c, prompt, tool=spec, model=str(payload.get("model") or role["model"]),
+                                      effort=role["effort"], refusal=role["refusal"], images=images,
+                                      what="program ask", title=ASK_TITLE.format(who=who),
+                                      done=ASK_DONE.format(who=who))
     if res.status != "ok" or res.output is None:
         raise HarnessError(f"the model call ended {res.status}: {res.detail or res.text[:300]}")
     return res.output.get("text", "") if plain else res.output

@@ -1115,12 +1115,13 @@ def check_input(check: dict[str, Any], doc: str, cover: list[dict[str, Any]], co
 async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None, program: Any = None) -> Any:
     """thimble's own checks task (tasks.py), lent to a program that runs it: a Claude Code session as the check agent
     (prompts/check.md) on the input's `context`, run as the program's run (harness.session_call), which comments
-    with add_comment as thimble's own run does, on Settings' checks row. A model.CallResult whose output is the
+    with add_comment as thimble's own run does, on Settings' checks row. A call_result.CallResult whose output is the
     session's last reply."""
-    from . import harness, model as model_mod, subagents  # noqa: PLC0415
+    from . import harness, subagents  # noqa: PLC0415
+    from .call_result import CallResult  # noqa: PLC0415
 
     if program is None:
-        return model_mod.CallResult(status="error", detail="the checks task runs only in a program's run")
+        return CallResult(status="error", detail="the checks task runs only in a program's run")
     with prompts.custom(userconf.prompt_files(c, "checks")):
         _, agent = agent_definition()
     values = subagents.values_for(c, ROLE, {"model": model} if model else None)
@@ -1129,8 +1130,8 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None, p
     try:
         reply = await harness.session_call(program, payload)
     except harness.HarnessError as e:
-        return model_mod.CallResult(status="error", detail=str(e))
-    return model_mod.CallResult(status="ok", output=reply)
+        return CallResult(status="error", detail=str(e))
+    return CallResult(status="ok", output=reply)
 
 
 def _doc(c: str, doc: str) -> dict[str, Any] | None:

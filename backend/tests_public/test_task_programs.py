@@ -240,11 +240,11 @@ async def test_thimble_reads_for_a_program_only_pictures_its_box_may_read(tmp_pa
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
     seen: list[list[tuple[bytes, str]]] = []
 
-    async def structured(prompt, *, tool, model, images=(), **k):
+    async def structured(c, prompt, *, tool, model, images=(), **k):
         seen.append(list(images))
         return model_result({"text": f"{len(images)} pictures"})
 
-    monkeypatch.setattr(model, "structured", structured)
+    monkeypatch.setattr(__import__("app.agent_call", fromlist=["agent_call"]), "structured", structured)
     monkeypatch.setattr(__import__("app.card_check", fromlist=["card_check"]), "fit_image", lambda b: b)
     active.append(_program(tmp_path, "peek", "card-check", PEEK))
     res = await tasks.call(CORPUS, "card-check", {"secret": str(secret), "png": str(png)})
