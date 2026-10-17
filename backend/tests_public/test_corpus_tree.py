@@ -100,3 +100,18 @@ def test_a_claims_matcher_agrees_with_glob_matches():
         want = [p for p in PATHS if views.glob_matches(p, pattern)]
         assert [p for p in PATHS if test(p)] == want, pattern
         assert views.match_all([pattern], PATHS) == want, pattern
+
+
+def test_bug_hunt_e3_a_label_reads_a_glob_as_a_view_does(tree_corpus):
+    # `*/**/README.md` over runs: a `**/` may stand for no folder, so a run's top-level README.md is in its scope, as a
+    # view's claims read it (views.glob_matches); a label read it with fnmatch alone and left it out
+    from app import concepts
+
+    for rel in ("runs/r1/README.md", "runs/r2/report/README.md"):
+        _write(tree_corpus, rel)
+    corpus.forget_sources()
+    assert [s["path"] for s in concepts.match_paths(tree_corpus, ["runs/*/**/README.md"])] == ["runs/r1/README.md", "runs/r2/report/README.md"]
+    every = [s["path"] for s in corpus.list_sources(tree_corpus)]
+    for pattern in ("*/**/README.md", "runs/**/agents/*.jsonl", "**/*.md", "runs/**/r1/**/a.jsonl", "runs/*/agents/*"):
+        labeled = [s["path"] for s in concepts.match_paths(tree_corpus, [pattern])]
+        assert labeled == [p for p in every if views.glob_matches(p, pattern)] and labeled, pattern

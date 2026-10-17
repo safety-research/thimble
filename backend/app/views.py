@@ -1196,18 +1196,16 @@ def folder_paths(corpus: Path, rel: str = "") -> list[str]:
 def glob_matches(rel_file: str, pattern: str | None) -> bool:
     """`pattern` against the file's corpus-relative path and its basename, so a claim may name a file type anywhere
     (`*.jsonl`) or a path from the corpus root (`boards/*.jsonl`); a `**/` may also stand for no folder, so `**/*.vtt`
-    names the files at the corpus root too; '' or '*' matches everything."""
+    names the files at the corpus root too, as a label's paths read (corpus_tree.glob_match); '' or '*' matches
+    everything."""
     if not pattern or pattern == "*":
         return True
     name = rel_file.rsplit("/", 1)[-1]
-    return any(fnmatch.fnmatch(rel_file, p) or fnmatch.fnmatch(name, p) for p in _glob_forms(pattern))
+    return corpus_tree.glob_match(rel_file, pattern) or corpus_tree.glob_match(name, pattern)
 
 
-@functools.lru_cache(maxsize=512)
-def _glob_forms(pattern: str) -> tuple[str, ...]:
-    """`pattern`, and it with each `**/` taken out when it has one."""
-    bare = re.sub(r"(^|/)\*\*/", r"\1", pattern)
-    return (pattern,) if bare == pattern else (pattern, bare)
+# a pattern as the fnmatch patterns that together name what it names, by the rule labels follow too (corpus_tree)
+_glob_forms = corpus_tree.glob_forms
 
 
 def records_text(c: str, slug: str) -> str:

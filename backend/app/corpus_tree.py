@@ -10,8 +10,12 @@ every folder again.
 """
 from __future__ import annotations
 
+import fnmatch
+import functools
+import itertools
 import operator
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -288,3 +292,33 @@ def forget(root: Path | None = None) -> None:
         for key, t in _trees.items():
             if root is None or key == str(root):
                 t.not_before = now
+
+
+# --------------------------------------------------------------------------- path patterns
+#
+# The one rule for a path pattern, which a label's paths (concepts.match_paths) and a view's claims (views.glob_matches)
+# both follow: fnmatch's, case-sensitive, where `*` may span `/`, and where a `**/` at the start or after a `/` may also
+# stand for no folder, as in git and pathlib: `*/**/README.md` names a run's top-level README.md (bug hunt E3) and
+# `**/*.vtt` the files at the corpus root too.
+
+_DEEP_RE = re.compile(r"(?:(?<=/)|^)\*\*/")  # a `**/` that may stand for no folder
+_DEEP_RUN_RE = re.compile(r"(?:(?<=/)|^)(?:\*\*/){2,}")  # `**/**/`, which names what one `**/` names
+GLOB_DEEP_MAX = 6  # the `**/` of a pattern read every way; past that, a pattern reads with all kept or all taken out
+
+
+@functools.lru_cache(maxsize=1024)
+def glob_forms(pattern: str) -> tuple[str, ...]:
+    """The fnmatch patterns that together name what `pattern` names: it with each `**/` kept or taken out, every way
+    (`a/**/b/**/c` also as `a/b/**/c`, `a/**/b/c` and `a/b/c`)."""
+    pattern = _DEEP_RUN_RE.sub("**/", pattern)
+    parts = _DEEP_RE.split(pattern)
+    if len(parts) == 1:
+        return (pattern,)
+    n = len(parts) - 1
+    ways = itertools.product(("**/", ""), repeat=n) if n <= GLOB_DEEP_MAX else (("**/",) * n, ("",) * n)
+    return tuple(dict.fromkeys(parts[0] + "".join(k + p for k, p in zip(way, parts[1:])) for way in ways))
+
+
+def glob_match(path: str, pattern: str) -> bool:
+    """Whether the corpus-relative `path` is one `pattern` names (glob_forms)."""
+    return any(fnmatch.fnmatchcase(path, f) for f in glob_forms(pattern))
