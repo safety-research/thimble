@@ -219,6 +219,27 @@ def test_f17_a_resumed_session_s_model_is_known_from_the_reply_it_gave_before_th
     assert _mirror() == [], "the history is not replayed"
 
 
+def test_h5_a_turn_main_answered_while_no_server_followed_it_reaches_main_s_chat_when_the_session_comes_back(cwd, tmp_path):
+    """Bug hunt H5: the analyst quit, `claude -c` brought the session back under its id, and main answered a turn before
+    `/thimble browser` started the server again; that turn never reached main's chat in the browser, which read on from
+    the transcript's end. A session that ended and comes back reads on from where the mirror stopped: the turn once,
+    and nothing twice."""
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = _attach(cwd, p)
+    session.tail_once(lv)
+    _append(p, lv, [_human("Which page has the most revisions?"), _assistant(_say("WillkommenImWiki.")), END])
+    session.detach(CORPUS, SID, "ended")  # the analyst quit
+    _write(p, [_human("ok I'm back. where were we?"), _assistant(_say("The label stopped at 3 of 8 records.")), END])
+    lv = _attach(cwd, p)  # `/thimble browser` in the continued session
+    session.tail_once(lv)
+    session.tail_once(lv)
+    said = [r.get("text") or r.get("delta") for r in _mirror() if r["type"] in ("user", "text")]
+    assert said == ["Which page has the most revisions?", "WillkommenImWiki.", "ok I'm back. where were we?",
+                    "The label stopped at 3 of 8 records."]
+    assert not lv.degraded
+
+
 # ----------------------------------------------------------------------------- the startup sweep
 
 
