@@ -125,10 +125,10 @@ def test_a_build_in_terminal_mode_asks_for_view_term_js(board):
         page = view_tools.builder_definition("board")["prompt"]
     with prompts.rendering("browser"):
         opened = tools.hint("propose_view-proposed", view="Board", slug="board", claims="board.jsonl")
-    assert "view.term.js" in term and "terminal-views.md" in term and "thimble view text" in term
+    assert "view.term.js" in term and "`terminal-views`" in term and "thimble view text" in term
     assert all(f"`{x}`" in term for x in ("timeline", "linked-sessions", "repository"))
     assert "view.html" not in term and "data-anchor" not in term and "npm" not in term and "px" not in term
-    assert "view.html" in page and "view.term.js" not in page and "terminal-views.md" not in page
+    assert "view.html" in page and "view.term.js" not in page and "terminal-views" not in page
     # 0.9.0 (SPEC-v2 3.18): one text for every session, the panel first and the browser workbench after the press
     assert "thimble's panel in the terminal" in proposed and "Files in the browser workbench" in proposed
     assert opened == proposed

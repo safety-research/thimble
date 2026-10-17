@@ -538,6 +538,34 @@ Finish the view you build: thimble runs the checks as the record of your build. 
 }
 ```
 
+## view_reference
+
+Get thimble's docs of the view kit and its worked examples, each whole. Name every doc and example you need in one call.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "docs": {"type": "array", "items": {"type": "string", "enum": ["color", "time-range", "rows-and-filters", "search-table-diff", "charts"]}, "description": "The docs of the kit: `color` (Color by and the marks of labels), `time-range` (the time range and its axis), `rows-and-filters` (Rows, Filter by, lanes, cards, the side panel, the transcript and the messages), `search-table-diff` (the search, the table, the diff and the text) and `charts` (charts, networks, trees and flows)."},
+    "examples": {"type": "array", "items": {"type": "string", "enum": ["timeline", "repository", "linked-sessions"]}, "description": "The worked examples, each with its view.json, reader.py and view.html."}
+  }
+}
+```
+
+## view_reference@term-page
+
+Get thimble's doc of the terminal view kit and its worked examples, each whole. Name all you need in one call.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "docs": {"type": "array", "items": {"type": "string", "enum": ["terminal-views"]}, "description": "The doc of the terminal view kit."},
+    "examples": {"type": "array", "items": {"type": "string", "enum": ["timeline", "repository", "linked-sessions"]}, "description": "The worked examples, each with its view.json, reader.py and view.term.js."}
+  }
+}
+```
+
 ## view_pictures
 
 Take pictures of the view you review, which the result shows. The first call gives the view as it opens; ask for other states in `states`, up to four more.
