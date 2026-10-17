@@ -3350,7 +3350,7 @@ _BARE_SPAN_RE = re.compile(rf"(?<![\w:/#@-])({_HEX8})({_SPAN_TAIL})")
 _WORD_ID_RE = re.compile(rf"\b(notebook|sentence|section|paragraph|comment)\s+`?{_HEX8}`?(?!\w)")
 _BARE_ID_RE = re.compile(rf"(?:\b(?P<prep>in|at|of|from|on|to|see|by|per)\s+)?(?<![\w:/#@.-])`?(?P<id>{_HEX8})`?(?![\w-])")
 _EMPTY_BRACKETS_RE = re.compile(r"\s*[(\[]\s*[)\]]")
-_SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,;:!?]|\.(?!\w))")  # not before a period that starts a word (".yardopts")
+_SPACE_BEFORE_PUNCT_RE = re.compile(r"\s+([,;:!?.])(?!\w)")  # only before punctuation that ends a word (".yardopts", ":8000")
 
 
 def readable_ids(text: str, *, cells: set[str] | None = None, doc_ids: set[str] | None = None) -> str:

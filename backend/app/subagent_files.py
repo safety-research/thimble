@@ -89,6 +89,7 @@ PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's modu
 FORK_TYPE = "fork"
 AGENT_TOOLS = ("Agent", "Task")
 SEND_TOOL = "SendMessage"
+MAIN_TO = "main"  # SendMessage's `to` for the main conversation, which a background subagent may name
 STOP_TOOL = "TaskStop"
 REQUEST_PREFIX = "req_"
 REQUEST_RE = re.compile(r"\breq_[0-9a-f]{10}\b")
@@ -390,8 +391,10 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
     not one of thimble's roles go on.
 
     SendMessage to a registered agent of a role claims the pending message request with the same text; with none it is
-    denied, unless a subagent sends it to its own parent (the registry's `parent`), which goes on. TaskStop claims a
-    pending stop request of its agent and is never denied."""
+    denied, unless a subagent sends it to its own parent (the registry's `parent`), which goes on. A SendMessage to main
+    from an agent of thimble's whose parent is another agent (a helper of the orientation) is denied with its parent's
+    id, so that it sends the message there (D12: a helper's note after a cut-off report took a turn of main's in the
+    analyst's chat). TaskStop claims a pending stop request of its agent and is never denied."""
     name = str(hook.get("tool_name") or "")
     inp = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
     caller = str(hook.get("agent_id") or "") or None
@@ -448,12 +451,15 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
         return None
     if name == SEND_TOOL:
         to = str(inp.get("to") or inp.get("recipient") or "")
+        parent = str((registry(state).get(caller) or {}).get("parent") or "") if caller else ""
+        if parent and to.strip().lower() == MAIN_TO:
+            return hint("agent-check-to-parent", parent=parent)
         agent = registry(state).get(to)
         if not isinstance(agent, dict) or agent.get("role") not in ROLES:
             return None
         if plan:
             return hint("start-plan-mode")
-        if caller and (registry(state).get(caller) or {}).get("parent") == to:
+        if parent and parent == to:
             # a subagent's message to its own parent, such as the rest of a cut-off report (B6): it adds no run that a
             # hand-back of that subagent would not add
             return None

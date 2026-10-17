@@ -66,6 +66,25 @@ def test_a_subagent_s_message_to_its_own_parent_goes_on_and_any_other_message_wi
     assert sf.check_call(state, {**send("helper1"), "permission_mode": "plan"}) is not None
 
 
+def test_a_helper_s_message_to_main_is_denied_with_a_reason_that_names_its_parent():
+    """Bug hunt 3, D12: a helper whose hand-back was cut off sent its note with SendMessage to "main", which took a turn
+    of main's in the analyst's chat. A message to main from an agent whose parent is one of thimble's agents is denied,
+    and the reason names that parent, where the message then goes on; main's direct agents may still message main."""
+    state: dict = {}
+    sf.registry(state).update({"orientx": {"role": "orientation", "key": "orient", "status": "running"},
+                               "helperx": {"role": sf.HELPER, "parent": "orientx", "status": "running"}})
+
+    def send(caller: str, to: str) -> dict:
+        return {"hook_event_name": "PreToolUse", "tool_name": "SendMessage", "session_id": MAIN_SID,
+                "tool_use_id": "toolu_send2", "permission_mode": "auto", "agent_id": caller,
+                "tool_input": {"to": to, "summary": "report cut off", "message": "my report on the relay was cut off"}}
+
+    reason = sf.check_call(state, send("helperx", "main"))
+    assert reason and "orientx" in reason
+    assert sf.check_call(state, send("helperx", "orientx")) is None
+    assert sf.check_call(state, send("orientx", "main")) is None
+
+
 # --------------------------------------------------------------------------- the hooks, run as Claude Code runs them
 
 

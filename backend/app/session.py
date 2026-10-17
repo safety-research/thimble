@@ -102,6 +102,8 @@ REPLY_TOOL = "reply_in_thread"
 # what main ends a turn with when it has nothing for the analyst, which no chat shows (module note, the end token)
 END_TOKEN = "(shown in the dashboard)"
 TERMINAL_ONLY = "↳"  # opens a line of main's or a fork's that only the terminal shows (prompts/main.md)
+# what Claude Code writes for an empty text block, which its terminal does not draw, so no chat shows it either
+NO_CONTENT = "(no content)"
 # the token at the end of a text, with the variants the model writes: any case, a trailing period, `*` or `_` emphasis
 END_RE = re.compile(r"[ \t]*[*_]*" + re.escape(END_TOKEN) + r"\.?[*_]*\.?\s*\Z", re.I)
 # Claude Code's calls that are nothing the analyst reads, so no row in any chat: loading a deferred tool's schema before
@@ -1937,10 +1939,12 @@ def handback_report(body: str) -> str:
 
 
 def visible(text: str, notes: bool = False) -> str:
-    """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN, the words before the
-    token when it ends with it (END_RE), and any other text as it is, without its lines that open with TERMINAL_ONLY
-    unless `notes` keeps them (main's reply to a hand-back of HANDBACK_ROWS), and with the citations written as Markdown
-    links for the terminal in their chat form (cite.from_links)."""
+    """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN or NO_CONTENT, the words
+    before the token when it ends with it (END_RE), and any other text as it is, without its lines that open with
+    TERMINAL_ONLY unless `notes` keeps them (main's reply to a hand-back of HANDBACK_ROWS), and with the citations written
+    as Markdown links for the terminal in their chat form (cite.from_links)."""
+    if text.strip() == NO_CONTENT:
+        return ""
     m = END_RE.search(text)
     text = cite.from_links(text[: m.start()].rstrip() if m else text)
     if notes or TERMINAL_ONLY not in text:
@@ -1950,7 +1954,9 @@ def visible(text: str, notes: bool = False) -> str:
 
 def _text(lv: Live, text: str, uuid: str = "", **extra: Any) -> None:
     """One text block of main's: kept raw with its record's `uuid` among the turn's rows (_answer_checked), and written
-    to main's chat as a chat shows it (visible), with that uuid."""
+    to main's chat as a chat shows it (visible), with that uuid. An empty block (NO_CONTENT) is neither."""
+    if text.strip() == NO_CONTENT:
+        return
     if uuid and lv.turn_open:
         if lv.turn_rows and lv.turn_rows[-1].get("uuid") == uuid:
             lv.turn_rows[-1] = {"uuid": uuid, "text": f"{lv.turn_rows[-1]['text']}\n{text}"}

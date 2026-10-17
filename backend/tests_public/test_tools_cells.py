@@ -93,6 +93,14 @@ async def test_add_cell_runs_code_and_reports_the_output(group):
     assert (await call("add_card", group, kind="table", question="q")).is_error
 
 
+async def test_a_takeaway_keeps_the_space_before_a_word_that_starts_with_punctuation(group):
+    """The tidy-up of a takeaway removes a space before punctuation that ends a word, and kept the one before a period
+    that starts a word but not before a colon: ":9100" read "on:9100". Only punctuation that ends a word loses it."""
+    cid = _cid(await call("add_card", group, kind="note", question="Which port?", text="One port."))
+    await call("edit_card", group, cell=cid, takeaway="Both relays bind one port , :9100 , and the cache dir .quill stays ; it lives on :9100 .")
+    assert notebook.get_cell(CORPUS, cid)["takeaway"] == "Both relays bind one port, :9100, and the cache dir .quill stays; it lives on :9100."
+
+
 async def test_an_agent_s_card_code_may_not_install(group, tmp_path, monkeypatch):
     """Card code runs in the kernel, where neither a prompt nor Claude Code's permission mode reaches it, so an agent's
     card that installs or downloads is refused, also where an earlier config set `installs` to "allow" (read and
