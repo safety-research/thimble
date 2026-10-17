@@ -1,7 +1,8 @@
 // The terminal's own failure notices (SPEC-v2 3.20), beside the workspace's (home's state `notices`, panel.tsx
-// homeNotices): a press that could not open the browser, a proxy that may stop the link, and the like. Each is a red row
-// above the prompt (band.tsx) with the acts that fix it and `dismiss`, and each new key posts one toast; so does each
-// new notice of the workspace's. Notices draw with every feature off and never reach the model.
+// homeNotices): a press that could not open the browser, a proxy that may stop the link, and the like. Each is a row
+// above the prompt (band.tsx), `notice` in red, with the acts that fix it and `dismiss`, each act's words saying what
+// its press does (modActWords, noticeActWords, seeWords), and each new key posts one toast; so does each new notice of
+// the workspace's. Notices draw with every feature off and never reach the model.
 //
 // The rows live in the panel's surface state under NOTICES (so the band draws again when they change); what an act
 // does is kept here by the notice's key and the act's words (onNoticeAct).
@@ -25,6 +26,31 @@ export function onNoticeAct(key: string, act: string, run: () => Promise<void> |
   const m = actions.get(key) ?? new Map<string, () => Promise<void> | void>()
   m.set(act, run)
   actions.set(key, m)
+}
+
+/** The words of a terminal notice's act on its row, which say what its press does: `doctor` says in a toast how to
+ *  find what is wrong and fix it (`how to fix it`); the others (`try again`, `copy link`) as posted. */
+export function modActWords(act: string): string {
+  return act === 'doctor' ? 'how to fix it' : act
+}
+
+/** The words of a workspace notice's act on its row (panel.tsx NoticeAct), which say what its press does: `settings`
+ *  says in a toast where thimble's config is, the terminal's Settings (`how to fix it`); `ticket-open` opens the ticket
+ *  in the browser workbench, where the analyst allows it (`allow in the browser ›`); the others (`try again`, `retry`,
+ *  `turn off view proposals`) as thimble words them. */
+export function noticeActWords(a: { act: string; label: string }): string {
+  if (a.act === 'settings') return 'how to fix it'
+  if (a.act === 'ticket-open') return 'allow in the browser ›'
+  return oneLine(a.label || a.act).toLowerCase()
+}
+
+/** The words of the press that opens a notice's thread, which name what opens (the owner's live test, 10-17: `open ›`
+ *  opened the orientation's panel unasked): the agent as its notice names it, its kind without its title (`see the
+ *  orientation ›`, `see the view build ›`); `see the thread ›` for a side thread. */
+export function seeWords(n: { open: string; agent: string }): string {
+  if (n.open === 'thread') return 'see the thread ›'
+  const who = oneLine(n.agent).split(':')[0]!.trim().toLowerCase().replace(/^the\s+/, '')
+  return `see the ${who || 'agent'} ›`
 }
 
 /** The terminal's notices as the band draws them, newest first. */

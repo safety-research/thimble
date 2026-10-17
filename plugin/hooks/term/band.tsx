@@ -2,7 +2,20 @@
 // most these, top to bottom: a panel that waits undrawn and why (the narrow fallback), the view proposal waiting for an
 // answer, the open notices (the workspace's and the terminal's own, notices.tsx), the one SSH row of a remote press
 // (offramp.ts), and last the thimble line, the one row that stays while thimble is on (the owner's design, 10-16 21:30,
-// with the look of mock3/line2 A3; under the pointer the name underlines, 10-16 21:55):
+// with the look of mock3/line2 A3; under the pointer the name underlines, 10-16 21:55).
+//
+// Every row but the thimble line is one line (the owner's live test, 10-17: "bottom tray is a mess"): a dim label
+// column (`notice` in red), then its words cut with `…` at the room its acts leave them, then its acts at the right,
+// each in the accent and underlined under the pointer as the thimble line's names are, the row's main act bold:
+//
+//   view proposal  Page Histories  Each wiki page as a strip of its…   accept  reject  don't ask again  dismiss
+//   notice         Claude's safeguards switched a reply of the orientation…    see the orientation ›  dismiss
+//
+// A press on words cut short shows them whole, wrapped, and a second press cuts them again; on the view proposal the
+// press is its name's. Where the acts would leave the words fewer than MIN_WORDS cells, they take a row of their own
+// under the words.
+//
+// The thimble line:
 //
 //   thimble   cards 12 •   threads 2   citations 18 ◌  1 failed   labels 3 •   checks 2 •   coverage 15%
 //
@@ -29,9 +42,9 @@ import type { On, RenderElement } from 'claude-code'
 
 import type { AnswerComment, CoverageSummary, FeatureSettings, SummarySeen, TermPanel } from './types'
 import type { Ctx } from './ctx'
-import { citations, labelRef, noControls } from './lib'
+import { citations, clean, cut, labelRef, noControls, width } from './lib'
 import { docsOf } from './model'
-import { dismissModNotice, modNotices, runNoticeAct, toastNewNotices } from './notices'
+import { dismissModNotice, modActWords, modNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
 import { browserShown, copyRemoteLink, copyTunnel, dismissLinks } from './offramp'
 import { answerOffer, dismissNotice, homeNotices, homeOffer, noticeAct, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
 import { COLORS } from './paint'
@@ -43,10 +56,11 @@ import { openChecks } from './checksview'
 import { citeItems, openCitations } from './citesview'
 import { openCoverage, percent } from './coverageview'
 
-const ABOVE_LABEL = 16
-/** The label column in a band narrower than this many columns. */
+/** The label column: `  view proposal` and two cells before the words. */
+export const ABOVE_LABEL = 17
+/** The label column in a band narrower than this many columns (`  proposal` and a cell before the words). */
 const NARROW = 80
-const NARROW_LABEL = 10
+const NARROW_LABEL = 11
 
 // ------------------------------------------------------------------------------------------------ shared state
 
@@ -298,17 +312,66 @@ export function fitItems<T extends Pick<SummaryItem, 'segs'> & Partial<Pick<Summ
   return { shown: [], cut: true, gap: GAP }
 }
 
-/** Under the pointer, a press of the thimble line keeps its look (no inverse, no background): only its name
- *  underlines (the owner's pick, 10-16 21:55); the focus still inverts it. */
-const NO_INVERSE = { inverse: false }
+// ------------------------------------------------------------------------------------------------ the tray's rows
 
-// ------------------------------------------------------------------------------------------------ the band
+/** The cells between a row's words and its acts, and between two acts. */
+export const ACT_GAP = 2
+/** The fewest cells a row's words keep beside its acts: where the acts would leave them fewer (a band narrower than
+ *  about 60 columns), the acts take a row of their own under the words. */
+export const MIN_WORDS = 12
+
+/** An act of a row above the prompt: its key, its words and its press; `primary`, the row's main act, is bold. One with
+ *  no press is a state drawn dim in the acts' place (`◌ accepting`). */
+export type BandAct = { key: string; label: string; press?: () => Promise<void> | void; primary?: boolean }
+
+/** The cells a row's acts take, ACT_GAP apart. */
+export function actsWidth(acts: readonly Pick<BandAct, 'label'>[]): number {
+  return acts.reduce((n, a, i) => n + width(a.label) + (i ? ACT_GAP : 0), 0)
+}
+
+/** The room of a row's words in a band `cols` wide, past its label column (`labelW`) and before its acts and the gap
+ *  before them; the whole width past the label column, with the acts on a row of their own (`own`), where that room
+ *  would be under MIN_WORDS. */
+export function wordsRoom(cols: number, labelW: number, acts: readonly Pick<BandAct, 'label'>[]): { room: number; own: boolean } {
+  const rest = Math.max(1, cols - labelW)
+  if (!acts.length) return { room: rest, own: false }
+  const room = rest - actsWidth(acts) - ACT_GAP
+  return room >= MIN_WORDS ? { room, own: false } : { room: rest, own: true }
+}
+
+/** Words for a row: one line, no control characters. */
+const oneLine = (s: string) => clean(s).replace(/\s+/g, ' ').trim()
+
+/** The view proposal's line in `room` cells: its name, cut only where not even it fits, then two cells and as much of
+ *  what the view would show as fits, cut at a word with `…` (none where fewer than two cells are left); `cut` when any
+ *  of either is left out. */
+export function offerWords(name: string, description: string, room: number): { name: string; rest: string; cut: boolean } {
+  const n0 = oneLine(name)
+  const d0 = oneLine(description)
+  const n = cut(n0, room)
+  const left = room - width(n) - 2
+  const rest = d0 && left >= 2 ? cut(d0, left) : ''
+  return { name: n, rest, cut: n !== n0 || rest !== d0 }
+}
+
+/** Under the pointer, a press of the band keeps its look (no inverse, no background): only its words underline (the
+ *  owner's pick for the thimble line, 10-16 21:55, and for every act, 10-17); the focus still inverts it. */
+const NO_INVERSE = { inverse: false }
 
 // the view proposals dismissed from the band in this session: hidden, neither accepted nor rejected
 const hiddenOffers = new Set<string>()
 
 async function hideOffer(cx: Ctx, slug: string): Promise<void> {
   hiddenOffers.add(slug)
+  await cx.bumpPanel()
+}
+
+// the rows whose words show whole, wrapped (a press on words cut short), by the row's key, in this session
+const unfolded = new Set<string>()
+
+/** A row's words shown whole, or cut again. */
+async function toggleRow(cx: Ctx, key: string): Promise<void> {
+  if (!unfolded.delete(key)) unfolded.add(key)
   await cx.bumpPanel()
 }
 
@@ -354,18 +417,56 @@ export function registerBand(on: On): void {
         <Box flexShrink={1}>{child}</Box>
       </Box>
     )
-    // a row of words that wrap and acts that are never cut, under its label
-    const actRow = (key: string, name: string, words: RenderElement, acts: RenderElement[], color?: string) => (
-      <Box key={key} flexDirection="row">
-        {label(name, color)}
-        <Box flexDirection="row" columnGap={2} flexShrink={1}>
-          <Box flexShrink={1}>{words}</Box>
-          <Box flexDirection="row" columnGap={2} flexShrink={0}>
-            {acts}
-          </Box>
+    // an act: in the accent, as the thimble line's names, underlined under the pointer (its own keyed Box is what the
+    // pointer is over), the row's main act bold; a state with no press dim
+    const actEl = (a: BandAct) =>
+      a.press ? (
+        <Box key={`${a.key}-lit`} flexDirection="row" flexShrink={0}>
+          <Button key={a.key} label={a.label} plain hover={NO_INVERSE} onPress={() => void a.press?.()}>
+            <Text color={COLORS.accent} {...(a.primary ? { bold: true } : {})} hover={{ underline: true }}>
+              {a.label}
+            </Text>
+          </Button>
         </Box>
-      </Box>
-    )
+      ) : (
+        <Text key={a.key} dimColor>
+          {a.label}
+        </Text>
+      )
+    // one row: the label column, the words, the acts at the right ACT_GAP past them; the acts on a row of their own
+    // under the words where wordsRoom says so; `more`, rows under it (the view proposal's files, why accept failed)
+    const trayRow = (key: string, name: string, words: RenderElement, acts: readonly BandAct[], o: { color?: string; own?: boolean; more?: RenderElement[] } = {}) => {
+      const actsEl = acts.length ? (
+        <Box key={`${key}-acts`} flexDirection="row" columnGap={ACT_GAP} flexShrink={0} {...(o.own ? {} : { marginLeft: ACT_GAP })}>
+          {acts.map(actEl)}
+        </Box>
+      ) : null
+      return (
+        <Box key={key} flexDirection="column">
+          <Box flexDirection="row">
+            {label(name, o.color)}
+            <Box key={`${key}-words`} flexGrow={1} flexShrink={1}>
+              {words}
+            </Box>
+            {o.own ? null : actsEl}
+          </Box>
+          {o.more ?? null}
+          {o.own && actsEl ? under(`${key}-own-acts`, actsEl) : null}
+        </Box>
+      )
+    }
+    // a row's words, cut to its room; where cut, or shown whole after a press, the words are that press
+    const foldWords = (key: string, text: string, room: number) => {
+      const full = oneLine(text)
+      const open = unfolded.has(key)
+      const shown = open ? full : cut(full, room)
+      if (shown === full && !open) return <Text wrap="truncate-end">{shown}</Text>
+      return (
+        <Button key={`${key}-more`} plain hover={NO_INVERSE} onPress={() => toggleRow(cx, key)}>
+          <Text wrap={open ? 'wrap' : 'truncate-end'}>{shown}</Text>
+        </Button>
+      )
+    }
     // a panel Claude Code left undrawn (an open it was not asked for, on a terminal narrower than it places those at),
     // and why; `open panel` opens it as `/thimble` does, from the press, which Claude Code places at any width. Gone
     // once the pane is drawn (Claude Code places it when the terminal is widened to that width)
@@ -376,74 +477,87 @@ export function registerBand(on: On): void {
       const columns = (e.surface === 'terminal' ? e.viewport?.columns : 0) || pending.columns || 0
       const more = pending.floor && columns ? pending.floor - columns : 0
       if (pending.floor && columns && more <= 0) cx.later(0, () => void retryPending(cx, columns))
-      rows.push(
-        actRow('above-panel', 'panel', <Text wrap="truncate-end">{`${pending.title} is ready`}</Text>, [
-          <Button key="above-panel-open" label="open panel" plain onPress={() => openPending(cx)} />,
-          <Button key="above-panel-dismiss" label="dismiss" plain onPress={() => closePanel(cx)} />,
-        ]),
-      )
+      const acts: BandAct[] = [
+        { key: 'above-panel-open', label: 'open panel', primary: true, press: () => openPending(cx) },
+        { key: 'above-panel-dismiss', label: 'dismiss', press: () => closePanel(cx) },
+      ]
+      const { room, own } = wordsRoom(cols, LW, acts)
+      rows.push(trayRow('above-panel', 'panel', foldWords('above-panel', `${pending.title} is ready`, room), acts, { own }))
     }
     // the view proposal waiting for the analyst's answer (proposer.py, or a viewer for a file type), until it is answered
-    // and whatever the panel shows: `view proposal` in the accent, its name in bold, what it would show (for a viewer of
-    // a file type, then its files) wrapped whole, never behind a press, and not the task it names; `accept`, `reject` and
-    // `don't ask again`, which turns view proposals off; why accept could not start its build, in red, under them
+    // and whatever the panel shows: its name bold, then as much of what it would show as fits, and not the task it names;
+    // a press on the name shows all of it, wrapped, and for a viewer of a file type its files; `accept` (bold), `reject`,
+    // `don't ask again`, which turns view proposals off, and `dismiss`; why accept could not start its build, in red,
+    // under it
     const offer = (await featuresOf(cx)).viewProposals ? await homeOffer(cx) : null
     if (offer && !hiddenOffers.has(offer.slug)) {
-      const accept = () => answerOffer(cx, offer.slug, 'accept')
-      const reject = () => answerOffer(cx, offer.slug, 'reject')
-      rows.push(
-        actRow(
-          'above-offer',
-          narrow ? 'proposal' : 'view proposal',
-          <Text bold wrap="wrap">{offer.name}</Text>,
-          offer.pressed
-            ? [<Text key="above-offer-pressed" dimColor>{offer.pressed === 'accept' ? '◌ accepting' : '◌ rejecting'}</Text>]
-            : [
-                <Button key="above-offer-accept" label="accept" plain onPress={accept} />,
-                <Button key="above-offer-reject" label="reject" plain onPress={reject} />,
-                <Button key="above-offer-off" label="don't ask again" plain onPress={() => proposalsOff(cx)} />,
-                <Button key="above-offer-dismiss" label="dismiss" plain onPress={() => hideOffer(cx, offer.slug)} />,
-              ],
-          COLORS.accent,
-        ),
+      const acts: BandAct[] = offer.pressed
+        ? [{ key: 'above-offer-pressed', label: offer.pressed === 'accept' ? '◌ accepting' : '◌ rejecting' }]
+        : [
+            { key: 'above-offer-accept', label: 'accept', primary: true, press: () => answerOffer(cx, offer.slug, 'accept') },
+            { key: 'above-offer-reject', label: 'reject', press: () => answerOffer(cx, offer.slug, 'reject') },
+            { key: 'above-offer-off', label: "don't ask again", press: () => proposalsOff(cx) },
+            { key: 'above-offer-dismiss', label: 'dismiss', press: () => hideOffer(cx, offer.slug) },
+          ]
+      const { room, own } = wordsRoom(cols, LW, acts)
+      const open = unfolded.has(`offer:${offer.slug}`)
+      const w = open ? { name: oneLine(offer.name), rest: oneLine(offer.description) } : offerWords(offer.name, offer.description, room)
+      const words = (
+        <Button key="above-offer-name" plain hover={NO_INVERSE} onPress={() => toggleRow(cx, `offer:${offer.slug}`)}>
+          <Text wrap={open ? 'wrap' : 'truncate-end'}>
+            <Text bold hover={{ underline: true }}>
+              {w.name}
+            </Text>
+            {w.rest ? `  ${w.rest}` : ''}
+          </Text>
+        </Button>
       )
-      if (offer.description) rows.push(under('above-offer-description', <Text wrap="wrap">{offer.description}</Text>))
-      if (!offer.task && offer.claims.length) rows.push(under('above-offer-files', <Text wrap="wrap"><Text dimColor>{'files  '}</Text>{offer.claims.join(', ')}</Text>))
-      if (offer.refused && !offer.pressed) rows.push(under('above-offer-refused', <Text color={COLORS.problem} wrap="wrap">{offer.refused}</Text>))
+      const more: RenderElement[] = []
+      if (open && !offer.task && offer.claims.length) {
+        more.push(under('above-offer-files', <Text wrap="wrap"><Text dimColor>{'files  '}</Text>{oneLine(offer.claims.join(', '))}</Text>))
+      }
+      if (offer.refused && !offer.pressed) {
+        const why = oneLine(offer.refused)
+        more.push(under('above-offer-refused', <Text color={COLORS.problem} wrap={open ? 'wrap' : 'truncate-end'}>{open ? why : cut(why, cols - LW)}</Text>))
+      }
+      rows.push(trayRow('above-offer', narrow ? 'proposal' : 'view proposal', words, acts, { own, more }))
     }
-    // every agent's open notices, newest first, then the terminal's own: a failure with its fix, in red, wrapped whole;
-    // then the acts that fix it, `open ›` to the agent's thread, `dismiss`. Each new one posts one toast (notices.tsx)
+    // every agent's open notices, newest first, then the terminal's own: `notice` in red on the label column, the words in
+    // the text color, cut to the line; then the acts that fix it, the agent's thread (`see the orientation ›`) and
+    // `dismiss`, each saying what its press does. Each new one posts one toast (notices.tsx)
     const notices = await homeNotices(cx)
     toastNewNotices(cx, notices)
+    const mainFirst = (acts: BandAct[]) => acts.map((a, i) => (i === 0 && acts.length > 1 ? { ...a, primary: true } : a))
     for (const n of notices) {
-      rows.push(
-        actRow('above-notice-' + n.id, 'notice', <Text color={COLORS.problem} wrap="wrap">{n.text}</Text>, [
-          ...n.acts.map((a, i) => <Button key={`above-notice-${n.id}-act-${i}`} label={a.label} plain onPress={() => noticeAct(cx, n, a)} />),
-          ...(n.open ? [<Button key={`above-notice-${n.id}-open`} label="open ›" plain onPress={() => openNoticeChat(cx, n)} />] : []),
-          <Button key={`above-notice-${n.id}-dismiss`} label="dismiss" plain onPress={() => dismissNotice(cx, n)} />,
-        ]),
-      )
+      const key = 'above-notice-' + n.id
+      const acts = mainFirst([
+        ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: noticeActWords(a), press: () => noticeAct(cx, n, a) })),
+        ...(n.open ? [{ key: `${key}-open`, label: seeWords(n), press: () => openNoticeChat(cx, n) }] : []),
+        { key: `${key}-dismiss`, label: 'dismiss', press: () => dismissNotice(cx, n) },
+      ])
+      const { room, own } = wordsRoom(cols, LW, acts)
+      rows.push(trayRow(key, 'notice', foldWords(key, n.text, room), acts, { color: COLORS.problem, own }))
     }
     for (const n of await modNotices(cx)) {
-      const k = n.key.replace(/[^a-z0-9-]+/gi, '-')
-      rows.push(
-        actRow(`above-mod-${k}`, 'notice', <Text color={COLORS.problem} wrap="wrap">{n.text}</Text>, [
-          ...n.acts.map((a, i) => <Button key={`above-mod-${k}-act-${i}`} label={a} plain onPress={() => runNoticeAct(cx, n, a)} />),
-          <Button key={`above-mod-${k}-dismiss`} label="dismiss" plain onPress={() => dismissModNotice(cx, n.key)} />,
-        ]),
-      )
+      const key = `above-mod-${n.key.replace(/[^a-z0-9-]+/gi, '-')}`
+      const acts = mainFirst([
+        ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: modActWords(a), press: () => runNoticeAct(cx, n, a) })),
+        { key: `${key}-dismiss`, label: 'dismiss', press: () => dismissModNotice(cx, n.key) },
+      ])
+      const { room, own } = wordsRoom(cols, LW, acts)
+      rows.push(trayRow(key, 'notice', foldWords(key, n.text, room), acts, { color: COLORS.problem, own }))
     }
     // the one SSH row of a remote press: the tunnel command (its Eternal Terminal form when there is one), `copy` it,
     // `copy link` (a one-time link, never drawn), `dismiss`
     const links = await cx.links()
     if (links) {
-      rows.push(
-        actRow('above-remote', 'browser', <Text wrap="wrap">{links.et ?? links.tunnel}</Text>, [
-          <Button key="above-remote-copy" label="copy" plain onPress={() => copyTunnel(cx)} />,
-          <Button key="above-remote-link" label="copy link" plain onPress={() => copyRemoteLink(cx)} />,
-          <Button key="above-remote-dismiss" label="dismiss" plain onPress={() => dismissLinks(cx)} />,
-        ]),
-      )
+      const acts: BandAct[] = [
+        { key: 'above-remote-copy', label: 'copy', primary: true, press: () => copyTunnel(cx) },
+        { key: 'above-remote-link', label: 'copy link', press: () => copyRemoteLink(cx) },
+        { key: 'above-remote-dismiss', label: 'dismiss', press: () => dismissLinks(cx) },
+      ]
+      const { room, own } = wordsRoom(cols, LW, acts)
+      rows.push(trayRow('above-remote', 'browser', foldWords('above-remote', links.et ?? links.tunnel, room), acts, { own }))
     }
     // the thimble line, the one row that stays while thimble is on: `thimble` bold, in the accent and underlined, which
     // opens home; then the items that fit. Under the pointer an item's name underlines, nothing else changes

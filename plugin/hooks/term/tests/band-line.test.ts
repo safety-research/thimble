@@ -4,15 +4,17 @@
 // underlined, whose press opens home; names in the accent, values bold in the text color, a bold purple `•` after the
 // value of an item with something new (cleared when its section opens), citations' purple `◌` while checked; under the
 // pointer the selection background on an item and the cell after it, its name underlined, no inverse; items three cells
-// apart where all fit so, else two, the zero items cut first and an item with a `•` or a failure last. `claude plugin
-// test plugin`.
+// apart where all fit so, else two, the zero items cut first and an item with a `•` or a failure last. Above it, the
+// tray's other rows, one line each: a dim label column, the words cut with `…` where the acts begin (a press shows them
+// whole), the acts at the right in the accent, underlined under the pointer, the main one bold. `claude plugin test
+// plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { LINE_LABEL_W, fitItems, percent } from '../band'
-import { cid } from '../lib'
+import { ABOVE_LABEL, ACT_GAP, LINE_LABEL_W, MIN_WORDS, actsWidth, fitItems, offerWords, percent, wordsRoom } from '../band'
+import { cid, cut, width } from '../lib'
 import { COLORS } from '../paint'
-import { CWD, PANEL, SUMMARY, WS, aboveAt, comment, featuresOff, panelWorld, shown, words } from './fixtures-panel'
+import { CWD, PANEL, SUMMARY, WS, aboveAt, comment, featuresOff, panelWorld, pressBrowser, shown, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
 type M = Mounted<'terminal'>
@@ -294,4 +296,123 @@ test('fitItems keeps every item 3 apart when all fit so, else 2 apart; else the 
   // the Coverage view's forms (coverageview.tsx percent): a share below 1% keeps one decimal, cut (owner's notes, 10-16)
   expect(percent(1, 1000)).toBe('0.1%')
   expect(percent(25, 1000)).toBe('3%')
+})
+
+// ------------------------------------------------------------------------------------------------ the tray's rows
+
+const OFFER = {
+  slug: 'page-histories',
+  name: 'Page Histories',
+  description: "Each wiki page as a strip of its saves over time, colored by the agent that saved it, so you can see which agents edited a page together and when its content settled.",
+  task: 'Find out when the agents edited together.',
+  claims: ['revisions.jsonl'],
+}
+const OFFER_ACTS = ['accept', 'reject', "don't ask again", 'dismiss']
+
+/** The Text runs inside an element, each with its look. */
+function texts(n: unknown, out: { s: string; color?: unknown; bold?: unknown; dim?: unknown; hover?: unknown; wrap?: unknown }[] = []): typeof out {
+  if (Array.isArray(n)) n.forEach(x => texts(x, out))
+  else if (n && typeof n === 'object') {
+    const o = n as Node & { hover?: unknown }
+    const kids = [o.children ?? o.props?.children].flat()
+    // a Text that holds Texts: each of its runs (its strings plain)
+    if (o.type === 'Text' && kids.some(k => (k as Node | null)?.type === 'Text')) kids.forEach(k => (typeof k === 'string' ? out.push({ s: k }) : texts(k, out)))
+    else if (o.type === 'Text') out.push({ s: words(o), color: o.props?.color, bold: o.props?.bold, dim: o.props?.dimColor, hover: o.hover ?? o.props?.hover, wrap: o.props?.wrap })
+    else texts(o.children ?? o.props?.children, out)
+  }
+  return out
+}
+
+test("the view proposal is one row: `view proposal` dim, the name bold, as much of what it would show as fits, cut with `…`, its acts at the right in the accent with `accept` bold; a press on the name shows it all", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = panelWorld(on)
+  w.states.home = { ...w.states.home, offer: OFFER } as never
+  await start($, w)
+  for (const cols of [150, 100]) {
+    const m = await band($, cols)
+    const row = await m.find({ type: 'Box', key: 'above-offer' })
+    // the label column (17), the name, two cells, the description cut; two cells; the acts (40 cells) at the right
+    expect(ABOVE_LABEL).toBe(17)
+    const room = cols - ABOVE_LABEL - 40 - 2
+    const ow = offerWords(OFFER.name, OFFER.description, room)
+    expect(ow).toEqual({ name: 'Page Histories', rest: cut(OFFER.description, room - 'Page Histories'.length - 2), cut: true })
+    expect(words(row)).toBe(`  view proposalPage Histories  ${ow.rest}${OFFER_ACTS.join('')}`)
+    expect(width(`Page Histories  ${ow.rest}`)).toBeLessThanOrEqual(room)
+    expect(ow.rest.endsWith('…')).toBe(true)
+    const looks = texts(row)
+    expect(looks[0]).toMatchObject({ s: '  view proposal', dim: true })
+    expect(looks.find(l => l.s === 'Page Histories')).toMatchObject({ bold: true, hover: { underline: true } })
+    expect(looks.find(l => l.s === 'accept')).toMatchObject({ color: COLORS.accent, bold: true, hover: { underline: true } })
+    for (const a of OFFER_ACTS.slice(1)) {
+      expect(looks.find(l => l.s === a)).toMatchObject({ color: COLORS.accent, hover: { underline: true } })
+      expect(looks.find(l => l.s === a)!.bold).toBeUndefined()
+    }
+    // one row: no description or files under it
+    expect(await m.find({ type: 'Box', key: 'above-offer-description' })).toBeUndefined()
+    expect(await m.find({ type: 'Box', key: 'above-offer-files' })).toBeUndefined()
+    await m.unmount()
+  }
+  // the name's press: all of it, wrapped; a second press cuts it again
+  const m = await band($, 100)
+  await m.press({ key: 'above-offer-name' })
+  await w.clock.settle()
+  await m.unmount()
+  const open = await band($, 100)
+  expect(words(await open.find({ type: 'Box', key: 'above-offer' }))).toContain(`Page Histories  ${OFFER.description}`)
+  await open.press({ key: 'above-offer-name' })
+  await w.clock.settle()
+  await open.unmount()
+  const shut = await band($, 100)
+  expect(words(await shut.find({ type: 'Box', key: 'above-offer' }))).not.toContain(OFFER.description)
+  await shut.unmount()
+})
+
+test("a viewer of a file type shows its files on the name's press; why accept could not start is one red row under it; on a narrow band the acts take a row of their own", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = panelWorld(on)
+  const refused = 'the view builder could not start: thimble server is not running. Run `thimble server restart` in a shell, then press accept again.'
+  w.states.home = { ...w.states.home, offer: { ...OFFER, task: '', claims: ['**/*.vtt'], refused } } as never
+  await start($, w)
+  const m = await band($, 100)
+  expect(await m.find({ type: 'Box', key: 'above-offer-files' })).toBeUndefined()
+  const why = await m.find({ type: 'Box', key: 'above-offer-refused' })
+  expect(words(why)).toBe(`  ${cut(refused, 100 - ABOVE_LABEL)}`)
+  expect(texts(why).at(-1)).toMatchObject({ color: COLORS.problem })
+  await m.press({ key: 'above-offer-name' })
+  await w.clock.settle()
+  await m.unmount()
+  const open = await band($, 100)
+  expect(words(await open.find({ type: 'Box', key: 'above-offer-files' }))).toBe('  files  **/*.vtt')
+  expect(words(await open.find({ type: 'Box', key: 'above-offer-refused' }))).toBe(`  ${refused}`)
+  await open.press({ key: 'above-offer-name' })
+  await w.clock.settle()
+  await open.unmount()
+  // 60 columns: the label column is 11 (`proposal` and a cell), and the acts would leave the words under MIN_WORDS cells
+  expect(wordsRoom(60, 11, OFFER_ACTS.map(label => ({ label })))).toEqual({ room: 49, own: true })
+  expect(wordsRoom(100, ABOVE_LABEL, OFFER_ACTS.map(label => ({ label })))).toEqual({ room: 41, own: false })
+  expect(MIN_WORDS).toBe(12)
+  const narrow = await band($, 60)
+  const row = await narrow.find({ type: 'Box', key: 'above-offer' })
+  expect(words(row).startsWith('  proposalPage Histories  ')).toBe(true)
+  expect(words(await narrow.find({ type: 'Box', key: 'above-offer-own-acts' }))).toBe(`  ${OFFER_ACTS.join('')}`)
+  await narrow.unmount()
+})
+
+test("the SSH row of a remote press is one row: its command cut where its acts begin (`copy` bold), whole on a press", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = panelWorld(on)
+  const tunnel = 'ssh -N -L 29321:127.0.0.1:29321 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 mjoerke@devbox-fellows-matthew.us-central1-a.c.project.internal'
+  w.open = { ...w.open, remote: true, opened: false, tunnel }
+  await start($, w)
+  await pressBrowser($, w)
+  await w.clock.settle()
+  expect(actsWidth([{ label: 'copy' }, { label: 'copy link' }, { label: 'dismiss' }])).toBe(4 + ACT_GAP + 9 + ACT_GAP + 7)
+  const m = await band($, 120)
+  const row = await m.find({ type: 'Box', key: 'above-remote' })
+  const room = 120 - ABOVE_LABEL - 24 - ACT_GAP
+  expect(words(row)).toBe(`  browser${cut(tunnel, room)}copycopy linkdismiss`)
+  expect(texts(row).find(l => l.s === 'copy')).toMatchObject({ color: COLORS.accent, bold: true })
+  await m.press({ key: 'above-remote-more' })
+  await w.clock.settle()
+  await m.unmount()
+  const open = await band($, 120)
+  expect(words(await open.find({ type: 'Box', key: 'above-remote' }))).toBe(`  browser${tunnel}copycopy linkdismiss`)
+  await open.unmount()
 })

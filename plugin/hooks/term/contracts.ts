@@ -19,7 +19,6 @@ export const FEATURES_ON: FeatureSettings = { viewProposals: true, labels: true,
 // $.state keys under plugin 'thimble' (types/index.d.ts):
 //   activated: Activated | null            set by the transcript at activation
 //   settings: FeatureSettings              the transcript (settings.ts)
-//   coverageLine: StateFamily<string>      by row uuid; the transcript
 //   coverageSummary: CoverageSummary|null  the transcript
 //   citeIndex: CiteRow[]                   the transcript
 //   answerComments: AnswerComment[]        the transcript (read on tick when <ws>/answer-comments.json changes)

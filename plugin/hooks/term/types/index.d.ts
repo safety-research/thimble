@@ -273,11 +273,10 @@ declare module 'claude-code' {
       // what `thimble state` said last for a surface the panel shows, by the surface and its arguments
       surface: StateFamily<unknown>
       // 0.9.0 (SPEC-v2 C13; contracts.ts has the shapes). The transcript's: thimble on in this session (null before
-      // activation), the feature switches, each turn's coverage line by the row it stands under, the session's
-      // coverage, the chat citations drawn, the checks' comments on answers and how many checks read an answer now
+      // activation), the feature switches, the session's coverage, the chat citations drawn, the checks' comments on
+      // answers and how many checks read an answer now
       activated: Activated | null
       settings: FeatureSettings
-      coverageLine: StateFamily<string>
       coverageSummary: CoverageSummary | null
       citeIndex: CiteRow[]
       answerComments: AnswerComment[]

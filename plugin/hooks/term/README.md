@@ -20,8 +20,7 @@ What it draws comes from `thimble state`, and every change it makes goes through
 tools or agents; the one call it changes is main's Agent call for a side thread's fork, which runs with the thread's
 question as its description, so that Claude Code's agent tray and exit dialog name the thread by it (its prompt keeps
 `thread:<name>`, by which thimble knows the fork). The one file it writes is the workspace's `terminal/chat.json`
-(`kept.ts`): what main's chat drew under each of its rows (the turn's cards, the answer's footer and coverage line, the
-`↳` rows), by the row's uuid, which Claude Code keeps across `--continue` and `--resume`, so a resumed session draws it
+(`kept.ts`): what main's chat drew under each of its rows (the turn's cards, the answer's footer, the `↳` rows), by the row's uuid, which Claude Code keeps across `--continue` and `--resume`, so a resumed session draws it
 again. It writes to main only when the analyst asks it to: a code label's run and a card's `run again` (code runs only
 in main's Bash) and a new label described in the labels list go to main as the analyst's prompt, and a document's `as
 slides` or `as a story` runs `/thimble:write`.
@@ -29,8 +28,8 @@ slides` or `as a story` runs `/thimble:write`.
 **Coverage** (`tracker.ts`). What Claude's tool calls read of the data files (a Read by its result: whole, part, a
 PDF's pages; Bash readers; searches, which touch a file's contents without showing them; a recursive grep over a
 folder), data files only and never the command's text, goes once per turn to `thimble act coverage --stdin`; the
-answer's last row then carries one dim line, `▸ saw 2% of records (3 of 13 files)`, which in fullscreen opens the
-panel's Coverage view.
+session's summary it answers is the thimble line's `coverage` (the read share of the data by size), whose press opens
+the panel's Coverage view. No line stands under the answer.
 
 **Checks on answers.** A check's comment on a passage of Claude's answer tints the passage in the check's color (the
 browser's label color of its place) with a flag `⚑` in that color in the margin on the passage's first row; a click on
@@ -97,19 +96,24 @@ Claude Code's panel chrome, no right-click menu.
   run's hand-back or its task notification, whichever came first), and `↳ view ·
   <name> · building|built|proposed` under the answer that proposed a view (`failed` in red, `new` once built until
   opened).
-- **One row above the prompt**, a toast: what is new in the workspace since home was last opened (`2 new cards`, `new` in
-  green), `open ›` opening home, gone once it is opened. Side threads have their `↳` rows and thimble's agents Claude
+- **The thimble line above the prompt**, while thimble is on, after one blank row: `thimble` (its press opens home),
+  then `cards`, `threads`, `citations`, `labels`, `checks` and `coverage` with their counts, a purple `•` for what is
+  new; each name's press opens its section (band.tsx). Side threads have their `↳` rows and thimble's agents Claude
   Code's agent tray, so no row repeats them.
-- **A view proposal above the prompt**, while one waits for an answer: `view proposal` in the accent, the view's name in
-  bold, what it would show and the task it serves, whole, then `accept` (thimble builds it), `reject` and `don't ask
-  again`, which turns view proposals off; why accept could not start the build, and the fix, in red under them. To turn
+- **Every row above the prompt is one line**: a dim label column, the words cut with `…` where the acts begin (a press
+  shows them whole), the acts at the right in the accent, underlined under the pointer, the main one bold.
+- **A view proposal above the prompt**, while one waits for an answer: `view proposal`, the view's name in bold and as
+  much of what it would show as fits (the name's press shows it all), then `accept` (thimble builds it), `reject`,
+  `don't ask again`, which turns view proposals off, and `dismiss`; why accept could not start the build, and the fix,
+  in red under it. To turn
   view proposals back on after `don't ask again`, set `"views": {"propose": true}` in thimble's config
   (`~/.thimble/config.json`, or the workspace's `config.json` when it sets the key), or take the key out.
 - **Every agent's failures above the prompt**, newest first, under the view proposal: a notice for each failure of any
   agent thimble runs (the orientation and its helpers, the critic, writers, view builds, report checks, code tickets,
-  card checks, labels, the view proposer), since Claude Code's own output shows only main's: its words in red, which
-  name the agent and the failure, then the acts that fix it (`try again`, `retry`, `turn off view proposals`; `open
-  settings` says where thimble's config is, the terminal's Settings), `open ›` to the agent's thread, and `dismiss`.
+  card checks, labels, the view proposer), since Claude Code's own output shows only main's: `notice` in red, its
+  words, which name the agent and the failure, then the acts that fix it (`try again`, `retry`, `turn off view
+  proposals`; `how to fix it` says where thimble's config is, the terminal's Settings), the agent's thread named for
+  what opens (`see the orientation ›`), and `dismiss`.
 - **One panel**, on Claude Code's panel chrome: one title row, the path from home, its earlier steps dim and a click
   away and the current step last in the accent color and bold (`home › Threads`; on home, `show all threads` and
   `N new` at the right; no `‹ back`, b goes back), a dim subtitle, a rule, the actions at the bottom after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back),
@@ -232,7 +236,7 @@ the surfaces a drawing shows.
 
 ## Files
 
-`register.tsx` holds the hooks (the answer footer, the coverage line, the `↳` rows, the stream and `/thimble`'s words
+`register.tsx` holds the hooks (the answer footer, the `↳` rows, the stream and `/thimble`'s words
 too); `ctx.ts` builds from each hook's `$` the context the other files take (`cxOf`: a hooks module passes `$` only to
 a function of its own file or one imported from the module's files); `contracts.ts` the contracts with the panel's files;
 `activate.ts` turning on and the guide, `tracker.ts` coverage facts, `settings.ts` the switches, `band.tsx` the rows above

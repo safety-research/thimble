@@ -62,7 +62,7 @@ Each channel has one meaning. A run the table does not cover is regular, in the 
 | purple, underlined | a citation's value; in a card, every citation and evidence link (`↗ events.jsonl line 197`), so a card has one underline color | controls |
 | blue, in brackets `[ … ]` | a chip: a citation that names only its place (`[ card ]`) | controls, a citation with words |
 | blue | the `?` and `↳` in the margin | |
-| accent | a panel's title, the selected row, `view proposal` above the prompt | anything else |
+| accent | a panel's title, the selected row, the acts of the rows above the prompt and the thimble line's names | anything else |
 | italic | a record's own words (in quotation marks); the key-hint row | emphasis, captions |
 | inverse | the selected tab; the control, citation, mark or bar label under the pointer; a card's title under the pointer | anything at rest |
 | selection background | a choice in use: a card's parameter, a label's type, the chosen record of a file, the words a find matched, text being dragged | rows, hover |
@@ -164,7 +164,7 @@ the type area runs from A0 to R.
 | dim | `inactive` (`dimColor`) | letters (rule 15); the catch-all value's marks | secondary |
 | rule gray | `subtle` | lines only: rules, card borders, a field's border, tracks, axes, tree guides, a diagram's boxes and edges | structure |
 | link | `remember` | links (rule 16); the `?` and `↳` in the margin | opens what it names |
-| accent | `suggestion` | a panel's title; the selected row's `❯` and its text; `view proposal` above the prompt; the label panel's actions, underlined | where you are; a view proposal waiting for an answer; a button |
+| accent | `suggestion` | a panel's title; the selected row's `❯` and its text; the acts of the rows above the prompt and the thimble line's names, underlined under the pointer; the label panel's actions, underlined | where you are; a button |
 | new | `success` | the word `new` and `N new` | new |
 | tip | `userMessageBackground`, a background | the tip of the citation under the pointer | |
 | prompt | `userMessageBackground`, a background | a side thread's question, across the type area, as Claude Code draws a prompt | the analyst's question |
@@ -222,7 +222,6 @@ outside this table.
 | `⏺` | an answer: main's reply (Claude Code's own) and a side thread's answer; dim, a side thread's turn at work | text |
 | `⎿` | under a side thread's question or its turn at work: its latest words, or how it ended without an answer, as Claude Code writes a result under a call or an interrupt under a prompt | dim |
 | `⚑` | a check commented on the passage that starts on this row (it wins over `↳` and `?` there) | the check's color |
-| `▸` | the coverage line under an answer: what the turn's calls saw of the data | dim |
 | `?` | ask a side thread about this passage (shown under the pointer; under the header for a file's chosen record) | link |
 | `↳` | a side thread was asked here (in a reply's margin, a click opens it); the start of a `↳` row | link in the margin; dim on a row |
 | **navigation** | | |
@@ -382,7 +381,8 @@ colored is said under each.
 
 ↳ thread · "How many delete events are in events.jsonl? One number." · answered · new
 ↳ view · Wiki Pages · built · new
-  thimble   3 new cards  open ›  dismiss
+
+  thimble   cards 2 •   threads 1   citations 13   labels 0   checks 0   coverage 15%
 ```
 
 The same reply's first row under the pointer, and a passage a thread was asked about:
@@ -443,29 +443,37 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - A `↳` row: `↳` at 0 and its words at 2, dim (`thread · "question" · answered`, `view · Wiki Pages · built`), `new` in
   green while it is new, `failed` in red. A thread's row names the turn's question; a stop is not news. A view's row
   stands under the answer that proposed it.
-- One row above the prompt, the toast, at column 2: `thimble` dim, what is new in the workspace since home was last opened
-  (`3 new cards`), `open ›`, which opens home, and `dismiss`, which marks them seen without opening home; the row is
-  gone once home is opened. Side threads have their `↳` rows and thimble's agents Claude Code's agent tray, so no row
-  repeats them.
-- The view proposal's rows above the prompt, while one waits for the analyst's answer, whatever the panel shows:
-  `view proposal` in the accent on the label column, the view's name in bold, then `accept`, `reject` and `don't ask
-  again`; under the name what the view would show (for a viewer of a file type, then the files it claims after `files`
-  dim), each wrapped whole and never cut, since nothing else shows them, and not the task a proposal names; why
-  accept could not start its build, and the fix, in red under them. A press shows `◌ accepting` or `◌ rejecting` until
+- The thimble line, the last row above the prompt while thimble is on, after one blank row, at column 2: `thimble`
+  bold in the accent and underlined (its press opens home), then `cards`, `threads`, `citations`, `labels`, `checks`
+  and `coverage`, each a name in the accent and its value bold, a purple `•` for what is new since its section was
+  last seen; each name's press opens its section (band.tsx has the whole design). No `open ›`, no `dismiss`. Side
+  threads have their `↳` rows and thimble's agents Claude Code's agent tray, so no row repeats them.
+- Every row above the prompt but the thimble line is one line (the owner's live test, 10-17): a dim label column, then
+  its words cut at a word with `…` where its acts begin, then its acts at the right, two cells apart, each in the
+  accent and underlined under the pointer (no inverse), as the thimble line's names are, the row's main act bold. A
+  press on words cut short shows them whole, wrapped, and a second press cuts them again. Where the acts would leave
+  the words fewer than 12 cells, they take a row of their own under the words.
+- The view proposal's row above the prompt, while one waits for the analyst's answer, whatever the panel shows:
+  `view proposal` dim on the label column, the view's name in bold, then as much of what the view would show as fits,
+  and not the task a proposal names; then `accept` (bold), `reject`, `don't ask again` and `dismiss`. A press on the
+  name shows what it would show whole (for a viewer of a file type, then the files it claims after `files` dim). Why
+  accept could not start its build, and the fix, is one red row under it. A press shows `◌ accepting` or `◌ rejecting` until
   thimble has written the answer. The rows go once the proposal is answered, and while view proposals are off; `don't
   ask again` turns them off (`views.propose: false` in thimble's config) and a toast says how to turn them back on. They
   bind no key: a letter typed goes to the prompt.
 - The notice rows, under them, newest first: every open notice of every agent thimble runs (the orientation and its
   helpers, the critic, writers, view builds and reviews, report checks, code tickets and the dev agent, card checks,
   labels, the view proposer), since Claude Code's own output shows only main's requests (a notice of main's own reply,
-  a switch of Claude's safeguards or an API error, is left out, as Claude Code shows those). One row each: `notice` dim on the label
-  column, then the notice's words in red, which name the agent and the failure, wrapped whole (a safeguard's block, or
+  a switch of Claude's safeguards or an API error, is left out, as Claude Code shows those). One row each: `notice` red on the label
+  column, then the notice's words in the text color, which name the agent and the failure (a safeguard's block, or
   its switch to another model; an API error that stopped the agent; an agent that ended failed or was refused; a view
   build, a check or a label run that failed; a check for a view proposal that failed or that a fallback model
-  answered); then the acts that fix it (`try again`, `retry`, `turn off view proposals`, `open settings`), `open ›` to
-  the agent's thread (a side thread in the threads panel, an agent's chat in its own panel) and `dismiss`. A fix that
-  is a command (`/login`, `thimble server restart`) is in the notice's words; `open settings` says in a toast where
-  thimble's config is, which the terminal has in place of the browser's Settings, and leaves the row. An act or
+  answered); then the acts that fix it (`try again`, `retry`, `turn off view proposals`, `how to fix it`, `allow in
+  the browser ›` for a code ticket), the press that opens the agent's thread, named for what opens (`see the
+  orientation ›`, `see the view build ›`, `see the thread ›` for a side thread in the threads panel), and `dismiss`.
+  Each act's words say what its press does. A fix that is a command (`/login`, `thimble server restart`) is in the
+  notice's words; `how to fix it` says in a toast where thimble's config is (which the terminal has in place of the
+  browser's Settings), or for the terminal's own notices to run `thimble doctor`, and leaves the row. An act or
   `dismiss` takes the row away at once and thimble writes the dismissal, so it stays gone after a relaunch; a failure
   that comes again is a new row. An act thimble refuses leaves the row, with why in a toast. A notice that thimble
   clears (a later success) goes when home's state is read again. Two notices that are not failures show the same way:
@@ -474,7 +482,7 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   unpair`).
 - The panel's row above the prompt, only while Claude Code leaves the panel undrawn (an open it was not asked for, from
   main's tool or a click in a card, on a terminal narrower than 144 columns, or 110 for a panel opened before): `panel`
-  dim, `Home is ready`, then `open panel` and `dismiss`. `open panel` opens the panel from its press, as `/thimble`
+  dim, `Home is ready`, then `open panel` (bold) and `dismiss`. `open panel` opens the panel from its press, as `/thimble`
   does, at any width, and says so in a toast when the terminal is still too narrow; the row is gone once the panel is
   drawn.
 - Claude Code's tool rows and subagent rows stay Claude Code's, folded as it folds them, with no hex id, in the row and

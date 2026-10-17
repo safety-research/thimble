@@ -13,7 +13,6 @@
 //     a passage a check commented on tinted in the check's color, with a flag in the margin
 //   - each card a turn of main added or changed, once, under the turn's last reply, in its last state, its takeaway
 //     under it, a ↗ on its border row in fullscreen; no hex id, and Claude Code's tool groups left folded
-//   - under an answer that read data, one dim coverage line (`▸ saw 2% of records (3 of 13 files)`)
 //   - the rows above the prompt (band.tsx) and one panel (panel.tsx): home, a card, a citation's place, the threads, a
 //     label, a document, the files, an agent, and the views views.ts registers
 //   - side threads: the blue "?" beside a passage or a card, or a selection's "ask"; a `↳ thread` row under main's
@@ -446,22 +445,6 @@ function rowText(message: { content?: unknown } | undefined): string {
   return blocks.map(b => (typeof b?.text === 'string' ? b.text : b?.type === 'tool_result' ? resultText(b.content) : '')).join('\n')
 }
 
-/** The coverage line under a turn's answer (SPEC-v2 3.9): one dim row, `▸ saw 2% of records (3 of 13 files)`, after the
- *  footer (one blank row above it where no footer stands); in fullscreen a press opens the panel's Coverage view. None
- *  for a turn whose calls read no data, and none with "Coverage" off. */
-async function coverageEl(cx: Ctx, e: ResolveInput & { requestId: string; viewport?: { isFullscreen?: boolean } }, afterFooter: boolean): Promise<RenderElement | null> {
-  if (!featureOn('coverage')) return null
-  const line = await cx.coverageLine(e.requestId)
-  if (!line) return null
-  const { Box, Text, Button } = cx.els(e)
-  const words = `▸ ${clean(line)}`
-  return (
-    <Box key={`coverage-${e.requestId}`} marginLeft={MARGIN} {...(afterFooter ? {} : { marginTop: 1 })} flexDirection="row">
-      {e.viewport?.isFullscreen ? <Button key={`coverage-open-${e.requestId}`} label={words} plain dimColor onPress={() => openCoverage(cx)} /> : <Text dimColor wrap="truncate-end">{words}</Text>}
-    </Box>
-  )
-}
-
 /** Whether a classic (main screen) answer tints late comments (LC9): Claude Code reprinted the whole transcript when a
  *  row taller than the screen changed, so a tall answer keeps no tint on the main screen and its comments show in the
  *  panel and the summary line only. */
@@ -830,16 +813,12 @@ export const register: Register = (on, options) => {
       // the chat citations the answer drew, for the panel's Citations view (C13 citeIndex)
       if (featureOn('citationMarks') && all.trim() && !t.own) await indexCitations(cx, all, last || row)
     }
-    // what the turn's calls saw of the data, sent once (awaited, so the main screen draws the line at its first paint):
-    // the line under the turn's answer and the session's summary
+    // what the turn's calls saw of the data, sent once: the session's summary, which the thimble line's coverage and the
+    // Coverage view read (no line under the answer: coverage lives in the thimble line, the owner's live test, 10-17)
     if (isActive() && e.agentId === undefined && featureOn('coverage') && factsHeld()) {
       const cx = cxOf($)
-      const row = lineRow || rt.anchor
-      const summary = await flushFacts(cx, await cx.sessionId(), row)
-      if (summary) {
-        if (row) await cx.setCoverageLine(row, summary.line)
-        await cx.setCoverageSummary(summary)
-      }
+      const summary = await flushFacts(cx, await cx.sessionId(), lineRow || rt.anchor)
+      if (summary) await cx.setCoverageSummary(summary)
     }
     return done
   })
@@ -853,7 +832,6 @@ export const register: Register = (on, options) => {
     const told = await signalRows(cx, e)
     const views = await viewRowsEl(cx, e)
     const footer = await footerEl(cx, e)
-    const coverage = await coverageEl(cx, e, footer !== null)
     // without main's end token, and a `↳ thread` line naming its thread by its first question, not its fork's slug; no
     // such line for a thread whose `↳ thread` row the terminal UI drew, which says the same
     const rows = await cx.threads()
@@ -866,7 +844,7 @@ export const register: Register = (on, options) => {
     // the document a writer finished, linked out to the browser workbench under the row that says so
     const written = await writtenEl(cx, e, text)
     const live = e.surface === 'terminal' || e.surface === 'desktop'
-    if (!ids.length && !told && !views && !footer && !coverage && !written && text === e.props.text && !live && !needsDrawing(text)) return next(e)
+    if (!ids.length && !told && !views && !footer && !written && text === e.props.text && !live && !needsDrawing(text)) return next(e)
     const { Box } = $.ui.resolve(e)
     // the reply fills the terminal's width, less 2, its cards as wide as its prose
     const cols = (e.viewport?.columns ?? 100) - 2
@@ -877,7 +855,7 @@ export const register: Register = (on, options) => {
     const cards = await drawCards(cx, e, ids, cols, t => openAsk(cx, t), id => openThread(cx, id))
     // a block that held only a line the terminal UI hides: nothing (ctrl+o's view still draws the reply's time and model
     // above it, which no hook reaches; the engine's own block with no text draws the same)
-    if (!body.length && !cards && !told && !views && !footer && !coverage && !written) return <Box />
+    if (!body.length && !cards && !told && !views && !footer && !written) return <Box />
     // one blank row above, as above Claude Code's own reply rows: the engine's row carries that margin itself, and this
     // tree takes the row's place, so without it the reply sits right under the person's message
     return (
@@ -886,7 +864,6 @@ export const register: Register = (on, options) => {
         {written}
         {cards}
         {footer}
-        {coverage}
         {told}
         {views}
       </Box>
