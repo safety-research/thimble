@@ -30,24 +30,24 @@ bubblewrap can create a sandbox, and otherwise with your user's access; `thimble
 
 ## Authentication
 
-thimble has no login of its own: every model call runs your own `claude`. Any way you sign in to Claude Code works.
+thimble has no login of its own and starts no Claude Code session of its own: every model call runs in your Claude
+Code session, on its sign-in. Any way you sign in to Claude Code works.
 
 - **Claude login.** Run `claude auth login`, or `/login` in a `claude` session.
-- **API key.** Export `ANTHROPIC_API_KEY` in your shell before thimble's server starts. The server keeps the environment
-  it started with, so if a server already runs, run `thimble server restart` from that shell. Claude Code asks once
+- **API key.** Export `ANTHROPIC_API_KEY` in your shell before you start `claude` or `thimble`. Claude Code asks once
   whether to use the key.
 - **apiKeyHelper (most robust).** Put `"apiKeyHelper": "<a command that prints the key>"` in `~/.claude/settings.json`
-  (your Claude Code config dir). It reaches your session and thimble's server calls, whatever your shell exports. Auth
-  set only in a project's `.claude/` settings does not reach thimble's server calls.
+  (your Claude Code config dir). It reaches your session whatever your shell exports, and with it every model call of
+  thimble's, which runs in your session.
 - **Bedrock, Vertex or Foundry.** Set `CLAUDE_CODE_USE_BEDROCK=1`, `CLAUDE_CODE_USE_VERTEX=1` or
-  `CLAUDE_CODE_USE_FOUNDRY=1` and the provider's credentials, as Claude Code's docs say, before the server starts.
+  `CLAUDE_CODE_USE_FOUNDRY=1` and the provider's credentials, as Claude Code's docs say, before Claude Code starts.
   thimble names Anthropic's model ids, such as `claude-opus-5-5`. If your provider needs other ids, set each agent's
   model in Settings or as `agents.<agent>.model` in `~/.thimble/config.json` ([docs/config.md](docs/config.md)), or set
   `THIMBLE_<ROLE>_MODEL` (such as `THIMBLE_ORIENT_MODEL`) in the server's environment.
 
-After you change credentials, run `thimble server restart`. `thimble doctor --verbose` shows the auth path. When your
-organization's managed settings set `forceLoginMethod`, Claude Code blocks API keys and `apiKeyHelper`: sign in with the
-method it names.
+After you change credentials, start Claude Code again, and run `thimble server restart` so that
+`thimble doctor --verbose`, which shows the auth path, reads them. When your organization's managed settings set
+`forceLoginMethod`, Claude Code blocks API keys and `apiKeyHelper`: sign in with the method it names.
 
 ## Permissions
 
@@ -63,15 +63,17 @@ you opened, such as an agent's notes in thimble's workspaces folder, Claude Code
 In Manual mode Claude Code asks before the first call of each thimble tool, before each edit thimble's agents make in
 their work folders (which are outside the folder you opened), and before most commands. Every permission request shows
 in the terminal, and you answer it there: the browser shows a waiting request read-only, with a line that says to answer
-it in the terminal. While your session reports Manual mode, thimble shows a red row above the prompt (and a red notice
-above the browser's chat) that says how to switch, or who turned auto mode off; it goes when you switch, and once you
-dismiss it, it stays off for that workspace.
+it in the terminal. A model call of thimble's (a card check, a prompt label, a label draft, a viewer suggestion) runs as
+a subagent with two tools of its own, and Claude Code asks before it reads its task and before it sends its answer; a
+prompt label asks about once per batch of 50 records. While your session reports Manual mode, thimble shows a red row
+above the prompt (and a red notice above the browser's chat) that says how to switch, or who turned auto mode off; it
+goes when you switch, and once you dismiss it, it stays off for that workspace.
 
-Code tickets and view builds are subagents of your session, so they run in its mode, Bypass included. thimble's own
-jobs (an extension's program that runs the dev agent, and the sessions thimble's server runs) follow your session's
-mode, but never Bypass: Settings offers Manual and Auto for them, and a session in Bypass, or `"bypass"` in thimble's
-config, counts as Manual. `thimble fix` starts no Claude Code session: it says what `thimble doctor` finds, and you make
-the repair in your own Claude Code session, opened in thimble's checkout.
+Code tickets and view builds are subagents of your session, so they run in its mode, Bypass included. An extension's
+program that runs the dev agent, a job of thimble's server, follows your session's mode, but never Bypass: Settings
+offers Manual and Auto for it, and a session in Bypass, or `"bypass"` in thimble's config, counts as Manual.
+`thimble fix` starts no Claude Code session: it says what `thimble doctor` finds, and you make the repair in your own
+Claude Code session, opened in thimble's checkout.
 
 To be asked less, add this to `~/.claude/settings.json`, with the path from the `workspaces_dir` line of
 `thimble doctor --verbose` (in a development install, also `~/.thimble/dev/trees`, made first with `mkdir -p`):
@@ -449,8 +451,8 @@ session. Claude Code's agent tray (↓) lists them, and each has its thread in t
   above the reply box, with the view's name, what it shows and the task it serves, until you answer it: Accept builds
   the view, Reject drops the proposal, and Don't ask again turns view proposals off. Nothing builds before you accept.
   When you open a file that only Raw can show, the same card can propose a viewer for its type. Deciding whether to
-  propose takes one model call on a copy of your session's context, made with the sign-in thimble's card checks and
-  labels use. In the terminal the proposal is a row above the prompt with accept, reject and don't ask again. Settings'
+  propose takes a fork of your session, a subagent that reads its conversation, uses no tools and runs on its model
+  and sign-in. In the terminal the proposal is a row above the prompt with accept, reject and don't ask again. Settings'
   View proposals switch and `/config` → thimble → "View proposals" turn them on and off
   ([docs/config.md](docs/config.md)).
 - **Models and efforts.** Each agent runs on exactly the model and effort that Settings name for it, and a change
