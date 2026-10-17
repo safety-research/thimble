@@ -79,6 +79,9 @@ export function tableModel(frame: Frame): TableModel {
   }
 }
 
+/** The rows a table holds back, counted with their unit: `1 more row`, `91 more rows`. Pure. */
+export const moreRows = (n: number): string => `${n.toLocaleString()} more ${n === 1 ? 'row' : 'rows'}`
+
 export function FrameTable({ frame, maxRows }: { frame: Frame; maxRows?: number }) {
   const model = useMemo(() => tableModel(frame), [frame])
   const box = useRef<HTMLDivElement>(null)
@@ -146,11 +149,11 @@ export function FrameTable({ frame, maxRows }: { frame: Frame; maxRows?: number 
       {cuts && (
         <div className="outputs-rows-more">
           <button type="button" className="outputs-showall" onClick={() => setExpanded((v) => !v)}>
-            {capped ? `… ${hidden.toLocaleString()} more rows` : `Show the first ${maxRows!.toLocaleString()} rows`}
+            {capped ? `… ${moreRows(hidden)}` : `Show the first ${maxRows!.toLocaleString()} rows`}
           </button>
         </div>
       )}
-      {model.more > 0 && !capped && <div className="dim canvas-viz-more">{`${model.more.toLocaleString()} more rows`}</div>}
+      {model.more > 0 && !capped && <div className="dim canvas-viz-more">{moreRows(model.more)}</div>}
     </div>
   )
 }

@@ -366,10 +366,10 @@ export function refLabel(ref: string): string {
       return `${base(p.path)} L${p.line}`
     case 'range':
       return `${base(p.path)} L${p.line}-${p.endLine}`
+    // a passage of a record by its line alone: its block (`.b0`) is the address's own part, which the hover shows
     case 'block':
-      return `${base(p.path)} L${p.line}.b${p.block}`
     case 'span':
-      return `${base(p.path)} L${p.line}.b${p.block}`
+      return `${base(p.path)} L${p.line}`
     case 'path':
       return p.locator ? `${base(p.path)} · ${locatorLabel(p.locator)}` : base(p.path)
   }

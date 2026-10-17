@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Code tickets in the browser: Report a problem offers File a code ticket in a development install, which files the
+// Code tickets in the browser: Report a problem offers Ask Claude to fix it in a development install, which files the
 // description as a ticket (the analyst's click, which starts the ticket's agent as a subagent of their Claude Code
 // session) and opens its thread (src/shell/ProblemReport.tsx); main's ticket that waits while another runs shows Start
 // and Discard at the foot of its thread (src/chat/TicketStatus.tsx).
@@ -38,7 +38,7 @@ afterEach(() => {
 
 const button = (root: ParentNode, text: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text)
 
-describe('File a code ticket in Report a problem', () => {
+describe('Ask Claude to fix it in Report a problem', () => {
 
   test('in a development install it files the description and opens the ticket\'s thread', async () => {
     const anchor = document.createElement('button')
@@ -48,7 +48,7 @@ describe('File a code ticket in Report a problem', () => {
     const onClose = vi.fn()
     await mount(<ProblemReportPopover ws="mini" anchor={anchor} open onClose={onClose} prefill={{ description: 'The chart cuts off its bars\nIn the Files tab.', focus: [] }} />)
     await settle()
-    const file = button(document.body, 'File a code ticket')!
+    const file = button(document.body, 'Ask Claude to fix it')!
     expect(file).toBeTruthy()
     await act(async () => file.click())
     await settle()
@@ -66,7 +66,7 @@ describe('File a code ticket in Report a problem', () => {
     await mount(<ProblemReportPopover ws="mini" anchor={anchor} open onClose={() => undefined} />)
     await settle()
     expect(calls.some(([, u]) => u.endsWith('/dev/status'))).toBe(true)
-    expect(button(document.body, 'File a code ticket')).toBeUndefined()
-    expect(button(document.body, 'Prepare bundle')).toBeTruthy()
+    expect(button(document.body, 'Ask Claude to fix it')).toBeUndefined()
+    expect(button(document.body, 'Make report file')).toBeTruthy()
   })
 })

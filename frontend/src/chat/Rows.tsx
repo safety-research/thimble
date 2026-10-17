@@ -16,7 +16,7 @@ import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
 import { Mark } from '../components/Marks'
 import { UserMessage } from '../components/Message'
-import { CardChipCites, RefChip, scrubIds } from '../components/RefChip'
+import { CardChipCites, CardQuestions, RefChip, scrubIds } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { ChipRun, ToolCard, type ToolState } from '../components/ToolCard'
 import { api } from '../lib/api'
@@ -185,6 +185,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
   }, [asked, answers.comments])
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
+      <CardQuestions.Provider value={true}>
       <AnswerMarksContext.Provider value={marksCtx}>
       {shown.map((r, i) => {
         switch (r.kind) {
@@ -262,6 +263,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
       })}
       {streaming && !toolPending && <Working />}
       </AnswerMarksContext.Provider>
+      </CardQuestions.Provider>
     </ChipContext.Provider>
   )
 }
@@ -277,13 +279,13 @@ export function devStarted(r: { view?: string; title?: string | null }): string 
 
 /** Where a message came from: in any chat, a prompt a plugin sent as the analyst's, as Claude Code's terminal says it
  * (thimble's terminal panel's `run again` or new label); in one of thimble's agents' threads, typed in Claude Code's
- * agent tray (`terminal` with `tray`, the record's origin `human`) or sent from thimble's browser (`browser`); none for
- * a prompt main's call sent (`terminal` alone), and none for the analyst's own messages in main. Pure. */
+ * agent tray (`terminal` with `tray`, the record's origin `human`); none for a prompt main's call sent (`terminal`
+ * alone), and none for the analyst's own messages sent here in the browser (`browser`), in main or a thread, which
+ * are theirs as they read them (bug hunt G11). Pure. */
 export function byLabel(by: string | undefined, chat: string | undefined, tray?: boolean, plugin?: string): string | null {
   if (plugin) return `Prompt from the ${plugin} plugin`
   if (!chat || chat === 'main') return null
   if (by === 'terminal') return tray ? 'typed in the agent tray' : null
-  if (by === 'browser') return 'sent from thimble'
   return null
 }
 
@@ -423,11 +425,14 @@ export function ToolGroupCard({ group, ws, pending }: { group: ToolGroup; ws: st
   const made = madeBy(tools)
   const cells = made.cells.map((c) => c.id)
   const summary = single ? toolSummary(single.name, single.input, ws) : ''
+  // a call whose target is refs (a lookup of a document, a card) names them as chips, never as `report:<slug>`
+  const refs = single ? targetRefs(single.name, summary) : null
   const madeSome = cells.length + made.views.length + made.labels.length > 0
-  const meta = single && !madeSome && summary ? summary : toolMeta(tools)
+  const meta = single && !madeSome && summary && !refs ? summary : toolMeta(tools)
   const state = groupState(tools, pending)
   const body = open && single ? <CallBody tool={single} ws={ws} summary={summary} /> : null
   const chips = [
+    ...(refs ?? []).filter((r) => !cells.includes(r.replace(/^(?:card|cell):/, '').split(/[#@]/)[0])).map((r) => <TargetChip key={`ref:${r}`} ref_={r} ws={ws} />),
     ...cells.map((id) => (
       <span key={`card:${id}`} className="chat-tool-cell" data-anchor={`card:${id}`} onClick={(e) => e.stopPropagation()}>
         <RefChip ref={`card:${id}`} compact workspace={ws} />
@@ -566,6 +571,23 @@ export function targetRefs(name: string, summary: string): string[] | null {
   return parts.length && parts.every((x) => x.includes(':') && parseRef(x) != null) ? parts : null
 }
 
+/** The chip of a ref a thimble call's target names: a whole document by its name (Pilot findings), as the chat's other
+ * chips of a document are, never `report:<slug>`; any other ref as its RefChip. */
+function TargetChip({ ref_: r, ws }: { ref_: string; ws: string }) {
+  const p = parseRef(r)
+  if (p?.kind === 'report' && !p.unit)
+    return (
+      <span className="chat-tool-cell" data-anchor={r} onClick={(e) => e.stopPropagation()}>
+        <DocChip ws={ws} slug={p.slug} className="chat-chip-link" onClick={() => teleport(r)} />
+      </span>
+    )
+  return (
+    <span className="chat-tool-cell" data-anchor={r} onClick={(e) => e.stopPropagation()}>
+      <RefChip ref={r} compact workspace={ws} />
+    </span>
+  )
+}
+
 /** The chips of what a thimble call made, after its chip line: the card, the view proposed, the label applied; and the
  * refs its target named that are not among them (targetRefs). */
 function madeChips(tool: ToolRowT, ws: string, refs: readonly string[] = []) {
@@ -575,11 +597,7 @@ function madeChips(tool: ToolRowT, ws: string, refs: readonly string[] = []) {
     ...refs
       .map((r) => r.replace(/^cell:/, 'card:'))
       .filter((r) => !madeIds.has(r.split(/[#@]/)[0]))
-      .map((r) => (
-        <span key={`ref:${r}`} className="chat-tool-cell" data-anchor={r} onClick={(e) => e.stopPropagation()}>
-          <RefChip ref={r} compact workspace={ws} />
-        </span>
-      )),
+      .map((r) => <TargetChip key={`ref:${r}`} ref_={r} ws={ws} />),
     ...made.cells.map((c) => (
       <span key={`card:${c.id}`} className="chat-tool-cell" data-anchor={`card:${c.id}`} onClick={(e) => e.stopPropagation()}>
         <RefChip ref={`card:${c.id}`} compact workspace={ws} />

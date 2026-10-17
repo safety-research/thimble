@@ -1,8 +1,8 @@
 // The top bar's Report a problem dialog. The form takes a description, an optional screenshot of this tab
-// (getDisplayMedia) and optionally the logs. Prepare bundle asks the server to write a zip (POST /ws/{c}/feedback) with
+// (getDisplayMedia) and optionally the logs. Make report file asks the server to write a zip (POST /ws/{c}/feedback) with
 // the tab's recent console errors and failed requests; the dialog then offers Download, Copy path, Show in folder and
 // Open a GitHub issue, prefilled by the server without the logs. The dialog hides itself while the tab is captured.
-// In a development install (GET /dev/status says code tickets run here) the form also offers File a code ticket, which
+// In a development install (GET /dev/status says code tickets run here) the form also offers Ask Claude to fix it, which
 // files the description as a ticket for thimble's developer agent (POST /dev/tickets, the analyst's click, which starts
 // the agent as a subagent of their Claude Code session) and opens the ticket's thread.
 //
@@ -18,6 +18,11 @@ import { bus, type ProblemPrefill } from '../lib/bus'
 import { demoStop } from '../lib/demo'
 import { recentProblems } from '../lib/problemLog'
 import type { ProblemReport, ProblemReportBody } from '../lib/types'
+
+/** The form's two actions in plain words (bug hunt G11): a code ticket for thimble's developer agent, in a development
+ * install, and the zip of the report to send. */
+export const FILE_TICKET = 'Ask Claude to fix it'
+export const MAKE_FILE = 'Make report file'
 
 export const LOGS_NOTE = "The logs contain parts of your data and Claude's answers, so share them only with people you trust."
 /** The longest data URL a PNG is sent as; a bigger picture goes as a JPEG (the server takes up to 5 MB). */
@@ -243,10 +248,10 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
         <div className="problem" data-panel="problem" data-state="done">
           <div className="problem-ready" role="status">
             <Mark kind="verified" label="ready" />
-            <span>Bundle ready, {done.size}</span>
+            <span>Report file ready, {done.size}</span>
           </div>
           <div className="problem-path">{done.path}</div>
-          {done.screenshot_missing && <p className="problem-note">The screenshot was not captured, so the bundle has none.</p>}
+          {done.screenshot_missing && <p className="problem-note">The screenshot was not captured, so the report file has none.</p>}
           <div className="problem-actions">
             <Button size="sm" variant="secondary" onClick={download}>
               Download
@@ -303,11 +308,11 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
             </Button>
             {tickets && (
               <Button variant="secondary" busy={filing} disabled={busy || !description.trim()} onClick={() => void fileTicket()} data-tel="file-code-ticket" title="thimble's developer agent works on it in a copy of thimble's code, and asks you before the change reaches thimble">
-                File a code ticket
+                {FILE_TICKET}
               </Button>
             )}
             <Button variant="primary" busy={busy} disabled={filing} onClick={() => void prepare()}>
-              Prepare bundle
+              {MAKE_FILE}
             </Button>
           </div>
         </div>

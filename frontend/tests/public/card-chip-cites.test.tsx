@@ -11,9 +11,9 @@ import { act } from 'react'
 import { foldRecords } from '../../src/chat/model.ts'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { Rows } from '../../src/chat/Rows.tsx'
-import { CardChipCites, GlyphCites, RefChip, cardCiteLabel } from '../../src/components/RefChip.tsx'
+import { CardChipCites, CardQuestions, GlyphCites, RefChip, cardCiteLabel } from '../../src/components/RefChip.tsx'
 import { bus } from '../../src/lib/bus.ts'
-import { registerCells } from '../../src/lib/cellName.ts'
+import { cutQuestion, registerCells } from '../../src/lib/cellName.ts'
 import type { Cell, ChatRecord, Group } from '../../src/lib/types.ts'
 import { useChecks } from '../../src/report/Checks.tsx'
 import { Sidebar } from '../../src/report/Sidebar.tsx'
@@ -52,8 +52,13 @@ describe("a chat reply's citation of a card", () => {
   test("is the card's chip with its glyph and name, as a step row draws the card, never brackets or the glyph alone", async () => {
     registerCells([{ id: 'c0ffee00', title: 'Which wikis have the most revisions?', slug: 'wikis-most-revisions' }])
     const el = await reply('Most records are messages [[card:page-saves-wiki]]. The wikis differ [[card:c0ffee00]]; an older card [[card:ab12cd34]]. It printed this [[card:page-saves-wiki@out0#L1-L3]].')
-    expect(names(el)).toEqual(['page-saves-wiki', 'wikis-most-revisions', 'card', 'page-saves-wiki · lines 1–3'])
-    const step = await mount(<RefChip ref="card:page-saves-wiki" compact workspace="w" />)
+    // a card the chat knows is named by its question (bug hunt G11), one it does not know yet by its id
+    expect(names(el)).toEqual(['page-saves-wiki', 'Which wikis have the most revisions?', 'card', 'page-saves-wiki · lines 1–3'])
+    const step = await mount(
+      <CardQuestions.Provider value={true}>
+        <RefChip ref="card:page-saves-wiki" compact workspace="w" />
+      </CardQuestions.Provider>,
+    )
     const stepChip = step.querySelector<HTMLElement>('[data-ref]')!
     const shared = (c: HTMLElement) => [...c.classList].filter((k) => k !== 'refchip-citation').sort()
     // a whole card's is the accent chip a step row draws; its printed lines' the evidence chip, as lines of data are
@@ -114,6 +119,28 @@ describe("a chat reply's citation of a card", () => {
     const chip = el.querySelector<HTMLElement>('[data-ref]')!
     expect(chip.textContent).toBe('')
     expect(chip.classList.contains('refchip-icon')).toBe(true)
+  })
+
+  test("names a card by its question in the chat, cut at a word, and by its short name elsewhere (bug hunt G11)", async () => {
+    registerCells([
+      { id: 'tea-orders-month', title: 'How many tea orders came in each month?', slug: 'tea-orders-month' },
+      { id: 'kettle-faults-shop', title: 'Which kettle faults did each repair shop report in the first quarter of the year?', slug: 'kettle-faults-shop' },
+    ])
+    const el = await reply('Orders rose in spring [[card:tea-orders-month]]. Faults cluster in two shops [[card:kettle-faults-shop]].')
+    expect(names(el)).toEqual(['How many tea orders came in each month?', 'Which kettle faults did each repair…'])
+    for (const c of cites(el)) expect(c.classList.contains('chip-sans')).toBe(true)
+    // a step row's chip of the card it made, in the chat
+    const step = await mount(
+      <CardQuestions.Provider value={true}>
+        <RefChip ref="card:tea-orders-month" compact workspace="w" />
+      </CardQuestions.Provider>,
+    )
+    expect(step.querySelector('.chip-text')?.textContent).toBe('How many tea orders came in each month?')
+    // outside the chat a chip keeps the card's short name
+    const canvas = await mount(<RefChip ref="card:tea-orders-month" compact workspace="w" />)
+    expect(canvas.querySelector('.chip-text')?.textContent).toBe('tea-orders-month')
+    expect(cutQuestion('Which kettle faults did each repair shop report in the first quarter of the year?')).toBe('Which kettle faults did each repair…')
+    expect(cutQuestion('  How   many   orders?  ')).toBe('How many orders?')
   })
 
   test("names a card by its id until its name is known, an older card's random id never", () => {

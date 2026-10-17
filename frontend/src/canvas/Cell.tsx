@@ -66,6 +66,8 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   const concept = kind === 'label' ? String(payload.concept ?? '') : ''
   const label = useConceptDetail(ctx.ws, concept || null)
   const thread = ctx.threadOf(cell)
+  // who made it, as its head names it: `you` for the analyst's own card
+  const maker = thread.maker ?? thread.name
   const time = hhmm(cell.created_ts ?? cell.ts)
   const dimmed = ctx.keep != null && !ctx.keep.has(cell.id)
   const unread = ctx.unread.has(cell.id)
@@ -167,7 +169,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
         onCheckAgain={() => void checkAgain(ctx, cell)}
         chrome={
           <div className="bcell-top">
-            {(thread.name || time || unread) && (
+            {(maker || time || unread) && (
               <button
                 type="button"
                 className="bcell-meta"
@@ -178,9 +180,9 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
                   ctx.openThread(cell)
                 }}
               >
-                {[thread.name, time].filter(Boolean).join(' · ')}
+                {[maker, time].filter(Boolean).join(' · ')}
                 {/* the dot at rest says this in words once the card is hovered, where the dot gives way to the chrome */}
-                {unread && <span className="bcell-meta-new">{thread.name || time ? ' · ' : ''}new reply</span>}
+                {unread && <span className="bcell-meta-new">{maker || time ? ' · ' : ''}new reply</span>}
               </button>
             )}
             <span className="bcell-acts" onMouseDown={(e) => e.stopPropagation()}>

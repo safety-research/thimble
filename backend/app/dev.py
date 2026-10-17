@@ -3569,7 +3569,7 @@ def _clicked(request: Request) -> None:
 
 @router.post("/dev/tickets", status_code=202)
 async def post_ticket(body: NewTicket, request: Request) -> dict[str, Any]:
-    """A ticket the analyst files in the browser (Report a problem's File a code ticket): a click, which starts its
+    """A ticket the analyst files in the browser (Report a problem's Ask Claude to fix it): a click, which starts its
     agent through main's module once nothing else runs."""
     await _on_first_request()
     _clicked(request)

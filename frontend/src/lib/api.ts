@@ -653,7 +653,7 @@ export const api = {
   retryTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/retry`, { method: 'POST' }),
   /** Start on main's ticket that waited while another ran: it starts through the plugin module once nothing else runs */
   startTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/start`, { method: 'POST' }),
-  /** whether code tickets run here (`tickets` is '' in a development install), for Report a problem's File a code ticket */
+  /** whether code tickets run here (`tickets` is '' in a development install), for Report a problem's Ask Claude to fix it */
   devStatus: () => j<DevStatus>(`${apiBase()}/dev/status`),
   dismissTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/dismiss`, { method: 'POST' }),
   /** stop a running ticket: nothing is applied and it ends `stopped`, which Retry runs again */

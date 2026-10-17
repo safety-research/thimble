@@ -875,21 +875,24 @@ export interface CellThread {
   name: string
   /** main or a thread: a chat the analyst can write to */
   writable: boolean
+  /** who made the card, as its head names it: `you` for a card the analyst made by hand; `name` when absent */
+  maker?: string
 }
 
 /**
  * The analyst's own cards and a chat's cards say which thread made them (the analyst's say `main`, an agent's its role:
- * `orient`); anything else is named as written and has no chat to open.
+ * `orient`); anything else is named as written and has no chat to open. A card the analyst made by hand (`user`) is
+ * headed `you` (bug hunt G11), and still asks in main.
  */
 export function cellThread(createdBy: string | null | undefined, chats: ReadonlyMap<string, Pick<ChatMeta, 'kind' | 'role' | 'title'>>): CellThread {
   const c = createdBy ?? ''
-  const chatId = c.startsWith('chat:') ? c.slice(5) : !c || c === 'user' || c === 'terminal' ? 'main' : null
-  if (!chatId) return { chatId: null, name: c, writable: false }
-  if (chatId === 'main') return { chatId, name: 'main', writable: true }
+  const chatId = c.startsWith('chat:') ? c.slice(5) : !c || c === 'user' || c === 'analyst' || c === 'terminal' ? 'main' : null
+  if (!chatId) return { chatId: null, name: c, writable: false, maker: c }
+  if (chatId === 'main') return { chatId, name: 'main', writable: true, maker: c === 'user' || c === 'analyst' ? 'you' : 'main' }
   const m = chats.get(chatId)
-  if (!m) return { chatId, name: chatId, writable: false }
-  if (m.kind === 'agent') return { chatId, name: m.role || m.title || chatId, writable: false }
-  return { chatId, name: m.title || chatId, writable: m.kind === 'thread' || m.kind === 'main' }
+  if (!m) return { chatId, name: chatId, writable: false, maker: chatId }
+  if (m.kind === 'agent') return { chatId, name: m.role || m.title || chatId, writable: false, maker: m.role || m.title || chatId }
+  return { chatId, name: m.title || chatId, writable: m.kind === 'thread' || m.kind === 'main', maker: m.title || chatId }
 }
 
 /** HH:MM of an ISO timestamp in the browser's zone; '' for none, the raw text for an unreadable one. */

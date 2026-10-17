@@ -26,7 +26,7 @@ export interface ThreadNode {
   /** the thread this one was asked from; null (or a thread not listed) at the top level */
   parent: string | null
   running?: boolean
-  /** mono, before the state: steps done of the whole (3/8) */
+  /** mono, before the state: how many steps a running agent took so far (8 steps) */
   progress?: string
   /** a reply the analyst has not read */
   unread?: boolean

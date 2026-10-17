@@ -502,10 +502,10 @@ session. Claude Code's agent tray (↓) lists them, and each has its thread in t
 - **Report checks** run after a writer saves a document. After your own edits a check shows how many passages changed,
   and Run starts it.
 - **Code tickets**, in a development install only, are changes to thimble's own code: file one with Report a problem →
-  File a code ticket, or ask Claude. Its agent, `thimble:dev-ticket`, works in a git worktree of thimble's code, which
-  it edits from your session, in your session's permission mode; its checks run in thimble's sandbox runtime where it
-  can run, and otherwise thimble asks you before the ticket starts, and the browser asks you before its change reaches
-  thimble's code. Code tickets run one at a time.
+  Ask Claude to fix it, or ask Claude in the chat. Its agent, `thimble:dev-ticket`, works in a git worktree of thimble's
+  code, which it edits from your session, in your session's permission mode; its checks run in thimble's sandbox
+  runtime where it can run, and otherwise thimble asks you before the ticket starts, and the browser asks you before its
+  change reaches thimble's code. Code tickets run one at a time.
 - **thimble's rules.** thimble adds no sandbox: the shell commands of your session and its agents follow your
   permission mode. thimble's plugin refuses file-tool reads and edits of its token files, edits of its records, and
   what you set to "off" in its config. View builders use your session's network. A view reaches you only as its checks

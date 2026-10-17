@@ -4,7 +4,8 @@
 // Write or Revise (WriteAction.tsx, where Revise asks first), which asks the analyst's session for the document (a
 // `write` browser event; `report` stream events follow it). While a writer of the document runs, Stop stands beside
 // Writing (WriteAction.tsx StopWriter), and while Claude Code asks that writer in the terminal the bar says so. A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
-// not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
+// not written yet is its frame (GET …/frame), and one with nothing in it names the documents that are written, so a
+// report main wrote under a name of its own is found (bug hunt G11). The views' module (Documents.tsx) is imported once in an effect rather than
 // with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never shows an empty body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Segmented } from '../components/Button'
@@ -34,10 +35,23 @@ import { docKey, docLabel, labelReadDocument, ownType, rendererOf, reportFilterS
 import { StopWriter, WriteAction } from './WriteAction'
 import { failedDetail, failedReport, failedText, noteRefusal, useWriteFailures, useWriteRefusals, WRITE_RETRY_NOTE, writingAfter } from './writeFailures'
 import { RefusedCard } from '../chat/Refused'
+import { DocChip } from '../chat/SurfaceChips'
 import { ApiErrorCard } from '../chat/ApiError'
 import { failureText, loadChunk } from '../lib/chunkRecovery'
 
 type DocsModule = typeof import('./Documents')
+
+/** The line over a document nothing is written in yet, before the chips of the documents that are written. */
+export const ELSEWHERE_LINE = 'Nothing is written here yet. Written so far:'
+
+/** Whether a document is a frame with nothing in it: no heading, sentence or figure (a report before its first write).
+ * Pure. */
+export function blankFrame(doc: AnyDoc | null | undefined): boolean {
+  const d = doc as Writeup | null | undefined
+  if (!d?.frame) return false
+  return (d.sections ?? []).every((sec) => !sec.heading?.trim() && !sec.figures?.length && !(sec.paragraphs ?? []).some((p) => p.sentences?.some((x) => x.text?.trim())))
+}
+
 let docsModule: DocsModule | null = null
 let docsLoading: Promise<DocsModule> | null = null
 /** The views' chunk, fetched once per page. */
@@ -332,6 +346,9 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const items = switcherItems(types)
   // a document the writer has produced: the primary action reads Revise; a frame, or nothing yet, reads Write
   const written = !!bodyDoc && !(bodyDoc as Writeup).frame
+  // a document with nothing in it while others are written, such as the report when main's "write a short report" made
+  // a document of its own: a line names the written ones, rather than the empty page alone (bug hunt G11)
+  const elsewhere = !held && !busy && bodyRenderer === 'document' && blankFrame(bodyDoc) ? items.filter((it) => it.slug !== slug && it.exists) : []
   const arranged = bodyRenderer === 'slides' || bodyRenderer === 'story'
   const fallback = (
     <div className="wu-status">
@@ -427,6 +444,14 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
               </>
             }
           />
+        </div>
+      )}
+      {elsewhere.length > 0 && (
+        <div className="wu-elsewhere" role="note" data-elsewhere={elsewhere.map((it) => it.slug).join(' ')}>
+          <span>{ELSEWHERE_LINE}</span>
+          {elsewhere.map((it) => (
+            <DocChip key={it.slug} ws={ws} slug={it.slug} onClick={() => setSlug(it.slug)} />
+          ))}
         </div>
       )}
       <div className={`wu-body${arranged ? ' wu-body-strip' : ''}`}>
