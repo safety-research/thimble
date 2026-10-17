@@ -294,6 +294,38 @@ test("under main's `↳ The writer finished …` row, a line links the document 
   await again.unmount()
 })
 
+test("the writer's `↳ document` label never shrinks, so a narrow column wraps the link and never breaks the word", async ($, on) => {
+  // bug hunt 0.9.0, B13: in a main column ~103 cells wide the label read `docu` / `ment` under the link
+  const w = world(on)
+  const writer = { name: 'thimble:writer', label: 'writer: report', state: 'running', kind: 'subagent', chat: 'w1', role: 'writer', started: '2026-10-06T10:10:00+00:00' }
+  ;(w.states.agents.rows as unknown[]).push(writer)
+  await start($, w)
+  await w.clock.advance(1100)
+  writer.state = 'done'
+  w.stamps.set(`${WS}/chats`, 2)
+  w.stamps.set(`${WS}/investigations/main`, 2)
+  await w.clock.advance(1100)
+  const ui = (await $.ui.mount(MESSAGE('r1', '↳ The writer finished the report; thimble shows it.'))) as unknown as M
+  type Node = { type?: string; props?: { key?: string; flexShrink?: number; children?: unknown }; children?: unknown[] }
+  const find = (n: unknown, key: string): Node | undefined => {
+    if (!n || typeof n !== 'object') return undefined
+    const o = n as Node
+    if (o.props?.key === key) return o
+    for (const k of (o.children ?? (Array.isArray(o.props?.children) ? (o.props.children as unknown[]) : [])) as unknown[]) {
+      const got = find(k, key)
+      if (got) return got
+    }
+    return undefined
+  }
+  const row = find(await ui.drawn(), 'written-r1')
+  const [label, link] = (row?.children ?? []) as Node[]
+  expect(label?.type).toBe('Box')
+  expect(label?.props?.flexShrink).toBe(0)
+  expect(shown(label)).toBe('↳ document ')
+  expect(shown(link)).toContain('read and edit it in the browser ↗')
+  await ui.unmount()
+})
+
 // ------------------------------------------------------------------------------------------------ 0.9.0
 
 test('"Citation marks" off: a citation is a plain link, with no mark and no check of its place', { timeoutMs: 30000, options: { citationMarks: false } }, async ($, on) => {

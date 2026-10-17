@@ -365,8 +365,13 @@ async function writtenEl(cx: Ctx, e: ResolveInput & { requestId: string }, text:
   const { Box, Text, Button } = cx.els(e)
   return (
     <Box key={`written-${e.requestId}`} marginLeft={MARGIN} marginTop={1} flexDirection="row">
-      <Text dimColor>{'↳ document '}</Text>
-      <Button key={`written-open-${e.requestId}`} label={`${quoted(clip(clean(doc.title), 60))} · read and edit it in the browser ↗`} plain onPress={() => void openInBrowser(cx, `report:${doc.slug}`)} />
+      {/* the label never shrinks: a narrow column wraps the link, not `document` (bug hunt 0.9.0, B13) */}
+      <Box flexShrink={0}>
+        <Text dimColor>{'↳ document '}</Text>
+      </Box>
+      <Box flexShrink={1}>
+        <Button key={`written-open-${e.requestId}`} label={`${quoted(clip(clean(doc.title), 60))} · read and edit it in the browser ↗`} plain onPress={() => void openInBrowser(cx, `report:${doc.slug}`)} />
+      </Box>
     </Box>
   )
 }
