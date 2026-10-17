@@ -102,6 +102,10 @@ Claude Code's panel chrome, no right-click menu.
   Code's agent tray, so no row repeats them.
 - **Every row above the prompt is one line**: a dim label column, the words cut with `…` where the acts begin (a press
   shows them whole), the acts at the right in the accent, underlined under the pointer, the main one bold.
+- **A press where no browser opens** (SSH, Eternal Terminal, no display): `/thimble browser` says so and what to do, and
+  one row above the prompt does too, `browser  No browser here. On your own computer, run ssh -N -L … <your ssh host>,
+  then press copy link and open the link there.  copy  copy link  dismiss` (offramp.ts remoteWords, bug hunt F11); the
+  row goes once a browser claims the one-time link (its claim file, watched for the link's 5 minutes).
 - **Claude Code's main screen** (the classic renderer) takes no clicks, so nothing above the prompt can be pressed there
   (bug hunt F1). There the thimble line ends with `/thimble to use these with keys` dim, where it fits; home lists the
   rows that wait first, under `Above the prompt` (the view proposal, the notices, the SSH row), and Enter on one opens

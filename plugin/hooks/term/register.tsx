@@ -46,7 +46,7 @@ import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './rep
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
-import { PANEL, cardDeleted, cardMade, keepKeys, keysBack, liveCards, loadCards, navOrigin, noteScreen, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
+import { PANEL, cardDeleted, cardMade, classicScreen, keepKeys, keysBack, liveCards, loadCards, navOrigin, noteScreen, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
 import { turns } from './turns'
 import { openSection, registerBand } from './band'
 import { registerPanelViews } from './views'
@@ -55,7 +55,7 @@ import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, d
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
 import { callDone, checkName, ownNotice } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
-import { openInBrowser } from './offramp'
+import { openInBrowser, remoteReply } from './offramp'
 import { openChecks } from './checksview'
 import { answerItems, citeCounts, openCitations } from './citesview'
 import { openCoverage } from './coverageview'
@@ -129,9 +129,15 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
     case '':
       return null
     case 'browser':
-    case 'open':
-      await openInBrowser(cx, 'home')
+    case 'open': {
+      // what happened, in plain words: where no browser opens (SSH, no display), what to run and how to get the link
+      // (bug hunt F11)
+      const how = await openInBrowser(cx, 'home')
+      const links = await cx.links()
+      if ((how === 'remote' || how === 'again') && links) return remoteReply(links, classicScreen())
+      if (how === 'failed') return "thimble: thimble's page did not open: the notice above the prompt says why and how to fix it"
       return "thimble: opening thimble's page in the browser"
+    }
     case 'coverage':
       await openCoverage(cx, arg || undefined)
       return 'thimble: the Coverage view is open'

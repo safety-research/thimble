@@ -142,9 +142,11 @@ the page's address with the code into a file in `~/.thimble/open/`, and gives yo
 page trades the code for a cookie: the server deletes the file and the code then works no more. When the default
 browser is a snap or a flatpak, which can't read hidden folders, and in VS Code's remote terminal, the opener gets the
 address itself; thimble's log says so, without the code. In a remote terminal (SSH, Eternal Terminal, or no display),
-thimble opens no browser: its panel shows one row with the tunnel command, `ssh -N -L <port>:127.0.0.1:<port> <your ssh
-host>` (set `THIMBLE_SSH_HOST` to fill in the host), and **copy link**, which copies a one-time link that works for 5
-minutes. `thimble open` in a shell prints where the page runs, never the code.
+thimble opens no browser. `/thimble browser` then says so, and a row above the prompt says what to do: run the tunnel
+command, `ssh -N -L <port>:127.0.0.1:<port> <your ssh host>`, on your own computer (set `THIMBLE_SSH_HOST` to fill in
+the host), then press **copy link**, which copies a one-time link that works for 5 minutes, and open the link in your
+browser there. The row goes once a browser signs in with it. On Claude Code's main screen, which takes no clicks, the
+panel opens on that row, and `2` copies the link. `thimble open` in a shell prints where the page runs, never the code.
 
 Same user only. A sign-in code is only in two places: the file the press writes (readable by your account alone, in a
 folder only your account can open, in `~/.thimble`, which only your account can open) and, for a remote terminal, the

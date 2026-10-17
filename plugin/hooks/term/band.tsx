@@ -56,7 +56,7 @@ import type { Ctx } from './ctx'
 import { clean, cut, noControls, width } from './lib'
 import { docsOf } from './model'
 import { dismissModNotice, modActWords, modNotices, moreNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
-import { BROWSER_ITEM, browserShown, copyRemoteLink, copyTunnel, dismissLinks } from './offramp'
+import { BROWSER_ITEM, browserShown, copyRemoteLink, copyTunnel, dismissLinks, remoteWords } from './offramp'
 import { answerOffer, dismissNotice, dismissOffer, homeNotices, homeOffer, noticeAct, noticeWords, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
 import type { HomeOffer } from './panel'
 import { COLORS } from './paint'
@@ -462,7 +462,7 @@ export async function waitItems(cx: Ctx): Promise<WaitItem[]> {
   if (offer) out.push({ key: `offer:${offer.slug}`, label: 'view proposal', name: oneLine(offer.name), words: oneLine(offer.description), ...(offer.refused && !offer.pressed ? { problem: oneLine(offer.refused) } : {}), acts: offerActs(cx, offer) })
   for (const r of await noticeRows(cx)) out.push({ key: r.key, label: 'notice', name: '', words: oneLine(r.words), acts: r.acts })
   const links = await cx.links()
-  if (links) out.push({ key: BROWSER_ITEM, label: 'browser', name: '', words: oneLine(links.et ?? links.tunnel), acts: remoteActs(cx) })
+  if (links) out.push({ key: BROWSER_ITEM, label: 'browser', name: '', words: oneLine(remoteWords(links)), acts: remoteActs(cx) })
   return out
 }
 
@@ -643,13 +643,14 @@ export function registerBand(on: On): void {
         : []
       rows.push(trayRow('above-notices-more', '', toggle, acts))
     }
-    // the one SSH row of a remote press: the tunnel command (its Eternal Terminal form when there is one), `copy` it,
-    // `copy link` (a one-time link, never drawn), `dismiss`
+    // the one SSH row of a press that opened no browser here: in plain words, the tunnel command (its Eternal Terminal
+    // form when there is one) to run on your own computer, then `copy link` (bug hunt F11); `copy` the command, `copy
+    // link` (a one-time link, never drawn), `dismiss`. It goes once a browser claims the link (offramp.ts watchLink)
     const links = await cx.links()
     if (links) {
       const acts = remoteActs(cx)
       const { room, own } = wordsRoom(cols, LW, acts)
-      rows.push(trayRow('above-remote', 'browser', foldWords('above-remote', links.et ?? links.tunnel, room), acts, { own }))
+      rows.push(trayRow('above-remote', 'browser', foldWords('above-remote', remoteWords(links), room), acts, { own }))
     }
     // the thimble line, the one row that stays while thimble is on: `thimble` bold, in the accent and underlined, which
     // opens home; then the items that fit. Under the pointer an item's name underlines, nothing else changes

@@ -349,7 +349,7 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
     return proposalsOff(cx)
   }
   // a code ticket that passed its checks waits for the analyst's Allow, which the browser's card asks (SPEC-v2 3.16)
-  if (a.act === 'ticket-open') return openInBrowser(cx, `ticket:${a.slug || n.id.replace(/^ticket:/, '')}`)
+  if (a.act === 'ticket-open') return void (await openInBrowser(cx, `ticket:${a.slug || n.id.replace(/^ticket:/, '')}`))
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, a.act, { ...(a.slug ? { slug: a.slug } : {}), notice: n.id })
   if (!got.ok || got.value.queued === false) {
     cx.toast(`thimble: ${got.ok ? got.value.reason || 'it could not start' : got.error}`)
