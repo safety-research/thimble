@@ -341,6 +341,16 @@ export function underCorpus(text: string, ws: string): string {
   return text.replace(new RegExp(`(?<!\\S)/\\S*/${name}(?=\\s|$)`, 'g'), '.').replace(new RegExp(`(?<!\\S)/\\S*/${name}/`, 'g'), '')
 }
 
+/** thimble's own commands by their names, as the analyst would type them (`thimble-run card runs`), never the absolute
+ * path a session calls them by (`/…/plugin/bin/thimble-run card runs`, bug hunt G11). Pure. */
+export function thimbleCommands(text: string): string {
+  return text.replace(/(^|[\s;&|(`])(['"]?)\/[^\s'"]*\/bin\/(thimble(?:-[a-z]+)*)\2(?=[\s;&|)`]|$)/g, '$1$3')
+}
+
+/** A shell command as a call's line shows it: thimble's own commands by their names (thimbleCommands) and paths under
+ * the corpus relative to it (underCorpus). Pure. */
+export const commandLine = (command: string, ws: string): string => underCorpus(thimbleCommands(command), ws)
+
 /** A call's chip line, as Claude Code prints a tool line: the tool and its target (`Read notes.jsonl`, `Bash grep -c
  * refund tickets/`). Pure. */
 export function callLineText(name: string, input: unknown, ws: string): string {
@@ -380,7 +390,7 @@ export function callTarget(name: string, input: unknown, n: number, ws = ''): st
     case 'Glob':
       return inp.pattern ? `files matching ${oneLine(str(inp.pattern), 60)}${where}` : step
     case 'Bash':
-      return oneLine(str(inp.description)) || oneLine(underCorpus(str(inp.command), ws)) || step
+      return oneLine(str(inp.description)) || oneLine(commandLine(str(inp.command), ws)) || step
     case 'add_card':
     case 'edit_card':
       return oneLine(str(inp.question ?? inp.title)) || 'a card'
@@ -415,7 +425,7 @@ export function callTarget(name: string, input: unknown, n: number, ws = ''): st
 export function callDetail(name: string, input: unknown, ws = ''): string | undefined {
   if (toolDisplayName(name) !== 'Bash') return undefined
   const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
-  return oneLine(underCorpus(str(inp.command), ws), 240) || undefined
+  return oneLine(commandLine(str(inp.command), ws), 240) || undefined
 }
 
 /** The SDK's Read paths are absolute; show them relative to the corpus root. */
@@ -519,7 +529,7 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       return str(inp.group)
     case 'Bash':
       // the command on one line, as far as the chip has room: a script's first line alone (`python3 -c "`) says nothing
-      return oneLine(underCorpus(str(inp.command), ws)) || oneLine(str(inp.description))
+      return oneLine(commandLine(str(inp.command), ws)) || oneLine(str(inp.description))
     case 'Edit':
     case 'Write':
     case 'MultiEdit':
@@ -878,7 +888,7 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
     case 'Glob':
       return with_('Listed files', oneLine(str(inp.pattern), 60))
     case 'Bash':
-      return with_('Ran', oneLine(str(inp.description)) || firstLine(str(inp.command)))
+      return with_('Ran', oneLine(str(inp.description)) || firstLine(thimbleCommands(str(inp.command))))
     case 'Edit':
     case 'MultiEdit':
       return with_('Edited', filePlain(str(inp.file_path ?? inp.path)))
