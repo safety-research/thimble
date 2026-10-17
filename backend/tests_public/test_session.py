@@ -120,6 +120,26 @@ def test_the_tail_translates_a_turn_and_skips_every_other_record(cwd, tmp_path):
     assert len(_log(agents.MAIN_ID)) == n  # nothing new
 
 
+def test_an_empty_text_block_claude_code_stores_as_no_content_shows_in_no_chat(cwd, tmp_path):
+    """Bug hunt 3, D14: main ended a step with an empty text block, which Claude Code stores as "(no content)" and its
+    terminal does not draw; the browser's chat showed it as a reply reading "(no content)". It is left out of the
+    mirror and of the turn's rows for the answer checks."""
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = _attach(cwd, p)
+    session.tail_once(lv)
+    _append(p, lv, [
+        _human("Start a thread on the relay outage."),
+        _assistant(_use("toolu_ag", "Agent", {"description": "relay outage", "prompt": "Look at the relay outage."})),
+        _result("toolu_ag", "Started."),
+        _assistant(_say("(no content)")),
+    ])
+    assert not [r for r in _mirror() if r["type"] == "text"], _mirror()
+    assert not any("(no content)" in str(r.get("text")) for r in lv.turn_rows)
+    _append(p, lv, [_assistant(_say("The thread is open.")), END])
+    assert [(r["type"], r.get("delta")) for r in _mirror()][-2:] == [("text", "The thread is open."), ("done", None)]
+
+
 def test_a_prompt_the_terminal_panel_sends_as_the_analyst_s_and_its_answer_reach_main_s_chat(cwd, tmp_path):
     """Bug hunt 2, C1: the terminal panel's `run again` and `describe a new label` send main a prompt as the analyst's
     ($.prompt.submit with asUser), which Claude Code records with origin {kind: plugin, name: thimble, asUser: true}.
