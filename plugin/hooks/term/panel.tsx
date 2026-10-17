@@ -4013,15 +4013,30 @@ export function plainFailure(raw: string): string {
   return clip(first || 'it failed', 160)
 }
 
+/** The words that add the analyst's focus to an orientation's brief. */
+const FOCUS_WORDS = 'Narrower focus for this run:'
+
+/** The brief of an orientation run again: its last run's brief with the focus typed added, an earlier focus replaced, so
+ *  the analyst's question stays (bug hunt E11); the focus alone when the last run had no brief; the last brief when no
+ *  focus is typed. */
+export function focusedBrief(last: string, focus: string): string {
+  const f = focus.trim()
+  if (!f) return last.trim()
+  const q = last.split(FOCUS_WORDS)[0]!.trim()
+  if (!q) return f
+  return `${/[.!?…:;]$/.test(q) ? q : `${q}.`} ${FOCUS_WORDS} ${f}`
+}
+
 /** The orientation started again by main (`start_orientation`), as the analyst asks it from the panel or its notice:
- *  with the focus they typed, else with the request its last run had (its chat's `brief`, read when not read yet). */
+ *  with the request its last run had (its chat's `brief`, read when not read yet) and the focus they typed added. */
 export async function orientAgain(cx: Ctx, focus: string, chat: string): Promise<void> {
-  let brief = focus.trim()
-  if (!brief && chat) {
+  let last = ''
+  if (chat) {
     const tt = (await cx.thread(chat)) ?? (rt.sc ? await readThreadMeta(cx, chat) : undefined)
-    brief = str(tt?.meta?.brief).trim()
+    last = str(tt?.meta?.brief)
   }
-  await cx.submit(brief ? `Run the orientation again: call start_orientation with the brief "${brief}".` : 'Run the orientation again: call start_orientation with no brief.')
+  const brief = focusedBrief(last, focus)
+  await cx.submit(brief ? `Run the orientation again: call start_orientation with this brief, word for word: "${brief}".` : 'Run the orientation again: call start_orientation with no brief.')
   cx.toast('thimble: main was asked to start the orientation again')
 }
 
