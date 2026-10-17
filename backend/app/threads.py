@@ -58,6 +58,13 @@ STOP_TEXT = {
 }
 STOP_KINDS = (SESSION_ENDED, UNANSWERED, FORK_LOST, "failed", "stopped")
 _DATA_URL_RE = re.compile(r"^data:image/png;base64,(.+)$", re.S)
+# in the workspace: the pictures the analyst pasted into a message, main's or a thread's (save_picture), which the
+# browser shows under the message (agents.picture_route) and a thread's fork reads
+PICTURE_DIR = "pictures"
+PICTURE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
+PICTURE_MEDIA = {ext: mime for mime, ext in PICTURE_TYPES.items()}
+PICTURE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}\.(png|jpg|gif|webp)$")
+PICTURE_REF = "picture:"  # a picture's ref, `picture:<name>`, which `screenshot` shows (tool_screenshot)
 _CHAT_REF_RE = re.compile(r"^chat:([A-Za-z0-9_-]{1,64})#(\d+)$")
 # (workspace, thread) -> the session a forkless event of the thread went to, until its fork is known (module note)
 _awaiting: dict[tuple[str, str], str | None] = {}
@@ -192,6 +199,41 @@ def save_image(c: str, thread_id: str, data_url: str | None) -> str | None:
     return str(path)
 
 
+def picture_type(data: bytes) -> str | None:
+    """A picture's media type by its first bytes: one of PICTURE_TYPES, else None."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def save_picture(c: str, stem: str, data: bytes) -> str | None:
+    """Write a picture the analyst pasted as PICTURE_DIR/<stem>.<ext> in the workspace; its file name, or None when it
+    is no picture of PICTURE_TYPES, is empty or is larger than IMAGE_MAX_BYTES."""
+    mime = picture_type(data)
+    stem = re.sub(r"[^A-Za-z0-9_-]", "", stem)[:72]
+    if mime is None or not stem or len(data) > IMAGE_MAX_BYTES:
+        return None
+    d = config.workspace_dir(c) / PICTURE_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    name = f"{stem}.{PICTURE_TYPES[mime]}"
+    (d / name).write_bytes(data)
+    return name
+
+
+def picture_path(c: str, name: str) -> Path | None:
+    """The file of a picture save_picture wrote, by its name; None for any other name."""
+    if not PICTURE_NAME_RE.match(str(name or "")):
+        return None
+    p = config.workspace_dir(c) / PICTURE_DIR / name
+    return p if p.is_file() and not p.is_symlink() else None
+
+
 def _anchors(meta: dict) -> list[str]:
     return [a.strip() for a in str(meta.get("anchor") or "").split(",") if a.strip()]
 
@@ -297,29 +339,37 @@ def event(c: str, payload: dict[str, Any], event_id: str) -> tuple[str, dict[str
     _, log_path = agents.paths(c, thread_id)
     by = agents.TERMINAL if payload.get("by") == agents.TERMINAL else agents.BROWSER  # message_thread's, from the terminal
     first = not first_question(c, thread_id)
-    agents.append(log_path, {"type": "user", "ts": _now(), "text": text, "by": by, "event": event_id})
+    # the pictures the analyst pasted with it (tool_message_thread), by their names in the workspace
+    images = [str(n) for n in payload.get("images") or [] if picture_path(c, str(n)) is not None]
+    agents.append(log_path, {"type": "user", "ts": _now(), "text": text, "by": by, "event": event_id,
+                             **({"images": images} if images else {})})
     # a thread made with no question is named by its first one, as one made with it is (agents.new_thread)
     if first:
         agents.name_by_question(c, meta, text)
     waits = awaiting_fork(c, thread_id)
     agents.set_running(c, thread_id, True)
     if waits:
-        entry = {"text": text, "event": event_id, "ts": _now()}
+        entry = {"text": text, "event": event_id, "ts": _now(), **({"images": images} if images else {})}
         # appended to the list as the meta holds it now, under its lock (agents.change_meta)
         meta = agents.change_meta(c, thread_id, lambda m: m.update({QUEUED_KEY: [*(m.get(QUEUED_KEY) or []), entry]}))
         agents._notify(c, thread_id)
         log.info("%s: thread %s: a message waits for its fork (%d queued)", c, thread_id, len(meta[QUEUED_KEY]))
         return None
-    return build(c, thread_id, [text])
+    return build(c, thread_id, [text], images)
 
 
-def build(c: str, thread_id: str, questions: list[str]) -> tuple[str, dict[str, Any], str]:
+def build(c: str, thread_id: str, questions: list[str], pictures: list[str] | tuple[str, ...] = ()) -> tuple[str, dict[str, Any], str]:
     """The event that asks the thread's questions: to its fork when it has one in the session that is main, else to
-    main to fork anew, with the anchor, what its refs hold and the thread's earlier turns."""
+    main to fork anew, with the anchor, what its refs hold and the thread's earlier turns. Each of `pictures`, the
+    pictures the analyst pasted with them (save_picture's names), is a `picture` line with its ref (`picture:<name>`),
+    which main passes on to the fork (prompts/main.md, the `thread` bullet), and which the fork looks at with
+    `screenshot`: thimble's own tool, which asks for no permission, where the fork's Read of the file outside the
+    working directories stopped on Claude Code's question in auto mode too (live check of bug hunt I5)."""
     meta = agents.read_meta(c, thread_id)
     group = group_ref(thread_id)
     fork = _live_fork(c, meta)
     lines = [_line("question", "\n\n".join(q.strip() for q in questions if q.strip()))]
+    lines += [_line("picture", f"{PICTURE_REF}{n}") for n in pictures if picture_path(c, n) is not None]
     if not fork.get("agent_id"):
         lines += [
             _line("ref", meta.get("anchor")),
@@ -407,24 +457,27 @@ def flush(c: str, thread_id: str) -> bool:
     if not queued:
         return False
     questions = [str(q["text"]) for q in queued]
-    body, fields, _ = build(c, thread_id, questions)
+    body, fields, _ = build(c, thread_id, questions, [str(n) for q in queued for n in q.get("images") or []])
     events.send(c, events.THREAD, body, fields, thread=thread_id,
                  line=events.terminal_line(events.THREAD, " ".join(questions), {"name": line_name(c, thread_id, questions)}))
     agents.set_running(c, thread_id, True)
     return True
 
 
-def unanswered(c: str, thread_id: str) -> list[str]:
-    """The analyst's questions after the thread's last reply or finished run; the last question when every one was
-    answered."""
+def _unanswered(c: str, thread_id: str) -> list[dict]:
+    """The records of unanswered()'s questions."""
     records = agents.read_events(agents.paths(c, thread_id)[1])
     last = max((i for i, r in enumerate(records) if r.get("type") == "done" or (r.get("type") == "text" and r.get("reply"))),
                default=-1)
-    after = [str(r.get("text") or "") for r in records[last + 1:] if r.get("type") == "user" and str(r.get("text") or "").strip()]
-    if after:
-        return after
-    asked = [str(r.get("text") or "") for r in records if r.get("type") == "user" and str(r.get("text") or "").strip()]
-    return asked[-1:]
+    asked = [r for r in records if r.get("type") == "user" and str(r.get("text") or "").strip()]
+    after = [r for r in records[last + 1:] if r.get("type") == "user" and str(r.get("text") or "").strip()]
+    return after or asked[-1:]
+
+
+def unanswered(c: str, thread_id: str) -> list[str]:
+    """The analyst's questions after the thread's last reply or finished run; the last question when every one was
+    answered."""
+    return [str(r.get("text") or "") for r in _unanswered(c, thread_id)]
 
 
 def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
@@ -439,13 +492,14 @@ def ask_again(c: str, thread_id: str, *, hand: bool = False) -> dict[str, Any]:
         raise HTTPException(400, f"{thread_id} is not a thread")
     if agents.running(c, thread_id):
         raise HTTPException(409, "the thread is working; its reply comes in the thread")
-    questions = unanswered(c, thread_id)
+    asked = _unanswered(c, thread_id)
+    questions = [str(r.get("text") or "") for r in asked]
     if not questions:
         raise HTTPException(400, "the thread has no question to ask again")
     if not events.reachable(c):
         raise HTTPException(409, events.NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     agents.update_agent(c, thread_id, **{QUEUED_KEY: []})
-    body, fields, _ = build(c, thread_id, questions)
+    body, fields, _ = build(c, thread_id, questions, [str(n) for r in asked for n in r.get("images") or []])
     if hand:
         event_id = secrets.token_hex(4)
         out = {"text": events.hand(c, event_id, body, fields, thread=thread_id)}
@@ -906,7 +960,10 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
             if not events.reachable(ctx.c):
                 return tools.err(f"message_thread: {events.NOT_LISTENING.format(cwd=config.corpus_dir(ctx.c))}")
             event_id = secrets.token_hex(4)
-            built = event(ctx.c, {"thread": tid, "text": text, "by": agents.TERMINAL}, event_id)
+            images, why = _pasted(ctx.c, f"{tid}-{event_id}", text, args.get("pictures"))
+            if why:
+                return tools.err(f"message_thread: {why}")
+            built = event(ctx.c, {"thread": tid, "text": text, "by": agents.TERMINAL, "images": images}, event_id)
             if built is None:
                 return tools.ok(tools.hint("message_thread-queued", thread=name))
             body, fields, _ = built
@@ -931,6 +988,36 @@ async def tool_message_thread(ctx: Any, args: dict[str, Any]) -> Any:
     return tools.err(tools.hint("message_thread-main", thread=name))
 
 
+# the place Claude Code holds for a picture the analyst pasted into a prompt
+PASTED_RE = re.compile(r"\[Image #\d+\]")
+
+
+def _pasted(c: str, stem: str, text: str, pictures: Any) -> tuple[list[str], str]:
+    """The pictures message_thread's call passes (`pictures`, their paths), copied into the workspace (save_picture),
+    where the thread's fork reads them and the thread shows them: (their names, '') or ([], why not). A message that
+    names a picture (`[Image #1]`) with no `pictures` given is refused with the hint that asks for them, since its thread
+    would show a dead placeholder and its fork never see the picture (bug hunt I5); an empty list passes."""
+    from . import tools  # noqa: PLC0415
+
+    if pictures is None:
+        named = PASTED_RE.findall(text)
+        return ([], tools.hint("message_thread-pictures", names=", ".join(dict.fromkeys(named)))) if named else ([], "")
+    if not isinstance(pictures, list) or not all(isinstance(p, str) for p in pictures):
+        return [], "`pictures` is a list of the pictures' paths"
+    names: list[str] = []
+    for k, raw in enumerate(pictures, 1):
+        path = Path(raw.strip()).expanduser()
+        try:
+            data = path.read_bytes() if path.is_file() and path.stat().st_size <= IMAGE_MAX_BYTES else b""
+        except OSError:
+            data = b""
+        name = save_picture(c, f"{stem}-{k}", data) if data else None
+        if name is None:
+            return [], tools.hint("message_thread-no-picture", path=raw.strip())
+        names.append(name)
+    return names, ""
+
+
 def _file_ref(ref: str) -> bool:
     """Whether `ref` names a place in a corpus file."""
     from . import refs  # noqa: PLC0415
@@ -942,10 +1029,17 @@ def _file_ref(ref: str) -> bool:
 
 
 async def tool_screenshot(ctx: Any, args: dict[str, Any]) -> Any:
-    """`screenshot` of `thread:<id>`, or of a ref a thread was opened on: the PNG the browser captured at the click."""
+    """`screenshot` of `thread:<id>`, or of a ref a thread was opened on: the PNG the browser captured at the click; of
+    `picture:<name>`, a picture the analyst pasted into a message (save_picture)."""
     from . import tools  # noqa: PLC0415
 
     ref = str(args.get("ref") or "").strip()
+    if ref.startswith(PICTURE_REF):
+        path = picture_path(ctx.c, ref[len(PICTURE_REF):])
+        if path is None:
+            return tools.err(f"screenshot: no picture {ref}; a pasted picture's ref is the `picture` line of its thread's event")
+        return tools._image(base64.b64encode(path.read_bytes()).decode("ascii"), PICTURE_MEDIA[path.suffix.lstrip(".")],
+                            f"the picture {ref} the analyst pasted")
     m = THREAD_REF_RE.match(ref)
     meta = agents.meta_or_none(ctx.c, m.group(1)) if m else None
     if meta is None and not m:

@@ -5,6 +5,6 @@ disable-model-invocation: true
 argument-hint: "THREAD [message]"
 ---
 
-Call `message_thread` with the first word below as `thread` and everything after it, word for word, as `message`, leaving `message` out when nothing follows the thread. Do what its result asks, then end the turn without text: the terminal shows your calls, and the thread shows the answer.
+Call `message_thread` with the first word below as `thread` and everything after it, word for word, as `message`, leaving `message` out when nothing follows the thread. When the message has pictures (`[Image #1]`), pass the path of each, from Claude Code's `[Image: source: …]` lines, as `pictures`. Do what its result asks, then end the turn without text: the terminal shows your calls, and the thread shows the answer.
 
 $ARGUMENTS

@@ -43,7 +43,9 @@ supersedes the check's earlier open comments on those passages and records their
 `checked {check, doc, status, comments}` when a run run_check started ends with no agent of main's, such as an
 extension's program; a run that ran as main's subagent says nothing more: the hand-back of a run thimble's module
 started is taken by thimble's hand-back hook and never reaches main (plugin/bin/.thimble-watch --handback), and that of
-a run main's own Agent call started tells main, which answers it in one line.
+a run main's own Agent call started tells main, which answers it in one line. The terminal UI lets that hand-back in
+and draws no row for it, and the notice Claude Code adds that the report reached main is kept empty
+(plugin/hooks/term/register.tsx, plugin/hooks/thimble.ts ownPointer), so main's line is the run's one row (bug hunt I7).
 
 The cards. A check `covers` the documents, the cards or both (COVERS; the built-ins say so in their frontmatter, a new
 check covers the documents unless made for the cards). The cards are one more run target beside the documents' slugs,

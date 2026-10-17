@@ -58,12 +58,15 @@ from data. Main's text records carry that uuid, so the browser can anchor a chec
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import html
 import json
 import logging
 import os
 import re
+import secrets
 import signal
 import time
 from datetime import datetime, timezone
@@ -3678,14 +3681,37 @@ def _blocks(rec: dict) -> list[dict]:
 
 
 def _user_text(rec: dict) -> str | None:
-    """The text of a user record that is a prompt (a string, or text blocks and no tool result), else None."""
+    """The text of a user record that is a prompt (a string, or text blocks and no tool result, with the pictures the
+    analyst pasted beside them), else None. A prompt with a picture holds an image block beside its text: it was no
+    prompt here, so its turn never reached the browser's chat (bug hunt I9)."""
     msg = rec.get("message")
     content = msg.get("content") if isinstance(msg, dict) else None
     if isinstance(content, str):
         return content
-    if isinstance(content, list) and content and all(isinstance(b, dict) and b.get("type") == "text" for b in content):
-        return "\n".join(str(b.get("text") or "") for b in content)
+    if (isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "text" for b in content)
+            and all(isinstance(b, dict) and b.get("type") in ("text", "image") for b in content)):
+        return "\n".join(str(b.get("text") or "") for b in content if b.get("type") == "text")
     return None
+
+
+def _pictures(lv: Live, rec: dict) -> list[str]:
+    """The pictures pasted into a prompt (its image blocks), written into the workspace (threads.save_picture) under the
+    record's uuid: their file names, for the browser to show under the prompt's row."""
+    out: list[str] = []
+    stem = re.sub(r"[^A-Za-z0-9]", "", str(rec.get("uuid") or ""))[:16] or secrets.token_hex(8)
+    for b in _content_list(rec):
+        src = b.get("source") if isinstance(b, dict) and b.get("type") == "image" else None
+        if not isinstance(src, dict) or src.get("type") != "base64":
+            continue
+        try:
+            data = base64.b64decode(str(src.get("data") or ""), validate=False)
+            name = threads.save_picture(lv.c, f"{stem}-{len(out) + 1}", data)
+        except (binascii.Error, ValueError, OSError) as e:
+            log.info("%s: a pasted picture was not kept (%s)", lv.c, e)
+            continue
+        if name:
+            out.append(name)
+    return out
 
 
 def translate(lv: Live, line: bytes | str) -> None:
@@ -3747,7 +3773,8 @@ def translate(lv: Live, line: bytes | str) -> None:
             elif command is not None:
                 _user_line(lv, command, analyst=command.split()[0] not in ASK_COMMANDS)
             elif not text.lstrip().startswith("<"):
-                _user_line(lv, text.strip())
+                pictures = _pictures(lv, rec)
+                _user_line(lv, text.strip(), **({"images": pictures} if pictures else {}))
         return
     if t == "attachment":
         att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}

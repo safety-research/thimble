@@ -140,6 +140,36 @@ def test_an_empty_text_block_claude_code_stores_as_no_content_shows_in_no_chat(c
     assert [(r["type"], r.get("delta")) for r in _mirror()][-2:] == [("text", "The thread is open."), ("done", None)]
 
 
+# a PNG of one pixel
+PNG = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def test_i9_a_prompt_with_a_pasted_picture_and_its_answer_reach_main_s_chat_with_the_picture(cwd, tmp_path):
+    """Bug hunt I9: a prompt with a picture holds an image block beside its text, which was no prompt for the mirror, so
+    neither it nor main's answer reached the browser's chat. It is the analyst's line now, its picture kept in the
+    workspace and named on the line, and the answer follows it."""
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = _attach(cwd, p)
+    session.tail_once(lv)
+    _append(p, lv, [
+        {"type": "user", "uuid": "08e84765-87c7-4445-a18a-81245b494aa4", "origin": {"kind": "human"}, "imagePasteIds": [1],
+         "message": {"content": [{"type": "text", "text": "This is my browser: [Image #1] Make a bar chart card."},
+                                 {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": PNG}}]}},
+        {"type": "user", "isMeta": True, "message": {"content": [{"type": "text", "text": "[Image: source: /tmp/x.png]"}]}},
+        _assistant(_say("I made the bar chart card.")),
+        END,
+    ])
+    recs = _mirror()
+    assert [r["type"] for r in recs] == ["user", "text", "done"], recs
+    assert recs[0]["text"] == "This is my browser: [Image #1] Make a bar chart card."
+    assert recs[1]["delta"] == "I made the bar chart card."
+    names = recs[0]["images"]
+    assert len(names) == 1 and threads.picture_path(CORPUS, names[0]).read_bytes().startswith(b"\x89PNG")
+    # a name that is no picture's is no file
+    assert threads.picture_path(CORPUS, "../config.json") is None
+
+
 def test_a_prompt_the_terminal_panel_sends_as_the_analyst_s_and_its_answer_reach_main_s_chat(cwd, tmp_path):
     """Bug hunt 2, C1: the terminal panel's `run again` and `describe a new label` send main a prompt as the analyst's
     ($.prompt.submit with asUser), which Claude Code records with origin {kind: plugin, name: thimble, asUser: true}.

@@ -120,3 +120,52 @@ def test_an_agent_s_thread_is_found_by_the_name_the_browser_gives_it_and_by_its_
     assert found("dev/Tea Board") == found("dev/tea-board") == [build["id"]]
     assert found("dev/Tea Board review") == found("dev/tea-board-review") == [review["id"]]
     assert found("Report") == [writer["id"]]
+
+
+# ----------------------------------------------------------------------------- a picture in a terminal ask
+
+# a PNG of one pixel
+PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+
+async def test_i5_a_picture_pasted_into_a_terminal_ask_is_kept_shown_in_its_thread_and_passed_to_the_fork(client, tmp_path):
+    """Bug hunt I5: `/thimble:ask <thread> [Image #1] …` reached the thread as the text alone, so the thread showed a
+    dead placeholder and the fork saw the picture only when main thought to name its path. message_thread takes the
+    pictures' paths, keeps a copy in the workspace, names it on the thread's record and gives its ref to the fork as a
+    `picture` line, which `screenshot` shows; a message that names a picture without them is refused with the hint
+    that asks for them, and a file that is no picture is refused."""
+    import base64
+
+    from app import threads, tools
+
+    Listener(CORPUS)
+    tid = agents.new_thread(CORPUS, None, "why does ep09 have so many dots")["id"]
+    ctx = tools.Ctx(CORPUS, tools.ANALYST)
+    shot = tmp_path / "view-ep09.png"
+    shot.write_bytes(base64.b64decode(PNG))
+    message = "[Image #1] What do the red X marks mean?"
+    said = lambda res: res.content[0]["text"]  # noqa: E731
+
+    asked = await threads.tool_message_thread(ctx, {"thread": tid, "message": message})
+    assert asked.is_error and "names [Image #1], but no picture came with it" in said(asked)
+    notes = tmp_path / "notes.txt"
+    notes.write_text("not a picture")
+    refused = await threads.tool_message_thread(ctx, {"thread": tid, "message": message, "pictures": [str(notes)]})
+    assert refused.is_error and f"{notes} is not a picture that thimble can keep" in said(refused)
+    assert not [r for r in _log(tid) if r.get("type") == "user"]
+
+    sent = await threads.tool_message_thread(ctx, {"thread": tid, "message": message, "pictures": [str(shot)]})
+    assert not sent.is_error, said(sent)
+    rec = [r for r in _log(tid) if r.get("type") == "user"][-1]
+    assert rec["text"] == message and len(rec["images"]) == 1
+    kept = threads.picture_path(CORPUS, rec["images"][0])
+    assert kept is not None and kept.read_bytes() == shot.read_bytes()
+    assert str(kept).startswith(str(agents._ws(CORPUS)))
+    assert f"picture: picture:{rec['images'][0]}" in said(sent)
+    # the fork looks at it with thimble's own screenshot tool, which asks for no permission to read a file
+    shown = await tools.call(CORPUS, "screenshot", {"ref": f"picture:{rec['images'][0]}"})
+    assert not shown.is_error and shown.content[1] == {"type": "image", "data": PNG, "mimeType": "image/png"}
+    # the browser reads it from the workspace
+    got = client.get(f"/api/ws/{CORPUS}/pictures/{rec['images'][0]}")
+    assert got.status_code == 200 and got.headers["content-type"] == "image/png" and got.content == shot.read_bytes()
+    assert client.get(f"/api/ws/{CORPUS}/pictures/..%2Fconfig.json").status_code == 404

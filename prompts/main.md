@@ -35,7 +35,7 @@ An event with no text of its own carries one line saying what the analyst did in
 - `main` is a message the analyst typed in thimble's chat. Answer it as if it were typed here, and with the Workflow tool when `ultracode` is true.
 {{/later}}
 {{later:event-thread}}
-- `thread` opens or continues a side thread. Fork with Agent, `subagent_type` "fork", the `name` attribute as `name`, and `thread:<name>` with that attribute as the description and the prompt, or SendMessage the fork the `agent` attribute names. The fork answers in the thread. Claude Code defers SendMessage, so load it with ToolSearch before you first call it.
+- `thread` opens or continues a side thread. Fork with Agent, `subagent_type` "fork", the `name` attribute as `name`, and `thread:<name>` with that attribute as the description and the prompt, or SendMessage the fork the `agent` attribute names. The fork answers in the thread. Claude Code defers SendMessage, so load it with ToolSearch before you first call it. A `picture` line names a picture the analyst pasted with the question: when you SendMessage the fork, include that ref, and the fork looks at it with `screenshot`.
 {{/later}}
 {{later:event-start_agent}}
 - `start_agent` asks you to start the dev agent for a ticket or a view, a writer, a check, or the orientation that a thread's fork filed, since a fork cannot start subagents. Make the Agent call its text gives, unchanged.

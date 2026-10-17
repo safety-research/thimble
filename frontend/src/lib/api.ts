@@ -647,6 +647,8 @@ export const api = {
   // ---- tickets ----
   tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),
   ticket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}`),
+  /** the address of a picture the analyst pasted into a message (`GET /ws/{c}/pictures/{name}`), for an <img> */
+  pictureUrl: (c: string, name: string) => `${ws(c)}/pictures/${enc(name)}`,
   /** the address of a ticket's before or after shot (`GET /dev/tickets/{id}/shots/{name}`), for an <img> */
   ticketShotUrl: (id: string, name: string) => `${apiBase()}/dev/tickets/${enc(id)}/shots/${enc(name)}`,
   fileTicket: (body: NewTicketBody) => j<Ticket>(`${apiBase()}/dev/tickets`, { method: 'POST', body: JSON.stringify(body) }),

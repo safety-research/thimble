@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, hmac, ownNotice, register } from './thimble'
+import { ABORT_WAIT_MS, CALL_DONE, POINTER_NOTE, PRIVATE_FALLBACK, callDone, checkName, hmac, ownNotice, register, typedCheck } from './thimble'
 
 type Json = Record<string, any>
 
@@ -355,6 +355,10 @@ function engine(opts: Options = {}) {
      *  text the model reads, null when it is left out */
     taskStatus: async (text: string, agentId?: string): Promise<string | null> =>
       (await hooks['prompt.attachment']($, { type: 'task_status', text, origin: { kind: 'engine' }, ...(agentId === undefined ? {} : { agentId }) }, async (x: Json) => ({ text: x.text }))).text,
+    /** a task notification row stored in main's (or an agent's) conversation, through the session.append hook: the
+     *  content it is stored with */
+    notified: async (text: string, agentId?: string, kind = 'task-notification'): Promise<unknown> =>
+      (await hooks['session.append']($, { door: 'prompt', uuid: 'u9', origin: { kind }, message: { type: 'user', role: 'user', content: text }, ...(agentId === undefined ? {} : { agentId }) }, async (x: Json) => ({ uuid: 'u9', message: x.message }))).message.content,
   }
 }
 
@@ -743,6 +747,41 @@ describe('ends and sessions', () => {
     expect(await e.taskStatus(done(writer, 'writer: report'))).toBe(done(writer, 'writer: report'))
     expect(await e.taskStatus(running('aMine000', 'count the pages'))).toBe(running('aMine000', 'count the pages'))
     expect(await e.taskStatus(done(check, 'check: Important details · answers'), 'aSub')).toBe(done(check, 'check: Important details · answers'))
+  })
+
+  // bug hunt I7: the hand-back of a check main started with run_check was dropped, which printed a warning-colored
+  // "Prompt dropped by a hook: Numbers found nothing to flag", and main, told only that the report had reached it, wrote
+  // that thimble showed the check's comments when it had none
+  it('tells the terminal UI which checks main started itself, whose reports reach main', async () => {
+    const e = await started()
+    const spawned = String((await e.server.answer(e.server.push('spawn', { role: 'check', prompt: 'p', description: 'check: Important details · report', values: {}, note: '' }))).agentId)
+    const writer = String((await e.server.answer(e.server.push('spawn', { role: 'writer', prompt: 'p', description: 'writer: report', values: {}, note: '' }))).agentId)
+    await e.agentCall({ subagentType: 'thimble:check', prompt: '[thimble request req_1]\nCheck the report.', description: 'check: Numbers · report' }, 'aTypedCheck')
+    await e.agentCall({ subagentType: 'thimble:writer', prompt: 'Write.', description: 'writer: slides' }, 'aTypedWriter')
+    expect([spawned, 'aTypedCheck', writer, 'aTypedWriter', 'aMine000'].map(typedCheck)).toEqual([false, true, false, false, false])
+    // both are checks this session started, by their names
+    expect([spawned, 'aTypedCheck'].map(checkName)).toEqual(['Important details', 'Numbers'])
+  })
+
+  // bug hunt I6: the view's builder, sent back for the terminal page, handed back to main, and Claude Code then wrote its
+  // notification to main's transcript too ("This agent's report was delivered to you as a message …"); main's next
+  // turn opened with "↳ The view builder finished. I covered its report above."
+  it("keeps Claude Code's notification that points at a hand-back of one of its agents as a note that asks for no words, and no other", async () => {
+    const e = await started()
+    const builder = String((await e.server.answer(e.server.push('spawn', { role: 'view-builder', prompt: 'p', description: 'view: Episodes', values: {}, note: '' }))).agentId)
+    await e.agentCall({ subagentType: 'thimble:check', prompt: 'Check the report.', description: 'check: Numbers · report' }, 'aTypedCheck')
+    const pointer = (id: string, what: string) =>
+      `<task-notification>\n<task-id>${id}</task-id>\n<tool-use-id>toolu_plugin_1</tool-use-id>\n<status>completed</status>\n<summary>Agent "${what}" finished</summary>\n<result>This agent's report was delivered to you as a message from "${id}" (its SubagentHandback call). Read it there; it is not repeated here.\n</result>\n</task-notification>`
+    const failed = `<task-notification>\n<task-id>${builder}</task-id>\n<status>failed</status>\n<summary>Agent "view: Episodes" failed</summary>\n<result>API Error: 529 overloaded</result>\n</task-notification>`
+    const note = [{ type: 'text', text: POINTER_NOTE }]
+    expect(await e.notified(pointer(builder, 'view: Episodes'))).toEqual(note)
+    expect(await e.notified(pointer('aTypedCheck', 'check: Numbers · report'))).toEqual(note)
+    // the analyst's own agent's, a notification that says more than the pointer, one in an agent's conversation and a
+    // message from another session stay as Claude Code wrote them
+    expect(await e.notified(pointer('aMine000', 'count the pages'))).toBe(pointer('aMine000', 'count the pages'))
+    expect(await e.notified(failed)).toBe(failed)
+    expect(await e.notified(pointer(builder, 'view: Episodes'), 'aSub')).toBe(pointer(builder, 'view: Episodes'))
+    expect(await e.notified(pointer(builder, 'view: Episodes'), undefined, 'peer')).toBe(pointer(builder, 'view: Episodes'))
   })
 
   it('keeps its poll across /clear: a hello under the new id, polls under it, the record again and a note per running agent', async () => {
