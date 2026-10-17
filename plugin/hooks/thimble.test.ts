@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, hmac, register } from './thimble'
+import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, forksFile, hmac, register } from './thimble'
 
 type Json = Record<string, any>
 
@@ -606,6 +606,21 @@ describe('model calls', () => {
     await e.complete(String(call.agentId), 'Done')
     await until(() => e.server.ended.length === 1)
     expect(e.server.ended[0]).toMatchObject({ agentId: call.agentId, answer: 'Done' }) // its end reaches the server
+  })
+
+  it("spawns a model call's fork of main with Claude Code's fork type, lists it for the fork guard while it runs, and posts its report", async () => {
+    const e = await started()
+    const list = forksFile(`${HOME}/.thimble`, MAIN)
+    const fork = await e.server.answer(e.server.push('spawn', { role: 'call', fork: true, prompt: 'Decide.', description: 'thimble: view proposal', values: {}, note: '', drop: 'thimble checked for a view proposal' }))
+    expect(e.$.agent.spawn).toHaveBeenCalledWith({ subagentType: 'fork', prompt: 'Decide.', description: 'thimble: view proposal' })
+    expect(e.$.agent.register).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'call' })) // a fork needs no type
+    expect(callDone(String(fork.agentId))).toBe('thimble checked for a view proposal')
+    expect(e.notes()).toEqual([])
+    expect(e.files[list]).toBe(`${fork.agentId}\n`)
+    await e.complete(String(fork.agentId), '{"show": false, "why": "Nothing new.", "proposal": null}')
+    await until(() => e.server.ended.length === 1)
+    expect(e.server.ended[0]).toMatchObject({ agentId: fork.agentId, answer: '{"show": false, "why": "Nothing new.", "proposal": null}' })
+    expect(e.files[list]).toBe('') // it ended: the guard has nothing to refuse
   })
 })
 

@@ -829,7 +829,8 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     in main (R3), and `caller_role` the role of the agent that makes a typed call itself (the critic's start, made by
     the orientation). A typed start whose tool call a thread's fork or another subagent of main's made keeps that
     subagent (`caller_agent`, typed_caller): only its Agent call claims the request. `fields` are more fields of the
-    request, such as an orientation's continuation's `continues` (ensure_chat)."""
+    request, such as an orientation's continuation's `continues` (ensure_chat), a model call's `drop`, and `fork`, a
+    model call that runs as a fork of main (agent_call.py), whose call names Claude Code's fork type."""
     if role not in TYPES or role == HELPER:
         raise ValueError(f"no role {role!r}")
     if check and not caller_role:
@@ -841,6 +842,8 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     rid = request_id or files.request_id()
     prompt = with_request_line(task, rid) if route == TYPED else task
     inp = call_input(role, prompt, description or role)
+    if (fields or {}).get("fork"):
+        inp["subagent_type"] = files.FORK_TYPE
     caller_agent = await typed_caller(c, call) if route == TYPED and not caller_role else None
     rid = new_request(c, "start", key, inp, values, route, role=role, rid=rid, chat=dict(chat or {}),
                       work=str(work) if work else None, call=call, caller_role=caller_role,
@@ -871,7 +874,7 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
     inp = r.get("input") or {}
     ans = await _bridge(c, "spawn", role=r.get("role"), values=r.get("values") or {}, prompt=inp.get("prompt"),
                         description=inp.get("description"), request=rid, what=_what(r), route=r.get("route") or CLICK,
-                        **({"drop": str(r["drop"])} if r.get("drop") else {}))
+                        **({"drop": str(r["drop"])} if r.get("drop") else {}), **({"fork": True} if r.get("fork") else {}))
     if ans.started:
         meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (the started agent's thread)
         return Answer({**ans, "request": rid, **({"chat": meta["id"]} if meta and meta.get("id") else {})})

@@ -92,6 +92,38 @@ async def test_an_agent_that_ends_without_its_answer_gives_the_part_back_once(ws
     assert res.status == "no_tool_call" and "Still not sure." in res.detail and len(bridge.ops("spawn")) == 2
 
 
+async def test_a_fork_of_main_answers_with_its_report_which_must_fit_the_schema(ws, bridge):
+    call = asyncio.create_task(agent_call.structured(
+        CORPUS, "Is the analyst's last reply curt?", tool=TOOL, model="", effort="", fork=True,
+        title="thimble: curt check", done="thimble judged a reply"))
+    await _until(lambda: bridge.ops("spawn"), "no fork started")
+    [spawn] = bridge.ops("spawn")
+    assert spawn["fork"] is True and spawn["role"] == "call" and spawn["drop"] == "thimble judged a reply"
+    prompt = spawn["prompt"]
+    assert "You are a fork of the analyst's session" in prompt and "Is the analyst's last reply curt?" in prompt
+    assert '"curt"' in prompt and "read_call" not in prompt and "send_answer" not in prompt
+    await _until(lambda: _agents(), "the fork was not registered")
+    assert _agents()[0][1]["type"] == "fork", "its start names Claude Code's fork type"
+    subagents.run_ended(CORPUS, _agents()[0][0], "done", 'Checking the reply.\n{"curt": "very"}')
+    await _until(lambda: len(_agents()) == 2, "an answer that does not fit gives the part to a second fork")
+    subagents.run_ended(CORPUS, _agents()[1][0], "done", 'One line first.\n```json\n{"curt": true}\n```')
+    res = await asyncio.wait_for(call, 5)
+    assert res.status == "ok" and res.output == {"curt": True} and len(bridge.ops("spawn")) == 2
+
+
+async def test_a_fork_the_safeguards_refused_fails_at_once_and_one_with_pictures_never_starts(ws, bridge):
+    refusal = {"model": "claude-opus-4-8", "effort": "high"}
+    call = asyncio.create_task(agent_call.structured(CORPUS, "Judge it.", tool=TOOL, model="", effort="", fork=True,
+                                                     refusal=refusal))
+    await _until(lambda: _agents(), "no fork started")
+    subagents.run_ended(CORPUS, _agents()[0][0], "failed", "API Error: Claude's safeguards flagged this message.")
+    res = await asyncio.wait_for(call, 5)
+    assert res.status == "refused" and len(bridge.ops("spawn")) == 1, "a fork cannot change its model"
+    pictured = await agent_call.structured(CORPUS, "Judge it.", tool=TOOL, model="", effort="", fork=True,
+                                           images=[(b"png", "image/png")])
+    assert pictured.status == "error" and "no pictures" in pictured.detail and len(bridge.ops("spawn")) == 1
+
+
 async def test_a_cancelled_call_stops_its_agent_and_takes_no_late_answer(ws, bridge):
     call = asyncio.create_task(agent_call.structured(CORPUS, "The reply: Now.", tool=TOOL, model="claude-opus-5-5",
                                                      effort="low"))

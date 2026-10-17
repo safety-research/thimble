@@ -2690,8 +2690,14 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
             if _sub_by(lv, agent_id=agent_id) is None and (lv.pending_paths[key] <= META_WAIT_SCANS
                                                           or _unsettled(lv, agent_id)):
                 continue
+        quiet = _chatless(lv, agent_id, meta) if meta else False
+        if quiet is None and lv.pending_paths.get(key, 0) < META_WAIT_SCANS:
+            lv.pending_paths[key] = lv.pending_paths.get(key, 0) + 1
+            continue
         lv.pending_paths.pop(key, None)
         lv.sub_paths.add(key)
+        if quiet:
+            continue  # an agent of thimble's with no chat: a model call's (agent_call.py), which nobody reads
         use = str(meta.get("toolUseId") or "") or None
         followed = _sub_by(lv, tool_use_id=use) or _sub_by(lv, agent_id=agent_id)
         # a fork's file names its thread by its description; when thimble-term gave the call the thread's question as
@@ -2712,6 +2718,31 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
             _take_place(sub, path, (places or {}).get(key), at_end=read_before)
     for owner in [s for s in lv.subs if s.workflow and s.workflow_dir is not None]:
         _scan_workflow(lv, owner, replay, places)
+
+
+def _chatless(lv: Live, agent_id: str, meta: dict) -> bool | None:
+    """Whether the transcript of `agent_id` belongs to an agent of thimble's whose role has no chat (subagents.Type's
+    chat_role None: a model call's agent or fork, agent_call.py), which the mirror leaves alone; None while that is not
+    known yet: a start thimble's module made (its meta json's toolUseId) that the registry has not taken up, while a
+    start of such a role waits for its answer."""
+    from . import subagents  # noqa: PLC0415
+
+    def chatless(role: Any) -> bool:  # one of thimble's roles with no chat (the helper's steps go to its ancestor's)
+        t = subagents.TYPES.get(str(role or ""))
+        return t is not None and t.role in subagents.ROLES and t.chat_role is None
+
+    try:
+        state = subagents.read(lv.c)
+    except Exception:  # noqa: BLE001 — an unreadable record holds no agent
+        return False
+    a = sfiles.registry(state).get(agent_id)
+    if isinstance(a, dict):
+        return chatless(a.get("role"))
+    if not str(meta.get("toolUseId") or "").startswith(sfiles.PLUGIN_CALL):
+        return False
+    waiting = any(isinstance(r, dict) and r.get("kind") == "start" and r.get("state") in sfiles.OPEN
+                  and chatless(r.get("role")) for r in sfiles.requests(state).values())
+    return None if waiting else False
 
 
 def _unsettled(lv: Live, agent_id: str) -> bool:

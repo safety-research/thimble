@@ -35,6 +35,15 @@ part given back MAX_TRIES times fails with the agent's last words (no_tool_call)
 error). A run the model's safeguards refused runs again, once, on the refusal row's model (Spec.refusal), as
 model.structured did; the result's refused_by names the model that refused.
 
+A fork (Spec.fork). A call that needs main's conversation, the view proposer's, runs its one part as a fork of main
+(`$.agent.spawn` with Claude Code's `fork` type), which inherits main's context, model and effort: its first message is
+the part's text with the schema (call-task.md `fork`), and its answer is its report, one JSON object, checked against
+the schema when its run ends (_agent_ended). A fork has main's tools, which thimble's module cannot take away, so the
+module lists each running fork in <home>/up/<session>/forks and the fork guard (plugin/bin/.thimble-watch --fork-guard,
+a PreToolUse hook) refuses every tool call one of them makes. A fork that ends without an answer that fits gives the
+part back once, as any agent of a call; a refusal or an API error fails the part at once, since a fork cannot change
+its model. A fork takes no pictures.
+
 Stops. A caller cancelled (a card that changed, a check past its time) stops the call: every agent of it is stopped
 (subagents.stop, TaskStop through the module) and the call is marked `stopped`, so a late send_answer is refused. A call
 with no change for IDLE_S fails its parts left, and its agents are stopped.
@@ -124,6 +133,7 @@ class Spec:
     refusal: dict[str, str] | None = None
     agents: int = 1
     budget_chars: int = BUDGET_CHARS
+    fork: bool = False  # a fork of main that answers with its report (module note); one part, no pictures
 
 
 @dataclass
@@ -273,6 +283,42 @@ def subagent_refused(c: str, req: dict[str, Any]) -> None:
                  str(req.get("reason") or "")[:200])
 
 
+def json_object(text: str) -> tuple[dict[str, Any] | None, str]:
+    """The JSON object a model's text holds: the text itself, a fenced block of it, or the span from its first `{` to
+    its last `}`, an object followed by more text included. (None, why) when it holds none."""
+    t = str(text or "").strip()
+    cands = [m.group(1).strip() for m in re.finditer(r"```(?:json|JSON)?\s*\n(.*?)\n\s*```", t, re.S)]
+    cands.append(t)
+    i, j = t.find("{"), t.rfind("}")
+    if 0 <= i < j:
+        cands.append(t[i:j + 1])
+    err = "no JSON object in the answer"
+    for cand in cands:
+        if "{" not in cand:
+            continue
+        try:
+            got = json.loads(cand)
+        except ValueError as e:
+            err = f"invalid JSON: {e}"
+            try:  # an object followed by more text
+                got, _ = json.JSONDecoder().raw_decode(cand[cand.find("{"):])
+            except ValueError:
+                continue
+        if isinstance(got, dict):
+            return got, ""
+        err = "the JSON is not an object"
+    return None, err
+
+
+def _fork_answer(rec: dict[str, Any], report: str) -> tuple[dict[str, Any] | None, str]:
+    """A fork's answer from its report: the JSON object it holds when that fits the call's schema, else (None, why)."""
+    got, why = json_object(report)
+    if got is None:
+        return None, why
+    why = _invalid((rec.get("tool") or {}).get("schema") or {"type": "object"}, got)
+    return (None, why) if why else (got, "")
+
+
 def _failure(report: str) -> tuple[str, str]:
     """(status, detail) of a part whose agent ended without its answer, from the agent's last words: refused,
     rate_limited or error for an API error, else no_tool_call."""
@@ -300,8 +346,12 @@ def _agent_ended(c: str, cid: str, agent_id: str, status: str, report: str) -> N
         if a.get("state") == "ended":
             return
         a.update(state="ended", status=status, report=str(report or "")[:2000], ended=time.time())
-        refused = notices.failure_class(report) == "refused" if report else False
-        fallback = (rec.get("refusal") or {}).get("model") if refused else None
+        fork = bool(rec.get("fork"))
+        # a fork's report that fits the schema is its answer, whatever words it holds
+        answer, why = _fork_answer(rec, report) if fork and status == "done" else (None, "")
+        cls = notices.failure_class(report) if report and answer is None else None
+        refused = cls == "refused"
+        fallback = (rec.get("refusal") or {}).get("model") if refused and not fork else None
         if fallback and not rec.get("refused_by") and not str(rec.get("model") or "").startswith(str(fallback)):
             rec["refused_by"] = str(rec.get("model") or "")
             rec["model"], rec["effort"] = str(fallback), str((rec.get("refusal") or {}).get("effort") or "")
@@ -312,12 +362,22 @@ def _agent_ended(c: str, cid: str, agent_id: str, status: str, report: str) -> N
         for n, p in (rec.get("parts") or {}).items():
             if p.get("state") != "given" or p.get("agent") != agent_id:
                 continue
-            if fallback or int(p.get("tries") or 0) < MAX_TRIES:
+            if answer is not None:  # a fork's report that fits: its answer
+                _answer_path(c, cid, int(n)).write_text(json.dumps(answer, ensure_ascii=False), "utf-8")
+                p.update(state="answered", answered=time.time(), model=str(rec.get("model") or ""))
+                a["answered"] = int(a.get("answered") or 0) + 1
+            elif fork and cls is not None:  # a fork cannot change its model: a refusal or an API error fails at once
+                st, detail = _failure(report)
+                p.update(state="failed", status=st, detail=detail)
+            elif fallback or int(p.get("tries") or 0) < MAX_TRIES:
                 p.update(state="queued", agent="")
                 if fallback:
                     p["tries"] = 0
             else:
                 st, detail = _failure(report)
+                if fork and why:
+                    words = " ".join(str(report or "").split())[:300]
+                    st, detail = "no_tool_call", f"the fork's answer did not fit ({why})" + (f": {words}" if words else "")
                 p.update(state="failed", status=st, detail=detail)
             log.info("%s: call %s part %s %s after agent %s ended %s", c, cid, n, p["state"], agent_id, status)
 
@@ -497,6 +557,10 @@ def task_text(cid: str, spec: Spec, first: Part | None) -> str:
     the parts."""
     from . import prompts  # noqa: PLC0415
 
+    if spec.fork:  # a fork of main: the part's text and the schema of its report, which is its answer
+        text = "\n\n".join(t for t in (spec.instructions.strip(), (first.text if first else "").strip()) if t)
+        return prompts.render_section(TASK_PROMPT, "fork", {
+            "text": text, "tool": spec.tool.description.strip(), "schema": _schema_text(spec.tool.input_schema)}).strip()
     if first is not None:
         parts = prompts.render_section(TASK_PROMPT, "one-part", {"text": first.text.strip()})
         if first.images:
@@ -573,7 +637,8 @@ class _Call:
         spec = self.spec
         with _locked(self.c, self.cid) as rec:
             rec.update(id=self.cid, what=spec.what, title=spec.title, done=spec.done, status="running", closed=False,
-                       created=time.time(), model=spec.model, effort=spec.effort, refusal=spec.refusal,
+                       created=time.time(), model=spec.model, effort=spec.effort,
+                       refusal=None if spec.fork else spec.refusal, fork=spec.fork,
                        budget=spec.budget_chars, refused_by="",
                        tool={"name": spec.tool.name, "description": spec.tool.description,
                              "schema": spec.tool.input_schema},
@@ -601,8 +666,9 @@ class _Call:
                              inline=True)
         self.starts += 1
         title = _short(self.spec.title or f"thimble: {self.spec.what}", TITLE_CHARS)
+        fields: dict[str, Any] = {"drop": self.spec.done or DONE_DEFAULT, **({"fork": True} if self.spec.fork else {})}
         ans = await subagents.start_job(self.c, ROLE, _key(self.cid), prompt, values, subagents.FOLLOW_ON,
-                                        description=title, fields={"drop": self.spec.done or DONE_DEFAULT})
+                                        description=title, fields=fields)
         if ans.started:
             aid = str(ans.agent_id)
             self.agents.add(aid)
@@ -777,26 +843,31 @@ async def run(c: str, spec: Spec, parts: Iterable[Part] | AsyncIterable[Part], *
 async def structured(c: str, prompt: str, *, tool: ToolSpec, model: str, effort: str, system: str = "",
                      images: Sequence[tuple[bytes, str]] = (), refusal: dict[str, str] | None = None,
                      what: str = "", title: str = "", done: str = "", timeout_s: float | None = None,
-                     **_ignored: Any) -> CallResult:
+                     fork: bool = False, **_ignored: Any) -> CallResult:
     """One structured call of one part, as model.structured made it: `system` the instructions, `prompt` the part's
     text, `images` its pictures, the answer's schema `tool`, on `model` at `effort`, again on `refusal`'s model when
     the model refused. Never raises but for the caller's cancel; read the CallResult's status (call_result.Status:
     `no_session` when no Claude Code session runs thimble here, its detail the fix). Arguments only an Agent SDK
     session took (speed, cwd, idle_timeout_s, on_retry, on_fallback) are ignored: Claude Code retries the API itself
-    and runs a subagent at main's speed."""
-    if not str(model or "").strip() or not str(effort or "").strip():
+    and runs a subagent at main's speed. With `fork` the call runs as a fork of main (module note), on main's model and
+    effort, which `model` and `effort` then only name."""
+    if not fork and (not str(model or "").strip() or not str(effort or "").strip()):
         return CallResult(status="error", detail=f"the {tool.name} call names no model or no effort",
+                          model_requested=model)
+    if fork and images:
+        return CallResult(status="error", detail=f"the {tool.name} call is a fork, which takes no pictures",
                           model_requested=model)
     t0 = time.monotonic()
     spec = Spec(what=what or tool.name, instructions=system, tool=tool, model=model, effort=effort, title=title,
-                done=done, refusal=refusal)
+                done=done, refusal=refusal, fork=fork)
     outs = await run(c, spec, [Part(prompt, tuple(images))], timeout_s=timeout_s)
     o = outs[0] if outs else Outcome(1, "error", detail="the call gave no outcome")
     used = o.model or (str((refusal or {}).get("model") or model) if o.refused_by else model)
     return CallResult(status=o.status if o.status != "ok" or o.output is not None else "error",  # type: ignore[arg-type]
                       output=o.output if o.status == "ok" else None, model_requested=used,
                       model_used=used if o.status == "ok" else None, duration_s=round(time.monotonic() - t0, 2),
-                      session_id=o.agent or None, attempts=1, detail=o.detail, refused_by=o.refused_by)
+                      session_id=o.agent or None, attempts=1, detail=o.detail, refused_by=o.refused_by,
+                      text=o.text)
 
 
 def tasks_running(c: str) -> list[str]:
