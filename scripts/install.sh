@@ -12,9 +12,9 @@
 #
 # It adds thimble's plugin to Claude Code with Claude Code's own commands: claude plugin marketplace add <the install
 # folder>, then claude plugin install --scope user thimble@<marketplace>, so /thimble works in any claude session. A
-# re-run updates the plugin when its version changed. It writes no shell startup file: when ~/.local/bin is not on PATH,
-# or THIMBLE_HOME is not ~/.thimble, it prints the line a new terminal needs. It installs no system package and never
-# runs sudo.
+# re-run updates the plugin when its version or its files changed. It writes no shell startup file: when ~/.local/bin is
+# not on PATH, or THIMBLE_HOME is not ~/.thimble, it prints the line a new terminal needs. It installs no system package
+# and never runs sudo.
 #
 # The question, asked only when it remains, and the flag that answers it without asking:
 #   --browser bundled|system|off   a browser for screenshots, asked only when no Chrome or Edge that starts under
@@ -1033,7 +1033,8 @@ cli_switch_line() {  # the line saying ~/.local/bin/thimble runs another install
 }
 
 plugin_step() {  # thimble's plugin in Claude Code (scripts/plugin.sh): added from this install's folder at user scope, or
-  # updated when its version changed; another install's is left as it is. --no-plugin leaves Claude Code's plugins alone
+  # updated when its version or its files changed; another install's is left as it is. --no-plugin leaves Claude Code's
+  # plugins alone
   local mp_file="$dir/.claude-plugin/marketplace.json"
   if [ "$plugin" = no ]; then ok "Claude Code's plugins left as they are (--no-plugin)"; return 0; fi
   if [ "$mp_name" != "$mp_file_name" ]; then
@@ -1182,7 +1183,7 @@ NODE_RUNTIME_SIZE="about 70 MB"  # a release's frontend/runtime packages, measur
 plan() {  # what the question, the plugin, the link and the startup files find, before the opening screen
   local q
   for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do "${q}_plan"; done
-  plugin_reg="" plugin_on="" plugin_version="" other_reg="" other_from="" plugin_known=1 plugin_ok=0
+  plugin_reg="" plugin_on="" plugin_version="" plugin_files="" other_reg="" other_from="" plugin_known=1 plugin_ok=0
   cli_state="" cli_other="" cli_switch=""
   if [ "$deps_only" = 0 ]; then
     [ "$plugin" = no ] || plugin_record
@@ -1248,8 +1249,15 @@ plugin_setup() {  # the plugin's line in "Your Claude Code setup"
     found warn "thimble's plugin: not added, since Claude Code is not installed; run install.sh again once it is"
   elif [ -n "$other_reg" ] && [ -z "$plugin_reg" ]; then
     found ok "another install's thimble@$other_reg (from $(tilde "$other_from")) stays; to switch: $(plugin_switch_cmds)"
+  elif [ "$plugin_reg" = "$mp_name" ] && [ "$plugin_version" != "$version" ]; then
+    found ok "updates thimble's plugin (thimble@$mp_name) from ${plugin_version:-its version} to $version with claude plugin update; on or off as you set it"
   elif [ "$plugin_reg" = "$mp_name" ]; then
-    found ok "updates thimble's plugin (thimble@$mp_name) when its version changed; on or off as you set it"
+    case "$plugin_files" in
+      inplace) found ok "thimble's plugin (thimble@$mp_name $version): Claude Code reads it from $(tilde "$dir")/plugin itself, so nothing to update";;
+      same) found ok "thimble's plugin (thimble@$mp_name $version): unchanged, nothing to update";;
+      differs) found ok "thimble's plugin (thimble@$mp_name $version): its files changed, so it is installed again (claude plugin uninstall, then install), with its options and on or off as you set them";;
+      *) found ok "updates thimble's plugin (thimble@$mp_name) when its version changed; on or off as you set it";;
+    esac
   else
     found ok "adds thimble's plugin with Claude Code's own commands: claude plugin marketplace add $(arg_path "$dir"), then claude plugin install --scope user thimble@$mp_name (Claude Code writes it to $cc/settings.json and $cc/plugins)"
   fi

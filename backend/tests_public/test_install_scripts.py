@@ -78,17 +78,22 @@ ANSWERS = ("--browser", "off")  # install.sh's question, answered
 # $CLAUDE_STATE, and each command is appended to $STUB_LOG. A plugin is its id (installed at user scope) or, as
 # `claude plugin list --json` lists one, {"id", "scope", "projectPath"}; `plugin uninstall --scope project|local` takes
 # out the one of the folder it runs in. `plugin install` and `plugin update` record the version of the plugin.json in
-# the marketplace's folder ("versions", else 0.0.1), and `plugin disable` and `enable` switch it ("disabled")
+# the marketplace's folder ("versions", else 0.0.1), and `plugin disable` and `enable` switch it ("disabled"). As Claude
+# Code does, `plugin install` copies the marketplace's plugin/ into a cache beside $CLAUDE_STATE ("copies", listed as
+# installPath), `plugin update` copies it again only for another version, and `plugin uninstall` drops the options set
+# with `plugin configure --values-stdin` ("options", which `plugin configure --json` lists) and the on or off; with
+# "inplace" set, `plugin list` names the marketplace's plugin/ as readFromFolder, as Claude Code 2.1.301 does
 CLAUDE_STUB = """#!{python} -I
-import json, os, sys
+import json, os, shutil, sys
 path, args = os.environ["CLAUDE_STATE"], sys.argv[1:]
 state = json.load(open(path)) if os.path.exists(path) else {"marketplaces": {}, "plugins": []}
 with open(os.environ.get("STUB_LOG", os.devnull), "a") as log:
     log.write(" ".join(args) + "\\n")
-words = [a for a in args if a not in ("--json", "--scope", "user", "project", "local")]
+words = [a for a in args if not a.startswith("--") and a not in ("user", "project", "local")]
 scope = args[args.index("--scope") + 1] if "--scope" in args else "user"
 here = os.path.realpath(os.getcwd())
 versions, disabled = state.get("versions", {}), state.get("disabled", [])
+copies, options = state.setdefault("copies", {}), state.setdefault("options", {})
 
 
 def taken(p):
@@ -97,21 +102,47 @@ def taken(p):
     return p["id"] == words[2] and p["scope"] == scope and (scope == "user" or os.path.realpath(p["projectPath"]) == here)
 
 
+def plugin_dir(pid):
+    return os.path.join(state["marketplaces"].get(pid.split("@")[1], ""), "plugin")
+
+
 def folder_version(pid):
-    folder = state["marketplaces"].get(pid.split("@")[1], "")
-    return json.load(open(os.path.join(folder, "plugin", ".claude-plugin", "plugin.json")))["version"]
+    return json.load(open(os.path.join(plugin_dir(pid), ".claude-plugin", "plugin.json")))["version"]
+
+
+def copy(pid):
+    to = os.path.join(os.path.dirname(path), "cache", pid.split("@")[1], folder_version(pid))
+    shutil.rmtree(to, ignore_errors=True)
+    shutil.copytree(plugin_dir(pid), to, symlinks=True)
+    copies[pid] = to
+
+
+def listed(p):
+    row = {"id": p, "version": versions.get(p, "0.0.1"), "scope": "user", "enabled": p not in disabled}
+    if p in copies:
+        row["installPath"] = copies[p]
+    if state.get("inplace"):
+        row["readFromFolder"] = plugin_dir(p)
+    return row
 
 
 if args[:1] == ["--version"]:
     print("2.1.286 (Claude Code)")
 elif words[:2] == ["plugin", "list"]:
-    print(json.dumps([p if isinstance(p, dict) else {"id": p, "version": versions.get(p, "0.0.1"), "scope": "user",
-                                                     "enabled": p not in disabled}
-                      for p in state["plugins"]]))
+    print(json.dumps([p if isinstance(p, dict) else listed(p) for p in state["plugins"]]))
 elif words[:2] in (["plugin", "disable"], ["plugin", "enable"]):
     state["disabled"] = sorted(set(disabled) - {words[2]} | ({words[2]} if words[1] == "disable" else set()))
 elif words[:2] == ["plugin", "update"]:
+    if folder_version(words[2]) != versions.get(words[2]):
+        copy(words[2])
     state["versions"] = {**versions, words[2]: folder_version(words[2])}
+elif words[:2] == ["plugin", "configure"] and "--values-stdin" in args:
+    options[words[2]] = {**options.get(words[2], {}), **json.load(sys.stdin)}
+elif words[:2] == ["plugin", "configure"]:
+    if words[2] not in state["plugins"]:
+        sys.exit(f"No installed plugin has the id {words[2]}")
+    set_ = options.get(words[2], {})
+    print(json.dumps({"inputs": {"labels": "true", **set_}, "configured": sorted(set_)}))
 elif words[:3] == ["plugin", "marketplace", "list"]:
     print(json.dumps([{"name": n, "source": "directory", "path": f, "installLocation": f}
                       for n, f in state["marketplaces"].items()]))
@@ -129,8 +160,12 @@ elif words[:2] == ["plugin", "install"]:
     state["plugins"] = sorted({p for p in state["plugins"] if isinstance(p, str)} | {words[2]}) + \\
         [p for p in state["plugins"] if isinstance(p, dict)]
     state["versions"] = {**versions, words[2]: folder_version(words[2])}
+    copy(words[2])
 elif words[:2] == ["plugin", "uninstall"]:
     state["plugins"] = [p for p in state["plugins"] if not taken(p)]
+    if scope == "user":
+        copies.pop(words[2], None), options.pop(words[2], None)
+        state["disabled"] = [p for p in disabled if p != words[2]]
 json.dump(state, open(path, "w"))
 """
 
@@ -141,8 +176,10 @@ def claude_stub(bin_: Path) -> None:
 
 
 def plugin_changes(log: Path) -> list[str]:
-    """The `claude plugin` commands in the stand-in's log that change something (every one but the listings)."""
-    return [c for c in log.read_text().splitlines() if c.startswith("plugin ") and not c.endswith("list --json")]
+    """The `claude plugin` commands in the stand-in's log that change something (every one but the listings and the
+    read of the options)."""
+    return [c for c in log.read_text().splitlines()
+            if c.startswith("plugin ") and not c.endswith("list --json") and not c.startswith("plugin configure --json")]
 
 
 def install(tree: Path, dest: Path, tmp_path: Path, *flags: str, **extra: str) -> subprocess.CompletedProcess:
@@ -347,6 +384,84 @@ def test_install_sh_adds_the_plugin_with_claude_code_s_commands_and_uninstall_re
            "/reload-plugins first), or run thimble there." in out, out
     assert not record.exists(), "0.7's record goes once the plugin is in place"
     assert run(uninstall)[1] == ["plugin uninstall thimble@thimble-local", "plugin marketplace remove thimble-local"]
+
+
+def test_a_re_run_installs_the_plugin_again_when_its_files_changed_at_the_same_version(tmp_path):
+    """While the version stays the same (a checkout between releases), a re-run compares the copy of the plugin Claude
+    Code loads with this install's plugin/: a copy whose files differ is uninstalled and installed again with Claude
+    Code's own commands, keeping the options the user set and its off; an unchanged copy, or plugin/ itself when Claude
+    Code reads it in place, gets no command; a new version is updated. One line says which, and the opening screen says
+    what a run will do."""
+    tree = fake_tree(tmp_path / "release")
+    dest = tmp_path / "home" / ".thimble" / "app"
+    bin_ = stub_bin(tmp_path)
+    claude_stub(bin_)
+    log, state = tmp_path / "claude.log", tmp_path / "claude.json"
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(log), CLAUDE_STATE=str(state))
+    pid = "thimble@thimble-local"
+    marker = tree / "plugin" / "bin" / "thimble-app-dir"
+
+    def install(*flags: str) -> tuple[str, list[str]]:
+        log.write_text("")
+        r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(dest), *ANSWERS, *flags],
+                           capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60, check=False)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout, plugin_changes(log)
+
+    def claude(*args: str, stdin: str = "") -> None:
+        subprocess.run([str(bin_ / "claude"), *args], input=stdin, text=True, env=env, check=True, timeout=60)
+
+    install()
+    out, changes = install()
+    assert changes == [] and f"✓ thimble's plugin in Claude Code is this install's, unchanged ({pid} 0.0.1): nothing to " \
+                             "update" in out, out
+    claude("plugin", "configure", "--values-stdin", pid, stdin='{"labels": "false"}')
+    claude("plugin", "disable", "--scope", "user", pid)
+    copy = Path(json.loads(state.read_text())["copies"][pid])
+    (copy / "bin" / "__pycache__").mkdir()
+    (copy / "bin" / "__pycache__" / "thimble-mcp.pyc").write_bytes(b"a run")  # what running the copy adds to it
+    (tree / "plugin" / "hooks" / "term" / "types").mkdir(parents=True)
+    (tree / "plugin" / "hooks" / "term" / "types" / "index.d.ts").write_text("x")  # what Claude Code's copy leaves out
+    out, changes = install()
+    assert changes == [] and f"unchanged ({pid} 0.0.1): nothing to update; it is off" in out, out
+
+    marker.write_text(marker.read_text() + "# a commit pulled\n")
+    out, changes = install("--dry-run")
+    assert changes == [] and (f"✓ thimble's plugin ({pid} 0.0.1): its files changed, so it is installed again (claude "
+                              "plugin uninstall, then install), with its options and on or off as you set them") in out
+    out, changes = install()
+    assert changes == [f"plugin uninstall --keep-data --scope user {pid}", f"plugin install --scope user {pid}",
+                       f"plugin configure --values-stdin {pid}", f"plugin disable --scope user {pid}"], out
+    assert (f"✓ Installed thimble's plugin in Claude Code again ({pid} 0.0.1), since its files had changed: a claude "
+            "session uses it from its next start, or after /reload-plugins; it is off in Claude Code, and /plugin turns "
+            "it on") in out, out
+    now = json.loads(state.read_text())
+    assert now["options"] == {pid: {"labels": "false"}} and now["disabled"] == [pid], "its options and its off kept"
+    assert (Path(now["copies"][pid]) / "bin" / "thimble-app-dir").read_text().endswith("# a commit pulled\n")
+    assert install()[1] == [], "the copy is this install's now"
+
+    state.write_text(json.dumps({**now, "inplace": True}))  # Claude Code 2.1.301 reads a directory marketplace in place
+    marker.write_text(marker.read_text() + "# another commit\n")
+    out, changes = install()
+    assert changes == [] and (f"✓ thimble's plugin in Claude Code is this install's ({pid} 0.0.1), read from "
+                              "~/.thimble/app/plugin itself: nothing to update. A claude session open since before uses "
+                              "any changed files after /reload-plugins") in out, out
+    (tree / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble", "version": "0.0.2"}))
+    out, changes = install()
+    assert changes == ["plugin marketplace update thimble-local", f"plugin update --scope user {pid}"], out
+
+
+def test_install_sh_leaves_out_what_thimble_doctor_leaves_out_when_it_compares_plugin_copies():
+    """scripts/plugin.sh compares a plugin copy with plugin/ as `thimble doctor` does (app/cli.py _plugin_files), the
+    same files left out, so the two never disagree on whether Claude Code's copy is this install's."""
+    import ast
+
+    from app import cli
+
+    text = (REPO / "scripts" / "plugin.sh").read_text()
+    for name in ("COPY_IGNORED", "COPY_LEFT_OUT", "COPY_LEFT_OUT_SUFFIX"):
+        found = re.search(rf"^{name} = (\(.*?\)|\"[^\"]*\")$", text, re.MULTILINE | re.DOTALL)
+        assert found and ast.literal_eval(found.group(1)) == getattr(cli, name), name
 
 
 # ----------------------------------------------------------------------------- the shell startup files
