@@ -89,7 +89,41 @@ describe('the strip above the composer, and the rows', () => {
     await click(el.querySelectorAll('.chat-notice-x')[0])
     await settle()
     expect(el.querySelector('.chat-notice')).toBeNull()
-    expect(sent).toEqual(['POST /api/ws/nt-x/notices/b1/dismiss', 'POST /api/ws/nt-x/notices/p1/dismiss'])
+    expect(sent).toEqual(['POST /api/ws/nt-x/notices/p1/dismiss', 'POST /api/ws/nt-x/notices/b1/dismiss'])
+  })
+
+  test('bug hunt C21: the newest notice shows in full and the others behind one row, which shows them in place with their fixes and Dismiss all', async () => {
+    const at = (m: number) => `2026-10-17T04:${String(m).padStart(2, '0')}:00.000+00:00`
+    const SWITCHED = "Claude's safeguards switched a reply of the report check Key facts from Opus 5.5 to Opus 4.8."
+    open = [
+      { id: 'c1', key: 'safeguards:check-1', kind: 'safeguards', agent: 'Report check: Key facts', chat: 'check-1', text: SWITCHED, ts: at(30) },
+      { id: 'o1', key: 'agent:orient', kind: 'agent', agent: 'Orientation', chat: 'orient-1', text: "The orientation failed: Claude's safeguards stopped its request; rephrase or narrow the request and try again.", action: { label: 'Run again', do: 'orient-again' }, ts: at(36) },
+      { id: 'c2', key: 'safeguards:check-2', kind: 'safeguards', agent: 'Report check: Key facts', chat: 'check-2', text: SWITCHED, ts: at(41) },
+      { id: 'l1', key: 'label:k1', kind: 'label', agent: 'Label: probing', text: "The label probing couldn't label 184 of 2,064 records: Claude's safeguards stopped its request.", action: [{ label: 'Run again on these 184', do: 'label-again', slug: 'k1' }, { label: 'See the label', do: 'label-open', slug: 'k1' }], ts: at(45) },
+      { id: 'p1', key: 'proposals', kind: 'proposals', agent: 'View proposals', text: BLOCKED, action: TRY, ts: at(47) },
+      { id: 'b1', key: 'build:agent-network', kind: 'agent', agent: 'View build: Agent Network', chat: 'dev-1', text: BUILD, ts: at(50) },
+    ]
+    const el = await strip('nt-more')
+    const shown = () => [...el.querySelectorAll('.chat-notice')].map((n) => n.getAttribute('data-notice'))
+    const toggle = () => el.querySelector('.chat-notices-toggle') as HTMLButtonElement
+    // the newest in full, the four other cards behind one row (the two notices in the same words are one card)
+    expect(shown()).toEqual(['b1'])
+    expect(toggle().textContent).toBe('4 more notices ›')
+    expect(el.querySelector('.chat-notices-all')).toBeNull()
+    await click(toggle())
+    expect(shown()).toEqual(['b1', 'p1', 'l1', 'c2', 'o1'])
+    expect(toggle().textContent).toBe('Show fewer')
+    // a fix runs from the opened list
+    await click([...el.querySelectorAll('.chat-notice-act')].find((b) => b.textContent === 'Run again on these 184'))
+    await settle()
+    expect(sent).toEqual(['POST /api/ws/nt-more/concepts/k1/apply/again', 'POST /api/ws/nt-more/notices/l1/dismiss'])
+    expect(shown()).toEqual(['b1', 'p1', 'c2', 'o1'])
+    // Dismiss all dismisses every open notice, the two in the same words too
+    sent = []
+    await click(el.querySelector('.chat-notices-all'))
+    await settle()
+    expect(sent.sort()).toEqual(['b1', 'c1', 'c2', 'o1', 'p1'].map((id) => `POST /api/ws/nt-more/notices/${id}/dismiss`))
+    expect(el.querySelector('.chat-notice')).toBeNull()
   })
 
   test('a fix that failed says so in a toast, and the notice stays', async () => {
@@ -107,7 +141,8 @@ describe('the strip above the composer, and the rows', () => {
     open = [signIn('aaaaaaaaaaaa'), signIn('bbbbbbbbbbbb')]
     try {
       const el = await strip('nt-sign-in')
-      expect(el.querySelectorAll('.chat-notice')).toHaveLength(2)
+      expect(el.querySelectorAll('.chat-notice')).toHaveLength(1)
+      expect(el.querySelector('.chat-notices-toggle')?.textContent).toBe('1 more notice ›')
       await act(async () => setBrowserId('aaaaaaaaaaaa'))
       const shown = [...el.querySelectorAll('.chat-notice')]
       expect(shown.map((n) => n.getAttribute('data-key'))).toEqual(['sign-in:bbbbbbbbbbbb'])

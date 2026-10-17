@@ -13,8 +13,10 @@
 // same words without buttons, kept as a quiet line of the chat's history once the notice is closed; while it is open
 // the strip shows it there, and an earlier closed row under its key in the same words waits too, so the words show
 // once. The Manual-mode notice (kind `manual-mode`, while main runs in Claude Code's Manual mode) is drawn in the
-// problem red instead (styles/chat.css).
-import { useState, type ReactNode } from 'react'
+// problem red instead (styles/chat.css). However many notices are open, the strip shows the newest in full and the rest
+// as one row under it, "5 more notices ›", which opens them in place, each with its fix, Open and ×, and Dismiss all; so
+// the chat keeps most of its column and no notice is cut off (bug hunt C21).
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { api, labelApi } from '../lib/api'
@@ -197,16 +199,66 @@ export function sameNotices<N extends Pick<Notice, 'id' | 'key' | 'kind' | 'text
   return [...groups.values()]
 }
 
-/** Every open notice of the workspace, above the composer of the chat shown (`current`), oldest first; those in the same
- * words as one card that counts them (sameNotices). */
+/** The strip's cards (sameNotices) newest first: by the time of the newest notice of each (its `ts`, which a notice
+ * posted again under its key takes anew), then by its place in the open notices, a later one newer. Pure. */
+export function newestFirst<C extends { all: readonly Pick<Notice, 'ts'>[] }>(cards: readonly C[]): C[] {
+  const at = (c: C) => c.all.reduce((t, n) => (n.ts && n.ts > t ? n.ts : t), '')
+  return cards
+    .map((c, i) => ({ c, i, t: at(c) }))
+    .sort((a, b) => (a.t === b.t ? b.i - a.i : a.t < b.t ? 1 : -1))
+    .map((x) => x.c)
+}
+
+/** The words of the row that opens the strip's other notices: `5 more notices ›`. Pure. */
+export const moreNotices = (n: number): string => `${n} more ${n === 1 ? 'notice' : 'notices'} ›`
+
+/** Every open notice of the workspace, above the composer of the chat shown (`current`); those in the same words as one
+ * card that counts them (sameNotices). The newest card shows in full; the others wait behind one row under it, `N more
+ * notices ›`, which shows them there, newest first, each with its fix, Open and ×, and turns into Show fewer and
+ * Dismiss all, which dismisses every open notice. */
 export function NoticeStrip({ ws, current, labels, onOpen }: { ws: string; current: string; labels?: ReadonlyMap<string, string>; onOpen: (chat: string) => void }) {
   const notices = useNotices(ws).filter((n) => stripShows(n, current))
-  if (!notices.length) return null
+  const [open, setOpen] = useState(false)
+  const cards = newestFirst(sameNotices(notices, (n) => noticeAgent(n, labels)))
+  const more = cards.length - 1
+  // once only one is left, the next notice that comes waits behind the row again
+  useEffect(() => {
+    if (more < 1) setOpen(false)
+  }, [more])
+  if (!cards.length) return null
+  const card = ({ all, agent }: (typeof cards)[number]) => <ForegroundNotice key={all[0].key || all[0].id} ws={ws} all={all} current={current} agent={agent} onOpen={onOpen} />
+  const shown = open && more > 0
   return (
-    <div className="chat-notices" role="region" aria-label="Notices">
-      {sameNotices(notices, (n) => noticeAgent(n, labels)).map(({ all, agent }) => (
-        <ForegroundNotice key={all[0].key || all[0].id} ws={ws} all={all} current={current} agent={agent} onOpen={onOpen} />
-      ))}
+    <div className="chat-notices" role="region" aria-label="Notices" data-open={shown || undefined}>
+      {card(cards[0])}
+      {shown && <div className="chat-notices-rest">{cards.slice(1).map(card)}</div>}
+      {more > 0 && (
+        <div className="chat-notices-more">
+          <button
+            type="button"
+            className="chat-notices-toggle"
+            aria-expanded={shown}
+            onClick={() => {
+              track('ui-click', { target: 'notices', detail: { action: shown ? 'fewer' : 'more' } })
+              setOpen(!shown)
+            }}
+          >
+            {shown ? 'Show fewer' : moreNotices(more)}
+          </button>
+          {shown && (
+            <button
+              type="button"
+              className="chat-notices-all"
+              onClick={() => {
+                track('ui-click', { target: 'notices', detail: { action: 'dismiss-all' } })
+                void Promise.all(notices.map((n) => dismissNotice(ws, n)))
+              }}
+            >
+              Dismiss all
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
