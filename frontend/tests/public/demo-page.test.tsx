@@ -11,6 +11,7 @@ import { act } from 'react'
 import { TIP_DELAY_MS } from '../../src/components/Tooltip.tsx'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChatPanel } from '../../src/chat/ChatPanel.tsx'
+import { ViewsBar } from '../../src/files/ViewsBar.tsx'
 import { isDemoPage, setDemo } from '../../src/lib/demo.ts'
 import type { ChatMeta } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -67,5 +68,28 @@ describe('what the page shows', () => {
     expect(document.querySelector('.tip')?.textContent).toBe("This is a demo and thimble isn't connected to a live Claude Code session.")
     expect(posted.filter((p) => p.includes('/events') || p.includes('/chats'))).toEqual([])
     expect(el.querySelector('.chat-offer')).toBeNull()
+  })
+})
+
+describe('what the page leaves as it is (bug hunt F5)', () => {
+  test("a view has no × and New view is off, with the note on hover; the analyst's own page keeps both", async () => {
+    const bar = () => <ViewsBar ws="demo-made-up-wiki" value="browser" onChange={() => undefined} views={[{ slug: 'page-history', name: 'Page History' }]} />
+    setDemo(true)
+    let el = await mount(bar())
+    await settle()
+    expect(el.querySelector('[aria-label="Delete Page History"]')).toBeNull()
+    const newView = [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('New view')) as HTMLButtonElement
+    expect(newView.disabled).toBe(true)
+    await act(async () => {
+      newView.closest('.demo-off')!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))
+      await new Promise((r) => setTimeout(r, TIP_DELAY_MS + 50))
+    })
+    expect(document.querySelector('.tip')?.textContent).toBe("This is a demo and thimble isn't connected to a live Claude Code session.")
+    unmountAll()
+    setDemo(false)
+    el = await mount(bar())
+    await settle()
+    expect(el.querySelector('[aria-label="Delete Page History"]')).not.toBeNull()
+    expect(([...el.querySelectorAll('button')].find((b) => b.textContent?.includes('New view')) as HTMLButtonElement).disabled).toBe(false)
   })
 })

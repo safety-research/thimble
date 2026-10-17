@@ -2,10 +2,12 @@
 // written one, which asks in a sheet under the button before a writer starts on a new draft. Writing while one runs,
 // with Stop beside it (StopWriter); while Claude Code asks that writer a permission prompt in the terminal, the words
 // TERMINAL_WAIT with a still dot in the button's place, since the writer does nothing until the analyst answers there.
+// Off on a demo page (components/DemoOff).
 import { useEffect, useRef, useState } from 'react'
 import { stopSession } from '../chat/AgentCard'
 import { STOP_HOLD_MS } from '../chat/ChatPanel'
 import { Button } from '../components/Button'
+import { DemoOff } from '../components/DemoOff'
 import { Popover } from '../components/Menu'
 import { TERMINAL_WAIT } from '../chat/waiting'
 
@@ -67,9 +69,11 @@ export function WriteAction({ name, written, busy, waiting = false, disabled, hi
   }
   return (
     <>
-      <Button ref={at} variant="primary" busy={busy} disabled={disabled} aria-haspopup={written && !busy ? 'dialog' : undefined} aria-expanded={written && !busy ? asking : undefined} onClick={click}>
-        {busy ? 'Writing' : written ? 'Revise' : 'Write'}
-      </Button>
+      <DemoOff>
+        <Button ref={at} variant="primary" busy={busy} disabled={disabled} aria-haspopup={written && !busy ? 'dialog' : undefined} aria-expanded={written && !busy ? asking : undefined} onClick={click}>
+          {busy ? 'Writing' : written ? 'Revise' : 'Write'}
+        </Button>
+      </DemoOff>
       <Popover anchor={at} open={asking} onClose={() => setAsking(false)} align="end" label={`Revise the ${name}`} className="wu-revise" width={300}>
         <div className="wu-revise-body">
           <p>

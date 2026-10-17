@@ -15,7 +15,7 @@ import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
 import { api, docsApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
-import { demoStop } from '../lib/demo'
+import { demoStop, useDemo } from '../lib/demo'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { revealAnchor } from '../lib/teleport'
@@ -66,6 +66,7 @@ const DOC_ICON: Record<string, IconName> = { document: 'doc', slides: 'image', s
 
 export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const [slug, setSlugState] = useState<string>(() => readStorage<string>(docKey(ws), SLUG) || SLUG)
+  const demo = useDemo()
   const [types, setTypes] = useState<TypesState | null>(null)
   const [load, setLoad] = useState<Load>({ state: 'loading' })
   const [filter, setFilter] = useState<DocFilter | null>(null)
@@ -387,7 +388,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
             ),
           }))}
         />
-        {ownType(slug) && types?.[slug] && <TypeActions ws={ws} slug={slug} name={types[slug].name || slug} onDeleted={() => setSlug(SLUG)} />}
+        {ownType(slug) && types?.[slug] && !demo && <TypeActions ws={ws} slug={slug} name={types[slug].name || slug} onDeleted={() => setSlug(SLUG)} />}
         <NewDocMenu ws={ws} onMade={(t) => void made(t)} />
         <span className="wu-bar-spacer" />
         {filter && <FilterChip concept={filter.concept} name={filter.name} value={filter.value} count={filter.sets.sids.size} onClear={() => void clearFilter()} />}

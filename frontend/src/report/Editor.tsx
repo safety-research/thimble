@@ -32,6 +32,7 @@ import { Icon, type IconName } from '../components/Icon'
 import { Menu } from '../components/Menu'
 import { api, reportApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { useDemo } from '../lib/demo'
 import { healChecks, mergeChecks } from '../lib/citeChecks'
 import { pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
@@ -414,6 +415,8 @@ const pointerPressExtension = () =>
 
 export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, onComment, captionOf, ref }: ReportEditorProps) {
   const { resolved } = useTheme()
+  // a demo page's document is read, not typed in (bug hunt F5)
+  const demo = useDemo()
   const docRef = useRef<Writeup | null>(doc)
   const ctx = useRef<MarksCtx>({ slug, doc, flags, filter: filter?.sets ?? null, locked: lockedBlocks(doc), agent: null })
   const initial = useMemo(() => editorBlocksFromWire(blocksFromDoc(doc)) as ReportPartialBlock[], []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -945,6 +948,7 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
             editor={editor}
             theme={resolved}
             className="wu-editor"
+            editable={!demo}
             slashMenu={false}
             formattingToolbar={false}
             sideMenu={false}

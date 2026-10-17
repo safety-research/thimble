@@ -1,12 +1,13 @@
 // The board's controls. At the top right, the bar that adds to the board (Card · Group, and Group ⌘G for a multiple
-// selection) and Comments, which lists the checks that comment on the cards with their switches and counts, as the
-// Report's Comments pane does (report/Checks.tsx CheckRows), and + for a new one; it carries the accent dot while a
-// check's run left comments on the cards that the analyst has not looked at, until the menu opens
-// (report/newComments.ts). At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and
-// the minimap, where a press or drag moves the view. While a filter is set the minimap draws the kept cards in ink, the
-// rest faint.
+// selection; off on a demo page, components/DemoOff) and Comments, which lists the checks that comment on the cards
+// with their switches and counts, as the Report's Comments pane does (report/Checks.tsx CheckRows), and + for a new
+// one; it carries the accent dot while a check's run left comments on the cards that the analyst has not looked at,
+// until the menu opens (report/newComments.ts). At the bottom right: the search menu (the card filter, cardFilter.ts),
+// the zoom and Fit, and the minimap, where a press or drag moves the view. While a filter is set the minimap draws the
+// kept cards in ink, the rest faint.
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
 import { Button } from '../components/Button'
+import { DemoOff } from '../components/DemoOff'
 import { Icon } from '../components/Icon'
 import { Kbd } from '../components/Marks'
 import { Popover } from '../components/Menu'
@@ -72,25 +73,31 @@ export function Controls(p: ControlsProps) {
     <>
       <div className="bctl bctl-top" {...hold}>
         <div className="bctl-bar bctl-add">
-          <button type="button" className="bctl-btn" onClick={p.onCell}>
-            <Icon name="cell-add" size={14} />
-            Card
-          </button>
-          <button type="button" className="bctl-btn" onClick={p.onGroup}>
-            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" className="icon">
-              <path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" strokeDasharray="3 2.5" />
-              <path d="M12 9v6M9 12h6" />
-            </svg>
-            Group
-          </button>
+          <DemoOff>
+            <button type="button" className="bctl-btn" onClick={p.onCell}>
+              <Icon name="cell-add" size={14} />
+              Card
+            </button>
+          </DemoOff>
+          <DemoOff>
+            <button type="button" className="bctl-btn" onClick={p.onGroup}>
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" className="icon">
+                <path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" strokeDasharray="3 2.5" />
+                <path d="M12 9v6M9 12h6" />
+              </svg>
+              Group
+            </button>
+          </DemoOff>
           <CommentsButton ws={p.ws} checks={p.checks} comments={p.comments} />
           {p.several > 1 && (
             <>
               <span className="bctl-sep" />
               <span className="bctl-count">{p.several} selected</span>
-              <Button variant="primary" size="md" className="bctl-group" onClick={p.onGroupSelection}>
-                Group <Kbd>{shortcutLabel('G')}</Kbd>
-              </Button>
+              <DemoOff>
+                <Button variant="primary" size="md" className="bctl-group" onClick={p.onGroupSelection}>
+                  Group <Kbd>{shortcutLabel('G')}</Kbd>
+                </Button>
+              </DemoOff>
             </>
           )}
         </div>

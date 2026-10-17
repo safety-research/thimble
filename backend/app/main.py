@@ -31,6 +31,7 @@ from starlette.staticfiles import StaticFiles
 from . import config
 from .errors import ErrorLog
 from . import hook_auth
+from .demo_guard import DemoReadOnly
 from .hook_auth import BrowserPath, HookAuth, LocalReadGuard, LocalWriteGuard, SlidingCookie
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
@@ -549,6 +550,7 @@ def create_app() -> FastAPI:
     vite = dev_origins(dev_mode())
     if vite:
         app.add_middleware(CORSMiddleware, allow_origins=vite, allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(DemoReadOnly)  # inside the sign-in checks: a demo workspace refuses a browser page's writes
     app.add_middleware(HookAuth)  # inside the write guard: a hook proves the token here too
     app.add_middleware(LocalWriteGuard)  # inside OriginCheck, outside HookAuth: a forged-Origin write still needs the cookie or the token
     app.add_middleware(LocalReadGuard)  # beside the write guard: a read needs the cookie, the CLI's proof or a shot's token
