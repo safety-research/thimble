@@ -7,7 +7,7 @@
 #
 # It opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card code and
 # the terminal's views can run in bubblewrap), what it installs where and about how big, what it changes in your Claude
-# Code setup, and whether a question remains. It asks it, then prints a line per step, and ends with what to run next.
+# Code setup, and that nothing is asked. Then it prints a line per step, and ends with what to run next.
 # A re-run with nothing to do says so in one line, and one that changes something shows only what changed.
 # Every command it runs, with its output, goes to $THIMBLE_HOME/install.log (~/.thimble/install.log).
 #
@@ -17,16 +17,16 @@
 # not on PATH, or THIMBLE_HOME is not ~/.thimble, it prints the line a new terminal needs. It installs no system package
 # and never runs sudo.
 #
-# The question, asked only when it remains, and the flag that answers it without asking:
-#   --browser bundled|system|off   a browser for screenshots, asked only when no Chrome or Edge that starts under
-#                          automation is found where Playwright looks (one that does is used, and nothing is downloaded).
-#                          bundled downloads Playwright's headless Chromium (about 210 MB to download, 650 MB on disk);
-#                          system uses the Chrome or Edge found anyway; off takes no screenshots
-# The answer is kept in $THIMBLE_HOME, so a re-run or `thimble update` doesn't ask it again; its flag changes it. Without a
-# terminal install.sh stops while the question remains without its flag, and says so.
+# It asks nothing. The browser for screenshots of thimble's cards and views is a default, which the opening screen names
+# in one line with what it downloads, from where, and the flag that changes it:
+#   --browser bundled|system|off   without it, a Chrome or Edge found where Playwright looks that starts under automation
+#                          (nothing is downloaded), else Playwright's headless Chromium (about 210 MB to download from
+#                          Microsoft's Playwright CDN, 650 MB on disk). bundled downloads that one; system uses the
+#                          Chrome or Edge found anyway; off takes no screenshots
+# A --browser is kept in $THIMBLE_HOME, so a re-run or `thimble update` keeps it; the flag changes it again.
 #
-#   --dry-run              print the opening screen and the question if it remains, with its flags; change nothing.
-#                          An agent installing thimble for someone asks exactly that question (CLAUDE.md, Installing).
+#   --dry-run              print the opening screen; change nothing. An agent installing thimble for someone shows it
+#                          (CLAUDE.md, Installing).
 #                          `thimble update --dry-run` runs it too (scripts/update.sh, which sets THIMBLE_INSTALL_VIA)
 #   --verbose              also print each command it runs and its output; with --dry-run, every step's commands
 #   --no-plugin            for thimble's own release tests only: add nothing to Claude Code (no marketplace, no
@@ -43,24 +43,26 @@
 # THIMBLE_BIN_DIR, when set, is the folder the `thimble` link goes into in place of ~/.local/bin.
 set -euo pipefail
 # How it works (not printed by --help).
-# Steps: what it finds (check_prerequisites) and plans (plan: the question's plan, the plugin, the link, the lines a new
-# terminal needs) · the opening screen · the question · copy the release into --dir, and commit it as the install's git
+# Steps: what it finds (check_prerequisites) and plans (plan: the browser's plan, the plugin, the link, the lines a new
+# terminal needs) · the opening screen · copy the release into --dir, and commit it as the install's git
 # baseline (git_baseline), so code tickets run in a release install too · backend/.venv · the frontend's
 # packages and frontend/dist · the browser · the app-dir pointer and `thimble` on PATH (~/.local/bin/thimble → the
 # tree's plugin/bin/thimble) · the plugin, unless --no-plugin (scripts/plugin.sh) · doctor · what to run next, with the
 # line for a shell startup file when a new terminal needs one. Nothing is left in a list for the user: a step that needs
 # them says so with a ! line and what fixes it under it.
 # Each question is one block of functions named after it, which adds its name to QUESTIONS; the rest of the script
-# reaches a question only through those functions, so deleting its block removes it.
-# The browser answer is kept in $THIMBLE_HOME (config.json's "browser"). A Chrome or Edge used because it was found and
-# started is not recorded: the server picks it too when config.json names no browser (backend/app/userconf.py browser),
-# and a later run asks only if it stops working.
+# reaches a question only through those functions, so deleting its block removes it. The browser's block is one that is
+# never asked (browser_pending), so none remains.
+# A --browser is kept in $THIMBLE_HOME (config.json's "browser"). A Chrome or Edge used because it was found and
+# started is not recorded: the server picks it too when config.json names no browser (backend/app/userconf.py browser).
+# The headless Chromium picked by default is recorded only when a Chrome or Edge was found that did not start, which the
+# server would pick otherwise.
 # Another install's plugin registration (a marketplace added from another folder, or from GitHub) is never changed:
 # install.sh names it and prints the commands that switch it. A ~/.local/bin/thimble linked into another install is
 # changed only on a yes, asked on a terminal.
-# Re-running it (after `git pull`, over a newer release, or to answer a question again with its flag) skips the steps that
+# Re-running it (after `git pull`, over a newer release, or to change the browser with its flag) skips the steps that
 # are done: the same release is not copied again, pinned packages already installed are kept, and the browser is fetched
-# only on a yes and only when the build thimble's Playwright needs is missing.
+# only when the build thimble's Playwright needs is missing.
 # A checkout gets backend/.venv from uv.lock with uv sync, and npm ci when package-lock.json changed since the packages were
 # installed; it rebuilds frontend/dist when it is older than the frontend's sources or the lockfile, so a pulled clone ends
 # with the current UI.
@@ -827,7 +829,8 @@ build_ui() {  # with node >= 20 the frontend's packages, which custom views need
   fi
 }
 
-# ---------------------------------------------------------------------------------- the browser question
+# ---------------------------------------------------------------------------------- the browser for screenshots
+# Not a question any more: install.sh picks a default (browser_plan) and says so in one line; --browser changes it.
 QUESTIONS+=(browser)
 browser=""  # --browser's value: bundled, system or off
 browser_flag() {  # browser_flag ARG…: --browser VALUE or --browser=VALUE (took: how many arguments)
@@ -876,7 +879,8 @@ probe_browser() {  # sys_starts=1 when the system browser starts headless with r
   say "$sys_name at $sys_path $( [ "$sys_starts" = 1 ] && echo 'starts' || echo 'does not start' ) headless with remote debugging"
 }
 
-BUNDLED_SIZE="about 210 MB to download, 650 MB on disk"  # both headless Chromium builds and ffmpeg, measured
+BUNDLED_DOWNLOAD="about 210 MB" BUNDLED_DISK="650 MB"  # both headless Chromium builds and ffmpeg, measured
+BUNDLED_SIZE="$BUNDLED_DOWNLOAD to download, $BUNDLED_DISK on disk"
 
 pw_cache() {  # the folder Playwright downloads its browsers into, as Playwright resolves it
   case "${PLAYWRIGHT_BROWSERS_PATH:-}" in
@@ -912,7 +916,7 @@ record_browser() {  # record_browser VALUE: config.json's "browser" (the file is
   say "+ set \"browser\": \"$1\" in $home/config.json"
   [ "$dry" = 1 ] && return 0
   mkdir -p "$home"
-  "$py" -I - "$home/config.json" "$1" <<'PY' >&4 2>&1 || note "(the answer was not recorded, so a later run asks again)"
+  "$py" -I - "$home/config.json" "$1" <<'PY' >&4 2>&1 || note "(the choice was not recorded, so a later run picks again)"
 import json, os, sys, tempfile
 path, value = sys.argv[1:]
 try:
@@ -986,25 +990,29 @@ fetch_bundled() {  # the headless Chromium each of thimble's Playwrights launche
   done
 }
 
-browser_plan() {  # before the opening screen: the earlier answer (browser_was, and browser_how, where it came from) and,
-  # without it or a flag, whether the Chrome or Edge found starts under automation (browser_auto=system: used without
-  # asking, and not recorded); bundled_there=1 when the backend's headless Chromium is downloaded already
+browser_plan() {  # before the opening screen: the earlier choice (browser_was, and browser_how, where it came from) and,
+  # without it or a flag, the default (browser_auto), which nobody is asked for: the Chrome or Edge found when it starts
+  # under automation, else Playwright's headless Chromium (browser_why says why); bundled_there=1 when the backend's
+  # headless Chromium is downloaded already
   local loc=""
-  browser_was="$(browser_prev)" browser_auto="" sys_starts="" bundled_there=0
-  browser_how="your earlier answer; --browser changes it"
+  browser_was="$(browser_prev)" browser_auto="" browser_why="" sys_starts="" bundled_there=0
+  browser_how="kept from an earlier run; --browser changes it"
   if [ -n "$browser_was" ] && [ "$(json_get "$home/config.json" browser 2>/dev/null)" != "$browser_was" ]; then
     browser_how="an earlier install downloaded it; --browser changes it"
   fi
   if earlier_install; then loc="$(pw_location "$dir/backend/.venv/bin/python" -I -m playwright)" || loc=""; fi
   [ -z "$loc" ] || [ ! -f "$loc/INSTALLATION_COMPLETE" ] || bundled_there=1
   system_browser
-  if [ -z "$browser$browser_was" ] && [ -n "$sys_path" ]; then
-    probe_browser
-    [ "$sys_starts" = 0 ] || browser_auto=system
+  [ -z "$browser$browser_was" ] || return 0
+  [ -z "$sys_path" ] || probe_browser
+  if [ "$sys_starts" = 1 ]; then browser_auto=system
+  else
+    browser_auto=bundled browser_why="no Chrome or Edge was found"
+    [ -z "$sys_path" ] || browser_why="$sys_name at $(tilde "$sys_path") did not start under automation here, which a policy can block"
   fi
 }
-browser_pending() { [ -z "$browser$browser_was$browser_auto" ]; }
-browser_unchanged() {  # nothing for its step to do (nothing_planned): the answer stays, and a bundled browser is there
+browser_pending() { return 1; }  # never asked: browser_plan picks a default, and --browser changes it
+browser_unchanged() {  # nothing for its step to do (nothing_planned): the choice stays, and a bundled browser is there
   [ -z "$browser" ] || [ "$browser" = "$browser_was" ] || return 1
   case "${browser:-${browser_was:-$browser_auto}}" in
     bundled) [ "$bundled_there" = 1 ];;
@@ -1013,45 +1021,43 @@ browser_unchanged() {  # nothing for its step to do (nothing_planned): the answe
     *) return 1;;
   esac
 }
-browser_found() {  # its line in the opening screen's Found
-  local how="$browser_how"
+pw_host() {  # where Playwright downloads its headless Chromium from
+  local h="${PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST:-${PLAYWRIGHT_DOWNLOAD_HOST:-}}"
+  if [ -n "$h" ]; then printf '%s\n' "$h (PLAYWRIGHT_DOWNLOAD_HOST)"; else printf '%s\n' "Microsoft's Playwright CDN (cdn.playwright.dev)"; fi
+}
+browser_found() {  # its line in the opening screen's Found; for a default, the one line that says what it picked, what it
+  # downloads and from where, and the flag that changes it
+  local how="$browser_how" what="Screenshots of thimble's cards and views" flags
   [ -z "$browser" ] || how="--browser $browser"
   case "${browser:-$browser_was}" in
     system) if [ -n "$sys_path" ]; then found ok "$sys_name at $(tilde "$sys_path") for screenshots ($how)"
             else found warn "Chrome or Edge for screenshots ($how), but neither is where Playwright looks, so no screenshots"; fi;;
     bundled) found ok "Playwright's headless Chromium for screenshots ($how)";;
     off) found ok "no browser, so no screenshots ($how)";;
-    *) if [ "$browser_auto" = system ]; then found ok "$sys_name at $(tilde "$sys_path"): screenshots use it, so nothing is downloaded"
-       elif [ -n "$sys_path" ]; then found warn "$sys_name at $(tilde "$sys_path") did not start under automation here, which a policy can block: a question below"
-       else found warn "No Chrome or Edge for screenshots: a question below"; fi;;
+    *) if [ "$browser_auto" = system ]; then
+         found ok "$what: $sys_name at $(tilde "$sys_path"), so nothing is downloaded. --browser bundled or --browser off changes it"
+       else
+         flags="--browser off skips it"
+         [ -z "$sys_path" ] || flags="--browser system tries $sys_name anyway; $flags"
+         if [ "$bundled_there" = 1 ]; then
+           found ok "$what: Playwright's headless Chromium, since $browser_why. It is downloaded already, in $(tilde "$(pw_cache)"). $flags"
+         else
+           found ok "$what: Playwright's headless Chromium, since $browser_why. It downloads $BUNDLED_DOWNLOAD from $(pw_host) into $(tilde "$(pw_cache)") ($BUNDLED_DISK on disk). $flags"
+         fi
+       fi;;
   esac
 }
 browser_installs() {  # its row in the opening screen's Installs, when it downloads
-  [ "${browser:-$browser_was}" = bundled ] || browser_pending || return 0
+  [ "${browser:-${browser_was:-$browser_auto}}" = bundled ] || return 0
   if [ "$bundled_there" = 1 ]; then row "headless Chromium" "$(tilde "$(pw_cache)")" "downloaded already"
-  else row "headless Chromium" "$(tilde "$(pw_cache)")" "$BUNDLED_SIZE$(browser_pending && echo ', only on a yes')"; fi
+  else row "headless Chromium" "$(tilde "$(pw_cache)")" "$BUNDLED_SIZE"; fi
 }
-browser_title()  { echo "Download a browser for screenshots?"; }
-browser_text() {
-  local why="No Chrome or Edge was found."
-  [ -z "$sys_path" ] || why="$sys_name at $(tilde "$sys_path") did not start under automation here, which a policy on this machine can block."
-  echo "thimble takes screenshots of the cards and views it draws, to check how they look. $why Playwright's headless Chromium does the job: $BUNDLED_SIZE, in $(tilde "$(pw_cache)")."
-  if [ -n "$sys_path" ]; then echo "With a no, thimble tries $sys_name anyway."; else echo "With a no, thimble works without screenshots."; fi
-}
-browser_prompt()  { echo "Download it?"; }
-browser_default() { echo y; }
-browser_choices() {
-  echo "yes, download it: --browser bundled"
-  [ -z "$sys_path" ] || echo "no, try $sys_name anyway: --browser system"
-  echo "no screenshots: --browser off"
-}
-browser_need()   { echo "a browser for screenshots: --browser bundled$( [ -z "$sys_path" ] || echo ', --browser system') or --browser off"; }
-browser_answer() { if [ "$1" = y ]; then browser=bundled; elif [ -n "$sys_path" ]; then browser=system; else browser=off; fi; }
 browser_phase()  { echo deps; }
-browser_step() {  # after the packages, since it launches the browser with thimble's Playwright: the answer's browser,
-  # downloaded only when it is bundled; a new answer is recorded in config.json
+browser_step() {  # after the packages, since it launches the browser with thimble's Playwright: the chosen browser,
+  # downloaded only when it is bundled. A --browser that changes the choice is recorded in config.json, and so is the
+  # headless Chromium picked over a Chrome or Edge that did not start, which the server would otherwise pick
   local choice="${browser:-${browser_was:-$browser_auto}}" fix="bash $(tilde "$dir")/scripts/install.sh --browser bundled"
-  local line=same  # ok for a new answer, which is a change
+  local line=same  # ok for a new choice, which is a change
   [ -z "$browser" ] || [ "$browser" = "$browser_was" ] || line=ok
   case "$choice" in
     system)
@@ -1068,7 +1074,7 @@ browser_step() {  # after the packages, since it launches the browser with thimb
         fi
       fi;;
     bundled)
-      busy "Downloading Playwright's headless Chromium (about 210 MB)"
+      busy "Downloading Playwright's headless Chromium ($BUNDLED_DOWNLOAD)"
       fetch_bundled
       launch_check
       if [ "$fetch_failed" = 1 ]; then
@@ -1083,10 +1089,9 @@ browser_step() {  # after the packages, since it launches the browser with thimb
       else "$line" "Screenshots use Playwright's headless Chromium, downloaded already ($(tilde "$(pw_cache)"))"; fi;;
     off)
       "$line" "No screenshots, as you chose: thimble can't check how its cards and views look (--browser bundled or --browser system turns them on)";;
-    *)
-      say "(the answer to the browser question, above)";;
   esac
-  if [ -n "$browser" ] && [ "$browser" != "$browser_was" ]; then record_browser "$browser"; fi
+  if [ -n "$browser" ] && [ "$browser" != "$browser_was" ]; then record_browser "$browser"
+  elif [ -z "$browser$browser_was" ] && [ "$browser_auto" = bundled ] && [ -n "$sys_path" ]; then record_browser bundled; fi
 }
 
 # ------------------------------------------------------------------------- card code's sandbox (Linux)
@@ -1362,8 +1367,8 @@ nothing_planned() {  # a re-run with nothing to do, as far as the plan can tell:
   case "$plugin_files" in inplace | same) return 0;; *) return 1;; esac
 }
 
-opening() {  # the one screen before the questions: what install.sh found, what it installs where, what it changes in
-  # Claude Code's setup, and how many questions remain
+opening() {  # the one screen before the steps: what install.sh found, what it installs where, what it changes in
+  # Claude Code's setup, and how many questions remain when any does
   local q n=0 venv="$dir/backend/.venv" fe="$dir/frontend/node_modules"
   for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do if "${q}_pending"; then n=$((n + 1)); fi; done
   heading "$(title)"
@@ -1408,10 +1413,10 @@ opening() {  # the one screen before the questions: what install.sh found, what 
     for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do if declare -F "${q}_setup" >/dev/null; then "${q}_setup"; fi; done
   fi
   if [ "${#ignored[@]}" -gt 0 ]; then show ""; ignored_line; fi
-  show ""
-  if [ "$n" = 0 ]; then show "Questions: none."
-  elif [ "$dry" = 1 ]; then show "Questions: $n, listed below."
-  else show "Questions: $n, next."; fi
+  # with no question (the usual case) nothing more: a dry run ends with "Nothing to ask" (ask), a run goes on
+  if [ "$n" = 0 ]; then [ "$dry" = 0 ] || show ""
+  elif [ "$dry" = 1 ]; then show ""; show "Questions: $n, listed below."
+  else show ""; show "Questions: $n, next."; fi
 }
 
 plugin_setup() {  # the plugin's line in "Your Claude Code setup"

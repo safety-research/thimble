@@ -233,7 +233,7 @@ Dev install, a clone installed in place with the backend's test tools:
 
 Either install:
 
-- installs the Python and Node packages and, if you want one, a browser for screenshots;
+- installs the Python and Node packages and a browser for screenshots;
 - adds thimble's plugin to Claude Code with Claude Code's own commands: `claude plugin marketplace add <install
   folder>`, then `claude plugin install --scope user thimble@<name>` (`thimble-local` for a release, `thimble` for a
   clone). Claude Code records the plugin in `~/.claude/settings.json` (`enabledPlugins`) and `~/.claude/plugins`.
@@ -249,21 +249,20 @@ install.sh changes nothing else in your Claude Code setup: no permission rule, n
 no system package and never runs sudo.
 
 install.sh opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card
-code and terminal-mode views can run in bubblewrap), what it installs where and about how big, what it changes in your
-Claude Code setup, and whether a question remains. Then it prints a line per step: ✓ when the step is done, ! when it
-needs you, with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`. A
-re-run that finds nothing to do says so in one line, and one that changes something shows only what changed. After a
-failed install, run it again: it makes the Python environment again when the failed run left it unfinished or broken.
-It removes only an environment it made itself; for one you made, it says what to do.
+code and terminal-mode views can run in bubblewrap), what it installs where and about how big, and what it changes in
+your Claude Code setup. It asks nothing. Then it prints a line per step: ✓ when the step is done, ! when it needs you,
+with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`. A re-run that
+finds nothing to do says so in one line, and one that changes something shows only what changed. After a failed
+install, run it again: it makes the Python environment again when the failed run left it unfinished or broken. It
+removes only an environment it made itself; for one you made, it says what to do.
 
-It asks one question, and only when it finds no Chrome or Edge that starts under automation: **a browser for
-screenshots**. thimble takes screenshots of the cards and views it draws, to check how they look. It offers Playwright's
-headless Chromium (about 210 MB to download, 650 MB on disk); with a no, thimble works without screenshots.
-`--browser bundled`, `--browser system` or `--browser off` answers it.
+**A browser for screenshots.** thimble takes screenshots of the cards and views it draws, to check how they look.
+install.sh uses a Chrome or Edge it finds that starts under automation, and downloads nothing. Otherwise it downloads
+Playwright's headless Chromium (about 210 MB from Microsoft's Playwright CDN, cdn.playwright.dev, 650 MB on disk) into
+Playwright's cache. The opening screen says which, in one line. `--browser off` takes no screenshots and downloads
+nothing; `--browser bundled` or `--browser system` picks one of the two. The flag is kept, so an update keeps it.
 
-Without a terminal, install.sh runs only when the question, if it remains, has its flag. The answer is kept, so an update
-doesn't ask it again. `install.sh --dry-run` prints the opening screen and the question, and changes nothing;
-`--verbose` also prints every command.
+`install.sh --dry-run` prints the opening screen and changes nothing; `--verbose` also prints every command.
 
 ## Start thimble
 
@@ -686,9 +685,9 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
   Claude's safeguards switched a reply to another model names both models; the reply, or the view proposal, came from
   the second.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
-  browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
-  libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one
-  up, and `thimble doctor --verbose` names the command for missing libraries. Then run `thimble restart`.
+  browser (`--browser off`, or its download failed), or the machine lacks the headless Chromium's system libraries.
+  `install.sh --browser system` or `--browser bundled` sets one up, and `thimble doctor --verbose` names the command for
+  missing libraries. Then run `thimble restart`.
 - `/thimble` is not recognized in a `claude` session: Claude Code doesn't have thimble's plugin, or it is off. `thimble
   doctor` says which. `bash <install folder>/scripts/install.sh` adds it, `/plugin` turns it on, and a session open
   since before then needs `/reload-plugins`.

@@ -3,8 +3,8 @@
 #
 #   scripts/update.sh [--dir DIR] [--from ZIP|URL] [--sums FILE] [--marketplace-name NAME] [--dry-run] [INSTALL FLAGS]
 #
-# INSTALL FLAGS are install.sh's answer to its question (--browser), --no-plugin and --require-pinned, passed on to it:
-# without a terminal it runs only with a flag for the question if it remains. --sandbox-deps, --no-sandbox-deps,
+# INSTALL FLAGS are install.sh's --browser (which changes the browser it picks), --no-plugin and --require-pinned,
+# passed on to it; install.sh asks nothing. --sandbox-deps, --no-sandbox-deps,
 # --plugin, --modify-path and --no-modify-path, 0.7's, are passed on too, and install.sh ignores them.
 # The install: --dir, else the one $THIMBLE_HOME/app-dir names, else the tree this script is in. A git checkout gets
 # `git pull --ff-only` + install.sh in place; a release install needs --from (a release zip, path or https URL), which is
@@ -19,7 +19,7 @@
 # release brings its own build). Claude Code takes the new plugin copy only when plugin.json's version changed, and a
 # running session only when it restarts; a running server is not restarted here (one line says how for each).
 # --dry-run (thimble update --dry-run) changes nothing: it prints the pull or the zip's check, then runs install.sh's own
-# dry run, which shows what the install would do and the question it would ask. In a checkout that dry run reads the
+# dry run, which shows what the install would do. In a checkout that dry run reads the
 # files as they are before the pull; a zip on disk is unpacked into a temporary folder for it, and a URL is not fetched.
 set -euo pipefail
 

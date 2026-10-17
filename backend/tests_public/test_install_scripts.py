@@ -694,3 +694,64 @@ def test_a_broken_environment_install_sh_did_not_make_is_never_removed(tmp_path)
     assert (f"install.sh: {venv} is broken (its Python does not run), and install.sh did not make it, so it leaves it "
             "as it is. Move it away or delete it, then run this again") in r.stderr, r.stderr
     assert (venv / "mine.txt").read_text() == "keep\n" and (venv / "bin" / "python").read_text() == "#!/bin/sh\nexit 1\n"
+
+
+# ----------------------------------------------------------------------------- the browser for screenshots
+
+
+def browser_install(tmp_path: Path, *, browser: str = "", tty: bool = False) -> tuple[subprocess.CompletedProcess, Path]:
+    """install.sh --deps-only of a release with no --browser, on a terminal (a pty as stdin) when `tty`, with `browser`
+    as the Chrome found where Playwright looks: '' for none, `starts` for one that starts under automation, `blocked`
+    for one that does not. Returns the run and thimble's config.json."""
+    import pty
+
+    tree = fake_tree(tmp_path / "release")
+    extra = {}
+    if browser:
+        chrome = tmp_path / "chrome"
+        chrome.write_text('#!/bin/sh\necho "DevTools listening on ws://127.0.0.1:9/devtools/browser/x" >&2; sleep 30\n'
+                          if browser == "starts" else '#!/bin/sh\necho "remote debugging is off by policy" >&2; exit 1\n')
+        chrome.chmod(0o755)
+        extra["THIMBLE_TEST_SYSTEM_BROWSER"] = f"chrome|Google Chrome|{chrome}"
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", **extra)
+    leader, follower = pty.openpty() if tty else (None, None)
+    try:
+        r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"), "--deps-only"],
+                           capture_output=True, text=True, env=env, timeout=60,
+                           stdin=follower if tty else subprocess.DEVNULL)
+    finally:
+        for fd in (leader, follower):
+            if fd is not None:
+                os.close(fd)
+    return r, Path(env["THIMBLE_HOME"]) / "config.json"
+
+
+def test_install_sh_asks_nothing_and_says_in_one_line_which_browser_it_picked(tmp_path):
+    """No question about the browser, without a terminal or on one: with no Chrome or Edge it picks Playwright's headless
+    Chromium and says in one line what it downloads, from where, into where, and the flag that skips it."""
+    r, conf = browser_install(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert ("  ✓ Screenshots of thimble's cards and views: Playwright's headless Chromium, since no Chrome or Edge was "
+            "found. It downloads about 210 MB from Microsoft's Playwright CDN (cdn.playwright.dev) into "
+            "~/.cache/ms-playwright (650 MB on disk). --browser off skips it\n") in r.stdout, r.stdout
+    assert "Question" not in r.stdout and not re.search(r"\?\s*$|\[[yY]/[nN]\]", r.stdout, re.M), r.stdout
+    assert not conf.exists(), "a default is not recorded: the server picks the same"
+
+
+def test_on_a_terminal_a_chrome_that_starts_is_used_and_one_that_does_not_gives_way_to_the_bundled_one(tmp_path):
+    """On a terminal nothing is asked either. A Chrome that starts under automation is used, and nothing is downloaded;
+    one that does not start (a policy) gives way to the headless Chromium, which is recorded so the server does not
+    pick that Chrome, and the line names the flag that tries Chrome anyway."""
+    r, conf = browser_install(tmp_path / "a", browser="starts", tty=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (f"  ✓ Screenshots of thimble's cards and views: Google Chrome at {tmp_path / 'a' / 'chrome'}, so nothing is "
+            "downloaded. --browser bundled or --browser off changes it\n") in r.stdout, r.stdout
+    assert not conf.exists()
+
+    r, conf = browser_install(tmp_path / "b", browser="blocked", tty=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (f"Playwright's headless Chromium, since Google Chrome at {tmp_path / 'b' / 'chrome'} did not start under "
+            "automation here, which a policy can block. It downloads about 210 MB from Microsoft's Playwright CDN") \
+        in r.stdout, r.stdout
+    assert "--browser system tries Google Chrome anyway; --browser off skips it\n" in r.stdout, r.stdout
+    assert json.loads(conf.read_text()) == {"browser": "bundled"}
