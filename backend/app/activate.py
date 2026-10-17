@@ -28,8 +28,9 @@ again under a new marker, for /resume both stay.
 launch.json (`<ws>/trusted/launch.json`) has one writer, write_launch, under `<ws>/trusted/launch.lock`:
 {session, pid, config_dir, via, transport, at, peers, moved}, every other field it held kept. A new main runs on the
 local transport until the press (runtime's local.transport); take_main makes a session main in place of a live one,
-which goes to `moved` and is told so by a notice. Until every reader takes `transport`, write_launch also writes the
-0.8.0 `mode` that matches it (LEGACY_MODE).
+which goes to `moved` and is told so by a notice. The conversation main's own `claude` process moved to (/clear,
+/resume) is the same session, not another one (same_session): it takes main with no notice. Until every reader takes
+`transport`, write_launch also writes the 0.8.0 `mode` that matches it (LEGACY_MODE).
 
 load_thimble (contract C5) is answered by the shim directly, through activate() and answer(); tool_load_handler serves
 a call that reaches tools.call instead.
@@ -370,13 +371,33 @@ def main_alive(c: str, rec: dict[str, Any] | None = None) -> bool:
         return False
 
 
+def same_session(c: str, rec: dict[str, Any], sid: str) -> bool:
+    """Whether session `sid` is the main launch.json's record `rec` names in workspace `c`, or the conversation that
+    main's `claude` process moved to (bug hunt 7, H10: after /clear, /thimble restore told of "the other session"):
+    `sid` is one of the moves workspace `c`'s subagents.json records from it (/clear, /resume: cli._moved_from), or the
+    record's `claude` process runs `sid` now (cli.live_launch), as after a /clear whose move a restored workspace never
+    recorded. False for a record that names no session."""
+    old = str(rec.get("session") or "")
+    if not old or old == sid:
+        return bool(old)
+    from . import cli  # noqa: PLC0415
+
+    try:
+        return sid in cli._moved_from(old, c) or cli.live_launch({**rec, "session": sid}, c)
+    except Exception:  # noqa: BLE001 — a record that cannot be checked names another session
+        return False
+
+
 def take_main(c: str, sid: str, via: str) -> str | None:
     """Make session `sid` main of workspace `c` in place of a live main (a press, /thimble or the `thimble` command):
     the old main goes to `moved` (write_launch) and gets the TAKEOVER_KEY notice. The previous main's id, None when
-    there was none or it was `sid`. The transport stays what the record had for main."""
+    there was none or it was `sid` or a conversation it moved to (same_session), which takes main with no notice and
+    leaves `moved` as it was. The transport stays what the record had for main."""
     rec = read_launch(c)
     old = str(rec.get("session") or "") or None
     was = transport_of(rec)
+    if old and same_session(c, rec, sid):
+        old = sid
     write_launch(c, sid, role=MAIN, transport=was, via=via, moved=old if old and old != sid else None)
     if old and old != sid:
         try:
@@ -447,7 +468,7 @@ def _role_for(c: str, sid: str, via: str) -> tuple[str, str | None]:
     """(main or peer, the session that lost main) for a new activation of `sid` in workspace `c` (module note)."""
     rec = read_launch(c)
     main = str(rec.get("session") or "")
-    if not main or main == sid or not main_alive(c, rec):
+    if not main or same_session(c, rec, sid) or not main_alive(c, rec):
         return MAIN, None
     if via in TAKES_MAIN:
         return MAIN, main
@@ -516,7 +537,9 @@ def activate(cwd: str | os.PathLike[str], sid: str, via: str, *, mod: bool = Fal
                 if role == MAIN:
                     if took:
                         took = take_main(c, sid, via)
-                    write_launch(c, sid, role=MAIN, transport=transport_of(rec) if took else LOCAL, via=via)
+                    # the conversation main's process moved to keeps main's transport, as a takeover does
+                    kept = took or (rec.get("session") not in (None, "", sid) and same_session(c, rec, sid))
+                    write_launch(c, sid, role=MAIN, transport=transport_of(rec) if kept else LOCAL, via=via)
                 else:
                     write_launch(c, sid, role=PEER, transport=LOCAL, via=via)
                 path = str(config.workspace_dir(c))

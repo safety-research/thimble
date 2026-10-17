@@ -153,3 +153,38 @@ def test_a_second_session_beside_a_live_main_is_a_peer_and_a_press_takes_main(co
     from app import notices
 
     assert any(n.get("key") == activate.TAKEOVER_KEY for n in notices.open_notices(c))
+
+
+def test_the_conversation_main_s_process_moved_to_takes_main_with_no_takeover(corpus, live_claude, monkeypatch):
+    """Bug hunt 7, H10: after /clear, /thimble restore brought back a workspace whose launch.json names the conversation
+    before the /clear, and taking main posted "thimble's browser follows the other session in this folder now" and
+    put that conversation under `moved`, though no other session ran. The conversation main's own `claude` process
+    moved to is the same session: it takes main with no notice, keeps main's transport and leaves `moved` empty, both
+    when the workspace recorded the move (subagents.json) and when only the process shows it."""
+    from app import cc_plugin, notices
+
+    pid = live_claude("s-before")
+    monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: pid)
+    _ok(activate.activate(corpus, "s-before", "command"))
+    c = config.workspace_for_cwd(str(corpus))
+    activate.write_launch(c, "s-before", role="main", transport="server", via="press")
+    # /clear: the same `claude` runs the new conversation, and the hook recorded the move in the workspace
+    live_claude("s-after")
+    with subagent_files.update(config.workspace_path(c)) as state:
+        subagent_files.rekey(state, "s-before", "s-after")
+    assert activate.take_main(c, "s-after", "press") is None
+    rec = activate.read_launch(c)
+    assert (rec["session"], rec["moved"], rec["transport"]) == ("s-after", [], "server")
+    # a restored workspace that names the conversation before a /clear it never saw: the process shows the move
+    activate.write_launch(c, "s-before", role="main", transport="server", via="press")
+    live_claude("s-later")
+    assert _ok(activate.activate(corpus, "s-later", "data"))["role"] == "main"
+    assert activate.read_launch(c)["transport"] == "server", "the same terminal keeps main's transport"
+    activate.write_launch(c, "s-before", role="main", transport="server", via="press")
+    assert activate.take_main(c, "s-later", "press") is None
+    assert activate.read_launch(c)["moved"] == []
+    assert not any(n.get("key") == activate.TAKEOVER_KEY for n in notices.open_notices(c))
+    # another `claude` that runs the session before is another session: a takeover, as before
+    monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: None)
+    assert _ok(activate.activate(corpus, "s-other", "press"))["took_over"] == "s-later"
+    assert any(n.get("key") == activate.TAKEOVER_KEY for n in notices.open_notices(c))
