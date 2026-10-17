@@ -454,7 +454,20 @@ async def _home(c: str, args: list[str], pos: list[str]) -> Any:
     out["orientation"] = run.get("status")
     out["coverage"] = run.get("coverage")  # run 0's coverage line (orient_session.measure), which home shows under Files
     out["transport"] = transport(c)
+    out["instance"] = _instance(c)
     return out
+
+
+def _instance(c: str) -> str:
+    """Which folder the workspace is now, `<device>:<inode>`: a rename keeps it (/thimble fresh moves the folder into
+    the archive, /thimble restore moves an archive back) and a new folder has another (the empty one fresh opens), so
+    the terminal UI tells when another run took the workspace's place (term.ts followWorkspace; bug hunt 7, H11). ''
+    when the folder cannot be read."""
+    try:
+        st = config.workspace_path(c).stat()
+    except (OSError, ValueError):
+        return ""
+    return f"{st.st_dev}:{st.st_ino}"
 
 
 def _home_views(c: str) -> list[dict[str, Any]]:

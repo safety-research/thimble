@@ -17,7 +17,7 @@ import type { Citation } from './lib'
 import { agentsOf, cellOf, cellsOf, chatOf, docUnits, docsOf, homeOf, labelIdOf, labelOf, labelsOf, resolutionOf, threadOf, threadRowsOf, uiRecordsOf, verdictOf } from './model'
 import { classColors, labelArgs, setLabelGone } from './labels'
 import { fileRef } from './files'
-import { keepSeen, keepSession, keptSeen, keptSession, loadKept, resetKept } from './kept'
+import { keepSeen, keepSession, keptFolder, keptSeen, keptSession, loadKept, resetKept, swapKept } from './kept'
 import { NAV_EMPTY, backTarget, moved, nextTrail, withBack } from './nav'
 import { signalEnd, withSignal } from './signal'
 import type { AnswerComment } from './contracts'
@@ -76,6 +76,9 @@ export const rt = {
   wantLabels: false,
   sc: null as Scope | null,
   sig: null as Signature | null,
+  // which folder the workspace is (`thimble state home`'s `instance`), '' before the first read: /thimble fresh and
+  // restore put another folder in its place (followWorkspace)
+  instance: '',
   busy: false,
   again: false,
   // the labels' lane (labelsLane): the label definitions' folder as last listed (null before the first listing), and
@@ -1280,6 +1283,7 @@ async function refreshHome(cx: Ctx): Promise<void> {
   const asked = ++rt.reads
   const got = await readState(cx, rt.sc, 'home')
   if (!got.ok || !lands('home', asked)) return
+  await followWorkspace(cx, String((got.value as { instance?: unknown } | null)?.instance ?? ''))
   // the views and the rest home draws, which the `↳ view` rows read too
   if (lands('home-full', asked)) await cx.setSurface('home-full', { ok: true, value: got.value })
   const views = Array.isArray((got.value as { views?: unknown })?.views) ? ((got.value as { views: { slug?: unknown; status?: unknown }[] }).views) : []
@@ -1491,6 +1495,36 @@ export function startTimers(cx: Ctx): void {
   // timer of the session's, which lives as long as it (viewhost.ts)
   cx.every(PUMP_MS, () => void viewPump(cx).catch(quiet))
   void tick(cx, applyUi).catch(quiet)
+}
+
+/** The workspace folder home names (`instance`, local.py _instance), followed: when another took its place (/thimble
+ *  fresh opens an empty one, /thimble restore moves an archived one back), what the session counts as its citations
+ *  goes with the folder before (bug hunt 7, H11: `citations 6  6 failed` after /thimble fresh). The kept file is read
+ *  again from the new folder, which holds this session's citations and drawn cards of that run (none in a new one), and
+ *  they take the place of the ones before, checked again against it; the cards and citations waiting for a check are
+ *  dropped. */
+export async function followWorkspace(cx: Ctx, instance: string): Promise<void> {
+  const was = rt.instance
+  if (!instance || instance === was) return
+  rt.instance = instance
+  const sc = rt.sc
+  if (!was) keptFolder(instance)
+  if (!was || !sc) return
+  rt.shown.clear()
+  rt.cardCites.clear()
+  rt.queue.clear()
+  rt.retries.clear()
+  await swapKept(cx, sc.ws, instance)
+  const mine = keptSession(await cx.sessionId().catch(() => ''))
+  const cites = mine?.cites ?? []
+  await cx.setCiteIndex(cites)
+  const ids = (mine?.shown ?? []).filter(id => !rt.deleted.has(id))
+  if (ids.length) {
+    await loadCardsBatch(cx, ids)
+    await recheckCards(cx, ids)
+  }
+  if (cites.length) await resolveCitations(cx, cites.map(c => ({ raw: c.raw, ref: c.ref, display: c.display })))
+  await refreshSummary(cx)
 }
 
 /** What main's chat drew under its rows in earlier processes of this conversation (kept.ts), put in the state where it

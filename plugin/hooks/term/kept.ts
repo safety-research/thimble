@@ -5,7 +5,10 @@
 // into the state when thimble turns on or the session starts again. So is what the thimble line counts as the session's
 // citations, by the session's id (`sessions`): its answers' chat citations (C13 citeIndex) and the cards the session
 // drew (term.ts rt.shown), so a resumed session counts the same ones (bug hunt H7: 14 before `claude -c`, 9 after). The
-// file is the terminal UI's own: the browser does not read it.
+// file names the workspace folder it was written for (`folder`): /thimble fresh and restore put another folder in the
+// workspace's place, whose own file this process reads instead once it sees the change (swapKept; bug hunt 7, H11), and
+// a file that names another folder is a write of the run before, made before the change was seen. The file is the
+// terminal UI's own: the browser does not read it.
 //
 // No `$` here: register.tsx reads and writes through the context (hooks/ctx.ts).
 import type { ChatSignal, CiteRow, TermAnswer, TermHome } from './types'
@@ -25,8 +28,9 @@ export type KeptSession = { cites: CiteRow[]; shown: string[] }
 
 /** The file: each row's drawings by its uuid, oldest first, the last turn's text and cards (`/thimble cite` and
  *  `/thimble card` open them by number), what the workspace held when home was last seen (`seen`), so the row above
- *  the prompt counts what came after across a relaunch, and each session's citations by its id, oldest first. */
-export type Kept = { rows: Record<string, KeptRow>; last: { reply: string; cards: string[] }; seen?: TermHome; sessions?: Record<string, KeptSession> }
+ *  the prompt counts what came after across a relaunch, each session's citations by its id, oldest first, and the
+ *  workspace folder it is for (`folder`, `thimble state home`'s `instance`). */
+export type Kept = { rows: Record<string, KeptRow>; last: { reply: string; cards: string[] }; seen?: TermHome; sessions?: Record<string, KeptSession>; folder?: string }
 
 /** The workspace file, under the workspace folder. */
 export const KEPT_FILE = 'terminal/chat.json'
@@ -81,7 +85,8 @@ export function parseKept(raw: string): Kept {
   }
   const seen = seenOf((o as { seen?: unknown }).seen)
   const sessions = sessionsOf((o as { sessions?: unknown }).sessions)
-  return { rows, last: { reply: typeof o.last?.reply === 'string' ? o.last.reply : '', cards: strings(o.last?.cards) }, ...(seen ? { seen } : {}), ...(sessions ? { sessions } : {}) }
+  const folder = (o as { folder?: unknown }).folder
+  return { rows, last: { reply: typeof o.last?.reply === 'string' ? o.last.reply : '', cards: strings(o.last?.cards) }, ...(seen ? { seen } : {}), ...(sessions ? { sessions } : {}), ...(typeof folder === 'string' && folder ? { folder } : {}) }
 }
 
 function citeRowsOf(v: unknown): CiteRow[] {
@@ -116,7 +121,7 @@ export function keptJson(k: Kept): string {
   const rows = Object.fromEntries(keys.slice(Math.max(0, keys.length - ROWS_MAX)).map(key => [key, k.rows[key]!]))
   const sids = Object.keys(k.sessions ?? {})
   const sessions = Object.fromEntries(sids.slice(Math.max(0, sids.length - SESSIONS_MAX)).map(sid => [sid, k.sessions![sid]!]))
-  return JSON.stringify({ rows, last: k.last, ...(k.seen ? { seen: k.seen } : {}), ...(sids.length ? { sessions } : {}) })
+  return JSON.stringify({ rows, last: k.last, ...(k.seen ? { seen: k.seen } : {}), ...(sids.length ? { sessions } : {}), ...(k.folder ? { folder: k.folder } : {}) })
 }
 
 /** `kept` with one row's part set (a row moves to the end, the newest). */
@@ -141,7 +146,24 @@ export async function loadKept(cx: Io, ws: string): Promise<Kept> {
   const got = parseKept(await cx.read(pathOf(ws)).catch(() => ''))
   const seen = kept.seen ?? got.seen
   const sessions = { ...got.sessions, ...kept.sessions }
-  kept = { rows: { ...got.rows, ...kept.rows }, last: kept.last.reply || kept.last.cards.length ? kept.last : got.last, ...(seen ? { seen } : {}), ...(Object.keys(sessions).length ? { sessions } : {}) }
+  const folder = kept.folder ?? got.folder
+  kept = { rows: { ...got.rows, ...kept.rows }, last: kept.last.reply || kept.last.cards.length ? kept.last : got.last, ...(seen ? { seen } : {}), ...(Object.keys(sessions).length ? { sessions } : {}), ...(folder ? { folder } : {}) }
+  return kept
+}
+
+/** The workspace folder this process's file is for, as the first read of home names it (term.ts followWorkspace):
+ *  written with the file from now on. */
+export function keptFolder(folder: string): void {
+  if (folder) kept = { ...kept, folder }
+}
+
+/** Another folder took the workspace's place (/thimble fresh, /thimble restore: term.ts followWorkspace): what this
+ *  process held goes, and the new folder's file is read once the writes under way have landed, unless it names another
+ *  folder, a write of the run before made before the change was seen; none in a new folder. */
+export async function swapKept(cx: Io, ws: string, folder: string): Promise<Kept> {
+  await writes
+  const got = parseKept(await cx.read(pathOf(ws)).catch(() => ''))
+  kept = { ...(got.folder && got.folder !== folder ? keptEmpty() : got), folder }
   return kept
 }
 

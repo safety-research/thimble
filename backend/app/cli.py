@@ -19,7 +19,7 @@
 `server up` (alias `ensure`) starts the server from a shell or for a /thimble action that needs it (fresh, restore,
 status, fix, feedback): `GET /api/health`, then under `flock <home>/server.lock` spawn uvicorn on the server's port
 (port) as its own session leader (plus Vite on 5300 when THIMBLE_DEV is on), wait for health, map the cwd to a
-workspace, print `thimble: <url>` (LINK_LINE in a session), and name the session to the server. /thimble alone starts
+workspace, print `thimble: <url>` (BROWSER_LINE in a session), and name the session to the server. /thimble alone starts
 no server: its hook and the skill's own commands turn thimble on in the session (app/activate.py), and `up` prints the
 line that says so (on_here). A press of the browser workbench (`thimble open`, app/open_cmd.py; /thimble browser, run_open)
 is the session's way to start the server; it makes the session main on the server (made_main), which switches its
@@ -31,9 +31,10 @@ Monitor runs (cc_plugin.route, monitor_lines).
 <home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, written 0600
 (write_state) in the 0700 home, readable by its owner alone; `token` is new at each start and is what the plugin's
 hooks and this CLI prove they hold (hook_auth.py). A browser signs in with a one-time code from ui_url(pair=True), never
-with a value from this file. Only a terminal gets a link with a code: `up` from a shell prints one, and /thimble fresh
-and restore print LINK_LINE for main's Stop hook to show the link, which gets its code as the hook shows it
-(leave_link). `thimble unpair` signs every browser out. Its `pid` is trusted
+with a value from this file. Only a shell's own terminal gets a link with a code (`up` from a shell, to_terminal),
+never output that Claude Code runs and a model can read: in a session, /thimble fresh and restore print BROWSER_LINE, no
+link, and the session's terminal gets one only from the clipboard (the panel's `copy link`, /thimble browser).
+`thimble unpair` signs every browser out. Its `pid` is trusted
 only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
 recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
 `up` acts on it. A server whose /api/health names another THIMBLE_HOME belongs to another install.
@@ -158,19 +159,21 @@ RESUME_LINE = "thimble: resuming the dashboard from your last run; `/thimble fre
 # the orientation left as context (precached.py)
 PRECACHED_LINE = ("thimble: opening the orientation that ran in advance on these files; this session starts fresh, "
                   "from its cards and report; `/thimble fresh` starts over")
-# what /thimble prints in place of the link: main's Stop hook shows the link under the reply with a sign-in code it gets
-# as it shows it (leave_link, plugin/bin/.thimble-watch link_lines), outside the model's context
-LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
-LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
+# what /thimble fresh and restore say of the browser in place of a link: a link with a sign-in code goes nowhere a model
+# can read (the transcript keeps a hook's systemMessage too); a browser that shows thimble follows the workspace, and
+# /thimble browser opens one, or puts a one-time link on the clipboard (`copy link`) where no browser opens
+BROWSER_LINE = "thimble: the browser workbench follows this workspace; /thimble browser opens it"
+LINKS_DIR = "links"  # under <home>: the notes each session's Stop hook shows once (leave_notes)
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
 NOTHING_ARCHIVED_LINE = "thimble: this folder had no workspace to archive"
-ARCHIVE_FAILED_LINE = "thimble: could not archive the last run, so the dashboard still shows it; see {log}"
+ARCHIVE_FAILED_LINE = "thimble: could not archive the last run, so the browser workbench still shows it; see {log}"
 RESTORED_LINE = "thimble: Restored the run archived as {name}."
 RESTORED_REPLACED_LINE = ("thimble: Restored the run archived as {name}. The run it replaced is archived at {path}; to go back "
                           "to it, run: /thimble restore {replaced}")
 NO_SUCH_ARCHIVE_LINE = "thimble: this folder has no archived run named {name}; `/thimble restore` lists them"
-RESTORE_FAILED_LINE = "thimble: could not restore {name}, so the dashboard still shows the current run; see {log}"
+RESTORE_FAILED_LINE = ("thimble: could not restore {name}, so the browser workbench still shows the current run; "
+                       "see {log}")
 ARCHIVES_LINE = "thimble: this folder's archived runs, newest first: {names}. `/thimble restore <name>` brings one back."
 REVERTED_LINE = "thimble: reverted \"{title}\" ({commit})"
 NO_ARCHIVES_LINE = "thimble: this folder has no archived runs"
@@ -1431,8 +1434,8 @@ PAIR_TIMEOUT_S = 3.0
 PAIRED_FILE = "paired.json"  # in <home>: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
 NO_CODE_LINE = ("thimble: the server gave no sign-in code, so this link opens thimble read-only in a browser that is "
                 "not signed in yet; see {log}.")
-UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. To sign one in again, open the link /thimble shows, "
-                 "or run `thimble up` in a shell.")
+UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. To sign one in again, type /thimble browser in your "
+                 "Claude Code terminal, or press o in thimble's panel.")
 UNPAIR_FAILED_LINE = ("thimble: the server did not sign the browsers out ({why}), so they stay signed in until it "
                       "restarts. In a shell: thimble server restart")
 
@@ -1488,14 +1491,15 @@ def browser_cookie(url: str | None = None) -> str:
     raise RuntimeError(f"the server at {base} set no cookie for the sign-in")
 
 
-def leave_link(session: str, url: str, notes: "list[str] | tuple[str, ...]" = ()) -> bool:
-    """`url` for the session's Stop hook to show under main's reply (LINK_LINE), with `notes` on the lines after it;
-    False when it could not be left."""
+def leave_notes(session: str, notes: "list[str] | tuple[str, ...]") -> bool:
+    """`notes` for the session's Stop hook to show under main's reply, after an empty first line, where an older build
+    left a link (app/session.py tell_terminal appends to the same file); never a link. False when they could not be
+    left."""
     name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
     try:
         d = ensure_home() / LINKS_DIR
         d.mkdir(exist_ok=True)
-        (d / name).write_text("\n".join([url, *notes]), "utf-8")
+        (d / name).write_text("\n".join(["", *notes]), "utf-8")
     except OSError as e:
         _log(f"the link for session {session} was not left: {e}")
         return False
@@ -1820,7 +1824,7 @@ def name_session(url: str, name: str, session: str, cwd: Path, sandbox: bool | N
 
 # What /thimble says about a session the launcher did not start, which lacks what the launcher gives main: a line for
 # each of UNSET_VARS its environment or its Claude Code settings set, and one for a shell proxy that no NO_PROXY keeps
-# off 127.0.0.1. The model relays these lines, and the Stop hook shows them under the reply too (leave_link's notes);
+# off 127.0.0.1. The model relays these lines, and the Stop hook shows them under the reply too (leave_notes);
 # the server posts a `setup` notice for each key (setup_warnings), in words it writes itself (notices.setup_text).
 SETUP_ENV_LINE = ("thimble: {name} is set in this session, so thimble's agents may not run on the models and efforts "
                   "Settings name. To fix it, quit, unset it and start claude again, or start with `thimble`, which "
@@ -3862,14 +3866,15 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         else:
             given = precached_context(url, name, str(args.session)) if name and args.session else ""
             second = [PRECACHED_LINE] if given else [RESUME_LINE] if not opened and resumes(url, name) else []
-        # a plain `claude`: what its environment lacks goes under the link too, which the Stop hook shows whatever
-        # main's reply holds
+        # a plain `claude`: what its environment lacks, which the Stop hook shows under the reply too, whatever main's
+        # reply holds
         setup = setup_lines(cwd) if args.session else []
-        # with the plugin's hooks off no Stop hook shows the link, so the page opens without a sign-in code; a link
-        # printed here reaches the model, so only a shell's own terminal gets one with a code
-        if (args.session and not cc_plugin.hooks_blocked(cwd, plugin_root())
-                and leave_link(str(args.session), ui_url(name), setup)):
-            print(LINK_LINE)
+        # what is printed here reaches the model, so a session gets no link with a sign-in code (BROWSER_LINE); with
+        # the plugin's hooks off, the page's link without a code; only a shell's own terminal gets one with a code
+        if args.session and not cc_plugin.hooks_blocked(cwd, plugin_root()):
+            if setup:
+                leave_notes(str(args.session), setup)
+            print(BROWSER_LINE)
         else:
             pair = not args.session and to_terminal()
             link = ui_url(name, pair=pair)

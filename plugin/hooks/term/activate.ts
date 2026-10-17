@@ -416,6 +416,8 @@ export async function turnOn(cx: Ctx, a: Activated): Promise<void> {
   rt.sc = { ws: a.path.replace(/\/+$/, ''), cwd: a.cwd, bin: (await preScope(cx)).bin, env: await envOf(cx) }
   rt.sig = null
   rt.uiN = -1
+  // the workspace folder is this session's first read of home's (term.ts followWorkspace)
+  rt.instance = ''
   // a turn that runs now (the call that turned thimble on is in it): its rows count from here, for its answer's lines
   if (!rt.turn) rt.turn = { id: '', at: new Date(await cx.now()).toISOString(), cards: [], row: '', parts: [[]], views: [], own: false }
   // the cards' colors in the theme's palette, the browser's (paint.ts)

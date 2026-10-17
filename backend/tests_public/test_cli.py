@@ -105,17 +105,17 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     assert capsys.readouterr().out.splitlines() == [cli.ON_LINE] and not (home / "links" / "s9").exists()
     assert posted == []
     rc = cli.main(["up", "--cwd", str(data / "mini" / "agents"), "--session", "s9", "--action", "fresh"])
-    # what the skill puts in the model's context holds no link: the session's Stop hook shows the link it left, with a
-    # sign-in code it gets as it shows it, so the file holds none
-    assert rc == 0 and capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.NOTHING_ARCHIVED_LINE]
-    assert (home / "links" / "s9").read_text() == "http://127.0.0.1:5300/?ws=mini"
+    # what the skill puts in the model's context holds no link, and nothing is left for the Stop hook to show one: the
+    # browser workbench follows the workspace, and /thimble browser opens it (bug hunt 7, H9)
+    assert rc == 0 and capsys.readouterr().out.splitlines() == [cli.BROWSER_LINE, cli.NOTHING_ARCHIVED_LINE]
+    assert not (home / "links" / "s9").exists()
     assert "ui_key" not in json.loads((home / "server.json").read_text())
     posted.clear()  # the session's name and the like, told to the server
     folder = tmp_path / "calls"
     folder.mkdir()
     assert cli.main(["ensure", "--cwd", str(folder), "--session", "s9", "--action", "fresh"]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.NOTHING_ARCHIVED_LINE]
-    assert (home / "links" / "s9").read_text() == "http://127.0.0.1:5300/?ws=calls"
+    assert capsys.readouterr().out.splitlines() == [cli.BROWSER_LINE, cli.NOTHING_ARCHIVED_LINE]
+    assert not (home / "links" / "s9").exists()
     assert posted[0] == ("http://127.0.0.1:8300/api/corpora/register", {"path": str(folder), "exact": True})
     posted.clear()
     (tmp_path / "cc").mkdir()
@@ -174,7 +174,8 @@ def test_slash_thimble_makes_its_session_main_with_a_launch_record_and_marks_the
     link = tmp_path / "mini-link"
     link.symlink_to(data / "mini", target_is_directory=True)
     assert cli.main(["up", "--cwd", str(link), "--session", "s5", "--action", "fresh"]) == 0
-    assert capsys.readouterr().out.splitlines() == [cli.LINK_LINE, cli.ARCHIVE_FAILED_LINE.format(log=cli.log_path())]
+    assert capsys.readouterr().out.splitlines() == [cli.BROWSER_LINE,
+                                                    cli.ARCHIVE_FAILED_LINE.format(log=cli.log_path())]
     assert told[-1] == {"session": "s5", "cwd": str(link), "warnings": [], "sandbox": True}
     with cli.server_dirs():
         rec = cli.read_launch("mini")
