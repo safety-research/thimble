@@ -28,7 +28,7 @@ import type { Register, RenderElement, ResolveInput } from 'claude-code'
 
 import type { Ctx } from './ctx'
 import { cxOf } from './ctx'
-import { act as actOn } from './data'
+import { act as actOn, readState } from './data'
 import type { Sent } from './gestures'
 import { SPIN, chipLook, claimsIn, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
@@ -51,9 +51,9 @@ import { turns } from './turns'
 import { registerBand } from './band'
 import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
-import { LOAD_TOOL, act, activateNow, appendGuide, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
+import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
-import { isCheck } from '../thimble'
+import { checkName } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
 import { openInBrowser } from './offramp'
 import { openChecks } from './checksview'
@@ -76,11 +76,23 @@ const SKILL_ARGS = new Set(['fresh', 'restore', 'status', 'fix', 'feedback'])
 // the text Claude Code stores as the reply of a turn that ended with none (its `<synthetic>` model's)
 const SYNTHETIC_RE = /^\s*No response requested\.\s*$/
 const THIMBLE_TOOL = /^mcp__plugin_thimble_thimble__/
-// a message of another agent's as main reads it (a subagent's hand-back), and why one of a check's is dropped
+// a message of another agent's as main reads it (a subagent's hand-back)
 const AGENT_MESSAGE = /<agent-message from="([^"]+)"/
-const CHECK_DROPPED = 'a thimble check finished; its comments are marked in the answer'
+// how long a check's dropped hand-back waits for its run's record (checkDone)
+const CHECK_READ_MS = 5000
 const CARD_TOOL = /^mcp__plugin_thimble_thimble__(add_card|edit_card|apply_label)$/
 const VIEW_TOOL = /^mcp__plugin_thimble_thimble__propose_view$/
+
+/** Why a check's hand-back is dropped, which Claude Code shows in its row for the drop: what the check did, by the record of
+ *  the run its agent ran (`thimble state checks`): `Judgment calls added 2 comments`, `Judgment calls found nothing to
+ *  flag`, or `Judgment calls finished` when the record cannot be read in time. */
+async function checkDone(cx: Ctx, agentId: string, name: string): Promise<string> {
+  const got = rt.sc ? await bounded(cx, readState(cx, rt.sc, 'checks'), CHECK_READ_MS) : null
+  const runs = got?.ok && Array.isArray(got.value) ? got.value.flatMap(c => Object.values((c as { runs?: object } | null)?.runs ?? {})) : []
+  const n = (runs.find(r => (r as { agent_id?: unknown } | null)?.agent_id === agentId) as { comments?: unknown } | undefined)?.comments
+  if (typeof n !== 'number') return `${name} finished`
+  return n === 0 ? `${name} found nothing to flag` : `${name} added ${n} comment${n === 1 ? '' : 's'}`
+}
 
 /** The text of a tool's result as the transcript holds it: a string, or content blocks. */
 function resultText(output: unknown): string {
@@ -575,10 +587,12 @@ export const register: Register = (on, options) => {
 
   // a prompt carries thimble's guide when it is owed (after /clear, a switch that changed it, a resumed session).
   // A check's hand-back never reaches main: thimble shows its comments as the passage's tint and flag (SPEC-v2 J7).
-  // Claude Code queues a hand-back for main with no session.receive, so it is dropped here, as it enters (the owner, 10-17)
+  // Claude Code queues a hand-back for main with no session.receive, so it is dropped here, as it enters, the reason saying
+  // what the check did (the owner, 10-17)
   on('prompt.submit', async ($, e, next) => {
     const from = e.origin.kind === 'peer' ? AGENT_MESSAGE.exec(e.text)?.[1] : undefined
-    if (from && isCheck(from)) return { drop: CHECK_DROPPED }
+    const check = from === undefined ? undefined : checkName(from)
+    if (from !== undefined && check !== undefined) return { drop: await checkDone(cxOf($), from, check) }
     if (!isActive()) return next(e)
     const cx = cxOf($)
     await followConversation(cx)
