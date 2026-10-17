@@ -16,8 +16,9 @@ whole (`data`, build_code_wrapper) beside its records, and a prompt as its recor
 as far as its model's context holds (whole_read_chars), a JSON document shortened to fit (iter_units, fit_json); either
 up to WHOLE_MAX_BYTES. A run that reads some only in part keeps them as its `cut` (read_cut).
 
-Trials: apply_label with a `limit` defines a trial (`trial: true`), left out of the Labels list and label counts until
-a run without a limit makes it a label; a limited run over files samples its units across files (trial_sample).
+Trials: apply_label with a `limit` defines a trial (`trial: true`), a label run on a sample, which every Labels list and
+label count holds, marked as a sample, so the analyst judges it where the other labels are, until a run without a limit
+makes it a label run on everything; a limited run over files samples its units across files (trial_sample).
 The same predicate again: re-applying a label with the same definition (same_definition) keeps its version and rows,
 and runs only over what its rows do not cover (covered).
 Within: a label over records may run only over the records another label gave one value (`within {label, value}`, kept
@@ -494,13 +495,12 @@ def write_concept(ws: Path, concept: dict) -> None:
         atomic_write_text(p, json.dumps(concept, indent=1, ensure_ascii=False))
 
 
-def list_concepts(ws: Path, *, trials: bool = True) -> list[dict]:
-    """Every concept, oldest first, each class with a colour (fill_colours). `trials` False leaves out the trials, for a count
-    of the workspace's labels."""
+def list_concepts(ws: Path) -> list[dict]:
+    """Every concept, trials among them (module note), oldest first, each class with a colour (fill_colours)."""
     d = concepts_dir(ws)
     out = []
     for p in d.glob("*.json") if d.is_dir() else ():
-        if ID_RE.match(p.stem) and (c := read_concept(ws, p.stem)) is not None and (trials or not c["trial"]):
+        if ID_RE.match(p.stem) and (c := read_concept(ws, p.stem)) is not None:
             out.append(c)
     out.sort(key=lambda c: (c["ts"], c["id"]))
     return fill_colours(out)
@@ -854,7 +854,7 @@ def unsure_counts(c: str, label_id: str) -> dict:
 
 
 def unsure_state(c: str, label_id: str | None = None, n: int = 20, offset: int = 0, *, counts_only: bool = False) -> dict:
-    """`thimble state label-unsure`: {labels: [{id, name, noFit, unsure, total, rows?}]}, every label (trials left out)
+    """`thimble state label-unsure`: {labels: [{id, name, noFit, unsure, total, rows?}]}, every label (trials among them)
     with its counts, or with `label_id` that label with one page of its rows (unsure)."""
     ws = _ws(c)
     if label_id and not counts_only:
@@ -862,7 +862,7 @@ def unsure_state(c: str, label_id: str | None = None, n: int = 20, offset: int =
         got = unsure(c, label_id, n, offset)
         return {"labels": [{"id": concept["id"], "name": concept["name"], **unsure_counts(c, label_id),
                             "rows": got["rows"]}]}
-    wanted = [x for x in list_concepts(ws, trials=False) if not label_id or x["id"] == label_id]
+    wanted = [x for x in list_concepts(ws) if not label_id or x["id"] == label_id]
     return {"labels": [{"id": x["id"], "name": x["name"], **unsure_counts(c, x["id"])} for x in wanted]}
 
 

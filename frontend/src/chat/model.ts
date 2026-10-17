@@ -20,6 +20,8 @@ export interface UserRow {
   run?: number
   /** with `by` extension: the extension whose orientation instructions the message is */
   extension?: string
+  /** the plugin that sent the prompt as the analyst's, such as thimble's terminal panel (`run again`, a new label) */
+  plugin?: string
 }
 export interface TextRow {
   kind: 'text'
@@ -199,7 +201,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     const into = parent ? parent.children : rows
     switch (e.type) {
       case 'user':
-        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), event: e.event, run: e.run, extension: e.extension })
+        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), ...(e.plugin ? { plugin: e.plugin } : {}), event: e.event, run: e.run, extension: e.extension })
         return
       case 'text': {
         // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
@@ -1081,8 +1083,8 @@ export function madeBy(rows: readonly Row[]): Made {
         }
         case 'apply_label': {
           if (!ok) break
-          // a trial on a few units (`limit`) is no label until a call runs it on everything (backend concepts.py, Trials)
-          if (inp.limit == null || inp.limit === '') add(out.labels, inp.name)
+          // a trial on a few units (`limit`) too, which the Labels pane lists as a sample (backend concepts.py, Trials)
+          add(out.labels, inp.name)
           const name = str(inp.name).trim()
           const id = r.result?.label_card
           if (!id) break

@@ -932,8 +932,8 @@ def views_text(counts: dict[str, int], none: str = "orient-made-views") -> str:
     return ", ".join(tools.hint(VIEW_LINES[k], views=tools._count("view", n)) for k, n in counts.items() if n)
 
 def made_text(c: str, run: dict[str, Any]) -> str:
-    """What the orientation of `run` made, for the `orient-made-*` lines of prompts/tools.md: the labels it defined (not
-    trials) and the cards it made in its deck, and for a record from before 0.8.0 whose passes name `views`, the views
+    """What the orientation of `run` made, for the `orient-made-*` lines of prompts/tools.md: the labels it defined (trials
+    among them) and the cards it made in its deck, and for a record from before 0.8.0 whose passes name `views`, the views
     it proposed by build state; an earlier orientation's cards in the same deck are not counted. A record may name the
     deck's pass `analyze` or keep the deck as its `final` group."""
     from . import concepts, notebook  # noqa: PLC0415 — the workspace's stores, only read at the end
@@ -948,7 +948,7 @@ def made_text(c: str, run: dict[str, Any]) -> str:
     if "views" in passes:
         parts.append(views_text(view_counts(c, since)))
     ws = config.workspace_dir(c)
-    labels = new(concepts.list_concepts(ws, trials=False), "ts")
+    labels = new(concepts.list_concepts(ws), "ts")
     if labels:
         parts.append(tools._count("label", labels))
     groups = run.get("groups") or {}

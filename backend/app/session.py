@@ -12,7 +12,7 @@ When main's session ends and none takes over, everything thimble runs for the wo
 once no workspace has a main session the server stops itself (cli.stop_self).
 
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
-or local commands such as /model), browser events, task notifications, peer messages, tool calls and results, text,
+or local commands such as /model) and the prompts a plugin sent as theirs (PLUGIN_ORIGIN), browser events, task notifications, peer messages, tool calls and results, text,
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
 interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each, and so does the
 analyst's Stop of main in the browser, which leaves no record in the transcript and ends the turn (turn_stopped); a
@@ -120,7 +120,10 @@ SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # origin OLD_ORIGIN on the channel route, inside task notifications on the hook and Monitor routes
 OLD_TAG, OLD_ORIGIN, OLD_SOURCE = "channel", "channel", "plugin:thimble:thimble"
 # the origin of a line a plugin's module adds to the session, such as the notes thimble's module appends to main
-# ($.session.append, which Claude Code records as a meta user record): no chat shows it as the analyst's
+# ($.session.append, which Claude Code records as a meta user record): no chat shows it as the analyst's. A prompt a
+# plugin sends as the analyst's ($.prompt.submit with asUser, origin `asUser: true`, which Claude Code shows as
+# `Prompt from the <name> plugin`), such as the terminal panel's `run again` and `describe a new label`, is the analyst's
+# line, marked with the plugin's name (plugin_prompt)
 PLUGIN_ORIGIN = "plugin"
 # one event, as events.render writes it or 0.5.0's channel did
 EVENT_RE = re.compile(rf"^\s*<(?:{EVENT_TAG}|{OLD_TAG})\s([^>]*)>\n?(.*?)\n?</(?:{EVENT_TAG}|{OLD_TAG})>\s*$", re.S)
@@ -1590,6 +1593,14 @@ def _user_line(lv: Live, text: str, by: str = TERMINAL, *, analyst: bool = True,
     lv.fresh = True
     lv.turn_analyst = lv.turn_analyst or analyst
     _rec(lv, "user", text=text, by=by, **extra)
+
+
+def plugin_prompt(origin: Any) -> str | None:
+    """The plugin that sent a prompt as the analyst's (PLUGIN_ORIGIN with `asUser`), by its name; None for any other
+    origin, a plugin's note to main among them."""
+    if isinstance(origin, dict) and origin.get("kind") == PLUGIN_ORIGIN and origin.get("asUser") is True:
+        return str(origin.get("name") or "").strip() or PLUGIN_ORIGIN
+    return None
 
 
 def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
@@ -3374,6 +3385,10 @@ def translate(lv: Live, line: bytes | str) -> None:
             elif text.startswith(terminal_tools.NUDGE):
                 _nudged(lv)
             return
+        elif (plugin := plugin_prompt(rec.get("origin"))) is not None:
+            lv.local_prompt = None
+            if not text.lstrip().startswith("<"):
+                _user_line(lv, text.strip(), plugin=plugin)
         elif origin == "human" or origin is None:
             command = _command_line(text)
             pid = str(rec.get("promptId") or "")
@@ -3423,7 +3438,11 @@ def translate(lv: Live, line: bytes | str) -> None:
             elif aorigin == "peer":
                 _peer(lv, mid_turn=True, origin=att.get("origin"))
             elif aorigin == PLUGIN_ORIGIN:
-                pass  # a plugin's line, such as thimble's note to main after a Stop: never the analyst's
+                # a prompt a plugin sent as the analyst's while main worked; any other plugin line, such as thimble's
+                # note to main after a Stop, is never the analyst's
+                plugin = plugin_prompt(att.get("origin"))
+                if plugin is not None and prompt.strip() and not prompt.lstrip().startswith("<"):
+                    _rec(lv, "user", text=prompt.strip(), by=TERMINAL, plugin=plugin)
             elif prompt.strip() and not prompt.lstrip().startswith("<"):
                 _rec(lv, "user", text=prompt.strip(), by=TERMINAL)
         elif att.get("type") == "model":

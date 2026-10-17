@@ -28,7 +28,7 @@ import type { Ctx } from './ctx'
 import { act } from './data'
 import type { Line, Seg } from './draw'
 import { hueOf } from './labels'
-import { plainCites } from './cite'
+import { plainProse } from './cite'
 import { clip, noControls, quoted } from './lib'
 import { linesEl } from './lines'
 import { COLORS } from './paint'
@@ -84,9 +84,6 @@ export async function openChecks(cx: Ctx, commentId?: string): Promise<void> {
   await cx.setChecksOpen(c?.id ?? null)
   await openPanel(cx, { view: 'checks', title: c ? noControls(c.checkName) : 'Checks', ...(c ? { mode: 'comment' } : {}) })
 }
-
-/** A check's words as read: citations as their words or `[ chip ]` (plainCites), no `**` or backticks of Markdown. */
-const prose = (s: string): string => plainCites(noControls(s)).replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/`([^`\n]+)`/g, '$1')
 
 /** The view moved to comment `c` (n, p, a dismiss), its step's title that comment's check, in place of the step. */
 async function stepTo(cx: Ctx, c: AnswerComment | undefined): Promise<void> {
@@ -147,9 +144,9 @@ async function drawChecks(cx: Ctx, e: PaneEvent, _p: TermPanel): Promise<RenderE
   const body: RenderElement[] = [...headerEls(els as never, { title: noControls(c.checkName), cols, right, sub: subLine([`on your answer${when ? ` at ${when}` : ''}`, noControls(c.about)]) })]
   // the passage with the check's flag in its color, the comment, its details
   const rows: [string, RenderElement | string, string?][] = [
-    ['passage', <Text wrap="wrap">{prose(c.quote)}</Text>],
-    ['comment', <Text wrap="wrap">{prose(c.text)}</Text>],
-    ...(c.details ? [['details', <Text dimColor wrap="wrap">{prose(c.details)}</Text>] as [string, RenderElement]] : []),
+    ['passage', <Text wrap="wrap">{plainProse(c.quote)}</Text>],
+    ['comment', <Text wrap="wrap">{plainProse(c.text)}</Text>],
+    ...(c.details ? [['details', <Text dimColor wrap="wrap">{plainProse(c.details)}</Text>] as [string, RenderElement]] : []),
   ]
   body.push(
     <Box key={marginKey('checks-comment')} flexDirection="row">

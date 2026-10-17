@@ -1258,7 +1258,7 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   const f = await featuresOf(cx)
   const coverage = f.coverage ? noControls((await cx.coverageSummary())?.line ?? '') : null
   const cites: HomeCite[] | null = f.citationMarks ? (await citeItems(cx)).map(c => ({ key: c.key, value: noControls(c.value), place: noControls(c.chip ?? citePlace(c.ref)), verdict: c.verdict, why: c.why, ref: c.ref, ...(c.card ? { card: c.card, n: c.n } : {}) })) : null
-  const comments: HomeComment[] | null = f.checks ? (await openComments(cx)).map(c => ({ id: c.id, check: noControls(c.checkName), colour: hueOf(c.color || 2), quote: noControls(c.quote) })) : null
+  const comments: HomeComment[] | null = f.checks ? (await openComments(cx)).map(c => ({ id: c.id, check: noControls(c.checkName), colour: hueOf(c.color || 2), quote: noControls(c.quote), ref: c.ref })) : null
   return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels }
 }
 

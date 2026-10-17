@@ -120,6 +120,39 @@ def test_the_tail_translates_a_turn_and_skips_every_other_record(cwd, tmp_path):
     assert len(_log(agents.MAIN_ID)) == n  # nothing new
 
 
+def test_a_prompt_the_terminal_panel_sends_as_the_analyst_s_and_its_answer_reach_main_s_chat(cwd, tmp_path):
+    """Bug hunt 2, C1: the terminal panel's `run again` and `describe a new label` send main a prompt as the analyst's
+    ($.prompt.submit with asUser), which Claude Code records with origin {kind: plugin, name: thimble, asUser: true}.
+    The mirror skipped it and main's answer, so the browser's chat never showed main's question to the analyst. Such a
+    prompt is the analyst's line, marked with its plugin, sent idle or queued while main worked; a plugin's note to main
+    (a meta record, no asUser) still shows nowhere."""
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = _attach(cwd, p)
+    session.tail_once(lv)
+    panel = {"kind": "plugin", "name": "thimble", "asUser": True}
+    _append(p, lv, [
+        {"type": "user", "isMeta": True, "origin": {"kind": "plugin", "name": "thimble"},
+         "message": {"content": [{"type": "text", "text": "thimble: the analyst started thimble's view-builder"}]}},
+        {"type": "user", "origin": panel, "promptSource": "system",
+         "message": {"role": "user", "content": "Make a label with apply_label and try it on a sample of 30: probes"}},
+        _assistant(_say("I made the label. Should coordination notes count as real content?")),
+        {"type": "attachment", "attachment": {"type": "queued_command", "origin": panel,
+                                              "prompt": "Run this card again with Bash: thimble-run card c1"}},
+        _assistant(_say("I ran the card again.")),
+        END,
+    ])
+    recs = [(r["type"], r.get("text") or r.get("delta"), r.get("plugin")) for r in _mirror()]
+    assert recs == [
+        ("user", "Make a label with apply_label and try it on a sample of 30: probes", "thimble"),
+        ("text", "I made the label. Should coordination notes count as real content?", None),
+        ("user", "Run this card again with Bash: thimble-run card c1", "thimble"),
+        ("text", "I ran the card again.", None),
+        ("done", None, None),
+    ], recs
+    assert not lv.degraded
+
+
 def test_mains_model_and_effort_are_known_from_the_first_prompt_and_never_guessed(cwd, tmp_path):
     """B30: before main's first prompt the composer's chip has no effort to show but one the analyst's settings choose,
     not a top-level `effortLevel` in the user's file that Claude Code does not read for main's model; from the prompt on,

@@ -12,12 +12,6 @@ const FILE_UNITS = new Set(['record', 'agent', 'run'])
 /** Whether a label is over files (records, files or runs), so the Files pane lists it. */
 export const isFilesLabel = (k: Pick<Concept, 'unit'>): boolean => FILE_UNITS.has(k.unit)
 
-/** Whether the Files pane's Labels list shows a label: any label that is no trial, since a trial a chat ran on a few
- * units with `limit` is no label until it runs on everything (backend concepts.py, Trials), and a trial over files
- * that is on, since its marks in the reader and the views need their row. Labels over cards and report sentences are
- * listed too: the pane is where labels are made and edited, whatever they label (LabelsPane). */
-export const listedInFiles = (k: Pick<Concept, 'unit' | 'trial' | 'shown'>): boolean => !k.trial || (isFilesLabel(k) && !!k.shown)
-
 /** What a label labels, as the edit card's Over names it: records or files (`files`), canvas cards, report sentences. */
 export type LabelOver = 'files' | 'cards' | 'sentences'
 
@@ -258,10 +252,10 @@ export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?
 
 /** Where a label over files stands, for its row in the Labels pane: an apply running (done of total units, or of the
  * files while they are indexed and the total is not known), the last run's outcome (its total null when the run kept
- * none it can state), or a failed run with its message. */
+ * none it can state; `sample` for a trial, run on a sample of its units), or a failed run with its message. */
 export type LabelStatus =
   | { state: 'running'; done: number; total: number | null; unit: string }
-  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null }
+  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null; sample?: boolean }
   | { state: 'error'; message: string }
 
 /** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
@@ -279,7 +273,8 @@ const later = (a: string | null | undefined, b: string | null | undefined): bool
  * on the label. A run that ended after the kept one stands in for it until the list is read again (a failed run sends
  * no `concepts` event). The kept run's count is matchedCount over the label's counts; before counts are known, the
  * run's `matches`. `cut` is the whole files or runs that run read only in part. */
-export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'last_run' | 'run'>, live?: ConceptRun | null): LabelStatus | null {
+export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'last_run' | 'run' | 'trial'>, live?: ConceptRun | null): LabelStatus | null {
+  const sample = k.trial ? { sample: true } : {}
   const run = live ?? k.run ?? null
   if (run?.status === 'running') {
     if (run.total != null) return { state: 'running', done: run.done ?? 0, total: run.total, unit: k.unit }
@@ -290,19 +285,22 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   if (run && (run.status === 'error' || run.status === 'done') && (!last || later(run.started, last.ts))) {
     if (run.status === 'error') return { state: 'error', message: run.message || 'the run failed' }
     const matches = run.matches ?? 0
-    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null }
+    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null, ...sample }
   }
   if (!last) return null
   if (last.status === 'error') return { state: 'error', message: last.message || 'the run failed' }
   const total = last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
-  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null }
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null, ...sample }
 }
 
-/** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, with "· 3 failed"
- * when units failed; the time follows it on the row. */
+/** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, a trial's as
+ * "20 of a sample of 30 records" (the canvas's and the terminal's `a sample of 30`), with "· 3 failed" when units
+ * failed; the time follows it on the row. */
 export function outcomeText(s: Extract<LabelStatus, { state: 'done' }>): string {
-  return s.total == null ? `${s.matches.toLocaleString()} ${unitWord(s.unit, s.matches)}` : `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
+  const n = s.matches.toLocaleString()
+  if (s.total == null) return `${n} ${unitWord(s.unit, s.matches)}${s.sample ? ' in a sample' : ''}`
+  return `${n} of ${s.sample ? 'a sample of ' : ''}${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
 }
 
 /** How many records a finished apply could not label, as the label row says it after the outcome: "230 failed"; ''

@@ -18,7 +18,7 @@
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from './types'
 import { lineWidth, placeWords, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, inlineRuns, isChip, isClock, labelRef, linksAsSpans, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
+import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, inlineRuns, isChip, isClock, labelRef, linksAsSpans, noControls, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -540,6 +540,12 @@ export function plainCites(text: string, chips = true): string {
   // a citation written as a Markdown link reads as its `[[…]]` spelling first
   const spans = withoutOwnParens(linksAsSpans(text))
   return plainLinks(citations(spans).reduce((t, c) => t.replaceAll(c.raw, c.display ?? (chips ? chipText(c) : chipWords(c))), spans))
+}
+
+/** A check's words as read (a passage of an answer, a comment): citations as their words or `[ chip ]` (plainCites),
+ *  no `**` or backticks of Markdown. */
+export function plainProse(s: string): string {
+  return plainCites(noControls(s)).replace(/\*\*([^*\n]+)\*\*/g, '$1').replace(/`([^`\n]+)`/g, '$1')
 }
 
 // ---------------------------------------------------------------------------------------- a cited record
