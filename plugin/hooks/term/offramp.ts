@@ -4,14 +4,19 @@
 // shows what happens: the toast `starting thimble's page…` at once; then, on this machine, a watch of the claim file for
 // 12 s, which ends in the toast `opened in the browser · 127.0.0.1:<port>` or the notice `open:not-claimed`; over SSH
 // the one row above the prompt with the tunnel command (band.tsx), whose `copy link` copies a one-time link that the
-// open wrote to a file only the person can read. A failure posts its notice (notices.tsx) with the acts that fix it.
+// open wrote to a file only the person can read; on Claude Code's main screen, which takes no clicks, the panel also
+// opens on that row with its acts on keys (waitview.tsx). A failure posts its notice (notices.tsx) with the acts that
+// fix it.
 //
 // Callers: `/thimble browser`, `o` and the title row's `↗` in every panel view (panel.tsx wayRow), a card's `↗`, the
 // checks' `open in the browser`, a notice's `open ›` for a code ticket.
 import type { Ctx } from './ctx'
 import { noControls } from './lib'
 import { dismissModNotice, onNoticeAct, postNotice } from './notices'
-import { rt } from './term'
+import { classicScreen, openPanel, rt } from './term'
+
+/** The key of the SSH row as home and the panel's `waiting` view name it (band.tsx waitItems, waitview.tsx). */
+export const BROWSER_ITEM = 'browser'
 
 /** How long the claim of a sign-in is watched for, and how often. */
 export const CLAIM_MS = 12_000
@@ -143,6 +148,9 @@ export async function openInBrowser(cx: Ctx, ref: string): Promise<void> {
     linkFile = got.link_file ?? ''
     const tunnel = noControls(got.tunnel ?? `ssh -N -L ${got.port}:127.0.0.1:${got.port} <your ssh host>`)
     await cx.setLinks({ tunnel, et: got.et ? noControls(got.et) : null, url: noControls(got.url) })
+    // Claude Code's main screen takes no clicks, so the SSH row's `copy link` cannot be pressed there: the panel shows
+    // the row with its acts on keys (waitview.tsx; bug hunt F1)
+    if (classicScreen()) await openPanel(cx, { view: 'waiting', title: 'browser', slug: BROWSER_ITEM })
     return
   }
   if (!got.opened) {

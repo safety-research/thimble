@@ -268,7 +268,12 @@ it off, use `/plugin` (everywhere, or for one project). `/thimble` opens its pan
 Once on, Claude makes cards and checked citations, which the terminal draws under its replies, and one dim line under an
 answer that read data says how much of the data Claude's tool calls saw (Coverage). The line above the prompt sums up
 what is new; a press on an item opens thimble's panel at that section: Coverage, Citations, Labels, Threads, Views and
-Checks, then Cards, Documents and Files. The panel opens on the right from 144 columns, and above the prompt below that.
+Checks, then Cards, Documents and Files. In Claude Code's fullscreen layout the panel opens on the right (from 110
+columns when you open it, from 144 when thimble opens it), and above the prompt below that. On Claude Code's main
+screen (the classic renderer) it always opens above the prompt, and nothing takes a click there: the line above the
+prompt then ends with `/thimble to use these with keys`. `/thimble` opens home, which lists the rows above the prompt
+first (a view proposal, notices, the browser's sign-in row); Enter on one shows its actions on number keys.
+`/thimble coverage`, `citations`, `labels`, `threads` and `checks` open the line's sections.
 
 `/thimble browser`, or `o` in the panel, opens the browser workbench on the same session ([Signing in](#signing-in)): the
 chat, the canvas, the File browser, labels, views and report writing. The report is written and edited in the browser;

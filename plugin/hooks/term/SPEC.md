@@ -459,7 +459,10 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   bold in the accent and underlined (its press opens home), then `cards`, `threads`, `citations`, `labels`, `checks`
   and `coverage`, each a name in the accent and its value bold, a purple `•` for what is new since its section was
   last seen; each name's press opens its section (band.tsx has the whole design). No `open ›`, no `dismiss`. Side
-  threads have their `↳` rows and thimble's agents Claude Code's agent tray, so no row repeats them.
+  threads have their `↳` rows and thimble's agents Claude Code's agent tray, so no row repeats them. On Claude Code's
+  main screen (the classic renderer), which takes no clicks, the line ends with `/thimble to use these with keys` dim
+  where it fits, and home lists the rows above the prompt that wait first, each opening its acts on digit keys
+  (waitview.tsx; bug hunt F1).
 - Every row above the prompt but the thimble line is one line (the owner's live test, 10-17): a dim label column, then
   its words cut at a word with `…` where its acts begin, then its acts at the right, two cells apart, each in the
   accent and underlined under the pointer (no inverse), as the thimble line's names are, the row's main act bold. A

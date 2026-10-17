@@ -53,9 +53,9 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { ORIENT_ROLES, PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, keysBack, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, readThread, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
+import { ORIENT_ROLES, PANEL, citePage, classicScreen, closePanel, deleteLabel, filterLabel, inPanelNow, keysBack, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, readThread, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, runReads, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
-import { featuresOf, openComments, openSection } from './band'
+import { featuresOf, openComments, openSection, waitItems } from './band'
 import { openChecks } from './checksview'
 import { citeItems, citePlace, openCitations } from './citesview'
 import { coverageTitle, openCoverage } from './coverageview'
@@ -573,6 +573,8 @@ function crumbText(s: ChatNavStep): string {
       return 'documents'
     case 'ask':
       return 'new thread'
+    case 'waiting':
+      return s.title
     case 'coverage': {
       // a folder drilled into by its path, a group of its files by its pattern or type; the corpus's top as the view's
       // name
@@ -1327,7 +1329,10 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   const coverage = f.coverage ? noControls((await cx.coverageSummary())?.line ?? '') : null
   const cites: HomeCite[] | null = f.citationMarks ? (await citeItems(cx)).map(c => ({ key: c.key, value: noControls(c.value), place: noControls(c.chip ?? citePlace(c.ref)), verdict: c.verdict, why: c.why, ref: c.ref, ...(c.card ? { card: c.card, n: c.n } : {}) })) : null
   const comments: HomeComment[] | null = f.checks ? (await openComments(cx)).map(c => ({ id: c.id, check: noControls(c.checkName), colour: hueOf(c.color || 2), quote: noControls(c.quote), ref: c.ref })) : null
-  return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels }
+  // on Claude Code's main screen, which takes no clicks, the rows above the prompt, first, with their acts on keys (bug
+  // hunt F1); in fullscreen they take clicks there, and home leaves them out
+  const waiting = classicScreen() ? (await waitItems(cx)).map(w => ({ key: w.key, label: w.label, title: w.name || w.words })) : null
+  return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels, waiting }
 }
 
 /** The labels as home and the labels list draw them (home.ts labelBlocks): each with its values' counts and colors, its
@@ -1474,6 +1479,8 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
       return o.card ? openCard(cx, o.card) : openCite(cx, o.ref, o.display)
     case 'comment':
       return openChecks(cx, o.id)
+    case 'waiting':
+      return openPanel(cx, { view: 'waiting', title: o.label, slug: o.key })
     case 'pane': {
       // a section's list: its `new` on the summary line cleared (band.tsx)
       if (o.view === 'reports') return openSection(cx, 'docs')
