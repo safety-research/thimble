@@ -1,12 +1,14 @@
 // The card pane: how the card's last run ended, `run again` (r) asking main to run it, and what its code printed; a
-// card's takeaway one blank row under its label row; every citation inside a card in the citation's purple.
+// card's takeaway one blank row under its label row; every citation inside a card in the citation's purple; a plan's
+// steps, each a bold title after its number and state glyph with its words, output and note under it.
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { cardOfCell } from '../cell'
 import type { ThimbleCell } from '../cell'
-import { cardLayout } from '../draw'
+import { cardLayout, stepParts } from '../draw'
+import type { Line } from '../draw'
 import { COLORS } from '../paint'
 import { CELLS, CWD, shown, world } from './fixtures'
 import type { World } from './fixtures'
@@ -99,14 +101,74 @@ test('a card with no label: its takeaway right under the card', async ($, on) =>
   await ui.unmount()
 })
 
-test("inside a card every citation and evidence link is in the citation's purple: an example's ↗ and place, a timeline's ↗; one underline color", () => {
+test("inside a card every citation and evidence mark is in the citation's purple: an example's ● and its ↗ and place, a timeline's ↗; one underline color; bold, not inverse, under the pointer", () => {
   // MATT-NOTES "Mockup feedback": "no two underline colors"; the link color stays for actions (↗ open, buttons)
   const example = cardOfCell({ id: 'x0quot00', notebook: 'g1', kind: 'example', title: 'Was anything force-pushed?', takeaway: '', labels: [], created_by: 'main', status: 'ok', payload: { refs: [{ ref: 'events.jsonl#L197', quote: '{"forced": true}' }] } } as unknown as ThimbleCell).card
   const segs = cardLayout(example, 80, -1).lines.flat()
+  // its bullet too: one evidence color in a card (the owner, 10-17: "card bullet and citations are different colors")
+  expect(segs.find(g => g.s === '● ')).toEqual({ s: '● ', fg: COLORS.cite })
   expect(segs.find(g => g.s === '↗')).toEqual({ s: '↗', fg: COLORS.cite })
   expect(segs.find(g => g.s.startsWith('events.jsonl'))).toEqual({ s: 'events.jsonl line 197', fg: COLORS.cite, u: true })
   expect(segs.some(g => g.fg === COLORS.link)).toBe(false)
+  expect(new Set(segs.filter(g => g.fg).map(g => g.fg))).toEqual(new Set([COLORS.cite]))
+  // the record under the pointer: its place bold, never inverse
+  const on = cardLayout(example, 80, 0).lines.flat()
+  expect(on.find(g => g.s.startsWith('events.jsonl'))).toEqual({ s: 'events.jsonl line 197', fg: COLORS.cite, u: true, b: true })
+  expect(on.some(g => g.inv || g.bg)).toBe(false)
   const timeline = cardOfCell({ ...(CELLS.e0time00 as object), outputs: [{ 'application/vnd.thimble.timeline+json': { events: [{ time: '2026-05-24', label: 'first saves', ref: 'events.jsonl#L3' }, { time: '2026-06-18', label: 'peak afternoon' }] } }] } as unknown as ThimbleCell).card
   const marks = cardLayout(timeline, 60, -1).lines.flat().filter(g => g.s === '↗')
   expect(marks).toEqual([{ s: '↗', fg: COLORS.cite }])
+})
+
+/** The 5-step plan the owner's live test drew (10-17), its statuses one of each kind. */
+const PLAN_STEPS = [
+  { text: 'Read each session closely: one agent per participant reads the transcript and what they typed into thimble, and writes a memo of initial codes, each with a timestamped quote.', makes: ['7 participant memos'], status: 'done', started: '2026-10-16T10:00:00Z', ended: '2026-10-16T10:42:00Z' },
+  { text: 'Merge the codes: group the initial codes of all seven memos into a shared codebook with a definition and two quotes per code.', makes: ['codebook'], status: 'running', time: '12 m' },
+  { text: 'Label every session with the codebook', makes: ['a label per code'], status: 'not started' },
+  { text: 'Check the labels against the memos: sample ten units per code and read them against its definition; note where they disagree.', makes: ['agreement per code'], status: 'needs you', note: 'Two codes overlap; which to keep is your call.' },
+  { text: 'Write it up: one section per theme, each with its codes, how many sessions show it, and three quotes.', makes: ['report'], status: 'not started' },
+]
+
+const plain = (l: Line) => l.map(g => g.s).join('')
+
+test("a plan step's title is the clause before its first colon; a colon inside a time or an address is no clause's end", () => {
+  expect(stepParts('Read each session closely: one agent per participant reads it.')).toEqual({ title: 'Read each session closely', rest: 'one agent per participant reads it.' })
+  expect(stepParts('Run the 10:53 job again')).toEqual({ title: 'Run the 10:53 job again', rest: '' })
+  expect(stepParts('Fetch https://example.org/a then read it')).toEqual({ title: 'Fetch https://example.org/a then read it', rest: '' })
+})
+
+test("a plan card: each step's number, its state glyph and its title in bold, its words under the title at one width, its output dim on its own row, a blank row between steps", () => {
+  const card = cardOfCell({ id: 'p0plan00', notebook: 'g1', kind: 'plan', title: 'How do participants use thimble?', takeaway: '', labels: [], created_by: 'main', status: 'ok', payload: { steps: PLAN_STEPS } } as unknown as ThimbleCell).card
+  const cols = 80
+  const lines = cardLayout(card, cols, -1).lines
+  const text = lines.map(plain)
+  // no bracketed status word on any step (the owner: "[not started] repeats on every step")
+  expect(text.some(t => /\[(?:not started|running|done|needs you)/.test(t))).toBe(false)
+  // the first step: `1. ● Read each session closely` with its time at the right edge, dim
+  expect(text[0]!.startsWith('1. ● Read each session closely')).toBe(true)
+  expect(lines[0]!.find(g => g.s === 'Read each session closely')).toEqual({ s: 'Read each session closely', b: true })
+  expect(lines[0]!.at(-1)).toEqual({ s: '42 m', fg: COLORS.dim })
+  expect(text[0]!.length).toBe(cols)
+  // each status's glyph: done ●, running ◌ in the accent, not started ○ dim, needs you ! in red
+  const heads = lines.filter(l => /^\d\. /.test(plain(l)))
+  expect(heads.length).toBe(5)
+  expect(heads.map(l => l[1])).toEqual([{ s: '●' }, { s: '◌', fg: COLORS.accent }, { s: '○', fg: COLORS.dim }, { s: '!', fg: COLORS.problem }, { s: '○', fg: COLORS.dim }])
+  // a blank row before every step but the first
+  for (const h of heads.slice(1)) expect(lines[lines.indexOf(h) - 1]).toEqual([])
+  // the rest of a step's words in the text color, indented under its title, wrapped at one width for every step: a row
+  // ends only where its next word would not fit
+  const room = cols - 5
+  const body = lines.filter(l => l.length === 2 && l[0]!.s === '     ' && !l[1]!.fg && !l[1]!.b)
+  expect(body.length).toBeGreaterThan(4)
+  for (const l of lines) expect(plain(l).length).toBeLessThanOrEqual(cols)
+  for (const [i, l] of body.entries()) {
+    const next = body[i + 1]
+    if (next && lines.indexOf(next) === lines.indexOf(l) + 1) expect(l[1]!.s.length + 1 + next[1]!.s.split(' ')[0]!.length).toBeGreaterThan(room)
+  }
+  // what a step makes on its own row, dim, under the title; a note dim under it
+  const made = lines.find(l => plain(l).trim() === '→ 7 participant memos')!
+  expect(made).toEqual([{ s: '     ' }, { s: '→ 7 participant memos', fg: COLORS.dim }])
+  expect(text).toContain('     Two codes overlap; which to keep is your call.')
+  // a step with no colon is all title
+  expect(text).toContain('3. ○ Label every session with the codebook')
 })

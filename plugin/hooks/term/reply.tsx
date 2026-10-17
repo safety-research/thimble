@@ -15,11 +15,12 @@
 // A citation's state (cite.ts chipLook): a purple ◌ one space after it, not underlined, while its place is resolved or
 // thimble's links check runs on a card's takeaway, nothing once it is found (never a ✓), a red × when it is not there or the check found another
 // value. A citation the check rewrote (another value, another place) reads as rewritten, with no mark and no words
-// beside it; its panel's history shows what Claude wrote. The citation under the pointer shows its status in plain words (where it was found, or why not)
-// on a quiet box. With "Citation marks" off a citation is a plain link: no mark, no check.
+// beside it; its panel's history shows what Claude wrote. The citation under the pointer turns bold, nothing more: a
+// press opens its panel, which says where it was found or why not. With "Citation marks" off a citation is a plain
+// link: no mark, no check.
 //
 // A passage of main's answer a check commented on (SPEC-v2 3.12) is tinted in the check's color (16%, 30% while its
-// comment is open in the panel) and carries a flag ⚑ in that color in the margin on its first row; its paragraph is
+// comment is open in the panel; a pale wash on a light theme, paint.ts passageTint) and carries a flag ⚑ in that color in the margin on its first row; its paragraph is
 // drawn by the mod's own layout (para.tsx, cite.ts), which knows where it wraps. A click on either opens the panel at
 // Checks. In fullscreen a card's border row ends with a ↗ that opens the card in the browser; a custom card draws its
 // table or its words and a `view in browser ↗` link.
@@ -37,7 +38,7 @@ import type { Target } from './gestures'
 import { bareCard, cardTag, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
-import { COLORS, FLAG, labelHex, paintLines, themeNow, tintOf } from './paint'
+import { COLORS, FLAG, labelHex, paintLines, passageTint } from './paint'
 import { labelLinkStale, labelsOf } from './model'
 import { loadCards, queueCitations, rt } from './term'
 import type { AnswerComment } from './contracts'
@@ -564,7 +565,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
           const where = passageIn(plain, text.slice(at[0], at[1]))
           if (!where || !lay) continue
           const color = labelHex(c.color)
-          tints.push({ ...where, bg: tintOf(color, themeNow(), opts.lit === c.id ? 0.3 : 0.16), id: c.id })
+          tints.push({ ...where, bg: passageTint(color, opts.lit === c.id), id: c.id })
           const cells = tintCells(lay, where)
           if (cells.length && (!flag || cells[0]!.line < flag.row)) flag = { row: cells[0]!.line, color, id: c.id }
         }

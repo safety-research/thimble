@@ -558,11 +558,11 @@ export const register: Register = (on, options) => {
 
   // the feature switches: a person's /config change of a thimble row reaches thimble's config at once (settings.ts),
   // from `e.value` (this fires before the write, while `options` holds the old value); before thimble is on it waits
-  // for the sync at activation. A theme change repaints the cards in that theme's palette.
+  // for the sync at activation. A theme change repaints the cards in that theme's palette and the passages' tints.
   on('config.set', { key: /^thimble\.|^theme$/ }, async ($, e, next) => {
     if (e.key === 'theme') {
       const r = await next(e)
-      setTheme(/light/i.test(String(e.value ?? '')) ? 'light' : 'dark')
+      if (!r.deny) setTheme(await cxOf($).theme(r.value))
       return r
     }
     if (e.origin.kind === 'composer' && isActive()) await pushChange(cxOf($), e.key, e.value)

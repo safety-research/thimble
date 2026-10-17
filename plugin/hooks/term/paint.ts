@@ -24,19 +24,43 @@ export const SERIES: string[] = [...SERIES_DARK]
 export const LABEL_HUES: string[] = [...LABEL_DARK]
 export const PICKED_HUES: string[] = [...PICKED_DARK]
 
-/** The theme the palette arrays hold now. */
-const painted = { theme: 'dark' as Theme }
+/** The theme the palette arrays hold now, and whether thimble knows it is the one Claude Code draws in (`known`). */
+const painted = { theme: 'dark' as Theme, known: true }
 
-/** The palette arrays filled with `theme`'s colors (light for a light Claude Code theme, Dark for any other). */
-export function setTheme(theme: Theme): void {
-  painted.theme = theme
-  SERIES.splice(0, SERIES.length, ...(theme === 'light' ? SERIES_LIGHT : SERIES_DARK))
-  LABEL_HUES.splice(0, LABEL_HUES.length, ...(theme === 'light' ? LABEL_LIGHT : LABEL_DARK))
-  PICKED_HUES.splice(0, PICKED_HUES.length, ...(theme === 'light' ? PICKED_LIGHT : PICKED_DARK))
+/** The palette arrays filled with `theme`'s colors (light for a light Claude Code theme, Dark for any other); null when
+ *  the theme is not known (themeFrom), which draws Dark's palette and the backgrounds in theme keys (passageTint). */
+export function setTheme(theme: Theme | null): void {
+  const t = theme ?? 'dark'
+  painted.theme = t
+  painted.known = theme !== null
+  SERIES.splice(0, SERIES.length, ...(t === 'light' ? SERIES_LIGHT : SERIES_DARK))
+  LABEL_HUES.splice(0, LABEL_HUES.length, ...(t === 'light' ? LABEL_LIGHT : LABEL_DARK))
+  PICKED_HUES.splice(0, PICKED_HUES.length, ...(t === 'light' ? PICKED_LIGHT : PICKED_DARK))
 }
 
 export function themeNow(): Theme {
   return painted.theme
+}
+
+/**
+ * The theme Claude Code draws in, from its `theme` setting (the /config row's value), as Claude Code resolves it:
+ * `light`, `light-daltonized` and `light-ansi` are light, the `dark` ones dark; a custom theme (`custom:<slug>`) is its
+ * file's `base` (`customBase`), dark when it is disabled in safe mode. `auto` (match terminal) is what the terminal's
+ * background is: Claude Code asks the terminal (OSC 11) and tells no plugin, so thimble reads what Claude Code falls back
+ * on, COLORFGBG (`fgbg`, its last field a color 0-15: 0-6 and 8 dark, else light). Null when nothing says which (`auto`
+ * with no COLORFGBG, a plugin's theme): the drawing then puts no background of its own color behind text.
+ */
+export function themeFrom(setting: unknown, fgbg?: string, customBase?: string): Theme | null {
+  const s = String(setting ?? '').trim()
+  if (!s) return 'dark'
+  if (s.endsWith('(disabled in safe mode)')) return 'dark'
+  if (s === 'auto') {
+    const bg = Number((fgbg ?? '').split(';').at(-1) || NaN)
+    if (!Number.isInteger(bg) || bg < 0 || bg > 15) return null
+    return bg <= 6 || bg === 8 ? 'dark' : 'light'
+  }
+  if (s.startsWith('custom:')) return customBase ? (customBase.startsWith('light') ? 'light' : 'dark') : null
+  return s.startsWith('light') ? 'light' : 'dark'
 }
 
 /** Label color `place` (1-12, then 13-18) in the theme's palette; a check's color is a place 1-8 of the same table. */
@@ -54,7 +78,7 @@ export const FLAG = '⚑'
 const GROUND: Record<Theme, string> = { dark: '#1e1e1e', light: '#ffffff' }
 
 /** A passage's tint: `hex` blended toward the theme's background, `share` of it the color (0.16 as drawn, 0.3 while
- *  its comment is open in the panel). */
+ *  its comment is open in the panel): a pale wash on a light theme, a dark one on a dark theme. */
 export function tintOf(hex: string, theme: Theme, share: number): string {
   const rgb = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
   const [a, b] = [rgb(hex), rgb(GROUND[theme])]
@@ -62,19 +86,28 @@ export function tintOf(hex: string, theme: Theme, share: number): string {
   return `#${a.map((v, i) => Math.round(v * share + b[i]! * (1 - share)).toString(16).padStart(2, '0')).join('')}`
 }
 
+/** The background of a passage a check commented on: the check's color `hex` as a tint of the theme (16%, 30% while its
+ *  comment is open in the panel, `lit`); while the theme is not known, a theme key Claude Code resolves for the theme
+ *  it draws in (COLORS.wash, COLORS.selected while lit), since a tint for the wrong theme hides the text on it. */
+export function passageTint(hex: string, lit: boolean): string {
+  if (!painted.known) return lit ? COLORS.selected : COLORS.wash
+  return tintOf(hex, painted.theme, lit ? 0.3 : 0.16)
+}
+
 /** Where a citation's value stands in its place (its cited lines, a card's cited cell or row, the code that types it):
  *  Claude Code's violet (COLORS.cite: rgb(175,135,255) on dark themes, rgb(135,0,255) on light) blended toward the
  *  theme's background, so the text on it keeps its own color (v9 review: "the cited value highlighted in purple in the
- *  source text"). */
-export function citeHighlight(theme: Theme = painted.theme): string {
-  return theme === 'light' ? tintOf('#8700ff', 'light', 0.18) : tintOf('#af87ff', 'dark', 0.35)
+ *  source text"); while the theme is not known, the selection background (COLORS.selected), a theme key. */
+export function citeHighlight(theme?: Theme): string {
+  if (!theme && !painted.known) return COLORS.selected
+  return (theme ?? painted.theme) === 'light' ? tintOf('#8700ff', 'light', 0.18) : tintOf('#af87ff', 'dark', 0.35)
 }
 
 // What each colour means (SPEC.md, "The visual system", section 4): letters in the text colour or dim; lines in
-// the rule grey; links in blue; citations in purple, a card's evidence links too; a panel's title and its selected row in
-// the accent; the word "new" and a citation panel's `checked` in green; a palette hue only on the glyphs and marks of a
-// region's one colour field; red only for a problem; the selection background on a choice in use. No other colour: no
-// warning amber, and no green but those two.
+// the rule grey; links in blue; citations in purple, a card's evidence too (an example's ● and its ↗ place); a panel's
+// title and its selected row in the accent; the word "new" and a citation panel's `checked` in green; a palette hue
+// only on the glyphs and marks of a region's one colour field; red only for a problem; the selection background on a
+// choice in use. No other colour: no warning amber, and no green but those two.
 export const COLORS = {
   /** the chart series: SERIES itself, so a theme change repaints them */
   series: SERIES,
@@ -102,8 +135,10 @@ export const COLORS = {
   fresh: 'success',
   /** a citation's state word `checked` in its panel's bar (MATT-NOTES "Mockup feedback", citation panel C) */
   checked: 'success',
-  /** the background of the tip of the citation under the pointer */
+  /** the background of a tip beside what is under the pointer (a view's region) */
   tip: 'userMessageBackground',
+  /** a passage a check commented on, while the theme is not known (passageTint) */
+  wash: 'userMessageBackground',
   /** the background of the analyst's question in a side thread, as Claude Code draws a prompt in its chat */
   prompt: 'userMessageBackground',
   /** the rules above and below an entry box (entry.tsx), as Claude Code draws its prompt box's border */

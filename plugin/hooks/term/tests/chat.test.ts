@@ -1,5 +1,6 @@
 // Main's chat as thimble-term draws it: a citation purple and underlined, a purple ◌ a space after it while checked,
-// checked as soon as it streams, no mark once found, red with × once it failed; a time's tip; a value the check
+// checked as soon as it streams, no mark once found, red with × once it failed, bold under the pointer with nothing
+// beside it; a time's tip; a value the check
 // corrected; the footer's `◌ checking N` and `N failed`; a reply as it streams handed to Claude Code as links, stored as
 // written; a card's value checked again when the card changes; the writer's finished line linking the document out;
 // with "Citation marks" off a plain link and no check. `claude plugin test plugin`.
@@ -136,10 +137,13 @@ test("a citation is purple and underlined, a purple ◌ a space after it while i
   expect(segs.find(g => g.s.includes('◌'))).toEqual({ s: '◌', fg: COLORS.cite })
   expect(segs.filter(g => g.u).map(g => g.s).join('')).toBe('4,579')
   expect(segs.map(g => g.s).join('')).toBe('It holds 4,579 ◌ pages.')
-  // the spinner's cells are the citation's: a pointer over the ◌ is over the link; under it the value is inverse
+  // the spinner's cells are the citation's: a pointer over the ◌ is over the link; under it the value is bold, still
+  // purple and underlined, never inverse (the owner, 10-17: "the citation text on hover is very hard to see")
   const checking = lay(chipLook('pending', undefined, undefined) as never)
   expect(checking.spans[0]).toMatchObject({ x0: 9, x1: 16 })
-  expect(lay(chipLook('pending', undefined, undefined) as never, 0).lines.flat().filter(g => g.inv).map(g => g.s).join('')).toBe('4,579')
+  const hovered = lay(chipLook('pending', undefined, undefined) as never, 0).lines.flat()
+  expect(hovered.find(g => g.s === '4,579')).toEqual({ s: '4,579', fg: COLORS.cite, u: true, b: true })
+  expect(hovered.some(g => g.inv || g.bg)).toBe(false)
   // found, and a script got the same number: no mark at all
   expect(chipLook('ok', undefined, 'verified')).toEqual({ state: 'link', mark: '', spin: false })
   segs = draw(chipLook('ok', undefined, 'verified') as never)
@@ -303,4 +307,26 @@ test('"Citation marks" off: a citation is a plain link, with no mark and no chec
   await ui.unmount()
   await w.clock.advance(1000)
   expect(w.calls.filter(c => c[2] === 'resolve')).toEqual([])
+})
+
+test('under the pointer a citation turns bold and nothing more: no inverse, no box beside it; a press still opens it', { timeoutMs: 30_000 }, async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  const text = 'The board holds [4,579](README.md#L3) pages in all.'
+  await turn($, w, [['r1', text]])
+  const ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
+  const json = JSON.stringify(await ui.drawn())
+  const para = /"key":"(para-\d+)"/.exec(json)![1]!
+  const x = 'The board holds '.length
+  await ui.pointer({ type: 'move', x, y: 0, in: para } as never)
+  await w.clock.advance(50)
+  const drawn = JSON.stringify(await ui.drawn({ in: para } as never))
+  expect(drawn).toContain(`"color":"${COLORS.cite}","bold":true,"underline":true},"children":["4,579"]`)
+  expect(drawn).not.toContain('"inverse":true')
+  expect(drawn).not.toContain('backgroundColor')
+  await ui.pointer({ type: 'down', x, y: 0, button: 'left', in: para } as never)
+  await ui.pointer({ type: 'up', x, y: 0, button: 'left', in: para } as never)
+  await w.clock.settle()
+  expect(w.panes.at(-1)).toMatchObject({ title: 'Citation' })
+  await ui.unmount()
 })
