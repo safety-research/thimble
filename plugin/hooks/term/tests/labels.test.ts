@@ -45,11 +45,11 @@ async function press($: E, w: World, pane: M, key: string): Promise<M> {
   return (await $.ui.mount(PANE)) as unknown as M
 }
 
-test("the label panel's fields read `name:`, `kind:`, `unit:`, `scope:`, `mark records in Files and views:`, and its pattern starts on their column", { timeoutMs: 30_000 }, async ($, on) => {
+test("the label panel's fields read `name:`, `kind:`, `unit:`, `scope:`, `highlight:`, and its pattern starts on their column", { timeoutMs: 30_000 }, async ($, on) => {
   const w = world(on)
   const pane = await labelPanel($, w)
   const text = shown(await pane.drawn())
-  for (const s of ['name:', 'kind:', 'unit:', 'scope:', 'mark records in Files and views:', 'pattern:', 'values:']) expect(text).toContain(s)
+  for (const s of ['name:', 'kind:', 'unit:', 'scope:', 'highlight:', 'pattern:', 'values:']) expect(text).toContain(s)
   expect(text).not.toContain('type:')
   // each label in a column 10 cells wide (the longest, `pattern:`, and a gutter), the field after it; the definition's
   // name on its box's first row of text
