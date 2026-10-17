@@ -93,9 +93,10 @@ one turn, so such an agent waits for this record, or for the call's result in ma
 The agent-check hook runs on main's Agent and SendMessage calls and on those of its subagents (app/subagent_files.py
 check_call): it lets a start of one of thimble's roles through only when it matches a pending request exactly, records a
 subagent's Agent call as a nested start, denies a SendMessage to one of thimble's agents that no pending message request
-names, and asks the server (POST /api/bg/agent-check) only whether main's Agent call would start a second fork of a
-thread. It never answers allow and never rewrites the call. The waker exits at once in `claude -p` (main's command line
-has -p or --print), which would otherwise wait for it and never call the model.
+names (but not a subagent's to its own parent), and asks the server (POST /api/bg/agent-check) only whether main's
+Agent call would start a second fork of a thread. It never answers allow and never rewrites the call. The waker exits
+at once in `claude -p` (main's command line has -p or --print), which would otherwise wait for it and never call the
+model.
 
 Local transport (the session's transport in launch.json: before a press, and always for a peer) has no server, and no
 hook makes an HTTP request there. The file-first hooks write their record as after a press and then start the
