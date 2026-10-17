@@ -35,8 +35,9 @@ it with `WS` (the workspace directory) set and registers it as `thimble`.
                               nothing outside a view's call
     thimble.timeline(events, spacing="time")
                               events on a time axis: (time, label[, lane]) or {time, label, lane, end}; TIMELINE_MIME
-                              with a text/plain listing. Clock times ("HH:MM[:SS]") are read on CLOCK_DAY, rolling over
-                              midnight when a time goes backwards
+                              with a text/plain listing. Clock times ("HH:MM[:SS]") stay times without a date; the
+                              canvas and the terminal read them in the order given, rolling over midnight when a time
+                              goes backwards
     thimble.chart(kind, data, **options)
                               a common chart (CHARTS) of a DataFrame whose columns come in the kind's order, such as
                               bar (category, value[, group]): VEGALITE_MIME with the rows inline and no color, font or
@@ -82,7 +83,6 @@ __all__ = ["labels", "colors", "marked", "kept", "view_labels", "color_value", "
 
 FRAME_ROWS = 500  # rows of a table card's DataFrame the card keeps and shows (frames.ROWS_MAX)
 
-CLOCK_DAY = "2000-01-01"  # the day clock times are read on (timeline); the canvas prints them as times of day
 
 DIAGRAM_MIME = "application/vnd.thimble.diagram+json"  # tools.DRAWING_MIMES and frontend components/Outputs.tsx
 TIMELINE_MIME = "application/vnd.thimble.timeline+json"
@@ -1018,40 +1018,11 @@ def _text(v) -> str:
 
 def _time(v):
     """A time as the canvas sorts it: a number stays a number (a step, a second), a numpy one included, since the canvas
-    reads a time given as text as a date; anything else is text (_text)."""
+    reads a time given as text as a date or a clock time ("22:14:07"); anything else is text (_text)."""
     if isinstance(v, numbers.Real) and not isinstance(v, bool):
         item = getattr(v, "item", None)
         return item() if callable(item) else v
     return _text(v)
-
-
-_CLOCK = re.compile(r"^(\d{1,3}):([0-5]\d)(?::([0-5]\d))?$")
-
-
-def _clock_times(times: list) -> list | None:
-    """Clock times ("01:03", "13:45:10") as ISO times on CLOCK_DAY, or None when any time is not one. A time earlier
-    than the one before starts the next day; with an hour past 23 hours count from the start of CLOCK_DAY. The canvas
-    reads a text time as a date, so without this it would space such events evenly."""
-    parsed = []
-    for t in times:
-        m = _CLOCK.match(t) if isinstance(t, str) else None
-        if m is None:
-            return None
-        parsed.append(int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3) or 0))
-    if not parsed:
-        return None
-    from datetime import datetime, timedelta
-
-    base = datetime.fromisoformat(CLOCK_DAY)
-    elapsed = any(sec >= 86400 for sec in parsed)  # an hour past 23: hours counted from the start, not times of day
-    out, day, prev = [], 0, None
-    for sec in parsed:
-        if not elapsed and prev is not None and sec + day * 86400 < prev:
-            day += 1
-        at = sec + day * 86400
-        prev = at
-        out.append((base + timedelta(seconds=at)).isoformat())
-    return out
 
 
 def _rows(items, columns: tuple, what: str) -> list:
@@ -1170,16 +1141,9 @@ def timeline(events=(), spacing="time"):
             if lane is not None:
                 ev["lane"] = _text(lane)
         evs.append(ev)
-    given = [ev["time"] for ev in evs]  # the listing keeps the times as the code gave them
-    clock = _clock_times(given)
-    if clock is not None:
-        for ev, t in zip(evs, clock):
-            ev["time"] = t
-        ends = _clock_times([ev["end"] for ev in evs if "end" in ev])
-        for ev, t in zip([ev for ev in evs if "end" in ev], ends or []):
-            ev["end"] = t
+    # the times as the code gave them: a clock time ("22:14:07") stays one, with no date of thimble's making
     lines = [f"timeline: {len(evs)} events" + (", evenly spaced" if spacing == "even" else "")]
-    lines += [f"{t}  {ev['label']}" + (f" [{ev['lane']}]" if ev.get("lane") else "") for t, ev in zip(given, evs)]
+    lines += [f"{ev['time']}  {ev['label']}" + (f" [{ev['lane']}]" if ev.get("lane") else "") for ev in evs]
     _show({TIMELINE_MIME: {"events": evs, **({"spacing": "even"} if spacing == "even" else {})},
            "text/plain": "\n".join(lines)})
 

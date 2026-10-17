@@ -237,6 +237,56 @@ function runPrefix(path: string): string {
   return f ? `${f.name}${RUN_SEP}${f.elided ? `…${RUN_SEP}` : ''}` : ''
 }
 
+// The files cited on this page, by the name a chip gives each (its run's folder and its name): two cited files that
+// would read the same (`x › notes.json` under a/x and b/x) read by the shortest end of their paths that tells them apart
+// (bug hunt B25). A chip notes its file once it is drawn (noteCitedRef), and the chips redraw (onCitedFiles).
+const citedFiles = new Map<string, Set<string>>()
+const citedListeners = new Set<() => void>()
+
+/** The name a chip gives a file when no other cited file reads the same: its run's folder and its name. */
+function shortFileName(path: string): string {
+  const { rest } = splitRun(path)
+  return `${runPrefix(path)}${rest.split('/').pop() ?? rest}`
+}
+
+/** Note the file a ref points into as cited, so a chip of another file of the same name tells them apart. */
+export function noteCitedRef(ref: string): void {
+  const p = parseRef(ref)
+  const path = p && 'path' in p ? p.path : ''
+  if (!path) return
+  const short = shortFileName(path)
+  const known = citedFiles.get(short) ?? new Set<string>()
+  if (known.has(path)) return
+  known.add(path)
+  citedFiles.set(short, known)
+  if (known.size > 1) for (const fn of [...citedListeners]) fn()
+}
+
+/** Call `fn` when a newly cited file makes another's chip read differently; returns the unsubscribe. */
+export function onCitedFiles(fn: () => void): () => void {
+  citedListeners.add(fn)
+  return () => citedListeners.delete(fn)
+}
+
+/** Forget the files cited so far (tests). */
+export function forgetCitedFiles(): void {
+  citedFiles.clear()
+}
+
+/** A file as a chip names it: its run's folder and its name (shortFileName), or, when another cited file reads the same,
+ * the shortest end of its path that no other's path ends in, its folders joined as a chip joins them. */
+export function fileChipName(path: string): string {
+  const short = shortFileName(path)
+  const twins = [...(citedFiles.get(short) ?? [])].filter((q) => q !== path)
+  if (!twins.length) return short
+  const parts = path.split('/')
+  for (let k = 1; k < parts.length; k++) {
+    const tail = parts.slice(-k).join('/')
+    if (!twins.some((q) => q === tail || q.endsWith(`/${tail}`))) return parts.slice(-k).join(RUN_SEP)
+  }
+  return parts.join(RUN_SEP)
+}
+
 /** A file ref's path when its chip leaves folders out of it (a chip names one folder at most), for the hover to show
  * whole; null otherwise. */
 export function hiddenPath(ref: string): string | null {
@@ -284,11 +334,8 @@ export function refLabel(ref: string): string {
   const p = parseRef(ref)
   if (!p) return ref
   // one folder, not every folder a file sits in, so a chip stays short where a paragraph cites several records of one
-  // run, and the one that tells same-named files apart
-  const base = (path: string) => {
-    const { rest } = splitRun(path)
-    return `${runPrefix(path)}${rest.split('/').pop() ?? rest}`
-  }
+  // run, and the one that tells same-named files apart; more of its path when that folder does not (fileChipName)
+  const base = fileChipName
   const runOf = runPrefix
   switch (p.kind) {
     case 'cell':
@@ -337,8 +384,7 @@ export function addressLabel(ref: string): string {
   const p = parseRef(ref)
   if (!p || !(p.kind === 'record' || p.kind === 'range' || p.kind === 'block' || p.kind === 'span' || p.kind === 'path' || p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow'))
     return refLabel(ref)
-  const { rest } = splitRun(p.path)
-  const file = `${runPrefix(p.path)}${rest.split('/').pop() ?? rest}`
+  const file = fileChipName(p.path)
   if (p.kind === 'path') return p.locator ? `${file} · ${locatorLabel(p.locator)}` : file
   if (p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow') return `${file} ${recordPart(p)}`
   return p.kind === 'range' ? `${file} L${p.line}-${p.endLine}` : `${file} L${p.line}`

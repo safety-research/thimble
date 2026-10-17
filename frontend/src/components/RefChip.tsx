@@ -21,7 +21,7 @@ import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../l
 import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
 import { callDetail, callFile, callTarget } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
-import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
+import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, noteCitedRef, onCitedFiles, parseRef, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
 import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
@@ -141,6 +141,7 @@ export function ensureRefName(ws: string, ref: string): void {
 export function useRefLabel(ref: string, workspace?: string): string {
   const ws = workspace ?? workspaceFromUrl() ?? ''
   useEffect(() => ensureRefName(ws, ref), [ws, ref])
+  useEffect(() => noteCitedRef(ref), [ref])
   const name = () => chipLabel(ref, null, ws)
   return useSyncExternalStore(onNames, name, name)
 }
@@ -173,13 +174,16 @@ const wordsFile = (p: { chat: string; n: number }): boolean => {
   return !!w && !!callFile(w.name, w.input)
 }
 
-/** The subscription that redraws a chip when a name it shows becomes known: a card's, a label's, a call's chip line. */
+/** The subscription that redraws a chip when a name it shows becomes known: a card's, a label's, a call's chip line;
+ * and when a file cited since reads as a file it names would (lib/refs fileChipName). */
 const onNames = (fn: () => void): (() => void) => {
   const a = onCellNames(fn)
   const b = onCallWords(fn)
+  const c = onCitedFiles(fn)
   return () => {
     a()
     b()
+    c()
   }
 }
 
@@ -332,6 +336,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
 
   const call = parsed?.kind === 'call' ? parsed : null
   useEffect(() => ensureRefName(ws, ref), [ws, ref])
+  useEffect(() => noteCitedRef(ref), [ref])
   useEffect(
     () => () => {
       window.clearTimeout(showTimer.current)

@@ -1942,7 +1942,7 @@ _pool_workers = 1
 
 RUN_FIELDS: dict[str, Any] = {
     "run_id": None, "status": "running", "started": None, "created_by": None, "paths": None,
-    "total": None, "matched_total": None, "done": 0, "labeled": 0, "failed": 0, "matches": 0,
+    "total": None, "matched_total": None, "done": 0, "labeled": 0, "failed": 0, "skipped": 0, "matches": 0,
     "files_total": None, "files_done": 0, "files_indexed": 0, "file": None, "bytes_total": None, "bytes_done": 0,
     "eta_s": None, "message": None, "phase": None, "examples": 0, "cut": None,
 }
@@ -2493,6 +2493,9 @@ async def _backoff(delay: float, cancel: threading.Event) -> None:
 
 
 MESSAGES_KEPT = 3  # distinct problem messages carried on a run's summary
+NO_LABELS = "the classifier gave no label for them"  # why units failed when no call said why
+_BLANK: dict = {}  # a prompt label's answer for a unit with no words, which it skips
+_STATUS_HEAD = re.compile(r"[a-z_]+")
 FALLBACK_MESSAGE = "Downgrading {model} to {fallback}"
 # the notices of a label's runs (module note): {name} the label's, {why} the failure in plain words
 LABEL_FAILED_TEXT = "The label {name} failed: {why}."
@@ -2500,10 +2503,35 @@ LABEL_UNITS_FAILED_TEXT = "The label {name} couldn't label {failed} of {total}: 
 LABEL_FALLBACK_TEXT = "Claude's safeguards switched {n} of the label {name}'s calls from {model} to {fallback}."
 
 
+def _reason_key(msg: str) -> str:
+    """The reason a failure's message gives, its details aside: a call's status (`overloaded: <detail>`), else the
+    message itself."""
+    head, sep, _ = msg.partition(": ")
+    return head if sep and _STATUS_HEAD.fullmatch(head) else msg
+
+
+def _failures_why(failures: list) -> tuple[str, Any]:
+    """The words of a notice for a run's failures, [message, units] each (the run's `failures`), and the action that
+    fixes the first that has one: one reason in its words, several each after how many units it failed, so they add up
+    to the run's failed units and no reason shows twice."""
+    from . import notices  # noqa: PLC0415
+
+    merged: dict[str, int] = {}
+    fix = None
+    for msg, n in failures:
+        words, f = notices.reason(msg, server=True)
+        merged[words] = merged.get(words, 0) + int(n)
+        fix = fix or f
+    if len(merged) == 1:
+        return next(iter(merged)), fix
+    return "; ".join(f"{n:,} because {words}" for words, n in merged.items()), fix
+
+
 def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, total: Any = None,
-                  message: str | None = None) -> None:
+                  message: str | None = None, failures: list | None = None) -> None:
     """A run of the label ended: an `error`, or `failed` units it could not label, is told in the foreground under
-    `label:<id>`, and a run with neither clears it. Never raises."""
+    `label:<id>`, and a run with neither clears it. A prompt label's run says why by its `failures` (_failures_why).
+    Never raises."""
     from . import notices  # noqa: PLC0415
 
     key, name = f"label:{concept['id']}", str(concept.get("name") or concept["id"])
@@ -2516,7 +2544,8 @@ def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, 
             text = LABEL_FAILED_TEXT.format(name=name, why=why)
         else:
             problems = [m for m in str(message or "").split("; ") if m and not m.startswith("Downgrading ")]
-            why, fix = notices.reason("; ".join(problems) or "the classifier gave no label for them", server=True)
+            why, fix = (_failures_why(failures) if failures else
+                        notices.reason("; ".join(problems) or NO_LABELS, server=True))
             noun = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}.get(str(concept.get("unit")),
                                                                                          "record")
             of = f"{int(total):,} {noun}s" if isinstance(total, int) and total else f"its {noun}s"
@@ -2616,7 +2645,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
     per_call, in_flight = BATCH_ITEMS, CONCURRENCY
     allowed = float(in_flight)  # the calls let run now
     slowdowns = 0  # a call started before the last slowdown does not slow the run again
-    labeled = failed = matches = cut = short = 0
+    labeled = failed = skipped = matches = cut = short = 0
     labels = concept["labels"]
     pos_label = labels[0]
     spans = concept.get("marks") == "span"
@@ -2633,12 +2662,24 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
     cut_tokens: list[int] = []  # the tokens sent of each, as its call counted them or estimated (CHARS_PER_TOKEN)
     cut_short = 0  # of them, the JSON documents read whole with their long parts shortened (fit_json), not cut
 
+    # why units failed, by reason (_reason_key): its first message and the units it failed, so a reason many calls
+    # give is said once, with all of its units
+    failures: dict[str, list] = {}
+
     def note(msg: str | None) -> None:
         if msg and msg not in messages and len(messages) < MESSAGES_KEPT:
             messages.append(msg)
 
+    def fail(msg: str | None, n: int) -> None:
+        k = _reason_key(msg or NO_LABELS)
+        if k in failures:
+            failures[k][1] += n
+        else:
+            failures[k] = [msg or NO_LABELS, n]
+
     def message() -> str | None:
-        lines = [_fallback_message(n, *pair) for pair, n in fell_back.items()] + messages
+        said = [m if len(failures) == 1 else f"{m} ({n:,})" for m, n in failures.values()]
+        lines = [_fallback_message(n, *pair) for pair, n in fell_back.items()] + said + messages
         return "; ".join(lines) or None
 
     def slow(since: int) -> None:
@@ -2702,18 +2743,14 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         return res, failure
 
     async def one(batch: list[_Item]) -> tuple[list[dict | None], str | None]:
-        """Each item's answer ({label, confidence, rationale, spans}; None where it got none) and the problem, if any. The
-        items a call left out, and all of them after a call that ended without a usable tool call (no_tool_call or
-        truncated), are asked once more, in halves (halving) if that call too makes no usable tool call; a call that
-        failed otherwise has had its retries."""
-        answers: list[dict | None] = [None] * len(batch)
+        """Each item's answer ({label, confidence, rationale, spans}; None where it got none, _BLANK for an item with no
+        words, which no call is asked about) and the problem, if any. The items a call left out, and all of them after a
+        call that ended without a usable tool call (no_tool_call or truncated), are asked once more, in halves (halving)
+        if that call too makes no usable tool call; a call that failed otherwise has had its retries."""
         live = [n for n, it in enumerate(batch) if (it.text or "").strip()]
-        cause = None
-        if len(live) < len(batch):
-            blank = next(it.unit.ref for it in batch if not (it.text or "").strip())
-            cause = f"{len(batch) - len(live)} unit(s) have no readable text (e.g. {blank}), so they were not labeled"
-            if not live:
-                return answers, cause
+        answers: list[dict | None] = [None if n in live else _BLANK for n in range(len(batch))]
+        if not live:
+            return answers, None
         items = [(batch[n].unit.ref, batch[n].text) for n in live]
         res, failure, status = await ask(items)
         if status == "stopped":
@@ -2725,26 +2762,28 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         for i, n in enumerate(live, 1):
             if (r := res.get(i)) is not None:
                 answers[n] = {**r, "spans": quoted_span(batch[n].text, r.get("quote", "")) if spans else None}
-        msg = failure or (None if res else "classifier returned no usable labels")
-        if cause:
-            msg = cause if msg is None else f"{cause}; {msg}"
-        return answers, msg
+        return answers, failure or (None if res else "classifier returned no usable labels")
 
     batches = _batches(units, unit, per_call, cap)
     windows: list[dict | None] = []  # the answers so far of the unit whose windows are being read
 
-    def settle(b: list[_Item], answers: list[dict | None]) -> tuple[list[dict], int]:
-        """The rows of the units whose last item is in `b`, and how many of those units failed."""
+    def settle(b: list[_Item], answers: list[dict | None]) -> tuple[list[dict], int, int]:
+        """The rows of the units whose last item is in `b`, how many of those units failed, and how many it skipped, as
+        they hold no words (a blank line between a transcript's turns), which need no label."""
         nonlocal cut, short, cut_short
         rows: list[dict] = []
-        n_failed = 0
+        n_failed = n_skipped = 0
         for it, a in zip(b, answers):
             if it.part == 0:
                 windows.clear()
             windows.append(a)
             if it.part < it.parts - 1:
                 continue
-            r = merge_windows(labels, windows) if it.parts > 1 else a
+            worded = [w for w in windows if w is not _BLANK]
+            if not worded:
+                n_skipped += 1
+                continue
+            r = merge_windows(labels, worded) if it.parts > 1 else worded[0]
             cut += it.cut
             short += it.short
             if (it.cut or it.short) and unit in WHOLE_UNITS:
@@ -2755,7 +2794,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 n_failed += 1
             else:
                 rows.append(_row(it.unit.ref, r["label"], r["confidence"], "model", r["rationale"] or None, r.get("spans"), it.unit.line))
-        return rows, n_failed
+        return rows, n_failed, n_skipped
 
     def take(n: int) -> list[list[_Item]]:
         got: list[list[_Item]] = []
@@ -2816,14 +2855,16 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             if msg is _BATCH_STOPPED:  # the analyst's cancel stopped the call: the batches after it are not answered
                 stopped = True
                 break
-            rows, n_failed = settle(b, answers)
+            rows, n_failed, n_skipped = settle(b, answers)
             if rows:
                 await asyncio.to_thread(writer.put, concept_scan.jsonl_bytes(rows), rows)
             labeled += len(rows)
             failed += n_failed
+            skipped += n_skipped
             matches += sum(1 for r in rows if r["label"] == pos_label)
-            done += len(rows) + n_failed
-            note(msg)
+            done += len(rows) + n_failed + n_skipped
+            if n_failed:
+                fail(msg, n_failed)
             emit(b, force=not pending)
         # the whole files or runs read in part are the run's `cut`, the cards cut its message
         read = read_cut(cut_refs, cut_tokens, cut_short, _runs[key].get("total"), unit) if cut_refs else None
@@ -2834,6 +2875,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             note(_cancelled_message(labeled + failed, unit))
         if cut or short or cancel.is_set():
             _progress(c, concept["id"], message=message(), **({"cut": read} if read else {}))
+        _progress(c, concept["id"], skipped=skipped, failures=[list(f) for f in failures.values()] or None)
         if run_call is not None:
             await run_call.close()
     finally:
@@ -3700,7 +3742,9 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             # label row can say "468 of 2,392,002 records" after a restart, when the run record is gone.
             # `limit` and `stopped` say what the run covered, which an apply of the same predicate reads (covered)
             # `cut`, the whole files or runs a prompt label read only in part (read_cut), stays on the label with its run
+            skipped = int(state.get("skipped") or 0)  # units with no words, which need no label (a prompt label's)
             app = {"ts": started, "paths": patterns, "total": total, "matched_total": matched, "labeled": labeled, "failed": failed,
+                   **({"skipped": skipped} if skipped else {}),
                    "matches": int(state.get("matches") or 0), "status": "done", "message": message, "created_by": created_by,
                    "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set(),
                    "within": within, "within_rev": within_rev, **({"cut": state["cut"]} if state.get("cut") else {})}
@@ -3712,9 +3756,10 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             if not out.exists():
                 labels_store.remove(out)
             whole = not cancel.is_set() and not limit and not failed and state.get("files_total") is not None
-            _progress(c, concept_id, status="done", done=labeled + failed, labeled=labeled, failed=failed, message=message,
+            _progress(c, concept_id, status="done", done=labeled + failed + skipped, labeled=labeled, failed=failed, message=message,
                       eta_s=None, phase=None, files_done=state["files_total"] if whole else state.get("files_done", 0), summary=summary)
-            _label_notice(c, concept, failed=failed if not cancel.is_set() else 0, total=total, message=message)
+            _label_notice(c, concept, failed=failed if not cancel.is_set() else 0, total=total, message=message,
+                          failures=state.get("failures"))
         except asyncio.CancelledError:
             _progress(c, concept_id, status="error", message="cancelled", eta_s=None, phase=None)
             raise
@@ -4558,7 +4603,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     counts = result.get("counts") if not partial else await asyncio.to_thread(_live_counts, ws, concept["id"])
     stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
     return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": result.get("total"), "counts": counts or {},
-            "failed": result.get("failed") or 0, "message": result.get("message"), "partial": partial,
+            "failed": result.get("failed") or 0, "skipped": 0 if partial else result.get("skipped") or 0,
+            "message": result.get("message"), "partial": partial,
             "cell": made["id"] if made else None, "filter": chosen, "labels_path": str(labels_file(ws, concept["id"])),
             "unchanged": unchanged, "stale": [x["id"] for x in stale], "cut": None if partial else result.get("cut")}
 

@@ -410,6 +410,24 @@ export function segmentsFrom(segs: Seg[], from: number): Seg[] {
   return out
 }
 
+/** The segments without the characters of `hide` (the `**` around a markdown chat log's bold words): a segment a range
+ * falls in is cut in two, each piece keeping its offset in the block's text. Pure. */
+export function segmentsWithout(segs: Seg[], hide: readonly (readonly [number, number])[]): Seg[] {
+  if (!hide.length) return segs
+  const out: Seg[] = []
+  for (const s of segs) {
+    let at = s.start
+    const end = s.start + s.text.length
+    for (const [a, b] of hide) {
+      if (b <= at || a >= end) continue
+      if (a > at) out.push({ ...s, text: s.text.slice(at - s.start, a - s.start), start: at })
+      at = Math.max(at, b)
+    }
+    if (at < end) out.push({ ...s, text: s.text.slice(at - s.start), start: at })
+  }
+  return out
+}
+
 interface BlockElProps {
   block: Block
   path?: string
@@ -421,6 +439,8 @@ interface BlockElProps {
   /** show the text from this offset on (a chat line's words after its speaker); anchors keep the whole text's
    * offsets */
   from?: number
+  /** ranges of the text not to show (a markdown chat log's syntax, in order); anchors keep the whole text's offsets */
+  hide?: readonly (readonly [number, number])[]
 }
 
 /** A piece of text a label marks: the focused label's colour at 24% behind it, another label's colour faintly
@@ -435,11 +455,12 @@ export function SpanEl({ seg, anchor, children }: { seg: Seg; anchor?: string; c
 }
 
 /** One element per block, the text verbatim, with the texts the labels that are on mark highlighted. */
-export function BlockEl({ block, path, line, index, target, hit, className, from = 0 }: BlockElProps) {
+export function BlockEl({ block, path, line, index, target, hit, className, from = 0, hide }: BlockElProps) {
   const isT = !!target && target.line === line && target.block === index
   const hl: [number, number] | null = isT && target!.start != null && target!.end != null ? [target!.start, target!.end] : null
   const marks = useMarksAt(path ?? '', path ? line : 0)
-  const segs = from > 0 ? segmentsFrom(segmentsFor(block, hl, path ? marks.spans : []), from) : segmentsFor(block, hl, path ? marks.spans : [])
+  const all = segmentsFor(block, hl, path ? marks.spans : [])
+  const segs = segmentsWithout(from > 0 ? segmentsFrom(all, from) : all, hide ?? [])
   const cls = ['reader-block', `reader-${block.kind}`, className, isT && 'reader-target', isT && hit && 'reader-hit'].filter(Boolean).join(' ')
   return (
     <div className={cls} data-line={line} data-block={index}>

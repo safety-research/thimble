@@ -603,50 +603,167 @@ function PostText({ text, line, target, hit, quote }: { text: string; line: numb
   return <BlockEl block={{ kind: 'text', text }} line={line} index={0} target={quoteTarget(target, line, 0, text, quote)} hit={hit} />
 }
 
+/** One turn of a text chat log as the view draws it: the line its speaker's line stands on and its last line, the
+ * server's `meta.turn` (null for the lines before the first turn), its lines, and the time a line of its own gave it
+ * (`**00:01:26**` before it), whose line `from` is. */
+export interface ChatLogTurn {
+  line: number
+  end: number
+  turn: ChatTurn | null
+  recs: SourceRecord[]
+  time?: string
+  from?: number
+}
+
 /** A text chat log's records as turns: each record whose line starts a turn (the server's `meta.turn`) opens one, and
- * the lines after it up to the next go on it. Lines before the first turn are one turn with no speaker. Pure. */
-export function chatTurns(records: readonly SourceRecord[]): { line: number; end: number; turn: ChatTurn | null; recs: SourceRecord[] }[] {
-  const out: { line: number; end: number; turn: ChatTurn | null; recs: SourceRecord[] }[] = []
-  for (const rec of records) {
-    const turn: ChatTurn | undefined = rec.meta?.turn
+ * the lines after it up to the next go on it. Lines before the first turn are one turn with no speaker. A line that
+ * holds only a time (`**00:01:26**`, `[00:01:26]`; clockLine) gives its time to the turn that starts after it, blank
+ * lines between them, and no turn shows it; one that no turn follows stays a line of the turn before it. Pure. */
+export function chatTurns(records: readonly SourceRecord[], md = false): ChatLogTurn[] {
+  const out: ChatLogTurn[] = []
+  let held: SourceRecord[] = [] // a time's line and the blank lines after it, until a turn starts
+  let time: string | null = null
+  const put = (rec: SourceRecord) => {
     const cur = out[out.length - 1]
-    if (turn || !cur) out.push({ line: rec.line, end: rec.line, turn: turn ?? null, recs: [rec] })
+    if (!cur) out.push({ line: rec.line, end: rec.line, turn: null, recs: [rec] })
     else {
       cur.recs.push(rec)
       cur.end = rec.line
     }
   }
+  const release = () => {
+    held.forEach(put)
+    held = []
+    time = null
+  }
+  for (const rec of records) {
+    const turn: ChatTurn | undefined = rec.meta?.turn
+    if (turn) {
+      out.push({ line: rec.line, end: rec.line, turn, recs: [rec], ...(time ? { time, from: held[0].line } : {}) })
+      held = []
+      time = null
+      continue
+    }
+    const clock = clockLine(lineText(rec), md)
+    if (clock) {
+      release()
+      held = [rec]
+      time = clock
+    } else if (time && !lineText(rec).trim()) held.push(rec)
+    else {
+      release()
+      put(rec)
+    }
+  }
+  release()
   return out
 }
 
+// a time alone on its line, in brackets or not, its date before it or not; a markdown line's syntax aside (clockLine)
+const CLOCK_LINE = /^[[(]?((?:\d{4}-\d{2}-\d{2}[ T,]+)?\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?(?:\s?[APap]\.?[Mm]\.?)?)[\])]?$/
+
+/** The time a chat log's line holds when it holds nothing else (`**00:01:26**` in markdown, `[00:01:26]`), else
+ * null. Pure. */
+export function clockLine(text: string, md: boolean): string | null {
+  const m = CLOCK_LINE.exec((md ? plainMd(text) : text).trim())
+  return m ? m[1] : null
+}
+
+// a markdown line's syntax: a heading's or a quote's lead, and inline the marks of code, a link (its target too), bold
+// and italic, as a reader of the rendered text would not see them
+const MD_LEAD = /^\s{0,3}(?:#{1,6}\s+|>\s?)/
+const MD_INLINE = /(`[^`\n]+`)|(\[[^[\]\n]*\]\([^()\s]*\))|(\*\*[^*\n]+\*\*|__[^_\n]+__)|((?<![\w*])\*[^*\s][^*\n]*\*(?!\w)|(?<![\w_])_[^_\s][^_\n]*_(?!\w))/g
+
+/** The ranges of a markdown line that are its syntax (mdSyntax's), in order. Pure. */
+export function mdSyntax(line: string): [number, number][] {
+  const out: [number, number][] = []
+  const lead = MD_LEAD.exec(line)?.[0] ?? ''
+  if (lead) out.push([0, lead.length])
+  inlineSyntax(line, lead.length, line.length, out)
+  return out.sort((a, b) => a[0] - b[0])
+}
+
+function inlineSyntax(line: string, from: number, to: number, out: [number, number][]): void {
+  for (const m of line.slice(from, to).matchAll(MD_INLINE)) {
+    const a = from + (m.index ?? 0)
+    const b = a + m[0].length
+    if (m[1]) out.push([a, a + 1], [b - 1, b])
+    else if (m[2]) {
+      const close = a + m[0].indexOf('](')
+      out.push([a, a + 1], [close, b])
+      inlineSyntax(line, a + 1, close, out)
+    } else {
+      const w = m[3] ? 2 : 1
+      out.push([a, a + w], [b - w, b])
+      inlineSyntax(line, a + w, b - w, out)
+    }
+  }
+}
+
+/** A markdown line's words from `from` on, without its syntax (mdSyntax). Pure. */
+export function plainMd(text: string, from = 0): string {
+  let out = ''
+  let at = from
+  for (const [a, b] of mdSyntax(text)) {
+    if (b <= at) continue
+    if (a > at) out += text.slice(at, a)
+    at = b
+  }
+  return out + text.slice(at)
+}
+
+/** A chat log turn's head: its speaker, the time its own line gives, else the time a line before it gave (chatTurns);
+ * undefined for the lines before the first turn. Pure. */
+export function chatHeader({ turn, time }: ChatLogTurn): string | undefined {
+  if (!turn) return undefined
+  const own = turn.time ? stamp(turn.time) : null
+  return [turn.speaker, own, time && !/\d/.test(own ?? '') ? time : null].filter(Boolean).join(' · ')
+}
+
+/** The words a chat log turn shows (shownLines), the first line's from where they start, a markdown line's without its
+ * syntax. Pure. */
+export function chatText(lines: readonly SourceRecord[], turn: ChatTurn | null, md: boolean): string {
+  return lines
+    .map((r, i) => {
+      const from = i === 0 && turn ? turn.at : 0
+      return md ? plainMd(lineText(r), from) : lineText(r).slice(from)
+    })
+    .join('\n')
+    .trim()
+}
+
+const MD_PATH = /\.(?:md|markdown|mdx)$/i
+
 /** A text or markdown chat log as one card per turn: the speaker and time in the head, the turn's lines under it, the
- * first from where its words start. Each line keeps its own record, so a span label or a citation of a line inside a
- * turn marks it there, and the card's gutter shows the labels of every line of the turn. */
+ * first from where its words start, a markdown file's without their syntax. Each line keeps its own record, so a span
+ * label or a citation of a line inside a turn marks it there, and the card's gutter shows the labels of every line of
+ * the turn, and of the line that gave it its time. */
 function ChatLog({ path, page, targetRef }: ViewProps) {
   const records = page.records
-  const turns = useMemo(() => chatTurns(records), [records])
+  const md = MD_PATH.test(path)
+  const turns = useMemo(() => chatTurns(records, md), [records, md])
   const rootRef = useRef<HTMLDivElement | null>(null)
   const asked = useMemo(() => targetOf(targetRef, path), [targetRef, path])
   // a citation of a line inside a turn scrolls to and flashes the turn, and marks its span on that line
-  const holder = asked ? turns.find((t) => asked.line >= t.line && asked.line <= t.end) : undefined
+  const holder = asked ? turns.find((t) => asked.line >= (t.from ?? t.line) && asked.line <= t.end) : undefined
   const cardRef = holder && holder.line !== asked!.line ? `${path}#L${holder.line}` : targetRef
   const { target, hit } = useTarget(cardRef, path, rootRef, [records])
   const starts = useMemo(() => turns.map((t) => t.line), [turns])
   const { runs, show } = useFilterRuns(starts, target)
   return (
     <div className="reader-transcript reader-chatlog" ref={rootRef}>
-      {turns.map(({ line, end, turn, recs }, ti) => {
+      {turns.map((g, ti) => {
+        const { line, end, turn, recs, from } = g
         const run = runs.get(ti)
-        const header = turn ? [turn.speaker, turn.time ? stamp(turn.time) : null].filter(Boolean).join(' · ') : undefined
         const lines = shownLines(recs, turn)
-        const text = lines.map((r, i) => (i === 0 && turn ? lineText(r).slice(turn.at) : lineText(r))).join('\n').trim()
+        const text = chatText(lines, turn, md)
         return (
           <Fragment key={line}>
             {run && <HiddenRun run={run} onShowFiltered={show} />}
-            <RecordCard path={path} line={line} end={end} target={target} hit={hit} className={turn ? 'reader-msg' : 'reader-msg reader-chat-lead'} header={header} text={text.slice(0, 500)} fold={textFold(text)}>
+            <RecordCard path={path} line={line} from={from} end={end} target={target} hit={hit} className={turn ? 'reader-msg' : 'reader-msg reader-chat-lead'} header={chatHeader(g)} text={text.slice(0, 500)} fold={textFold(text)}>
               {lines.map((r, i) =>
                 r.blocks.length ? (
-                  r.blocks.map((b, k) => <BlockEl key={`${r.line}.${k}`} block={b} path={path} line={r.line} index={k} target={asked} hit={hit} from={i === 0 && turn && k === 0 ? turn.at : 0} className={i === 0 && turn && turn.at >= b.text.length ? 'reader-chat-empty' : undefined} />)
+                  r.blocks.map((b, k) => <BlockEl key={`${r.line}.${k}`} block={b} path={path} line={r.line} index={k} target={asked} hit={hit} from={i === 0 && turn && k === 0 ? turn.at : 0} hide={md ? mdSyntax(b.text) : undefined} className={i === 0 && turn && turn.at >= b.text.length ? 'reader-chat-empty' : undefined} />)
                 ) : null,
               )}
             </RecordCard>
