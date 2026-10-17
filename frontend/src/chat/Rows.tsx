@@ -198,6 +198,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
                 <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined} data-by={r.by}>
                   <RefText text={stripHarness(r.text)} workspace={ws} />
                 </UserMessage>
+                {r.images?.length ? <Pictures names={r.images} ws={ws} /> : null}
               </div>
             )
           case 'text': {
@@ -269,6 +270,23 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
+
+/** The pictures the analyst pasted into a message (Claude Code's `[Image #1]` in its text), under it, each opening full
+ * size. */
+function Pictures({ names, ws }: { names: readonly string[]; ws: string }) {
+  return (
+    <div className="chat-pictures">
+      {names.map((name, i) => {
+        const src = api.pictureUrl(ws, name)
+        return (
+          <a key={name} className="chat-picture" href={src} target="_blank" rel="noreferrer" title={`Image #${i + 1}`}>
+            <img src={src} alt={`Image #${i + 1}, pasted with the message`} loading="lazy" />
+          </a>
+        )
+      })}
+    </div>
+  )
+}
 
 /** Main's note for a dev chat that started: a view's build (`view`, on the backend's agent row), else a code ticket.
  * Pure. */

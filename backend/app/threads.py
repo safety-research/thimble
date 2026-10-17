@@ -58,6 +58,12 @@ STOP_TEXT = {
 }
 STOP_KINDS = (SESSION_ENDED, UNANSWERED, FORK_LOST, "failed", "stopped")
 _DATA_URL_RE = re.compile(r"^data:image/png;base64,(.+)$", re.S)
+# in the workspace: the pictures the analyst pasted into a message, main's or a thread's (save_picture), which the
+# browser shows under the message (agents.picture_route) and a thread's fork reads
+PICTURE_DIR = "pictures"
+PICTURE_TYPES = {"image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp"}
+PICTURE_MEDIA = {ext: mime for mime, ext in PICTURE_TYPES.items()}
+PICTURE_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}\.(png|jpg|gif|webp)$")
 _CHAT_REF_RE = re.compile(r"^chat:([A-Za-z0-9_-]{1,64})#(\d+)$")
 # (workspace, thread) -> the session a forkless event of the thread went to, until its fork is known (module note)
 _awaiting: dict[tuple[str, str], str | None] = {}
@@ -190,6 +196,41 @@ def save_image(c: str, thread_id: str, data_url: str | None) -> str | None:
     path = d / f"{thread_id}.png"
     path.write_bytes(data)
     return str(path)
+
+
+def picture_type(data: bytes) -> str | None:
+    """A picture's media type by its first bytes: one of PICTURE_TYPES, else None."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def save_picture(c: str, stem: str, data: bytes) -> str | None:
+    """Write a picture the analyst pasted as PICTURE_DIR/<stem>.<ext> in the workspace; its file name, or None when it
+    is no picture of PICTURE_TYPES, is empty or is larger than IMAGE_MAX_BYTES."""
+    mime = picture_type(data)
+    stem = re.sub(r"[^A-Za-z0-9_-]", "", stem)[:72]
+    if mime is None or not stem or len(data) > IMAGE_MAX_BYTES:
+        return None
+    d = config.workspace_dir(c) / PICTURE_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    name = f"{stem}.{PICTURE_TYPES[mime]}"
+    (d / name).write_bytes(data)
+    return name
+
+
+def picture_path(c: str, name: str) -> Path | None:
+    """The file of a picture save_picture wrote, by its name; None for any other name."""
+    if not PICTURE_NAME_RE.match(str(name or "")):
+        return None
+    p = config.workspace_dir(c) / PICTURE_DIR / name
+    return p if p.is_file() and not p.is_symlink() else None
 
 
 def _anchors(meta: dict) -> list[str]:

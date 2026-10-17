@@ -46,7 +46,7 @@ import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './rep
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
-import { PANEL, cardDeleted, cardMade, classicScreen, keepKeys, keysBack, liveCards, loadCards, navOrigin, noteScreen, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
+import { PANEL, cardDeleted, cardMade, classicScreen, keepKeys, keysBack, liveCards, loadCards, navOrigin, noteScreen, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rowAs, rowSeen, rt, surfaceValue, takeKeys, threadsNow } from './term'
 import { turns } from './turns'
 import { openSection, registerBand } from './band'
 import { registerPanelViews } from './views'
@@ -456,7 +456,8 @@ async function noteAnswer(cx: Ctx, row: string, text: string): Promise<void> {
 
 /** A row of main's chat with what thimble-term draws under it: the turn's cards (when no reply row carries them) and
  *  the side threads' rows. */
-async function underRow(cx: Ctx, e: ResolveInput & { requestId: string; viewport?: { columns: number } }, next: () => Promise<RenderElement>): Promise<RenderElement> {
+async function underRow(cx: Ctx, drawn: ResolveInput & { requestId: string; viewport?: { columns: number } }, next: () => Promise<RenderElement>): Promise<RenderElement> {
+  const e = storedAs(drawn)
   const ids = liveCards(await cx.turnCards(e.requestId))
   const told = await signalRows(cx, e)
   const views = await viewRowsEl(cx, e)
@@ -471,6 +472,12 @@ async function underRow(cx: Ctx, e: ResolveInput & { requestId: string; viewport
       {views}
     </Box>
   )
+}
+
+/** A drawing's event with the uuid of the stored row it stands for as its `requestId` (term.ts rowAs). */
+function storedAs<T extends { requestId: string }>(e: T): T {
+  const row = rowAs(e.requestId)
+  return row === e.requestId ? e : { ...e, requestId: row }
 }
 
 /** The text a stored row holds: its text blocks, and a tool result's text. */
@@ -840,6 +847,9 @@ export const register: Register = (on, options) => {
       // the row is stored whatever the terminal UI makes of it
     }
     const stored = await next(msg === e.message ? e : { ...e, message: msg })
+    // the row's uuid and its blocks, by which a drawing's id finds the row again (term.ts rowAs)
+    const kept = stored.message ?? msg
+    if (e.agentId === undefined && stored.uuid && (kept.type === 'user' || kept.type === 'assistant')) rowSeen(stored.uuid, Array.isArray(kept.content) ? kept.content.length : 1)
     // the guide a delivery sent is marked sent once the row that carries it is stored in main's conversation
     if (act.pending && e.agentId === undefined && stored.deny === undefined) await rowStored(cxOf($), { text: rowText(stored.message ?? msg) })
     return stored
@@ -894,9 +904,11 @@ export const register: Register = (on, options) => {
 
   // ---------------------------------------------------------------------------------------------- main's chat
 
-  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (!rt.sc) return next(e)
+  on('ui.render', { component: 'AssistantMessage' }, async ($, drawn, next) => {
+    if (!rt.sc) return next(drawn)
     const cx = cxOf($)
+    // the drawing by the stored row it stands for, whose uuid what it carries is kept under (rowAs); `drawn` for the rest
+    const e = storedAs(drawn)
     const ids = liveCards(await cx.turnCards(e.requestId))
     const told = await signalRows(cx, e)
     const views = await viewRowsEl(cx, e)
@@ -913,8 +925,8 @@ export const register: Register = (on, options) => {
     // the document a writer finished, linked out to the browser workbench under the row that says so
     const written = await writtenEl(cx, e, text)
     const live = e.surface === 'terminal' || e.surface === 'desktop'
-    if (!ids.length && !told && !views && !footer && !written && text === e.props.text && !live && !needsDrawing(text)) return next(e)
-    const { Box } = $.ui.resolve(e)
+    if (!ids.length && !told && !views && !footer && !written && text === e.props.text && !live && !needsDrawing(text)) return next(drawn)
+    const { Box } = $.ui.resolve(drawn)
     // the reply fills the terminal's width, less 2, its cards as wide as its prose
     const cols = (e.viewport?.columns ?? 100) - 2
     // the checks' comments on this row's passages: each passage tinted in its check's color, a flag in the margin

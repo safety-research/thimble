@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import config, investigation, ledger, tools
@@ -918,6 +919,18 @@ def _main_state(c: str) -> dict:
     from . import module_bridge  # noqa: PLC0415 — module_bridge imports the session modules
 
     return module_bridge.main_meta(c)
+
+
+@router.get("/ws/{c}/pictures/{name}")
+def picture_route(c: str, name: str) -> FileResponse:
+    """A picture the analyst pasted into a message, main's or a thread's (threads.save_picture), for the message's row."""
+    from . import threads  # noqa: PLC0415
+
+    config.workspace_dir(c)
+    p = threads.picture_path(c, name)
+    if p is None:
+        raise HTTPException(404, "no such picture")
+    return FileResponse(p, media_type=threads.PICTURE_MEDIA[p.suffix.lstrip(".")], headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/ws/{c}/chats/main")

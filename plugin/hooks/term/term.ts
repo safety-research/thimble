@@ -97,6 +97,9 @@ export const rt = {
   wanted: new Set<string>(),
   // the latest row of main's chat a line can stand under (signal.ts isAnchor)
   anchor: '',
+  // main's rows by the first ROW_PREFIX characters of their uuid: the uuid each is stored under and how many blocks it
+  // holds (0: not known), which rowAs reads
+  rowIds: new Map<string, { uuid: string; blocks: number }>(),
   termColumns: 0,
   // which of Claude Code's two screens the terminal draws (a command's `presentation`, a drawing's `viewport`, fixed per
   // session): true fullscreen, the only one that takes clicks; false the main screen (the classic renderer), where
@@ -212,6 +215,30 @@ export function cardDeleted(id: string): void {
 /** A card a call of main's made or changed (add_card, edit_card): no longer deleted. */
 export function cardMade(id: string): void {
   rt.deleted.delete(id)
+}
+
+// what Claude Code keeps of a row's uuid in the id it draws a block of the row under, once the drawing ids part from the
+// stored ones (rowAs), and the block's index in hex after it
+const ROW_PREFIX = 24
+const ROW_INDEX = /^[0-9a-f]{12}$/
+
+/** A row of main's chat stored under `uuid`, with `blocks` content blocks (0: not known), which rowAs finds again. */
+export function rowSeen(uuid: string, blocks = 0): void {
+  if (uuid.length > ROW_PREFIX) rt.rowIds.set(uuid.slice(0, ROW_PREFIX), { uuid, blocks })
+}
+
+/** The stored row that a drawing's `requestId` stands for: the drawings stand under rows by the uuid they are stored
+ *  under. Claude Code draws each block of a message as a row of its own, and once a message of more than one block was
+ *  in the conversation (a prompt with a pasted picture holds its text and the picture), it draws that row and every row
+ *  after it under an id of its own: the stored uuid's first 24 characters, then the block's index in 12 hex digits.
+ *  Without this, no card or footer was drawn under any answer after a pasted picture (bug hunt I9). A row of several
+ *  blocks stands for its last block, so what it carries is drawn once; an id rowSeen never saw stands for itself. */
+export function rowAs(id: string): string {
+  const hit = rt.rowIds.get(id.slice(0, ROW_PREFIX))
+  if (!hit || hit.uuid === id) return id
+  const tail = id.slice(ROW_PREFIX)
+  if (!ROW_INDEX.test(tail)) return id
+  return !hit.blocks || parseInt(tail, 16) === hit.blocks - 1 ? hit.uuid : id
 }
 
 /** The cards of `ids` main has not deleted. */
@@ -1577,6 +1604,8 @@ export async function restoreKept(cx: Ctx): Promise<void> {
     if (add.length) await cx.setCiteIndex([...add, ...have].slice(-2000))
   }
   for (const [row, r] of Object.entries(k.rows)) {
+    rowSeen(row)
+    for (const part of r.answer?.rows ?? []) rowSeen(part)
     await cx.restoreRow(row, r)
     for (const id of [...(r.cards ?? []), ...(r.answer?.cards ?? []), ...embeddedCards(r.answer?.text ?? '')]) ids.add(id)
     for (const v of r.views ?? []) rt.viewsTold.add(v)

@@ -22,6 +22,8 @@ export interface UserRow {
   extension?: string
   /** the plugin that sent the prompt as the analyst's, such as thimble's terminal panel (`run again`, a new label) */
   plugin?: string
+  /** the pictures the analyst pasted into the message, by their file names in the workspace (`GET …/pictures/{name}`) */
+  images?: string[]
 }
 export interface TextRow {
   kind: 'text'
@@ -201,7 +203,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     const into = parent ? parent.children : rows
     switch (e.type) {
       case 'user':
-        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), ...(e.plugin ? { plugin: e.plugin } : {}), event: e.event, run: e.run, extension: e.extension })
+        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), ...(e.plugin ? { plugin: e.plugin } : {}), ...(e.images?.length ? { images: e.images } : {}), event: e.event, run: e.run, extension: e.extension })
         return
       case 'text': {
         // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
