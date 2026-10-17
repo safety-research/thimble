@@ -2,9 +2,11 @@
 // one-string excerpt: the record's text, its tool call and output, or for a JSON record of unknown shape its short
 // fields on one line and long text fields under them, never a JSON dump. A span is the passage with the words around
 // it. Prose written in markdown is marked `md`; a text that is JSON reads as its fields, and a passage of JSON as the
-// decoded string values it covers (jsonSpanParts). Pure.
+// decoded string values it covers (jsonSpanParts). A line of a chat log that starts a turn (the server's `meta.turn`) is
+// its speaker's words under the speaker's name, a markdown line's without its syntax (turnParts). Pure.
+import { plainMd } from '../lib/mdPlain'
 import { findQuote } from '../lib/quoteFind'
-import type { ResolvedRef } from '../lib/types'
+import type { ChatTurn, ResolvedRef } from '../lib/types'
 
 /** where a passage an example card quotes sits in a part's text, as [start, end) offsets (markQuotes) */
 export type Mark = [number, number]
@@ -76,19 +78,65 @@ function inline(v: unknown): string {
   return cut(pairs.join(', '), INLINE_MAX)
 }
 
+/** What an example card says of the record it quotes (bug hunt B17): the words it quotes from it and the values its
+ * takeaway cites there (`quotes`), and its question's and takeaway's words (`words`). */
+export interface ClaimAbout {
+  quotes?: readonly string[]
+  words?: string
+}
+
+const fold = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
+
+/** The fields of a record a card's claim is about, at most two: those whose value holds words the card quotes or a value
+ * its takeaway cites (a quote of a few characters only where it is the whole value). The terminal picks them alike
+ * (plugin/hooks/term/lib.ts claimFields). Pure. */
+export function claimedKeys(entries: readonly [string, unknown][], quotes: readonly string[] = []): Set<string> {
+  const qs = quotes.map((q) => fold(q).replace(/^["“'‘]+|["”'’]+$/g, '').trim()).filter(Boolean)
+  const holds = (v: unknown) => {
+    if (v == null || typeof v === 'object') return false
+    const t = fold(String(v))
+    return t !== '' && qs.some((q) => (q.length >= 4 && t.includes(q)) || t === q)
+  }
+  return new Set(entries.filter(([, v]) => holds(v)).slice(0, 2).map(([k]) => k))
+}
+
+/** Whether a card's words name a record's field: a word of its name the card says, or one that starts the other
+ * (`merged_by` where the card says "merged", `reviewer` where it says "review"). Pure. */
+export function namedBy(words: string): (key: string) => boolean {
+  const said = new Set(fold(words).split(/[^a-z0-9]+/).filter((w) => w.length >= 4))
+  return (key) =>
+    key
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .some((p) => p.length >= 4 && [...said].some((w) => w === p || (Math.min(w.length, p.length) >= 5 && (w.startsWith(p) || p.startsWith(w)))))
+}
+
 /** A JSON record as fields: its short values on one line (nested ones and lists cut short), its long strings each
- * under its name, output fields (a tool's result, stdout) in mono. */
-export function recordParts(record: unknown): QuotePart[] {
+ * under its name, output fields (a tool's result, stdout) in mono. What a card says of it (`about`) puts first the
+ * fields its claim is about, each under its name (claimedKeys), and on the line those its words name (namedBy). */
+export function recordParts(record: unknown, about: ClaimAbout = {}): QuotePart[] {
   if (record == null || typeof record !== 'object' || Array.isArray(record)) return [{ kind: 'code', text: JSON.stringify(record, null, 2) }]
+  const entries = Object.entries(record as Record<string, unknown>)
+  const read = claimedKeys(entries, about.quotes)
+  const named = namedBy(about.words ?? '')
+  const claimed: QuotePart[] = []
   const pairs: [string, string][] = []
   const long: QuotePart[] = []
-  for (const [k, v] of Object.entries(record as Record<string, unknown>)) {
-    if (typeof v === 'string' && (v.length > LONG_FIELD || v.includes('\n') || (TEXT_KEYS.has(k) && v.trim().length > 0 && v.length > 24))) {
-      const text = v.replace(/^\s*\n/, '').replace(/\s+$/, '')
-      if (text) long.push({ kind: 'field', key: k, text, ...(OUTPUT_KEYS.test(k) ? { mono: true } : looksMarkdown(text) ? { md: true } : {}) })
+  const field = (k: string, v: string): QuotePart | null => {
+    const text = v.replace(/^\s*\n/, '').replace(/\s+$/, '')
+    return text ? { kind: 'field', key: k, text, ...(OUTPUT_KEYS.test(k) ? { mono: true } : looksMarkdown(text) ? { md: true } : {}) } : null
+  }
+  for (const [k, v] of entries) {
+    if (read.has(k)) {
+      const f = field(k, typeof v === 'string' ? v : inline(v))
+      if (f) claimed.push(f)
+    } else if (typeof v === 'string' && (v.length > LONG_FIELD || v.includes('\n') || (TEXT_KEYS.has(k) && v.trim().length > 0 && v.length > 24))) {
+      const f = field(k, v)
+      if (f) long.push(f)
     } else if (v != null && v !== '') pairs.push([k, inline(v)])
   }
-  return [...(pairs.length ? [{ kind: 'fields', pairs } as QuotePart] : []), ...long]
+  const line = [...pairs.filter(([k]) => named(k)), ...pairs.filter(([k]) => !named(k))]
+  return [...claimed, ...(line.length ? [{ kind: 'fields', pairs: line } as QuotePart] : []), ...long]
 }
 
 function parseJson(text: string): unknown {
@@ -343,9 +391,10 @@ function trail(text: string): string {
   return s.length < text.length ? s.replace(/\s+$/, '') + '…' : s
 }
 
-/** What an example card shows of one resolved ref, as parts (module note), its text cleaned and its code dedented. */
-export function quoteParts(r: ResolvedRef): QuotePart[] {
-  return rawParts(r).map(tidyPart)
+/** What an example card shows of one resolved ref, as parts (module note), its text cleaned and its code dedented;
+ * `about`, what the card says of a database row it quotes (recordParts). */
+export function quoteParts(r: ResolvedRef, about?: ClaimAbout): QuotePart[] {
+  return rawParts(r, about).map(tidyPart)
 }
 
 function tidyPart(p: QuotePart): QuotePart {
@@ -364,11 +413,31 @@ function tidyPart(p: QuotePart): QuotePart {
   }
 }
 
-function rawParts(r: ResolvedRef): QuotePart[] {
+/** The turn a chat log's line starts (the server's `meta.turn`, as the Transcript mode reads it), or null. */
+function turnOf(meta: unknown): ChatTurn | null {
+  const t = meta && typeof meta === 'object' ? (meta as { turn?: unknown }).turn : null
+  return t && typeof t === 'object' && typeof (t as ChatTurn).speaker === 'string' && typeof (t as ChatTurn).at === 'number' ? (t as ChatTurn) : null
+}
+
+/** A chat log's line that starts a turn, quoted (bug hunt D9): its words under its speaker's name, on one line, a
+ * markdown line's without its syntax as the Transcript mode shows them (mdPlain, bug hunt B20); a passage of it (a span
+ * from `start` to `end` past the speaker) with the words around it. Null for a line its turn does not fit. */
+function turnParts(line: string, turn: ChatTurn, md: boolean, start?: number, end?: number): QuotePart[] | null {
+  if (turn.at > line.length || (start !== undefined && start < turn.at)) return null
+  const words = (a: number, b: number) => (md ? plainMd(line, a, b) : line.slice(a, b)).replace(/\s+/g, ' ')
+  if (start === undefined || end === undefined) {
+    const text = words(turn.at, line.length).trim()
+    return text ? [{ kind: 'field', key: turn.speaker, text }] : null
+  }
+  return [{ kind: 'span', key: turn.speaker, before: lead(words(turn.at, start).trimStart()), text: words(start, end), after: trail(words(end, line.length)) }]
+}
+
+function rawParts(r: ResolvedRef, about?: ClaimAbout): QuotePart[] {
   const kind = fileKind(r.path)
   // a view's reader wrote the excerpt (a post of a message board): its words are the record's
   if (r.view) return r.excerpt ? [{ kind: 'text', text: r.excerpt, ...(kind === 'md' || looksMarkdown(r.excerpt) ? { md: true } : {}) }] : []
   const blocks = (r.blocks ?? []) as Block[]
+  const turn = turnOf(r.meta)
   if (r.kind === 'span') {
     const k = typeof (r as { block?: unknown }).block === 'number' ? ((r as { block?: number }).block as number) : 0
     const whole = blocks[k]?.text ?? ''
@@ -376,6 +445,8 @@ function rawParts(r: ResolvedRef): QuotePart[] {
     const end = (r as { end?: number }).end
     if (whole && typeof start === 'number' && typeof end === 'number' && end > start) {
       const bk = blocks[k]?.kind
+      const said = turn && k === 0 && bk === 'text' ? turnParts(whole, turn, kind === 'md', start, end) : null
+      if (said) return said
       // a passage of a record kept as its JSON, of a tool call's input, or of a text or output that is JSON: the string
       // values it covers, decoded (jsonSpanParts)
       const nl = whole.indexOf('\n')
@@ -390,22 +461,28 @@ function rawParts(r: ResolvedRef): QuotePart[] {
   }
   if (r.kind === 'block') {
     const k = (r as { block?: number }).block ?? 0
-    return blocks[k] ? blockParts(blocks[k], kind) : []
+    const said = turn && k === 0 && blocks[0]?.kind === 'text' ? turnParts(blocks[0].text, turn, kind === 'md') : null
+    return said ?? (blocks[k] ? blockParts(blocks[k], kind) : [])
   }
-  const records = (r as { records?: { blocks?: Block[] }[] }).records
+  const records = (r as { records?: { blocks?: Block[]; meta?: unknown }[] }).records
   if (r.kind === 'range' && Array.isArray(records) && records.length) {
     // the lines of a text file are one text, a line to a line; the records of a JSONL file each read as a record
     const lines = records.map((x) => x.blocks ?? [])
     if (lines.every((bs) => bs.length <= 1 && (bs[0]?.kind ?? 'text') === 'text')) {
-      const text = lines.map((bs) => bs[0]?.text ?? '').join('\n').replace(/^\n+|\s+$/g, '')
+      // a chat log's lines as the Transcript mode shows them: a markdown line without its syntax, so a speaker reads
+      // `P7:` where the file writes `**P7:**`
+      const chat = kind === 'md' && records.some((x) => turnOf(x.meta))
+      const text = lines.map((bs) => (chat ? plainMd(bs[0]?.text ?? '') : (bs[0]?.text ?? ''))).join('\n').replace(/^\n+|\s+$/g, '')
       if (!text) return []
-      return kind === 'code' ? [{ kind: 'code', text }] : [{ kind: 'text', text, ...(kind === 'md' ? { md: true } : {}) }]
+      return kind === 'code' ? [{ kind: 'code', text }] : [{ kind: 'text', text, ...(kind === 'md' && !chat ? { md: true } : {}) }]
     }
     return lines.flatMap((bs) => bs.flatMap((b) => blockParts(b, kind)))
   }
+  const said = turn && blocks.length === 1 && blocks[0].kind === 'text' ? turnParts(blocks[0].text, turn, kind === 'md') : null
+  if (said) return said
   if (blocks.length) return blocks.flatMap((b) => blockParts(b, kind))
   // a database row or a CSV row reads as a record's fields, never as the JSON its excerpt is
-  if ((r.kind === 'row' || r.kind === 'csvrow') && r.record && typeof r.record === 'object' && !Array.isArray(r.record)) return recordParts(r.record)
+  if ((r.kind === 'row' || r.kind === 'csvrow') && r.record && typeof r.record === 'object' && !Array.isArray(r.record)) return recordParts(r.record, about)
   // a whole file, a media file's note: the excerpt as the backend wrote it
   if (!r.excerpt) return []
   if (kind === 'code') return [{ kind: 'code', text: r.excerpt }]
@@ -500,16 +577,19 @@ function wholeRecord(r: ResolvedRef): ResolvedRef {
 /**
  * What an example entry shows, as parts, from `got` (a ref's resolution; undefined while it loads, null when it failed):
  * a lone ref as it reads (quoteParts), with the quote kept beside it marked; several refs of one record that record
- * once, a span's record whole, with every quoted passage marked (a span's own words where no quote was kept). Null
- * until the entry's refs have come back, or when none resolved. Pure.
+ * once, a span's record whole, with every quoted passage marked (a span's own words where no quote was kept). A
+ * database row puts first the fields the card's claim is about: those holding its quotes or a value its takeaway cites
+ * from the entry's refs (`said`), then on its fields line those `words` (its question and takeaway) name. Null until the
+ * entry's refs have come back, or when none resolved. Pure.
  */
-export function entryParts(e: ExampleEntry, got: (ref: string) => ResolvedRef | null | undefined): QuotePart[] | null {
+export function entryParts(e: ExampleEntry, got: (ref: string) => ResolvedRef | null | undefined, claim: { said?: readonly string[]; words?: string } = {}): QuotePart[] | null {
   const res = e.refs.map(got)
   if (res.some((r) => r === undefined)) return null
   const first = res.find((r): r is ResolvedRef => !!r)
   if (!first) return null
+  const about: ClaimAbout = { quotes: [...e.quotes.filter(Boolean), ...(claim.said ?? [])], words: claim.words ?? '' }
   if (e.refs.length === 1) {
-    const parts = quoteParts(first)
+    const parts = quoteParts(first, about)
     return first.kind === 'span' || !e.quotes[0] ? parts : markQuotes(parts, [e.quotes[0]])
   }
   const said = e.refs.flatMap((_r, i) => {
@@ -517,5 +597,5 @@ export function entryParts(e: ExampleEntry, got: (ref: string) => ResolvedRef | 
     const r = res[i]
     return r && r.kind === 'span' ? quoteParts(r).flatMap((p) => (p.kind === 'span' ? [p.text] : [])) : []
   })
-  return markQuotes(quoteParts(wholeRecord(first)), said)
+  return markQuotes(quoteParts(wholeRecord(first), about), said)
 }

@@ -102,3 +102,12 @@ body[data-cmd-drag] ::selection {
 body:has(.pointer-box) .bn-formatting-toolbar {
   display: none;
 }
+
+/* the ask hint (CmdPointer AskHint): the one tooltip's overlay beside the pointer, once, after a plain click on
+   something one can ask about, with the ask key as a key cap */
+.tip.ask-hint {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  animation: dialog-in var(--dur-base) var(--ease-out);
+}

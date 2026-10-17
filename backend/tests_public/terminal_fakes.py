@@ -1,7 +1,7 @@
-"""Stand-ins for terminal mode (the two-modes build, lane agents): a workspace whose launch.json says terminal mode, as the
-launcher writes it (lane mode), and thimble's hooks module as it answers in terminal mode (plugin/hooks/thimble.ts), a
-thread that takes the requests subagents.json addresses to it and writes module.json, as the module does. Each is a
-fixture or a helper a test asks for by name."""
+"""Stand-ins for local transport (a session before its press of the browser workbench): a workspace whose launch.json
+names main and its transport, as activation writes it (app/activate.py write_launch), and thimble's hooks module as it
+answers on local transport (plugin/hooks/thimble.ts), a thread that takes the requests subagents.json addresses to it
+and writes module.json, as the module does. Each is a fixture or a helper a test asks for by name."""
 from __future__ import annotations
 
 import json
@@ -21,11 +21,20 @@ CORPUS = "mini"
 MAIN = "7e000000-0000-4000-8000-00000000000a"
 
 
-def write_launch(ws: Path, session: str = MAIN, mode: str = "terminal", pid: int | None = None, **more: Any) -> None:
-    """launch.json as the launcher writes it in terminal mode, with the test process standing in for main's `claude`."""
+def write_launch(ws: Path, session: str = MAIN, mode: str | None = None, pid: int | None = None,
+                 transport: str | None = None, **more: Any) -> None:
+    """launch.json naming main `session`, with the test process standing in for main's `claude`: `transport` (local or
+    server) as activation writes it, and `mode` when given, as a 0.8.0 launcher wrote it. With neither, a 0.8.0
+    terminal-mode record, which reads as local transport."""
     sf.ensure(ws)
     rec = {"session": session, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "fenced": True,
-           "switches": {}, "unset": [], "pid": os.getpid() if pid is None else pid, "mode": mode, **more}
+           "switches": {}, "unset": [], "pid": os.getpid() if pid is None else pid, **more}
+    if transport is None and mode is None:
+        mode = "terminal"
+    if transport is not None:
+        rec["transport"] = transport
+    if mode is not None:
+        rec["mode"] = mode
     sf.launch_path(ws).write_text(json.dumps(rec), "utf-8")
 
 
@@ -40,8 +49,9 @@ def terminal_ws(workspaces_tmp) -> Path:
 class FileModule:
     """The hooks module in terminal mode: a heartbeat in module.json, and an answer there to each pending request of
     kind module for its session (`answer(op, args)`, by default a new agent for a spawn and {agentId} for a send or a
-    stop, {ok} for a note or a register). `ended` adds a run's end as the module writes it. Start with start(), end
-    with stop()."""
+    stop, {ok} for a note or a register); a model call's arguments are read from its file and its answer written to
+    its own file, as the module does. `ended` adds a run's end as the module writes it. Start with start(), end with
+    stop()."""
 
     def __init__(self, ws: Path, session: str = MAIN, answer: Callable[[str, dict], dict | None] | None = None,
                  delay_s: float = 0.0) -> None:
@@ -87,11 +97,18 @@ class FileModule:
                     or float(r.get("expires_at") or 0) <= now):
                 continue
             self.out["taken"].append(rid)
-            self.seen.append((rid, str(r.get("op")), dict(r.get("args") or {})))
+            op, args = str(r.get("op")), dict(r.get("args") or {})
+            call = str(args.get("call") or "") if op in ("complete", "fork") else ""
+            folder = sf.trusted_dir(self.ws) / "completions"
+            if call:  # a model call: its arguments and its answer are files of their own (module_bridge.COMPLETIONS)
+                args = json.loads((folder / f"{call}.json").read_text("utf-8"))
+            self.seen.append((rid, op, args))
             if self.delay_s:
                 time.sleep(self.delay_s)
-            got = self.answer(str(r.get("op")), dict(r.get("args") or {}))
-            if got is not None:
+            got = self.answer(op, args)
+            if got is not None and call:
+                (folder / f"{call}.answer.json").write_text(json.dumps(got), "utf-8")
+            elif got is not None:
                 self.out["answers"][rid] = got
         self.write()
 

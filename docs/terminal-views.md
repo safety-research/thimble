@@ -1,13 +1,15 @@
 # Views in the terminal
 
-In terminal mode a view is drawn in thimble-term's panel by its own program, `view.term.js`, beside the view's
-`reader.py`, as `view.html` draws it in the browser. The program imports thimble's terminal view kit, which gives it
-the parts every view shares, drawn in terminal mode's look (mods/thimble-term/SPEC.md): Color by with its chips,
-Filter by and Rows, the time range, lanes on the range's scale with their key, a list with a chosen row, a side pane for
-its details, the divider between the overview and the list, a transcript, a record's place one click away and asking
-about a row as a side thread. They mirror the browser's parts ([color.md](color.md), [time-range.md](time-range.md),
-[rows-and-filters.md](rows-and-filters.md)). The rest of the view is the program's own: what it draws, in which rows,
-and what its keys and clicks do.
+In the terminal a view is drawn in thimble's panel by its own program, `view.term.js`, beside the view's `reader.py`, as
+`view.html` draws it in the browser workbench. A view built from the terminal (before the browser is open) gets
+`view.term.js`, one built after the browser opened gets `view.html`, and the first open in the other place builds the
+page it lacks, reusing its `reader.py`. The program imports thimble's terminal view kit (by the name `thimble-term`),
+which gives it the parts every view shares, drawn in the terminal's look (plugin/hooks/term/SPEC.md): Color by with its
+chips, Filter by and Rows, the time range, lanes on the range's scale with their key, a list with a chosen row, a side
+pane for its details, the divider between the overview and the list, a transcript, a record's place one click away and
+asking about a row as a side thread. They mirror the browser's parts ([color.md](color.md),
+[time-range.md](time-range.md), [rows-and-filters.md](rows-and-filters.md)). The rest of the view is the program's own:
+what it draws, in which rows, and what its keys and clicks do.
 
 ```js
 import { colorBy, details, draw, fetch, list } from 'thimble-term'
@@ -154,8 +156,10 @@ the hint row names it. A view that binds `?` itself keeps it, and the kit then b
 `colorBy(opts)` is the one control for the view's color, as in the browser ([color.md](color.md)). Draw it in the top row
 with `color.draw(d, before)` (`before(r)` adds the row's other controls first) or `color.add(r)`.
 
-- The view opens colored by a label that is on in Files and marks its files (not one Rows groups by), as the browser's
-  view does, else as its `initial` says, else Off; a label turned on while the view is away or open takes the color, the one turned on last.
+- The view opens colored by a label that is on in Files and marks some records of its files with a value it colors by
+  (not one Rows groups by), as the browser's view does, else as its `initial` says, else Off; such a label turned on
+  while the view is away or open takes the color, the one turned on last. A label that marks none of them, such as one
+  whose run found nothing, colors no row, so the view keeps its own choice until the analyst picks the label.
 - The row reads `Color by  Kind` and the chosen field's values as chips: `●` in the value's hue, its name, its count
   dim. A click on a chip turns the value's hue off (`○`, dim) or on: its records stay, dim as those with no value.
   Values past the sixth share one chip, `other`, with no
@@ -439,7 +443,7 @@ frame's rows as text in the kit itself.
 ❯ ● 01:40:12  chat    message     Oona                 Tonight's release train: web 2.31.0 and payments 4.12.0…
 ```
 
-A view built in terminal mode passes its checks only when its draft draws this way with no error, within the time limit
+A build of `view.term.js` passes its checks only when its draft draws this way with no error, within the time limit
 and with nothing cut, at 120 and 200 columns in light and dark and opened at the first place that resolves
 (views.term_draws), and, with the checks' test label on, when every choice of the Color by, Filter by and Rows it draws
 draws with no error: Off, None, each field and each label, two fields together, then each part's first choice again

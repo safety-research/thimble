@@ -3,15 +3,18 @@
 // on the server over the whole corpus: names at once (GET /corpora/{c}/sources/find), text as a stream of a line per
 // file (GET /sources/grep), so the first files show while a big corpus is read. The text search has no time limit:
 // while it reads, a row says how many files it has read, with Stop. ↑ and ↓ pick a row, Enter opens it (at line n when
-// the query ends in `:<n>`), Escape clears the field.
+// the query ends in `:<n>`), Escape clears the field. Each file names its run folder beside its name (find.ts
+// foundFolder), its whole path on hover.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from 'react'
 import { Icon } from '../components/Icon'
+import { MidCut } from '../components/MidCut'
 import { Spinner } from '../components/Spinner'
+import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { track } from '../lib/telemetry'
 import type { FileFind, GrepDone, GrepFile, GrepProgress } from '../lib/types'
-import { nameSegments, parseFileQuery, resultRows, snippetParts, type ResultRow } from './find'
-import { baseName, glyphOf, parentOf } from './Tree'
+import { foundFolder, nameSegments, parseFileQuery, resultRows, snippetParts, type ResultRow } from './find'
+import { baseName, glyphOf } from './Tree'
 
 /** ms the search by name waits after the last key before it asks the server */
 const DEBOUNCE_MS = 150
@@ -142,6 +145,29 @@ export function grepStatus(grep: { loading: boolean; stopped: boolean; progress:
   return p.scanned ? `Searched ${filesRead(p.scanned, p.of)}` : `Searching ${p.of.toLocaleString()} ${p.of === 1 ? 'file' : 'files'}`
 }
 
+/** A file the search found, by its name or its text: its glyph, its name (the words marked in a name found), its folder
+ * (foundFolder) cut in its middle, and for a file found by its text how many matches it holds; its whole path in its
+ * tooltip. */
+function FoundFile({ row: r, words, active, common }: { row: Extract<ResultRow, { kind: 'name' | 'file' }>; words: string; active: boolean; common: Record<string, unknown> }) {
+  const { props: tipProps, tip } = useTooltip(r.path, undefined, 'start')
+  const name = baseName(r.path)
+  const folder = foundFolder(r.path)
+  return (
+    <div {...common} {...tipProps} className={'files-row files-file files-found-row' + (r.kind === 'file' ? ' files-found-infile' : '') + (active ? ' active' : '')} data-anchor={r.path} data-anchor-text={r.path}>
+      <Icon className="files-glyph" name={glyphOf(name)} size={13} />
+      <span className="files-name">{r.kind === 'name' ? nameSegments(name, words).map((s, k) => (s.hit ? <mark key={k}>{s.text}</mark> : s.text)) : name}</span>
+      {folder && <MidCut className="files-found-dir" text={folder} tip={null} />}
+      {r.kind === 'file' && (
+        <span className="files-found-n">
+          {r.total.toLocaleString()}
+          {r.complete ? '' : '+'}
+        </span>
+      )}
+      {tip}
+    </div>
+  )
+}
+
 interface Props {
   ws: string
   /** the field, for the shortcut to put the focus in */
@@ -247,21 +273,7 @@ export function FileSearch({ ws, inputRef, onOpen, children }: Props) {
                 </div>
               )
             }
-            const name = baseName(r.path)
-            const folder = parentOf(r.path)
-            return (
-              <div key={r.key} {...common} className={'files-row files-file files-found-row' + (r.kind === 'file' ? ' files-found-infile' : '') + (active ? ' active' : '')} data-anchor={r.path} data-anchor-text={r.path}>
-                <Icon className="files-glyph" name={glyphOf(name)} size={13} />
-                <span className="files-name">{r.kind === 'name' ? nameSegments(name, query.text).map((s, k) => (s.hit ? <mark key={k}>{s.text}</mark> : s.text)) : name}</span>
-                {folder && <span className="files-found-dir">{folder}</span>}
-                {r.kind === 'file' && (
-                  <span className="files-found-n">
-                    {r.total.toLocaleString()}
-                    {r.complete ? '' : '+'}
-                  </span>
-                )}
-              </div>
-            )
+            return <FoundFile key={r.key} row={r} words={query.text} active={active} common={common} />
           })}
           {(grep.loading || grep.stopped) && (
             <div className="files-found-status">

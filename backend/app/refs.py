@@ -113,12 +113,16 @@ _BRACKETS = re.compile(r"\[\[([^\[\]]+?)\]\]")
 
 
 class RefError(Exception):
-    """A ref that cannot be resolved. `status` is the HTTP status for the route: 400 malformed, 404 missing."""
+    """A ref that cannot be resolved. `status` is the HTTP status for the route: 400 malformed, 404 missing. `retry`
+    marks a ref that may resolve soon, such as a view's key while the view is still built or indexed, or before any
+    process has read the key from its index (views.resolve_view_ref): a caller checks it again rather than calling the
+    place missing for good."""
 
-    def __init__(self, detail: str, status: int = 404):
+    def __init__(self, detail: str, status: int = 404, *, retry: bool = False):
         super().__init__(detail)
         self.detail = detail
         self.status = status
+        self.retry = retry
 
 
 # --------------------------------------------------------------------------- grammar
@@ -260,9 +264,10 @@ def format_ref(p: dict[str, Any]) -> str:
 
 
 def extract_refs(text: str) -> list[str]:
-    """All `[[ref]]` occurrences in order, deduplicated (same as frontend refs.ts)."""
+    """All `[[ref]]` occurrences in order, deduplicated (same as frontend refs.ts); a link whose words are in double
+    brackets, `[[↗]](card:<id>)`, cites its target (cite.mixed_links), never a ref named `↗`."""
     out: list[str] = []
-    for m in _BRACKETS.finditer(text):
+    for m in _BRACKETS.finditer(cite.mixed_links(text)):
         r = m[1].strip()
         if "|" in r:  # value-ref [[<display>|<ref>]]: keep only the ref part
             r = r.split("|", 1)[1].strip()
@@ -771,6 +776,23 @@ def _join_blocks(blocks: list[dict[str, str]]) -> str:
     return "\n\n".join(b["text"] for b in blocks)
 
 
+def _with_turns(path: Path, rel: str, recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The records of a text chat log's lines (transcripts.sniff), each line that starts a turn with that turn in
+    `meta.turn` ({speaker, at, time?}: transcripts.turn_of, as the Transcript mode reads it), so a quote of the line can
+    show its speaker apart from its words; any other file's records as they are."""
+    from . import transcripts  # noqa: PLC0415 — transcripts imports this module
+
+    try:
+        hint = transcripts.sniff(path, rel)
+        if not hint or hint.get("format") != "text":
+            return recs
+        texts = [r["record"].get("text") if isinstance(r.get("record"), dict) else None for r in recs]
+        turns = list(transcripts.text_turns(texts, hint))
+    except Exception:  # noqa: BLE001 — a line with no turn read is quoted as it is
+        return recs
+    return [{**r, "meta": {**(r.get("meta") or {}), "turn": t}} if t else r for r, t in zip(recs, turns)]
+
+
 def _resolve_lines(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
     from . import corpus  # data access lives in corpus.py; imported lazily to avoid an import cycle
 
@@ -790,7 +812,7 @@ def _resolve_lines(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, A
         raise RefError(f"range end L{end_line} is before start L{line}", 400)
     end_line = min(end_line, total)
 
-    recs = corpus.load_records(path, rel, src_kind, line, min(end_line, line + RANGE_MAX_RECORDS - 1))
+    recs = _with_turns(path, rel, corpus.load_records(path, rel, src_kind, line, min(end_line, line + RANGE_MAX_RECORDS - 1)))
     first = recs[0]
     out: dict[str, Any] = {
         "ref": ref,
@@ -1031,5 +1053,6 @@ def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
             meta["span"] = {"out": p["out"], "line": n, "text": "\n".join(lines[n - 1 : last])}
             if m_end is not None:
                 meta["span"]["end_line"] = last
-    return {"ref": ref, "kind": "cell", "cell_id": p["cell_id"], "notebook": nb_id, "record": cell,
+    # the card's id, also when the ref names it by its name (notebook.find_cell)
+    return {"ref": ref, "kind": "cell", "cell_id": str(cell.get("id") or p["cell_id"]), "notebook": nb_id, "record": cell,
             "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}

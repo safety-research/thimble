@@ -1,26 +1,37 @@
-"""thimble's backend without its server, for terminal mode.
+"""thimble's backend without its server: the local transport.
 
-In browser mode the plugin's MCP shim (plugin/bin/thimble-mcp) posts each tool call to the server, and the browser reads
-the workspace through the server's routes. In terminal mode no server runs. The shim, one process per Claude Code
-session that main and every subagent share, runs the same `tools.call` in its own process (call); the renderer reads the
-same JSON the server's GET routes give the browser with `thimble state <surface>` (state), and makes the changes the
-browser's POST routes make with `thimble act <kind>` (act). Each of these writes the same workspace files the server
-writes, so a workspace made in one mode opens in the other.
+A session reaches thimble one of two ways (transport): locally, from the session's own processes, until the analyst's
+first press of the browser workbench (`thimble open`, `/thimble browser`, a ↗ or `o` in the terminal panel), and through
+thimble's server for the rest of that session after it. The switch is one way, for as long as main's `claude` process
+runs: the session continued in a new process after a quit (`claude -c`) starts local again (activate.continue_main).
+Peers (a second session that turned thimble on beside a live main) and sessions another took main from always stay
+local.
 
-Which mode a workspace runs in is the session's, recorded by the launcher as `mode` in the workspace's
-`trusted/launch.json` (session_mode). A tool call here refuses a folder that holds no workspace (no tool call registers
-a corpus: only the launcher, /thimble, `thimble demo` and the browser do) and a workspace whose session runs in browser
-mode, whose server owns it. A process that lost its environment (THIMBLE_HOME) finds no workspace under the default
-home and does nothing.
+On local transport no server runs for the session. The plugin's MCP shim, one process per Claude Code session that main
+and every subagent share, runs the same `tools.call` in its own process (call); the terminal UI reads the same JSON the
+server's GET routes give the browser with `thimble state <surface>` (state), and makes the changes the browser's POST
+routes make with `thimble act <kind>` (act). Each of these writes the same workspace files the server writes, so a
+workspace opens the same way in either transport. After the press, an act whose state the server holds in memory (a
+comment dismissed or opened again, a view proposal's answer, a notice's dismissal: SERVER_ACTS) goes to the server's
+route for `thimble act`, POST /api/ws/{c}/act (app/term_acts.py), a token route of this command's own, and so does a
+label's run (SERVER_RUNS), whose model calls only the server can hand to main's session after the press; the others
+run here. The browser's routes for those changes take only the browser's cookie, never the token this command proves.
+
+The transport is read from the workspace's `trusted/launch.json` (subagent_files.transport), which only activation
+writes (app/activate.py write_launch). A tool call here refuses a folder that holds no workspace (no tool call
+registers a corpus: activation, `thimble demo` and the browser do), and a session another took main from
+(TAKEOVER_LINE). A process that lost its environment (THIMBLE_HOME) finds no workspace under the default home and does
+nothing.
 
 Code a model wrote never runs in the shim: card code, code labels and the rerun of cards after a label changed run
-through `thimble-run` in the caller's Bash, with the caller's permission mode (cardrun.py). The shim runs the jobs a
-tool leaves running (a prompt label's run, the card check of a card `thimble-run` wrote) on its event loop, and they end
-with the session, as browser-mode jobs end with it.
+through `thimble-run` in the caller's Bash, with the caller's permission mode (cardrun.py), before and after the press.
+The shim runs the jobs a tool leaves running (a prompt label's run, the card check of a card `thimble-run` wrote) on
+its event loop, and they end with the session; one that ends after the press writes its files under their locks and
+posts its event, which the server takes from the event queue (events.py, event_files.py).
 
-    python -m app.local state <surface> --cwd <dir> [args]    prints JSON (STATE_USAGE)
-    python -m app.local act <kind> --cwd <dir> '<json>'        prints {ok, ...} (ACT_USAGE)
-    python -m app.local view host|text …                      terminal views (term_views.py)
+    python -m app.local state <surface> --cwd <dir> [args]          prints JSON (STATE_USAGE)
+    python -m app.local act <kind> --cwd <dir> ('<json>' | --stdin)  prints {ok, ...} (ACT_USAGE)
+    python -m app.local view host|text …                            terminal views (term_views.py)
 
 Both print `{error}` and exit 1 when they fail, and open no port.
 """
@@ -32,7 +43,6 @@ import json
 import logging
 import os
 import sys
-import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,16 +52,16 @@ from . import config
 
 log = logging.getLogger("thimble.local")
 
-BROWSER, TERMINAL = "browser", "terminal"
-MODES = (BROWSER, TERMINAL)
-LAUNCH_FILE = "trusted/launch.json"  # cli.LAUNCH_FILE: the launcher's record of the session, with its `mode`
-WS_ENV = "THIMBLE_WS"  # the workspace folder, which the launcher exports in terminal mode
+LOCAL, SERVER = "local", "server"  # a session's transport (subagent_files.transport)
+LAUNCH_FILE = "trusted/launch.json"  # activation's record of the session (activate.write_launch), with its `transport`
+WS_ENV = "THIMBLE_WS"  # a workspace folder a process is told to use (the card runner's trial, cardrun.trial_env)
 UI_LOG = "ui.jsonl"  # the UI tools' records for the renderer: {n, at, kind, args}
 # the refusals of call(), in the tool route's words where it has them (tools.call_route)
 NO_WORKSPACE = ("{cwd} is not inside a corpus thimble knows, so `{name}` was not run. Start thimble in that folder with "
                 "`thimble`.")
-NOT_TERMINAL = ("`{name}` was not run: this workspace's session runs in browser mode, where the thimble server runs "
-                "the tools. Start it again with `thimble`.")
+# a call from a session that another session in the folder took main from (activate.take_main)
+TAKEOVER_LINE = ("`{name}` was not run: another Claude Code session in this folder took over thimble. Ask the analyst "
+                 "to type /thimble in this terminal to take it back.")
 
 _started: set[str] = set()  # the workspaces this process has served a call for (_start)
 # The plugin copy this session loaded, which the shim names from its own path (plugin/bin/thimble-mcp), so the commands
@@ -63,32 +73,29 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
-# --------------------------------------------------------------------------- the session's mode
+# --------------------------------------------------------------------------- the session's transport
 
 
-def session_mode(ws: Path) -> str:
-    """The mode the workspace folder `ws`'s session runs in: `mode` in its launch.json, else browser. The mode lane's
-    launch_mode.session_mode when it is installed, which reads the same field."""
+def transport(c: str, sid: str | None = None) -> str:
+    """How session `sid` of workspace `c` reaches thimble (module note): "server" only when `sid` (or, with no `sid`,
+    main) is main's session and a press made its transport the server; "local" for peers, for sessions in `moved`, for
+    any other session, and for a workspace that is not there. Read from launch.json at each call."""
+    from . import subagent_files  # noqa: PLC0415 — standard library only
+
     try:
-        from . import launch_mode  # noqa: PLC0415 — the mode lane's module
-
-        return str(launch_mode.session_mode(Path(ws)))
-    except ImportError:
-        pass
-    try:
-        rec = json.loads((Path(ws) / LAUNCH_FILE).read_text("utf-8"))
-    except (OSError, ValueError):
-        return BROWSER
-    mode = rec.get("mode") if isinstance(rec, dict) else None
-    return TERMINAL if mode == TERMINAL else BROWSER
+        return subagent_files.transport(config.workspace_path(c), sid)
+    except (ValueError, OSError):
+        return LOCAL
 
 
 def terminal(c: str) -> bool:
-    """Whether workspace `c`'s session runs in terminal mode (session_mode). False for a workspace that is not there."""
+    """Whether workspace `c`'s main runs on local transport (transport), kept for the callers that still ask in 0.8.0's
+    words. False for a workspace that is not there."""
     try:
-        return session_mode(config.workspace_path(c)) == TERMINAL
+        config.workspace_path(c)
     except (ValueError, OSError):
         return False
+    return transport(c) == LOCAL
 
 
 def _pid_alive(pid: Any) -> bool:
@@ -104,15 +111,32 @@ def _pid_alive(pid: Any) -> bool:
 
 
 def live_terminal(ws: Path) -> bool:
-    """Whether the workspace folder `ws` is open in terminal mode in a session that still runs (launch.json's `pid`).
-    A server that starts leaves such a workspace's running cards alone (notebook.mark_interrupted_cells)."""
-    if session_mode(ws) != TERMINAL:
+    """Whether the workspace folder `ws`'s main runs on local transport in a session that still runs (launch.json's
+    `pid`). A server that starts leaves such a workspace's running cards alone (notebook.mark_interrupted_cells)."""
+    from . import subagent_files  # noqa: PLC0415
+
+    if subagent_files.transport(Path(ws)) != LOCAL:
         return False
-    try:
-        rec = json.loads((Path(ws) / LAUNCH_FILE).read_text("utf-8"))
-    except (OSError, ValueError):
-        return False
-    return _pid_alive(rec.get("pid") if isinstance(rec, dict) else None)
+    rec = subagent_files.launch(Path(ws))
+    return _pid_alive(rec.get("pid"))
+
+
+def session_here() -> str | None:
+    """The Claude Code session this process runs under: Claude Code's record of the `claude` process above it
+    (`<config dir>/sessions/<pid>.json`, which /clear rewrites), else CLAUDE_CODE_SESSION_ID; None for neither (the
+    server, a shell)."""
+    from . import cc_plugin  # noqa: PLC0415
+
+    pid = cc_plugin.claude_pid()
+    if pid:
+        try:
+            rec = json.loads((cc_plugin.config_dir() / cc_plugin.SESSIONS / f"{pid}.json").read_text("utf-8"))
+            sid = rec.get("sessionId") if isinstance(rec, dict) else None
+            if isinstance(sid, str) and sid:
+                return sid
+        except (OSError, ValueError):
+            pass
+    return os.environ.get("CLAUDE_CODE_SESSION_ID") or None
 
 
 def settle_dirs() -> None:
@@ -151,20 +175,28 @@ def workspace(cwd: str | None) -> str | None:
 
 
 async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None = None,
-               session_token: str | None = None, tool_use_id: str | None = None) -> dict[str, Any]:
+               session_token: str | None = None, tool_use_id: str | None = None,
+               caller: str | None = None, secondary: bool = False) -> dict[str, Any]:
     """One tool call in this process: {content, is_error}, the shape the server's tool route answers with
     (tools.call_route). The session is believed as the route believes it: with a token that proves it, else the call
-    runs as main's, attributed to the agent of thimble's that made it (tools._as_caller)."""
-    from . import hook_auth, tools  # noqa: PLC0415
+    runs as main's, attributed to the agent of thimble's that made it (tools._as_caller). The analyst's session that
+    makes the call (`caller`, else session_here) is refused with TAKEOVER_LINE when another session took main from it
+    (launch.json `moved`). A `secondary` process, an agent's own shim (plugin/bin/thimble-mcp --private), never makes
+    the shim's start (_start), whose marks of what an earlier session left running would mark main's shim's running
+    work."""
+    from . import hook_auth, subagent_files, tools  # noqa: PLC0415
 
     if not tools.known(name):
         return tools.err(f"no such tool: {name}").as_dict()
     c = workspace(cwd)
     if not c:
         return tools.err(NO_WORKSPACE.format(cwd=cwd or "(no folder)", name=name)).as_dict()
-    if not terminal(c):
-        return tools.err(NOT_TERMINAL.format(name=name)).as_dict()
-    _start(c)
+    if not session:
+        who = caller or session_here()
+        if who and who in subagent_files.moved(config.workspace_path(c)):
+            return tools.err(TAKEOVER_LINE.format(name=name)).as_dict()
+    if not secondary:
+        _start(c)
     session = session or None
     if session and not hook_auth.session_proven(c, session, session_token or ""):
         if session_token:
@@ -179,42 +211,52 @@ async def call(name: str, args: dict[str, Any], *, cwd: str, session: str | None
 
 
 def begin(cwd: str | None) -> str | None:
-    """The shim's start in terminal mode, on its event loop: _start for the workspace of `cwd`, before any tool call.
-    A session resumed with `--continue` may run cards with `thimble-run` before it calls a tool, and their card checks
-    wait for the card watch, which would otherwise start only with the first call. The workspace, or None for a folder
-    of no terminal-mode workspace."""
+    """The shim's start on local transport, once the session's thimble is on: _start for the workspace of `cwd`, before
+    any tool call. A session resumed with `--continue` may run cards with `thimble-run` before it calls a tool, and
+    their card checks wait for the card watch, which would otherwise start only with the first call. The shim runs this
+    in a worker thread, which has no event loop, and then starts the watch on its loop (watch). The workspace, or None
+    for a folder of no workspace."""
     c = workspace(cwd)
-    if not c or not terminal(c):
+    if not c:
         return None
     _start(c)
     return c
 
 
 def _start(c: str) -> None:
-    """The shim's start (begin), or the first call for workspace `c` in this process: the cards an earlier session left
-    `running` are marked interrupted, and the watch that starts the card check of each card `thimble-run` writes begins
-    (cardrun.CardWatch)."""
-    if c in _started:
-        return
-    _started.add(c)
-    from . import cardrun, notebook  # noqa: PLC0415
+    """The shim's start (begin), or a call for workspace `c` in this process: the first marks the cards an earlier session
+    left `running` interrupted, and each starts the watch that starts the card check of each card `thimble-run` writes
+    (watch) until one on the loop has started it."""
+    from . import notebook  # noqa: PLC0415
+
+    if c not in _started:
+        _started.add(c)
+        try:
+            marked = notebook.mark_interrupted_cells(only=(c,))
+            if marked:
+                log.info("cards left running by an earlier session, marked interrupted: %s", ", ".join(marked))
+        except Exception:  # noqa: BLE001 — never fails the call
+            log.exception("%s: marking interrupted cards failed", c)
+        try:
+            stopped = _end_left_agents(c)
+            if stopped:
+                log.info("label runs' chats left running by an earlier session, marked stopped: %s", ", ".join(stopped))
+        except Exception:  # noqa: BLE001 — never fails the call
+            log.exception("%s: marking left label chats stopped failed", c)
+    watch(c)
+
+
+def watch(c: str) -> bool:
+    """Start the card watch of workspace `c` on this thread's running loop, once per process (cardrun.CardWatch.start).
+    False with no running loop: a worker thread, such as the one the shim runs begin in, or a one-call process (tests,
+    the CLI), which checks no cards."""
+    from . import cardrun  # noqa: PLC0415
 
     try:
-        marked = notebook.mark_interrupted_cells(only=(c,))
-        if marked:
-            log.info("cards left running by an earlier session, marked interrupted: %s", ", ".join(marked))
-    except Exception:  # noqa: BLE001 — never fails the call
-        log.exception("%s: marking interrupted cards failed", c)
-    try:
-        stopped = _end_left_agents(c)
-        if stopped:
-            log.info("label runs' chats left running by an earlier session, marked stopped: %s", ", ".join(stopped))
-    except Exception:  # noqa: BLE001 — never fails the call
-        log.exception("%s: marking left label chats stopped failed", c)
-    try:
         cardrun.CardWatch.start(c)
-    except RuntimeError:  # no running loop: a one-call process (tests, the CLI) checks no cards
-        pass
+    except RuntimeError:
+        return False
+    return True
 
 
 def _end_left_agents(c: str) -> list[str]:
@@ -226,8 +268,7 @@ def _end_left_agents(c: str) -> list[str]:
 
 
 async def close() -> None:
-    """The end of the shim's session in terminal mode: the jobs it ran end with it, as browser-mode jobs end with the
-    session (the card checks, a label's run, the card watch), and the browser and kernels it started stop. Never
+    """The end of the shim's session: the jobs it ran end with it, as the server's jobs end with the session (the card checks, a label's run, the card watch), and the browser and kernels it started stop. Never
     raises."""
     from . import cardrun  # noqa: PLC0415
 
@@ -272,8 +313,8 @@ async def close() -> None:
 
 def ui_append(c: str, kind: str, args: dict[str, Any]) -> dict[str, Any]:
     """Append one record to the workspace's ui.jsonl under its lock: {n, at, kind, args}, `n` one past the last. The UI
-    tools (set_layout, open_view, set_filter, clear_filter, show_label) write it in terminal mode, where the renderer
-    follows it (`thimble state ui --after <n>`)."""
+    tools (set_layout, open_view, set_filter, clear_filter, show_label) write it on local transport, where the terminal
+    UI follows it (`thimble state ui --after <n>`)."""
     from . import ledger  # noqa: PLC0415
 
     path = config.workspace_dir(c) / UI_LOG
@@ -288,8 +329,8 @@ UI_KINDS = ("layout", "open_view", "filter", "label")
 
 
 def ui_note(c: str, kind: str, args: dict[str, Any]) -> None:
-    """ui_append in terminal mode, where a UI tool's change reaches the renderer through ui.jsonl alone; nothing in
-    browser mode, whose page hears the stream. Never raises: the tool's change is made either way."""
+    """ui_append on local transport, where a UI tool's change reaches the terminal UI through ui.jsonl alone; nothing on
+    the server, whose page hears the stream. Never raises: the tool's change is made either way."""
     try:
         if terminal(c):
             ui_append(c, kind, args)
@@ -411,8 +452,21 @@ async def _home(c: str, args: list[str], pos: list[str]) -> Any:
     run = orientation.read_run(c) or {}
     out["orientation"] = run.get("status")
     out["coverage"] = run.get("coverage")  # run 0's coverage line (orient_session.measure), which home shows under Files
-    out["mode"] = session_mode(config.workspace_path(c))
+    out["transport"] = transport(c)
+    out["instance"] = _instance(c)
     return out
+
+
+def _instance(c: str) -> str:
+    """Which folder the workspace is now, `<device>:<inode>`: a rename keeps it (/thimble fresh moves the folder into
+    the archive, /thimble restore moves an archive back) and a new folder has another (the empty one fresh opens), so
+    the terminal UI tells when another run took the workspace's place (term.ts followWorkspace; bug hunt 7, H11). ''
+    when the folder cannot be read."""
+    try:
+        st = config.workspace_path(c).stat()
+    except (OSError, ValueError):
+        return ""
+    return f"{st.st_dev}:{st.st_ino}"
 
 
 def _home_views(c: str) -> list[dict[str, Any]]:
@@ -434,11 +488,19 @@ def _home_views(c: str) -> list[dict[str, Any]]:
             status = str(p["status"])
         else:
             status = "proposed" if p else "not built"
-        rows.append({"slug": slug, "name": str(p.get("name") or (v or {}).get("name") or slug), "status": status,
-                     "ts": str(p.get("ts") or (v or {}).get("built") or ""),
-                     "files": [str(x) for x in ((v or {}).get("claims") or p.get("claims") or [])],
-                     # whether the terminal draws it: a view.term.js among the files its last pass covered
-                     "term": status == "built" and term_views.has_term(v)})
+        term = status == "built" and term_views.has_term(v)
+        row = {"slug": slug, "name": str(p.get("name") or (v or {}).get("name") or slug), "status": status,
+               "ts": str(p.get("ts") or (v or {}).get("built") or ""),
+               "files": [str(x) for x in ((v or {}).get("claims") or p.get("claims") or [])],
+               # whether the terminal draws it: a view.term.js among the files its last pass covered
+               "term": term}
+        if status == "built" and not term:
+            # where the terminal page of a view built for the browser stands: building, failed (and why) or missing,
+            # which its first open in the terminal builds (views.page_ask)
+            row["page"], why = views.page_state(c, slug, views.TERM_PAGE, view=v, prop=p)
+            if why:
+                row["page_why"] = why
+        rows.append(row)
     return rows
 
 
@@ -446,14 +508,14 @@ def _offer(c: str) -> dict[str, Any] | None:
     """The view proposal waiting for the analyst's answer (views.open_offer), as the rows above the prompt show it: its
     slug, name, description, the analyst's task (empty for a viewer of a file type) and the files it claims, and
     `refused`, why accept could not start its build and how to fix that (views.click_refused), while that stands. None
-    while none waits, and while view proposals are off (views.propose_enabled). It is not among the `views` until it is
-    accepted."""
+    while none waits, while view proposals are off (views.propose_enabled), and while it is dismissed in main's session
+    (views.offer_hidden). It is not among the `views` until it is accepted."""
     from . import views  # noqa: PLC0415
 
     if not views.propose_enabled(c):
         return None
     row = views.open_offer(c)
-    if not row:
+    if not row or views.offer_hidden(c, row):
         return None
     refused = row.get("refused") if isinstance(row.get("refused"), dict) else {}
     return {"slug": str(row["slug"]), "name": str(row.get("name") or row["slug"]),
@@ -468,14 +530,24 @@ def _offer(c: str) -> dict[str, Any] | None:
 # of main's own request (kind "safeguards" or notices.API in main's chat: a reply the safeguards switched, an API error)
 # is left out, as Claude Code shows it there. Each action maps to the act that takes it in the terminal: a `thimble act` kind, or for `settings` (Open
 # Settings: the terminal has no Settings pane) "settings", which says where thimble's config is, since Settings writes it.
+# "ticket-open" is no `thimble act` kind: the terminal UI opens the ticket in the browser workbench (its `ref`), where
+# the analyst allows its change. Nor are a label's "label-open" (the terminal UI opens the label's panel), "label-again"
+# (it runs `thimble act label-run` with `again`), the orientation's "orient-again" (it asks main to start it again),
+# and, for main's reply the safeguards stopped, "card-again" (it sends main the act's `text`) and "ask-again" (it puts
+# the act's `text`, the analyst's last message, back in Claude Code's prompt), nor the stopped page's "page-start" (it
+# starts the page as /thimble browser does).
 NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
-               "settings": "settings"}
+               "settings": "settings", "ticket-open": "ticket-open", "sign-out": "sign-out", "label-open": "label-open",
+               "label-again": "label-again", "orient-again": "orient-again", "card-again": "card-again",
+               "ask-again": "ask-again", "page-start": "page-start"}
+TEXT_ACTS = ("card-again", "ask-again")  # the acts that take the action's `text`
 
 
 def _notice_acts(action: Any) -> list[dict[str, str]]:
-    """A notice's `action` (one {label, do, slug?} or a list of them) as the terminal takes it: {label, act, slug?,
-    config?} each, in its order, `config` the file of thimble's config for "settings"; a Retry with no view is left
-    out."""
+    """A notice's `action` (one {label, do, slug?, text?} or a list of them) as the terminal takes it: {label, act,
+    slug?, config?, ref?, text?} each, in its order, `config` the file of thimble's config for "settings", `ref` the
+    ticket to open in the browser (`ticket:<slug>`) for "ticket-open" and `text` the words of a TEXT_ACTS act; a Retry
+    with no view, a ticket's open with no ticket, and a TEXT_ACTS act with no words, are left out."""
     from . import userconf  # noqa: PLC0415
 
     out: list[dict[str, str]] = []
@@ -483,23 +555,36 @@ def _notice_acts(action: Any) -> list[dict[str, str]]:
         if not isinstance(a, dict) or (act := NOTICE_ACTS.get(str(a.get("do") or ""))) is None:
             continue
         slug = str(a.get("slug") or "")
-        if act == "view-retry" and not slug:
+        if act in ("view-retry", "label-open", "label-again") and not slug:
             continue
-        out.append({"label": str(a.get("label") or "") or act, "act": act, **({"slug": slug} if slug else {}),
-                    **({"config": str(userconf.global_file())} if act == "settings" else {})})
+        ticket = " ".join(str(a.get("slug") or a.get("ticket") or "").split()).removeprefix("ticket:")
+        if act == "ticket-open" and not ticket:
+            continue
+        text = str(a.get("text") or "") if act in TEXT_ACTS else ""
+        if act in TEXT_ACTS and not text.strip():
+            continue
+        out.append({"label": str(a.get("label") or "") or act, "act": act,
+                    **({"slug": slug} if slug and act != "ticket-open" else {}),
+                    **({"config": str(userconf.global_file())} if act == "settings" else {}),
+                    **({"ref": f"ticket:{ticket}"} if act == "ticket-open" else {}),
+                    **({"text": text} if text else {})})
     return out
 
 
-def _notices(c: str) -> list[dict[str, Any]]:
+def _notices(c: str, session: str | None = None) -> list[dict[str, Any]]:
     """Every agent's open notices (notices.open_notices), newest first: {id, key, kind, text, agent, chat, at, acts,
     open}. `text` reads alone (it names the agent and the failure), `agent` names the agent ("Orientation", "View build:
     Agent Network"), `acts` are its actions as `thimble act` takes them (_notice_acts), and `open` says how its own
     thread opens: "thread" for a side thread, "agent" for an agent's chat, "" for main's, for none, or for a chat that
-    is gone."""
+    is gone. A notice addressed to one Claude Code session (its `session`: the takeover notice) is left out for every
+    other session, the one asking being `session`, else the one this process runs under (session_here; bug hunt 7, H14:
+    the session that took main showed "thimble's browser follows the other session in this folder now")."""
     from . import agents, notices  # noqa: PLC0415
 
+    here = session if session is not None else (session_here() or "")
     rows = [n for n in notices.open_notices(c) if isinstance(n, dict) and str(n.get("text") or "").strip()
-            and not (n.get("chat") == agents.MAIN_ID and n.get("kind") in ("safeguards", notices.API))]
+            and not (n.get("chat") == agents.MAIN_ID and n.get("kind") in ("safeguards", notices.API))
+            and (not n.get("session") or n.get("session") == here)]
     rows = sorted(reversed(rows), key=lambda n: str(n.get("ts") or ""), reverse=True)  # newest first, ties as given
     out: list[dict[str, Any]] = []
     for n in rows:
@@ -574,6 +659,12 @@ def _scope_total(c: str, label: dict[str, Any]) -> int | None:
     try:
         corpus_dir = config.corpus_dir(c)
         sources = concepts.match_paths(corpus_dir, concepts.glob_patterns(label.get("glob")))
+        within = label.get("within")
+        if sources and isinstance(within, dict) and within.get("label"):
+            # a label within another runs over the records that label gave its value, not over its whole glob (bug
+            # hunt I4: `◌ labeling 301 of 29,555` for a run over 4,556)
+            found = concepts.within_refs(config.workspace_dir(c), sources, within, SCOPE_COUNT_MAX)
+            return sum(len(refs) for refs in found.values())
         return concepts.units_at_least(corpus_dir, sources, str(label["unit"]), SCOPE_COUNT_MAX)[0] if sources else None
     except Exception:  # noqa: BLE001 — a scope that cannot be counted is said without its size
         log.debug("scope not counted", exc_info=True)
@@ -622,11 +713,67 @@ async def _label(c: str, args: list[str], pos: list[str]) -> Any:
     # how many records that is (the label panel's counts, and its `set by you`)
     applied, moved = await asyncio.to_thread(concepts.verdicts_applied, ws, str(found["id"]), dict(out.get("counts") or {}))
     scope = await asyncio.to_thread(_scope_total, c, out)
+    facts = await asyncio.to_thread(_scope_facts, c, out)
     # the value of this label its scope's filter keeps (a label card's value, the Labels pane's funnel), else None
     f = concepts.read_filters(ws).get(concepts.SCOPE_OF_UNIT.get(str(out.get("unit")), "files")) or {}
     return {**out, "examples": ex, "rows": rows, "totals": totals, "verdicts": {"counts": applied, "set": moved},
             "filter": f.get("value") if f.get("concept") == found["id"] else None,
-            **({"scope_total": scope} if scope is not None else {})}
+            **({"scope_total": scope} if scope is not None else {}), **facts}
+
+
+def _scope_facts(c: str, label: dict[str, Any]) -> dict[str, Any]:
+    """What the label panel's header says beside a label's definition: how many files its glob matches (`scope_files`,
+    for a label over files) and what its records are called there (`scope_unit`, _record_noun); the model a prompt label
+    runs on, by the name the analyst reads (`run_model`, concepts.label_model); and for the panel's `model:` choice, by
+    their ids, the model it runs on (`model_id`), the labels role's (`model_role`, Settings' row for labels, which a
+    label with no model of its own runs on) and the models to choose from (`model_choices`, as the browser's label
+    editor offers them: the one it runs on, every role's, then the aliases' models). A fact that cannot be read is left
+    out. Blocking."""
+    from . import concepts  # noqa: PLC0415
+    from .session import model_label  # noqa: PLC0415
+
+    out: dict[str, Any] = {}
+    if label.get("unit") in concepts.FILE_UNITS:
+        try:
+            found = concepts.match_paths(config.corpus_dir(c), concepts.glob_patterns(label.get("glob")))
+            out["scope_files"] = len(found)
+            out["scope_unit"] = _record_noun(str(label.get("unit")), [str(s.get("path") or "") for s in found])
+        except Exception:  # noqa: BLE001 — a scope that cannot be matched is said without its count
+            log.debug("scope files not counted", exc_info=True)
+    try:
+        role = config.base_model(concepts.labels_model(c)["model"])
+        model = config.base_model(concepts.label_model(c, label))
+        roles = (config.base_model(str(r.get("model") or "")) for r in config.models_for(c).values())
+        choices = [model, role, *roles, *config.MODEL_ALIASES.values()]
+        out.update({"model_id": model, "model_role": role, "model_choices": list(dict.fromkeys(m for m in choices if m))})
+        if label.get("kind") == "prompt":
+            out["run_model"] = model_label(model)
+    except Exception:  # noqa: BLE001 — no model row rather than no panel
+        log.debug("label model not read", exc_info=True)
+    return out
+
+
+# what one record of a file is called, by the file's type (concepts: a line of text, a row of a database's table or a
+# CSV file, a page of a PDF, a value of a JSON document)
+_RECORD_NOUNS = {**dict.fromkeys(("db", "sqlite", "sqlite3", "duckdb", "csv", "tsv", "xlsx", "parquet", "arrow", "feather"), "rows"),
+                 "pdf": "pages", "json": "entries"}
+
+
+def _record_noun(unit: str, paths: list[str]) -> str:
+    """What a label's records are called in the label panel's scope row (`· 44 lines`): `files` for a label over whole
+    files, `run folders` for one over runs; for one over records, the word its files' type gives them (`lines`, `rows`,
+    `pages`, `entries`), `records` when its files differ or none matched. Pure."""
+    from . import coverage  # noqa: PLC0415
+
+    if unit == "agent":
+        return "files"
+    if unit == "run":
+        return "run folders"
+    nouns = set()
+    for p in paths:
+        ext = coverage.ext_of(p)
+        nouns.add(_RECORD_NOUNS.get(ext) or ("lines" if ext in coverage.LINE_EXTS else "records"))
+    return nouns.pop() if len(nouns) == 1 else "records"
 
 
 def _verdict_rows(c: str, concept_id: str) -> list[dict[str, Any]]:
@@ -671,7 +818,7 @@ def _unread(c: str, meta: dict[str, Any]) -> bool:
 def answered(events: list[dict[str, Any]]) -> int:
     """How many of a thread's questions have an answer: each question (a `user` record and the records after it) counts
     once, at its first `done` record or its first reply (the `text` record `reply_in_thread` writes, threads.reply). In
-    terminal mode main often answers with `reply_in_thread` alone, and no `done` record follows."""
+    the terminal main often answers with `reply_in_thread` alone, and no `done` record follows."""
     n, got = 0, False
     for r in events:
         kind = r.get("type")
@@ -942,15 +1089,17 @@ async def _resolve(c: str, args: list[str], pos: list[str]) -> Any:
     corpus_dir = config.corpus_dir(c)
 
     def one(item: Any) -> dict[str, Any]:
-        """The ref route's answer for one ref (refs.resolve), `{ref, error}` when it does not resolve; with `state`
-        (ok, missing, differs) and its `why`, the value checked as the takeaway's links check it (verify)."""
+        """The ref route's answer for one ref (refs.resolve), `{ref, error}` when it does not resolve, with `retry`
+        true when it may resolve soon (refs.RefError.retry: a view's key while the view is built or indexed); with
+        `state` (ok, missing, differs) and its `why`, the value checked as the takeaway's links check it (verify)."""
         ref = str(item.get("ref") if isinstance(item, dict) else item or "").strip()
         value = item.get("value") if isinstance(item, dict) else None
         given = {"value": value} if value is not None else {}
         try:
             got = dict(refs.resolve(corpus_dir, ref))
         except refs.RefError as e:
-            return {"ref": ref, **given, "error": str(e.detail), "state": "missing", "why": str(e.detail)}
+            later = {"retry": True} if getattr(e, "retry", False) else {}
+            return {"ref": ref, **given, "error": str(e.detail), **later, "state": "missing", "why": str(e.detail)}
         except Exception as e:  # noqa: BLE001 — one bad ref never takes the others down
             why = f"{type(e).__name__}: {e}"
             return {"ref": ref, **given, "error": why, "state": "missing", "why": why}
@@ -977,22 +1126,99 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 # --------------------------------------------------------------------------- thimble act
 
 
-ACT_USAGE = ("thimble act <kind> --cwd <dir> '<json>'; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
-             "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
+ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id>]; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
+             "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?, again?, resume?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
-             "stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
-             "view-propose-now {notice?}, view-retry {slug, notice?}, notice-dismiss {id}")
+             "stop {agent}, view-accept {slug}, view-reject {slug}, view-dismiss {slug}, view-proposals-off {}, "
+             "view-propose-now {notice?}, view-retry {slug, notice?}, view-term-page {slug}, notice-dismiss {id}, sign-out {slug}")
 
 
-async def act(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """The change the browser's POST route for `kind` makes (ACT_USAGE): {ok: true, ...}."""
+# The acts whose state thimble's server holds in memory once main's transport is server: the comments of a document and
+# of Claude's answers, which its routes change and announce to the browser, and the view proposals, builds and notices,
+# whose queue and writer then live in the server (H6). After the press each goes to ACT_ROUTE (app/term_acts.py), which
+# makes the change the browser's route `kind -> the route's path` makes, the fields that path names checked here first;
+# every other act runs here.
+ACT_ROUTE = "/api/ws/{c}/act"
+SERVER_ACTS = {
+    "comment-resolve": "/api/ws/{c}/investigations/main/types/{doc}/comments/{comment}/dismiss",
+    "comment-reopen": "/api/ws/{c}/investigations/main/types/{doc}/comments/{comment}/reopen",
+    "answer-comment-resolve": "/api/ws/{c}/answer-comments/{comment}/{how}",
+    "view-accept": "/api/ws/{c}/views/proposals/{slug}/accept",
+    "view-reject": "/api/ws/{c}/views/proposals/{slug}/reject",
+    "view-retry": "/api/ws/{c}/views/proposals/{slug}/retry",
+    # the browser has no dismiss: its card follows the terminal's (views.hide_offer); the path names the field it needs
+    "view-dismiss": "/api/ws/{c}/views/proposals/{slug}",
+    "view-term-page": "/api/ws/{c}/views/{slug}/frame",  # the browser's first open of a view builds its page there
+    "view-propose-now": "/api/ws/{c}/views/propose-now",
+    "notice-dismiss": "/api/ws/{c}/notices/{id}/dismiss",
+}
+SERVER_ACT_TIMEOUT_S = 10.0
+# The acts that run in thimble's server once main's transport is the server, whose answer is the run's end: a label's
+# run, since a prompt label's model calls go through main's session's hooks module (model_call.py), which only the server
+# reaches after the press (module_bridge.model). Run here, it ended at once with "no Claude Code session runs thimble in
+# this folder" (bug hunt E8: a notice's Run again on these 2). The server runs the same act (term_acts.py), and holds the
+# request until the run ends; `label-stop`, a file this process writes, reaches it there as here.
+SERVER_RUNS = ("label-run",)
+
+
+def server_route(c: str, kind: str, payload: dict[str, Any]) -> str | None:
+    """The server's route that an act of SERVER_ACTS takes (its path), or None for an act that runs here. StateError
+    when the payload lacks a field the route names."""
+    import string  # noqa: PLC0415
+    from urllib.parse import quote  # noqa: PLC0415
+
+    path = SERVER_ACTS.get(kind)
+    if path is None:
+        return None
+    values = {"c": c, "how": "reopen" if payload.get("reopen") is True else "dismiss",
+              "doc": str(payload.get("doc") or "").strip().removeprefix("report:")}
+    for name in ("comment", "slug", "id"):
+        values[name] = " ".join(str(payload.get(name) or "").split())
+    names = [f for _, f, _, _ in string.Formatter().parse(path) if f]
+    missing = [f for f in names if not values.get(f)]
+    if missing:
+        raise StateError(f"`{missing[0]}` is empty")
+    return path.format(**{k: quote(v, safe="") for k, v in values.items()})
+
+
+def _post_to_server(c: str, kind: str, payload: dict[str, Any],
+                    timeout: float | None = SERVER_ACT_TIMEOUT_S) -> dict[str, Any]:
+    """The act `kind` posted to thimble's server (ACT_ROUTE) with the token's proof (cli._request): its JSON answer, or
+    StateError with why. `timeout` None waits for the answer as long as it takes (SERVER_RUNS)."""
+    from urllib.parse import quote  # noqa: PLC0415
+
+    from . import cli  # noqa: PLC0415
+
+    status, body = cli._request("POST", f"{cli.api_url()}/api/ws/{quote(c, safe='')}/act",
+                                {"kind": kind, "payload": payload}, timeout=timeout)
+    if status != 200:
+        why = body.get("detail") if isinstance(body, dict) else body
+        raise StateError(f"thimble's server did not take this change ({status or 'no answer'}: {why})")
+    return body if isinstance(body, dict) else {}
+
+
+async def act(c: str, kind: str, payload: dict[str, Any], session: str | None = None) -> dict[str, Any]:
+    """The change the browser's POST route for `kind` makes (ACT_USAGE): {ok: true, ...}. After the press, an act of
+    SERVER_ACTS or SERVER_RUNS made for a session whose transport is the server goes to the server's route (module
+    note)."""
     from fastapi import HTTPException  # noqa: PLC0415
 
     fn = _ACTS.get(kind)
-    if fn is None:
+    if fn is None and kind not in SERVER_ACTS:
         raise StateError(f"no act {kind!r}; {ACT_USAGE}")
     if not isinstance(payload, dict):
         raise StateError("the act's argument must be a JSON object")
+    if kind in SERVER_RUNS and transport(c, session) == SERVER:
+        got = await asyncio.to_thread(_post_to_server, c, kind, payload, None)
+        if got.get("ok") is False:
+            raise StateError(str(got.get("error") or f"thimble's server did not run {kind}"))
+        return {"ok": True, **{k: v for k, v in got.items() if k != "ok"}, "via": "server"}
+    if kind in SERVER_ACTS and transport(c, session) == SERVER:
+        if server_route(c, kind, payload) is not None:
+            got = await asyncio.to_thread(_post_to_server, c, kind, payload)
+            return {"ok": True, **{k: v for k, v in got.items() if k != "ok"}, "via": "server"}
+    if fn is None:
+        raise StateError(f"no act {kind!r}; {ACT_USAGE}")
     try:
         return {"ok": True, **(await fn(c, payload))}
     except HTTPException as e:
@@ -1046,7 +1272,8 @@ async def _act_verdict(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 async def _act_label(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """The analyst's edit of a label in the terminal's label panel, saved as the browser's label editor saves it (PUT
     /concepts/{id}, concepts.update_concept_route; LabelCard's patchOf): `name`, `kind` (prompt, regex or code), `body` (a
-    prompt label's prompt, else its pattern or code), `glob` (the files it applies to) and `values`. A field left out stays
+    prompt label's prompt, else its pattern or code), `glob` (the files it applies to), `values` and `model` (the model a
+    prompt label's calls run on, by its id; '' for the labels role's, Settings' row for labels). A field left out stays
     as it is."""
     from . import concepts  # noqa: PLC0415
 
@@ -1072,8 +1299,10 @@ async def _act_label(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         if len([v for v in values if v]) < 2:
             raise StateError("`values` needs two values or more")
         patch["labels"] = [v for v in values if v]
+    if payload.get("model") is not None:
+        patch["model"] = config.base_model(str(payload["model"]))
     if not patch:
-        raise StateError("nothing to change: give name, kind, body, glob or values")
+        raise StateError("nothing to change: give name, kind, body, glob, values or model")
     out = await asyncio.to_thread(concepts.update_concept_route, c, str(found["id"]), concepts.ConceptPatch(**patch))
     return {"label": found["id"], "concept": out}
 
@@ -1083,7 +1312,13 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     (concepts.apply_route): a label that never ran gets its card, and main hears of a version it has not heard of
     (tell_main). The run goes on in this process until it ends and its summary is the answer, so the renderer starts it
     beside the session, which it ends with. A code label's code runs only in main's sandbox: as apply_label does, the run
-    waits for `thimble-run label` (concepts.PENDING_RUN), and the answer gives its command (`deferred`)."""
+    waits for `thimble-run label` (concepts.PENDING_RUN), and the answer gives its command (`deferred`); a code label
+    whose last run already covers this one (the same version over the same files and sample, concepts.covered) runs
+    nothing and waits for nothing, and the answer says so (`unchanged`), so main is not asked to run what apply_label
+    would answer with the old rows (bug hunt B31). With `again`, a prompt label runs only over the units its last run
+    could not label (a label notice's act, concepts.start_again), and main hears of it once it ends (`label_done`), as it
+    does of a trial run on everything. With `resume`, a run that was stopped goes on with the units it never read, as the
+    browser's Run again does, when the label's `resume` says it can (concepts.resumable)."""
     from . import cardrun, concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -1091,12 +1326,16 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     if found is None:
         raise StateError(f"no label {payload.get('label')!r}")
     cid = str(found["id"])
-    limit = _int(str(payload["limit"]), 0, "limit") if payload.get("limit") not in (None, "") else 0
+    again = payload.get("again") is True
+    resume = payload.get("resume") is True and not again
+    limit = _int(str(payload["limit"]), 0, "limit") if payload.get("limit") not in (None, "") and not again and not resume else 0
     if limit < 0:
         raise StateError("limit must be 1 or more, or left out for every record")
     files = found["unit"] in concepts.FILE_UNITS
     paths = concepts.glob_patterns(found["glob"]) if files else []
-    if found["kind"] == "code" and cardrun.defers(c):
+    if found["kind"] == "code" and cardrun.defers(c) and not again:
+        if concepts.running_apply(c, cid) is None and await asyncio.to_thread(concepts.covered, c, found, paths, limit or None):
+            return {"label": cid, "unchanged": True}
         args: dict[str, Any] = {"scope": concepts.SCOPE_OF_UNIT.get(found["unit"], "files"), "name": found["name"],
                                 "predicate": {"kind": "code", "text": found["spec"]}, "values": found["labels"],
                                 **({"paths": paths} if files else {}), **({"limit": limit} if limit else {})}
@@ -1104,45 +1343,49 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         cardrun.mirror(c)
         return {"label": cid, "deferred": True, "command": cardrun.command("label", cid)}
     ran_before = bool(found["applications"])
-    stop = _label_stop_file(c, cid)
-    stop.unlink(missing_ok=True)
-    await concepts.start_apply(c, cid, paths, limit or None, "user")
-    cards = await asyncio.to_thread(concepts._label_cards, ws, cid)
-    card = dict(cards[0][1]) if cards else None
-    if card is None and not ran_before:
-        card = await asyncio.to_thread(concepts.label_card, c, found, None, "user")
-    concepts.tell_main(c, found, card)
+    told = None
+    if again:
+        await concepts.start_again(c, cid, "user")
+        told = concepts.tell_when_done(c, cid)
+    else:
+        if resume:
+            paths = await asyncio.to_thread(concepts.resume_paths, ws, found, paths)
+        await concepts.start_apply(c, cid, paths, limit or None, "user", resume=resume)
+        cards = await asyncio.to_thread(concepts._label_cards, ws, cid)
+        card = dict(cards[0][1]) if cards else None
+        if card is None and not ran_before:
+            card = await asyncio.to_thread(concepts.label_card, c, found, None, "user")
+        concepts.tell_main(c, found, card)
+        if found["trial"] and not limit:  # a trial run on everything: main hears when it ends (bug hunt G3)
+            told = concepts.tell_when_done(c, cid, whole_trial=True)
     # `label-stop` from another process asks this run to stop after its current unit, as the browser's Stop does; so does
-    # `label-delete` from another process, which removes the label's file
-    ended = threading.Event()
-    defined = concepts._concept_file(ws, cid)
-
-    def watch() -> None:
-        while not ended.wait(LABEL_STOP_POLL_S):
-            if stop.exists() or not defined.is_file():
-                concepts._cancel_event(c, cid).set()
-                stop.unlink(missing_ok=True)
-                return
-
-    threading.Thread(target=watch, name=f"label-stop-{cid}", daemon=True).start()
-    try:
-        summary = await concepts.wait_apply(c, cid, float("inf"))
-    finally:
-        ended.set()
+    # `label-delete` from another process, which removes the label's file: this process watches for both while the run
+    # goes on, as every process that runs a label does (concepts._watch_runs)
+    summary = await concepts.wait_apply(c, cid, float("inf"))
+    if told is not None:  # this process ends with the run: main's `label_done` goes out first
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.shield(told), LABEL_DONE_WAIT_S)
     return {"label": cid, "summary": summary}
 
 
-LABEL_STOP_POLL_S = 0.5
+LABEL_DONE_WAIT_S = 30.0  # how long a `label-run` with `again`, or of a trial on everything, waits for its `label_done`
 
 
 def _label_stop_file(c: str, cid: str) -> Path:
-    """The file that asks a running `label-run` of label `cid` to stop (`label-stop`); the run's process watches for it."""
-    return config.workspace_dir(c) / "concepts" / f"{cid}.stop"
+    """The file that asks a run of label `cid` to stop (`label-stop`); the run's process watches for it."""
+    from . import concepts  # noqa: PLC0415
+
+    return concepts.stop_file(config.workspace_dir(c), cid)
+
+
+# what `label-stop` answers when no run of the label is going (the label panel says it on its `×` row)
+LABEL_NOT_RUNNING = "no run of this label is going"
 
 
 async def _act_label_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Stop a label's run that `label-run` started, after its current unit; the rows written so far stay (the browser's
-    Stop, concepts.cancel_apply_route). The run lives in that act's own process, which watches for the stop file."""
+    """Stop a label's run after its current unit, whichever process runs it (main's apply_label in the server or the
+    session's shim, a `label-run`, the browser's Run again); the rows written so far stay (the browser's Stop,
+    concepts.cancel_apply_route). {stopping: true}, or {stopping: false, reason} when no run of it is going."""
     from . import concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -1150,9 +1393,8 @@ async def _act_label_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     if found is None:
         raise StateError(f"no label {payload.get('label')!r}")
     cid = str(found["id"])
-    stop = _label_stop_file(c, cid)
-    stop.parent.mkdir(parents=True, exist_ok=True)
-    stop.write_text(_now(), "utf-8")
+    if not concepts.request_stop(c, cid):
+        return {"label": cid, "stopping": False, "reason": LABEL_NOT_RUNNING}
     return {"label": cid, "stopping": True}
 
 
@@ -1245,11 +1487,17 @@ async def _act_seen(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 
 async def _act_stop(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Stop one of thimble's agents, by its chat or its agent id, through the hooks module (subagents.stop), as the
-    browser's Stop does."""
-    from . import agents, subagents  # noqa: PLC0415
+    browser's Stop does. The chat that follows a label's run is no agent: its stop stops that run, wherever it runs
+    (concepts.request_stop; bug hunt I1: it went to the module and answered that the module was not loaded)."""
+    from . import agents, concepts, subagents  # noqa: PLC0415
 
     who = _text(payload, "agent").removeprefix("chat:").removeprefix("thread:")
     meta = agents.meta_or_none(c, who) if agents.ID_RE.match(who) else None
+    if meta is not None and meta.get("role") == "labels":
+        cid = concepts.label_of_chat(c, meta)
+        if cid is None or not concepts.request_stop(c, cid):
+            return {"stopped": False, "kind": "not-running", "reason": LABEL_NOT_RUNNING}
+        return {"stopped": True, "label": cid}
     # an agent's chat names its agent; a side thread's, the fork of main that answers it
     fork = (meta or {}).get("fork") if isinstance((meta or {}).get("fork"), dict) else {}
     agent_id = str((meta or {}).get("agent_id") or fork.get("agent_id") or who)
@@ -1290,9 +1538,10 @@ def _queued(kind: str, c: str, body: dict[str, Any] | None = None) -> dict[str, 
 
 
 def _offer_answer(c: str, payload: dict[str, Any], kind: str) -> dict[str, Any]:
-    """The analyst's accept or reject of the view proposal that waits (views.open_offer), handed to the holder
-    (local_hooks `view-accept`: views.accept, its build queued; `view-reject`): this process reads and writes nothing
-    more. {queued: true} at once, or {queued: false, reason} when the proposal is gone or no longer waits."""
+    """The analyst's accept, reject or dismiss of the view proposal that waits (views.open_offer), handed to the holder
+    (local_hooks `view-accept`: views.accept, its build queued; `view-reject`; `view-dismiss`): this process reads and
+    writes nothing more. {queued: true} at once, or {queued: false, reason} when the proposal is gone or no longer
+    waits."""
     from . import views  # noqa: PLC0415
 
     slug = _text(payload, "slug")
@@ -1313,6 +1562,12 @@ async def _act_view_accept(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 async def _act_view_reject(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Reject the view proposal, as the browser's Reject does (POST …/proposals/{slug}/reject)."""
     return _offer_answer(c, payload, "view-reject")
+
+
+async def _act_view_dismiss(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Dismiss the view proposal from the row above the prompt: hidden for main's session, there and in the browser's
+    card, and not answered (views.hide_offer)."""
+    return _offer_answer(c, payload, "view-dismiss")
 
 
 async def _act_view_proposals_off(c: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1362,6 +1617,19 @@ async def _act_view_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return _queued("view-retry", c, {"slug": slug, **_notice_ref(payload)})
 
 
+async def _act_view_term_page(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The terminal's open of a built view that has no terminal page (built for the browser): its build queued as the
+    browser's first open of a terminal-built view queues one (views.ensure_page), handed to the holder (local_hooks
+    `view-term-page`), which follows the build. {queued: true} at once, also while a build of the view goes; {ready:
+    true} when it has the page; {queued: false, reason} with the fix when it cannot be built now (views.page_ask)."""
+    from . import views  # noqa: PLC0415
+
+    got = views.page_ask(c, _text(payload, "slug"), views.TERM_PAGE)
+    if got.pop("build", False):
+        return _queued("view-term-page", c, {"slug": _text(payload, "slug")})
+    return got
+
+
 def _notice_ref(payload: dict[str, Any]) -> dict[str, Any]:
     """The id of the notice whose act the press was (`notice`), which the holder dismisses before it runs the act, so
     that a failure that comes again shows as a notice of its own: {notice: id}, or {} for none."""
@@ -1375,13 +1643,29 @@ async def _act_notice_dismiss(c: str, payload: dict[str, Any]) -> dict[str, Any]
     return _queued("notice-dismiss", c, {"id": _text(payload, "id")})
 
 
+async def _act_sign_out(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A sign-in notice's Sign it out in the terminal: the browser the notice names (`slug`, its id) signed out by
+    thimble's server, as `thimble unpair` signs out every browser (POST /api/ui/unpair {browser}, a token route), and
+    its notice gone. {queued: true}; StateError when the server does not take it."""
+    from . import cli  # noqa: PLC0415
+
+    browser = _text(payload, "slug")
+    status, body = await asyncio.to_thread(cli._request, "POST", f"{cli.api_url()}/api/ui/unpair",
+                                           {"browser": browser}, SERVER_ACT_TIMEOUT_S)
+    if status not in (200, 204):
+        why = body.get("detail") if isinstance(body, dict) else body
+        raise StateError(f"thimble's server did not sign that browser out ({status or 'no answer'}: {why})")
+    return {"queued": True, "signed_out": browser}
+
+
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
          "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete,
          "label-undelete": _act_label_undelete, "label-show": _act_label_show, "label-filter": _act_label_filter,
          "seen": _act_seen, "stop": _act_stop, "view-accept": _act_view_accept,
-         "view-reject": _act_view_reject, "view-proposals-off": _act_view_proposals_off,
+         "view-reject": _act_view_reject, "view-dismiss": _act_view_dismiss,
+         "view-proposals-off": _act_view_proposals_off,
          "view-propose-now": _act_view_propose_now, "view-retry": _act_view_retry,
-         "notice-dismiss": _act_notice_dismiss}
+         "view-term-page": _act_view_term_page, "notice-dismiss": _act_notice_dismiss, "sign-out": _act_sign_out}
 
 
 # --------------------------------------------------------------------------- the command line
@@ -1413,14 +1697,17 @@ def main(argv: list[str]) -> int:
         if verb == "state":
             out: Any = asyncio.run(state(c, what, [a for a in rest]))
         else:
-            if not terminal(c):
-                return _fail("this workspace's session runs in browser mode, where the browser makes this change")
+            # --stdin: the act's JSON on standard input, for a payload past what one argument may hold (coverage facts
+            # that name 100,000 paths)
+            stdin = "--stdin" in rest
+            rest = [a for a in rest if a != "--stdin"]
             raw = _positional(rest)
             try:
-                payload = json.loads(raw[0]) if raw else {}
+                text = sys.stdin.read() if stdin else (raw[0] if raw else "")
+                payload = json.loads(text) if text.strip() else {}
             except ValueError as e:
                 return _fail(f"the act's argument is not JSON: {e}")
-            out = asyncio.run(act(c, what, payload))
+            out = asyncio.run(act(c, what, payload, session=_flag(rest, "--session") or session_here()))
     except StateError as e:
         return _fail(str(e))
     except Exception as e:  # noqa: BLE001 — the renderer reads {error} rather than a traceback
@@ -1430,14 +1717,21 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-# the report in terminal mode (term_report.py): the checks its comments name, a comment resolved or opened again, and
-# the document saved from the panel's edit
+# the report in the terminal (term_report.py): the checks its comments name, and a comment resolved or opened again
 from . import term_report as _term_report  # noqa: E402 — it joins the surfaces and acts above
 
 _SURFACES.update(_term_report.SURFACES)
 _ACTS.update(_term_report.ACTS)
 STATE_USAGE += _term_report.STATE_USAGE
 ACT_USAGE += _term_report.ACT_USAGE
+
+# 0.9.0's surfaces and acts (state_more.py): coverage, the labels' unsure records, the checks' comments on answers
+from . import state_more as _state_more  # noqa: E402 — it joins the surfaces and acts above
+
+_SURFACES.update(_state_more.SURFACES)
+_ACTS.update(_state_more.ACTS)
+STATE_USAGE += _state_more.STATE_USAGE
+ACT_USAGE += _state_more.ACT_USAGE
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ from bisect import bisect_right
 from collections import OrderedDict
 from contextlib import closing
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Iterator
+from typing import Any, AsyncIterator, Callable, Container, Iterator
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -100,11 +100,23 @@ def source_title(rel: str, kind: str) -> str:
     return name
 
 
-def run_dir(rel: str) -> str:
-    """The run directory of a nested path (`run2-x/agents/a.jsonl` -> `run2-x`); '' for flat paths."""
-    parts = rel.split("/")
-    depth = 2 if len(parts) > 1 and parts[-2] in ("agents", "prompts") else 1
-    return "/".join(parts[:-depth]) if len(parts) > depth else ""
+RUN_OWN_FOLDERS = ("agents", "prompts")  # a run's own folders, whose files belong to the run folder above them
+
+
+def run_dir(rel: str, holders: Container[str] = ()) -> str:
+    """The run folder of a corpus-relative file path: the outermost folder on its path, below the corpus root, that holds
+    files itself (`holders`, file_folders), so a file deep in a run (`run-1/final/report/a.md`) belongs to its run
+    (`run-1`), and a folder that holds only folders (`runs` of `runs/run-1/t.jsonl`) is not a run. A folder named in
+    RUN_OWN_FOLDERS belongs to the folder above it (`run2-x/agents/a.jsonl` -> `run2-x`). '' for a file at the root. A
+    folder of runs that holds files of its own reads as one run."""
+    parts = rel.split("/")[:-1]
+    for i, name in enumerate(parts):
+        if name in RUN_OWN_FOLDERS:
+            return "/".join(parts[:i])
+        here = "/".join(parts[: i + 1])
+        if here in holders:
+            return here
+    return "/".join(parts)
 
 
 SOURCES_MEMO_S = 30.0  # a corpus's source list is walked at most this often
@@ -114,13 +126,15 @@ _sources_walks: dict[tuple[Path, bool], threading.Lock] = {}  # one walk at a ti
 
 
 class _Listing:
-    """One walk of a corpus: its sources as list_sources returns them, and when the walk ended."""
+    """One walk of a corpus: its sources as list_sources returns them, when the walk ended, and the folders that hold
+    them (file_folders, made on first use)."""
 
-    __slots__ = ("ts", "sources")
+    __slots__ = ("ts", "sources", "folders")
 
     def __init__(self, ts: float, sources: list[dict[str, Any]]) -> None:
         self.ts = ts
         self.sources = sources
+        self.folders: frozenset[str] | None = None
 
 
 def _is_hidden(rel: str) -> bool:
@@ -172,6 +186,15 @@ def list_sources(corpus: Path, include_hidden: bool = False) -> list[dict[str, A
     """The corpus's files as the Files tab lists them. Paths with a dot component are left out unless `include_hidden`,
     which marks them `hidden: True`. Memoised per corpus; callers must not mutate the shared list."""
     return _listing(corpus, include_hidden).sources
+
+
+def file_folders(corpus: Path) -> frozenset[str]:
+    """The folders that hold a file of list_sources themselves ('' for the corpus root), memoised with the listing: the
+    folders run_dir reads as run folders."""
+    listing = _listing(corpus, False)
+    if listing.folders is None:
+        listing.folders = frozenset(s["path"].rpartition("/")[0] for s in listing.sources)
+    return listing.folders
 
 
 def source_of(corpus: Path, rel: str) -> dict[str, Any] | None:
@@ -672,6 +695,22 @@ def line_offsets(path: Path) -> LineIndex:
             _keep(path, idx)
             _index_builds.pop(path, None)
         return idx
+
+
+def known_index(path: Path) -> LineIndex | None:
+    """The file's line index when one is at hand without a pass over the file: in this process's LRU, or kept on disk
+    (a big file's, save_index), at the file's present (size, mtime_ns); else None. Never builds one."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    key = (st.st_size, st.st_mtime_ns)
+    with _index_lock:
+        hit = _INDEX.get(path)
+        if hit is not None and hit.key == key:
+            _INDEX.move_to_end(path)
+            return hit
+    return load_index(path, key)
 
 
 def forget_index(path: Path) -> None:

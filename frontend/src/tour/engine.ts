@@ -9,7 +9,9 @@
 // source. Esc closes the tour; while an ask box or a source is open, Esc closes only that.
 //
 // Examples are the tour's own markup (./examples.json, ./steps), laid over the page under the dim and removed when
-// their step ends. Nothing the tour shows reaches the server.
+// their step ends. Nothing the tour shows reaches the server. The steps run only on thimble's demo workspace, in the
+// tour's frame (lib/tourFrame), never over the analyst's own files; on their page the engine draws only the welcome, a
+// card with no steps that hands its begin to the frame (StartOptions.onBegin).
 import { askKeyLabel, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { setGuard } from './freeze'
 import './tour.css'
@@ -122,8 +124,17 @@ export interface StartOptions {
   at?: number
   /** the first launch: a small card asks first whether to take the tour */
   welcome?: boolean
+  /** the welcome's title (Welcome to thimble when none) */
+  title?: string
   /** what the welcome says above its buttons, a paragraph of markup each (./steps welcomeTexts) */
   says?: string[]
+  /** the welcome's button that starts the tour (Take the tour when none); null leaves it out, so the card only informs */
+  begin?: string | null
+  /** the welcome's button that closes it (Skip when none) */
+  skip?: string
+  /** the welcome's begin, when the tour runs elsewhere (the tour's frame, shell/TourFrame): this runs, then the welcome
+   * closes */
+  onBegin?: () => void
   /** the tour was asked for again (Settings) */
   replay?: boolean
   /** shows a surface (the shell's own tab switch) */
@@ -455,9 +466,11 @@ export function createTour(snaps: Snaps): Tour {
     open = null
     pop.classList.add('tour-welcome')
     const says = (opts.says || []).map((p) => `<p class="tour-body">${p}</p>`).join('')
-    const html = `<div class="tour-head"><div class="tour-title">Welcome to thimble</div></div>
+    const begin = opts.begin === undefined ? 'Take the tour' : opts.begin
+    const skip = btn('skip', begin ? 'btn-ghost tour-skip' : 'btn-primary', opts.skip ?? 'Skip')
+    const html = `<div class="tour-head"><div class="tour-title">${opts.title ?? 'Welcome to thimble'}</div></div>
       ${says}
-      <div class="tour-foot">${btn('skip', 'btn-ghost tour-skip', 'Skip')}<span class="tour-spacer"></span>${btn('begin', 'btn-primary', 'Take the tour')}</div>`
+      <div class="tour-foot">${begin ? `${skip}<span class="tour-spacer"></span>${btn('begin', 'btn-primary', begin)}` : `<span class="tour-spacer"></span>${skip}`}</div>`
     if (pop.dataset.html !== html) {
       setMarkup(pop, html)
       pop.dataset.html = html
@@ -1229,6 +1242,11 @@ export function createTour(snaps: Snaps): Tour {
       const b = (e.target as Element).closest<HTMLElement>('[data-tour]')
       if (!b || b.dataset.i !== String(i)) return
       const act = b.dataset.tour
+      if (act === 'begin' && opts.onBegin) {
+        opts.onBegin()
+        end()
+        return
+      }
       if (act === 'begin') {
         welcome = false
         pop.classList.remove('tour-welcome')

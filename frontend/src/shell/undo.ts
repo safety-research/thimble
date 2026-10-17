@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { undoApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { isDemo } from '../lib/demo'
 import type { UndoLabels } from '../lib/types'
 
 const REFETCH_MS = 250
@@ -65,7 +66,8 @@ export function useUndo(ws: string): { labels: UndoLabels; undo: () => void; red
 
   const act = useCallback(
     (which: 'undo' | 'redo') => {
-      if (busy.current) return
+      // a demo page changes nothing (bug hunt F5)
+      if (busy.current || isDemo()) return
       busy.current = true
       undoApi[which](ws)
         .then((r) => setLabels({ undo: r.undo, redo: r.redo, held: r.held ?? null }))

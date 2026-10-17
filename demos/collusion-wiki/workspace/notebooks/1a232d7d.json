@@ -139,6 +139,11 @@
      "status": "partial",
      "resolved": [
       {
+       "value": "posted its answer",
+       "ref": "revisions.jsonl#L6357",
+       "tier": 0
+      },
+      {
        "value": "3,898",
        "ref": "card:5c34a2fe@out0#L13",
        "tier": 2
@@ -153,32 +158,15 @@
       "16",
       "22"
      ],
-     "broken": [
-      {
-       "value": "posted its answer",
-       "ref": "revisions.jsonl#L6357",
-       "tier": 0,
-       "why": "the cited place shows 8553",
-       "source": "8553"
-      }
-     ],
+     "broken": [],
      "quiet": [],
+     "typed": [],
      "checked": true,
      "healed": {
       "version": "f8c772c495bd",
       "relinks": 0,
-      "changes": [
-       {
-        "value": "posted its answer",
-        "ref": "revisions.jsonl#L6357",
-        "state": "contradicted",
-        "how": "contradicted",
-        "to": "revisions.jsonl#L6357",
-        "source": "8553",
-        "why": "the cited place shows 8553"
-       }
-      ],
-      "ms": 45
+      "changes": [],
+      "ms": 85
      }
     },
     "attempts": 0,
@@ -385,7 +373,7 @@
    "verification": {
     "exec_count": 27,
     "links": {
-     "status": "pending",
+     "status": "ok",
      "resolved": [
       {
        "value": "14,591",
@@ -406,11 +394,18 @@
      "unresolved": [],
      "broken": [],
      "quiet": [],
-     "checked": false
+     "typed": [],
+     "checked": true,
+     "healed": {
+      "version": "9283b30d8528",
+      "relinks": 0,
+      "changes": [],
+      "ms": 15
+     }
     },
     "attempts": 0,
     "note": null,
-    "status": "checking"
+    "status": "ok"
    },
    "check": {
     "id": "chk_51f32530eb51",

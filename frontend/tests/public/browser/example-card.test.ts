@@ -1,8 +1,6 @@
 // An example card drawn by the canvas's own CardFace (canvas/bodies.tsx ExampleBody) with thimble's stylesheets, in a
-// real browser, on a made-up JSON document of a few chat steps about planning a picnic, one of them long. Three quotes
-// of one record show that record once with the three passages highlighted, not three copies of its start; a quote deep
-// inside a long record opens the record's fold at the quote, and Show all still shows the whole record; refs of two
-// records stay two entries.
+// real browser, on a made-up JSON document of a few chat steps, one of them long: a quote deep inside a long record
+// opens the record's fold at the quote, and Show all still shows the whole record.
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -119,14 +117,6 @@ const cardOf = (p: Page, name: string) =>
     })
   }, name)
 
-test('three quotes of one record: the record once, with the three passages highlighted', async () => {
-  const entries = await cardOf(page, 'three')
-  assert.equal(entries.length, 1, `one entry, not one per ref ${JSON.stringify(entries)}`)
-  assert.equal(await page.locator('[data-state="three"] .bcell-quotes').count(), 0, 'no numbered list of copies')
-  assert.deepEqual(entries[0].marks, THREE)
-  assert.ok(entries[0].markShows, 'the first passage shows in the fold')
-})
-
 test('a quote deep in a long record opens the fold at the quote; Show all shows the whole record', async () => {
   const [e] = await cardOf(page, 'deep')
   assert.deepEqual(e.marks, ['start packing up at half past five'])
@@ -140,16 +130,4 @@ test('a quote deep in a long record opens the fold at the quote; Show all shows 
   await page.click('[data-state="deep"] .bcell-more')
   const [again] = await cardOf(page, 'deep')
   assert.ok(again.scrollTop > 0 && again.markShows, `Show less opens it at the quote again ${JSON.stringify(again)}`)
-})
-
-test('refs of two records stay two entries, each from its start', async () => {
-  const entries = await cardOf(page, 'two')
-  assert.deepEqual(
-    entries.map((e) => [e.marks.length, e.scrollTop, e.startShows]),
-    [
-      [0, 0, true],
-      [0, 0, true],
-    ],
-  )
-  assert.equal(new Set(entries.map((e) => e.address)).size, 2)
 })

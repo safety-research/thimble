@@ -1,10 +1,13 @@
-"""plugin/bin/thimble-mcp: in the analyst's session in a workspace it subscribes to the server's `GET /api/events` with
-its folder, its session id, its parent's pid and the route its session hears events by (`hook`, or `monitor` where
-Claude Code's settings turn hooks off, app.cc_plugin.route), declares no experimental capability and writes nothing but
-its answers. In a folder that is no workspace yet it lists no tools, sends no instructions and makes no request, until
-/thimble registers the folder: then it lists the tools and says once that the list changed. It passes each tool call
-on to the server with the id Claude Code gave it. Every request proves the token in server.json and the shim believes
-only an answer that proves it too (app/hook_auth.py). The server here is a stand-in."""
+"""plugin/bin/thimble-mcp: before thimble is on in a session it lists load_thimble alone, deferred, with its search
+hint, gives no instructions in any session and makes no request; a call of load_thimble turns thimble on, lists main's
+tools in its place with one list_changed, records the tools/list that follows (listed.json) and answers thimble's
+guidance, marked sent only when no mod runs in the session. Once thimble is on, each call runs by the session's
+transport, read per call: in the shim's own process before the press, posted to the server after it, where the shim
+also subscribes to the server's `GET /api/events` with its folder, its session id, its parent's pid and the route its
+session hears events by (`hook`, or `monitor` where Claude Code's settings turn hooks off, app.cc_plugin.route). It
+passes each tool call on with the id Claude Code gave it. Every request proves the token in server.json and the shim
+believes only an answer that proves it too (app/hook_auth.py). The server here is a stand-in, but for the tests of
+the server's own routes, which answer the shim only when the request proves the token, and of the analyst's cookie."""
 from __future__ import annotations
 
 import json
@@ -21,8 +24,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app import config, hook_auth
+from app.main import create_app
 from conftest import MINI, fake_claude_bin
 
 SHIM = config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"
@@ -124,31 +129,41 @@ INITIALIZE = {"jsonrpc": "2.0", "id": 0, "method": "initialize",
 INITIALIZED = {"jsonrpc": "2.0", "method": "notifications/initialized"}
 
 
-def _run(tmp_path: Path, port: int, wait_s: float, until: Any, send: list[dict] | None = None,
-         parent: list[str] | None = None, extra: dict | None = None) -> list[dict]:
-    """The shim's output until `until` (a method written, or a function that says when) or `wait_s`, after the MCP
-    handshake and the messages in `send`; with `parent`, the shim runs as the child of a stand-in `claude` process whose
-    command line carries those arguments; `extra` adds to its environment."""
-    p = _start(tmp_path, port, parent=parent, extra=extra)
-    _send(p, [INITIALIZE, INITIALIZED, *(send or [])])
-    try:
-        return _read(p, until, wait_s)
-    finally:
-        _stop(p)
+SID = "s-123"  # the session the shims below serve (CLAUDE_CODE_SESSION_ID)
+CORPUS = "mini"
+
+
+def _on(tmp_path: Path, transport: str | None, sid: str = SID, mod: bool = False) -> Path:
+    """Thimble on for session `sid` in the workspace of MINI, as activate.activate leaves it: the session marker in the
+    test's home and launch.json naming the session main on `transport` (local or server); with None, thimble is off.
+    The workspaces folder, which the shim's environment names (THIMBLE_WORKSPACES_DIR)."""
+    ws = tmp_path / "ws"
+    (ws / "mini" / "trusted").mkdir(parents=True, exist_ok=True)
+    if transport is None:
+        return ws
+    up = tmp_path / "home" / "up"
+    up.mkdir(parents=True, exist_ok=True)
+    (up / f"{sid}.active").write_text(json.dumps({"cwd": str(MINI), "ws": "mini", "path": str(ws / "mini"),
+                                                   "via": "command", "role": "main", "mod": mod, "at": time.time()}))
+    (ws / "mini" / "trusted" / "launch.json").write_text(json.dumps(
+        {"session": sid, "transport": transport, "mode": "terminal" if transport == "local" else "browser"}))
+    return ws
 
 
 def _start(tmp_path: Path, port: int | None, parent: list[str] | None = None,
-           extra: dict | None = None) -> subprocess.Popen:
+           extra: dict | None = None, on: str | None = "server") -> subprocess.Popen:
     """The shim as a child process (of a stand-in `claude` with `parent`), its server the stand-in on `port`, recorded
-    in server.json with TOKEN; with `port` None there is no server.json."""
+    in server.json with TOKEN; with `port` None there is no server.json. `on` is the transport of the session thimble is
+    on in (_on): the server's by default, as after a press; None for a session thimble is off in."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
+    ws = _on(tmp_path, on)
     if port is not None:
         (home / "server.json").write_text(json.dumps({"port": port, "api": f"http://127.0.0.1:{port}", "token": TOKEN}))
     claude = fake_claude_bin(home, {"loggedIn": True, "authMethod": "claude.ai"})
     (tmp_path / "cc").mkdir(exist_ok=True)
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_CWD": str(MINI), "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"),
-           "CLAUDE_CODE_SESSION_ID": "s-123", "THIMBLE_CLAUDE_BIN": str(claude)}
+           "CLAUDE_CODE_SESSION_ID": SID, "THIMBLE_CLAUDE_BIN": str(claude), "THIMBLE_WORKSPACES_DIR": str(ws)}
     env.pop("THIMBLE_SKIP_KEY", None)
     env.pop("THIMBLE_MODE", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
@@ -195,123 +210,143 @@ def _stop(p: subprocess.Popen) -> None:
     p.wait()
 
 
-@pytest.mark.parametrize("hooks", [True, False])
-def test_the_shim_subscribes_with_its_route_and_writes_only_its_answers(tmp_path, server, hooks):
-    if not hooks:
-        (tmp_path / "cc").mkdir(exist_ok=True)
-        (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
-    p = _start(tmp_path, server.port)
-    out: list[dict] = []
-    try:
-        _send(p, [INITIALIZE, INITIALIZED])
-        end = time.monotonic() + 30
-        while time.monotonic() < end and not (server.queries and any(m.get("id") == 0 for m in out)):
-            out += _read(p, lambda: False, 0.2)
-        out += _read(p, lambda: False, 1.0)  # a second after both, for anything it would write of its own
-    finally:
-        _stop(p)
-    init = next(m for m in out if m.get("id") == 0)
-    assert not init["result"]["capabilities"].get("experimental")
-    assert "/thimble" in init["result"]["instructions"] and len(init["result"]["instructions"].encode()) < 2048
-    assert init["result"]["capabilities"]["tools"]["listChanged"] is True
-    assert not [m for m in out if "method" in m], "no notification of its own"
-    q = server.queries[0]
-    assert q["cwd"] == str(MINI) and q["session"] == "s-123" and int(q["pid"]) == os.getpid()
-    assert q["delivery"] == ("hook" if hooks else "monitor")
-
-
-def test_a_tool_call_carries_the_id_claude_code_gave_it(tmp_path, server):
-    """Claude Code sends each MCP tool call's id in the request's `_meta` as "claudecode/toolUseId"; the shim
-    passes it on as `tool_use_id`, so a record the server writes into main while the call runs (the follow-up the call
-    resumed) can name the call, and main's chat shows it after the call. The id is no argument of the tool."""
-    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "message_orientation", "arguments": {"message": "more"},
-                       "_meta": {"claudecode/toolUseId": "toolu_01abc"}}}
-    bare = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": {"name": "message_orientation", "arguments": {"message": "again"}}}
-    _run(tmp_path, server.port, wait_s=15, send=[call, bare], until=lambda: len(server.calls) >= 2)
-    got = {body["args"]["message"]: (name, body["tool_use_id"]) for name, body in server.calls}  # the two calls may land in either order
-    assert got == {"more": ("message_orientation", "toolu_01abc"), "again": ("message_orientation", None)}
-
-
-def test_a_proxy_in_the_environment_never_carries_the_shim_s_calls_to_the_local_server(tmp_path, server):
-    """The shim talks only to thimble's server on 127.0.0.1, so a proxy the analyst's shell sets without NO_PROXY must
-    not carry its subscription or its tool calls (httpx would send even 127.0.0.1 through it): here the proxy is a port
-    nothing listens on, and both still reach the server."""
-    with __import__("socket").socket() as s:
-        s.bind(("127.0.0.1", 0))
-        dead = f"http://127.0.0.1:{s.getsockname()[1]}"  # closed again before the shim runs
-    proxies = {k: dead for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")}
-    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "message_orientation", "arguments": {"message": "through"}}}
-    saved = {k: os.environ.pop(k) for k in ("NO_PROXY", "no_proxy") if k in os.environ}
-    try:
-        _run(tmp_path, server.port, wait_s=20, send=[call], until=lambda: bool(server.calls and server.queries),
-             extra=proxies)
-    finally:
-        os.environ.update(saved)
-    assert server.queries and [body["args"]["message"] for _, body in server.calls] == ["through"]
-
-
-def test_a_session_name_counts_only_with_its_token(tmp_path, server):
-    """THIMBLE_SESSION without THIMBLE_SESSION_TOKEN is what Claude Code's background service can hand on from one of
-    thimble's sessions to the user's own: the shim then calls as the analyst's session. With the token both go to the
-    server, which checks it (app/hook_auth.py)."""
-    from app import tools
-
-    both = {t["name"] for t in tools.list(tools.ANALYST, session=None)} & \
-        {t["name"] for t in tools.list(tools.ANALYST, session="orient")}
-    name = sorted(both)[0]
-    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": {}}}
-    _run(tmp_path, server.port, wait_s=15, send=[call], until=lambda: bool(server.calls),
-         extra={"THIMBLE_SESSION": "orient"})
-    _run(tmp_path, server.port, wait_s=15, send=[call], until=lambda: len(server.calls) >= 2,
-         extra={"THIMBLE_SESSION": "orient", "THIMBLE_SESSION_TOKEN": "n.m"})
-    assert [(body["session"], body["session_token"]) for _, body in server.calls] == [(None, None), ("orient", "n.m")]
-
-
 LIST = {"jsonrpc": "2.0", "id": 5, "method": "tools/list", "params": {}}
+LOAD = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "load_thimble", "arguments": {}}}
 
 
-def test_outside_a_workspace_the_shim_lists_nothing_and_asks_nothing_until_the_folder_becomes_one(tmp_path, server):
-    """A plain `claude` session in a folder thimble never opened: no tools, no instructions and no request to the
-    server, so the session carries none of thimble's tools. Once /thimble registers the folder (here: it becomes a
-    corpus folder), the shim says once that its tool list changed, lists the tools and subscribes."""
-    data = tmp_path / "data"
-    folder = data / "late"
-    folder.mkdir(parents=True)
-    p = _start(tmp_path, server.port, extra={"THIMBLE_DATA_DIR": str(data), "THIMBLE_CWD": str(folder)})
+def _read_id(p: subprocess.Popen, rid: int, wait_s: float) -> list[dict]:
+    """The messages the shim writes until its answer to the request `rid`, or `wait_s`."""
+    out: list[dict] = []
+    end = time.monotonic() + wait_s
+    while time.monotonic() < end and not any(m.get("id") == rid for m in out):
+        out += _read(p, lambda: False, 0.3)
+    return out
+
+
+def _listed(out: list[dict], rid: int) -> list[dict]:
+    return next(m for m in out if m.get("id") == rid)["result"]["tools"]
+
+
+def _corpus(tmp_path: Path) -> Path:
+    d = tmp_path / "corpus"
+    d.mkdir()
+    (d / "events.jsonl").write_text('{"a": 1}\n')
+    return d
+
+
+def test_load_thimble_turns_thimble_on_in_a_session_it_was_off_in(tmp_path, server):
+    """A plain `claude` session in a data folder thimble never opened: until load_thimble is called the shim lists it
+    alone, deferred, with its search hint (placement of live check LC12), and gives no instructions, no notification
+    and no request to the server, over more than one look for the session marker. A call of load_thimble activates the
+    session (via `tool`), lists main's tools in its place with one list_changed, records Claude Code's tools/list that
+    follows (listed.json, with `at`) and answers thimble's guidance with the session's lead line, marked sent."""
+    folder = _corpus(tmp_path)
+    p = _start(tmp_path, server.port, on=None, extra={"THIMBLE_CWD": str(folder)})
+    env_home = tmp_path / "home"
     try:
         _send(p, [INITIALIZE, INITIALIZED, LIST])
-        out = _read(p, lambda: False, 3.0)  # more than one look (RETRY_S)
+        out = _read_id(p, 5, 30)
+        out += _read(p, lambda: False, 2.5)  # more than one look for the marker (RETRY_S)
         init = next(m for m in out if m.get("id") == 0)
-        assert "instructions" not in init["result"] or not init["result"]["instructions"]
+        assert not init["result"].get("instructions")
         assert init["result"]["capabilities"]["tools"]["listChanged"] is True
-        assert next(m for m in out if m.get("id") == 5)["result"]["tools"] == []
-        assert not [m for m in out if "method" in m], "no list_changed while the folder is no workspace"
+        [tool] = _listed(out, 5)
+        assert tool["name"] == "load_thimble" and tool["inputSchema"] == {"type": "object", "properties": {}}
+        assert tool["_meta"] == {"anthropic/searchHint": "card plan chart table label classify records thimble"}
+        assert tool["description"].startswith("Turn on thimble in this session.")
+        assert not [m for m in out if "method" in m], "no list_changed while thimble is off"
         assert not server.queries and not server.calls and not server.refused, "no request to the server"
-        (folder / "manifest.json").write_text("{}")
-        out = _read(p, "notifications/tools/list_changed", 15)
+        assert not (env_home / "up").exists(), "nothing written"
+        started = time.time()
+        _send(p, [LOAD])
+        out = _read(p, "notifications/tools/list_changed", 60)
         assert [m["method"] for m in out if "method" in m] == ["notifications/tools/list_changed"]
-        _send(p, [{**LIST, "id": 6}])
-        out = _read(p, lambda: False, 1.0)
-        assert next(m for m in out if m.get("id") == 6)["result"]["tools"], "the tools are listed now"
-        assert not [m for m in out if "method" in m], "said once"
-        end = time.monotonic() + 15
-        while not server.queries and time.monotonic() < end:
-            time.sleep(0.05)
-        assert server.queries and server.queries[0]["cwd"] == str(folder)
+        _send(p, [{**LIST, "id": 8}])
+        out += _read_id(p, 7, 30)
+        out += _read(p, lambda: False, 0.5)
     finally:
         _stop(p)
+    names = [t["name"] for t in _listed(out, 8)]
+    assert "load_thimble" not in names and len(names) == 29  # 0.8.0's 36 less the 7 only thimble's agents call
+    answer = next(m for m in out if m.get("id") == 7)["result"]
+    assert not answer["isError"], answer
+    text = answer["content"][0]["text"]
+    marker = (env_home / "up" / SID / "guide-marker").read_text().strip()
+    assert text.startswith(f"thimble guidance {marker}: thimble is on in this folder.") and "# thimble" in text
+    rec = json.loads((env_home / "up" / SID / "listed.json").read_text())
+    assert rec["count"] == 29 and rec["at"] >= started
+    marker_rec = json.loads((env_home / "up" / f"{SID}.active").read_text())
+    assert marker_rec["mod"] is False and marker_rec["via"] == "tool"
+    assert json.loads((env_home / "up" / SID / "guide.json").read_text())["digest"]
+    assert len([m for m in out if m.get("method") == "notifications/tools/list_changed"]) == 1, "one list_changed"
 
 
-def test_a_folder_whose_last_launch_was_in_terminal_mode_is_in_browser_mode_without_thimble_mode(tmp_path, server):
-    """The launcher sets THIMBLE_MODE for a session it starts in terminal mode. A plain `claude` session in a folder
-    whose launch.json still says terminal mode is in browser mode (/thimble opens the folder so), so the shim
-    subscribes to the server, which a terminal-mode shim never does."""
-    ws = tmp_path / "ws"
-    (ws / "mini" / "trusted").mkdir(parents=True)
-    (ws / "mini" / "trusted" / "launch.json").write_text(json.dumps({"session": "s-123", "mode": "terminal"}))
-    _run(tmp_path, server.port, wait_s=15, until=lambda: bool(server.queries),
-         extra={"THIMBLE_WORKSPACES_DIR": str(ws)})
-    assert server.queries and server.queries[0]["cwd"] == str(MINI)
+# --------------------------------------------------------------------------- the token and the cookie
+
+
+def test_the_server_answers_the_shim_s_routes_only_to_a_request_that_proves_the_token(plugin_headers):
+    cwd = str(config.corpus_dir(CORPUS))
+    tool = {"args": {"ref": "events.jsonl#L1"}, "actor": "analyst", "cwd": cwd}
+    asks = [("POST", "/api/tools/read_ref", {"json": tool}), ("GET", "/api/events", {"params": {"cwd": "/nowhere"}}),
+            ("POST", f"/api/ws/{CORPUS}/sessions/permission", {"json": {"session": "orient", "tool_name": "Bash"}})]
+    with TestClient(create_app(), base_url="http://127.0.0.1") as client:
+        wrong = hook_auth.headers("another-token", 80)
+        for method, path, kw in asks:
+            assert client.request(method, path, **kw).status_code == 401, path
+            assert client.request(method, path, headers=wrong, **kw).status_code == 401, path
+        for method, path, kw in asks:
+            h = plugin_headers()
+            r = client.request(method, path, headers=h, **kw)
+            assert r.status_code != 401, path
+            assert r.headers[hook_auth.PROOF_HEADER] == hook_auth.sign(hook_auth.token(), "server", h[hook_auth.NONCE_HEADER])
+        assert not client.post("/api/tools/read_ref", json=tool, headers=plugin_headers()).json()["is_error"]
+        assert client.get("/api/tools/holdings", params={"workspace": CORPUS}).status_code == 200, "the CLI's, open"
+
+
+def test_the_shim_believes_no_answer_without_the_server_s_proof(tmp_path):
+    """A process on the recorded port that cannot prove the token gets the shim's requests, but its tool answer is never
+    shown."""
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "message_orientation", "arguments": {"message": "more"}}}
+    rogue = _Server(token=None)
+    try:
+        p = _start(tmp_path, rogue.port)
+        try:
+            _send(p, [INITIALIZE, INITIALIZED, call])
+            out: list[dict] = []
+            subscribed, end = None, time.monotonic() + 20
+            while time.monotonic() < end:
+                out += _read(p, lambda: False, 0.2)
+                subscribed = subscribed or (time.monotonic() if rogue.queries else None)
+                if subscribed and time.monotonic() - subscribed > 1 and any(m.get("id") == 1 for m in out):
+                    break
+        finally:
+            _stop(p)
+    finally:
+        rogue.close()
+    assert rogue.queries and rogue.calls, "it was asked"
+    answer = next(m for m in out if m.get("id") == 1)["result"]
+    assert answer["isError"] and "ok" not in [c.get("text") for c in answer["content"]]
+
+
+def test_the_analyst_s_cookie_goes_only_to_thimble_s_api_routes_under_the_browser_s_own_path():
+    """The link's code is traded for a cookie scoped to the browser's own path, /b/<key>/api/, whose key the answer
+    gives that page alone, HttpOnly and SameSite=Strict: a browser sends a cookie to every port of its host, so a cookie
+    scoped to /api/ would reach another server's page that asks for its own /api/ paths. The answer also deletes a
+    cookie an earlier build scoped to /api/, and sets no other; a code that is not alive gets none."""
+    import json
+
+    from starlette.requests import Request
+
+    fresh = Request({"type": "http", "headers": []})
+    r, browser = hook_auth.claim({"code": hook_auth.mint()}, fresh)
+    key = json.loads(r.body)["key"]
+    cookies = [v.decode() for k, v in r.raw_headers if k == b"set-cookie"]
+    assert r.status_code == 200 and len(cookies) == 2 and browser, cookies
+    [mine] = [c for c in cookies if "Max-Age=0" not in c]
+    [old] = [c for c in cookies if "Max-Age=0" in c]
+    assert mine.startswith(f"{hook_auth.ui_cookie()}=") and f"Path=/b/{key}/api/;" in mine, mine
+    assert "HttpOnly" in mine and "SameSite=strict" in mine, mine
+    assert old.startswith(f'{hook_auth.ui_cookie()}=""') and "Path=/api/;" in old, old
+    gone, none = hook_auth.claim({"code": "another-code"}, fresh)
+    assert gone.status_code == 410 and none == "" and not [k for k, _ in gone.raw_headers if k == b"set-cookie"]

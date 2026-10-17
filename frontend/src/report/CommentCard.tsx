@@ -1,4 +1,5 @@
-// One comment as the Report's margin (Margin.tsx) and the canvas (canvas/CommentLayer.tsx) draw it, the same on both:
+// One comment as the Report's margin (Margin.tsx), the canvas (canvas/CommentLayer.tsx) and main's chat under Claude's
+// answer (chat/AnswerComment.tsx) draw it, the same on each:
 // its check's name in the check's color beside the color square, then its statement, and ✓ (Done) at the head's end,
 // which resolves the comment and hides it. Show more under the statement opens its details, whose citations show as
 // chips, and Show less folds them. A click makes it active, which opens its details and a field whose text asks Thimble
@@ -42,8 +43,8 @@ export interface CommentThread {
   passage: string
   /** where on it the comment stands, such as "step 2" */
   where?: string
-  /** the surface the comment is on */
-  surface: 'report' | 'canvas'
+  /** the surface the comment is on: main's chat for a check's comment on Claude's answer (chat/AnswerComment.tsx) */
+  surface: 'report' | 'canvas' | 'chat'
 }
 
 export interface CommentCardProps {

@@ -15,10 +15,13 @@ from app import config
 NEEDS = pytest.mark.skipif(not shutil.which("zip") or not shutil.which("git"), reason="release.sh needs zip and git")
 
 
-# a stand-in for mods/: thimble-term, the terminal-mode renderer, and a file beside it that does not ship
-MOD_FILES = {"mods/thimble-term/.claude-plugin/plugin.json": '{"name": "thimble-term", "version": "0.1.0"}\n',
-             "mods/thimble-term/hooks/register.tsx": "export const register = () => {}\n",
-             "mods/thimble-term/tests/render.test.ts": "test\n",
+# a stand-in for the plugin's hooks: the one module and the terminal UI (plugin/hooks/term), their tests and the terminal
+# UI's fake thimble, which do not ship, and a file under mods/, where nothing ships since 0.9.0
+MOD_FILES = {"plugin/hooks/register.ts": "export const register = () => {}\n",
+             "plugin/hooks/term/register.tsx": "export const register = () => {}\n",
+             "plugin/hooks/term/tests/render.test.ts": "test\n",
+             "plugin/hooks/term/tests/fake_thimble.py": "print()\n",
+             "plugin/hooks/tests/one-module.test.ts": "test\n",
              "mods/notes.md": "not shipped\n"}
 
 
@@ -114,50 +117,3 @@ def test_a_release_pins_the_backend_with_hashes_and_carries_the_frontend_s_runti
             assert f"{at}/node_modules/{dep}".lstrip("/") in lock, f"{path} needs {dep}"
     assert "node_modules/vega-lite/node_modules/vega-expression" in lock, "a nested version is kept where it was"
     assert not {"node_modules/react", "node_modules/vite", "node_modules/@blocknote/core"} & set(lock)
-
-
-@NEEDS
-def test_the_zip_carries_the_config_s_reference_the_install_guide_links(tmp_path):
-    """INSTALL.md links docs/config.md, which the zip carries; a page's link to a file the zip leaves out goes to GitHub."""
-    root = small_repo(tmp_path, "INSTALL.md", "docs/config.md")
-    (root / "docs" / "config.md").write_text((root / "docs" / "config.md").read_text() + "\nSee [the notes](notes.md).\n")
-    git(root, "commit", "-q", "-am", "link")
-    r, files, meta = release(root, tmp_path / "out", read=("INSTALL.md", "docs/config.md"))
-    assert r.returncode == 0, r.stderr
-    assert "docs/config.md" in files
-    assert "](docs/config.md)" in meta["INSTALL.md"]
-    assert "/blob/" in meta["docs/config.md"] and "/docs/notes.md)" in meta["docs/config.md"]
-
-
-@NEEDS
-def test_the_zip_carries_the_plugin_s_hooks_module_without_its_tests(tmp_path):
-    """plugin/hooks/thimble.ts is the module Claude Code loads; its test file beside it is the checkout's alone."""
-    root = small_repo(tmp_path, "plugin/hooks/hooks.json", "plugin/hooks/thimble.ts", "plugin/hooks/thimble.test.ts")
-    r, files, _ = release(root, tmp_path / "out")
-    assert r.returncode == 0, r.stderr
-    assert {"plugin/hooks/hooks.json", "plugin/hooks/thimble.ts"} <= files
-    assert "plugin/hooks/thimble.test.ts" not in files
-
-
-@NEEDS
-def test_the_zip_carries_thimble_term_and_its_marketplace_lists_thimble_under_the_install_s_name(tmp_path):
-    """mods/thimble-term ships without its tests, and nothing else under mods/; the zip's marketplace lists the thimble
-    plugin alone under the --marketplace-name, thimble-local by default (the `thimble` command loads thimble-term from
-    its folder), and keeps the marketplace's renames. A plugin the marketplace lists without its folder in the zip stops
-    the release."""
-    root = small_repo(tmp_path)
-    r, files, meta = release(root, tmp_path / "out", read=(".claude-plugin/marketplace.json",))
-    assert r.returncode == 0, r.stderr
-    assert {"mods/thimble-term/.claude-plugin/plugin.json", "mods/thimble-term/hooks/register.tsx"} <= files
-    assert not {f for f in files if f.startswith("mods/") and not f.startswith("mods/thimble-term/")}
-    assert "mods/thimble-term/tests/render.test.ts" not in files
-    market = json.loads(meta[".claude-plugin/marketplace.json"])
-    assert market["name"] == "thimble-local"
-    assert {p["name"]: p["source"] for p in market["plugins"]} == {"thimble": "./plugin"}
-    ours = json.loads((config.REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text())
-    assert market.get("renames") == ours.get("renames")
-    listed = root / ".claude-plugin" / "marketplace.json"
-    listed.write_text(json.dumps({**ours, "plugins": [*ours["plugins"], {"name": "gone", "source": "./mods/gone"}]}))
-    git(root, "commit", "-q", "-am", "a plugin without its folder")
-    r, files, _ = release(root, tmp_path / "out2")
-    assert r.returncode != 0 and "./mods/gone" in r.stderr

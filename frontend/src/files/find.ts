@@ -2,6 +2,7 @@
 // open file (⌘F) and go to line (Ctrl+G, or `:<n>` in the find field). The components are FileSearch.tsx and
 // FindBar.tsx; the searches run on the server, since the client holds only part of the tree and of a file.
 import { isMacPlatform } from '../lib/platform'
+import { runFolder } from '../lib/refs'
 import type { GrepDone, GrepFile } from '../lib/types'
 
 export type FindKey = 'files' | 'find' | 'line'
@@ -50,6 +51,16 @@ export function nameSegments(name: string, text: string): { text: string; hit: b
     else out.push({ text: name[i], hit: marked[i] })
   }
   return out
+}
+
+/** The folder a result names beside the file's name: the run folder a chip names the file by (lib/refs runFolder, its
+ * first folder with a digit), since same-named files sit under many runs and the run is what tells them apart in the
+ * narrow column (bug hunt G2: 16 `agent-07.jsonl` read `runs/sweep2-opu…`); else its parent folder; '' at the top. The
+ * row's tooltip gives the whole path. Pure. */
+export function foundFolder(path: string): string {
+  const run = runFolder(path)
+  if (run && /\d/.test(run.name)) return run.name
+  return path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
 }
 
 /** How many files found by name the search lists before the matches inside files, until the analyst asks for all. */

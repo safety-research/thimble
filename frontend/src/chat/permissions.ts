@@ -171,8 +171,9 @@ function declineLine(seconds: number | null | undefined): string {
   return seconds ? ` If nobody answers within ${waitWords(seconds)}, it is declined.` : ''
 }
 
-/** Main's own request: Claude Code's dialog stays open in the terminal while the hook waits, and either answers (U6a). */
-export const MAIN_ASKS_LINE = 'Answer here or in your terminal.'
+/** Main's own request: Claude Code's dialog asks in the terminal, the one place it is answered (0.9.0: the browser
+ * answers no permission request). */
+export const MAIN_ASKS_LINE = 'Answer it in your Claude Code terminal.'
 
 /** Where a request of one of thimble's agents is answered: in the terminal, which asks at once (U6b). `who` is the
  * agent as the card names it ("The orientation"); `plugin` says Claude Code names it as from thimble's plugin, for an
@@ -194,8 +195,7 @@ export function pluginSteered(id: string | null | undefined, metas: ReadonlyMap<
   return false
 }
 
-/** Why the session asks, in one line: main's fence's rule when one sends it, then where it is answered (main's in the
- * browser or the terminal, a subagent's in the terminal). A code ticket's request keeps its own reasons: thimble's own
+/** Why the session asks, in one line: main's fence's rule when one sends it, then where it is answered (the terminal). A code ticket's request keeps its own reasons: thimble's own
  * (`why`), auto mode could not judge the call or left it to the analyst, the session runs in Manual, then when an
  * unanswered request is declined; for one declined unanswered, that it was. Pure. */
 export function askWhy(ask: PendingAsk, metas: ReadonlyMap<string, ChatMeta>, labels: ReadonlyMap<string, string> = new Map()): string {

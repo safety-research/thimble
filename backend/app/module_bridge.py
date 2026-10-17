@@ -1,28 +1,25 @@
 """The server's side of thimble's hooks module (plugin/hooks/thimble.ts): how a click in the browser reaches Claude Code's
-`$.agent.spawn`, `SendMessage` and `TaskStop` in main's session with no turn of main.
+`$.agent.spawn`, `SendMessage` and `TaskStop` in main's session with no turn of main, and how thimble's model calls
+reach `$.model.complete` and `$.model.fork` there (model, below).
 
-The module runs inside main's `claude` process, in thimble's interactive main only (one the launcher started, or one
-in which /thimble expanded), and starts no process. It says hello (POST /api/module/hello), fetches the roles it registers (GET /api/module/roles, from subagents.roles) and
+The module runs inside main's `claude` process, once thimble is on in the session (the session marker activation
+writes, which the terminal UI tells it of at once: bridgeActivated), and starts no process. Until a press of the browser
+workbench it uses the trusted folder (local transport, below); after the press it says hello (POST /api/module/hello), fetches the roles it registers (GET /api/module/roles, from subagents.roles) and
 what the workspace's record holds (GET /api/module/state), then holds a long poll (GET /api/module/next) that hands it
 the requests made for its main session, one at a time; it answers each (POST /api/module/result), and posts the end of
 each run of an agent it started (POST /api/module/ended), since its other hooks skip those agents. Every route is
 hook-authenticated (hook_auth.MODULE_PREFIX): a request proves the token of server.json and the answer proves it back,
 so a process that holds the port can neither hand the module requests nor read them.
 
-A hello is accepted only from main's session: the one launch.json names (while it names none, the one /thimble made
-main), or the one `--rekey` moved it to after a /clear or an in-session /resume (rekey), in either order, since the
-module sees the new id within tens of milliseconds of the SessionStart hook (spike V2): a hello for an id that is not
-main yet is held up to HELLO_HOLD_S for a rekey that names it. Main is the session /thimble or the launcher made
-main; a session that only inherited THIMBLE_LAUNCHED is another session, which gets NOT_MAIN. At session start, before
-/thimble attaches main, the hello is accepted when its session is launch.json's and the process launch.json names
-(`pid`: main's `claude`, which the launcher writes, _launched) is a `claude` whose command line names the session, so
-the module registers thimble's types inside session.start, in time for main's first agent listing. Where that check
-cannot be made (no pid in launch.json, the process gone, a command line that is not that `claude`, or a session /clear
-moved main to), a hello is accepted once main's session has opened thimble (/thimble attached it, _opened), and a hello
-before then is asked again later rather than refused. launch.json is the launcher's, or /thimble's for a session it
-made main (`via: skill`): the server makes it when it registers the workspace, kernels see it read-only and the hooks
-module refuses file tools its edit (userconf.module_rules). The long poll hands out requests for that session only, so
-two mains in one folder never take each other's clicks.
+A hello is accepted only from main's session: the one launch.json names, or the one `--rekey` moved it to after a
+/clear or an in-session /resume (rekey), in either order, since the module sees the new id within tens of milliseconds
+of the SessionStart hook (spike V2): a hello for an id that is not main yet is held up to HELLO_HOLD_S for a rekey that
+names it. Main is the session activation made main (app/activate.py); a peer, or a session another took main from, gets
+NOT_MAIN. A hello is accepted once main's session is the one this server follows (the press attached it, _opened), or
+when the process launch.json names is a `claude` whose command line names the session (_launched); a hello before then
+is asked again later rather than refused. launch.json is written by activation alone (activate.write_launch): kernels
+see it read-only and the hooks module refuses file tools its edit (userconf.module_rules). The long poll hands out
+requests for that session only, so two sessions in one folder never take each other's clicks.
 
 `request(c, op, **args)` is how the rest of the server asks (lane B's clicks, follow-ups and stops, lane E's jobs). It
 waits up to REQUEST_TIMEOUT_S for the module's answer, after which the request expires and the answer is `no-module`:
@@ -39,9 +36,11 @@ starts an agent after its card said it did not. An Answer is a dict with exactly
                 (`expired`: true)
 Ops and their arguments:
     register                              the module registers every role again from GET /api/module/roles
-    spawn  role, prompt, description, values {model, effort}, what, request
+    spawn  role, prompt, description, values {model, effort}, what, request, drop
                                           register the role with `values` if they differ, `$.agent.spawn`, then the
-                                          one-line note (hint module-started-note, with `what`, a server-checked name)
+                                          one-line note (hint module-started-note, with `what`, a server-checked name);
+                                          `drop`, the card check's, is the reason the terminal UI gives when it drops
+                                          the agent's hand-back (agent_call.py)
     send   agent, text, role, values      register the run's values if needed, then SendMessage
     stop   agent                          TaskStop
     abort                                 `$.turn.abort` of main's running turn (the analyst's Stop of main), answered
@@ -49,6 +48,22 @@ Ops and their arguments:
                                           background is stopped too (TaskStop)
     note   text                           `$.session.append` to main
 `request` is a coroutine for the server's loop; request_blocking is the same call from a worker thread.
+
+Model calls (`model(c, op, args)`, model_call.py's only way to the module). `complete` is one tool-less completion
+through main's own API client and sign-in ($.model.complete: {model, prompt, system, maxTokens, effort, timeoutMs},
+prompt and system as text blocks); `fork` is one tool-less completion over main's own transcript ($.model.fork:
+{prompt}). Neither is a subagent: Claude Code shows no row for one and asks nothing. The module runs each at once,
+beside the queue of the other requests, so many run together, and answers when the model did:
+    text, usage                 the reply's text and what it cost
+    failed, usage               no text: `api-error` (with the HTTP `status`, null for no response, and the error's
+                                `kind`), `empty-reply`, `aborted` (cancelled, or past its timeoutMs), `nothing-to-fork`
+    error                       Claude Code refused to send it (a model the organization does not allow, a bad cap)
+The module must take the request within REQUEST_TIMEOUT_S; once taken, `model` waits for the answer as long as the
+module stays live, up to the call's own time. A caller cancelled (asyncio) sends `cancel {request}`, which aborts the
+completion (its AbortSignal); a fork cannot be aborted, and its late answer goes nowhere. On local transport the
+request's arguments and the answer are files in the trusted folder (COMPLETIONS: <id>.json and <id>.answer.json), so
+neither subagents.json nor module.json carries a prompt; the entry in subagents.json names the file (`call`) and goes
+once the call ended.
 
 The workspace's subagents.json (in its trusted folder) holds, under `module`, the last hello `{session, version, at}`,
 or the reason the module stays idle (`idle`), what it could not register (`problem`), and the session moves rekey
@@ -64,11 +79,11 @@ a click's agent runs on the registration in force when it starts, and while a lo
 once a file changed, so that the registration is new before main's next turn, whose own Agent calls ignore a
 registration made during the turn.
 
-Terminal mode (the session launch.json names runs in terminal mode: transport is "file") has no server and no HTTP.
-The module takes the same requests from the workspace's subagents.json and writes everything it says to module.json,
-both in the trusted folder (subagent_files.py):
+Local transport (main has not pressed the browser workbench yet: transport is "file", read from launch.json at each
+call) has no server and no HTTP. The module takes the same requests from the workspace's subagents.json and writes
+everything it says to module.json, both in the trusted folder (subagent_files.py):
     roles       trusted/roles.json {at, digest, roles, rules}: what GET /api/module/roles would serve (roles_file, which
-                the launcher writes and push_roles and sync_roles write again); the module registers the roles again
+                activation writes and push_roles and sync_roles write again); the module registers the roles again
                 and takes the rules when the file changes
     requests    entries of subagents.json's `requests` of kind `module`, {op, args, module: pending, session,
                 asked_at, expires_at} (subagent_files.add_module_request): the module takes those of main's session
@@ -88,7 +103,9 @@ open page reads it again (_show).
 
 The roles route also carries the rules the module enforces on file tools and the web tools (userconf.module_rules:
 the token files, thimble's records, the corpus when its edits are off, and the web when it is off), and roles.json
-carries them in terminal mode; the digest the server keeps of what it served covers both (_served).
+carries them on local transport; the digest the server keeps of what it served covers both (_served). At the press,
+requests the module had not taken from subagents.json are still taken: the module reads both until its own next
+look at launch.json (H5).
 """
 from __future__ import annotations
 
@@ -127,17 +144,23 @@ ROLES_CHECK_S = 2.0  # how often a held long poll looks whether the files the ro
 EXPIRED_KEPT = 64  # expired requests remembered for their late answers
 REKEYS_KEPT = 32
 OPS = ("register", "spawn", "send", "stop", "abort", "note")
+MODEL_OPS = ("complete", "fork")  # model calls (module note): run beside the queue, answered when the model did
+CANCEL = "cancel"  # aborts a model call the module runs: {request: its id}
+COMPLETIONS = "completions"  # in the trusted folder: a model call's request and answer on local transport
+MODEL_GRACE_S = 10.0  # past a model call's own time, how long its answer is waited for before it is cancelled
+MODEL_LIVE_S = 2.0  # how often a model call's wait looks whether the module is still live
+NOT_LIVE = "main's Claude Code session stopped answering while thimble's model call ran"
 ANSWER_KEYS = ("agentId", "deny", "limit", "error", "ok")
 NO_MODULE = "no-module"
 REGISTRY = "trusted/subagents.json"  # lane B's record of thimble's agents, in the workspace (module note; subagent_files)
-LAUNCH = "trusted/launch.json"  # written by the launcher or /thimble: {session, at, via, mode, switches, unset, pid}
+LAUNCH = "trusted/launch.json"  # written by activation (activate.write_launch): {session, pid, via, transport, peers, moved}
 NOTE_HINT = sf.NOTE_HINT  # prompts/tools.md: {role}, {agent}, {what}, {how}
 AGENT = "{agent}"  # left in a note for the module to fill with the agent id it got
 HOW = sf.HOW  # module-started-note's {how}, by the route of the agent's start
-HTTP, FILE = "http", "file"  # transport(): the server's routes (browser mode), or the trusted folder (terminal mode)
-FILE_BEAT_MS = 2000  # the module's heartbeat in terminal mode (thimble.ts)
+HTTP, FILE = "http", "file"  # transport(): the server's routes (after a press), or the trusted folder (local transport)
+FILE_BEAT_MS = 2000  # the module's heartbeat on local transport (thimble.ts)
 FILE_LIVE_S = 6.0  # a heartbeat younger than this is a live module
-FILE_POLL_S = 0.05  # how often a request in terminal mode reads module.json for its answer
+FILE_POLL_S = 0.05  # how often a request on local transport reads module.json for its answer
 NO_MODULE_ENV = "THIMBLE_NO_MODULE"
 NOT_LOADED = "Claude Code did not load thimble's hooks module"
 NOT_ANSWERING = "Your Claude Code session's thimble module did not answer"
@@ -147,11 +170,16 @@ NO_MAIN = "thimble knows no main session in this folder yet"
 # notice cli.PROXY_KEY, events.session_route), which the module's requests to 127.0.0.1 then go to
 PROXY_IN_WAY = ("your shell sets a proxy without 127.0.0.1 and localhost in NO_PROXY, so thimble's hooks module "
                 "cannot reach thimble's server")
-# main's session as launch.json names it has not opened thimble yet: the launcher's first prompt, /thimble, attaches it
-# (session.current) only after the module's first hello at session start, and its `claude` process is known only then
-# (session.main_pid), unless launch.json's pid names it (_launched)
+# main's session as launch.json names it has not been attached by this server yet: the press attaches it
+# (session.current), and its `claude` process is known only then (session.main_pid), unless launch.json's pid names it
+# (_launched)
 NOT_OPEN = "main's session has not opened thimble yet"
-WAIT_REASONS = (NO_MAIN, NOT_OPEN)  # a hello refused for one of these is asked again later (409), never refused for good
+# main runs on the local transport (a session continued after a quit: activate.continue_main), so its module takes its
+# requests from the workspace's files, not from this server's long poll (bug hunt 7, H17)
+LOCAL_NOW = "main's session runs thimble without the server now"
+# a hello refused for one of these is asked again later (409), never refused for good; the module reads launch.json
+# again meanwhile and goes on through the files when it says so (thimble.ts toFiles)
+WAIT_REASONS = (NO_MAIN, NOT_OPEN, LOCAL_NOW)
 ENDED_STATES = frozenset({"ended", "stopped", "killed", "completed", "failed", "done", "refused", "expired"})
 TYPED_LIVE = frozenset({"", "pending", "claimed"})  # a typed start's request still waiting for main's Agent call
 ROLE_TYPE = re.compile(r"thimble:(.+)")
@@ -288,8 +316,8 @@ def _bridge(c: str) -> _Bridge:
 
 
 def _moves(c: str) -> dict[str, str]:
-    """The moves of main's session rekey recorded: this server's, or in terminal mode, where other processes record them,
-    subagents.json's as it is now."""
+    """The moves of main's session rekey recorded: this server's, or on local transport, where other processes record
+    them, subagents.json's as it is now."""
     return sf.moves(registry(c)) if transport(c) == FILE else _bridge(c).rekeyed
 
 
@@ -348,7 +376,7 @@ def _is_claude(argv: list[str]) -> bool:
 
 
 def _names(argv: list[str], sid: str) -> bool:
-    """Whether a command line names session `sid`, as the launcher passes it: `--session-id <sid>` for a new session,
+    """Whether a command line names session `sid`, as `claude` takes it: `--session-id <sid>` for a new session,
     `--resume <sid>` for a continued one, or either flag's `=` form."""
     return any(a == sid and i and argv[i - 1] in ("--session-id", "--resume", "-r")
                or a in (f"--session-id={sid}", f"--resume={sid}") for i, a in enumerate(argv))
@@ -356,7 +384,7 @@ def _names(argv: list[str], sid: str) -> bool:
 
 def _launched(c: str, sid: str) -> bool:
     """Whether main's session `sid` is the one launch.json names, and the process launch.json names (`pid`: main's
-    `claude`, which the launcher writes there as it starts it) runs now as `claude` (_is_claude) with a command line
+    `claude`, which activation writes there) runs now as `claude` (_is_claude) with a command line
     that names `sid` (_names). False when the check cannot be made: no pid, the process gone, or a command line that is
     not that `claude`, such as another process that took the pid later."""
     from . import procs  # noqa: PLC0415
@@ -369,21 +397,47 @@ def _launched(c: str, sid: str) -> bool:
         argv = procs.argv(pid)
         return _is_claude(argv) and _names(argv, sid)
     except Exception:  # noqa: BLE001 — a command line that cannot be read is no proof
-        log.debug("the launcher's process %s in %s could not be read", pid, c, exc_info=True)
+        log.debug("main's process %s in %s could not be read", pid, c, exc_info=True)
         return False
 
 
 def _refusal(c: str, sid: str) -> str:
     """'' when a hello from `sid` may be accepted, else why not. Before main's session opened thimble, the process
-    launch.json names shows main (_launched), else the hello waits (NOT_OPEN)."""
+    launch.json names shows main (_launched), else the hello waits (NOT_OPEN). A hello of main's while main runs on the
+    local transport waits too (LOCAL_NOW): its requests go through the workspace's files, which a module that polls this
+    server never reads."""
     main = main_session(c)
     if not main:
         return NO_MAIN
     if sid != main:
         return NOT_MAIN
+    if transport(c) == FILE:
+        return LOCAL_NOW
     if not _opened(c, sid):
         return "" if _launched(c, sid) else NOT_OPEN
     return ""
+
+
+def follow_launch(c: str, sid: str, cwd: str) -> bool:
+    """launch.json names `sid` as main on the server's transport and its `claude` runs it (activate.main_alive), while
+    this server follows another session or none: the server follows `sid` now (session.attach), as a press would have
+    it, since launch.json, which activation alone writes, says which session is main (bug hunt 7, H13 and H17: a
+    session that took main, or was continued, was asked for its hello again every 2 s for as long as it ran, and the
+    browser kept following the session before it). Its module's hello (NOT_OPEN) and its watcher's pull
+    (events.pull_route), whichever comes first, make the server follow it. True when it attached `sid`."""
+    from . import activate, session  # noqa: PLC0415
+
+    rec = _launch(c)
+    if not sid or str(rec.get("session") or "") != sid or transport(c) != HTTP or not activate.main_alive(c, rec):
+        return False
+    pid = rec.get("pid") if isinstance(rec.get("pid"), int) and not isinstance(rec.get("pid"), bool) else None
+    config_dir = rec.get("config_dir") if isinstance(rec.get("config_dir"), str) else None
+    log.info("%s: launch.json names session %s as main and its claude runs it: this server follows it", c, sid)
+    try:
+        return session.attach(c, sid, cwd, None, pid, config_dir) is not None
+    except Exception:  # noqa: BLE001 — the hello is asked again, as before
+        log.exception("%s: session %s was not attached", c, sid)
+        return False
 
 
 def _accepted(c: str, sid: str) -> bool:
@@ -425,16 +479,17 @@ def _remember_loop() -> None:
 # ---------------------------------------------------------------------------------------------------- the contract
 
 def transport(c: str) -> str:
-    """How the module of workspace `c` is reached (module note): FILE when the session launch.json names runs in terminal
-    mode, else HTTP."""
+    """How the module of workspace `c` is reached (module note): FILE while main runs on local transport
+    (subagent_files.transport, read from launch.json at each call), HTTP once a press made main's transport the
+    server."""
     try:
-        return FILE if sf.terminal(_ws(c)) else HTTP
+        return FILE if sf.transport(_ws(c)) == sf.LOCAL else HTTP
     except ValueError:
         return HTTP
 
 
 def read_out(c: str) -> dict[str, Any]:
-    """module.json of workspace `c` (module note): what the module wrote in terminal mode; {} when there is none."""
+    """module.json of workspace `c` (module note): what the module wrote on local transport; {} when there is none."""
     try:
         return sf.read_module(_ws(c))
     except ValueError:
@@ -451,7 +506,7 @@ def _file_live(c: str, out: dict[str, Any] | None = None) -> bool:
 
 
 def live(c: str) -> bool:
-    """Whether a module holds the long poll for main's session in workspace `c` (module note); in terminal mode, whether
+    """Whether a module holds the long poll for main's session in workspace `c` (module note); on local transport, whether
     main's module wrote its heartbeat lately."""
     if transport(c) == FILE:
         return _file_live(c)
@@ -481,7 +536,7 @@ def why_not(c: str) -> str:
     switches = launch.get("switches")
     if isinstance(switches, (list, dict)) and NO_MODULE_ENV in switches:
         return f"{NO_MODULE_ENV} is set"
-    if launch.get("modules_off"):  # what the launcher found, such as its own --settings that set disableAllHooks
+    if launch.get("modules_off"):  # what a 0.8.0 launcher found, such as its own --settings that set disableAllHooks
         return str(launch["modules_off"])
     from . import cc_plugin  # noqa: PLC0415
 
@@ -500,6 +555,49 @@ def why_not(c: str) -> str:
     if not file and _proxy_found(c):
         return PROXY_IN_WAY
     return NOT_LOADED
+
+
+# why_not's reasons that say which session the server follows, or that main's module stopped answering: a restart of
+# Claude Code is no fix for them while a session runs thimble in the folder (session_runs)
+FOLLOW_REASONS = (NO_MAIN, NOT_MAIN, NOT_OPEN, LOCAL_NOW)
+
+
+def session_runs(c: str) -> bool:
+    """Whether a Claude Code session runs thimble in workspace `c`'s folder now: the main launch.json names runs
+    (activate.main_alive), or this server follows a session as main. Never raises."""
+    try:
+        from . import activate, session  # noqa: PLC0415
+
+        return c in session.attached_workspaces() or activate.main_alive(c, _launch(c))
+    except Exception:  # noqa: BLE001 — a record that cannot be read shows no session
+        return False
+
+
+def needs_restart(c: str, why: str) -> bool:
+    """Whether restarting Claude Code in the folder is a fix for `why` (why_not): no session runs thimble there
+    (session_runs), or the reason is one that only a new `claude` process takes up once its cause is fixed (hooks
+    modules off, THIMBLE_NO_MODULE, a proxy, a module Claude Code did not load). Never for FOLLOW_REASONS, nor for a
+    module that stopped answering, while a session runs (bug hunt 7, H13: a check failed with "restart Claude Code in
+    this folder" while two sessions ran thimble there)."""
+    if not session_runs(c):
+        return True
+    return not (why in FOLLOW_REASONS or why.startswith(NOT_ANSWERING))
+
+
+def no_session_text(c: str) -> str:
+    """Why a model call or the card check's agent found no module to run it (model_call, agent_call): call_result's
+    NO_SESSION, with its fix to start a session, only when no Claude Code session runs thimble in the folder
+    (session_runs); else that the session's module did not answer, and why (why_not), with no fix that starts a session
+    (bug hunt 7, H13 and H17: "no Claude Code session runs thimble in this folder" while one did). Never raises."""
+    from .call_result import NO_SESSION  # noqa: PLC0415
+
+    if not session_runs(c):
+        return NO_SESSION
+    try:
+        why = why_not(c)
+    except Exception:  # noqa: BLE001
+        why = ""
+    return f"{NOT_ANSWERING}: {why}" if why and not why.startswith(NOT_ANSWERING) else (why or NOT_ANSWERING)
 
 
 def _proxy_found(c: str) -> bool:
@@ -559,7 +657,7 @@ def on_ended(fn: Callable[[str, str, str, str], None]) -> None:
 
 def rekey(c: str, old: str, new: str) -> None:
     """Main moved from session `old` to `new` (/clear or an in-session /resume; lane B's `--rekey` calls this). A hello
-    from `new` waiting for it is accepted, whichever came first. In terminal mode the --rekey hook recorded the move in
+    from `new` waiting for it is accepted, whichever came first. On local transport the --rekey hook recorded the move in
     subagents.json itself, which the module and every reader take from there."""
     if not (old and new) or old == new or transport(c) == FILE:
         return
@@ -578,11 +676,18 @@ def _note(role: str, what: str, route: str = "click") -> str:
     {what})."""
     from . import tools  # noqa: PLC0415
 
+    # a check tells main nothing: its comments show on the answer or the document, never in main's chat (SPEC-v2 J7);
+    # nor does the card check's agent, whose answer reaches only the server (agent_call.py)
+    if role in ("check", "call"):
+        return ""
     return tools.hint(NOTE_HINT, role=role, agent=AGENT, what=sf.note_what(what), how=HOW.get(route) or HOW["click"])
 
 
 def _answer(op: str, raw: Any) -> Answer:
-    """The module's answer as module note's Answer: one main key, and only the extras named there."""
+    """The module's answer as module note's Answer: one main key, and only the extras named there; a model call's in its
+    own shape (_model_answer)."""
+    if op in MODEL_OPS:
+        return _model_answer(raw)
     if not isinstance(raw, dict):
         return {"error": f"the module's answer to {op} was not an object"}
     key = next((k for k in ANSWER_KEYS if raw.get(k) not in (None, "", False)), None)
@@ -616,6 +721,8 @@ def _args(op: str, args: dict[str, Any]) -> dict[str, Any]:
                "note": _note(role, str(args.get("what") or ""), str(args.get("route") or "click"))}
         if args.get("request"):
             out["request"] = str(args["request"])
+        if args.get("drop"):  # the card check's: the reason the terminal UI gives when it drops the agent's hand-back
+            out["drop"] = str(args["drop"])
         return out
     if op == "send":
         return {"agent": str(args.get("agent") or ""), "text": str(args.get("text") or ""),
@@ -679,10 +786,184 @@ def _expire(c: str, req: _Request) -> None:
         req.future.set_result({NO_MODULE: NOT_ANSWERING, "expired": True})
 
 
+# ---------------------------------------------------------------------------------------------------- model calls
+
+COMPLETIONS_KEEP_S = 3600.0  # a model call's files left behind (a cancel, a crash) go after this long
+
+
+def _model_answer(raw: Any) -> Answer:
+    """A model call's answer (module note): {text, usage}, {failed, status, kind, usage} or {error}."""
+    if not isinstance(raw, dict):
+        return {"error": "the module's answer to a model call was not an object"}
+    usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else None
+    extra: dict[str, Any] = {"usage": usage} if usage is not None else {}
+    if isinstance(raw.get("text"), str):
+        return {"text": raw["text"], **extra}
+    if isinstance(raw.get("failed"), str) and raw["failed"]:
+        out: dict[str, Any] = {"failed": raw["failed"], **extra}
+        if raw["failed"] == "api-error":
+            st = raw.get("status")
+            out["status"] = st if isinstance(st, int) and not isinstance(st, bool) else None
+            out["kind"] = str(raw.get("kind") or "unknown")
+        return out
+    if isinstance(raw.get("error"), str) and raw["error"]:
+        return {"error": raw["error"]}
+    return {"error": "the module gave no answer to a model call"}
+
+
+async def model(c: str, op: str, args: dict[str, Any], *, timeout_s: float) -> Answer:
+    """One model call `op` (MODEL_OPS) in main's session of workspace `c` (module note): the module's answer
+    (_model_answer); {no-module: why} when no module is live, or none took the request in time (`expired`); {error:
+    NOT_LIVE} when the module stopped being live while it ran; {failed: aborted, timeout: true} when no answer came
+    within `timeout_s` and MODEL_GRACE_S. Never raises for the module's sake; a cancel of the caller cancels the call in
+    the module (`cancel`) and is raised."""
+    if op not in MODEL_OPS:
+        raise ValueError(f"unknown model op {op!r}")
+    if transport(c) == FILE:
+        return await _file_model(c, op, args, timeout_s)
+    _remember_loop()
+    if not live(c):
+        return {NO_MODULE: why_not(c) or NOT_LOADED}
+    b = _bridge(c)
+    req = _enqueue(c, op, dict(args), b.session, REQUEST_TIMEOUT_S)
+    end = time.monotonic() + timeout_s + MODEL_GRACE_S
+    try:
+        while True:
+            left = end - time.monotonic()
+            if left <= 0:
+                _cancel_http(c, req)
+                return {"failed": "aborted", "timeout": True}
+            try:
+                # shielded: the wait's own timeout leaves the request as it is
+                return await asyncio.wait_for(asyncio.shield(req.future), min(left, MODEL_LIVE_S))  # type: ignore[arg-type]
+            except asyncio.TimeoutError:
+                pass
+            if not req.taken and time.monotonic() >= req.deadline:
+                _cancel_http(c, req)
+                return {NO_MODULE: NOT_ANSWERING, "expired": True} if live(c) else {NO_MODULE: why_not(c) or NOT_LOADED}
+            if req.taken and not live(c):
+                _cancel_http(c, req)
+                return {"error": NOT_LIVE}
+    except asyncio.CancelledError:
+        _cancel_http(c, req)
+        raise
+
+
+def _cancel_http(c: str, req: _Request) -> None:
+    """A model call nobody waits for any more: out of the queue when the module has not taken it, else aborted in the
+    module (`cancel`, which a fork ignores); a late answer goes nowhere."""
+    b = _bridge(c)
+    b.by_id.pop(req.id, None)
+    if not req.taken:
+        with contextlib.suppress(ValueError):
+            b.queue.remove(req)
+    elif live(c):
+        _enqueue(c, CANCEL, {"request": req.id}, b.session, None)
+    if req.future is not None and not req.future.done():
+        req.future.set_result({"failed": "aborted"})
+
+
+def _completions(c: str) -> Path:
+    return sf.trusted_dir(config.workspace_dir(c)) / COMPLETIONS
+
+
+def _write_call(folder: Path, path: Path, args: dict[str, Any]) -> None:
+    """A model call's request file on local transport (module note), and the files of calls older than
+    COMPLETIONS_KEEP_S gone."""
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    cut = time.time() - COMPLETIONS_KEEP_S
+    for old in folder.iterdir():
+        with contextlib.suppress(OSError):
+            if old.stat().st_mtime < cut:
+                old.unlink()
+    sf._replace(path, args)
+
+
+def _read_answer(path: Path) -> dict[str, Any] | None:
+    """A model call's answer file, None while it is not there or not whole (the module writes it in place)."""
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    try:
+        got = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return got if isinstance(got, dict) else {}
+
+
+def _end_call(c: str, rid: str, *paths: Path) -> None:
+    """A model call on local transport ended: its entry leaves subagents.json, and its files go."""
+    ws = config.workspace_dir(c)
+    with _file_lock, sf.update(ws) as state:
+        sf.requests(state).pop(rid, None)
+    for p in paths:
+        with contextlib.suppress(OSError):
+            p.unlink()
+
+
+def _file_cancel(c: str, rid: str, *paths: Path) -> None:
+    """model() on local transport for a call nobody waits for any more: `cancel` for the module, and the call ended."""
+    ws = config.workspace_dir(c)
+    with contextlib.suppress(Exception), _file_lock, sf.update(ws) as state:
+        sf.add_module_request(state, CANCEL, {"request": rid}, sf.main_session(ws, state), REQUEST_TIMEOUT_S)
+    _end_call(c, rid, *paths)
+
+
+async def _file_model(c: str, op: str, args: dict[str, Any], timeout_s: float) -> Answer:
+    """model() on local transport (module note): the request's file, its entry in subagents.json naming the file, then
+    the answer's file, read every FILE_POLL_S; the entry is taken (module.json `taken`) within REQUEST_TIMEOUT_S or the
+    call expires."""
+    if not _file_live(c):
+        return {NO_MODULE: why_not(c) or NOT_LOADED}
+    ws = config.workspace_dir(c)
+    folder = _completions(c)
+    cid = secrets.token_hex(8)
+    ask, answer = folder / f"{cid}.json", folder / f"{cid}.answer.json"
+    await asyncio.to_thread(_write_call, folder, ask, dict(args))
+    with _file_lock, sf.update(ws) as state:
+        rid = sf.add_module_request(state, op, {"call": cid}, sf.main_session(ws, state), REQUEST_TIMEOUT_S)
+    take_by = time.monotonic() + REQUEST_TIMEOUT_S
+    end = time.monotonic() + timeout_s + MODEL_GRACE_S
+    out_path, seen, taken, looked = sf.module_path(ws), None, False, time.monotonic()
+    try:
+        while True:
+            got = _read_answer(answer)
+            if got is not None:
+                _end_call(c, rid, ask, answer)
+                return _model_answer(got)
+            now = time.monotonic()
+            if not taken:
+                try:
+                    st = out_path.stat()
+                    stamp = (st.st_mtime_ns, st.st_size)
+                except OSError:
+                    stamp = None
+                if stamp is not None and stamp != seen:
+                    seen = stamp
+                    taken = rid in (sf.read_module(ws).get("taken") or [])
+                if not taken and now >= take_by:
+                    _end_call(c, rid, ask, answer)
+                    return ({NO_MODULE: NOT_ANSWERING, "expired": True} if _file_live(c)
+                            else {NO_MODULE: why_not(c) or NOT_LOADED})
+            elif now - looked >= MODEL_LIVE_S:
+                looked = now
+                if not _file_live(c):
+                    _end_call(c, rid, ask, answer)
+                    return {"error": NOT_LIVE}
+            if now >= end:
+                _file_cancel(c, rid, ask, answer)
+                return {"failed": "aborted", "timeout": True}
+            await asyncio.sleep(FILE_POLL_S)
+    except asyncio.CancelledError:
+        _file_cancel(c, rid, ask, answer)
+        raise
+
+
 def push_roles(c: str) -> None:
     """Have the module register every role again (Settings, the orientation instructions or the active extensions
-    changed). Returns at once, from any thread; nothing when no module is live or one such request already waits. In
-    terminal mode roles.json is written again (roles_file), which the module registers again from."""
+    changed). Returns at once, from any thread; nothing when no module is live or one such request already waits. On
+    local transport roles.json is written again (roles_file), which the module registers again from."""
     if transport(c) == FILE:
         try:
             roles_file(c)
@@ -806,23 +1087,18 @@ def _watch_roles(c: str) -> None:
     asyncio.get_running_loop().create_task(look(), name=f"module-roles-{c}")
 
 
-# ---------------------------------------------------------------------------------------------------- terminal mode
+# ---------------------------------------------------------------------------------------------------- local transport
 
 
 def _session_served(c: str) -> dict[str, Any]:
-    """_served rendered in the mode of workspace `c`'s session (launch.json's `mode`), whichever process asks: the
-    launcher writes roles.json before main starts, from a folder that is no corpus and with no THIMBLE_WS, where the
-    prompts would otherwise render in browser mode."""
-    from . import prompts  # noqa: PLC0415
-
-    with prompts.rendering(sf.session_mode(config.workspace_dir(c))):
-        return _served(c)
+    """_served for workspace `c`, as roles.json holds it (one rendering for every transport)."""
+    return _served(c)
 
 
 def roles_file(c: str) -> Path:
     """trusted/roles.json of workspace `c` written (module note): `{at, digest, roles, rules}`, what GET
     /api/module/roles serves (subagents.roles as `$.agent.register` takes them, and userconf.module_rules), from which
-    the module registers thimble's types and takes its rules in terminal mode. The launcher writes it, and push_roles
+    the module registers thimble's types and takes its rules on local transport. Activation writes it, and push_roles
     and sync_roles write it again. Its path."""
     served = _session_served(c)
     ws = config.workspace_dir(c)
@@ -841,7 +1117,7 @@ def roles_file(c: str) -> Path:
 
 
 def _sync_roles_file(c: str) -> bool:
-    """sync_roles in terminal mode: roles.json written again when the roles rendered now differ from those it holds.
+    """sync_roles on local transport: roles.json written again when the roles rendered now differ from those it holds.
     True when it was written."""
     try:
         held = _read_json(sf.roles_path(config.workspace_dir(c)))
@@ -856,7 +1132,7 @@ def _sync_roles_file(c: str) -> bool:
 
 
 async def _file_request(c: str, op: str, args: dict[str, Any]) -> Answer:
-    """request() in terminal mode (module note): the entry in subagents.json, then module.json read for its answer up to
+    """request() on local transport (module note): the entry in subagents.json, then module.json read for its answer up to
     REQUEST_TIMEOUT_S; past it the entry expires and the answer is `no-module`, `expired`."""
     if not _file_live(c):
         return {NO_MODULE: why_not(c) or NOT_LOADED}
@@ -892,9 +1168,9 @@ async def _file_request(c: str, op: str, args: dict[str, Any]) -> Answer:
 
 
 def reconcile(c: str) -> list[str]:
-    """Terminal mode: a spawn whose request expired but which the module answered late with an agent gets that agent
-    stopped (a stop request nobody waits for), since its caller was told it did not start, as result_route does in
-    browser mode. The agents stopped."""
+    """Local transport: a spawn whose request expired but which the module answered late with an agent gets that agent
+    stopped (a stop request nobody waits for), since its caller was told it did not start, as result_route does on the
+    server. The agents stopped."""
     if transport(c) != FILE:
         return []
     ws = config.workspace_dir(c)
@@ -916,7 +1192,7 @@ def reconcile(c: str) -> list[str]:
 
 
 def new_ended(c: str) -> list[dict[str, Any]]:
-    """Terminal mode: the ends of runs of the agents the module started that module.json holds and no caller took yet
+    """Local transport: the ends of runs of the agents the module started that module.json holds and no caller took yet
     ({agentId, answer, reason, refusal?}), now taken: each is handed out once, by the module's load and its `n`, kept
     under subagents.json's `module.ended_seen`. A refusal that wrote no text has what the API said of it as its answer
     (refusal_text)."""
@@ -999,12 +1275,15 @@ class HelloBody(BaseModel):
 async def hello_route(body: HelloBody) -> dict[str, Any]:
     """The module's hello: accepted (200) from main's session, held up to HELLO_HOLD_S for a rekey that names a new
     main, else refused (403, with the reason recorded for why_not). 404 for a folder that is no workspace (a module that
-    /thimble turned on stays idle then, until the next /thimble), and 409 while no main session is known or main's
-    session has not opened thimble yet and launch.json's process cannot show main (WAIT_REASONS): the module says hello
-    again later."""
+    /thimble turned on stays idle then, until the next /thimble), and 409 while no main session is known, main runs on
+    the local transport, or main's session has not opened thimble yet and launch.json's process cannot show main
+    (WAIT_REASONS): the module says hello again later. A hello of the live main launch.json names on the server's
+    transport makes the server follow it first (follow_launch)."""
     _remember_loop()
     c = _workspace(body.cwd)
     b = _bridge(c)
+    if _refusal(c, body.session) == NOT_OPEN:
+        follow_launch(c, body.session, body.cwd)
     end = time.monotonic() + HELLO_HOLD_S
     while True:
         why = _refusal(c, body.session)
@@ -1221,7 +1500,8 @@ def _efforts(reg: dict[str, Any], agents: dict[str, dict[str, Any]]) -> dict[str
 
 
 def _typed(reg: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """The typed starts still waiting for main's Agent call, by request id: {role, values, key}."""
+    """The typed starts still waiting for main's Agent call, by request id: {role, values, key, inline}, `inline` true
+    when the trusted folder holds the whole prompt its agent gets (subagent_files.INLINE)."""
     out: dict[str, dict[str, Any]] = {}
     for table in ("pending", "requests"):
         rows = reg.get(table)
@@ -1233,7 +1513,8 @@ def _typed(reg: dict[str, Any]) -> dict[str, dict[str, Any]]:
             if str(r.get("state") or "") not in TYPED_LIVE:
                 continue
             out[str(r.get("id") or rid)] = {"role": _role_of(r.get("role")) or str(r.get("role") or ""),
-                                            "values": dict(r.get("values") or {}), "key": str(r.get("key") or "")}
+                                            "values": dict(r.get("values") or {}), "key": str(r.get("key") or ""),
+                                            "inline": bool(r.get("inline"))}
     return out
 
 

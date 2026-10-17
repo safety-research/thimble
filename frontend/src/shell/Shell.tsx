@@ -26,6 +26,7 @@ import { isReplay, useWorkspaceEvents } from '../lib/events'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
 import { refFromUrl, teleport } from '../lib/teleport'
+import { inTourFrame } from '../lib/tourFrame'
 import { noteOpened, openedBefore, openingRef, readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { CmdPointer } from '../pointer/CmdPointer'
 import { ReportTab } from '../report/ReportTab'
@@ -211,7 +212,7 @@ export function Shell({ ws }: { ws: string }) {
         open()
       }),
       bus.on('openRef', (e) => {
-        if (chatOpen.current || !e.ref.startsWith('call:')) return
+        if (chatOpen.current || !(e.ref.startsWith('call:') || e.ref.startsWith('answer:'))) return
         holdForChat({ event: 'openRef', payload: e })
         open()
       }),
@@ -224,6 +225,8 @@ export function Shell({ ws }: { ws: string }) {
   // dataset's main view, an example's), as that row on the start page does
   const [firstOpen] = useState(() => !openedBefore(ws))
   useEffect(() => {
+    // the tour's frame shows the demo workspace as the tour sets it, and leaves no trace of an open (lib/tourFrame)
+    if (inTourFrame()) return
     noteOpened(ws)
     const ref = refFromUrl()
     if (ref) return teleport(ref, { still: true })
@@ -372,7 +375,7 @@ export function Shell({ ws }: { ws: string }) {
       <CmdPointer ws={ws} />
       <LabelEditorHost ws={ws} />
       <Toasts />
-      <TourHost />
+      <TourHost ws={ws} />
       {!gone && <ServerDown />}
       <NewVersion />
       {gone && <SessionGone gone={gone} ws={ws} />}

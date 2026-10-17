@@ -52,8 +52,8 @@ export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'vie
 
 /** One line of `chats/<id>.jsonl`; its index in the log is its id. */
 export type ChatRecord =
-  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string }
-  | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean }
+  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string; plugin?: string; images?: string[] }
+  | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean; uuid?: string }
   | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
   | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
   | { type: 'refs'; ts?: string; resolved: string[]; broken: string[]; why?: Record<string, string>; links?: unknown[]; unlinked?: unknown[] }
@@ -65,12 +65,16 @@ export type ChatRecord =
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
 
 /** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
- * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
- * sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
+ * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), sign
+ * out the browser whose id is `slug` (`sign-out`, a sign-in notice's), open the label `slug` (`label-open`), run it again
+ * on the units its last run could not label (`label-again`), run the orientation again (`orient-again`), or, for main's
+ * reply Claude's safeguards stopped, send main `text`, which asks it to make the lost card again (`card-again`), or put
+ * `text`, the analyst's last message to main, back in main's composer (`ask-again`). */
 export interface NoticeAction {
   label: string
-  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | (string & {})
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | 'label-open' | 'label-again' | 'orient-again' | 'card-again' | 'ask-again' | (string & {})
   slug?: string
+  text?: string
 }
 
 /** A failure the analyst should know of, with an easy fix (backend notices.post), as `GET /ws/{c}/notices` lists the
@@ -352,6 +356,9 @@ export interface Concept {
   /** GET /concepts carries these too: the last kept run (the Files pane's outcome line) and the live run record */
   last_run?: ConceptApplication | null
   run?: ConceptRun | null
+  /** what a Run again after a stop goes on with: the units the stopped run read and those it never read, of its scope's;
+   * null when a run labels every unit again, as its definition changed since (backend concepts.resumable, bug hunt I3) */
+  resume?: LabelResume | null
   /** how many times what a card reads from the label has changed (backend concepts.py, Revisions), and the last of
    * those changes in words */
   rev?: number
@@ -492,6 +499,8 @@ export interface Proposal {
   held?: boolean
   /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
   off?: boolean
+  /** a view proposal dismissed in the terminal in main's session (backend views.offer_hidden): its card does not show */
+  hidden?: boolean
   status: ProposalStatus
   ts: string
   error?: string
@@ -642,7 +651,7 @@ export interface ViewDerived {
  * reader could not place; and the fields its reader derived, by kind of record, the inferred ones first in each. */
 export interface ViewShown {
   files: number
-  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string; claimed?: boolean }[] }
+  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string }[] }
   missing?: { path: string; why: string }[]
   unplaced?: ViewProblems
   derived: ViewDerived[]
@@ -1182,7 +1191,7 @@ export interface NewTicketBody {
   title: string
   body: string
   target?: unknown
-  /** where it was filed: `ui` for the browser's File a code ticket (backend dev.SOURCES) */
+  /** where it was filed: `ui` for the browser's Ask Claude to fix it (backend dev.SOURCES) */
   source?: 'ui'
 }
 
@@ -1198,7 +1207,7 @@ export interface DevStatus {
 
 /** Every role that runs a model, as the settings popover lists them (backend config.MODEL_ROLES), main first, whose
  * model, effort and fast mode are its session's and the composer chip's: the agents (each runs exactly the model and
- * effort of its row), then the classifiers, then the row a refused classifier call runs again on. */
+ * effort of its row), then the model calls, then the row a refused model call runs again on. */
 export const ROLES = ['main', 'orient', 'subagents', 'critic', 'writer', 'dev', 'checks', 'labels', 'verify', 'suggest', 'refusal'] as const
 export type Role = (typeof ROLES)[number]
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -1208,11 +1217,11 @@ export interface ModelConf {
   model: string
   /** '' for a model Claude Code runs with no effort (Haiku) */
   effort: Effort | string
-  /** fast mode: the classifiers' rows only (labels, verify, suggest); the agents have none */
-  fast: boolean
+  /** fast mode: main's alone; thimble's agents and model calls run as subagents of main, which have none of their own */
+  fast?: boolean
   /** the role whose model this one takes while the analyst has picked none (the orientation's subagents: `orient`) */
   follows?: string
-  /** the refusal row: no second call when a classifier's model refuses */
+  /** the refusal row: no second call when a model call's model refuses */
   off?: boolean
 }
 
@@ -1242,8 +1251,14 @@ export interface Settings {
   /** the key held with a click to ask in the browser (thimble's config `askKey`, lib/platform): "meta" (⌘, Ctrl off a
    * Mac) or "alt" (⌥, Alt) */
   ask_key?: 'meta' | 'alt'
+  /** thimble's feature switches, as thimble's config `features` resolves them (backend features.settings, ledger
+   * FEATURES_KEY): true or false each; a key it leaves out is on */
+  features?: Partial<Record<FeatureKey, boolean>>
   [k: string]: unknown
 }
+
+/** thimble's feature switches (backend features.py; /config → thimble in the terminal shows the same). */
+export type FeatureKey = 'labels' | 'checks' | 'citationMarks' | 'coverage' | 'cardCheck'
 
 /** The agent rows of the settings: thimble's subagents, the code tickets' dev agent and the two classifiers. */
 export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent
@@ -1302,6 +1317,8 @@ export interface SettingsPatch {
   propose_views?: boolean | null
   /** the ask key: "alt", or null to put back the default ("meta") */
   ask_key?: 'meta' | 'alt' | null
+  /** the feature switches: false turns one off, null puts back the default (on) */
+  features?: Partial<Record<FeatureKey, false | null>>
   [k: string]: unknown
 }
 
@@ -1775,6 +1792,14 @@ export interface ConceptApplication {
   matches?: number
   /** the whole files or runs a prompt label's run read only in part; absent when it read every one whole */
   cut?: ReadCut | null
+  /** a trial's sample: the most units the run read; null or absent for a run on everything */
+  limit?: number | null
+  /** the analyst stopped the run (Stop run), or quitting Claude Code did (`stopped_by` quit): it read `labeled` +
+   * `failed` + `skipped` units of `total` */
+  stopped?: boolean
+  stopped_by?: 'quit' | string | null
+  /** the units with no words, which need no label (a prompt label's) */
+  skipped?: number
 }
 
 /** The whole files or runs a prompt label's run read only in part, since they were longer than its model's context
@@ -1844,12 +1869,21 @@ export interface ConceptCoverage {
   offset: number
 }
 
+/** What a label's Run again after a stop goes on with (Concept `resume`). */
+export interface LabelResume {
+  read: number
+  left: number
+  total: number
+}
+
 /** POST /concepts/{id}/apply */
 export interface ApplyBody {
   paths?: string[]
   limit?: number | null
   comment?: boolean
   wait?: boolean
+  /** a Run again after a stop: go on with the units the stopped run never read, when the label's `resume` says it can */
+  resume?: boolean
 }
 
 /** POST /concepts/{id}/labels: the analyst's verdict on one unit. */
@@ -2054,9 +2088,9 @@ export interface Attached {
   session: string
   cwd: string
   since: string
-  /** the model the session's replies came from, as the mirror last read it */
+  /** the model the session's requests and replies ran on, as the mirror last read it (from the first prompt on) */
   model?: string
-  /** the effort they ran at, as the mirror last read it */
+  /** the effort they ran at, as the mirror last read it; absent until the first request */
   effort?: string
   /** what the composer's chip chose for main's next launch, while this session runs */
   effort_choice?: MainEffort
@@ -2086,6 +2120,8 @@ export interface SessionEnded {
   session: string
   cwd: string
   at: string
+  /** when it was attached: the agents that stopped before then stopped with an earlier session */
+  since?: string
 }
 export interface ChatMeta {
   /** a thread: the fork of main that answers it, once main forked it (backend threads.fork_started); `ended` once it

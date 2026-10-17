@@ -31,17 +31,14 @@ For a development build, clone the repo and run `bash scripts/install.sh`. See [
 
 ## Usage
 
-Run `thimble` in a folder with files you'd like to analyze, just like you run `claude`. Use `thimble mode terminal|browser` to switch between browser and terminal modes (see below).
+Run `claude` in a folder with files you'd like to analyze. By default, thimble is enabled in every session. You can toggle
+thimble on and off using `/plugin`.
 
-- To attach thimble to a running Claude Code session, run `/thimble`.
+![thimble in the terminal: cards under Claude's reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
 
-### Terminal mode
+Type `/thimble browser` to open the same session in the browser workbench.
 
-In terminal mode, thimble operates as a Claude Code mod and shows its work directly in the terminal, with no server or browser.
-
-![terminal mode: cards under a reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
-
-To switch a directory to terminal mode, run `thimble mode terminal` in it, then `thimble`. `thimble mode browser` switches it back.
+![the same session in the browser workbench](docs/assets/thimble-browser.png)
 
 ## Commands
 
@@ -49,20 +46,23 @@ To switch a directory to terminal mode, run `thimble mode terminal` in it, then 
 
 | Command | What it does |
 |---|---|
-| `/thimble` | open this folder in thimble and print the dashboard link |
+| `/thimble` | open thimble's panel in the terminal |
+| `/thimble browser` | open the browser workbench on this session, signed in |
+| `/thimble coverage`, `/thimble citations`, `/thimble checks` | open the panel at that section |
 | `/thimble fresh` | archive this workspace and open an empty one |
 | `/thimble restore [<name>]` | bring an archived workspace back |
 | `/thimble:orient [focus]` | start an orientation |
 | `/thimble:label <name> [definition]` | define a label and apply it to the records |
-| `/thimble:write [report\|slides\|story] [request]` | start a writer on a document |
+| `/thimble:write [report\|slides\|story] [request]` | start a writer on a document (in the browser workbench) |
+| `/config` → thimble | turn single features on or off: view proposals, labels, checks, citation marks, coverage, card check |
 
 **From a shell** (`thimble help` lists every command)
 
 | Command | What it does |
 |---|---|
-| `thimble` | start Claude Code with thimble in this folder (a shortcut for `claude`, then `/thimble`); `thimble -c` continues the last session |
+| `thimble` | start Claude Code in this folder and open the browser workbench; `thimble -c` continues the last session |
+| `thimble open` | open the browser workbench for this folder's running session |
 | `thimble demo` | download the [demo datasets](demos/README.md) and open them in the browser |
-| `thimble mode browser\|terminal` | show thimble's work in the browser or in the terminal |
 | `thimble list`, `thimble purge <id>` | list the workspaces, or delete one |
 | `thimble doctor` | a checklist of what is installed and running, with the fix for each problem (`--verbose` for the details) |
 | `thimble unpair` | sign out every browser |
@@ -71,11 +71,11 @@ To switch a directory to terminal mode, run `thimble mode terminal` in it, then 
 
 ## Requirements
 
-Claude Code (tested with 2.1.300), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. 
+Claude Code (tested with 2.1.301), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. 
 
 ## Security & Privacy
 
-thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`.
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`. It starts no Claude Code session of its own: its agents run as subagents of your session, in its permission mode, and its model calls through your session's own client.
 
 ## License
 

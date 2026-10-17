@@ -22,12 +22,15 @@ export interface WriteFailure {
   seq: number
 }
 
+/** A document's name read as a plural noun ("slides", "pilot-findings"), which takes "were"; not "analysis", "status". */
+const PLURAL = /[^siu]s$/i
+
 /** The failure card's head and the tab's tooltip: the writer's last words, or for Claude Code's API error line what
  * failed. */
 export function failedText(f: Pick<WriteFailure, 'slug' | 'note'>): string {
   const at = apiErrorAt(f.note)
   const why = at < 0 ? f.note : `${apiFailureText(f.note.slice(at))}.`
-  return `The ${f.slug} was not written.${why ? ` ${why}` : ''}`
+  return `The ${f.slug} ${PLURAL.test(f.slug) ? 'were' : 'was'} not written.${why ? ` ${why}` : ''}`
 }
 
 /** The failure card's detail behind its chevron: the writer's note when it ends in an API error line; else nothing. */

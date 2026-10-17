@@ -1,27 +1,33 @@
 // A ref on every surface. Standalone (no `value`) it is a Chip: the icon of what it points to and a short name, the
 // evidence chip for the data and the accent chip for the agent's work (refTone). Inside prose (`value`) it is an inline
 // citation: the text itself is the link, with a quiet accent underline. `cite` marks a citation; in GlyphCites contexts
-// a standalone citation is its target's glyph alone, a file's the glyph of its type (lib/fileGlyph). The links toggle
-// hides every citation (lib/links). Hovering shows the evidence in a label: the excerpt with the record's facts and the
+// a standalone citation is its target's glyph alone, a file's the glyph of its type (lib/fileGlyph), except that a chat
+// reply's citation of a card is the card's chip, its glyph and name, as a step row draws it (CardChipCites). The links
+// toggle hides every citation (lib/links). Hovering shows the evidence in a label: the excerpt with the record's facts and the
 // cited words highlighted; for a table cell (`card:<id>#<col>/<row>`) the table around it, or in place when the table is
 // drawn right above; for printed output lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) the
 // cited lines of its output under what it points at in plain words (lib/calls, chat/model callTarget). A click, on the
 // citation or on the chip that heads its label, teleports to the ref's surface (lib/teleport); a ⌘-click asks about it.
+// A citation's check (lib/citeChecks, given by CiteChecksContext) shows the same way on every surface: a small spinner
+// after it while it is checked, nothing once verified, red with × when it failed; a citation the check rewrote in place
+// looks verified, and a click on it shows what Claude wrote, what the check made it and why, the chip that heads the
+// label still opening the place.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { openCited } from '../lib/citeTargets'
 import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../lib/calls'
-import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
+import { cellLabel, cellQuestion, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames, viewLabel } from '../lib/cellName'
 import { callDetail, callFile, callTarget } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
-import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
+import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, noteCitedRef, onCitedFiles, parseRef, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
 import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
 import type { Cell, ResolvedRef } from '../lib/types'
 import { workspaceFromUrl } from '../lib/workspace'
+import { checkOf, type CiteChecks, type CiteRevision } from '../lib/citeChecks'
 import { glyphOf } from '../lib/fileGlyph'
 import { Chip, type ChipTone } from './Chip'
 import type { IconName } from './Icon'
@@ -58,8 +64,38 @@ export { decodeLabel }
 
 /** True where a standalone citation is its target's glyph alone, its name in the hover, so a long name does not crowd
  * the text: chat replies, inside a card's content wherever the card is drawn, and a report's text. A cited number stays
- * the link's text. */
+ * the link's text, and a chat reply's citation of a card its chip (CardChipCites). */
 export const GlyphCites = createContext(false)
+
+/** True where a standalone citation of a card is the card's chip, its glyph and its name, as a chat step row draws the
+ * cards it made, in place of its glyph alone: a chat reply (chat/Rows; Matt 2026-10-17, in place of the terminal's
+ * `[ card:<name> ]`). Like every citation it has the spinner after it while it is checked, and is red with × when it
+ * failed. */
+export const CardChipCites = createContext(false)
+
+/** True where a chip names a card by its question, cut (lib/cellName cellQuestion), rather than its short name: the
+ * browser chat, where the analyst reads which card a step made or a reply cites (bug hunt G11). */
+export const CardQuestions = createContext(false)
+
+/** A random card id of an older card, never shown. */
+const RANDOM_CARD_ID = /^[0-9a-f]{8}$/
+
+/** A card's name on a chip: its question, cut, where chips name cards by their questions (`questions`, CardQuestions),
+ * else its short name; undefined while the card is not known. */
+const cardName = (id: string, questions: boolean): string | undefined => (questions ? cellQuestion(id) : undefined) ?? cellLabel(id)
+
+/** The name a chat reply's citation of a card shows on its chip: its chip's label (chipLabel), the card named by its
+ * id while the canvas's name for it is not known yet, since a card made since ids are names is named by its id; an
+ * older card's random id is never shown. */
+export function cardCiteLabel(ref: string, home?: string | null, ws = '', questions = false): string {
+  const p = parseRef(ref)
+  const known = p?.kind === 'cell' ? cardName(p.cellId, questions) : undefined
+  if (p?.kind !== 'cell' || (known && known !== 'card') || RANDOM_CARD_ID.test(p.cellId)) return chipLabel(ref, home, ws, questions)
+  return cardPartLabel(p, p.cellId, home === p.cellId) ?? p.cellId + (p.exec != null ? `@${p.exec}` : '')
+}
+
+/** The checks of the citations in the text below (lib/citeChecks): a card's takeaway, a document's sentences. */
+export const CiteChecksContext = createContext<CiteChecks | null>(null)
 
 const ID_TOKEN = /\b(cell|concept|chat|group|report|view|call)[:]([A-Za-z0-9_-]{4,})(?:\/\d+)?(?:#[A-Za-z0-9_@.-]*)?/g
 /** An id-looking `kind:<id>` replaced by its kind word, so a chip never shows a hash. */
@@ -83,7 +119,7 @@ export function compactLabel(ref: string): string {
 
 /** A chip's name: a cell's or view's name alone, and for a ref into part of a card its table cell or lines (lib/refs
  * cardPartLabel), without the card's name when the chip sits in that card (`home`). Other refs read as compactLabel. */
-export function chipLabel(ref: string, home?: string | null, ws = ''): string {
+export function chipLabel(ref: string, home?: string | null, ws = '', questions = false): string {
   const p = parseRef(ref)
   if (p?.kind === 'call') {
     // what the call points at in plain words, once a thread or a read registered it; its step number until then
@@ -92,10 +128,12 @@ export function chipLabel(ref: string, home?: string | null, ws = ''): string {
     return p.line != null ? `${line} · ${p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`}` : line
   }
   if (p?.kind === 'cell') {
-    const name = cellLabel(p.cellId) ?? 'card'
+    const name = cardName(p.cellId, questions) ?? 'card'
     return cardPartLabel(p, name, home === p.cellId) ?? name + (p.exec != null ? `@${p.exec}` : '')
   }
   if (p?.kind === 'view' && p.key) return p.slug
+  // a whole view by its name, once Files listed it, never its slug
+  if (p?.kind === 'view') return viewLabel(p.slug) ?? compactLabel(ref)
   return compactLabel(ref)
 }
 
@@ -113,6 +151,7 @@ export function ensureRefName(ws: string, ref: string): void {
 export function useRefLabel(ref: string, workspace?: string): string {
   const ws = workspace ?? workspaceFromUrl() ?? ''
   useEffect(() => ensureRefName(ws, ref), [ws, ref])
+  useEffect(() => noteCitedRef(ref), [ref])
   const name = () => chipLabel(ref, null, ws)
   return useSyncExternalStore(onNames, name, name)
 }
@@ -145,13 +184,16 @@ const wordsFile = (p: { chat: string; n: number }): boolean => {
   return !!w && !!callFile(w.name, w.input)
 }
 
-/** The subscription that redraws a chip when a name it shows becomes known: a card's, a label's, a call's chip line. */
+/** The subscription that redraws a chip when a name it shows becomes known: a card's, a label's, a call's chip line;
+ * and when a file cited since reads as a file it names would (lib/refs fileChipName). */
 const onNames = (fn: () => void): (() => void) => {
   const a = onCellNames(fn)
   const b = onCallWords(fn)
+  const c = onCitedFiles(fn)
   return () => {
     a()
     b()
+    c()
   }
 }
 
@@ -278,20 +320,35 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   // named without the card's name
   const [home, setHome] = useState<string | null>(null)
   useLayoutEffect(() => setHome(chipEl.current?.closest<HTMLElement>('[data-cite-home]')?.dataset.citeHome ?? null), [])
-  const name = () => chipLabel(ref, home, ws)
-  const label = useSyncExternalStore(onNames, name, name)
   const parsed = parseRef(ref)
-  const unresolved = !parsed && !broken
+  // a standalone citation of a card in a chat reply (CardChipCites) is the card's chip with its name, as a step row
+  // draws the cards it made
+  const cardChip = useContext(CardChipCites) && value == null && !!cite && parsed?.kind === 'cell'
+  // in the chat a card is named by its question, in the body face
+  const questions = useContext(CardQuestions)
+  const name = () => (cardChip ? cardCiteLabel(ref, home, ws, questions) : chipLabel(ref, home, ws, questions))
+  const label = useSyncExternalStore(onNames, name, name)
+  // the citation's check: one that failed is red with ×, as a ref the link pass named broken is; one the check
+  // rewrote keeps its revisions for a click
+  const checks = useContext(CiteChecksContext)
+  const check = cite ? checkOf(checks, ref, value) : null
+  const failed = !!broken || check?.state === 'failed'
+  const failWhy = broken ? brokenWhy : check?.why
+  const checking = !failed && check?.state === 'checking'
+  const history = !failed && check?.state === 'corrected' && check.history?.length ? check.history : undefined
+  const [pinned, setPinned] = useState(false)
+  const unresolved = !parsed && !failed
   const wholeCell = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null ? parsed.cellId : null
   const asText = value != null
   const icon = refIcon(ref)
-  // a standalone citation of a card, or inside a card or report text (GlyphCites), is its glyph alone with its name in
-  // the hover; a chip that lists what a step made keeps its name
+  // any other standalone citation of a card, or inside a card or report text (GlyphCites), is its glyph alone with its
+  // name in the hover; a chip that lists what a step made keeps its name
   const glyphCites = useContext(GlyphCites)
-  const iconOnly = !asText && !broken && !!cite && (glyphCites || parsed?.kind === 'cell')
+  const iconOnly = !asText && !cardChip && !failed && !!cite && (glyphCites || parsed?.kind === 'cell')
 
   const call = parsed?.kind === 'call' ? parsed : null
   useEffect(() => ensureRefName(ws, ref), [ws, ref])
+  useEffect(() => noteCitedRef(ref), [ref])
   useEffect(
     () => () => {
       window.clearTimeout(showTimer.current)
@@ -345,14 +402,37 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const cancelHide = () => window.clearTimeout(hideTimer.current)
   const scheduleHide = () => {
     cancelHide()
+    // a label a click opened stays until a click elsewhere or Escape
+    if (pinned) return
     hideTimer.current = window.setTimeout(() => setPop(null), HIDE_DELAY_MS)
   }
+  const close = () => {
+    setPinned(false)
+    setPop(null)
+  }
+  useEffect(() => {
+    if (!pinned) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null
+      if (t && (popEl.current?.contains(t) || chipEl.current?.contains(t))) return
+      close()
+    }
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', onDown, true)
+    document.addEventListener('keydown', onEsc)
+    return () => {
+      document.removeEventListener('mousedown', onDown, true)
+      document.removeEventListener('keydown', onEsc)
+    }
+  }, [pinned])
   const open = async () => {
     // under ⌘ the pointer's highlight speaks for the chip, so the evidence label stays shut
     if (pointing()) return
     const rect = chipEl.current?.getBoundingClientRect()
     if (!rect) return
-    if (broken) return setPop({ state: 'error', rect, message: 'Unable to verify', detail: brokenWhy || undefined })
+    if (failed) return setPop({ state: 'error', rect, message: 'Unable to verify', detail: failWhy || undefined })
     if (quiet) return setPop({ state: 'error', rect, message: `Not linked${quietWhy ? ` — ${quietWhy}` : ''}`, muted: true })
     if (unresolved || !parsed) return setPop({ state: 'error', rect, message: 'Unknown reference', muted: true })
     if (NAME_ONLY.has(parsed.kind) && !(parsed.kind === 'view' && parsed.key)) {
@@ -426,6 +506,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const onLeave = () => {
     if (home) bus.emit('citeHover', { card: home, ref: null })
     window.clearTimeout(showTimer.current)
+    if (pinned) return
     reqSeq.current++
     unmark()
     scheduleHide()
@@ -433,21 +514,36 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') onClick(e)
   }
-  const onClick = (e: React.MouseEvent | React.KeyboardEvent) => {
+  /** Open what the citation cites. */
+  const go = (e: React.MouseEvent | React.KeyboardEvent) => {
     // a ⌘-click is the pointer's: it asks about the ref and never leaves the page
     if ('metaKey' in e && pointKeyHeld(e)) return
     e.stopPropagation()
     window.clearTimeout(showTimer.current)
-    setPop(null)
+    close()
     unmark()
     if (unresolved) return
     if (home && openCited(home, ref)) return
     void clickTarget().then((to) => teleport(to))
   }
+  /** A citation the check rewrote shows its revisions in its label, which stays open; any other opens what it cites. */
+  const onClick = (e: React.MouseEvent | React.KeyboardEvent) => {
+    if (!history) return go(e)
+    if ('metaKey' in e && pointKeyHeld(e)) return
+    e.stopPropagation()
+    window.clearTimeout(showTimer.current)
+    cancelHide()
+    setPinned(true)
+    if (pop) return
+    const rect = chipEl.current?.getBoundingClientRect()
+    if (!rect) return
+    setPop({ state: 'name', rect })
+    void open()
+  }
 
   const kind = asText ? undefined : parsed?.kind
   const anchorAttrs = anchor && !unresolved ? { 'data-anchor': ref, 'data-anchor-text': value ?? label } : {}
-  const cls = ['refchip', asText ? 'refchip-value' : '', cite ? 'refchip-citation' : '', iconOnly ? 'refchip-icon' : '', kind && INTERNAL.has(kind) ? 'refchip-internal' : '', broken ? 'broken' : '', quiet && !broken ? 'refchip-quiet' : '', unresolved ? 'refchip-unresolved' : '', compact ? 'refchip-compact' : '', late ? 'refchip-late' : '']
+  const cls = ['refchip', asText ? 'refchip-value' : '', cite ? 'refchip-citation' : '', iconOnly ? 'refchip-icon' : '', kind && INTERNAL.has(kind) ? 'refchip-internal' : '', failed ? 'broken' : '', checking ? 'refchip-checking' : '', quiet && !failed ? 'refchip-quiet' : '', unresolved ? 'refchip-unresolved' : '', compact || cardChip ? 'refchip-compact' : '', late ? 'refchip-late' : '']
     .filter(Boolean)
     .join(' ')
   const artifact = pop?.state === 'ok' && pop.cell ? primaryArtifact(pop.cell.outputs) : null
@@ -475,22 +571,29 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
           {shownValue(value ?? '')}
         </span>
       ) : (
-        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={broken ? 'x' : icon} face={(kind && NAME_KINDS.has(kind)) || (call && !wordsFile(call)) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
+        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={failed ? 'x' : icon} face={(kind && NAME_KINDS.has(kind)) || (call && !wordsFile(call)) || (questions && kind === 'cell') ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
           {iconOnly ? null : label}
         </Chip>
+      )}
+      {checking && <Spinner size={8} className="refchip-mark refchip-spin" label="Checking this citation" />}
+      {failed && asText && (
+        <span className="refchip-mark refchip-x" aria-label="Unable to verify">
+          ×
+        </span>
       )}
       {pop &&
         createPortal(
           <div ref={popEl} className={`refchip-pop overlay${wholeCell ? ' refchip-pop-cell' : ''}${tableFrame ? ' refchip-pop-table' : ''}`} role="tooltip" style={{ position: 'fixed', left: POP_MARGIN, top: 0, width: popWidth, maxWidth: tableFrame ? POP_WIDTH_TABLE : undefined }} onMouseEnter={cancelHide} onMouseLeave={scheduleHide} onMouseDown={(e) => e.stopPropagation()}>
             {/* an inline citation's label names the evidence: the chip, then the value; a standalone chip's name is already under the cursor, except a glyph alone's */}
-            {(asText || (iconOnly && !(pop.state === 'ok' && pop.cell))) && (
+            {(asText || (iconOnly && !(pop.state === 'ok' && pop.cell)) || (pinned && history)) && (
               <div className="refchip-pop-head">
-                <Chip kind="ref" tone={refTone(ref)} icon={icon} className="refchip-pop-chip" onClick={interactive ? onClick : undefined}>
+                <Chip kind="ref" tone={refTone(ref)} icon={icon} className="refchip-pop-chip" onClick={interactive ? go : undefined}>
                   {label}
                 </Chip>
                 {value && !tableFrame ? <span className="refchip-pop-value">{value}</span> : null}
               </div>
             )}
+            {pinned && history && <CiteHistory revisions={history} ws={ws} />}
             {pop.state === 'loading' && (
               <div className="refchip-pop-body">
                 <Spinner size={10} label="Resolving the reference" />
@@ -517,6 +620,25 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
           document.body,
         )}
     </>
+  )
+}
+
+/** A citation's revisions, as a click on it shows them: what Claude wrote, what the check made it, and why. */
+function CiteHistory({ revisions, ws }: { revisions: CiteRevision[]; ws: string }) {
+  const shown = (p: { value?: string; ref: string }) => [p.value ? shownValue(p.value) : '', chipLabel(p.ref, null, ws)].filter(Boolean).join(' · ')
+  return (
+    <div className="refchip-history" aria-label="Revision history">
+      {revisions.map((r, i) => (
+        <dl key={i} className="refchip-history-rev">
+          <dt>Claude wrote</dt>
+          <dd className="refchip-history-was">{shown(r.wrote)}</dd>
+          <dt>The check made it</dt>
+          <dd>{shown(r.now)}</dd>
+          <dt>Why</dt>
+          <dd>{r.why}</dd>
+        </dl>
+      ))}
+    </div>
   )
 }
 

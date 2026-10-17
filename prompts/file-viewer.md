@@ -22,7 +22,7 @@ A viewer helps when the format has a structure a page shows better than its text
   "properties": {
     "help": {"type": "boolean", "description": "Whether a viewer would help the analyst read files of this type."},
     "name": {"type": "string", "description": "A short name in Title Case, as the mode shows it, such as Terminal Replay. Empty when it would not help."},
-    "why": {"type": "string", "description": "What the analyst sees in it and why that helps, in one sentence."},
+    "why": {"type": "string", "description": "One sentence the analyst reads on the card, written to them: what they will see in it and why that helps."},
     "arrangement": {"type": "string", "description": "What one record is and how one file is laid out, from its overview to one record's details."}
   },
   "required": ["help", "name", "why", "arrangement"]

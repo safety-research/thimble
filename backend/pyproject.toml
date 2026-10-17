@@ -1,6 +1,6 @@
 [project]
 name = "thimble-backend"
-version = "0.8.0"
+version = "0.9.0"
 license = "Apache-2.0"
 description = "thimble: an analyst workbench for reconstructing what happened in agent transcripts"
 requires-python = ">=3.12"
@@ -11,7 +11,6 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "sse-starlette>=2.1",
   "pydantic>=2.7",
-  "claude-agent-sdk>=0.1",
   "jupyter_client>=8.6",
   "ipykernel>=6.29",
   "pandas>=2.2",
@@ -26,6 +25,10 @@ dependencies = [
   # the plugin's MCP shim (plugin/bin/thimble-mcp) calls the server's tools and holds its subscription's stream with it,
   # in the tree's own venv, which a release installs without the dev extras
   "httpx>=0.27",
+  # the shim's MCP server (plugin/bin/thimble-mcp), on the MCP SDK's 2.x server API (mcp.server.mcpserver)
+  "mcp>=2.1",
+  # a model call's answer is checked against its schema (app/agent_call.py), and a task's input and output (app/tasks.py)
+  "jsonschema>=4.20",
 ]
 
 [project.optional-dependencies]

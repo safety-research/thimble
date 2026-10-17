@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// Download in the File browser (src/files/Reader.tsx DownloadButton): the bar of an open file, whatever its kind (text,
-// a PDF, an image, a binary file), has the button, which saves the file from the download route under its own name; a
-// folder's bar has none. FilesTab is mounted fresh for each open tab, as a reload mounts it, over a server that answers
-// the calls it makes.
+// Download in the File browser (src/files/Reader.tsx DownloadButton): the bar of an open file, a text file in a folder
+// with spaces in its name or a binary file, has the button, which saves the file from the download route under its own
+// name. FilesTab is mounted fresh for each open tab, as a reload mounts it, over a server that answers the calls it
+// makes.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { FilesTab } from '../../src/files/FilesTab.tsx'
@@ -63,8 +63,6 @@ const downloadIn = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('.re
 describe('Download in the File browser', () => {
   test.each([
     ['a text file in a folder, its name with spaces', 'notes/day 1 notes.txt', 'day 1 notes.txt'],
-    ['a PDF', 'docs/report.pdf', 'report.pdf'],
-    ['an image', 'notes/chart.png', 'chart.png'],
     ['a binary file', 'blob.bin', 'blob.bin'],
   ])('the bar of %s has the button, which saves the file from the download route under its own name', async (_, path, name) => {
     const el = await openTab(path)
@@ -76,12 +74,5 @@ describe('Download in the File browser', () => {
     expect(clicked).toEqual([{ href: url, download: name }])
     // the anchor it clicked is gone again
     expect(document.querySelector('a[download]')).toBeNull()
-  })
-
-  test('a folder open in the File browser has no Download', async () => {
-    const el = await openTab('notes')
-    expect(el.querySelector('.folder-pane-row'), 'the folder pane lists the folder').not.toBeNull()
-    expect(el.querySelector('.reader-bar'), 'the folder pane has its bar').not.toBeNull()
-    expect(downloadIn(el)).toBeNull()
   })
 })

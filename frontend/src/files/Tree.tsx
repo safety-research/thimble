@@ -4,10 +4,11 @@
 // that changed on disk (useFolderWatch), such as a folder where an agent just wrote a file.
 // At the right of a row, a dot per label that is on and marks something in the file; a file label that is on draws a
 // stripe left of the glyph instead (labels.ts presenceOf). A collapsed folder shows a dot for each label that marks
-// something under it. The guide lines show only while the pointer is over the tree. Every file row carries
-// `data-anchor`.
+// something under it. The guide lines show only while the pointer is over the tree. A name too long for its row is cut
+// in its middle, its end kept, the whole name in its tooltip (components/MidCut). Every file row carries `data-anchor`.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { Icon } from '../components/Icon'
+import { MidCut } from '../components/MidCut'
 import { Spinner } from '../components/Spinner'
 import { scaleApi } from '../lib/api'
 import type { FolderEntry, FolderListing, SourceInfo } from '../lib/types'
@@ -397,7 +398,7 @@ export function Tree({ folders, error, activePath, onOpen, marksOf, folderDotsOf
                 <span key={st.id} className="files-stripe" style={{ left: 12 + row.depth * INDENT - i * 5, background: st.colour }} aria-label={`${st.name}, a file label`} />
               ))}
               {isDir ? <Icon className="files-glyph files-chevron" name="chevron-right" size={13} /> : <Icon className="files-glyph" name={glyphOf(n.name)} size={13} />}
-              <span className="files-name">{n.name}</span>
+              <MidCut className="files-name" text={n.name} />
               {row.loading && <Spinner size={10} className="files-row-spinner" />}
               {dots.length > 0 && (
                 <span className="files-dots">

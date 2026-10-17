@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { openInItems } from '../../src/files/OpenIn'
 import { chooseView } from '../../src/files/viewChoice'
 import { claimMatches } from '../../src/files/labels'
 
@@ -11,14 +10,6 @@ describe('chooseView', () => {
     expect(chooseView({ views, remembered: 'threads' })).toBe('threads')
     expect(chooseView({ views, remembered: 'gone' })).toBeNull()
     expect(chooseView({ views })).toBeNull()
-  })
-})
-
-describe('openInItems', () => {
-  it('lists the other views, and the File browser from a view', () => {
-    const none = () => undefined
-    expect(openInItems(views, 'threads', none).map((i) => ('label' in i ? i.label : i.id))).toEqual(['Timeline', 'File browser'])
-    expect(openInItems(views, null, none).map((i) => ('label' in i ? i.label : i.id))).toEqual(['Threads', 'Timeline'])
   })
 })
 

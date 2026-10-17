@@ -32,8 +32,13 @@ export type Events = {
   checks: { id?: string }
   /** the comments on the cards changed (the stream's `canvas-comments` record) */
   canvasComments: { card?: string }
+  /** the checks' comments on Claude's answers changed (the stream's `answer-comments` record, chat/answerComments.ts) */
+  answerComments: Record<string, never>
   /** the stream connected or dropped */
   wsStream: { connected: boolean }
+  /** the page stopped and sends nothing more under its key (lib/stale): the server stopped for good, the workspace's
+   * session ended, reconnects failed, or the challenge failed */
+  pageStopped: { reason: 'stopping' | 'session-ended' | 'failures' | 'challenge' }
   /** a lazy chunk did not load and the server serves another build: ask for a reload (lib/chunkRecovery) */
   uiStale: Record<string, never>
   /** the workspace's log was replaced (`/thimble fresh` or `resume`): what the page shows is from the log that is gone */
@@ -61,8 +66,9 @@ export type Events = {
   /** open a label's edit card in Files, with the Labels pane open in the sidebar that holds it (Open in Files in a
    * label's popover on a card, files/LabelCard LabelSheet) */
   editLabel: { id: string }
-  /** show a chat in the panel; `send` is a first message to post once it is shown */
-  openChat: { chatId: string; send?: string }
+  /** show a chat in the panel; `send` is a first message to post once it is shown, `draft` words put in its composer for
+   * the analyst to change and send (a notice's Ask again) */
+  openChat: { chatId: string; send?: string; draft?: string }
   /** A toast (shell/Toasts) only confirms or fails the analyst's own click, or reports news with a link to it: `ref`
    * puts a chip of what it names on it, `thread` the chip of a thread (chat/Notes ThreadChip). A state that lasts, such
    * as a refused start or a write that failed, shows once next to what it concerns and is never also a toast. */

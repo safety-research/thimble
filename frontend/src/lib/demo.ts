@@ -1,6 +1,9 @@
 // A demo page: a workspace read without a Claude Code session, a pre-cache `thimble demo` installed or a worked example
 // `thimble demo --examples` opened, while no session has attached to it (shell/SessionGone sets it, isDemoPage). What
-// works without a session stays as it is: Files, views, the canvas, the report, labels and filters. The top bar wears
+// works without a session stays as it is: Files, views, the canvas, the report, labels and filters. Nothing on it
+// changes (bug hunt F5): a control that would change the workspace is off with DEMO_NOTE on hover (components/DemoOff)
+// or not shown, a card neither moves nor resizes, the report takes no typing, and the server refuses such a change
+// (backend demo_guard); turning a label or a check on or off still works. The top bar wears
 // a Demo tag (shell/DemoTag), and a line under it says first that the page holds example data, not the analyst's
 // files, and how to open a folder of their own (shell/DemoLine); the tour's welcome, which dims it, says it first too
 // (tour/steps). The chat's composer is disabled, so nothing can be typed there, and hovering it shows DEMO_NOTE. Any

@@ -7,17 +7,20 @@
 // on hover that changes its colours (LabelPalette). Beside a view, a label's row (and each value's) has a funnel on
 // hover that sets the Files label filter, which the view keeps its records by; the funnel of the filter set stays
 // pressed, and a click on it clears the filter. A row's ⋯ menu edits the label or deletes it, once confirmed
-// (DeleteLabelConfirm).
-import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
+// (DeleteLabelConfirm), and while the label runs, stops its run; a demo page's rows have none, and its New label is off.
+// The row of a run the analyst just started comes into view in the list (`reveal`), which scrolls with no bar.
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
+import { DemoOff } from '../components/DemoOff'
 import { Icon } from '../components/Icon'
 import { Menu } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { TipButton } from '../components/Tooltip'
+import { useDemo } from '../lib/demo'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
-import type { Concept, ConceptRun } from '../lib/types'
-import { classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, outcomeText, progressText, unitWord, type LabelFilter, type LabelStatus } from './labels'
+import type { Concept, ConceptRun, LabelResume } from '../lib/types'
+import { againWords, classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, noValueText, outcomeText, progressText, stoppedText, unitWord, type LabelFilter, type LabelStatus } from './labels'
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { LabelMark } from './LabelMark'
 import { LabelPalette } from './LabelPalette'
@@ -34,7 +37,13 @@ interface Props {
   /** the runs the pane has seen per label: running ones, and the last record of one that ended */
   runs: ReadonlyMap<string, ConceptRun>
   /** apply a label again after a failed run; resolves once the server has answered */
-  onRetry: (id: string) => Promise<void>
+  /** apply the label again: after a failure, or after a stop, with `resume` going on with the units it never read */
+  onRetry: (id: string, resume?: boolean) => Promise<void>
+  /** stop a label's run; resolves once the server has answered */
+  onStop: (id: string) => Promise<void>
+  /** the label whose row comes into view once the list holds it (a run the analyst just started), then `onRevealed` */
+  reveal?: string | null
+  onRevealed?: () => void
   /** beside a view, where the pane is the whole sidebar: hide that sidebar */
   onHide?: () => void
   /** beside a view: the labels that mark its files, listed first */
@@ -47,7 +56,7 @@ interface Props {
   note?: ReactNode
 }
 
-export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onHide, first, onFilter, filter = null, note }: Props) {
+export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, onRetry, onStop, reveal = null, onRevealed, onHide, first, onFilter, filter = null, note }: Props) {
   const files = labels.all.filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
   const [deleting, setDeleting] = useState<DeleteLabelAsk | null>(null)
@@ -56,6 +65,15 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
     if (editing === id) onEdit(null)
     void labels.remove(id)
   }
+  // the row of a run just started comes into view in the list, once the list holds it
+  const list = useRef<HTMLDivElement>(null)
+  const shown = open && !!reveal && labels.byId.has(reveal)
+  useEffect(() => {
+    if (!shown || !reveal) return
+    const row = [...(list.current?.querySelectorAll<HTMLElement>('.files-label') ?? [])].find((e) => e.dataset.anchor === `concept:${reveal}`)
+    if (list.current && row) revealIn(list.current, row)
+    onRevealed?.()
+  }, [shown, reveal, onRevealed])
   return (
     <section className="files-labels" aria-label="Labels">
       <div className="files-side-head">
@@ -63,12 +81,14 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
           <Icon name="chevron-right" size={14} className="files-caret" />
           Labels
         </button>
-        <Button variant="icon" size="sm" icon="plus" title="New label" aria-label="New label" active={editing === 'new'} onClick={() => onEdit(editing === 'new' ? null : 'new')} />
+        <DemoOff>
+          <Button variant="icon" size="sm" icon="plus" title="New label" aria-label="New label" active={editing === 'new'} onClick={() => onEdit(editing === 'new' ? null : 'new')} />
+        </DemoOff>
         {onHide && <Button variant="icon" size="sm" icon="sidebar" title="Hide labels" aria-label="Hide labels" onClick={onHide} />}
       </div>
       {open && note}
       {open && labels.all.length > 0 && (
-        <div className="files-labels-list">
+        <div ref={list} className="files-labels-list">
           {[...ordered, ...labels.all.filter((k) => !isFilesLabel(k))].map((k) => (
             <LabelRow
               key={k.id}
@@ -81,6 +101,7 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
               labels={labels}
               onEdit={onEdit}
               onRetry={onRetry}
+              onStop={onStop}
               onFilter={isFilesLabel(k) ? onFilter : undefined}
               filter={filter?.concept === k.id ? filter.value : null}
               onDelete={(at) => setDeleting({ id: k.id, name: k.name, at })}
@@ -105,6 +126,7 @@ interface RowProps {
   labels: FilesLabels
   onEdit: Props['onEdit']
   onRetry: Props['onRetry']
+  onStop: Props['onStop']
   onFilter?: Props['onFilter']
   /** the value the Files label filter keeps of this label, null when the filter is not this label's */
   filter: string | null
@@ -112,7 +134,7 @@ interface RowProps {
   onDelete: (at: HTMLElement) => void
 }
 
-function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEdit, onRetry, onFilter, filter, onDelete }: RowProps) {
+function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEdit, onRetry, onStop, onFilter, filter, onDelete }: RowProps) {
   const classes = classesOf(k)
   const running = status?.state === 'running'
   const files = isFilesLabel(k)
@@ -121,6 +143,8 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
   const paletteAt = useRef<HTMLButtonElement>(null)
   const moreAt = useRef<HTMLButtonElement>(null)
   const [picking, setPicking] = useState(false)
+  // a demo page's labels are read (bug hunt F5): no edit or delete
+  const demo = useDemo()
   const turn = () => {
     if (!on) labels.setFocus(k.id)
     labels.toggle(k.id)
@@ -160,19 +184,22 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
         {onFilter && (classes.length <= 2 || !on) && (
           <FilterButton pressed={filter != null} label={`Show only the records ${k.name} marks`} onClick={() => onFilter(k.id, filter != null ? null : ((classes.find((c) => c.highlight) ?? classes[0])?.name ?? 'yes'))} />
         )}
-        <Menu
-          label={k.name}
-          align="end"
-          className="files-label-menu"
-          items={[
-            { id: 'edit', label: 'Edit label', icon: 'edit', onSelect: () => onEdit(k.id) },
-            { id: 'delete', label: 'Delete label', icon: 'trash', danger: true, onSelect: () => moreAt.current && onDelete(moreAt.current) },
-          ]}
-          trigger={<Button ref={moreAt} variant="icon" size="sm" icon="more-horizontal" title="Edit or delete" aria-label={`Edit or delete ${k.name}`} className="files-label-edit" active={editing} />}
-        />
+        {!demo && (
+          <Menu
+            label={k.name}
+            align="end"
+            className="files-label-menu"
+            items={[
+              ...(running ? [{ id: 'stop', label: 'Stop run', icon: 'stop' as const, onSelect: () => void onStop(k.id) }] : []),
+              { id: 'edit', label: 'Edit label', icon: 'edit', onSelect: () => onEdit(k.id) },
+              { id: 'delete', label: 'Delete label', icon: 'trash', danger: true, onSelect: () => moreAt.current && onDelete(moreAt.current) },
+            ]}
+            trigger={<Button ref={moreAt} variant="icon" size="sm" icon="more-horizontal" title={running ? 'Stop, edit or delete' : 'Edit or delete'} aria-label={`${running ? 'Stop, edit or delete' : 'Edit or delete'} ${k.name}`} className="files-label-edit" active={editing} />}
+          />
+        )}
       </div>
       {files && <LabelPalette label={k} anchor={paletteAt} open={picking} onClose={() => setPicking(false)} onPick={(value, n) => labels.setColour(k.id, value, n)} />}
-      {status && <LabelStatusLine status={status} name={k.name} marked={byHand} onRetry={() => onRetry(k.id)} />}
+      {status && <LabelStatusLine status={status} name={k.name} marked={byHand} resume={k.resume ?? null} onRetry={(resume) => onRetry(k.id, resume)} />}
       {!status && files && byHand > 0 && (
         <div className="files-label-status">
           <span className="files-label-marked">
@@ -206,15 +233,25 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
   )
 }
 
+/** Scroll the list so that `row` shows whole in it, by the list's own scroll alone (scrollIntoView would scroll the
+ * sidebar and the page around it too). */
+function revealIn(list: HTMLElement, row: HTMLElement): void {
+  const l = list.getBoundingClientRect()
+  const r = row.getBoundingClientRect()
+  if (r.bottom > l.bottom) list.scrollTop += r.bottom - l.bottom
+  else if (r.top < l.top) list.scrollTop -= l.top - r.top
+}
+
 /** The funnel that keeps a view to a label's records: pressed while the filter is its own, when a click clears it. */
 function FilterButton({ pressed, label, onClick }: { pressed: boolean; label: string; onClick: () => void }) {
   return <Button variant="icon" size="sm" icon="filter" title={pressed ? 'Show all records' : 'Show only these records'} aria-label={label} active={pressed} className="files-label-filter" onClick={onClick} />
 }
 
-/** The line under a label's name: the run's progress, its outcome with how many records it could not label, how many
- * the analyst marked by hand (in a view, the Files reader or the label's card) and how many whole files it read only in
- * part (ReadCutLine), each on a line of its own, or its failure with Retry. */
-function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelStatus; name: string; marked: number; onRetry: () => Promise<void> }) {
+/** The line under a label's name: the run's progress, its outcome with how many records it could not label, where a
+ * stopped run stopped with Run again, how many the analyst marked by hand (in a view, the Files reader or the label's
+ * card) and how many whole files it read only in part (ReadCutLine), each on a line of its own, or its failure with
+ * Retry. */
+function LabelStatusLine({ status: s, name, marked, resume, onRetry }: { status: LabelStatus; name: string; marked: number; resume: LabelResume | null; onRetry: (resume?: boolean) => Promise<void> }) {
   const [retrying, setRetrying] = useState(false)
   if (s.state === 'running') {
     const share = s.total ? Math.min(1, s.done / s.total) : null
@@ -261,6 +298,29 @@ function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelSt
         </>
       )}
       {failed && <span className="files-label-failed">{failed}</span>}
+      {/* the units it gave no value, which its counts leave out (bug hunt I10) */}
+      {noValueText(s) && <span className="files-label-none">{noValueText(s)}</span>}
+      {/* a run that was stopped, by the analyst or by quitting Claude Code, says how far it got, and runs again on its
+          line (bug hunt H3: a run the quit stopped at 8,447 of 14,591 records read as finished) */}
+      {s.stopped && (
+        <span className="files-label-stopped">
+          <span className="files-label-stopped-text">{stoppedText(s.stoppedAt ?? { read: s.total ?? 0, of: null, quit: false }, s.unit)}</span>
+          {/* its words say whether it goes on with the units the stopped run never read or labels every unit again (bug
+              hunt I3) */}
+          <Button
+            size="sm"
+            className="files-label-retry"
+            aria-label={`${againWords(resume, s.stoppedAt, s.sample)} of ${name}`}
+            busy={retrying}
+            onClick={() => {
+              setRetrying(true)
+              void onRetry(Boolean(resume)).finally(() => setRetrying(false))
+            }}
+          >
+            {againWords(resume, s.stoppedAt, s.sample)}
+          </Button>
+        </span>
+      )}
       {marked > 0 && (
         <span className="files-label-marked">
           {marked.toLocaleString()} {unitWord(s.unit, marked)} marked by hand

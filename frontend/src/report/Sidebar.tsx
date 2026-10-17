@@ -1,7 +1,7 @@
 // The report's sidebar: the card search and the hide toggle, then the canvas's cards in Starred,
 // Orientation and Your work (cards.ts), each draggable into the page or placed at its end with a double-click (or
-// Enter), ✓ once the page shows it; and the Checks pane (Checks.tsx, the same pane every document type's sidebar has)
-// pinned to the bottom.
+// Enter); and the Checks pane (Checks.tsx, the same pane every document type's sidebar has) pinned to the bottom. No
+// mark shows a card the page already holds: a ✓ would read as verified.
 import { useMemo, useState, type DragEvent } from 'react'
 import { figureKind } from '../components/Outputs'
 import type { Cell, Group } from '../lib/types'
@@ -17,8 +17,6 @@ export interface SidebarProps {
   ws: string
   cells: readonly Cell[]
   groups: readonly Group[]
-  /** the cells the page shows as figures */
-  used: ReadonlySet<string>
   onInsert: (cellId: string) => void
   onHide: () => void
   /** it shows over the page's left edge, the pane being too narrow for it beside the text */
@@ -29,7 +27,7 @@ export interface SidebarProps {
   comments: readonly DocComment[]
 }
 
-export function Sidebar({ ws, cells, groups, used, onInsert, onHide, over, doc, checks, comments }: SidebarProps) {
+export function Sidebar({ ws, cells, groups, onInsert, onHide, over, doc, checks, comments }: SidebarProps) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<Record<string, boolean>>(() => ({ ...DEFAULT_OPEN, ...readStorage<Record<string, boolean>>(sectionsKey(ws), {}) }))
   const sections = useMemo(() => cardSections(cells, groups, query, figureKind), [cells, groups, query])
@@ -82,7 +80,6 @@ export function Sidebar({ ws, cells, groups, used, onInsert, onHide, over, doc, 
                     >
                       <Glyph name={k.shape} size={13} className="wu-card-ico" />
                       <span className="wu-card-q">{k.title}</span>
-                      {used.has(k.id) && <span className="wu-card-used">✓</span>}
                     </div>
                   ))}
               </section>

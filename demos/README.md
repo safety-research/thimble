@@ -105,7 +105,11 @@ card that asks for one:
 - the top bar shows a Demo tag, whose tooltip says "Example data and a finished analysis; Claude isn't connected here",
   and the line under it says "This is example data, not your files. To open your own folder, run `thimble` in it." The
   start page, which `thimble demo` opens, says the same over its demo datasets;
-- Files, the views, the canvas, the report, labels and filters work as they do without a session;
+- Files, the views, the canvas, the report, labels and filters work as they do without a session, and nothing in the
+  workspace changes: a control that would change it (a card's Delete, Card, Group, New view, a label's or a view's
+  delete, Write and Revise, New, Undo) is off or not shown, cards neither move nor resize, the report takes no typing,
+  and the server refuses a change a page sends (backend/app/demo_guard.py), while a label or a check still turns on and
+  off;
 - the orientation's thread opens with a card that says it ran in advance, when, on what model and what it left;
 - the chat's composer is disabled, so nothing can be typed there, and hovering it shows "This is a demo and thimble
   isn't connected to a live Claude Code session." Ask about this, a card's or the report's request, and each button

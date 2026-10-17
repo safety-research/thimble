@@ -4,19 +4,37 @@
 Files are read fresh from disk on every call, so a hand edit takes effect at once. An unknown directive, an unfilled
 slot, or a stray '{{' or '}}' raises PromptError naming the file, so nothing malformed reaches a model.
 
-Modes. thimble runs in browser mode or in terminal mode (app/launch_mode.py), and a prompt can say a thing two ways:
-- `{{if:browser}}…{{end}}` and `{{if:terminal}}…{{end}}` keep their text only in that mode. A block stays inside one
-  file and holds no other block. A marker alone on its line takes the line with it, so a block of whole lines leaves no
-  blank line.
-- A section `## <name>@terminal` replaces the body of `## <name>` in terminal mode, in place, and is left out in browser
-  mode (`@browser` the other way round). With no `## <name>` in the file, it is `## <name>` in its own mode only.
-The mode is the call's `mode`, else the one a `rendering` block sets, else the session's (launch_mode.current(), from
-the session's launch record), else browser. A file with no block and no such section never asks for the mode.
+Flags. A prompt can hold text that only some renderings keep:
+- `{{if:<flag>}}…{{end}}` keeps its text only while the flag is on. A block stays inside one file and holds no other
+  block. A marker alone on its line takes the line with it, so a block of whole lines leaves no blank line.
+- A section `## <name>@<flag>` replaces the body of `## <name>` while the flag is on, in place, and is left out
+  otherwise. With no `## <name>` in the file, it is `## <name>` while the flag is on, and absent otherwise.
+The flags (FLAGS) are of two kinds. The feature flags, `labels` and `checks` (features.flags), keep the guidance of a
+feature the analyst has on, so the guide leaves out the guidance of one they turned off. The build targets, `term-page`
+and `html-page`, say which page a view build makes (view.term.js or view.html), so the view prompts and the view tools
+tell the builder; at most one of them holds.
+The flags are the call's `flags`, else the ones a `rendering` block sets, else DEFAULT_FLAGS (every feature on). A set of
+flags is exact: a feature flag it leaves out is off. A target that none of them names is the session's (current_target:
+`term-page` while the session's transport is local, `html-page` after the press and where no session is found, as in
+the server), looked up only for a file that has a target block or section.
+0.8.0's modes are gone. A `{{if:browser}}` or `{{if:terminal}}` block, or a `@browser` or `@terminal` section, is a load
+error, except in LEGACY_TARGET_FILES, the view prompts, where those names stand for `html-page` and `term-page` until
+their blocks are renamed. A caller that still passes a mode name ("browser", "terminal") as its flags gets every
+feature on and that mode's target (LEGACY_MODES).
+
+Later parts. `{{later:<name>}}…{{/later}}` marks a part of main's guidance that the guide leaves out until Claude first
+uses its feature (guide.py, disclose.py). Every rendering keeps the part's text and drops its markers (KEEP), so each
+other prompt that includes the file reads it as before; inside `later_parts(DROP)` the parts are left out, but those
+named in `keep`, and inside `later_parts(MARK)` each part is kept between the sentinels of LATER_PART_RE, which
+later_texts reads (without_marks and without_parts give KEEP's and DROP's text from it). A part stays inside one file,
+holds no other part, and is read after the flag blocks, so a part may sit inside a flag block or hold one whole. A
+marker alone on its line takes the line with it, as a flag block's does.
 """
 from __future__ import annotations
 
 import contextlib
 import contextvars
+import json
 import os
 import re
 from collections.abc import Iterable, Iterator
@@ -53,10 +71,9 @@ TYPES_DIR = "types"
 TYPE_FILES = {"document": "report-markdown", "slides": "report-slides", "story": "report-story", "custom": "report-custom",
               "video": "report-video"}
 # The dev calls: dev.md is the preamble every dev call reads, ending in `{{task}}`, filled with the call's own body
-# file: a code ticket's agent's registered prompt (dev-ticket), the server-down fix (dev-fix) or the view builder's
-# registered prompt (dev-view).
+# file: a code ticket's agent's registered prompt (dev-ticket) or the view builder's registered prompt (dev-view).
 DEV_PROMPT = "dev"
-DEV_FILES = ("dev-ticket", "dev-fix", "dev-view")
+DEV_FILES = ("dev-ticket", "dev-view")
 
 # The whole directive grammar: {{include:<relpath>}} or {{<slot>}} with slot = [a-z_][a-z0-9_]*. Anything else inside
 # {{...}}, such as a mistyped slot or stray spaces, fails loudly instead of reaching a model half-filled.
@@ -65,89 +82,258 @@ _SLOT_RE = re.compile(r"[a-z_][a-z0-9_]*\Z")
 _INCLUDE_PREFIX = "include:"
 _PART_RE = re.compile(r"^## (.+?)[ \t]*$", re.M)
 
-# The modes a prompt renders in (module note), and the one that holds when nothing names a mode.
-MODES = ("browser", "terminal")
-DEFAULT_MODE = "browser"
-# A mode block's markers, {{if:<mode>}} and {{end}}. They are read before includes and slots, so `end` is never a slot.
+# The flags a prompt renders with (module note): the feature flags, then the view build targets.
+FEATURE_FLAGS = ("labels", "checks")
+TERM_PAGE, HTML_PAGE = TARGETS = ("term-page", "html-page")
+FLAGS = (*FEATURE_FLAGS, *TARGETS)
+DEFAULT_FLAGS = frozenset(FEATURE_FLAGS)  # the flags of a call that names none, outside a `rendering` block
+# 0.8.0's mode names, as the target each stands for: in LEGACY_TARGET_FILES' blocks, and as a caller's flags
+LEGACY_MODES = {"browser": HTML_PAGE, "terminal": TERM_PAGE}
+MODES = tuple(LEGACY_MODES)  # the names 0.8.0's callers passed as a mode, still taken as flags (module note)
+# the view prompts, whose 0.8.0 mode blocks still name their targets until the features lane renames them (module note)
+LEGACY_TARGET_FILES = frozenset({"dev-view.md", "view-review.md", "dev-view-task.md", "view-propose.md"})
+# A block's markers, {{if:<flag>}} and {{end}}. They are read before includes and slots, so `end` is never a slot.
 _BLOCK_RE = re.compile(r"\{\{(?:if:([^{}]*)|(end))\}\}")
-# A section heading that holds one mode's text: `<name>@<mode>`, and a test for one anywhere in a text.
-_MODE_PART_RE = re.compile(rf"(.+?)@({'|'.join(MODES)})")
-_HAS_MODE_PART_RE = re.compile(rf"^## .+@(?:{'|'.join(MODES)})[ \t]*$", re.M)
+# A section heading that holds a flag's text: `<name>@<flag>` (a legacy mode name among them, refused outside
+# LEGACY_TARGET_FILES), and a test for one anywhere in a text.
+_FLAG_NAMES = (*FLAGS, *LEGACY_MODES)
+_FLAG_PART_RE = re.compile(rf"(.+?)@({'|'.join(map(re.escape, _FLAG_NAMES))})")
+_HAS_FLAG_PART_RE = re.compile(rf"^## .+@(?:{'|'.join(map(re.escape, _FLAG_NAMES))})[ \t]*$", re.M)
+# Sections that a merge of 0.8.0's mode branches renamed, by the name code still knows them by, as (file, old name) ->
+# new name: section() finds them under either name. events.EVENTS_SECTION names main.md's events section by its 0.8.0
+# browser-mode heading.
+_RENAMED = {("main.md", "Events from the browser"): "Events from thimble"}
+# A later part's markers, {{later:<name>}} and {{/later}} (module note, later parts). They are read after the flag blocks
+# and before includes and slots.
+_LATER_RE = re.compile(r"\{\{(?:later:([a-z][a-z0-9_-]*)|(/later))\}\}")
+KEEP, DROP, MARK = "keep", "drop", "mark"
+# MARK's sentinels: an opening one names its part and whether its opening marker stood alone on its line (L) or in a
+# line (I). An L part's sentinels each stand on a line of their own, so a heading the part opens with still starts a
+# line; an I part's stand in the line.
+_LATER_RES = r"[a-z][a-z0-9_-]*"
+LATER_PART_RE = re.compile(f"\x1eL({_LATER_RES})\x1f\n(.*?)\x1d\n|\x1eI({_LATER_RES})\x1f(.*?)\x1c", re.S)
+_LATER_MARK_RE = re.compile(f"\x1eL{_LATER_RES}\x1f\n|\x1eI{_LATER_RES}\x1f|\x1d\n|\x1c")
 
 
 class PromptError(ValueError):
-    """A prompt file is missing, its includes form a cycle, or it holds an unknown {{...}} directive or an unfilled
-    slot. The message names the file and the slot or include."""
+    """A prompt file is missing, its includes form a cycle, or it holds an unknown {{...}} directive, an unknown flag,
+    an unfilled slot or one of 0.8.0's mode blocks. The message names the file and the slot, include or flag."""
 
 
-# The mode of the calls made inside `rendering` that name none.
-_rendering: contextvars.ContextVar[str | None] = contextvars.ContextVar("prompt_mode", default=None)
+# The flags of the calls made inside `rendering` that name none.
+_rendering: contextvars.ContextVar[frozenset[str] | None] = contextvars.ContextVar("prompt_flags", default=None)
+# How the calls made inside `later_parts` render the later parts: (KEEP, DROP or MARK, the parts DROP keeps)
+_later: contextvars.ContextVar[tuple[str, frozenset[str]]] = contextvars.ContextVar("later_parts",
+                                                                                    default=(KEEP, frozenset()))
+
+Flags = "str | Iterable[str] | None"
 
 
-def _check_mode(mode: str, where: str) -> str:
-    if mode not in MODES:
-        raise PromptError(f"{where}: unknown mode {mode!r} (one of {', '.join(MODES)})")
-    return mode
+def _check_flags(flags: "str | Iterable[str]", where: str) -> frozenset[str]:
+    """`flags` as a set of FLAGS; a legacy mode name (LEGACY_MODES) as every feature on and its target. PromptError for
+    a flag it does not know, a plain string that is no mode name, or both targets."""
+    if isinstance(flags, str):
+        if flags not in LEGACY_MODES:
+            raise PromptError(f"{where}: flags are a set of {', '.join(FLAGS)}, not the string {flags!r}")
+        return DEFAULT_FLAGS | {LEGACY_MODES[flags]}
+    got = frozenset(flags)
+    if bad := sorted(got - set(FLAGS)):
+        raise PromptError(f"{where}: unknown flag {', '.join(map(repr, bad))} (one of {', '.join(FLAGS)})")
+    if len(got & set(TARGETS)) > 1:
+        raise PromptError(f"{where}: a rendering builds one page, so it names at most one of {', '.join(TARGETS)}")
+    return got
 
 
 @contextlib.contextmanager
-def rendering(mode: str) -> Iterator[None]:
-    """Within the block, prompts render in `mode` unless a call names its own: for a caller that renders for a session
-    other than its own, such as a launcher that writes a session's roles before the session starts."""
-    token = _rendering.set(_check_mode(mode, "prompts.rendering"))
+def rendering(flags: "str | Iterable[str]") -> Iterator[None]:
+    """Within the block, prompts render with `flags` unless a call names its own (module note): the guide with the
+    feature flags of the analyst's switches (features.flags), a view build with its target among them."""
+    token = _rendering.set(_check_flags(flags, "prompts.rendering"))
     try:
         yield
     finally:
         _rendering.reset(token)
 
 
-def current_mode(mode: str | None = None) -> str:
-    """The mode a prompt renders in: `mode` when given, else the `rendering` block's, else the session's
-    (launch_mode.current()), else browser."""
-    if mode is not None:
-        return _check_mode(mode, "prompts")
-    if (block := _rendering.get()) is not None:
-        return block
+@contextlib.contextmanager
+def later_parts(mode: str, keep: Iterable[str] = ()) -> Iterator[None]:
+    """Within the block, prompts render their later parts by `mode` (module note, later parts): KEEP, DROP (but the
+    parts named in `keep`) or MARK."""
+    if mode not in (KEEP, DROP, MARK):
+        raise PromptError(f"later_parts: {mode!r} is none of {KEEP}, {DROP}, {MARK}")
+    token = _later.set((mode, frozenset(keep)))
     try:
-        from . import launch_mode  # noqa: PLC0415 — imported late: it is read only for a file that has modes
-    except ImportError:  # a tree without the mode switch has browser mode only
-        return DEFAULT_MODE
-    found = launch_mode.current()
-    return found if found in MODES else DEFAULT_MODE
+        yield
+    finally:
+        _later.reset(token)
 
 
-class _Mode:
-    """The mode of one load, found on first use, so a file with no mode block and no mode section never asks."""
+def later_texts(marked: str) -> list[tuple[str, str, str]]:
+    """The later parts of a text rendered inside `later_parts(MARK)`, in order: (the part's name, the last `## ` or
+    `### ` heading above it, its text as KEEP renders it, without the blank lines around it; a part in a line also
+    without the spaces around it)."""
+    out: list[tuple[str, str, str]] = []
+    heading = ""
+    last = 0
+    for m in LATER_PART_RE.finditer(marked):
+        for line in marked[last:m.start()].splitlines():
+            if re.match(r"#{2,3} \S", line):
+                heading = line.strip()
+        line_part = m.group(1) is not None
+        inner = m.group(2) if line_part else m.group(4)
+        text = inner.strip("\n").rstrip()
+        out.append((m.group(1) or m.group(3), heading, text if line_part else text.strip()))
+        for line in inner.splitlines():
+            if re.match(r"#{2,3} \S", line):
+                heading = line.strip()
+        last = m.end()
+    return out
 
-    def __init__(self, given: str | None) -> None:
-        self.given = None if given is None else _check_mode(given, "prompts")
-        self.value: str | None = None
 
-    def __call__(self) -> str:
-        if self.value is None:
-            self.value = current_mode(self.given)
-        return self.value
+def without_marks(text: str) -> str:
+    """A text rendered inside `later_parts(MARK)` as KEEP renders it: each part's text kept, its sentinels taken out."""
+    return _LATER_MARK_RE.sub("", text)
 
 
-def _modes_out(text: str, rel: str, mode: _Mode) -> str:
-    """`text` with each mode block's text kept in its mode and left out in the other, and its markers taken out. A
-    marker alone on its line takes the line with it. PromptError for an unknown mode, a block inside a block, an
+def without_parts(text: str) -> str:
+    """A text rendered inside `later_parts(MARK)` as DROP renders it: each part left out with its sentinels."""
+    return LATER_PART_RE.sub("", text)
+
+
+def _later_out(text: str, rel: str) -> str:
+    """`text` with each later part rendered by the current `later_parts` mode (module note, later parts). PromptError
+    for a part inside a part, a {{/later}} with no part open, or a part left open."""
+    marks = [*_LATER_RE.finditer(text)]
+    if not marks:
+        return text
+    mode, keep = _later.get()
+    out: list[str] = []
+    last = 0
+    opened: str | None = None
+    opened_alone = False
+    for m in marks:
+        start, end = m.start(), m.end()
+        line_start = text.rfind("\n", 0, start) + 1
+        line_end = text.find("\n", end)
+        line_end = len(text) if line_end == -1 else line_end
+        alone = not text[line_start:start].strip() and not text[end:line_end].strip()
+        if alone:
+            start, end = line_start, min(line_end + 1, len(text))
+        if m.group(2):
+            if opened is None:
+                raise PromptError(f"{rel}: {{{{/later}}}} with no {{{{later:<name>}}}} part open")
+            if mode != DROP or opened in keep:
+                out.append(text[last:start])
+            if mode == MARK:
+                out.append("\x1d\n" if opened_alone else "\x1c")
+            opened = None
+        else:
+            if opened is not None:
+                raise PromptError(f"{rel}: {{{{later:{m.group(1)}}}}} inside the {{{{later:{opened}}}}} part; close "
+                                  "each part with {{/later}} before the next one opens")
+            out.append(text[last:start])
+            opened, opened_alone = m.group(1), alone
+            if mode == MARK:
+                out.append(f"\x1eL{opened}\x1f\n" if alone else f"\x1eI{opened}\x1f")
+        last = end
+    if opened is not None:
+        raise PromptError(f"{rel}: the {{{{later:{opened}}}}} part is not closed with {{{{/later}}}}")
+    out.append(text[last:])
+    return "".join(out)
+
+
+def current_flags(flags: Flags = None) -> frozenset[str]:
+    """The flags a prompt renders with, its target left out unless named: `flags` when given, else the `rendering`
+    block's, else DEFAULT_FLAGS."""
+    if flags is not None:
+        return _check_flags(flags, "prompts")
+    block = _rendering.get()
+    return DEFAULT_FLAGS if block is None else block
+
+
+def session_target(cwd: str | None = None) -> str:
+    """The build target of the session this process belongs to (module note): `term-page` when the workspace of `cwd`
+    (default: this process's folder), else of THIMBLE_WS, has a launch.json whose transport is local (a legacy
+    `mode: terminal` counts as local), else `html-page`. The server's folder is no corpus, so the server is always on
+    `html-page`."""
+    try:
+        from . import config  # noqa: PLC0415 — read only for a file that has a target block
+
+        here = cwd if cwd is not None else os.getcwd()
+        c = config.workspace_for_cwd(here) or config.workspace_for_folder(here)
+        ws = config.workspace_path(c) if c else None
+    except (OSError, ValueError, RuntimeError, KeyError):
+        ws = None
+    found: list[Path] = [ws] if ws is not None else []
+    named = os.environ.get("THIMBLE_WS", "").strip()
+    if named and os.path.isabs(named):
+        found.append(Path(named))
+    for folder in found:
+        try:
+            rec = json.loads((folder / "trusted" / "launch.json").read_text("utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        transport = rec.get("transport") or {"terminal": "local", "browser": "server"}.get(str(rec.get("mode")))
+        return TERM_PAGE if transport == "local" else HTML_PAGE
+    return HTML_PAGE
+
+
+def current_target(flags: Flags = None) -> str:
+    """The build target a prompt renders for: the one current_flags names, else the session's (session_target)."""
+    named = current_flags(flags) & set(TARGETS)
+    return next(iter(named)) if named else session_target()
+
+
+class _Flags:
+    """The flags of one load, its target found on first use, so a file with no target block never looks it up."""
+
+    def __init__(self, given: Flags) -> None:
+        self.flags = current_flags(given)
+        self.target: str | None = next(iter(self.flags & set(TARGETS)), None)
+
+    def has(self, flag: str) -> bool:
+        if flag in TARGETS:
+            if self.target is None:
+                self.target = session_target()
+            return self.target == flag
+        return flag in self.flags
+
+
+def _flag(name: str, rel: str) -> str:
+    """The flag a block or a section names in the file `rel`: one of FLAGS, or in LEGACY_TARGET_FILES a legacy mode
+    name as its target. PromptError otherwise."""
+    if name in FLAGS:
+        return name
+    if name in LEGACY_MODES:
+        if rel in LEGACY_TARGET_FILES:
+            return LEGACY_MODES[name]
+        raise PromptError(f"{rel}: {name!r} is one of 0.8.0's modes, which are gone; a block names one of "
+                          f"{', '.join(FLAGS)} (module note)")
+    raise PromptError(f"{rel}: unknown flag {name!r} (one of {', '.join(FLAGS)})")
+
+
+def _blocks_out(text: str, rel: str, flags: _Flags) -> str:
+    """`text` with each flag block's text kept while its flag is on and left out otherwise, and its markers taken out.
+    A marker alone on its line takes the line with it. PromptError for an unknown flag, a block inside a block, an
     `{{end}}` with no block open, or a block left open."""
     marks = [*_BLOCK_RE.finditer(text)]
     if not marks:
         return text
-    spans: list[tuple[int, int, str | None]] = []  # (start, end, the mode a marker opens, None for an {{end}})
+    spans: list[tuple[int, int, str | None]] = []  # (start, end, the flag a marker opens, None for an {{end}})
     opened: str | None = None
     for m in marks:
         if m.group(2):
             if opened is None:
-                raise PromptError(f"{rel}: {{{{end}}}} with no {{{{if:<mode>}}}} block open")
+                raise PromptError(f"{rel}: {{{{end}}}} with no {{{{if:<flag>}}}} block open")
             opened, opens = None, None
         else:
             if opened is not None:
                 raise PromptError(f"{rel}: {{{{if:{m.group(1)}}}}} inside the {{{{if:{opened}}}}} block; close each "
                                   "block with {{end}} before the next one opens")
-            opened = opens = _check_mode(m.group(1), rel)
+            opens = _flag(m.group(1), rel)
+            opened = m.group(1)
         start, end = m.start(), m.end()
         line_start = text.rfind("\n", 0, start) + 1
         line_end = text.find("\n", end)
@@ -157,13 +343,12 @@ def _modes_out(text: str, rel: str, mode: _Mode) -> str:
         spans.append((start, end, opens))
     if opened is not None:
         raise PromptError(f"{rel}: the {{{{if:{opened}}}}} block is not closed with {{{{end}}}}")
-    now = mode()
     out: list[str] = []
     last, keep = 0, True
     for start, end, opens in spans:
         if keep:
             out.append(text[last:start])
-        keep = opens is None or opens == now
+        keep = opens is None or flags.has(opens)
         last = end
     out.append(text[last:])
     return "".join(out)
@@ -180,27 +365,27 @@ def _parts(text: str) -> tuple[str, list[tuple[str, str, str]]]:
     return (text[:marks[0].start()] if marks else text), parts
 
 
-def _mode_sections(text: str, rel: str, mode: _Mode) -> str:
-    """`text` with each `## <name>@<mode>` section's body in place of the body of `## <name>` in that mode, and the
-    section left out in the other (module note). PromptError for two sections of one name and mode."""
-    if not _HAS_MODE_PART_RE.search(text):
+def _flag_sections(text: str, rel: str, flags: _Flags) -> str:
+    """`text` with each `## <name>@<flag>` section's body in place of the body of `## <name>` while the flag is on, and
+    the section left out otherwise (module note). PromptError for two sections of one name that are both on, or a
+    section of a legacy mode name outside LEGACY_TARGET_FILES."""
+    if not _HAS_FLAG_PART_RE.search(text):
         return text
     head, parts = _parts(text)
-    now = mode()
     names = {name for name, _, _ in parts}
-    own: dict[str, str] = {}  # a section's name -> the body this mode gives it
+    own: dict[str, str] = {}  # a section's name -> the body the flags give it
     for name, _, body in parts:
-        if (hit := _MODE_PART_RE.fullmatch(name)) and hit.group(2) == now:
+        if (hit := _FLAG_PART_RE.fullmatch(name)) and flags.has(_flag(hit.group(2), rel)):
             if hit.group(1) in own:
-                raise PromptError(f"{rel}: two sections '## {name}'")
+                raise PromptError(f"{rel}: two sections of '## {hit.group(1)}' hold for these flags")
             own[hit.group(1)] = body
     out = [head]
     for name, line, body in parts:
-        hit = _MODE_PART_RE.fullmatch(name)
+        hit = _FLAG_PART_RE.fullmatch(name)
         if hit is None:
-            # the mode's body, with the blank lines the section's own body ended in, so the next heading keeps its gap
+            # the flag's body, with the blank lines the section's own body ended in, so the next heading keeps its gap
             out.append(line + (own[name].rstrip("\n") + body[len(body.rstrip("\n")):] if name in own else body))
-        elif hit.group(2) == now and hit.group(1) not in names:
+        elif flags.has(_flag(hit.group(2), rel)) and hit.group(1) not in names:
             out.append(f"## {hit.group(1)}\n{body}")
     return "".join(out)
 
@@ -274,10 +459,10 @@ def _directive(body: str, rel: str) -> str | None:
                       f"an include is {{{{include:<relpath>}}}})")
 
 
-def _read(rel: str, stack: tuple[str, ...], mode: _Mode) -> str:
-    """One file with its mode blocks resolved, its includes pasted in and its slots left in place. `stack` is the chain
+def _read(rel: str, stack: tuple[str, ...], flags: _Flags) -> str:
+    """One file with its flag blocks resolved, its includes pasted in and its slots left in place. `stack` is the chain
     being expanded."""
-    text = _modes_out(_path(rel, stack).read_text("utf-8"), rel, mode)
+    text = _later_out(_blocks_out(_path(rel, stack).read_text("utf-8"), rel, flags), rel)
     stack = (*stack, rel)
     out: list[str] = []
     last = 0
@@ -289,26 +474,26 @@ def _read(rel: str, stack: tuple[str, ...], mode: _Mode) -> str:
         inc = _directive(m.group(1), rel)
         # An included file's closing newline is left off, so an include on its own line between blank lines leaves one
         # blank line.
-        out.append(m.group(0) if inc is None else _read(inc, stack, mode).rstrip("\n"))
+        out.append(m.group(0) if inc is None else _read(inc, stack, flags).rstrip("\n"))
     _check_literal(text[last:], rel)
     out.append(text[last:])
     return "".join(out)
 
 
-def _assemble(name: str, mode: str | None) -> str:
-    """The file `name` with its includes pasted in, in the mode `mode` names or the current one (module note)."""
+def _assemble(name: str, flags: Flags) -> str:
+    """The file `name` with its includes pasted in, with the flags `flags` names or the current ones (module note)."""
     rel = _norm(name)
-    of = _Mode(mode)
-    return _mode_sections(_read(rel, (), of), rel, of)
+    of = _Flags(flags)
+    return _flag_sections(_read(rel, (), of), rel, of)
 
 
-def load(name: str, mode: str | None = None) -> str:
-    """The prompt file with every include pasted in, read fresh from disk, slots left in place, in `mode` (the current
-    mode when None, module note). `name` is relative to the prompts directory, with or without '.md'. Under
+def load(name: str, flags: Flags = None) -> str:
+    """The prompt file with every include pasted in, read fresh from disk, slots left in place, with `flags` (the
+    current flags when None, module note). `name` is relative to the prompts directory, with or without '.md'. Under
     THIMBLE_PROMPT_CAPTURE the files read are noted for the next capture (capture.prompt_used)."""
-    text = _assemble(name, mode)
+    text = _assemble(name, flags)
     if capture.enabled():
-        capture.prompt_used(_norm(name), files(name, mode))
+        capture.prompt_used(_norm(name), files(name, flags))
     return text
 
 
@@ -319,12 +504,12 @@ def names_in(folder: str) -> list[str]:
     return sorted(p.stem for p in d.glob("*.md") if p.is_file()) if d.is_dir() else []
 
 
-def frontmatter(name: str, mode: str | None = None) -> tuple[dict, str]:
+def frontmatter(name: str, flags: Flags = None) -> tuple[dict, str]:
     """(frontmatter, body) of a prompt file that opens with its frontmatter between two `---` lines, read as load()
     reads it; ({}, the whole text) for one that does not. PromptError when the frontmatter does not parse."""
     import yaml  # noqa: PLC0415 — only the files with frontmatter need it
 
-    text = load(name, mode)
+    text = load(name, flags)
     head, sep, body = text.removeprefix("---\n").partition("\n---\n")
     if not text.startswith("---\n") or not sep:
         return {}, text.strip()
@@ -335,19 +520,19 @@ def frontmatter(name: str, mode: str | None = None) -> tuple[dict, str]:
     return (front if isinstance(front, dict) else {}), body.strip()
 
 
-def slots(name: str, mode: str | None = None) -> frozenset[str]:
-    """The slot names left in `name` once its includes are pasted in, in `mode`."""
-    return frozenset(m.group(1) for m in _DIRECTIVE_RE.finditer(load(name, mode)))
+def slots(name: str, flags: Flags = None) -> frozenset[str]:
+    """The slot names left in `name` once its includes are pasted in, with `flags`."""
+    return frozenset(m.group(1) for m in _DIRECTIVE_RE.finditer(load(name, flags)))
 
 
-def files(name: str, mode: str | None = None) -> list[str]:
-    """Every file load(name, mode) reads, the file itself and its includes, in read order, each once. It raises
-    PromptError where load(name, mode) would, so a name it lists is a name that loads."""
+def files(name: str, flags: Flags = None) -> list[str]:
+    """Every file load(name, flags) reads, the file itself and its includes, in read order, each once. It raises
+    PromptError where load(name, flags) would, so a name it lists is a name that loads."""
     out: list[str] = []
-    of = _Mode(mode)
+    of = _Flags(flags)
 
     def walk(rel: str, stack: tuple[str, ...]) -> None:
-        text = _modes_out(_path(rel, stack).read_text("utf-8"), rel, of)
+        text = _later_out(_blocks_out(_path(rel, stack).read_text("utf-8"), rel, of), rel)
         if rel not in out:
             out.append(rel)
         for m in _DIRECTIVE_RE.finditer(text):
@@ -375,29 +560,29 @@ def _fill(text: str, values: dict[str, str], rel: str) -> str:
     return _DIRECTIVE_RE.sub(fill, text)
 
 
-def render(name: str, values: dict[str, str], mode: str | None = None) -> str:
-    """load(name, mode) with every slot filled from `values`. A slot the file uses but `values` lacks raises
+def render(name: str, values: dict[str, str], flags: Flags = None) -> str:
+    """load(name, flags) with every slot filled from `values`. A slot the file uses but `values` lacks raises
     PromptError, and keys the file does not use are ignored."""
-    return _fill(load(name, mode), values, _norm(name))
+    return _fill(load(name, flags), values, _norm(name))
 
 
-def render_dev(body: str, values: dict[str, str], mode: str | None = None) -> str:
+def render_dev(body: str, values: dict[str, str], flags: Flags = None) -> str:
     """A dev call's text: prompts/dev.md with `{{task}}` filled by `body` (one of DEV_FILES) rendered with `values`. The
     body is rendered first, so a `{{` inside a ticket's own text is never read as a slot of the preamble."""
     if body not in DEV_FILES:
         raise PromptError(f"{body!r} is not a dev body ({', '.join(DEV_FILES)})")
-    return render(DEV_PROMPT, {"task": render(body, values, mode).strip()}, mode)
+    return render(DEV_PROMPT, {"task": render(body, values, flags).strip()}, flags)
 
 
-def agent_file(name: str, mode: str | None = None) -> tuple[dict, str]:
+def agent_file(name: str, flags: Flags = None) -> tuple[dict, str]:
     """(frontmatter, body) of an agent definition among AGENT_FILES, read fresh from disk with its includes pasted in
-    (each includes preamble.md) and its slots left in place, in `mode`. The body is the agent's system prompt, which
+    (each includes preamble.md) and its slots left in place, with `flags`. The body is the agent's system prompt, which
     Claude Code sends whole. PromptError when the file is missing or its frontmatter does not parse."""
     import yaml  # noqa: PLC0415 — only the agent definitions need it
 
     if name not in AGENT_FILES:
         raise PromptError(f"{name!r} is not an agent definition ({', '.join(AGENT_FILES)})")
-    text = _assemble(name, mode)
+    text = _assemble(name, flags)
     head, sep, body = text.removeprefix("---\n").partition("\n---\n")
     try:
         front = yaml.safe_load(head) if sep else None
@@ -408,42 +593,39 @@ def agent_file(name: str, mode: str | None = None) -> tuple[dict, str]:
     return front, body.strip()
 
 
-def section(name: str, heading: str, mode: str | None = None) -> str:
-    """The body of the `## <heading>` section of `name` in `mode`, includes pasted in and slots left in place, up to the
-    next `## ` heading: in terminal mode the body of `## <heading>@terminal` where the file has one (module note).
-    A heading with a mode block in it is also found by its text in browser mode, the name the code has known it by.
-    PromptError when the file has no such section."""
-    _, parts = _parts(load(name, mode))
-    for part, _, body in parts:
-        if part == heading:
-            return body.strip() + "\n"
-    if current_mode(mode) != DEFAULT_MODE:
-        _, browser = _parts(load(name, DEFAULT_MODE))
-        at = [i for i, (part, _, _) in enumerate(browser) if part == heading]
-        if at and len(browser) == len(parts):
-            return parts[at[0]][2].strip() + "\n"
+def section(name: str, heading: str, flags: Flags = None) -> str:
+    """The body of the `## <heading>` section of `name` with `flags`, includes pasted in and slots left in place, up to
+    the next `## ` heading: the body of `## <heading>@<flag>` while that flag is on, where the file has one (module
+    note). A section a merge renamed is also found by its old name (_RENAMED). PromptError when the file has no such
+    section."""
+    _, parts = _parts(load(name, flags))
+    wanted = (heading, _RENAMED.get((_norm(name), heading)))
+    for want in wanted:
+        for part, _, body in parts:
+            if want is not None and part == want:
+                return body.strip() + "\n"
     raise PromptError(f"{_norm(name)}: no section '## {heading}' (has {[part for part, _, _ in parts]})")
 
 
-def render_head(name: str, values: dict[str, str], mode: str | None = None) -> str:
-    """render(name, values, mode) of the part of `name` above its first `## ` heading, for a file whose `## ` sections
+def render_head(name: str, values: dict[str, str], flags: Flags = None) -> str:
+    """render(name, values, flags) of the part of `name` above its first `## ` heading, for a file whose `## ` sections
     are sent apart (wiring.json's `mixed`), such as labels.md, whose sections fill its own slots."""
-    head, _ = _parts(load(name, mode))
+    head, _ = _parts(load(name, flags))
     return _fill(head, values, _norm(name))
 
 
-def render_section(name: str, heading: str, values: dict[str, str], mode: str | None = None) -> str:
-    """section(name, heading, mode) with its slots filled from `values`, as render fills a whole file."""
-    return _fill(section(name, heading, mode), values, f"{_norm(name)} ## {heading}")
+def render_section(name: str, heading: str, values: dict[str, str], flags: Flags = None) -> str:
+    """section(name, heading, flags) with its slots filled from `values`, as render fills a whole file."""
+    return _fill(section(name, heading, flags), values, f"{_norm(name)} ## {heading}")
 
 
-def agent_prompt(name: str, values: dict[str, str], mode: str | None = None) -> str:
+def agent_prompt(name: str, values: dict[str, str], flags: Flags = None) -> str:
     """The body of an agent definition among AGENT_FILES with its includes pasted in and its slots filled from `values`,
-    in `mode`, for an agent whose body is a template (orient.md). PromptError where render raises it, or when the file
-    does not open with its frontmatter."""
+    with `flags`, for an agent whose body is a template (orient.md). PromptError where render raises it, or when the
+    file does not open with its frontmatter."""
     if name not in AGENT_FILES:
         raise PromptError(f"{name!r} is not an agent definition ({', '.join(AGENT_FILES)})")
-    text = render(name, values, mode)
+    text = render(name, values, flags)
     _, sep, body = text.removeprefix("---\n").partition("\n---\n")
     if not text.startswith("---\n") or not sep:
         raise PromptError(f"{_norm(name)}: an agent definition opens with its frontmatter between two `---` lines")

@@ -1,24 +1,29 @@
-// The settings gear's popover. First one table, a row per role with exactly the model and effort that runs: main, whose
-// model is read-only (only /model in the terminal changes it) and whose effort and fast mode are kept for its next
-// launch (PUT session/effort and session/fast); thimble's agents (the orientation, the orientation's subagents run as
-// thimble:orient-helper, the critic, the writers, the dev agent of view builds, reviews and code tickets, the report checks),
-// with a "web" switch that keeps an agent off WebFetch and WebSearch, and on the dev row a fast switch for `thimble fix`
-// alone (backend config.FAST_OF_TICKETS); the classifiers (labels, the card check, the view proposals), the only
-// other rows with fast mode; and the row a classifier's call runs again on when its model
-// refuses, or off. Then one row per agent of the extensions running here (`<extension>:<agent>`). The effort menu lists
-// Claude Code's levels, and a model that runs with no effort shows none. An agent's row applies to its next start. A
-// save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
-// cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
-// Under the table, the View proposals switch (PROPOSE_NOTE), which a view proposal's Don't ask again turns off; the
-// Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
-// canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents, the subagents of the
-// analyst's Claude Code session (web, edits of the data, and whether the session's shell runs in Claude Code's
-// sandbox), with the CLAUDE.md files each agent reads;
-// then the one agent with a permission mode of its own, an extension's program that runs the dev agent, shown only
-// where one does, and its own fence; then labels and the card check, which have no mode; then how long a code
+// The settings gear's popover, under its title. First one table, a row per role with exactly the model and effort that
+// runs: main, whose model is read-only (only /model in the terminal changes it, and the table reads it from main's meta
+// as the composer does) and whose effort and fast mode, the bolt beside its effort, are kept for its next launch (PUT
+// session/effort and session/fast); thimble's agents (the orientation, the orientation's subagents run as
+// thimble:orient-helper, the critic, the writers, the dev agent of view builds, reviews and code tickets, the report
+// checks), each with a switch in the "web" column that keeps it off WebFetch and WebSearch; the model calls (labels,
+// the card check, the viewer suggestion), each a subagent of the session too; and the row a model call runs again on
+// when its model refuses, whose model menu also has Off. Only main has fast mode: a subagent has none of its own. Then
+// one row per agent of the extensions running here (`<extension>:<agent>`). The effort menu lists Claude Code's levels,
+// and a model that runs with no effort shows none. An agent's row applies to its next start. A save sends only the
+// changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that cannot take effect are
+// dimmed with the reason in a tooltip. Every row names its model exactly, never `default`. Under the table, thimble's
+// feature switches (FEATURE_ROWS: View proposals, Labels, Checks, Citation marks, Coverage, Card check), the same
+// switches as /config → thimble in the terminal, kept in thimble's config (`features`, backend features.py; View
+// proposals as `views.propose`, which a view proposal's Don't ask again turns off); the Ask key choice, ⌘-click or
+// ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the canvas (thimble's config
+// `askKey`, lib/platform); then thimble's rules for main and its agents, the subagents of the analyst's Claude Code
+// session (web, edits of the data, and whether the session's shell runs in Claude Code's sandbox), with the CLAUDE.md
+// files each agent reads; then the one agent with a permission mode of its own, an extension's program that runs the
+// dev agent, shown only where one does, with Manual or Auto (no Bypass: thimble 0.9.0 sets no agent to skip its
+// permission prompts), and its own fence; then labels and the card check, which have no mode; then how long a code
 // ticket's question about thimble's code waits on its card (cardWait); then the extensions added to thimble, each with
-// its switch for this workspace (ExtensionsSettings).
-import { useEffect, useState } from 'react'
+// its switch for this workspace (ExtensionsSettings). In the foot, beside Take the tour, Sign out this browser signs
+// this browser out (POST /ui/signout with its own id, lib/notices ownBrowserId), and every tab shows the sign-in line
+// (bug hunt G4: the browser had no way to sign itself out).
+import { Fragment, useEffect, useState } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { TextInput } from '../components/Field'
@@ -28,12 +33,14 @@ import { Spinner } from '../components/Spinner'
 import { Switch } from '../components/Switch'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
+import { clearBrowserKey } from '../lib/browserKey'
+import { ownBrowserId } from '../lib/notices'
 import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, extensionCalls, viewKey } from './ExtensionsSettings'
 import { hasEffort, hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
-import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type MainEffort, type MainFence, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type SettingsPatch, type TaskRow } from '../lib/types'
+import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type FeatureKey, type MainEffort, type MainFence, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type SettingsPatch, type TaskRow } from '../lib/types'
 import { bus } from '../lib/bus'
 import { askKeyLabel, isMacPlatform, setAskKey, type AskKey } from '../lib/platform'
-import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast, noFastTip } from '../chat/ModelLine'
+import { EFFORT_CHOICES, FastBolt, MODEL_TIP, NEXT_LAUNCH, effortWord, mainEffort, mainFast } from '../chat/ModelLine'
 
 type Models = Record<string, ModelConf>
 
@@ -44,15 +51,12 @@ export const MODE_ROWS: { agent: ModeAgent; label: string }[] = [{ agent: 'dev',
 const PROGRAM_WAYS = ['sdk', 'command']
 /** Whether a MODE_ROWS row applies: an extension runs that agent with a program of its own. Pure. */
 export const modeRowShown = (row: Pick<AgentRow, 'way'> | undefined): boolean => !!row && PROGRAM_WAYS.includes(row.way)
-const MODE_NAME: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Bypass' }
-/** The modes of the dev agent's program, by the names the menu shows. */
+const MODE_NAME: Record<OrientPermissions, string> = { manual: 'Manual', auto: 'Auto', bypass: 'Manual' }
+/** The modes of the dev agent's program, by the names the menu shows: no Bypass (backend modes.choose refuses it). */
 export const MODE_OPTIONS: { value: OrientPermissions; label: string }[] = [
   { value: 'manual', label: 'Manual' },
   { value: 'auto', label: 'Auto' },
-  { value: 'bypass', label: 'Bypass' },
 ]
-/** The warning Claude Code shows before a session runs in Bypass Permissions mode, its first sentence. */
-export const BYPASS_LINE = 'In Bypass Permissions mode, Claude Code will not ask for your approval before running potentially dangerous commands.'
 /** The one line on the modes of every other agent. */
 export const MAIN_MODE_LINE = "thimble's agents, code tickets' among them, run in your Claude Code session's permission mode."
 
@@ -61,26 +65,28 @@ export const MAIN_MODE_LINE = "thimble's agents, code tickets' among them, run i
 export const permissionChoice = (mode: string | null | undefined): OrientPermissions =>
   mode === 'auto' ? 'auto' : mode === 'bypassPermissions' ? 'bypass' : 'manual'
 
-/** The mode the dev agent's program starts in: its row as the server answers it (a Bypass the analyst did not choose
- * here answers as Manual), else the mode of the analyst's Claude Code session with Bypass as Manual, else Manual,
- * whichever their Claude Code settings do not turn off (backend modes.mode_for). Pure. */
+/** The mode the dev agent's program starts in: its row as the server answers it, else the mode of the analyst's Claude
+ * Code session, else Manual, whichever their Claude Code settings do not turn off (backend modes.mode_for); Bypass,
+ * from a row an earlier version wrote or from the session, counts as Manual. Pure. */
 export function agentMode(rows: Settings['permission_modes'], agent: ModeAgent, sessionMode: string | null | undefined, off: readonly string[] = []): OrientPermissions {
-  const session = permissionChoice(sessionMode)
-  return [rows?.[agent], session === 'bypass' ? ('manual' as const) : session, 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
+  const manual = (m: OrientPermissions | undefined): OrientPermissions | undefined => (m === 'bypass' ? 'manual' : m)
+  return [manual(rows?.[agent]), manual(permissionChoice(sessionMode)), 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
 }
-/** The note of the menu's "Your session's" item while the analyst's Claude Code session runs in Bypass, which reaches
- * the dev agent's program only when chosen here. */
-export const SESSION_BYPASS_NOTE = 'Manual (Bypass only when chosen here)'
 
+/** What a CALL_ROWS row shows where the dev agent's program shows its permission mode, and why: a model call through
+ * the session's own client asks nothing; the card check, a subagent of the session that reads the card's picture,
+ * follows its permission mode. */
+const PROGRAM_TIP = "An extension's program that runs its tasks has no thread to ask you in."
+export const CALL_CELLS = {
+  model: { cell: 'Asks nothing', tip: `It is one model call through your Claude Code session's own sign-in, with no tools, so it asks nothing in any mode.\n${PROGRAM_TIP}` },
+  subagent: { cell: "Your session's", tip: `It runs as a subagent of your Claude Code session, in its permission mode: Manual mode asks before it reads its task and before it sends its answer.\n${PROGRAM_TIP}` },
+} as const
 /** The agents of thimble's config that are one model call each, listed after the dev agent's program; their settings
  * reach an extension's program that runs their tasks (backend userconf.CALLS). */
-export const CALL_ROWS: { agent: CallAgent; label: string }[] = [
-  { agent: 'labels', label: 'Labels' },
-  { agent: 'cardCheck', label: 'Card check' },
+export const CALL_ROWS: { agent: CallAgent; label: string; runs: keyof typeof CALL_CELLS }[] = [
+  { agent: 'labels', label: 'Labels', runs: 'model' },
+  { agent: 'cardCheck', label: 'Card check', runs: 'subagent' },
 ]
-/** What a CALL_ROWS row shows where the dev agent's program shows its permission mode, and why. */
-export const CALL_CELL = 'Asks nothing'
-const CALL_CELL_TIP = "It has no permission mode. thimble runs it as one model call with no tools, and an extension's program that runs its tasks has no thread to ask you in."
 
 const DATA_WORDS: Record<NonNullable<AgentRow['data']>, string> = { ask: 'asks to edit data', allow: 'may edit data', off: 'never edits data' }
 const DATA_TIP: Record<NonNullable<AgentRow['data']>, string> = {
@@ -93,7 +99,7 @@ const DATA_TIP: Record<NonNullable<AgentRow['data']>, string> = {
 export function runsWords(row: Pick<AgentRow, 'way' | 'extension' | 'additions' | 'conflict'>): string {
   if (row.conflict.length) return `thimble, since ${row.conflict.join(' and ')} both replace it`
   const added = row.additions.length ? ` + ${row.additions.join(', ')}` : ''
-  if (row.way === 'sdk') return `${row.extension}, Agent SDK`
+  if (row.way === 'sdk') return `${row.extension}, Agent SDK, which thimble no longer starts`
   if (row.way === 'command') return `${row.extension}, own program`
   if (row.way === 'prompt') return `${row.extension}'s prompt${added}`
   return `thimble${added}`
@@ -122,7 +128,7 @@ export function tasksLine(rows: TaskRow[] | undefined): string {
 /** What an agent's line means, one sentence per line, for its tooltip. Pure. */
 export function agentTip(row: AgentRow): string {
   const who = row.conflict.length ? `thimble runs it, since ${row.conflict.join(' and ')} both replace it.`
-    : row.way === 'sdk' ? `${row.extension} runs it with an Agent SDK program.`
+    : row.way === 'sdk' ? `${row.extension} replaces it with an Agent SDK program, which thimble no longer starts: it starts no Claude Code session of its own.`
     : row.way === 'command' ? `${row.extension} runs it with its own program.`
     : row.way === 'prompt' ? `thimble runs it with ${row.extension}'s prompt.`
     : 'thimble runs it.'
@@ -184,12 +190,13 @@ function FenceLine({ fence, sandbox }: { fence: MainFence; sandbox?: boolean | n
 }
 
 /** A CALL_ROWS row's cell where the code tickets have their permission mode. */
-function CallCell({ label }: { label: string }) {
-  const { props, tip } = useTooltip(CALL_CELL_TIP, 'tip-lines', 'start')
+function CallCell({ label, runs }: { label: string; runs: keyof typeof CALL_CELLS }) {
+  const { cell, tip: why } = CALL_CELLS[runs]
+  const { props, tip } = useTooltip(why, 'tip-lines', 'start')
   return (
     <>
-      <Chip kind="plain" face="sans" className="settings-cell settings-mode settings-mode-none" tabIndex={0} aria-label={`${label}: ${CALL_CELL}`} {...props}>
-        {CALL_CELL}
+      <Chip kind="plain" face="sans" className="settings-cell settings-mode settings-mode-none" tabIndex={0} aria-label={`${label}: ${cell}`} {...props}>
+        {cell}
       </Chip>
       {tip}
     </>
@@ -220,27 +227,29 @@ export const ROLE_LABEL: Record<string, string> = {
   writer: 'writers',
   checks: 'report checks',
   verify: 'card check',
-  suggest: 'view proposals',
+  suggest: 'viewer suggestion',
   refusal: 'if refused',
 }
 /** A row's note under its name: what it covers, where its id does not say. */
 export const ROLE_NOTE: Record<string, string> = {
   subagents: "for subagents the orientation starts as thimble:orient-helper; others run on the orientation's own model and effort",
   dev: 'view builds, view reviews and code tickets',
-  refusal: "if a classifier's model refuses: run again on this, or switch it off",
+  suggest: "which viewer a file of an unknown type needs; a view proposal runs on your session's model",
+  refusal: "if a model call's model refuses, the call runs again on this model, or not at all when Off",
 }
 /** thimble's agents, whose rows apply to their next start. */
 export const AGENT_ROLES = ['orient', 'subagents', 'critic', 'writer', 'dev', 'checks'] as const
-/** The classifiers: one model call each, the only rows with fast mode but the dev row's, which is `thimble fix`'s. */
+/** The model calls: labels and the viewer suggestion through main's own client, the card check a `thimble:call`
+ * subagent of main; none has a fast mode of its own. */
 export const CLASSIFIER_ROLES = ['labels', 'verify', 'suggest'] as const
 /** The agents whose web switch the table offers (backend userconf.SUBAGENT_ROLES less the orientation, whose web is
  * main's rule). */
 export const WEB_ROWS = ['critic', 'writer', 'checks'] as const
 export type WebRow = (typeof WEB_ROWS)[number]
-/** The dev row's fast switch, by the name it shows: its fast mode reaches `thimble fix` alone, the one `claude -p` job
- * of the server; view builds, reviews and code tickets run as subagents of main, which Claude Code gives no fast mode of
- * their own (backend config.FAST_OF_TICKETS). */
-export const TICKET_FAST = "thimble fix's fast mode"
+/** The table's last column, in words: each agent's switch for the web. */
+export const WEB_HEAD_TIP = 'Whether the agent may fetch pages and search the web; off keeps it off the web'
+/** The refusal row's model menu's last choice, which runs a refused call on no other model. */
+export const REFUSAL_OFF = 'Off'
 /** The dev row's web switch's reason: the dev agent's web in thimble's config reaches all of its work. */
 export const DEV_WEB_WHY = "The dev agent's view builds, reviews and code tickets follow agents.dev.web in thimble's config."
 /** The line on how long a code ticket's question about thimble's own code waits on its card (cardWait). */
@@ -251,6 +260,31 @@ export const NEXT_START_LINE = "An agent's row applies to its next start; a run 
 /** The View proposals switch's name and note. */
 export const PROPOSE_LABEL = 'View proposals'
 export const PROPOSE_NOTE = 'thimble may propose a view for your task above the reply box. Nothing builds until you accept it.'
+
+/** thimble's feature switches in Settings, the same rows as /config → thimble in the terminal, in that order (View
+ * proposals first, as PROPOSE_LABEL): each key as thimble's config `features` names it (backend
+ * features.py), its name and what it does. Off, a feature runs nothing in the background. */
+export const FEATURE_ROWS: { key: FeatureKey; label: string; note: string }[] = [
+  { key: 'labels', label: 'Labels', note: 'Claude can label every record of a file with a model.' },
+  { key: 'checks', label: 'Checks', note: 'The checks that are on comment on answers that read data, and on documents.' },
+  { key: 'citationMarks', label: 'Citation marks', note: 'thimble checks each citation in an answer and marks one it cannot verify red with ×.' },
+  { key: 'coverage', label: 'Coverage', note: "A line under answers that read data says how much of the data Claude's tool calls saw." },
+  { key: 'cardCheck', label: 'Card check', note: "thimble checks each new card's chart and citations." },
+]
+
+/** The feature switches as Settings loaded them: on unless thimble's config turns a feature off. Pure. */
+export function featureRows(s: Settings | null): Record<FeatureKey, boolean> {
+  return Object.fromEntries(FEATURE_ROWS.map(({ key }) => [key, s?.features?.[key] !== false])) as Record<FeatureKey, boolean>
+}
+
+/** What a save sends for the feature switches: false for one turned off, null for one put back on (the default), only
+ * those that changed. Pure. */
+export function changedFeatures(loaded: Settings | null, now: Record<FeatureKey, boolean>): Partial<Record<FeatureKey, false | null>> {
+  const was = featureRows(loaded)
+  const out: Partial<Record<FeatureKey, false | null>> = {}
+  for (const { key } of FEATURE_ROWS) if (was[key] !== now[key]) out[key] = now[key] ? null : false
+  return out
+}
 
 /** The Ask key choice's name, its options as the platform writes them (⌘-click and ⌥-click on a Mac, Ctrl-click and
  * Alt-click elsewhere), and its note: what the other key does. */
@@ -286,16 +320,15 @@ export function roleEfforts(role: string): string[] {
   return [...EFFORTS]
 }
 
-/** Why a role's cell cannot be changed here, or null when it can. Fast mode is the classifiers', main's and, for
- * `thimble fix` alone, the dev row's (TICKET_FAST); a model with no effort has no effort to pick. Pure. */
+/** Why a role's cell cannot be changed here, or null when it can. Only main has fast mode; a model with no effort has
+ * no effort to pick. Pure. */
 export function lockedWhy(role: string, cell: 'model' | 'effort' | 'fast', conf: ModelConf, main: { attached: boolean }): string | null {
   if (role === 'main') {
     if (cell === 'model') return MODEL_TIP
     return main.attached ? null : 'No Claude Code session is attached to main'
   }
   if (cell === 'effort' && conf.model && !hasEffort(conf.model)) return `${modelLabel(conf.model)} runs with no effort`
-  if (cell === 'fast' && role !== 'dev' && !(CLASSIFIER_ROLES as readonly string[]).includes(role)) return "thimble's agents have no fast mode of their own"
-  if (cell === 'fast' && conf.model && !hasFastMode(conf.model)) return noFastTip(conf.model)
+  if (cell === 'fast') return "thimble's agents have no fast mode of their own"
   return null
 }
 
@@ -317,7 +350,6 @@ export function changedRoles(loaded: Models, now: Models): Record<string, Partia
     const patch: Partial<ModelConf> = {}
     if (!was || was.model !== conf.model) patch.model = conf.model
     if (!was || was.effort !== conf.effort) patch.effort = conf.effort
-    if (!was || !!was.fast !== !!conf.fast) patch.fast = !!conf.fast
     if (role === 'refusal' && !!was?.off !== !!conf.off) patch.off = !!conf.off
     if (Object.keys(patch).length) out[role] = patch
   }
@@ -389,6 +421,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [runAnswers, setRunAnswers] = useState<Record<string, boolean>>({})
   // View proposals (thimble's config `views.propose`)
   const [propose, setPropose] = useState(true)
+  // the feature switches (thimble's config `features`)
+  const [features, setFeatures] = useState<Record<FeatureKey, boolean>>(featureRows(null))
   // the ask key (thimble's config `askKey`)
   const [ask, setAsk] = useState<AskKey>('meta')
   const mac = isMacPlatform()
@@ -411,10 +445,11 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setModeRows(s.permission_modes ?? {})
         setWeb(webRows(s))
         setPropose(s.propose_views !== false)
+        setFeatures(featureRows(s))
         setAsk(s.ask_key === 'alt' ? 'alt' : 'meta')
         setAttached(a)
         const fast = mainFast(a)
-        setModels({ ...(s.models ?? {}), main: { model: a?.model ?? '', effort: mainEffort(a), fast: !!fast } })
+        setModels({ ...(s.models ?? {}), main: { model: a?.model ?? '', effort: mainEffort(a) ?? '', fast: !!fast } })
       })
       .catch((e) => alive && setError((e as Error).message))
     return () => {
@@ -433,13 +468,16 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const webs = changedWeb(webRows(settings), web)
       const proposeNow = changedPropose(settings, propose)
       const askNow = changedAskKey(settings, ask)
-      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow)
+      const featuresNow = changedFeatures(settings, features)
+      const anyFeature = Object.keys(featuresNow).length > 0
+      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow || anyFeature)
         await api.putSettings(ws, {
           ...(Object.keys(changed).length ? { models: changed } : {}),
           ...(Object.keys(modes).length ? { permission_modes: modes } : {}),
           ...(Object.keys(webs).length ? { web: webs } : {}),
           ...proposeNow,
           ...askNow,
+          ...(anyFeature ? { features: featuresNow } : {}),
         })
       // the pointer, the canvas, the tour and the views' frames take the key at once
       if ('ask_key' in askNow) setAskKey(ask)
@@ -449,7 +487,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       }
       for (const [name, slug, on] of changedViews(exts?.extensions ?? [], viewOn)) await api.switchExtensionView(ws, name, slug, on)
       for (const [slug, on] of changedLocalViews(exts?.local?.views ?? [], localOn)) await api.switchLocalView(ws, slug, on)
-      const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }
+      const was = { effort: mainEffort(attached) ?? '', fast: !!mainFast(attached) }
       const main = models.main
       const effortNow = !!main && !!attached && main.effort !== was.effort
       const fastNow = !!main && !!attached && !!main.fast !== was.fast
@@ -471,6 +509,20 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       setBusy(false)
     }
   }
+  // this browser's id, known once GET /ui/paired answered; a page without one (a screenshot's) has no sign-out
+  const me = ownBrowserId()
+  const signOut = async () => {
+    try {
+      await api.signOut(me, ws)
+    } catch (e) {
+      setError(`Could not sign this browser out. ${(e as Error).message}`)
+      return
+    }
+    onClose()
+    // the key is spent: every tab asks again and shows the sign-in line (shell/SignIn)
+    clearBrowserKey()
+    bus.emit('signedOut', {})
+  }
   const roles = rolesOf(settings)
   const off = settings?.disabled_modes ?? []
   const own = permissionChoice(attached?.permission_mode)
@@ -484,18 +536,20 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         id: `m:${m}`,
         label: modelLabel(m),
         note: m,
-        checked: !conf.follows && sameModel(m, conf.model),
+        checked: !conf.follows && !conf.off && sameModel(m, conf.model),
         onSelect: () =>
-          (conf.follows || !sameModel(m, conf.model)) &&
-          set(role, { model: m, follows: undefined, ...(hasEffort(m) ? (conf.effort ? {} : { effort: 'high' }) : { effort: '' }), ...(hasFastMode(m) ? {} : { fast: false }) }),
+          (conf.follows || conf.off || !sameModel(m, conf.model)) &&
+          set(role, { model: m, follows: undefined, ...(role === 'refusal' ? { off: false } : {}), ...(hasEffort(m) ? (conf.effort ? {} : { effort: 'high' }) : { effort: '' }) }),
       })),
       { id: 'sep', separator: true as const },
       { id: 'other', label: 'Other', icon: 'edit' as const, onSelect: () => setTyping(role) },
+      ...(role === 'refusal' ? [{ id: 'off', label: REFUSAL_OFF, checked: !!conf.off, onSelect: () => set(role, { off: true }) }] : []),
     ]
   }
   return (
     <Popover anchor={anchor} open={open} onClose={onClose} align="end" role="dialog" label="Settings" className="settings-pop">
       <div className="settings" data-panel="settings">
+        <h2 className="settings-title">Settings</h2>
         {!settings && !error && (
           <div className="settings-loading dim">
             <Spinner size={10} label="Loading settings" />
@@ -507,7 +561,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               <span className="label">role</span>
               <span className="label">model</span>
               <span className="label">effort</span>
-              <span className="label">fast · web</span>
+              <span className="label" title={WEB_HEAD_TIP}>web</span>
             </div>
             {roles.map((role) => {
               const conf = models[role] ?? EMPTY
@@ -550,33 +604,32 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                       items={modelMenu(role, conf, model)}
                       trigger={
                         <Chip kind="plain" face="sans" as="button" trailingIcon="chevron-down" className="settings-cell settings-model" aria-label={`${role} model`} data-model={model} data-follows={conf.follows}>
-                          {conf.follows ? SAME_AS_ORIENT : modelLabel(model)}
+                          {conf.follows ? SAME_AS_ORIENT : offRow ? REFUSAL_OFF : modelLabel(model)}
                         </Chip>
                       }
                     />
                   )}
-                  {why('effort') ? (
-                    <LockedChip why={why('effort')!} label={`${role} effort`}>
-                      {effortShown ? effortWord(effortShown) : 'none'}
-                    </LockedChip>
-                  ) : (
-                    <Menu
-                      label={`${role} effort`}
-                      items={roleEfforts(role).map((ef) => ({ id: ef || 'default', label: effortWord(ef), checked: ef === conf.effort, onSelect: () => set(role, { effort: ef }) }))}
-                      trigger={
-                        <Chip kind="plain" face="sans" as="button" trailingIcon="chevron-down" className="settings-cell settings-effort" aria-label={`${role} effort`} data-effort={conf.effort}>
-                          {effortWord(conf.effort)}
-                        </Chip>
-                      }
-                    />
-                  )}
-                  {role === 'main' || classifier ? (
-                    <FastBolt on={!!conf.fast && (!conf.model || hasFastMode(conf.model))} why={why('fast')} label={`${role} fast mode`} onChange={(fast) => set(role, { fast })} className={`settings-fast${why('fast') ? ' settings-locked' : ''}`} />
-                  ) : refusal ? (
-                    <span className="settings-web" data-on={!conf.off}>
-                      <Switch checked={!conf.off} onChange={() => set(role, { off: !conf.off })} aria-label="Run a refused classifier call again" />
-                    </span>
-                  ) : (WEB_ROWS as readonly string[]).includes(role) ? (
+                  <span className="settings-effort-cell">
+                    {why('effort') ? (
+                      <LockedChip why={why('effort')!} label={`${role} effort`}>
+                        {effortShown ? effortWord(effortShown) : 'none'}
+                      </LockedChip>
+                    ) : (
+                      <Menu
+                        label={`${role} effort`}
+                        items={roleEfforts(role).map((ef) => ({ id: ef || 'default', label: effortWord(ef), checked: ef === conf.effort, onSelect: () => set(role, { effort: ef }) }))}
+                        trigger={
+                          <Chip kind="plain" face="sans" as="button" trailingIcon="chevron-down" className="settings-cell settings-effort" aria-label={`${role} effort`} data-effort={conf.effort}>
+                            {effortWord(conf.effort)}
+                          </Chip>
+                        }
+                      />
+                    )}
+                    {role === 'main' && (
+                      <FastBolt on={!!conf.fast && (!conf.model || hasFastMode(conf.model))} why={why('fast')} label={`${role} fast mode`} onChange={(fast) => set(role, { fast })} className={`settings-fast${why('fast') ? ' settings-locked' : ''}`} />
+                    )}
+                  </span>
+                  {(WEB_ROWS as readonly string[]).includes(role) ? (
                     <WebSwitch role={role} on={web[role as WebRow] ?? true} onChange={(on) => setWeb((w) => ({ ...w, [role]: on }))} />
                   ) : role === 'orient' || role === 'subagents' ? (
                     <WebSwitch role={role} on={fence?.web !== 'off'} why={`The orientation and its subagents follow your session's web rule (${fence?.config ?? 'agents.orientation'}.web in thimble's config).`} />
@@ -585,18 +638,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                   ) : (
                     <span />
                   )}
-                  {ROLE_NOTE[role] && (
-                    <span className="settings-role-note">
-                      {ROLE_NOTE[role]}
-                      {role === 'dev' && ' · '}
-                      {role === 'dev' && (
-                        <span className="settings-ticket-fast">
-                          {TICKET_FAST}
-                          <FastBolt on={!!conf.fast && (!conf.model || hasFastMode(conf.model))} why={why('fast')} label={TICKET_FAST} onChange={(fast) => set(role, { fast })} className={`settings-fast${why('fast') ? ' settings-locked' : ''}`} />
-                        </span>
-                      )}
-                    </span>
-                  )}
+                  {ROLE_NOTE[role] && <span className="settings-role-note">{ROLE_NOTE[role]}</span>}
                 </div>
               )
             })}
@@ -606,17 +648,30 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
           </div>
         )}
         {settings && (
-          <div className="settings-grid settings-modes settings-auto" role="table" aria-label={PROPOSE_LABEL}>
+          <div className="settings-grid settings-modes settings-auto settings-features" role="table" aria-label="Features">
             <div className="settings-row settings-headrow" role="row">
-              <span className="label">views</span>
+              <span className="label">features</span>
             </div>
-            <div className="settings-row" role="row" data-auto="propose-views">
-              <span className="settings-role">{PROPOSE_LABEL}</span>
-              <span className="settings-web" data-on={propose}>
-                <Switch checked={propose} onChange={() => setPropose(!propose)} aria-label={PROPOSE_LABEL} />
-              </span>
-              <span className="settings-agent-line">{PROPOSE_NOTE}</span>
-            </div>
+            {FEATURE_ROWS.map(({ key, label, note }, i) => (
+              <Fragment key={key}>
+                {i === 0 && (
+                  <div className="settings-row" role="row" data-auto="propose-views">
+                    <span className="settings-role">{PROPOSE_LABEL}</span>
+                    <span className="settings-web" data-on={propose}>
+                      <Switch checked={propose} onChange={() => setPropose(!propose)} aria-label={PROPOSE_LABEL} />
+                    </span>
+                    <span className="settings-agent-line">{PROPOSE_NOTE}</span>
+                  </div>
+                )}
+                <div className="settings-row" role="row" data-feature={key}>
+                  <span className="settings-role">{label}</span>
+                  <span className="settings-web" data-on={features[key]}>
+                    <Switch checked={features[key]} onChange={() => setFeatures((f) => ({ ...f, [key]: !f[key] }))} aria-label={label} />
+                  </span>
+                  <span className="settings-agent-line">{note}</span>
+                </div>
+              </Fragment>
+            ))}
           </div>
         )}
         {settings && (
@@ -664,7 +719,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
               const mode = agentMode(modeRows, agent, attached?.permission_mode, off)
               const pick = (m: OrientPermissions | undefined) => setModeRows((r) => ({ ...r, [agent]: m }))
               const items: MenuItem[] = [
-                { id: 'session', label: "Your session's", note: own === 'bypass' ? SESSION_BYPASS_NOTE : MODE_NAME[off.includes(own) ? 'manual' : own], checked: !picked, onSelect: () => pick(undefined) },
+                { id: 'session', label: "Your session's", note: MODE_NAME[off.includes(own) ? 'manual' : own], checked: !picked, onSelect: () => pick(undefined) },
                 ...MODE_OPTIONS.filter((o) => !off.includes(o.value)).map((o) => ({ id: o.value, label: o.label, checked: picked === o.value, onSelect: () => pick(o.value) })),
               ]
               const row = settings.agents?.[agent]
@@ -676,8 +731,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                       label={`${label} permission mode`}
                       items={items}
                       trigger={
-                        <Chip kind="plain" face="sans" as="button" trailingIcon="chevron-down" className="settings-cell settings-mode" aria-label={`${label} permission mode`} data-mode={mode} data-picked={picked ?? undefined}>
-                          {picked ? MODE_NAME[mode] : `${MODE_NAME[mode]} (your session's)`}
+                        <Chip kind="plain" face="sans" as="button" trailingIcon="chevron-down" className="settings-cell settings-mode" aria-label={`${label} permission mode`} data-mode={mode} data-picked={picked && picked !== 'bypass' ? picked : undefined}>
+                          {picked && picked !== 'bypass' ? MODE_NAME[mode] : `${MODE_NAME[mode]} (your session's)`}
                         </Chip>
                       }
                     />
@@ -686,12 +741,12 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                 </div>
               )
             })}
-            {CALL_ROWS.map(({ agent, label }) => {
+            {CALL_ROWS.map(({ agent, label, runs }) => {
               const row = settings.agents?.[agent]
               return row ? (
                 <div className="settings-row" role="row" key={agent} data-call-agent={agent}>
                   <span className="settings-role">{label}</span>
-                  <CallCell label={label} />
+                  <CallCell label={label} runs={runs} />
                   <AgentLine row={row} />
                 </div>
               ) : null
@@ -712,11 +767,6 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             {!!tasksLine(settings.tasks) && (
               <p className="settings-agent-main settings-agent-tasks" role="note">
                 Tasks: {tasksLine(settings.tasks)}
-              </p>
-            )}
-            {MODE_ROWS.some(({ agent }) => modeRowShown(settings.agents?.[agent]) && agentMode(modeRows, agent, attached?.permission_mode, off) === 'bypass') && (
-              <p className="settings-modes-warn" role="note">
-                {BYPASS_LINE}
               </p>
             )}
             {ignored.length > 0 && (
@@ -741,17 +791,24 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         )}
         {(error || settings?.config_error) && <div className="settings-error">{error || settings?.config_error}</div>}
         <div className="settings-foot">
-          {/* the product tour again, from its first step (shell/TourHost) */}
-          <Button
-            variant="ghost"
-            className="settings-tour"
-            onClick={() => {
-              onClose()
-              window.setTimeout(() => bus.emit('tour', {}), 250)
-            }}
-          >
-            Take the tour
-          </Button>
+          <span className="settings-foot-start">
+            {/* the product tour again, from its first step, in its frame on thimble's demo workspace (shell/TourHost) */}
+            <Button
+              variant="ghost"
+              className="settings-tour"
+              onClick={() => {
+                onClose()
+                window.setTimeout(() => bus.emit('tour', {}), 250)
+              }}
+            >
+              Take the tour
+            </Button>
+            {me && (
+              <Button variant="ghost" className="settings-signout" onClick={() => void signOut()}>
+                Sign out this browser
+              </Button>
+            )}
+          </span>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>

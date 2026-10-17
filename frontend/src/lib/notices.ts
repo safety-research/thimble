@@ -17,14 +17,14 @@ import type { Notice, NoticeAction } from './types'
 
 const str = (x: unknown): string => (typeof x === 'string' ? x : '')
 
-/** One action as the server sends it: {label, do, slug?}, else null. Pure. */
+/** One action as the server sends it: {label, do, slug?, text?}, else null. Pure. */
 function actionOf(a: unknown): NoticeAction | null {
   if (!a || typeof a !== 'object') return null
   const o = a as Record<string, unknown>
   const label = str(o.label).trim()
   const what = str(o.do).trim()
   if (!label || !what) return null
-  return { label, do: what, ...(str(o.slug) ? { slug: str(o.slug) } : {}) }
+  return { label, do: what, ...(str(o.slug) ? { slug: str(o.slug) } : {}), ...(str(o.text).trim() ? { text: str(o.text) } : {}) }
 }
 
 /** A notice's actions, from one action or a list of them; those without a label or a `do` left out. Pure. */
@@ -71,7 +71,7 @@ export function withoutNotice(list: readonly Notice[], gone: { id?: string; key?
 
 /** The words of backend hook_auth.CODE_GONE: the sign-in code of the link this page opened was used, replaced by a
  * newer one, or expired. */
-export const CODE_GONE_TEXT = 'This sign-in link was already used or has expired. Run `thimble up` in a shell for a new one, or type /thimble in your terminal.'
+export const CODE_GONE_TEXT = "This sign-in link was already used or has expired. Type `/thimble browser` in your Claude Code terminal for a new one, or press o in thimble's panel."
 /** The start of the id of a notice this page made, which the server does not hold. */
 export const PAGE_NOTICE = 'page:'
 
@@ -93,6 +93,10 @@ function touchAll(): void {
   pageSubs.forEach((fn) => fn())
   stores.forEach((s) => s.subs.forEach((fn) => fn()))
 }
+
+/** This browser's id, as GET /ui/paired answered it after the claim; '' while unknown. Settings' Sign out this browser
+ * signs out this id. */
+export const ownBrowserId = (): string => browserId
 
 /** This browser's id, as GET /ui/paired answers it after the claim: its own sign-in notice is left out. */
 export function setBrowserId(id: string): void {

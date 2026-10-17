@@ -50,8 +50,9 @@ SESSION_ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 REF_RE = re.compile(r"^call:([A-Za-z0-9_-]+)/(\d+)(?:#L(\d+)(?:-L(\d+))?)?$")
 # a page of a call's output from code unit <k> of line <a> on, to line <b> or the end of line <a> (module note)
 PIECE_RE = re.compile(r"^call:([A-Za-z0-9_-]+)/(\d+)#L(\d+):c(\d+)(?:-L(\d+))?$")
-# the prefixes of thimble's own tools, whose calls the hook skips
-THIMBLE_PREFIXES = ("mcp__plugin_thimble_thimble__", "mcp__thimble__")
+# the prefixes of thimble's own tools, whose calls the hook skips: main's shim's, a worker's, and an agent's own shim's
+# (thimble-<role>, subagents.private_server)
+THIMBLE_PREFIXES = ("mcp__plugin_thimble_thimble__", "mcp__thimble__", "mcp__thimble-")
 CHAT_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 

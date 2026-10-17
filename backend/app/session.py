@@ -4,7 +4,8 @@ A session attaches when its MCP shim subscribes naming it (events.subscribe) or 
 (`POST /api/ws/{c}/session`); its transcript is found under the config dir its shim reported (find_transcript). One
 session is main per workspace, kept in `workspaces/<c>/sessions.json` with the tail's cursor and each subagent's place,
 so a restarted server reads on where it stopped. The shim's subscription is the session's liveness: with no
-subscriber for GRACE_S the session detaches. /clear and /resume switch sessions in the same process, and main follows
+subscriber for GRACE_S the session detaches, unless its `claude` process runs on, as when /plugin turned thimble off in
+it (disconnected). /clear and /resume switch sessions in the same process, and main follows
 the new id by pid (_follow). When Claude Code moves the session into a background job, its transcript ends with a
 `continued-in` record naming the job's session, which copied the conversation and runs in its own process: main follows
 it there (_continue), and the session it left, parked in its old process, is never main again by its shim (_parked).
@@ -12,10 +13,11 @@ When main's session ends and none takes over, everything thimble runs for the wo
 once no workspace has a main session the server stops itself (cli.stop_self).
 
 The tail translates transcript records into main's log (`by: terminal`): the analyst's lines (not /thimble's own turn
-or local commands such as /model), browser events, task notifications, peer messages, tool calls and results, text,
+or local commands such as /model) and the prompts a plugin sent as theirs (PLUGIN_ORIGIN), browser events, task notifications, peer messages, tool calls and results, text,
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
 interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each, and so does the
 analyst's Stop of main in the browser, which leaves no record in the transcript and ends the turn (turn_stopped); a
+safety stop of main's reply is a notice too, with Make the card again and Ask again (STOP_TEXT); a
 reply Claude's safeguards switched to another model becomes a notice (notices.py, FALLBACK_TEXT), shown in the
 foreground and kept in its chat, main's or an agent's, and so does an API error that stops a side thread's fork or a
 helper of one of thimble's agents (_sub_error; thimble's agents' own failures are told where their runs end,
@@ -35,22 +37,36 @@ the start tool, or got the `start_agent` event that carries a thread's fork's st
 the request when it did not happen; a start_agent event a turn missed is posted once more first (_ask_again). A Workflow
 call is one agent chat whose members are the run's agent transcripts.
 
-Terminal mode (launch.json names a session in terminal mode, subagent_files.session_mode) has no server to follow main.
-Main is the session launch.json names, followed through the moves --rekey recorded, and current() gives every process a
-Live of it that reads nothing. The mirror runs in passes, from the hooks' backend calls (local_hooks.py): catch_up
-attaches main from sessions.json's cursor as a restarted server would, reads main's and every subagent's transcript to
-their ends and saves the cursor, with no tail task, grace or waits. The cursor keeps what R2 and R3 need across passes. Main ends a turn with
-nothing for the analyst without text, or with END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat
-shows END_TOKEN, nor a line that opens with TERMINAL_ONLY."""
+On local transport (subagent_files.transport: before the analyst's first press of the browser workbench) no server
+follows main. Main is the session launch.json names, followed through the moves --rekey recorded, and current() gives
+every process a Live of it that reads nothing. The mirror runs in passes, from the hooks' backend calls
+(local_hooks.py): catch_up attaches main from sessions.json's cursor as a restarted server would, reads main's and every
+subagent's transcript to their ends and saves the cursor, with no tail task, grace or waits, one pass at a time
+(PASS_LOCK). The cursor keeps what R2 and R3 need across passes. After the press this server follows main: the press
+moves the transport to the server first, then this server's attach waits for a pass under way (PASS_LOCK) and reads on
+from the cursor that pass saved, so the mirror has no gap and no duplicate (H4), and catch_up reads nothing more. A
+session no pass read yet (a press at the end of the first turn, before the Stop hook's pass) is read from when thimble
+turned on in it (its session marker's time), so main's chat holds that turn too. Main ends a turn with nothing for the analyst without text, or with
+END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat shows END_TOKEN, nor a line that opens with
+TERMINAL_ONLY, except in main's reply to the hand-back of an agent whose end main's chat has no row for (HANDBACK_ROWS:
+a view's builder or reviewer), which shows whole under one short row for the hand-back, as the terminal shows it.
+
+At the end of each of main's turns the checks hear of it twice: the shown checks over the cards run on the cards that
+changed (checks.main_turn_ended), and the checks over Claude's answers get the turn's text rows as Claude wrote them,
+each with its record's uuid, and the turn's tool calls (checks.answer_ended), which decides whether the turn answered
+from data. Main's text records carry that uuid, so the browser can anchor a check's comment on its passage."""
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import html
 import json
 import logging
 import os
 import re
+import secrets
 import signal
 import time
 from datetime import datetime, timezone
@@ -90,6 +106,8 @@ REPLY_TOOL = "reply_in_thread"
 # what main ends a turn with when it has nothing for the analyst, which no chat shows (module note, the end token)
 END_TOKEN = "(shown in the dashboard)"
 TERMINAL_ONLY = "↳"  # opens a line of main's or a fork's that only the terminal shows (prompts/main.md)
+# what Claude Code writes for an empty text block, which its terminal does not draw, so no chat shows it either
+NO_CONTENT = "(no content)"
 # the token at the end of a text, with the variants the model writes: any case, a trailing period, `*` or `_` emphasis
 END_RE = re.compile(r"[ \t]*[*_]*" + re.escape(END_TOKEN) + r"\.?[*_]*\.?\s*\Z", re.I)
 # Claude Code's calls that are nothing the analyst reads, so no row in any chat: loading a deferred tool's schema before
@@ -110,7 +128,10 @@ SID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # origin OLD_ORIGIN on the channel route, inside task notifications on the hook and Monitor routes
 OLD_TAG, OLD_ORIGIN, OLD_SOURCE = "channel", "channel", "plugin:thimble:thimble"
 # the origin of a line a plugin's module adds to the session, such as the notes thimble's module appends to main
-# ($.session.append, which Claude Code records as a meta user record): no chat shows it as the analyst's
+# ($.session.append, which Claude Code records as a meta user record): no chat shows it as the analyst's. A prompt a
+# plugin sends as the analyst's ($.prompt.submit with asUser, origin `asUser: true`, which Claude Code shows as
+# `Prompt from the <name> plugin`), such as the terminal panel's `run again` and `describe a new label`, is the analyst's
+# line, marked with the plugin's name (plugin_prompt)
 PLUGIN_ORIGIN = "plugin"
 # one event, as events.render writes it or 0.5.0's channel did
 EVENT_RE = re.compile(rf"^\s*<(?:{EVENT_TAG}|{OLD_TAG})\s([^>]*)>\n?(.*?)\n?</(?:{EVENT_TAG}|{OLD_TAG})>\s*$", re.S)
@@ -148,6 +169,9 @@ PLAN_MODE_ATTACHMENTS = ("plan_mode", "plan_mode_reentry")
 PLAN_EXIT_ATTACHMENT = "plan_mode_exit"
 # a Bash call's result when it runs in the background: its shell's task id, which TaskStop takes (live check L33)
 BG_SHELL_RE = re.compile(r"\A\s*Command running in background with ID:\s*([A-Za-z0-9_-]+)")
+# a Bash call's result when its timeout moved it to the background: its shell's task id
+BG_MOVED_RE = re.compile(r"moved to the background \(ID:\s*([A-Za-z0-9_-]+)\)")
+STOP_TOOLS = ("TaskStop", "KillShell")  # the tools that end a background task by its id (`task_id`, `shell_id`)
 HANDBACK_RE = re.compile(r"\A\[Subagent hand-back\].*?follows:\n", re.S)  # the harness's lead of a hand-back
 START_TOOLS = ("start_orientation", "start_writing", "message_orientation", "propose_view", "run_check")  # R3, the Bash true
 # R2: what an error result of main's call for one of thimble's agents says, by the kind of refusal it is
@@ -157,6 +181,13 @@ EARLIER_RE = re.compile(r"could not be resumed|no transcript found", re.I)
 # analyst reads the reason alone, as the PermissionDenied hook gives it (R1)
 AUTO_MODE_RE = re.compile(r"denied by the Claude Code auto mode classifier\.\s*Reason:\s*(.+?)\.(?:\s|$)")
 HANDBACK_LEAD = "[Subagent hand-back]"  # how Claude Code's frame around a subagent's last report opens
+# the roles of thimble's agents whose end main's chat has no row of its own, by the row their hand-back gets there (a
+# `chip` of HANDBACK_CHIP naming the agent's chat, never its report), under which main's reply shows whole, its
+# TERMINAL_ONLY line too, since the terminal shows that line under the hand-back (bug hunt D2). The orientation's, a
+# writer's and a code ticket's end have their rows (its landing, the document's chip, the ticket's chip), so main's
+# TERMINAL_ONLY line stays the terminal's; a check's and a model call's agent hand back to no one (subagents.py)
+HANDBACK_ROWS = {"view-builder": "View builder finished", "view-reviewer": "View reviewer finished"}
+HANDBACK_CHIP = "handback"
 ASYNC_RESULT_RE = re.compile(r"^\s*Async agent launched")
 AGENT_ID_RE = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 TASK_DONE = ("completed", "done", "success")
@@ -172,6 +203,7 @@ SAFETY_TEXT = "Claude's safety check stopped a response, and the session is tryi
 SAFETY_STOP_TEXT = "The session stopped: Claude's safety check ended this turn"
 INTERRUPTED_TEXT = "The turn was interrupted in the terminal"
 STOPPED_TEXT = "The turn was stopped in the browser"
+CANCELLED_TEXT = "Stopped in the browser before main got it"  # a message the analyst's Stop took back (cancelled)
 WAITING_TEXT = "The session is waiting for you in the terminal"
 WAITING_FOR = {"permission prompt": "a permission prompt", "dialog open": "a dialog is open",
                "input needed": "a request for input", "sandbox request": "a sandboxed command asks for network access"}
@@ -181,6 +213,32 @@ WAIT_NOTE_S = 2.0  # a wait shorter than this (a prompt the analyst answered at 
 # Main's hook-relayed prompt older than this is ended while Claude Code's record says the session waits on none: the
 # analyst answered it in the terminal. A subagent's or fork's prompt is never released this way.
 ASK_RELEASE_S = 10.0
+# a reply of main's that Claude's safeguards stopped partway (the model's own reply ends with stop_reason refusal, not
+# Claude Code's API error line), after which Claude Code goes on once (SAFETY_RE): when the turn ends, a notice in the
+# browser and the terminal says so, and names the card the stopped reply was making when that card was not added, with
+# the fixes: Make the card again (`card-again`, CARD_AGAIN sent to main as the analyst's) and Ask again (`ask-again`,
+# the analyst's last message to main put back in the prompt to send in other words) (bug hunt C23). When main went on
+# after the stop and ended its turn, the request ran to its end: no Ask again, and a notice only for a card still
+# missing (STOP_CARD_WENT_ON_TEXT) (bug hunt D11)
+STOP_KEY = "stopped:main"
+STOP_KIND = "stopped"
+STOP_TEXT = "Claude's safeguards stopped main's reply partway. Ask again in other words."
+STOP_CARD_TEXT = ("Claude's safeguards stopped main's reply partway, so the card it was making wasn't added{question}. "
+                  "Make the card again, or ask again in other words.")
+STOP_CARDS_TEXT = ("Claude's safeguards stopped main's reply partway, so the {n} cards it was making weren't added. "
+                   "Make the cards again, or ask again in other words.")
+STOP_CARD_WENT_ON_TEXT = ("Claude's safeguards stopped main's reply partway. Main went on, but the card it was making "
+                          "wasn't added{question}. Make the card again.")
+STOP_CARDS_WENT_ON_TEXT = ("Claude's safeguards stopped main's reply partway. Main went on, but the {n} cards it was "
+                           "making weren't added. Make the cards again.")
+CARD_AGAIN = ("Claude's safeguards stopped your reply while you were adding the card{question}, and the card was not "
+              "added. Make that card again.")
+CARDS_AGAIN = ("Claude's safeguards stopped your reply while you were adding these cards, and they were not added. "
+               "Make them again:\n{questions}")
+CARD_AGAIN_LABELS = ("Make the card again", "Make the cards again")
+ASK_AGAIN_LABEL = "Ask again"
+STOP_QUESTION_CHARS = 120  # of a card's question in the notice's words
+CARD_TOOLS = ("add_card", "add_cell")  # the calls that make a card, by their names
 SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check stopped this answer. Choose there whether "
                 "to switch to another model and go on, or to stay on this one and stop the answer.")
 # Claude's safeguards and a reply (module note, stops and waits). A downgrade: Claude Code answers on another model
@@ -195,6 +253,13 @@ SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check 
 # agent it stopped is told as any API error's (_sub_error, subagents.run_ended).
 FALLBACK_SUBTYPE = "model_refusal_fallback"
 FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
+# main's switch for the rest of the session (the record's scope `session`): Claude Code answers on the fallback from then
+# on, and says the way back is to retry the message on the model it refused. The browser's model line cannot change
+# main's model, so the fix is in the terminal (bug hunt C20: the notice said "this reply")
+SESSION_FALLBACK_TEXT = ("Claude's safeguards switched main from {model} to {fallback} for the rest of this session. In "
+                         "your terminal: run /model to pick {model} again, or edit your message and retry it with "
+                         "{model}.")
+SESSION_SCOPE = "session"
 AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}."
 FALLBACK_KEY = "safeguards:{chat}"  # the notices' key: a later switch in the same chat updates the notice
 SUB_ERROR_TEXT = "{subject} stopped with an error: {why}."  # a side thread's fork or a helper an API error stopped
@@ -237,6 +302,9 @@ class Sub:
         self.skip_prompt = False
         self.root: str | None = None  # the agent id of the thimble agent a descendant's chat is a step of
         self.last_text: str | None = None  # the last text it wrote, a turn's answer (agent_answer)
+        # the background tasks it started that have not ended (a shell, a Monitor, a background agent): Claude Code
+        # wakes it when each ends (agent_tasks)
+        self.tasks: set[str] = set()
         # a thread's fork's words in its last `↳ thread <name>: …` line written after its last tool call, which only the
         # terminal shows: its answer when it ends with no reply in the thread (_note_reply)
         self.note: str | None = None
@@ -273,6 +341,15 @@ class Live:
         self.config: str | None = None
         self.config_known = False
         self.offset = -1  # bytes of the transcript read; -1 before the first look
+        # an ISO time: at the first look the transcript is read from its first record since then, not from its end
+        # (attach: a session no mirror read yet, from when thimble turned on in it)
+        self.read_from = ""
+        self.attached_at = time.monotonic()  # when this process made it main (sweep)
+        # tool_use id -> question of each card call in main's reply the safeguards are stopping, until the stop is told
+        # (_stop_notice); a call that ran to its end and made its card leaves (_tool_result)
+        self.stopped_cards: dict[str, str] = {}
+        self.stop_pending = False  # the safeguards stopped a reply in this turn, which is told when the turn ends
+        self.went_on = False  # main replied after that stop (no API error, no second stop)
         self.buf = b""
         self.saved = -1  # the offset the cursor in sessions.json holds (_save_cursor)
         self.subs_saved: dict[str, tuple] = {}  # each subagent's (offset, done) sessions.json holds (_sub_places)
@@ -297,11 +374,15 @@ class Live:
         self.turn_calls: set[str] = set()  # the ids of main's tool calls in the turn (R3, _end_turn)
         self.turn_since: str | None = None  # when the turn opened, which the checks over the cards look from (_end_turn)
         self.turn_text = ""  # main's last text in the turn, the reason R3 quotes
+        self.turn_rows: list[dict] = []  # the turn's text rows as Claude wrote them: {uuid, text} (_answer_checked)
+        self.turn_tools: list[dict] = []  # the turn's tool calls: {name, input}, inputs cut (_brief, _answer_checked)
+        # main's TERMINAL_ONLY lines show in its chat for the rest of the turn: a hand-back of HANDBACK_ROWS reached it
+        self.turn_notes = False
         self.thimble_calls: dict[str, dict] = {}  # tool_use id of main's call for one of thimble's agents -> {name, input}
         # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
         # ran, since a hook (thimble's --agent-check) or auto mode may refuse it
         self.relays: dict[str, tuple] = {}
-        # relays a pass of the mirror in terminal mode handed on as [agent id, input], until their Subs are known
+        # relays a pass of the mirror on local transport handed on as [agent id, input], until their Subs are known
         self.pending_relays: dict[str, list] = {}
         self.after_start = False  # main's last call was a start of thimble's or its tool: a bare `Bash true` next is hidden
         self.last_tool: str | None = None  # the name of main's last tool call (_nudged)
@@ -309,8 +390,8 @@ class Live:
         # the promptId of the local command whose caveat was read last ('' when the record has none), whose command
         # line is not the analyst's line to main (module note, the table); None once another line was read
         self.local_prompt: str | None = None
-        self.model: str | None = None  # the model of main's last reply (_note_model)
-        self.effort: str | None = None  # the effort of main's last reply (_note_model)
+        self.model: str | None = None  # the model of main's last request or reply (_note_run)
+        self.effort: str | None = None  # the effort of main's last request or reply (_note_run)
         self.fast: bool | None = None  # whether main's last reply ran in fast mode (_note_model)
         self.alerted = False  # main's meta holds the alert for the model-switch dialog (_watch_wait)
         self.flagged = False  # the safety check stopped a response in this turn (module note, stops and waits)
@@ -327,6 +408,8 @@ class Live:
         self.continued: tuple[str, str] | None = None  # (session, time) of the continued-in record read (_continue)
         self.came_from: dict | None = None  # {session, transcript, at} of the session this one continues (FROM_KEY)
         self.copied: tuple[set[str], float] | None = None  # what that session's records are known by (_copied)
+        # time.monotonic() when a signed-in browser made this server follow it from local transport (follow_browser)
+        self.handed_at: float | None = None
         self.moved_at: float | None = None  # time.monotonic() when main followed it here from that session (_continue)
         self.reading = False  # tail_once runs for it now, so _read_now leaves it to that read
         self.task: asyncio.Task | None = None
@@ -361,6 +444,8 @@ SHIM_PIDS_KEPT = 256  # _shim_pids and _shim_configs keep the newest this many
 STAMP_LINES = 200  # _began_since looks this far into a transcript for its first record with a timestamp
 CURSOR_CALLS = 200  # the cursor keeps the names of main's newest this many tool calls, for results that come later
 TURN_TEXT_KEPT = 4_000  # chars of main's last text in the turn the cursor keeps (R3's reason)
+TURN_ROWS_KEPT = 200  # the turn's last text rows the cursor keeps for the checks over Claude's answers
+TURN_TOOLS_KEPT = 500  # the turn's last tool calls the cursor keeps for them
 SUBS_KEY = "subs"  # sessions.json: each followed subagent transcript's place, by its path (_sub_places)
 CONTINUED = "continued"  # sessions.json's reason for a session that continued in another (_continue)
 FROM_KEY = "continues"  # sessions.json: {session, transcript, at} of the session this one continues (_continue)
@@ -465,10 +550,13 @@ def _turn_state(lv: Live) -> dict:
             "seen": [k for k in lv.seen if k.split(":", 1)[-1] in names],
             "watch_calls": [i for i in lv.watch_calls if i in names], "sends": lv.sends,
             "turn_threads": lv.turn_threads, "forked": sorted(lv.forked),
-            # R2 and R3 (module note), which a pass of the mirror in terminal mode hands to the next
+            # R2 and R3 (module note), which a pass of the mirror on local transport hands to the next
             "thimble_calls": lv.thimble_calls, "turn_calls": sorted(lv.turn_calls)[-CURSOR_CALLS:],
             "turn_text": lv.turn_text[-TURN_TEXT_KEPT:], "after_start": lv.after_start, "last_tool": lv.last_tool,
-            "last_failed": lv.last_failed,
+            # the checks over Claude's answers (_answer_checked): a turn's text and its end are often read by
+            # different passes
+            "turn_rows": lv.turn_rows[-TURN_ROWS_KEPT:], "turn_tools": lv.turn_tools[-TURN_TOOLS_KEPT:],
+            "last_failed": lv.last_failed, "turn_notes": lv.turn_notes,
             "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id},
             # the proposer's (proposer.turn_ended): a turn's first line and its end are often read by different passes
             "turn_analyst": lv.turn_analyst, "last_cut": lv.last_cut, "context_tokens": lv.context_tokens,
@@ -489,9 +577,12 @@ def _take_turn(lv: Live, cur: dict) -> None:
     lv.thimble_calls = {str(k): v for k, v in calls.items() if isinstance(v, dict)} if isinstance(calls, dict) else {}
     lv.turn_calls = {str(i) for i in cur.get("turn_calls") or []}
     lv.turn_text = str(cur.get("turn_text") or "")
+    lv.turn_rows = [r for r in cur.get("turn_rows") or [] if isinstance(r, dict)]
+    lv.turn_tools = [t for t in cur.get("turn_tools") or [] if isinstance(t, dict)]
     lv.after_start = bool(cur.get("after_start"))
     lv.last_tool = str(cur.get("last_tool") or "") or None
     lv.last_failed = bool(cur.get("last_failed"))
+    lv.turn_notes = bool(cur.get("turn_notes"))
     lv.turn_analyst = bool(cur.get("turn_analyst"))
     lv.api_failed = bool(cur.get("api_failed"))
     lv.last_cut = str(cur.get("last_cut") or "") or None
@@ -544,13 +635,46 @@ def _learn_config(lv: Live, reported: str | None) -> bool:
 # --------------------------------------------------------------------------- attach and detach
 
 
-def _terminal_ws(c: str) -> Path | None:
-    """The workspace folder of `c` when the session launch.json names runs in terminal mode (module note), else None."""
+def _local_ws(c: str) -> Path | None:
+    """The workspace folder of `c` while main runs on local transport (module note), else None."""
     try:
         ws = config.workspace_path(c)
     except ValueError:
         return None
-    return ws if sfiles.terminal(ws) else None
+    return ws if sfiles.transport(ws) == sfiles.LOCAL else None
+
+
+PASS_LOCK = "mirror.pass.lock"  # in the workspace folder: held by a pass of the mirror (catch_up) while it reads
+HANDOVER_S = 15.0  # how long this server's attach waits for a pass under way to end (H4)
+
+
+@contextlib.contextmanager
+def _pass_lock(ws: Path, wait_s: float | None = None):
+    """PASS_LOCK held for the block: waited for (None) or for at most `wait_s`, after which the block runs without it."""
+    import fcntl  # noqa: PLC0415
+
+    try:
+        fd = os.open(Path(ws) / PASS_LOCK, os.O_RDONLY | os.O_CREAT, 0o600)
+    except OSError:
+        fd = -1
+    if fd >= 0:
+        end = None if wait_s is None else time.monotonic() + wait_s
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | (0 if end is None else fcntl.LOCK_NB))
+                break
+            except BlockingIOError:
+                if time.monotonic() >= end:
+                    log.warning("%s: a pass of the mirror held %s past %.0f s", ws.name, PASS_LOCK, wait_s or 0)
+                    break
+                time.sleep(0.02)
+            except OSError:
+                break
+    try:
+        yield
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def attached_workspaces() -> list[str]:
@@ -560,9 +684,9 @@ def attached_workspaces() -> list[str]:
 
 def tell_terminal(c: str, line: str) -> bool:
     """`line` for main's terminal in workspace `c`: appended to <home>/links/<main's session>, which main's Stop hook shows
-    under main's next reply (plugin/bin/.thimble-watch link_lines), as a note after the link /thimble left there, or after
-    an empty first line in a file this makes (readable by its owner alone). False when no main is attached or the line
-    was not written."""
+    under main's next reply (plugin/bin/.thimble-watch terminal_notes), as a note after the empty first line of the file
+    /thimble left there or this makes (readable by its owner alone); never a sign-in code (the transcript keeps it).
+    False when no main is attached or the line was not written."""
     lv = _live.get(c)
     name = "".join(ch for ch in (lv.sid if lv is not None else "") if ch.isalnum() or ch in "-_")
     if not name or not line.strip():
@@ -586,20 +710,20 @@ def tell_terminal(c: str, line: str) -> bool:
 
 
 def current(c: str) -> Live | None:
-    """The session that is main in workspace `c`: the one this server follows, or in terminal mode the one launch.json
+    """The session that is main in workspace `c`: the one this server follows, or on local transport the one launch.json
     names, followed through the moves --rekey recorded (_terminal_main), when no pass of the mirror in this process
     attached it (catch_up)."""
     lv = _live.get(c)
-    if lv is None and (ws := _terminal_ws(c)) is not None:
+    if lv is None and (ws := _local_ws(c)) is not None:
         return _terminal_main(c, ws)
     return lv
 
 
-_shadows: dict[str, Live] = {}  # workspace -> main as current() gives it in terminal mode, which reads nothing
+_shadows: dict[str, Live] = {}  # workspace -> main as current() gives it on local transport, which reads nothing
 
 
 def _terminal_main(c: str, ws: Path) -> Live | None:
-    """Main in terminal mode as a Live that reads nothing (no tail, not in _live): its id, its folder, its transcript and
+    """Main on local transport as a Live that reads nothing (no tail, not in _live): its id, its folder, its transcript and
     its `claude` process (launch.json's pid), for the code that asks which session is main. None while launch.json names
     none."""
     sid = sfiles.main_session(ws)
@@ -624,10 +748,15 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
            config_dir: str | None = None, *, follow: bool = False, after: str | None = None) -> Live | None:
     """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR ("" for
     unset, None for what its shim reported); `follow` says the session runs in the process of the one it replaces
-    (_follow); `attached.after` names the previous main when it still runs in another process."""
+    (_follow); `attached.after` names the previous main when it still runs in another process. Main followed again
+    means thimble's page is up (or, in a pass on local transport, that main's tools run without it), so the shim's
+    `page:stopped` notice goes (notices.page_back, bug hunt H4)."""
     sid, cwd = str(sid or ""), str(cwd or "")
     if not SID_RE.match(sid):
         return None
+    from . import notices  # noqa: PLC0415
+
+    notices.page_back(c)
     # `/thimble` names neither; the session's shim reported both when it subscribed
     pid = pid or _shim_pids.get((c, sid))
     config_dir = _shim_configs.get((c, sid)) if config_dir is None else config_dir
@@ -648,6 +777,11 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         if after is None and not follow and _runs_elsewhere(c, cur, pid):
             after = cur.sid
         detach(c, cur.sid, "replaced")
+    if _handing_over(c):
+        # H4: a pass of the mirror that runs now on local transport ends first (none starts once the transport is the
+        # server's), and what it kept, main's meta and its cursor, is what this reads on from
+        with _pass_lock(config.workspace_path(c), HANDOVER_S):
+            pass
     meta = agents.ensure_main(c)
     held = meta.get("attached") or {}
     stored = sessions(c).get(sid) or {}
@@ -656,6 +790,11 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
               pid or stored.get("pid"))
     _learn_config(lv, config_dir)
     lv.transcript_path = lv.transcript_path or find_transcript(sid, lv.config_dir)
+    if not restored and not stored and not follow:
+        # a session no mirror has read: from when thimble turned on in it, so main's chat holds what main said before a
+        # press that came ahead of any pass on local transport (thimble is on from the session's start), not only what
+        # comes after it
+        lv.read_from = _turned_on(c, sid)
     if restored:
         lv.since = str(stored.get("since") or lv.since)
         _restore_cursor(lv, stored.get("cursor"))
@@ -664,6 +803,11 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
             _take_copied(lv)
             lv.offset = max(lv.offset, 0)
         lv.continued = _continued_in(lv.transcript_path)  # it moved while no server followed it: tail_once follows
+    elif stored.get("reason") == "ended" and not follow:
+        # a session that ended (the analyst quit) and came back under its id (`claude -c`, `--resume`): read on from where
+        # the mirror stopped, so main's chat holds the turns it answered while no server followed it, each once (bug hunt
+        # H5: the answer to "where were we?" before `/thimble browser` never reached the browser)
+        _restore_cursor(lv, stored.get("cursor"))
     # A session followed before comes back under the same id when resumed, so its subagents' and forks' transcripts are
     # picked up where they stand rather than read from their start.
     _restore_subs(lv, stored.get(SUBS_KEY), revive=restored)
@@ -700,6 +844,69 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _resume_work(c)
     log.info("%s: session %s attached (%s)", c, sid, "restored" if restored else "new")
     return lv
+
+
+def _turned_on(c: str, sid: str) -> str:
+    """When thimble turned on in session `sid` (its session marker's `at`, which activation writes: contract C1), as an
+    ISO time; '' when the session has no marker or its marker names another workspace."""
+    from . import activate  # noqa: PLC0415 — the standard library only, at its import
+
+    try:
+        marker = activate.read_marker(sid)
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(marker, dict) or str(marker.get("ws") or "") != c:
+        return ""
+    at = marker.get("at")
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return ""
+    try:
+        return datetime.fromtimestamp(float(at), timezone.utc).isoformat(timespec="milliseconds")
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def follow_browser(c: str) -> Live | None:
+    """A signed-in browser opened workspace `c`'s page, or wrote to main there, while main runs on local transport: the
+    browser stayed signed in from an earlier session, so this session had no press. A permission request on local
+    transport reaches no server, so such a browser never showed main's waiting request (bug hunt F4). The server
+    follows main from now on, as after a press (open_cmd.press): launch.json's transport made the server's first, then
+    the attach, which reads on from the last pass's cursor (H4). The session's shim, hooks and waker read the transport
+    as they go and move to the server. Nothing when main runs on the server already, when launch.json names no main, or
+    when main's `claude` has ended. The Live it attached, else None."""
+    from . import activate  # noqa: PLC0415
+
+    ws = _local_ws(c)
+    lv = current(c) if ws is not None else None
+    if ws is None or lv is None:
+        return None
+    rec = sfiles.launch(ws)
+    if not activate.main_alive(c, rec):
+        return None
+    pid = rec.get("pid") if isinstance(rec.get("pid"), int) and not isinstance(rec.get("pid"), bool) else None
+    config_dir = rec.get("config_dir") if isinstance(rec.get("config_dir"), str) else None
+    try:
+        activate.write_launch(c, lv.sid, role=activate.MAIN, transport=activate.SERVER, via="press", pid=pid,
+                              config_dir=config_dir or "")
+    except (OSError, ValueError) as e:
+        log.warning("%s: main's session %s stays on local transport: %s", c, lv.sid, e)
+        return None
+    log.info("%s: a signed-in browser opened the page; this server follows main's session %s from now on", c, lv.sid)
+    got = attach(c, lv.sid, lv.cwd, lv.transcript_path, pid, config_dir)
+    if got is not None:
+        got.handed_at = time.monotonic()
+    return got
+
+
+def _handing_over(c: str) -> bool:
+    """Whether this server follows main of workspace `c` after a press (events.SERVING and main's transport is the
+    server), where passes of the mirror on local transport may have read main until now (H4)."""
+    from . import events  # noqa: PLC0415
+
+    try:
+        return events.SERVING and sfiles.transport(config.workspace_path(c)) == sfiles.SERVER
+    except ValueError:
+        return False
 
 
 def _kept_modes() -> dict[str, Any]:
@@ -816,9 +1023,9 @@ def note_plan(c: str, sid: str | None, plan: bool) -> None:
 
 def main_mode(c: str) -> str | None:
     """The permission mode main's hooks last reported (note_mode), by Claude Code's name, to this server or, for the
-    session it restarted under, to the one before it; None before the first report. In terminal mode, as the files say
+    session it restarted under, to the one before it; None before the first report. On local transport, as the files say
     (subagent_files.main_mode: the mode hook's record, and the module's plan poll)."""
-    if (ws := _terminal_ws(c)) is not None:
+    if (ws := _local_ws(c)) is not None:
         return sfiles.main_mode(ws)
     lv, got = _live.get(c), _modes.get(c)
     return got[1] if lv is not None and got is not None and got[0] == lv.sid else None
@@ -852,7 +1059,7 @@ def _restore_subs(lv: Live, places: Any = None, *, revive: bool = True) -> None:
             lv.subs.append(sub)
         elif (meta.get("kind") == agents.KIND_THREAD and fork.get("tool_use_id") and fork.get("session") == lv.sid
               and not fork.get("ended") and not threads.settled(lv.c, str(meta["id"]))):
-            # its Agent call was read and its file not yet found (terminal mode reads each in its own process): the
+            # its Agent call was read and its file not yet found (local transport reads each in its own process): the
             # file, which names the thread by its question only, joins the thread by the call's tool_use id
             lv.subs.append(Sub(lv.c, str(meta["id"]), fork.get("tool_use_id"), None, thread=True))
         # a chat of one of thimble's agents (route subagent), its role's or a descendant's step, is followed to its end
@@ -917,8 +1124,9 @@ def _take_place(sub: Sub, path: Path, place: Any, at_end: bool) -> None:
 
 def detach(c: str, sid: str, reason: str | None = None) -> bool:
     """The session is no longer main: the tail stops, a running subagent is stopped, main's meta drops `attached` and
-    names the session in `ended` ({session, cwd, at}), and the Manual-mode notice of the session goes. True when this
-    session was main."""
+    names the session in `ended` ({session, cwd, at, since}: `since` when it was attached, so the browser names only the
+    agents that stopped with this session, not an earlier one's: bug hunt 7, H17), and the Manual-mode notice of the
+    session goes. True when this session was main."""
     lv = _live.get(c)
     if lv is not None and lv.sid == sid:
         _live.pop(c, None)
@@ -940,7 +1148,8 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
         return False
     meta["attached"] = None
     meta["alert"] = None
-    meta["ended"] = {"session": sid, "cwd": str(held.get("cwd") or ""), "at": _now()}
+    meta["ended"] = {"session": sid, "cwd": str(held.get("cwd") or ""), "at": _now(),
+                     **({"since": str(held["since"])} if held.get("since") else {})}
     agents.write_meta(c, meta)
     agents.notify(c, agents.MAIN_ID)
     if held.get(MANUAL_KEY):  # the Manual-mode notice was this session's; the next main reports its own mode
@@ -973,6 +1182,7 @@ def connected(c: str, sid: str | None, cwd: str, pid: int | None, config_dir: st
             return
         old = cur.sid if cur is not None else held
     _cancel_grace(c)
+    _back(c)
     _came_back.add(c)
     if old:
         _follow(c, str(old), str(sid), cwd, pid)
@@ -993,7 +1203,7 @@ def _moved_main(c: str, sid: str) -> Live | None:
 def main_pid(c: str) -> int | None:
     """The pid of the `claude` process main's session runs in: what its shim reported, else (after a restart, before
     that shim came back) what sessions.json recorded for the session main's meta names."""
-    if (ws := _terminal_ws(c)) is not None:
+    if (ws := _local_ws(c)) is not None:
         return sfiles.main_pid(ws)  # main's `claude`, which the launcher wrote there, for the session's life
     cur = _live.get(c)
     if cur is not None:
@@ -1092,8 +1302,12 @@ def _continue(lv: Live) -> None:
 
 
 def disconnected(c: str, sid: str | None) -> None:
-    """A shim's subscription ended: when none of main's is left after GRACE_S, the session is gone."""
-    from . import events  # noqa: PLC0415
+    """A shim's subscription ended: when none of main's is left after GRACE_S, the session is gone, unless main's
+    `claude` process still runs. Then thimble is off in the session (/plugin unloads the plugin and stops its shim, and
+    runs no SessionEnd hook): main stays main, away (_away), its agents run on, and it is looked at again every GRACE_S
+    until its shim comes back (connected) or the process is gone (bug hunt H19). A quit is the SessionEnd hook's
+    (subagents.hook_end), or the process gone."""
+    from . import events, procs  # noqa: PLC0415
 
     def mains() -> bool:
         lv = _live.get(c)
@@ -1109,6 +1323,12 @@ def disconnected(c: str, sid: str | None) -> None:
             return  # stopping ends every subscription at once; the session's shim comes back to the next server
         lv = _live.get(c)
         if not mains() and lv is not None and (sid is None or lv.sid == sid):
+            pid = main_pid(c)
+            if pid and procs.alive(pid):
+                _away(c, lv.sid, pid)
+                with contextlib.suppress(RuntimeError):
+                    _grace[c] = asyncio.get_running_loop().call_later(GRACE_S, check)
+                return
             detach(c, lv.sid, "ended")
             _hand_back(c, lv.sid)
             if _live.get(c) is None:  # no session took over as main: the analyst quit, so thimble's agents stop too
@@ -1118,6 +1338,31 @@ def disconnected(c: str, sid: str | None) -> None:
         _grace[c] = asyncio.get_running_loop().call_later(GRACE_S, check)
     except RuntimeError:
         check()
+
+
+AWAY_KIND = "away"  # main's meta's alert while thimble is off in main's session (_away)
+AWAY_TEXT = "thimble is off in this Claude Code session. To turn it on again, type /plugin in the terminal."
+
+
+def _away(c: str, sid: str, pid: int) -> None:
+    """Main's shim is gone but its `claude` process runs: thimble is off in the session, which the page's alert on main
+    says until the shim comes back (_back); another alert of main's is left as it is."""
+    meta = agents.ensure_main(c)
+    if (meta.get("attached") or {}).get("session") != sid or meta.get("alert"):
+        return
+    meta["alert"] = {"kind": AWAY_KIND, "text": AWAY_TEXT, "since": _now()}
+    agents.write_meta(c, meta)
+    agents.notify(c, agents.MAIN_ID)
+    log.info("%s: session %s has no shim, but its claude process (pid %s) runs: thimble is off in it", c, sid, pid)
+
+
+def _back(c: str) -> None:
+    """Main's shim subscribed again: the alert _away set goes."""
+    meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
+    if (meta.get("alert") or {}).get("kind") == AWAY_KIND:
+        meta["alert"] = None
+        agents.write_meta(c, meta)
+        agents.notify(c, agents.MAIN_ID)
 
 
 def _stop_agents(c: str) -> None:
@@ -1142,10 +1387,10 @@ def _stop_agents(c: str) -> None:
 
 def _resume_work(c: str) -> None:
     """A session is main in workspace `c`: the view builds a server restart left are attached again (dev.resume_views).
-    Nothing main's quit stopped starts again by itself. Nothing in terminal mode, where no server restarts."""
+    Nothing main's quit stopped starts again by itself. Nothing on local transport, where no server restarts."""
     from . import dev  # noqa: PLC0415 — dev imports this module
 
-    if _terminal_ws(c) is not None:
+    if _local_ws(c) is not None:
         return
     for fn in (dev.resume_views,):
         try:
@@ -1160,14 +1405,21 @@ STOP_AFTER_S = 3.0  # after main's end, how long the server waits before it stop
 async def _stop_server() -> None:
     """No workspace has a main session: what still runs in any workspace stops as main's end stops it, the kernels end,
     and the server stops itself (cli.stop_self), STOP_AFTER_S later, so a page that is open reads main's end and shows
-    the session-gone card before its stream closes (live check L10), and a session that attaches meanwhile keeps it."""
-    from . import cli, notebook  # noqa: PLC0415
+    the session-gone card before its stream closes (live check L10), and a session that attaches meanwhile keeps it. A
+    page that shows a demo workspace (demo_guard.is_demo), which needs no session, keeps it up, as `thimble demo`'s
+    own server stays up (bug hunt F7)."""
+    from . import cli, demo_guard, investigation, notebook  # noqa: PLC0415
 
     for c in sorted(agents.at_work()):
         with contextlib.suppress(Exception):
             await agents.stop_all(c)
     await asyncio.sleep(STOP_AFTER_S)
     if _live or _shutting_down():
+        return
+    demos = sorted(c for c in investigation.watched() if demo_guard.is_demo(c))
+    if demos:
+        log.info("no workspace has a main session, but a page shows the demo %s, which needs none: the server stays up",
+                 ", ".join(demos))
         return
     with contextlib.suppress(Exception):
         await notebook.shutdown_all()
@@ -1304,10 +1556,14 @@ def _open_turn(lv: Live) -> None:
     """A record that starts main's turn: the analyst's line, an event, a task notification. Several before the first
     assistant record open the same turn."""
     if not lv.turn_open or not lv.fresh:
+        if lv.stop_pending:  # a turn with a stop that ended with no record of its end
+            _stop_notice(lv)
         lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
-        lv.turn_analyst = lv.api_failed = False
+        lv.turn_rows, lv.turn_tools = [], []
+        lv.turn_analyst = lv.api_failed = lv.turn_notes = False
+        lv.stopped_cards = {}
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
 
@@ -1329,6 +1585,8 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     _asked(lv, False)  # a relayed prompt the terminal answered before the tail saw the wait
     if lv.flagged and not lv.answered:
         _stopped(lv, SAFETY_STOP_TEXT)
+    if lv.stop_pending:
+        _stop_notice(lv)
     if lv.wrote:
         agents.mirror(lv.c, "done", by=TERMINAL, session_id=lv.sid)
     was_open = lv.turn_open
@@ -1337,6 +1595,7 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     _ask_again(lv, again)
     if was_open:
         _cards_checked(lv)
+        _answer_checked(lv)
         if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
             _main_api_cleared(lv)
         _proposer_turn(lv, cut)
@@ -1350,6 +1609,38 @@ def _cards_checked(lv: Live) -> None:
         checks.main_turn_ended(lv.c, lv.turn_since or lv.since)
     except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
         log.exception("%s: the checks over the cards did not start at main's turn end", lv.c)
+
+
+def _answer_checked(lv: Live) -> None:
+    """The checks over Claude's answers hear of the turn (checks.answer_ended, module note): its text rows as Claude wrote
+    them, each with its record's uuid, the uuid of its first text row as the turn's, and its tool calls. A turn with no
+    text row tells nothing."""
+    from . import checks  # noqa: PLC0415
+
+    rows = [r for r in lv.turn_rows if str(r.get("text") or "").strip()]
+    if not rows:
+        return
+    turn = {"sid": lv.sid, "turn": str(rows[0].get("uuid") or ""), "rows": [dict(r) for r in rows],
+            "tools": [dict(t) for t in lv.turn_tools], "at": time.time()}
+    try:
+        checks.answer_ended(lv.c, turn)
+    except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
+        log.exception("%s: the checks over Claude's answer did not start at main's turn end", lv.c)
+
+
+INPUT_CHARS = 4000  # of each text value of a turn's tool call kept for the checks over Claude's answers (_brief)
+
+
+def _brief(value: Any) -> Any:
+    """A tool call's input as the turn keeps it (Live.turn_tools): every text value cut at INPUT_CHARS, the rest as it
+    is."""
+    if isinstance(value, str):
+        return value[:INPUT_CHARS]
+    if isinstance(value, dict):
+        return {str(k): _brief(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_brief(v) for v in value]
+    return value
 
 
 def _proposer_turn(lv: Live, cut: str | None) -> None:
@@ -1410,8 +1701,87 @@ def _note(lv: Live, text: str) -> None:
 
 
 def _safety_stop(lv: Live) -> None:
+    """Claude's safeguards stopped main's reply and Claude Code tries once more: the chat's note now, the notice when
+    the turn ends (_stop_notice), which knows by then whether main went on."""
     lv.flagged, lv.answered = True, False
+    lv.stop_pending, lv.went_on = True, False
     _note(lv, SAFETY_TEXT)
+
+
+def _stopped_cards(lv: Live, rec: dict) -> None:
+    """A record of main's reply the safeguards stopped (stop_reason refusal on the model's own reply): its card calls,
+    whose cards the stop may have cost (Live.stopped_cards)."""
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    if msg.get("stop_reason") != REFUSAL or rec.get("isApiErrorMessage") is True:
+        return
+    for b in _content_list(rec):
+        if isinstance(b, dict) and b.get("type") == "tool_use" and _short(str(b.get("name") or "")) in CARD_TOOLS:
+            inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+            lv.stopped_cards[str(b.get("id") or "")] = " ".join(str(inp.get("question") or "").split())
+
+
+def _stop_notice(lv: Live) -> None:
+    """The turn in which Claude's safeguards stopped main's reply partway ended (STOP_TEXT): a notice in the foreground,
+    in the browser and the terminal, that says so, names the card the reply was making when that card was not added,
+    and offers Make the card again and Ask again (the analyst's last message to main). When main went on after the stop,
+    its request ran to its end: Ask again would send it twice, so only a card still missing is told
+    (STOP_CARD_WENT_ON_TEXT), and nothing else. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    went_on = lv.went_on
+    lv.stop_pending = lv.went_on = False
+    cards = [q for q in lv.stopped_cards.values() if not _card_made(lv.c, q)]
+    lv.stopped_cards = {}
+    if went_on and not cards:
+        return
+    try:
+        acts: list[dict[str, str]] = []
+        if cards:
+            acts.append({"label": CARD_AGAIN_LABELS[len(cards) > 1], "do": "card-again", "text": _card_again(cards)})
+        asked = "" if went_on else _last_asked(lv.c)
+        if asked:
+            acts.append({"label": ASK_AGAIN_LABEL, "do": "ask-again", "text": asked})
+        question = f": \"{notices._short(cards[0], STOP_QUESTION_CHARS)}\"" if cards and cards[0] else ""
+        if went_on:
+            text = (STOP_CARDS_WENT_ON_TEXT.format(n=len(cards)) if len(cards) > 1 else
+                    STOP_CARD_WENT_ON_TEXT.format(question=question))
+        else:
+            text = (STOP_CARDS_TEXT.format(n=len(cards)) if len(cards) > 1 else
+                    STOP_CARD_TEXT.format(question=question) if cards else STOP_TEXT)
+        notices.post(lv.c, kind=STOP_KIND, text=text, chat=agents.MAIN_ID, key=STOP_KEY, action=acts or None)
+    except Exception:  # noqa: BLE001 — the chat's note says it all the same
+        log.exception("%s: the stop of main's reply was not told", lv.c)
+
+
+def _card_again(questions: list[str]) -> str:
+    """Main's message that asks it to make again the cards of `questions` (CARD_AGAIN, CARDS_AGAIN)."""
+    if len(questions) > 1:
+        return CARDS_AGAIN.format(questions="\n".join(f"- {q}" for q in questions if q))
+    return CARD_AGAIN.format(question=f" \"{questions[0]}\"" if questions[0] else "")
+
+
+def _card_made(c: str, question: str) -> bool:
+    """Whether a card asks `question`: a card call of a stopped reply may have run to its end before the stop."""
+    if not question:
+        return False
+    from . import notebook  # noqa: PLC0415
+
+    try:
+        return any(" ".join(str(cell.get("title") or "").split()) == question
+                   for _, nb in notebook._stored(config.workspace_dir(c)) for cell in nb.get("cells") or []
+                   if isinstance(cell, dict))
+    except Exception:  # noqa: BLE001 — a canvas that cannot be read has not shown the card either
+        return False
+
+
+def _last_asked(c: str) -> str:
+    """The analyst's last message to main, as main's chat shows it (typed in the terminal or sent from the browser),
+    with what they pasted as its text; '' for none."""
+    for r in reversed(agents.read_events(agents.paths(c, agents.MAIN_ID)[1])):
+        text = str(r.get("text") or "") if r.get("type") == "user" else ""
+        if text.strip():
+            return "\n".join(piece.strip("\n") for _, piece in pastes(text)).strip()
+    return ""
 
 
 def _stopped(lv: Live, text: str) -> None:
@@ -1426,6 +1796,8 @@ def _interrupted(lv: Live) -> None:
     a stop held the turn, it was the safety check that ended the turn; else the analyst did."""
     if lv.turn_open:
         _stopped(lv, SAFETY_STOP_TEXT if lv.held_by_check or (lv.flagged and not lv.answered) else INTERRUPTED_TEXT)
+        if lv.stop_pending:
+            _stop_notice(lv)
 
 
 def turn_stopped(c: str, *, stopped: bool = True) -> None:
@@ -1452,6 +1824,22 @@ def turn_stopped(c: str, *, stopped: bool = True) -> None:
     _save_cursor(lv)
 
 
+def cancelled(c: str, event_ids: list[str]) -> bool:
+    """The analyst's Stop took back messages main had not got yet (events.cancel_waiting): the mirror expects them no
+    more, main's chat says so (CANCELLED_TEXT), and main stops running unless a turn of its own runs, which the Stop
+    then ends too. Whether such a turn runs, as the transcript holds it now."""
+    for event_id in event_ids:
+        _expected.discard(event_id)
+    lv = _live.get(c)
+    if lv is not None:
+        _read_now(lv)
+    agents.chip(c, CHIP_KIND, CANCELLED_TEXT)
+    turn = lv is not None and lv.turn_open
+    if not turn:
+        agents.set_running(c, agents.MAIN_ID, False)
+    return turn
+
+
 def _user_line(lv: Live, text: str, by: str = TERMINAL, *, analyst: bool = True, **extra: Any) -> None:
     """A line the analyst typed in main's terminal; `analyst` False for one whose message another chat answers
     (ASK_COMMANDS), which leaves the turn as it was for the proposer (Live.turn_analyst)."""
@@ -1459,6 +1847,14 @@ def _user_line(lv: Live, text: str, by: str = TERMINAL, *, analyst: bool = True,
     lv.fresh = True
     lv.turn_analyst = lv.turn_analyst or analyst
     _rec(lv, "user", text=text, by=by, **extra)
+
+
+def plugin_prompt(origin: Any) -> str | None:
+    """The plugin that sent a prompt as the analyst's (PLUGIN_ORIGIN with `asUser`), by its name; None for any other
+    origin, a plugin's note to main among them."""
+    if isinstance(origin, dict) and origin.get("kind") == PLUGIN_ORIGIN and origin.get("asUser") is True:
+        return str(origin.get("name") or "").strip() or PLUGIN_ORIGIN
+    return None
 
 
 def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
@@ -1480,11 +1876,12 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
     if event_id and event_id in _expected:
         _expected.discard(event_id)
         return
-    if event_id and (ws := _terminal_ws(lv.c)) is not None:
+    if event_id:
         from . import event_files  # noqa: PLC0415
 
-        if event_files.posted(ws, event_id):  # posted by another process of the session, which logged it (events.post)
-            return
+        with contextlib.suppress(ValueError):
+            if event_files.posted(config.workspace_path(lv.c), event_id):
+                return  # posted by another process of the session through the queue file, which logged it (events.post)
     if kind == "main" or not kind:
         lv.wrote = True
         agents.mirror(lv.c, "user", by=BROWSER, text=body.strip(), event=event_id or None)
@@ -1563,12 +1960,14 @@ def _task_notice(lv: Live, fields: dict, at: float = 0.0) -> None:
     _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 
 
-def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None) -> None:
+def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None, *, main: bool = True) -> None:
     """A task notification of one of thimble's agents ends its run once (subagents.run_ended): killed or stopped by a
     TaskStop or Esc, or cut off by main's quit (DIDNT_FINISH, after `thimble --continue`), which marks its chat
     `continue: here`; or, in default mode, a later run's end with its whole report. A notification older than the
     agent's latest start is about an earlier run, and so is the `completed` a plugin-started agent's later run brings
-    after its hand-back: neither ends anything (subagents.run_ended ignores a run that ended)."""
+    after its hand-back: neither ends anything (subagents.run_ended ignores a run that ended). A failure in main's own
+    transcript (`main`) is one main has read, so thimble's event of it would be old news (subagents.failure_seen, bug
+    hunt C22)."""
     from . import subagents  # noqa: PLC0415
 
     agent_id = str(fields.get("task-id") or (sub.agent_id if sub is not None else "") or "")
@@ -1586,6 +1985,8 @@ def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None)
         subagents.mark_stopped_by(lv.c, agent_id, subagents.STOPPED_USER)
     elif status == "stopped" and not cut and not a.get("stopped_by"):
         subagents.mark_stopped_by(lv.c, agent_id, subagents.STOPPED_ANALYST)
+    if main and status == "failed":
+        subagents.failure_seen(lv.c, agent_id)
     subagents.run_ended(lv.c, agent_id, status, report or summary or None, source="notification", interrupted=cut)
     if by_user:
         subagents.mark_cancelled(lv.c, agent_id)
@@ -1610,15 +2011,63 @@ def _child_finished(lv: Live, text: str) -> None:
             continue
         _tail_sub(lv, sub)
         if sub.thimble:
-            _thimble_notice(lv, fields, 0.0, sub)
+            _thimble_notice(lv, fields, 0.0, sub, main=False)
             continue
         _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
+
+
+def _task_started(sub: Sub, name: str, text: str, is_error: bool) -> None:
+    """A call of a subagent's whose result says it started a background task: a Bash command in the background (or
+    moved there by its timeout), a Monitor, a background agent. Its id is kept until the task ends (_own_tasks)."""
+    if is_error:
+        return
+    m = None
+    if name == "Bash":
+        m = BG_SHELL_RE.search(text) or BG_MOVED_RE.search(text)
+    elif name == MONITOR_TOOL:
+        m = MONITOR_TASK_RE.search(text)
+    elif name in AGENT_TOOLS and ASYNC_RESULT_RE.match(text):
+        m = AGENT_ID_RE.search(text)
+    if m:
+        sub.tasks.add(m.group(1))
+
+
+def _own_tasks(lv: Live, sub: Sub, text: str) -> None:
+    """Task notifications in a subagent's own transcript, each of which wakes it: a task of its own whose notification
+    has a status has ended (a Monitor's event has none), and one of thimble's agents that waited on its background work
+    runs again (subagents.resumed)."""
+    for fields in task_notices(text):
+        if fields.get("status"):
+            sub.tasks.discard(str(fields.get("task-id") or ""))
+    if sub.thimble and sub.agent_id:
+        from . import subagents  # noqa: PLC0415
+
+        subagents.resumed(lv.c, str(sub.agent_id))
+
+
+def agent_tasks(c: str, agent_id: str) -> list[str]:
+    """The background tasks one of thimble's agents started that have not ended (_task_started, _own_tasks). Claude Code
+    wakes the agent when each ends, so a turn that ends while one runs does not end its run (subagents.ended). [] when
+    the mirror does not follow the agent."""
+    lv = _live.get(c)
+    if lv is None:
+        return []
+    sub = _sub_by(lv, agent_id=agent_id)
+    if sub is None or sub.path is None:  # its transcript not found yet: look for it now, as agent_error does
+        _scan_subs(lv)
+        sub = _sub_by(lv, agent_id=agent_id)
+    if sub is None:
+        return []
+    _tail_sub(lv, sub)
+    return sorted(sub.tasks)
 
 
 def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     """A message another session sent main (module note), a subagent's hand-back among them: no row of its own, since
     it is neither the analyst's line nor main's. The hand-back of one of thimble's agents ends its run with its report
-    (subagents.run_ended), and its own chat has its end. On its own record it opens main's turn."""
+    (subagents.run_ended), and its own chat has its end; that of a role whose end main's chat has no row for
+    (HANDBACK_ROWS) is one short row there, never its report, and main's reply to it shows whole (turn_notes), as the
+    terminal shows it. On its own record it opens main's turn."""
     if not mid_turn:
         _open_turn(lv)
     o = origin if isinstance(origin, dict) else {}
@@ -1634,6 +2083,11 @@ def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
         if sub is not None:
             _tail_sub(lv, sub)
         subagents.run_ended(lv.c, sender, "done", handback_report(raw) or None, source="handback")
+        line = HANDBACK_ROWS.get(str(a.get("role") or ""))
+        if line and lv.turn_open:
+            chat = str(a.get("chat") or "")
+            _rec(lv, "chip", kind=HANDBACK_CHIP, text=line, **({"chat": chat} if chat else {}))
+            lv.turn_notes = True
 
 
 def handback_report(body: str) -> str:
@@ -1646,23 +2100,35 @@ def handback_report(body: str) -> str:
     return textwrap.dedent(text).strip()
 
 
-def visible(text: str) -> str:
-    """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN, the words before the
-    token when it ends with it (END_RE), and any other text as it is, without its lines that open with TERMINAL_ONLY,
-    and with the citations written as Markdown links for the terminal in their chat form (cite.from_links)."""
+def visible(text: str, notes: bool = False) -> str:
+    """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN or NO_CONTENT, the words
+    before the token when it ends with it (END_RE), and any other text as it is, without its lines that open with
+    TERMINAL_ONLY unless `notes` keeps them (main's reply to a hand-back of HANDBACK_ROWS), and with the citations written
+    as Markdown links for the terminal in their chat form (cite.from_links)."""
+    if text.strip() == NO_CONTENT:
+        return ""
     m = END_RE.search(text)
     text = cite.from_links(text[: m.start()].rstrip() if m else text)
-    if TERMINAL_ONLY not in text:
+    if notes or TERMINAL_ONLY not in text:
         return text
     return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()
 
 
-def _text(lv: Live, text: str, **extra: Any) -> None:
-    text = visible(text)
+def _text(lv: Live, text: str, uuid: str = "", **extra: Any) -> None:
+    """One text block of main's: kept raw with its record's `uuid` among the turn's rows (_answer_checked), and written
+    to main's chat as a chat shows it (visible), with that uuid. An empty block (NO_CONTENT) is neither."""
+    if text.strip() == NO_CONTENT:
+        return
+    if uuid and lv.turn_open:
+        if lv.turn_rows and lv.turn_rows[-1].get("uuid") == uuid:
+            lv.turn_rows[-1] = {"uuid": uuid, "text": f"{lv.turn_rows[-1]['text']}\n{text}"}
+        else:
+            lv.turn_rows.append({"uuid": uuid, "text": text})
+    text = visible(text, lv.turn_notes)
     if not text.strip():
         return
     lv.turn_text = text
-    _rec(lv, "text", delta=text, **extra)
+    _rec(lv, "text", delta=text, **({"uuid": uuid} if uuid else {}), **extra)
 
 
 def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
@@ -1672,10 +2138,12 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
     if f"use:{tool_use_id}" in lv.seen:
         return
     lv.seen.add(f"use:{tool_use_id}")
+    inp = tool_input if isinstance(tool_input, dict) else {}
+    if lv.turn_open:
+        lv.turn_tools.append({"name": name, "input": _brief(inp)})
     if name in PLUMBING_TOOLS:
         lv.hidden.add(tool_use_id)
         return
-    inp = tool_input if isinstance(tool_input, dict) else {}
     after_start, lv.after_start = lv.after_start, False
     if after_start and name == "Bash" and str(inp.get("command") or "").strip() == "true":
         lv.hidden.add(tool_use_id)  # main's empty call after a start of thimble's (module note): no row (U5)
@@ -1697,7 +2165,8 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
             _spawn(lv, tool_use_id, None, str(ref), inp.get("subagent_type"))
             return
     if name == SEND_TOOL:
-        sub = _sub_by(lv, agent_id=str(inp.get("to") or inp.get("recipient") or ""))
+        to = str(inp.get("to") or inp.get("recipient") or "")
+        sub = _sub_by(lv, agent_id=to) or _fork_named(lv, to)
         if sub is not None and sub.thread:
             lv.hidden.add(tool_use_id)
             lv.forked.add(sub.chat)
@@ -1756,6 +2225,8 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
     name = lv.tool_names.get(tool_use_id, "")
     if is_error and name == lv.last_tool:
         lv.last_failed = True
+    if tool_use_id in lv.stopped_cards and not is_error and agents.cell_id(response_text(content)):
+        lv.stopped_cards.pop(tool_use_id)  # the call of a stopped reply ran to its end and made its card
     if tool_use_id in lv.watch_calls:
         m = MONITOR_TASK_RE.search(response_text(content))
         if m:
@@ -1771,7 +2242,7 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
         lv.forked.discard(tid)
         threads.fork_lost(lv.c, tid)
     relay = lv.relays.pop(tool_use_id, None)
-    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read (terminal mode)
+    if relay is None and tool_use_id in lv.pending_relays:  # a call an earlier pass read (local transport)
         agent_id, inp = lv.pending_relays.pop(tool_use_id)
         held = _sub_by(lv, agent_id=str(agent_id or ""))
         relay = (held, inp if isinstance(inp, dict) else {}) if held is not None else None
@@ -1912,7 +2383,7 @@ def _request_of(lv: Live, tool_use_id: str, name: str, inp: dict) -> str | None:
         return hit
     want = str(inp.get(key) or "")
     # never one another call claimed: a later call with the same text may have claimed it before this pass read the
-    # denied call's result (terminal mode reads in passes)
+    # denied call's result (local transport reads in passes)
     found = [rid for rid, r in reqs.items() if isinstance(r, dict) and r.get("kind") == kind and r.get("route") == subagents.TYPED
              and r.get("state") in ("pending", "claimed") and not r.get("claimed_by")
              and str((r.get("input") or {}).get(key) or "") == want]
@@ -2109,16 +2580,19 @@ def _sub_who(c: str, sub: Sub) -> tuple[str, str]:
     return notices.who("", title)
 
 
-def _switched(c: str, chat: str, model: Any, fallback: Any, *, sub: Sub | None = None) -> None:
+def _switched(c: str, chat: str, model: Any, fallback: Any, *, sub: Sub | None = None, scope: Any = None) -> None:
     """Claude's safeguards switched a reply in chat `chat` (main's, or subagent `sub`'s) from `model` to `fallback`: a
-    notice that says so (FALLBACK_TEXT), one per chat however often it happens (FALLBACK_KEY). Never raises."""
+    notice that says so (FALLBACK_TEXT), one per chat however often it happens (FALLBACK_KEY); for main switched for the
+    rest of the session (`scope`, SESSION_SCOPE), that it stays so and how to go back (SESSION_FALLBACK_TEXT). Never
+    raises."""
     from . import notices  # noqa: PLC0415
 
     was = model_label(str(model or "")) if model else "the model it was asked for"
     now = model_label(str(fallback or ""))
     try:
         if sub is None:
-            name, text = None, FALLBACK_TEXT.format(model=was, fallback=now)
+            whole = scope == SESSION_SCOPE and model
+            name, text = None, (SESSION_FALLBACK_TEXT if whole else FALLBACK_TEXT).format(model=was, fallback=now)
         else:
             name, subject = _sub_who(c, sub)
             text = AGENT_FALLBACK_TEXT.format(subject=subject[0].lower() + subject[1:], model=was, fallback=now)
@@ -2187,17 +2661,17 @@ def agent_answer(c: str, agent_id: str) -> str | None:
 
 def main_quit(c: str, sid: str) -> None:
     """Main's SessionEnd hook said it quit (subagents.end_route): main detaches now and the workspace's jobs stop at
-    once (_stop_agents), without the grace a lost subscription waits. In terminal mode main detaches alone: the jobs of
+    once (_stop_agents), without the grace a lost subscription waits. On local transport main detaches alone: the jobs of
     the session ran in its own processes, which end with it."""
     lv = _live.get(c)
-    if lv is None and (ws := _terminal_ws(c)) is not None and sid and sid == sfiles.main_session(ws):
-        detach(c, sid, "ended")  # terminal mode: no pass attached main in this process; its record ends all the same
+    if lv is None and (ws := _local_ws(c)) is not None and sid and sid == sfiles.main_session(ws):
+        detach(c, sid, "ended")  # local transport: no pass attached main in this process; its record ends all the same
         return
     if lv is None or (sid and lv.sid != sid):
         return
     _cancel_grace(c)
     detach(c, lv.sid, "ended")
-    if _live.get(c) is None and _terminal_ws(c) is None:  # in terminal mode no server's jobs run, and none stops
+    if _live.get(c) is None and _local_ws(c) is None:  # on local transport no server's jobs run, and none stops
         _stop_agents(c)
 
 
@@ -2228,6 +2702,16 @@ def _sub_by(lv: Live, *, tool_use_id: str | None = None, agent_id: str | None = 
         if agent_id and sub.agent_id == agent_id:
             return sub
     return None
+
+
+def _fork_named(lv: Live, name: str) -> Sub | None:
+    """A thread's fork in this session by the name it runs under (the thread's fork name, its Agent call's `name`), as
+    main's SendMessage names it in `to` (live feedback, 10-17: the mirror took a follow-up sent so for no message, and
+    the thread read "Main's turn ended without answering in this thread" while its fork worked on it)."""
+    tid = threads.by_fork_name(lv.c, name)
+    if not tid:
+        return None
+    return next((sub for sub in reversed(lv.subs) if sub.thread and sub.chat == tid), None)
 
 
 def _fork_runs(lv: Live, thread_id: str, tool_use_id: str | None) -> bool:
@@ -2549,8 +3033,14 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
             if _sub_by(lv, agent_id=agent_id) is None and (lv.pending_paths[key] <= META_WAIT_SCANS
                                                           or _unsettled(lv, agent_id)):
                 continue
+        quiet = _chatless(lv, agent_id, meta) if meta else False
+        if quiet is None and lv.pending_paths.get(key, 0) < META_WAIT_SCANS:
+            lv.pending_paths[key] = lv.pending_paths.get(key, 0) + 1
+            continue
         lv.pending_paths.pop(key, None)
         lv.sub_paths.add(key)
+        if quiet:
+            continue  # an agent of thimble's with no chat: the card check's (agent_call.py), which nobody reads
         use = str(meta.get("toolUseId") or "") or None
         followed = _sub_by(lv, tool_use_id=use) or _sub_by(lv, agent_id=agent_id)
         # a fork's file names its thread by its description; when thimble-term gave the call the thread's question as
@@ -2571,6 +3061,31 @@ def _scan_subs(lv: Live, replay: bool = True, places: dict[str, dict] | None = N
             _take_place(sub, path, (places or {}).get(key), at_end=read_before)
     for owner in [s for s in lv.subs if s.workflow and s.workflow_dir is not None]:
         _scan_workflow(lv, owner, replay, places)
+
+
+def _chatless(lv: Live, agent_id: str, meta: dict) -> bool | None:
+    """Whether the transcript of `agent_id` belongs to an agent of thimble's whose role has no chat (subagents.Type's
+    chat_role None: the card check's agent, agent_call.py), which the mirror leaves alone; None while that is not
+    known yet: a start thimble's module made (its meta json's toolUseId) that the registry has not taken up, while a
+    start of such a role waits for its answer."""
+    from . import subagents  # noqa: PLC0415
+
+    def chatless(role: Any) -> bool:  # one of thimble's roles with no chat (the helper's steps go to its ancestor's)
+        t = subagents.TYPES.get(str(role or ""))
+        return t is not None and t.role in subagents.ROLES and t.chat_role is None
+
+    try:
+        state = subagents.read(lv.c)
+    except Exception:  # noqa: BLE001 — an unreadable record holds no agent
+        return False
+    a = sfiles.registry(state).get(agent_id)
+    if isinstance(a, dict):
+        return chatless(a.get("role"))
+    if not str(meta.get("toolUseId") or "").startswith(sfiles.PLUGIN_CALL):
+        return False
+    waiting = any(isinstance(r, dict) and r.get("kind") == "start" and r.get("state") in sfiles.OPEN
+                  and chatless(r.get("role")) for r in sfiles.requests(state).values())
+    return None if waiting else False
 
 
 def _unsettled(lv: Live, agent_id: str) -> bool:
@@ -2997,6 +3512,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     att = rec.get("attachment") if rec.get("type") == "attachment" and isinstance(rec.get("attachment"), dict) else None
     if att is not None and "<task-notification>" in str(att.get("prompt") or ""):
         _child_finished(lv, str(att["prompt"]))  # a subagent this one started has stopped
+        _own_tasks(lv, sub, str(att["prompt"]))
         return 0
     if att is not None and att.get("type") in (*PLAN_MODE_ATTACHMENTS, PLAN_EXIT_ATTACHMENT) and sub.thimble \
             and sub.agent_id:
@@ -3020,6 +3536,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         text = _user_text(rec) or ""
         if origin.get("kind") == "task-notification" and "<task-notification>" in text:
             _child_finished(lv, text)
+            _own_tasks(lv, sub, text)
         return 0
     # a compaction's summary (isCompactSummary) is Claude Code's, written as a user record: no message of anyone's
     if rec.get("type") == "user" and not sub.thread and not rec.get("isMeta") and not rec.get("isCompactSummary"):
@@ -3032,6 +3549,10 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if sub.skip_prompt:
                 sub.skip_prompt = False
                 return 0
+            if sub.thimble == "check":  # a check's prompt holds its whole task, which its task file records
+                from . import checks  # noqa: PLC0415
+
+                prompt = checks.prompt_row(prompt)
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
             return 1
     if rec.get("type") == "user":
@@ -3051,6 +3572,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 from . import subagents  # noqa: PLC0415
 
                 subagents.add_shell(lv.c, owner, shell.group(1))
+            _task_started(sub, sub.names.get(tid, ""), response_text(b.get("content")), bool(b.get("is_error")))
             if tid in sub.starts:
                 _sub_start_result(lv, tid, sub.starts.pop(tid), b.get("content"), bool(b.get("is_error")))
             sub.rec.tool_result(tid, data.pop("summary"), is_error=bool(data.pop("is_error", False)), by=TERMINAL,
@@ -3108,6 +3630,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             n_ = sub.calls.use(tid, name, b.get("input")) if sub.calls is not None else None
             sub.rec.tool_use(tid, name, b.get("input"), by=TERMINAL, **({"n": n_} if n_ else {}))
             inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+            if name in STOP_TOOLS:  # it stopped a background task of its own, which then sends no notification
+                sub.tasks.discard(str(inp.get("task_id") or inp.get("shell_id") or ""))
             if name in AGENT_TOOLS and not sub.thimble and not sub.root:
                 from . import subagents  # noqa: PLC0415
 
@@ -3157,14 +3681,37 @@ def _blocks(rec: dict) -> list[dict]:
 
 
 def _user_text(rec: dict) -> str | None:
-    """The text of a user record that is a prompt (a string, or text blocks and no tool result), else None."""
+    """The text of a user record that is a prompt (a string, or text blocks and no tool result, with the pictures the
+    analyst pasted beside them), else None. A prompt with a picture holds an image block beside its text: it was no
+    prompt here, so its turn never reached the browser's chat (bug hunt I9)."""
     msg = rec.get("message")
     content = msg.get("content") if isinstance(msg, dict) else None
     if isinstance(content, str):
         return content
-    if isinstance(content, list) and content and all(isinstance(b, dict) and b.get("type") == "text" for b in content):
-        return "\n".join(str(b.get("text") or "") for b in content)
+    if (isinstance(content, list) and any(isinstance(b, dict) and b.get("type") == "text" for b in content)
+            and all(isinstance(b, dict) and b.get("type") in ("text", "image") for b in content)):
+        return "\n".join(str(b.get("text") or "") for b in content if b.get("type") == "text")
     return None
+
+
+def _pictures(lv: Live, rec: dict) -> list[str]:
+    """The pictures pasted into a prompt (its image blocks), written into the workspace (threads.save_picture) under the
+    record's uuid: their file names, for the browser to show under the prompt's row."""
+    out: list[str] = []
+    stem = re.sub(r"[^A-Za-z0-9]", "", str(rec.get("uuid") or ""))[:16] or secrets.token_hex(8)
+    for b in _content_list(rec):
+        src = b.get("source") if isinstance(b, dict) and b.get("type") == "image" else None
+        if not isinstance(src, dict) or src.get("type") != "base64":
+            continue
+        try:
+            data = base64.b64decode(str(src.get("data") or ""), validate=False)
+            name = threads.save_picture(lv.c, f"{stem}-{len(out) + 1}", data)
+        except (binascii.Error, ValueError, OSError) as e:
+            log.info("%s: a pasted picture was not kept (%s)", lv.c, e)
+            continue
+        if name:
+            out.append(name)
+    return out
 
 
 def translate(lv: Live, line: bytes | str) -> None:
@@ -3202,6 +3749,10 @@ def translate(lv: Live, line: bytes | str) -> None:
             elif text.startswith(terminal_tools.NUDGE):
                 _nudged(lv)
             return
+        elif (plugin := plugin_prompt(rec.get("origin"))) is not None:
+            lv.local_prompt = None
+            if not text.lstrip().startswith("<"):
+                _user_line(lv, text.strip(), plugin=plugin)
         elif origin == "human" or origin is None:
             command = _command_line(text)
             pid = str(rec.get("promptId") or "")
@@ -3222,7 +3773,8 @@ def translate(lv: Live, line: bytes | str) -> None:
             elif command is not None:
                 _user_line(lv, command, analyst=command.split()[0] not in ASK_COMMANDS)
             elif not text.lstrip().startswith("<"):
-                _user_line(lv, text.strip())
+                pictures = _pictures(lv, rec)
+                _user_line(lv, text.strip(), **({"images": pictures} if pictures else {}))
         return
     if t == "attachment":
         att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
@@ -3251,9 +3803,18 @@ def translate(lv: Live, line: bytes | str) -> None:
             elif aorigin == "peer":
                 _peer(lv, mid_turn=True, origin=att.get("origin"))
             elif aorigin == PLUGIN_ORIGIN:
-                pass  # a plugin's line, such as thimble's note to main after a Stop: never the analyst's
+                # a prompt a plugin sent as the analyst's while main worked; any other plugin line, such as thimble's
+                # note to main after a Stop, is never the analyst's
+                plugin = plugin_prompt(att.get("origin"))
+                if plugin is not None and prompt.strip() and not prompt.lstrip().startswith("<"):
+                    _rec(lv, "user", text=prompt.strip(), by=TERMINAL, plugin=plugin)
             elif prompt.strip() and not prompt.lstrip().startswith("<"):
                 _rec(lv, "user", text=prompt.strip(), by=TERMINAL)
+        elif att.get("type") == "model":
+            _note_request(lv, rec)
+        return
+    if t == "api-request":
+        _note_request(lv, rec)
         return
     if t == "system":
         if rec.get("subtype") == "turn_duration":
@@ -3264,11 +3825,12 @@ def translate(lv: Live, line: bytes | str) -> None:
             _safety_stop(lv)
         elif rec.get("subtype") == FALLBACK_SUBTYPE and rec.get("direction", "retry") == "retry":
             lv.wrote = True
-            _switched(lv.c, agents.MAIN_ID, rec.get("originalModel"), rec.get("fallbackModel"))
+            _switched(lv.c, agents.MAIN_ID, rec.get("originalModel"), rec.get("fallbackModel"), scope=rec.get("scope"))
         return
     if t != "assistant":
         return
     _note_model(lv, rec)
+    _stopped_cards(lv, rec)
     api = _api_fields(rec)
     if api:
         _main_api_error(lv, rec)
@@ -3281,11 +3843,14 @@ def translate(lv: Live, line: bytes | str) -> None:
     lv.fresh = False
     # the retry after a stop, if there was one, is writing; after the dialog, the analyst chose to go on
     lv.answered, lv.held_by_check = True, False
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    if lv.stop_pending and not api and msg.get("stop_reason") != REFUSAL:
+        lv.went_on = True  # the retry after the stop replies: main goes on with the request
     for b in _blocks(rec):
         if b["type"] == "text":
             if not isinstance(b.get("text"), str):
                 raise Unreadable("a text block without text")
-            _text(lv, b["text"], **api)
+            _text(lv, b["text"], uuid=str(rec.get("uuid") or ""), **api)
         elif b["type"] == "tool_use":
             if not isinstance(b.get("id"), str) or not isinstance(b.get("name"), str):
                 raise Unreadable("a tool_use block without id or name")
@@ -3316,8 +3881,34 @@ def _note_model(lv: Live, rec: dict) -> None:
                if isinstance(n := usage.get(k), int) and not isinstance(n, bool))
     if read > 0:  # an API error line Claude Code wrote itself reads nothing
         lv.context_tokens = read
+    _note_run(lv, model, effort, fast)
+
+
+MAIN_QUERY = "repl_main_thread"  # the querySource of an `api-request` record of main's own thread (_note_request)
+
+
+def _note_request(lv: Live, rec: dict) -> None:
+    """The model and effort main's reply will run with, as Claude Code writes them before the reply comes, so the
+    composer's chip shows the session's real setting from the analyst's first prompt on: the model a `model` attachment
+    names as the prompt goes out, and the model and effort of the request main's own thread sends (an `api-request`
+    record). A record without them changes nothing."""
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment")
+        identity = att.get("identity") if isinstance(att, dict) else None
+        _note_run(lv, identity.get("modelId") if isinstance(identity, dict) else None, None, None)
+    elif rec.get("type") == "api-request" and rec.get("querySource") == MAIN_QUERY:
+        params = rec.get("params") if isinstance(rec.get("params"), dict) else {}
+        out = params.get("output_config") if isinstance(params.get("output_config"), dict) else {}
+        _note_run(lv, params.get("model"), out.get("effort"), None)
+
+
+def _note_run(lv: Live, model: Any, effort: Any, fast: bool | None) -> None:
+    """Main's model, effort and fast mode as a record names them, kept on main's `attached` for the composer's chip; one
+    the record does not name (None) stays as it was."""
     if not isinstance(model, str) or not model or model.startswith("<"):
         model = None
+    if not isinstance(effort, str) or not effort:
+        effort = None
     if (model is None or model == lv.model) and (effort is None or effort == lv.effort) and (fast is None or fast == lv.fast):
         return
     lv.model, lv.effort = model or lv.model, effort or lv.effort
@@ -3368,7 +3959,7 @@ def _tail_once(lv: Live) -> None:
         if sub.finish and not sub.done and time.monotonic() - sub.quiet_since >= SUB_QUIET_S:
             _finish_sub(lv, sub, *sub.finish)
     _save_cursor(lv)  # the subagents' places, and the runs that ended
-    if _terminal_ws(lv.c) is None:  # in terminal mode the analyst sees the wait in the terminal itself
+    if _local_ws(lv.c) is None:  # on local transport the analyst sees the wait in the terminal itself
         _watch_wait(lv)
 
 
@@ -3475,6 +4066,40 @@ def _size(path: Path) -> int:
         return 0
 
 
+EARLIER_RUN_BYTES = 512 * 1024  # of a transcript's history before the tail's first place, read for main's model
+
+
+def _note_earlier_run(lv: Live, p: Path) -> None:
+    """Main's model and effort as the last record before the tail's first place names them (_note_model,
+    _note_request), for the history the tail does not replay: a session resumed with `claude -c` has answered already,
+    and the composer and Settings showed its model as not known until its next reply (bug hunt F17). Reads at most
+    EARLIER_RUN_BYTES back; a record it cannot read is skipped."""
+    if lv.model is not None or lv.offset <= 0:
+        return
+    try:
+        with p.open("rb") as f:
+            start = max(0, lv.offset - EARLIER_RUN_BYTES)
+            f.seek(start)
+            lines = f.read(lv.offset - start).split(b"\n")
+    except OSError:
+        return
+    for line in reversed(lines[1:] if start else lines):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("isSidechain"):
+            continue
+        msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+        att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+        if rec.get("type") == "assistant" and isinstance(msg.get("model"), str) and not msg["model"].startswith("<"):
+            _note_model(lv, rec)
+        elif (rec.get("type") == "attachment" and att.get("type") == "model") or rec.get("type") == "api-request":
+            _note_request(lv, rec)
+        if lv.model is not None:
+            return
+
+
 def _tail_main(lv: Live) -> None:
     if lv.degraded or not lv.transcript_path:
         return
@@ -3485,10 +4110,16 @@ def _tail_main(lv: Live) -> None:
         if lv.offset < 0:
             lv.offset = 0  # not written yet: everything it will hold is this session's
         return
+    first = lv.offset < 0
+    if lv.offset < 0 and lv.read_from:
+        lv.offset = _offset_since(str(p), lv.read_from)  # a session no mirror read yet: since thimble turned on (attach)
     if lv.offset < 0:
         lv.offset = size  # already there when the session attached: its history is not replayed
         _save_cursor(lv)  # a cursor an earlier attach of this session left would replay that history after a restart
+        _note_earlier_run(lv, p)
         return
+    if first:
+        _note_earlier_run(lv, p)
     if size < lv.offset:  # truncated or rewritten
         lv.offset, lv.buf = 0, b""
     if size == lv.offset:
@@ -3533,8 +4164,8 @@ async def _tail(lv: Live) -> None:
 
 
 def _ensure_tail(lv: Live) -> None:
-    if lv.degraded or (lv.task is not None and not lv.task.done()) or _terminal_ws(lv.c) is not None:
-        return  # in terminal mode the mirror reads in passes (catch_up), never as a task
+    if lv.degraded or (lv.task is not None and not lv.task.done()) or _local_ws(lv.c) is not None:
+        return  # on local transport the mirror reads in passes (catch_up), never as a task
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -3542,19 +4173,26 @@ def _ensure_tail(lv: Live) -> None:
     lv.task = loop.create_task(_tail(lv), name=f"tail:{lv.c}:{lv.sid}")
 
 
-# --------------------------------------------------------------------------- terminal mode
+# --------------------------------------------------------------------------- local transport
 
 
 def catch_up(c: str) -> Live | None:
-    """Terminal mode (module note): one pass of the mirror. Main is attached in this process when it is not yet, from
-    sessions.json's cursor as a restarted server attaches it (a session no pass read yet is read from launch.json's
-    time, so a new session's first turn is read too); a move of main since the cursor's session (/clear, /resume) is
-    followed as _follow follows it; then main's transcript and every subagent's are read to their ends (tail_once,
-    with a look for new subagent files) and the cursor is saved. No tail task, grace or wait. The Live, or None outside
-    terminal mode or while launch.json names no session."""
-    ws = _terminal_ws(c)
+    """Local transport (module note): one pass of the mirror, under PASS_LOCK. Main is attached in this process when it
+    is not yet, from sessions.json's cursor as a restarted server attaches it (a session no pass read yet is read from
+    launch.json's time, so a new session's first turn is read too); a move of main since the cursor's session (/clear,
+    /resume) is followed as _follow follows it; then main's transcript and every subagent's are read to their ends
+    (tail_once, with a look for new subagent files) and the cursor is saved. No tail task, grace or wait. The Live, or
+    None once main runs on the server or while launch.json names no session."""
+    ws = _local_ws(c)
     if ws is None:
         return None
+    with _pass_lock(ws):
+        if _local_ws(c) is None:  # the press came while this pass waited for the one before
+            return None
+        return _catch_up(c, ws)
+
+
+def _catch_up(c: str, ws: Path) -> Live | None:
     sid = sfiles.main_session(ws)
     if not sid:
         return None
@@ -3585,7 +4223,7 @@ def catch_up(c: str) -> Live | None:
 
 
 def _attach_pass(c: str, ws: Path, sid: str) -> Live | None:
-    """attach() for a pass of the mirror in terminal mode: main's session `sid` in its `claude` process (launch.json's
+    """attach() for a pass of the mirror on local transport: main's session `sid` in its `claude` process (launch.json's
     pid); a session no pass read yet starts at the first record written since launch.json's time (_offset_since)."""
     try:
         cwd = str(config.corpus_dir(c))
@@ -3631,10 +4269,10 @@ STAMP_SLACK_S = 2.0  # launch.json's time and Claude Code's first record of a re
 
 def sweep() -> list[str]:
     """Detach every recorded main session in a workspace where no shim is subscribed and main's own has not subscribed
-    since
-    this server started. Never while the server is stopping, when every workspace looks unsubscribed. Returns the
-    session
-    ids detached."""
+    since this server started. A session this server made main less than GRACE_S ago (a press just before the sweep,
+    whose shim subscribes a moment later) is not detached at once: its shim gets GRACE_S to subscribe, as after a shim
+    leaves (disconnected). Never while the server is stopping, when every workspace looks unsubscribed. Returns the
+    session ids detached."""
     from . import events  # noqa: PLC0415
 
     if _shutting_down():
@@ -3650,6 +4288,11 @@ def sweep() -> list[str]:
             continue
         sid = held.get("session")
         if not sid:
+            continue
+        lv = _live.get(c)
+        if lv is not None and lv.sid == sid and time.monotonic() - lv.attached_at < GRACE_S:
+            # made main just now (a press, /thimble): its shim gets GRACE_S to subscribe, as after it leaves
+            disconnected(c, str(sid))
             continue
         try:
             if c in _live:

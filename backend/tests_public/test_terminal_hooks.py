@@ -1,8 +1,9 @@
-"""thimble's hooks in terminal mode (plugin/bin/.thimble-watch with THIMBLE_WS naming a workspace whose launch.json says
-terminal mode): no hook makes an HTTP request; the waker takes main's events from the workspace's queue and wakes main
-with exit 2; the held hook prints what waited; the mode hook records main's permission mode and starts the backend's
-call on main's Stop; the file-first hooks start the backend's call (app/local_hooks.py) in place of a post; the
-statusline reads the files. A process that lost the launcher's environment finds no workspace and makes nothing."""
+"""thimble's hooks on local transport (plugin/bin/.thimble-watch in a session whose workspace's launch.json names a local
+transport, before a press of the browser workbench): no hook makes an HTTP request; the waker takes the session's events
+from the workspace's queue and wakes main with exit 2; the held hook prints what waited; the mode hook records main's
+permission mode and starts the backend's call on main's Stop; the file-first hooks start the backend's call
+(app/local_hooks.py) in place of a post; the statusline reads the files. A process that lost its environment finds no
+workspace and makes nothing. Every hook exits in its shell line unless thimble is on in the session (its marker)."""
 from __future__ import annotations
 
 import importlib.util
@@ -17,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from terminal_fakes import CORPUS, MAIN, write_launch
+from test_delivery import EVENT_TEXT, TOKEN, _Stand
 
 from app import config, event_files, events
 from app import subagent_files as sf
@@ -53,15 +55,19 @@ def _claude_pid(claude):
 
 
 def env_for(tmp_path: Path, ws: Path, **more: str) -> dict:
-    """The hooks' environment in a terminal-mode session: the launcher's THIMBLE_HOME, THIMBLE_MODE and THIMBLE_WS, and a
-    server.json naming a server, which no hook of terminal mode may ask."""
+    """The hooks' environment in a session thimble is on in, on local transport: THIMBLE_HOME with the session's marker
+    (up/<session>.active, which activation writes and the watcher's shell line gates on, CLAUDE_CODE_SESSION_ID), the
+    data and workspaces folders, and a server.json naming a server, which no hook on local transport may ask."""
     home = tmp_path / "hook-home"
-    home.mkdir(exist_ok=True)
+    (home / "up").mkdir(parents=True, exist_ok=True)
     (home / "server.json").write_text(json.dumps({"port": 9, "token": "t0ken"}))
+    session = more.get("CLAUDE_CODE_SESSION_ID", MAIN)
+    (home / "up" / f"{session}.active").write_text(json.dumps({"cwd": str(config.corpus_dir(CORPUS)), "ws": CORPUS}))
     env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "THIMBLE_"))}
-    env.update(THIMBLE_HOME=str(home), THIMBLE_MODE="terminal", THIMBLE_WS=str(ws),
+    env.update(THIMBLE_HOME=str(home), THIMBLE_WORKSPACES_DIR=str(config.WORKSPACES_DIR),
                THIMBLE_DATA_DIR=str(config.DATA_DIR), CLAUDE_PROJECT_DIR=str(config.corpus_dir(CORPUS)),
-               CLAUDE_CONFIG_DIR=str(tmp_path / "claude-config"), CLAUDE_PID=str(_CLAUDE[0]))
+               CLAUDE_CONFIG_DIR=str(tmp_path / "claude-config"), CLAUDE_PID=str(_CLAUDE[0]),
+               CLAUDE_CODE_SESSION_ID=MAIN)
     env.update(more)
     return env
 
@@ -72,7 +78,7 @@ def run_hook(env: dict, flag: str | None, stdin: dict, timeout: float = 30) -> s
 
 
 def loaded(monkeypatch, tmp_path: Path, ws: Path):
-    """The watcher as a module, in a terminal-mode environment, with spawn_local recording its calls and every socket
+    """The watcher as a module, in a session on local transport, with spawn_local recording its calls and every socket
     refused."""
     for k, v in env_for(tmp_path, ws).items():
         monkeypatch.setenv(k, v)
@@ -110,85 +116,171 @@ def test_the_waker_takes_a_queued_event_wakes_main_with_its_text_and_exits_2(tmp
     assert event_files.waiting(ws) == []
 
 
-def test_a_second_waker_exits_at_once_and_one_for_another_session_does_not_wait(tmp_path, ws):
+def test_a_press_while_main_is_idle_turns_the_waker_to_the_server_and_its_event_wakes_main(tmp_path, ws):
+    """The `thimble` command presses the browser workbench at the session's start, after SessionStart's waker began on
+    local transport and took the session's lock, and no queue file is there yet. Every later hook's waker exits on that
+    lock, and while main is idle none runs, so this waker pulls from the server from the press on: a side thread's
+    event the server holds wakes main."""
+    stand = _Stand([(200, {"id": "e1", "text": EVENT_TEXT})])
     env = env_for(tmp_path, ws)
-    first = subprocess.Popen([str(WATCHER)], stdin=subprocess.PIPE, text=True, env=env,
-                             cwd=str(config.corpus_dir(CORPUS)))
-    first.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "SessionStart"}))
-    first.stdin.close()
+    Path(env["THIMBLE_HOME"], "server.json").write_text(json.dumps({"api": f"http://127.0.0.1:{stand.port}",
+                                                                    "token": TOKEN}))
+    waker = subprocess.Popen([str(WATCHER)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=env, cwd=str(config.corpus_dir(CORPUS)))
+    waker.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "SessionStart", "source": "startup"}))
+    waker.stdin.close()
     try:
         time.sleep(0.5)
-        start = time.monotonic()
-        assert run_hook(env, None, {"session_id": MAIN, "hook_event_name": "PreToolUse"}).returncode == 0
-        assert time.monotonic() - start < 5
-        assert run_hook(env, None, {"session_id": "not-main", "hook_event_name": "Stop"}).returncode == 0
-        assert run_hook(env, None, {"session_id": MAIN, "agent_id": AGENT, "hook_event_name": "PreToolUse"}).returncode == 0
+        assert waker.poll() is None and not event_files.queue_path(ws).exists()
+        write_launch(ws, session=MAIN, transport="server")  # the press
+        try:
+            code = waker.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            code = None
     finally:
-        first.kill()
-        first.wait()
+        if waker.poll() is None:
+            waker.kill()
+        stand.close()
+    assert code == 2 and waker.stderr.read().strip() == EVENT_TEXT
+    assert [(m, p) for m, p, _ in stand.seen] == [("GET", "/api/events/pull"), ("POST", "/api/events/ack")]
 
 
-def test_the_held_hook_prints_the_held_events_and_the_lines_of_those_the_waker_wrote_out(tmp_path, ws):
-    events.post(CORPUS, "orient", {"text": "The orientation made 7 cards.\nIt opened 3 of 7 files."}, check_kind=False)
-    sent = events.post(CORPUS, "label_done", {"text": "x", "name": "refunds"}, check_kind=False)
-    event_files.take(ws, MAIN)
-    events.post(CORPUS, "written", {"text": "Saved.", "doc": "report"}, check_kind=False)
-    out = run_hook(env_for(tmp_path, ws), "--held", {"session_id": MAIN, "hook_event_name": "UserPromptSubmit"})
-    got = json.loads(out.stdout)
-    assert got["hookSpecificOutput"]["additionalContext"] == 'meanwhile:\n[kind="written" doc="report"] Saved.'
-    # the writer's end is left out: its hand-back's row says it, and Claude Code draws a systemMessage under the hook's
-    # name (`UserPromptSubmit says: …`), a row no render hook reaches
-    assert got["systemMessage"] == "label finished: refunds\nThe orientation made 7 cards.\nIt opened 3 of 7 files.", \
-        "the orient event rode along with the next one"
-    assert sent["id"] and run_hook(env_for(tmp_path, ws), "--held", {"session_id": MAIN}).stdout == "", "each once"
-    assert run_hook(env_for(tmp_path, ws), "--held", {"session_id": "not-main"}).stdout == ""
+def test_with_plain_claude_a_side_thread_asked_after_the_press_wakes_idle_main_through_the_server(tmp_path, ws,
+                                                                                                   monkeypatch):
+    """Bug hunt B4, plain `claude`: main's turn ended on local transport before any event was queued, so its Stop
+    hook's waker holds the session's lock with no queue file to look at. The analyst presses `/thimble browser` while
+    main is idle, then asks in a side thread from the terminal: `thimble act thread` writes the thread's event to the
+    queue file, as every process of the session but the server does, and the server takes it from there at a pull
+    (events._drain_files). The waker must be pulling by then: it used to look at the transport only once a queue file
+    was there, so it saw the press only when the thread's event made the file, and exited with nothing pulled; no other
+    waker runs while main is idle, so the thread waited for the analyst's next prompt."""
+    stand = _Stand([])
+    env = env_for(tmp_path, ws)
+    Path(env["THIMBLE_HOME"], "server.json").write_text(json.dumps({"api": f"http://127.0.0.1:{stand.port}",
+                                                                    "token": TOKEN}))
+    waker = subprocess.Popen([str(WATCHER)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=env, cwd=str(config.corpus_dir(CORPUS)))
+    waker.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "Stop"}))
+    waker.stdin.close()
+    try:
+        time.sleep(0.5)
+        assert waker.poll() is None and not event_files.queue_path(ws).exists()
+        write_launch(ws, session=MAIN, transport="server")  # /thimble browser
+        until = time.monotonic() + 6
+        while time.monotonic() < until and not any(p == "/api/events/pull" for _, p, _ in stand.seen):
+            time.sleep(0.1)
+        monkeypatch.setattr(events, "SERVING", False)  # posted from the terminal's `thimble act`, not the server
+        out = events.post(CORPUS, "label_done", {"text": "the side thread's question", "name": "q"}, check_kind=False,
+                          session=MAIN)
+        assert [r["id"] for r in event_files.waiting(ws)] == [out["id"]], "the terminal's process writes the file"
+        stand.answers.append((200, {"id": out["id"], "text": EVENT_TEXT}))  # the server's pull drained the file
+        try:
+            code = waker.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            code = None
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+        stand.close()
+    assert code == 2 and waker.stderr.read().strip() == EVENT_TEXT
+    assert ("POST", "/api/events/ack") in [(m, p) for m, p, _ in stand.seen]
 
 
-def test_the_permission_hook_answers_nothing_at_once(tmp_path, ws):
-    start = time.monotonic()
-    out = run_hook(env_for(tmp_path, ws), "--permission", {"session_id": MAIN, "tool_name": "WebFetch",
-                                                          "tool_input": {"url": "https://example.com"}})
-    assert (out.returncode, out.stdout) == (0, "") and time.monotonic() - start < 5
+def _start_waker(env: dict, source: str = "startup") -> subprocess.Popen:
+    """SessionStart's waker as Claude Code runs it: hooks.json's asyncRewake command for the event, in a shell, with the
+    hook's input on its stdin."""
+    hooks = json.loads((BIN.parent / "hooks" / "hooks.json").read_text())["hooks"]["SessionStart"]
+    command = next(h["command"] for e in hooks if "matcher" not in e for h in e["hooks"] if h.get("asyncRewake"))
+    proc = subprocess.Popen(["/bin/sh", "-c", command], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True, env={**env, "CLAUDE_PLUGIN_ROOT": str(BIN.parent)},
+                            cwd=str(config.corpus_dir(CORPUS)))
+    proc.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "SessionStart", "source": source}))
+    proc.stdin.close()
+    return proc
 
 
-def test_the_mode_hook_records_main_s_mode_and_starts_the_backend_s_call_on_main_s_stop(tmp_path, ws, monkeypatch):
-    watcher, spawned = loaded(monkeypatch, tmp_path, ws)
-    watcher.mode_files({"session_id": MAIN, "hook_event_name": "UserPromptSubmit", "permission_mode": "auto"}, ws)
-    assert sf.read(ws)["main"]["permission_mode"] == "auto" and spawned == []
-    watcher.mode_files({"session_id": MAIN, "hook_event_name": "Stop", "permission_mode": "auto"}, ws)
-    assert [k for k, _ in spawned] == ["main-stop"]
-    watcher.mode_files({"session_id": MAIN, "hook_event_name": "UserPromptSubmit", "permission_mode": "plan"}, ws)
-    assert [k for k, _ in spawned] == ["main-stop"], "plan mode starts no backend call: it stops no running agent"
-    assert sf.read(ws)["main"]["before_plan"] == "auto"
-    watcher.mode_files({"session_id": "not-main", "hook_event_name": "Stop", "permission_mode": "default"}, ws)
-    watcher.mode_files({"session_id": MAIN, "agent_id": AGENT, "hook_event_name": "Stop", "permission_mode": "default"}, ws)
-    assert len(spawned) == 1 and sf.read(ws)["main"]["permission_mode"] == "plan"
+def _wait(proc: subprocess.Popen, timeout: float) -> int | None:
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
 
 
-def test_the_mode_hook_starts_the_mode_notice_call_only_as_main_turns_into_or_out_of_manual_mode(
-        tmp_path, ws, monkeypatch, capsys):
-    """In terminal mode thimble-term's band shows the Manual-mode notice (app/notices.py `manual-mode`): the mode hook
-    prints nothing, and starts the backend's `mode-notice` call (app/local_hooks.py) only when main's reported mode
-    turns into Manual mode (MANUAL_MODES) or out of it; another mode, another session or a subagent starts none."""
-    watcher, spawned = loaded(monkeypatch, tmp_path, ws)
+def test_h2_after_claude_c_the_waker_waits_for_the_server_a_press_starts_so_a_browser_question_wakes_idle_main(
+        tmp_path, ws):
+    """Bug hunt H2: after a quit stopped the server, `claude -c` continued the session. The wakers that SessionStart and
+    the first turn started found `transport: server` with no server up and left at once, and `/thimble browser`, a
+    local command, starts no hook's waker once its press started the server, so a question from the browser waited for
+    the analyst's next prompt. A waker of a session on the server's transport now waits for the server (the stopped
+    server's record, then none, then the one the press starts) and pulls from it; and once the session is local again
+    (activate.continue_main) it takes the session's events from the queue file."""
+    write_launch(ws, session=MAIN, transport="server")
+    env = env_for(tmp_path, ws, CLAUDE_CODE_ENTRYPOINT="cli")  # server.json names port 9, where nothing listens
+    record = Path(env["THIMBLE_HOME"], "server.json")
+    stand = _Stand([(200, {"id": "e1", "text": EVENT_TEXT})])
+    waker = _start_waker(env, source="resume")
+    try:
+        time.sleep(2.5)
+        assert waker.poll() is None, "it waits for a server that is not up yet"
+        record.unlink()
+        time.sleep(2.5)
+        assert waker.poll() is None, "and with no server.json"
+        record.write_text(json.dumps({"api": f"http://127.0.0.1:{stand.port}", "token": TOKEN}))  # the press
+        code = _wait(waker, 15)
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+        stand.close()
+    assert code == 2 and waker.stderr.read().strip() == EVENT_TEXT
+    assert [(m, p) for m, p, _ in stand.seen] == [("GET", "/api/events/pull"), ("POST", "/api/events/ack")]
+    record.unlink()
+    waker = _start_waker(env, source="resume")
+    try:
+        time.sleep(1.5)
+        assert waker.poll() is None
+        write_launch(ws, session=MAIN, transport="local")  # the session continued in this process (continue_main)
+        out = events.post(CORPUS, "main", {"text": "Did the label finish?"})
+        code = _wait(waker, 15)
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+    err = waker.stderr.read()
+    assert code == 2 and f'event="{out["id"]}"' in err and "Did the label finish?" in err
 
-    def report(mode: str, event: str = "UserPromptSubmit", session: str = MAIN, **more: str) -> list[str]:
-        watcher.mode_files({"session_id": session, "hook_event_name": event, "permission_mode": mode, **more}, ws)
-        assert capsys.readouterr().out == "", "no systemMessage: the band shows the notice"
-        kinds = [k for k, _ in spawned if k == "mode-notice"]
-        spawned.clear()
-        return kinds
 
-    assert report("auto") == [] and report("plan") == [] and report("acceptEdits") == []
-    assert report("default", session="not-main") == [] and report("default", agent_id=AGENT) == []
-    assert report("default") == ["mode-notice"], "into Manual mode"
-    assert report("default") == [] and report("manual") == [], "still Manual mode"
-    assert report("default", "Stop") == []
-    assert report("auto") == ["mode-notice"], "out of Manual mode"
-    assert report("plan") == []
-    assert report("manual") == ["mode-notice"]
-    watcher.mode_files({"session_id": MAIN, "hook_event_name": "Stop", "permission_mode": "auto"}, ws)
-    assert [k for k, _ in spawned] == ["mode-notice", "main-stop"] and spawned[0][1]["permission_mode"] == "auto"
+def test_session_start_s_waker_waits_for_the_marker_activation_writes_so_the_first_browser_question_wakes_idle_main(
+        tmp_path, ws):
+    """Bug hunt G1: Claude Code runs SessionStart's hooks as the session starts, and the terminal UI's activation writes
+    the session's marker a few seconds later. SessionStart's waker left at the gate, and no other hook runs while main is
+    idle, so the analyst's first question from the browser waited for a prompt typed in the terminal. In an interactive
+    session the waker now waits for the marker; under `claude -p`, which waits for this hook, it still leaves at once."""
+    env = env_for(tmp_path, ws, CLAUDE_CODE_ENTRYPOINT="cli")
+    marker = Path(env["THIMBLE_HOME"], "up", f"{MAIN}.active")
+    body = marker.read_text()
+    marker.unlink()
+    printing = _start_waker({**env, "CLAUDE_CODE_ENTRYPOINT": "sdk-cli"})
+    try:
+        assert printing.wait(timeout=1.5) == 0, "under claude -p it waits for no marker"
+    finally:
+        if printing.poll() is None:
+            printing.kill()
+    waker = _start_waker(env)
+    try:
+        time.sleep(1.5)
+        assert waker.poll() is None, "it waits for the marker rather than leaving at the gate"
+        marker.write_text(body)  # the terminal UI's activation
+        time.sleep(1.0)
+        out = events.post(CORPUS, "main", {"text": "What are these runs?"})
+        try:
+            code = waker.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            code = None
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+    err = waker.stderr.read()
+    assert code == 2 and f'event="{out["id"]}"' in err and "What are these runs?" in err
+    assert event_files.waiting(ws) == []
 
 
 def test_no_hook_opens_a_socket_in_terminal_mode_and_each_file_first_hook_starts_the_backend_s_call(
@@ -231,82 +323,6 @@ def test_no_hook_opens_a_socket_in_terminal_mode_and_each_file_first_hook_starts
     assert sf.read(ws)["requests"]["req_t000000001"]["state"] == "started"
 
 
-def test_the_agent_check_refuses_a_second_fork_of_a_thread_from_the_file(tmp_path, ws, monkeypatch, capsys):
-    watcher, _ = loaded(monkeypatch, tmp_path, ws)
-    fork = {"session_id": MAIN, "tool_use_id": "toolu_f1", "tool_name": "Agent",
-            "tool_input": {"subagent_type": "fork", "description": "thread:bots", "prompt": "thread:bots"}}
-    watcher.agent_check(fork)
-    assert capsys.readouterr().out == ""
-    watcher.agent_check({**fork, "tool_use_id": "toolu_f2"})
-    out = json.loads(capsys.readouterr().out)["hookSpecificOutput"]
-    assert out["permissionDecision"] == "deny" and "thread bots is running already" in out["permissionDecisionReason"]
-    watcher.agent_check({**fork, "tool_input": {**fork["tool_input"], "description": "thread:other", "prompt": "thread:other"}})
-    assert capsys.readouterr().out == ""
-
-
-def test_the_agent_check_names_a_refused_fork_s_thread_by_its_question_and_knows_the_fork_by_its_prompt(tmp_path, ws, monkeypatch, capsys):
-    """thimble-term gives main's fork call the thread's question as its description, so the check knows the fork by
-    the prompt's `thread:<name>`; a refusal names the thread by its first question, never its fork's slug."""
-    from app import agents
-
-    meta = agents.new_thread(CORPUS, None, None, "Bots", surface="terminal")
-    agents.update_agent(CORPUS, meta["id"], fork_name="which-bots-saved-the")
-    agents.append(agents.paths(CORPUS, meta["id"])[1], {"type": "user", "text": "Which bots saved the welcome page on 18 June, and how often?"})
-    watcher, _ = loaded(monkeypatch, tmp_path, ws)
-    fork = {"session_id": MAIN, "tool_use_id": "toolu_f1", "tool_name": "Agent",
-            "tool_input": {"subagent_type": "fork", "description": "thread “Which bots saved the welcome…”",
-                           "prompt": "thread:which-bots-saved-the"}}
-    watcher.agent_check(fork)
-    assert capsys.readouterr().out == ""
-    watcher.agent_check({**fork, "tool_use_id": "toolu_f2"})
-    reason = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["permissionDecisionReason"]
-    assert reason == ("The fork of thread “Which bots saved the welcome page on 18 June, and how often?” is running "
-                      "already and answers in the thread, so this turn needs nothing more.")
-    assert "which-bots-saved-the" not in reason
-    # the call let through is kept by its tool_use id, by which the mirror knows the fork's thread whatever its meta json
-    # says (live check term-fix5, new quirk 1); the refused one is not
-    state = sf.read(ws)
-    assert sf.fork_call_ref(state, "toolu_f1") == "thread:which-bots-saved-the"
-    assert sf.fork_call_ref(state, "toolu_f2") is None
-
-
-def test_the_agents_hook_numbers_an_orientation_s_call_and_tells_it_its_ref(tmp_path, ws, monkeypatch, capsys):
-    import types
-
-    watcher, spawned = loaded(monkeypatch, tmp_path, ws)
-    numbered: list[tuple] = []
-    fake = types.ModuleType("app.calls_file")
-    fake.number = lambda ws_, chat, tid, name, inp, agent: numbered.append((chat, tid, name, agent)) or 7
-    monkeypatch.setitem(sys.modules, "app.calls_file", fake)
-    import app
-
-    monkeypatch.setattr(app, "calls_file", fake, raising=False)
-    with sf.update(ws) as state:
-        sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "chat": "orient-chat", "status": "running"}
-    watcher.agents_hook({"session_id": MAIN, "agent_id": AGENT, "tool_use_id": "toolu_r", "tool_name": "Read",
-                         "tool_input": {"file_path": "x"}, "permission_mode": "default"})
-    ctx = json.loads(capsys.readouterr().out)["hookSpecificOutput"]["additionalContext"]
-    assert "call:orient-chat/7" in ctx and numbered == [("orient-chat", "toolu_r", "Read", None)]
-    watcher.agents_hook({"session_id": MAIN, "agent_id": AGENT, "tool_use_id": "toolu_p", "tool_name": "Read",
-                         "tool_input": {"file_path": "x"}, "permission_mode": "plan"})
-    assert spawned == [], "an agent's call in plan mode starts no backend call: plan mode stops no running agent"
-
-
-def test_the_statusline_reads_the_files_in_terminal_mode(tmp_path, ws):
-    with sf.update(ws) as state:
-        sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "status": "running"}
-    (ws / "orient").mkdir(exist_ok=True)
-    (ws / "orient" / "run.json").write_text(json.dumps({"passes": ["final"], "groups": {"orientation": "orientation"}}))
-    (ws / "notebooks").mkdir(exist_ok=True)
-    (ws / "notebooks" / "orientation.json").write_text(json.dumps({"cells": [{"id": "a"}, {"id": "b"}]}))
-    event_files.append(ws, {"content": "Which bot?", "meta": {"kind": "thread", "event": "e1"},
-                            "terminal": "› thread bots: Which bot?"}, events.render)
-    out = subprocess.run([str(AGENTS), "--statusline"], input=json.dumps({"session_id": MAIN}), capture_output=True,
-                         text=True, env=env_for(tmp_path, ws), timeout=30)
-    assert out.stdout.strip().splitlines() == ["thimble · orientation working · 2 cards",
-                                              "thimble · queued: thread bots: Which bot?"]
-
-
 def test_a_process_that_lost_the_launcher_s_environment_finds_no_workspace_and_makes_nothing(tmp_path, ws):
     """Live check T12: every THIMBLE_* unset and another HOME. Each hook and the statusline do nothing, and the home
     that environment names is never made."""
@@ -331,59 +347,3 @@ def test_a_process_that_lost_the_launcher_s_environment_finds_no_workspace_and_m
     assert local.returncode == 0, local.stderr
     assert not (fake / ".thimble").exists()
     assert "events" not in os.listdir(ws) and not (ws / "sessions.json").exists()
-
-
-def test_main_s_stop_starts_the_backend_s_call_as_a_process_of_its_own_that_runs_the_mirror(tmp_path, ws):
-    """The whole chain with no fake: the mode hook on main's Stop starts `thimble-python … app.local_hooks main-stop`
-    detached and returns at once; that process attaches main from launch.json and reads its transcript."""
-    project = tmp_path / "claude-config" / "projects" / "-corpus"
-    project.mkdir(parents=True)
-    (project / f"{MAIN}.jsonl").write_text(json.dumps({"type": "user", "origin": {"kind": "human"},
-                                                       "message": {"content": "How many files?"}}) + "\n")
-    start = time.monotonic()
-    done = run_hook(env_for(tmp_path, ws), "--mode", {"session_id": MAIN, "hook_event_name": "Stop",
-                                                      "permission_mode": "default"})
-    assert done.returncode == 0 and time.monotonic() - start < 10
-    for _ in range(300):
-        rec = json.loads((ws / "sessions.json").read_text()).get(MAIN) if (ws / "sessions.json").exists() else None
-        if rec and rec.get("cursor"):
-            break
-        time.sleep(0.1)
-    assert rec and rec["cursor"]["offset"] > 0, (ws / "local-hooks.log").read_text() if (ws / "local-hooks.log").exists() else ""
-    from app import agents
-
-    said = [r.get("text") for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]) if r.get("type") == "user"]
-    assert said == ["How many files?"]
-
-
-def test_the_monitor_route_streams_main_s_events_from_the_queue_until_main_exits(tmp_path, ws):
-    a = events.post(CORPUS, "label_done", {"text": "first", "name": "a"}, check_kind=False)
-    b = events.post(CORPUS, "rerun", {"text": "second", "name": "b"}, check_kind=False)
-    short = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
-    import threading
-
-    threading.Thread(target=short.wait, daemon=True).start()  # reaped as main's shell reaps it, so it is gone
-    try:
-        out = subprocess.run([str(WATCHER), "--stream", "--cwd", str(config.corpus_dir(CORPUS)), "--session", MAIN],
-                             capture_output=True, text=True, env=env_for(tmp_path, ws, CLAUDE_PID=str(short.pid)),
-                             timeout=30)
-    finally:
-        short.wait()
-    assert out.returncode == 0
-    assert out.stdout.index(f'event="{a["id"]}"') < out.stdout.index(f'event="{b["id"]}"')
-    assert event_files.waiting(ws) == []
-
-
-def test_the_waker_starts_no_backend_call_when_the_module_sees_plan_mode_while_agents_run(tmp_path, ws, monkeypatch):
-    """Plan mode stops no running agent, as in browser mode, so the waker starts nothing when the module's plan poll
-    sees plan mode begin while one of thimble's agents runs, nor for an agent's tool call in plan mode."""
-    from terminal_fakes import FileModule
-
-    watcher, spawned = loaded(monkeypatch, tmp_path, ws)
-    assert not hasattr(watcher, "PlanWatch") and not hasattr(watcher, "plan_call")
-    with sf.update(ws) as state:
-        sf.registry(state)[AGENT] = {"role": "orientation", "key": "orient", "status": "running"}
-    FileModule(ws, session=MAIN).plan(True)
-    assert watcher.watch_files({"session_id": MAIN, "agent_id": AGENT, "hook_event_name": "PreToolUse",
-                                "permission_mode": "plan"}, ws) == 0
-    assert spawned == []

@@ -1,12 +1,14 @@
 // The type bar's two menus. + New makes a document: a page, a preset (prompts/types on the server), or a custom type
-// from a name and a brief. The ⋯ beside a workspace's own type renames or deletes it with its document. The chat makes
+// from a name and a brief; on a demo page it is off (components/DemoOff). The ⋯ beside a workspace's own type renames or deletes it with its document. The chat makes
 // the same documents through start_writing's `type` (backend write_session).
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
+import { DemoOff } from '../components/DemoOff'
 import { TextArea, TextInput } from '../components/Field'
 import { Menu, Popover, type MenuItem } from '../components/Menu'
 import { docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { useDemo } from '../lib/demo'
 import { track } from '../lib/telemetry'
 import type { DocPreset, ReportType } from '../lib/types'
 import { newDocItems } from './model'
@@ -22,6 +24,7 @@ export function NewDocMenu({ ws, onMade }: { ws: string; onMade: (t: ReportType)
   const [brief, setBrief] = useState('')
   const trigger = useRef<HTMLButtonElement | null>(null)
   const nameField = useRef<HTMLInputElement | null>(null)
+  const demo = useDemo()
   useEffect(() => {
     let live = true
     docsApi
@@ -62,6 +65,15 @@ export function NewDocMenu({ ws, onMade }: { ws: string; onMade: (t: ReportType)
     onSelect: () => (it.custom ? setAsking(true) : void make(it.kind)),
   }))
   const ready = !!name.trim() && !!brief.trim()
+  // a demo page makes no document (bug hunt F5)
+  if (demo)
+    return (
+      <DemoOff>
+        <Button icon="plus" className="wu-new" data-doc-chip="+new">
+          New
+        </Button>
+      </DemoOff>
+    )
   return (
     <>
       <Menu label="New document" trigger={

@@ -1,5 +1,5 @@
-// A cell's display name for chips: its title reduced to a slug, never its id. The canvas registers the cells it
-// loads; a chip for an unregistered cell asks for the names once.
+// A cell's display name for chips: its title reduced to a slug, never its id, and in the chat its question, cut
+// (cellQuestion). The canvas registers the cells it loads; a chip for an unregistered cell asks for the names once.
 import { api } from './api'
 
 export interface NamedCell {
@@ -40,6 +40,26 @@ export function cellLabel(id: string): string | undefined {
 
 export const hasCellName = (id: string): boolean => registry.has(id)
 
+/** How long a card's question runs on a chip in the chat before it is cut at a word, with an ellipsis. */
+export const QUESTION_CHIP_MAX = 40
+
+/** A question cut for a chip: on one line, at most QUESTION_CHIP_MAX characters, cut at the last space before the limit
+ * when there is one. Pure. */
+export function cutQuestion(title: string, max = QUESTION_CHIP_MAX): string {
+  const t = (title || '').replace(/\s+/g, ' ').trim()
+  if (t.length <= max) return t
+  const head = t.slice(0, max - 1)
+  const space = head.lastIndexOf(' ')
+  return `${(space > max / 2 ? head.slice(0, space) : head).replace(/[\s,;:.\-–—]+$/, '')}…`
+}
+
+/** A card's question, cut for a chip (cutQuestion), as the chat names a card; undefined while the card is not known or
+ * has no question. */
+export function cellQuestion(id: string): string | undefined {
+  const t = registry.get(id)?.title
+  return t && t.trim() ? cutQuestion(t) : undefined
+}
+
 // A label's name for `concept:` chips, kept beside the cell names so one subscription redraws both.
 const concepts = new Map<string, string>()
 
@@ -50,6 +70,21 @@ export function registerConcepts(rows: { id: string; name?: string }[]): void {
 
 export const conceptLabel = (id: string): string | undefined => concepts.get(id)
 export const hasConceptName = (id: string): boolean => concepts.has(id)
+
+// A view's name for `view:` chips (a toast's, a citation's), which Files registers from the views it lists.
+const views = new Map<string, string>()
+
+export function registerViewNames(names: Iterable<readonly [string, string]>): void {
+  let changed = false
+  for (const [slug, name] of names) {
+    if (!name || views.get(slug) === name) continue
+    views.set(slug, name)
+    changed = true
+  }
+  if (changed) for (const fn of listeners) fn()
+}
+
+export const viewLabel = (slug: string): string | undefined => views.get(slug)
 
 const conceptsInflight = new Map<string, Promise<void>>()
 

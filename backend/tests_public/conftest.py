@@ -171,10 +171,12 @@ def workspaces_tmp(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _workspaces_off_the_checkout(tmp_path, monkeypatch):
     """Every test's workspaces live under its own tmp dir. config.WORKSPACES_DIR defaults to the checkout's
-    workspaces/, which a running server may be using."""
-    from app import config
+    workspaces/, which a running server may be using. What this process remembers of a workspace's canvas history goes
+    too: card ids are names of their questions, so another test's card can have this test's card's id."""
+    from app import canvas_history, config
 
     monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "workspaces")
+    canvas_history.forget()
 
 
 @pytest.fixture(autouse=True)
@@ -389,16 +391,27 @@ def _view_tickets_held(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _no_held_events():
-    """The quiet events events.post holds for the next event and the modes main's hooks reported are module state:
-    none carries over from another test."""
-    from app import events, session
+def _serving():
+    """The backend's code runs here as thimble's server runs it (events.SERVING, which the server's lifespan sets): an
+    event for main whose transport is the server goes to the server's own queue. A test of another process of the
+    session (the MCP shim, a hook, `thimble act`) sets it False."""
+    from app import events
 
-    for held in (events._held, session._modes):
-        held.clear()
+    events.SERVING = True
     yield
-    for held in (events._held, session._modes):
-        held.clear()
+    events.SERVING = True
+
+
+@pytest.fixture(autouse=True)
+def _no_held_events():
+    """The modes main's hooks reported are module state: none carries over from another test. (The quiet events
+    events.post holds for the next event live in the workspace's held-events.json, which each test's workspace has
+    its own of.)"""
+    from app import session
+
+    session._modes.clear()
+    yield
+    session._modes.clear()
 
 
 LISTENER_SID = "5e55a000-0000-4000-8000-0000000000aa"
@@ -454,27 +467,9 @@ class Listener:
 
 
 @pytest.fixture(autouse=True)
-def _no_rate_limit_retry_wait(monkeypatch):
-    """model.structured waits before its one 429 retry; tests wait 0 s."""
-    from app import model
-
-    monkeypatch.setattr(model, "RATE_LIMIT_RETRY_S", 0.0)
-
-
-@pytest.fixture(autouse=True)
-def _no_backoff_wait(monkeypatch):
-    """retry.with_retries waits between retries of a transient failure; tests wait 0 s and the retries still run."""
-    from app import retry
-
-    async def no_wait(s: float) -> None:
-        return None
-
-    monkeypatch.setattr(retry, "_sleep", no_wait)
-
-
-@pytest.fixture(autouse=True)
 def _no_plugin_list(monkeypatch):
-    """launch_args asks `claude plugin list` which plugin copy main loads (cli.installed_copy). Tests load plugin/."""
+    """launch_args asks `claude plugin list` which plugin copy the session loads (cli.installed_copy). Tests load
+    plugin/."""
     from app import cli
 
     monkeypatch.setattr(cli, "installed_copy", lambda cwd: None)
@@ -482,15 +477,11 @@ def _no_plugin_list(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _launch_writes_nothing_shared(monkeypatch):
-    """launch_args registers its folder (cli.register_here), starts thimble's server (cli.server_for_launch) and finds
-    the workspace's extensions again through it (cli.refresh_extensions). In a test it registers nothing, so the suite's
-    shared data folder gains no corpus, and starts and reaches no server: the default port may be a live server's. A
-    test of any of them replaces it again."""
+    """Activation registers its folder (cli.register_here). In a test it registers nothing, so the suite's shared data
+    folder gains no corpus. A test of it replaces it again."""
     from app import cli, config
 
     monkeypatch.setattr(cli, "register_here", lambda cwd: config.workspace_for_cwd(str(cwd)))
-    monkeypatch.setattr(cli, "server_for_launch", lambda c: [])
-    monkeypatch.setattr(cli, "refresh_extensions", lambda c: None)
 
 
 def _port_of(url: str | None, default: int) -> int:
@@ -534,7 +525,7 @@ def _claude_stand_in(tmp_path_factory, monkeypatch):
     test and the processes it starts, which prints the version thimble is tested with for `--version` and nothing
     otherwise. `up` warns when claude is missing or older than that version, and the tests must pass the same on a
     machine without Claude Code and never run the real one. A test's own setting still wins."""
-    from app import agent_session, cli, config, dev
+    from app import agent_session, cli, config
 
     bin_dir = tmp_path_factory.getbasetemp() / "claude-stand-in"
     exe = bin_dir / "claude"
@@ -543,7 +534,7 @@ def _claude_stand_in(tmp_path_factory, monkeypatch):
         exe.write_text(f'#!/bin/sh\n[ "$1" = --version ] && echo "{cli.TESTED_CLAUDE_CODE} (Claude Code)"\nexit 0\n')
         exe.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-    for module, name in ((config, "CLI_PATH"), (config, "CLAUDE_BIN"), (agent_session, "CLAUDE_BIN"), (dev, "CLAUDE_BIN")):
+    for module, name in ((config, "CLI_PATH"), (config, "CLAUDE_BIN"), (agent_session, "CLAUDE_BIN")):
         monkeypatch.setattr(module, name, str(exe))
 
 
@@ -564,7 +555,7 @@ def data_tmp(tmp_path, monkeypatch):
 @pytest.fixture()
 def home(tmp_path, monkeypatch):
     """A scratch THIMBLE_HOME and Claude Code config dir, a stand-in UI build, and no adoption of a real server: the
-    default port may be a live server's. `up` runs as in a session the launcher started."""
+    default port may be a live server's."""
     from app import cli, config
 
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
@@ -576,7 +567,6 @@ def home(tmp_path, monkeypatch):
     (tmp_path / "ui-dist" / "index.html").write_text("<html></html>")
     monkeypatch.setenv("THIMBLE_FRONTEND_DIST", str(tmp_path / "ui-dist"))
     monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "ui-dist")
-    monkeypatch.setenv(cli.LAUNCHED_ENV, "1")
     monkeypatch.setattr(cli, "health_leader", lambda url=None: None)
     monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)  # nor refuses one: another test covers that
     monkeypatch.setattr(cli, "port_free", lambda p: True)  # nor passes over a live server's port (test_port.py does)
@@ -668,15 +658,17 @@ def _kill_kernel_pid(pid: int, wait_s: float = 3.0) -> None:
 
 @pytest.fixture(autouse=True)
 def _kernels_left_by_the_test():
-    """After every test, a kernel still in notebook's tables is terminated through its recorded pid and its files
-    dropped."""
+    """After every test, a kernel still in notebook's tables, or launched and named by none (notebook._launched), is
+    terminated through its recorded pid and its files dropped."""
     yield
     nb = sys.modules.get("app.notebook")
     if nb is None or not hasattr(nb, "_kernels"):
         return  # never imported, or a test's stand-in module is still in place
-    left = [*nb._kernels.values(), *nb._exec_kernels.values()]
+    launched = getattr(nb, "_launched", set())
+    left = list(dict.fromkeys([*nb._kernels.values(), *nb._exec_kernels.values(), *launched]))
     nb._kernels.clear()
     nb._exec_kernels.clear()
+    launched.clear()
     for k in left:
         pid, pgid = k.pid, k.pgid
         if pid is None:

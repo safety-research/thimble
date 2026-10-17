@@ -20,11 +20,18 @@ export interface UserRow {
   run?: number
   /** with `by` extension: the extension whose orientation instructions the message is */
   extension?: string
+  /** the plugin that sent the prompt as the analyst's, such as thimble's terminal panel (`run again`, a new label) */
+  plugin?: string
+  /** the pictures the analyst pasted into the message, by their file names in the workspace (`GET …/pictures/{name}`) */
+  images?: string[]
 }
 export interface TextRow {
   kind: 'text'
   index: number
   text: string
+  /** the uuids of the transcript rows its text came from (the mirror's text records), which a check's comment on an
+   * answer names (chat/answerComments.ts) */
+  uuids?: string[]
   /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
    * failure's class, so the row is an error card whatever its words (withApiErrors) */
   apiError?: string
@@ -196,7 +203,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
     const into = parent ? parent.children : rows
     switch (e.type) {
       case 'user':
-        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), event: e.event, run: e.run, extension: e.extension })
+        rows.push({ kind: 'user', index, text: e.text, ts: e.ts, by: e.by, ...(e.tray ? { tray: true } : {}), ...(e.plugin ? { plugin: e.plugin } : {}), ...(e.images?.length ? { images: e.images } : {}), event: e.event, run: e.run, extension: e.extension })
         return
       case 'text': {
         // a Claude Code notification the model copied into its reply is harness text, not words for the analyst
@@ -214,8 +221,11 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
           return
         }
         const last = into[into.length - 1]
-        if (last && last.kind === 'text' && !last.apiError && !wholeMessage(e)) last.text += e.delta
-        else into.push({ kind: 'text', index, text: e.delta })
+        const uuid = typeof e.uuid === 'string' && e.uuid ? e.uuid : null
+        if (last && last.kind === 'text' && !last.apiError && !wholeMessage(e)) {
+          last.text += e.delta
+          if (uuid) last.uuids = [...(last.uuids ?? []), uuid]
+        } else into.push({ kind: 'text', index, text: e.delta, ...(uuid ? { uuids: [uuid] } : {}) })
         return
       }
       case 'tool_use':
@@ -288,6 +298,8 @@ export function countTools(rows: readonly Row[]): number {
 // ---- tools ----
 
 export const MCP_PREFIXES: readonly string[] = ['mcp__plugin_thimble_thimble__', 'mcp__thimble__']
+// an agent's own shim's tools (backend subagents.private_server): mcp__thimble-<role>__<tool>
+const PRIVATE_TOOL = /^mcp__thimble-[a-z-]+__/
 
 /** Alias names of the card tools and start_orientation (backend tools.TOOL_ALIASES), read as the current ones. */
 const OLD_TOOL_NAMES: Record<string, string> = {
@@ -331,6 +343,16 @@ export function underCorpus(text: string, ws: string): string {
   return text.replace(new RegExp(`(?<!\\S)/\\S*/${name}(?=\\s|$)`, 'g'), '.').replace(new RegExp(`(?<!\\S)/\\S*/${name}/`, 'g'), '')
 }
 
+/** thimble's own commands by their names, as the analyst would type them (`thimble-run card runs`), never the absolute
+ * path a session calls them by (`/…/plugin/bin/thimble-run card runs`, bug hunt G11). Pure. */
+export function thimbleCommands(text: string): string {
+  return text.replace(/(^|[\s;&|(`])(['"]?)\/[^\s'"]*\/bin\/(thimble(?:-[a-z]+)*)\2(?=[\s;&|)`]|$)/g, '$1$3')
+}
+
+/** A shell command as a call's line shows it: thimble's own commands by their names (thimbleCommands) and paths under
+ * the corpus relative to it (underCorpus). Pure. */
+export const commandLine = (command: string, ws: string): string => underCorpus(thimbleCommands(command), ws)
+
 /** A call's chip line, as Claude Code prints a tool line: the tool and its target (`Read notes.jsonl`, `Bash grep -c
  * refund tickets/`). Pure. */
 export function callLineText(name: string, input: unknown, ws: string): string {
@@ -370,7 +392,7 @@ export function callTarget(name: string, input: unknown, n: number, ws = ''): st
     case 'Glob':
       return inp.pattern ? `files matching ${oneLine(str(inp.pattern), 60)}${where}` : step
     case 'Bash':
-      return oneLine(str(inp.description)) || oneLine(underCorpus(str(inp.command), ws)) || step
+      return oneLine(str(inp.description)) || oneLine(commandLine(str(inp.command), ws)) || step
     case 'add_card':
     case 'edit_card':
       return oneLine(str(inp.question ?? inp.title)) || 'a card'
@@ -405,7 +427,7 @@ export function callTarget(name: string, input: unknown, n: number, ws = ''): st
 export function callDetail(name: string, input: unknown, ws = ''): string | undefined {
   if (toolDisplayName(name) !== 'Bash') return undefined
   const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
-  return oneLine(underCorpus(str(inp.command), ws), 240) || undefined
+  return oneLine(commandLine(str(inp.command), ws), 240) || undefined
 }
 
 /** The SDK's Read paths are absolute; show them relative to the corpus root. */
@@ -509,7 +531,7 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       return str(inp.group)
     case 'Bash':
       // the command on one line, as far as the chip has room: a script's first line alone (`python3 -c "`) says nothing
-      return oneLine(underCorpus(str(inp.command), ws)) || oneLine(str(inp.description))
+      return oneLine(commandLine(str(inp.command), ws)) || oneLine(str(inp.description))
     case 'Edit':
     case 'Write':
     case 'MultiEdit':
@@ -657,7 +679,7 @@ const SHOWN_TOOLS: ReadonlySet<string> = new Set(['Workflow', 'Skill', 'Subagent
 export function isRawCall(name: string): boolean {
   const n = toolDisplayName(name)
   if (RAW_TOOLS.has(n)) return true
-  return !MCP_PREFIXES.some((p) => name.startsWith(p)) && !Object.hasOwn(TOOL_WORDS, n) && !Object.hasOwn(TOOL_GROUPS, n) && !SHOWN_TOOLS.has(n)
+  return !MCP_PREFIXES.some((p) => name.startsWith(p)) && !PRIVATE_TOOL.test(name) && !Object.hasOwn(TOOL_WORDS, n) && !Object.hasOwn(TOOL_GROUPS, n) && !SHOWN_TOOLS.has(n)
 }
 
 /** A piece of a run of calls as the transcript shows it: two or more calls in a row fold into one chip (`run`); a call
@@ -868,7 +890,7 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
     case 'Glob':
       return with_('Listed files', oneLine(str(inp.pattern), 60))
     case 'Bash':
-      return with_('Ran', oneLine(str(inp.description)) || firstLine(str(inp.command)))
+      return with_('Ran', oneLine(str(inp.description)) || firstLine(thimbleCommands(str(inp.command))))
     case 'Edit':
     case 'MultiEdit':
       return with_('Edited', filePlain(str(inp.file_path ?? inp.path)))
@@ -1073,8 +1095,8 @@ export function madeBy(rows: readonly Row[]): Made {
         }
         case 'apply_label': {
           if (!ok) break
-          // a trial on a few units (`limit`) is no label until a call runs it on everything (backend concepts.py, Trials)
-          if (inp.limit == null || inp.limit === '') add(out.labels, inp.name)
+          // a trial on a few units (`limit`) too, which the Labels pane lists as a sample (backend concepts.py, Trials)
+          add(out.labels, inp.name)
           const name = str(inp.name).trim()
           const id = r.result?.label_card
           if (!id) break

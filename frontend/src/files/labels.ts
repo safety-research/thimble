@@ -12,12 +12,6 @@ const FILE_UNITS = new Set(['record', 'agent', 'run'])
 /** Whether a label is over files (records, files or runs), so the Files pane lists it. */
 export const isFilesLabel = (k: Pick<Concept, 'unit'>): boolean => FILE_UNITS.has(k.unit)
 
-/** Whether the Files pane's Labels list shows a label: any label that is no trial, since a trial a chat ran on a few
- * units with `limit` is no label until it runs on everything (backend concepts.py, Trials), and a trial over files
- * that is on, since its marks in the reader and the views need their row. Labels over cards and report sentences are
- * listed too: the pane is where labels are made and edited, whatever they label (LabelsPane). */
-export const listedInFiles = (k: Pick<Concept, 'unit' | 'trial' | 'shown'>): boolean => !k.trial || (isFilesLabel(k) && !!k.shown)
-
 /** What a label labels, as the edit card's Over names it: records or files (`files`), canvas cards, report sentences. */
 export type LabelOver = 'files' | 'cards' | 'sentences'
 
@@ -256,13 +250,48 @@ const UNIT_WORDS: Record<string, [string, string]> = { record: ['record', 'recor
 /** A label's unit as a count says it: records, files (a file label's unit, `agent`), runs, cards or sentences. */
 export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?? [unit, `${unit}s`])[n === 1 ? 0 : 1]
 
+/** The units a run read that got no value (backend `skipped`), which no count holds: those a code label's code returned
+ * None for, or those a prompt label found no words in. */
+export interface NoValue {
+  n: number
+  code: boolean
+}
+
 /** Where a label over files stands, for its row in the Labels pane: an apply running (done of total units, or of the
  * files while they are indexed and the total is not known), the last run's outcome (its total null when the run kept
- * none it can state), or a failed run with its message. */
+ * none it can state; `sample` for a trial, run on a sample of its units), or a failed run with its message. */
 export type LabelStatus =
   | { state: 'running'; done: number; total: number | null; unit: string }
-  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null }
+  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null; sample?: boolean; stopped?: boolean; stoppedAt?: StoppedAt; none?: NoValue }
   | { state: 'error'; message: string }
+
+/** Where a run that was stopped stopped: the units it read, of how many it would have read (null when the run kept no
+ * count above them), and whether quitting Claude Code stopped it rather than the analyst's Stop (backend
+ * concepts._keep_quit_stop, bug hunt H3). */
+export interface StoppedAt {
+  read: number
+  of: number | null
+  quit: boolean
+}
+
+/** A stopped run's StoppedAt from its read units and its total. Pure. */
+const stoppedAt = (read: number, total: number | null | undefined, by: string | null | undefined): StoppedAt => ({ read, of: total != null && total > read ? total : null, quit: by === 'quit' })
+
+/** Where a stopped run stopped, as the Labels pane's row and the label's card say it: "stopped at 8,447 of 14,591
+ * records when Claude Code quit", "stopped at 1,700 of 42,205 records", or "stopped" when the run kept no count above
+ * the units it read. Pure. */
+export function stoppedText(st: StoppedAt, unit: string): string {
+  const at = st.of != null ? ` at ${st.read.toLocaleString()} of ${st.of.toLocaleString()} ${unitWord(unit, st.of)}` : ''
+  return `stopped${at}${st.quit ? ' when Claude Code quit' : ''}`
+}
+
+/** What a stopped run's Run again says it does (bug hunt I3): go on with the units the stopped run never read while the
+ * label's definition stands (`resume`, "Label the other 22,028"), else label every unit again ("Run again on all
+ * 29,555", or with no count when the run kept none or was a sample's). Pure. */
+export function againWords(resume: { left: number } | null | undefined, st: StoppedAt | null | undefined, sample = false): string {
+  if (resume && resume.left > 0) return `Label the other ${resume.left.toLocaleString()}`
+  return st?.of != null && !sample ? `Run again on all ${st.of.toLocaleString()}` : 'Run again on all'
+}
 
 /** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
  * (0 for a run whose files were never counted). Pure. */
@@ -279,7 +308,8 @@ const later = (a: string | null | undefined, b: string | null | undefined): bool
  * on the label. A run that ended after the kept one stands in for it until the list is read again (a failed run sends
  * no `concepts` event). The kept run's count is matchedCount over the label's counts; before counts are known, the
  * run's `matches`. `cut` is the whole files or runs that run read only in part. */
-export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'last_run' | 'run'>, live?: ConceptRun | null): LabelStatus | null {
+export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'last_run' | 'run' | 'trial'> & { kind?: string }, live?: ConceptRun | null): LabelStatus | null {
+  const sample = k.trial ? { sample: true } : {}
   const run = live ?? k.run ?? null
   if (run?.status === 'running') {
     if (run.total != null) return { state: 'running', done: run.done ?? 0, total: run.total, unit: k.unit }
@@ -290,19 +320,41 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   if (run && (run.status === 'error' || run.status === 'done') && (!last || later(run.started, last.ts))) {
     if (run.status === 'error') return { state: 'error', message: run.message || 'the run failed' }
     const matches = run.matches ?? 0
-    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null }
+    // a run the analyst stopped states the units it read, not those it would have read, and says where it stopped
+    const summary = run.summary as { stopped?: boolean; stopped_by?: string | null } | null | undefined
+    const stopped = !!summary?.stopped
+    const total = stopped ? run.done ?? null : run.total
+    return { state: 'done', matches, total: statedTotal(total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null, ...sample, ...(stopped ? { stopped, stoppedAt: stoppedAt(run.done ?? 0, run.total, summary?.stopped_by) } : {}) }
   }
   if (!last) return null
   if (last.status === 'error') return { state: 'error', message: last.message || 'the run failed' }
-  const total = last.total ?? last.matched_total ?? last.labeled
+  const read = last.labeled + last.failed + (last.skipped ?? 0)
+  // the units with a value, as the label's counts hold them, the terminal, main's card and read_ref count them: those of
+  // earlier runs it kept among them, and none its run left with no value (bug hunt I10: 9 of 370 here and 9 + 391 in the
+  // terminal after a trial; 1,521 of 71,298 here and of 8,496 there for a code label that returns None)
+  const valued = k.counts ? Object.values(k.counts).reduce((a, b) => a + (b ?? 0), 0) : 0
+  const total = valued > 0 ? valued : last.stopped ? read : last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
-  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null }
+  const none = last.skipped ? { none: { n: last.skipped, code: k.kind === 'code' } } : {}
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null, ...sample, ...none, ...(last.stopped ? { stopped: true, stoppedAt: stoppedAt(read, last.total, last.stopped_by) } : {}) }
 }
 
-/** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, with "· 3 failed"
- * when units failed; the time follows it on the row. */
+/** The units a run gave no value, as the label row says them under its outcome: "62,802 records got no value from its
+ * code" (a code label's code returned None for them), "4 records had no words to read" (a prompt label's); '' for none.
+ * Pure. */
+export function noValueText(s: Extract<LabelStatus, { state: 'done' }>): string {
+  if (!s.none?.n) return ''
+  const n = `${s.none.n.toLocaleString()} ${unitWord(s.unit, s.none.n)}`
+  return s.none.code ? `${n} got no value from its code` : `${n} had no words to read`
+}
+
+/** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, a trial's as
+ * "20 of a sample of 30 records" (the canvas's and the terminal's `a sample of 30`), with "· 3 failed" when units
+ * failed; the time follows it on the row. */
 export function outcomeText(s: Extract<LabelStatus, { state: 'done' }>): string {
-  return s.total == null ? `${s.matches.toLocaleString()} ${unitWord(s.unit, s.matches)}` : `${s.matches.toLocaleString()} of ${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
+  const n = s.matches.toLocaleString()
+  if (s.total == null) return `${n} ${unitWord(s.unit, s.matches)}${s.sample ? ' in a sample' : ''}`
+  return `${n} of ${s.sample ? 'a sample of ' : ''}${s.total.toLocaleString()} ${unitWord(s.unit, s.total)}`
 }
 
 /** How many records a finished apply could not label, as the label row says it after the outcome: "230 failed"; ''
@@ -447,13 +499,14 @@ export interface PageLabel {
 }
 
 /** A label over files as a view's page lists it (thimble.onLabels `all`): whether it is on, whether it marks records in
- * the view's files (`here`), every value with its colour and highlight, and how many records it marks once a run is
- * done. */
+ * the view's files (`here`), whether it gives one of them a value it highlights (`marking`: Color by opens on a label
+ * that is on only then), every value with its colour and highlight, and how many records it marks once a run is done. */
 export interface PageLabelItem {
   id: string
   name: string
   on: boolean
   here: boolean
+  marking: boolean
   colour: string
   values: { name: string; colour: string; highlight: boolean }[]
   count: number | null
@@ -485,8 +538,8 @@ export function pageLabels(
 }
 
 /** Every label over files as a view's page lists it, in the Labels pane's order, with those that mark the view's files
- * (`first`) ahead and `here`. Pure. */
-export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) => string, first?: ReadonlySet<string>): PageLabelItem[] {
+ * (`first`) ahead and `here`, and `marking` for those of `marking` (every label without it). Pure. */
+export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) => string, first?: ReadonlySet<string>, marking?: ReadonlySet<string>): PageLabelItem[] {
   const files = [...all].filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
   return ordered.map((k) => {
@@ -498,6 +551,7 @@ export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) =
       name: k.name,
       on: !!k.shown,
       here: !!first?.has(k.id),
+      marking: marking ? marking.has(k.id) : true,
       colour: resolve(colourToken((lit[0] ?? cls[0])?.color ?? 1)),
       values: cls.map((c) => ({ name: c.name, colour: resolve(colourToken(c.color)), highlight: c.highlight })),
       count: status?.state === 'done' ? status.matches : null,
@@ -698,6 +752,22 @@ export function viewLabels(all: readonly Concept[], presence: ReadonlyMap<string
     if (!isFilesLabel(k)) continue
     const files = Object.keys(presence.get(k.id) ?? {})
     if (files.some((f) => claims.some((c) => claimMatches(f, c)))) out.add(k.id)
+  }
+  return out
+}
+
+/** The labels over files that give a record of a view's files a value they highlight, the values Color by colors by: a
+ * label that marks none of them (its run found nothing, or only its unhighlighted values fall there) colors no row, so
+ * the view does not open on it. Undefined before the presence is first read, when no label can be told apart; then a
+ * label the read does not hold yet (one just made) marks none. Pure. */
+export function viewMarking(all: readonly Concept[], presence: ReadonlyMap<string, Record<string, Record<string, number>>>, claims: readonly string[]): Set<string> | undefined {
+  if (!presence.size) return undefined
+  const out = new Set<string>()
+  for (const k of all) {
+    if (!isFilesLabel(k)) continue
+    const lit = new Set(classesOf(k).filter((c) => c.highlight).map((c) => c.name))
+    const files = Object.entries(presence.get(k.id) ?? {})
+    if (files.some(([f, values]) => Object.keys(values).some((v) => lit.has(v)) && claims.some((c) => claimMatches(f, c)))) out.add(k.id)
   }
   return out
 }

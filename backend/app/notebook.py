@@ -7,7 +7,7 @@ for everything else (_kernel_for). Oversized stream outputs are bounded to a hea
 file. The in-memory notebook cache is used by the event-loop thread only, and is trusted only while the file is
 unchanged (mtime_ns, size and inode).
 
-More than one process writes the groups: the server or, in terminal mode, the MCP shim, and `thimble-run`, which runs a
+More than one process writes the groups: the server or, before a press, the MCP shim, and `thimble-run`, which runs a
 card's code in main's Bash and writes its outputs (cardrun.py). Every change therefore holds the store's lock (editing:
 ledger.locked on the notebooks folder) from its read to its write, and a run, which cannot hold it while the code runs,
 saves its cell into the group as the file holds it then (_merge_cell).
@@ -56,8 +56,11 @@ log = logging.getLogger("thimble.notebook")
 async def _lifespan(app: Any):
     """The router's lifespan: first mark the cells the previous server left `running`, then reconnect the recorded
     kernels in the background, so /api/health answers at once. `_reconnect_done` tells wait_reconnect a reconnect is
-    under way."""
+    under way. The server's card watch runs for as long as the server (cardrun.CardWatch.serve): after the press it
+    records the runs main's `thimble-run` ends and starts their card checks, a mark a run left before this start too."""
     global _reconnect_done
+    from . import cardrun  # noqa: PLC0415
+
     try:
         marked = await asyncio.to_thread(mark_interrupted_cells)
         if marked:
@@ -66,11 +69,13 @@ async def _lifespan(app: Any):
         log.exception("marking interrupted cells failed")
     _reconnect_done = asyncio.Event()
     task = asyncio.create_task(_reconnect_on_start())
+    watch = asyncio.create_task(cardrun.CardWatch.serve(), name="thimble-cardwatch-server")
     try:
         yield
     finally:
-        if not task.done():
-            task.cancel()
+        for t in (task, watch):
+            if not t.done():
+                t.cancel()
 
 
 router = APIRouter(lifespan=_lifespan)
@@ -780,7 +785,11 @@ def _bound_stream(ws: Path, cell_id: str, i: int, bundle: dict) -> dict:
 def _drop_side_files(ws: Path, cell_id: str) -> None:
     d = ws / OUTPUTS_DIR
     if d.is_dir() and ID_RE.match(cell_id or ""):
+        # only `<id>-<n>.txt`: a card named `runs` must not take `runs-compare-0.txt`, another card's file
+        own = re.compile(rf"{re.escape(cell_id)}-\d+\.txt")
         for p in d.glob(f"{cell_id}-*.txt"):
+            if not own.fullmatch(p.name):
+                continue
             try:
                 p.unlink()
             except OSError:
@@ -1118,9 +1127,9 @@ INTERRUPTED_EVALUE = "thimble stopped while this card ran; run it again"  # the 
 def mark_interrupted_cells(root: Path | None = None, only: "tuple[str, ...] | None" = None) -> list[str]:
     """Server start: a cell stored `running` was mid-run when the previous server went away, and nothing will write its
     result. Mark each such cell errored with one Interrupted output (code, title and place stay), and end a pending card
-    check the same way. Reads every workspace under `root` directly, or only the workspaces `only` names (the terminal
-    mode's shim, which serves one), and writes changed notebooks back atomically under the store's lock. A workspace
-    open in terminal mode in a session that still runs is left alone, since its cards run in that session's Bash
+    check the same way. Reads every workspace under `root` directly, or only the workspaces `only` names (the shim on
+    local transport, which serves one), and writes changed notebooks back atomically under the store's lock. A workspace
+    on local transport in a session that still runs is left alone, since its cards run in that session's Bash
     (local.live_terminal). Returns `<workspace>/<notebook>/<cell>` per cell marked."""
     from . import checkstore, local  # noqa: PLC0415 — checkstore imports this module
 
@@ -1250,10 +1259,19 @@ def cell_slugs(ws: Path) -> dict[str, str]:
     return out
 
 
+def _names_taken(ws: Path, but: str | None = None) -> set[str]:
+    """Every card's id and name in the workspace, card `but` aside: what a new id or name must not be."""
+    return {x for cid, slug in cell_slugs(ws).items() if cid != but for x in (cid, slug)}
+
+
+def mint_id(ws: Path, title: str) -> str:
+    """A new card's id: the name of its question (slug_of), base-2, base-3 … when a card has it as its id or name."""
+    return unique_slug(slug_of(title), _names_taken(ws))
+
+
 def _name_cell(ws: Path, cell: dict) -> None:
-    """Store a name made from the card's question on it, one no other card of the workspace has."""
-    taken = {slug for cid, slug in cell_slugs(ws).items() if cid != cell.get("id")}
-    cell["slug"] = unique_slug(slug_of(cell.get("title") or ""), taken)
+    """Store a name made from the card's question on it, one no other card of the workspace has as its name or id."""
+    cell["slug"] = unique_slug(slug_of(cell.get("title") or ""), _names_taken(ws, cell.get("id")))
 
 
 def with_slugs(ws: Path, cells: list[dict]) -> list[dict]:
@@ -1381,7 +1399,7 @@ def set_parent(ws: Path, nb: dict, parent: str | None) -> None:
 
 
 def _locate(ws: Path, cell_id: str) -> tuple[dict, dict] | None:
-    """(notebook, cell) for a cell id, searching every notebook (cell ids are random, hence globally unique)."""
+    """(notebook, cell) for a cell id, searching every notebook (cell ids are unique across a workspace)."""
     for _, nb in _stored(ws):
         for c in nb["cells"]:
             if c.get("id") == cell_id:
@@ -1389,10 +1407,24 @@ def _locate(ws: Path, cell_id: str) -> tuple[dict, dict] | None:
     return None
 
 
+def _locate_name(ws: Path, name: str) -> tuple[dict, dict] | None:
+    """(notebook, cell) for a card's name (cell_slugs), which a chip shows: a card with an older id, or one whose
+    question changed since its id was made, is cited by its name too."""
+    if not name:
+        return None
+    for _, nb in _stored(ws):
+        for c in nb["cells"]:
+            if c.get("slug") == name:
+                return nb, c
+    cid = next((i for i, n in cell_slugs(ws).items() if n == name), None)
+    return _locate(ws, cid) if cid else None
+
+
 def find_cell(ws: Path, cell_id: str) -> tuple[str, dict] | None:
-    """(group id, cell) for a cell id, searching every group (cell ids are random, hence unique across a workspace).
-    Every reader of refs comes through here, so a `card:<id>` stays a live ref wherever its card moved."""
-    hit = _locate(ws, cell_id)
+    """(group id, cell) for a cell id, or else a card's name (_locate_name), searching every group (cell ids are unique
+    across a workspace). Every reader of refs comes through here, so a `card:<id>` stays a live ref wherever its card
+    moved."""
+    hit = _locate(ws, cell_id) or _locate_name(ws, cell_id)
     return (hit[0]["id"], hit[1]) if hit else None
 
 
@@ -1444,9 +1476,10 @@ def _find(nb: dict, cell_id: str) -> dict:
 
 
 def new_cell(kind: str, created_by: str, title: str = "", notebook: str = MAIN, *, code: str | None = None,
-             payload: dict | None = None, created_at_event: int | None = None) -> dict:
+             payload: dict | None = None, created_at_event: int | None = None, workspace: str | None = None) -> dict:
     """A new cell of `kind`, not yet stored. A runnable kind takes `code`, a data kind `payload`, a diagram or a
-    timeline one of the two. ValueError for a kind outside CELL_KINDS or a combination that does not fit."""
+    timeline one of the two. ValueError for a kind outside CELL_KINDS or a combination that does not fit. Given its
+    `workspace`, its id is a readable name of its question (mint_id), also its name; else a random one."""
     if kind not in CELL_KINDS:
         raise ValueError(f"kind must be one of {', '.join(CELL_KINDS)}, not {kind!r}")
     data = kind in DATA_KINDS or (kind in PAYLOAD_KEYS and code is None)
@@ -1466,6 +1499,8 @@ def new_cell(kind: str, created_by: str, title: str = "", notebook: str = MAIN, 
             cell["labels"] = [cell["payload"]["concept"]]
     else:
         cell.update(code=str(code or ""), exec_count=None, status="idle", outputs=[])
+    if workspace:
+        cell["id"] = cell["slug"] = mint_id(_ws(workspace), title)
     return cell
 
 
@@ -1904,10 +1939,11 @@ def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
 # killed. Every signal goes to a pid whose command line was just checked.
 #
 # Kernels end with the server: shutdown() kills them unless the server is restarting, when it detaches them for the next
-# server. A restart says so with <THIMBLE_HOME>/kernels-handoff.json (cli.hand_over_kernels); a `--reload` worker writes
-# it for itself. An exit that skips the lifespan still kills kernels from an atexit hook. Explicit shutdown sends
-# SIGTERM to the process group, SIGKILL after KILL_WAIT_S, and removes the record. A watchdog inside the kernel exits
-# once the recorded server has been gone for KERNEL_TTL_S. Interrupt is SIGINT to the process group.
+# server, and no kernel starts after it began (stopping). A restart says so with <THIMBLE_HOME>/kernels-handoff.json
+# (cli.hand_over_kernels); a `--reload` worker writes it for itself. An exit that skips the lifespan still kills kernels
+# from an atexit hook. Explicit shutdown sends SIGTERM to the process group, SIGKILL after KILL_WAIT_S, and removes the
+# record. A watchdog inside the kernel exits once the recorded server has been gone for KERNEL_TTL_S. Interrupt is SIGINT
+# to the process group.
 #
 # With `kernel_wrap: bwrap` the argv runs inside bubblewrap: the recorded pid is bwrap's outer process, which leads the
 # process group. The kernel cannot see the server's pid there, so its watchdog reads a LEASE instead: an flock on
@@ -2252,10 +2288,32 @@ class _Kernel:
 
 _kernels: dict[str, _Kernel] = {}  # the shared per-workspace kernel: the run session's exploration notebooks
 _exec_kernels: dict[tuple[str, str], _Kernel] = {}  # named dedicated execution kernels, keyed (workspace, name)
+# Every kernel this server launched that it has not stopped or left for the next server, also one that neither table
+# names any more: a start that waited for its kernel's lock while the kernel was shut down (shutdown_kernel,
+# shutdown_all) launches on an object the tables have dropped. shutdown_all and the atexit hook stop these too.
+_launched: set[_Kernel] = set()
 # In a card runner (`thimble-run`, cardrun.py), the in-process shell that stands in for every kernel: a function of
 # (workspace, kernel name) returning an object with the kernel's fields and `local = True`, which _ensure_started and
 # _execute hand over to (cardrun.LocalKernel). None everywhere else.
 local_kernel: Any = None
+
+
+_stopped_on: asyncio.AbstractEventLoop | None = None  # the loop of the server that began to stop (shutdown)
+
+
+def stopping() -> bool:
+    """Whether this server has begun to stop for good (shutdown ran on its loop), from when no kernel starts (_launch)
+    and no view's headless run (views._shoot_in): a start then, such as a reader kernel's after its call was cancelled by
+    the stop, would outlive the server. It is the loop's state, not the process's, since a test's app stops on a loop of
+    its own."""
+    try:
+        return asyncio.get_running_loop() is _stopped_on
+    except RuntimeError:
+        return False
+
+
+class Stopping(RuntimeError):
+    """A kernel did not start because the server is stopping (stopping)."""
 
 
 class TerminalRun(RuntimeError):
@@ -2275,7 +2333,7 @@ def _no_kernel_here(workspace: str) -> None:
     from . import local  # noqa: PLC0415
 
     if local.terminal(workspace):
-        raise TerminalRun(f"in terminal mode, card code in {workspace} runs through thimble-run, not in this process")
+        raise TerminalRun(f"on local transport, card code in {workspace} runs through thimble-run, not in this process")
 
 
 def _kernel(workspace: str, kernel: str | None = None) -> _Kernel:
@@ -2653,7 +2711,10 @@ def _release_lease(k: _Kernel, drop: bool = False) -> None:
 
 
 async def _launch(k: _Kernel, workspace: str) -> None:
-    """A fresh kernel process in the workspace's scratch mirror, recorded and connected. Call with k.lock held."""
+    """A fresh kernel process in the workspace's scratch mirror, recorded and connected. Call with k.lock held. Stopping
+    once the server has begun to stop, also when it began while the start was under way."""
+    if stopping():
+        raise Stopping("the server is stopping, so the kernel did not start")
     corpus = config.corpus_dir(workspace)
     cwd = await asyncio.to_thread(scratch_dir, workspace, corpus)  # the scratch mirror (module docstring)
     k.record.parent.mkdir(parents=True, exist_ok=True)
@@ -2678,6 +2739,8 @@ async def _launch(k: _Kernel, workspace: str) -> None:
             await asyncio.to_thread(_fresh_home, k)
         if wrapped:
             await asyncio.to_thread(_hold_lease, k)  # before the process exists: its watchdog never sees a free lease
+        if stopping():  # it began during the awaits above; nothing is awaited from here to the Popen
+            raise Stopping("the server is stopping, so the kernel did not start")
         log.info("starting kernel %s for %s in %s (a mirror of %s)%s", k.key, workspace, cwd, corpus,
                  f"; wrapped in {wrap} ({source})" if wrapped else "")
         with k.log.open("wb") as out:
@@ -2685,6 +2748,7 @@ async def _launch(k: _Kernel, workspace: str) -> None:
                                     stdout=out, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
         k.proc = proc
         k.pid = k.pgid = proc.pid
+        _launched.add(k)
         k.wrap = wrap
         _write_record(k, {"name": k.name, "workspace": workspace, "pid": proc.pid, "pgid": proc.pid,
                           "connection_file": str(k.conn), "cwd": str(cwd), "started": _now(), "server_pid": os.getpid(),
@@ -2755,6 +2819,7 @@ def _detach(k: _Kernel) -> None:
     if kc is not None:
         _close_client(kc)
     _release_lease(k)  # the file stays: the next server's _attach takes the lease back
+    _launched.discard(k)
 
 
 async def _kill(k: _Kernel) -> None:
@@ -2769,6 +2834,7 @@ async def _kill(k: _Kernel) -> None:
         rec = _read_record(k.record) or {}
         pid, pgid = _record_pid(rec), _record_pid(rec, "pgid")
     k.pid = k.pgid = None
+    _launched.discard(k)
     if pid is not None:
         ours = proc is not None and proc.pid == pid and proc.poll() is None
         await asyncio.to_thread(_terminate, pid, pgid or pid, k.conn, ours)
@@ -2797,9 +2863,9 @@ async def shutdown_workspace(workspace: str) -> None:
 
 
 async def shutdown_all() -> None:
-    """Explicit shutdown of every kernel this server holds, all at once, so a stopping server ends them within
-    KILL_WAIT_S."""
-    ks = [*_kernels.values(), *_exec_kernels.values()]
+    """Explicit shutdown of every kernel this server holds or launched (_launched), all at once, so a stopping server
+    ends them within KILL_WAIT_S."""
+    ks = _held()
     _kernels.clear()
     _exec_kernels.clear()
     for r in await asyncio.gather(*(_kill(k) for k in ks), return_exceptions=True):
@@ -2808,11 +2874,18 @@ async def shutdown_all() -> None:
 
 
 async def detach_all() -> None:
-    """Leave every kernel this server holds running with its record, for the next server to take back (a restart)."""
+    """Leave every kernel this server holds running with its record, for the next server to take back (a restart). One
+    that neither table names is left too, for the next server's start to take back or stop (reconnect_all)."""
     for k in [*_kernels.values(), *_exec_kernels.values()]:
         _detach(k)
     _kernels.clear()
     _exec_kernels.clear()
+    _launched.clear()
+
+
+def _held() -> list[_Kernel]:
+    """Every kernel this server holds in its tables or launched (_launched), each once."""
+    return list(dict.fromkeys([*_kernels.values(), *_exec_kernels.values(), *_launched]))
 
 
 def _home() -> Path:
@@ -2834,16 +2907,18 @@ def _server_alive(pid: int | None) -> bool:
 
 
 async def shutdown() -> None:
-    """Lifespan shutdown and dev's pre-execv hook: kernels end with the server, unless it is restarting, when they are
-    detached for the next server."""
+    """Lifespan shutdown and dev's pre-execv hook: kernels end with the server, and none starts after (stopping),
+    unless it is restarting, when they are detached for the next server (and a restart whose execv fails goes on)."""
+    global _stopped_on
     from . import cli  # noqa: PLC0415
 
-    held = len(_kernels) + len(_exec_kernels)
+    held = len(_held())
     if cli.kernel_handoff() == os.getpid() or (held and _under_reloader() and cli.hand_over_kernels(os.getpid())):
         if held:
             log.info("restarting: %d kernel(s) left running for the next server", held)
         await detach_all()
         return
+    _stopped_on = asyncio.get_running_loop()
     await shutdown_all()
     if held:
         log.info("stopped %d kernel(s) with the server", held)
@@ -2852,9 +2927,10 @@ async def shutdown() -> None:
 def _kill_left_at_exit() -> None:
     """The interpreter exits with kernels still held (uvicorn skipped the lifespan on a forced exit): terminate them as
     shutdown_all would; nothing when shutdown ran."""
-    ks = [*_kernels.values(), *_exec_kernels.values()]
+    ks = _held()
     _kernels.clear()
     _exec_kernels.clear()
+    _launched.clear()
     for k in ks:
         try:
             if k.pid:
@@ -3473,13 +3549,13 @@ def _keep_takeaway(workspace: str, cell: dict, changed: bool) -> tuple[str, str]
     return kept, before
 
 
-RUN_KEY = "run"  # a card whose code runs through `thimble-run` (terminal mode): {state, by, script, ...} (cardrun.py)
+RUN_KEY = "run"  # a card whose code runs through `thimble-run` in main's Bash: {state, by, script, ...} (cardrun.py)
 
 
 @_changes
 def stage_edit(workspace: str, nb_id: str, cell_id: str, code: str, run: dict, *, by: str, title: str | None = None,
                kind: str | None = None, from_dataset: bool = False) -> dict:
-    """edit_and_run's change to a card stored to run later through `thimble-run` (terminal mode), with its RUN_KEY
+    """edit_and_run's change to a card stored to run later through `thimble-run` in main's Bash, with its RUN_KEY
     record. A kept takeaway's outputs text goes in the record as `kept`, so the run marks it stale when its outputs
     differ. Returns a copy of the stored cell."""
     ws = _ws(workspace)
@@ -3709,8 +3785,8 @@ async def _run_code(
         # the target is gone: append a fresh cell
     nb_id = notebook or active_notebook_id(workspace)
     nb = load_notebook(workspace, nb_id)
-    cell = new_cell(kind or DEFAULT_KIND, created_by, title, nb_id, code=code, created_at_event=created_at_event)
-    _name_cell(_ws(workspace), cell)
+    cell = new_cell(kind or DEFAULT_KIND, created_by, title, nb_id, code=code, created_at_event=created_at_event,
+                    workspace=workspace)
     nb["cells"].append(cell)
     _emit(workspace, cell)
     return await _execute_cell(workspace, nb, cell, kernel, timeout_s, default_timeout_s)
@@ -3797,9 +3873,13 @@ class NotebookMeta(BaseModel):
 @router.get("/ws/{c}/canvas")
 async def canvas_route(c: str) -> dict:
     """The canvas as the browser shows it, the orientation's cards among them as it adds them. A Scratch group is marked
-    first (migrate_scratch), so canvas() leaves it out."""
+    first (migrate_scratch), so canvas() leaves it out. A thread's group named by the first words of what it was asked
+    about takes the thread's first question (agents.retitle_threads)."""
+    from . import agents  # noqa: PLC0415 — agents imports this module
+
     migrate_scratch(c)
     migrate_writer_groups(c)
+    agents.retitle_threads(c)
     return canvas(_ws(c))
 
 
@@ -4098,7 +4178,7 @@ async def create_cell(c: str, nb: str, body: NewCell) -> dict:
     load_notebook(c, nb)  # 404 before anything is made
     try:
         cell = new_cell(body.kind, body.created_by, body.title, nb, code=body.code, payload=body.payload,
-                        created_at_event=body.created_at_event)
+                        created_at_event=body.created_at_event, workspace=c)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return insert_cell(c, nb, cell, body.after)
@@ -4132,10 +4212,13 @@ async def update_cell_by_id(c: str, cell_id: str, body: CellEdit) -> dict:
 
 @router.get("/ws/{c}/cells/{cell_id}")
 async def get_cell_route(c: str, cell_id: str) -> dict:
+    """The card by its id or its name (find_cell), with its name (with_slugs), which its chip shows."""
     cell = get_cell(c, cell_id)
+    if cell is None and (hit := find_cell(_ws(c), cell_id)) is not None:  # a card's name, as a chip shows it
+        cell = get_cell(c, hit[1]["id"])
     if cell is None:
         raise HTTPException(404, f"no such card: {cell_id}")
-    return cell
+    return with_slugs(_ws(c), [cell])[0]
 
 
 @router.get("/ws/{c}/cells/{cell_id}/versions/{entry}")

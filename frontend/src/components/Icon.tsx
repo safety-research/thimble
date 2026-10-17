@@ -64,6 +64,7 @@ export type IconName =
   | 'tag'
   | 'history'
   | 'arrow-up'
+  | 'arrow-down'
   | 'trash'
   | 'stop'
   | 'link'
@@ -177,6 +178,7 @@ const PATHS: Record<IconName, string> = {
   tag: 'M3 5a2 2 0 0 1 2-2h7.2a2 2 0 0 1 1.4.6l7.2 7.2a2 2 0 0 1 0 2.8l-6.4 6.4a2 2 0 0 1-2.8 0L3.6 12.6A2 2 0 0 1 3 11.2zM8 8h.01',
   history: 'M3.5 9a9 9 0 1 1-1 4.5M3.5 9V4M3.5 9h4.5M12 8v4.5l3 2',
   'arrow-up': 'M12 19V5M6 11l6-6 6 6',
+  'arrow-down': 'M12 5v14M6 13l6 6 6-6',
   trash: 'M4 7h16M10 4h4a1 1 0 0 1 1 1v2H9V5a1 1 0 0 1 1-1zM6.5 7l.8 12a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9l.8-12M10 11v6M14 11v6',
   stop: 'M8 7.5h8a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-.5.5H8a.5.5 0 0 1-.5-.5V8a.5.5 0 0 1 .5-.5z',
   link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',

@@ -29,8 +29,44 @@ const timeKey = (t: unknown): number => {
   return Number.isNaN(n) ? Number.POSITIVE_INFINITY : n
 }
 
+// a clock time as thimble.timeline keeps it, with no date (backend kernel_thimble.timeline): "01:03", "22:14:07"
+const CLOCK = /^(\d{1,3}):([0-5]\d)(?::([0-5]\d))?$/
+
+/**
+ * Clock times ("22:14:07") as ms from the start of the day of the first, in the order given, and the day each falls on
+ * (0 for the first): a time earlier than the one before starts the next day; with an hour past 23 the hours count from
+ * the start, on one day. Null when any time is not a clock time. Pure.
+ */
+export function clockKeys(times: readonly unknown[]): { at: number[]; day: number[] } | null {
+  const secs: number[] = []
+  for (const t of times) {
+    const m = typeof t === 'string' ? CLOCK.exec(t.trim()) : null
+    if (!m) return null
+    secs.push(Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] ?? 0))
+  }
+  if (!secs.length) return null
+  const elapsed = secs.some((s) => s >= 86400)
+  let day = 0
+  let prev = -1
+  const at: number[] = []
+  const days: number[] = []
+  for (const s of secs) {
+    if (!elapsed && prev >= 0 && s + day * 86400 < prev) day++
+    prev = s + day * 86400
+    at.push(prev * 1000)
+    days.push(day)
+  }
+  return { at, day: days }
+}
+
+/** The events with their keys, in time order: clock times by clockKeys, else as timeKey reads them. Pure. */
+function keyedEvents(events: TimelineDataset['events']): { e: TimelineDataset['events'][number]; k: number; day: number }[] {
+  const clock = clockKeys(events.map((e) => e.time))
+  return events.map((e, i) => ({ e, k: clock ? clock.at[i] : timeKey(e.time), day: clock ? clock.day[i] : 0 })).sort((a, b) => a.k - b.k)
+}
+
 export function sortedEvents(events: TimelineDataset['events']): TimelineDataset['events'] {
-  return [...events].sort((a, b) => timeKey(a.time) - timeKey(b.time))
+  return keyedEvents(events).map((x) => x.e)
 }
 
 // ---- the timeline: a list of events down a time axis ----
@@ -42,7 +78,7 @@ export function timeAxisType(events: readonly { time?: unknown }[]): 'temporal' 
   const times = events.map((e) => e.time).filter((t) => t != null && t !== '')
   if (!times.length) return 'ordinal'
   if (times.every((t) => typeof t === 'number')) return 'quantitative'
-  if (times.every((t) => typeof t === 'string' && !Number.isNaN(Date.parse(t)))) return 'temporal'
+  if (clockKeys(times) || times.every((t) => typeof t === 'string' && !Number.isNaN(Date.parse(t)))) return 'temporal'
   return 'ordinal'
 }
 
@@ -60,14 +96,15 @@ export function timeFractions(events: readonly { time?: unknown }[], type: 'temp
   const n = events.length
   const byOrder = (i: number) => (n > 1 ? i / (n - 1) : 0.5)
   if (type === 'ordinal') return events.map((_, i) => byOrder(i))
-  const ts = events.map((e) => timeKey(e.time))
+  const ts = clockKeys(events.map((e) => e.time))?.at ?? events.map((e) => timeKey(e.time))
   const finite = ts.filter((t) => Number.isFinite(t))
   const min = Math.min(...finite)
   const max = Math.max(...finite)
   return ts.map((t, i) => (!Number.isFinite(t) ? byOrder(i) : max > min ? (t - min) / (max - min) : 0.5))
 }
 
-/** the month of the day thimble.timeline reads clock times on (backend kernel_thimble.CLOCK_DAY, 2000-01-01) */
+/** the month of the day thimble.timeline put clock times on in a card that ran before it kept them without a date
+ * (2000-01-01) */
 const CLOCK_MONTH = '2000-01-'
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 // an ISO date or date-time as written: its wall-clock parts are shown as they are, whatever zone it names, so a time
@@ -156,23 +193,26 @@ export function waitText(ms: number, type: 'temporal' | 'quantitative'): string 
  * the spacing; with `even` every gap is the least one and nothing is a break. Pure.
  */
 export function timelineRows(events: TimelineDataset['events'], even = false): TimelineRow[] {
-  const sorted = sortedEvents(events).slice(0, MAX_EVENTS)
-  const type = timeAxisType(sorted)
-  const format = type === 'temporal' ? timeFormat(sorted) : ''
-  const plain = sorted.map((e) => timeText(e.time, format))
+  const keyed = keyedEvents(events).slice(0, MAX_EVENTS)
+  const sorted = keyed.map((x) => x.e)
+  // clock times (thimble.timeline's "22:14:07") read as written, with no date
+  const onClock = !!clockKeys(sorted.map((e) => e.time))
+  const type = onClock ? 'temporal' : timeAxisType(sorted)
+  const format = type === 'temporal' && !onClock ? timeFormat(sorted) : ''
+  const plain = sorted.map((e) => (onClock ? String(e.time).trim() : timeText(e.time, format)))
   // two events that read the same time take the finer form, and so does every other time, so the column reads one way
-  const finer = type === 'temporal' && new Set(plain).size < plain.length
+  const finer = type === 'temporal' && !onClock && new Set(plain).size < plain.length
   const seconds = finer && format === '%H:%M'
   const withDate = finer && format !== '%H:%M'
   const clock = sorted.map((e, i) => (finer ? timeText(e.time, format, seconds, withDate) : plain[i]))
   // times of day across midnight: the first time of each day carries its date, so the change of day is not lost
-  // (clock times that thimble.timeline put on its day, 2000-01-01, count their days instead of naming a date)
+  // (clock times count their days instead of naming a date, as do those an older thimble.timeline put on 2000-01-01)
   const onClockDay = sorted.every((e) => typeof e.time === 'string' && e.time.startsWith(CLOCK_MONTH))
-  const days = sorted.map((e) => (format !== '%H:%M' ? '' : onClockDay ? `day ${Number(String(e.time).slice(8, 10))}` : timeText(e.time, '%b %d')))
+  const days = keyed.map(({ e, day }) => (onClock ? `day ${day + 1}` : format !== '%H:%M' ? '' : onClockDay ? `day ${Number(String(e.time).slice(8, 10))}` : timeText(e.time, '%b %d')))
   const newDay = new Set(days).size > 1
   const times = clock.map((t, i) => (newDay && (i === 0 || days[i] !== days[i - 1]) ? `${days[i]} ${t}` : t))
   const spaced = type !== 'ordinal' && !even
-  const ts = sorted.map((e) => timeKey(e.time))
+  const ts = keyed.map((x) => x.k)
   const breaks = spaced ? timelineBreaks(ts) : new Set<number>()
   // the gaps share the budget in proportion to the waits that are not breaks
   const waits = ts.map((t, i) => (i === 0 || breaks.has(i) || !Number.isFinite(t) || !Number.isFinite(ts[i - 1]) ? 0 : Math.max(0, t - ts[i - 1])))

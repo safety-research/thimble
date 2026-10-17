@@ -9,7 +9,6 @@ import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { Cell, Group, Writeup } from '../lib/types'
 import { ReadProbe, useDock } from '../shell/dock'
-import { usedCells } from './cards'
 import { SidebarShow, useChecks, useSidebar } from './Checks'
 import { checkColumns, openComments, passageFlags, shownComments, type DocComment } from './checkComments'
 import { commentsApi } from './commentsApi'
@@ -70,7 +69,6 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
   const { on, look } = checks
   const [active, setActive] = useState<string | null>(null)
   const [draft, setDraft] = useState<string | null>(null)
-  const [figures, setFigures] = useState<string[]>([])
   const { cells, groups } = useCanvas(ws)
   const editor = useRef<EditorHandle | null>(null)
   const column = useRef<HTMLDivElement | null>(null)
@@ -98,7 +96,6 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
   const open = useMemo(() => openComments(doc.comments, allSentences(doc), passageOrder(doc), paragraphOf(doc)), [doc])
   const shown = useMemo(() => shownComments(open, on), [open, on])
   const flags = useMemo(() => passageFlags(shown, active, look), [shown, active, look])
-  const used = useMemo(() => usedCells(figures), [figures])
   const byId = useMemo(() => new Map(cells.map((c) => [c.id, c])), [cells])
   const captionOf = useCallback((id: string) => {
     const c = byId.get(id)
@@ -197,7 +194,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
     <div className="wu-report" ref={side.row}>
       <ReadProbe probe={side.probe} />
       {side.shown ? (
-        <Sidebar ws={ws} cells={cells} groups={groups} used={used} onInsert={(id) => editor.current?.insertCard(id)} onHide={side.hide} over={side.over} doc={slug} checks={checks} comments={open} />
+        <Sidebar ws={ws} cells={cells} groups={groups} onInsert={(id) => editor.current?.insertCard(id)} onHide={side.hide} over={side.over} doc={slug} checks={checks} comments={open} />
       ) : (
         <SidebarShow onShow={side.show} />
       )}
@@ -205,7 +202,7 @@ export function ReportPage({ ws, slug, doc, filter, client, onSaved }: ReportPag
         <ReadProbe probe={rail.probe} />
         <div className="wu-page-row">
           <div className="wu-page-col" ref={column}>
-            <ReportEditor ref={editor} ws={ws} slug={slug} doc={doc} flags={flags} filter={filter} client={client} onSaved={onSaved} onFigures={setFigures} onComment={setDraft} captionOf={captionOf} />
+            <ReportEditor ref={editor} ws={ws} slug={slug} doc={doc} flags={flags} filter={filter} client={client} onSaved={onSaved} onComment={setDraft} captionOf={captionOf} />
           </div>
           {shown.length > 0 || draft ? (
             <Margin ws={ws} slug={slug} comments={shown} look={look} active={active} onActivate={setActive} onResolve={resolve} draft={draft} onDraft={saveDraft} onDraftCancel={() => setDraft(null)} column={column} textOf={textOf} />

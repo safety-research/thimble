@@ -5,12 +5,13 @@
 > person each question it lists (often there are none), and pass the flag for each of their answers. Answer none of
 > them yourself.
 
-thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
-your config dir with your user settings. thimble's agents run as subagents of your Claude Code session;
-its single model calls (labels, card checks, view proposals) and `thimble fix` run as `claude -p` jobs in folders of
-their own, so auth
-set only in a project's `.claude/` settings does not reach them. thimble tells you when `claude` is missing or not
-logged in.
+thimble uses whichever auth path you have configured for `claude`, and starts no Claude Code session of its own: its
+agents (the orientation, its critic, writers, view builds and reviews, code tickets, the checks and the card check) run
+as subagents of your Claude Code session, under its permission mode and sign-in, and its single model calls (prompt
+labels, label drafts, whether an extension's view fits, viewer suggestions, view proposals) run through your session's
+own API client and sign-in, with no tools, so they ask nothing and leave no row in your terminal. A view proposal reads
+your session's conversation. With no Claude Code session running thimble in the folder, these features say so and how
+to start one. thimble tells you when `claude` is missing or not logged in.
 
 What thimble's agents may do, and on which models, is set in `~/.thimble/config.json`: [docs/config.md](docs/config.md).
 Card code runs in the notebook kernel with your network, whatever that file says. The kernel runs in Anthropic's sandbox
@@ -20,34 +21,36 @@ bubblewrap can create a sandbox, and otherwise with your user's access; `thimble
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.300), logged in (`claude auth status`)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.301), logged in (`claude auth status`)
   or set up with an API key or a cloud provider ([Authentication](#authentication)), with
   its hooks modules on, which thimble's agents need: managed settings with `disableAllHooks` or
   `allowManagedHooksOnly`, or a folder Claude Code doesn't trust, turn them off.
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
 - Node 20+ for custom views and for the sandbox card code and code tickets run in; a Dev install needs 20.19+, 22.13+ or 24+, which the frontend's tests need.
+  install.sh checks Node first: when it is missing or too old, it says so with the command that gets Node 22 on your
+  machine (nvm, fnm, Volta or Homebrew), or the folder to put first on PATH when a newer Node is installed already.
 
 ## Authentication
 
-thimble has no login of its own: every model call runs your own `claude`. Any way you sign in to Claude Code works.
+thimble has no login of its own and starts no Claude Code session of its own: every model call runs in your Claude
+Code session, on its sign-in. Any way you sign in to Claude Code works.
 
 - **Claude login.** Run `claude auth login`, or `/login` in a `claude` session.
-- **API key.** Export `ANTHROPIC_API_KEY` in your shell before thimble's server starts. The server keeps the environment
-  it started with, so if a server already runs, run `thimble server restart` from that shell. Claude Code asks once
-  whether to use the key.
+- **API key.** Export `ANTHROPIC_API_KEY` in your shell before you start `claude` or `thimble`. Claude Code asks once
+  whether to use the key, which then overrides a Claude login.
 - **apiKeyHelper (most robust).** Put `"apiKeyHelper": "<a command that prints the key>"` in `~/.claude/settings.json`
-  (your Claude Code config dir). It reaches your session and thimble's server calls, whatever your shell exports. Auth
-  set only in a project's `.claude/` settings does not reach thimble's server calls.
+  (your Claude Code config dir). It reaches your session whatever your shell exports, and with it every model call of
+  thimble's, which runs in your session.
 - **Bedrock, Vertex or Foundry.** Set `CLAUDE_CODE_USE_BEDROCK=1`, `CLAUDE_CODE_USE_VERTEX=1` or
-  `CLAUDE_CODE_USE_FOUNDRY=1` and the provider's credentials, as Claude Code's docs say, before the server starts.
+  `CLAUDE_CODE_USE_FOUNDRY=1` and the provider's credentials, as Claude Code's docs say, before Claude Code starts.
   thimble names Anthropic's model ids, such as `claude-opus-5-5`. If your provider needs other ids, set each agent's
   model in Settings or as `agents.<agent>.model` in `~/.thimble/config.json` ([docs/config.md](docs/config.md)), or set
   `THIMBLE_<ROLE>_MODEL` (such as `THIMBLE_ORIENT_MODEL`) in the server's environment.
 
-After you change credentials, run `thimble server restart`. `thimble doctor --verbose` shows the auth path. When your
-organization's managed settings set `forceLoginMethod`, Claude Code blocks API keys and `apiKeyHelper`: sign in with the
-method it names.
+After you change credentials, start Claude Code again, and run `thimble server restart` so that
+`thimble doctor --verbose`, which shows the auth path, reads them. When your organization's managed settings set
+`forceLoginMethod`, Claude Code blocks API keys and `apiKeyHelper`: sign in with the method it names.
 
 ## Permissions
 
@@ -60,19 +63,22 @@ call, so thimble's agents keep working while you watch the browser. Start with `
 `~/.claude/settings.json` (a project's settings can't choose auto). The first time Claude reads a file outside the folder
 you opened, such as an agent's notes in thimble's workspaces folder, Claude Code asks once whether to allow such reads.
 
-In Manual mode Claude Code asks before the first call of each thimble tool, before each edit thimble's agents make in
-their work folders (which are outside the folder you opened), and before most commands. An agent's requests show only
-in the terminal, and for an agent the browser started Claude Code offers only Yes and No. While your session reports
-Manual mode, thimble shows a red notice above the browser's chat (in terminal mode, a red row above the prompt) that
-says how to switch, or who turned auto mode off; it goes when you switch, and once you dismiss it, it stays off for that
-workspace. In browser mode the terminal also prints that line once per session.
+In Manual mode Claude Code asks before the first call of each of main's thimble tools, before every call of the tools
+thimble's agents have of their own (a view's builder and reviewer, a card check, the orientation's critique and a code
+ticket's agent), for which it offers no "don't ask again", before each edit thimble's agents make in their work folders
+(which are outside the folder you opened), and before most commands. Every permission request shows
+in the terminal, and you answer it there: the browser shows a waiting request read-only, with a line that says to answer
+it in the terminal. A card check runs as a subagent with two tools of its own, and Claude Code asks before it reads its
+task and before it sends its answer. A model call of thimble's (a prompt label, a label draft, a viewer suggestion, a
+view proposal) has no tools and asks nothing, in any mode. While your session reports Manual mode, thimble shows a red row
+above the prompt (and a red notice above the browser's chat) that says how to switch, or who turned auto mode off; it
+goes when you switch, and once you dismiss it, it stays off for that workspace.
 
-Code tickets and view builds are subagents of your session, so they run in its mode, Bypass included. thimble's own
-jobs (an extension's program that runs the dev agent, and the sessions thimble's server runs) follow your session's
-mode, except Bypass: they run in Bypass only when you choose Bypass for them in thimble's Settings. `"bypass"` written
-into thimble's config by hand counts as Manual until you choose it in Settings. `thimble fix` asks you in the terminal
-before its change reaches thimble's code, and before it starts where its sandbox can't run. Nobody can answer it while
-it works, so it runs its commands without asking, in its sandbox where that can run.
+Code tickets and view builds are subagents of your session, so they run in its mode, Bypass included. An extension's
+program that runs the dev agent, a job of thimble's server, follows your session's mode, but never Bypass: Settings
+offers Manual and Auto for it, and a session in Bypass, or `"bypass"` in thimble's config, counts as Manual.
+`thimble fix` starts no Claude Code session: it says what `thimble doctor` finds, and you make the repair in your own
+Claude Code session, opened in thimble's checkout.
 
 To be asked less, add this to `~/.claude/settings.json`, with the path from the `workspaces_dir` line of
 `thimble doctor --verbose` (in a development install, also `~/.thimble/dev/trees`, made first with `mkdir -p`):
@@ -80,29 +86,40 @@ To be asked less, add this to `~/.claude/settings.json`, with the path from the 
 ```json
 {
   "permissions": {
-    "allow": ["mcp__plugin_thimble_thimble", "Skill(thimble:shared)"],
+    "allow": ["mcp__plugin_thimble_thimble", "mcp__thimble-orientation", "mcp__thimble-view-builder",
+              "mcp__thimble-view-reviewer", "mcp__thimble-call", "mcp__thimble-dev-ticket", "Bash(thimble-run:*)"],
     "additionalDirectories": ["/home/you/.thimble/app/workspaces"]
   }
 }
 ```
 
+The `mcp__thimble-…` rules other than `mcp__plugin_thimble_thimble` are the only way to stop the asks of the agents'
+own tools. `additionalDirectories` lets Claude read thimble's workspaces without asking; edits there still ask.
+
+`Bash(thimble-run:*)` lets Claude run a card's code, or a code label, with `thimble-run` without asking. That code runs
+with your access, as any command Claude runs does, so leave this rule out if you want to see each run first.
+
 What protects what:
 
 | | thimble, always | Claude Code's sandbox (optional) | Your permission mode |
 |---|---|---|---|
-| thimble's token files | Claude's file tools can't read or edit them | Shell commands can't read or write them | A shell command that reads them asks (Manual) or is judged (auto) |
-| Reading or acting as you in the browser | Needs this browser's sign-in, which the browser sends to thimble alone; a link's code works once, for 5 minutes; each new sign-in shows a line in your terminal | Shell commands can't make a sign-in | Shell commands that try follow your mode |
+| thimble's token files | Claude's file tools can't read or edit them; once thimble is on, a shell command that names them literally is refused | Shell commands can't read or write them | A shell command that reads them asks (Manual) or is judged (auto) |
+| A sign-in code | Only in a redirect file or a link file that only your account can read; never in a command line, a log, the terminal's output or Claude's context; works once, for 60 s (5 minutes for a link you copy) | Shell commands can't read the files | Shell commands that try follow your mode |
+| Reading or acting as you in the browser | Needs this browser's sign-in, which the browser sends to thimble alone; each new sign-in shows a notice with Sign it out | Shell commands can't make a sign-in | Shell commands that try follow your mode |
+| Another account on this computer | Can't read your codes; on Linux a sign-in from its connection is refused; reads nothing without a sign-in | — | — |
+| A tab whose server stopped | Stops, and sends its sign-in to nothing that can't prove it is thimble's server | — | — |
+| Permission requests | Answered in the terminal only; the browser shows them read-only | — | Your session's mode |
 | The folder you opened | File-tool edits refused when `data` is `"off"` | Shell commands can still write it | Edits ask (Manual), are judged (auto) or run (Bypass) |
-| thimble's own jobs | Never in Bypass unless you choose it in Settings | — | Follow your session's mode, Bypass as Manual |
+| thimble's own jobs | Never in Bypass | — | Follow your session's mode, Bypass as Manual |
 | Code tickets and view builds | You approve each change before it reaches thimble's code | Their shell commands are contained like yours | Your session's mode, Bypass included |
 
 In every mode, thimble's plugin refuses some calls of Claude's file tools (Read, Edit, Write, Grep, Glob and the others),
 in your session and in its agents: reads and edits of thimble's token files (`server.json`, `session.key`, `paired.json`
 and `links/` in `~/.thimble`), edits of thimble's records (in the workspace, and the permission modes it keeps in
 `~/.thimble`), and the edits and web calls you turned off in thimble's config (`data` or `web` set to `"off"`,
-[docs/config.md](docs/config.md)). thimble does not limit shell commands: they follow your permission mode, as in any
-Claude Code session. In terminal mode there is no browser to sign in: thimble's keys in the terminal, and any shell
-command, act as you. To keep Claude from editing the folder you open, add a deny rule to your Claude Code settings, such
+[docs/config.md](docs/config.md)). Apart from the token files, thimble does not limit shell commands: they follow your
+permission mode, as in any Claude Code session. thimble's keys in the terminal panel act as you, as the terminal itself
+does. To keep Claude from editing the folder you open, add a deny rule to your Claude Code settings, such
 as `"deny": ["Edit(//path/to/folder/**)"]` (two slashes for a path from `/`). To keep shell commands away from
 thimble's token files too, turn on Claude Code's sandbox (`/sandbox`, or in your settings) and add:
 
@@ -111,34 +128,64 @@ thimble's token files too, turn on Claude Code's sandbox (`/sandbox`, or in your
   "sandbox": {
     "enabled": true,
     "filesystem": {
-      "denyRead": ["~/.thimble/server.json", "~/.thimble/session.key", "~/.thimble/paired.json", "~/.thimble/links"],
+      "denyRead": ["~/.thimble/server.json", "~/.thimble/session.key", "~/.thimble/paired.json", "~/.thimble/links",
+                   "~/.thimble/open"],
       "allowWrite": ["/home/you/.thimble/app/workspaces"]
     }
   }
 }
 ```
 
-The `allowWrite` entry lets thimble's agents write their notes. /thimble starts thimble's server from a hook, which runs
-outside the sandbox. `thimble doctor` says whether the sandbox is on.
+The `allowWrite` entry lets thimble's agents write their notes. `/thimble browser` starts thimble's server outside the
+sandbox. `thimble doctor` says whether the sandbox is on.
 
-### Signing in the browser
+### Signing in
 
-/thimble shows the dashboard's link under its reply. The link carries a one-time code: opening it signs this browser in
-to thimble. The code then stops working, as it does 5 minutes after it was shown or when a newer link for the workspace
-is shown; opening it in a browser that is signed in already changes nothing. A browser that is not signed in shows
-only a line that says so and says to open the link. For a new link, run `thimble up` in a shell. thimble's server
-answers only on this computer, and only to a signed-in browser or to thimble's own programs, since another account on
-the same computer can reach thimble's port too.
+thimble's browser page opens on a press: `/thimble browser` in Claude Code, `o` or `↗` in thimble's terminal panel, `↗` on a
+card, or the `thimble` command. The press starts thimble's server if none runs, makes this session the one the page
+follows, and opens the page on what you pressed, signed in. The terminal keeps working, and closing the tab changes
+nothing. A browser still signed in from an earlier session needs no press: when it opens the page or sends a message
+while thimble's server runs, the page follows this session, and shows its permission requests.
+
+How the press signs the browser in. It asks the server for a one-time code, which works once, for 60 seconds. It writes
+the page's address with the code into a file in `~/.thimble/open/`, and gives your browser opener (`$BROWSER`, `open`,
+`xdg-open`, `gio open` or `wslview`) the file's path. The browser opens the file, which forwards it to the page, and the
+page trades the code for a cookie: the server deletes the file and the code then works no more. When the default
+browser is a snap or a flatpak, which can't read hidden folders, and in VS Code's remote terminal, the opener gets the
+address itself; thimble's log says so, without the code. In a remote terminal (SSH, Eternal Terminal, or no display),
+thimble opens no browser. `/thimble browser` then says so, and a row above the prompt says what to do: run the tunnel
+command, `ssh -N -L <port>:127.0.0.1:<port> <your ssh host>`, on your own computer (set `THIMBLE_SSH_HOST` to fill in
+the host), then press **copy link**, which copies a one-time link that works for 5 minutes, and open the link in your
+browser there. The row goes once a browser signs in with it. On Claude Code's main screen, which takes no clicks, the
+panel opens on that row, and `2` copies the link. `thimble open` in a shell prints where the page runs, never the code.
+
+Same user only. A sign-in code is only in two places: the file the press writes (readable by your account alone, in a
+folder only your account can open, in `~/.thimble`, which only your account can open) and, for a remote terminal, the
+link in `~/.thimble/links/<session>.json` (readable by your account alone). It is never in a command line, which other
+accounts on the computer can see, nor in thimble's output, logs, notices or Claude's context. So another account on the
+same computer can't learn a code, and a code works once. On Linux, thimble's server also asks the system which account
+owns the connection a sign-in comes on, and refuses one from another account; an SSH or VS Code forward connects as
+your own account. thimble's server answers only on this computer (127.0.0.1), and only to a signed-in browser or to
+thimble's own programs, since another account can reach the port too.
 
 The sign-in is a cookie that the browser sends to thimble and to no other program. A browser sends a cookie for
 127.0.0.1 or localhost to every server on that address, whatever its port, so thimble's cookie is scoped to a path that
 holds a random key, which only thimble's page in this browser knows. A web page that another program on this computer
-serves, such as a project's development server, never gets the cookie. If this browser loses the page's stored data
-(you clear the site's data, use a private window, or the browser removes data it has not used for some days), the page
-shows the sign-in line again: open the link /thimble shows, or run `thimble up`, to sign in again.
+serves, such as a project's development server, never gets the cookie. The cookie lasts 30 days and each use renews it;
+a browser not used for 30 days signs in again. If this browser loses the page's stored data (you clear the site's data,
+use a private window, or the browser removes data it has not used for some days), the page shows the sign-in line:
+type `/thimble browser` in your Claude Code terminal, or press `o` in thimble's panel.
 
-Each new sign-in prints a line in your terminal under Claude's next reply, and shows a notice in thimble with
-**Sign it out**. If a sign-in was not you, click Sign it out, or run `thimble unpair` in a shell, which signs out every
+When the Claude Code session ends, the page stops: it shows that it stopped and how to open it again, and it sends
+nothing more. A tab whose server went away first asks the address it reconnects to to prove, without any credential,
+that it is the same thimble server; another program that later uses the port can't, and the page stops without sending
+it the cookie. After 6 failed reconnects the page stops too. A demo (`thimble demo`) needs no session: while its page
+is open, the server stays up when the last session ends, and a demo page that stops says to run `thimble demo` again.
+
+Each new sign-in shows a notice with **Sign it out**, in the browser and above the prompt in your terminal (only in the
+Claude Code session it happened in: a later session's terminal does not show it again); a terminal without thimble's
+panel shows a line under Claude's next reply instead. The browser that signed in can't dismiss its
+own notice. If a sign-in was not you, click Sign it out, or run `thimble unpair` in a shell, which signs out every
 browser.
 
 ## For administrators
@@ -155,11 +202,13 @@ What thimble needs from a managed Claude Code setup:
   plugin in managed `enabledPlugins` instead. A plugin that managed settings force on also loads in the sessions of
   extension programs beside the copy thimble gives them.
 - **`allowManagedPermissionRulesOnly`** makes Claude Code ignore the rules users save, so each thimble tool call asks in
-  Manual mode and no "don't ask again" is offered. Add `mcp__plugin_thimble_thimble` and `Skill(thimble:shared)` to
-  managed `permissions.allow`.
+  Manual mode and no "don't ask again" is offered. Add `mcp__plugin_thimble_thimble` and the agents' own servers
+  (`mcp__thimble-orientation`, `mcp__thimble-view-builder`, `mcp__thimble-view-reviewer`, `mcp__thimble-call`,
+  `mcp__thimble-dev-ticket`) to managed `permissions.allow`.
 - **`disableSideloadFlags`** makes Claude Code reject `--plugin-dir`. Sessions that load the installed plugin are not
-  affected. Terminal mode's renderer, which the `thimble` command loads with `--plugin-dir`, can't start, and neither
-  can extension programs.
+  affected. Extension programs can't start.
+- **`allowManagedModsOnly`** keeps thimble's terminal UI from loading. `/thimble` and `/thimble browser` still work, through
+  the skill, but Claude's first read of a data file does not turn thimble on, and the terminal draws no cards or panel.
 - **`forceLoginMethod`** blocks API keys and `apiKeyHelper` ([Authentication](#authentication)).
 - **`disableAutoMode`** turns auto mode off, so users answer many more prompts ([Permissions](#permissions)).
 - **A sandbox (optional).** Managed `sandbox.enabled` with the `denyRead` block in [Permissions](#permissions) keeps
@@ -191,13 +240,14 @@ Dev install, a clone installed in place with the backend's test tools:
 
 Either install:
 
-- installs the Python and Node packages and, if you want one, a browser for screenshots;
+- installs the Python and Node packages and a browser for screenshots;
 - adds thimble's plugin to Claude Code with Claude Code's own commands: `claude plugin marketplace add <install
   folder>`, then `claude plugin install --scope user thimble@<name>` (`thimble-local` for a release, `thimble` for a
   clone). Claude Code records the plugin in `~/.claude/settings.json` (`enabledPlugins`) and `~/.claude/plugins`.
-  `/thimble` then works in any `claude` session. A re-run updates the plugin when its version changed and leaves it on
-  or off as you set it. When Claude Code has another install's thimble plugin, or the one from GitHub, install.sh
-  leaves it and prints the commands that switch it. `--no-plugin` leaves your Claude Code plugins as they are;
+  `/thimble` then works in any `claude` session. A re-run updates the plugin when its version or its files changed and
+  leaves it on or off as you set it. When Claude Code has another install's thimble plugin, or the one from GitHub, install.sh
+  leaves it and prints the commands that switch it. Like any Claude Code plugin, thimble is then on in every session;
+  `/plugin` turns it off, everywhere or for one project;
 - links the `thimble` command into `~/.local/bin`, and when that folder is not on your PATH (or `THIMBLE_HOME` is not
   `~/.thimble`), prints the line to add to your shell's startup file so that a new terminal finds it;
 - runs `thimble doctor`.
@@ -206,77 +256,60 @@ install.sh changes nothing else in your Claude Code setup: no permission rule, n
 no system package and never runs sudo.
 
 install.sh opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card
-code and terminal-mode views can run in bubblewrap), what it installs where and about how big, what it changes in your
-Claude Code setup, and whether a question remains. Then it prints a line per step: ✓ when the step is done, ! when it
-needs you, with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`.
+code and terminal-mode views can run in bubblewrap), what it installs where and about how big, and what it changes in
+your Claude Code setup. It asks nothing. Then it prints a line per step: ✓ when the step is done, ! when it needs you,
+with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`. A re-run that
+finds nothing to do says so in one line, and one that changes something shows only what changed. After a failed
+install, run it again: it makes the Python environment again when the failed run left it unfinished or broken. It
+removes only an environment it made itself; for one you made, it says what to do.
 
-It asks one question, and only when it finds no Chrome or Edge that starts under automation: **a browser for
-screenshots**. thimble takes screenshots of the cards and views it draws, to check how they look. It offers Playwright's
-headless Chromium (about 210 MB to download, 650 MB on disk); with a no, thimble works without screenshots.
-`--browser bundled`, `--browser system` or `--browser off` answers it.
+**A browser for screenshots.** thimble takes screenshots of the cards and views it draws, to check how they look.
+install.sh uses a Chrome or Edge it finds that starts under automation, and downloads nothing. Otherwise it downloads
+Playwright's headless Chromium (about 210 MB from Microsoft's Playwright CDN, cdn.playwright.dev, 650 MB on disk) into
+Playwright's cache. The opening screen says which, in one line. `--browser off` takes no screenshots and downloads
+nothing; `--browser bundled` or `--browser system` picks one of the two. The flag is kept, so an update keeps it.
 
-Without a terminal, install.sh runs only when the question, if it remains, has its flag. The answer is kept, so an update
-doesn't ask it again. `install.sh --dry-run` prints the opening screen and the question, and changes nothing;
-`--verbose` also prints every command.
+`install.sh --dry-run` prints the opening screen and changes nothing; `--verbose` also prints every command.
 
 ## Start thimble
 
-In a folder of transcripts, start Claude Code and type `/thimble`:
+Start Claude Code in a folder of transcripts or other data, as usual:
 
     cd <folder>
     claude
 
-In a session that was open before the install, run `/reload-plugins` first. /thimble starts thimble's server, opens the
-folder as a workspace and shows the dashboard's link under its reply; open it to sign this browser in
-([Signing in the browser](#signing-in-the-browser)). The browser chat, cards, labels and reports work, and thimble's
-agents can start a few seconds after the link shows. If your shell sets `HTTP_PROXY` or `HTTPS_PROXY`, start claude with
-`NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost"`, or thimble's plugin may not reach its server; /thimble says so
-when it sees a proxy.
+thimble is a regular Claude Code plugin: once installed it is on from the start of every session, in every folder but
+the ones it refuses (your home folder, `/` and the folders above them). The line above the prompt shows it is on. To turn
+it off, use `/plugin` (everywhere, or for one project). `/thimble` opens its panel in the terminal.
 
-In a session you start with `claude`:
+Once on, Claude makes cards and checked citations, which the terminal draws under its replies, and one dim line under an
+answer that read data says how much of the data Claude's tool calls saw (Coverage). The line above the prompt sums up
+what is new; a press on an item opens thimble's panel at that section: Coverage, Citations, Labels, Threads, Views and
+Checks, then Cards, Documents and Files. In Claude Code's fullscreen layout the panel opens on the right (from 110
+columns when you open it, from 144 when thimble opens it), and above the prompt below that. On Claude Code's main
+screen (the classic renderer) it always opens above the prompt, and nothing takes a click there: the line above the
+prompt then ends with `/thimble to use these with keys`. `/thimble` opens home, which lists the rows above the prompt
+first (a view proposal, notices, the browser's sign-in row); Enter on one shows its actions on number keys.
+`/thimble coverage`, `citations`, `labels`, `threads` and `checks` open the line's sections.
 
-- don't move one of thimble's agents to the background (← or "Move to background"): thimble loses track of a moved agent.
-  The `thimble` command turns both off;
-- /thimble says so, in the terminal and in the browser, when `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_MODEL` or
-  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is set, since each would change the models and efforts thimble's Settings give its
-  agents.
+`/thimble browser`, or `o` in the panel, opens the browser workbench on the same session ([Signing in](#signing-in)): the
+chat, the canvas, the File browser, labels, views and report writing. The report is written and edited in the browser;
+the terminal panel shows documents read-only. In a session open before the install, run `/reload-plugins` first.
 
-The `thimble` command does the same in one step, and adds:
+The `thimble` command starts `claude` in the folder (all its arguments pass on) and opens the browser workbench at the
+start; `thimble -c` continues the last session. It adds 127.0.0.1 and localhost to `NO_PROXY` for the session. If you
+start `claude` yourself and your shell sets `HTTP_PROXY` or `HTTPS_PROXY`, start it with
+`NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost"`, or thimble's plugin may not reach its server; thimble's panel
+says so when it sees a proxy.
 
-- thimble's prompt in the system prompt. /thimble gives it as a message instead: each /thimble adds it again, and
-  /clear and /compact give it back;
-- thimble's agents from the first message, since it starts the server before Claude Code;
-- terminal mode (`thimble mode terminal`), which only the `thimble` command starts;
-- `thimble -c`, which continues the last thimble session in the folder. With `claude`, use `claude --continue` or
-  `claude --resume`, then type /thimble again;
-- thimble's status line, the composer's fast mode and Ultracode at the start, the name `thimble:main · <folder>` in
-  `/resume`, and effort `high` when your settings name none;
-- it unsets the three variables above for the session, turns off "Move to background" and the ← agent view, and adds
-  127.0.0.1 to `NO_PROXY`.
+Each feature can be turned off: `/config` → thimble, or the browser's Settings, has a switch for each ("View
+proposals", "Labels", "Checks", "Citation marks", "Coverage", "Card check"), and the two
+places show the same switches ([docs/config.md](docs/config.md#features)).
 
-### Start it by hand with everything but terminal mode
-
-Replace `<thimble folder>` with the path in `~/.thimble/app-dir`:
-
-    NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost" no_proxy="${no_proxy:+$no_proxy,}127.0.0.1,localhost" \
-    CLAUDE_CODE_DISABLE_AGENT_VIEW=1 \
-    env -u CLAUDE_CODE_EFFORT_LEVEL -u CLAUDE_CODE_SUBAGENT_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL_FORCE \
-      claude --name "thimble:main · ${PWD##*/}" --effort high \
-      --settings '{"statusLine": {"type": "command", "command": "<thimble folder>/plugin/bin/thimble-agents --statusline", "refreshInterval": 2}}' \
-      /thimble
-
-- `NO_PROXY` and `no_proxy` keep thimble's traffic to 127.0.0.1 away from a proxy your shell sets.
-- `CLAUDE_CODE_DISABLE_AGENT_VIEW=1` turns off "Move to background" and the ← agent view.
-- `env -u` removes the three variables that override thimble's models and efforts. If an `env` block of your Claude
-  Code settings sets them, add `"env": {"CLAUDE_CODE_EFFORT_LEVEL": "", "CLAUDE_CODE_SUBAGENT_MODEL": "",
-  "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": ""}` to the `--settings` value.
-- `--name` sets the name `/resume` and `claude agents` show.
-- `--effort high` is thimble's effort for your session. Leave it out when your settings choose one.
-- `--settings` adds thimble's status line. To keep your own, add `--chain '<your command>'` after `--statusline`.
-- Add `--permission-mode auto` for fewer prompts.
-
-For terminal mode and `-c` too, run the `thimble` command by its path, `<thimble folder>/plugin/bin/thimble`. It needs
-no link in `~/.local/bin`.
+Don't move one of thimble's agents to the background (← or "Move to background"): thimble loses track of a moved agent.
+thimble says so, in the terminal and in the browser, when `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_MODEL` or
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is set, since each would change the models and efforts thimble's Settings give its
+agents.
 
 ## Manual install
 
@@ -308,6 +341,11 @@ workspaces in `$T/workspaces`. Keep that folder when you replace `$T`.
 
 thimble needs Python 3.12 or later. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
 installs the tested versions, and it gets Python if the machine has none.
+
+On a Mac with Apple silicon, use a native Python: an Intel one, which a terminal under Rosetta finds first, gets no
+wheel for some packages and builds them from source, which needs Xcode. With uv, write
+`--python cpython-3.12-macos-aarch64-none` in place of `--python '>=3.12'` below, and add `--no-build` to its install
+commands.
 
 From a release, with uv:
 
@@ -353,7 +391,7 @@ thimble uses Chrome or Edge when it finds one. If you have neither:
 If the browser does not start on Linux, `sudo "$T/backend/.venv/bin/python" -m playwright install-deps
 chromium-headless-shell` installs its libraries. `"browser": "off"` in `~/.thimble/config.json` turns screenshots off.
 
-On Linux, card code runs in a sandbox, and terminal mode shows views, only where bubblewrap can create a sandbox:
+On Linux, card code runs in a sandbox, and the terminal shows views, only where bubblewrap can create a sandbox:
 bubblewrap installed, and on Ubuntu 23.10 or later an AppArmor profile that lets it. `thimble doctor` (step 7) says
 whether it can, and `thimble doctor --verbose` prints the commands that add it.
 
@@ -395,8 +433,7 @@ Then [start thimble](#start-thimble).
 - **Updates.** `thimble update` runs install.sh, which turns a manual install into an install.sh install. It adds the
   plugin from the folder, unless Claude Code has the plugin from GitHub (or another install's): install.sh leaves that one
   as it is and prints the commands that switch it, so update the GitHub one yourself, with `claude plugin marketplace
-  update thimble` and `claude plugin update thimble@thimble`. `thimble update --no-plugin` leaves Claude Code's plugins
-  alone. To update by hand: get the new folder and keep `workspaces/`, do steps 2 and 3 again, run `claude plugin
+  update thimble` and `claude plugin update thimble@thimble`. To update by hand: get the new folder and keep `workspaces/`, do steps 2 and 3 again, run `claude plugin
   marketplace update <name>` and `claude plugin update thimble@<name>`, then `thimble server restart`. Claude Code installs
   a new plugin copy only when its version changes, and a session uses it only after a restart.
 - **Uninstall.** `thimble uninstall` removes `~/.thimble`, with a release in `~/.thimble/app` and its workspaces, and the
@@ -442,30 +479,29 @@ session. Claude Code's agent tray (↓) lists them, and each has its thread in t
   above the reply box, with the view's name, what it shows and the task it serves, until you answer it: Accept builds
   the view, Reject drops the proposal, and Don't ask again turns view proposals off. Nothing builds before you accept.
   When you open a file that only Raw can show, the same card can propose a viewer for its type. Deciding whether to
-  propose takes one model call on a copy of your session's context, made with the sign-in thimble's card checks and
-  labels use. Settings' View proposals switch turns them on and off. In terminal mode the proposal is a row above the
-  prompt with accept, reject and don't ask again; to turn proposals on again there, remove `views.propose` from
-  `~/.thimble/config.json` or set it to true ([docs/config.md](docs/config.md)).
+  propose takes one model call over your session's conversation, which uses no tools, runs on its model and sign-in
+  and reads most of the conversation from the prompt cache. In the terminal the proposal is a row above the prompt
+  with accept, reject and don't ask again. Settings'
+  View proposals switch and `/config` → thimble → "View proposals" turn them on and off
+  ([docs/config.md](docs/config.md)).
 - **Models and efforts.** Each agent runs on exactly the model and effort that Settings name for it, and a change
   applies to the next start, with no restart. `/thimble:orient --model <model> --effort <level>` and the start tools
   take a model and an effort for one run. The orientation's own subagents run on the "orientation subagents" row
   when it starts them as `thimble:orient-helper`; one it starts as another type runs on the orientation's own model and
   effort. A follow-up runs on its run's model and effort, except one typed in the terminal to an agent started from
   the browser after that role's settings changed, which runs on the new ones; its thread says so. The `thimble` command
-  unsets `CLAUDE_CODE_EFFORT_LEVEL` (passing it on as your session's own effort), `CLAUDE_CODE_SUBAGENT_MODEL` and
-  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` for the session, blanks them where an `env` block of your Claude Code settings sets
-  them, and prints a line for each; in a session you start with `claude`, /thimble says so for each that is set, in the
-  terminal and in the browser.
+  doesn't change them: thimble says so for each of `CLAUDE_CODE_EFFORT_LEVEL`, `CLAUDE_CODE_SUBAGENT_MODEL` and
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` that is set, in the terminal and in the browser.
 - **Ending.** When an agent finishes, its report reaches your session, and Claude answers in one short line; the result
-  is in the browser. Quitting Claude Code stops every agent, and nothing restarts on its own: `thimble -c` (or
-  `claude -c`, then /thimble) and a message in an agent's thread continue it, and Retry starts a view build, review or
+  is in the terminal and the browser. Quitting Claude Code stops every agent, and nothing restarts on its own:
+  `claude -c` (or `thimble -c`) and a message in an agent's thread continue it, and Retry starts a view build, review or
   check again. An orientation from an earlier session, not the one `-c` continues, goes on only in that session:
-  `thimble -r <its session id>` (or `claude -r`, then /thimble), which its thread shows. A finished agent leaves the ↓
-  tray; `/tasks` opens it. The `thimble` command turns "Move to background" and the ← agent view off; in a session you
-  start with `claude`, don't use them, since thimble loses track of a moved agent. `/clear` keeps the agents running, but it stops the orientation's current command, which it may run
-  again or skip.
+  `claude -r <its session id>`, which its thread shows. A finished agent leaves the ↓ tray; `/tasks` opens it. Don't
+  move one of thimble's agents to the background, since thimble loses track of a moved agent. `/clear` keeps the agents
+  running, but it stops the orientation's current command, which it may run again or skip.
 - **Failures.** When one of thimble's agents fails, a notice tells you where you are looking: in the browser above the
-  reply box of the chat you have open, main's or a thread's, and in terminal mode in the rows above the prompt. It
+  reply box of the chat you have open, main's or a thread's, and in the terminal in the rows above the prompt, with a
+  toast. It
   names the agent, such as Orientation, View build: Agent Network or Card check, says in one line what failed and how
   to fix it, and has a button for the fix where the browser can run it (Retry, Try again, Open Settings) and Open for
   the agent's thread. A fix only your terminal can run, such as `/login` or `/model`, says "In your terminal:". It stays
@@ -479,18 +515,18 @@ session. Claude Code's agent tray (↓) lists them, and each has its thread in t
 - **Report checks** run after a writer saves a document. After your own edits a check shows how many passages changed,
   and Run starts it.
 - **Code tickets**, in a development install only, are changes to thimble's own code: file one with Report a problem →
-  File a code ticket, or ask Claude. Its agent, `thimble:dev-ticket`, works in a git worktree of thimble's code, which
-  it edits from your session, in your session's permission mode; its checks run in thimble's sandbox runtime where it
-  can run, and otherwise thimble asks you before the ticket starts, and the browser asks you before its change reaches
-  thimble's code. Code tickets run one at a time.
+  Ask Claude to fix it, or ask Claude in the chat. Its agent, `thimble:dev-ticket`, works in a git worktree of thimble's
+  code, which it edits from your session, in your session's permission mode; its checks run in thimble's sandbox
+  runtime where it can run, and otherwise thimble asks you before the ticket starts, and the browser asks you before its
+  change reaches thimble's code. Code tickets run one at a time.
 - **thimble's rules.** thimble adds no sandbox: the shell commands of your session and its agents follow your
   permission mode. thimble's plugin refuses file-tool reads and edits of its token files, edits of its records, and
   what you set to "off" in its config. View builders use your session's network. A view reaches you only as its checks
   last passed it, whatever was written in its folder since.
 - **Permissions.** Every agent runs in your session's permission mode, which you change in the terminal; auto mode
-  asks least ([Permissions](#permissions)). Your session's own requests show on the browser's card and in the
-  terminal, and either place answers them. An agent's request shows only in the terminal; for one the browser started,
-  Claude Code names the request as from the thimble plugin and offers Yes and No without an always-allow. When auto
+  asks least ([Permissions](#permissions)). Every request is answered in the terminal; the browser shows a waiting
+  request read-only. For an agent the browser started, Claude Code names the request as from the thimble plugin and
+  offers Yes and No without an always-allow. When auto
   mode refuses an agent's call, `/permissions` → Recently denied approves it.
 - **Limits.** Claude Code runs at most 20 subagents at once in a session. thimble's agents, their own subagents and side
   threads count, and thimble queues view builds and checks at the limit. Raise it with
@@ -536,16 +572,14 @@ are checked, and the episodes are drawn as `multiagent-swimlane` cards, the card
 actions main chose. Test builds called it `swarm`: the commands still take that name for this release, and what was
 set for it carries over.
 
-## Terminal mode
+## The terminal and the browser
 
-`thimble mode terminal` in a folder, then `thimble` there, starts Claude Code with thimble's plugin and its terminal
-renderer ([mods/thimble-term](mods/thimble-term/README.md)), with no server, port or browser. Cards and citations are
-drawn under Claude's replies, and home, threads, cards, citations, labels, documents and files open in a panel beside
-the chat. Views are not drawn in the terminal: a view's line says to open it in browser mode. `thimble mode terminal
---default` makes terminal mode the default for every folder that has no mode of its own, `thimble mode browser`
-switches a folder back, and `thimble mode` says which mode a folder starts in. A workspace is open in one mode at a
-time. Only the `thimble` command starts it; /thimble in a session you start with `claude` opens the browser workspace.
-On Linux, views in terminal mode need bubblewrap (`thimble doctor` says whether it runs).
+thimble 0.9.0 has no modes. thimble's terminal UI, which draws cards, citations, the coverage line and the panel, is
+always there once thimble is on, and the browser workbench joins on a press ([Signing in](#signing-in)). Before the
+press, thimble runs without a server: the tools run in Claude Code's own processes. After the press, the server runs
+for the rest of the session. `thimble mode` from earlier versions only says so and changes nothing. A view built from
+the terminal draws in the terminal, and the browser builds its page the first time it opens it; on Linux, views in the
+terminal need bubblewrap (`thimble doctor` says whether it runs).
 
 ## Demo datasets
 
@@ -575,6 +609,11 @@ Until a session attaches, each dataset's workspace is a demo page: the top bar s
 without Claude works, and the orientation's thread says it ran in advance. The chat's composer is disabled, and
 hovering it says "This is a demo and thimble isn't connected to a live Claude Code session." Any other action that
 needs Claude shows the same note in the chat.
+
+The product tour (offered on the first launch, and under Settings, Take the tour) runs in a demo dataset's workspace,
+never over your own files: it opens that workspace in a frame over the page, under a banner that says it is example
+data, with Exit tour, and when it ends your folder is as you left it. Without a demo dataset installed, the tour sets
+up a small example workspace from files every install ships (`example-timeline`, with no download) and runs there.
 
 The demo is static: it starts no Claude Code session and asks nothing about one. `--attach` starts one in the
 dataset's folder, once `claude auth status` says you are logged in (when you are not, it says how to log in). Without
@@ -608,16 +647,28 @@ how a maintainer makes one.
 which reinstall the frontend's packages when `package-lock.json` changed and rebuild the UI when its sources did.
 `thimble update --from <zip>` installs a zip you downloaded, checked against the release's `SHA256SUMS` when that
 file is beside it. A zip whose digest does not match is refused. Workspaces are kept. A running server keeps the old code
-until `thimble server restart`. It also updates thimble's plugin in Claude Code when its version changed. After an update
-from 0.7, open the link /thimble shows once more in each browser: every browser signs in again.
+until `thimble server restart`. It also updates thimble's plugin in Claude Code when its version changed. When the
+version is the same but the plugin's files changed, as after a `git pull` between releases, and Claude Code loads a copy
+of the plugin, the update uninstalls and installs the plugin again with Claude Code's own commands, keeping its options
+and its on or off. When Claude Code reads the plugin from the install folder itself, nothing needs updating. Either way
+the update says what it did, and a `claude` session open since before uses the new plugin after `/reload-plugins`.
+After an update from 0.7, every browser signs in again: type `/thimble browser` in each session.
+
+`thimble update --dry-run` shows what the update would do and changes nothing: the `git pull` it would run, or the
+release zip's check, then the install's own dry run (what it would install where, and the question it would ask). In a
+Dev install that dry run reads the files as they are before the pull.
 
 ## Uninstall
 
 `thimble uninstall` asks, then removes the trust entry an install before 0.6.0 added, thimble's plugin and marketplace
 when their folder is this install's, `~/.local/bin/thimble`, the lines an install before 0.8.0 added to your shell's
 startup files (and a startup file it created, once nothing else is in it), and `~/.thimble`, which holds a Global
-install's workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where it is, and so does a downloaded headless Chromium, in
-Playwright's cache folder.
+install's workspaces. Before it asks, it lists what it removes and what stays. `--keep-home` keeps `~/.thimble`: your
+settings, the demo datasets you downloaded, the logs and thimble's own state, and in a Global install thimble itself with
+your workspaces. It still removes the browsers' sign-in files and keys in it, so every browser signs in again, and the
+markers of the sessions and folders thimble was on in. A Dev install keeps your workspaces in the clone's `workspaces/`
+folder, and the clone stays where it is. So does a downloaded headless Chromium, in Playwright's cache folder
+(`~/.cache/ms-playwright`; on macOS `~/Library/Caches/ms-playwright`), which other programs may use too.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
 that one and prints each path it deleted. The folder it read and your Claude Code transcripts stay.
@@ -633,25 +684,31 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - A start or a view proposal's Accept is refused with a line about plan mode: your session is in plan mode, where an
   agent would ask before every card. Leave it with shift+tab in the terminal, then try again.
 - A notice says thimble couldn't check for a view proposal: it gives the reason, with Try again and Turn off view
-  proposals. When it says Claude Code isn't signed in for thimble's server, run `/login` in your terminal (or
-  `claude auth login` in a shell); if you changed your sign-in after the server started, such as by exporting
-  `ANTHROPIC_API_KEY`, run `thimble server restart` from that shell. Then press Try again. An accepted view that fails
-  to build has a notice with Retry.
+  proposals. An accepted view that fails to build has a notice with Retry.
+- A notice says Anthropic's API refused Claude Code's sign-in, or that its credit balance is too low: it names the login
+  Claude Code uses, as `claude auth status` reports it. An API key your shell exports, such as `ANTHROPIC_API_KEY`,
+  overrides a `/login`: quit, unset it (in your shell's startup file too) and start claude again in a new terminal,
+  or run `/login`. Then press Try again where the notice has it.
 - A chat says Claude's safeguards stopped a request: rephrase or narrow the request and send it again. A notice that
   Claude's safeguards switched a reply to another model names both models; the reply, or the view proposal, came from
   the second.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
-  browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
-  libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one
-  up, and `thimble doctor --verbose` names the command for missing libraries. Then run `thimble restart`.
+  browser (`--browser off`, or its download failed), or the machine lacks the headless Chromium's system libraries.
+  `install.sh --browser system` or `--browser bundled` sets one up, and `thimble doctor --verbose` names the command for
+  missing libraries. Then run `thimble restart`.
 - `/thimble` is not recognized in a `claude` session: Claude Code doesn't have thimble's plugin, or it is off. `thimble
   doctor` says which. `bash <install folder>/scripts/install.sh` adds it, `/plugin` turns it on, and a session open
   since before then needs `/reload-plugins`.
-- Each thimble tool call asks you: answer "Yes, and don't ask again" once for each tool, in the terminal or on the
-  browser's card, add the allow line in [Permissions](#permissions), or use auto mode.
+- Each thimble tool call asks you: answer "Yes, and don't ask again" once for each of main's tools in the terminal, add
+  the allow line in [Permissions](#permissions), which is the only way for the tools of thimble's agents, or use auto
+  mode.
 - thimble's agents never start in a session you started with `claude`, and your shell sets a proxy: start claude with
   127.0.0.1 and localhost in `NO_PROXY` ([Start thimble](#start-thimble)).
-- A change in the browser says to open the link: this browser is not signed in. Open the link /thimble shows in your
-  terminal, or run `thimble up` in a shell for a new one. A link works once, for 5 minutes.
+- The browser says it isn't signed in: type `/thimble browser` in your Claude Code terminal, or press `o` in thimble's
+  panel. A code works once, for 60 seconds (a link you copy, for 5 minutes).
+- The browser did not open on `/thimble browser`: the panel shows a notice with **copy link**; open the link in the browser
+  of your choice. Over SSH, run the tunnel command the panel shows on your own computer first.
+- The page says it stopped: its Claude Code session ended, or the server stopped. Type `/thimble browser` in the terminal
+  to open it again.
 - To report a problem, run `thimble feedback "<what went wrong>"`. It writes a zip of the logs, chats and Claude
   Code transcripts, with keys removed, and says where to send it. The chats and transcripts quote your corpus.

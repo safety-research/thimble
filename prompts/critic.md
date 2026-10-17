@@ -1,7 +1,6 @@
 ---
 name: critic
 description: Reviews an orientation's analysis and drafted outputs before it finishes, and returns a thorough report of what to follow up. Only the orientation starts it, with the exact Agent call that its critique tool gives.
-skills: [shared]
 model: claude-opus-5-5
 effort: xhigh
 color: orange

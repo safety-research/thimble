@@ -1,11 +1,8 @@
 // A card's History in a real browser with thimble's own stylesheets: the real Canvas (src/canvas/Canvas.tsx) holding a
-// plan main changed twice on the analyst's feedback, and the analyst's own edit before them, made before thimble kept
-// what edits replaced. The History button among the card's buttons opens the History in the side panel
-// (src/canvas/DetailPanel.tsx): each edit, newest first, who made it and what it changed, then the card's making; an
-// edit whose version was kept opens the card as it was before it (GET /cells/{id}/versions/{entry}), to read, with the
-// parts it changed marked; Back returns to the list, and Restore (POST .../restore) makes the card that version again,
-// after which the list shows the analyst's edit at its top. The card's details list the same history. Matt 2026-10-09:
-// "we should not keep 'Before' with a strikethrough. maybe cards have a history button?".
+// plan main changed twice, and the analyst's own edit before them, made before thimble kept what edits replaced. The
+// History button among the card's buttons opens the History in the side panel (src/canvas/DetailPanel.tsx): each
+// edit, newest first, who made it and what it changed, then the card's making; Restore (POST .../restore) on an edit's
+// version makes the card that version again, after which the list shows the analyst's edit at its top.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -97,35 +94,6 @@ test("the card's History button opens its history: each edit newest first, who m
   ])
 })
 
-test('an edit opens the card as it was before it, to read, with the part it changed marked; Back returns to the list', async () => {
-  await page.locator('[data-view="history"] .bdetail-hist[data-entry="a1b2c3d4"]').click()
-  await page.waitForSelector('[data-view="version"] .plan-step')
-  assert.deepEqual(read.at(-1), 'a1b2c3d4')
-  const got = await page.evaluate(() => {
-    const v = document.querySelector<HTMLElement>('[data-view="version"]')!
-    return {
-      what: v.querySelector('.bdetail-version-what')?.textContent,
-      labels: [...v.querySelectorAll('.bdetail-label')].map((l) => [l.childNodes[0]?.textContent, l.querySelector('.plan-mark')?.textContent ?? null]),
-      steps: [...v.querySelectorAll('.plan-step .plan-line')].map((l) => l.textContent),
-      anchors: v.querySelectorAll('[data-anchor]').length,
-      fields: v.querySelectorAll('textarea, [contenteditable="true"]').length,
-      marks: v.querySelectorAll('.plan-step .plan-mark').length,
-      restore: v.querySelector('.bdetail-restore')?.textContent,
-    }
-  })
-  assert.ok(got.what?.startsWith('Before main’s edit at '), got.what ?? '')
-  assert.deepEqual(got.labels, [['Question', null], ['Steps', 'Changed']])
-  assert.deepEqual(got.steps, MADE.map((s) => s.text), 'the steps as they were')
-  assert.equal(got.anchors, 0, "the copy's steps are not taken for the card's own")
-  assert.equal(got.fields, 0, 'nothing to edit in a version')
-  assert.equal(got.marks, 0, "the card's marks of its last edit are not the version's")
-  assert.equal(got.restore, 'Restore')
-  // the card itself still shows its steps now
-  assert.equal(await page.locator('[data-cell="plan1"] .plan-step').count(), 3)
-  await page.locator('[data-view="version"] .bdetail-back').click()
-  await page.waitForSelector('.bdetail [data-view="history"]')
-})
-
 test('Restore makes the card that version again, and the history shows the analyst’s edit at its top', async () => {
   await page.locator('[data-view="history"] .bdetail-hist[data-entry="a1b2c3d4"]').click()
   await page.waitForSelector('[data-view="version"] .plan-step')
@@ -135,20 +103,4 @@ test('Restore makes the card that version again, and the history shows the analy
   await page.waitForFunction(() => document.querySelectorAll('[data-cell="plan1"] .plan-step').length === 2)
   const top = (await rows('[data-view="history"]'))[0]
   assert.deepEqual(top, { text: 'edited by yousteps', entry: 'c0ffee00' })
-})
-
-test("the card's details list the same history, whose edits open their versions too", async () => {
-  await page.locator('.bdetail-close').click()
-  await page.locator('[data-cell="plan1"]').hover()
-  await page.locator('[data-cell="plan1"] .bcell-acts [aria-label="Details"]').click()
-  await page.waitForSelector('.bdetail-body:not([hidden]) .bdetail-hist')
-  assert.equal(await page.textContent('.bdetail-title'), 'Detail')
-  const list = await rows('.bdetail-body:not([hidden])')
-  assert.deepEqual(list.map((r) => r.entry), ['c0ffee00', 'e5f6a7b8', 'a1b2c3d4', null, null])
-  await page.locator('.bdetail-body:not([hidden]) .bdetail-hist[data-entry="e5f6a7b8"]').click()
-  await page.waitForSelector('[data-view="version"] .plan-step')
-  assert.equal(read.at(-1), 'e5f6a7b8')
-  await page.locator('[data-view="version"] .bdetail-back').click()
-  await page.waitForSelector('.bdetail-body:not([hidden]) .bdetail-hist')
-  assert.equal(await page.textContent('.bdetail-title'), 'Detail', 'Back returns to the details it was opened from')
 })

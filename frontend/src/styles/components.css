@@ -250,6 +250,15 @@
   opacity: 0.4;
   cursor: default;
 }
+/* a control that changes the workspace, off on a demo page (components/DemoOff): its span takes the pointer for the note */
+.demo-off {
+  display: inline-flex;
+}
+.demo-off > :disabled {
+  opacity: 0.4;
+  cursor: default;
+  pointer-events: none;
+}
 .btn-ghost:disabled:hover {
   background: transparent;
   color: var(--text-tertiary);
@@ -1402,4 +1411,35 @@ a.card:hover {
 .pane-status-totals {
   flex: none;
   margin-left: auto;
+}
+/* the open file's path, cut in its middle where the strip is narrow (components/MidCut), then its mode */
+.pane-status-file {
+  display: flex;
+  min-width: 0;
+}
+.pane-status-path {
+  flex: 0 1 auto;
+}
+.pane-status-mode {
+  flex: none;
+  white-space: pre;
+}
+/* a name cut in its middle (components/MidCut): it takes the room its row leaves it, which MidCut measures; its start
+   gives way first and ends in an ellipsis, its end stays whole; both keep their spaces, so a space where the two meet
+   stays */
+.midcut {
+  display: inline-flex;
+  flex: 1 1 0%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: pre;
+}
+.midcut-start {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.midcut-end {
+  flex: none;
 }

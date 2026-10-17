@@ -105,14 +105,16 @@ The bad chat gives the headline drop without what explains it, and the one table
 
 {{card_types}}
 
+{{if:labels}}
 ## Labels
 
-A label is a semantic category that is derived from raw data via a classifier, such as "asks for a refund". `apply_label` defines it and applies it to every unit of a scope, which is the records in the files its `paths` name, or with `unit` each whole file or run directory, the cards or the sentences of the report. Its predicate decides each unit in one of three ways. A `regex` matches the text, `code` is a Python function that returns a value and a confidence, and a `prompt` has a model judge each unit against your description. The result is a count per value and a label card, where the analyst reads the definition, sees units of each value and can edit the rule and run it again. The label card answers a question like any card, so once its counts are final, write its takeaway, what the label found. A card reads the label with `thimble.labels(name)`. The analyst picks the color of a label's value in Files, in a view or in a card's legend, and you set it with `show_label`'s `colors`.
+A label is a semantic category that is derived from raw data via a classifier, such as "asks for a refund".{{later:labels}} `apply_label` defines it and applies it to every unit of a scope, which is the records in the files its `paths` name, or with `unit` each whole file or run directory, the cards or the sentences of the report. Its predicate decides each unit in one of three ways. A `regex` matches the text, `code` is a Python function that returns a value and a confidence, and a `prompt` has a model judge each unit against your description. The result is a count per value and a label card, where the analyst reads the definition, sees units of each value and can edit the rule and run it again. The label card answers a question like any card, so once its counts are final, write its takeaway, what the label found. A card reads the label with `thimble.labels(name)`. The analyst picks the color of a label's value in Files, in a view or in a card's legend, and you set it with `show_label`'s `colors`.{{/later}}
 
 Whenever you sort units into categories, use `apply_label`, never a regex or a model call of your own inside a card. Thimble provides fast defaults to run many calls in parallel, so using thimble's built-in tooling ensures that the answer reaches the analyst quickly. Moreover, the label is shown to the analyst so they can inspect and edit the definition and instances. It also applies the category to exactly the scope you give it, and a category made inside a card's code reads to the analyst as a fact they cannot check.
 
 Use a regex or code when string matching is sufficient. Use a prompt for semantic similarity or labels that require interpretation or judgment. Give values the analyst would recognize, with the positive one first. You can try out a new label on a few units with `limit`, read the results, and make sure it also catches other ways of saying or doing the same thing, before you run it on everything. A takeaway that counts by a label names it and says whether a rule or a model made it.
 
+{{later:labels}}
     Analyst   What do customers complain about?
     Good      1  randomly samples 25 tickets to see how customers describe what went wrong
               2  apply_label({"scope": "files", "paths": ["tickets/*.jsonl"], "name": "customer complaint type",
@@ -148,9 +150,11 @@ Use a regex or code when string matching is sufficient. Use a prompt for semanti
               2  chat  9 of the report's 41 sentences hedge their claim [[card:<id>]]. A label, "hedged", marks them, in which a model reads each sentence's words, so you can see each one in the report.
     Bad       1  reads the report once and answers from memory
               2  chat  A few sentences in the findings hedge.
+{{/later}}
 
 A label or a card that sorts outcomes, such as which attempts worked, decides each one by what the analyst asked about, such as whether the agent got past its sandbox. A command that exits with 0 has only run, and an `ls` run with the sandbox off got past nothing. Once a card or a label defines an outcome, use that definition wherever the same outcome comes up again, in a takeaway, another label or a view you propose, since two definitions give the analyst two answers to one question and leave them unsure of both.
 
+{{end}}
 ## Citations
 
 A citation opens its source in one click. `[[<ref>]]` shows as a small link, and `[[<value>|<ref>]]` makes the number the link, as in `[[31|card:<id>#outcome/merged]] of the 40 runs`.
@@ -158,20 +162,28 @@ A citation opens its source in one click. `[[<ref>]]` shows as a small link, and
     a card                                      card:<id>
     a value in a card's table or chart          card:<id>#<column>/<row>
     lines of a card's output                    card:<id>@out<i>#L<n>
+{{later:labels}}
     a value's count on a label card             concept:<id>/<value>
+{{/later}}
     a file                                      minutes/meeting-3.md
     a record or lines of a text file            logs/run-7.jsonl#L88, or logs/run-7.jsonl#L88-L120
     a row of a database table                   runs/r1/forge.db#prs/12, by its primary key
     a page or pages of a PDF                    docs/audit.pdf#p4, or docs/audit.pdf#p4-p6
     a value of a JSON document                  results.json#/runs/3, by its JSON pointer
     a row of a CSV or TSV file                  data/orders.csv#row=12, counting from the row after the header
+{{later:documents}}
     a sentence or a paragraph of a document     report:<slug>#<id>, or report:<slug>#p<id>
+{{/later}}
+{{later:orientation}}
     a call the orientation made                 call:<chat>/<n>
     lines of a call's output                    call:<chat>/<n>#L4, or call:<chat>/<n>#L4-L9
+{{/later}}
 
+{{later:views}}
 The rows below, if there are any, come from this corpus's viewers. A viewer of one kind of file, such as spreadsheets, is cited by the file's path and a place in its own notation, as in `budget.xlsx#Q3!B2:B40`. A view across the whole corpus, such as an inbox of conversations, is cited as `view:<slug>/<key>` and opens the whole unit.
 
 {{forms}}
+{{/later}}
 
 - In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. On an example card, which shows records rather than values, link the words of each claim to the record that shows them, as in `a second run [[had the answer cached|board.jsonl#L6176]]`. A rewritten takeaway keeps every link that is right.
 - Always use the citation notation to point at anything inside thimble, such as a card, a record, a file or a sentence. Use a markdown link only for a page outside thimble, such as a web page, and sparingly.
@@ -185,8 +197,10 @@ The rows below, if there are any, come from this corpus's viewers. A viewer of o
 
 A link shows its words where it stands. So the second bad answer reads "352 of the 410 refund requests were approved 352.", and "made by one account [[1|<ref>]]" reads "made by one account 1."
 
+{{later:views}}
     Analyst   Show me a customer who gave up.
     Good      One customer wrote three times over nine days, got only the auto-reply, and then disputed the charge [[view:inbox/c-4471]].
     Bad       One customer wrote three times [[tickets/march.jsonl#L88]] [[tickets/march.jsonl#L412]] [[tickets/april.jsonl#L19]].
 
 The view's citation opens the whole conversation in order, the customer's three tickets, the auto-replies between them and the dispute, in one click. The three line refs open three raw records in two files, and the analyst has to put the conversation together.
+{{/later}}

@@ -8,12 +8,13 @@ import asyncio
 import json
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from terminal_fakes import FileModule, write_launch
 
-from app import agents, config, event_files, events, local_hooks, orient_session, orientation, session
+from app import activate, agents, config, event_files, events, local_hooks, orient_session, orientation, session
 from app import subagent_files as sf
 from app import subagents
 
@@ -39,7 +40,7 @@ def _fresh(workspaces_tmp, tmp_path, monkeypatch):
         return COVERAGE
 
     monkeypatch.setattr(orient_session, "measure", measured)
-    for table in (session._live, session._shadows, session._expected, events._held, subagents._waits):
+    for table in (session._live, session._shadows, session._expected, subagents._waits):
         table.clear()
     yield
     for table in (session._live, session._shadows, subagents._waits):
@@ -159,6 +160,80 @@ def test_catch_up_attaches_main_from_launch_json_and_reads_a_new_session_from_it
     said = [(r["type"], r.get("text") or r.get("delta")) for r in _log(agents.MAIN_ID) if r["type"] in ("user", "text")]
     assert said == [("user", "How many records?"), ("text", "Four files."), ("user", "And the largest?"),
                     ("text", "board.jsonl.")], "a new process reads on from the cursor, nothing twice"
+
+
+def _turned_on(ws: Path, at: float, sid: str = SID) -> None:
+    """The session marker activation writes when thimble turns on in session `sid` (contract C1)."""
+    activate.write_private(activate.marker_path(sid), {"cwd": str(config.corpus_dir(CORPUS)), "ws": CORPUS,
+                                                       "path": str(ws), "via": "command", "role": "main", "mod": True,
+                                                       "at": at})
+
+
+def _stamped(at: float, rec: dict) -> dict:
+    return {**rec, "timestamp": datetime.fromtimestamp(at, timezone.utc).isoformat(timespec="milliseconds")}
+
+
+def _said() -> list[tuple]:
+    return [(r["type"], r.get("text") or r.get("delta")) for r in _log(agents.MAIN_ID) if r["type"] in ("user", "text")]
+
+
+def test_a_press_before_any_pass_reads_main_from_when_thimble_turned_on(ws, project, monkeypatch):
+    """The owner's live test of 0.9.0: thimble on from the session's start, a question answered in the terminal, then
+    /thimble browser as that first turn ended, before the Stop hook's pass of the mirror read it. The server's attach
+    read main from the transcript's end, so the browser's chat showed `main` and nothing of the conversation. A session
+    no pass read is read from when thimble turned on in it (its session marker), and nothing from before."""
+    on = time.time()  # launch.json's time too (the ws fixture)
+    _turned_on(ws, on)
+    main = _main(project)
+    _write(main, _stamped(on - 60, _human("Before thimble was on.")),
+           _stamped(on - 59, _assistant({"type": "text", "text": "Not mirrored."})), _stamped(on - 58, END),
+           _stamped(on + 5, _human("I'd like you to perform a thematic analysis")),
+           _stamped(on + 9, _assistant({"type": "text", "text": "Here is my plan: the card has it."})),
+           _stamped(on + 10, END))
+    # the press: the transport moves to the server (cli.made_main), then the server attaches the session
+    write_launch(ws, session=SID, transport="server")
+    monkeypatch.setattr(events, "SERVING", True)
+    lv = session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)))
+    assert lv is not None
+    session.tail_once(lv)
+    assert _said() == [("user", "I'd like you to perform a thematic analysis"),
+                       ("text", "Here is my plan: the card has it.")]
+    _write(main, _stamped(on + 20, _human("Go ahead.")), _stamped(on + 21, _assistant({"type": "text", "text": "Done."})),
+           _stamped(on + 22, END))
+    session.tail_once(lv)
+    assert _said()[2:] == [("user", "Go ahead."), ("text", "Done.")], "and on from there"
+
+
+def test_the_press_s_attach_waits_for_a_pass_under_way_and_reads_on_from_it_once(ws, project, monkeypatch):
+    """H4 in the press's order (the transport first, then the server's attach): a pass of the Stop hook's process that
+    holds the pass lock but has not attached main yet is waited for, and the server reads on from what it kept, so
+    nothing shows twice in main's chat."""
+    on = time.time()  # launch.json's time too (the ws fixture)
+    _turned_on(ws, on)
+    main = _main(project)
+    _write(main, _stamped(on + 5, _human("How many records?")),
+           _stamped(on + 6, _assistant({"type": "text", "text": "Four files."})), _stamped(on + 7, END))
+    got: dict = {}
+
+    def attach() -> None:
+        got["lv"] = session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)))
+
+    with session._pass_lock(ws):  # the pass's process holds the lock: it began before the press
+        write_launch(ws, session=SID, transport="server")
+        monkeypatch.setattr(events, "SERVING", True)
+        server = threading.Thread(target=attach)
+        server.start()
+        server.join(0.3)
+        assert server.is_alive(), "the server's attach waits for the pass under way"
+        monkeypatch.setattr(events, "SERVING", False)  # the pass, in its own process, reads main to its end
+        session._catch_up(CORPUS, ws)
+        _process_restart()
+        monkeypatch.setattr(events, "SERVING", True)
+    server.join(5)
+    lv = got["lv"]
+    assert lv is not None and session._live[CORPUS] is lv
+    session.tail_once(lv)
+    assert _said() == [("user", "How many records?"), ("text", "Four files.")], "each once"
 
 
 def test_outside_terminal_mode_catch_up_does_nothing_and_current_is_the_server_s(workspaces_tmp, project):

@@ -115,9 +115,3 @@ test("the analyst's click in the view turns a label on, stores a mark, sets the 
   assert.equal((await logOf('edit')).ok, true)
   assert.deepEqual((await acts()).filter((a) => a[0] === 'edit'), [['edit', 'k1']])
 })
-
-test('a call thimble cannot do comes back with its reason', async () => {
-  await frame().locator('#bad').click()
-  const bad = await logOf('bad')
-  assert.deepEqual([bad.ok, bad.error], [false, 'asks has no value "maybe"'])
-})

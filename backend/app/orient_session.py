@@ -832,7 +832,7 @@ async def _measured(c: str, run: subagents.Run, status: str, summary: str, stopp
     except asyncio.CancelledError:
         _closed(c)
         try:
-            _tell_main(c, status, 0, made)
+            _tell_main(c, status, 0, made, run=run)
         except Exception:  # noqa: BLE001 — the server is stopping either way
             log.exception("%s: main did not hear the orientation's end", c)
         raise
@@ -859,7 +859,7 @@ def _go_on(c: str, run: subagents.Run, status: str, summary: str, stopped: "bool
            coverage: str = "") -> None:
     """What follows a run's end once its record is closed: main hears it, with the first run's coverage line, thimble's
     view proposer is told when the first run ended done (_tell_proposer), and the work folder is cleared."""
-    _tell_main(c, status, run.k, made, error=summary if status == "failed" else "", coverage=coverage)
+    _tell_main(c, status, run.k, made, error=summary if status == "failed" else "", coverage=coverage, run=run)
     if run.k == 0 and status == "done" and not run.interrupted:
         _tell_proposer(c)
     work_files.after_run(c, work_dir(c), "stopped" if status != "failed" and stopped else status)
@@ -932,8 +932,8 @@ def views_text(counts: dict[str, int], none: str = "orient-made-views") -> str:
     return ", ".join(tools.hint(VIEW_LINES[k], views=tools._count("view", n)) for k, n in counts.items() if n)
 
 def made_text(c: str, run: dict[str, Any]) -> str:
-    """What the orientation of `run` made, for the `orient-made-*` lines of prompts/tools.md: the labels it defined (not
-    trials) and the cards it made in its deck, and for a record from before 0.8.0 whose passes name `views`, the views
+    """What the orientation of `run` made, for the `orient-made-*` lines of prompts/tools.md: the labels it defined (trials
+    among them) and the cards it made in its deck, and for a record from before 0.8.0 whose passes name `views`, the views
     it proposed by build state; an earlier orientation's cards in the same deck are not counted. A record may name the
     deck's pass `analyze` or keep the deck as its `final` group."""
     from . import concepts, notebook  # noqa: PLC0415 — the workspace's stores, only read at the end
@@ -948,7 +948,7 @@ def made_text(c: str, run: dict[str, Any]) -> str:
     if "views" in passes:
         parts.append(views_text(view_counts(c, since)))
     ws = config.workspace_dir(c)
-    labels = new(concepts.list_concepts(ws, trials=False), "ts")
+    labels = new(concepts.list_concepts(ws), "ts")
     if labels:
         parts.append(tools._count("label", labels))
     groups = run.get("groups") or {}
@@ -992,11 +992,12 @@ def failure_line(summary: str | None, chars: int = FAILURE_CHARS) -> str:
 
 
 def _tell_main(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "",
-               coverage: str = "") -> None:
+               coverage: str = "", run: "subagents.Run | None" = None) -> None:
     """The `orient` browser event: a run of the orientation ended, with status_text as its text (prompts/main.md). It
-    waits for main's next event, since it asks main for nothing."""
+    waits for main's next event, since it asks main for nothing; a failure of `run` that main read in Claude Code's own
+    line is no event (subagents.tell_main)."""
     subagents.tell_main(c, orientation.ORIENT_KIND, {"text": status_text(c, status, k, made, error, coverage),
-                                                     "status": status, **({"run": k} if k else {})})
+                                                     "status": status, **({"run": k} if k else {})}, run=run)
 
 
 def _wrote_since(c: str, since: str, chat: str = agents.MAIN_ID) -> bool:
@@ -1138,6 +1139,24 @@ async def start_route(c: str, body: StartBody, request: Request) -> dict[str, An
     config.workspace_dir(c)
     brief, values = choices_of(body.model_dump())
     ans = await start(c, brief, values=values, route=subagents.CLICK)
+    return {**dict(ans), **({"kind": ans.kind, "reason": ans.reason} if ans.refused else {})}
+
+
+class AgainBody(BaseModel):
+    """The body of POST /ws/{c}/orientation/again: the focus the analyst gives, or none for the last request."""
+
+    text: str = ""
+
+
+@router.post("/ws/{c}/orientation/again")
+async def again_route(c: str, body: AgainBody, request: Request) -> dict[str, Any]:
+    """A failed or stopped orientation's Run again (its notice's act, the 0.9.0 bug hunt C18): a click, so the analyst's
+    cookie (403 without it), and the orientation starts through the module (start) with the focus given, else with the
+    request its last run had. The answer as /start gives it."""
+    subagents.analyst_only(request)
+    config.workspace_dir(c)
+    brief = body.text.strip() or str((orientation.read_run(c) or {}).get("query") or "")
+    ans = await start(c, brief, route=subagents.CLICK)
     return {**dict(ans), **({"kind": ans.kind, "reason": ans.reason} if ans.refused else {})}
 
 

@@ -24,10 +24,6 @@ export const AGENT_EFFORTS: readonly OrientEffort[] = ['low', 'medium', 'high', 
  * (config.LEGACY_EFFORTS); nothing as nothing. Pure. */
 export const agentEffort = (e: string | null | undefined): string | null => (e === 'ultracode' ? 'xhigh' : e ?? null)
 
-/** Main's effort when neither the line nor the analyst's settings chose one: the launcher's `--effort` then
- * (cc_settings.MAIN_DEFAULT_EFFORT). */
-export const MAIN_DEFAULT_EFFORT: MainEffort = 'high'
-
 /** The orientation's effort while Settings are not read yet (config.ORIENT_DEFAULT_EFFORT). */
 export const ORIENT_DEFAULT_EFFORT: OrientEffort = 'xhigh'
 
@@ -50,14 +46,15 @@ const isChoice = (e: unknown): e is MainEffort => typeof e === 'string' && (EFFO
 
 /**
  * Main's effort as its line shows it: the line's choice for this session; else Ultracode while the settings turn it on
- * and replies run at xhigh; else the level main's replies ran at; else the analyst's choice; else the default. Pure.
+ * and replies run at xhigh; else the level main's requests ran at; else the analyst's settings' choice; else null, as
+ * the session runs at Claude Code's own default, which is not known until its first request. Pure.
  */
-export function mainEffort(a: Attached | null | undefined): MainEffort {
+export function mainEffort(a: Attached | null | undefined): MainEffort | null {
   if (isChoice(a?.effort_choice)) return a.effort_choice
   const own = isChoice(a?.settings_effort) ? a.settings_effort : null
   const ran = isChoice(a?.effort) ? a.effort : null
   if (own === 'ultracode' && (ran == null || ran === 'xhigh')) return 'ultracode'
-  return ran ?? own ?? MAIN_DEFAULT_EFFORT
+  return ran ?? own
 }
 
 /** Main's fast mode for the line: the line's choice for this session, else whether its replies ran fast. Pure. */

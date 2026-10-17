@@ -1,22 +1,26 @@
-// The chat column: the thread tree at the top, the transcript of the thread being read, and the composer floating over
-// it. Main is the analyst's Claude Code session and leaves out what shows elsewhere (model.mainSkips). A thread is a
+// The chat column: the thread tree at the top, the transcript of the thread being read, and the composer under it.
+// Main is the analyst's Claude Code session and leaves out what shows elsewhere (model.mainSkips). A thread is a
 // fork of main: main's conversation up to where it branched, then its own rows. The orientation and a writer show their
 // card, then their whole session; a dev ticket shows its request and run; a view build its proposal and runs. While a
-// thread works, a strip of its steps rides behind the composer, and every permission request waits on one card above
-// it (PermissionCard). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a
+// thread works, a strip rides behind the composer: main's and a side thread's name the step under way and the time so
+// far (working.ts), a session's its subagents; every permission request waits on one card above it (PermissionCard). The composer sends where threads.composerTarget says, and while the agent a thread shows (or a
 // step's parent) runs and the browser can stop it, the composer's send square is its Stop (composerStopOf). A thread
 // whose run ended without a reply offers Ask again. Main opens empty with its composer, as Claude Code does; a start that
 // did not happen shows its card in main (OrientStart). A view proposal waits above the composer until the analyst
 // answers it (ProposalCard), except while the product tour runs (lib/touring). A failure of main or of any of thimble's
 // agents shows as a notice with its fix under the proposal's place, above the composer of whichever chat is open, and
 // as a row in the chat it happened in (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode
-// notice shows there in red.
+// notice shows there in red. The transcript ends above the composer and the cards over it, so none of its lines shows
+// between them or under the composer. A transcript at its end stays there as rows come, until the analyst scrolls up
+// (the wheel, a touch, a key, a drag); a scroll the layout makes never stops it. While the analyst reads above the end,
+// rows that come show "New messages ↓" at the foot of the transcript, which takes it to its end; sending a message
+// does too.
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { Icon } from '../components/Icon'
 import { UserMessage } from '../components/Message'
-import { RefChip } from '../components/RefChip'
+import { CardQuestions, RefChip } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { ThreadTree } from '../components/ThreadTree'
 import { useTooltip } from '../components/Tooltip'
@@ -34,7 +38,7 @@ import { colourVar } from '../files/labels'
 import { NOTE_COLOR } from '../report/checkComments'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
-import { Composer } from './Composer'
+import { Composer, type ComposerFill } from './Composer'
 import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
@@ -43,15 +47,17 @@ import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
 import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
-import { AgentCard, stopSession, useAgentRows } from './AgentCard'
+import { AgentCard, stopAnswer, stopSession, useAgentRows, type StopAnswer } from './AgentCard'
 import { OrientStart, startedChat, useOrientRun } from './OrientStart'
-import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
+import { CONTINUE_HERE_LINE, MAIN_ESC_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, TERMINAL_STOP_LINE, continueOf, continueText, lastSession } from './subagent'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
 import { ThreadRows } from './ThreadRows'
 import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
-import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
+import { currentStep, elapsedText, turnStart } from './working'
+import { answeredSince, composerTarget, pickItems, replyIn, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
+import { useDocNames } from './SurfaceChips'
 import { useChat, type ChatState } from './useChat'
 import { pendingAsks, TERMINAL_WAIT, terminalWaits, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
@@ -115,26 +121,47 @@ export function composerStopOf(
   return null
 }
 
-/** The composer's Stop sent: a session's through stopSession, a ticket's through dev.stop_ticket, whose record then
- * goes to `onTicket`, a view's build or review through its own route; a failure is a toast, `Could not stop …: <why>`
- * for each. Resolves true when the request went through (the run is ending), false when it failed. */
-export function stopRun(ws: string, what: ComposerStop, onTicket: (t: Ticket) => void): Promise<boolean> {
-  if (what.kind === 'session') return stopSession(ws, what.chat, what.role)
+/** The composer's Stop sent: a session's through stopAnswer, a ticket's through dev.stop_ticket, whose record then goes
+ * to `onTicket`, a view's build or review through its own route. Resolves `ok` when the request went through (the run is
+ * ending), with a line for a toast when there is one; else why it did not stop and what to do, which the Stop itself
+ * then says (stopNote). */
+export function stopRun(ws: string, what: ComposerStop, onTicket: (t: Ticket) => void): Promise<StopAnswer> {
+  if (what.kind === 'session') return stopAnswer(ws, what.chat, what.role)
   if (what.kind === 'view') {
     const noun = what.review ? 'the review' : 'the build'
     return (what.review ? api.viewReviewStop(ws, what.slug) : api.stopViewBuild(ws, what.slug))
-      .then(() => (void refreshProposals(ws), true))
-      .catch((e: Error) => (bus.emit('toast', { text: `Could not stop ${noun}: ${e.message}`, kind: 'error' }), false))
+      .then((): StopAnswer => (void refreshProposals(ws), { ok: true }))
+      .catch((e: Error): StopAnswer => ({ ok: false, text: `Could not stop ${noun}: ${e.message}`, kind: 'error' }))
   }
   return api
     .stopTicket(what.ticket)
     .then(() => api.ticket(what.ticket))
-    .then((t) => (onTicket(t), true))
-    .catch((e: Error) => (bus.emit('toast', { text: `Could not stop the ticket: ${e.message}`, kind: 'error' }), false))
+    .then((t): StopAnswer => (onTicket(t), { ok: true }))
+    .catch((e: Error): StopAnswer => ({ ok: false, text: `Could not stop the ticket: ${e.message}`, kind: 'error' }))
 }
 
 /** How long the stop square stays busy after a Stop went through, at most, should the run not report its end. */
 export const STOP_HOLD_MS = 30_000
+/** How long a Stop of main, a side thread or one of thimble's agents waits for the run to end before the Stop says it
+ * did not (stopStillLine): Claude Code ends a turn or an agent within a few seconds of thimble's request. */
+export const STOP_CHECK_MS = 12_000
+
+/** What the Stop says when what it stops still runs STOP_CHECK_MS after thimble passed the Stop on: that it still runs,
+ * and how to stop it in the terminal; null for a ticket, a view's build or a review, which thimble's server stops
+ * itself. Pure. */
+export function stopStillLine(what: ComposerStop): string | null {
+  if (what.kind !== 'session') return null
+  return what.chat === 'main' ? `Main is still running. ${MAIN_ESC_LINE}` : `It is still running. ${TERMINAL_STOP_LINE}`
+}
+
+/** What the Stop of main, a side thread or one of thimble's agents says before it is pressed when thimble's module does
+ * not run in main's session (main's meta `module` false), through which alone thimble stops them: why, from main's
+ * `module_why`, and how to stop it in the terminal; null otherwise. Pure. */
+export function stopBlockedLine(what: ComposerStop | null, main: Pick<ChatMeta, 'module' | 'module_why'> | null | undefined): string | null {
+  if (what?.kind !== 'session' || main?.module !== false) return null
+  const why = (main.module_why || "Claude Code did not load thimble's hooks module").replace(/[.\s]+$/, '')
+  return what.chat === 'main' ? `thimble cannot stop main from here: ${why}. ${MAIN_ESC_LINE}` : `thimble cannot stop it from here: ${why}. ${TERMINAL_STOP_LINE}`
+}
 
 /** A thread's anchors: the meta's `anchor` split at ',' (a ⌘-drag joins several), empty for main. */
 export function threadAnchors(meta: Pick<ChatMeta, 'anchor'> | null | undefined): string[] {
@@ -253,10 +280,12 @@ export function buildStatus(stages: readonly string[], live: boolean): { label: 
   return { label: last.label, state, tip: all.map((s) => (s.detail ? `${s.label}: ${s.detail}` : s.label)).join('\n') }
 }
 
-/** A running agent's progress at its row's edge: its calls answered of those made (30/31); '' before its first. Pure. */
+/** A running agent's progress at its row's edge, beside its spinner: how many steps it took so far (`31 steps`); ''
+ * before its first. Never a fraction of the steps made, which read as done (`27/27`) while it still worked (bug hunt
+ * G11). Pure. */
 export function stepProgress(rows: readonly Row[]): string {
-  const steps = toolSteps(rows.filter((r) => r.kind === 'tool'), true)
-  return steps.length ? `${steps.filter((s) => s.state === 'done').length}/${steps.length}` : ''
+  const n = toolSteps(rows.filter((r) => r.kind === 'tool'), true).length
+  return n ? `${n} ${n === 1 ? 'step' : 'steps'}` : ''
 }
 
 /** The strip's count: its subagents ended (done or failed) of those started (5/8), `8 done` once all have ended; ''
@@ -269,10 +298,13 @@ export function subagentCount(agents: readonly ToolStep[]): string {
 
 /** The strip behind the composer while the current thread works: what it is doing, its steps and count, or null. Only
  * subagents are listed and counted; a session with no agents yet, or one that only makes calls, shows just the title
- * and its spinner. A dev thread that builds a view (`view`) says so; a side thread says, in its own words, that it
- * starts and then that it works (`stage`, threadStatus STAGE_TEXT). Pure. */
-export function taskStrip(kind: ThreadKind | null, running: boolean, rows: readonly Row[], metas: ReadonlyMap<string, ChatMeta> = new Map(), view = false, stage: ThreadStage | null = null): { title: string; steps: ToolStep[]; count: string } | null {
-  if (!running || kind == null || kind === 'main') return null
+ * and its spinner. A dev thread that builds a view (`view`) says so. Main and a side thread name the step under way
+ * (working.currentStep: the call that runs, the subagent a call waits on, or Thinking), and a side thread whose question
+ * waits for its fork says it starts (`stage`, threadStatus STAGE_TEXT); the caller adds the time since the turn started
+ * (`since`). Pure. */
+export function taskStrip(kind: ThreadKind | null, running: boolean, rows: readonly Row[], metas: ReadonlyMap<string, ChatMeta> = new Map(), view = false, stage: ThreadStage | null = null): { title: string; steps: ToolStep[]; count: string; since?: number | null } | null {
+  if (!running || kind == null) return null
+  if (kind === 'main') return { title: currentStep(rows), steps: [], count: '' }
   const session = (title: string, own: readonly Row[]) => {
     const steps = sessionSteps(own, metas, true)
     return { title, steps, count: subagentCount(steps) }
@@ -287,7 +319,8 @@ export function taskStrip(kind: ThreadKind | null, running: boolean, rows: reado
   if (kind === 'dev') return session(view ? 'Building the view' : 'Working on the ticket', rows)
   if (kind === 'check') return session('Working', rows)
   // a thread's or an agent's calls are rows in its thread, never steps
-  return { title: kind === 'thread' && stage ? STAGE_TEXT[stage] : 'Working', steps: [], count: '' }
+  if (kind === 'thread') return { title: stage === 'sent' ? STAGE_TEXT.sent : currentStep(rows), steps: [], count: '' }
+  return { title: 'Working', steps: [], count: '' }
 }
 
 export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => void }) {
@@ -307,10 +340,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // a message handed over with `openChat`: state, so an openChat for the chat already shown still sends
   const [pendingSend, setPendingSend] = useState<{ chatId: string; text: string; n: number } | null>(null)
   const sendSeq = useRef(0)
+  // words handed over with `openChat`'s `draft`, which the composer puts in that chat's draft
+  const [draft, setDraft] = useState<ComposerFill | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const flowRef = useRef<HTMLDivElement>(null)
-  const rootRef = useRef<HTMLElement>(null)
-  const footRef = useRef<HTMLDivElement>(null)
   // the tree: collapsed to one row by default
   const treeKey = storageKey(ws, 'threads-collapsed')
   const [treeCollapsed, setTreeCollapsed] = useState(() => readStorage<boolean>(treeKey, true))
@@ -352,6 +385,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     () =>
       bus.on('openChat', (e) => {
         if (e.send) setPendingSend({ chatId: e.chatId, text: e.send, n: ++sendSeq.current })
+        if (e.draft) setDraft({ thread: e.chatId, text: e.draft, n: ++sendSeq.current })
         setCurrent(e.chatId)
         void loadList()
       }),
@@ -404,39 +438,74 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     setSeen(markSeen(ws, current, nMessages))
   }, [ws, current, nMessages, chat.loading])
 
-  // follow the newest record while the list is near its end; a thread opens at its end
+  // follow the newest record while the list is at its end; a thread opens at its end. Only the analyst's own scroll up
+  // stops it (followScroll: a scroll up right after the wheel, a touch or a key, or while a pointer is pressed in the
+  // list), never a scroll the layout makes (bug hunt C10, E12: a row above the view that resized as rows came moved the
+  // list up through the browser's scroll anchoring, and the list emptied while a thread loaded scrolled it to its top;
+  // either read as the analyst's scroll)
   const nearEnd = useRef(true)
-  useEffect(() => {
+  const lastTop = useRef(0)
+  // when the analyst last asked the list to go up (the wheel up, a finger moving down, a key), whether a pointer is
+  // pressed in it (a drag of a selection scrolls it), and where a touch on it last was
+  const askedUp = useRef(-Infinity)
+  const pressed = useRef(false)
+  const touchY = useRef<number | null>(null)
+  // the shown chat's records now, and when the list stopped following: a record since shows "New messages"
+  const records = useRef(0)
+  records.current = chat.records.length
+  const leftAt = useRef(0)
+  const [unseen, setUnseen] = useState(false)
+  const stopFollow = () => {
+    if (!nearEnd.current) return
+    nearEnd.current = false
+    leftAt.current = records.current
+  }
+  const follow = () => {
     nearEnd.current = true
+    setUnseen(false)
+  }
+  const toEnd = () => {
+    follow()
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }
+  useEffect(() => {
+    const up = () => {
+      pressed.current = false
+    }
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  }, [])
+  useEffect(() => {
+    follow()
     setStripOpen(false)
   }, [current])
-  // a followed call brings itself into view (Rows.CallLine), so the list stops following its end
+  // a followed call brings itself into view (Rows.CallLine), and so does an answer's comment (Rows), so the list stops
+  // following its end
   useEffect(() => {
-    if (focus) nearEnd.current = false
+    if (focus) stopFollow()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus])
+  useEffect(
+    () =>
+      bus.on('openRef', (e) => {
+        if (e.ref.startsWith('answer:')) stopFollow()
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
   useEffect(() => {
     const el = listRef.current
-    if (!el || !nearEnd.current) return
-    el.scrollTop = el.scrollHeight
+    if (!el) return
+    if (nearEnd.current) el.scrollTop = el.scrollHeight
+    else if (records.current > leftAt.current) setUnseen(true)
   }, [chat.rows, chat.streaming, main.rows, current])
-  // the composer floats over the transcript, so the list keeps its height clear at the bottom; a growing foot only moves
-  // the list's padding, which no scroll follows, so a list followed to its end is taken to its new end
-  useEffect(() => {
-    const foot = footRef.current
-    const root = rootRef.current
-    if (!foot || !root) return
-    const set = () => {
-      root.style.setProperty('--composer-h', `${foot.offsetHeight}px`)
-      const el = listRef.current
-      if (el && nearEnd.current) el.scrollTop = el.scrollHeight
-    }
-    set()
-    const ro = new ResizeObserver(set)
-    ro.observe(foot)
-    return () => ro.disconnect()
-  }, [])
   // rows that fill in later (a card reading its agent's log, a chip learning its name) and a list that shrinks (the
-  // tree opened) keep the end in view
+  // tree opened, the foot grown by a card or the task strip) keep the end in view
   useEffect(() => {
     const el = listRef.current
     const flow = flowRef.current
@@ -449,7 +518,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       })
     })
     ro.observe(flow)
-    // the list's own box, not its content box: the composer's height moves the list's padding, never its box
+    // the list's own box: the foot under it takes its height from it
     ro.observe(el, { box: 'border-box' })
     return () => {
       cancelAnimationFrame(frame)
@@ -465,15 +534,17 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   }, [chats, main.meta?.permissions])
   // the chats of thimble's agents that wait in the terminal, where Claude Code asks them, and the chats they run under
   const terminalIds = useMemo(() => terminalWaits(main.meta, chats), [chats, main.meta])
+  // a writer's thread is named by its document's name
+  const docName = useDocNames(ws)
   const items = useMemo(
     () =>
       pickItems(
         chats,
         (m) => (m.id === current ? chat.running : !!m.running),
         (m) => (m.id === current ? false : isUnread(seen, m.id, m.n_messages)),
-        { current, waiting: waitingIds, terminal: terminalIds },
+        { current, waiting: waitingIds, terminal: terminalIds, docName },
       ),
-    [chats, current, chat.running, seen, waitingIds, terminalIds],
+    [chats, current, chat.running, seen, waitingIds, terminalIds, docName],
   )
   const labels = useMemo(() => threadLabels(items), [items])
   // a thread the analyst left while it answered says so once its answer is in: a toast with its chip, beside the dot
@@ -530,22 +601,43 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const stopWhat = composerStopOf(kind, curMeta, ticket, stepParent, threadView)
   const stopKey = stopWhat ? (stopWhat.kind === 'ticket' ? `ticket:${stopWhat.ticket}` : stopWhat.kind === 'view' ? `view:${stopWhat.slug}:${stopWhat.review}` : `chat:${stopWhat.chat}`) : null
   // the Stop that is under way, by stopKey, so another thread's composer is not left busy: from the request until the
-  // run ends (its Stop goes, stopKey changes) or STOP_HOLD_MS pass; a failed request clears it at once
+  // run ends (its Stop goes, stopKey changes) or STOP_HOLD_MS pass (STOP_CHECK_MS for what Claude Code stops, after which
+  // the Stop says the run goes on, stopStillLine); a failed request clears it at once
   const [stopping, setStopping] = useState<string | null>(null)
+  // why the Stop did not stop the run and what to do, by stopKey: shown on the Stop and in the strip until the run ends
+  const [stopNote, setStopNote] = useState<{ key: string; text: string } | null>(null)
   useEffect(() => {
     if (stopping && stopping !== stopKey) setStopping(null)
   }, [stopping, stopKey])
   useEffect(() => {
+    if (stopNote && stopNote.key !== stopKey) setStopNote(null)
+  }, [stopNote, stopKey])
+  const still = stopWhat ? stopStillLine(stopWhat) : null
+  useEffect(() => {
     if (!stopping) return
-    const t = window.setTimeout(() => setStopping((s) => (s === stopping ? null : s)), STOP_HOLD_MS)
+    const t = window.setTimeout(
+      () => {
+        setStopping((s) => (s === stopping ? null : s))
+        if (still) setStopNote({ key: stopping, text: still })
+      },
+      still ? STOP_CHECK_MS : STOP_HOLD_MS,
+    )
     return () => window.clearTimeout(t)
-  }, [stopping])
+  }, [stopping, still])
   const stopNow = () => {
     if (!stopWhat || !stopKey || stopping === stopKey) return
     const key = stopKey
     setStopping(key)
-    void stopRun(ws, stopWhat, (t) => setTicket(t as TicketWithShots)).then((ok) => ok || setStopping((s) => (s === key ? null : s)))
+    setStopNote(null)
+    void stopRun(ws, stopWhat, (t) => setTicket(t as TicketWithShots)).then((a) => {
+      if (a.ok) return void (a.note && bus.emit('toast', { text: a.note }))
+      setStopping((s) => (s === key ? null : s))
+      setStopNote({ key, text: a.text })
+    })
   }
+  // what the Stop says, to a screen reader and in a line above the composer (the strip's, else its tooltip): why it did
+  // not stop the run and what to do, or why it cannot before it is pressed; null while there is nothing to say
+  const stopSays = (stopNote?.key === stopKey ? stopNote.text : null) ?? stopBlockedLine(stopWhat, main.meta)
   // the orientation and the tickets that run: their steps at their rows' edge, and in main the orientation's strip
   const runningAgents = useMemo(() => chats.filter((m) => (threadKind(m) === 'orient' || threadKind(m) === 'writer' || threadKind(m) === 'dev') && m.status === 'running').sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [chats])
   // the orientations' logs are read as well: main leaves out its relay of the summary one handed back
@@ -580,6 +672,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // show it as main at work
   const starter = kind === 'thread' && mainRelays(main.records, main.running, chat.records, running) ? 'main' : null
   const strip = waitingTicket ? null : orienting ? taskStrip('orient', true, agentRows.get(orienting.id) ?? [], metaMap) : taskStrip(kind, running, chat.rows, metaMap, !!curMeta?.view, stage)
+  // main's and a side thread's strip count the time since the turn started: its log's time, else since this page saw it run
+  const counting = !orienting && !!strip && (kind === 'main' || kind === 'thread')
+  const since = useRunSince(counting, current, counting ? turnStart(chat.records) : null)
+  if (strip && counting) strip.since = since
   // the orientation waits for its critic's report: the strip says so (subagents' `paused: critique`)
   const pausedFor = (orienting ?? (kind === 'orient' ? curMeta : null))?.paused === 'critique'
   if (strip && pausedFor) strip.title = PAUSED_LINE
@@ -690,6 +786,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
     if (demoStop()) return Promise.resolve(false)
+    // the question sent is where the analyst looks next: the list goes to its end and follows it there
+    toEnd()
     if (target.to === 'orient') {
       // the latest orientation takes the analyst's message itself: it resumes the finished session, or waits for the run
       // going on to end; from one of its steps, its thread opens, where the message and the reply show
@@ -749,24 +847,13 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   return (
     <ThreadsContext.Provider value={{ labels, metas, main: main.meta }}>
+      <CardQuestions.Provider value={true}>
       <section
-        ref={rootRef}
         className="chat"
         data-panel="chat"
         data-thread-kind={kind ?? undefined}
         data-chat-current={current}
         aria-label="Chat"
-        onPointerDown={(e) => {
-          // a press anywhere in the chat outside the tree's card folds the open tree. It folds only after the click has landed:
-          // folding at the press would move the thread under the pointer and the click would go there
-          if (treeCollapsed || (e.target as Element).closest?.('.tt')) return
-          const fold = () =>
-            window.setTimeout(() => {
-              writeStorage(treeKey, true)
-              setTreeCollapsed(true)
-            }, 0)
-          window.addEventListener('pointerup', fold, { once: true })
-        }}
       >
         <header className="chat-head">
           <ThreadTree
@@ -793,7 +880,30 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           ref={listRef}
           onScroll={(e) => {
             const el = e.currentTarget
-            nearEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+            const was = nearEnd.current
+            nearEnd.current = followScroll(was, lastTop.current, el, pressed.current || performance.now() - askedUp.current < ASKED_UP_MS)
+            if (was && !nearEnd.current) leftAt.current = records.current
+            else if (!was && nearEnd.current) setUnseen(false)
+            lastTop.current = el.scrollTop
+          }}
+          onWheel={(e) => {
+            if (e.deltaY < 0) askedUp.current = performance.now()
+          }}
+          onTouchStart={(e) => {
+            touchY.current = e.touches[0]?.clientY ?? null
+          }}
+          onTouchMove={(e) => {
+            const y = e.touches[0]?.clientY ?? null
+            // a finger moving down moves the transcript up
+            if (y != null && touchY.current != null && y > touchY.current) askedUp.current = performance.now()
+            touchY.current = y
+          }}
+          onPointerDown={(e) => {
+            if (e.button === 0 || e.button === 1) pressed.current = true
+          }}
+          onKeyDown={(e) => {
+            if (typingIn(e.target)) return
+            if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home' || (e.key === ' ' && e.shiftKey)) askedUp.current = performance.now()
           }}
         >
           <CallFocusContext.Provider value={focus}>
@@ -819,13 +929,23 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!chat.loading && !chat.error && kind === 'step' && curMeta && <StepView ws={ws} meta={curMeta} chat={chat} running={running} />}
           </div>
           </CallFocusContext.Provider>
+          {unseen && (
+            <div className="chat-new">
+              <Button variant="secondary" size="sm" icon="arrow-down" onClick={toEnd}>
+                New messages
+              </Button>
+            </div>
+          )}
         </div>
-        <div ref={footRef} className="chat-foot">
-          <Holds className="chat-main-holds" alert={main.meta?.alert} />
-          {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
-          {!touring && !demo && <ProposalCard ws={ws} />}
-          <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
-          {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
+        <div className="chat-foot">
+          {/* the cards above the composer: while one shows, the foot takes its own space under the transcript (chat.css) */}
+          <div className="chat-foot-cards">
+            <Holds className="chat-main-holds" alert={main.meta?.alert} />
+            {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
+            {!touring && !demo && <ProposalCard ws={ws} />}
+            <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
+          </div>
+          {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} since={strip.since} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} note={stopSays} />}
           <DemoNote />
           {orientClosedText ? (
             <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
@@ -842,17 +962,42 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               chip={roleChip}
               onSend={send}
               sending={target.to === 'orient' ? sendingOrient : target.to === 'view' ? sendingView : target.to === 'main' ? main.streaming : chat.streaming}
-              placeholder={`Reply in ${target.to === 'main' ? 'main' : target.to === 'orient' ? labels.get(target.chat) ?? 'orient' : curPath}…`}
+              placeholder={replyIn(target.to === 'main' ? 'main' : target.to === 'orient' ? labels.get(target.chat) ?? 'orient' : curPath)}
               disabled={demo || chat.loading || !!chat.error}
               tip={demo ? DEMO_NOTE : undefined}
-              stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
+              stop={stopWhat ? { label: stopSays ?? stopWhat.label, tip: strip && stopSays ? stopWhat.label : undefined, onStop: stopNow, busy: stopping === stopKey } : undefined}
               thread={current}
+              fill={draft}
             />
           )}
         </div>
       </section>
+      </CardQuestions.Provider>
     </ThreadsContext.Provider>
   )
+}
+
+/** How near its end a list still counts as at its end, in px. */
+export const NEAR_END_PX = 80
+/** How long after the analyst's wheel up, touch or key a scroll up of the list is theirs, in ms. */
+const ASKED_UP_MS = 500
+
+/** Whether the list follows its end after a scroll. Only a scroll up `byAnalyst` stops it (right after their wheel up,
+ * touch or key, or while their pointer is pressed in the list: a drag of a selection). A scroll the layout makes never
+ * does: rows that grow below a scroll of the list's own, a row above the view that resizes as rows come (which the
+ * browser's scroll anchoring answers by moving the list up), the list emptied and filled again while a chat loads.
+ * Back at its end, or near it (NEAR_END_PX) on the way down, it follows again. Pure. */
+export function followScroll(following: boolean, lastTop: number, el: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>, byAnalyst = false): boolean {
+  const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+  if (gap < 2 || (gap < NEAR_END_PX && el.scrollTop >= lastTop)) return true
+  if (byAnalyst && el.scrollTop < lastTop) return false
+  return following
+}
+
+/** Whether a key goes into a text field (a key there edits, it does not scroll the transcript). */
+function typingIn(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
 }
 
 /** The kinds of a thread's `error` record that end a run without a reply the analyst can read (backend
@@ -1196,11 +1341,29 @@ function TicketView({ ws, id, chat, mainRecords, ticket, onTicket: setTicket }: 
   )
 }
 
+/** When the run of what the strip follows (`running`, in thread `chat`) started, in ms: `logged`, the time its log
+ * gives, else when this page first saw it run; null while it does not run. */
+function useRunSince(running: boolean, chat: string, logged: number | null): number | null {
+  const [seen, setSeen] = useState<number | null>(null)
+  useEffect(() => setSeen(running ? Date.now() : null), [running, chat])
+  return running ? (logged ?? seen) : null
+}
+
+/** The time since `since` (ms), counted up each second (working.elapsedText). */
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(t)
+  }, [])
+  return <span className="chat-strip-meta chat-strip-time">{elapsedText(now - since)}</span>
+}
+
 /** The strip behind the composer's top edge while the thread works: the spinner, what it is doing, how many steps; it
  * opens on the steps. A pending permission prompt shows a still dot in place of the spinner (and one Claude Code asks
  * in the terminal makes the title TERMINAL_WAIT, set by the caller); a session waiting to retry
  * after an API capacity error shows a countdown row with Retry now. */
-function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry = null, onRetry }: { title: string; steps: ToolStep[]; count: string; open: boolean; onToggle: () => void; waiting?: boolean; retry?: SessionAlert | null; onRetry?: () => Promise<unknown> }) {
+function TaskStrip({ title, steps, count, since = null, open, onToggle, waiting = false, retry = null, onRetry, note = null }: { title: string; steps: ToolStep[]; count: string; since?: number | null; open: boolean; onToggle: () => void; waiting?: boolean; retry?: SessionAlert | null; onRetry?: () => Promise<unknown>; note?: string | null }) {
   const retryLine = useRetryText(retry)
   const [retrying, setRetrying] = useState(false)
   const retryNow = () => {
@@ -1219,14 +1382,21 @@ function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry
   return (
     <div className={`chat-strip${open ? ' open' : ''}${waiting ? ' is-waiting' : ''}`} data-steps={steps.length} data-waiting={waiting || undefined} data-retry={retry ? '' : undefined}>
       <div className="chat-strip-bar">
-        <button type="button" className="chat-strip-head" aria-expanded={open} onClick={onToggle}>
+        <button type="button" className="chat-strip-head" aria-expanded={steps.length ? open : undefined} onClick={onToggle}>
           {waiting || retry ? <span className="chat-strip-wait-dot" aria-hidden="true" /> : <Spinner label="working" />}
           <span className="chat-strip-title">{title}</span>
+          {since != null && <Elapsed since={since} />}
           {/* subagents only (subagentCount); the strip shows while the session runs, so all ended does not mean finished */}
           {count && <span className="chat-strip-meta">{count}</span>}
-          <Icon name="chevron-down" size={12} className="chat-strip-caret" />
+          {/* the chevron only where there are steps to open */}
+          {steps.length > 0 && <Icon name="chevron-down" size={12} className="chat-strip-caret" />}
         </button>
       </div>
+      {note && (
+        <div className="chat-strip-note" role="status">
+          {note}
+        </div>
+      )}
       {retry && (
         <div className="chat-strip-retry-row">
           <span className="chat-strip-retry-text" role="status">

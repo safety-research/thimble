@@ -179,14 +179,15 @@ def level_of(choice: str) -> str:
 
 def analyst_effort(cwd: Path, environ: dict[str, str] | None = None) -> str | None:
     """The effort the analyst's own settings or environment choose for a session in `cwd`, as the effort menus name it:
-    CLAUDE_CODE_EFFORT_LEVEL, else `ultracode`, else the effort for main's model, else the user file's top-level
-    `effortLevel`; None when they choose none."""
+    CLAUDE_CODE_EFFORT_LEVEL, else `ultracode`, else the effort for main's model; None when they choose none, or only a
+    top-level `effortLevel` in the user's file that Claude Code does not read for main's model (module note), since the
+    session then runs at Claude Code's own default."""
     env = os.environ if environ is None else environ
     value = env.get(EFFORT_ENV, "").strip().lower()
     if value in EFFORTS:
         return value
-    _, by_env, ultracode, level, unread = _efforts(cwd, env)
-    return by_env or (ULTRACODE if ultracode else level or unread)
+    _, by_env, ultracode, level, _ = _efforts(cwd, env)
+    return by_env or (ULTRACODE if ultracode else level)
 
 
 STATUSLINE_REFRESH_S = 2
