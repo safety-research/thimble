@@ -325,8 +325,8 @@ class Live:
         # the promptId of the local command whose caveat was read last ('' when the record has none), whose command
         # line is not the analyst's line to main (module note, the table); None once another line was read
         self.local_prompt: str | None = None
-        self.model: str | None = None  # the model of main's last reply (_note_model)
-        self.effort: str | None = None  # the effort of main's last reply (_note_model)
+        self.model: str | None = None  # the model of main's last request or reply (_note_run)
+        self.effort: str | None = None  # the effort of main's last request or reply (_note_run)
         self.fast: bool | None = None  # whether main's last reply ran in fast mode (_note_model)
         self.alerted = False  # main's meta holds the alert for the model-switch dialog (_watch_wait)
         self.flagged = False  # the safety check stopped a response in this turn (module note, stops and waits)
@@ -3395,6 +3395,11 @@ def translate(lv: Live, line: bytes | str) -> None:
                 pass  # a plugin's line, such as thimble's note to main after a Stop: never the analyst's
             elif prompt.strip() and not prompt.lstrip().startswith("<"):
                 _rec(lv, "user", text=prompt.strip(), by=TERMINAL)
+        elif att.get("type") == "model":
+            _note_request(lv, rec)
+        return
+    if t == "api-request":
+        _note_request(lv, rec)
         return
     if t == "system":
         if rec.get("subtype") == "turn_duration":
@@ -3457,8 +3462,34 @@ def _note_model(lv: Live, rec: dict) -> None:
                if isinstance(n := usage.get(k), int) and not isinstance(n, bool))
     if read > 0:  # an API error line Claude Code wrote itself reads nothing
         lv.context_tokens = read
+    _note_run(lv, model, effort, fast)
+
+
+MAIN_QUERY = "repl_main_thread"  # the querySource of an `api-request` record of main's own thread (_note_request)
+
+
+def _note_request(lv: Live, rec: dict) -> None:
+    """The model and effort main's reply will run with, as Claude Code writes them before the reply comes, so the
+    composer's chip shows the session's real setting from the analyst's first prompt on: the model a `model` attachment
+    names as the prompt goes out, and the model and effort of the request main's own thread sends (an `api-request`
+    record). A record without them changes nothing."""
+    if rec.get("type") == "attachment":
+        att = rec.get("attachment")
+        identity = att.get("identity") if isinstance(att, dict) else None
+        _note_run(lv, identity.get("modelId") if isinstance(identity, dict) else None, None, None)
+    elif rec.get("type") == "api-request" and rec.get("querySource") == MAIN_QUERY:
+        params = rec.get("params") if isinstance(rec.get("params"), dict) else {}
+        out = params.get("output_config") if isinstance(params.get("output_config"), dict) else {}
+        _note_run(lv, params.get("model"), out.get("effort"), None)
+
+
+def _note_run(lv: Live, model: Any, effort: Any, fast: bool | None) -> None:
+    """Main's model, effort and fast mode as a record names them, kept on main's `attached` for the composer's chip; one
+    the record does not name (None) stays as it was."""
     if not isinstance(model, str) or not model or model.startswith("<"):
         model = None
+    if not isinstance(effort, str) or not effort:
+        effort = None
     if (model is None or model == lv.model) and (effort is None or effort == lv.effort) and (fast is None or fast == lv.fast):
         return
     lv.model, lv.effort = model or lv.model, effort or lv.effort

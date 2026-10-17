@@ -120,6 +120,36 @@ def test_the_tail_translates_a_turn_and_skips_every_other_record(cwd, tmp_path):
     assert len(_log(agents.MAIN_ID)) == n  # nothing new
 
 
+def test_mains_model_and_effort_are_known_from_the_first_prompt_and_never_guessed(cwd, tmp_path):
+    """B30: before main's first prompt the composer's chip has no effort to show but one the analyst's settings choose,
+    not a top-level `effortLevel` in the user's file that Claude Code does not read for main's model; from the prompt on,
+    the `model` attachment Claude Code writes with it names the model and the request main's thread sends names the
+    effort, before any reply. A request of another query source changes nothing."""
+    user = tmp_path / "claude-config" / "settings.json"
+    user.parent.mkdir(parents=True, exist_ok=True)
+    user.write_text(json.dumps({"effortLevel": "high"}))
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = _attach(cwd, p)
+    session.tail_once(lv)
+
+    def attached() -> dict:
+        return (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {})["attached"]
+
+    assert {"model", "effort", "settings_effort"}.isdisjoint(attached())
+    _append(p, lv, [_human("What is in here?"), {"type": "attachment", "attachment": {
+        "type": "model", "identity": {"modelId": "claude-opus-5-5", "marketingName": "Opus 5.5"}}}])
+    assert attached()["model"] == "claude-opus-5-5" and "effort" not in attached()
+    _append(p, lv, [
+        {"type": "api-request", "querySource": "repl_main_thread",
+         "params": {"model": "claude-opus-5-5", "output_config": {"effort": "medium"}}},
+        {"type": "api-request", "querySource": "side_question",
+         "params": {"model": "claude-haiku-4-5", "output_config": {"effort": "low"}}},
+    ])
+    assert (attached()["model"], attached()["effort"]) == ("claude-opus-5-5", "medium")
+    assert not lv.degraded
+
+
 # ----------------------------------------------------------------------------- the startup sweep
 
 

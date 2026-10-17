@@ -439,7 +439,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setAsk(s.ask_key === 'alt' ? 'alt' : 'meta')
         setAttached(a)
         const fast = mainFast(a)
-        setModels({ ...(s.models ?? {}), main: { model: a?.model ?? '', effort: mainEffort(a), fast: !!fast } })
+        setModels({ ...(s.models ?? {}), main: { model: a?.model ?? '', effort: mainEffort(a) ?? '', fast: !!fast } })
       })
       .catch((e) => alive && setError((e as Error).message))
     return () => {
@@ -477,7 +477,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       }
       for (const [name, slug, on] of changedViews(exts?.extensions ?? [], viewOn)) await api.switchExtensionView(ws, name, slug, on)
       for (const [slug, on] of changedLocalViews(exts?.local?.views ?? [], localOn)) await api.switchLocalView(ws, slug, on)
-      const was = { effort: mainEffort(attached), fast: !!mainFast(attached) }
+      const was = { effort: mainEffort(attached) ?? '', fast: !!mainFast(attached) }
       const main = models.main
       const effortNow = !!main && !!attached && main.effort !== was.effort
       const fastNow = !!main && !!attached && !!main.fast !== was.fast
