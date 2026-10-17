@@ -21,7 +21,7 @@ bubblewrap can create a sandbox, and otherwise with your user's access; `thimble
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.300), logged in (`claude auth status`)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.301), logged in (`claude auth status`)
   or set up with an API key or a cloud provider ([Authentication](#authentication)), with
   its hooks modules on, which thimble's agents need: managed settings with `disableAllHooks` or
   `allowManagedHooksOnly`, or a folder Claude Code doesn't trust, turn them off.
