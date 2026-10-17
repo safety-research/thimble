@@ -640,7 +640,7 @@ Get a part of your task: its text and its pictures. When you have a part that yo
 
 ## send_answer
 
-Send your answer to a part of your task. The answer must agree with the schema in your task. When it does not agree, the result gives the errors. Then correct the answer and send it again.
+Send your answer to a part of your task. The answer must agree with the schema in your task. When it does not agree, the result gives the errors. Then correct the answer and send it again. When it agrees, the result gives your next part, if there is one.
 
 ```json
 {
@@ -1018,6 +1018,20 @@ The worktree holds no change yet, so there is nothing to check.
 
 The {count} of part {part} follow.
 
+## read_call-page
+
+# Part {part}, page {page} of {pages}
+
+{text}
+
+## read_call-page-next
+
+Part {part} continues. Call read_call to get page {page}. Do not answer part {part} before you read all its pages.
+
+## read_call-page-last
+
+This is the last page of part {part}. Answer part {part} now.
+
 ## read_call-pictures-only
 
 The {count} of part {part} follow. Its text is in your first message.
@@ -1037,6 +1051,10 @@ You answered your share of the parts. Another agent gets the parts that are left
 ## send_answer-more
 
 thimble has your answer to part {part}. Call read_call to get the next part.
+
+## send_answer-next
+
+thimble has your answer to part {part}. Your next part follows.
 
 ## send_answer-last
 

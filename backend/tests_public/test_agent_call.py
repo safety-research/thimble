@@ -119,9 +119,10 @@ async def test_a_call_of_many_parts_takes_them_one_at_a_time_and_a_fresh_agent_t
     again = await _send("read_call", {}, 1)
     assert "# Part 1" in again.text, "an agent holds one part until it answers it"
     more = await _send("send_answer", {"answer": {"curt": False}}, 2)
-    assert "Call read_call" in more.text
+    assert "Your next part follows" in more.text and "# Part 2" in more.text and "reply number 2" in more.text, \
+        "the next part comes with the answer's result"
     second = await _send("read_call", {}, 3)
-    assert "reply number 2" in second.text
+    assert "reply number 2" in second.text, "the part it holds, again"
     last = await _send("send_answer", {"part": 2, "answer": {"curt": True}}, 4)
     assert "That was your last part" in last.text, "its share is read"
     share = await _send("read_call", {}, 5)
@@ -135,6 +136,63 @@ async def test_a_call_of_many_parts_takes_them_one_at_a_time_and_a_fresh_agent_t
     assert [(o.part, o.status, o.output) for o in outs] == [(1, "ok", {"curt": False}), (2, "ok", {"curt": True}),
                                                            (3, "ok", {"curt": True})]
     assert heard == [1, 2, 3]
+
+
+async def test_a_lazy_source_that_waits_adds_parts_as_it_goes_and_starts_an_agent_only_for_a_part_none_waits_for(
+        ws, bridge):
+    """A source that yields WAIT keeps the call open until it ends; with room for four agents, one part starts one
+    agent, and a part added while that agent holds one starts a second."""
+    queue: list[str] = ["reply one"]
+    closed = False
+
+    async def source():
+        while True:
+            if queue:
+                yield agent_call.Part(queue.pop(0))
+            elif closed:
+                return
+            else:
+                yield agent_call.WAIT
+
+    spec = agent_call.Spec(what="labels", instructions="Judge each reply.", tool=TOOL, model="claude-opus-5-5",
+                           effort="low", agents=4)
+    call = asyncio.create_task(agent_call.run(CORPUS, spec, source()))
+    await _until(lambda: _agents(), "no agent started")
+    await asyncio.sleep(0.1)
+    assert len(bridge.ops("spawn")) == 1, "one part waits, so one agent starts"
+    first = await _send("read_call", {})
+    assert "reply one" in first.text
+    queue.append("reply two")
+    await _until(lambda: len(_agents()) == 2, "a part no agent waits for starts a second agent")
+    second = await _send("read_call", {}, 1, agent=1)
+    assert "reply two" in second.text
+    await _send("send_answer", {"answer": {"curt": True}}, 2, agent=0)
+    await _send("send_answer", {"answer": {"curt": False}}, 3, agent=1)
+    await asyncio.sleep(0.1)
+    assert not call.done(), "a source that waits keeps the call open"
+    closed = True
+    outs = await asyncio.wait_for(call, 5)
+    assert [(o.part, o.output) for o in outs] == [(1, {"curt": True}), (2, {"curt": False})]
+
+
+async def test_a_long_part_reaches_its_agent_in_pages(ws, bridge, monkeypatch):
+    monkeypatch.setattr(agent_call, "PAGE_CHARS", 30)
+    monkeypatch.setattr(agent_call, "PAGE_SEEK", 10)
+    text = "\n".join(f"line {i:02d} of the reply" for i in range(4))  # 4 lines of 20 characters
+    assert agent_call.pages(text) == [(0, 21), (21, 42), (42, 63), (63, 83)], "each page ends at a line break"
+    spec = agent_call.Spec(what="labels", instructions="Judge each reply.", tool=TOOL, model="claude-opus-5-5",
+                           effort="low")
+    call = asyncio.create_task(agent_call.run(CORPUS, spec, [agent_call.Part(text), agent_call.Part("short")]))
+    await _until(lambda: _agents(), "no agent started")
+    got = [(await _send("read_call", {}, n)).text for n in range(5)]
+    assert "page 1 of 4" in got[0] and "line 00" in got[0] and "line 01" not in got[0]
+    assert "Call read_call to get page 2" in got[0] and "line 03" in got[3] and "last page of part 1" in got[3]
+    assert "page 1 of 4" in got[4], "after its last page, its first again"
+    nxt = await _send("send_answer", {"answer": {"curt": True}}, 5)
+    assert "short" in nxt.text and "page" not in nxt.text
+    await _send("send_answer", {"answer": {"curt": False}}, 6)
+    outs = await asyncio.wait_for(call, 5)
+    assert [o.status for o in outs] == ["ok", "ok"]
 
 
 async def test_the_card_check_s_reading_gets_its_picture_from_read_call(ws, bridge, tmp_path, monkeypatch):

@@ -26,9 +26,13 @@ cannot write an answer.
 
 Agents. A call runs at most `agents` agents at once (Spec.agents, 1 by default, MAX_AGENTS at most), each answering one
 part at a time until it has read about Spec.budget_chars of part text; read_call then tells it to end, and the caller
-starts a fresh agent for the parts left, so no agent's context grows past what one model call would hold. A lazy part
-source is read only AHEAD parts ahead of the answers. A start refused at Claude Code's subagent limit waits LIMIT_WAIT_S
-and tries again. Any other refusal ends the call: `no_session` when no Claude Code session runs thimble in the folder
+starts a fresh agent for the parts left, so no agent's context grows past what one model call would hold. An agent is
+started only for a part that no agent waits to take, so a call of few parts starts few agents. send_answer's result
+gives the agent its next part, which saves it a read_call. A part longer than PAGE_CHARS reaches the agent in pages,
+one per read_call, since Claude Code saves a longer tool result to a file the agent cannot read; a call of one part
+gives it in the agent's first message when it is at most INLINE_CHARS. A lazy part source is read only AHEAD parts
+ahead of the answers, and may yield WAIT when it has no part yet and is not spent (a caller that adds parts as it goes,
+such as a prompt label's run). A start refused at Claude Code's subagent limit waits LIMIT_WAIT_S and tries again. Any other refusal ends the call: `no_session` when no Claude Code session runs thimble in the folder
 (no module answers, such as a browser opened with no session), with NO_SESSION's fix; `error` with the refusal's own
 words (main's plan mode, a hook). An agent whose run ends with a part it took and did not answer gives the part back; a
 part given back MAX_TRIES times fails with the agent's last words (no_tool_call), or its API error (refused, rate_limited,
@@ -83,6 +87,11 @@ POLL_S = 0.2  # how often the caller reads call.json
 PART_WAIT_S = 20.0  # how long read_call waits for a part a lazy source has not given yet
 BUDGET_CHARS = 200_000  # the part text one agent reads before a fresh agent takes the rest (Spec.budget_chars)
 MAX_AGENTS = 4  # a call's agents at once, at most
+# chars of a part's text one read_call gives: Claude Code (2.1.301) saves a tool result of more than 50,000 characters
+# to a file and shows the agent a 2KB preview, and the call's agent has no tool to read that file (tools.READ_REF_UNITS)
+PAGE_CHARS = 40_000
+PAGE_SEEK = 2_000  # of a page's end, where a page ends at a line break when one is there
+INLINE_CHARS = 100_000  # a call of one part gives its text in the agent's first message up to this many chars
 AHEAD = 2  # parts of a lazy source written ahead of the answers, per agent
 MAX_TRIES = 2  # an agent that ends without the answer gives its part back; past this many tries the part fails
 LIMIT_WAIT_S = 5.0  # a start refused at Claude Code's subagent limit is tried again after this
@@ -142,6 +151,16 @@ class Outcome:
 
 class Refused(Exception):
     """A tool call that may not run: its message is the tool's error result."""
+
+
+class _Wait:
+    """WAIT: what a lazy part source yields when it has no part yet and is not spent."""
+
+    def __repr__(self) -> str:
+        return "agent_call.WAIT"
+
+
+WAIT = _Wait()
 
 
 # --------------------------------------------------------------------------- the files
@@ -213,7 +232,8 @@ def _write_part(c: str, cid: str, n: int, part: Part) -> dict[str, Any]:
         name = f"p{n}-{k}.{ext}"
         (d / name).write_bytes(bytes(data))
         pictures.append({"file": name, "type": str(mime).lower()})
-    return {"state": "queued", "agent": "", "tries": 0, "chars": len(part.text), "pictures": pictures}
+    return {"state": "queued", "agent": "", "tries": 0, "chars": len(part.text), "pages": len(pages(part.text)),
+            "pictures": pictures}
 
 
 def _new_id() -> str:
@@ -351,31 +371,51 @@ def _pictures_word(n: int) -> str:
     return f"{n} picture" if n == 1 else f"{n} pictures"
 
 
-def _take(c: str, cid: str, agent_id: str) -> tuple[str, int | None]:
-    """read_call's choice for `agent_id`, under the call's lock: ("part", n) for the part it holds without an answer, else
-    the next part in the queue, now given to it; ("share", None) once it read its share; ("none", None) when no part is
-    left; ("wait", None) while a lazy source has not given the next; ("stopped", None) for a call that ended."""
+def _take(c: str, cid: str, agent_id: str) -> tuple[str, int | None, int]:
+    """read_call's choice for `agent_id`, under the call's lock: ("part", n, page) for the part it holds without an
+    answer, its next page (its first again after its last), else the next part in the queue, now given to it, from its
+    first page; ("share", None, 0) once it read its share; ("none", None, 0) when no part is left; ("wait", None, 0)
+    while a lazy source has not given the next; ("stopped", None, 0) for a call that ended."""
     with _locked(c, cid) as rec:
         if rec.get("status") != "running":
-            return "stopped", None
+            return "stopped", None, 0
         parts = rec.get("parts") or {}
         a = rec.setdefault("agents", {}).setdefault(agent_id, {"state": "running", "chars": 0, "started": time.time()})
         held = _held(rec, agent_id)
         if held:
-            return "part", held[0]
+            p = parts[str(held[0])]
+            p["page"] = int(p.get("page") or 0) % max(1, int(p.get("pages") or 1)) + 1
+            return "part", held[0], p["page"]
         if int(a.get("chars") or 0) >= int(rec.get("budget") or BUDGET_CHARS):
-            return "share", None
+            return "share", None, 0
         queued = sorted(int(n) for n, p in parts.items() if p.get("state") == "queued")
         if queued:
             n = queued[0]
             p = parts[str(n)]
-            p.update(state="given", agent=agent_id, tries=int(p.get("tries") or 0) + 1, given=time.time())
+            p.update(state="given", agent=agent_id, tries=int(p.get("tries") or 0) + 1, given=time.time(), page=1)
             a["chars"] = int(a.get("chars") or 0) + int(p.get("chars") or 0)
-            return "part", n
-        return ("none", None) if rec.get("closed") else ("wait", None)
+            return "part", n, 1
+        return ("none", None, 0) if rec.get("closed") else ("wait", None, 0)
 
 
-def _part_result(c: str, cid: str, n: int) -> Any:
+def pages(text: str) -> list[tuple[int, int]]:
+    """Where each page of a part's text starts and ends: PAGE_CHARS at most, ending at the last line break within
+    PAGE_SEEK of that when there is one. One page for a text that fits."""
+    out, at = [], 0
+    while True:
+        end = at + PAGE_CHARS
+        if end >= len(text):
+            out.append((at, len(text)))
+            return out
+        brk = text.rfind("\n", end - PAGE_SEEK, end)
+        end = brk + 1 if brk > at else end
+        out.append((at, end))
+        at = end
+
+
+def _part_result(c: str, cid: str, n: int, page: int = 1) -> Any:
+    """read_call's result for page `page` of part `n`: its text (one page of it when it is long, pages) and, with its
+    first page, its pictures."""
     rec = read(c, cid)
     p = (rec.get("parts") or {}).get(str(n)) or {}
     try:
@@ -383,14 +423,22 @@ def _part_result(c: str, cid: str, n: int) -> Any:
     except OSError:
         text = ""
     pics = [x for x in p.get("pictures") or [] if isinstance(x, dict)]
+    spans = pages(text)
+    page = min(max(1, page), len(spans))
     if p.get("inline") and pics:  # its text is in the agent's first message already (task_text): the pictures alone
         body = tools.hint("read_call-pictures-only", count=_pictures_word(len(pics)), part=n)
+    elif len(spans) > 1:
+        a, b = spans[page - 1]
+        body = tools.hint("read_call-page", part=n, page=page, pages=len(spans), text=text[a:b]) or text[a:b]
+        nxt = (tools.hint("read_call-page-next", part=n, page=page + 1) if page < len(spans)
+               else tools.hint("read_call-page-last", part=n))
+        body += "\n\n" + (nxt or "")
     else:
         body = tools.hint("read_call-part", part=n, text=text) or f"# Part {n}\n\n{text}"
-        if pics:
-            body += "\n\n" + (tools.hint("read_call-pictures", count=_pictures_word(len(pics)), part=n) or "")
+    if pics and page == 1 and not p.get("inline"):
+        body += "\n\n" + (tools.hint("read_call-pictures", count=_pictures_word(len(pics)), part=n) or "")
     content: list[dict[str, Any]] = [{"type": "text", "text": body.strip()}]
-    for pic in pics:
+    for pic in pics if page == 1 else []:
         try:
             data = (call_dir(c, cid) / str(pic["file"])).read_bytes()
         except OSError:
@@ -408,12 +456,12 @@ async def tool_read_call(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(str(e))
     end = time.monotonic() + PART_WAIT_S
     while True:
-        what, n = await asyncio.to_thread(_take, ctx.c, cid, agent_id)
+        what, n, page = await asyncio.to_thread(_take, ctx.c, cid, agent_id)
         if what != "wait" or time.monotonic() >= end:
             break
         await asyncio.sleep(POLL_S)
     if what == "part" and n is not None:
-        return await asyncio.to_thread(_part_result, ctx.c, cid, n)
+        return await asyncio.to_thread(_part_result, ctx.c, cid, n, page)
     hint = {"stopped": "call-stopped", "share": "read_call-share", "none": "read_call-none", "wait": "read_call-wait"}
     return tools.ok(tools.hint(hint[what]) or what)
 
@@ -481,6 +529,13 @@ async def tool_send_answer(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(tools.hint("send_answer-which", parts=", ".join(map(str, n))) or "which part?")
     if what == "not-held":
         return tools.err(tools.hint("send_answer-not-held", part="" if n is None else n) or "not your part")
+    if what == "more":  # the agent's next part comes with the result, which saves it a read_call
+        nxt, m, page = await asyncio.to_thread(_take, ctx.c, cid, agent_id)
+        if nxt == "part" and m is not None:
+            got = await asyncio.to_thread(_part_result, ctx.c, cid, m, page)
+            head = tools.hint("send_answer-next", part=n) or "recorded"
+            return tools.ToolResult([{"type": "text", "text": head}, *got.content])
+        what = "more" if nxt == "wait" else "last"
     return tools.ok(tools.hint(f"send_answer-{what}", part=n) or "recorded")
 
 
@@ -554,7 +609,7 @@ class _Call:
         added: dict[int, dict[str, Any]] = {}
         while not self.exhausted and open_ + len(added) < want:
             part = await self._next()
-            if part is None:
+            if part is None or part is WAIT:
                 break
             self.n += 1
             added[self.n] = await asyncio.to_thread(_write_part, self.c, self.cid, self.n, part)
@@ -579,6 +634,8 @@ class _Call:
                              "schema": spec.tool.input_schema},
                        parts={}, agents={})
         single = list(self.source) if isinstance(self.source, (list, tuple)) and len(self.source) == 1 else None
+        if single and len(single[0].text) > INLINE_CHARS:  # read in pages through read_call instead
+            single = None
         await self._top_up(read(self.c, self.cid))
         return single[0] if single else None
 
@@ -688,9 +745,12 @@ class _Call:
             await self._top_up(rec)
             rec = read(self.c, self.cid)
             running = self._running(rec)
-            queued = any(p.get("state") == "queued" for p in (rec.get("parts") or {}).values())
+            parts = rec.get("parts") or {}
+            queued = sum(1 for p in parts.values() if p.get("state") == "queued")
+            busy = {p.get("agent") for p in parts.values() if p.get("state") == "given"}
+            idle = sum(1 for aid in running if aid not in busy)  # started, or between parts, and holding none
             want = max(1, min(MAX_AGENTS, self.spec.agents))
-            if queued and len(running) < want and time.monotonic() >= self.retry_at:
+            if queued > idle and len(running) < want and time.monotonic() >= self.retry_at:
                 await self._start(first)
                 continue
             if timeout_s is not None and time.monotonic() - self.t0 > timeout_s:
