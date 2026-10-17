@@ -10,7 +10,8 @@ takes it from there:
                        TRIM_BYTES.
   held-events.json     the quiet events (events.QUIET_KINDS) as notes, which ask for nothing: they ride along with the
                        next event under MEANWHILE, or with the session's next prompt (the held hook). The server keeps
-                       main's here too.
+                       main's here too. A note of a failed run of one of thimble's agents names the run in `about`, and
+                       goes once main reads that failure in Claude Code's own line (drop_held).
 
 An event names the session it is for in `to` (a peer: a second session that turned thimble on beside a live main), or
 none, which is main's; a session takes only its own (take: `to` that is the session, or a session --rekey moved to it,
@@ -204,6 +205,17 @@ def hold(ws: Path, note: dict[str, Any], to: str | None = None) -> None:
     path = held_path(ws)
     with locked(path):
         _keep_held(ws, [*held(ws, everyone=True), {**note, **({"to": to} if to else {})}])
+
+
+def drop_held(ws: Path, about: str) -> list[dict[str, Any]]:
+    """The held events that tell of the run `about` (events.post's `about`), no longer waiting; the ones that went."""
+    path = held_path(ws)
+    with locked(path):
+        everyone = held(ws, everyone=True)
+        gone = [n for n in everyone if about and n.get("about") == about]
+        if gone:
+            _keep_held(ws, [n for n in everyone if not any(n is g for g in gone)])
+    return gone
 
 
 def pop_held(ws: Path, session: str | None = None) -> list[dict[str, Any]]:

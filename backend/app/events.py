@@ -8,7 +8,7 @@ The browser posts `POST /api/ws/{c}/events {kind, payload}`; server code calls p
 `## Events from the browser`, and other kinds are refused. A post with no subscriber is refused with 409. An event of
 QUIET_KINDS asks main for nothing, so it wakes no turn: it waits in the workspace's HELD_FILE and rides along, under
 MEANWHILE, with the next event or the analyst's next prompt in the terminal (the plugin's UserPromptSubmit hook takes it
-with held_route).
+with held_route). One that tells of a failure main has read since in Claude Code's own line no longer waits (drop_held).
 
 Each event is queued per workspace and session (_pending), and the plugin's watcher takes it with a long poll
 (pull_route) as the text the model reads (render); unacknowledged events return to the queue after ACK_S. The watcher
@@ -316,14 +316,16 @@ def _cut(line: str, n: int) -> str:
 
 def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,
          mirror: bool = True, line: str | None = None, event_id: str | None = None,
-         session: str | None = None) -> dict[str, Any]:
+         session: str | None = None, about: str | None = None) -> dict[str, Any]:
     """Send one event to a session of the workspace: {id, kind, delivered, thread?}. `session` names the session it is
     for; with none, a process of a session posts for its own (local.session_here) and this server for main, and an event
     for main's session is main's (module note). A `main` event shows in main's chat as the analyst's line unless
     `mirror` is False, for a request server code writes to main, which passes the `line` main's terminal shows instead
     of terminal_line's. `event_id` is the event's id when the caller recorded it first (a START_AGENT event's request
-    keeps it). 409 when no session listens, 400 for a kind main.md names no bullet for (when `check_kind`), or for a
-    message with no text."""
+    keeps it). `about` names the run of one of thimble's agents whose failure a quiet event tells (subagents.run_about),
+    which its held note keeps, so that it goes once main reads that failure in Claude Code's own line (drop_held). 409
+    when no session listens, 400 for a kind main.md names no bullet for (when `check_kind`), or for a message with no
+    text."""
     from . import agents, session as session_mod, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
@@ -366,6 +368,8 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
     if to:
         out["session"] = to
     if kind in QUIET_KINDS:
+        if about:
+            note["about"] = about
         if ws is None:
             _keep_held(c, [*held(c), note])
         else:
@@ -458,6 +462,21 @@ def _keep_held(c: str, notes: list[dict[str, Any]]) -> None:
         event_files.keep_held(config.workspace_dir(c), notes)
     except OSError:
         log.warning("%s: the held events were not saved to %s", c, path, exc_info=True)
+
+
+def drop_held(c: str, about: str) -> int:
+    """Main's held events that tell of the run `about` (post's `about`) no longer wait, since main read of it in Claude
+    Code's own line (subagents.failure_seen), and the later parts of main's guidance they carried go with the next
+    event of their kind (disclose.untold). How many went."""
+    from . import disclose  # noqa: PLC0415
+
+    try:
+        ws = config.workspace_path(c)
+        gone = event_files.drop_held(ws, about)
+    except (ValueError, OSError):
+        return 0
+    disclose.untold(ws, gone)
+    return len(gone)
 
 
 def pop_held(c: str) -> list[dict[str, Any]]:

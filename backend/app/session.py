@@ -16,6 +16,7 @@ or local commands such as /model) and the prompts a plugin sent as theirs (PLUGI
 and `done` at turn_duration; any record shape it does not cover disables it with one `error` record. Safety stops,
 interrupts and long waits (read from `<claude config>/sessions/<pid>.json`) become one note each, and so does the
 analyst's Stop of main in the browser, which leaves no record in the transcript and ends the turn (turn_stopped); a
+safety stop of main's reply is a notice too, with Make the card again and Ask again (STOP_TEXT); a
 reply Claude's safeguards switched to another model becomes a notice (notices.py, FALLBACK_TEXT), shown in the
 foreground and kept in its chat, main's or an agent's, and so does an API error that stops a side thread's fork or a
 helper of one of thimble's agents (_sub_error; thimble's agents' own failures are told where their runs end,
@@ -194,6 +195,26 @@ WAIT_NOTE_S = 2.0  # a wait shorter than this (a prompt the analyst answered at 
 # Main's hook-relayed prompt older than this is ended while Claude Code's record says the session waits on none: the
 # analyst answered it in the terminal. A subagent's or fork's prompt is never released this way.
 ASK_RELEASE_S = 10.0
+# a reply of main's that Claude's safeguards stopped partway (the model's own reply ends with stop_reason refusal, not
+# Claude Code's API error line), after which Claude Code goes on once (SAFETY_RE): a notice in the browser and the
+# terminal says so, and names the card the stopped reply was making when that card was not added, with the fixes: Make
+# the card again (`card-again`, CARD_AGAIN sent to main as the analyst's) and Ask again (`ask-again`, the analyst's last
+# message to main put back in the prompt to send in other words) (bug hunt C23)
+STOP_KEY = "stopped:main"
+STOP_KIND = "stopped"
+STOP_TEXT = "Claude's safeguards stopped main's reply partway. Ask again in other words."
+STOP_CARD_TEXT = ("Claude's safeguards stopped main's reply partway, so the card it was making wasn't added{question}. "
+                  "Make the card again, or ask again in other words.")
+STOP_CARDS_TEXT = ("Claude's safeguards stopped main's reply partway, so the {n} cards it was making weren't added. "
+                   "Make the cards again, or ask again in other words.")
+CARD_AGAIN = ("Claude's safeguards stopped your reply while you were adding the card{question}, and the card was not "
+              "added. Make that card again.")
+CARDS_AGAIN = ("Claude's safeguards stopped your reply while you were adding these cards, and they were not added. "
+               "Make them again:\n{questions}")
+CARD_AGAIN_LABELS = ("Make the card again", "Make the cards again")
+ASK_AGAIN_LABEL = "Ask again"
+STOP_QUESTION_CHARS = 120  # of a card's question in the notice's words
+CARD_TOOLS = ("add_card", "add_cell")  # the calls that make a card, by their names
 SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check stopped this answer. Choose there whether "
                 "to switch to another model and go on, or to stay on this one and stop the answer.")
 # Claude's safeguards and a reply (module note, stops and waits). A downgrade: Claude Code answers on another model
@@ -297,6 +318,9 @@ class Live:
         # (attach: a session no mirror read yet, from when thimble turned on in it)
         self.read_from = ""
         self.attached_at = time.monotonic()  # when this process made it main (sweep)
+        # tool_use id -> question of each card call in main's reply the safeguards are stopping, until the stop is told
+        # (_stop_notice); a call that ran to its end and made its card leaves (_tool_result)
+        self.stopped_cards: dict[str, str] = {}
         self.buf = b""
         self.saved = -1  # the offset the cursor in sessions.json holds (_save_cursor)
         self.subs_saved: dict[str, tuple] = {}  # each subagent's (offset, done) sessions.json holds (_sub_places)
@@ -1416,6 +1440,7 @@ def _open_turn(lv: Live) -> None:
         lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
         lv.turn_rows, lv.turn_tools = [], []
         lv.turn_analyst = lv.api_failed = False
+        lv.stopped_cards = {}
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
 
@@ -1553,6 +1578,73 @@ def _note(lv: Live, text: str) -> None:
 def _safety_stop(lv: Live) -> None:
     lv.flagged, lv.answered = True, False
     _note(lv, SAFETY_TEXT)
+    _stop_notice(lv)
+
+
+def _stopped_cards(lv: Live, rec: dict) -> None:
+    """A record of main's reply the safeguards stopped (stop_reason refusal on the model's own reply): its card calls,
+    whose cards the stop may have cost (Live.stopped_cards)."""
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    if msg.get("stop_reason") != REFUSAL or rec.get("isApiErrorMessage") is True:
+        return
+    for b in _content_list(rec):
+        if isinstance(b, dict) and b.get("type") == "tool_use" and _short(str(b.get("name") or "")) in CARD_TOOLS:
+            inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+            lv.stopped_cards[str(b.get("id") or "")] = " ".join(str(inp.get("question") or "").split())
+
+
+def _stop_notice(lv: Live) -> None:
+    """Claude's safeguards stopped main's reply partway (STOP_TEXT): a notice in the foreground, in the browser and the
+    terminal, that says so, names the card the reply was making when that card was not added, and offers Make the card
+    again and Ask again (the analyst's last message to main). Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    cards = [q for q in lv.stopped_cards.values() if not _card_made(lv.c, q)]
+    lv.stopped_cards = {}
+    try:
+        acts: list[dict[str, str]] = []
+        if cards:
+            acts.append({"label": CARD_AGAIN_LABELS[len(cards) > 1], "do": "card-again", "text": _card_again(cards)})
+        asked = _last_asked(lv.c)
+        if asked:
+            acts.append({"label": ASK_AGAIN_LABEL, "do": "ask-again", "text": asked})
+        question = f": \"{notices._short(cards[0], STOP_QUESTION_CHARS)}\"" if cards and cards[0] else ""
+        text = (STOP_CARDS_TEXT.format(n=len(cards)) if len(cards) > 1 else
+                STOP_CARD_TEXT.format(question=question) if cards else STOP_TEXT)
+        notices.post(lv.c, kind=STOP_KIND, text=text, chat=agents.MAIN_ID, key=STOP_KEY, action=acts or None)
+    except Exception:  # noqa: BLE001 — the chat's note says it all the same
+        log.exception("%s: the stop of main's reply was not told", lv.c)
+
+
+def _card_again(questions: list[str]) -> str:
+    """Main's message that asks it to make again the cards of `questions` (CARD_AGAIN, CARDS_AGAIN)."""
+    if len(questions) > 1:
+        return CARDS_AGAIN.format(questions="\n".join(f"- {q}" for q in questions if q))
+    return CARD_AGAIN.format(question=f" \"{questions[0]}\"" if questions[0] else "")
+
+
+def _card_made(c: str, question: str) -> bool:
+    """Whether a card asks `question`: a card call of a stopped reply may have run to its end before the stop."""
+    if not question:
+        return False
+    from . import notebook  # noqa: PLC0415
+
+    try:
+        return any(" ".join(str(cell.get("title") or "").split()) == question
+                   for _, nb in notebook._stored(config.workspace_dir(c)) for cell in nb.get("cells") or []
+                   if isinstance(cell, dict))
+    except Exception:  # noqa: BLE001 — a canvas that cannot be read has not shown the card either
+        return False
+
+
+def _last_asked(c: str) -> str:
+    """The analyst's last message to main, as main's chat shows it (typed in the terminal or sent from the browser),
+    with what they pasted as its text; '' for none."""
+    for r in reversed(agents.read_events(agents.paths(c, agents.MAIN_ID)[1])):
+        text = str(r.get("text") or "") if r.get("type") == "user" else ""
+        if text.strip():
+            return "\n".join(piece.strip("\n") for _, piece in pastes(text)).strip()
+    return ""
 
 
 def _stopped(lv: Live, text: str) -> None:
@@ -1713,12 +1805,14 @@ def _task_notice(lv: Live, fields: dict, at: float = 0.0) -> None:
     _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 
 
-def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None) -> None:
+def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None, *, main: bool = True) -> None:
     """A task notification of one of thimble's agents ends its run once (subagents.run_ended): killed or stopped by a
     TaskStop or Esc, or cut off by main's quit (DIDNT_FINISH, after `thimble --continue`), which marks its chat
     `continue: here`; or, in default mode, a later run's end with its whole report. A notification older than the
     agent's latest start is about an earlier run, and so is the `completed` a plugin-started agent's later run brings
-    after its hand-back: neither ends anything (subagents.run_ended ignores a run that ended)."""
+    after its hand-back: neither ends anything (subagents.run_ended ignores a run that ended). A failure in main's own
+    transcript (`main`) is one main has read, so thimble's event of it would be old news (subagents.failure_seen, bug
+    hunt C22)."""
     from . import subagents  # noqa: PLC0415
 
     agent_id = str(fields.get("task-id") or (sub.agent_id if sub is not None else "") or "")
@@ -1736,6 +1830,8 @@ def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None)
         subagents.mark_stopped_by(lv.c, agent_id, subagents.STOPPED_USER)
     elif status == "stopped" and not cut and not a.get("stopped_by"):
         subagents.mark_stopped_by(lv.c, agent_id, subagents.STOPPED_ANALYST)
+    if main and status == "failed":
+        subagents.failure_seen(lv.c, agent_id)
     subagents.run_ended(lv.c, agent_id, status, report or summary or None, source="notification", interrupted=cut)
     if by_user:
         subagents.mark_cancelled(lv.c, agent_id)
@@ -1760,7 +1856,7 @@ def _child_finished(lv: Live, text: str) -> None:
             continue
         _tail_sub(lv, sub)
         if sub.thimble:
-            _thimble_notice(lv, fields, 0.0, sub)
+            _thimble_notice(lv, fields, 0.0, sub, main=False)
             continue
         _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 
@@ -1915,6 +2011,8 @@ def _tool_result(lv: Live, tool_use_id: str, content: Any, is_error: bool = Fals
     name = lv.tool_names.get(tool_use_id, "")
     if is_error and name == lv.last_tool:
         lv.last_failed = True
+    if tool_use_id in lv.stopped_cards and not is_error and agents.cell_id(response_text(content)):
+        lv.stopped_cards.pop(tool_use_id)  # the call of a stopped reply ran to its end and made its card
     if tool_use_id in lv.watch_calls:
         m = MONITOR_TASK_RE.search(response_text(content))
         if m:
@@ -3475,6 +3573,7 @@ def translate(lv: Live, line: bytes | str) -> None:
     if t != "assistant":
         return
     _note_model(lv, rec)
+    _stopped_cards(lv, rec)
     api = _api_fields(rec)
     if api:
         _main_api_error(lv, rec)

@@ -267,3 +267,24 @@ async def test_a_model_call_s_agent_and_fork_get_no_chat_of_their_own(bridge, pr
     made = [m for m in agents.list_chats(CORPUS) if m["id"] not in before]
     assert [m.get("title") for m in made] == ["Look around"], made
     assert str(project / SID / "subagents" / "agent-acall000000000002.jsonl") not in lv.sub_paths, "it waits"
+
+
+@pytest.mark.parametrize("first", ["notification", "module"])
+async def test_a_failure_main_read_in_claude_code_s_own_line_waits_for_no_prompt(bridge, project, first):
+    """Bug hunt C22: the orientation failed while main was busy, main read Claude Code's own line of it (a task
+    notification in main's transcript) and told the analyst, and thimble's `orient` event of the same failure was held
+    and came with the analyst's next question, minutes later, as old news. Whichever signal ends the run first, no event
+    of that failure waits for main's next prompt."""
+    lv, _chat, _path = await _click_orientation(bridge, project)
+    events._subs.setdefault(CORPUS, set()).add(events.Sub(SID))
+    main = project / f"{SID}.jsonl"
+    _write(main, {"type": "user", "origin": {"kind": "human"}, "message": {"content": "What stands out?"}})
+    session.tail_once(lv)
+    error = "API Error: Opus 5.5's safeguards flagged this message."
+    if first == "module":  # the module's turn end comes first: the event is held, as before
+        subagents.run_ended(CORPUS, AGENT, "failed", error, source="module")
+        assert [n["meta"]["status"] for n in events.held(CORPUS)] == ["failed"]
+    _write(main, _notice(AGENT, "failed", f'Agent "orientation: the whole corpus" failed: {error}'))
+    session.tail_once(lv)
+    assert subagents.agent(CORPUS, AGENT)["status"] == "failed"
+    assert events.held(CORPUS) == [], "no old news for the analyst's next question"

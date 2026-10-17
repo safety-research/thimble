@@ -9,8 +9,8 @@ thread, an agent chat; `chat`) is also written into that chat as a row, for its 
 The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, kind, text, agent, chat, action, ts}:
 `text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command, such as /login
 or `thimble server restart`); `agent` names the agent in a few words ("Orientation", "View build: Agent Network");
-`chat` is the agent's own chat, which the strip's Open goes to; `action` is the button, one object {label, do, slug?} or
-a list of them, `do` one of ACTIONS:
+`chat` is the agent's own chat, which the strip's Open goes to; `action` is the button, one object {label, do, slug?,
+text?} or a list of them, `do` one of ACTIONS:
 
   proposals-retry  POST /api/ws/{c}/views/propose-now (proposer.run_now)
   proposals-off    PUT /api/ws/{c}/settings {propose_views: false}
@@ -24,6 +24,10 @@ a list of them, `do` one of ACTIONS:
                    could not label (concepts.start_again)
   orient-again     the orientation run again with its last request, or the focus the analyst gives
                    (orient_session.again_route in the browser; the terminal asks main)
+  ask-again        `text`, the analyst's last message to main, put back in main's composer in the browser or in
+                   Claude Code's prompt in the terminal, to send again in other words
+  card-again       `text` sent to main as the analyst's message: it asks main to make again the card a reply the
+                   safeguards stopped did not add
 
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
 (a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
@@ -33,7 +37,8 @@ true} for one taken away. GET /api/ws/{c}/notices gives the open ones, so a page
 
 Keys: `agent:<the agent's key>` for an agent of thimble's (agent_key: subagents.py for its runs and starts, dev.py for
 view builds and code tickets, checks.py for report checks), `proposals` for the view proposer (proposer.py),
-`safeguards:<chat>` for a reply Claude's safeguards switched to another model (session.py), `thread:<chat>` and
+`safeguards:<chat>` for a reply Claude's safeguards switched to another model and `stopped:main` for a reply of main's
+they stopped partway (session.py), `thread:<chat>` and
 `helper:<agent id>` for a side thread's or a helper's API error, `main:api` for main's own (session.py), `card-check`
 (card_check.py) and `label:<id>` (concepts.py). post and clear never raise: a failure to tell is logged.
 
@@ -86,7 +91,7 @@ TYPE = "notice"  # the event's type on the workspace stream, and the row's type 
 API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
 # shows as its API error card: no row, and the foreground strip leaves it out while main is open
 ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out", "ticket-open", "label-open",
-           "label-again", "orient-again")
+           "label-again", "orient-again", "ask-again", "card-again")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
 # keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
@@ -124,8 +129,9 @@ def _gist(text: Any, limit: int) -> str:
 
 def _action(a: Any) -> dict[str, str]:
     if not isinstance(a, dict) or a.get("do") not in ACTIONS or not str(a.get("label") or "").strip():
-        raise ValueError(f"a notice's action is {{label, do, slug?}} with `do` one of {', '.join(ACTIONS)}: {a!r}")
-    return {k: str(a[k]) for k in ("label", "do", "slug") if a.get(k)}
+        raise ValueError(f"a notice's action is {{label, do, slug?, text?}} with `do` one of {', '.join(ACTIONS)}: "
+                         f"{a!r}")
+    return {k: str(a[k]) for k in ("label", "do", "slug", "text") if a.get(k)}
 
 
 def _actions(action: Any) -> dict[str, str] | list[dict[str, str]] | None:

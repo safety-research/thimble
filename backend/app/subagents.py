@@ -37,7 +37,10 @@ Each role's handlers (Type.started, Type.ended, Type.refused) do what its run's 
 Notices. A start or a message that did not happen, and a run that ended failed, are told in the foreground with their
 fix (notices.agent_refused, agent_failed), under the agent's key; its next start and a run that ended done clear it. A
 role whose module settles what its end means (Type.own_notices: a view's build, a report check, a code ticket) tells
-its own failures there, since a run's status is not its outcome (a build that ends failed may be repaired).
+its own failures there, since a run's status is not its outcome (a build that ends failed may be repaired). Main hears a
+run's end as a quiet event (tell_main), except a failure main already read in Claude Code's own line, the task
+notification in main's transcript (failure_seen): that event would be old news, so it is left out, and one held for
+main's next prompt goes (bug hunt C22).
 
 Attribution. A PreToolUse hook on thimble's tools records which agent makes each call (callers.jsonl); caller() names
 the agent, and its key is the session the call runs as (tools.call_route), a descendant's that of its thimble ancestor.
@@ -1601,13 +1604,50 @@ def child_ended(c: str, agent_id: str) -> None:
     set_paused(c, agent_id, None)
 
 
-def tell_main(c: str, kind: str, payload: dict[str, Any]) -> bool:
-    """A browser event for main from server code (an `orient` or `written` end line): posted, or, with no session
-    listening, logged and dropped, since thimble's agents end with main. False when no session heard it."""
+FAILURE_SEEN = "failure_seen"  # on a registry entry: the run whose failure main read in Claude Code's own line
+
+
+def run_about(agent_id: str, k: int) -> str:
+    """The name of run `k` of agent `agent_id` on the event that tells its end (events.post's `about`)."""
+    return f"{agent_id}:{k}"
+
+
+def failure_seen(c: str, agent_id: str) -> None:
+    """Main's transcript holds Claude Code's own line that the current run of `agent_id` failed (its task notification,
+    module note): the run is marked, so tell_main leaves out the event of that failure, and an event of it already held
+    for main's next prompt goes (events.drop_held). Never raises."""
     from . import events  # noqa: PLC0415
 
     try:
-        events.post(c, kind, payload, check_kind=False)
+        with update(c) as state:
+            a = files.registry(state).get(agent_id)
+            if not isinstance(a, dict):
+                return
+            k = int(a.get("run") or 0)
+            a[FAILURE_SEEN] = k
+        if events.drop_held(c, run_about(agent_id, k)):
+            log.info("%s: main read the failure of %s run %s in Claude Code's own line; its held event went", c,
+                     agent_id, k)
+    except Exception:  # noqa: BLE001 — an event told twice is no reason to fail the mirror
+        log.exception("%s: the failure main read of %s was not marked", c, agent_id)
+
+
+def tell_main(c: str, kind: str, payload: dict[str, Any], run: "Run | None" = None) -> bool:
+    """A browser event for main from server code (an `orient` or `written` end line): posted, or, with no session
+    listening, logged and dropped, since thimble's agents end with main. The failure of a `run` that main read in Claude
+    Code's own line (failure_seen) is not posted again; one main has not read yet names the run (`about`), so it goes if
+    main reads that line before the event reaches main. False when no session heard it."""
+    from . import events  # noqa: PLC0415
+
+    about = None
+    if run is not None and payload.get("status") == "failed":
+        if (agent(c, run.agent_id) or {}).get(FAILURE_SEEN) == run.k:
+            log.info("%s: main read the failure of %s run %s in Claude Code's own line; no %s event", c, run.agent_id,
+                     run.k, kind)
+            return True
+        about = run_about(run.agent_id, run.k)
+    try:
+        events.post(c, kind, payload, check_kind=False, about=about)
     except HTTPException as e:
         if e.status_code != 409:
             raise

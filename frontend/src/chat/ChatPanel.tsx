@@ -36,7 +36,7 @@ import { colourVar } from '../files/labels'
 import { NOTE_COLOR } from '../report/checkComments'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
-import { Composer } from './Composer'
+import { Composer, type ComposerFill } from './Composer'
 import { mainEffort, mainFast, NEXT_LAUNCH } from './ModelLine'
 import { API_ERROR_KIND, apiRetry, branchIndex, capacityNote, foldRecords, landedTexts, madeBy, mainSkips, orientRuns, orientSummaries, orientWriters, QUIET_RE, sessionSteps, stepEnded, toolSteps, withApiErrors, withBranches, withCallNumbers, type MainContext, type Row, type ShotRow } from './model'
 import { Holds, useRetryText } from './Holds'
@@ -309,6 +309,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // a message handed over with `openChat`: state, so an openChat for the chat already shown still sends
   const [pendingSend, setPendingSend] = useState<{ chatId: string; text: string; n: number } | null>(null)
   const sendSeq = useRef(0)
+  // words handed over with `openChat`'s `draft`, which the composer puts in that chat's draft
+  const [draft, setDraft] = useState<ComposerFill | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const flowRef = useRef<HTMLDivElement>(null)
   // the tree: collapsed to one row by default
@@ -352,6 +354,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     () =>
       bus.on('openChat', (e) => {
         if (e.send) setPendingSend({ chatId: e.chatId, text: e.send, n: ++sendSeq.current })
+        if (e.draft) setDraft({ thread: e.chatId, text: e.draft, n: ++sendSeq.current })
         setCurrent(e.chatId)
         void loadList()
       }),
@@ -840,6 +843,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               tip={demo ? DEMO_NOTE : undefined}
               stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
               thread={current}
+              fill={draft}
             />
           )}
         </div>

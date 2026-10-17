@@ -278,3 +278,33 @@ test("bug hunt C17: a label's notice links the label (`see the label ›`) and r
   expect(w.acts.filter(a => a.kind === 'notice-dismiss').map(a => a.payload.id)).toEqual(['n6'])
   await band.unmount()
 })
+
+// bug hunt C23: main's reply Claude's safeguards stopped partway, mid add_card
+const ASKED = 'Which runs failed, and why?'
+const AGAIN = 'Claude\'s safeguards stopped your reply while you were adding the card "Which runs failed?", and the card was not added. Make that card again.'
+const STOPPED = { id: 'n7', key: 'stopped:main', kind: 'stopped', text: "Claude's safeguards stopped main's reply partway, so the card it was making wasn't added: \"Which runs failed?\". Make the card again, or ask again in other words.", agent: '', chat: 'main', open: '', at: '2026-10-17T05:31:38Z', acts: [{ label: 'Make the card again', act: 'card-again', text: AGAIN }, { label: 'Ask again', act: 'ask-again', text: ASKED }] }
+
+test("bug hunt C23: a stopped reply's notice puts the analyst's question back in the prompt, or asks main to make the card again", T, async ($, on) => {
+  const w = panelWorld(on)
+  w.states.home.notices = [STOPPED]
+  await start($, w)
+  let band = (await $.ui.mount(aboveAt(220))) as unknown as M
+  expect(words(await band.find({ type: 'Box', key: 'above-notice-n7' }))).toContain('make the card againask againdismiss')
+  await band.press({ key: 'above-notice-n7-act-1' })
+  await w.clock.settle()
+  expect(w.filled.at(-1)).toBe(ASKED)
+  expect(w.submitted).toEqual([])
+  expect(w.acts.filter(a => a.kind === 'notice-dismiss').map(a => a.payload.id)).toEqual(['n7'])
+  await band.unmount()
+  // the same failure again, and this time the card
+  w.states.home.notices = [{ ...STOPPED, id: 'n8' }]
+  w.stamps.set(`${WS}/notices.json`, 9)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  band = (await $.ui.mount(aboveAt(220))) as unknown as M
+  await band.press({ key: 'above-notice-n8-act-0' })
+  await w.clock.settle()
+  expect(w.submitted.at(-1)).toBe(AGAIN)
+  expect(w.acts.filter(a => a.kind === 'notice-dismiss').map(a => a.payload.id)).toEqual(['n7', 'n8'])
+  await band.unmount()
+})
