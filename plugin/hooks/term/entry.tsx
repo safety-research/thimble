@@ -158,7 +158,7 @@ export function entryEl(cx: Ctx, e: PaneEvent, o: EntryOpts): RenderElement {
                 // a slash command is Claude Code's: it waits in the prompt for the Enter that runs it there
                 if (isSlash(v) || sent.has(o.key)) {
                   void toPrompt(cx, o.key, v)
-                  cx.toast("thimble: a slash command goes to Claude Code's prompt: press Enter there to run it")
+                  cx.toast("a slash command goes to Claude Code's prompt: press Enter there to run it")
                   return
                 }
                 const had = entryRows(drafts.get(o.key) ?? '', o.cols, submit)

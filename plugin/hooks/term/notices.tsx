@@ -79,8 +79,7 @@ export function postNotice(cx: Ctx, key: string, text: string, acts: string[]): 
   const words = oneLine(text)
   if (!toasted.has(key)) {
     toasted.add(key)
-    // a notice's text that names thimble first (the activation's notices) toasts as it is, not `thimble: thimble …`
-    cx.toast(/^thimble\b/.test(words) ? words : `thimble: ${words}`)
+    cx.toast(words)
   }
   void (async () => {
     const now = await cx.now()
@@ -100,8 +99,8 @@ export async function dismissModNotice(cx: Ctx, key: string): Promise<void> {
 export async function runNoticeAct(cx: Ctx, n: ModNotice, act: string): Promise<void> {
   const run = actions.get(n.key)?.get(act)
   if (run) return void (await run())
-  if (act === 'doctor') return cx.toast('thimble: run `thimble doctor` in a shell: it says what is wrong and how to fix it')
-  cx.toast(`thimble: "${act}" cannot run from here`)
+  if (act === 'doctor') return cx.toast('run `thimble doctor` in a shell: it says what is wrong and how to fix it')
+  cx.toast(`"${act}" cannot run from here`)
 }
 
 /** One toast for each workspace notice not toasted yet. The first look of a session only notes what is there already,
@@ -120,6 +119,6 @@ export function toastNewNotices(cx: Ctx, notices: readonly { id: string; ids?: r
     const ids = idsOf(n)
     const fresh = ids.every(id => !toasted.has(`ws:${id}`))
     for (const id of ids) toasted.add(`ws:${id}`)
-    if (fresh) cx.toast(`thimble: ${oneLine(n.text)}`)
+    if (fresh) cx.toast(oneLine(n.text))
   }
 }

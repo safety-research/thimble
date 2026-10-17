@@ -149,7 +149,7 @@ export function askEntry(cx: Ctx, e: PaneEvent, o: { key: string; placeholder: s
     onSubmit: q => {
       void (async () => {
         const why = await askNow(cx, await askAbout(cx, o.target, o.over ?? {}), q)
-        if (why) cx.toast(`thimble: the side thread did not start: ${why}`)
+        if (why) cx.toast(`the side thread did not start: ${why}`)
       })()
     },
   })
@@ -301,7 +301,7 @@ export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'rejec
 export async function dismissOffer(cx: Ctx, slug: string): Promise<void> {
   if (!rt.sc) return
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, 'view-dismiss', { slug })
-  if (!got.ok || got.value.queued === false) cx.toast(`thimble: the view proposal still shows in the browser: ${got.ok ? got.value.reason || 'it no longer waits' : got.error}`)
+  if (!got.ok || got.value.queued === false) cx.toast(`the view proposal still shows in the browser: ${got.ok ? got.value.reason || 'it no longer waits' : got.error}`)
 }
 
 /** The view proposal's `don't ask again`: view proposals off (`thimble act view-proposals-off`, `views.propose: false`
@@ -310,12 +310,12 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
   if (!rt.sc) return
   const got = await act<{ config?: string }>(cx, rt.sc, 'view-proposals-off', {})
   if (!got.ok) {
-    cx.toast(`thimble: view proposals are still on: ${got.error}`)
+    cx.toast(`view proposals are still on: ${got.error}`)
     return
   }
   const home = await surfaceValue<Obj>(cx, 'home-full')
   if (home?.ok) await cx.setSurface('home-full', { ok: true, value: { ...home.value, offer: null } })
-  cx.toast(`thimble: view proposals are off. To turn them back on, set "views": {"propose": true} in ${got.value.config || "thimble's config"}`)
+  cx.toast(`view proposals are off. To turn them back on, set "views": {"propose": true} in ${got.value.config || "thimble's config"}`)
 }
 
 /** A notice's act: `view-propose-now` (try again) or `view-retry` {slug} (retry), which name the notice, so that thimble
@@ -346,17 +346,17 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
   if (a.act === 'card-again' && a.text.trim()) {
     await dismissNotice(cx, n)
     await cx.submit(a.text)
-    cx.toast('thimble: main was asked to make the card again')
+    cx.toast('main was asked to make the card again')
     return
   }
   if (a.act === 'ask-again' && a.text.trim()) {
     await dismissNotice(cx, n)
     await cx.fill(a.text)
-    cx.toast('thimble: your question is back in the prompt, to change and send')
+    cx.toast('your question is back in the prompt, to change and send')
     return
   }
   if (a.act === 'settings') {
-    cx.toast(`thimble: Settings are in the browser workbench (/thimble browser) and in thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
+    cx.toast(`Settings are in the browser workbench (/thimble browser) and in thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
     return
   }
   if (a.act === 'view-proposals-off') {
@@ -367,13 +367,13 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
   if (a.act === 'ticket-open') return void (await openInBrowser(cx, `ticket:${a.slug || n.id.replace(/^ticket:/, '')}`))
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, a.act, { ...(a.slug ? { slug: a.slug } : {}), notice: n.id })
   if (!got.ok || got.value.queued === false) {
-    cx.toast(`thimble: ${got.ok ? got.value.reason || 'it could not start' : got.error}`)
+    cx.toast(got.ok ? got.value.reason || 'it could not start' : got.error)
     return
   }
   await hideNotice(cx, n.id)
   // the same notices this row stood for go with it: the act was the fix for each
   for (const id of n.ids.slice(1)) await dismissOne(cx, id)
-  cx.toast(a.act === 'view-propose-now' ? 'thimble: checking for a view proposal' : a.act === 'sign-out' ? 'thimble: that browser is signed out' : 'thimble: building the view again')
+  cx.toast(a.act === 'view-propose-now' ? 'checking for a view proposal' : a.act === 'sign-out' ? 'that browser is signed out' : 'building the view again')
 }
 
 /** The notice's row gone at once (home's state read again no longer has it once thimble has written why). */
@@ -393,7 +393,7 @@ async function dismissOne(cx: Ctx, id: string): Promise<void> {
   await hideNotice(cx, id)
   if (!rt.sc) return
   const got = await act(cx, rt.sc, 'notice-dismiss', { id })
-  if (!got.ok) cx.toast(`thimble: the notice was not dismissed: ${got.error}`)
+  if (!got.ok) cx.toast(`the notice was not dismissed: ${got.error}`)
 }
 
 /** The thread of the agent a notice names: a side thread in the threads panel, an agent's chat in its own panel. */
@@ -1939,7 +1939,7 @@ async function citeEntry(cx: Ctx, e: PaneEvent, c: Citation, target: Target, sen
     onSubmit: q => {
       void (async () => {
         const r = await threadMessage(cx, tid, `${q} (about ${c.raw})`)
-        if (r.error) return cx.toast(`thimble: ${r.error}`)
+        if (r.error) return cx.toast(r.error)
         const now = (await cx.nav()) ?? NAV_EMPTY
         let i = now.trail.length - 1
         while (i >= 0 && now.trail[i]!.thread !== tid) i--
@@ -2183,7 +2183,7 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const askScript = () =>
     void (async () => {
       const got = await startThread(cx, c.ref, p.sentence ? plainCites(p.sentence) : citeLabel(c), scriptQuestion(c), { title: targetLabel(target, 60) })
-      if ('error' in got) return cx.toast(`thimble: ${got.error}`)
+      if ('error' in got) return cx.toast(got.error)
       await openThread(cx, got.id, scriptQuestion(c))
     })()
   const canAsk = !pending && !kept && !scriptT && c.display !== null && v?.status !== 'missing' && e.surface !== 'mobile'
@@ -2757,7 +2757,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
     </Box>,
   )
   const keys: Key[] = alone ? [] : order.slice(0, 9).map((x, i) => ({ key: `t${i}`, hotkey: String(i + 1), onPress: () => void openThread(cx, x.id) }))
-  const stop = t && running && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: t.id }).then(r => (!r.ok ? cx.toast(`thimble: the thread was not stopped: ${r.error}`) : undefined)) : null
+  const stop = t && running && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: t.id }).then(r => (!r.ok ? cx.toast(`the thread was not stopped: ${r.error}`) : undefined)) : null
   let field: RenderElement | null = null
   if (t) {
     // a blank row between the parts of the chat, none right under a rule (rule 10)
@@ -2828,8 +2828,8 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       onSubmit: q => {
         // a question asked while the thread answers waits until its answer ends: thimble queues it
         void threadMessage(cx, t.id, q).then(r => {
-          if (r.error) cx.toast(`thimble: ${r.error}`)
-          else if (r.queued || running) cx.toast('thimble: the side thread is still answering: your question waits until it ends')
+          if (r.error) cx.toast(r.error)
+          else if (r.queued || running) cx.toast('the side thread is still answering: your question waits until it ends')
         })
       },
     })
@@ -3458,7 +3458,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
         const verdict = (value: string) => async () => {
           if (!rt.sc) return
           const got2 = await act(cx, rt.sc, 'verdict', { label: id, ref: r.ref, value })
-          if (!got2.ok) cx.toast(`thimble: the verdict was not kept: ${got2.error}`)
+          if (!got2.ok) cx.toast(`the verdict was not kept: ${got2.error}`)
           await readUnsure(cx, id)
           await readSurface(cx, `label:${id}`, 'label', labelArgs(id))
           await cx.bumpPanel()
@@ -3507,7 +3507,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
         const verdict = (value: string) => async () => {
           if (!rt.sc) return
           const r = await act(cx, rt.sc, 'verdict', { label: id, ref, value })
-          if (!r.ok) cx.toast(`thimble: the verdict was not kept: ${r.error}`)
+          if (!r.ok) cx.toast(`the verdict was not kept: ${r.error}`)
           await readSurface(cx, `label:${id}`, 'label', [id])
           await cx.bumpPanel()
         }
@@ -3957,7 +3957,7 @@ async function drawDoc(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEleme
     hints.push('o to edit in the browser')
   }
   // retell: main writes the document again in another form (thimble's writer)
-  const retell = (to: 'slides' | 'story') => () => void cx.command('thimble:write', `${to} Retell the document "${title}" as ${to === 'slides' ? 'slides' : 'a story'}.`).catch(err => cx.toast(`thimble: could not start the writer: ${String(err).slice(0, 200)}`))
+  const retell = (to: 'slides' | 'story') => () => void cx.command('thimble:write', `${to} Retell the document "${title}" as ${to === 'slides' ? 'slides' : 'a story'}.`).catch(err => cx.toast(`could not start the writer: ${String(err).slice(0, 200)}`))
   if (units.length && !writing) {
     // each key with what it retells the document as, as the label panel's hint names what each key opens
     const forms: string[] = []
@@ -4069,7 +4069,7 @@ export async function orientAgain(cx: Ctx, focus: string, chat: string): Promise
   // the panel on this run shows the new one once it is listed (term.ts followRerun): a run listed now is not it
   if (chat) rt.rerun = { chat, known: [chat, ...(await cx.agents()).filter(a => ORIENT_ROLES.has(a.role) && a.chat).map(a => a.chat)] }
   await cx.submit(brief ? `Run the orientation again: call start_orientation with this brief, word for word: "${brief}".` : 'Run the orientation again: call start_orientation with no brief.')
-  cx.toast('thimble: main was asked to start the orientation again')
+  cx.toast('main was asked to start the orientation again')
   await cx.bumpPanel()
 }
 
@@ -4243,11 +4243,11 @@ async function retryPage(cx: Ctx, v: HomeView): Promise<void> {
   if (!rt.sc) return
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, 'view-retry', { slug: v.slug })
   if (!got.ok || got.value.queued === false) {
-    cx.toast(`thimble: ${got.ok ? got.value.reason || 'it could not start' : got.error}`)
+    cx.toast(got.ok ? got.value.reason || 'it could not start' : got.error)
     return
   }
   pageAsks.delete(v.slug)
-  cx.toast('thimble: building the terminal page again')
+  cx.toast('building the terminal page again')
 }
 
 /** One view (docs/terminal-views.md): a view with a terminal page is drawn by its program (hooks/viewhost.ts) under

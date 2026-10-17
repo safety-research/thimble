@@ -1201,7 +1201,7 @@ export const register: Register = (on, options) => {
         await readSurface(cx, 'labels', 'labels')
         hit = await find()
       }
-      if (!hit) cx.toast('thimble: that label is no longer in this workspace')
+      if (!hit) cx.toast('that label is no longer in this workspace')
       else await openLabel(cx, hit.id, hit.name ?? hit.id)
     } else if (d.type === 'field' && typeof d.name === 'string' && typeof d.text === 'string') {
       // a field's words (field.tsx): a draft, or a save

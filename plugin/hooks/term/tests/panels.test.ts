@@ -57,7 +57,7 @@ test("a thread that answers: what it is about, dim, before its first question; `
   const field = ((await pane.findAll({ type: 'Input' })) as { key?: string }[]).find(i => String(i.key).startsWith('ask-'))!
   await pane.input({ key: field.key!, text: 'And in June?' })
   await w.clock.settle()
-  expect(w.toasts).toContain('thimble: the side thread is still answering: your question waits until it ends')
+  expect(w.toasts).toContain('the side thread is still answering: your question waits until it ends')
   await pane.unmount()
 })
 

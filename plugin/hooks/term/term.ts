@@ -1151,7 +1151,7 @@ export async function runLabel(cx: Ctx, id: string, name: string, limit: number,
 export async function stopLabel(cx: Ctx, id: string): Promise<void> {
   if (!rt.sc) return
   const got = await act(cx, rt.sc, 'label-stop', { label: id })
-  if (!got.ok) cx.toast(`thimble: the label's run was not stopped: ${got.error}`)
+  if (!got.ok) cx.toast(`the label's run was not stopped: ${got.error}`)
   else await labelSaid(cx, id, '◌ stopping after the current record')
 }
 
@@ -1170,7 +1170,7 @@ export async function deleteLabel(cx: Ctx, id: string, name: string): Promise<st
   await cx.setLabelUi({ ...ui, runs: drop(ui.runs), said: drop(ui.said), kind: drop(ui.kind), open: ui.open.filter(k => !k.startsWith(`${id}:`)) })
   await readSurface(cx, 'labels', 'labels')
   await refreshHome(cx)
-  cx.toast(`thimble: deleted the label "${name}"`)
+  cx.toast(`deleted the label "${name}"`)
   // the labels list offers to undo it, as the browser's top bar does
   setLabelGone({ id, name })
   await openList(cx, { view: 'labels', title: 'Labels' })
@@ -1228,7 +1228,7 @@ export async function undeleteLabel(cx: Ctx, id: string, name: string): Promise<
   setLabelGone(null)
   await readSurface(cx, 'labels', 'labels')
   await refreshHome(cx)
-  cx.toast(`thimble: restored the label "${got.value.name || name}"`)
+  cx.toast(`restored the label "${got.value.name || name}"`)
   await openPanel(cx, { view: 'label', title: got.value.name || name, label: id })
   return ''
 }
