@@ -223,6 +223,7 @@ switches and coverage have their own:
 | `thimble act seen --cwd <dir> {thread}` | the thread's answers read |
 | `thimble act stop --cwd <dir> {agent}` | stop one of thimble's agents, or a side thread's fork |
 | `thimble act view-accept --cwd <dir> {slug}` / `view-reject` | the view proposal accepted (its build queued) or rejected, as the browser's Accept and Reject do; it answers `{queued: true}` at once and thimble's hook process writes the answer, or `{queued: false, reason}` when the proposal no longer waits |
+| `thimble act view-dismiss --cwd <dir> {slug}` | the view proposal hidden for main's session, here and in the browser, and not answered; written as `view-reject` is |
 | `thimble act view-proposals-off --cwd <dir> {}` | view proposals off (`views.propose: false` in thimble's config), as Don't ask again does; `{off, config}` names the file written |
 | `thimble act view-propose-now --cwd <dir> {notice?}` / `view-retry --cwd <dir> {slug, notice?}` | a notice's act: check for a view proposal now, or build again a view whose build failed, run by thimble's hook process, which first dismisses the notice it was pressed on (`notice`, its id) |
 | `thimble act view-term-page --cwd <dir> {slug}` | a view built for the browser opened in the panel: its terminal page's build queued (views.ensure_page) by thimble's hook process, or after the press by the server; `{queued: true}` while it builds, `{queued: false, reason}` with the fix when it cannot be built (its build failed: Retry; this machine lacks Node) |

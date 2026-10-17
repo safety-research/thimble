@@ -3,7 +3,8 @@
 // view's name in bold and what it shows (for a file-type viewer, then the files it reads), then Accept, which builds
 // it as a view the analyst asked for, Reject, and a quiet Don't ask again, which turns view proposals off (Settings
 // turns them on again). The oldest open proposal shows (openOffer); a `suggested` row without
-// `offered` is from an older version and never shows, and nothing shows while view proposals are off. A new proposal
+// `offered` is from an older version and never shows, nor does one dismissed in the terminal in this session (`hidden`),
+// and nothing shows while view proposals are off. A new proposal
 // ignores clicks for ARM_MS, so a double click never answers it unread. An Accept that cannot start a build now keeps
 // the proposal and says why, and what to do, under its buttons. The card never takes the focus, and a request that
 // fails says so in a toast.
@@ -23,10 +24,11 @@ export const PROPOSAL_HEAD = 'View proposal'
 /** The toast after Don't ask again (and a notice's Turn off view proposals). */
 export const PROPOSALS_OFF_LINE = 'View proposals are off. Settings turns them on again.'
 
-/** The proposal the card shows: the oldest `suggested` row with `offered` whose view is not switched off. Pure. */
+/** The proposal the card shows: the oldest `suggested` row with `offered` whose view is not switched off and that the
+ * terminal did not dismiss in this session. Pure. */
 export function openOffer(proposals: readonly Proposal[] | null | undefined): Proposal | null {
   if (!Array.isArray(proposals)) return null
-  const open = proposals.filter((p) => p.status === 'suggested' && !!p.offered && !p.off)
+  const open = proposals.filter((p) => p.status === 'suggested' && !!p.offered && !p.off && !p.hidden)
   const at = (p: Proposal) => p.offered?.at ?? ''
   return open.sort((a, b) => (at(a) < at(b) ? -1 : at(a) > at(b) ? 1 : 0))[0] ?? null
 }

@@ -25,6 +25,7 @@ memory):
 
     view-accept       the view proposal accepted (views.accept: its build queued as one the analyst asked for)
     view-reject       the view proposal rejected (views.answer_offer)
+    view-dismiss      the view proposal hidden for main's session, not answered (views.hide_offer)
     view-retry        a failed build of a view run again, a notice's Retry (views.retry)
     view-propose-now  a check for a view proposal now, a notice's Try again (proposer.run_now)
     view-term-page    the terminal page of a view built for the browser, built on its first open in the terminal
@@ -69,7 +70,7 @@ from . import subagent_files as sf
 log = logging.getLogger("thimble.local_hooks")
 
 KINDS = ("started", "stopped", "handback", "denied", "end", "rekey", "main-stop", "mode-notice", "view-accept",
-         "view-reject", "view-retry", "view-propose-now", "view-term-page", "notice-dismiss")
+         "view-reject", "view-dismiss", "view-retry", "view-propose-now", "view-term-page", "notice-dismiss")
 MIRROR_LOCK = "mirror.lock"  # in the workspace folder: held by the one process that runs passes
 TODO = "mirror.todo.jsonl"  # in the workspace folder: the calls that found the lock held, for the holder
 TICK_S = 1.0
@@ -275,8 +276,8 @@ def _mode_notice(c: str, hook: dict[str, Any]) -> None:
 
 
 def _answered(what: str, c: str, slug: str, fn: Any, *args: Any) -> None:
-    """A view's call (views.accept, answer_offer, retry) for the analyst's press; a press the view no longer takes (a
-    second press, an answer written meanwhile: 404 or 409) is one line in the log."""
+    """A view's call (views.accept, answer_offer, hide_offer, retry) for the analyst's press; a press the view no
+    longer takes (a second press, an answer written meanwhile: 404 or 409) is one line in the log."""
     from fastapi import HTTPException  # noqa: PLC0415
 
     try:
@@ -297,6 +298,12 @@ def _reject(c: str, body: dict[str, Any]) -> None:
     from . import views  # noqa: PLC0415
 
     _answered("rejected", c, str(body.get("slug") or ""), views.answer_offer, "rejected")
+
+
+def _hide(c: str, body: dict[str, Any]) -> None:
+    from . import views  # noqa: PLC0415
+
+    _answered("dismissed", c, str(body.get("slug") or ""), views.hide_offer)
 
 
 def _retry(c: str, body: dict[str, Any]) -> None:
@@ -347,8 +354,8 @@ def _term_page(c: str, body: dict[str, Any]) -> None:
 
 
 # the analyst's answers that `thimble act` hands to the holder (module note), each called with the act's body
-ANSWERS = {"view-accept": _accept, "view-reject": _reject, "view-retry": _retry, "view-propose-now": _propose_now,
-           "view-term-page": _term_page, "notice-dismiss": _dismiss}
+ANSWERS = {"view-accept": _accept, "view-reject": _reject, "view-dismiss": _hide, "view-retry": _retry,
+           "view-propose-now": _propose_now, "view-term-page": _term_page, "notice-dismiss": _dismiss}
 
 
 def _step(what: str, fn: Any, *args: Any) -> Any:

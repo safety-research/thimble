@@ -52,7 +52,7 @@ import { clean, cut, noControls, width } from './lib'
 import { docsOf } from './model'
 import { dismissModNotice, modActWords, modNotices, moreNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
 import { browserShown, copyRemoteLink, copyTunnel, dismissLinks } from './offramp'
-import { answerOffer, dismissNotice, homeNotices, homeOffer, noticeAct, noticeWords, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
+import { answerOffer, dismissNotice, dismissOffer, homeNotices, homeOffer, noticeAct, noticeWords, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
 import { COLORS } from './paint'
 import { readState } from './data'
 import { cxOf } from './ctx'
@@ -354,9 +354,11 @@ const NO_INVERSE = { inverse: false }
 // the view proposals dismissed from the band in this session: hidden, neither accepted nor rejected
 const hiddenOffers = new Set<string>()
 
+/** A view proposal's `dismiss`: the row gone at once, and thimble told, so the browser's card goes too (dismissOffer). */
 async function hideOffer(cx: Ctx, slug: string): Promise<void> {
   hiddenOffers.add(slug)
   await cx.bumpPanel()
+  await dismissOffer(cx, slug)
 }
 
 // the rows whose words show whole, wrapped (a press on words cut short), by the row's key, in this session

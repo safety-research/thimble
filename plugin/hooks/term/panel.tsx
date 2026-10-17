@@ -281,6 +281,14 @@ export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'rejec
   cx.later(OFFER_PRESS_MS, () => void markOffer(cx, slug, '', at, at))
 }
 
+/** The view proposal's `dismiss`, after the row went at once: `thimble act view-dismiss` {slug} has thimble hide it for
+ *  main's session, so the browser's card goes too; it is not answered, and a later session shows it again. */
+export async function dismissOffer(cx: Ctx, slug: string): Promise<void> {
+  if (!rt.sc) return
+  const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, 'view-dismiss', { slug })
+  if (!got.ok || got.value.queued === false) cx.toast(`thimble: the view proposal still shows in the browser: ${got.ok ? got.value.reason || 'it no longer waits' : got.error}`)
+}
+
 /** The view proposal's `don't ask again`: view proposals off (`thimble act view-proposals-off`, `views.propose: false`
  *  in thimble's config), the row gone at once, and a toast that says how to turn them back on. */
 export async function proposalsOff(cx: Ctx): Promise<void> {

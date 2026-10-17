@@ -496,6 +496,8 @@ export interface Proposal {
   held?: boolean
   /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
   off?: boolean
+  /** a view proposal dismissed in the terminal in main's session (backend views.offer_hidden): its card does not show */
+  hidden?: boolean
   status: ProposalStatus
   ts: string
   error?: string

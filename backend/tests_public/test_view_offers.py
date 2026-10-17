@@ -116,6 +116,32 @@ async def test_reject_is_the_analyst_s_click_and_drops_the_view_proposal_with_it
     assert e.value.status_code == 409, "a 0.7.x suggested row without `offered`"
 
 
+async def test_a_dismiss_in_the_terminal_hides_the_view_proposal_in_the_browser_too_for_main_s_session(corpus,
+                                                                                                       monkeypatch):
+    """The row's `dismiss` (`thimble act view-dismiss`), on the server after the press or by the holder before it: the
+    view proposal is hidden for main's session, in the row above the prompt and in the browser's list (`hidden`), and
+    not answered, so it still waits; a later session shows it again."""
+    from app import local, local_hooks, module_bridge, term_acts
+
+    main = {"sid": "sess-plum"}
+    monkeypatch.setattr(module_bridge, "main_session", lambda c: main["sid"])
+
+    async def shown() -> tuple[bool, bool]:
+        listed = {p["slug"]: p for p in await views.list_proposals_route(CORPUS)}
+        return not listed[row["slug"]].get("hidden"), local._offer(CORPUS) is not None
+
+    row, _ = _offer()
+    assert await shown() == (True, True)
+    got = await term_acts.act_route(CORPUS, term_acts.ActBody(kind="view-dismiss", payload={"slug": row["slug"]}))
+    assert got == {"queued": True} and corpus.sent[-1] == (row["slug"], "suggested", {})
+    assert await shown() == (False, False), "hidden in the browser and above the prompt"
+    assert views.open_offer(CORPUS)["slug"] == row["slug"] and "answer" not in _row(row["slug"]), "not answered"
+    main["sid"] = "sess-quince"
+    assert await shown() == (True, True), "a later session shows it again"
+    local_hooks.ANSWERS["view-dismiss"](CORPUS, {"slug": row["slug"]})
+    assert await shown() == (False, False)
+
+
 def test_a_0_7_suggested_row_is_never_the_waiting_view_proposal_and_blocks_none(corpus):
     legacy = _legacy_trace()
     assert legacy["status"] == "suggested" and "offered" not in legacy

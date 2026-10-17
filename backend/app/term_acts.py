@@ -83,6 +83,12 @@ async def _view(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         return _view_answer(views.accept, c, slug)
     if kind == "view-reject":
         return _view_answer(views.answer_offer, c, slug, "rejected")
+    if kind == "view-dismiss":  # hidden, not answered: a refusal an earlier Accept left on it is no answer to this
+        try:
+            views.hide_offer(c, slug)
+        except HTTPException as e:
+            return {"queued": False, "reason": str(e.detail)}
+        return {"queued": True}
     _notice_first(c, payload)
     return _view_answer(views.retry, c, slug)
 
@@ -139,7 +145,7 @@ async def act_route(c: str, body: ActBody) -> dict[str, Any]:
         return await _comment(c, payload, kind == "comment-reopen")
     if kind == "answer-comment-resolve":
         return await _answer_comment(c, payload)
-    if kind in ("view-accept", "view-reject", "view-retry"):
+    if kind in ("view-accept", "view-reject", "view-dismiss", "view-retry"):
         return await _view(c, kind, payload)
     if kind == "view-term-page":
         return await _term_page(c, payload)
