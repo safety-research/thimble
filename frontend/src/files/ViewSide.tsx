@@ -31,7 +31,7 @@ export interface LabelRuns {
   runs: ReadonlyMap<string, ConceptRun>
   setRun: (id: string, run: ConceptRun | null) => void
   /** apply a label again after a failed run */
-  retry: (id: string) => Promise<void>
+  retry: (id: string, resume?: boolean) => Promise<void>
   /** a run the analyst started here (an edit card's Run or Re-run): followed as setRun follows a run, and its label's
    * row brought into view in the Labels pane (bug hunt G12: a new label ran at the bottom of a scrolled list) */
   start: (id: string, run: ConceptRun) => void
@@ -103,10 +103,10 @@ export function useLabelRuns(ws: string, labels: FilesLabels): LabelRuns {
   // Retry applies the label again over its glob; the run it starts is polled from the record the server answers, and a
   // refusal shows on the row as the failure did
   const retry = useCallback(
-    (id: string) => {
-      track('label-apply', { target: `concept:${id}`, detail: { retry: true } })
+    (id: string, resume?: boolean) => {
+      track('label-apply', { target: `concept:${id}`, detail: { retry: true, ...(resume ? { resume: true } : {}) } })
       return labelApi
-        .apply(ws, id, {})
+        .apply(ws, id, resume ? { resume: true } : {})
         .then((run) => setRun(id, run))
         .catch((e: Error) => setRun(id, { status: 'error', message: e.message, started: new Date().toISOString() }))
     },

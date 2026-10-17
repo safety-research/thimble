@@ -1127,8 +1127,9 @@ const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n =
 
 /** What the analyst did that a code label's run follows, for main's prompt: `changed`, the press saved an edit of the
  *  label first; `reads`, what the run reads (labels.ts runReads: `30 of its 33 files`). */
-/** `again`: a run over the units the label's last run could not label (a label notice's act, bug hunt C17). */
-export type LabelRunHow = { changed: boolean; reads: string; again?: boolean }
+/** `again`: a run over the units the label's last run could not label (a label notice's act, bug hunt C17); `resume`:
+ *  a stopped run that goes on with the units it never read, how many (bug hunt I3). */
+export type LabelRunHow = { changed: boolean; reads: string; again?: boolean; resume?: number }
 
 /** Run a label from its panel on a sample of `limit` records, or on every record (`limit` 0), with `thimble act
  *  label-run`, which answers once the run ends: the panel says `◌ labeling` meanwhile and the counts after. A code
@@ -1140,7 +1141,7 @@ export type LabelRunHow = { changed: boolean; reads: string; again?: boolean }
 export async function runLabel(cx: Ctx, id: string, name: string, limit: number, asked: LabelRunHow = { changed: false, reads: '' }): Promise<void> {
   if (!rt.sc) return
   await labelSaid(cx, id, '', { limit, at: await cx.now() })
-  const got = await actLong<{ deferred?: boolean; unchanged?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null; stopped?: boolean; again?: { total?: number } } }>(cx, rt.sc, 'label-run', { label: id, ...(asked.again ? { again: true } : limit ? { limit } : {}) })
+  const got = await actLong<{ deferred?: boolean; unchanged?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null; stopped?: boolean; again?: { total?: number } } }>(cx, rt.sc, 'label-run', { label: id, ...(asked.again ? { again: true } : asked.resume ? { resume: true } : limit ? { limit } : {}) })
   if (!got.ok) {
     await labelSaid(cx, id, `× ${got.error}`, null)
     return
@@ -1166,7 +1167,9 @@ export async function runLabel(cx: Ctx, id: string, name: string, limit: number,
     ? `stopped after ${(s.labeled ?? 0).toLocaleString('en-US')}`
     : asked.again
       ? `ran again on the ${(s.again?.total ?? 0).toLocaleString('en-US')} it could not label`
-      : `ran on ${limit ? `a sample of ${(s.labeled ?? limit).toLocaleString('en-US')}` : `all ${(s.labeled ?? 0).toLocaleString('en-US')}`}`
+      : asked.resume
+        ? `labeled the other ${asked.resume.toLocaleString('en-US')}`
+        : `ran on ${limit ? `a sample of ${(s.labeled ?? limit).toLocaleString('en-US')}` : `all ${(s.labeled ?? 0).toLocaleString('en-US')}`}`
   // a run with failures says the first error on a row of its own, `!` in red
   const err = s.failed && s.message && !s.stopped ? `\n! ${s.message}` : ''
   await labelSaid(cx, id, `${how}${counts ? `: ${counts}` : ''}${failed}${err}`, null)

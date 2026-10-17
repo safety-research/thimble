@@ -67,6 +67,9 @@ export type ThimbleLabel = {
   last_run?: LabelRun | null
   /** its run going on, in any process (bug hunt I2) */
   run?: LabelLiveRun | null
+  /** what its Run again goes on with after a stop: the units the stopped run read and those it never read, of its
+   *  scope's; null when a run labels every unit again (the definition changed since: backend concepts.resumable) */
+  resume?: { read: number; left: number; total: number } | null
   rows?: { ref?: string; label?: string; rationale?: string; analyst?: unknown; text?: string; confidence?: number; match?: string }[]
   /** its revision, which steps whenever its rows or its definition change (concepts.note_change) */
   rev?: number

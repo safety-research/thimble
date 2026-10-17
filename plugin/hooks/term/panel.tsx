@@ -3018,6 +3018,14 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     const saved = await save()
     if (saved) await runLabel(cx, id, name, limit, { changed: saved === 'saved', reads: runReads(limit, unitsN, noun).prompt })
   }
+  // go on with a stopped run: its `left` units, which an edit saved first would make a run on every unit
+  const goOn = (left: number) => async () => {
+    if (running) return
+    const saved = await save()
+    // an edit saved first makes it another definition, whose run labels every unit
+    if (saved === 'saved') await runLabel(cx, id, name, 0, { changed: true, reads: runReads(0, unitsN, noun).prompt })
+    else if (saved) await runLabel(cx, id, name, 0, { changed: false, reads: `the other ${num(left)} ${noun}`, resume: left })
+  }
   // delete: asked once in the panel (labelDeleting), then `thimble act label-delete` and the labels list
   const askDelete = async () => {
     labelDeleting = id
@@ -3394,6 +3402,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     else
       rows.push(
         <Box key="lb-runs" flexDirection="row" columnGap={3} flexWrap="wrap">
+          {/* a run stopped part way under the definition it has now goes on with the units it never read, its rows kept
+              (bug hunt I3); `run on all` labels every unit again */}
+          {l.resume ? actionEl(els, 'lb-resume', `label the other ${num(l.resume.left)}`, () => void goOn(l.resume!.left)()) : null}
           {sampleWhole ? null : actionEl(els, 'lb-sample', runReads(sample, unitsN, noun).button, () => void run(sample)())}
           {actionEl(els, 'lb-all', runReads(0, unitsN, noun).button, () => void run(0)())}
           {actionEl(els, 'lb-rename', 'rename', () => void askRename())}

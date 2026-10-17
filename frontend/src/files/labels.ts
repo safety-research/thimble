@@ -278,6 +278,14 @@ export function stoppedText(st: StoppedAt, unit: string): string {
   return `stopped${at}${st.quit ? ' when Claude Code quit' : ''}`
 }
 
+/** What a stopped run's Run again says it does (bug hunt I3): go on with the units the stopped run never read while the
+ * label's definition stands (`resume`, "Label the other 22,028"), else label every unit again ("Run again on all
+ * 29,555", or with no count when the run kept none or was a sample's). Pure. */
+export function againWords(resume: { left: number } | null | undefined, st: StoppedAt | null | undefined, sample = false): string {
+  if (resume && resume.left > 0) return `Label the other ${resume.left.toLocaleString()}`
+  return st?.of != null && !sample ? `Run again on all ${st.of.toLocaleString()}` : 'Run again on all'
+}
+
 /** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
  * (0 for a run whose files were never counted). Pure. */
 const statedTotal = (total: number | null | undefined, matches: number): number | null =>

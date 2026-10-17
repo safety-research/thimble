@@ -829,6 +829,10 @@ class Store:
                 tuple(part))})
         return out
 
+    def model_refs_since(self, ts: str) -> set[str]:
+        """The refs whose classifier row was written at `ts` or after (a run that began then, concepts.resumable)."""
+        return {str(r) for (r,) in self._q("SELECT ref FROM current WHERE label IS NOT NULL AND ts >= ?", (str(ts),))}
+
     def refs(self) -> set[str]:
         """The refs of the rows (the records the covers hold without a row are not listed)."""
         return {r[0] for r in self._q("SELECT ref FROM current")}

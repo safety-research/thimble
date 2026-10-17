@@ -54,6 +54,7 @@ const labelsOf = (all: Concept[]): FilesLabels => ({
 interface Call {
   method: string
   path: string
+  body?: unknown
 }
 let calls: Call[] = []
 
@@ -69,7 +70,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
     const path = new URL(String(url), 'http://thimble.test').pathname
     const method = init?.method ?? 'GET'
-    calls.push({ method, path })
+    calls.push({ method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined })
     const answer = (status: number, json: unknown) => new Response(JSON.stringify(json), { status, headers: { 'content-type': 'application/json' } })
     if (path.endsWith('/apply/cancel')) return answer(200, { ok: true, cancelling: true })
     if (path.endsWith('/apply') && method === 'POST') return answer(202, { status: 'running', run_id: 'r3' })
@@ -181,9 +182,32 @@ describe('a run that quitting Claude Code stopped (bug hunt H3)', () => {
     expect(stoppedText((s as Extract<typeof s, { state: 'done' }>).stoppedAt!, 'record')).toBe('stopped at 8,447 of 14,591 records when Claude Code quit')
     const el = await mount(<Side start={labelsOf([halfway])} />)
     const row = el.querySelector('[data-anchor="concept:q1"]')!
-    expect(row.querySelector('.files-label-stopped')?.textContent).toBe('stopped at 8,447 of 14,591 records when Claude Code quitRun again')
-    await act(async () => button(row, 'Run again')!.click())
+    expect(row.querySelector('.files-label-stopped')?.textContent).toBe('stopped at 8,447 of 14,591 records when Claude Code quitRun again on all 14,591')
+    await act(async () => button(row, 'Run again on all 14,591')!.click())
     await settle()
-    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/q1/apply'))).toHaveLength(1)
+    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/q1/apply')).map((c) => c.body)).toEqual([{}])
+  })
+})
+
+describe('Run again after a stop (bug hunt I3)', () => {
+  // it started over at record 0 and labeled the 7,527 records the stopped run had read again, with no word of it
+  const STOPPED = { ts: '2026-10-17T18:24:45Z', paths: ['*'], total: 29555, matched_total: 29555, labeled: 7527, failed: 0, matches: 276, status: 'done', stopped: true }
+  const stopped = { ...label('s1', 'kills another process'), last_run: STOPPED, counts: { match: 276, 'no match': 7251 }, n_labeled: 7527 } as unknown as Concept
+
+  test('goes on with the records the stopped run never read while its definition stands, and says so', async () => {
+    const el = await mount(<Side start={labelsOf([{ ...stopped, resume: { read: 7527, left: 22028, total: 29555 } } as Concept])} />)
+    const row = el.querySelector('[data-anchor="concept:s1"]')!
+    expect(row.querySelector('.files-label-stopped')?.textContent).toBe('stopped at 7,527 of 29,555 recordsLabel the other 22,028')
+    await act(async () => button(row, 'Label the other 22,028')!.click())
+    await settle()
+    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/s1/apply')).map((c) => c.body)).toEqual([{ resume: true }])
+  })
+
+  test('labels every record again once its definition changed, and says so', async () => {
+    const el = await mount(<Side start={labelsOf([{ ...stopped, resume: null } as Concept])} />)
+    const row = el.querySelector('[data-anchor="concept:s1"]')!
+    await act(async () => button(row, 'Run again on all 29,555')!.click())
+    await settle()
+    expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/s1/apply')).map((c) => c.body)).toEqual([{}])
   })
 })

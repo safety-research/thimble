@@ -8,6 +8,8 @@ concepts.classify_structured, answers its first calls and holds the rest) and as
   when no run is going, never that Claude Code did not load thimble's hooks module;
 - I2: `thimble state` gives that run as the label's run, with the counts this process gives, and a second run of the
   label is refused;
+- I3: Run again after a stop goes on with the records the stopped run never read while the definition stands, and labels
+  every record again once it changed;
 - I4: a label within another counts its scope by the records it runs over, not its whole glob."""
 from __future__ import annotations
 
@@ -124,6 +126,53 @@ async def test_a_run_main_started_is_seen_and_stopped_from_another_process(monke
     assert "hooks module" not in json.dumps(again)
     after = next(k for k in await other_process("state", "labels") if k["id"] == cid)
     assert (after["run"] or {}).get("status") != "running" and after["last_run"]["stopped"] is True
+
+
+async def test_run_again_after_a_stop_goes_on_with_the_records_the_stopped_run_never_read(monkeypatch):
+    gate = Gate(3)
+    monkeypatch.setattr(concepts, "classify_structured", gate)
+    cid = (await concepts.apply_scoped(CORPUS, name="asks", kind="prompt", text=PROMPT, **KW))["concept"]
+    ws = config.workspace_dir(CORPUS)
+
+    async def stop_after(n: int) -> dict:
+        await gate.asked_at_least(n)
+        await asyncio.sleep(0.2)
+        assert concepts.cancel_apply_route(CORPUS, cid)["cancelling"]  # the browser's Stop run
+        return await concepts.wait_apply(CORPUS, cid, 10)
+
+    first = await stop_after(3)
+    assert first["stopped"] and first["labeled"] == 3
+    read = sorted(gate.asked)
+    k = await concepts.get_concept_route(CORPUS, cid)
+    assert k["resume"] == {"read": 3, "left": 5, "total": 8}
+    # the same definition applied over more files since adds them to what it applies to, and leaves the stopped run's
+    concepts.update_concept_route(CORPUS, cid, concepts.ConceptPatch(glob="board.jsonl, agents/*.jsonl"))
+    assert (await concepts.get_concept_route(CORPUS, cid))["resume"] == {"read": 3, "left": 5, "total": 8}
+    # the browser's Run again, the definition unchanged: the other 5 records of the stopped run's files, the 3 rows kept
+    gate.asked.clear()
+    gate.release.set()
+    await concepts.apply_route(CORPUS, cid, concepts.ApplyBody(resume=True), Response())
+    done = await concepts.wait_apply(CORPUS, cid, 10)
+    assert sorted(gate.asked) == sorted(set(BOARD) - set(read))
+    apps = concepts.read_concept(ws, cid)["applications"]
+    assert len(apps) == 1 and apps[-1]["labeled"] == 8 and apps[-1]["stopped"] is False and apps[-1]["total"] == 8
+    assert done["labeled"] == 8 and done["counts"] == {"yes": 8}
+    assert (await concepts.get_concept_route(CORPUS, cid))["resume"] is None
+    # the definition changed after a stop: Run again labels every record again
+    concepts.update_concept_route(CORPUS, cid, concepts.ConceptPatch(description=PROMPT + " Count requests only.",
+                                                                     glob="board.jsonl"))
+    gate.asked.clear()
+    gate.open, gate.release = 3, asyncio.Event()
+    await concepts.apply_route(CORPUS, cid, concepts.ApplyBody(), Response())
+    await stop_after(3)
+    assert (await concepts.get_concept_route(CORPUS, cid))["resume"] == {"read": 3, "left": 5, "total": 8}
+    concepts.update_concept_route(CORPUS, cid, concepts.ConceptPatch(description=PROMPT + " Count questions too."))
+    assert (await concepts.get_concept_route(CORPUS, cid))["resume"] is None
+    gate.asked.clear()
+    gate.release.set()
+    await concepts.apply_route(CORPUS, cid, concepts.ApplyBody(resume=True), Response())
+    await concepts.wait_apply(CORPUS, cid, 10)
+    assert sorted(gate.asked) == sorted(BOARD)
 
 
 async def test_a_label_within_another_counts_its_scope_by_the_records_it_runs_over(monkeypatch):

@@ -11,7 +11,7 @@ import { refIcon, refTone } from '../components/RefChip'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { useTooltip } from '../components/Tooltip'
-import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, mainColour, stoppedText } from '../files/labels'
+import { againWords, classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, mainColour, stoppedText } from '../files/labels'
 import { ReadCutLine } from '../files/ReadCutLine'
 import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
@@ -371,15 +371,17 @@ function LabelBody({ cellId, conceptId, concept, error, reload }: { cellId: stri
     track('ui-click', { target: `cell:${cellId}`, detail: { action: 'label-records' } })
     ctx.openDetail?.(cellId)
   }
-  // where its last run stopped, when it was stopped; Run again runs it as that run ran (a trial on its sample)
+  // where its last run stopped, when it was stopped; Run again goes on with the units that run never read while the
+  // definition stands (`resume`, bug hunt I3), else runs it as that run ran (a trial on its sample), its words saying which
   const lastRun = known.last_run ?? (known as ConceptDetail).applications?.at(-1) ?? null
   const status = running ? null : labelStatus({ ...known, last_run: lastRun }, run ?? null)
   const stopped = status?.state === 'done' && status.stopped ? status.stoppedAt ?? null : null
+  const resume = known.resume ?? null
   const again = async () => {
     setStarting(true)
     try {
-      track('label-apply', { target: `concept:${conceptId}`, detail: { again: 'stopped', via: 'label-card' } })
-      await labelApi.apply(ws, conceptId, lastRun?.limit ? { limit: lastRun.limit } : {})
+      track('label-apply', { target: `concept:${conceptId}`, detail: { again: 'stopped', via: 'label-card', ...(resume ? { resume: true } : {}) } })
+      await labelApi.apply(ws, conceptId, resume ? { resume: true } : lastRun?.limit ? { limit: lastRun.limit } : {})
       await reload?.()
     } catch (e) {
       fail(e)
@@ -424,7 +426,7 @@ function LabelBody({ cellId, conceptId, concept, error, reload }: { cellId: stri
           <span>{sentenceOf(stoppedText(stopped, known.unit))}</span>
           {ctx.openDetail && (
             <Button variant="secondary" size="sm" busy={starting} onMouseDown={(e) => e.stopPropagation()} onClick={() => void again()}>
-              Run again
+              {!resume && lastRun?.limit ? 'Run the sample again' : againWords(resume, stopped)}
             </Button>
           )}
         </div>

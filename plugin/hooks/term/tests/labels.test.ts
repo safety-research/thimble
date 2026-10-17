@@ -457,6 +457,28 @@ test('a run going on in another process shows in the panel as running, its count
   await pane.unmount()
 })
 
+test('a run stopped part way under the definition it has now offers `label the other N`, which goes on with it (`label-run {resume}`); `run on all` labels every record again (bug hunt I3)', { timeoutMs: 30_000 }, async ($, on) => {
+  const w = world(on)
+  runningElsewhere(w, {}, { run: null, resume: { read: 7527, left: 7064, total: 14591 } })
+  let pane = await labelPanel($, w)
+  const text = shown(await pane.drawn())
+  expect(text).toContain('stopped at 7,527 of 14,591')
+  expect(await pane.find({ type: 'Button', key: 'lb-resume' })).toMatchObject({ text: 'label the other 7,064' })
+  expect(await pane.find({ type: 'Button', key: 'lb-all' })).toMatchObject({ text: 'run on all 14,591 records' })
+  w.labelRun = { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 14591, failed: 0, counts: { none: 14000, 'proxy-link': 591 } } }
+  pane = await press($, w, pane, 'lb-resume')
+  expect(w.acts.filter(a => a.kind === 'label-run').at(-1)).toEqual({ kind: 'label-run', payload: { label: LABEL.id, resume: true } })
+  expect(shown(await pane.drawn())).toContain('labeled the other 7,064: none 14,000 · proxy-link 591')
+  await pane.unmount()
+  // no `resume` (its definition changed since the stop): only the run on every record
+  runningElsewhere(w, {}, { run: null, resume: null })
+  w.stamps.set(`${WS}/concepts`, 10)
+  await w.clock.advance(1100)
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(await pane.find({ type: 'Button', key: 'lb-resume' })).toBeUndefined()
+  await pane.unmount()
+})
+
 test("a run's count in the panel follows its run file each second, and a run whose file went has ended there, before the label is read again (bug hunt I1)", { timeoutMs: 30_000 }, async ($, on) => {
   // the panel's count stood behind the card's, and `◌ labeling … stop` stayed half a minute after the stop, as the
   // refresh pass reads every card before the panel

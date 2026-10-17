@@ -1127,7 +1127,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id>]; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
-             "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?, again?}, label-stop {label}, "
+             "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?, again?, resume?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
              "stop {agent}, view-accept {slug}, view-reject {slug}, view-dismiss {slug}, view-proposals-off {}, "
              "view-propose-now {notice?}, view-retry {slug, notice?}, view-term-page {slug}, notice-dismiss {id}, sign-out {slug}")
@@ -1317,7 +1317,8 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     nothing and waits for nothing, and the answer says so (`unchanged`), so main is not asked to run what apply_label
     would answer with the old rows (bug hunt B31). With `again`, a prompt label runs only over the units its last run
     could not label (a label notice's act, concepts.start_again), and main hears of it once it ends (`label_done`), as it
-    does of a trial run on everything."""
+    does of a trial run on everything. With `resume`, a run that was stopped goes on with the units it never read, as the
+    browser's Run again does, when the label's `resume` says it can (concepts.resumable)."""
     from . import cardrun, concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -1326,7 +1327,8 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise StateError(f"no label {payload.get('label')!r}")
     cid = str(found["id"])
     again = payload.get("again") is True
-    limit = _int(str(payload["limit"]), 0, "limit") if payload.get("limit") not in (None, "") and not again else 0
+    resume = payload.get("resume") is True and not again
+    limit = _int(str(payload["limit"]), 0, "limit") if payload.get("limit") not in (None, "") and not again and not resume else 0
     if limit < 0:
         raise StateError("limit must be 1 or more, or left out for every record")
     files = found["unit"] in concepts.FILE_UNITS
@@ -1346,7 +1348,9 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         await concepts.start_again(c, cid, "user")
         told = concepts.tell_when_done(c, cid)
     else:
-        await concepts.start_apply(c, cid, paths, limit or None, "user")
+        if resume:
+            paths = await asyncio.to_thread(concepts.resume_paths, ws, found, paths)
+        await concepts.start_apply(c, cid, paths, limit or None, "user", resume=resume)
         cards = await asyncio.to_thread(concepts._label_cards, ws, cid)
         card = dict(cards[0][1]) if cards else None
         if card is None and not ran_before:

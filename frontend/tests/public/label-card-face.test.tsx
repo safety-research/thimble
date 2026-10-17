@@ -93,9 +93,16 @@ test('a run that quitting Claude Code stopped says where it stopped under its co
   const apply = vi.spyOn(labelApi, 'apply').mockResolvedValue({ status: 'running' } as never)
   const { el } = await card(QUESTION, k, { openDetail: () => undefined })
   const line = el.querySelector('.bcell-label-stopped')!
-  expect(line.textContent).toBe('Stopped at 8,447 of 14,591 records when Claude Code quit.Run again')
-  await act(async () => [...line.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Run again')!.click())
+  expect(line.textContent).toBe('Stopped at 8,447 of 14,591 records when Claude Code quit.Run again on all 14,591')
+  await act(async () => [...line.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Run again on all 14,591')!.click())
   expect(apply).toHaveBeenCalledWith('ws', 'k1', {})
+  // while its definition stands, Run again goes on with the records the stopped run never read, and says so (bug hunt I3)
+  unmountAll()
+  const goOn = (await card(QUESTION, { ...k, resume: { read: 8447, left: 6144, total: 14591 } } as ConceptDetail, { openDetail: () => undefined })).el
+  const words = goOn.querySelector('.bcell-label-stopped button')!
+  expect(words.textContent?.trim()).toBe('Label the other 6,144')
+  await act(async () => (words as HTMLButtonElement).click())
+  expect(apply).toHaveBeenLastCalledWith('ws', 'k1', { resume: true })
   // a run that ended whole says nothing of the kind
   unmountAll()
   expect((await card()).el.querySelector('.bcell-label-stopped')).toBeNull()
