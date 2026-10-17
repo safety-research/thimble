@@ -2735,7 +2735,10 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
                                     card=not orienting, within=within, show=bool(args.get("show")), defer=defer,
-                                    unit=LABEL_UNITS.get(unit_arg))
+                                    unit=LABEL_UNITS.get(unit_arg),
+                                    # who changed the label, which main's `rerun` event names: an agent by its key
+                                    by=ctx.session or (concepts.BY_ANALYST if ctx.created_by == BROWSER_AUTHOR
+                                                       else concepts.BY_MAIN))
     if s.get("deferred"):
         # the run makes the call again where the code runs; the filter and Files' switch are set already, here
         again = {k: v for k, v in args.items() if k not in ("filter", "show")}

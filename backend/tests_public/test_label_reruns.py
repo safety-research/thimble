@@ -111,3 +111,38 @@ async def test_a_label_run_reruns_its_two_cards_once_each_and_main_hears_which_n
     concepts._start_reruns(CORPUS, cid)
     await _rerun_ends(cid)
     assert kernel.ran == [], "a label revision reruns a card once"
+
+
+async def test_a_label_the_running_orientation_changed_leaves_its_cards_to_it_and_names_who_changed_it(kernel,
+                                                                                                    monkeypatch):
+    """Bug hunt G10: the running orientation ran its own label again, and main's `rerun` event said neither who changed
+    it nor whose cards read it, so main ran the orientation's card again and rewrote it while the orientation still
+    worked on it, and told the analyst they had changed the label. The event names who changed the label, and the
+    cards of the agent that changed it stay with that agent while it runs, since its own call's result named them."""
+    from app import agents, subagents, tools
+    from app import subagent_files as sf
+
+    cid = await _label("even", r"value \d*[02468]$")
+    await _rerun_ends(cid)
+    chat = agents.new_agent(CORPUS, "orient", "Orientation", announce=False)["id"]
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["a5e1d0c0ffee0000f"] = {"type": "thimble:orientation", "role": "orientation",
+                                                    "key": "orient", "chat": chat, "run": 0, "status": "running",
+                                                    "started": sf.now()}
+    theirs = (await notebook.run_code(CORPUS, f"count reads {cid}", f"chat:{chat}"))["id"]
+    mine = await _card(f"share reads {cid}")
+    monkeypatch.setattr(cardrun, "defers", lambda c: True)  # the server: the cards run again through thimble-run
+    q = Listener(CORPUS)
+    try:
+        res = await tools.call(CORPUS, "apply_label", {
+            "scope": "files", "name": "even", "paths": ["log.jsonl"], "values": ["yes", "no"],
+            "predicate": {"kind": "regex", "text": r"value \d*[02468]"}}, session="orient")
+        assert not res.is_error, res.text
+        assert f"[[card:{theirs}]]" in res.text, "the orientation's own result names its card"
+        await _rerun_ends(cid)
+        note = await asyncio.wait_for(q.get(), 10)
+    finally:
+        q.close()
+    assert note["meta"]["kind"] == "rerun" and note["meta"]["by"] == "the orientation", note
+    assert note["content"].startswith(f"The orientation changed label even [[concept:{cid}]]."), note["content"]
+    assert f"[[card:{mine}]]" in note["content"] and f"[[card:{theirs}]]" not in note["content"], note["content"]
