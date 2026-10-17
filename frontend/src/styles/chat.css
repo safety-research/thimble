@@ -48,6 +48,26 @@
 .chat-list::-webkit-scrollbar {
   display: none;
 }
+/* "New messages ↓": rows came while the analyst reads above the end; it stands over the transcript's foot, centered,
+   and takes it to its end */
+.chat-new {
+  position: sticky;
+  bottom: 4px;
+  z-index: 2;
+  height: 0;
+}
+.chat-new .btn {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  background: var(--surface-card);
+  box-shadow: var(--shadow-popover);
+}
+.chat-new .btn:hover {
+  background: linear-gradient(var(--surface-hover), var(--surface-hover)), var(--surface-card);
+}
 .chat-empty {
   display: flex;
   justify-content: center;

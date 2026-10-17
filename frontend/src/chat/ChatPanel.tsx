@@ -11,8 +11,10 @@
 // agents shows as a notice with its fix under the proposal's place, above the composer of whichever chat is open, and
 // as a row in the chat it happened in (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode
 // notice shows there in red. The transcript ends above the composer and the cards over it, so none of its lines shows
-// between them or under the composer. A transcript at its end stays there as rows come, until the analyst scrolls up;
-// sending a message takes it to its end.
+// between them or under the composer. A transcript at its end stays there as rows come, until the analyst scrolls up
+// (the wheel, a touch, a key, a drag); a scroll the layout makes never stops it. While the analyst reads above the end,
+// rows that come show "New messages ↓" at the foot of the transcript, which takes it to its end; sending a message
+// does too.
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -407,22 +409,71 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     setSeen(markSeen(ws, current, nMessages))
   }, [ws, current, nMessages, chat.loading])
 
-  // follow the newest record while the list is near its end; a thread opens at its end. Only the analyst scrolling up
-  // stops it (followScroll), never rows that grow under a scroll of the list's own
+  // follow the newest record while the list is at its end; a thread opens at its end. Only the analyst's own scroll up
+  // stops it (followScroll: a scroll up right after the wheel, a touch or a key, or while a pointer is pressed in the
+  // list), never a scroll the layout makes (bug hunt C10, E12: a row above the view that resized as rows came moved the
+  // list up through the browser's scroll anchoring, and the list emptied while a thread loaded scrolled it to its top;
+  // either read as the analyst's scroll)
   const nearEnd = useRef(true)
   const lastTop = useRef(0)
-  useEffect(() => {
+  // when the analyst last asked the list to go up (the wheel up, a finger moving down, a key), whether a pointer is
+  // pressed in it (a drag of a selection scrolls it), and where a touch on it last was
+  const askedUp = useRef(-Infinity)
+  const pressed = useRef(false)
+  const touchY = useRef<number | null>(null)
+  // the shown chat's records now, and when the list stopped following: a record since shows "New messages"
+  const records = useRef(0)
+  records.current = chat.records.length
+  const leftAt = useRef(0)
+  const [unseen, setUnseen] = useState(false)
+  const stopFollow = () => {
+    if (!nearEnd.current) return
+    nearEnd.current = false
+    leftAt.current = records.current
+  }
+  const follow = () => {
     nearEnd.current = true
+    setUnseen(false)
+  }
+  const toEnd = () => {
+    follow()
+    const el = listRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }
+  useEffect(() => {
+    const up = () => {
+      pressed.current = false
+    }
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+    return () => {
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+    }
+  }, [])
+  useEffect(() => {
+    follow()
     setStripOpen(false)
   }, [current])
-  // a followed call brings itself into view (Rows.CallLine), so the list stops following its end
+  // a followed call brings itself into view (Rows.CallLine), and so does an answer's comment (Rows), so the list stops
+  // following its end
   useEffect(() => {
-    if (focus) nearEnd.current = false
+    if (focus) stopFollow()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus])
+  useEffect(
+    () =>
+      bus.on('openRef', (e) => {
+        if (e.ref.startsWith('answer:')) stopFollow()
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
   useEffect(() => {
     const el = listRef.current
-    if (!el || !nearEnd.current) return
-    el.scrollTop = el.scrollHeight
+    if (!el) return
+    if (nearEnd.current) el.scrollTop = el.scrollHeight
+    else if (records.current > leftAt.current) setUnseen(true)
   }, [chat.rows, chat.streaming, main.rows, current])
   // rows that fill in later (a card reading its agent's log, a chip learning its name) and a list that shrinks (the
   // tree opened, the foot grown by a card or the task strip) keep the end in view
@@ -680,9 +731,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const send = (text: string): Promise<boolean> => {
     if (demoStop()) return Promise.resolve(false)
     // the question sent is where the analyst looks next: the list goes to its end and follows it there
-    nearEnd.current = true
-    const list = listRef.current
-    if (list) list.scrollTop = list.scrollHeight
+    toEnd()
     if (target.to === 'orient') {
       // the latest orientation takes the analyst's message itself: it resumes the finished session, or waits for the run
       // going on to end; from one of its steps, its thread opens, where the message and the reply show
@@ -774,8 +823,30 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           ref={listRef}
           onScroll={(e) => {
             const el = e.currentTarget
-            nearEnd.current = followScroll(nearEnd.current, lastTop.current, el)
+            const was = nearEnd.current
+            nearEnd.current = followScroll(was, lastTop.current, el, pressed.current || performance.now() - askedUp.current < ASKED_UP_MS)
+            if (was && !nearEnd.current) leftAt.current = records.current
+            else if (!was && nearEnd.current) setUnseen(false)
             lastTop.current = el.scrollTop
+          }}
+          onWheel={(e) => {
+            if (e.deltaY < 0) askedUp.current = performance.now()
+          }}
+          onTouchStart={(e) => {
+            touchY.current = e.touches[0]?.clientY ?? null
+          }}
+          onTouchMove={(e) => {
+            const y = e.touches[0]?.clientY ?? null
+            // a finger moving down moves the transcript up
+            if (y != null && touchY.current != null && y > touchY.current) askedUp.current = performance.now()
+            touchY.current = y
+          }}
+          onPointerDown={(e) => {
+            if (e.button === 0 || e.button === 1) pressed.current = true
+          }}
+          onKeyDown={(e) => {
+            if (typingIn(e.target)) return
+            if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'Home' || (e.key === ' ' && e.shiftKey)) askedUp.current = performance.now()
           }}
         >
           <CallFocusContext.Provider value={focus}>
@@ -801,6 +872,13 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!chat.loading && !chat.error && kind === 'step' && curMeta && <StepView ws={ws} meta={curMeta} chat={chat} running={running} />}
           </div>
           </CallFocusContext.Provider>
+          {unseen && (
+            <div className="chat-new">
+              <Button variant="secondary" size="sm" icon="arrow-down" onClick={toEnd}>
+                New messages
+              </Button>
+            </div>
+          )}
         </div>
         <div className="chat-foot">
           {/* the cards above the composer: while one shows, the foot takes its own space under the transcript (chat.css) */}
@@ -843,13 +921,25 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
 /** How near its end a list still counts as at its end, in px. */
 export const NEAR_END_PX = 80
+/** How long after the analyst's wheel up, touch or key a scroll up of the list is theirs, in ms. */
+const ASKED_UP_MS = 500
 
-/** Whether the list follows its end after a scroll: at its end (within NEAR_END_PX) it does; away from it, it stops
- * only when the analyst scrolled up (its scrollTop went down from `lastTop`). Rows that grow below a scroll the list
- * made itself leave it away from its end without the analyst doing anything, and it keeps following. Pure. */
-export function followScroll(following: boolean, lastTop: number, el: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>): boolean {
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_END_PX) return true
-  return el.scrollTop < lastTop ? false : following
+/** Whether the list follows its end after a scroll. Only a scroll up `byAnalyst` stops it (right after their wheel up,
+ * touch or key, or while their pointer is pressed in the list: a drag of a selection). A scroll the layout makes never
+ * does: rows that grow below a scroll of the list's own, a row above the view that resizes as rows come (which the
+ * browser's scroll anchoring answers by moving the list up), the list emptied and filled again while a chat loads.
+ * Back at its end, or near it (NEAR_END_PX) on the way down, it follows again. Pure. */
+export function followScroll(following: boolean, lastTop: number, el: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>, byAnalyst = false): boolean {
+  const gap = el.scrollHeight - el.scrollTop - el.clientHeight
+  if (gap < 2 || (gap < NEAR_END_PX && el.scrollTop >= lastTop)) return true
+  if (byAnalyst && el.scrollTop < lastTop) return false
+  return following
+}
+
+/** Whether a key goes into a text field (a key there edits, it does not scroll the transcript). */
+function typingIn(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
 }
 
 /** The kinds of a thread's `error` record that end a run without a reply the analyst can read (backend
