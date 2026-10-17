@@ -1,4 +1,5 @@
-"""Labels over whole runs: each run folder is one unit however deep its matched files lie (bug hunt 2, C6).
+"""Labels over whole runs: each run folder is one unit however deep its matched files lie (bug hunt 2, C6), and a prompt
+label over runs far longer than its model reads is refused before anything runs, with why and what to do instead (C5).
 
 A run's folder is the outermost folder below the corpus root that holds files itself (corpus.run_dir): a file in a run's
 sub-folder belongs to the run, and a folder that holds only run folders is not a run. The classifier is scripted at
@@ -9,8 +10,9 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 
-from app import call_result, concepts, config
+from app import call_result, concepts, config, notices
 
 CORPUS = "nested"
 RUNS = ("alpha-run", "beta-run", "sweeps/gamma-run")  # `sweeps` holds only a run folder
@@ -77,3 +79,25 @@ async def test_a_label_over_runs_gives_each_run_folder_one_value_however_deep_it
     asked.clear()
     await _apply("run reached its goal (one)", ["*/*/report/*.md"], limit=1)
     assert len(asked) == 1 and [ref for ref, _t in asked[0]] in ([r] for r in RUNS), asked
+
+
+async def test_a_prompt_label_over_runs_far_longer_than_its_model_reads_is_refused_before_anything_runs(
+        corpus, asked, workspaces_tmp, monkeypatch):
+    """Bug hunt 2, C5: a prompt label over whole runs with 30-42 MB transcripts failed on every run, and neither the
+    tool's result nor the notice said why or what to do. A run with more than WHOLE_FAR times the text the model reads
+    is refused before the label is defined or any agent starts; the refusal and the notice say why and what to do
+    instead. Runs that fit still run."""
+    monkeypatch.setattr(concepts, "whole_read_chars", lambda c, concept: 2_000)  # the model reads 2,000 characters
+    _write(corpus, "beta-run/transcript.jsonl", "".join(_turn(f"step {i} " + "x" * 80) for i in range(100)))
+    with pytest.raises(HTTPException) as refused:
+        await _apply("run reached its goal", ["*/prompt.md", "*/transcript.jsonl"])
+    why = str(refused.value.detail)
+    assert refused.value.status_code == 400 and why.startswith("1 of 3 runs are too long"), why
+    assert "beta-run" in why and "Label their records instead (unit records), such as the lines of */transcript.jsonl" in why
+    assert not asked and concepts.find_concept(workspaces_tmp / CORPUS, "run reached its goal") is None
+    told = [n["text"] for n in notices.open_notices(CORPUS)]
+    assert any("1 of 3 runs are too long" in t and "Label their records instead" in t for t in told), told
+
+    s = await _apply("run reached its goal", ["*/prompt.md"])
+    assert s["total"] == 3 and {ref for batch in asked for ref, _t in batch} == set(RUNS)
+    assert not [n for n in notices.open_notices(CORPUS) if "too long" in n["text"]]  # the apply that ran took it away
