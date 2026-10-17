@@ -47,7 +47,8 @@ from the cursor that pass saved, so the mirror has no gap and no duplicate (H4),
 session no pass read yet (a press at the end of the first turn, before the Stop hook's pass) is read from when thimble
 turned on in it (its session marker's time), so main's chat holds that turn too. Main ends a turn with nothing for the analyst without text, or with
 END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat shows END_TOKEN, nor a line that opens with
-TERMINAL_ONLY.
+TERMINAL_ONLY, except in main's reply to the hand-back of an agent whose end main's chat has no row for (HANDBACK_ROWS:
+a view's builder or reviewer), which shows whole under one short row for the hand-back, as the terminal shows it.
 
 At the end of each of main's turns the checks hear of it twice: the shown checks over the cards run on the cards that
 changed (checks.main_turn_ended), and the checks over Claude's answers get the turn's text rows as Claude wrote them,
@@ -171,6 +172,13 @@ EARLIER_RE = re.compile(r"could not be resumed|no transcript found", re.I)
 # analyst reads the reason alone, as the PermissionDenied hook gives it (R1)
 AUTO_MODE_RE = re.compile(r"denied by the Claude Code auto mode classifier\.\s*Reason:\s*(.+?)\.(?:\s|$)")
 HANDBACK_LEAD = "[Subagent hand-back]"  # how Claude Code's frame around a subagent's last report opens
+# the roles of thimble's agents whose end main's chat has no row of its own, by the row their hand-back gets there (a
+# `chip` of HANDBACK_CHIP naming the agent's chat, never its report), under which main's reply shows whole, its
+# TERMINAL_ONLY line too, since the terminal shows that line under the hand-back (bug hunt D2). The orientation's, a
+# writer's and a code ticket's end have their rows (its landing, the document's chip, the ticket's chip), so main's
+# TERMINAL_ONLY line stays the terminal's; a check's and a model call's agent hand back to no one (subagents.py)
+HANDBACK_ROWS = {"view-builder": "View builder finished", "view-reviewer": "View reviewer finished"}
+HANDBACK_CHIP = "handback"
 ASYNC_RESULT_RE = re.compile(r"^\s*Async agent launched")
 AGENT_ID_RE = re.compile(r"agentId:\s*([A-Za-z0-9_-]+)")
 TASK_DONE = ("completed", "done", "success")
@@ -347,6 +355,8 @@ class Live:
         self.turn_text = ""  # main's last text in the turn, the reason R3 quotes
         self.turn_rows: list[dict] = []  # the turn's text rows as Claude wrote them: {uuid, text} (_answer_checked)
         self.turn_tools: list[dict] = []  # the turn's tool calls: {name, input}, inputs cut (_brief, _answer_checked)
+        # main's TERMINAL_ONLY lines show in its chat for the rest of the turn: a hand-back of HANDBACK_ROWS reached it
+        self.turn_notes = False
         self.thimble_calls: dict[str, dict] = {}  # tool_use id of main's call for one of thimble's agents -> {name, input}
         # tool_use id of main's SendMessage to a subagent -> (its Sub, the call's input): shown in its chat once the call
         # ran, since a hook (thimble's --agent-check) or auto mode may refuse it
@@ -523,7 +533,7 @@ def _turn_state(lv: Live) -> dict:
             # the checks over Claude's answers (_answer_checked): a turn's text and its end are often read by
             # different passes
             "turn_rows": lv.turn_rows[-TURN_ROWS_KEPT:], "turn_tools": lv.turn_tools[-TURN_TOOLS_KEPT:],
-            "last_failed": lv.last_failed,
+            "last_failed": lv.last_failed, "turn_notes": lv.turn_notes,
             "relays": {k: [sub.agent_id, inp] for k, (sub, inp) in lv.relays.items() if sub.agent_id},
             # the proposer's (proposer.turn_ended): a turn's first line and its end are often read by different passes
             "turn_analyst": lv.turn_analyst, "last_cut": lv.last_cut, "context_tokens": lv.context_tokens,
@@ -549,6 +559,7 @@ def _take_turn(lv: Live, cur: dict) -> None:
     lv.after_start = bool(cur.get("after_start"))
     lv.last_tool = str(cur.get("last_tool") or "") or None
     lv.last_failed = bool(cur.get("last_failed"))
+    lv.turn_notes = bool(cur.get("turn_notes"))
     lv.turn_analyst = bool(cur.get("turn_analyst"))
     lv.api_failed = bool(cur.get("api_failed"))
     lv.last_cut = str(cur.get("last_cut") or "") or None
@@ -1439,7 +1450,7 @@ def _open_turn(lv: Live) -> None:
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
         lv.turn_rows, lv.turn_tools = [], []
-        lv.turn_analyst = lv.api_failed = False
+        lv.turn_analyst = lv.api_failed = lv.turn_notes = False
         lv.stopped_cards = {}
     agents.set_running(lv.c, agents.MAIN_ID, True)
 
@@ -1864,7 +1875,9 @@ def _child_finished(lv: Live, text: str) -> None:
 def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     """A message another session sent main (module note), a subagent's hand-back among them: no row of its own, since
     it is neither the analyst's line nor main's. The hand-back of one of thimble's agents ends its run with its report
-    (subagents.run_ended), and its own chat has its end. On its own record it opens main's turn."""
+    (subagents.run_ended), and its own chat has its end; that of a role whose end main's chat has no row for
+    (HANDBACK_ROWS) is one short row there, never its report, and main's reply to it shows whole (turn_notes), as the
+    terminal shows it. On its own record it opens main's turn."""
     if not mid_turn:
         _open_turn(lv)
     o = origin if isinstance(origin, dict) else {}
@@ -1880,6 +1893,11 @@ def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
         if sub is not None:
             _tail_sub(lv, sub)
         subagents.run_ended(lv.c, sender, "done", handback_report(raw) or None, source="handback")
+        line = HANDBACK_ROWS.get(str(a.get("role") or ""))
+        if line and lv.turn_open:
+            chat = str(a.get("chat") or "")
+            _rec(lv, "chip", kind=HANDBACK_CHIP, text=line, **({"chat": chat} if chat else {}))
+            lv.turn_notes = True
 
 
 def handback_report(body: str) -> str:
@@ -1892,13 +1910,14 @@ def handback_report(body: str) -> str:
     return textwrap.dedent(text).strip()
 
 
-def visible(text: str) -> str:
+def visible(text: str, notes: bool = False) -> str:
     """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN, the words before the
-    token when it ends with it (END_RE), and any other text as it is, without its lines that open with TERMINAL_ONLY,
-    and with the citations written as Markdown links for the terminal in their chat form (cite.from_links)."""
+    token when it ends with it (END_RE), and any other text as it is, without its lines that open with TERMINAL_ONLY
+    unless `notes` keeps them (main's reply to a hand-back of HANDBACK_ROWS), and with the citations written as Markdown
+    links for the terminal in their chat form (cite.from_links)."""
     m = END_RE.search(text)
     text = cite.from_links(text[: m.start()].rstrip() if m else text)
-    if TERMINAL_ONLY not in text:
+    if notes or TERMINAL_ONLY not in text:
         return text
     return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()
 
@@ -1911,7 +1930,7 @@ def _text(lv: Live, text: str, uuid: str = "", **extra: Any) -> None:
             lv.turn_rows[-1] = {"uuid": uuid, "text": f"{lv.turn_rows[-1]['text']}\n{text}"}
         else:
             lv.turn_rows.append({"uuid": uuid, "text": text})
-    text = visible(text)
+    text = visible(text, lv.turn_notes)
     if not text.strip():
         return
     lv.turn_text = text

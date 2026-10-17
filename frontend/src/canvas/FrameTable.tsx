@@ -1,7 +1,10 @@
 // A table card's DataFrame drawn as thimble's own table (lib/dataFrame, backend/app/frames.py): a sticky header,
 // numbers right-aligned in their columns' formats, prose columns wrapping at a readable measure, and "n more rows"
-// when the DataFrame was truncated. A table wider than the card wraps its text (`data-fit`); a table of numbers still
-// wider scrolls sideways under a fade. Says `data-settled` at once, since it draws in one pass.
+// when the DataFrame was truncated. With `maxRows` (a card on the canvas) a longer table shows its first rows and
+// `… n more rows` under them, as the terminal's card does, and a press on that line shows the rest in place; the rows
+// past the cap are drawn hidden, so a citation of one finds it and opens them (lib/tableCell revealCell). A table
+// wider than the card wraps its text (`data-fit`); a table of numbers still wider scrolls sideways under a fade. Says
+// `data-settled` at once, since it draws in one pass.
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { cellText, type Frame } from '../lib/dataFrame'
 import { isProse } from '../lib/tables'
@@ -76,10 +79,13 @@ export function tableModel(frame: Frame): TableModel {
   }
 }
 
-export function FrameTable({ frame }: { frame: Frame }) {
+export function FrameTable({ frame, maxRows }: { frame: Frame; maxRows?: number }) {
   const model = useMemo(() => tableModel(frame), [frame])
   const box = useRef<HTMLDivElement>(null)
   const [more, setMore] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  const cuts = maxRows != null && maxRows > 0 && model.rows.length > maxRows
+  const capped = cuts && !expanded
   useLayoutEffect(() => {
     const el = box.current
     const root = el?.closest<HTMLElement>('.frame-table')
@@ -105,7 +111,8 @@ export function FrameTable({ frame }: { frame: Frame }) {
       el.removeEventListener('scroll', check)
       ro?.disconnect()
     }
-  }, [model])
+  }, [model, capped])
+  const hidden = capped ? model.rows.length - maxRows! + model.more : 0
   return (
     <div className="frame-table" data-body="" data-settled="true">
       <div className={`outputs-html-wrap${more ? ' outputs-html-more' : ''}`}>
@@ -123,7 +130,7 @@ export function FrameTable({ frame }: { frame: Frame }) {
             </thead>
             <tbody>
               {model.rows.map((r, i) => (
-                <tr key={i}>
+                <tr key={i} hidden={capped && i >= maxRows!}>
                   <th data-label={r.name !== r.label ? r.name : undefined}>{r.label}</th>
                   {r.cells.map((cell, k) => (
                     <td key={k} className={model.cols[k].num ? 'outputs-num' : cell.prose ? 'outputs-prose' : undefined}>
@@ -136,7 +143,14 @@ export function FrameTable({ frame }: { frame: Frame }) {
           </table>
         </div>
       </div>
-      {model.more > 0 && <div className="dim canvas-viz-more">{`${model.more.toLocaleString()} more rows`}</div>}
+      {cuts && (
+        <div className="outputs-rows-more">
+          <button type="button" className="outputs-showall" onClick={() => setExpanded((v) => !v)}>
+            {capped ? `… ${hidden.toLocaleString()} more rows` : `Show the first ${maxRows!.toLocaleString()} rows`}
+          </button>
+        </div>
+      )}
+      {model.more > 0 && !capped && <div className="dim canvas-viz-more">{`${model.more.toLocaleString()} more rows`}</div>}
     </div>
   )
 }
