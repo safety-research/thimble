@@ -32,6 +32,10 @@ folder read-only (kernel_wrap.TRUSTED_DIR).
 Runs and ends. A run is one turn sequence of an agent, from its start or a follow-up to its hand-back. The mirror
 (session.py) and the hooks tell run_ended the end once per run, by whichever signal comes first; a SubagentStop alone is
 a turn's end, which ends the run only when no child of the agent runs and no hand-back follows within HANDBACK_WAIT_S.
+In auto mode the hand-back of a check's or the card check's agent that the module started never reaches main: the
+hand-back hook (.thimble-watch --handback) records its report on the agent's entry (subagent_files.record_handback),
+refuses the call and ends the agent's turn there, and the run ends done with that report (hook_handback), whichever
+signal comes first, since the agent's later turn end says it was stopped by a hook.
 Each role's handlers (Type.started, Type.ended, Type.refused) do what its run's start, end and refusal mean for it.
 
 Notices. A start or a message that did not happen, and a run that ended failed, are told in the foreground with their
@@ -48,7 +52,8 @@ the agent, and its key is the session the call runs as (tools.call_route), a des
 Local transport (before a press). No server runs: the starts, follow-ups and stops above reach the module through the trusted folder
 (module_bridge's file transport), main's permission mode and plan mode come from the files (session.main_mode), and the
 hooks' records are followed by their backend calls (local_hooks.py), which run the same bodies as the routes below
-(hook_started, hook_stopped, hook_denied, hook_end, hook_rekey). Plan mode stops no running agent there either.
+(hook_started, hook_stopped, hook_handback, hook_denied, hook_end, hook_rekey). Plan mode stops no running agent there
+either.
 """
 from __future__ import annotations
 
@@ -1444,10 +1449,15 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
     """End the current run of a registered agent once: its status, its chat ended with the report (unless its type
     keeps its chat, Type.keeps_chat), and its role's end handler (Type.ended). A run whose latest reply is an API error (api_error: a refusal by the model's safeguards,
     retries run out) failed, with Claude Code's error line as its report, whichever signal ends it, unless the agent
-    handed back or was stopped. A run that main's plan mode held at its end, and that left no work, failed too, with
-    its role's line (_plan_end). A run that ended already (another signal of the same end) is left alone. True when
-    this call ended it."""
+    handed back or was stopped. A run whose hand-back the hand-back hook took (subagent_files.taken_handback) ends done
+    with that report, whichever signal ends it (module note). A run that main's plan mode held at its end, and that left
+    no work, failed too, with its role's line (_plan_end). A run that ended already (another signal of the same end) is
+    left alone. True when this call ended it."""
     cls = None  # the class of the API error that failed it (session.api_error_class), for its notice
+    if source != "handback":
+        taken = files.taken_handback(agent(c, agent_id))
+        if taken is not None:
+            status, report, source = "done", taken or report, "handback"
     if source != "handback" and status != "stopped":
         error = api_error(c, agent_id)  # read first: the transcript's tail may hold the run's hand-back, which ends it
         if error:
@@ -1860,6 +1870,23 @@ def hook_stopped(c: str, hook: dict[str, Any]) -> dict[str, Any]:
 async def stopped_route(body: HookBody) -> dict[str, Any]:
     """SubagentStop (hook_stopped)."""
     return hook_stopped(_workspace(body), body.hook)
+
+
+def hook_handback(c: str, hook: dict[str, Any]) -> dict[str, Any]:
+    """PreToolUse of SubagentHandback: the hook took the report of a check's or the card check's agent and refused the
+    call (subagent_files.record_handback), so the run ends here, done with that report, as a hand-back that reached main
+    ended it before. {ended}."""
+    agent_id = str(hook.get("agent_id") or "")
+    taken = files.taken_handback(agent(c, agent_id))
+    if taken is None:
+        return {"ended": False}
+    return {"ended": run_ended(c, agent_id, "done", taken or None, source="handback")}
+
+
+@router.post("/subagents/handback")
+async def handback_route(body: HookBody) -> dict[str, Any]:
+    """PreToolUse of SubagentHandback (hook_handback)."""
+    return hook_handback(_workspace(body), body.hook)
 
 
 def hook_end(c: str, hook: dict[str, Any]) -> dict[str, Any]:

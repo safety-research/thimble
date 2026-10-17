@@ -91,6 +91,53 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     assert _run(cid)["stale"] == 0
 
 
+async def test_a_hand_back_the_hook_took_ends_the_run_done_with_its_report_whichever_end_comes_first(doc, bridge):
+    """In auto mode thimble's hand-back hook keeps a check's report and refuses the call, which ends the agent's turn
+    (plugin/bin/.thimble-watch --handback). The run ends done with that report: from the hook's own call
+    (hook_handback), and also when the agent's turn end comes first, which the module reports as a hook's stop (on
+    local transport a pass reads module.json's ends before the hook's call)."""
+    from app import subagent_files as files
+
+    await _write()
+    for cid, module_first in (("unverified", False), ("judgment", True)):
+        act = await _started(cid)
+        agent = _run(cid)["agent_id"]
+        hook = {"hook_event_name": "PreToolUse", "tool_name": "SubagentHandback", "agent_id": agent,
+                "agent_type": "thimble:check", "tool_input": {"message": f"{cid}: commented on 1 of 3 passages."}}
+        with subagents.update(CORPUS) as state:
+            assert files.record_handback(state, hook) is not None
+        if module_first:
+            subagents.ended(CORPUS, agent, "", "hook_stopped")
+        assert subagents.hook_handback(CORPUS, hook) == {"ended": not module_first}
+        subagents.ended(CORPUS, agent, "", "hook_stopped")  # a later end changes nothing
+        await _until(lambda: act.ended, f"the run of {cid} never ended")
+        assert _run(cid)["status"] == "done" and _run(cid)["summary"] == f"{cid}: commented on 1 of 3 passages."
+        assert subagents.agent(CORPUS, agent)["handed_back"] is True
+
+
+def test_the_hook_keeps_no_hand_back_of_a_check_main_started_or_of_another_role():
+    """main's run_check starts a check with main's own Agent call, and Claude Code tells main of that agent's end, so its
+    hand-back reaches main; so does every role's but the check's and the card check's."""
+    from app import subagent_files as files
+
+    state: dict = {}
+    files.registry(state).update({
+        "chk-main": {"role": "check", "plugin_started": False, "run": 0},
+        "orient": {"role": "orientation", "plugin_started": True, "run": 0},
+        "call": {"role": "call", "plugin_started": True, "run": 1}})
+
+    def hook(agent: str, agent_type: str) -> dict:
+        return {"tool_name": "SubagentHandback", "agent_id": agent, "agent_type": agent_type,
+                "tool_input": {"message": "done"}}
+
+    assert files.record_handback(state, hook("chk-main", "thimble:check")) is None
+    assert files.record_handback(state, hook("orient", "thimble:orientation")) is None
+    assert files.record_handback(state, hook("call", "thimble:call")) is not None
+    assert files.taken_handback(files.registry(state)["call"]) == "done"
+    files.registry(state)["call"]["run"] = 2  # a later run: the hand-back of run 1 ends it not
+    assert files.taken_handback(files.registry(state)["call"]) is None
+
+
 async def test_a_run_s_task_file_is_never_written_through_a_link(doc, bridge, tmp_path):
     """check-work/ is a folder the agents' Bash and a kernel can write, and the server, which no sandbox holds, writes
     each run's task file there: a link planted at the file is replaced, never followed, and a run whose folder is a link

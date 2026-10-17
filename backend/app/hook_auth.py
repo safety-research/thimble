@@ -104,8 +104,8 @@ HOOK_PATHS = frozenset({
     "/api/events/pull", "/api/events/ack", "/api/events/held", "/api/events/mode", "/api/events/permission",
     "/api/agents", "/api/bg/agent-check",
     # thimble's agents' hooks (subagents.py), each beside the record it wrote to the workspace's files
-    "/api/subagents/started", "/api/subagents/denied", "/api/subagents/stopped", "/api/subagents/end",
-    "/api/subagents/rekey",
+    "/api/subagents/started", "/api/subagents/denied", "/api/subagents/stopped", "/api/subagents/handback",
+    "/api/subagents/end", "/api/subagents/rekey",
 })
 SHIM_PATHS = frozenset({"/api/events"})
 MODULE_PREFIX = "/api/module/"  # the hooks module's routes (app/module_bridge.py): every one, whatever the method
