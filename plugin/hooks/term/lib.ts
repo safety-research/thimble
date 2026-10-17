@@ -26,9 +26,31 @@ export type TableRuns = { rows: Run[][][]; align: ('left' | 'right' | 'center')[
 const FENCE_RE = /```[\s\S]*?```|`[^`\n]*`/g
 const LINK_RE = /(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
 const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
-const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|report:[A-Za-z0-9_-]+(?:#p?[A-Za-z0-9_-]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
+const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|view:[a-z0-9][a-z0-9-]{0,39}(?:\/[^\s()]+)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|report:[A-Za-z0-9_-]+(?:#p?[A-Za-z0-9_-]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
 const LABEL_REF = /^concept:([A-Za-z0-9_-]+)(?:\/(.+))?$/
 const REPORT_REF = /^report:([A-Za-z0-9_-]+)(?:#(p?[A-Za-z0-9_-]+))?$/
+// a view's slug as the backend writes it (views.SLUG_RE), then any key the view defines
+const VIEW_REF = /^view:([a-z0-9][a-z0-9-]{0,39})(?:\/(\S+))?$/
+
+/** A card's column or row label as a ref writes it (`managed%5Fprs`), as the label it stands for (`managed_prs`), as
+ *  backend cite.decode_label reads it: each run of %XX decoded; a run that is no UTF-8 kept as written. */
+export function decodeLabel(s: string): string {
+  if (!s.includes('%')) return s
+  return s.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
+    try {
+      return decodeURIComponent(run)
+    } catch {
+      return run
+    }
+  })
+}
+
+/** A link to a view, or to a unit only that view defines (`view:<slug>/<key>`, backend views.py): the view's slug and
+ *  the key ('' for the whole view); null for any other ref. */
+export function viewRef(ref: string): { slug: string; key: string } | null {
+  const m = VIEW_REF.exec(ref.trim())
+  return m ? { slug: m[1]!, key: m[2] ?? '' } : null
+}
 
 /** A link to a document, or to one of its paragraphs (`p<id>`), sentences or headings (`report:<slug>#<unit>`): the
  *  document's slug and the unit; null for any other ref. */
@@ -376,6 +398,14 @@ export function chipWords(c: Citation): string {
   }
   const rr = reportRef(c.ref)
   if (rr) return rr.slug === 'slides' || rr.slug === 'story' ? rr.slug : 'report'
+  // a view by its slug, a unit of it by the view's slug and the unit's key, as the browser's chip names them (bug hunt
+  // B14: `↗ (view:page-histories/dse~WillkommenImWiki)` showed in a reply)
+  const vr = viewRef(c.ref)
+  if (vr) {
+    if (!vr.key) return cut(`view ${vr.slug}`, CHIP_MAX)
+    const head = `${vr.slug} · `
+    return CHIP_MAX - width(head) >= 8 ? `${head}${middleCut(vr.key, CHIP_MAX - width(head))}` : cut(`${head}${vr.key}`, CHIP_MAX)
+  }
   const [base = '', frag = ''] = c.ref.split('#', 2)
   const out = outputLine(c.ref)
   if (out) return out.last !== out.first ? `card output lines ${out.first}-${out.last}` : `card output line ${out.first}`
@@ -1212,6 +1242,32 @@ export function recordFields(text: string, rule: { kind?: string; spec?: string;
     read: read.map(k => [k, words(fields.find(([x]) => x === k)?.[1])]),
     rest: fields.filter(([k, v]) => !read.includes(k) && one(v)).map(([k, v]) => [k, words(v)]),
   }
+}
+
+/** A database row's fields as an example card shows them (bug hunt B17: a row read as one line of JSON with literal
+ *  `\r\n`): `read`, the fields the card's claim is about, each its whole value, at most two: those whose value holds
+ *  words the card quotes from the row or a value its takeaway cites there (`about.quotes`), else the row's words (its
+ *  text field, else its longest words, as recordFields picks them); `rest`, its other fields with a value, those whose
+ *  name the card's words name first (`merged_by` where the card says "merged", `reviewer` where it says "review"), then
+ *  in the row's order. A value as text: a string with its line ends as `\n`, a list or an object as its JSON. Pure. */
+export function claimFields(record: Record<string, unknown>, about: { quotes?: readonly string[]; words?: string } = {}): { read: [string, string][]; rest: [string, string][] } {
+  const text = (v: unknown): string => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n') : v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v))
+  const fields = Object.entries(record).map(([k, v]): [string, string] => [k, text(v)]).filter(([, v]) => v.trim() !== '')
+  const flat = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
+  const quotes = (about.quotes ?? []).map(q => flat(q).replace(/^["“'‘]+|["”'’]+$/g, '').trim()).filter(Boolean)
+  // a quote of a few characters (a count, `PR`) holds only where it is the whole value
+  const holds = (v: string) => quotes.some(q => (q.length >= 4 && flat(v).includes(q)) || flat(v) === q)
+  let read = fields.filter(([, v]) => holds(v)).slice(0, 2)
+  if (!read.length) {
+    const words = fields.find(([k]) => /^(text|content|message|body|msg|comment|title|name|summary)$/i.test(k) && typeof record[k] === 'string')
+    const longest = fields.filter(([k]) => typeof record[k] === 'string').sort((a, b) => b[1].length - a[1].length)[0]
+    read = [words ?? longest ?? fields[0]].filter((f): f is [string, string] => Boolean(f))
+  }
+  const said = new Set(flat(about.words ?? '').split(/[^a-z0-9]+/).filter(w => w.length >= 4))
+  // a name's word the card says, or one that starts the other (`merge` and "merged", `reviewer` and "review")
+  const named = (k: string) => k.toLowerCase().split(/[^a-z0-9]+/).some(p => p.length >= 4 && [...said].some(w => w === p || (Math.min(w.length, p.length) >= 5 && (w.startsWith(p) || p.startsWith(w)))))
+  const others = fields.filter(f => !read.includes(f))
+  return { read, rest: [...others.filter(([k]) => named(k)), ...others.filter(([k]) => !named(k))] }
 }
 
 /** The sentence of a reply that holds a citation, for the prompt that asks for its verification script. */

@@ -5,6 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { cid } from '../lib'
+import { citePlace } from '../citesview'
 import { CWD, aboveAt, paneAt, panelWorld, shown, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
@@ -103,4 +104,12 @@ test('one count everywhere (bug hunt B8): the footer under an answer, the thimbl
   expect(rows.join('\n')).not.toContain('(no words)')
   expect(rows.find(r => r.includes('14592'))).toMatch(/^ {4}14592 · revisions TOTAL · found +card 1$/)
   await m.unmount()
+})
+
+test("a card cell's place names its column and row as the labels they stand for, never their %XX (bug hunt B18)", () => {
+  // as the Citations view and home's Citations list name it
+  expect(citePlace('card:far-apart-average#mean%20merged%20PRs/managed%5Fprs')).toBe('mean merged PRs managed_prs')
+  expect(citePlace('card:far-apart-average#mean merged PRs/emergent%5Fprs%5Fissues')).toBe('mean merged PRs emergent_prs_issues')
+  // a label with no %XX as written
+  expect(citePlace('card:x#pages/TOTAL')).toBe('pages TOTAL')
 })

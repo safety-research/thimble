@@ -50,6 +50,44 @@ test('a bar chart whose field names hold a dot draws as bars: its fields escaped
   expect(card.rows as BarRow[]).toEqual([{ label: 'LinkHelper771', value: 165, group: '' }, { label: 'MapHelper', value: 75, group: '' }])
 })
 
+test("a dots chart draws as its rows of dots on one x axis, the agents a text layer names beside their dots, never as its raw rows (bug hunt B15)", () => {
+  // thimble.chart("dots", df[["PRs opened", "run"]]) with an invisible layer for the tooltip and a text layer naming
+  // the top agent of each run, as main layered it in pandas-swarm
+  const dots = [
+    ...[2, 3, 2, 2, 11, 1].map(n => ({ 'PRs opened': n, run: 'fable-emergent' })),
+    ...[16, 4, 16, 2].map(n => ({ 'PRs opened': n, run: 'opus-emergent' })),
+  ]
+  const named = [{ 'PRs opened': 11, run: 'fable-emergent', agent: 'agent-21' }, { 'PRs opened': 16, run: 'opus-emergent', agent: 'agent-15 & agent-48' }]
+  const xy = { x: { field: 'PRs opened', type: 'quantitative' }, y: { field: 'run', type: 'nominal' } }
+  const spec = {
+    layer: [
+      { data: { name: 'thimble-chart-5167b8b7', values: dots }, mark: { type: 'point', yOffset: { expr: 'datum.d * 3.5' } }, encoding: { x: xy.x, y: { ...xy.y, sort: ['opus-emergent', 'fable-emergent'] } } },
+      { data: { name: 'data-all' }, mark: { type: 'point', opacity: 0 }, encoding: { ...xy, tooltip: [{ field: 'agent', type: 'nominal' }] } },
+      { data: { name: 'data-top' }, mark: { type: 'text', align: 'left', dx: 8 }, encoding: { ...xy, text: { field: 'agent', type: 'nominal' } } },
+    ],
+    datasets: { 'data-all': dots.map((d, i) => ({ ...d, agent: `agent-${i}` })), 'data-top': named },
+  }
+  const { card } = cardOfCell({ ...of('b0bar000'), id: 'd0dots00', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell)
+  expect(card.kind).toBe('dots')
+  // the rows in the order the chart sorts them, each with its dots and the words beside them
+  expect(card.strips!.map(r => [r.name, r.dots.length, r.notes.map(n => n.text)])).toEqual([
+    ['opus-emergent', 4, ['agent-15 & agent-48']],
+    ['fable-emergent', 6, ['agent-21']],
+  ])
+  const lay = cardLayout(card, 80, -1)
+  const lines = lay.lines.map(l => l.map(x => x.s).join(''))
+  // a row per run, its name first, its dots after, the agents a cell after the top dot; then the x axis's ticks
+  expect(lines.length).toBe(4)
+  expect(lines[0]).toMatch(/^opus-emergent {3,}[·•●][·•● ]*[·•●] agent-15 & agent-48$/)
+  expect(lines[1]).toMatch(/^fable-emergent {2,}[·•●][·•● ]*[·•●] agent-21$/)
+  expect(lines[2]).toMatch(/^ +─+(┬─+)+$/)
+  expect(lines[3]!.trim().split(/ +/)).toEqual(['5', '10', '15'])
+  // the same x of two dots is one mark: `●` where a cell holds the most, its readout saying how many
+  const two = lay.items.findIndex(it => it.label === 'opus-emergent' && it.text === '16')
+  expect(lay.items[two]).toMatchObject({ value: '16 PRs opened · 2 dots', kind: 'mark' })
+  expect(lines.join('\n')).not.toContain('fable-emergent  2')
+})
+
 test("a heatmap's rows as a table: in its axes' order, its days by the chart's sort, not as text sorts them", () => {
   // README capture 10-17: days grouped as text ("Jul 01" before "Jun 01" before "May 24") under `sort=days`
   const rows = [

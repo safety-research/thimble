@@ -395,6 +395,8 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerd
     out.path = str(res.path)
     if (typeof res.line === 'number') out.line = res.line
     out.lines = linesOf(res, c.display)
+    // a row's fields, which an example card shows by their names, never as the JSON its excerpt is
+    if ((kind === 'row' || kind === 'csvrow') && isObj(res.record)) out.record = res.record
     // a command's output: the command that printed it, as its row names it (calls.py chip_line)
     if (kind === 'call' && str(meta.line)) out.command = str(meta.line)
   }

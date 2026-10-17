@@ -2,11 +2,11 @@
 // the drawing form of hooks/draw.ts (CardData), so its layouts draw it in the terminal. No `$`.
 //
 // The map of card kinds (the two-modes study): a table, a timeline, a diagram, an example and a label draw directly; a
-// simple bar or line chart (one Altair layer, x and y fields) draws as text; any other chart draws as a table of its
-// rows; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text; a custom
+// simple bar or line chart (one Altair layer, x and y fields) draws as text, and a dots chart as its rows of dots with
+// the words a text layer writes beside them; any other chart draws as a table of its rows; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text; a custom
 // HTML card draws as its text. A label card's counts and records come from the label (`thimble state label`).
 import type { TermLinks } from './types'
-import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, PlanStep } from './draw'
+import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, DotRow, PlanStep } from './draw'
 import { labelState, labelStateWords } from './lib'
 import { classColors } from './labels'
 import type { LabelClass } from './labels'
@@ -101,7 +101,7 @@ const READS = 'application/vnd.thimble.reads+json'
 type Frame = { columns?: string[]; index?: string | null; label?: string; rows?: Cell[][]; total?: number; view?: { columns?: string[]; formats?: Record<string, string> } }
 type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown; axis?: { values?: unknown } | null }
 type VegaLite = {
-  mark?: string | { type?: string }
+  mark?: string | { type?: string; opacity?: unknown }
   encoding?: Record<string, Enc | undefined>
   data?: { name?: string; values?: Record<string, unknown>[] }
   datasets?: Record<string, Record<string, unknown>[]>
@@ -369,6 +369,50 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
   return null
 }
 
+// the marks a dots chart draws its dots with
+const DOT_MARKS = new Set(['point', 'circle', 'square', 'tick'])
+
+/** A dots chart (thimble.chart("dots"), or any chart of dots along rows: x numbers or times, y the rows' names) as a
+ *  dots card: each row's dots, in the order its axis sorts the rows, colored by the chart's color field, with the words
+ *  a text layer on the same x and y writes beside them (bug hunt B15: the rows' table drew 281 raw rows, and the agents
+ *  a text layer named never showed). Its other layers may be dots no one sees (a tooltip's, opacity 0) and rules (an
+ *  interval's, a mark's); null for any other chart, which draws as its rows' table. */
+export function dotsCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
+  if (spec.facet || spec.hconcat || spec.vconcat || spec.concat || spec.spec) return null
+  const layers = (spec.layer ?? [spec]).map(l => ({ ...l, encoding: { ...(spec.layer ? spec.encoding : {}), ...l.encoding }, data: l.data ?? spec.data }))
+  if (layers.some(l => l.layer || l.facet || l.hconcat || l.vconcat || l.concat || l.spec)) return null
+  if (!layers.every(l => DOT_MARKS.has(markOf(l)) || markOf(l) === 'text' || markOf(l) === 'rule')) return null
+  const rowsOf = (l: VegaLite) => vegaRows(l, spec)
+  const seen = (l: VegaLite) => typeof l.mark !== 'object' || l.mark.opacity !== 0
+  const discrete = (e: Enc | undefined) => Boolean(e?.field) && (e!.type === 'nominal' || e!.type === 'ordinal')
+  const along = (e: Enc | undefined) => Boolean(e?.field) && !e!.aggregate && (e!.type === 'quantitative' || e!.type === 'temporal')
+  // the dots: thimble.chart's own layer, else the seen dot layer with the most rows; rows down y, values along x
+  const shaped = layers.filter(l => DOT_MARKS.has(markOf(l)) && seen(l) && discrete(l.encoding.y) && along(l.encoding.x) && rowsOf(l).length)
+  const dots = shaped.find(l => l.data?.name?.startsWith(CHART_ROWS_NAME)) ?? shaped.reduce<(typeof shaped)[number] | null>((a, b) => (!a || rowsOf(b).length > rowsOf(a).length ? b : a), null)
+  if (!dots) return null
+  const enc = dots.encoding
+  const xf = enc.x!.field!
+  const yf = enc.y!.field!
+  const gf = enc.color?.field && enc.color.field !== yf ? enc.color.field : ''
+  const valued = (r: Record<string, unknown>) => (typeof r[xf] === 'number' && Number.isFinite(r[xf])) || (typeof r[xf] === 'string' && r[xf] !== '')
+  const rows = sortedBars(rowsOf(dots).filter(valued), enc, 'y', yf)
+  if (!rows.length) return null
+  const strips = new Map<string, DotRow>()
+  const strip = (name: string) => strips.get(name) ?? strips.set(name, { name, dots: [], notes: [] }).get(name)!
+  for (const r of rows) strip(String(r[yf] ?? '')).dots.push({ x: r[xf] as number | string, group: gf ? String(r[gf] ?? '') : '' })
+  // the words each text layer on the dots' x and y writes, beside the dots of their row
+  for (const l of layers) {
+    const t = l.encoding.text?.field
+    if (markOf(l) !== 'text' || !t || l.encoding.x?.field !== xf || l.encoding.y?.field !== yf) continue
+    for (const r of rowsOf(l)) {
+      const words = r[t] === null || r[t] === undefined ? '' : String(r[t]).trim()
+      const row = strips.get(String(r[yf] ?? ''))
+      if (words && row && valued(r)) row.notes.push({ x: r[xf] as number | string, text: words })
+    }
+  }
+  return { ...blank(cell, 'dots'), x: xf, y: yf, strips: [...strips.values()] }
+}
+
 /** The values an axis names itself (Vega-Lite's `axis.values`, which thimble.chart sets at each time of weekly or
  *  monthly data): numbers and text as written, a DateTime as its wall clock written out (`2026-05-18T00:00:00`), as a
  *  row's time is. */
@@ -492,9 +536,14 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   if (kind === 'plan') return { card: { ...blank(cell, 'plan'), steps: planSteps(payload?.steps) }, error }
   if (kind === 'example') {
     const refs = Array.isArray(payload?.refs) ? (payload!.refs as unknown[]) : []
-    const examples: CardExample[] = refs.map(r =>
-      typeof r === 'string' ? { ref: r.replace(/^\[\[|\]\]$/g, ''), quote: '', note: '' } : { ref: String((r as { ref?: unknown }).ref ?? ''), quote: String((r as { quote?: unknown }).quote ?? ''), note: '' },
-    )
+    // the words add_card kept beside each ref (`quotes`, one per ref), which the card quotes from its record
+    const quotes = Array.isArray(payload?.quotes) ? (payload!.quotes as unknown[]) : []
+    const examples: CardExample[] = refs.map((r, i) => {
+      const kept = typeof quotes[i] === 'string' ? (quotes[i] as string).trim() : ''
+      return typeof r === 'string'
+        ? { ref: r.replace(/^\[\[|\]\]$/g, ''), quote: '', note: '', ...(kept ? { kept } : {}) }
+        : { ref: String((r as { ref?: unknown }).ref ?? ''), quote: String((r as { quote?: unknown }).quote ?? ''), note: '' }
+    })
     return { card: { ...blank(cell, 'example'), examples }, error }
   }
   if (kind === 'label') return { card: labelCard(cell, label ?? null), error }
@@ -511,7 +560,7 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   const spec = first(cell, k => k.startsWith('application/vnd.vegalite')) as VegaLite | undefined
   if (spec && typeof spec === 'object') {
     const vl = plainFields(spec)
-    const chart = chartCard(cell, vl)
+    const chart = chartCard(cell, vl) ?? dotsCard(cell, vl)
     if (chart) return { card: chart, error }
     const table = rowsTable(cell, axisOrder(anyRows(vl), vl))
     if (table) return { card: table, error }

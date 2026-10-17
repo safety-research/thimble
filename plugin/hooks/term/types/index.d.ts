@@ -121,6 +121,8 @@ export type TermVerdict = {
   row?: string
   value?: string
   command?: string
+  /** a database row's or a CSV row's fields, as its place resolved them */
+  record?: Record<string, unknown>
   at: number
 }
 

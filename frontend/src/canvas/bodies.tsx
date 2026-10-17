@@ -52,7 +52,7 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
       const raw = Array.isArray(payload.refs) ? (payload.refs as unknown[]) : []
       const quotes = Array.isArray(payload.quotes) ? (payload.quotes as unknown[]) : []
       const refs = raw.filter((r): r is string => typeof r === 'string')
-      return <ExampleBody refs={refs} quotes={raw.flatMap((r, i) => (typeof r === 'string' ? [quotes[i]] : []))} ws={ws} big={big} />
+      return <ExampleBody refs={refs} quotes={raw.flatMap((r, i) => (typeof r === 'string' ? [quotes[i]] : []))} ws={ws} big={big} question={cell.title ?? ''} takeaway={cell.takeaway ?? ''} />
     }
     case 'label': {
       const concept = typeof payload.concept === 'string' ? payload.concept : ''
@@ -185,7 +185,7 @@ function MediaExample({ ws, media }: { ws: string; media: MediaRef }) {
  * (canvas/quotes exampleEntries, entryParts). A ref to an image, recording or video shows the file itself
  * (MediaExample).
  */
-function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknown[]; ws: string; big: boolean }) {
+function ExampleBody({ refs, quotes, ws, big, question = '', takeaway = '' }: { refs: string[]; quotes: unknown[]; ws: string; big: boolean; question?: string; takeaway?: string }) {
   const [got, setGot] = useState<Record<string, ResolvedRef | null>>({})
   useEffect(() => {
     let alive = true
@@ -195,6 +195,9 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
     }
   }, [ws, refs])
   const entries = useMemo(() => exampleEntries(refs, quotes), [refs, quotes])
+  // what the card says of each record: the values its takeaway cites there, and its question's and takeaway's words
+  const cited = useMemo(() => [...takeaway.matchAll(/\[\[([^\]|]*)\|([^\]]*)\]\]/g)].map((m) => ({ said: m[1].trim(), ref: m[2].trim() })), [takeaway])
+  const words = `${question} ${takeaway.replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')}`
   if (!entries.length) return null
   const open = (r: string) => {
     track('chip-teleport', { target: r, detail: { kind: 'example' } })
@@ -213,7 +216,7 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
   const body = (e: ExampleEntry, max: number) => {
     const media = mediaOf(e.ref)
     if (media) return <MediaExample ws={ws} media={media} />
-    const parts = entryParts(e, lookup)
+    const parts = entryParts(e, lookup, { said: cited.filter((c) => c.said && e.refs.includes(c.ref)).map((c) => c.said), words })
     if (!parts?.length) return null
     return (
       <Clamp max={max} className="bcell-q-body">

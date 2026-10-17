@@ -3,7 +3,7 @@
 // returns its lines and a hit test from a cell to an item. The `note` and `text` kinds (noteLayout, textLayout) are the
 // cards drawn as their words.
 import { axisTicks, numberTicks, ownTicks, placeLabels, wallClock } from './axis'
-import { cut, cw, fmt, formatted, quoted, width } from './lib'
+import { cut, cw, fmt, formatted, itemsRow, quoted, viewRef, width } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 import { hueOf } from './labels'
@@ -14,6 +14,9 @@ export type Seg = { s: string; fg?: string; bg?: string; b?: boolean; d?: boolea
 export type Line = Seg[]
 
 export type BarRow = { label: string; value: number; group: string }
+/** A row of a dots card (cell.ts dotsCard): its name, its dots (each its x, a number or a time as written, and the
+ *  value of the chart's color field it is colored by, '' for none), and the words a text layer writes beside them. */
+export type DotRow = { name: string; dots: { x: string | number; group: string }[]; notes: { x: string | number; text: string }[] }
 export type Cell = string | number | boolean | null
 export type CardParam = { name: string; value: string | number; default: string | number; choices: (string | number)[] }
 export type DiagramNode = { id: string; label: string; ref?: string; detail?: string }
@@ -24,8 +27,9 @@ export type CardLabel = { slug: string; name: string; values: string[]; marks?: 
 /** A label card's own label (cell.ts labelCard, from `thimble state label`): how its records were labeled and how many. */
 export type LabelInfo = { slug: string; name: string; kind: string; values: string[]; labeled: number; total: number; trial: boolean; paths?: string[]; colors?: Record<string, number> }
 /** An example: its record, its words, and on a label card its value now, why, and whether the analyst set or agreed
- *  with it (`set`; `was` the value the label gave). */
-export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string }
+ *  with it (`set`; `was` the value the label gave). `kept`: the words the card quotes from the record (its payload's
+ *  `quotes`); `fields`: a database row's fields (lib.ts claimFields), which it shows in place of its words. */
+export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string; kept?: string; fields?: { read: [string, string][]; rest: [string, string][] } }
 /** A plan card's step (cell.ts planSteps, backend notebook.plan_step_of): its words, its status (`not started`,
  *  `running`, `done`, `needs you`), what it makes, the note its agent left, and its time ('' for none). */
 export type PlanStep = { text: string; status: string; makes: string[]; note: string; time: string }
@@ -42,6 +46,8 @@ export type CardData = {
   total?: number
   columns?: string[]
   series?: { name: string; points: [string | number, number][] }[]
+  /** a dots card's rows, in the order its rows' axis sorts them */
+  strips?: DotRow[]
   /** a line card's x axis's own ticks, as its x values are written (Vega-Lite's `axis.values`: thimble.chart's at each
    *  time of weekly or monthly data), which the axis names in place of round ones */
   xTicks?: (string | number)[]
@@ -311,8 +317,11 @@ function classColour(card: CardData, name?: string, ref?: string): string | unde
 }
 
 /** A place as the analyst reads it: `revisions.jsonl line 10566`, `lines 3-8`, `row 12`, `results.json item 4`, `the
- *  command's output line 3`; never `#L` or a command's id. A card's place is named by its question by the caller. */
+ *  command's output line 3`, `view page-histories · <its key>`; never `#L` or a command's id. A card's place is named by
+ *  its question by the caller. */
 export function placeWords(ref: string): string {
+  const view = viewRef(ref)
+  if (view) return view.key ? `view ${view.slug} · ${view.key}` : `view ${view.slug}`
   const call = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/.exec(ref)
   if (call) return `the command's output${call[1] ? ` ${call[2] && call[2] !== call[1] ? `lines ${call[1]}-${call[2]}` : `line ${call[1]}`}` : ''}`
   const at = ref.indexOf('#')
@@ -707,6 +716,146 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   lines.push([{ s: ' '.repeat(yW + 1) + xl, fg: COLORS.dim }])
   if (series.length > 1) lines.push(...flow(series.map((s, si) => [{ s: '● ', fg: seriesColour(si) }, { s: s.name }]), cols))
   return { lines, items, hit: (x, y) => nearest(x, y) }
+}
+
+/** How many dots one cell holds, as its glyph: `●` where it holds the most any cell of the card holds or near it (more
+ *  than two thirds of it), `•` past a third, `·` for fewer; every dot `●` where no cell holds two. */
+export function dotGlyph(n: number, most: number): string {
+  if (most <= 1 || n * 3 > most * 2) return '●'
+  return n * 3 > most ? '•' : '·'
+}
+
+/**
+ * A dots card (cell.ts dotsCard): a row per row of the chart, its name at the content's edge as a bar's is, then its
+ * dots on one x axis for all rows, a cell's glyph saying how many dots it holds (dotGlyph), in the first hue or its
+ * group's; the words a text layer writes stand a cell after their dot, or after the row's last dot where something
+ * stands there. Under the rows, the x axis's ticks, as a line chart names them, and the groups' legend. The first
+ * MAX_BARS rows, then `… N more`. A cell's dots are one mark: the readout names its row, its x and how many.
+ */
+function dotsLayout(card: CardData, cols: number, hover: number): Layout {
+  const all = (card.strips ?? []).filter(r => r.dots.length || r.notes.length)
+  const strips = all.slice(0, MAX_BARS)
+  const xs = strips.flatMap(r => [...r.dots.map(d => d.x), ...r.notes.map(n => n.x)])
+  const kind: 'num' | 'time' = xs.every(x => typeof x === 'number' || (x.trim() !== '' && !Number.isNaN(Number(x)))) ? 'num' : 'time'
+  const xOf = (x: string | number) => (kind === 'num' ? Number(x) : wallClock(String(x)))
+  const vals = xs.map(xOf).filter(Number.isFinite)
+  if (!vals.length) return { lines: [[{ s: 'no dots to draw', fg: COLORS.dim }]], items: [], hit: () => -1 }
+  const x0 = Math.min(...vals)
+  const x1 = Math.max(...vals)
+  // an x as the readout names it: a time as a bar's label reads (barNames), a number as the mod writes one
+  const xName = (x: string | number) => (kind === 'time' ? (barNames([String(x)])[0] ?? String(x)) : amount(Number(x)))
+  const names = barNames(strips.map(r => r.name))
+  const notes = strips.map(r => r.notes.map(n => n.text))
+  // the room the words beside the dots may take past the axis's last cell, and the names' column, as a bar card's
+  const noteW = Math.min(Math.max(0, ...notes.flat().map(t => width(t))), Math.floor(cols * 0.3))
+  const after = noteW ? noteW + 1 : 0
+  const labelW = Math.min(Math.max(4, ...names.map(n => width(n))), Math.max(8, Math.floor((cols - after) * 0.35)))
+  const pw = Math.max(10, cols - labelW - 2 - after)
+  const area = pw + after
+  const cellOf = (v: number) => (x1 === x0 ? Math.floor(pw / 2) : Math.round(((v - x0) / (x1 - x0)) * (pw - 1)))
+  const groups = [...new Set(strips.flatMap(r => r.dots.map(d => d.group)).filter(Boolean))]
+  const hue = (g: string) => classColour(card, g) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(g)) % COLORS.series.length]! : one())
+  // each row's cells that hold dots, left to right, with their dots: the marks the pointer picks, row by row
+  type Mark = { row: number; cell: number; dots: { x: string | number; group: string }[] }
+  const marks: Mark[] = []
+  strips.forEach((r, row) => {
+    const by = new Map<number, Mark['dots']>()
+    for (const d of r.dots) {
+      const v = xOf(d.x)
+      if (!Number.isFinite(v)) continue
+      const c = cellOf(v)
+      by.set(c, [...(by.get(c) ?? []), d])
+    }
+    for (const cell of [...by.keys()].sort((a, b) => a - b)) marks.push({ row, cell, dots: by.get(cell)! })
+  })
+  const most = Math.max(1, ...marks.map(m => m.dots.length))
+  const items: Item[] = marks.map(m => {
+    const v = m.dots.map(d => xOf(d.x))
+    const lo = m.dots[v.indexOf(Math.min(...v))]!.x
+    const hi = m.dots[v.indexOf(Math.max(...v))]!.x
+    const at = xName(lo) === xName(hi) ? xName(lo) : `${xName(lo)} to ${xName(hi)}`
+    const open = `card:${card.id}#${card.x}/${strips[m.row]!.name}`
+    return { label: names[m.row]!, value: `${at} ${card.x}${m.dots.length > 1 ? ` · ${count(m.dots.length)} dots` : ''}`, cite: cite(at, open), open, kind: 'mark', text: at }
+  })
+  const hot = hover >= 0 ? marks[hover] : undefined
+  const lines: Line[] = []
+  const owner: number[] = []
+  strips.forEach((r, row) => {
+    // the row's cells past its name: a dot's glyph, or a cell of the words beside them (null where nothing stands)
+    const cells: (Seg | null)[] = new Array<Seg | null>(area).fill(null)
+    const used = new Array<boolean>(area).fill(false)
+    for (const m of marks) {
+      if (m.row !== row) continue
+      const tally = new Map<string, number>()
+      for (const d of m.dots) tally.set(d.group, (tally.get(d.group) ?? 0) + 1)
+      const group = [...tally].sort((a, b) => b[1] - a[1])[0]![0]
+      cells[m.cell] = { s: dotGlyph(m.dots.length, most), fg: hot === m ? COLORS.text : hue(group), ...(hot === m ? { inv: true } : {}) }
+      used[m.cell] = true
+    }
+    // the words beside their dot, a blank cell between; else after the row's last word or dot
+    r.notes.forEach(n => {
+      const v = xOf(n.x)
+      const free = (p: number, w: number) => p + w <= area && used.slice(Math.max(0, p - 1), p + w).every(u => !u)
+      const text = cut(n.text, Math.max(1, Math.min(width(n.text), noteW)))
+      const w = width(text)
+      let p = Number.isFinite(v) ? cellOf(v) + 2 : area
+      while (p + w <= area && !free(p, w)) p++
+      if (p + w > area) {
+        const end = used.lastIndexOf(true) + 2
+        if (end >= area) return
+        p = end
+      }
+      const shown = cut(text, area - p)
+      cells[p] = { s: shown }
+      for (let k = p; k < Math.min(area, p + width(shown)); k++) used[k] = true
+    })
+    const segs: Seg[] = []
+    for (let k = 0; k < area; k++) {
+      const c = cells[k]
+      if (c) {
+        segs.push(c)
+        k += width(c.s) - 1
+      } else if (segs.length && segs.at(-1)!.fg === undefined && !segs.at(-1)!.inv && /^ +$/.test(segs.at(-1)!.s)) segs.at(-1)!.s += ' '
+      else segs.push({ s: ' ' })
+    }
+    while (segs.length && /^ +$/.test(segs.at(-1)!.s) && segs.at(-1)!.fg === undefined) segs.pop()
+    const [first, second] = fold(names[row]!, labelW)
+    const on = hot?.row === row
+    lines.push([{ s: first!, inv: on }, { s: ' '.repeat(Math.max(0, labelW - width(first!)) + 2) }, ...segs])
+    owner.push(row)
+    if (second) {
+      lines.push([{ s: second, inv: on }])
+      owner.push(row)
+    }
+  })
+  if (all.length > strips.length) lines.push([{ s: `… ${all.length - strips.length} more`, fg: COLORS.dim }])
+  // the x axis under the dots, its labels dim, each under a ┬, as a line chart's
+  const ticks = x1 > x0 ? axisTicks(kind, x0, x1, pw, cellOf, kind === 'num' && vals.every(v => Number.isInteger(v))) : { at: [], labels: [], cells: [], x: [] }
+  const single = x1 === x0 ? placeLabels([cellOf(x0)], [xName(xs[0]!)], pw) : null
+  const rule = new Array<string>(pw).fill('─')
+  for (const c of ticks.cells) rule[c] = '┬'
+  if (single) rule[cellOf(x0)] = '┬'
+  const pad0 = ' '.repeat(labelW + 2)
+  lines.push([{ s: pad0 }, { s: rule.join(''), fg: COLORS.rule }])
+  let xl = ''
+  ticks.labels.forEach((l, i) => (xl += ' '.repeat(Math.max(0, ticks.x[i]! - width(xl))) + l))
+  if (single) xl = ' '.repeat(single[0]!) + xName(xs[0]!)
+  lines.push([{ s: pad0 + xl, fg: COLORS.dim }])
+  // the legend on its own row under the chart; none when a label it read names the groups on its label row
+  const named = new Set(cardLabels(card).flatMap(l => l.values))
+  if (groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map(g => [{ s: '● ', fg: hue(g) }, { s: g }]), cols))
+  // a row's dots: the mark nearest the pointer's cell on its row
+  const hit = (x: number, y: number): number => {
+    const row = owner[y]
+    if (row === undefined) return -1
+    const cx = x - labelW - 2
+    let best = -1
+    marks.forEach((m, i) => {
+      if (m.row === row && (best < 0 || Math.abs(m.cell - cx) < Math.abs(marks[best]!.cell - cx))) best = i
+    })
+    return best
+  }
+  return { lines, items, hit }
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -1198,18 +1347,65 @@ function quoteLines(words: string, room: number, max: number): string[] {
   return lines
 }
 
+/** A field of a record the claim is about, in `room` cells: its name dim, then its value in quotation marks and italic,
+ *  its line ends kept (its blank lines left out), wrapped under the value's first row, in at most `max` rows; words that
+ *  do not fit end in `…` and the closing mark. */
+function fieldLines(key: string, value: string, room: number, max: number): Line[] {
+  const keyW = width(key) + 2
+  const w = Math.max(8, room - keyW)
+  const q = quoted(value)
+  const [open, close] = q === value ? ['', ''] : [q[0]!, q.at(-1)!]
+  const parts = value.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const rows: string[] = []
+  let cutShort = false
+  parts.forEach((part, i) => {
+    if (rows.length >= max) return void (cutShort = true)
+    const got = wrapCell(`${i === 0 ? open : ''}${part}${i === parts.length - 1 ? close : ''}`, w, max - rows.length).filter(Boolean)
+    rows.push(...got)
+    if (got.at(-1)?.endsWith('…')) cutShort = true
+  })
+  if (cutShort && rows.length) {
+    const t = rows.at(-1)!.replace(/…$/, '').trimEnd()
+    const kept = width(t) + 1 + close.length <= w ? t : cut(t, w - close.length).slice(0, -1)
+    rows[rows.length - 1] = `${kept.replace(/[\s,;:.!?]+$/, '')}…${close}`
+  }
+  return rows.map((r, i) => [{ s: i === 0 ? key : ' '.repeat(width(key)), fg: COLORS.dim }, { s: '  ' }, { s: r, i: true }])
+}
+
+/** A record's other fields as `name value` items parted by ` · `, dim, in at most `max` rows of `room` cells: whole items
+ *  while they fit, then ` · +N` for those left out (lib.ts itemsRow). */
+function restLines(rest: readonly [string, string][], room: number, max: number): Line[] {
+  const items = rest.map(([k, v]) => `${k} ${cut(v.replace(/\s+/g, ' ').trim(), 48)}`)
+  const out: Line[] = []
+  let k = 0
+  while (k < items.length && out.length < max) {
+    if (out.length === max - 1) {
+      out.push([{ s: itemsRow(items.slice(k), room), fg: COLORS.dim }])
+      break
+    }
+    let j = k + 1
+    while (j < items.length && width(items.slice(k, j + 1).join(' · ')) <= room) j++
+    out.push([{ s: cut(items.slice(k, j).join(' · '), room), fg: COLORS.dim }])
+    k = j
+  }
+  return out
+}
+
 /**
  * Example records: per record, a ● at the content's edge (in its value's hue when a label the card read marks it, dim
  * when it marks it not, else the citation's purple, as its ↗ and place: one evidence color in a card, the owner 10-17:
  * "card bullet and citations are different colors") and thimble's note after it, regular; under the note, 2 cells in,
  * the record's words in quotation marks and italic, up to three rows, then ↗ and its place in purple and underlined, on
- * the quote's last row where it fits, else on the row under it. A blank row between records.
+ * the quote's last row where it fits, else on the row under it. A database row shows its fields in place of its words
+ * (bug hunt B17): the fields the claim is about, each its name dim and its value as words are quoted, its line ends
+ * kept, then its other fields on up to two dim rows, those the card names first. A blank row between records.
  */
 function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   const exs = (card.examples ?? []).slice(0, 8)
   const lines: Line[] = []
   const owner: number[] = []
-  const items: Item[] = exs.map(e => ({ label: placeWords(e.ref), value: e.note || e.quote.slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.note || e.quote }))
+  const words = (e: CardExample) => e.note || e.quote || (e.fields?.read[0]?.[1] ?? '').replace(/\s+/g, ' ').trim()
+  const items: Item[] = exs.map(e => ({ label: placeWords(e.ref), value: words(e).slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: words(e) }))
   const valued = cardLabels(card).length > 0
   const room = Math.max(10, cols - 2)
   exs.forEach((e, i) => {
@@ -1223,9 +1419,22 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
     const lead = () => (rows.length ? { s: '  ' } : glyph)
     const note = e.note ? wrapCell(e.note.replace(/\s+/g, ' ').trim(), room, 3).filter(Boolean) : []
     for (const t of note) rows.push([lead(), { s: t }])
-    const words = demojibake(e.quote).replace(/\s+/g, ' ').trim()
-    const quote = words ? quoteLines(words, room, 3) : []
-    for (const t of quote) rows.push([lead(), { s: t, i: true }])
+    if (e.fields && (e.fields.read.length || e.fields.rest.length)) {
+      const read = e.fields.read.map(([k, v]): [string, string] => [k, demojibake(v)])
+      // the claim's fields share four rows, the first its three at most; the other fields two
+      let left = 4
+      for (const [k, v] of read) {
+        const got = fieldLines(k, v, room, Math.min(3, left))
+        left -= got.length
+        for (const l of got) rows.push([lead(), ...l])
+        if (left <= 0) break
+      }
+      for (const l of restLines(e.fields.rest.map(([k, v]) => [k, demojibake(v)]), room, 2)) rows.push([lead(), ...l])
+    } else {
+      const said = demojibake(e.quote).replace(/\s+/g, ' ').trim()
+      const quote = said ? quoteLines(said, room, 3) : []
+      for (const t of quote) rows.push([lead(), { s: t, i: true }])
+    }
     // the place after the quote's last row (or the note's, with no quote) when it fits there with a gutter
     const last = rows.at(-1)
     const want = 2 + width(placeWords(e.ref))
@@ -2181,6 +2390,8 @@ export function cardLayout(card: CardData, cols: number, hover: number, plotRows
       return barLayout(card, cols, hover)
     case 'line':
       return lineLayout(card, cols, hover, plotRows)
+    case 'dots':
+      return dotsLayout(card, cols, hover)
     case 'timeline':
       return timelineLayout(card, cols, hover)
     case 'table':
