@@ -105,7 +105,8 @@ thread's fork too. --agent-check also refuses a second fork of a thread from sub
 fork_check), and records each fork it lets through by its tool_use id, by which the mirror knows the fork's thread.
 The waker polls the workspace's events/queue.jsonl (app/event_files.py) for an event of its own session that no watcher
 has taken (an event names its session, and one that names none is main's), takes it, writes it to stderr and exits 2;
-it exits 0 once a press turned its session's transport to the server, so the next hook's waker pulls from the server.
+once a press turned its session's transport to the server, it pulls from the server with the session's lock it holds,
+since no other hook's waker runs while main is idle (the `thimble` command presses at the session's start).
 --held prints the session's held events from held-events.json and the lines of the events the waker wrote out.
 --mode records main's permission mode in subagents.json, and when it turns into or out of Manual mode starts the
 backend's `mode-notice` call, which shows or clears the `manual-mode` notice in the terminal UI's band
@@ -371,12 +372,13 @@ def ack(cwd: str, session: str, event_id: str, terminal: bool = False) -> None:
         pass
 
 
-def watch(inp: dict) -> int:
-    """The asyncRewake hook (module note)."""
+def watch(inp: dict, held=None) -> int:
+    """The asyncRewake hook (module note); `held`, the session's lock, which the waker on local transport took before a
+    press turned its session's transport to the server (watch_files)."""
     session = str(inp.get("session_id") or "")
     if inp.get("agent_id") or not session:
         return 0
-    held = lock(session)
+    held = held or lock(session)
     if held is None:
         return 0
     cwd = folder(inp)
@@ -511,9 +513,10 @@ FILE_LOOK_TICKS = 4  # the waker takes again at least every this many ticks, the
 def watch_files(inp: dict, ws: Path) -> int:
     """The waker on local transport (module note): the oldest event for this session that no watcher has taken, from the
     queue, written to stderr with exit 2; 0 in a subagent, for a session with no marker (thimble is not on in it),
-    when another waker holds the session's lock, when the `claude` process has moved to another session or exited, and
-    once a press turned this session's transport to the server (the next hook's waker pulls from it). A new session's waker first waits up to MAIN_WAIT_S for --rekey to
-    record a /clear's move to it, since main's events name no session."""
+    when another waker holds the session's lock, and when the `claude` process has moved to another session or exited.
+    Once a press turned this session's transport to the server, it pulls from the server with the lock it holds (watch):
+    another hook's waker exits on that lock, and while main is idle no other hook runs. A new session's waker first
+    waits up to MAIN_WAIT_S for --rekey to record a /clear's move to it, since main's events name no session."""
     session = str(inp.get("session_id") or "")
     if not session or inp.get("agent_id") or not (home() / "up" / f"{_safe(session)}.active").exists():
         return 0  # a subagent's hook, or a session thimble is not on in
@@ -541,10 +544,10 @@ def watch_files(inp: dict, ws: Path) -> int:
         except OSError:
             stamp = None
         ticks += 1
-        if stamp is not None and (stamp != seen or ticks % FILE_LOOK_TICKS == 0):
+        if stamp != seen or ticks % FILE_LOOK_TICKS == 0:  # with no queue file too: a press writes none
             seen = stamp
             if sf.transport(ws, session) != sf.LOCAL:
-                return 0
+                return watch(inp, held_lock)
             got = ef.take(ws, session)
             if got is not None:
                 sys.stderr.write(str(got.get("text") or "") + "\n")
