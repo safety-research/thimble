@@ -53,7 +53,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
+import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, runReads, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
 import { featuresOf, openComments, openSection } from './band'
 import { openChecks } from './checksview'
@@ -181,7 +181,7 @@ export async function homeViews(cx: Ctx): Promise<HomeView[]> {
     const state = st === 'built' ? 'built' : st === 'building' ? 'building' : st === 'failed' ? 'failed' : 'proposed'
     const slug = str(v.slug)
     const fresh = state === 'built' && !rt.viewsSeen.has(slug) && rt.viewsBuiltBefore !== null && !rt.viewsBuiltBefore.has(slug)
-    return { slug, name: str(v.name) || slug, state, words: '', files: Array.isArray(v.files) ? (v.files as unknown[]).map(String) : [], unit: '', drawable: state === 'built', left: 0, at: Date.parse(str(v.ts)) || 0, ...(fresh ? { fresh: true } : {}), ...(v.term === true ? { term: true } : {}) }
+    return { slug, name: str(v.name) || slug, state, words: '', files: Array.isArray(v.files) ? (v.files as unknown[]).map(String) : [], unit: '', drawable: state === 'built', left: 0, at: Date.parse(str(v.ts)) || 0, ...(fresh ? { fresh: true } : {}), ...(v.term === true ? { term: true } : {}), ...(str(v.page) ? { page: str(v.page) } : {}), ...(str(v.page_why) ? { pageWhy: str(v.page_why) } : {}) }
   })
 }
 
@@ -3985,6 +3985,47 @@ const VIEW_CHROME = 3
 // the panel's own keys, which a view never takes (term_kit/kit.mjs PANEL_KEYS): back, the threads, close
 const PANEL_KEYS = ['b', 't', 'x']
 
+// what thimble answered this open's ask for the terminal page of a view built for the browser, by the view's slug: null
+// while it asks or once it builds; `why` when it is not built, with the fix, `failed` when Retry is the fix
+const pageAsks = new Map<string, { why: string; failed: boolean } | null>()
+
+/** Each open of a view built for the browser (the panel's load of it, term.ts loadPanel; a drawing writes nothing):
+ *  thimble asked to build its terminal page (`thimble act view-term-page`), as the browser's first open of a
+ *  terminal-built view builds that view's page (views.page_ask, ensure_page), unless home's row says it builds or failed. */
+async function askTermPage(cx: Ctx, p: TermPanel): Promise<void> {
+  const slug = p.slug ?? ''
+  const find = async () => (await homeViews(cx)).find(x => x.slug === slug)
+  // a view opened before home was read (open_view in a new session): home read first
+  const v = (await find()) ?? (await readSurface(cx, 'home-full', 'home'), await find())
+  const sc = rt.sc
+  if (!v || v.term || v.state !== 'built' || (v.page && v.page !== 'missing') || !sc) return
+  pageAsks.set(slug, null)
+  const got = await act<{ queued?: boolean; reason?: string; failed?: boolean }>(cx, sc, 'view-term-page', { slug })
+  pageAsks.set(slug, !got.ok ? { why: `thimble did not start the build of its terminal page: ${got.error}`, failed: false } : got.value.queued === false && got.value.reason ? { why: got.value.reason, failed: got.value.failed === true } : null)
+  await cx.bumpPanel()
+}
+
+/** Where the terminal page of a view built for the browser stands, as the panel says it: why it is not built, with the
+ *  fix (home's row: its build failed, or thimble has none for it; or thimble's answer to this open's ask), else `why`
+ *  empty while it builds. */
+function termPage(v: HomeView): { why: string; failed: boolean } {
+  if (v.page === 'failed') return { why: `The build of its terminal page failed${v.pageWhy ? `: ${v.pageWhy.replace(/\.$/, '')}` : ''}. r builds it again.`, failed: true }
+  if (v.page === 'none') return { why: v.pageWhy || 'thimble has no terminal page for this view.', failed: false }
+  return (v.page !== 'building' && pageAsks.get(v.slug)) || { why: '', failed: false }
+}
+
+/** `r` on a terminal page whose build failed: the view built again with that change (`thimble act view-retry`). */
+async function retryPage(cx: Ctx, v: HomeView): Promise<void> {
+  if (!rt.sc) return
+  const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, 'view-retry', { slug: v.slug })
+  if (!got.ok || got.value.queued === false) {
+    cx.toast(`thimble: ${got.ok ? got.value.reason || 'it could not start' : got.error}`)
+    return
+  }
+  pageAsks.delete(v.slug)
+  cx.toast('thimble: building the terminal page again')
+}
+
 /** One view (docs/terminal-views.md): a view with a terminal page is drawn by its program (hooks/viewhost.ts) under
  *  the panel's header, its subtitle the facts the program gives, its hint row the keys it binds; its keys reach it
  *  through the list's relay (↑↓, Enter, Space, Backspace) and as hotkeys (a letter, a digit, a sign), every key while a
@@ -3998,12 +4039,20 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const slug = p.slug ?? ''
   const v = (await homeViews(cx)).find(x => x.slug === slug)
   if (!v?.term || !rt.sc || (e.surface !== 'terminal' && e.surface !== 'desktop')) {
+    const page = v && !v.term && v.state === 'built' ? termPage(v) : null
+    const retry = page?.failed ? hiddenKeys(cx, e, [{ key: 'page-retry', hotkey: 'r', onPress: () => void retryPage(cx, v!) }]) : null
     return (
       <Box flexDirection="column">
         {[
+          ...(retry ? [retry] : []),
           ...headerEls(els, { title: p.title || slug || 'view', cols, sub: subLine(['view']) }),
-          <Text key="view-words" wrap="wrap">{v && !v.term && v.state === 'built' ? 'building the terminal page… The browser draws this view now: o or ↗ opens it there.' : 'The view is not built yet. Its row on home says when it is.'}</Text>,
-          hintsRow(els, ['o to open it in the browser', 'b to go back', 'x to close'], cols),
+          page?.why ? (
+            <Text key="view-words" color={COLORS.problem} wrap="wrap">{`× ${page.why}`}</Text>
+          ) : (
+            <Text key="view-words" wrap="wrap">{page ? 'building the terminal page… The browser draws this view now: o or ↗ opens it there.' : 'The view is not built yet. Its row on home says when it is.'}</Text>
+          ),
+          ...(page?.why ? [<Text key="view-browser" wrap="wrap">The browser draws this view now: o or ↗ opens it there.</Text>] : []),
+          hintsRow(els, [...(page?.failed ? ['r to build it again'] : []), 'o to open it in the browser', 'b to go back', 'x to close'], cols),
         ]}
       </Box>
     )
@@ -4079,6 +4128,7 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
 /** What the view's acts do in the panel: a record's place in the citation panel, a side thread about a row, a label's
  *  panel (views.ts registerPanelViews calls it once). */
 export function registerViewActs(): void {
+  loadsView('view', askTermPage)
   onViewAct(async (cx, a) => {
     if (a.kind === 'open' && a.ref) return openCite(cx, a.ref, null)
     if (a.kind === 'ask' && a.ref) return openAsk(cx, { kind: 'record', ref: a.ref, text: a.text ?? '' }, { anchor: a.ref, anchorText: a.text ?? '' })

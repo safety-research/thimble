@@ -47,7 +47,9 @@ export const HOME_UI_EMPTY: HomeUi = { folded: [], unfolded: [], more: [], pick:
 // ------------------------------------------------------------------------------------------------ the data
 
 /** `term`: built with a terminal program (view.term.js), so the panel draws it (hooks/viewhost.ts). */
-export type HomeView = { slug: string; name: string; state: string; words: string; files: string[]; unit: string; drawable: boolean; left: number; at: number; fresh?: boolean; term?: boolean }
+/** `term`: it has a terminal page; `page`, for a built view without one, where that page stands (views.page_state:
+ *  building, failed, missing or none) and `pageWhy` why (the failed build's error). */
+export type HomeView = { slug: string; name: string; state: string; words: string; files: string[]; unit: string; drawable: boolean; left: number; at: number; fresh?: boolean; term?: boolean; page?: string; pageWhy?: string }
 export type HomeReport = { slug: string; title: string; form: string; state: string; cards: number; tools: number; at: number; fresh?: boolean }
 export type HomeThread = { id: string; title: string; about: string; words: string; tone: string; unread: number; earlier: boolean; at: number }
 /** `fresh`: made since home was last opened, `new` in green at R as every new item. */
