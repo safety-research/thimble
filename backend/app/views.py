@@ -3952,20 +3952,21 @@ def _json_strings(path: str, mtime_ns: int, size: int) -> str:
     return "\n".join(parts)
 
 
-def source_text(c: str, file_ref: str) -> str | None:
-    """Every string of the records a file ref cites, joined: what an excerpt's lines must appear in to count as literal
-    source. A .json document's decoded string values count too. '' when the ref does not resolve, None for a binary
-    file."""
+def source_parts(c: str, file_ref: str) -> list[str] | None:
+    """What an excerpt's lines must appear in to count as literal source of a file ref: every string of the records it
+    cites, joined, and for a .json document its decoded string values, joined, as one more part (the same string for
+    every ref into that document, _json_strings). [] when the ref does not resolve, None for a binary file."""
     try:
         res = refs.resolve_base(config.corpus_dir(c), file_ref)
     except refs.RefError:
-        return ""
+        return []
     suffix = Path(str(res.get("path") or "")).suffix.lower()
     if (res.get("meta") or {}).get("binary") or suffix in BINARY_SUFFIXES:
         return None
-    parts: list[str] = []
+    strings: list[str] = []
     for r in res.get("records") or ([{"record": res.get("record")}] if res.get("record") is not None else []):
-        _strings(r.get("record"), parts)
+        _strings(r.get("record"), strings)
+    parts = ["\n".join(strings)]
     if suffix == ".json":
         try:
             path = config.safe_corpus_path(config.corpus_dir(c), str(res["path"]))
@@ -3974,13 +3975,19 @@ def source_text(c: str, file_ref: str) -> str | None:
                 parts.append(_json_strings(str(path), st.st_mtime_ns, st.st_size))
         except (OSError, ValueError, KeyError):
             pass
-    return "\n".join(parts)
+    return parts
 
 
 def missing_lines(excerpt: str, source: str) -> list[str]:
-    """The excerpt's non-blank lines that are not in the source text (whitespace runs compared as one space)."""
-    src = _squeeze(source)
-    return [ln.strip() for ln in excerpt.splitlines() if ln.strip() and _squeeze(ln) not in src]
+    """The excerpt's non-blank lines that are not in the source text (whitespace runs compared as one space). Each
+    line's words are looked for with any whitespace between them, so the source is never split into its words: a
+    transcript's strings made millions of them, a gigabyte at once, for each key checked (bug hunt D15)."""
+    out = []
+    for ln in excerpt.splitlines():
+        words = ln.split()
+        if words and re.search(r"\s+".join(map(re.escape, words)), source) is None:
+            out.append(ln.strip())
+    return out
 
 
 def _covers(ref_list: list[str], path: str, line: int) -> bool:
@@ -4137,11 +4144,14 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
         if p["kind"] != "view" and "line" in p and not _covers(res["refs"], p["path"], p["line"]):
             row["why"] = f"the answer does not cite {loc} back (its refs: {', '.join(res['refs'][:3])})"
             return row
-        texts = await asyncio.to_thread(lambda: [source_text(c, r) for r in res["refs"][:CHECK_KEY_REFS]])
+        texts = await asyncio.to_thread(lambda: [source_parts(c, r) for r in res["refs"][:CHECK_KEY_REFS]])
         if all(t is None for t in texts):
             row["unchecked"] = "the cited file is binary, so the excerpt was not compared with it"
         else:
-            gone = missing_lines(res["excerpt"], "\n".join(t for t in texts if t))
+            # a document's strings once, however many of its records the answer cites: 30 refs into one transcript
+            # joined 30 copies of its strings, 200 MB, for each key checked
+            source = "\n".join(dict.fromkeys(x for t in texts if t for x in t if x))
+            gone = await asyncio.to_thread(missing_lines, res["excerpt"], source)
             if gone:
                 row["why"] = f"the excerpt is not literal text of the records it cites: {gone[0][:160]!r}"
                 return row

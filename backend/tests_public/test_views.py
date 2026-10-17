@@ -643,6 +643,37 @@ def test_the_refs_an_answer_hands_the_page_are_those_among_its_first_values(monk
     assert views._answer_refs(answer)[0] == {"a.jsonl#L1", "a.jsonl#L2"}
 
 
+def test_the_records_an_answer_cites_in_one_document_share_its_strings(data):
+    """Bug hunt D15: a key whose answer cites 30 messages of one transcript had each excerpt line looked for in 30
+    copies of the transcript's strings; each record's own strings are one part and the document's another, the same
+    string for every ref into it, so the check reads it once."""
+    talk = {"agent": "u1", "messages": [{"role": "user", "text": "hello there"}, {"role": "bot", "text": "general kenobi"}]}
+    (data / CORPUS / "talk.json").write_text(json.dumps(talk))
+    first, second = (views.source_parts(CORPUS, f"talk.json#/messages/{i}") for i in (0, 1))
+    assert first[0] == "user\nhello there" and second[0] == "bot\ngeneral kenobi"
+    assert first[1] is second[1] and "u1" in first[1], "the document's strings are one string"
+    assert views.missing_lines("general kenobi\nu1\nnot said", "\n".join(dict.fromkeys([*first, *second]))) == ["not said"]
+    assert views.source_parts(CORPUS, "board.jsonl#L2")[0] == "t2\nbo\n2026-06-01T10:05:00Z\nAnyone have the build number?"
+    assert views.source_parts(CORPUS, "gone.json#/x") == []
+
+
+def test_an_excerpt_line_is_found_in_its_source_as_when_both_were_squeezed():
+    """missing_lines looks for each line's words with any whitespace between them in place of squeezing the whole
+    source into one line, and finds what the squeezing found."""
+    import random
+
+    def squeezed(excerpt: str, source: str) -> list[str]:
+        src = " ".join(source.split())
+        return [ln.strip() for ln in excerpt.splitlines() if ln.strip() and " ".join(ln.split()) not in src]
+
+    rnd = random.Random(15)
+    pieces = ["ab", "b", "a.b", "(a", "*", " ", "  ", "\t", "\n", "\u2028", "\xa0", "\x1f", "\xe9"]
+    for _ in range(3000):
+        source = "".join(rnd.choice(pieces) for _ in range(rnd.randint(0, 24)))
+        excerpt = "".join(rnd.choice(pieces) for _ in range(rnd.randint(0, 10)))
+        assert views.missing_lines(excerpt, source) == squeezed(excerpt, source), (excerpt, source)
+
+
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
 
