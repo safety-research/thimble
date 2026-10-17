@@ -589,6 +589,40 @@ async def test_a_page_that_loads_a_script_by_its_path_fails_the_checks_as_the_br
     assert any("lib/marked/marked.min.js, which a view may not do" in e for e in state["errors"]), state["errors"]
 
 
+TRICKY = 'a "quote", a back\\slash, a\ttab, a snowman \u2603 and a line separator \u2028 in one value'
+MANY = 3000
+MANY_READER = THREADS_READER.replace("def records(index, query):", f'''def records(index, query):
+    if (query or {{}}).get("many"):
+        return [{{"ref": f"board.jsonl#L{{n}}", "n": n, "text": json.loads({json.dumps(json.dumps(TRICKY))})}}
+                for n in range(1, {MANY} + 1)]
+    return _records(index, query)
+
+
+def _records(index, query):''')
+MANY_HTML = f"""<!doctype html><html><body><div id="out"></div><script>
+thimble.onOpen(async () => {{
+  const rows = await thimble.fetch({{ many: true }})
+  if (rows.length !== {MANY} || rows.some((r) => r.text !== {json.dumps(TRICKY)})) return
+  document.getElementById('out').innerHTML = rows.map((r) => `<div data-anchor="${{r.ref}}">${{r.n}}</div>`).join('')
+}})
+</script></body></html>"""
+
+
+async def test_a_long_answer_reaches_the_checks_page_as_the_reader_made_it(ws, inproc, bound):
+    """Bug hunt D15: the checks' page gets each reader answer as JSON text, which the page parses itself, since
+    Playwright's check of a value an exposed function returns took a minute of each check of a view whose answers were
+    3 MB. The answer's values arrive intact, quotes, a line separator and all, and every record it holds counts."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    views.write_view(CORPUS, "many", reader=MANY_READER, html=MANY_HTML, **{**VIEW, "name": "Many"})
+    (state,) = await views.shoot_states(CORPUS, "many", [{"open": {}}], answers=1)
+    assert state["ok"], state["errors"]
+    assert state["records"] == MANY and state["fetched_records"] == MANY
+    assert state["answers"][0][0] == {"ref": "board.jsonl#L1", "n": 1, "text": TRICKY}, "the answer is kept as read"
+
+
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
 
