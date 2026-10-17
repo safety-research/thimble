@@ -83,7 +83,9 @@
 //   refetches what the workspace's record holds and appends to the new main one note per running thimble agent; on
 //   any other reason it stops polling.
 // Its state lives in this module's memory, which /clear and /resume keep, with subagents.json as the record it
-// refetches at session start and after a change of session; never in $.state, which both commands reset.
+// refetches at session start and after a change of session; never in $.state, which both commands reset. /plugin off
+// and on loads the module afresh (session.start again, no session.end): the record gives it the agents still running,
+// and their types are offered again (offerAgain).
 //
 // Local transport (launch.json `transport: local`, module note) has no server, and the module makes no HTTP request
 // there, even when server.json names a live server. It is main's when launch.json names its session, or one --rekey
@@ -155,6 +157,8 @@ export const FILE_POLL_MS = 500 // how often subagents.json and roles.json are l
 export const FILE_BEAT_MS = 2000 // the heartbeat in module.json; module_bridge counts a module live while it is fresh
 const KEPT = 64 // the requests taken, the answers and the ends module.json keeps, the newest
 const TYPED_LIVE = new Set(['', 'pending', 'claimed']) // module_bridge.TYPED_LIVE
+// an agent of subagents.json with one of these statuses has ended (module_bridge.ENDED_STATES)
+const ENDED_STATES = new Set(['ended', 'stopped', 'killed', 'completed', 'failed', 'done', 'refused', 'expired'])
 const MODULE_KIND = 'module' // subagent_files.MODULE_KIND
 
 // the file guard (module note): the tools whose path it reads, those of them that edit, those that search a folder
@@ -433,7 +437,11 @@ async function fetchState($: Engine, m: State): Promise<string[]> {
     m.requests = requests
   }
   if (isObj(r.data.agents)) {
-    for (const [id, agent] of Object.entries(r.data.agents)) if (isObj(agent) && agent.plugin_started === true) m.started.add(id)
+    for (const [id, agent] of Object.entries(r.data.agents)) {
+      if (!isObj(agent)) continue
+      if (agent.plugin_started === true) m.started.add(id)
+      offerAgain(m, agent.type) // the server lists the running agents only
+    }
   }
   return Array.isArray(r.data.notes) ? r.data.notes.filter((n): n is string => typeof n === 'string' && n !== '') : []
 }
@@ -930,8 +938,23 @@ async function fetchStateFile($: Engine, m: State): Promise<Json> {
     }
   }
   m.requests = requests
-  if (isObj(state.agents)) for (const [id, a] of Object.entries(state.agents)) if (isObj(a) && a.plugin_started === true) m.started.add(id)
+  if (isObj(state.agents)) {
+    for (const [id, a] of Object.entries(state.agents)) {
+      if (!isObj(a)) continue
+      if (a.plugin_started === true) m.started.add(id)
+      const status = text(a.status) || text(a.state)
+      if (status ? !ENDED_STATES.has(status) : !a.ended) offerAgain(m, a.type) // as module_bridge._running reads it
+    }
+  }
   return state
+}
+
+/** A type of thimble's whose agent the record says runs is offered from now on (agent.offer), as if this load of the
+ *  module had seen it start: after /plugin turned thimble off and on, the module's memory is new, and Claude Code checks
+ *  the offer again when it resumes the agent, as when a helper of the orientation reports to it (bug hunt H19). */
+function offerAgain(m: State, type: unknown): void {
+  const role = roleOf(text(type))
+  if (role && role !== CALL) m.used.add(`${PLUGIN}:${role}`)
 }
 
 /** The local transport's start (module note): main or a peer by launch.json, the roles from roles.json, the record,

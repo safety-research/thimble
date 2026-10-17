@@ -4,7 +4,8 @@ A session attaches when its MCP shim subscribes naming it (events.subscribe) or 
 (`POST /api/ws/{c}/session`); its transcript is found under the config dir its shim reported (find_transcript). One
 session is main per workspace, kept in `workspaces/<c>/sessions.json` with the tail's cursor and each subagent's place,
 so a restarted server reads on where it stopped. The shim's subscription is the session's liveness: with no
-subscriber for GRACE_S the session detaches. /clear and /resume switch sessions in the same process, and main follows
+subscriber for GRACE_S the session detaches, unless its `claude` process runs on, as when /plugin turned thimble off in
+it (disconnected). /clear and /resume switch sessions in the same process, and main follows
 the new id by pid (_follow). When Claude Code moves the session into a background job, its transcript ends with a
 `continued-in` record naming the job's session, which copied the conversation and runs in its own process: main follows
 it there (_continue), and the session it left, parked in its old process, is never main again by its shim (_parked).
@@ -1178,6 +1179,7 @@ def connected(c: str, sid: str | None, cwd: str, pid: int | None, config_dir: st
             return
         old = cur.sid if cur is not None else held
     _cancel_grace(c)
+    _back(c)
     _came_back.add(c)
     if old:
         _follow(c, str(old), str(sid), cwd, pid)
@@ -1297,8 +1299,12 @@ def _continue(lv: Live) -> None:
 
 
 def disconnected(c: str, sid: str | None) -> None:
-    """A shim's subscription ended: when none of main's is left after GRACE_S, the session is gone."""
-    from . import events  # noqa: PLC0415
+    """A shim's subscription ended: when none of main's is left after GRACE_S, the session is gone, unless main's
+    `claude` process still runs. Then thimble is off in the session (/plugin unloads the plugin and stops its shim, and
+    runs no SessionEnd hook): main stays main, away (_away), its agents run on, and it is looked at again every GRACE_S
+    until its shim comes back (connected) or the process is gone (bug hunt H19). A quit is the SessionEnd hook's
+    (subagents.hook_end), or the process gone."""
+    from . import events, procs  # noqa: PLC0415
 
     def mains() -> bool:
         lv = _live.get(c)
@@ -1314,6 +1320,12 @@ def disconnected(c: str, sid: str | None) -> None:
             return  # stopping ends every subscription at once; the session's shim comes back to the next server
         lv = _live.get(c)
         if not mains() and lv is not None and (sid is None or lv.sid == sid):
+            pid = main_pid(c)
+            if pid and procs.alive(pid):
+                _away(c, lv.sid, pid)
+                with contextlib.suppress(RuntimeError):
+                    _grace[c] = asyncio.get_running_loop().call_later(GRACE_S, check)
+                return
             detach(c, lv.sid, "ended")
             _hand_back(c, lv.sid)
             if _live.get(c) is None:  # no session took over as main: the analyst quit, so thimble's agents stop too
@@ -1323,6 +1335,31 @@ def disconnected(c: str, sid: str | None) -> None:
         _grace[c] = asyncio.get_running_loop().call_later(GRACE_S, check)
     except RuntimeError:
         check()
+
+
+AWAY_KIND = "away"  # main's meta's alert while thimble is off in main's session (_away)
+AWAY_TEXT = "thimble is off in this Claude Code session. To turn it on again, type /plugin in the terminal."
+
+
+def _away(c: str, sid: str, pid: int) -> None:
+    """Main's shim is gone but its `claude` process runs: thimble is off in the session, which the page's alert on main
+    says until the shim comes back (_back); another alert of main's is left as it is."""
+    meta = agents.ensure_main(c)
+    if (meta.get("attached") or {}).get("session") != sid or meta.get("alert"):
+        return
+    meta["alert"] = {"kind": AWAY_KIND, "text": AWAY_TEXT, "since": _now()}
+    agents.write_meta(c, meta)
+    agents.notify(c, agents.MAIN_ID)
+    log.info("%s: session %s has no shim, but its claude process (pid %s) runs: thimble is off in it", c, sid, pid)
+
+
+def _back(c: str) -> None:
+    """Main's shim subscribed again: the alert _away set goes."""
+    meta = agents.meta_or_none(c, agents.MAIN_ID) or {}
+    if (meta.get("alert") or {}).get("kind") == AWAY_KIND:
+        meta["alert"] = None
+        agents.write_meta(c, meta)
+        agents.notify(c, agents.MAIN_ID)
 
 
 def _stop_agents(c: str) -> None:

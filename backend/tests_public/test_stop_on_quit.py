@@ -66,6 +66,7 @@ def test_main_ending_with_no_successor_stops_the_agents(monkeypatch):
 
     class Lv:
         sid = "s1"
+        pid = None  # no `claude` process known to run on (test_session: thimble turned off with /plugin)
 
     session._live["w"] = Lv()
     monkeypatch.setattr(session, "detach", lambda c, sid, why: session._live.pop(c, None))
