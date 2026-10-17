@@ -36,7 +36,7 @@ test("a notice's words and a view proposal's name and description above the prom
   const ui = await $.ui.mount({ plugin: 'thimble', component: 'AbovePrompt', requestId: 'above', surface: 'terminal', viewport: { columns: 150, rows: 40 }, props: { hasSurvey: false, isWorking: false, view: {}, bodyColumns: 150 } } as never)
   const text = shown(await ui.drawn())
   expect(text).toContain('The build failed: alink red bevil cd zwjk.')
-  expect(text).toContain('view proposalPages')
+  expect(text).toContain('viewthimble can build a page for these records: Pages')
   expect(text).toContain('dismiss  alink red bevil cd zwjk.')
   expect(text).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u200b-\u200f\u2066-\u2069\ufeff]/)
   await ui.unmount()

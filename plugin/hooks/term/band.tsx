@@ -11,15 +11,16 @@
 // behind one row under it, `5 more notices ›`, whose press shows them there, newest first, and turns into `show fewer`
 // with `dismiss all` (bug hunt B5 and C21: stacked, a view proposal, six notices and the SSH row took 14 of 58 rows):
 //
-//   view proposal  Page Histories                                       accept  reject  don't ask again  dismiss
+//   view           thimble can build a page for these records: Page Histories
 //                  Each wiki page as a strip of its saves over time, colored by the author, whole and wrapped
+//                  build it  don't build it  stop suggesting pages  dismiss
 //   notice         Claude's safeguards switched a reply of the orientation    see the orientation ›  dismiss
 //                  from Opus 5.5 to Opus 4.8.
 //                  5 more notices ›
 //
 // A press on words cut short shows them whole, wrapped, and a second press cuts them again; on the view proposal the
-// press is its name's. Where the acts would leave the words fewer than MIN_WORDS cells, they take a row of their own
-// under the words.
+// press is its name's. Where the acts would leave the words fewer than MIN_WORDS cells, or would cut what the view
+// proposal says, they take a row of their own under the words.
 //
 // The thimble line:
 //
@@ -68,9 +69,9 @@ import { openChecks } from './checksview'
 import { citeCounts, citeItems, openCitations } from './citesview'
 import { openCoverage, percent } from './coverageview'
 
-/** The label column: `  view proposal` and two cells before the words. */
+/** The label column: two cells, the label (`view`, `notice`, `browser`), and the cells up to 17 before the words. */
 export const ABOVE_LABEL = 17
-/** The label column in a band narrower than this many columns (`  proposal` and a cell before the words). */
+/** The label column in a band narrower than this many columns (`  browser` and two cells before the words). */
 const NARROW = 80
 const NARROW_LABEL = 11
 
@@ -391,15 +392,20 @@ async function toggleNotices(cx: Ctx): Promise<void> {
  *  what `dismiss` does, which `dismiss all` does for each. */
 type NoticeRow = { key: string; at: number; words: string; acts: BandAct[]; dismiss: () => Promise<void> }
 
-/** The view proposal's acts: `accept` (bold), `reject`, `don't ask again`, which turns view proposals off, and
- *  `dismiss`; once one is pressed, its state (`◌ accepting`) in their place. */
+/** What the view proposal's row says before the view's name: what the analyst gets (live feedback, 10-17: "What is this
+ *  proposal?"). */
+export const OFFER_LEAD = 'thimble can build a page for these records:'
+
+/** The view proposal's acts, each saying what it does: `build it` (bold; accept), `don't build it` (reject),
+ *  `stop suggesting pages`, which turns view proposals off, and `dismiss`; once one is pressed, its state
+ *  (`◌ starting the build`) in their place. */
 function offerActs(cx: Ctx, offer: HomeOffer): BandAct[] {
   return offer.pressed
-    ? [{ key: 'above-offer-pressed', label: offer.pressed === 'accept' ? '◌ accepting' : '◌ rejecting' }]
+    ? [{ key: 'above-offer-pressed', label: offer.pressed === 'accept' ? '◌ starting the build' : '◌ declining' }]
     : [
-        { key: 'above-offer-accept', label: 'accept', primary: true, press: () => answerOffer(cx, offer.slug, 'accept') },
-        { key: 'above-offer-reject', label: 'reject', press: () => answerOffer(cx, offer.slug, 'reject') },
-        { key: 'above-offer-off', label: "don't ask again", press: () => proposalsOff(cx) },
+        { key: 'above-offer-accept', label: 'build it', primary: true, press: () => answerOffer(cx, offer.slug, 'accept') },
+        { key: 'above-offer-reject', label: "don't build it", press: () => answerOffer(cx, offer.slug, 'reject') },
+        { key: 'above-offer-off', label: 'stop suggesting pages', press: () => proposalsOff(cx) },
         { key: 'above-offer-dismiss', label: 'dismiss', press: () => hideOffer(cx, offer.slug) },
       ]
 }
@@ -459,7 +465,7 @@ export type WaitItem = { key: string; label: string; name: string; words: string
 export async function waitItems(cx: Ctx): Promise<WaitItem[]> {
   const out: WaitItem[] = []
   const offer = await shownOffer(cx)
-  if (offer) out.push({ key: `offer:${offer.slug}`, label: 'view proposal', name: oneLine(offer.name), words: oneLine(offer.description), ...(offer.refused && !offer.pressed ? { problem: oneLine(offer.refused) } : {}), acts: offerActs(cx, offer) })
+  if (offer) out.push({ key: `offer:${offer.slug}`, label: 'view', name: oneLine(offer.name), words: oneLine(`${OFFER_LEAD} ${offer.description}`), ...(offer.refused && !offer.pressed ? { problem: oneLine(offer.refused) } : {}), acts: offerActs(cx, offer) })
   for (const r of await noticeRows(cx)) out.push({ key: r.key, label: 'notice', name: '', words: oneLine(r.words), acts: r.acts })
   const links = await cx.links()
   if (links) out.push({ key: BROWSER_ITEM, label: 'browser', name: '', words: oneLine(remoteWords(links)), acts: remoteActs(cx) })
@@ -580,21 +586,28 @@ export function registerBand(on: On): void {
       rows.push(trayRow('above-panel', 'panel', foldWords('above-panel', `${pending.title} is ready`, room), acts, { own }))
     }
     // the view proposal waiting for the analyst's answer (proposer.py, or a viewer for a file type), until it is answered
-    // and whatever the panel shows: its name bold, then as much of what it would show as fits, and not the task it names;
-    // a press on the name shows all of it, wrapped, and for a viewer of a file type its files; `accept` (bold), `reject`,
-    // `don't ask again`, which turns view proposals off, and `dismiss`; why accept could not start its build, in red,
-    // under it
+    // and whatever the panel shows: `view` dim on the label column, then what the analyst gets, `thimble can build a
+    // page for these records:` and the view's name bold, and not the task it names; what the page would show whole
+    // under it; a press on the name shows a viewer's files; `build it` (bold), `don't build it`, `stop suggesting
+    // pages`, which turns view proposals off, and `dismiss`; why the build could not start, in red, under it
     const offer = await shownOffer(cx)
     if (offer) {
       const acts = offerActs(cx, offer)
-      const { own } = wordsRoom(cols, LW, acts)
+      const name = oneLine(offer.name)
+      // the acts on a row of their own where they would cut what the row says
+      const fit = wordsRoom(cols, LW, acts)
+      const own = fit.own || fit.room < width(`${OFFER_LEAD} ${name}`)
       const open = unfolded.has(`offer:${offer.slug}`)
-      // the name on the row with the acts; what the view would show, whole and wrapped, on the rows under it (the
-      // owner, 10-17: the full text must be readable); a press on the name shows a file-type viewer's files
+      // what the analyst gets and the name on the row with the acts; what the page would show, whole and wrapped, on
+      // the rows under it (the owner, 10-17: the full text must be readable); a press on the name shows a file-type
+      // viewer's files
       const words = (
         <Button key="above-offer-name" plain hover={NO_INVERSE} onPress={() => toggleRow(cx, `offer:${offer.slug}`)}>
-          <Text bold wrap="truncate-end" hover={{ underline: true }}>
-            {oneLine(offer.name)}
+          <Text wrap="wrap">
+            {`${OFFER_LEAD} `}
+            <Text bold hover={{ underline: true }}>
+              {name}
+            </Text>
           </Text>
         </Button>
       )
@@ -608,7 +621,7 @@ export function registerBand(on: On): void {
         const why = oneLine(offer.refused)
         more.push(under('above-offer-refused', <Text color={COLORS.problem} wrap={open ? 'wrap' : 'truncate-end'}>{open ? why : cut(why, cols - LW)}</Text>))
       }
-      rows.push(trayRow('above-offer', narrow ? 'proposal' : 'view proposal', words, acts, { own, more }))
+      rows.push(trayRow('above-offer', 'view', words, acts, { own, more }))
     }
     // every open notice, every agent's and the terminal's own, newest first: `notice` in red on the label column, the
     // words in the text color, whole and wrapped; then the acts that fix it, the agent's thread (`see the orientation ›`)

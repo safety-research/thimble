@@ -277,9 +277,9 @@ async function markOffer(cx: Ctx, slug: string, pressed: '' | 'accept' | 'reject
   await cx.setSurface('home-full', { ok: true, value: { ...home.value, offer: { ...o, pressed, pressedAt: pressed ? at : 0 } } })
 }
 
-/** The analyst's accept or reject of the view proposal, from the row above the prompt: `thimble act view-accept` or
- *  `view-reject` {slug}, which hands the answer to thimble and answers at once. The row shows the answer as pressed
- *  (`◌ accepting`) until home's state is read again or OFFER_PRESS_MS pass; an act that failed or that thimble
+/** The analyst's accept (`build it`) or reject (`don't build it`) of the view proposal, from the row above the prompt:
+ *  `thimble act view-accept` or `view-reject` {slug}, which hands the answer to thimble and answers at once. The row
+ *  shows the answer as pressed (`◌ starting the build`) until home's state is read again or OFFER_PRESS_MS pass; an act that failed or that thimble
  *  refused, or a proposal that no longer waits, brings the controls back with why in the red row under the proposal. */
 export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'reject'): Promise<void> {
   if (!rt.sc) return
@@ -289,7 +289,7 @@ export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'rejec
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, `view-${verb}`, { slug })
   if (!got.ok || got.value.queued === false) {
     const why = got.ok ? got.value.reason || 'the view proposal no longer waits' : got.error
-    offerFailed = { slug, why: `thimble could not ${verb} it: ${why}` }
+    offerFailed = { slug, why: `thimble could not ${verb === 'accept' ? 'start building it' : 'decline it'}: ${why}` }
     await markOffer(cx, slug, '', at, at)
     return
   }
@@ -304,18 +304,18 @@ export async function dismissOffer(cx: Ctx, slug: string): Promise<void> {
   if (!got.ok || got.value.queued === false) cx.toast(`the view proposal still shows in the browser: ${got.ok ? got.value.reason || 'it no longer waits' : got.error}`)
 }
 
-/** The view proposal's `don't ask again`: view proposals off (`thimble act view-proposals-off`, `views.propose: false`
+/** The view proposal's `stop suggesting pages`: view proposals off (`thimble act view-proposals-off`, `views.propose: false`
  *  in thimble's config), the row gone at once, and a toast that says how to turn them back on. */
 export async function proposalsOff(cx: Ctx): Promise<void> {
   if (!rt.sc) return
   const got = await act<{ config?: string }>(cx, rt.sc, 'view-proposals-off', {})
   if (!got.ok) {
-    cx.toast(`view proposals are still on: ${got.error}`)
+    cx.toast(`thimble still suggests pages: ${got.error}`)
     return
   }
   const home = await surfaceValue<Obj>(cx, 'home-full')
   if (home?.ok) await cx.setSurface('home-full', { ok: true, value: { ...home.value, offer: null } })
-  cx.toast(`view proposals are off. To turn them back on, set "views": {"propose": true} in ${got.value.config || "thimble's config"}`)
+  cx.toast(`thimble will suggest no more pages. To turn suggestions back on, set "views": {"propose": true} in ${got.value.config || "thimble's config"}`)
 }
 
 /** A notice's act: `view-propose-now` (try again) or `view-retry` {slug} (retry), which name the notice, so that thimble

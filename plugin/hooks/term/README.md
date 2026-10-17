@@ -117,11 +117,11 @@ Claude Code's panel chrome, no right-click menu.
   answers the row goes back to home. `/thimble browser` and `o` in a remote terminal open the SSH row there at once.
   `/thimble labels`, like `threads`, `citations`, `checks` and `coverage`, opens a section of the line. Fullscreen
   (`viewport.isFullscreen`, a command's `presentation.isFullscreen`) shows none of this.
-- **A view proposal above the prompt**, while one waits for an answer: `view proposal`, the view's name in bold and as
-  much of what it would show as fits (the name's press shows it all), then `accept` (thimble builds it), `reject`,
-  `don't ask again`, which turns view proposals off, and `dismiss`; why accept could not start the build, and the fix,
-  in red under it. To turn
-  view proposals back on after `don't ask again`, set `"views": {"propose": true}` in thimble's config
+- **A view proposal above the prompt**, while one waits for an answer, saying what the analyst gets: `view`, `thimble
+  can build a page for these records:` and the view's name in bold, what the page would show under it, then `build
+  it` (thimble builds it), `don't build it`, `stop suggesting pages`, which turns view proposals off, and `dismiss`;
+  why the build could not start, and the fix, in red under it. To turn
+  view proposals back on after `stop suggesting pages`, set `"views": {"propose": true}` in thimble's config
   (`~/.thimble/config.json`, or the workspace's `config.json` when it sets the key), or take the key out.
 - **Every agent's failures above the prompt**, newest first, under the view proposal: a notice for each failure of any
   agent thimble runs (the orientation and its helpers, the critic, writers, view builds, report checks, code tickets,

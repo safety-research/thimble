@@ -312,7 +312,7 @@ test('the view proposal row · accept and reject hand the answer to thimble (`th
   expect(w.acts.at(-1)).toEqual({ kind: 'view-accept', payload: { slug: 'edit-bursts' } })
   await row.unmount()
   row = await above($)
-  expect(shown(await row.find({ type: 'Box', key: 'above-offer' }))).toContain('◌ accepting')
+  expect(shown(await row.find({ type: 'Box', key: 'above-offer' }))).toContain('◌ starting the build')
   expect(await row.find({ type: 'Button', key: 'above-offer-accept' })).toBeUndefined()
   await row.unmount()
   // thimble wrote the answer: the proposal no longer waits, and home's state read again has none
@@ -335,7 +335,7 @@ test('the view proposal row · accept and reject hand the answer to thimble (`th
   await row.unmount()
   row = await above($)
   expect(await row.find({ type: 'Button', key: 'above-offer-reject' })).toBeDefined()
-  expect(shown(await row.find({ type: 'Box', key: 'above-offer-refused' }))).toContain("thimble could not reject it: the view proposal 'Board Threads' no longer waits")
+  expect(shown(await row.find({ type: 'Box', key: 'above-offer-refused' }))).toContain("thimble could not decline it: the view proposal 'Board Threads' no longer waits")
   await row.unmount()
   // bug hunt B11: an accept whose `thimble act` fails (the server answered 403) says why in the red row, as no toast
   // that goes by does
@@ -346,7 +346,7 @@ test('the view proposal row · accept and reject hand the answer to thimble (`th
   await row.unmount()
   row = await above($)
   expect(await row.find({ type: 'Button', key: 'above-offer-accept' })).toBeDefined()
-  expect(shown(await row.find({ type: 'Box', key: 'above-offer-refused' }))).toContain("thimble could not accept it: thimble's server did not take this change (403")
+  expect(shown(await row.find({ type: 'Box', key: 'above-offer-refused' }))).toContain("thimble could not start building it: thimble's server did not take this change (403")
   await row.unmount()
   // the next press clears it while it runs
   w.refuse = {}

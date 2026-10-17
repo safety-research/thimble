@@ -3,14 +3,14 @@
 // `copy link`, nor the thimble line's items. There home lists those rows first, under `Above the prompt` (home.ts), and
 // Enter on one opens it here, with its acts on digit keys:
 //
-//   home › view proposal                                                                     ↗
+//   home › view                                                                              ↗
 //   Page Histories
-//   Each wiki page as a strip of its saves over time, colored by the author
+//   thimble can build a page for these records: Each wiki page as a strip of its saves over time, colored by the author
 //   ──────────────────────────────────────────────────────────────────────────────────────────
-//   1 accept   2 reject   3 don't ask again   4 dismiss
+//   1 build it   2 don't build it   3 stop suggesting pages   4 dismiss
 //   1–4 to press · b to go back · x to close
 //
-// A digit presses its act as a click on the band's would. An act that answers the row (accept, dismiss) goes back to
+// A digit presses its act as a click on the band's would. An act that answers the row (build it, dismiss) goes back to
 // home; a copy stays (the SSH row's `copy` and `copy link`, which copies a one-time link it never draws); an act that
 // opens another view (`see the orientation ›`) shows that view. A row answered meanwhile says that nothing waits there.
 // `/thimble browser` and the panel's `o` open the SSH row here at once on the main screen (offramp.ts). In fullscreen
