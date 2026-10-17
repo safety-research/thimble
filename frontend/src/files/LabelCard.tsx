@@ -1,7 +1,8 @@
 // A label's edit card beside the Labels pane: what it labels (records of files, canvas cards or report sentences), for
 // a label over files what it marks (Span, Record or File) and its glob, the classifier (Prompt, Regex or Code) with its
 // body, and the classes with colour and highlight switch. Colours and highlights save as they change; the rest is a
-// draft that Re-run (Run for a new label) saves before applying the label (backend concepts.apply_route). Cancel, × or
+// draft that Re-run saves before applying the label (backend concepts.apply_route), and Run creates a new label and runs
+// it in one call (concepts.create_and_run), which leaves no label when the run cannot start. Cancel, × or
 // Escape drops the draft. The card stands at the Labels pane's edge, or in the popover a view or Files opens beside a
 // control (LabelEditor). A label that exists opens compact: its name in its color (a multi-class label's in the ink,
 // after its glyph), its type and scope, a rule, its prompt (pattern or code) clamped to four lines until it has the
@@ -39,8 +40,9 @@ interface Props {
   appliesTo: string[]
   /** a new label's definition when the Label from prompt row drafted it, else a blank one */
   draft?: LabelDraft | null
-  /** the row above the head, which then holds the card's × (a new label's Label from prompt, LabelPrompt) */
-  lead?: ReactNode
+  /** the row above the head, which then holds the card's × (a new label's Label from prompt, LabelPrompt), from what the
+   * card's Applies to says now */
+  lead?: (glob: string) => ReactNode
   /** in a popover (LabelEditor), which is then the card's paper, its place and its dialog */
   inPopover?: boolean
   onClose: () => void
@@ -145,8 +147,12 @@ export function draftProblem(draft: Draft, classes: LabelClass[]): string {
   if (!draft.name.trim()) return 'The label needs a name.'
   if (classes.map((c) => c.name.trim()).filter(Boolean).length < 2) return 'The label needs two classes.'
   if (!draft.body.trim()) return 'The classifier is empty.'
+  if (draft.over === 'files' && !globPatterns(draft.glob).length) return APPLIES_TO_EMPTY
   return ''
 }
+
+/** What the card says when its Applies to names no file (the server's concepts.APPLIES_TO_EMPTY). */
+export const APPLIES_TO_EMPTY = 'Applies to is empty. Name the files the label runs over, such as * for every file.'
 
 /** What a draft saves (PUT /concepts/{id}, or with the unit POST /concepts for a new label). */
 export function patchOf(draft: Draft, classes: LabelClass[]): ConceptPatch {
@@ -236,9 +242,11 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
     const patch = patchOf(draft, classes)
     setSaving(true)
     try {
-      const k = isNew ? await labelApi.create(ws, { ...patch, name: patch.name!, unit: unitOfOver(draft.over, draft.marks), shown: files }) : await labels.save(label!.id, patch)
+      // a new label runs as it is created: the server keeps it only once its run starts, so a run that cannot start
+      // leaves no label behind and the card stays open to fix what the toast names
+      const k = isNew ? await labelApi.create(ws, { ...patch, name: patch.name!, unit: unitOfOver(draft.over, draft.marks), shown: files, run: true }) : await labels.save(label!.id, patch)
       track('label-apply', { target: `concept:${k.id}`, detail: { over: draft.over, marks: files ? draft.marks : null, kind: draft.kind, created: isNew } })
-      onRun(k.id, await labelApi.apply(ws, k.id, {}))
+      onRun(k.id, isNew ? k.run ?? { status: 'running' } : await labelApi.apply(ws, k.id, {}))
       onClose()
     } catch (e) {
       bus.emit('toast', { text: `Could not run ${patch.name}. ${(e as Error).message}`, kind: 'error' })
@@ -262,7 +270,7 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
     >
       {lead && (
         <div className="label-card-lead">
-          {lead}
+          {lead(draft.glob)}
           <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />
         </div>
       )}

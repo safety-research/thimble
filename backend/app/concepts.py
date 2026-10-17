@@ -1288,10 +1288,13 @@ def units_at_least(corpus_dir: Path, sources: list[dict], unit: str, cap: int) -
     return n, len(sources)
 
 
-def prompt_apply_too_wide(count: int, files_read: int, n_files: int, unit: str) -> str:
-    """The one sentence a too-wide prompt apply answers with: the count and the two knobs."""
+def prompt_apply_too_wide(count: int, files_read: int, n_files: int, unit: str, card: bool = False) -> str:
+    """The one sentence a too-wide prompt apply answers with: the count and the two knobs, or with `card` the edit
+    card's one knob, its Applies to."""
     what = {"record": "records", "agent": "files", "run": "runs"}.get(unit, unit + "s")
     seen = f"{count:,} in the first {files_read} of {n_files} files alone" if files_read < n_files else f"{count:,} in {n_files} files"
+    if card:
+        return f"This prompt label would run over more than {PROMPT_APPLY_MAX:,} {what} ({seen}). Narrow Applies to to some files."
     return (f"This prompt label would run over more than {PROMPT_APPLY_MAX:,} {what} ({seen}); "
             f"pass limit to cap the run or paths to narrow it to some files.")
 
@@ -3833,27 +3836,30 @@ def _already_running(live: dict) -> HTTPException:
                                "run_id": live.get("run_id")})
 
 
-def no_files_match(corpus_dir: Path, patterns: list[str]) -> str:
-    """The refusal of an apply whose paths match no file."""
+def no_files_match(corpus_dir: Path, patterns: list[str], card: bool = False) -> str:
+    """The refusal of an apply whose paths match no file; with `card`, in the words of the edit card's Applies to."""
+    if card:
+        return f"No file matches Applies to ({', '.join(patterns)}). Change Applies to, or use * for every file."
     return f"no files match {patterns}"
 
 
 def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int | None, within: bool = False,
-                  read: int | None = None) -> list[dict]:
+                  read: int | None = None, *, card: bool = False) -> list[dict]:
     """The sources an apply of a file unit runs over, or HTTPException(400) when it cannot run: no file matches, a
     prompt label would run over the whole of a big corpus with neither a limit nor `within`, or (TooLong) a prompt
     label over whole files or runs, which reads `read` characters of each (whole_read_chars), would run over some that
-    hold far more (too_long_units). Blocking (a thread)."""
+    hold far more (too_long_units). With `card` (a new label the edit card runs) the first two say what to change in
+    its Applies to. Blocking (a thread)."""
     corpus_dir = config.corpus_dir(c)
     sources = match_paths(corpus_dir, patterns)
     if not sources:
-        raise HTTPException(400, no_files_match(corpus_dir, patterns))
+        raise HTTPException(400, no_files_match(corpus_dir, patterns, card))
     if kind == "prompt" and not limit and not within and not narrowing(patterns):
         # a prompt label needs a model call per BATCH_ITEMS units; over a whole big corpus that is unbounded, so past
         # PROMPT_APPLY_MAX units the analyst must cap it or name the files
         n, read_files = units_at_least(corpus_dir, sources, unit, PROMPT_APPLY_MAX)
         if n > PROMPT_APPLY_MAX:
-            raise HTTPException(400, prompt_apply_too_wide(n, read_files, len(sources), unit))
+            raise HTTPException(400, prompt_apply_too_wide(n, read_files, len(sources), unit, card))
     if kind == "prompt" and unit in WHOLE_UNITS and read:
         far, checked = too_long_units(corpus_dir, sources, unit, read, limit)
         if far:
@@ -5045,6 +5051,7 @@ class NewConcept(BaseModel):
     model: str = ""
     classes: list[ClassBody] | None = None
     shown: bool = False
+    run: bool = False  # run it at once, and keep it only once its run starts (create_and_run)
 
 
 class ConceptPatch(BaseModel):
@@ -5113,13 +5120,49 @@ def _classes_in(body: list[ClassBody] | None) -> list[dict] | None:
 
 
 @router.post("/ws/{c}/concepts")
-def create_concept_route(c: str, body: NewConcept) -> dict:
+async def create_concept_route(c: str, body: NewConcept) -> dict:
+    """A new label, answered as its card (with_stats). With `run` (the browser's Run and Label from prompt) it runs at
+    once and is kept only once its run starts (create_and_run), and the answer's `run` is its run record."""
     ws = _ws(c)
     concept = new_concept(body.name, body.description, body.kind, body.spec, body.unit, body.labels, body.created_by,
                           marks=body.marks, glob=body.glob, model=body.model, classes=_classes_in(body.classes), shown=body.shown)
-    write_concept(ws, coloured(ws, concept))
+    if body.run:
+        return await create_and_run(c, ws, concept)
+    await asyncio.to_thread(lambda: write_concept(ws, coloured(ws, concept)))
     _notify(c, concept["id"], "defined")
-    return with_stats(ws, concept)
+    return await asyncio.to_thread(with_stats, ws, concept)
+
+
+# what the edit card says when its Applies to names no file (create_and_run)
+APPLIES_TO_EMPTY = "Applies to is empty. Name the files the label runs over, such as * for every file."
+
+
+async def create_and_run(c: str, ws: Path, concept: dict) -> dict:
+    """A new label that the browser runs at once (its edit card's Run, Label from prompt), not yet written: what its run
+    would refuse is refused before the label is written, in the words of the edit card's fields, and a run that still
+    does not start takes the label away again, so a failed run never leaves an empty label behind (0.9.0 bug hunt D1).
+    Answered as the label's card (with_stats) with its run record as `run`."""
+    files = concept["unit"] in FILE_UNITS
+    paths = glob_patterns(concept["glob"]) if files else []
+    if files and not paths:
+        raise HTTPException(400, APPLIES_TO_EMPTY)
+    if concept["kind"] == "regex":
+        _compiled(concept)
+    sources = None
+    if files:
+        read = whole_read_chars(c, concept) if concept["kind"] == "prompt" and concept["unit"] in WHOLE_UNITS else None
+        sources = await asyncio.to_thread(scope_sources, c, concept["unit"], concept["kind"], paths, None, False, read,
+                                          card=True)
+    await asyncio.to_thread(lambda: write_concept(ws, coloured(ws, concept)))
+    _notify(c, concept["id"], "defined")
+    try:
+        await start_apply(c, concept["id"], paths, None, concept["created_by"], sources=sources)
+    except Exception:
+        _forget_concept(c, ws, concept["id"], None)
+        _notify(c, concept["id"], "deleted")
+        raise
+    await _ran_from_browser(c, ws, concept, concept["created_by"], ran_before=False)
+    return await asyncio.to_thread(lambda: with_stats(ws, read_concept(ws, concept["id"]) or concept))
 
 
 @router.get("/ws/{c}/concepts/{concept_id}")
@@ -5294,6 +5337,16 @@ def restore_concept(c: str, concept_id: str, trash: Path, cards: list[dict], fil
     _notify(c, concept_id, "defined")
 
 
+async def _ran_from_browser(c: str, ws: Path, concept: dict, created_by: str, ran_before: bool) -> None:
+    """A run the browser started: the browser is the analyst, so their label gets its card and main hears of it; a label
+    that ran before without a card keeps having none."""
+    cards = await asyncio.to_thread(_label_cards, ws, concept["id"])
+    card = dict(cards[0][1]) if cards else None
+    if card is None and not ran_before:
+        card = await asyncio.to_thread(label_card, c, concept, None, created_by)
+    tell_main(c, concept, card)  # on the loop: the events module's queues are the loop's
+
+
 @router.post("/ws/{c}/concepts/{concept_id}/apply")
 async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Response) -> dict:
     """Start an apply: 202 with the run record (409 while one runs), or with `wait: true` the summary once the run ends (202
@@ -5305,13 +5358,7 @@ async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Respon
         raise HTTPException(400, "paths is required: corpus-relative globs or a directory (e.g. ['*/board.jsonl'], 'agents'; '*' is the whole dataset)")
     ran_before = bool(concept["applications"])
     record = await start_apply(c, concept_id, paths, body.limit, body.created_by, comment=body.comment)
-    # the browser is the analyst: their label gets its card and main hears of it; a label that ran before without a card
-    # keeps having none
-    cards = await asyncio.to_thread(_label_cards, ws, concept_id)
-    card = dict(cards[0][1]) if cards else None
-    if card is None and not ran_before:
-        card = await asyncio.to_thread(label_card, c, concept, None, body.created_by)
-    tell_main(c, concept, card)  # on the loop: the events module's queues are the loop's
+    await _ran_from_browser(c, ws, concept, body.created_by, ran_before)
     if not body.wait:
         response.status_code = 202
         return record
@@ -5610,7 +5657,7 @@ DRAFT_OVER = {"files": "files", "canvas": "cards", "report": "sentences"}  # a d
 
 class DraftBody(BaseModel):
     text: str = ""
-    paths: list[str] = Field(default_factory=list)  # the globs the label would apply to (the open file, a view's claims)
+    paths: list[str] = Field(default_factory=list)  # the globs the label would apply to (the new-label card's Applies to)
 
 
 def sample_records(c: str, paths: list[str]) -> dict[str, str]:
@@ -5725,22 +5772,24 @@ def _call_failed(call: Any) -> HTTPException:
 async def draft_route(c: str, body: DraftBody) -> dict:
     """Label from prompt, the new-label card's top row: the labels model defines a label from the analyst's description
     (labels.md `draft`), reading the first records of the files it would apply to, and the route answers the draft
-    (draft_of) without storing anything. 400 for an empty description; 422 for a draft that could not run; 429 or 502 when
-    the call gave none."""
+    (draft_of) without storing anything. No paths is every file (`*`, as the card's Applies to says by default), so a
+    drafted label over files always names what it runs over (0.9.0 bug hunt D1). 400 for an empty description; 422 for
+    a draft that could not run; 429 or 502 when the call gave none."""
     text = " ".join(body.text.split())
     if not text:
         raise HTTPException(400, "describe the label")
+    paths = [p for given in body.paths for p in glob_patterns(given)] or ["*"]
     try:
-        records = await asyncio.to_thread(sample_records, c, body.paths)
+        records = await asyncio.to_thread(sample_records, c, paths)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
     from . import tasks  # noqa: PLC0415
 
-    call = await tasks.call(c, "label-draft", {"description": text, "paths": list(body.paths), "records": records},
+    call = await tasks.call(c, "label-draft", {"description": text, "paths": paths, "records": records},
                             schema=draft_tool().input_schema)
     if call.status != "ok":
         raise _call_failed(call)
-    return draft_of(call.output, body.paths)
+    return draft_of(call.output, paths)
 
 
 @router.get("/ws/{c}/filters")

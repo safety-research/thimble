@@ -9,6 +9,7 @@ import { Popover, type Align, type PopoverAnchor } from '../components/Menu'
 import type { ConceptRun, LabelDraft } from '../lib/types'
 import { LabelCard, labelCardName } from './LabelCard'
 import { LabelPrompt } from './LabelPrompt'
+import { globPatterns } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 
 /** The editor's width in the popover, the card's own width at the Labels pane's edge (files.css .label-card). */
@@ -46,7 +47,7 @@ export function LabelEditor({ ws, labels, editing, drafted, appliesTo, onEdit, o
       inPopover={inPopover}
       onClose={() => onEdit(null)}
       onRun={onRun}
-      lead={editing === 'new' ? <LabelPrompt ws={ws} labels={labels} appliesTo={appliesTo} onRun={onRun} onManual={onDraft} onEdit={onEdit} onDone={() => onEdit(null)} /> : undefined}
+      lead={editing === 'new' ? (glob) => <LabelPrompt ws={ws} labels={labels} appliesTo={globPatterns(glob)} onRun={onRun} onManual={onDraft} onDone={() => onEdit(null)} /> : undefined}
     />
   )
 }
