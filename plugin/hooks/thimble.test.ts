@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, PRIVATE_FALLBACK, hmac, register } from './thimble'
+import { ABORT_WAIT_MS, PRIVATE_FALLBACK, hmac, isCheck, register } from './thimble'
 
 type Json = Record<string, any>
 
@@ -533,6 +533,15 @@ describe('ends and sessions', () => {
     await until(() => e.server.ended.length === 1)
     await new Promise(r => setTimeout(r, 10))
     expect(e.server.ended).toEqual([{ cwd: CWD, session: MAIN, agentId: 'agent-8', answer: 'Two comments.', reason: 'answer' }])
+  })
+
+  it("knows its checks, spawned by it or by main's Agent call, whose hand-backs the terminal UI drops", async () => {
+    const e = await started()
+    const check = await e.server.answer(e.server.push('spawn', { role: 'check', prompt: 'p', description: 'check: Unverified · report', values: {}, note: '' }))
+    const writer = await e.server.answer(e.server.push('spawn', { role: 'writer', prompt: 'p', description: 'writer: report', values: {}, note: '' }))
+    await e.agentCall({ subagentType: 'thimble:check', prompt: 'Check the answer.' }, 'aTypedCheck')
+    await e.agentCall({ subagentType: 'thimble:orientation', prompt: 'Orient.' }, 'aTypedOrient')
+    expect([check.agentId, writer.agentId, 'aTypedCheck', 'aTypedOrient', 'someone-else'].map(isCheck)).toEqual([true, false, true, false, false])
   })
 
   it('keeps its poll across /clear: a hello under the new id, polls under it, the record again and a note per running agent', async () => {

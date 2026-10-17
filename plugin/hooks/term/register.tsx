@@ -53,6 +53,7 @@ import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
 import { LOAD_TOOL, act, activateNow, appendGuide, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
+import { isCheck } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
 import { openInBrowser } from './offramp'
 import { openChecks } from './checksview'
@@ -75,6 +76,9 @@ const SKILL_ARGS = new Set(['fresh', 'restore', 'status', 'fix', 'feedback'])
 // the text Claude Code stores as the reply of a turn that ended with none (its `<synthetic>` model's)
 const SYNTHETIC_RE = /^\s*No response requested\.\s*$/
 const THIMBLE_TOOL = /^mcp__plugin_thimble_thimble__/
+// a message of another agent's as main reads it (a subagent's hand-back), and why one of a check's is dropped
+const AGENT_MESSAGE = /<agent-message from="([^"]+)"/
+const CHECK_DROPPED = "thimble shows a check's comments where they apply"
 const CARD_TOOL = /^mcp__plugin_thimble_thimble__(add_card|edit_card|apply_label)$/
 const VIEW_TOOL = /^mcp__plugin_thimble_thimble__propose_view$/
 
@@ -569,8 +573,12 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // a prompt carries thimble's guide when it is owed (after /clear, a switch that changed it, a resumed session)
+  // a prompt carries thimble's guide when it is owed (after /clear, a switch that changed it, a resumed session).
+  // A check's hand-back never reaches main: thimble shows its comments as the passage's tint and flag (SPEC-v2 J7).
+  // Claude Code queues a hand-back for main with no session.receive, so it is dropped here, as it enters (the owner, 10-17)
   on('prompt.submit', async ($, e, next) => {
+    const from = e.origin.kind === 'peer' ? AGENT_MESSAGE.exec(e.text)?.[1] : undefined
+    if (from && isCheck(from)) return { drop: CHECK_DROPPED }
     if (!isActive()) return next(e)
     const cx = cxOf($)
     await followConversation(cx)
@@ -595,17 +603,6 @@ export const register: Register = (on, options) => {
 
   // /clear and /resume end this conversation (no session.start follows): the next call of the new one rekeys thimble,
   // and after /clear its next prompt carries the guide
-  // a check's hand-back never reaches main: thimble shows its comments as the passage's tint and flag (SPEC-v2 J7), so
-  // the delivery from a thimble:check agent is taken before main reads it, and main writes no `↳` line (the owner, 10-17)
-  on('session.receive', async ($, e, next) => {
-    const from = e.agentId === undefined ? /<agent-message from="([^"]+)"/.exec(e.text)?.[1] : undefined
-    if (from) {
-      const sender = (await $.agent.list().catch(() => [])).find(a => a.id === from)
-      if (sender && /(^|:)check$/.test(sender.type)) return { consumed: "thimble shows a check's comments where they apply" }
-    }
-    return next(e)
-  }).catch(($, e, next) => next(e))
-
   on('session.end', { reason: /^/ }, async ($, e, next) => {
     conversationEnded(e.sessionId, e.reason)
     return next(e)

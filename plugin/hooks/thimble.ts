@@ -230,6 +230,7 @@ type State = {
   efforts: Record<string, Effort> // agent id -> the effort turn.step sets (typed runs and their children)
   requests: Record<string, { role: string; values: Values }> // typed starts waiting for main's Agent call
   started: Set<string> // agents this module spawned: their turn.complete is posted
+  checks: Set<string> // agents of thimble's check role, this module's spawns and main's Agent calls (isCheck)
   queue: Promise<void> // the requests, one at a time
   helloing: { sid: string; said: Promise<Hello> } | null
   leaving: string // the session /clear or /resume is taking main away from, until the new one is known
@@ -242,7 +243,7 @@ function fresh(): State {
   return {
     active: false, interactive: false, user: '', home: '', homeReal: '', rules: null,
     cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
-    requests: {}, started: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
+    requests: {}, started: new Set(), checks: new Set(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
     file: false, peer: false, rechecking: null, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
     out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
   }
@@ -545,6 +546,7 @@ async function spawn($: Engine, m: State, role: string, prompt: string, descript
   if (r.deny !== undefined) return LIMIT.test(r.deny) ? { limit: r.deny } : { deny: r.deny }
   if (!r.agentId) return { error: 'Claude Code started no agent' }
   m.started.add(r.agentId)
+  if (role === 'check') m.checks.add(r.agentId)
   if (line) await note($, line.split('{agent}').join(r.agentId))
   return { agentId: r.agentId, model: r.model }
 }
@@ -1109,6 +1111,11 @@ export async function bridgeActivated($: Engine, a: Activated): Promise<void> {
   if (m) await start($, m, a)
 }
 
+/** Whether `agentId` is an agent of thimble's check role this session started; the terminal UI drops its hand-back. */
+export function isCheck(agentId: string): boolean {
+  return live.m?.checks.has(agentId) === true
+}
+
 export const register: Register = on => {
   const m = fresh()
   live.m = m
@@ -1136,6 +1143,7 @@ export const register: Register = on => {
     const r = await next(got.model ? { ...e, model: got.model } : e)
     if (r.agentId) {
       if (got.effort !== undefined) m.efforts[r.agentId] = got.effort
+      if (roleOf(e.subagentType ?? '') === 'check') m.checks.add(r.agentId)
       if (got.typed) delete m.requests[got.typed]
     }
     return r
