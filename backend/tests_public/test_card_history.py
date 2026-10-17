@@ -204,8 +204,8 @@ async def test_a_card_checks_fix_that_shows_the_same_outputs_is_a_version_in_the
     assert v["code"] == "8" and json.dumps(v["outputs"]) == json.dumps(cell["outputs"])
     notebook.restore_version(CORPUS, cid, e["id"])
     assert _cell(cid)["code"] == "8" and _edits(cid)[-1]["by"] == "user"
-    # a fix whose code changes the outputs is marked fixed, with Undo, as before
-    revision["code"] = "9"
+    # a fix whose code changes the outputs is marked fixed, with Undo, as before; it keeps the 8 the takeaway cites
+    revision["code"] = "8, 9"
     cell = await _checked(cid, again=True)
     assert cell["check"]["status"] == "fixed" and [f["state"] for f in cell["fixes"]] == ["applied"]
-    assert (_edits(cid)[-1]["by"], cell["outputs"][0]["text/plain"]) == (checkstore.ACTOR, "9")
+    assert (_edits(cid)[-1]["by"], cell["outputs"][0]["text/plain"]) == (checkstore.ACTOR, "(8, 9)")

@@ -15,7 +15,11 @@ whose counts are typed in still are (live QA 3: a merges chart with three events
 heights 39, 36 and 33).
 
 The card harness (app/render.py) on a machine without its headless Chromium says so plainly, warns once and does not
-try again, and no card check begins, or stays on a card when it began before the harness knew."""
+try again, and no card check begins, or stays on a card when it began before the harness knew.
+
+A check changes how a card draws its data, never the data: a replacement whose code would break a citation into the
+card, from main's answer or a takeaway, has its code refused and keeps the rest (live bug hunt C7: the check shortened
+a bar chart's long run names, and main's citations of two bars failed)."""
 from __future__ import annotations
 
 import json
@@ -27,7 +31,7 @@ import pandas as pd
 import playwright.async_api
 import pytest
 
-from app import card_check, config, filters, headless, notebook, render, userconf
+from app import card_check, cardrun, config, context, filters, headless, notebook, refs, render, tools, userconf
 
 CORPUS = "mini"
 
@@ -171,3 +175,74 @@ async def test_without_its_browser_the_harness_warns_once_and_no_card_check_is_l
     assert [r.name for r in caplog.records] == ["thimble.headless"], [r.getMessage() for r in caplog.records]
     assert card_check.start(CORPUS, cid, card_check.MAIN) is None
     assert "check" not in notebook.get_cell(CORPUS, cid)
+
+
+# made-up run names, long enough for a chart to cut off, and the short names the check gave them
+LONG = ["tracekit__underspecified-fan-out-attempt-07", "annotation__underspecified-fan-out-attempt-07", "plain-run"]
+SHORT = ["tracekit__underspec", "annotation__underspec", "plain-run"]
+
+
+def _bars(names: list[str]) -> dict:
+    df = pd.DataFrame({"run": names, "tool calls": [99, 63, 7]})
+    return {"application/vnd.vegalite.v6.json": alt.Chart(df).mark_bar().encode(y="run:N", x="tool calls:Q").to_dict(),
+            "text/plain": "<VegaLite 6 object>"}
+
+
+async def test_a_card_check_never_renames_the_rows_that_main_s_answer_cites(workspaces_tmp, tmp_path, monkeypatch):
+    async def started(k, workspace, kernel=None) -> None:
+        return None
+
+    async def ran(k, code, kind, timeout_s, extra_exprs=None):  # `short()` draws the bars with the short names
+        k.last_labels, k.last_label_revs = [], {}
+        return [_bars(SHORT if code.strip().endswith("short()") else LONG)], 1, "ok"
+
+    monkeypatch.setattr(notebook, "_ensure_started", started)
+    monkeypatch.setattr(notebook, "_run_card_code", ran)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)  # this process stands in for the card runner
+    group = notebook.create_notebook(config.workspace_dir(CORPUS), "Your work", role="analyst")["id"]
+    res = await tools.call(CORPUS, "add_card", {"kind": "plot", "question": "Which runs have the most tool calls?",
+                                                "code": "bars()", "takeaway": "Two runs stand out."},
+                           actor="analyst", notebook=group, terminal=False)
+    assert not res.is_error, res.text
+    cid = res.text.split("card:", 1)[1].split()[0]
+    cited = [f"card:{cid}#tool%20calls/{LONG[0]}", f"card:{cid}#tool%20calls/{LONG[1]}"]
+    main = tmp_path / "transcripts" / "main.jsonl"  # main's answer, its citations as the terminal shows them
+    main.parent.mkdir()
+    main.write_text(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "text", "text": f"Most are in [99]({cited[0]}), then [63]({cited[1]})."}]}}) + "\n")
+    monkeypatch.setattr(context, "transcript_path", lambda c: main)
+    replacement = {"question": "Which runs made the most tool calls?", "code": "short()",
+                   "takeaway": f"[[99|card:{cid}#tool%20calls/{SHORT[0]}]] calls."}
+
+    async def draw(c, cell):
+        return render.Rendered(png=b"\x89PNG card")
+
+    async def read(c, cell, png, run, picture=None):
+        assessment = [{"problem": ""}] * card_check.CRITERIA
+        assessment[2] = {"problem": "Long run names are cut off."}
+        return assessment, dict(replacement), "test-model"
+
+    monkeypatch.setattr(render, "down", lambda: False)
+    monkeypatch.setattr(card_check, "_draw", draw)
+    monkeypatch.setattr(card_check, "_read", read)
+
+    async def checked(again: bool = False) -> dict:
+        run = card_check.start(CORPUS, cid, card_check.MAIN, again=again)
+        assert run is not None
+        await run.task
+        cell = notebook.get_cell(CORPUS, cid)
+        assert cell is not None and cell["code"] == "bars()", "the code that renames the cited rows is refused"
+        for ref, value in zip(cited, ("99", "63")):
+            meta = refs.resolve(config.corpus_dir(CORPUS), ref)["meta"]
+            assert not meta.get("span_missing") and meta["span"]["value"] == value, (ref, meta)
+        return cell
+
+    takeaway = notebook.get_cell(CORPUS, cid)["takeaway"]
+    cell = await checked()
+    assert cell["title"] == replacement["question"], "the rest of the replacement is kept"
+    assert cell["check"]["status"] == "fixed"
+    assert [(f["state"], f["fields"]) for f in cell["fixes"]] == [("applied", ["title"])], "no red ✕ for the refused code"
+    assert cell["takeaway"] == takeaway, "its takeaway, written for the short names, is not"
+    replacement["question"] = cell["title"]  # a replacement that is its refused code alone leaves the card as it is
+    cell = await checked(again=True)
+    assert cell["check"]["status"] == "ok" and len(cell["fixes"]) == 1

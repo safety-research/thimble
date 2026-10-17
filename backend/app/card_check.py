@@ -19,6 +19,9 @@ new change to the card cancels a running check and starts the next. At most READ
    changes (_problems). New code runs on the card's kernel, and on the local transport, where the check runs in the shim,
    through `thimble-run trial` in main's sandbox, as a card run would (cardrun.trial). A replacement that left all the
    card shows as it was (checkstore.shows_same) is one more version in the card's history, and the check ends `ok`.
+   New code that would break a citation into the card, from main's replies or a takeaway (a cited cell of a table or
+   a line, or its value: checkstore.broken_citations), is refused and the rest is tried alone (_breaks): a check
+   changes how a card draws its data, never the data or the names of its rows and columns (C7).
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -869,6 +872,27 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
     tid = str((cand or {}).get("trial") or "")
     keep, settled = False, False
     try:
+        broken = _breaks(c, cid, patch, cand)
+        if broken:
+            # the new code would break citations into the card (C7: it renamed the rows main's answer cited), so its
+            # trial is put back and the rest of the replacement is tried alone
+            settled = True
+            await _settle(c, cid, tid, keep=False)
+            tid = ""
+            patch = _without_code(c, cid, patch)
+            timing["kept_citations"] = len(broken)
+            log.info("card check: the new code of card:%s would break %s, so it was not applied", cid,
+                     ", ".join(broken))
+            if not patch:
+                timing["replace_ms"] = _ms(t0)
+                timing["replacement"] = "kept citations"
+                _end(run, "ok")
+                return
+            try:
+                cand = await checkstore.candidate(c, cid, patch)
+            except Exception as e:  # noqa: BLE001 — a card gone meanwhile
+                cand = None
+                log.info("card check: the replacement of card:%s cannot be applied (%s)", cid, e)
         why = await _not_kept(run, cand, _type_of(cell))
         timing["replace_ms"] = _ms(t0)
         if why:
@@ -895,6 +919,32 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
     finally:
         if not settled and tid:  # stopped or past its time before the settle began
             _spawn(_settle_now(c, cid, tid, keep))
+
+
+def _breaks(c: str, cid: str, patch: dict[str, Any], cand: dict[str, Any] | None) -> list[str]:
+    """The citations into card `cid`, from main's replies and the takeaways, that the replacement's new code would break
+    (checkstore.broken_citations): a cited cell of a table or a line, or its value, that the card shows and the
+    replacement's run does not. A check never changes the data a card shows, only how it is drawn."""
+    from . import checkstore, notebook  # noqa: PLC0415
+
+    if "code" not in patch or not cand or str(cand.get("status") or "ok") != "ok":
+        return []
+    before = notebook.get_cell(c, cid, full_outputs=True)
+    return checkstore.broken_citations(c, before, cand) if before is not None else []
+
+
+def _without_code(c: str, cid: str, patch: dict[str, Any]) -> dict[str, Any]:
+    """The parts of a replacement left once its code is refused: its question, and its takeaway when each citation in
+    it of a cell or a line of the card holds on the card's own outputs (a takeaway written for the refused code cites
+    what that code showed)."""
+    from . import checkstore, notebook  # noqa: PLC0415
+
+    out = {k: v for k, v in patch.items() if k != "code"}
+    if "takeaway" in out:
+        cell = notebook.get_cell(c, cid, full_outputs=True)
+        if cell is None or not checkstore.takeaway_holds(c, cell, str(out["takeaway"])):
+            out.pop("takeaway")
+    return out
 
 
 async def _not_kept(run: _Run, cand: dict[str, Any] | None, typed: str = "") -> str:

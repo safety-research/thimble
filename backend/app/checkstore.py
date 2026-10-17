@@ -8,10 +8,13 @@ stale record is refused, so a slow check never writes over a newer card.
 `cell.fixes` lists the changes checks made, oldest first. A fix is tried on a candidate first (candidate()), then
 apply_fix() stores it as one undo step with actor `check`, only on an unlocked card a model made. undo_fix() puts the
 card back; outputs a code fix replaced are kept in workspaces/<c>/card-checks/<card>/<fix>-before.json. A fix that left
-all the card shows as it was (shows_same) is one more version in the card's history and no entry of `fixes`.
+all the card shows as it was (shows_same) is one more version in the card's history and no entry of `fixes`. New code
+that would break a citation into the card, from main's replies or a takeaway, is no part of a fix (broken_citations),
+since those texts are not rewritten: a fix changes how the card draws its data, never the data (C7).
 """
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import json
@@ -339,6 +342,115 @@ def fixable(cell: dict, fields: Iterable[str]) -> list[str]:
             continue
         out.append(f)
     return out
+
+
+# ----------------------------------------------------------------------------------------------------------
+# the citations a fix keeps
+# ----------------------------------------------------------------------------------------------------------
+
+
+def _card_names(c: str, cell: dict) -> set[str]:
+    """The names a citation gives card `cell`: its id and its name (notebook.cell_slugs)."""
+    from . import notebook  # noqa: PLC0415
+
+    cid = str(cell.get("id") or "")
+    names = {cid, str(cell.get("slug") or "")}
+    with contextlib.suppress(Exception):  # a workspace that cannot be read names the card by its id alone
+        names.add(notebook.cell_slugs(config.workspace_dir(c)).get(cid, ""))
+    return {n for n in names if n}
+
+
+def _main_replies(c: str, names: set[str]) -> list[str]:
+    """The text of main's replies that name the card (`names`), as the analyst read them: its transcript's text
+    (context.transcript_path), with the citations written for the terminal in their chat form (session.visible)."""
+    from . import context, session  # noqa: PLC0415
+
+    path = context.transcript_path(c)
+    try:
+        data = path.read_bytes() if path is not None else b""
+    except OSError:
+        return []
+    keys = [n.encode("utf-8") for n in names]
+    out: list[str] = []
+    for line in data.splitlines():
+        if b'"assistant"' not in line or not any(k in line for k in keys):
+            continue
+        try:
+            rec = json.loads(line)
+            if not isinstance(rec, dict) or rec.get("type") != "assistant" or rec.get("isSidechain"):
+                continue
+            blocks = session._blocks(rec)
+        except (ValueError, session.Unreadable):
+            continue
+        out.extend(session.visible(str(b.get("text") or "")) for b in blocks if b.get("type") == "text")
+    return out
+
+
+def _spans_into(cid: str, names: set[str], text: str) -> list[tuple[dict, str | None]]:
+    """The citations in `text` of a cell of a table or a line that card `cid` shows (it named by one of `names`):
+    (the ref parsed and naming the card by `cid`, its value or None for a citation without one)."""
+    from . import refs  # noqa: PLC0415
+
+    out: list[tuple[dict, str | None]] = []
+    for m in refs._BRACKETS.finditer(cite.normalise_markup(text)):
+        display, bar, ref = m.group(1).partition("|")
+        display, ref = (display.strip(), ref.strip()) if bar else (None, display.strip())
+        try:
+            p = refs.parse_ref(ref)
+        except ValueError:
+            continue
+        span = p.get("col") is not None or p.get("out") is not None
+        if p.get("kind") == "cell" and p.get("cell_id") in names and span:
+            out.append(({**p, "cell_id": cid}, display or None))
+    return out
+
+
+def _holds(cell: dict, p: dict, display: str | None) -> bool:
+    """Whether card `cell` shows what a citation points at (`p`): the cell or line it names and, when it has a value
+    (`display`), that value there."""
+    from . import heal, refs  # noqa: PLC0415
+
+    if not heal._at_place(cell, p)[0]:
+        return False
+    if display is None:
+        return True
+    return cite._Sources(str(p["cell_id"]), cell.get("outputs")).verify(refs.format_ref(p), display) is not None
+
+
+def citations_into(c: str, cell: dict) -> list[tuple[dict, str | None]]:
+    """The citations that point into card `cell` at a cell of a table or a line, from main's replies and from every
+    card's takeaway, each once: (the ref parsed, its value or None)."""
+    from . import notebook, refs  # noqa: PLC0415
+
+    cid = str(cell.get("id") or "")
+    names = _card_names(c, cell)
+    texts = _main_replies(c, names)
+    texts += [str(x.get("takeaway") or "") for _, nb in notebook._stored(config.workspace_dir(c))
+              for x in nb.get("cells") or [] if isinstance(x, dict)]
+    found: dict[str, tuple[dict, str | None]] = {}
+    for text in texts:
+        if any(n in text for n in names):
+            for p, display in _spans_into(cid, names, text):
+                found.setdefault(f"{display}|{refs.format_ref(p)}", (p, display))
+    return list(found.values())
+
+
+def broken_citations(c: str, before: dict, after: dict) -> list[str]:
+    """The citations into card `before` that its replacement `after` would break: a cited cell of a table or a line,
+    or the value at it, that `before` shows and `after` does not (as a renamed row, C7). A fix never breaks one, since
+    the answers and takeaways that cite it are not rewritten. Each as `[[value|ref]]`."""
+    from . import refs  # noqa: PLC0415
+
+    return [f"[[{display}|{refs.format_ref(p)}]]" if display else f"[[{refs.format_ref(p)}]]"
+            for p, display in citations_into(c, before) if _holds(before, p, display) and not _holds(after, p, display)]
+
+
+def takeaway_holds(c: str, cell: dict, takeaway: str) -> bool:
+    """Whether every citation in a takeaway for card `cell` of a cell of a table or a line that the card shows holds
+    on it."""
+    cid = str(cell.get("id") or "")
+    text = cite.qualify_bare_spans(cid, takeaway)
+    return all(_holds(cell, p, display) for p, display in _spans_into(cid, _card_names(c, cell), text))
 
 
 def _before_path(c: str, cid: str, fix_id: str) -> Path:
