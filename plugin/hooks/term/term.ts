@@ -601,6 +601,7 @@ export async function openPanel(cx: Ctx, p: TermPanel, opts: { replace?: boolean
  *  and has not closed by hand; below that it waits undrawn, the row above the prompt offers it and says why, and Claude
  *  Code places it once the terminal is widened to that width (the Pane's first drawing then takes the row away). */
 async function placePanel(cx: Ctx, p: TermPanel): Promise<void> {
+  opens++
   try {
     const title = paneTitle(p)
     rt.fittedFor = rt.termColumns
@@ -714,6 +715,27 @@ export async function takeKeys(cx: Ctx): Promise<void> {
   await cx.open({ id: PANEL, title: paneTitle(p), focus: true, columns: panelColumns() }).catch(() => undefined)
   await cx.bumpPanel()
   giveKeys(cx, paneTitle(p))
+}
+
+// the panel's opens so far (placePanel): an act that opened a view asked for the keys itself
+let opens = 0
+
+/** The keys kept by the panel after the person pressed one of its own acts (a Button such as `checked ›` or a passage's
+ *  `?`, a link, a row, a card's mark), as a click on a list keeps them (takeKeys). A click can leave the keys with the
+ *  prompt though the act changed only the panel (bug hunt B28: after `checked ›` the hint row said `click the panel for
+ *  its keys`, and the next `f` went to main's prompt). A moment after the press, once its act ran, a pane that no longer
+ *  holds the keys takes them back; nothing when the act opened a view (placePanel asked for them), while the pane holds
+ *  them, or once it closed. */
+export function keepKeys(cx: Ctx): void {
+  const at = opens
+  cx.later(KEYS_AGAIN_MS, () =>
+    void (async () => {
+      if (opens !== at) return
+      const pane = (await cx.panes()).find(x => x.id === PANEL)
+      if (!pane?.isPlaced || (pane.isFocused !== false && !rt.typeThrough)) return
+      await takeKeys(cx)
+    })().catch(() => undefined),
+  )
 }
 
 // the relay's field (panel.tsx RELAY.pick), a new thread's question field (panel.tsx drawAsk) and the ring off every

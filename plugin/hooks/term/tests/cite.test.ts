@@ -6,6 +6,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { firstCode, literalAt } from '../cite'
+import { UNFOCUSED_HINT } from '../panel'
 import { CITED_BG, CWD, WS, citedText, shown, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -282,6 +283,38 @@ test("a file citation's `checked` says how thimble verified it and asks a side t
   pane = (await $.ui.mount(PANE)) as unknown as M
   // the panel shows the thread, its question its step
   expect(shown(await pane.find({ type: 'Box', key: 'way' }))).toContain('threads › "Write and run a short script that recomputes 4,579')
+  await pane.unmount()
+})
+
+test("a click on the bar's `checked ›` keeps the panel's keys: the hint row still names them and `f` opens the file (bug hunt B28)", async ($, on) => {
+  // bug hunt B28: after a click on `checked ›` the hint row said `click the panel for its keys`, and the next `f` went
+  // to main's prompt. Claude Code is played as it behaved there: the click leaves the keys with the prompt, and an open
+  // with `focus` gives them back while the prompt is empty
+  const w = world(on)
+  w.paneFocused = true
+  w.grantOnReopen = true
+  await start($, w)
+  let pane = await clickCite($, w, 'It has [4,579](README.md#L3) pages.', 8)
+  expect(shown(await pane.find({ key: 'h-hints' }))).toContain('f for its file')
+  // the open's own asks for the keys are over
+  await w.clock.advance(1000)
+  w.paneFocused = false
+  await pane.press({ key: 'cite-state' })
+  await w.clock.advance(300)
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.find({ key: 'cite-how' }))).toContain('thimble read the cited line')
+  expect(w.paneFocused).toBe(true)
+  const hint = shown(await pane.find({ key: 'h-hints' }))
+  expect(hint).toContain('f for its file')
+  expect(hint).not.toContain(UNFOCUSED_HINT)
+  // `f` is the panel's: the file opens, and nothing is typed into main's prompt
+  await pane.press({ key: 'hk-files' })
+  await w.clock.settle()
+  await pane.unmount()
+  expect(w.filled).toEqual([])
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.find({ type: 'Box', key: 'way' }))).toContain('README.md')
   await pane.unmount()
 })
 

@@ -46,7 +46,7 @@ import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './rep
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
-import { PANEL, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
+import { PANEL, keepKeys, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
 import { turns } from './turns'
 import { registerBand } from './band'
 import { registerPanelViews } from './views'
@@ -1100,7 +1100,10 @@ export const register: Register = (on, options) => {
   on('ui.press', async ($, e, next) => {
     if (!rt.sc) return next(e)
     const cx = cxOf($)
-    await navOrigin(cx, e.component === 'Pane' && e.requestId === PANEL)
+    const inPanel = e.component === 'Pane' && e.requestId === PANEL
+    await navOrigin(cx, inPanel)
+    // a press on one of the panel's own acts keeps the panel's keys (bug hunt B28; term.ts keepKeys)
+    if (inPanel) keepKeys(cx)
     if (e.element === 'sel-ask' && rt.selection) await openAsk(cx, { kind: 'sentence', text: rt.selection.slice(0, 1200) })
     return next(e)
   })
@@ -1115,6 +1118,8 @@ export const register: Register = (on, options) => {
       const last = rt.seenGestures.get(d.origin) ?? 0
       const fresh = (d.gestures as Sent[]).filter(g => typeof g?.seq === 'number' && g.seq > last)
       if (fresh.length) rt.seenGestures.set(d.origin, Math.max(...fresh.map(g => g.seq)))
+      // a click in the panel (a card's mark, a passage's link) keeps the panel's keys, as a press there does
+      if (inPanel && fresh.some(g => g.gesture && g.target)) keepKeys(cx)
       for (const g of fresh) {
         if (!g.gesture || !g.target) continue
         // a click on a passage a check commented on: the panel at Checks on that comment (the ref is its id)
@@ -1132,6 +1137,8 @@ export const register: Register = (on, options) => {
     }
     if (d.type === 'home') {
       await navOrigin(cx, inPanel)
+      // a click on a part drawn from lines (a link, `↳`, a row) keeps the panel's keys
+      if (inPanel) keepKeys(cx)
       await linesMessage(cx, d.horigin, d.hacts)
     } else if (d.type === 'view') {
       // a click or a drag in a terminal view (viewclient.tsx); like a click on a list, it gives the pane its keys back
@@ -1145,6 +1152,7 @@ export const register: Register = (on, options) => {
     } else if (d.type === 'label-open' && typeof d.slug === 'string') {
       // a press on a card's label row (its name or its ↗): the label's panel, under its name
       await navOrigin(cx, inPanel)
+      if (inPanel) keepKeys(cx)
       const find = async () => {
         const got = await surfaceValue(cx, 'labels')
         return got?.ok ? labelsOf(got.value).find(l => l.id === d.slug || l.name === d.slug) : undefined

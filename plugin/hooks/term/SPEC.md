@@ -303,8 +303,9 @@ and never what a script got. In the citation panel's bar, a citation still check
     element then, so no row names them. A letter the panel does not bind goes to the prompt; the panel then draws
     neither the relay nor its hotkeys until the prompt has the keys, and its row says `click the panel for its keys`.
     The row names the list's keys only once a `ui.focus` says the ring rests there. A click on a list, on a row or on
-    an empty part, hands the keys back to the pane. A list taller than its pane is cut to the rows the pane leaves it
-    around the chosen row, `↑ N more` and `↓ N more` dim above and below (a click moves a page, the wheel a row), so
+    an empty part, hands the keys back to the pane, and so does a click on any other act of the panel's own (`checked
+    ›`, a passage's `?`, a link): it never leaves the keys with the prompt (bug hunt B28). A list taller than its pane
+    is cut to the rows the pane leaves it around the chosen row, `↑ N more` and `↓ N more` dim above and below (a click moves a page, the wheel a row), so
     the chosen row and the hint row always show. A choice that moves up to the first row shown, or above it, starts the
     rows shown at the row that leads it: on home its section's heading, and the top for the first row the keys choose,
     so every row can be reached by keys. No letter is a hotkey unless the hint row names it, or, in a view, the list
