@@ -608,7 +608,9 @@ async def go_live(wait: bool = True) -> bool:
     if first and LIVE.transport == activate.LOCAL and not LIVE.begun:
         LIVE.begun = True
         try:  # the card watch from thimble's start, not its first call (local.begin)
-            await anyio.to_thread.run_sync(local.begin, cwd())
+            c = await anyio.to_thread.run_sync(local.begin, cwd())
+            if c:
+                local.watch(c)  # on this loop: the worker thread begin ran in has none
         except Exception:  # noqa: BLE001 — the tools still serve without it
             log.exception("the card watch did not start")
     await connection.send_tool_list_changed()

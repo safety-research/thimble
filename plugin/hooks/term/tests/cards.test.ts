@@ -72,6 +72,25 @@ test("the card pane says how the card's last run ended; `run again` (r) asks mai
   await pane.unmount()
 })
 
+test("a card whose run ended and whose check waits to start: the card says `◌ checking`, the pane offers `run again`, never `◌ running` (bug hunt B19)", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = world(on)
+  Object.assign(w.cells.k0code00!, { code: 'print(8)', run: { state: 'done', by: 'bash' }, check: 'pending' })
+  await start($, w)
+  await turn($, w, 'k0code00')
+  await $.command.run({ command: 'thimble:thimble', args: 'card k0code00' } as never)
+  await w.clock.settle()
+  const pane = (await $.ui.mount(PANE)) as unknown as M
+  const text = shown(await pane.drawn())
+  expect(shown(await pane.drawn({ in: 'card-pane-k0code00' }))).toContain('◌ checking')
+  expect(text).toContain('last run ok')
+  expect(text).not.toContain('◌ running')
+  expect(text).toContain('run again')
+  expect(text).toContain('r to run again')
+  await pane.press({ key: 'card-again' })
+  expect(w.submitted.at(-1)).toBe('Run this card again with Bash: thimble-run card k0code00')
+  await pane.unmount()
+})
+
 // the card's region (a Client), a blank row, then the takeaway
 const GAP = /"client":\{"plugin":"thimble"\}\},\{"type":"Text","children":\[" "\]\},\{"type":"Box".*The dse wiki has the most revisions\./
 

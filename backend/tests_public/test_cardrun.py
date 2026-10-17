@@ -194,6 +194,54 @@ async def test_the_shims_watch_starts_the_check_of_a_card_run_with_a_takeaway(te
     assert mine[-1]["state"]["status"] == "ok" and mine[-1]["state"]["takeaway"].startswith("There are")
 
 
+async def test_a_run_again_s_check_starts_before_and_after_the_press(term, monkeypatch):
+    """Bug hunt B19: after `run again` a card stayed `check: "pending"` for good. The shim's watch never started (the shim
+    makes local.begin in a worker thread, which has no loop, and the calls after it took the start as made), and after
+    the press no process watched. Now the shim's watch starts with the next call on its loop and acts while main's
+    transport is local, and the server's watch acts after the press. An edit's new code waits for its run, so no check
+    reads it beside the old outputs, and a run whose card stands as its last check read it leaves no mark."""
+    import asyncio
+
+    from app import card_check, checkstore
+
+    started: list[str] = []
+    monkeypatch.setattr(card_check, "start", lambda c, cid, author, **kw: started.append(cid))
+    monkeypatch.setenv("THIMBLE_CARD_CHECK", "on")
+
+    async def claimed(cid: str) -> bool:
+        for _ in range(50):
+            if started == [cid] and "check" not in notebook.get_cell(CORPUS, cid):
+                return True
+            await asyncio.sleep(0.1)
+        return False
+
+    assert await asyncio.to_thread(local.begin, str(term)) == CORPUS  # as bin/thimble-mcp's go_live makes it
+    cid = card_id(await call(term, "add_card", question="Posts?", code="print(8)", takeaway="There are 8 posts."))
+    started.clear()  # add_card's own call (card_check.after_tool)
+    assert run(term, "card", cid).returncode == 0
+    assert await claimed(cid), "the shim's watch started the check of the run on local transport"
+    # an edit that keeps the takeaway waits for its run beside the old outputs: no check of it yet, and its run's end
+    # marks it
+    await call(term, "edit_card", card=cid, code="print(8)")
+    staged = notebook.get_cell(CORPUS, cid)
+    assert staged["run"]["state"] == "waiting" and staged["takeaway"] and not card_check.wants_check(staged)
+    # the press: main's calls go to the server, and so does the run's check
+    (config.workspace_dir(CORPUS) / "trusted" / "launch.json").write_text(json.dumps({"transport": "server"}))
+    started.clear()
+    assert run(term, "card", cid).returncode == 0
+    assert notebook.get_cell(CORPUS, cid).get("check") == "pending"
+    await asyncio.sleep(2 * cardrun.WATCH_S)
+    assert started == [], "the shim's watch leaves it to the server after the press"
+    async with notebook._lifespan(None):
+        assert await claimed(cid), "the server's watch started the check of the run again"
+    # a run again whose outputs came out as the last check read them: that check stands, and no mark
+    check = checkstore.begin(CORPUS, cid)
+    assert checkstore.finish(CORPUS, cid, check, "ok")
+    started.clear()
+    assert run(term, "card", cid).returncode == 0
+    assert notebook.get_cell(CORPUS, cid)["check"]["status"] == "ok"
+
+
 def test_main_s_bash_runs_thimble_run_by_its_name_from_the_plugin_s_bin(tmp_path, monkeypatch):
     """Claude Code puts the bin/ of the plugin copy it started the shim from (CLAUDE_PLUGIN_ROOT) on main's Bash's PATH,
     after its own, and not on the shim's: the command names `thimble-run` alone then. It names the full path when main's

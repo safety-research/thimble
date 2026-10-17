@@ -110,18 +110,25 @@ def current(c: str, cid: str) -> dict | None:
     return copy.deepcopy(rec) if isinstance(rec, dict) else None
 
 
+def read_as_is(cell: dict) -> bool:
+    """Whether the card's latest check read it to the end as it stands now (READ, same basis), so another reads nothing
+    new: a run again whose outputs came out as they were."""
+    rec = cell.get("check") if isinstance(cell.get("check"), dict) else None
+    return rec is not None and rec.get("status") in READ and rec.get("basis") == basis(cell)
+
+
 @_changes
 def begin(c: str, cid: str, *, author: str | None = None, again: bool = False) -> str | None:
     """Open a check of card `cid`: a fresh `pending` record naming the `author` whose work led to the card. Returns the
-    check's id; None for a card that is gone, or one already read to the end as it stands, unless asked `again`."""
+    check's id; None for a card that is gone, or one already read to the end as it stands (read_as_is), unless asked
+    `again`."""
     hit = _locate(c, cid)
     if hit is None:
         return None
     nb, cell = hit
-    rec = cell.get("check") if isinstance(cell.get("check"), dict) else None
-    now = basis(cell)
-    if not again and rec is not None and rec.get("basis") == now and rec.get("status") in READ:
+    if not again and read_as_is(cell):
         return None
+    now = basis(cell)
     rec = {"id": _id("chk"), "basis": now, "status": "pending", "phase": "queued", "stages": {}, "started": _now(),
            "ended": None, **({"author": author} if author else {})}
     cell["check"] = rec
