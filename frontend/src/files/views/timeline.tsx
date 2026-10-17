@@ -8,11 +8,14 @@
 // values of the keys Color by offers in the Transcript and Table views (GET /source/events, colorKeys), Color by opening
 // on the key those views open on (defaultChoice) and Rows on the next key with few values; a record that opens in the
 // side panel is read whole (GET /ref). The labels that are on mark the records the table draws, and a citation of the
-// file opens the record it names.
+// file opens the record it names. Color by opens on a label that is on only when it marks some of the file's records
+// (labels.viewMarking, as a view's page does: E9), else on that key, and lists the labels that mark the file first (bug
+// hunt G8: it opened on the newest label, over another file, as `match 0 · Not marked 23`).
 import { useMemo } from 'react'
 import { api } from '../../lib/api'
 import type { SourceEvents, SourceKey, SourceKind, TimeHint, TranscriptHint } from '../../lib/types'
 import { colorKeys, defaultChoice, KEY_COLORS } from '../colorChoice'
+import { viewLabels, viewMarking } from '../labels'
 import { useFilesFilter } from '../useLabels'
 import { ViewerFrame, type FrameHost } from '../ViewerFrame'
 import type { ViewDef, ViewProps } from './common'
@@ -39,6 +42,12 @@ export function timelineAnswer(got: SourceEvents): SourceEvents & { initial: { c
 
 function Timeline({ workspace, path, targetRef, labels }: ViewProps) {
   const filter = useFilesFilter(workspace)
+  // the labels that mark this file, which the page lists first, and those that give one of its records a value they
+  // highlight, which Color by may open on
+  const all = labels?.all
+  const presence = labels?.presence
+  const first = useMemo(() => (all && presence ? viewLabels(all, presence, [path]) : undefined), [all, presence, path])
+  const marking = useMemo(() => (all && presence ? viewMarking(all, presence, [path]) : undefined), [all, presence, path])
   const host = useMemo<FrameHost>(
     () => ({
       page: () => api.timelinePage(workspace),
@@ -62,6 +71,8 @@ function Timeline({ workspace, path, targetRef, labels }: ViewProps) {
       filter={filter}
       filterFiles={filter ? labels?.presence.get(filter.concept) : undefined}
       byId={labels?.byId}
+      first={first}
+      marking={marking}
     />
   )
 }
