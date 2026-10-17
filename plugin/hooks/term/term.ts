@@ -86,6 +86,8 @@ export const rt = {
   // the cards some drawing shows, and the label each label card counts
   shown: new Set<string>(),
   labelOf: new Map<string, string>(),
+  // the cards main deleted in this session (delete_card), which no answer draws or counts (bug hunt C16)
+  deleted: new Set<string>(),
   // the last ui.jsonl record followed (-1 until the first read, which follows none of the earlier ones)
   uiN: -1,
   // where the latest gesture came from: inside the panel or not; the way a press on back or a crumb chose
@@ -156,6 +158,25 @@ export function panelColumns(): number {
 }
 
 // ------------------------------------------------------------------------------------------------ cards
+
+/** A card main deleted (delete_card): gone from the turn that runs and from what `/thimble card` opens, and from every
+ *  answer's cards and footer from now on (liveCards). A card made again under its id is drawn again (cardMade). */
+export function cardDeleted(id: string): void {
+  rt.deleted.add(id)
+  rt.shown.delete(id)
+  if (rt.turn) rt.turn.cards = rt.turn.cards.filter(x => x !== id)
+  rt.lastCards = rt.lastCards.filter(x => x !== id)
+}
+
+/** A card a call of main's made or changed (add_card, edit_card): no longer deleted. */
+export function cardMade(id: string): void {
+  rt.deleted.delete(id)
+}
+
+/** The cards of `ids` main has not deleted. */
+export function liveCards(ids: readonly string[]): string[] {
+  return ids.filter(id => !rt.deleted.has(id))
+}
 
 /** A cell as the drawing holds it. */
 export function termCard(cell: ThimbleCell, label: ThimbleLabel | null, rev: number): TermCard {

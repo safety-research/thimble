@@ -46,7 +46,7 @@ import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './rep
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
-import { PANEL, keepKeys, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
+import { PANEL, cardDeleted, cardMade, keepKeys, liveCards, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
 import { turns } from './turns'
 import { registerBand } from './band'
 import { registerPanelViews } from './views'
@@ -83,6 +83,7 @@ const AGENT_MESSAGE = /<agent-message from="([^"]+)"/
 // how long a check's dropped hand-back waits for its run's record (checkDone)
 const CHECK_READ_MS = 5000
 const CARD_TOOL = /^mcp__plugin_thimble_thimble__(add_card|edit_card|apply_label)$/
+const DELETE_TOOL = /^mcp__plugin_thimble_thimble__(delete_card|delete_cell)$/
 const VIEW_TOOL = /^mcp__plugin_thimble_thimble__propose_view$/
 
 /** Why a check's hand-back is dropped, which Claude Code shows in its row for the drop: what the check did, by the record of
@@ -311,14 +312,15 @@ async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promi
   const ans = await cx.answer(e.requestId)
   if (!ans) return null
   const { Box, Text, Button } = cx.els(e)
-  const counts = citeCounts(await answerItems(cx, ans.text, ans.cards))
+  const cards = liveCards(ans.cards)
+  const counts = citeCounts(await answerItems(cx, ans.text, cards))
   // "Citation marks" off: nothing checks them
   const marks = featureOn('citationMarks')
   const checking = marks ? counts.pending : 0
   const failed = marks ? counts.bad : 0
   const num = (n: number) => n.toLocaleString('en-US')
   const plural = (n: number, w: string) => `${num(n)} ${w}${n === 1 ? '' : 's'}`
-  const facts = [...(counts.all ? [plural(counts.all, 'citation')] : []), ...(ans.cards.length ? [plural(ans.cards.length, 'card')] : [])].join(' · ')
+  const facts = [...(counts.all ? [plural(counts.all, 'citation')] : []), ...(cards.length ? [plural(cards.length, 'card')] : [])].join(' · ')
   return (
     <Box key={`footer-${e.requestId}`} marginTop={1} marginLeft={MARGIN} flexDirection="row" columnGap={2}>
       <Box flexShrink={1} flexDirection="row">
@@ -439,7 +441,7 @@ async function noteAnswer(cx: Ctx, row: string, text: string): Promise<void> {
 /** A row of main's chat with what thimble-term draws under it: the turn's cards (when no reply row carries them) and
  *  the side threads' rows. */
 async function underRow(cx: Ctx, e: ResolveInput & { requestId: string; viewport?: { columns: number } }, next: () => Promise<RenderElement>): Promise<RenderElement> {
-  const ids = await cx.turnCards(e.requestId)
+  const ids = liveCards(await cx.turnCards(e.requestId))
   const told = await signalRows(cx, e)
   const views = await viewRowsEl(cx, e)
   if (!ids.length && !told && !views) return next()
@@ -691,8 +693,16 @@ export const register: Register = (on, options) => {
     const ran = await next(call)
     try {
       if (!rt.sc || e.agentId !== undefined || ran.deny !== undefined) return ran
+      // a card main deleted is no card of the turn's, and no answer draws or counts it (bug hunt C16: one made and
+      // deleted in the same turn drew `× card 1 cannot be drawn` and counted in the footer)
+      if (DELETE_TOOL.test(String(e.tool)) && !ran.isError) {
+        const input = e as unknown as Record<string, unknown>
+        const id = String(input.card ?? input.cell ?? '').trim().replace(/^(?:card|cell):/, '')
+        if (id) cardDeleted(id)
+      }
       const ids = cardsOfCall(String(e.tool), e, String(ran.text ?? ''))
       if (ids.length) {
+        for (const id of ids) cardMade(id)
         if (rt.turn) for (const id of ids) if (!rt.turn.cards.includes(id)) rt.turn.cards.push(id)
         void loadCards(cxOf($), ids)
       }
@@ -844,7 +854,7 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (!rt.sc) return next(e)
     const cx = cxOf($)
-    const ids = await cx.turnCards(e.requestId)
+    const ids = liveCards(await cx.turnCards(e.requestId))
     const told = await signalRows(cx, e)
     const views = await viewRowsEl(cx, e)
     const footer = await footerEl(cx, e)

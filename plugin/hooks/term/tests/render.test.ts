@@ -240,3 +240,29 @@ test("a tool's layout record for Files opens Coverage: the terminal has no file 
   expect(w.opened).toEqual(['thimble'])
   expect(w.panes.at(-1)!.title).toBe('Coverage')
 })
+
+test("bug hunt C16: a card made and deleted in the same turn is neither drawn (no `× card 1 cannot be drawn`) nor counted in the footer", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  await $.turn.start({ text: 'Try a sample, then run it on all.', turnId: 't1' } as never)
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u1', question: 'q', code: 'df' } as never)
+  // main deletes it: the card is gone from the workspace
+  w.toolText = 'Deleted card:ff73e071, the card that asked: q'
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__delete_card', tool_use_id: 'u2', card: 'card:ff73e071' } as never)
+  delete w.cells.ff73e071
+  w.toolText = 'card:d0diag00\n[out0: diagram]'
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u3', question: 'q2', code: 'df' } as never)
+  await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: 'r1', message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'The label ran on every record.' }] } } as never).catch(() => undefined)
+  await $.turn.complete({ turnId: 't1', answer: 'The label ran on every record.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(300)
+  const ui = (await $.ui.mount(MESSAGE('r1', 'The label ran on every record.'))) as unknown as M
+  const json = JSON.stringify(await ui.drawn())
+  expect(json).not.toContain('cannot be drawn')
+  expect(json).not.toContain('ff73e071')
+  expect(json).toContain('d0diag00')
+  const footer = shown(await ui.find({ key: 'footer-r1' }))
+  expect(footer).toContain('1 card')
+  expect(footer).not.toContain('2 cards')
+  await ui.unmount()
+})
