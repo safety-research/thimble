@@ -510,6 +510,15 @@ describe('the agent listing', () => {
     expect(await e.offer('thimble:writer')).toBe(false)
   })
 
+  it('after /plugin off and on, offers again the type of an agent the record says runs, which Claude Code resumes (H19)', async () => {
+    // a new load of the module, whose memory is new: the server lists the running agents only
+    const server = new Server()
+    server.state = { ...server.state, agents: { 'a-orient': { type: 'thimble:orientation', role: 'orientation', plugin_started: false } } }
+    const e = await started({ server })
+    expect(await e.offer('thimble:orientation')).toBe(true) // a helper's report resumes it
+    expect(await e.offer('thimble:critic')).toBe(false)
+  })
+
   it('offers a type the module spawned from then on', async () => {
     const e = await started()
     expect(await e.offer('thimble:writer')).toBe(false)
@@ -958,6 +967,12 @@ describe('local transport', () => {
       expect(e.$.http.fetch).not.toHaveBeenCalled()
     })
   }
+
+  it('after /plugin off and on, offers again the type of an agent subagents.json says runs, not of one that ended (H19)', async () => {
+    const e = await begun({ state: { agents: { 'a-orient': { type: 'thimble:orientation', status: 'waiting' }, 'a-w': { type: 'thimble:writer', status: 'done', ended: 1 } } } })
+    expect(await e.offer('thimble:orientation')).toBe(true)
+    expect(await e.offer('thimble:writer')).toBe(false)
+  })
 
   it('at the press takes the requests still in subagents.json, then goes on over HTTP and never back', async () => {
     const e = await begun()
