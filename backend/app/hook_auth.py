@@ -53,7 +53,9 @@ stays signed in; a signed-in browser not used for PAIRED_IDLE_S signs in again (
 once in TOUCH_S). A tab whose server went away may later reach another program that holds the old port. Before such a
 tab sends its cookie or its key again, it asks HELLO_PATH on the plain path, with no credentials, for an HMAC of a
 fresh nonce under the sha256 of its key, bound to the port the server listens on (hello); a program that is not this
-server cannot answer it, and the tab stops (frontend lib/stale).
+server cannot answer it, and the tab stops (frontend lib/stale). A browser this server signed out gets an answer of
+its own under the same key (hello_out_mac), so its tab shows the sign-in line rather than that thimble stopped, and
+comes back once the browser signs in again (bug hunt G4).
 
 A cookie is bound to a host and a path, never to a port, so a browser sends a cookie of 127.0.0.1 to every server on
 127.0.0.1 (and one of localhost to every server on localhost) whose page asks for a path the cookie covers. A cookie
@@ -675,9 +677,26 @@ def claim(body: Any, request: Request) -> tuple[Response, str]:
     return set_cookie(JSONResponse({"key": key, "port": _own_port(request.scope)}), cookie, key), digest[:12]
 
 
+# the keys (their sha256) of the browsers this server signed out (sign_out, unpair), newest last, at most
+# SIGNED_OUT_KEPT; in memory only: a signed-out tab's challenge learns from this server that it is signed out (hello)
+_signed_out: OrderedDict[str, None] = OrderedDict()
+SIGNED_OUT_KEPT = 64
+
+
+def _note_signed_out(entries: list[dict[str, str]]) -> None:
+    """Keep the keys of `entries`, signed out now, for hello. Call with _pair_lock held."""
+    for e in entries:
+        if e.get("key"):
+            _signed_out[e["key"]] = None
+            _signed_out.move_to_end(e["key"])
+    while len(_signed_out) > SIGNED_OUT_KEPT:
+        _signed_out.popitem(last=False)
+
+
 def unpair() -> None:
     """Sign every browser out: no cookie proves anything until a browser signs in again."""
     with _pair_lock:
+        _note_signed_out(_entries())
         _save([])
 
 
@@ -690,6 +709,7 @@ def sign_out(browser: str) -> bool:
         kept = [e for e in held if not e["hash"].startswith(browser)]
         if len(kept) == len(held):
             return False
+        _note_signed_out([e for e in held if e["hash"].startswith(browser)])
         _save(kept)
     return True
 
@@ -989,19 +1009,32 @@ def hello_mac(key_hash: str, port: int, nonce: str) -> str:
     return hmac.new(key_hash.encode("utf-8"), f"hello:{int(port)}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def hello(nonce: object, kid: object, scope: dict) -> str | None:
-    """The answer to a stale tab's challenge (module note) for the signed-in browser whose key's id is `kid`, None when
-    no signed-in browser has that id or the nonce is not one."""
+def hello_out_mac(key_hash: str, port: int, nonce: str) -> str:
+    """The challenge's answer for a browser this server signed out: HMAC-SHA256 under the key's sha256 of
+    "signed-out:<port>:<nonce>", which only this server can give, so the tab learns from it alone that it is signed out."""
+    return hmac.new(key_hash.encode("utf-8"), f"signed-out:{int(port)}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def hello(nonce: object, kid: object, scope: dict) -> dict[str, str] | None:
+    """The answer to a stale tab's challenge (module note) for the browser whose key's id is `kid`: {"mac"} (hello_mac)
+    while it is signed in; {"out"} (hello_out_mac) once this server signed it out (sign_out, unpair, or unused past
+    PAIRED_IDLE_S), so its page shows the sign-in line; None for an id no browser here had, or a nonce that is not one."""
     if not isinstance(nonce, str) or not nonce or len(nonce) > HELLO_NONCE_MAX or not isinstance(kid, str):
         return None
     port = _own_port(scope)
     if port is None:
         return None
     with _pair_lock:
-        keys = [e["key"] for e in _live()]
+        now = time.time()
+        held = _entries()
+        keys = [e["key"] for e in held if _fresh(e, now)]
+        out = [*[e["key"] for e in held if not _fresh(e, now)], *_signed_out]
     for k in keys:
         if _same(key_id(k), kid):
-            return hello_mac(k, port, nonce)
+            return {"mac": hello_mac(k, port, nonce)}
+    for k in out:
+        if _same(key_id(k), kid):
+            return {"out": hello_out_mac(k, port, nonce)}
     return None
 
 

@@ -103,6 +103,8 @@ export function openStream(url: string, opts: StreamOptions): () => void {
     if (released) return
     if (v === 'stopped') release()
     else if (v === 'down') failed()
+    // signed out: the page shows the sign-in line; the stream asks again after a wait, and opens under a new key
+    else if (v === 'out') retry()
     else open()
   }
   const alive = () => {

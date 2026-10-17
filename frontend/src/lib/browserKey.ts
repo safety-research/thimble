@@ -49,6 +49,16 @@ export function setBrowserKey(key: unknown): boolean {
   }
 }
 
+/** Forget the key, once this browser signed itself out (Settings): every tab then asks the API's own path, where the
+ * server reads it as a browser that is not signed in, and each tab's sign-in check runs again (shell/SignIn). */
+export function clearBrowserKey(): void {
+  try {
+    store()?.removeItem(KEY_ITEM)
+  } catch {
+    /* storage blocked: there was no key */
+  }
+}
+
 /** The port the server that gave this browser its key listens on, 0 when none is kept. */
 export function serverPort(): number {
   try {

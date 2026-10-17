@@ -627,8 +627,8 @@ def create_app() -> FastAPI:
 
     @app.get(hook_auth.HELLO_PATH)  # open: a stale tab's challenge before it sends its cookie again (hook_auth.hello)
     def hello(request: Request, n: str = "", k: str = "") -> JSONResponse:
-        mac = hook_auth.hello(n, k, request.scope)
-        return JSONResponse({"mac": mac}, status_code=200 if mac else 404, headers={"cache-control": "no-store"})
+        answer = hook_auth.hello(n, k, request.scope)  # {mac} signed in, {out} signed out here, None unknown
+        return JSONResponse(answer or {"mac": None}, status_code=200 if answer else 404, headers={"cache-control": "no-store"})
 
     @app.post("/api/ui/shot")  # token only: a dev ticket's shot of this server's page (dev._take_shot)
     def ui_shot() -> dict:

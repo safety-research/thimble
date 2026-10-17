@@ -20,7 +20,9 @@
 // dev agent, shown only where one does, with Manual or Auto (no Bypass: thimble 0.9.0 sets no agent to skip its
 // permission prompts), and its own fence; then labels and the card check, which have no mode; then how long a code
 // ticket's question about thimble's code waits on its card (cardWait); then the extensions added to thimble, each with
-// its switch for this workspace (ExtensionsSettings).
+// its switch for this workspace (ExtensionsSettings). In the foot, beside Take the tour, Sign out this browser signs
+// this browser out (POST /ui/signout with its own id, lib/notices ownBrowserId), and every tab shows the sign-in line
+// (bug hunt G4: the browser had no way to sign itself out).
 import { Fragment, useEffect, useState } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -31,6 +33,8 @@ import { Spinner } from '../components/Spinner'
 import { Switch } from '../components/Switch'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
+import { clearBrowserKey } from '../lib/browserKey'
+import { ownBrowserId } from '../lib/notices'
 import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, extensionCalls, viewKey } from './ExtensionsSettings'
 import { hasEffort, hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type FeatureKey, type MainEffort, type MainFence, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type SettingsPatch, type TaskRow } from '../lib/types'
@@ -505,6 +509,20 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       setBusy(false)
     }
   }
+  // this browser's id, known once GET /ui/paired answered; a page without one (a screenshot's) has no sign-out
+  const me = ownBrowserId()
+  const signOut = async () => {
+    try {
+      await api.signOut(me, ws)
+    } catch (e) {
+      setError(`Could not sign this browser out. ${(e as Error).message}`)
+      return
+    }
+    onClose()
+    // the key is spent: every tab asks again and shows the sign-in line (shell/SignIn)
+    clearBrowserKey()
+    bus.emit('signedOut', {})
+  }
   const roles = rolesOf(settings)
   const off = settings?.disabled_modes ?? []
   const own = permissionChoice(attached?.permission_mode)
@@ -773,17 +791,24 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         )}
         {(error || settings?.config_error) && <div className="settings-error">{error || settings?.config_error}</div>}
         <div className="settings-foot">
-          {/* the product tour again, from its first step, in its frame on thimble's demo workspace (shell/TourHost) */}
-          <Button
-            variant="ghost"
-            className="settings-tour"
-            onClick={() => {
-              onClose()
-              window.setTimeout(() => bus.emit('tour', {}), 250)
-            }}
-          >
-            Take the tour
-          </Button>
+          <span className="settings-foot-start">
+            {/* the product tour again, from its first step, in its frame on thimble's demo workspace (shell/TourHost) */}
+            <Button
+              variant="ghost"
+              className="settings-tour"
+              onClick={() => {
+                onClose()
+                window.setTimeout(() => bus.emit('tour', {}), 250)
+              }}
+            >
+              Take the tour
+            </Button>
+            {me && (
+              <Button variant="ghost" className="settings-signout" onClick={() => void signOut()}>
+                Sign out this browser
+              </Button>
+            )}
+          </span>
           <Button variant="ghost" onClick={onClose} disabled={busy}>
             Cancel
           </Button>

@@ -365,7 +365,39 @@ def test_hello_answers_a_signed_in_key_s_challenge_with_no_credential_and_nothin
     assert bare.get(f"/api/hello?k={kid}").status_code == 404
     assert bare.get(f"/api/hello?n={'x' * 200}&k={kid}").status_code == 404
     hook_auth.unpair()
-    assert bare.get(f"/api/hello?n=abc123&k={kid}").status_code == 404, "a signed-out browser gets no answer"
+    assert "mac" not in bare.get(f"/api/hello?n=abc123&k={kid}").json(), "a signed-out browser gets no answer to sign with"
+
+
+def _out_answer(key: str, port: int, nonce: str) -> str:
+    """What the page expects once this server signed it out (frontend lib/stale expectedOutAnswer): HMAC-SHA256 under
+    sha256(key) (hex) of "signed-out:<port>:<nonce>"."""
+    import hashlib
+    import hmac
+
+    kh = hashlib.sha256(key.encode()).hexdigest()
+    return hmac.new(kh.encode(), f"signed-out:{port}:{nonce}".encode(), hashlib.sha256).hexdigest()
+
+
+@pytest.mark.real_read_guard
+def test_a_signed_out_browser_s_challenge_proves_it_is_signed_out_so_its_tab_shows_the_sign_in_line(client):
+    """/api/hello for a browser this server signed out (`thimble unpair`, Sign it out): 200 {out: HMAC(sha256(key),
+    "signed-out:<port>:<nonce>")}, no `mac` to sign with, so its tab learns from the server itself that it is signed out
+    and shows the sign-in line rather than that thimble stopped (bug hunt G4: a 404 the page read as a stopped server).
+    A browser still signed in keeps its `mac`; an id this server never had stays 404."""
+    import hashlib
+
+    def kid(key: str) -> str:
+        return hashlib.sha256(hashlib.sha256(key.encode()).hexdigest().encode()).hexdigest()[:16]
+
+    first, second = (_signed(_claim(hook_auth.mint())[0])[1] for _ in range(2))
+    bare = TestClient(client.app, base_url="http://testserver")
+    hook_auth.sign_out(next(e["hash"][:12] for e in hook_auth._entries() if e["key"] == hashlib.sha256(first.encode()).hexdigest()))
+    got = bare.get(f"/api/hello?n=n1&k={kid(first)}")
+    assert got.status_code == 200 and got.json() == {"out": _out_answer(first, 80, "n1")}
+    assert bare.get(f"/api/hello?n=n1&k={kid(second)}").json() == {"mac": _hello_answer(second, 80, "n1")}
+    hook_auth.unpair()
+    assert bare.get(f"/api/hello?n=n2&k={kid(second)}").json() == {"out": _out_answer(second, 80, "n2")}
+    assert bare.get("/api/hello?n=n2&k=0000000000000000").status_code == 404
 
 
 def test_peer_uid_reads_the_owner_of_a_live_loopback_connection():
