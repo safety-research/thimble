@@ -327,6 +327,35 @@ async def test_state_gives_what_the_routes_give(term):
     assert concepts.find_concept(config.workspace_dir(CORPUS), "bash")
 
 
+async def test_state_resolve_says_a_view_s_key_may_resolve_soon_while_its_view_is_built_or_indexed(term, monkeypatch):
+    """A `view:<slug>/<key>` citation that no process has read from the view's index yet, or whose view is still built,
+    answers `retry`, so the terminal checks it again rather than marking it failed for good; one that no view or
+    proposal knows does not (bug hunt D3)."""
+    from app import views
+
+    ref = "view:editor-graph/agent-a"
+
+    async def resolve(refs_: list[str]) -> list[dict]:
+        return await local.state(CORPUS, "resolve", [json.dumps(refs_)])
+
+    monkeypatch.setattr(views, "read_built", lambda c, slug: None)
+    monkeypatch.setattr(views, "read_proposal", lambda c, slug: {"slug": slug, "name": "Editor Graph", "status": "building"})
+    [building] = await resolve([ref])
+    assert building["retry"] is True and building["state"] == "missing", building
+    monkeypatch.setattr(views, "read_built", lambda c, slug: {"slug": slug, "name": "Editor Graph", "ok": True})
+    monkeypatch.setattr(views, "resolve_sync", lambda c, slug, locator: ("unknown", None))
+    [indexing] = await resolve([ref])
+    assert indexing["retry"] is True, indexing
+    monkeypatch.setattr(views, "key_refs", lambda c: {ref: {"label": "agent-a", "excerpt": "agent-a: 3 pages",
+                                                            "refs": ["pages.jsonl#L2"], "name": "Editor Graph"}})
+    [found] = await resolve([ref])
+    assert "error" not in found and found["excerpt"] == "agent-a: 3 pages", found
+    monkeypatch.setattr(views, "read_built", lambda c, slug: None)
+    monkeypatch.setattr(views, "read_proposal", lambda c, slug: None)
+    [gone] = await resolve(["view:no-such-view/agent-a"])
+    assert gone["error"] and "retry" not in gone, gone
+
+
 async def test_state_label_gives_the_scope_s_size_for_a_label_whose_run_never_ended(term):
     """Live check term-fix9, quirk 4: a label whose first run Claude Code's quit stopped part way read `not run yet`
     beside its counts, and its run's size was nowhere. `state label` and `state labels` give its scope's size

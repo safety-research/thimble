@@ -137,6 +137,9 @@ export const AREAS = {
   agents: [{ dir: 'trusted', names: ['subagents.json', 'module.json'] }, { dir: 'orient', names: ['run.json'] }, { dir: '', names: ['notices.json'] }],
   // a view built (its folder in the local extension) or proposed (proposals.json)
   views: [{ dir: 'extension/views' }, { dir: 'views', names: ['proposals.json'] }],
+  // the answers of views' keys a process read from a view's index (views/key-refs.json), from which `thimble state
+  // resolve` answers a `view:<slug>/<key>` citation
+  viewKeys: [{ dir: 'views', names: ['key-refs.json'] }],
   ui: [{ dir: '', names: ['ui.jsonl'] }],
   // what the session's tool calls saw of the data (coverage.py touches the folder when a record count ends) and the
   // checks' comments on Claude's answers

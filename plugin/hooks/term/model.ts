@@ -269,7 +269,7 @@ export function withoutEnd(text: string): string {
 
 // ------------------------------------------------------------------------------------------------ a citation's check
 
-type Resolution = Obj & { error?: unknown; excerpt?: unknown; meta?: unknown; path?: unknown; line?: unknown; kind?: unknown; record?: unknown; context?: unknown; blocks?: unknown; end_line?: unknown }
+type Resolution = Obj & { error?: unknown; retry?: unknown; excerpt?: unknown; meta?: unknown; path?: unknown; line?: unknown; kind?: unknown; record?: unknown; context?: unknown; blocks?: unknown; end_line?: unknown }
 
 /** The resolution of one ref out of what `thimble state resolve` printed: `{ref: resolution}`, a list of resolutions
  *  (each naming its `ref`), or `{refs: …}` around either. */
@@ -362,10 +362,13 @@ function linesOf(res: Resolution, display: string | null): TermVerdict['lines'] 
 }
 
 /** A citation's check from its resolution: missing when the place does not resolve (or a card's cited cell or line is
- *  gone), differs when it resolves and its shown value (a number or quoted words) is not there, else ok. */
-export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerdict {
+ *  gone), differs when it resolves and its shown value (a number or quoted words) is not there, else ok. A place that
+ *  may resolve soon (`retry`: a view's key while the view is built or indexed) is pending, checked again (term.ts
+ *  resolveCitations), unless `final`: its checks again are spent, and it is missing. */
+export function verdictOf(c: Citation, res: Resolution | null, at = 0, final = false): TermVerdict {
   const base = { ref: c.ref, display: c.display, kind: '', lines: [] as TermVerdict['lines'], at }
   if (!res) return { ...base, status: 'pending', why: 'not checked yet' }
+  if (res.error !== undefined && res.retry === true && !final) return { ...base, status: 'pending', why: `checked again soon: ${str(res.error)}` }
   if (res.error !== undefined) return { ...base, status: 'missing', why: `the place does not resolve: ${str(res.error)}` }
   const kind = str(res.kind)
   const meta = isObj(res.meta) ? res.meta : {}

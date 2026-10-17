@@ -113,12 +113,16 @@ _BRACKETS = re.compile(r"\[\[([^\[\]]+?)\]\]")
 
 
 class RefError(Exception):
-    """A ref that cannot be resolved. `status` is the HTTP status for the route: 400 malformed, 404 missing."""
+    """A ref that cannot be resolved. `status` is the HTTP status for the route: 400 malformed, 404 missing. `retry`
+    marks a ref that may resolve soon, such as a view's key while the view is still built or indexed, or before any
+    process has read the key from its index (views.resolve_view_ref): a caller checks it again rather than calling the
+    place missing for good."""
 
-    def __init__(self, detail: str, status: int = 404):
+    def __init__(self, detail: str, status: int = 404, *, retry: bool = False):
         super().__init__(detail)
         self.detail = detail
         self.status = status
+        self.retry = retry
 
 
 # --------------------------------------------------------------------------- grammar
