@@ -7,6 +7,12 @@ the new log from its start. Every module emits through emit(c, "main", event): o
 
 emit() runs on the event-loop thread only; a module that must emit from a thread schedules it onto the loop. A torn last
 line (a crash mid-append) is healed before the next append and skipped by the reader.
+
+A signed-in browser's open stream is a tab of thimble's page on the workspace (tabs). The press (`thimble open`,
+open_cmd.py) hands its ref to such a tab rather than open another (press: the SSE event `press`, which is in no log and
+replays to no one), and the tab answers that it took it (took), within PRESS_WAIT_S; a tab that does not answer, such as
+one its browser froze, is passed over and the press opens a new tab (bug hunt round 9, J8: every press opened one more
+tab beside a live one).
 """
 from __future__ import annotations
 
@@ -139,6 +145,48 @@ EVENTS_POLL_S = 3.0  # how often an idle SSE subscriber re-reads events.jsonl fo
 _seq: dict[tuple[str, str], int] = {}  # next seq per investigation; recounted from events.jsonl when unknown
 _left: dict[tuple[str, str], int] = {}  # the offset just after this process's last record in events.jsonl
 _RESET = object()  # queued to a subscriber when the workspace's log was replaced (reset_streams)
+_tabs: dict[str, set[asyncio.Queue]] = {}  # workspace -> the queues of the signed-in browsers' streams (press)
+_presses: dict[str, asyncio.Event] = {}  # an open id of a press handed to the tabs -> set once a tab took it (took)
+PRESS_WAIT_S = 3.0  # how long a press handed to the tabs waits for one to say it took it
+
+
+class _Tell:
+    """An SSE event for the tabs alone (press), in no log."""
+
+    def __init__(self, event: str, data: dict) -> None:
+        self.event, self.data = event, data
+
+
+def tabs(c: str) -> int:
+    """How many signed-in tabs of thimble's page hold the workspace's stream open now."""
+    return len(_tabs.get(c) or ())
+
+
+async def press(c: str, ref: str, open_id: str, wait_s: float = PRESS_WAIT_S) -> bool:
+    """Hand the press of `ref` to the workspace's signed-in tabs (module note): whether one took it within `wait_s`.
+    False at once when no tab is open."""
+    queues = list(_tabs.get(c) or ())
+    if not queues or not open_id:
+        return False
+    got = _presses.setdefault(open_id, asyncio.Event())
+    for q in queues:
+        q.put_nowait(_Tell("press", {"ref": ref, "open": open_id}))
+    try:
+        await asyncio.wait_for(got.wait(), timeout=wait_s)
+        return True
+    except asyncio.TimeoutError:
+        return False
+    finally:
+        _presses.pop(open_id, None)
+
+
+def took(open_id: str) -> bool:
+    """A tab took the press `open_id` (press); whether that press still waited."""
+    got = _presses.get(open_id)
+    if got is None:
+        return False
+    got.set()
+    return True
 
 
 def watched() -> set[str]:
@@ -242,11 +290,11 @@ def _top(events: list[dict]) -> int:
 
 
 async def _stream(c: str, inv_id: str, request: Request, after: int | None = None,
-                  log: str | None = None) -> EventSourceResponse:
+                  log: str | None = None, tab: bool = False) -> EventSourceResponse:
     """Every SSE record carries id = seq, so `Last-Event-ID` or ?after=<seq> replays from seq+1 and then streams live;
     with neither, the whole history replays first. A `live` event (carrying log_id) follows the replay, so the browser
     tells history from new records. A reopen onto another log, or a log replaced under an open stream, gets `reset`
-    first."""
+    first. A signed-in browser's stream (`tab`) also gets the presses handed to it (press)."""
     d = _existing(c, inv_id)
     if after is None:
         lei = request.headers.get("last-event-id")
@@ -258,6 +306,8 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
     key = (c, inv_id)
     q: asyncio.Queue = asyncio.Queue()
     _subscribers.setdefault(key, set()).add(q)  # subscribe BEFORE reading the file: no event can fall in the gap
+    if tab:
+        _tabs.setdefault(c, set()).add(q)
     pos = _size(d / "events.jsonl")  # before the read: what lands between the two is read again, and skipped by seq
     stored = _read_jsonl(d / "events.jsonl")
     moved = (after is not None and after > _top(stored)) or bool(log and log != log_id(c, inv_id))
@@ -287,6 +337,9 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
                     got = await asyncio.wait_for(q.get(), timeout=EVENTS_POLL_S)
                 except asyncio.TimeoutError:
                     got = None  # nothing from this process: the tail below finds what another process wrote
+                if isinstance(got, _Tell):  # for this tab alone, in no log
+                    yield {"event": got.event, "data": json.dumps(got.data, ensure_ascii=False)}
+                    continue
                 if got is _RESET:  # the log was replaced under this stream: start over on the new one
                     pos = _size(d / "events.jsonl")
                     fresh = _read_jsonl(d / "events.jsonl")
@@ -307,6 +360,7 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
                         yield {"data": json.dumps(ev, ensure_ascii=False), "id": str(ev["seq"])}
         finally:
             _subscribers.get(key, set()).discard(q)
+            _tabs.get(c, set()).discard(q)
 
     return EventSourceResponse(gen(), ping=15, ping_message_factory=lambda: ServerSentEvent(data="{}", event="ping"))
 
@@ -318,6 +372,14 @@ async def workspace_events(c: str, request: Request, after: int | None = None,
     transport (session.follow_browser), so the page shows main's permission requests."""
     from . import hook_auth, session  # noqa: PLC0415
 
-    if hook_auth.analyst(request):
+    tab = hook_auth.analyst(request)
+    if tab:
         session.follow_browser(c)
-    return await _stream(c, MAIN, request, after, log)
+    return await _stream(c, MAIN, request, after, log, tab=tab)
+
+
+@router.post("/ws/{c}/press/{open_id}")
+async def took_route(c: str, open_id: str) -> dict:
+    """A tab took the press handed to it (press): a signed-in browser's write, as every route here is."""
+    _ws(c)
+    return {"ok": took(open_id)}

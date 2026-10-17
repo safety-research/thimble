@@ -2,13 +2,15 @@
 // the workspace's history, then the server sends `live` (backend investigation._stream); isReplay tells whether the
 // record being dispatched is from that history, so one-time effects (a toast, a tab dot) happen only for new records.
 // When `/thimble fresh` or `resume` replaces the log, the server sends `reset`, the bus gets `wsReset` and the shell
-// reloads the page. A new `session-ended` record stops the page (lib/stale).
+// reloads the page. A new `session-ended` record stops the page (lib/stale). A `press` (a signed-in tab's alone, in no
+// log) is the terminal's press handed to this tab (lib/tabs takePress).
 import { useEffect } from 'react'
 import { api } from './api'
 import { bus } from './bus'
 import { parseNotice } from './notices'
 import { openStream } from './sse'
 import { stopPage } from './stale'
+import { takePress } from './tabs'
 import type { ViewQuery, WsEvent } from './types'
 
 let replaying = false
@@ -144,7 +146,7 @@ export function subscribeWorkspace(workspace: string): () => void {
     let history = true
     let log: string | null = null
     const release = openStream(api.eventsUrl(workspace), {
-      events: ['live', 'reset'],
+      events: ['live', 'reset', 'press'],
       urlFor: (last) => api.eventsUrl(workspace, last, log),
       onEvent: (event, data) => {
         if (event === 'live') {
@@ -154,7 +156,8 @@ export function subscribeWorkspace(workspace: string): () => void {
         } else if (event === 'reset') {
           history = true
           bus.emit('wsReset', { workspace })
-        } else dispatch(data as WsEvent, history)
+        } else if (event === 'press') takePress(workspace, data)
+        else dispatch(data as WsEvent, history)
       },
       onReopen: () => bus.emit('wsStream', { connected: true }),
       onDown: () => bus.emit('wsStream', { connected: false }),

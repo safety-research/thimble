@@ -616,6 +616,20 @@ def create_app() -> FastAPI:
         code = hook_auth.mint(str(body.get("ws") or ""), ttl, opened if isinstance(opened, str) else "")
         return {"code": code, "expires_s": ttl}
 
+    @app.post("/api/ui/press")  # token only (hook_auth.guarded): `thimble open`, before it opens another tab
+    async def ui_press(body: dict = Body(default={})) -> dict:
+        from . import investigation, opener  # noqa: PLC0415
+
+        ws, ref = str(body.get("ws") or ""), str(body.get("ref") or "")
+        opened = body.get("open")
+        if not ws or not opener.valid_id(opened) or opener.check_ref(ref):
+            return {"reused": False}
+        # a tab of thimble's page on the workspace that is signed in and live takes the press (bug hunt round 9, J8)
+        if not await investigation.press(ws, ref, str(opened)):
+            return {"reused": False}
+        opener.claimed(opened)  # the terminal's watch of the press ends as for a tab that claimed its sign-in
+        return {"reused": True}
+
     @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble unpair`, a sign-in notice's act in the terminal
     def ui_unpair(body: dict = Body(default={})) -> None:
         browser = str(body.get("browser") or "") if isinstance(body, dict) else ""

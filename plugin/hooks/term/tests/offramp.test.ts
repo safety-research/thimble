@@ -95,3 +95,16 @@ test("bug hunt F11: `/thimble browser` where no browser opens says so in plain w
   expect(await m.find({ type: 'Box', key: 'above-remote' })).toBeUndefined()
   await m.unmount()
 })
+
+test("bug hunt round 9, J8: a tab of the page already open takes the press: the toast says that tab shows it, and `/thimble browser` says the page is open", T, async ($, on) => {
+  const w = panelWorld(on)
+  w.open = { ...w.open, reused: true }
+  w.exists.add(CLAIM) // the server writes the claim mark once the tab took the press
+  await start($, w)
+  await press($, w, 'abc')
+  await w.clock.advance(600)
+  await w.clock.settle()
+  expect(w.toasts.at(-1)).toBe('shown in the thimble tab already open in your browser · 127.0.0.1:29321')
+  const said = ((await $.command.run({ command: 'thimble:thimble', args: 'browser' } as never)) as { text?: string }).text ?? ''
+  expect(said).toBe("thimble: thimble's page is already open in a tab of your browser")
+})

@@ -8,7 +8,8 @@
 // wrote to a file only the person can read; the row goes once a browser claims the link (watchLink). On Claude Code's
 // main screen, which takes no clicks, the panel also opens on that row with its acts on keys (waitview.tsx).
 // `/thimble browser` says which of these happened (openInBrowser's answer, register.tsx). A failure posts its notice
-// (notices.tsx) with the acts that fix it.
+// (notices.tsx) with the acts that fix it. Where a signed-in tab of thimble's page is open and live, the open hands the
+// object to it and opens no other tab (`reused`; bug hunt round 9, J8): the toast says the open tab shows it.
 //
 // Callers: `/thimble browser`, `o` and the title row's `↗` in every panel view (panel.tsx wayRow), a card's `↗`, the
 // checks' `open in the browser`, a notice's `open ›` for a code ticket.
@@ -33,7 +34,7 @@ const AGAIN_MS = 5_000
 
 /** What `thimble open --json` prints (C12). */
 export type OpenResult =
-  | { ok: true; port: number; url: string; opened: boolean; remote: boolean; tunnel: string | null; et: string | null; link_file: string | null; claim_file: string; proxy: boolean }
+  | { ok: true; port: number; url: string; opened: boolean; remote: boolean; tunnel: string | null; et: string | null; link_file: string | null; claim_file: string; proxy: boolean; reused?: boolean }
   | { ok: false; error: { code: string; message: string; fix: string } }
 
 // the one-time link's file of the last remote open (the SSH row's `copy link`), never shown
@@ -51,10 +52,15 @@ let lastRef = 'home'
 let remoteClaim: { file: string; until: number } | null = null
 let watchingLink = false
 
-/** What happened on a press: the page opens in a browser here (`opening`), no browser opens here and the SSH row says
- *  what to do (`remote`), it failed and a notice says why (`failed`), or a press on the same object a moment ago still
- *  runs (`again`). */
-export type OpenOutcome = 'opening' | 'remote' | 'failed' | 'again'
+/** What happened on a press: the page opens in a browser here (`opening`), the tab of the page already open shows it
+ *  (`shown`), no browser opens here and the SSH row says what to do (`remote`), it failed and a notice says why
+ *  (`failed`), or a press on the same object a moment ago still runs (`again`). */
+export type OpenOutcome = 'opening' | 'shown' | 'remote' | 'failed' | 'again'
+
+/** The toast once a press is in the browser: a new tab, or the tab already open (`reused`). */
+export function openedWords(port: number, reused = false): string {
+  return reused ? `shown in the thimble tab already open in your browser · 127.0.0.1:${port}` : `opened in the browser · 127.0.0.1:${port}`
+}
 
 /** The SSH row's words (bug hunt F11: `opening thimble's page in the browser` said nothing of what to do): no browser
  *  opens here, the tunnel command to run on your own computer, then copy link. */
@@ -169,18 +175,19 @@ function postFailed(cx: Ctx, ref: string, error: { code: string; message: string
   postNotice(cx, 'open:failed', `thimble's page did not start: ${why || error.code}`, ['try again', 'doctor'])
 }
 
-/** The claim file watched every CLAIM_STEP_MS until it is there or CLAIM_MS pass (from timers, outside any hook). */
-function watchClaim(cx: Ctx, file: string, port: number, ref: string, left = CLAIM_MS): void {
+/** The claim file watched every CLAIM_STEP_MS until it is there or CLAIM_MS pass (from timers, outside any hook); a tab
+ *  already open that took the press (`reused`) wrote it at once. */
+function watchClaim(cx: Ctx, file: string, port: number, ref: string, left = CLAIM_MS, reused = false): void {
   cx.later(CLAIM_STEP_MS, () => {
     void (async () => {
       const there = await cx.stat(file).then(() => true, () => false)
       if (there) {
         claimed = true
         await cx.setPressing(null)
-        cx.toast(`opened in the browser · 127.0.0.1:${port}`)
+        cx.toast(openedWords(port, reused))
         return
       }
-      if (left - CLAIM_STEP_MS > 0) return watchClaim(cx, file, port, ref, left - CLAIM_STEP_MS)
+      if (left - CLAIM_STEP_MS > 0) return watchClaim(cx, file, port, ref, left - CLAIM_STEP_MS, reused)
       await cx.setPressing(null)
       onNoticeAct('open:not-claimed', 'copy link', () => copyLink(cx, ref))
       postNotice(cx, 'open:not-claimed', "The browser did not open thimble's page.", ['copy link'])
@@ -221,8 +228,8 @@ export async function openInBrowser(cx: Ctx, ref: string): Promise<OpenOutcome> 
     postFailed(cx, ref, { code: 'NO_OPENER', message: '', fix: '' })
     return 'failed'
   }
-  watchClaim(cx, got.claim_file, got.port, ref)
-  return 'opening'
+  watchClaim(cx, got.claim_file, got.port, ref, CLAIM_MS, !!got.reused)
+  return got.reused ? 'shown' : 'opening'
 }
 
 /** The SSH row's `copy`: the tunnel command (its Eternal Terminal form when the open gave one). */

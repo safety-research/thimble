@@ -117,7 +117,7 @@ SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)"
 # `thimble up` and `thimble unpair` call
 CLI_PATHS = frozenset({
     "/api/corpora/register", "/api/dev/announce", "/api/dev/revert", "/api/extensions/refresh", "/api/subagents/caller",
-    "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
+    "/api/ui/pair", "/api/ui/press", "/api/ui/unpair", "/api/ui/shot",
 })
 # POST; `act` is the terminal's change after the press (`thimble act`, app/term_acts.py), which the browser's own routes
 # for the same change take only with its cookie

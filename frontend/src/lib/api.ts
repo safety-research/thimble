@@ -448,6 +448,8 @@ export const api = {
     const q = [after != null && after !== '' ? `after=${enc(String(after))}` : '', log ? `log=${enc(log)}` : ''].filter(Boolean)
     return `${ws(c)}/events${q.length ? `?${q.join('&')}` : ''}`
   },
+  /** This tab took the terminal's press `open` handed to it on the stream (backend investigation.took_route). */
+  pressTaken: (c: string, open: string) => j<{ ok: boolean }>(`${ws(c)}/press/${enc(open)}`, { method: 'POST' }),
 
   // ---- canvas ----
   canvas: (c: string) => j<CanvasResponse>(`${ws(c)}/canvas`),

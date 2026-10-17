@@ -16,13 +16,19 @@ server before the server attaches the session, which reads on from the mirror's 
 The code. A one-time code (60 s; 300 s for a link a person copies) goes only into the redirect file the opener gets, or
 into a remote terminal's link file (app/opener.py), each readable by the analyst's account alone. stdout and stderr
 hold status only, never a code, TTY or not: one line on a TTY, else the C12 JSON {ok, port, url, opened, remote,
-tunnel, et, link_file, claim_file, proxy}, or {ok: false, error: {code, message, fix}}. Exit 0 always. --link makes a
-300 s link (no opener runs), as the panel's `copy link` asks; --hook reads the session and the folder from the hook's
+tunnel, et, link_file, claim_file, proxy, reused?}, or {ok: false, error: {code, message, fix}}. Exit 0 always. --link makes
+a 300 s link (no opener runs), as the panel's `copy link` asks; --hook reads the session and the folder from the hook's
 input on stdin and prints nothing.
 
 One tab per press. The mod's press and the UserPromptExpansion hook can both run for one `/thimble browser`: a press of the
 same session at the same ref within DEBOUNCE_S answers the first press's status and runs no second opener (a lock
 serializes presses; the record is <home>/open/<hash>.last, opener.press_record).
+
+One tab for the page. Where a signed-in tab of thimble's page on the folder's workspace holds its stream open, the press
+hands it the ref (reuse: the server's press, investigation.press), which it opens and comes to the front where the
+browser lets it, and no opener runs and no code is made: the status says `reused`. Only when no tab takes it does the
+press open one (bug hunt round 9, J8: after a quit, `claude -c` and `/thimble browser`, `thimble -c` and two ↗ the
+analyst had five tabs of one page). A press for a link (`--link`) always makes one.
 """
 from __future__ import annotations
 
@@ -43,6 +49,7 @@ from urllib.parse import urlsplit
 from . import opener
 
 DEBOUNCE_S = 5.0  # a second press of one session at one ref within this long answers the first's status
+REUSE_TIMEOUT_S = 6.0  # the server waits investigation.PRESS_WAIT_S for a tab to take a press (reuse)
 LOCK_NAME = "press.lock"  # under <home>/open: one press at a time
 PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 NO_PROXY_VARS = ("NO_PROXY", "no_proxy")
@@ -165,6 +172,16 @@ def mint(api: str, ws: str, ttl: int, open_id: str) -> str:
     return ""
 
 
+def reuse(api: str, ws: str, ref: str, open_id: str) -> bool:
+    """Whether a signed-in tab of thimble's page on workspace `ws` took the press of `ref` (POST /api/ui/press, which
+    needs the token), so no other tab need open (module note). False when none did or the server did not answer."""
+    from . import cli  # noqa: PLC0415
+
+    status, body = cli._request("POST", f"{api}/api/ui/press", {"ws": ws, "ref": ref, "open": open_id},
+                                timeout=REUSE_TIMEOUT_S)
+    return status == 200 and isinstance(body, dict) and body.get("reused") is True
+
+
 def _port(url: str) -> int:
     u = urlsplit(url)
     return int(u.port or (443 if u.scheme == "https" else 80))
@@ -270,6 +287,10 @@ def _press(sid: str, cwd: Path, ref: str, link: bool, env: Mapping[str, str]) ->
     status: dict[str, Any] = {"ok": True, "port": port, "url": page, "opened": False, "remote": where.remote,
                               "tunnel": None, "et": None, "link_file": None,
                               "claim_file": str(opener.claim_path(oid)), "proxy": proxy_set(env)}
+    if not link and reuse(api, name, ref, oid):
+        status.update(opened=True, reused=True, remote=False)
+        cli._log(f"thimble open: {name} at {ref} for session {sid[:8]}: a tab open on it took the press")
+        return status
     no_opener = not (link or where.remote) and opener.choose(env) is None
     if link or where.remote or no_opener:
         code = mint(api, name, hook_auth.LINK_TTL_S, oid)
@@ -311,6 +332,8 @@ def status_line(status: dict[str, Any]) -> str:
         return " ".join(parts)
     if status.get("link_file") and not status.get("opened"):
         return f"thimble: the one-time link (5 minutes) is in {status['link_file']}."
+    if status.get("reused"):
+        return f"shown in the thimble tab already open in your browser · 127.0.0.1:{status['port']}"
     return f"opened in the browser · 127.0.0.1:{status['port']}"
 
 
