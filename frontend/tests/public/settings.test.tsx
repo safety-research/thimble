@@ -111,6 +111,22 @@ describe('the popover', () => {
   })
 })
 
+describe('the model calls', () => {
+
+  test("labels ask nothing, as a model call through the session's own client; the card check follows the session's mode", async () => {
+    settings = { ...SETTINGS, agents: { ...SETTINGS.agents, labels: row({ config: 'agents.labels', tasks: ['labels'] }), cardCheck: row({ config: 'agents.cardCheck', tasks: ['card-check'] }) } as Settings['agents'] }
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const cell = (agent: string) => document.body.querySelector(`[data-call-agent="${agent}"] .settings-mode`)
+    expect(cell('labels')?.textContent).toBe('Asks nothing')
+    expect(cell('labels')?.getAttribute('aria-label')).toBe('Labels: Asks nothing')
+    expect(cell('cardCheck')?.textContent).toBe("Your session's")
+  })
+})
+
 describe('the feature switches', () => {
 
   test('the switches round trip: they show what GET /settings answers, and Save PUTs the change', async () => {
