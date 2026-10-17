@@ -478,6 +478,11 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   rows go once the proposal is answered, and while view proposals are off; `stop suggesting pages` turns them off
   (`views.propose: false` in thimble's config) and a toast says how to turn them back on. They bind no key: a letter
   typed goes to the prompt.
+- While a side thread's agent is in view (Claude Code's agent list, Enter on it; its fork's agent id, the thread's
+  `fork.agent_id`), one row in place of all the others (live feedback, 10-17: a question typed there by mistake, its
+  answer waited for there 10 minutes): `thread` dim on the label column, `This is side thread "<its question>". What
+  you type here goes to it, and its answers show in the thread.`, then `back to main` (bold, `$.ui.view({})`) and
+  `open the thread` (the panel on it). Any other agent's view keeps Claude Code's band, with no row of thimble's.
 - The notice rows, under them, newest first: every open notice of every agent thimble runs (the orientation and its
   helpers, the critic, writers, view builds and reviews, report checks, code tickets and the dev agent, card checks,
   labels, the view proposer), since Claude Code's own output shows only main's requests (a notice of main's own reply,

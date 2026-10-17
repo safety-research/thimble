@@ -198,9 +198,10 @@ export type TermThread = { id: string; meta: Record<string, unknown>; events: Re
 
 /** A row of the threads list (`thimble state threads`): a side thread with what the rows need; `element` where it was
  *  asked (a document's passage, `report:<slug>#<unit>`), `fork` the name its forks run under (a slug, which main's
- *  `↳ thread` line names and the chat shows as its first question), `turn` how its latest question stands as its records
+ *  `↳ thread` line names and the chat shows as its first question), `forkAgent` the agent id of main's fork for it in
+ *  Claude Code (its meta's `fork.agent_id`, once thimble found it), `turn` how its latest question stands as its records
  *  say (`answered`, `stopped`, `failed`, '' while it runs: backend local.last_turn). */
-export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string; question?: string; fork?: string; turn?: string }
+export type TermThreadRow = { id: string; title: string; anchor: string; anchorText: string; running: boolean; answers: number; seen: number; unread: number; at: string; parent: string; created?: string; element?: string; question?: string; fork?: string; forkAgent?: string; turn?: string }
 
 /** The label panel's state: the parts opened, by `<label>:<part>`; the kind picked in `type` and not yet saved, by
  *  label; and each label's run started from the panel (its size, 0 for every record) and its last word. */

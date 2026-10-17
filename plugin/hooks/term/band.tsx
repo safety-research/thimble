@@ -54,11 +54,12 @@ import type { On, RenderElement } from 'claude-code'
 
 import type { AnswerComment, CoverageSummary, FeatureSettings, SummarySeen, TermPanel } from './types'
 import type { Ctx } from './ctx'
-import { clean, cut, noControls, width } from './lib'
+import { clean, clip, cut, noControls, quoted, width } from './lib'
+import { plainCites } from './cite'
 import { docsOf } from './model'
 import { dismissModNotice, modActWords, modNotices, moreNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
 import { BROWSER_ITEM, browserShown, copyRemoteLink, copyTunnel, dismissLinks, remoteWords } from './offramp'
-import { answerOffer, dismissNotice, dismissOffer, homeNotices, homeOffer, noticeAct, noticeWords, noticesRead, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
+import { answerOffer, dismissNotice, dismissOffer, homeNotices, homeOffer, noticeAct, noticeWords, noticesRead, openHomeNew, openNoticeChat, openThread, proposalsOff, refreshUnsure } from './panel'
 import type { HomeOffer } from './panel'
 import { COLORS } from './paint'
 import { readState } from './data'
@@ -491,7 +492,7 @@ export function registerBand(on: On): void {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (!rt.sc || e.props.hasSurvey || e.props.view.agentId) return next(e)
+    if (!rt.sc || e.props.hasSurvey) return next(e)
     const cx = cxOf($)
     // other plugins' rows first; thimble's after them
     const theirs = await next(e)
@@ -566,6 +567,36 @@ export function registerBand(on: On): void {
         <Button key={`${key}-more`} plain hover={NO_INVERSE} onPress={() => toggleRow(cx, key)}>
           <Text wrap={open ? 'wrap' : 'truncate-end'}>{shown}</Text>
         </Button>
+      )
+    }
+    // a side thread's agent in view (Claude Code's agent list, Enter on it; live feedback, 10-17: a question typed there
+    // by mistake, its answer waited for there 10 minutes): one row, `thread` on the label column, which thread it is,
+    // that what the analyst types here goes to it and that its answers show in the thread; `back to main` (bold), which
+    // puts main's transcript back in view, and `open the thread`, thimble's panel on it. Any other agent's view keeps
+    // Claude Code's own band, with none of thimble's rows
+    if (e.props.view.agentId) {
+      const fork = (await cx.threads()).find(t => t.forkAgent === e.props.view.agentId)
+      if (!fork) return theirs
+      const acts: BandAct[] = [
+        {
+          key: 'above-fork-main',
+          label: 'back to main',
+          primary: true,
+          press: async () => {
+            const why = await cx.viewMain()
+            if (why) cx.toast(`main did not come back: ${why}. Choose main in the agent list under the prompt`)
+          },
+        },
+        { key: 'above-fork-open', label: 'open the thread', press: () => openThread(cx, fork.id) },
+      ]
+      const asked = clip(plainCites(fork.question || fork.title || fork.anchorText).replace(/\s+/g, ' ').trim(), 60)
+      const words = `This is side thread ${quoted(asked)}. What you type here goes to it, and its answers show in the thread.`
+      // whole and wrapped, as a notice's, so a narrow band beside the panel keeps where the answer goes
+      return (
+        <Box flexDirection="column">
+          {theirs}
+          {trayRow('above-fork', 'thread', <Text wrap="wrap">{words}</Text>, acts, { own: wordsRoom(cols, LW, acts).own })}
+        </Box>
       )
     }
     // a panel Claude Code left undrawn (an open it was not asked for, on a terminal narrower than it places those at),

@@ -123,6 +123,10 @@ Claude Code's panel chrome, no right-click menu.
   why the build could not start, and the fix, in red under it. To turn
   view proposals back on after `stop suggesting pages`, set `"views": {"propose": true}` in thimble's config
   (`~/.thimble/config.json`, or the workspace's `config.json` when it sets the key), or take the key out.
+- **A side thread's agent in view** (Claude Code's agent list, Enter on it): above the prompt one row only, `thread
+  This is side thread "<its question>". What you type here goes to it, and its answers show in the thread.`, then
+  `back to main` (bold), which puts main's transcript back in view, and `open the thread`. Any other agent's view keeps
+  Claude Code's own band, with no row of thimble's.
 - **Every agent's failures above the prompt**, newest first, under the view proposal: a notice for each failure of any
   agent thimble runs (the orientation and its helpers, the critic, writers, view builds, report checks, code tickets,
   card checks, labels, the view proposer), since Claude Code's own output shows only main's: `notice` in red, its

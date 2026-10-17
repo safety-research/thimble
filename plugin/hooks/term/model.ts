@@ -560,6 +560,7 @@ export function threadRowsOf(v: unknown): TermThreadRow[] {
         element: str(m.anchor_element),
         question: str(m.question),
         fork: str(m.fork_name),
+        forkAgent: isObj(m.fork) ? str(m.fork.agent_id) : '',
         turn: str(m.turn),
       }
     })
