@@ -2371,7 +2371,10 @@ def enrich_file_ref(corpus_dir: Path, ref: str, out: dict[str, Any]) -> None:
 def resolve_view_ref(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
     """`view:<slug>` (the view itself: its name and what it is for) or `view:<slug>/<key>` (the unit the key names:
     its excerpt, label and the file refs it stands for). A key whose view is gone answers from key-refs.json with
-    meta.deleted. Raises refs.RefError 404 for what no view, proposal or kept answer knows."""
+    meta.deleted. Raises refs.RefError 404 for what no view, proposal or kept answer knows, with `retry` where the key
+    may resolve soon: its view is queued or building, or built and its reader gave no answer here and now (a process
+    with no views kernel, such as `thimble state resolve`, answers a key only from key-refs.json, which the kernel
+    writes as it reads the view's index; bug hunt D3: a citation main wrote as a view's build ended stayed failed)."""
     c = config.workspace_for_corpus_dir(corpus_dir)
     slug, key = p["slug"], p.get("key")
     view = read_built(c, slug)
@@ -2400,8 +2403,11 @@ def resolve_view_ref(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str,
                 "meta": {"slug": slug, "name": kept.get("name") or slug, "refs": list(kept.get("refs") or []),
                          "deleted": view is None, "stale": True}}
     if view is None:
+        prop = read_proposal(c, slug)
+        if prop is not None and prop.get("status") in PENDING:
+            raise refs.RefError(f"the view {prop.get('name') or slug!r} is still being built", 404, retry=True)
         raise refs.RefError(f"no view {slug!r}", 404)
-    raise refs.RefError(f"the view {view['name']!r} could not resolve {key!r} now", 404)
+    raise refs.RefError(f"the view {view['name']!r} could not resolve {key!r} now", 404, retry=True)
 
 
 # ----------------------------------------------------------------------------------------------------------

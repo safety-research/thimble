@@ -249,6 +249,8 @@ export type World = {
   holdActivate: Promise<void> | null
   /** set: `thimble state resolve` answers only once it settles (a citation still being checked) */
   holdResolve: Promise<void> | null
+  /** by surface: `thimble state <surface>` answers only once its promise settles (a slow read) */
+  holdState: Record<string, Promise<void>>
   /** the guide: owed or not, how many times it was marked sent and unmarked */
   guide: string
   guideOwed: boolean
@@ -382,6 +384,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     activations: [],
     holdActivate: null,
     holdResolve: null,
+    holdState: {},
     guide: GUIDE,
     guideOwed: true,
     marked: 0,
@@ -545,6 +548,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     }
     const [, verb, what, flag, , ...rest] = argv
     if (flag !== '--cwd') return out({ error: 'no --cwd' }, 1)
+    if (verb === 'state' && w.holdState[what!]) await w.holdState[what!]
     if (verb === 'act') {
       const payload = JSON.parse(rest[0] ?? '{}') as Record<string, unknown>
       w.acts.push({ kind: what!, payload })

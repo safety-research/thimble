@@ -69,8 +69,9 @@ export type EntryOpts = {
   cols: number
   /** the box takes the keys as its view opens (a new thread's) */
   autoFocus?: boolean
-  /** whether the box holds the keys, where a list beside it shows a cursor of its own: false draws its `❯` dim, so one
-   *  row shows the cursor (the labels list, bug hunt C2); left out, the `❯` as Claude Code's prompt box draws it */
+  /** whether the box holds the keys, where a list beside it shows a cursor of its own: false draws no `❯`, so one row
+   *  shows the cursor (the labels list, bug hunt C2: a dim `❯` beside the chosen label's still read as a second
+   *  cursor); left out, the `❯` as Claude Code's prompt box draws it */
   held?: boolean
   /** its rule above; false where a rule of the panel's stands right above it already */
   top?: boolean
@@ -99,7 +100,7 @@ export function entryEl(cx: Ctx, e: PaneEvent, o: EntryOpts): RenderElement {
       {o.top === false ? null : rule(`entry-top-${o.key}`)}
       <Box key={`entry-row-${o.key}`} flexDirection="row">
         <Box width={MARGIN_W} flexShrink={0}>
-          <Text {...(o.held === false ? { dimColor: true } : {})}>❯ </Text>
+          <Text>{o.held === false ? '  ' : '❯ '}</Text>
         </Box>
         <Box flexGrow={1} flexShrink={1}>
           <Input

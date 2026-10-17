@@ -676,6 +676,18 @@ The code was stopped after {limit}. Make it faster and run it again with `edit_c
 
 The card's code did not run yet. Run this command with Bash next: `{command}`. thimble shows the card when its code has run.
 
+## card-run-check-wrote
+
+thimble's card check changed the {parts} of card:{cid} after you wrote them. The card now asks "{question}", and its takeaway now reads: {takeaway}
+
+## card-fixed
+
+thimble's card check changed the {parts} of card:{cid}.
+
+## card-fixed-why
+
+It found these problems: {problems}
+
 ## kind-mismatch
 
 card:{cid} is a `{kind}` card but its output is {shape}. Change the code or the `kind` with `edit_card`.

@@ -117,6 +117,31 @@ test("a view's link reads as a chip like any place's, never its raw ref in paren
   await ui.unmount()
 })
 
+test("a view's key that does not resolve yet, as its view is indexed, is checked again until it is found, never a red × meanwhile (bug hunt D3)", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = world(on)
+  const ref = 'view:editor-graph/agent-a'
+  // `thimble state resolve` before any process wrote the key's answer from the view's index: it may resolve soon
+  w.resolve[ref] = { ref, error: "the view 'Editor Graph' could not resolve 'agent-a' now", status: 404, retry: true }
+  await start($, w)
+  const text = 'The builder finished Editor Graph; open agent-a in it [↗](view:editor-graph/agent-a).'
+  let ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  let [chip] = await chipsOf(ui, 'para-1')
+  expect(chip).toMatchObject({ state: 'link', mark: '', spin: true })
+  await ui.unmount()
+  // the index is written: the next check, a few seconds on, finds the key
+  w.resolve[ref] = { ref, kind: 'view', slug: 'editor-graph', key: 'agent-a', excerpt: 'agent-a: 3 pages', refs: ['pages.jsonl#L2'], meta: { name: 'Editor Graph' } }
+  await w.clock.advance(5_300)
+  await w.clock.settle()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  ;[chip] = await chipsOf(ui, 'para-1')
+  expect(chip).toMatchObject({ state: 'link', mark: '', spin: false })
+  expect(chip!.tip).toBe('view editor-graph · agent-a · found')
+  await ui.unmount()
+})
+
 test("the footer says `◌ checking N` while its citations are checked, no `failed` when none failed; a press on `N failed` opens the panel's Citations view", async ($, on) => {
   const w = world(on)
   await start($, w)

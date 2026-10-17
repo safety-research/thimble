@@ -1063,15 +1063,17 @@ async def _resolve(c: str, args: list[str], pos: list[str]) -> Any:
     corpus_dir = config.corpus_dir(c)
 
     def one(item: Any) -> dict[str, Any]:
-        """The ref route's answer for one ref (refs.resolve), `{ref, error}` when it does not resolve; with `state`
-        (ok, missing, differs) and its `why`, the value checked as the takeaway's links check it (verify)."""
+        """The ref route's answer for one ref (refs.resolve), `{ref, error}` when it does not resolve, with `retry`
+        true when it may resolve soon (refs.RefError.retry: a view's key while the view is built or indexed); with
+        `state` (ok, missing, differs) and its `why`, the value checked as the takeaway's links check it (verify)."""
         ref = str(item.get("ref") if isinstance(item, dict) else item or "").strip()
         value = item.get("value") if isinstance(item, dict) else None
         given = {"value": value} if value is not None else {}
         try:
             got = dict(refs.resolve(corpus_dir, ref))
         except refs.RefError as e:
-            return {"ref": ref, **given, "error": str(e.detail), "state": "missing", "why": str(e.detail)}
+            later = {"retry": True} if getattr(e, "retry", False) else {}
+            return {"ref": ref, **given, "error": str(e.detail), **later, "state": "missing", "why": str(e.detail)}
         except Exception as e:  # noqa: BLE001 — one bad ref never takes the others down
             why = f"{type(e).__name__}: {e}"
             return {"ref": ref, **given, "error": why, "state": "missing", "why": why}

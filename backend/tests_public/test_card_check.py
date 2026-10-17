@@ -246,3 +246,71 @@ async def test_a_card_check_never_renames_the_rows_that_main_s_answer_cites(work
     replacement["question"] = cell["title"]  # a replacement that is its refused code alone leaves the card as it is
     cell = await checked(again=True)
     assert cell["check"]["status"] == "ok" and len(cell["fixes"]) == 1
+
+
+async def test_main_learns_of_a_fix_of_its_card_in_one_line_at_its_next_turn_and_a_run_again_shows_the_new_takeaway(
+        workspaces_tmp, monkeypatch):
+    """A check's fix of a card main made reaches main as one line held for its next turn (a quiet event): the parts it
+    changed and the problems it found, with no line in main's terminal. A run of the card again then says what the card
+    asks and says now, so main does not compare the output with the takeaway it wrote before the fix (bug hunt D6)."""
+    from terminal_fakes import write_launch
+
+    from app import event_files, events
+
+    async def started(k, workspace, kernel=None) -> None:
+        return None
+
+    async def ran(k, code, kind, timeout_s, extra_exprs=None):
+        k.last_labels, k.last_label_revs = [], {}
+        return [_bars(LONG)], 1, "ok"
+
+    monkeypatch.setattr(notebook, "_ensure_started", started)
+    monkeypatch.setattr(notebook, "_run_card_code", ran)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)
+    ws = config.workspace_dir(CORPUS)
+    write_launch(ws)  # main runs, on local transport, where the check runs in main's shim and holds main's events
+    monkeypatch.setattr(notebook, "_no_kernel_here", lambda c: None)  # this process stands in for the card runner
+    group = notebook.create_notebook(ws, "Your work", role="analyst")["id"]
+    res = await tools.call(CORPUS, "add_card", {"kind": "plot", "question": "Which runs made most calls, and why?",
+                                                "code": "bars()", "takeaway": "One run made most of the calls."},
+                           actor="analyst", notebook=group, terminal=False)
+    assert not res.is_error, res.text
+    cid = res.text.split("card:", 1)[1].split()[0]
+    problem = "\"Most of the calls\" is wrong: the first run made 99 of 169."
+
+    async def draw(c, cell):
+        return render.Rendered(png=b"\x89PNG card")
+
+    async def read(c, cell, png, run, picture=None):
+        assessment = [{"problem": ""}] * card_check.CRITERIA
+        assessment[0] = {"problem": "The question asks two things at once"}
+        assessment[3] = {"problem": problem}
+        return assessment, {"question": "Which runs made the most calls?", "code": "bars()",
+                            "takeaway": "The first run made the most calls."}, "test-model"
+
+    monkeypatch.setattr(render, "down", lambda: False)
+    monkeypatch.setattr(card_check, "_draw", draw)
+    monkeypatch.setattr(card_check, "_read", read)
+    run = card_check.start(CORPUS, cid, card_check.MAIN)
+    assert run is not None
+    await run.task
+    cell = notebook.get_cell(CORPUS, cid)
+    assert cell["check"]["status"] == "fixed" and cell["title"] == "Which runs made the most calls?"
+
+    notes = event_files.held(ws)
+    assert [n["meta"]["kind"] for n in notes] == ["card_fixed"]
+    assert notes[0]["meta"]["card"] == f"card:{cid}"
+    line = events.meanwhile(notes)
+    assert f"changed the question and takeaway of card:{cid}" in line, line
+    assert "The question asks two things at once." in line and problem in line, line
+    assert event_files.said(notes) == "", "main's terminal prints no line for it"
+
+    text, code = await cardrun.run_card(CORPUS, cid)
+    assert code == 0
+    assert "The card now asks \"Which runs made the most calls?\"" in text, text
+    assert "takeaway now reads: The first run made the most calls." in text, text
+
+    # a card another agent made (the orientation's) tells main nothing
+    event_files.pop_held(ws)
+    assert not card_check.tell_main(CORPUS, cid, "orient:o1", cell["fixes"][-1], [problem])
+    assert event_files.held(ws) == []

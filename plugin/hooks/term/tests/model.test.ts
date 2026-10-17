@@ -89,8 +89,8 @@ test('the thimble command beside the plugin, what a run printed, what changed', 
   expect(parsePrinted({ exitCode: 0, stdout: '{"a":1}', stderr: '' })).toEqual({ ok: true, value: { a: 1 } })
   expect(parsePrinted({ exitCode: 1, stdout: '{"error":"no workspace for /x"}', stderr: '' })).toEqual({ ok: false, error: 'no workspace for /x' })
   expect(parsePrinted({ exitCode: 2, stdout: '', stderr: 'Traceback\nValueError: bad' })).toEqual({ ok: false, error: 'ValueError: bad' })
-  const a = { cards: '1', labels: '', docs: '', chats: '', agents: '', views: '', ui: '', coverage: '', answers: '' }
-  expect(changed(null, a).length).toBe(9)
+  const a = { cards: '1', labels: '', docs: '', chats: '', agents: '', views: '', viewKeys: '', ui: '', coverage: '', answers: '' }
+  expect(changed(null, a).length).toBe(10)
   expect(changed(a, { ...a, cards: '2' })).toEqual(['cards'])
 })
 

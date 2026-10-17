@@ -14,7 +14,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 import { ABOVE_LABEL, ACT_GAP, LINE_LABEL_W, MIN_WORDS, actsWidth, fitItems, percent, wordsRoom } from '../band'
 import { cid, cut, width } from '../lib'
 import { COLORS } from '../paint'
-import { CWD, PANEL, SUMMARY, WS, aboveAt, comment, featuresOff, panelWorld, pressBrowser, shown, words } from './fixtures-panel'
+import { CWD, PANEL, SUMMARY, WS, aboveAt, comment, featuresOff, paneAt, panelWorld, pressBrowser, shown, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
 type M = Mounted<'terminal'>
@@ -187,6 +187,35 @@ test('labels counts the labels, not the records they could not place; refreshSum
   expect(await line(m)).toContain('labels 1 checks')
   expect(await line(m)).not.toContain('unsure')
   expect(w.calls.some(c => c[1] === 'state' && c[2] === 'label-unsure' && c.includes('--counts'))).toBe(true)
+  await m.unmount()
+})
+
+test('a label made elsewhere reaches the thimble line and the labels list within seconds, while a pass of the refresh loop still runs (bug hunt D4)', { timeoutMs: 30_000 }, async ($, on) => {
+  // bug hunt D4: a sub-label the orientation made, and labels made in the browser, reached the terminal minutes late
+  const w = panelWorld(on)
+  await start($, w)
+  const m = await band($)
+  await m.press({ key: 'above-summary-labels' })
+  await w.clock.settle()
+  expect(await line(m)).toContain('labels 1 ')
+  // a pass of the refresh loop that does not end soon: its read of the agents waits, as a read does while labels run
+  let release: () => void = () => undefined
+  w.holdState.agents = new Promise<void>(r => (release = r))
+  w.stamps.set(`${WS}/chats`, 5)
+  await w.clock.advance(1100)
+  // a label made elsewhere, in the browser or by the orientation
+  w.states.labels = [...w.states.labels, { ...w.states.labels[0]!, id: 'e1sub000', name: 'coordinated saves' }] as never
+  w.states.home = { ...w.states.home, labels: 2 }
+  w.stamps.set(`${WS}/concepts/e1sub000.json`, 3)
+  await w.clock.advance(2100)
+  expect(await line(m)).toContain('labels 2 ')
+  const pane = (await $.ui.mount(paneAt(96))) as unknown as M
+  expect(words(await pane.drawn())).toContain('2 labels')
+  expect(shown(await pane.drawn({ in: 'm:labels-list' }))).toContain('coordinated saves')
+  await pane.unmount()
+  release()
+  await w.clock.advance(1100)
+  await w.clock.settle()
   await m.unmount()
 })
 

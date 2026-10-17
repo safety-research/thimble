@@ -12,7 +12,8 @@ the cell-reads hook and the `thimble` module with WS set), thimble's matplotlibr
 then the same storage path as a kernel run (notebook._execute_cell: output bounding, memos, reads, labels read). The
 cell runs in the process's main thread, as in a kernel, with a SIGALRM time limit standing in for a kernel's SIGINT,
 while the event loop runs in a thread of its own (serve). It writes the card's outputs into the group under the store's
-lock and prints what add_card prints, and exits 0, or 1 when the code errored. No kernel lasts between runs, so each run
+lock and prints what add_card prints, with what the card asks and says now when the card check wrote its question or
+takeaway last (check_wrote), and exits 0, or 1 when the code errored. No kernel lasts between runs, so each run
 loads its data again. A run writes only the folders write_dirs names; it writes no canvas history or
 undo step and starts no chat.
 
@@ -722,8 +723,29 @@ async def run_card(c: str, cid: str) -> tuple[str, int]:
     after = notebook.get_cell(c, cid) or full
     if not noted:
         text += tools._takeaway_missing(ctx, str(after.get("notebook") or ""), {**after, "status": full.get("status")})
+    text += check_wrote(after)
     _finish(c, cid, str(full.get("status") or ""), check=card_check.enabled() and card_check.auto(c))
     return text, 1 if full.get("status") != "ok" else 0
+
+
+def check_wrote(cell: dict[str, Any]) -> str:
+    """`## card-run-check-wrote` after a run of a card whose question or takeaway the card check wrote last (the card's
+    `edited`, newest last): what the card asks and says now, so that the run's caller compares the new output with the
+    takeaway the card shows and not with the one it wrote before the check changed it (bug hunt D6: after `run again`
+    main said the output was the same, so the takeaway it wrote still held). '' when the check wrote neither last."""
+    from . import card_check, checkstore, cite, tools  # noqa: PLC0415
+
+    last: dict[str, str] = {}
+    for entry in cell.get("edited") or []:
+        if isinstance(entry, dict):
+            for f in entry.get("fields") or []:
+                last[str(f)] = str(entry.get("by") or "")
+    fields = [f for f in ("title", "takeaway") if last.get(f) == checkstore.ACTOR]
+    if not fields:
+        return ""
+    return "\n\n" + tools.hint("card-run-check-wrote", cid=str(cell.get("id") or ""),
+                               parts=card_check.parts_words(fields), question=" ".join(str(cell.get("title") or "").split()),
+                               takeaway=" ".join(cite._prose(str(cell.get("takeaway") or "")).split()))
 
 
 def _finish(c: str, cid: str, status: str, *, check: bool) -> None:
