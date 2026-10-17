@@ -31,3 +31,55 @@
 .start-demo code {
   font: var(--type-mono-sm);
 }
+/* The tour's frame (shell/TourFrame): thimble's demo workspace in a frame over the whole window, under the tour's banner,
+   an accent strip across the top that says it is the tour, on example data, not the analyst's files, with Exit tour */
+.tour-frame {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-scrim) + 1);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-page);
+}
+.tour-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 8px 0 24px;
+  background: var(--accent);
+  color: var(--accent-on);
+  font: var(--type-ui-sm);
+}
+.tour-banner-name {
+  font-weight: 600;
+}
+.tour-banner-sep {
+  opacity: 0.7;
+}
+.tour-banner-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tour-banner-spacer {
+  flex: 1;
+}
+.tour-banner .tour-banner-exit {
+  flex: none;
+  border-color: transparent;
+  background: var(--surface-card);
+  color: var(--text-primary);
+}
+.tour-banner .tour-banner-exit:hover {
+  background: color-mix(in oklab, var(--surface-card) 88%, var(--accent));
+}
+.tour-frame-page {
+  display: block;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+}

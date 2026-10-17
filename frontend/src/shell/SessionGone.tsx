@@ -21,6 +21,7 @@ import { Button } from '../components/Button'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { isDemoPage, setDemo } from '../lib/demo'
+import { inTourFrame } from '../lib/tourFrame'
 import type { ChatMeta, CorpusInfo, SessionEnded, WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
 import { copyText } from './ProblemReport'
@@ -161,9 +162,12 @@ export function useSessionGone(ws: string): Gone | null {
       if (timer != null) window.clearTimeout(timer)
     }
   }, [ws])
-  const gone = isGone(main, up, precached || example !== false)
+  // the tour's frame (lib/tourFrame) shows the demo workspace read-only, as a demo page, whatever its session: never the
+  // card, which is about a session of the analyst's own
+  const framed = inTourFrame()
+  const gone = !framed && isGone(main, up, precached || example !== false)
   // a demo page (lib/demo): read without a session, and no session attached to it yet
-  const demo = isDemoPage(main, precached || example === true)
+  const demo = framed || isDemoPage(main, precached || example === true)
   useEffect(() => {
     setDemo(demo)
     return () => setDemo(false)

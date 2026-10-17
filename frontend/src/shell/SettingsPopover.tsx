@@ -777,7 +777,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         )}
         {(error || settings?.config_error) && <div className="settings-error">{error || settings?.config_error}</div>}
         <div className="settings-foot">
-          {/* the product tour again, from its first step (shell/TourHost) */}
+          {/* the product tour again, from its first step, in its frame on thimble's demo workspace (shell/TourHost) */}
           <Button
             variant="ghost"
             className="settings-tour"

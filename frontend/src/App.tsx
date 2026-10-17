@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './lib/api'
 import { useTheme } from './lib/theme'
+import { inTourFrame, sendTourEvent } from './lib/tourFrame'
 import { moveWorkspaceStorage, renamedTo, syncInstance, withWorkspace, workspaceFromUrl } from './lib/workspace'
 import { Shell } from './shell/Shell'
 import { StartPage } from './shell/StartPage'
@@ -25,7 +26,8 @@ export default function App() {
   const { paper, accent } = useTheme()
   // the card harness draws a card offscreen in the theme this browser last showed (backend/app/render.py)
   useEffect(() => {
-    if (ws) api.reportTheme(ws, paper, accent).catch(() => undefined)
+    // the tour's frame shows the demo workspace and writes nothing to it (lib/tourFrame)
+    if (ws && !inTourFrame()) api.reportTheme(ws, paper, accent).catch(() => undefined)
   }, [ws, paper, accent])
   useEffect(() => {
     if (!ws) return
@@ -75,6 +77,10 @@ export default function App() {
       alive = false
     }
   }, [ws])
+  // the tour's frame on a workspace this server does not hold: the page around it closes the frame and says so
+  useEffect(() => {
+    if (inTourFrame() && (!ws || missing)) sendTourEvent(window.parent, 'fail')
+  }, [ws, missing])
   if (!ws) return <StartPage />
   if (missing) return <StartPage missing={ws} />
   if (!checked) return null
