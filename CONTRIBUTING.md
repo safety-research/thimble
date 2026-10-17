@@ -23,7 +23,7 @@ thimble status                     # one line: the server, the orientation, the 
 thimble doctor --verbose           # the install state, versions, port and the log's recent errors, with the lines
                                    # only a development install prints: the turn endings, the source changed since
                                    # the server started, the validation stack, the last apply and the dev tickets
-thimble fix                        # the server will not start: the dev agent repairs it in the checkout, asking first
+thimble fix                        # the server will not start: what doctor finds, to repair in your own Claude Code
 thimble revert                     # undo the last change thimble's dev agent applied
 thimble launch-args | prompt <name>   # what a session starts with, and a prompt as a session gets it
 thimble open [--ref REF] [--json]  # the press: the browser workbench on this folder's session, signed in (no code printed)

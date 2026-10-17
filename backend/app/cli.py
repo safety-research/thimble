@@ -2529,14 +2529,13 @@ def pages_line(commands: bool = True) -> str:
 
 
 def sandbox_lines(commands: bool = True) -> list[str]:
-    """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run (cc_settings.sandbox_ok), which
-    `thimble fix` and extension programs run their Bash in where it runs, unless thimble's config says `sandbox.use`
-    "never"; when it cannot run, what it lacks and with `commands` the root commands that install it. Without it they
-    run as they are: `thimble fix` asks first (dev.FIX_QUESTION) and an extension program posts a notice, unless
-    `sandbox.enforce` refuses them."""
+    """The doctor's `bash sandbox` line: whether Claude Code's Bash sandbox can run (cc_settings.sandbox_ok), unless
+    thimble's config says `sandbox.use` "never"; when it cannot run, what it lacks and with `commands` the root commands
+    that install it. Without it an extension program runs as it is and posts a notice, unless `sandbox.enforce` refuses
+    it."""
     from . import cc_settings, userconf  # noqa: PLC0415
 
-    head = "  bash sandbox (thimble fix and extension programs): "
+    head = "  bash sandbox (extension programs): "
     try:
         missing = cc_settings.sandbox_missing()
         cmds, what = cc_settings.sandbox_setup() if missing else ([], "")
@@ -2547,7 +2546,7 @@ def sandbox_lines(commands: bool = True) -> list[str]:
     except Exception:  # noqa: BLE001
         box = userconf.DEFAULTS["sandbox"]
     without = ("thimble's config (sandbox.enforce) refuses to start them without it" if box.get("enforce") else
-               "they run without it (thimble fix asks you first; an extension program's notice says so)")
+               "they run without it (an extension program's notice says so)")
     if box.get("use") == "never":
         return [f"{head}off in thimble's config (sandbox.use \"never\"); {without}"]
     if not missing:

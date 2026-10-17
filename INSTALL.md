@@ -7,8 +7,8 @@
 
 thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
 your config dir with your user settings. thimble's agents and its card checks run as subagents of your Claude Code
-session, under its permission mode; its other single model calls (labels, view proposals) and `thimble fix` run as
-`claude -p` jobs in folders of their own, so auth
+session, under its permission mode, and so do view proposals, as a fork of your session that reads its conversation
+and uses no tools; its other single model calls (labels) run as `claude -p` jobs in folders of their own, so auth
 set only in a project's `.claude/` settings does not reach them. thimble tells you when `claude` is missing or not
 logged in.
 
@@ -70,9 +70,8 @@ dismiss it, it stays off for that workspace.
 Code tickets and view builds are subagents of your session, so they run in its mode, Bypass included. thimble's own
 jobs (an extension's program that runs the dev agent, and the sessions thimble's server runs) follow your session's
 mode, but never Bypass: Settings offers Manual and Auto for them, and a session in Bypass, or `"bypass"` in thimble's
-config, counts as Manual. `thimble fix` asks you in the terminal before its change reaches thimble's code, and before it
-starts where its sandbox can't run. Nobody can answer it while it works, so it runs its commands without asking, in its
-sandbox where that can run.
+config, counts as Manual. `thimble fix` starts no Claude Code session: it says what `thimble doctor` finds, and you make
+the repair in your own Claude Code session, opened in thimble's checkout.
 
 To be asked less, add this to `~/.claude/settings.json`, with the path from the `workspaces_dir` line of
 `thimble doctor --verbose` (in a development install, also `~/.thimble/dev/trees`, made first with `mkdir -p`):

@@ -69,8 +69,8 @@ shows its before and after shots, run in the ticket's box, with no network, no h
 worktree and the ticket's cache folder, and the server's git commands in the worktree run hardened (WORKTREE_GIT). The
 agent's own Bash runs as main's does; its prompt tells it to change only the worktree, and the server commits to the
 ticket's branch (commit_worktree) and moves it. Its code first runs outside a sandbox once
-merged, so thimble asks the analyst, in every mode, just before the merge (APPLY_QUESTION, on the card; `thimble fix` in
-the terminal). The merge takes the commit that passed, by its id (the ticket's `change`). Anything but an Allow ends
+merged, so thimble asks the analyst, in every mode, just before the merge (APPLY_QUESTION, on the
+card). The merge takes the commit that passed, by its id (the ticket's `change`). Anything but an Allow ends
 the ticket stopped with its branch kept. Where the box can't run, the ticket runs its gates on the validation stack,
 outside the sandbox, so thimble also asks before it starts (CODE_QUESTION); a no stops it before its worktree exists.
 
@@ -2078,7 +2078,7 @@ def _allow_notice(t: dict[str, Any], waiting: bool) -> None:
 
 def _ticket_notice(rec: dict[str, Any]) -> None:
     """A code ticket ended: a failure is told in the foreground, with Open on its thread, and an apply clears the
-    ticket's notice. A ticket with no workspace (`thimble fix`) tells the terminal itself. Never raises."""
+    ticket's notice. Never raises."""
     from . import notices  # noqa: PLC0415
 
     c, status = rec.get("workspace"), str(rec.get("status") or "")
@@ -3202,8 +3202,7 @@ def ticket_contained(c: str | None = None) -> bool:
 
 async def shutdown() -> None:
     """Lifespan shutdown: cancel the builds an extension's program runs, which stay building for recover_views, and the
-    running ticket's preparation or settling, which stays running for the next server (_recover); a `thimble fix` run
-    ends failed. thimble's own builders and the tickets' agents are subagents of main, which go on: the next server
+    running ticket's preparation or settling, which stays running for the next server (_recover). thimble's own builders and the tickets' agents are subagents of main, which go on: the next server
     takes them up again (recover_views, _recover)."""
     global _closing
     _closing = True
