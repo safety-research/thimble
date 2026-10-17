@@ -477,7 +477,7 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   if (!got.ok) {
     if (!rt.toasted.has(`${p.path}:${got.error}`)) {
       rt.toasted.add(`${p.path}:${got.error}`)
-      cx.toast(`thimble: could not read ${p.title}: ${got.error}`)
+      cx.toast(`could not read ${p.title}: ${got.error}`)
     }
     return <Box flexDirection="column"><Text color={COLORS.problem} wrap="wrap">{`× ${got.error}`}</Text></Box>
   }

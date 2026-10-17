@@ -150,9 +150,9 @@ export async function copyLink(cx: Ctx, ref = lastRef): Promise<void> {
   const link = file ? linkIn(await cx.read(file).catch(() => '')) : ''
   // a link works once: the next copy needs a new one
   linkFile = ''
-  if (!link) return cx.toast('thimble: no link to copy: press o in the panel to open the page again')
+  if (!link) return cx.toast('no link to copy: press o in the panel to open the page again')
   const r = await cx.copy(link)
-  cx.toast(r.isCopied ? 'thimble: copied a link to thimble\'s page: it works once, for 5 minutes' : `thimble: could not copy the link: ${r.reason ?? 'no clipboard'}`)
+  cx.toast(r.isCopied ? 'copied a link to thimble\'s page: it works once, for 5 minutes' : `could not copy the link: ${r.reason ?? 'no clipboard'}`)
 }
 
 function postFailed(cx: Ctx, ref: string, error: { code: string; message: string; fix: string }): void {
@@ -230,7 +230,7 @@ export async function copyTunnel(cx: Ctx): Promise<void> {
   const l = await cx.links()
   if (!l) return
   const r = await cx.copy(l.et ?? l.tunnel)
-  cx.toast(r.isCopied ? 'thimble: copied the tunnel command: run it on your own computer, then open the link' : `thimble: could not copy: ${r.reason ?? 'no clipboard'}`)
+  cx.toast(r.isCopied ? 'copied the tunnel command: run it on your own computer, then open the link' : `could not copy: ${r.reason ?? 'no clipboard'}`)
 }
 
 /** The SSH row's `copy link`: the one-time link of the remote open. */

@@ -35,13 +35,13 @@ test('each new notice posts one toast, once; the notices there at activation pos
   await w.clock.settle()
   await w.clock.advance(1100)
   await w.clock.settle()
-  expect(w.toasts.filter(t => t === `thimble: ${NOTICE.text}`)).toEqual([`thimble: ${NOTICE.text}`])
+  expect(w.toasts.filter(t => t === NOTICE.text)).toEqual([NOTICE.text])
   // the terminal's own: one toast for a key posted twice
   w.open = { ok: false, error: { code: 'START', message: 'no server', fix: '' } }
   await pressBrowser($, w)
   await w.clock.advance(6000)
   await pressBrowser($, w)
-  // a notice whose text names thimble first toasts as it is (no `thimble: thimble's …`)
+  // a notice toasts as it is: Claude Code shows the plugin's name before a toast (no `thimble: thimble's …`)
   expect(w.toasts.filter(t => t.startsWith("thimble's page did not start")).length).toBe(1)
   await m.unmount()
 })
@@ -109,7 +109,7 @@ test("bug hunt B5: notices with the same words are one row with their count firs
   expect(await m.find({ type: 'Box', key: 'above-notice-h1' })).toBeUndefined()
   // the older notice waits behind its row
   expect(words(await m.find({ type: 'Box', key: 'above-notices-more' }))).toBe(`  ${moreNotices(1)}`)
-  expect(w.toasts.filter(t => t === `thimble: ${SWITCHED}`).length).toBe(1)
+  expect(w.toasts.filter(t => t === SWITCHED).length).toBe(1)
   // a fourth joins the row and toasts nothing
   w.states.home.notices = [helper('h4', 'c4'), helper('h3', 'c3'), helper('h2', 'c2'), helper('h1', 'c1'), NOTICE]
   w.stamps.set(`${WS}/notices.json`, 10)
@@ -118,7 +118,7 @@ test("bug hunt B5: notices with the same words are one row with their count firs
   await m.unmount()
   const four = (await $.ui.mount(aboveAt(150))) as unknown as M
   expect(words(await four.find({ type: 'Box', key: 'above-notice-h4' }))).toContain(`4× ${SWITCHED}`)
-  expect(w.toasts.filter(t => t === `thimble: ${SWITCHED}`).length).toBe(1)
+  expect(w.toasts.filter(t => t === SWITCHED).length).toBe(1)
   await four.press({ key: 'above-notice-h4-dismiss' })
   await w.clock.settle()
   expect(w.acts.filter(a => a.kind === 'notice-dismiss').map(a => a.payload.id)).toEqual(['h4', 'h3', 'h2', 'h1'])
@@ -462,5 +462,5 @@ test('bug hunt F12: the notice of a sign-in from an earlier session shows once, 
   const after = (await $.ui.mount(aboveAt(160))) as unknown as M
   expect(words(await after.find({ type: 'Box', key: 'above-notice-si2' }))).toContain('at 09:15.')
   await after.unmount()
-  expect(w.toasts.filter(t => /signed in/.test(t))).toEqual(["thimble: A browser signed in to thimble's page at 09:15."])
+  expect(w.toasts.filter(t => /signed in/.test(t))).toEqual(["A browser signed in to thimble's page at 09:15."])
 })

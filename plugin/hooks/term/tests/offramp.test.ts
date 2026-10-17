@@ -53,7 +53,7 @@ test('no claim in 12 s: the `open:not-claimed` notice with `copy link`, which co
   const m = (await $.ui.mount(aboveAt(120))) as unknown as M
   const row = words(await m.find({ type: 'Box', key: 'above-mod-open-not-claimed' }))
   expect(row).toBe("  noticeThe browser did not open thimble's page.copy linkdismiss")
-  expect(w.toasts).toContain("thimble: The browser did not open thimble's page.")
+  expect(w.toasts).toContain("The browser did not open thimble's page.")
   w.open = { ...w.open, link_file: LINK_FILE }
   w.files.set(LINK_FILE, JSON.stringify({ url: LINK }))
   await m.press({ key: 'above-mod-open-not-claimed-act-0' })

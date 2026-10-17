@@ -99,7 +99,7 @@ async function dismiss(cx: Ctx, c: AnswerComment): Promise<void> {
   const before = await openComments(cx)
   const at = before.findIndex(x => x.id === c.id)
   const got = await act(cx, rt.sc, 'answer-comment-resolve', { comment: c.id, reopen: false })
-  if (!got.ok) return cx.toast(`thimble: the comment was not dismissed: ${got.error}`)
+  if (!got.ok) return cx.toast(`the comment was not dismissed: ${got.error}`)
   hiddenComments.add(c.id)
   const left = await openComments(cx)
   await markSeen(cx, ['checks'])

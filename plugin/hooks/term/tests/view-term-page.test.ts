@@ -80,6 +80,6 @@ test("when the terminal page is not built the panel says why, with the fix; `r` 
   await pane.press({ key: 'hk-page-retry' })
   await w.clock.settle()
   expect(w.acts).toContainEqual({ kind: 'view-retry', payload: { slug: 'board' } })
-  expect(w.toasts).toContain('thimble: building the terminal page again')
+  expect(w.toasts).toContain('building the terminal page again')
   await pane.unmount()
 })
