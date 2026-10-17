@@ -882,8 +882,13 @@ def caller(inp: dict) -> int:
     return 0
 
 
-# the reason the hand-back hook gives its refusal when prompts/tools.md has none (`## handback-taken`)
+# the reason the hand-back hook gives its refusal when prompts/tools.md has none (`## handback-taken`); the agent reads
+# it only if its turn goes on
 HANDBACK_TAKEN = "thimble already has your report. Stop now and write nothing more."
+# why the hand-back hook ended the agent's turn (`continue` false), which the agent's view in Claude Code shows the
+# analyst: with the refusal alone, Claude Code asks the agent to hand back again three times (6 to 7 more requests per
+# agent in the live smoke), and with this none
+HANDBACK_STOPPED = "thimble has this agent's report"
 
 
 def handback(inp: dict) -> int:
@@ -900,7 +905,7 @@ def handback(inp: dict) -> int:
     except Exception:  # noqa: BLE001 — the hand-back goes on to main, where the terminal UI drops it
         return 0
     reason = sf.hint("handback-taken") or HANDBACK_TAKEN
-    print(json.dumps({"continue": False, "stopReason": reason,
+    print(json.dumps({"continue": False, "stopReason": HANDBACK_STOPPED,
                       "hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                              "permissionDecisionReason": reason}}))
     sys.stdout.flush()
