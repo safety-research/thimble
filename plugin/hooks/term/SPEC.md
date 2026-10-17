@@ -623,9 +623,19 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   agent's note, dim. Every step wraps at the same width, and a blank row stands between steps (the owner, 10-17).
 - A diagram: boxes and edges in the rule gray, node text in the text color, edge labels dim; a note's number in a dim
   column and its text dim.
-- A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line
-  chart (a bar chart with its values written on its bars is one) or a dots chart: a table of its rows, in the order its axes put them
-  where the chart sorts an axis (a heatmap's days in the order of its `sort`), else in its data's order.
+- A stacked area chart: its bands, each cell's two halves in the hue of the band that holds their middle (`█`, `▀`,
+  `▄`), stacked by the chart's `order` field, else by the series' names, the first lowest; the key in the legend's order.
+- A heatmap: a row per y value, its name at the content's edge, then a cell per x value as wide as the room allows,
+  shaded from the least number to the most (`·░▒▓█`, the least a dim dot, in the first hue), the x values' names under
+  their columns, and the key `0 ·░▒▓█ 0.31  share`. A cell's readout names its row, its column and its number.
+- A faceted chart (`.facet(column=…)`, a `row` or `column` channel, thimble.chart's `panels`): each panel's title in
+  bold over its picture as its kind draws, side by side as many to a row as are 40 cells wide, else one under another;
+  the panels share their scales but those the chart keeps to each panel, every panel of bars lists every label, a value
+  has one hue in all of them, and one key stands under them all. A mark's readout names its panel first.
+- A note, a custom card, a code card and a card type's card: their words. Any other chart: a table of its rows while
+  they are 15 or fewer, in the order its axes put them where the chart sorts an axis, else in its data's order; past
+  that, the note `The terminal cannot draw this chart. The browser shows it.` and a `view in browser ↗` link, never a
+  long table (bug hunt J10).
 - A card that cannot be read: one red line named by its place (`× card 2 cannot be drawn: …`).
 - The card pane: the question is the panel's title and the subtitle reads the card's id (`card:<name>`), its kind, who
   made it, `last run ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or

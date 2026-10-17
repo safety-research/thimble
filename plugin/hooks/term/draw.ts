@@ -62,7 +62,29 @@ export type CardData = {
   label?: LabelInfo
   /** a table's number formats by column (the frame's `view.formats`, backend frames.py) */
   formats?: Record<string, string>
+  /** a line card's series stacked as areas, the first lowest: `zero` as they are, `share` each x to the whole */
+  stack?: 'zero' | 'share'
+  /** the color field's values in the order their hues go by, when that is not the order of the card's own series or
+   *  groups: a stacked area's legend, or a panel's, whose values are those of every panel (cell.ts facetCard) */
+  hues?: string[]
+  /** a heat card's cells (cell.ts heatCard): its x values across and its y values down, as written, each cell's number
+   *  (`v[y][x]`, null for none) and the place of the row it shows in the chart's rows (`at`), and the number's name */
+  grid?: Heat
+  /** a faceted chart's panels (cell.ts facetCard), each a card of one kind under its values' title; `own` the scales
+   *  each panel keeps to itself (Vega-Lite's `resolve`), the others shared; `total` how many panels there are when
+   *  more than those drawn */
+  panels?: Panel[]
+  own?: ('x' | 'y')[]
+  /** a chart the terminal draws no picture of: its words, and a link that opens it in the browser (reply.tsx) */
+  browser?: boolean
 }
+
+export type Heat = { xs: string[]; ys: string[]; v: (number | null)[][]; at: (number | null)[][]; name: string }
+export type Panel = { title: string; card: CardData }
+
+/** What the panels of a faceted chart share (panelsLayout): the ranges of their x and y scales, in the numbers the
+ *  layout places marks by, and whether a panel draws its key (the panels draw one key under them all). */
+export type Shared = { x?: [number, number]; y?: [number, number]; key?: boolean }
 
 /** What the mod is doing to a card now: running its script, or why the last run failed. */
 export type CardMeta = { busy?: string; error?: string }
@@ -319,6 +341,14 @@ function classColour(card: CardData, name?: string, ref?: string): string | unde
   return undefined
 }
 
+/** The hue of a value of a card's color field: its label's color where a label the card read names it, else the
+ *  palette's by the value's place among the field's values, the card's `hues` where it has them (a panel's: those of
+ *  every panel), else `own`, the values the card itself draws. */
+function groupHue(card: CardData, name: string, own: readonly string[]): string {
+  const order = card.hues ?? own
+  return classColour(card, name) ?? seriesHue(Math.max(0, order.indexOf(name)))
+}
+
 /** A place as the analyst reads it: `revisions.jsonl line 10566`, `lines 3-8`, `row 12`, `results.json item 4`, `the
  *  command's output line 3`, `view page-histories · <its key>`; never `#L` or a command's id. A card's place is named by
  *  its question by the caller. */
@@ -450,7 +480,7 @@ function barNames(labels: readonly string[]): string[] {
   return labels.length && labels.every(l => STAMP.test(l.trim())) ? shortTimes(labels) : [...labels]
 }
 
-function barLayout(card: CardData, cols: number, hover: number): Layout {
+function barLayout(card: CardData, cols: number, hover: number, shared: Shared = {}): Layout {
   const { rows, more } = barRows(card)
   const col = card.y || 'value'
   const groups = [...new Set(rows.map(r => r.group).filter(Boolean))]
@@ -474,7 +504,7 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   // the bars keep two fifths of the room; a label longer than the rest takes two lines
   const labelW = Math.min(Math.max(4, ...names.map(n => width(n))), Math.max(8, room - Math.max(12, Math.ceil(room * 0.4))))
   const barW = Math.max(4, room - labelW)
-  const max = Math.max(...totals.map(t => Math.abs(t)), 0)
+  const max = shared.y?.[1] ?? Math.max(...totals.map(t => Math.abs(t)), 0)
   const lines: Line[] = []
   const owner: number[] = []
   // where each label's bars stand on its row: [x0, x1) per row of the data, from the content's edge
@@ -497,7 +527,7 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
     const on = ids.includes(hover)
     // a hue for a value of the card's colour field (its groups, or a label it read); with no colour field the bars are
     // one series, in the first hue (rule 20); the bar under the pointer turns the text colour
-    const hueOf = (r: BarRow) => classColour(card, r.group || r.label) ?? (groups.length ? seriesHue(Math.max(0, groups.indexOf(r.group))) : one())
+    const hueOf = (r: BarRow) => (r.group ? groupHue(card, r.group, groups) : (classColour(card, r.label) ?? one()))
     const segs: Seg[] = []
     const mine: { x0: number; x1: number; i: number }[] = []
     let x = labelW + 2
@@ -551,7 +581,7 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   if (own && card.note) lines.push(card.note.startsWith('◌') ? [{ s: card.note }] : [{ s: card.note, fg: COLORS.dim }])
   // the legend on its own row under the chart; none when a label it read names the groups on its label row
   const named = new Set(cardLabels(card).flatMap(l => l.values))
-  if (groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map((g, j) => [{ s: '● ', fg: classColour(card, g) ?? seriesHue(j) }, { s: g }]), cols))
+  if (shared.key !== false && groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map(g => [{ s: '● ', fg: groupHue(card, g, groups) }, { s: g }]), cols))
   // a row's one bar is the row's mark; on a stacked row the part under the pointer, the nearest part off the bar
   const hit = (x: number, y: number): number => {
     const j = owner[y]
@@ -579,7 +609,11 @@ function xNumber(v: string | number, kind: 'num' | 'time' | 'cat', i: number): n
   return i
 }
 
-function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10): Layout {
+/** A line card's x kind and the ranges of its scales: x as numbers, times (their wall clock) or categories (their place,
+ *  in first-seen order); y from its least value, or 0 where the least is small beside the most, to its most. A stacked
+ *  card's y runs from 0 to its highest stack (1 for shares), and `stacks` holds, at each x, each series' band, bottom
+ *  and top, in the card's series' order. */
+function lineScale(card: CardData) {
   const series = (card.series ?? []).filter(s => s.points.length > 0)
   const all = series.flatMap(s => s.points)
   const xs = all.map(p => p[0])
@@ -591,18 +625,48 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   // categorical x: one position per distinct value, in first-seen order
   const cats = kind === 'cat' ? [...new Set(xs.map(String))] : []
   const xOf = (p: [string | number, number], i: number) => (kind === 'cat' ? cats.indexOf(String(p[0])) : xNumber(p[0], kind, i))
+  const xv = series.flatMap(s => s.points.map((p, i) => xOf(p, i)))
+  let yv = all.map(p => p[1])
+  // a stack's bands at each x the data names, a series with no point there at 0 (bug hunt J10)
+  const stacks = new Map<number, [number, number][]>()
+  if (card.stack) {
+    const at = [...new Set(xv)].sort((a, b) => a - b)
+    const by = series.map(s => new Map(s.points.map((p, i) => [xOf(p, i), p[1]] as const)))
+    for (const x of at) {
+      const vals = by.map(m => Math.max(0, m.get(x) ?? 0))
+      const sum = vals.reduce((a, b) => a + b, 0)
+      let base = 0
+      stacks.set(
+        x,
+        vals.map(v => {
+          const part = card.stack === 'share' ? (sum ? v / sum : 0) : v
+          const band: [number, number] = [base, base + part]
+          base += part
+          return band
+        }),
+      )
+    }
+    yv = [0, ...[...stacks.values()].map(b => b.at(-1)?.[1] ?? 0)]
+  }
+  const x0 = Math.min(...xv)
+  const x1 = Math.max(...xv)
+  const y0 = card.stack ? 0 : Math.min(...yv, 0 < Math.min(...yv) && Math.min(...yv) < Math.max(...yv) * 0.3 ? 0 : Math.min(...yv))
+  const y1 = Math.max(...yv)
+  return { series, all, xs, kind, cats, xOf, xv, yv, x0, x1, y0, y1, stacks }
+}
+
+function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10, shared: Shared = {}): Layout {
+  const scale = lineScale(card)
+  const { series, all, xs, kind, cats, xOf, xv, yv, stacks } = scale
   // an x as the axis and the readout name it: times as a bar's labels read (barNames), any other x as written; a
   // citation keeps the x as the card's rows hold it
   const stamps = kind === 'time' ? [...new Set(xs.map(String))] : []
   const names = barNames(stamps)
   const named = new Map(stamps.map((t, i) => [t, names[i]!]))
   const xName = (x: string | number) => named.get(String(x)) ?? String(x)
-  const xv = series.flatMap(s => s.points.map((p, i) => xOf(p, i)))
-  const yv = all.map(p => p[1])
-  const x0 = Math.min(...xv)
-  const x1 = Math.max(...xv)
-  let y0 = Math.min(...yv, 0 < Math.min(...yv) && Math.min(...yv) < Math.max(...yv) * 0.3 ? 0 : Math.min(...yv))
-  let y1 = Math.max(...yv)
+  // the panels of a faceted chart share their ranges (panelsLayout)
+  const [x0, x1] = shared.x ?? [scale.x0, scale.x1]
+  let [y0, y1] = shared.y ?? [scale.y0, scale.y1]
   if (y0 === y1) {
     y0 -= 1
     y1 += 1
@@ -631,7 +695,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
     bits[cy]![cx]! |= DOT[dy & 3]![dx & 1]!
     owner[cy]![cx] = s
   }
-  series.forEach((s, si) => {
+  if (!card.stack) series.forEach((s, si) => {
     const pts = s.points.map((p, i) => [px(xOf(p, i)), py(p[1])] as const).sort((a, b) => a[0] - b[0])
     for (let i = 0; i < pts.length; i++) {
       const [ax, ay] = pts[i]!
@@ -649,12 +713,26 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
     s.points.forEach((p, i) => {
       const xLabel = String(p[0])
       items.push({ label: xName(p[0]), value: `${s.name} ${amount(p[1])}`, cite: cite(fmt(p[1]), `card:${card.id}#${s.name}/${xLabel}`), open: `card:${card.id}#${s.name}/${xLabel}`, kind: 'mark', text: amount(p[1]) })
-      at.push({ s: si, i, cx: px(xOf(p, i)) >> 1, cy: py(p[1]) >> 2 })
+      // a stacked point stands in the middle of its band
+      const band = stacks.get(xOf(p, i))?.[si]
+      at.push({ s: si, i, cx: px(xOf(p, i)) >> 1, cy: py(band ? (band[0] + band[1]) / 2 : p[1]) >> 2 })
     }),
   )
+  // a stack's columns: the x the data names nearest each cell, and the series whose band holds each half of a row
+  const stackAt = [...stacks.keys()]
+  const nearX = (c: number) => stackAt.reduce((b, x) => (Math.abs((px(x) >> 1) - c) < Math.abs((px(b) >> 1) - c) ? x : b), stackAt[0]!)
+  const bandOf = (c: number, y: number) => (stacks.get(nearX(c)) ?? []).findIndex(([lo, hi]) => hi > lo && y > lo && y <= hi)
   const nearest = (x: number, y: number): number => {
     const cx = x - yW - 1
     if (cx < 0 || cx >= pw || y < 0 || y >= plotRows) return -1
+    if (card.stack) {
+      // the band under the pointer at the x nearest its cell, else the top band there
+      const xAt = nearX(cx)
+      const si = bandOf(cx, y1 - ((y + 0.5) / plotRows) * (y1 - y0))
+      const top = (stacks.get(xAt) ?? []).map(([lo, hi]) => hi > lo).lastIndexOf(true)
+      const want = si >= 0 ? si : top
+      return at.findIndex(a => a.s === want && xOf(series[a.s]!.points[a.i]!, a.i) === xAt)
+    }
     let best = -1
     let score = Infinity
     at.forEach((a, j) => {
@@ -668,11 +746,27 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   }
   const hot = hover >= 0 ? at[hover] : undefined
   // a chart with no colour field is one series, in the first hue (rule 12); with several, each its hue
-  const seriesColour = (si: number) => classColour(card, series[si]?.name) ?? (series.length > 1 ? seriesHue(si) : one())
+  const seriesColour = (si: number) => (card.hues ? groupHue(card, series[si]?.name ?? '', []) : (classColour(card, series[si]?.name) ?? (series.length > 1 ? seriesHue(si) : one())))
   const lines: Line[] = []
   for (let r = 0; r < plotRows; r++) {
     const yl = yTicks.get(r)
     const row: Line = [{ s: pad(yl ?? '', yW - 1, true) + ' ', fg: COLORS.dim }, { s: yl === undefined ? '│' : '┤', fg: COLORS.rule }]
+    if (card.stack) {
+      // each cell's two halves in the hue of the band that holds their middle: a full block, a half block in the one
+      // hue, or the upper half in its hue over the lower's
+      for (let c = 0; c < pw; c++) {
+        const half = (h: number) => bandOf(c, y1 - ((2 * r + h + 0.5) / (plotRows * 2)) * (y1 - y0))
+        const [t, b] = [half(0), half(1)]
+        const on = hot && c === hot.cx && r === hot.cy ? { inv: true } : {}
+        if (t < 0 && b < 0) row.push({ s: ' ' })
+        else if (t === b) row.push({ s: '█', fg: seriesColour(t), ...on })
+        else if (t < 0) row.push({ s: '▄', fg: seriesColour(b), ...on })
+        else if (b < 0) row.push({ s: '▀', fg: seriesColour(t), ...on })
+        else row.push({ s: '▀', fg: seriesColour(t), bg: seriesColour(b), ...on })
+      }
+      lines.push(row)
+      continue
+    }
     for (let c = 0; c < pw; c++) {
       const b = bits[r]![c]!
       const o = owner[r]![c]!
@@ -717,7 +811,9 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
     }
   } else for (const t of ticks) xl += ' '.repeat(Math.max(0, t.x - width(xl))) + t.label
   lines.push([{ s: ' '.repeat(yW + 1) + xl, fg: COLORS.dim }])
-  if (series.length > 1) lines.push(...flow(series.map((s, si) => [{ s: '● ', fg: seriesColour(si) }, { s: s.name }]), cols))
+  // the key in the order of the hues; none in a panel, under whose panels one key stands
+  const keyOrder = card.hues ? card.hues.filter(n => series.some(s => s.name === n)) : series.map(s => s.name)
+  if (shared.key !== false && series.length > 1) lines.push(...flow(keyOrder.map(n => [{ s: '● ', fg: seriesColour(series.findIndex(s => s.name === n)) }, { s: n }]), cols))
   return { lines, items, hit: (x, y) => nearest(x, y) }
 }
 
@@ -737,16 +833,23 @@ export function dotGlyph(n: number, most: number): string {
  * start-to-end chart's span (cell.ts spansCard) is a bar from its start's cell to its end's, one mark whose readout
  * names its start, its end and how long it lasts.
  */
-function dotsLayout(card: CardData, cols: number, hover: number): Layout {
+/** A dots card's x kind and the range of its x scale, over its first MAX_BARS rows; null for a card with no dot. */
+function dotsScale(card: CardData) {
   const all = (card.strips ?? []).filter(r => r.dots.length || r.notes.length)
   const strips = all.slice(0, MAX_BARS)
   const xs = strips.flatMap(r => [...r.dots.flatMap(d => (d.x2 === undefined ? [d.x] : [d.x, d.x2])), ...r.notes.map(n => n.x)])
   const kind: 'num' | 'time' = xs.every(x => typeof x === 'number' || (x.trim() !== '' && !Number.isNaN(Number(x)))) ? 'num' : 'time'
   const xOf = (x: string | number) => (kind === 'num' ? Number(x) : wallClock(String(x)))
   const vals = xs.map(xOf).filter(Number.isFinite)
+  return { all, strips, xs, kind, xOf, vals, x0: Math.min(...vals), x1: Math.max(...vals) }
+}
+
+function dotsLayout(card: CardData, cols: number, hover: number, shared: Shared = {}): Layout {
+  const scale = dotsScale(card)
+  const { all, strips, xs, kind, xOf, vals } = scale
   if (!vals.length) return { lines: [[{ s: 'no dots to draw', fg: COLORS.dim }]], items: [], hit: () => -1 }
-  const x0 = Math.min(...vals)
-  const x1 = Math.max(...vals)
+  // the panels of a faceted chart share their range (panelsLayout)
+  const [x0, x1] = shared.x ?? [scale.x0, scale.x1]
   // an x as the readout names it: a time as a bar's label reads (barNames), a number as the mod writes one
   const xName = (x: string | number) => (kind === 'time' ? (barNames([String(x)])[0] ?? String(x)) : amount(Number(x)))
   const names = barNames(strips.map(r => r.name))
@@ -759,7 +862,7 @@ function dotsLayout(card: CardData, cols: number, hover: number): Layout {
   const area = pw + after
   const cellOf = (v: number) => (x1 === x0 ? Math.floor(pw / 2) : Math.round(((v - x0) / (x1 - x0)) * (pw - 1)))
   const groups = [...new Set(strips.flatMap(r => r.dots.map(d => d.group)).filter(Boolean))]
-  const hue = (g: string) => classColour(card, g) ?? (groups.length ? seriesHue(Math.max(0, groups.indexOf(g))) : one())
+  const hue = (g: string) => (g ? groupHue(card, g, groups) : (classColour(card, g) ?? one()))
   // each row's cells that hold dots, left to right, with their dots, and each span from its first cell to its last
   // (`end`): the marks the pointer picks, row by row
   type Mark = { row: number; cell: number; end?: number; dots: DotRow['dots'] }
@@ -871,7 +974,7 @@ function dotsLayout(card: CardData, cols: number, hover: number): Layout {
   lines.push([{ s: pad0 + xl, fg: COLORS.dim }])
   // the legend on its own row under the chart; none when a label it read names the groups on its label row
   const named = new Set(cardLabels(card).flatMap(l => l.values))
-  if (groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map(g => [{ s: '● ', fg: hue(g) }, { s: g }]), cols))
+  if (shared.key !== false && groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map(g => [{ s: '● ', fg: hue(g) }, { s: g }]), cols))
   // a row's dots: the mark nearest the pointer's cell on its row
   const hit = (x: number, y: number): number => {
     const row = owner[y]
@@ -2487,7 +2590,196 @@ function textLayout(card: CardData, cols: number): Layout {
   return { lines, items: [], hit: () => -1 }
 }
 
-export function cardLayout(card: CardData, cols: number, hover: number, plotRows?: number): Layout {
+// the shades of a heat card's cells, from its least number to its most: the least a dim dot
+const SHADES = ['·', '░', '▒', '▓', '█']
+
+/** A heat card's key: its least number, the shades, its most, and the numbers' name, dim but the shades. */
+function heatKey(lo: number, hi: number, name: string): Line {
+  return [{ s: `${amount(lo)} `, fg: COLORS.dim }, { s: SHADES[0]!, fg: COLORS.dim }, { s: SHADES.slice(1).join(''), fg: one() }, { s: ` ${amount(hi)}  ${name}`, fg: COLORS.dim }]
+}
+
+/** A heat card's numbers, over the rows and columns it draws. */
+function heatNumbers(card: CardData): number[] {
+  const g = card.grid
+  return g ? g.v.slice(0, MAX_BARS).flat().filter((n): n is number => n !== null) : []
+}
+
+/**
+ * A heat card (cell.ts heatCard), as the browser's heatmap reads: a row per y value, its name at the content's edge as
+ * a bar's is, then a cell per x value, as wide as the room allows (one to eight cells, a blank cell between two from
+ * three on), shaded by its number from the card's least to its most (SHADES, in the first hue, the least a dim `·`; a
+ * cell with no number blank). Under the rows each x value's name: under its column, wrapped in it on up to three rows,
+ * where the columns are wide enough, else from its column every so many columns; then the key (heatKey). The first
+ * MAX_BARS rows, then `… N more`; columns past the room, `… N more columns`. A cell is a mark: its readout names its
+ * row, its column and its number (bug hunt J10: a heatmap drew as 110 rows of a table).
+ */
+function heatLayout(card: CardData, cols: number, hover: number, shared: Shared = {}): Layout {
+  const g = card.grid
+  if (!g || !g.xs.length || !g.ys.length) return { lines: [[{ s: 'no cells to draw', fg: COLORS.dim }]], items: [], hit: () => -1 }
+  const ys = g.ys.slice(0, MAX_BARS)
+  const yNames = barNames(ys)
+  const xNames = barNames(g.xs)
+  const labelW = Math.min(Math.max(4, ...yNames.map(n => width(n))), Math.max(8, Math.floor(cols * 0.35)))
+  const room = Math.max(1, cols - labelW - 2)
+  const fit = Math.min(g.xs.length, room)
+  // each column's cells, its gap included, and those its shade fills
+  const step = Math.max(1, Math.min(8, Math.floor(room / fit)))
+  const fill = step >= 3 ? step - 1 : step
+  const nums = heatNumbers(card)
+  const [lo, hi] = shared.y ?? [Math.min(...nums), Math.max(...nums)]
+  const shadeOf = (n: number) => (hi > lo ? Math.max(0, Math.min(SHADES.length - 1, Math.floor(((n - lo) / (hi - lo)) * SHADES.length))) : SHADES.length - 1)
+  const items: Item[] = []
+  const marks: { yi: number; xi: number }[] = []
+  const index = new Map<string, number>()
+  ys.forEach((_, yi) =>
+    g.xs.slice(0, fit).forEach((_, xi) => {
+      const n = g.v[yi]?.[xi]
+      if (n === null || n === undefined) return
+      const open = `card:${card.id}#${g.name}/${g.at[yi]?.[xi] ?? ''}`
+      index.set(`${yi}:${xi}`, items.length)
+      marks.push({ yi, xi })
+      items.push({ label: `${yNames[yi]} · ${xNames[xi]}`, value: `${amount(n)} ${g.name}`, cite: cite(fmt(n), open), open, kind: 'mark', text: amount(n) })
+    }),
+  )
+  const hot = hover >= 0 ? marks[hover] : undefined
+  const lines: Line[] = []
+  const owner: number[] = []
+  ys.forEach((_, yi) => {
+    const segs: Seg[] = []
+    for (let xi = 0; xi < fit; xi++) {
+      const n = g.v[yi]?.[xi]
+      const on = hot?.yi === yi && hot.xi === xi ? { inv: true } : {}
+      if (n === null || n === undefined) segs.push({ s: ' '.repeat(fill) })
+      else {
+        const k = shadeOf(n)
+        // the least a dot in the middle of its cell
+        const glyph = k === 0 ? ' '.repeat((fill - 1) >> 1) + SHADES[0]! + ' '.repeat(fill - 1 - ((fill - 1) >> 1)) : SHADES[k]!.repeat(fill)
+        segs.push({ s: glyph, fg: k === 0 ? COLORS.dim : one(), ...on })
+      }
+      if (step > fill && xi < fit - 1) segs.push({ s: ' '.repeat(step - fill) })
+    }
+    const [first, second] = fold(yNames[yi]!, labelW)
+    const on = hot?.yi === yi
+    lines.push([{ s: first!, inv: on }, { s: ' '.repeat(Math.max(0, labelW - width(first!)) + 2) }, ...segs])
+    owner.push(yi)
+    if (second) {
+      lines.push([{ s: second, inv: on }])
+      owner.push(yi)
+    }
+  })
+  if (g.ys.length > ys.length) lines.push([{ s: `… ${g.ys.length - ys.length} more`, fg: COLORS.dim }])
+  // the columns' names: wrapped under their columns where these are wide, else from a column every so many
+  const pad0 = ' '.repeat(labelW + 2)
+  const shown = xNames.slice(0, fit)
+  if (fill >= 3) {
+    // a name too long for its column whole goes without the words in brackets at its end (`May 26 (436 saves)` as
+    // `May 26`), which would show only cut
+    const fitted = (n: string) => {
+      const short = n.replace(/\s*\([^()]*\)$/, '')
+      return wrapped(n, fill, 3).cut && short && short !== n ? short : n
+    }
+    const named = shown.map(n => wrapCell(fitted(n), fill, 3))
+    const depth = Math.max(...named.map(w => w.length))
+    for (let k = 0; k < depth; k++) lines.push([{ s: (pad0 + named.map(w => pad(w[k] ?? '', step)).join('')).trimEnd(), fg: COLORS.dim }])
+  } else {
+    const every = Math.max(1, Math.ceil((Math.min(8, Math.max(...shown.map(n => width(n)))) + 2) / step))
+    let xl = ''
+    for (let xi = 0; xi < fit; xi += every) xl += ' '.repeat(Math.max(0, xi * step - width(xl))) + cut(shown[xi]!, Math.max(1, every * step - 2))
+    lines.push([{ s: pad0 + xl, fg: COLORS.dim }])
+  }
+  if (g.xs.length > fit) lines.push([{ s: `… ${g.xs.length - fit} more columns`, fg: COLORS.dim }])
+  if (shared.key !== false && nums.length) lines.push(heatKey(lo, hi, g.name))
+  const hit = (x: number, y: number): number => {
+    const yi = owner[y]
+    const xi = Math.floor((x - labelW - 2) / step)
+    if (yi === undefined || xi < 0 || xi >= fit) return -1
+    return index.get(`${yi}:${xi}`) ?? -1
+  }
+  return { lines, items, hit }
+}
+
+// the least width of a panel with another beside it, and the gap between two panels side by side
+const PANEL_MIN = 40
+const PANEL_GAP = 3
+
+/**
+ * A panels card (cell.ts facetCard), as the browser's faceted chart reads: each panel's title in bold, then its card
+ * drawn as its kind is, the panels side by side as many to a row as are PANEL_MIN wide, else one under another, a
+ * blank row between two rows of panels. The panels share their scales, as the browser's do, but those the chart keeps
+ * to each panel (`own`): a line chart's x and y ranges, a bar chart's longest bar, a dots chart's x range, a heatmap's
+ * numbers. One key under them all names the color field's values (none where the panels' titles name them), or a
+ * heatmap's shades. A mark's readout names its panel first (bug hunt J10).
+ */
+function panelsLayout(card: CardData, cols: number, hover: number, plotRows?: number): Layout {
+  const panels = (card.panels ?? []).map(p => ({ ...p, card: { ...p.card, ...(card.labels ? { labels: card.labels } : {}) } }))
+  if (!panels.length) return { lines: [], items: [], hit: () => -1 }
+  const across = Math.max(1, Math.min(panels.length, Math.floor((cols + PANEL_GAP) / (PANEL_MIN + PANEL_GAP))))
+  const w = across > 1 ? Math.floor((cols - PANEL_GAP * (across - 1)) / across) : cols
+  // a panel's plot is lower than a chart's own, the more so one under another
+  const rows = Math.min(plotRows ?? 10, across > 1 || panels.length === 1 ? 8 : 6)
+  const own = new Set(card.own ?? [])
+  const kind = panels[0]!.card.kind
+  const shared: Shared = { key: false }
+  const span = (rs: [number, number][]): [number, number] | undefined => (rs.length ? [Math.min(...rs.map(r => r[0])), Math.max(...rs.map(r => r[1]))] : undefined)
+  if (kind === 'line') {
+    const scales = panels.map(p => lineScale(p.card)).filter(s => s.series.length)
+    if (!own.has('x') && scales.every(s => s.kind === scales[0]!.kind && s.kind !== 'cat')) shared.x = span(scales.map(s => [s.x0, s.x1]))
+    if (!own.has('y')) shared.y = span(scales.map(s => [s.y0, s.y1]))
+  } else if (kind === 'bar' && !own.size) {
+    const tops = panels.flatMap(p => {
+      const by = new Map<string, number>()
+      for (const r of barRows(p.card).rows) by.set(r.label, (by.get(r.label) ?? 0) + r.value)
+      return [...by.values()].map(Math.abs)
+    })
+    shared.y = [0, Math.max(0, ...tops)]
+  } else if (kind === 'dots' && !own.has('x')) {
+    const scales = panels.map(p => dotsScale(p.card)).filter(s => s.vals.length)
+    if (scales.every(s => s.kind === scales[0]!.kind)) shared.x = span(scales.map(s => [s.x0, s.x1]))
+  } else if (kind === 'heat' && !own.size) {
+    const nums = panels.flatMap(p => heatNumbers(p.card))
+    if (nums.length) shared.y = [Math.min(...nums), Math.max(...nums)]
+  }
+  // each panel's layout, the one under the pointer with its mark lit; its items after those of the panels before it
+  const lays = panels.map(p => cardLayout(p.card, w, -1, rows, shared))
+  const offsets = lays.map((_, k) => lays.slice(0, k).reduce((a, l) => a + l.items.length, 0))
+  const lit = hover >= 0 ? offsets.findIndex((o, k) => hover >= o && hover < o + lays[k]!.items.length) : -1
+  if (lit >= 0) lays[lit] = cardLayout(panels[lit]!.card, w, hover - offsets[lit]!, rows, shared)
+  const lines: Line[] = []
+  const boxes: { k: number; x0: number; y0: number; h: number }[] = []
+  for (let r0 = 0; r0 < panels.length; r0 += across) {
+    if (r0) lines.push([])
+    const blocks = panels.slice(r0, r0 + across).map((p, j) => [[{ s: cut(p.title, w), b: true }] as Line, ...lays[r0 + j]!.lines])
+    const top = lines.length
+    const h = Math.max(...blocks.map(b => b.length))
+    for (let i = 0; i < h; i++) {
+      const line: Line = []
+      blocks.forEach((b, j) => {
+        const l = b[i] ?? []
+        if (j) line.push({ s: ' '.repeat(PANEL_GAP) })
+        line.push(...l)
+        if (j < blocks.length - 1) line.push({ s: ' '.repeat(Math.max(0, w - lineWidth(l))) })
+      })
+      lines.push(line)
+    }
+    blocks.forEach((_, j) => boxes.push({ k: r0 + j, x0: j * (w + PANEL_GAP), y0: top + 1, h: h - 1 }))
+  }
+  if (card.total !== undefined && card.total > panels.length) lines.push([{ s: `… ${card.total - panels.length} more panels`, fg: COLORS.dim }])
+  // one key under all the panels
+  const hues = card.hues ?? []
+  const named = new Set([...cardLabels(card).flatMap(l => l.values), ...panels.map(p => p.title)])
+  if (hues.length > 1 && !hues.every(h => named.has(h))) lines.push(...flow(hues.map(h => [{ s: '● ', fg: groupHue(card, h, hues) }, { s: h }]), cols))
+  if (kind === 'heat' && shared.y) lines.push(heatKey(shared.y[0], shared.y[1], panels[0]!.card.grid?.name ?? ''))
+  const items = lays.flatMap((l, k) => l.items.map(it => ({ ...it, label: `${panels[k]!.title} · ${it.label}` })))
+  const hit = (x: number, y: number): number => {
+    const b = boxes.find(b => y >= b.y0 && y < b.y0 + b.h && x >= b.x0 && x < b.x0 + w)
+    if (!b) return -1
+    const i = lays[b.k]!.hit(x - b.x0, y - b.y0)
+    return i >= 0 ? offsets[b.k]! + i : -1
+  }
+  return { lines, items, hit }
+}
+
+export function cardLayout(card: CardData, cols: number, hover: number, plotRows?: number, shared?: Shared): Layout {
   switch (card.kind) {
     case 'note':
       return noteLayout(card, cols)
@@ -2496,16 +2788,20 @@ export function cardLayout(card: CardData, cols: number, hover: number, plotRows
     case 'plan':
       return planLayout(card, cols)
     case 'bar':
-      return barLayout(card, cols, hover)
+      return barLayout(card, cols, hover, shared)
     case 'label':
       // a label card is a bar card of its label's counts; its records live in the label panel; a label with no run says
       // so, dim after the not-started glyph, as home draws it
       if (!(card.rows ?? []).length && card.note) return { lines: [card.note.startsWith('◌') ? [{ s: card.note }] : [{ s: '○ ', fg: COLORS.dim }, { s: card.note, fg: COLORS.dim }]], items: [], hit: () => -1 }
       return barLayout(card, cols, hover)
     case 'line':
-      return lineLayout(card, cols, hover, plotRows)
+      return lineLayout(card, cols, hover, plotRows, shared)
     case 'dots':
-      return dotsLayout(card, cols, hover)
+      return dotsLayout(card, cols, hover, shared)
+    case 'heat':
+      return heatLayout(card, cols, hover, shared)
+    case 'panels':
+      return panelsLayout(card, cols, hover, plotRows)
     case 'timeline':
       return timelineLayout(card, cols, hover)
     case 'table':

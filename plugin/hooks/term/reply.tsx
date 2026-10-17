@@ -23,7 +23,7 @@
 // comment is open in the panel; a pale wash on a light theme, paint.ts passageTint) and carries a flag ⚑ in that color in the margin on its first row; its paragraph is
 // drawn by the mod's own layout (para.tsx, cite.ts), which knows where it wraps. A click on either opens the panel at
 // Checks. In fullscreen a card's border row ends with a ↗ that opens the card in the browser; a custom card draws its
-// table or its words and a `view in browser ↗` link.
+// table or its words and a `view in browser ↗` link, and so does a chart the terminal draws no picture of.
 import type { RenderElement, ResolveInput } from 'claude-code'
 
 import type { TermCard, TermLinks, TermVerdict } from './types'
@@ -722,8 +722,9 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [...titleLines(data.question, inner, name).lines, []]), ...(clip !== undefined ? body.slice(0, clip) : body), ...state, ...(clip !== undefined ? [] : labelHead(data, inner).lines)])}</Box>)
   }
   // a custom card is HTML: the terminal draws its table or its words (cell.ts cardOfCell), and its link opens the whole
-  // card in the browser (Matt, 2026-10-16: the link text is "view in browser")
-  const custom = tc.kind === 'custom'
+  // card in the browser (Matt, 2026-10-16: the link text is "view in browser"); so does a chart the terminal draws no
+  // picture of, whose note says so (bug hunt J10)
+  const custom = tc.kind === 'custom' || data.browser === true
   if (custom && clip === undefined) {
     rows.push(fullscreen
       ? <Box key={`custom-row-${key}-${id}`} flexDirection="row"><Button key={`custom-open-${key}-${id}`} plain onPress={() => openInBrowser(cx, `card:${id}`)}><Text color={COLORS.link}>view in browser ↗</Text></Button></Box>

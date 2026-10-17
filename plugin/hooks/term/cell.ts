@@ -2,11 +2,14 @@
 // the drawing form of hooks/draw.ts (CardData), so its layouts draw it in the terminal. No `$`.
 //
 // The map of card kinds (the two-modes study): a table, a timeline, a diagram, an example and a label draw directly; a
-// simple bar or line chart (one Altair layer, x and y fields) draws as text, and a dots chart as its rows of dots with
-// the words a text layer writes beside them; any other chart draws as a table of its rows; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text; a custom
+// simple bar or line chart (one Altair layer, x and y fields) draws as text, a stacked area chart as its bands, a dots
+// chart as its rows of dots with the words a text layer writes beside them, a heatmap as its grid of shaded cells, and
+// a faceted chart as one of these per panel; any other chart draws as a table of its rows when they are few, else as a
+// short note that the browser draws it; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text; a custom
 // HTML card draws as its text. A label card's counts and records come from the label (`thimble state label`).
 import type { TermLinks } from './types'
-import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, DotRow, PlanStep } from './draw'
+import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, DotRow, Panel, PlanStep } from './draw'
+import { MAX_TABLE_ROWS } from './draw'
 import { labelState, labelStateWords } from './lib'
 import { classColors } from './labels'
 import type { LabelClass } from './labels'
@@ -109,7 +112,7 @@ export const CARD_TYPE = 'application/vnd.thimble.card+json'
 const READS = 'application/vnd.thimble.reads+json'
 
 type Frame = { columns?: string[]; index?: string | null; label?: string; rows?: Cell[][]; total?: number; view?: { columns?: string[]; formats?: Record<string, string> } }
-type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown; axis?: { values?: unknown } | null }
+type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown; axis?: { values?: unknown } | null; stack?: unknown }
 type VegaLite = {
   mark?: string | { type?: string; opacity?: unknown }
   encoding?: Record<string, Enc | undefined>
@@ -117,6 +120,7 @@ type VegaLite = {
   datasets?: Record<string, Record<string, unknown>[]>
   layer?: VegaLite[]
   facet?: unknown
+  resolve?: { scale?: Record<string, unknown> }
   spec?: VegaLite
   hconcat?: VegaLite[]
   vconcat?: VegaLite[]
@@ -124,6 +128,10 @@ type VegaLite = {
 }
 
 export type Drawn = { card: CardData; error: string }
+
+/** The words of a chart the terminal draws no picture of, whose rows are too many for a short table; the link under
+ *  them opens it in the browser (reply.tsx cardBlock). */
+export const BROWSER_CHART = 'The terminal cannot draw this chart. The browser shows it.'
 
 function blank(cell: ThimbleCell, kind: string): CardData {
   return { id: cell.id, kind, question: cell.title ?? '', x: '', y: '', note: '', source: {} }
@@ -371,14 +379,31 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
   }
   // a dots chart's rows are names down its y axis, which no line card draws: its rows' table instead
   if ((mark === 'line' || mark === 'point' || mark === 'area' || mark === 'circle') && y.type !== 'nominal' && y.type !== 'ordinal') {
+    // the series in the order the color field's own list gives (its legend's), else as the rows first name them
     const by = new Map<string, [string | number, number][]>()
-    for (const r of rows) {
+    const ordered = color?.field && Array.isArray(color.sort) ? sortedBars(rows, spec.encoding ?? {}, 'color', color.field) : rows
+    for (const r of ordered) {
       const s = color?.field ? String(r[color.field] ?? '') : y.field
       const xv = r[x.field]
       by.set(s, [...(by.get(s) ?? []), [typeof xv === 'number' ? xv : String(xv ?? ''), Number(r[y.field] ?? 0)]])
     }
     const xTicks = axisValues(x)
-    return { ...blank(cell, 'line'), x: x.field, y: y.field, series: [...by].map(([name, points]) => ({ name, points })), ...(xTicks.length ? { xTicks } : {}) }
+    const series = [...by].map(([name, points]) => ({ name, points }))
+    // an area chart of several series stacks them, as Vega-Lite does unless its y says not to: by its `order` field,
+    // else by the series' names, the first lowest; `normalize` stacks each x to the whole (bug hunt J10)
+    const stacked = mark === 'area' && Boolean(color?.field) && by.size > 1 && y.stack !== null && y.stack !== false
+    if (stacked) {
+      const of = spec.encoding?.order?.field
+      const key = (name: string) => {
+        const vs = rows.filter(r => String(r[color!.field!] ?? '') === name).map(r => r[of ?? ''])
+        return of && vs.length && vs.every(v => typeof v === 'number') ? Math.min(...(vs as number[])) : name
+      }
+      const keys = new Map(series.map(s => [s.name, key(s.name)]))
+      const hues = series.map(s => s.name)
+      series.sort((a, b) => ascending(keys.get(a.name), keys.get(b.name)))
+      return { ...blank(cell, 'line'), x: x.field, y: y.field, series, stack: y.stack === 'normalize' ? 'share' : 'zero', hues, ...(xTicks.length ? { xTicks } : {}) }
+    }
+    return { ...blank(cell, 'line'), x: x.field, y: y.field, series, ...(xTicks.length ? { xTicks } : {}) }
   }
   return null
 }
@@ -456,6 +481,137 @@ export function dotsCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
     }
   }
   return { ...blank(cell, 'dots'), x: xf, y: yf, strips: [...strips.values()] }
+}
+
+// the marks a heatmap draws its cells with
+const CELL_MARKS = new Set(['rect', 'square'])
+
+/** A heatmap (thimble.chart("heatmap"), or any chart of rect marks on two discrete axes colored by a number) as a heat
+ *  card: its x values across, its y values down, each in the order its axis sorts them, and each cell's number; a text
+ *  layer that writes the numbers on the cells may stand beside it. Null for any other chart, and for one whose cells
+ *  have no number (bug hunt J10: a heatmap of 110 cells drew as 110 rows of a table). `index` is each row's place in
+ *  the chart's own rows, when these are a panel's part of them, so a mark cites the row it shows. */
+export function heatCard(cell: ThimbleCell, spec: VegaLite, index?: Map<Record<string, unknown>, number>): CardData | null {
+  if (spec.facet || spec.hconcat || spec.vconcat || spec.concat || spec.spec) return null
+  const layers = (spec.layer ?? [spec]).map(l => ({ ...l, encoding: { ...(spec.layer ? spec.encoding : {}), ...l.encoding }, data: l.data ?? spec.data }))
+  if (layers.some(l => l.layer || l.facet || l.hconcat || l.vconcat || l.concat || l.spec)) return null
+  if (!layers.every(l => CELL_MARKS.has(markOf(l)) || markOf(l) === 'text')) return null
+  const cells = layers.filter(l => CELL_MARKS.has(markOf(l)))
+  if (cells.length !== 1) return null
+  const enc = cells[0]!.encoding
+  const discrete = (e: Enc | undefined) => Boolean(e?.field) && !e!.aggregate && (e!.type === 'nominal' || e!.type === 'ordinal')
+  const color = enc.color
+  if (!discrete(enc.x) || !discrete(enc.y) || !color?.field || color.aggregate || color.type !== 'quantitative') return null
+  const xf = enc.x!.field!
+  const yf = enc.y!.field!
+  const vf = color.field
+  const rows = vegaRows(cells[0]!, spec).filter(r => xf in r && yf in r)
+  if (!rows.length) return null
+  const order = (ch: string, f: string) => [...new Set(sortedBars(rows, enc, ch, f).map(r => String(r[f] ?? '')))]
+  const xs = order('x', xf)
+  const ys = order('y', yf)
+  const v: (number | null)[][] = ys.map(() => xs.map(() => null))
+  const at: (number | null)[][] = ys.map(() => xs.map(() => null))
+  rows.forEach((r, i) => {
+    const n = r[vf]
+    const value = typeof n === 'number' && Number.isFinite(n) ? n : typeof n === 'string' && n.trim() !== '' && Number.isFinite(Number(n)) ? Number(n) : null
+    if (value === null) return
+    const yi = ys.indexOf(String(r[yf] ?? ''))
+    const xi = xs.indexOf(String(r[xf] ?? ''))
+    v[yi]![xi] = value
+    at[yi]![xi] = index?.get(r) ?? i
+  })
+  if (v.every(row => row.every(n => n === null))) return null
+  return { ...blank(cell, 'heat'), x: xf, y: yf, grid: { xs, ys, v, at, name: vf } }
+}
+
+/** The fields a faceted chart's panels split its rows by, and the chart each panel draws: Vega-Lite's facet operator
+ *  (`{facet: {row, column}, spec}`, Altair's `.facet(column=…)`; or `{facet: field, columns, spec}`, a wrapped facet),
+ *  or a chart with a `row`, `column` or `facet` channel (thimble.chart's `panels`). Null for a chart of no panels. */
+function facetParts(spec: VegaLite): { inner: VegaLite; by: { field: string; def: Enc }[] } | null {
+  const named = (d: unknown): d is Enc & { field: string } => Boolean(d) && typeof d === 'object' && typeof (d as Enc).field === 'string'
+  if (spec.facet && spec.spec) {
+    const f = spec.facet as Record<string, unknown>
+    const by = named(f) ? [f] : [f.row, f.column].filter(named)
+    return by.length ? { inner: spec.spec, by: by.map(d => ({ field: d.field, def: d })) } : null
+  }
+  const enc = spec.encoding ?? {}
+  const by = (['row', 'column', 'facet'] as const).map(ch => enc[ch]).filter(named)
+  if (!by.length || spec.facet || spec.spec) return null
+  const rest = Object.fromEntries(Object.entries(enc).filter(([ch]) => ch !== 'row' && ch !== 'column' && ch !== 'facet'))
+  return { inner: { ...spec, encoding: rest }, by: by.map(d => ({ field: d.field, def: d })) }
+}
+
+/** The card a chart draws as with its rows: a start-to-end chart, a simple bar or line chart, a dots chart or a
+ *  heatmap; null for any other. */
+function pictureCard(cell: ThimbleCell, spec: VegaLite, index?: Map<Record<string, unknown>, number>): CardData | null {
+  return spansCard(cell, spec) ?? chartCard(cell, spec) ?? dotsCard(cell, spec) ?? heatCard(cell, spec, index)
+}
+
+// the panels a faceted chart draws at most; the others are counted under them
+const MAX_PANELS = 12
+
+/** A faceted chart (facetParts) as a panels card: the chart of each panel as its own card (pictureCard), the panels in
+ *  the order their fields sort them, each named by its values; null when the panels' chart has no picture, which then
+ *  draws as its rows' table or a note (bug hunt J10: three charts faceted by model drew as 636, 1,159 and 45 rows).
+ *  Every panel takes its marks' order from the chart over all the rows, as the browser shares one scale between
+ *  panels: a bar card's labels (each panel lists every label, so panels side by side line up), a heatmap's rows and
+ *  columns, and the color field's values (`hues`), so a value has one color in every panel. */
+export function facetCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
+  const parts = facetParts(spec)
+  if (!parts) return null
+  const rows = vegaRows(spec, spec)
+  if (!rows.length) return null
+  const index = new Map(rows.map((r, i) => [r, i]))
+  const inner: VegaLite = { ...parts.inner, data: { values: rows } }
+  delete inner.datasets
+  const whole = pictureCard(cell, inner, index)
+  if (!whole) return null
+  // each panel's values: every combination of the fields' values, in each field's order, that holds rows
+  const keyOf = (r: Record<string, unknown>) => parts.by.map(b => String(r[b.field] ?? '')).join('\u0000')
+  const orders = parts.by.map(b => [...new Set(sortedBars(rows, { f: b.def }, 'f', b.field).map(r => String(r[b.field] ?? '')))])
+  const combos = orders.reduce<string[][]>((acc, vals) => acc.flatMap(a => vals.map(v => [...a, v])), [[]])
+  const groups = new Map<string, Record<string, unknown>[]>()
+  for (const r of rows) groups.set(keyOf(r), [...(groups.get(keyOf(r)) ?? []), r])
+  // the color field's values in the whole chart's order, which every panel colors by
+  const hues =
+    whole.hues ??
+    (whole.kind === 'line' && (whole.series ?? []).length > 1
+      ? (whole.series ?? []).map(s => s.name)
+      : whole.kind === 'bar'
+        ? [...new Set((whole.rows as BarRow[]).map(r => r.group).filter(Boolean))]
+        : whole.kind === 'dots'
+          ? [...new Set((whole.strips ?? []).flatMap(s => s.dots.map(d => d.group)).filter(Boolean))]
+          : [])
+  const labels = whole.kind === 'bar' ? [...new Set((whole.rows as BarRow[]).map(r => r.label))] : []
+  const panels: Panel[] = []
+  let more = 0
+  for (const combo of combos) {
+    const mine = groups.get(combo.join('\u0000'))
+    if (!mine?.length) continue
+    if (panels.length >= MAX_PANELS) {
+      more++
+      continue
+    }
+    let card = pictureCard(cell, { ...inner, data: { values: mine } }, index)
+    if (!card || card.kind !== whole.kind) continue
+    if (card.kind === 'bar') {
+      // every label of the whole chart, in its order, a label this panel has no row of at 0
+      const own = card.rows as BarRow[]
+      card = { ...card, rows: labels.flatMap(l => (own.some(r => r.label === l) ? own.filter(r => r.label === l) : [{ label: l, value: 0, group: '' }])) }
+    }
+    if (card.kind === 'heat' && card.grid && whole.grid) {
+      const g = card.grid
+      const all = whole.grid
+      const pick = <T,>(m: (T | null)[][]): (T | null)[][] => all.ys.map(y => all.xs.map(x => (g.ys.includes(y) && g.xs.includes(x) ? m[g.ys.indexOf(y)]![g.xs.indexOf(x)]! : null)))
+      card = { ...card, grid: { ...g, xs: all.xs, ys: all.ys, v: pick(g.v), at: pick(g.at) } }
+    }
+    panels.push({ title: combo.join(' · '), card: { ...card, ...(hues.length ? { hues } : {}) } })
+  }
+  if (!panels.length) return null
+  const free = spec.resolve?.scale ?? {}
+  const own = (['x', 'y'] as const).filter(ch => free[ch] === 'independent')
+  return { ...blank(cell, 'panels'), x: whole.x, y: whole.y, panels, ...(hues.length ? { hues } : {}), ...(own.length ? { own } : {}), ...(more ? { total: panels.length + more } : {}) }
 }
 
 /** The values an axis names itself (Vega-Lite's `axis.values`, which thimble.chart sets at each time of weekly or
@@ -605,10 +761,14 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   const spec = first(cell, k => k.startsWith('application/vnd.vegalite')) as VegaLite | undefined
   if (spec && typeof spec === 'object') {
     const vl = plainFields(spec)
-    const chart = spansCard(cell, vl) ?? chartCard(cell, vl) ?? dotsCard(cell, vl)
+    const chart = facetCard(cell, vl) ?? pictureCard(cell, vl)
     if (chart) return { card: chart, error }
-    const table = rowsTable(cell, axisOrder(anyRows(vl), vl))
+    // a chart the terminal has no picture of: its rows' table while it is short, else a note that the browser draws it
+    // (bug hunt J10: never a long table of a chart's rows)
+    const rows = anyRows(vl)
+    const table = rows.length <= MAX_TABLE_ROWS ? rowsTable(cell, axisOrder(rows, vl)) : null
     if (table) return { card: table, error }
+    if (rows.length) return { card: { ...blank(cell, 'note'), note: BROWSER_CHART, browser: true }, error }
   }
   // a card type's card and a figure: the listing they print
   const typed = bundles(cell).find(b => CARD_TYPE in b)
