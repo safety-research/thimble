@@ -8,8 +8,11 @@
 // after its glyph), its type and scope, a rule, its prompt (pattern or code) clamped to four lines until it has the
 // focus, its classes one line each, and More folded over the rest (what it labels and marks, what it applies to, the
 // classifier, the model, the highlights, + class, Delete label), open or folded for the page's session; Cancel and Re-run show once
-// something changed, until then only ×. A new label shows every field. LabelSheet is the same card in a popover on a canvas card (LabelFields, with each class's
-// count); its draft outlasts the popover (canvas/labelDrafts) and its foot offers Discard and Re-run.
+// something changed, until then only ×. A trial (a label run on a sample, backend concepts.py Trials) offers Run on all N
+// at all times, and its Re-run runs the sample again (bug hunt G3: Re-run quietly ran all 9,921 records, and nothing
+// offered the run on all that the terminal's label panel offers). A new label shows every field. LabelSheet is the same
+// card in a popover on a canvas card (LabelFields, with each class's count); its draft outlasts the popover
+// (canvas/labelDrafts) and its foot offers Discard and Re-run, and Run on all N for a trial.
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type ReactNode } from 'react'
 import { Button, Segmented } from '../components/Button'
 import { CodeArea } from '../components/Code'
@@ -210,12 +213,25 @@ export function editsOf(k: Concept, d: Draft): string[] {
   return out
 }
 
+/** A trial's sample and scope: how many units its runs read (its last run's `limit`, else that run's count) and how
+ * many its scope holds (that run's `matched_total`), null where not known; null for a label run on everything. Pure. */
+export function trialOf(k: Pick<Concept, 'trial' | 'last_run'> | null): { sample: number | null; all: number | null } | null {
+  if (!k?.trial) return null
+  const last = k.last_run
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null)
+  return { sample: n(last?.limit) ?? n(last?.total), all: n(last?.matched_total) }
+}
+
+/** The button that runs a trial on everything, with the count of its scope where known: "Run on all 9,921". */
+export const runAllText = (t: { all: number | null }): string => (t.all ? `Run on all ${t.all.toLocaleString()}` : 'Run on all')
+
 /** The accessible name of a label's edit card. */
 export const labelCardName = (label: Concept | null): string => (label ? `Edit ${label.name}` : 'New label')
 
 export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null, lead, inPopover, onClose, onRun }: Props) {
   const [draft, setDraft] = useState<Draft>(() => draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
-  const [saving, setSaving] = useState(false)
+  // the run being started: Re-run's (`sample`, a new label's Run too) or Run on all's
+  const [saving, setSaving] = useState<'sample' | 'all' | null>(null)
   const [deleting, setDeleting] = useState<DeleteLabelAsk | null>(null)
   const isNew = label == null
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }))
@@ -224,6 +240,8 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
   const compact = !isNew
   const changed = isNew || draftChanges(label!, draft)
   const multi = isMultiClass(classes)
+  // a trial offers Run on all at all times, and its Re-run runs its sample again
+  const trial = trialOf(label)
 
   useEffect(() => {
     setDraft(draftOf(label, appliesTo, nextFreeColour(labels.all), drafted, usedColours(labels.all)))
@@ -232,26 +250,28 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [label?.id, drafted])
 
-  const run = async () => {
-    const problem = draftProblem(draft, classes)
+  const run = async (scope: 'sample' | 'all') => {
+    const problem = changed ? draftProblem(draft, classes) : null
     if (problem) {
       bus.emit('toast', { text: problem, kind: 'error' })
       return
     }
     const files = draft.over === 'files'
     const patch = patchOf(draft, classes)
-    setSaving(true)
+    setSaving(scope)
     try {
       // a new label runs as it is created: the server keeps it only once its run starts, so a run that cannot start
       // leaves no label behind and the card stays open to fix what the toast names
-      const k = isNew ? await labelApi.create(ws, { ...patch, name: patch.name!, unit: unitOfOver(draft.over, draft.marks), shown: files, run: true }) : await labels.save(label!.id, patch)
-      track('label-apply', { target: `concept:${k.id}`, detail: { over: draft.over, marks: files ? draft.marks : null, kind: draft.kind, created: isNew } })
-      onRun(k.id, isNew ? k.run ?? { status: 'running' } : await labelApi.apply(ws, k.id, {}))
+      const k = isNew ? await labelApi.create(ws, { ...patch, name: patch.name!, unit: unitOfOver(draft.over, draft.marks), shown: files, run: true }) : changed ? await labels.save(label!.id, patch) : label!
+      // a trial's Re-run reads its sample again; Run on all, or a label's Re-run, reads everything
+      const limit = trial && scope === 'sample' ? trial.sample : null
+      track('label-apply', { target: `concept:${k.id}`, detail: { over: draft.over, marks: files ? draft.marks : null, kind: draft.kind, created: isNew, ...(trial ? { trial: scope } : {}) } })
+      onRun(k.id, isNew ? k.run ?? { status: 'running' } : await labelApi.apply(ws, k.id, limit ? { limit } : {}))
       onClose()
     } catch (e) {
       bus.emit('toast', { text: `Could not run ${patch.name}. ${(e as Error).message}`, kind: 'error' })
     } finally {
-      setSaving(false)
+      setSaving(null)
     }
   }
 
@@ -292,13 +312,20 @@ export function LabelCard({ ws, label, labels, appliesTo, draft: drafted = null,
           void labels.remove(id)
         }}
       />
-      {changed && (
-        <div className="label-card-foot">
-          {!isNew && examplesNote(draft.kind, label?.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, label?.n_marked)}</span>}
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" busy={saving} onClick={() => void run()}>
-            {isNew ? 'Run' : 'Re-run'}
-          </Button>
+      {(changed || trial) && (
+        <div className={'label-card-foot' + (changed && trial ? ' has-three' : '')}>
+          {!isNew && changed && examplesNote(draft.kind, label?.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, label?.n_marked)}</span>}
+          {changed && <Button onClick={onClose}>Cancel</Button>}
+          {trial && (
+            <Button variant={changed ? 'secondary' : 'primary'} busy={saving === 'all'} disabled={saving === 'sample'} onClick={() => void run('all')}>
+              {runAllText(trial)}
+            </Button>
+          )}
+          {changed && (
+            <Button variant="primary" busy={saving === 'sample'} disabled={saving === 'all'} onClick={() => void run('sample')}>
+              {isNew ? 'Run' : 'Re-run'}
+            </Button>
+          )}
         </div>
       )}
     </div>
@@ -629,7 +656,7 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
  */
 export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onReview }: { ws: string; label: Concept; draft: Draft | null; onDraft: (d: Draft | null) => void; onClose: () => void; onOpen: () => void; onReview?: () => void }) {
   const labels = useFilesLabels(ws)
-  const [saving, setSaving] = useState(false)
+  const [saving, setSaving] = useState<'sample' | 'all' | null>(null)
   // the label as Files shows it, a colour just picked included, else as the canvas has it
   const k = labels.byId.get(label.id) ?? label
   const shown = draft ?? draftOf(k, [])
@@ -643,23 +670,28 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
     const next = { ...now, ...patch }
     onDraft(definitionOf(next) === definitionOf(draftOf(label, [])) ? null : next)
   }
-  const rerun = async () => {
-    if (!draft) return
-    const problem = draftProblem(draft, classes)
+  const trial = trialOf(k)
+  // Re-run saves the draft and runs the label, a trial on its sample again; Run on all runs a trial on everything, with
+  // the draft saved first when there is one
+  const rerun = async (scope: 'sample' | 'all') => {
+    if (!draft && scope === 'sample') return
+    const problem = draft ? draftProblem(draft, classes) : null
     if (problem) {
       bus.emit('toast', { text: problem, kind: 'error' })
       return
     }
-    setSaving(true)
+    setSaving(scope)
     try {
-      await labels.save(k.id, patchOf(draft, classes))
-      track('label-apply', { target: `concept:${k.id}`, detail: { over: draft.over, marks: draft.over === 'files' ? draft.marks : null, kind: draft.kind, created: false } })
+      const d = draft ?? shown
+      if (draft) await labels.save(k.id, patchOf(draft, classes))
+      const limit = trial && scope === 'sample' ? trial.sample : null
+      track('label-apply', { target: `concept:${k.id}`, detail: { over: d.over, marks: d.over === 'files' ? d.marks : null, kind: d.kind, created: false, ...(trial ? { trial: scope } : {}) } })
       onDraft(null)
-      await labelApi.apply(ws, k.id, {})
+      await labelApi.apply(ws, k.id, limit ? { limit } : {})
     } catch (e) {
       bus.emit('toast', { text: `Could not run ${k.name}. ${(e as Error).message}`, kind: 'error' })
     } finally {
-      setSaving(false)
+      setSaving(null)
     }
   }
   const status = labelStatus(k)
@@ -678,27 +710,39 @@ export function LabelSheet({ ws, label, draft, onDraft, onClose, onOpen, onRevie
         <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />
       </div>
       <LabelFields ws={ws} label={k} labels={labels} draft={shown} classes={classes} set={set} counts={k.counts} />
-      <div className="label-card-foot">
+      <div className={'label-card-foot' + (draft && trial ? ' has-three' : '')}>
         {draft ? (
           <>
             {examplesNote(draft.kind, k.n_marked) && <span className="label-card-note">{examplesNote(draft.kind, k.n_marked)}</span>}
             <Button onClick={() => onDraft(null)}>Discard</Button>
-            <Button variant="primary" busy={saving} onClick={() => void rerun()}>
+            {trial && (
+              <Button variant="secondary" busy={saving === 'all'} disabled={saving === 'sample'} onClick={() => void rerun('all')}>
+                {runAllText(trial)}
+              </Button>
+            )}
+            <Button variant="primary" busy={saving === 'sample'} disabled={saving === 'all'} onClick={() => void rerun('sample')}>
               Re-run
             </Button>
           </>
         ) : (
-          <span className="label-sheet-links">
-            {onReview && (
-              <button type="button" className="label-card-files" onClick={onReview}>
-                Review records
+          <>
+            <span className="label-sheet-links">
+              {onReview && (
+                <button type="button" className="label-card-files" onClick={onReview}>
+                  Review records
+                </button>
+              )}
+              <button type="button" className="label-card-files" onClick={onOpen}>
+                Open in Files
+                <Icon name="arrow-up-right" size={12} />
               </button>
+            </span>
+            {trial && (
+              <Button variant="primary" busy={saving === 'all'} onClick={() => void rerun('all')}>
+                {runAllText(trial)}
+              </Button>
             )}
-            <button type="button" className="label-card-files" onClick={onOpen}>
-              Open in Files
-              <Icon name="arrow-up-right" size={12} />
-            </button>
-          </span>
+          </>
         )}
       </div>
     </div>

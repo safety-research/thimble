@@ -20,7 +20,9 @@ up to WHOLE_MAX_BYTES. A run that reads some only in part keeps them as its `cut
 
 Trials: apply_label with a `limit` defines a trial (`trial: true`), a label run on a sample, which every Labels list and
 label count holds, marked as a sample, so the analyst judges it where the other labels are, until a run without a limit
-makes it a label run on everything; a limited run over files samples its units across files (trial_sample).
+makes it a label run on everything; a limited run over files samples its units across files (trial_sample). That run
+marks the takeaway of its card stale (_trial_takeaways_stale), and when the analyst starts it (the browser's Run on all,
+the terminal's `run on all`) main hears of it once it ends (`label_done`).
 The same predicate again: re-applying a label with the same definition (same_definition) keeps its version and rows,
 and runs only over what its rows do not cover (covered).
 Within: a label over records may run only over the records another label gave one value (`within {label, value}`, kept
@@ -3691,6 +3693,22 @@ def _patterns(paths: Any) -> list[str]:
     return [str(p) for p in (paths if isinstance(paths, list) else [paths] if paths else []) if str(p).strip()]
 
 
+async def _trial_takeaways_stale(c: str, ws: Path, concept_id: str) -> None:
+    """Mark the takeaway of the label's card stale (notebook.TAKEAWAY_STALE) as its trial starts its run on everything:
+    the takeaway was written for the sample, and the card's counts will be the whole scope's (bug hunt G3: the card kept
+    "On a trial sample, 4 of 40 …" over the counts of 9,920 records). Main writes it again from `label_done` or from its
+    own apply_label's result, which clears the mark. Never raises."""
+    from . import notebook  # noqa: PLC0415
+
+    try:
+        cards = await asyncio.to_thread(_label_cards, ws, concept_id)
+        for _nb, cell in cards:
+            if str(cell.get("takeaway") or "").strip() and not cell.get(notebook.TAKEAWAY_STALE):
+                notebook._mark_takeaway_stale(c, str(cell["id"]))
+    except Exception:  # noqa: BLE001 — the run goes on either way
+        log.exception("%s: the takeaway of label %s's card was not marked stale", c, concept_id)
+
+
 async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, limit: int | None = None, created_by: str = "user",
                     *, comment: bool = True, run_id: str | None = None, started: str | None = None,
                     sources: list[dict] | None = None, again: bool = False) -> dict:
@@ -3708,10 +3726,11 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             raise HTTPException(409, AGAIN_NONE)
         again_refs, limit = set(found), None
     if concept["trial"] and not limit and not again:
-        # a trial becomes a label once it runs on everything
+        # a trial becomes a label once it runs on everything, and its card's takeaway, written for the sample, is stale
         concept["trial"] = False
         write_concept(ws, concept)
         _notify(c, concept_id, "defined")
+        await _trial_takeaways_stale(c, ws, concept_id)
     version = concept["version"]
     unit = concept["unit"]
     within = concept.get("within") if unit == "record" else None
@@ -5094,12 +5113,14 @@ def _check_takeaways(c: str, cards: list[dict]) -> None:
             card_check.start(c, str(cell["id"]), str(rec.get("author") or card_check.MAIN))
 
 
-def tell_when_done(c: str, concept_id: str) -> asyncio.Task:
+def tell_when_done(c: str, concept_id: str, *, whole_trial: bool = False) -> asyncio.Task:
     """Post `label_done` to main once the label's running apply ends and thimble ran the cards that read it again
-    (rerun_readers): its counts, how many units got no value and why (unlabeled_text), its card, and those cards whose
-    takeaway is stale or that failed, with their new output. A run that fails or is stopped posts nothing. Returns the
-    task that waits, which a process that ends with the run awaits."""
-    from . import events
+    (rerun_readers): its counts, how many units got no value and why (unlabeled_text), its card (with a line that its
+    takeaway is stale when it is: _trial_takeaways_stale), and those cards whose takeaway is stale or that failed, with
+    their new output. `whole_trial`: the analyst ran a trial on everything from the browser or the terminal's label panel,
+    which the text says, so main learns the label ran on all its units as it does of its own runs (bug hunt G3). A run
+    that fails or is stopped posts nothing. Returns the task that waits, which a process that ends with the run awaits."""
+    from . import events, notebook, tools  # noqa: PLC0415
 
     key = (c, concept_id)
     _told_in_label_done.add(key)
@@ -5135,8 +5156,21 @@ def tell_when_done(c: str, concept_id: str) -> asyncio.Task:
             after = "thimble ran the cards that read it again, and these need you:\n\n" + rerun_text(c, reran)
         else:
             after = "No card that read it needs you."
-        text = (f"label {concept['name']} [[concept:{concept_id}]] finished: {told}. "
-                + (f"Its card is [[card:{cards[0][1]['id']}]]. " if cards else "") + after)
+        if whole_trial:
+            total = summary.get("total")
+            one, many = UNIT_NAMES.get(concept["unit"], ("unit", "units"))
+            scope = f"all its {int(total):,} {one if total == 1 else many}" if isinstance(total, int) and total else f"all its {many}"
+            lead = (f"The analyst ran label {concept['name']} [[concept:{concept_id}]] on {scope}, after its trial on a "
+                    f"sample, and it finished: {told}. ")
+        else:
+            lead = f"label {concept['name']} [[concept:{concept_id}]] finished: {told}. "
+        card_line = ""
+        if cards:
+            card_id = str(cards[0][1]["id"])
+            card_line = f"Its card is [[card:{card_id}]]. "
+            if (notebook.get_cell(c, card_id) or {}).get(notebook.TAKEAWAY_STALE):
+                card_line += tools.hint("apply_label-takeaway-stale", cid=card_id) + " "
+        text = lead + card_line + after
         payload = {"text": text, "name": concept["name"], "ref": f"concept:{concept_id}",
                    "card": f"card:{cards[0][1]['id']}" if cards else None,
                    "cards": ", ".join(f"card:{x['id']}" for x in reran) or None}
@@ -5506,14 +5540,19 @@ async def _ran_from_browser(c: str, ws: Path, concept: dict, created_by: str, ra
 async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Response) -> dict:
     """Start an apply: 202 with the run record (409 while one runs), or with `wait: true` the summary once the run ends (202
     with `partial: true` past APPLY_WAIT_S). File units run over `paths`, else the label's glob. The label is the analyst's:
-    a new label gets its card, and main hears of a version it has not heard of (tell_main)."""
+    a new label gets its card, and main hears of a version it has not heard of (tell_main), and of a trial run on
+    everything once it ends (`label_done`)."""
     ws, concept = load_concept(c, concept_id)
     paths = _patterns(body.paths) or (glob_patterns(concept["glob"]) if concept["unit"] in FILE_UNITS else [])
     if concept["unit"] in FILE_UNITS and not paths:
         raise HTTPException(400, "paths is required: corpus-relative globs or a directory (e.g. ['*/board.jsonl'], 'agents'; '*' is the whole dataset)")
     ran_before = bool(concept["applications"])
+    whole_trial = bool(concept["trial"]) and not body.limit
     record = await start_apply(c, concept_id, paths, body.limit, body.created_by, comment=body.comment)
     await _ran_from_browser(c, ws, concept, body.created_by, ran_before)
+    if whole_trial:
+        # the analyst ran a trial on everything: main hears when it ends, as of its own runs (bug hunt G3)
+        tell_when_done(c, concept_id, whole_trial=True)
     if not body.wait:
         response.status_code = 202
         return record

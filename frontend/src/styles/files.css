@@ -1164,6 +1164,13 @@
   color: var(--text-secondary);
   font: var(--type-body-sm);
 }
+/* a trial's edit offers three buttons (Cancel, Run on all, Re-run): the note takes a row of its own above them */
+.label-card-foot.has-three {
+  flex-wrap: wrap;
+}
+.label-card-foot.has-three .label-card-note {
+  flex-basis: 100%;
+}
 
 /* the same card in the popover beside the control that opened it (LabelEditor): the popover is its paper, its place
    and its scroll, at the card's own width */
@@ -1202,6 +1209,10 @@
   display: flex;
   align-items: center;
   gap: 12px;
+}
+/* a trial's Run on all at the right, the links at the left */
+.label-sheet-links:not(:last-child) {
+  margin-right: auto;
 }
 
 /* -------- the reader: the cell's paper behind a hairline, square tabs on the sidebar's step -------- */
