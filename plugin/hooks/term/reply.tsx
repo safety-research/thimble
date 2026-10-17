@@ -39,7 +39,7 @@ import { bareCard, cardTag, cardWords, chipPlace, cid, claimFields, questionOf, 
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, FLAG, labelHex, paintLines, passageTint } from './paint'
-import { labelLinkStale, labelsOf } from './model'
+import { labelLinkStale, labelsOf, turnWords } from './model'
 import { loadCards, queueCitations, rt } from './term'
 import type { AnswerComment } from './contracts'
 import { openInBrowser } from './offramp'
@@ -635,6 +635,13 @@ async function withQuotes(cx: Ctx, data: CardData, takeaway = ''): Promise<CardD
       continue
     }
     const v = await cx.verdict(cid(`[[${x.ref}]]`))
+    // a chat log's line: its words under its speaker's name, as a database row's field is drawn (bug hunt D9)
+    const said = v ? turnWords(v) : null
+    if (said) {
+      const quote = said.words.slice(0, 600)
+      examples.push({ ...x, quote, ...(said.speaker ? { fields: { read: [[said.speaker, quote]], rest: [] } } : {}) })
+      continue
+    }
     const quote = v ? v.lines.filter(l => l.hit).map(l => l.text).join(' ').slice(0, 600) : ''
     examples.push({ ...x, quote })
   }

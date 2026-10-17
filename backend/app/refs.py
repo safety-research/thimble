@@ -775,6 +775,23 @@ def _join_blocks(blocks: list[dict[str, str]]) -> str:
     return "\n\n".join(b["text"] for b in blocks)
 
 
+def _with_turns(path: Path, rel: str, recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The records of a text chat log's lines (transcripts.sniff), each line that starts a turn with that turn in
+    `meta.turn` ({speaker, at, time?}: transcripts.turn_of, as the Transcript mode reads it), so a quote of the line can
+    show its speaker apart from its words; any other file's records as they are."""
+    from . import transcripts  # noqa: PLC0415 — transcripts imports this module
+
+    try:
+        hint = transcripts.sniff(path, rel)
+        if not hint or hint.get("format") != "text":
+            return recs
+        texts = [r["record"].get("text") if isinstance(r.get("record"), dict) else None for r in recs]
+        turns = list(transcripts.text_turns(texts, hint))
+    except Exception:  # noqa: BLE001 — a line with no turn read is quoted as it is
+        return recs
+    return [{**r, "meta": {**(r.get("meta") or {}), "turn": t}} if t else r for r, t in zip(recs, turns)]
+
+
 def _resolve_lines(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
     from . import corpus  # data access lives in corpus.py; imported lazily to avoid an import cycle
 
@@ -794,7 +811,7 @@ def _resolve_lines(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, A
         raise RefError(f"range end L{end_line} is before start L{line}", 400)
     end_line = min(end_line, total)
 
-    recs = corpus.load_records(path, rel, src_kind, line, min(end_line, line + RANGE_MAX_RECORDS - 1))
+    recs = _with_turns(path, rel, corpus.load_records(path, rel, src_kind, line, min(end_line, line + RANGE_MAX_RECORDS - 1)))
     first = recs[0]
     out: dict[str, Any] = {
         "ref": ref,

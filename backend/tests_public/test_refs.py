@@ -69,3 +69,16 @@ def test_resolve_cell(mini, workspaces_tmp):
     with pytest.raises(refs.RefError) as e:
         refs.resolve(mini, "card:nope")
     assert e.value.status == 404
+
+
+def test_a_line_of_a_markdown_chat_log_resolves_with_its_turn(tmp_path):
+    """Bug hunt D9: a quote of a markdown chat log's line showed `**R3:**`, since the line resolved as its raw text alone.
+    It resolves with the turn the line starts (`meta.turn`, as the Transcript mode reads it), so a quote can show the
+    speaker apart from the words."""
+    lines = ["# Session R3", "", "**Moderator:** What did you try first?", "", "**R3:** I could not find the stop button.",
+             "", "**00:01:26**", "", "**Moderator:** And then?", "", "**R3:** I asked the chat instead."]
+    (tmp_path / "R3").mkdir()
+    (tmp_path / "R3" / "notes.md").write_text("\n".join(lines) + "\n")
+    out = refs.resolve(tmp_path, "R3/notes.md#L5.b0:c8-28")
+    assert out["meta"]["turn"] == {"speaker": "R3", "at": 8} and out["excerpt"] == "I could not find the"
+    assert "turn" not in refs.resolve(tmp_path, "R3/notes.md#L7")["meta"], "a time's own line starts no turn"
