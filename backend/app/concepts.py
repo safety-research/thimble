@@ -1248,7 +1248,7 @@ def units_at_least(corpus_dir: Path, sources: list[dict], unit: str, cap: int) -
     """(units counted, files read) over the matched sources, stopping once the count passes `cap`: records are lines
     (corpus.line_count, memoised per file), agents and runs are groups. Blocking (a thread)."""
     if unit != "record":
-        return len(groups_for(sources, unit)), len(sources)
+        return len(groups_for(sources, unit, corpus_dir)), len(sources)
     n = 0
     for i, src in enumerate(sources, 1):
         try:
@@ -1342,13 +1342,15 @@ def _one(ref: str, text: str, record: Any) -> Unit:
     return Unit(ref, [], lambda: iter([(ref, text)]), record)
 
 
-def groups_for(sources: list[dict], unit: str) -> list[dict]:
-    """[{ref, paths}] per file unit: one group per file for records and agents, one per run directory for runs."""
+def groups_for(sources: list[dict], unit: str, corpus_dir: Path) -> list[dict]:
+    """[{ref, paths}] per file unit: one group per file for records and agents, one per run folder for runs, the outermost
+    folder below the corpus root that holds files itself (corpus.run_dir), whatever depth the matched files lie at."""
     if unit in ("record", "agent"):
         return [{"ref": s["path"], "paths": [s["path"]]} for s in sources]
+    holders = corpus.file_folders(corpus_dir)
     runs: dict[str, list[str]] = {}
     for s in sources:
-        runs.setdefault(corpus.run_dir(s["path"]) or ".", []).append(s["path"])
+        runs.setdefault(corpus.run_dir(s["path"], holders) or ".", []).append(s["path"])
     return [{"ref": run, "paths": paths} for run, paths in runs.items()]
 
 
@@ -1364,7 +1366,7 @@ def iter_units(corpus_dir: Path, sources: list[dict], unit: str, cap: int = UNIT
                 yield _record_unit(src["path"], r)
         return
     by_path = {s["path"]: s for s in sources}
-    for g in groups_for(sources, unit):
+    for g in groups_for(sources, unit, corpus_dir):
         srcs = [by_path[p] for p in g["paths"]]
         u = Unit(g["ref"], g["paths"], lambda: iter(()))
 
@@ -1852,10 +1854,10 @@ def trial_sample(corpus_dir: Path, sources: list[dict], limit: int, lines: dict[
     return out
 
 
-def trial_groups(sources: list[dict], unit: str, limit: int) -> tuple[list[dict], int]:
+def trial_groups(sources: list[dict], unit: str, limit: int, corpus_dir: Path) -> tuple[list[dict], int]:
     """(the sources of a trial's files or runs, the number of files or runs in scope): `limit` of them spread over the
     matched ones in corpus order, so a trial of an agent or run label runs as a full run does, over fewer of them."""
-    groups = groups_for(sources, unit)
+    groups = groups_for(sources, unit, corpus_dir)
     by_path = {s["path"]: s for s in sources}
     picked = [groups[i] for i in spread(len(groups), limit)]
     return [by_path[p] for g in picked for p in g["paths"]], len(groups)
@@ -2903,7 +2905,7 @@ async def _index_sources(c: str, concept_id: str, corpus_dir: Path, sources: lis
     pool, and the records of the others counted (records.count). Returns {total, files: {path: index}, counts: {path:
     records}}."""
     if unit != "record":
-        return {"total": len(groups_for(sources, unit)), "files": {}, "counts": {}}
+        return {"total": len(groups_for(sources, unit, corpus_dir)), "files": {}, "counts": {}}
     lined = await asyncio.to_thread(lambda: [s for s in sources if line_source(corpus_dir, s)])
     keep = {s["path"] for s in lined}
     others = [s for s in sources if s["path"] not in keep]
@@ -2998,7 +3000,7 @@ async def _apply_regex(c: str, concept: dict, corpus_dir: Path, sources: list[di
                                       cap is None)))
     else:
         sizes = {s["path"]: int(s.get("size_bytes") or 0) for s in sources}
-        groups = groups_for(sources, unit)
+        groups = groups_for(sources, unit, corpus_dir)
         for g in (groups[:limit] if limit else groups):
             tasks.append((g["ref"], sum(sizes.get(p, 0) for p in g["paths"]), 1,
                           partial(concept_scan.scan_group, str(corpus_dir), g["ref"], [(p, kinds[p]) for p in g["paths"]], spec, pos, neg)))
@@ -3445,11 +3447,11 @@ async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Un
             # the wrapper reads files of lines itself; the records of the others go to it in the units file
             lined = await asyncio.to_thread(lambda: [line_source(corpus_dir, s) for s in sources])
             rest = [s for s, ok in zip(sources, lined) if not ok]
-            groups = groups_for([s for s, ok in zip(sources, lined) if ok], "record")
+            groups = groups_for([s for s, ok in zip(sources, lined) if ok], "record", corpus_dir)
         else:
             # the wrapper reads the files of lines of each unit, and the records of its other files (a JSON document's,
             # a CSV file's rows, a database's rows, a PDF's pages) from a file; each file whole as its kind says
-            groups = groups_for(sources, concept["unit"])
+            groups = groups_for(sources, concept["unit"], corpus_dir)
             kinds = await asyncio.to_thread(lambda: {s["path"]: whole_kind(corpus_dir, s) for s in sources})
             others = await asyncio.to_thread(lambda: [s for s in sources if not line_source(corpus_dir, s)])
             if others:
@@ -3611,7 +3613,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
     # records picks its records once the files are indexed (trial_sample)
     scope_groups: int | None = None
     if limit and unit in ("agent", "run"):
-        sources, scope_groups = await asyncio.to_thread(trial_groups, sources, unit, limit)
+        sources, scope_groups = await asyncio.to_thread(trial_groups, sources, unit, limit, corpus_dir)
     key = (c, concept_id)
     lock = _locks.setdefault(key, asyncio.Lock())
     async with lock:
