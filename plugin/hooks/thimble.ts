@@ -1289,9 +1289,17 @@ function checkOf(description: string): string {
 }
 
 /** The name of the check (`Judgment calls`) that `agentId` runs, when it is an agent of thimble's check role this session
- *  started; the terminal UI drops its hand-back. */
+ *  started; the terminal UI drops its hand-back unless main's own Agent call started it (typedCheck). */
 export function checkName(agentId: string): string | undefined {
   return live.m?.checks.get(agentId)
+}
+
+/** Whether `agentId` runs a check that main's own Agent call started (run_check, a typed start), which reports to main as
+ *  any of main's subagents does: its hand-back, or Claude Code's notification of its end, reaches main, which answers it
+ *  in one line (backend/app/checks.py). The terminal UI drops those of the checks this module started (checkName). */
+export function typedCheck(agentId: string): boolean {
+  const m = live.m
+  return Boolean(m && m.checks.has(agentId) && !m.started.has(agentId))
 }
 
 /** The reason Claude Code prints when the terminal UI drops the hand-back of `agentId`, when it is a model call's agent

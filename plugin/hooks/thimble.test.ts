@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, CALL_DONE, POINTER_NOTE, PRIVATE_FALLBACK, callDone, checkName, hmac, ownNotice, register } from './thimble'
+import { ABORT_WAIT_MS, CALL_DONE, POINTER_NOTE, PRIVATE_FALLBACK, callDone, checkName, hmac, ownNotice, register, typedCheck } from './thimble'
 
 type Json = Record<string, any>
 
@@ -738,6 +738,20 @@ describe('ends and sessions', () => {
     expect(await e.taskStatus(done(writer, 'writer: report'))).toBe(done(writer, 'writer: report'))
     expect(await e.taskStatus(running('aMine000', 'count the pages'))).toBe(running('aMine000', 'count the pages'))
     expect(await e.taskStatus(done(check, 'check: Important details · answers'), 'aSub')).toBe(done(check, 'check: Important details · answers'))
+  })
+
+  // bug hunt I7: the hand-back of a check main started with run_check was dropped, which printed a warning-colored
+  // "Prompt dropped by a hook: Numbers found nothing to flag", and main, told only that the report had reached it, wrote
+  // that thimble showed the check's comments when it had none
+  it('tells the terminal UI which checks main started itself, whose reports reach main', async () => {
+    const e = await started()
+    const spawned = String((await e.server.answer(e.server.push('spawn', { role: 'check', prompt: 'p', description: 'check: Important details · report', values: {}, note: '' }))).agentId)
+    const writer = String((await e.server.answer(e.server.push('spawn', { role: 'writer', prompt: 'p', description: 'writer: report', values: {}, note: '' }))).agentId)
+    await e.agentCall({ subagentType: 'thimble:check', prompt: '[thimble request req_1]\nCheck the report.', description: 'check: Numbers · report' }, 'aTypedCheck')
+    await e.agentCall({ subagentType: 'thimble:writer', prompt: 'Write.', description: 'writer: slides' }, 'aTypedWriter')
+    expect([spawned, 'aTypedCheck', writer, 'aTypedWriter', 'aMine000'].map(typedCheck)).toEqual([false, true, false, false, false])
+    // both are checks this session started, by their names
+    expect([spawned, 'aTypedCheck'].map(checkName)).toEqual(['Important details', 'Numbers'])
   })
 
   // bug hunt I6: the view's builder, sent back for the terminal page, handed back to main, and Claude Code then wrote its

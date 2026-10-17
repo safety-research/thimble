@@ -53,7 +53,7 @@ import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
 import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble, takeMain } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
-import { POINTER_NOTE, callDone, checkName, ownNotice } from '../thimble'
+import { POINTER_NOTE, callDone, checkName, ownNotice, typedCheck } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
 import { openInBrowser, remoteReply } from './offramp'
 import { openChecks } from './checksview'
@@ -80,6 +80,10 @@ const THIMBLE_TOOL = /^mcp__(plugin_thimble_thimble|thimble-[a-z-]+)__/ // main'
 const REWAKE_SUMMARY = 'thimble'
 // a message of another agent's as main reads it (a subagent's hand-back)
 const AGENT_MESSAGE = /<agent-message from="([^"]+)"/
+// a check's agent type, which names the sender of its hand-back's row (a check's Agent call gives it no name)
+const CHECK_TYPE = 'thimble:check'
+/** What main reads beside the report of a check it started with run_check (bug hunt I7). */
+export const CHECK_REPORT = 'This is the report of the check you started with run_check. Tell the analyst in one line what it found.'
 // how long a check's dropped hand-back waits for its run's record (checkDone)
 const CHECK_READ_MS = 5000
 const CARD_TOOL = /^mcp__plugin_thimble_thimble__(add_card|edit_card|apply_label)$/
@@ -616,31 +620,36 @@ export const register: Register = (on, options) => {
   })
 
   // a prompt carries thimble's guide when it is owed (after /clear, a switch that changed it, a resumed session).
-  // A check's hand-back never reaches main: thimble shows its comments as the passage's tint and flag (SPEC-v2 J7).
-  // thimble's hand-back hook (plugin/bin/.thimble-watch --handback) takes the report of a check's or a model call's agent
-  // that thimble's module started and refuses the call, so it never enters main's queue and Claude Code prints no row.
-  // One that still arrives (the hook failed, or main's own Agent call started the check) is dropped here, as it enters,
-  // since Claude Code queues a hand-back for main with no session.receive: the reason says what the check did (the owner,
-  // 10-17), or for a model call's agent, whose answer went to thimble through its tools, the line the server gave its
-  // start (`thimble checked the card "…"`, backend/app/agent_call.py). Claude Code's task notification of such an agent
-  // is dropped the same way (ownNotice): it too is queued with no session.receive (enqueueAgentNotification), and a
-  // check's notice that it waits on its own background work, or ended with no report, is about thimble's plumbing (bug
-  // hunt E10); .thimble-watch --foreground keeps a check from starting such work, so none is sent
+  // The hand-back of a check thimble's module started never reaches main: thimble shows its comments as the passage's
+  // tint and flag (SPEC-v2 J7). thimble's hand-back hook (plugin/bin/.thimble-watch --handback) takes the report of a
+  // check's or a model call's agent that thimble's module started and refuses the call, so it never enters main's queue
+  // and Claude Code prints no row. One that still arrives (the hook failed) is dropped here, as it enters, since Claude
+  // Code queues a hand-back for main with no session.receive: the reason says what the check did (the owner, 10-17), or
+  // for a model call's agent, whose answer went to thimble through its tools, the line the server gave its start
+  // (`thimble checked the card "…"`, backend/app/agent_call.py). Claude Code's task notification of such an agent is
+  // dropped the same way (ownNotice): it too is queued with no session.receive (enqueueAgentNotification), and a check's
+  // notice that it waits on its own background work, or ended with no report, is about thimble's plumbing (bug hunt
+  // E10); .thimble-watch --foreground keeps a check from starting such work, so none is sent. A check that main's own
+  // Agent call started (run_check, typedCheck) reports to main as main's other subagents do, and main answers its
+  // report in one line: dropped, its row read `Prompt dropped by a hook: …` in a warning's color, and main, told only
+  // by Claude Code's notice that the report had reached it, made up what the check found (bug hunt I7)
   on('prompt.submit', async ($, e, next) => {
     const from = e.origin.kind === 'peer' ? AGENT_MESSAGE.exec(e.text)?.[1] : e.origin.kind === 'task-notification' ? ownNotice(e.text) : undefined
     const done = from === undefined ? undefined : callDone(from)
     if (done !== undefined) return { drop: done }
-    const check = from === undefined ? undefined : checkName(from)
+    const check = from === undefined || typedCheck(from) ? undefined : checkName(from)
     if (from !== undefined && check !== undefined) return { drop: await checkDone(cxOf($), from, check) }
-    if (!isActive()) return next(e)
+    // the report of a check main started with run_check, which main answers in one line (backend/app/checks.py)
+    const sent = from !== undefined && e.origin.kind === 'peer' && typedCheck(from) ? { ...e, context: [...(e.context ?? []), CHECK_REPORT] } : e
+    if (!isActive()) return next(sent)
     const cx = cxOf($)
     await followConversation(cx)
     // a delivery still in flight when the person sends the next prompt never reached the conversation: owe it again
     if (act.pending) deliveryLost()
     const guide = await owedGuide(cx)
-    if (!guide) return next(e)
+    if (!guide) return next(sent)
     deliverStarts(guide)
-    const r = await next({ ...e, context: [...(e.context ?? []), guide] })
+    const r = await next({ ...sent, context: [...(sent.context ?? []), guide] })
     if (r.drop !== undefined) deliveryLost()
     return r
   }).catch(($, e, next) => next(e))
@@ -973,6 +982,15 @@ export const register: Register = (on, options) => {
       if (description !== input.description || prompt !== input.prompt || output !== e.props.output) return next({ ...e, props: { ...e.props, input: { ...input, description, prompt }, ...(output !== undefined ? { output } : {}) } })
     }
     return next(e)
+  })
+
+  // the hand-back of a check main started with run_check is no row: main's `↳` line under it says what the check found,
+  // and thimble shows its comments (bug hunt I7); ctrl+o's full view still draws it. Only a check main started hands
+  // back to main (the others' hand-backs are taken or dropped, above), so its type names it
+  on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'peer' } } }, async ($, e, next) => {
+    if (!rt.sc || e.props.isExpanded || e.props.from?.name !== CHECK_TYPE) return next(e)
+    const { Box } = $.ui.resolve(e)
+    return <Box />
   })
 
   // the row saying a side thread's fork finished names the thread by its first question, never the fork's slug. A
