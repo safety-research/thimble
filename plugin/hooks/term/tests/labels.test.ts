@@ -152,8 +152,8 @@ test("a prompt label's panel has a `model:` row among its fields, after `kind:`:
   const rows = (tree.children ?? []).map(r => shown(r))
   const at = (s: string) => rows.findIndex(r => r.startsWith(s))
   // the definition's name stands on its box's first row of text, under a blank cell
-  for (const s of ['name:', 'kind:', 'model:', 'unit:', 'scope:', 'mark records', '──', ' prompt:']) expect(at(s), s).toBeGreaterThanOrEqual(0)
-  expect([at('kind:'), at('unit:'), at('scope:'), at('mark records'), at('──'), at(' prompt:')]).toEqual([at('name:') + 1, at('model:') + 1, at('unit:') + 1, at('scope:') + 1, at('mark records') + 1, at('──') + 1])
+  for (const s of ['name:', 'kind:', 'model:', 'unit:', 'scope:', 'highlight:', '──', ' prompt:']) expect(at(s), s).toBeGreaterThanOrEqual(0)
+  expect([at('kind:'), at('unit:'), at('scope:'), at('highlight:'), at('──'), at(' prompt:')]).toEqual([at('name:') + 1, at('model:') + 1, at('unit:') + 1, at('scope:') + 1, at('highlight:') + 1, at('──') + 1])
   expect(at('model:')).toBe(at('kind:') + 1)
   // a click shows the models, the one it runs on lit; a pick saves it
   await pane.press({ key: 'lb-model' })
@@ -196,7 +196,7 @@ test("a label over cards has neither the marks row nor a glob field: its scope i
   const pane = await labelPanel($, w)
   const text = shown(await pane.drawn())
   expect(text).toContain("scope:the canvas's cards · 9 cards")
-  expect(text).not.toContain('mark records')
+  expect(text).not.toContain('highlight:')
   expect(await pane.find({ type: 'Input', key: `lb-glob-${LABEL.id}` })).toBeUndefined()
   // one model to choose from: no choice to make, no button
   expect(text).toMatch(/model:\s*claude-haiku-5-5 ▾/)
