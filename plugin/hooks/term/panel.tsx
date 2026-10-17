@@ -53,7 +53,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
+import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, readThread, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, runReads, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
 import { featuresOf, openComments, openSection } from './band'
 import { openChecks } from './checksview'
@@ -301,7 +301,8 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
  *  `settings` (open settings) says in a toast where thimble's config is, which the terminal has in place of the
  *  browser's Settings, and leaves the notice. A label's `label-open` opens its panel and leaves the notice; its
  *  `label-again` runs it again on the units its last run could not label, in its panel, which says how the run goes
- *  (a new failure brings a new notice) (bug hunt C17: the analyst always has a next step). */
+ *  (a new failure brings a new notice); the orientation's `orient-again` asks main to start it again with its last
+ *  request (bug hunt C17, C18: the analyst always has a next step). */
 export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<void> {
   if (!rt.sc) return
   if (a.act === 'label-open') return openLabelAt(cx, a.slug, '')
@@ -311,6 +312,10 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
     const name = (await cx.panel())?.title || 'label'
     void runLabel(cx, a.slug, name, 0, { changed: false, reads: '', again: true })
     return
+  }
+  if (a.act === 'orient-again') {
+    await dismissNotice(cx, n)
+    return orientAgain(cx, '', n.chat)
   }
   if (a.act === 'settings') {
     cx.toast(`thimble: Settings are in the browser workbench (/thimble browser) and in thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
@@ -3940,6 +3945,41 @@ function commentAsk(doc: Obj, slug: string, c: DocComment): { target: Target; ov
 
 // ------------------------------------------------------------------------------------------------ agents and views
 
+/** The states of an agent's run that ended: nothing to stop. */
+const ENDED = new Set(['done', 'failed', 'stopped', 'error'])
+/** The roles an orientation's chat and row carry (its chat's `role`, its row's): its panel offers `run again`. */
+const ORIENT_ROLES = new Set(['orient', 'orientation'])
+// the agents' chats whose raw error the panel shows (`details`), by chat
+const agentDetails = new Set<string>()
+
+/** A failed run's raw error in a line of plain words, without its request and message ids: Claude's safeguards by name,
+ *  else the error's first sentence. */
+export function plainFailure(raw: string): string {
+  const t = raw.replace(/\s+/g, ' ').trim()
+  if (/safeguard|refus/i.test(t)) return "Claude's safeguards stopped its request."
+  const head = t.split(/\b(?:Request ID|Message ID|Details):/)[0]!.trim()
+  const first = /^.*?[.!?](?=\s|$)/.exec(head)?.[0] ?? head
+  return clip(first || 'it failed', 160)
+}
+
+/** The orientation started again by main (`start_orientation`), as the analyst asks it from the panel or its notice:
+ *  with the focus they typed, else with the request its last run had (its chat's `brief`, read when not read yet). */
+export async function orientAgain(cx: Ctx, focus: string, chat: string): Promise<void> {
+  let brief = focus.trim()
+  if (!brief && chat) {
+    const tt = (await cx.thread(chat)) ?? (rt.sc ? await readThreadMeta(cx, chat) : undefined)
+    brief = str(tt?.meta?.brief).trim()
+  }
+  await cx.submit(brief ? `Run the orientation again: call start_orientation with the brief "${brief}".` : 'Run the orientation again: call start_orientation with no brief.')
+  cx.toast('thimble: main was asked to start the orientation again')
+}
+
+/** A chat's meta when no drawing read it yet. */
+async function readThreadMeta(cx: Ctx, chat: string): Promise<TermThread | undefined> {
+  await readThread(cx, chat)
+  return cx.thread(chat)
+}
+
 async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Text, Button } = cx.els(e)
@@ -3950,27 +3990,69 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const tt: TermThread | undefined = p.thread ? await cx.thread(p.thread) : undefined
   const meta = tt?.meta ?? {}
   const state = a ? a.state : str(meta.status) || 'done'
+  const failed = state === 'failed' || state === 'error'
+  const chat = a?.chat || p.thread || ''
   const body: RenderElement[] = [...headerEls(els, { title: a?.label ?? (str(meta.title) || p.title), cols, sub: subLine([state]) })]
   const steps: string[] = []
   let text = ''
+  // a failed run's error as Claude Code gave it (request and message ids and all), and the failure in plain words (the
+  // notice thimble wrote into its chat): the words show, the raw error only under `details` (bug hunt C18)
+  let raw = ''
+  let why = ''
   for (const ev of tt?.events ?? []) {
     if (ev.type === 'tool_use') {
       const inp = isObj(ev.input) ? ev.input : {}
       const what = str(inp.question ?? inp.command ?? inp.file_path ?? inp.pattern ?? inp.name ?? inp.description ?? '')
       steps.push(await scrubIds(cx, `${str(ev.name).replace(/^mcp__.*__/, '')}${what ? ` · ${what.replace(/\s+/g, ' ')}` : ''}`))
       text = ''
-    } else if (ev.type === 'text') text += str(ev.delta ?? ev.text)
-    else if (ev.type === 'done' && ev.result) text = str(ev.result)
+    } else if (ev.type === 'text' && ev.api_error) raw = str(ev.delta ?? ev.text)
+    else if (ev.type === 'text') text += str(ev.delta ?? ev.text)
+    else if (ev.type === 'done' && ev.result) {
+      if (failed) raw = str(ev.result)
+      else text = str(ev.result)
+    } else if (ev.type === 'error' && ev.message) raw = raw || str(ev.message)
+    else if (ev.type === 'notice' && str(ev.key).startsWith('agent:') && ev.text) why = str(ev.text)
   }
+  if (failed && !raw) raw = str(meta.result)
   if (!(tt?.events ?? []).length) body.push(<Text key="agent-none" dimColor>{tt ? 'nothing yet' : '◌ reading its chat'}</Text>)
   if (steps.length) {
     body.push(<Text key="agent-steps"><Text bold>Steps</Text><Text dimColor>{` (${num(steps.length)})`}</Text></Text>)
     steps.slice(-12).forEach((s, i) => body.push(<Text key={`agent-step-${i}`} dimColor wrap="truncate-end">{cut(`  ${s}`, cols)}</Text>))
   }
   if (text.trim()) body.push(<Box key={marginKey('agent-text')} flexDirection="column" marginTop={steps.length ? 1 : 0}>{await drawReply(cx, e, text.trim(), cols, { margin: PANEL_MARGIN, prefix: 'agent-' })}</Box>)
-  const stop = a && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: a.chat || a.name, name: a.name }) : null
-  body.push(...bottomRows(cx, e, cols, [stop ? <Button key="agent-stop" label="stop" plain onPress={stop} /> : null], [], [...(stop ? ['s to stop'] : []), 'b to go back', 'x to close']))
-  const hk = stop ? hiddenKeys(cx, e, [{ key: 'stop', hotkey: 's', onPress: stop }]) : null
+  const details = agentDetails.has(chat)
+  const toggle = () => {
+    if (agentDetails.has(chat)) agentDetails.delete(chat)
+    else agentDetails.add(chat)
+    void cx.bumpPanel()
+  }
+  if (failed) {
+    body.push(
+      <Box key="agent-failed" flexDirection="column" marginTop={steps.length || text.trim() ? 1 : 0}>
+        <Text color={COLORS.problem} wrap="wrap">{`× ${why || plainFailure(raw)}`}</Text>
+        {raw && details ? <Text key="agent-raw" dimColor wrap="wrap">{raw.trim()}</Text> : null}
+      </Box>,
+    )
+  }
+  // `stop` only while the run goes on; an orientation that failed or was stopped runs again, with a focus if one is typed
+  const stop = a && rt.sc && !ENDED.has(state) ? () => void act(cx, rt.sc!, 'stop', { agent: a.chat || a.name, name: a.name }) : null
+  const orient = ORIENT_ROLES.has(a?.role || str(meta.role) || str(meta.key))
+  const again = orient && (failed || state === 'stopped') && rt.sc ? () => void orientAgain(cx, '', chat) : null
+  const focusKey = `make-orient-again-${chat}`
+  const entry = again && e.surface !== 'mobile' ? entryEl(cx, e, { key: fieldKey(focusKey), placeholder: 'run it again with a narrower focus', submit: 'run again', cols, onSubmit: v => void orientAgain(cx, v, chat) }) : null
+  const controls = [
+    again ? <Button key="agent-again" label="run again" plain onPress={again} /> : null,
+    failed && raw ? <Button key="agent-details" label={details ? 'hide details' : 'details'} plain onPress={toggle} /> : null,
+    stop ? <Button key="agent-stop" label="stop" plain onPress={stop} /> : null,
+  ]
+  const keys: Key[] = [
+    ...(again ? [{ key: 'again', hotkey: 'r', onPress: again }, { key: 'focus', hotkey: 'f', onPress: () => void ringOnto(cx, focusKey) }] : []),
+    ...(failed && raw ? [{ key: 'details', hotkey: 'd', onPress: toggle }] : []),
+    ...(stop ? [{ key: 'stop', hotkey: 's', onPress: stop }] : []),
+  ]
+  const hints = [...(again ? ['r to run again', 'f for a focus'] : []), ...(failed && raw ? [details ? 'd to hide details' : 'd for details'] : []), ...(stop ? ['s to stop'] : []), 'b to go back', 'x to close']
+  body.push(...entryBottom(cx, e, cols, controls, entry, hints))
+  const hk = keys.length ? hiddenKeys(cx, e, keys) : null
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
 

@@ -1141,6 +1141,24 @@ async def start_route(c: str, body: StartBody, request: Request) -> dict[str, An
     return {**dict(ans), **({"kind": ans.kind, "reason": ans.reason} if ans.refused else {})}
 
 
+class AgainBody(BaseModel):
+    """The body of POST /ws/{c}/orientation/again: the focus the analyst gives, or none for the last request."""
+
+    text: str = ""
+
+
+@router.post("/ws/{c}/orientation/again")
+async def again_route(c: str, body: AgainBody, request: Request) -> dict[str, Any]:
+    """A failed or stopped orientation's Run again (its notice's act, the 0.9.0 bug hunt C18): a click, so the analyst's
+    cookie (403 without it), and the orientation starts through the module (start) with the focus given, else with the
+    request its last run had. The answer as /start gives it."""
+    subagents.analyst_only(request)
+    config.workspace_dir(c)
+    brief = body.text.strip() or str((orientation.read_run(c) or {}).get("query") or "")
+    ans = await start(c, brief, route=subagents.CLICK)
+    return {**dict(ans), **({"kind": ans.kind, "reason": ans.reason} if ans.refused else {})}
+
+
 RUN_FIELDS = ("status", "query", "model", "effort", "route", "started_by", "agent_id", "request", "refused", "requested",
               "started", "ended", "chats")  # what run_route shows of orient/run.json
 

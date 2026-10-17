@@ -612,6 +612,9 @@ export const api = {
   // ---- orientation ----
   /** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): {} before any was asked for. */
   orientation: (c: string) => j<OrientRun>(`${ws(c)}/orientation`),
+  /** A failed orientation's Run again (`POST /ws/{c}/orientation/again`, its notice's act): a click start with the
+   * focus given, else the request its last run had. */
+  orientAgain: (c: string, text = '') => j<StartAnswer>(`${ws(c)}/orientation/again`, { method: 'POST', body: JSON.stringify({ text }) }).then(startAnswer),
 
   // ---- documents ----
   frame: (c: string, slug: DocumentType) => j<Writeup>(`${inv(c, slug)}/frame`),

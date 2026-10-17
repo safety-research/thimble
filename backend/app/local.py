@@ -516,11 +516,11 @@ def _offer(c: str) -> dict[str, Any] | None:
 # is left out, as Claude Code shows it there. Each action maps to the act that takes it in the terminal: a `thimble act` kind, or for `settings` (Open
 # Settings: the terminal has no Settings pane) "settings", which says where thimble's config is, since Settings writes it.
 # "ticket-open" is no `thimble act` kind: the terminal UI opens the ticket in the browser workbench (its `ref`), where
-# the analyst allows its change. Nor are a label's "label-open" (the terminal UI opens the label's panel) and
-# "label-again" (it runs `thimble act label-run` with `again`).
+# the analyst allows its change. Nor are a label's "label-open" (the terminal UI opens the label's panel), "label-again"
+# (it runs `thimble act label-run` with `again`) and the orientation's "orient-again" (it asks main to start it again).
 NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
                "settings": "settings", "ticket-open": "ticket-open", "sign-out": "sign-out", "label-open": "label-open",
-               "label-again": "label-again"}
+               "label-again": "label-again", "orient-again": "orient-again"}
 
 
 def _notice_acts(action: Any) -> list[dict[str, str]]:

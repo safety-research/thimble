@@ -130,4 +130,12 @@ describe('the strip above the composer, and the rows', () => {
     expect(sent).toEqual(['POST /api/ws/nt-label-again/concepts/k1/apply/again', 'POST /api/ws/nt-label-again/notices/l1/dismiss'])
     expect(el.querySelector('.chat-notice')).toBeNull()
   })
+  test('a failed orientation runs again from its notice, with the request its last run had (bug hunt C18)', async () => {
+    open = [{ id: 'o1', key: 'agent:orient', kind: 'agent', agent: 'Orientation', chat: 'orient-1', text: "The orientation failed: Claude's safeguards stopped its request; rephrase or narrow the request and try again.", action: { label: 'Run again', do: 'orient-again' } }]
+    const el = await strip('nt-orient-again')
+    await click(el.querySelector('.chat-notice-act'))
+    await settle()
+    expect(sent).toEqual(['POST /api/ws/nt-orient-again/orientation/again {"text":""}', 'POST /api/ws/nt-orient-again/notices/o1/dismiss'])
+    expect(el.querySelector('.chat-notice')).toBeNull()
+  })
 })

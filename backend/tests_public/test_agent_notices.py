@@ -45,3 +45,12 @@ async def test_a_run_that_failed_is_told_with_open_on_its_chat_and_a_new_run_cle
     assert _open("agent:writer:report") is None
     subagents.run_ended(CORPUS, ans.agent_id, "stopped", "", source="module")
     assert notices.open_notices(CORPUS) == [], "a stop is no failure"
+
+
+async def test_a_failed_orientation_s_notice_runs_it_again(bridge):
+    """Bug hunt C18: the notice of an orientation both models refused offered nothing but its thread."""
+    ans = await subagents.start_job(CORPUS, "orientation", "orient", "o", {}, subagents.CLICK, chat={"title": "Orientation"})
+    subagents.run_ended(CORPUS, ans.agent_id, "failed", BLOCK, source="module")
+    n = _open("agent:orient")
+    assert n["text"] == f"The orientation failed: {SAFEGUARDS}."
+    assert n["action"] == {"label": "Run again", "do": "orient-again"}, n["action"]

@@ -28,7 +28,7 @@ import type { NoticeRow as NoticeRowT } from './model'
 import { proposalsOff } from './ProposalCard'
 
 /** The actions a notice's button can run; one with another `do` shows no button. */
-export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out', 'label-open', 'label-again']
+export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out', 'label-open', 'label-again', 'orient-again']
 
 /** The actions that name what they act on in `slug`. */
 const SLUGGED: readonly string[] = ['view-retry', 'sign-out', 'label-open', 'label-again']
@@ -40,7 +40,8 @@ export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(a
  * server could not start (a check that cannot run now, a build refused at once) throws with its reason, which the
  * toast says, and the notice stays. Try again names the notice's key, so the check that failed is the one run again.
  * Sign it out signs out the browser a sign-in notice names (its slug). A label's notice opens the label (and stays) or
- * runs it again on the units its last run could not label. */
+ * runs it again on the units its last run could not label; a failed orientation's runs it again, a start the module
+ * refused saying why. */
 export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<Notice, 'key'>): Promise<boolean> {
   switch (action.do) {
     case 'proposals-retry': {
@@ -72,6 +73,11 @@ export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<
       if (!action.slug) return false
       await labelApi.applyAgain(ws, action.slug)
       return true
+    case 'orient-again': {
+      const got = await api.orientAgain(ws)
+      if (!got.agentId && !got.program && got.kind) throw new Error(got.reason || 'the orientation did not start')
+      return true
+    }
     default:
       return false
   }

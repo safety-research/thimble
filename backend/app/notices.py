@@ -22,6 +22,8 @@ a list of them, `do` one of ACTIONS:
   label-open       the label opened (its id in `slug`): the link of a label's notice
   label-again      POST /api/ws/{c}/concepts/{slug}/apply/again: a prompt label run again on the units its last run
                    could not label (concepts.start_again)
+  orient-again     the orientation run again with its last request, or the focus the analyst gives
+                   (orient_session.again_route in the browser; the terminal asks main)
 
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
 (a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
@@ -84,7 +86,7 @@ TYPE = "notice"  # the event's type on the workspace stream, and the row's type 
 API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
 # shows as its API error card: no row, and the foreground strip leaves it out while main is open
 ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out", "ticket-open", "label-open",
-           "label-again")
+           "label-again", "orient-again")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
 # keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
@@ -480,14 +482,21 @@ def chat_title(c: str, chat: Any) -> str:
     return ""
 
 
+# the act a failed agent's notice offers first, by its role: the run again (the 0.9.0 bug hunt C18: a failed
+# orientation's notice offered nothing but its thread)
+AGAIN_ACTS: dict[str, dict[str, str]] = {"orientation": {"label": "Run again", "do": "orient-again"}}
+
+
 def agent_failed(c: str, *, role: str, key: Any, error: Any, chat: str | None = None, title: str = "",
                  action: Any = None, cls: str | None = None) -> dict[str, Any] | None:
     """An agent of thimble's ended failed with `error` (its report or Claude Code's API error line, of class `cls` when
-    its record named one): the notice "<agent> failed: <why and fix>." under its key, with Open on its chat. Never
-    raises."""
+    its record named one): the notice "<agent> failed: <why and fix>." under its key, with Open on its chat, and the
+    role's run again (AGAIN_ACTS) before the fix. Never raises."""
     try:
         name, subject = who(role, title or chat_title(c, chat))
         why, fix = reason(error, cls=cls)
+        if action is None and role in AGAIN_ACTS:
+            action = [AGAIN_ACTS[role], *([fix] if fix else [])]
         return post(c, kind="agent", text=f"{subject} failed: {why}.", agent=name, chat=chat, key=agent_key(key),
                     action=action if action is not None else fix)
     except Exception:  # noqa: BLE001 — a failure not told is no reason to fail what reports it
