@@ -359,6 +359,8 @@ def _agent_ended(c: str, cid: str, agent_id: str, status: str, report: str) -> N
                         rec["refused_by"], fallback)
         else:
             fallback = None
+        if fork:
+            _held(rec, agent_id)  # a fork that ended before its start's answer named it still holds its part
         for n, p in (rec.get("parts") or {}).items():
             if p.get("state") != "given" or p.get("agent") != agent_id:
                 continue

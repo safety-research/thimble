@@ -124,6 +124,17 @@ async def test_a_fork_the_safeguards_refused_fails_at_once_and_one_with_pictures
     assert pictured.status == "error" and "no pictures" in pictured.detail and len(bridge.ops("spawn")) == 1
 
 
+def test_a_fork_that_ends_before_its_start_s_answer_named_it_still_answers_its_part(ws):
+    cid = "f0f0f0f0f0f0"
+    with agent_call._locked(CORPUS, cid) as rec:
+        rec.update(id=cid, status="running", fork=True, model="", tool={"schema": TOOL.input_schema},
+                   parts={"1": {"state": "given", "agent": "", "tries": 1, "inline": True}}, agents={})
+    agent_call._agent_ended(CORPUS, cid, "afast", "done", '{"curt": false}')
+    part = agent_call.read(CORPUS, cid)["parts"]["1"]
+    assert part["state"] == "answered" and part["agent"] == "afast"
+    assert json.loads(agent_call._answer_path(CORPUS, cid, 1).read_text()) == {"curt": False}
+
+
 async def test_a_cancelled_call_stops_its_agent_and_takes_no_late_answer(ws, bridge):
     call = asyncio.create_task(agent_call.structured(CORPUS, "The reply: Now.", tool=TOOL, model="claude-opus-5-5",
                                                      effort="low"))
