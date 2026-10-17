@@ -304,6 +304,10 @@ and never what a script got. In the citation panel's bar, a citation still check
     neither the relay nor its hotkeys until the prompt has the keys, and its row says `click the panel for its keys`.
     Every key after it goes to the prompt too, however fast it comes, until the analyst gives the panel its keys back
     (a click on it); a paste, several letters at once, goes to the prompt whole and is never a hotkey (bug hunt D8).
+    An entry box never takes a slash command: its `/` goes to the prompt and the box draws no field until the prompt
+    has the keys, so the rest of the command and the Enter that runs it reach the prompt (bug hunt E13). Once the
+    analyst runs a failed orientation again from its panel, the panel says main was asked, draws no focus box (so its
+    keys, `x` among them, are the panel's), and shows the new run in its place once it starts (bug hunt E13).
     The row names the list's keys only once a `ui.focus` says the ring rests there. A click on a list, on a row or on
     an empty part, hands the keys back to the pane, and so does a click on any other act of the panel's own (`checked
     ›`, a passage's `?`, a link): it never leaves the keys with the prompt (bug hunt B28). A list taller than its pane

@@ -53,7 +53,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, keysBack, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, readThread, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
+import { ORIENT_ROLES, PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, keysBack, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, readThread, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, runReads, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
 import { featuresOf, openComments, openSection } from './band'
 import { openChecks } from './checksview'
@@ -65,7 +65,7 @@ import { act } from './data'
 import { closeView, onViewAct, openViewState, retryView, sendEvent, viewFaultOf, viewFor } from './viewhost'
 import { openInBrowser } from './offramp'
 import type { ViewFrame } from './viewhost'
-import { ENTRY_KEY, entryEl, entryHeight } from './entry'
+import { ENTRY_KEY, entryEl, entryHeight, entryPrompt } from './entry'
 
 export type PaneEvent = MatchedEvent<'ui.render', { component: 'Pane'; requestId: string }>
 
@@ -981,6 +981,16 @@ export function panelHasKeys(): boolean {
 function keysHidden(): boolean {
   return rt.typeThrough && paneFocused
 }
+
+/** A slash command typed into an entry box (entry.tsx) goes to the prompt as typing the panel does not bind
+ *  (typeThrough): the boxes then draw no field, so the next key, and the Enter that runs it, reach the prompt (bug hunt
+ *  E13: `/exit` typed into the orientation's focus box became its brief). */
+async function slashOut(cx: Ctx, text: string): Promise<void> {
+  if (rt.typeThrough) await cx.fill(text)
+  else await typeThrough(cx, text)
+  await cx.bumpPanel()
+}
+entryPrompt(slashOut, keysHidden)
 
 /** The pane's body rows as the drawing measured them, 0 when not known (a list is then drawn whole). */
 export function paneRows(): number {
@@ -3998,8 +4008,6 @@ function commentAsk(doc: Obj, slug: string, c: DocComment): { target: Target; ov
 
 /** The states of an agent's run that ended: nothing to stop. */
 const ENDED = new Set(['done', 'failed', 'stopped', 'error'])
-/** The roles an orientation's chat and row carry (its chat's `role`, its row's): its panel offers `run again`. */
-const ORIENT_ROLES = new Set(['orient', 'orientation'])
 // the agents' chats whose raw error the panel shows (`details`), by chat
 const agentDetails = new Set<string>()
 
@@ -4036,8 +4044,11 @@ export async function orientAgain(cx: Ctx, focus: string, chat: string): Promise
     last = str(tt?.meta?.brief)
   }
   const brief = focusedBrief(last, focus)
+  // the panel on this run shows the new one once it is listed (term.ts followRerun): a run listed now is not it
+  if (chat) rt.rerun = { chat, known: [chat, ...(await cx.agents()).filter(a => ORIENT_ROLES.has(a.role) && a.chat).map(a => a.chat)] }
   await cx.submit(brief ? `Run the orientation again: call start_orientation with this brief, word for word: "${brief}".` : 'Run the orientation again: call start_orientation with no brief.')
   cx.toast('thimble: main was asked to start the orientation again')
+  await cx.bumpPanel()
 }
 
 /** A chat's meta when no drawing read it yet. */
@@ -4104,19 +4115,25 @@ async function drawAgent(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const stop = a && rt.sc && !ENDED.has(state) ? () => void act(cx, rt.sc!, 'stop', { agent: a.chat || a.name, name: a.name }) : null
   const orient = ORIENT_ROLES.has(a?.role || str(meta.role) || str(meta.key))
   const again = orient && (failed || state === 'stopped') && rt.sc ? () => void orientAgain(cx, '', chat) : null
+  // once main is asked to run it again, until the new run shows here in its place (term.ts followRerun): a line says so,
+  // and the focus box is gone, so the keys are the panel's again (bug hunt E13: the box kept them for 15 minutes, and
+  // `x` and a later `/exit` went into it); `run again` stays, should main not start it
+  const asked = Boolean(again && chat && rt.rerun?.chat === chat)
+  if (asked) body.push(<Text key="agent-asked" dimColor wrap="wrap">{`${SPIN} main was asked to run it again; the new run shows here once it starts`}</Text>)
   const focusKey = `make-orient-again-${chat}`
-  const entry = again && e.surface !== 'mobile' ? entryEl(cx, e, { key: fieldKey(focusKey), placeholder: 'run it again with a narrower focus', submit: 'run again', cols, onSubmit: v => void orientAgain(cx, v, chat) }) : null
+  const entry = again && !asked && e.surface !== 'mobile' ? entryEl(cx, e, { key: fieldKey(focusKey), placeholder: 'run it again with a narrower focus', submit: 'run again', cols, onSubmit: v => void orientAgain(cx, v, chat) }) : null
   const controls = [
     again ? <Button key="agent-again" label="run again" plain onPress={again} /> : null,
     failed && raw ? <Button key="agent-details" label={details ? 'hide details' : 'details'} plain onPress={toggle} /> : null,
     stop ? <Button key="agent-stop" label="stop" plain onPress={stop} /> : null,
   ]
   const keys: Key[] = [
-    ...(again ? [{ key: 'again', hotkey: 'r', onPress: again }, { key: 'focus', hotkey: 'f', onPress: () => void ringOnto(cx, focusKey) }] : []),
+    ...(again ? [{ key: 'again', hotkey: 'r', onPress: again }] : []),
+    ...(entry ? [{ key: 'focus', hotkey: 'f', onPress: () => void ringOnto(cx, focusKey) }] : []),
     ...(failed && raw ? [{ key: 'details', hotkey: 'd', onPress: toggle }] : []),
     ...(stop ? [{ key: 'stop', hotkey: 's', onPress: stop }] : []),
   ]
-  const hints = [...(again ? ['r to run again', 'f for a focus'] : []), ...(failed && raw ? [details ? 'd to hide details' : 'd for details'] : []), ...(stop ? ['s to stop'] : []), 'b to go back', 'x to close']
+  const hints = [...(again ? ['r to run again'] : []), ...(entry ? ['f for a focus'] : []), ...(failed && raw ? [details ? 'd to hide details' : 'd for details'] : []), ...(stop ? ['s to stop'] : []), 'b to go back', 'x to close']
   body.push(...entryBottom(cx, e, cols, controls, entry, hints))
   const hk = keys.length ? hiddenKeys(cx, e, keys) : null
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>

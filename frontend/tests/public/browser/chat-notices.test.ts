@@ -256,10 +256,11 @@ test('a transcript at its end stays there while rows fill in, and sending a ques
       row(400)
     })
     assert.ok((await fromEnd(page)) < 2, 'the transcript is still at its end')
-    // the analyst scrolls up to read; the list stays where they put it
-    await page.evaluate(() => {
-      document.querySelector('.chat-list')!.scrollTop = 0
-    })
+    // the analyst scrolls up to read (the wheel); the list stays where they put it, as a row grows under it
+    const at = (await (await page.$('.chat-list'))!.boundingBox())!
+    await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2)
+    await page.mouse.wheel(0, -5000)
+    await page.evaluate(() => Object.assign(document.querySelector('.chat-flow')!.appendChild(document.createElement('div')), { className: 'test-row' }).style.setProperty('height', '200px'))
     assert.ok((await fromEnd(page)) > 400, 'the transcript stays where the analyst scrolled it')
     await page.fill('.chat-foot .composer-text', 'which run failed first?')
     await page.press('.chat-foot .composer-text', 'Enter')
