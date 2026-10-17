@@ -1515,7 +1515,7 @@ async function drawCard(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const busy = Boolean(tc.busy) && tc.busy !== CHECK_WAITS
   const again = () => {
     if (busy) return
-    void cx.submit(`Run this card again with Bash: thimble-run card ${id}`)
+    void cx.submit(`Run this card again. Use Bash to run this command exactly as it is, with no \`cd\` before it: thimble-run card ${id}`)
   }
   const code = p.mode === 'code'
   // the subtitle opens with the card's id as its chips read it (`card:<name>`)

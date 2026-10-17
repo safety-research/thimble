@@ -173,6 +173,27 @@ async def test_a_code_label_runs_through_thimble_run(term):
     assert concepts.PENDING_RUN not in concepts.read_concept(config.workspace_dir(CORPUS), lid)
 
 
+async def test_the_commands_main_is_told_to_run_are_thimble_run_alone_with_no_cd(term):
+    """Bug hunt F3: main ran `cd <folder>; thimble-run card …`, so the one "don't ask again" Claude Code offered in
+    Manual mode was `cd *`, and once wrapped the command in `$(…)`. A card's, a code label's and the stale cards'
+    results give the command alone, `thimble-run <kind> …`, and say to run it exactly as it is with no `cd` before it,
+    so INSTALL's `Bash(thimble-run:*)` matches what main runs."""
+    from app import concepts
+
+    res = await call(term, "add_card", kind="table", question="How many?", group="T",
+                     code="import pandas as pd\npd.DataFrame({'n': [1]})")
+    rule = "def label(u):\n    return 'long' if len(str(u)) > 300 else 'short'"
+    lab = await call(term, "apply_label", scope="files", name="long", predicate={"kind": "code", "text": rule},
+                     paths=["agents/*.jsonl"], values=["long", "short"])
+    told = {"card": text(res), "label": text(lab), "stale": concepts.stale_note(CORPUS, [{"id": card_id(res)}])}
+    for kind, said in told.items():
+        [cmd] = re.findall(r"`([^`]*thimble-run[^`]*)`", said)
+        argv = shlex.split(cmd)
+        assert Path(argv[0]).name == "thimble-run" and argv[1] == kind, (kind, cmd)
+        assert not re.search(r"[;&|$()<>]", cmd) and "cd" not in argv, (kind, cmd)
+        assert "exactly as it is, with no `cd` before it" in said, (kind, said)
+
+
 async def test_a_label_panel_run_of_an_unchanged_code_label_waits_for_no_run(term):
     """Bug hunt B31: the label panel's `run on a sample` of a code label nobody changed asked main to run it, and
     `thimble-run label` answered with the old rows. `label-run` now answers `unchanged` when the label's last run covers

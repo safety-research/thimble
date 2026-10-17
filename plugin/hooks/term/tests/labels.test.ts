@@ -248,13 +248,13 @@ test("a code label's run from its panel (bug hunt B31): its buttons say what the
   // a run its last one does not cover goes to main with what it reads, and no word of a change
   w.labelRun = { ok: true, label: LABEL.id, deferred: true, command: 'thimble-run label d9b51617' }
   pane = await press($, w, pane, 'lb-all')
-  expect(w.submitted).toEqual(['Run the code label "which build ships at the end" on all 33 of its files. Use Bash to run this command: thimble-run label d9b51617'])
+  expect(w.submitted).toEqual(['Run the code label "which build ships at the end" on all 33 of its files. Use Bash to run this command exactly as it is, with no `cd` before it: thimble-run label d9b51617'])
   // an edit of its code, saved by the press: the prompt says the analyst changed it
   await pane.post({ type: 'field', name: `label-body:${LABEL.id}`, text: code.replace('own', 'rival'), save: false, origin: 'f', gestures: [] }, { in: `lb-def-${LABEL.id}-code` })
   await w.clock.settle()
   pane = await press($, w, pane, 'lb-sample')
   expect(w.acts).toContainEqual({ kind: 'label', payload: { label: LABEL.id, body: code.replace('own', 'rival') } })
-  expect(w.submitted.at(-1)).toBe('I changed the code label "which build ships at the end" in its panel. Run it on 30 of its 33 files. Use Bash to run this command: thimble-run label d9b51617')
+  expect(w.submitted.at(-1)).toBe('I changed the code label "which build ships at the end" in its panel. Run it on 30 of its 33 files. Use Bash to run this command exactly as it is, with no `cd` before it: thimble-run label d9b51617')
   await pane.unmount()
   // a scope of no more files than a sample runs whole: one button, and `r` runs every file
   Object.assign(label(w), { scope_files: 12, last_run: { total: 12, matched_total: 12, labeled: 12, status: 'done', paths: ['runs/*/log.json'], limit: null } })

@@ -83,11 +83,14 @@ To be asked less, add this to `~/.claude/settings.json`, with the path from the 
 {
   "permissions": {
     "allow": ["mcp__plugin_thimble_thimble", "mcp__thimble-orientation", "mcp__thimble-view-builder",
-              "mcp__thimble-view-reviewer", "mcp__thimble-dev-ticket"],
+              "mcp__thimble-view-reviewer", "mcp__thimble-dev-ticket", "Bash(thimble-run:*)"],
     "additionalDirectories": ["/home/you/.thimble/app/workspaces"]
   }
 }
 ```
+
+`Bash(thimble-run:*)` lets Claude run a card's code, or a code label, with `thimble-run` without asking. That code runs
+with your access, as any command Claude runs does, so leave this rule out if you want to see each run first.
 
 What protects what:
 

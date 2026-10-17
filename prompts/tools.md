@@ -674,7 +674,7 @@ The code was stopped after {limit}. Make it faster and run it again with `edit_c
 
 ## card-run
 
-The card's code did not run yet. Run this command with Bash next: `{command}`. thimble shows the card when its code has run.
+The card's code did not run yet. Next, run this command with Bash exactly as it is, with no `cd` before it: `{command}`. thimble shows the card when its code has run.
 
 ## card-run-check-wrote
 
@@ -810,7 +810,7 @@ Checks are off in thimble's Settings, so no check ran. Ask the analyst to turn C
 
 ## label-run
 
-The label's code did not run yet. Run this command with Bash next: `{command}`. It runs your function on each unit and prints the label's result with its counts.
+The label's code did not run yet. Next, run this command with Bash exactly as it is, with no `cd` before it: `{command}`. It runs your function on each unit and prints the label's result with its counts.
 
 ## label_done-unlabeled
 
@@ -818,7 +818,7 @@ The label's code did not run yet. Run this command with Bash next: `{command}`. 
 
 ## cards-stale
 
-{cards} read this label before it changed, so their outputs are old. When the label's counts are final, run them again with Bash: `{command}`. It prints each card whose takeaway the new output leaves behind, or that fails, with that output. Write each of those takeaways again with `edit_card`, and fix each card that fails.
+{cards} read this label before it changed, so their outputs are old. When the label's counts are final, run them again with this command in Bash, exactly as it is, with no `cd` before it: `{command}`. It prints each card whose takeaway the new output leaves behind, or that fails, with that output. Write each of those takeaways again with `edit_card`, and fix each card that fails.
 
 ## show_label-not-files
 
