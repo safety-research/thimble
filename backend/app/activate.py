@@ -382,7 +382,8 @@ def continue_main(c: str, sid: str, pid: int | None = None) -> bool:
     from now on, on the local transport, as a new main starts (write_launch, with `at` now, from which a pass of the
     mirror reads a session it saw end). The server that followed the old process stopped with it, so the one-way switch
     to the server held only for that process; a press, or a signed-in browser on a running server
-    (session.follow_browser), moves the session to the server again. True when it wrote launch.json."""
+    (session.follow_browser), moves the session to the server again. The shim's `page:stopped` notice goes with the move
+    (notices.page_back). True when it wrote launch.json."""
     from . import cc_plugin, cli, subagent_files  # noqa: PLC0415
 
     pid = cc_plugin.claude_pid() if pid is None else pid
@@ -407,6 +408,9 @@ def continue_main(c: str, sid: str, pid: int | None = None) -> bool:
     if done is None:
         return False
     cli._log(f"activate: session {sid} of {c} continues in claude pid {pid}, on the local transport")
+    from . import notices  # noqa: PLC0415
+
+    notices.page_back(c)  # its tools run here now, and wait for no page
     return True
 
 

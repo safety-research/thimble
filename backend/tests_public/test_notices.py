@@ -37,6 +37,26 @@ async def test_a_notice_with_a_key_is_one_open_notice_that_clear_takes_away(sent
     assert not notices.clear(CORPUS, "k")
 
 
+async def test_h4_the_page_stopped_notice_goes_once_the_server_follows_main_again(sent, tmp_path, monkeypatch):
+    """Bug hunt H4: the MCP shim posts `page:stopped` ("thimble's page stopped. thimble's tools wait for it.") when the
+    server answers neither of its looks. It stayed in the terminal's band and above the browser's composer after
+    /thimble browser brought the page back. It goes once the server follows main again (session.attach, which the
+    press and the shim's subscription run), and the stream tells the browser."""
+    from app import config, session
+
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
+    session._live.clear()
+    stopped = notices.post(CORPUS, kind="server", text="thimble's page stopped. thimble's tools wait for it.",
+                           key=notices.PAGE_STOPPED_KEY)
+    other = notices.post(CORPUS, kind="proposals", text="Another failure.", key="k")
+    try:
+        session.attach(CORPUS, "5e55a000-0000-4000-8000-0000000000a4", str(config.corpus_dir(CORPUS)))
+    finally:
+        session._live.clear()
+    assert [n["id"] for n in notices.open_notices(CORPUS)] == [other["id"]]
+    assert {"type": "notice", "id": stopped["id"], "key": notices.PAGE_STOPPED_KEY, "cleared": True} in sent
+
+
 @pytest.mark.parametrize("line,words,fix", [
     ("API Error: Opus 5.5's safeguards flagged this message (https://www.anthropic.com/legal/aup).",
      "Claude's safeguards stopped its request; rephrase or narrow the request and try again", None),
