@@ -397,6 +397,8 @@ class Live:
         self.continued: tuple[str, str] | None = None  # (session, time) of the continued-in record read (_continue)
         self.came_from: dict | None = None  # {session, transcript, at} of the session this one continues (FROM_KEY)
         self.copied: tuple[set[str], float] | None = None  # what that session's records are known by (_copied)
+        # time.monotonic() when a signed-in browser made this server follow it from local transport (follow_browser)
+        self.handed_at: float | None = None
         self.moved_at: float | None = None  # time.monotonic() when main followed it here from that session (_continue)
         self.reading = False  # tail_once runs for it now, so _read_now leaves it to that read
         self.task: asyncio.Task | None = None
@@ -841,6 +843,38 @@ def _turned_on(c: str, sid: str) -> str:
         return datetime.fromtimestamp(float(at), timezone.utc).isoformat(timespec="milliseconds")
     except (OverflowError, OSError, ValueError):
         return ""
+
+
+def follow_browser(c: str) -> Live | None:
+    """A signed-in browser opened workspace `c`'s page, or wrote to main there, while main runs on local transport: the
+    browser stayed signed in from an earlier session, so this session had no press. A permission request on local
+    transport reaches no server, so such a browser never showed main's waiting request (bug hunt F4). The server
+    follows main from now on, as after a press (open_cmd.press): launch.json's transport made the server's first, then
+    the attach, which reads on from the last pass's cursor (H4). The session's shim, hooks and waker read the transport
+    as they go and move to the server. Nothing when main runs on the server already, when launch.json names no main, or
+    when main's `claude` has ended. The Live it attached, else None."""
+    from . import activate  # noqa: PLC0415
+
+    ws = _local_ws(c)
+    lv = current(c) if ws is not None else None
+    if ws is None or lv is None:
+        return None
+    rec = sfiles.launch(ws)
+    if not activate.main_alive(c, rec):
+        return None
+    pid = rec.get("pid") if isinstance(rec.get("pid"), int) and not isinstance(rec.get("pid"), bool) else None
+    config_dir = rec.get("config_dir") if isinstance(rec.get("config_dir"), str) else None
+    try:
+        activate.write_launch(c, lv.sid, role=activate.MAIN, transport=activate.SERVER, via="press", pid=pid,
+                              config_dir=config_dir or "")
+    except (OSError, ValueError) as e:
+        log.warning("%s: main's session %s stays on local transport: %s", c, lv.sid, e)
+        return None
+    log.info("%s: a signed-in browser opened the page; this server follows main's session %s from now on", c, lv.sid)
+    got = attach(c, lv.sid, lv.cwd, lv.transcript_path, pid, config_dir)
+    if got is not None:
+        got.handed_at = time.monotonic()
+    return got
 
 
 def _handing_over(c: str) -> bool:

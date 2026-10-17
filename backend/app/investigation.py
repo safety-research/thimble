@@ -309,5 +309,10 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
 @router.get("/ws/{c}/events")
 async def workspace_events(c: str, request: Request, after: int | None = None,
                            log: str | None = None) -> EventSourceResponse:
-    """The workspace event stream."""
+    """The workspace event stream. A signed-in browser's makes this server follow main when main runs on local
+    transport (session.follow_browser), so the page shows main's permission requests."""
+    from . import hook_auth, session  # noqa: PLC0415
+
+    if hook_auth.analyst(request):
+        session.follow_browser(c)
     return await _stream(c, MAIN, request, after, log)

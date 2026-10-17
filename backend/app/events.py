@@ -602,13 +602,16 @@ def _live_subs(c: str, main: str | None) -> list[Sub]:
 
 
 def _awaits_shim(c: str) -> bool:
-    """Whether main is a session it continued in less than session.GRACE_S ago (session._continue) whose shim has not
+    """Whether main is a session it continued in (session._continue), or one a signed-in browser's visit moved from
+    local transport to this server (session.follow_browser), less than session.GRACE_S ago, whose shim has not
     subscribed yet: its events wait in its queue (_pending) for its watcher's pull."""
     from . import session  # noqa: PLC0415
 
     lv = session.current(c)
-    return (lv is not None and lv.came_from is not None and lv.moved_at is not None
-            and time.monotonic() - lv.moved_at < session.GRACE_S
+    if lv is None:
+        return False
+    since = lv.moved_at if lv.came_from is not None else lv.handed_at
+    return (since is not None and time.monotonic() - since < session.GRACE_S
             and not any(sub.session == lv.sid for sub in _subs.get(c, ())))
 
 
@@ -751,16 +754,23 @@ BROWSER_KINDS = ("main", "thread", "card")  # the kinds the browser posts (event
 
 
 @router.post("/ws/{c}/events")
-async def events_route(c: str, body: EventBody) -> dict[str, Any]:
+async def events_route(c: str, body: EventBody, request: Request) -> dict[str, Any]:
     """The browser's one way to reach the session: a message to main or a thread, or a card's event (BROWSER_KINDS);
-    400 for any other kind, which only the server's own code posts (post)."""
+    400 for any other kind, which only the server's own code posts (post). After a signed-in browser's post, this server
+    follows main when main ran on local transport (session.follow_browser): the event went to the queue file first,
+    which the server takes events from once it follows main (_drain_files)."""
+    from . import hook_auth, session  # noqa: PLC0415
+
     if body.kind not in BROWSER_KINDS:
         raise HTTPException(400, "the browser sends only main, thread and card events")
     try:
         config.workspace_dir(c)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
-    return post(c, body.kind, body.payload)
+    out = post(c, body.kind, body.payload)
+    if hook_auth.analyst(request):
+        session.follow_browser(c)
+    return out
 
 
 class SessionBody(BaseModel):

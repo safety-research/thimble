@@ -134,7 +134,8 @@ sandbox. `thimble doctor` says whether the sandbox is on.
 thimble's browser page opens on a press: `/thimble browser` in Claude Code, `o` or `↗` in thimble's terminal panel, `↗` on a
 card, or the `thimble` command. The press starts thimble's server if none runs, makes this session the one the page
 follows, and opens the page on what you pressed, signed in. The terminal keeps working, and closing the tab changes
-nothing.
+nothing. A browser still signed in from an earlier session needs no press: when it opens the page or sends a message
+while thimble's server runs, the page follows this session, and shows its permission requests.
 
 How the press signs the browser in. It asks the server for a one-time code, which works once, for 60 seconds. It writes
 the page's address with the code into a file in `~/.thimble/open/`, and gives your browser opener (`$BROWSER`, `open`,
