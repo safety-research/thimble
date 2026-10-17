@@ -265,6 +265,45 @@ async def test_the_sweep_gives_a_session_made_main_just_before_it_time_for_its_s
     assert session.sweep() == [SID] and CORPUS not in session._live and stopped == []
 
 
+async def test_turning_thimble_off_with_plugin_is_no_end_of_the_session(cwd, tmp_path, monkeypatch):
+    """Bug hunt H19: /plugin off stops the plugin's shim, not the session, and runs no SessionEnd hook. The server took
+    the shim's end for main's: it detached main as ended, stopped the orientation, which ran on in Claude Code, and
+    stopped itself. While main's `claude` process runs, main stays main, its agents run on and the page says thimble
+    is off; the shim's return takes that alert away; once the process is gone, main's session ended, as before."""
+    from app import procs
+
+    stopped: list[str] = []
+    monkeypatch.setattr(session, "_stop_agents", stopped.append)
+    monkeypatch.setattr(session, "_shutting_down", lambda: False)
+    monkeypatch.setattr(session, "GRACE_S", 0.05)
+    runs = {4242: True}
+    monkeypatch.setattr(procs, "alive", lambda pid: runs.get(pid, False))
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    sub = _subscribe(SID)
+    lv = _attach(cwd, p, pid=4242)
+
+    def main() -> dict:
+        return agents.meta_or_none(CORPUS, agents.MAIN_ID) or {}
+
+    events._subs[CORPUS].discard(sub)  # /plugin off: the shim stops, `claude` runs on
+    session.disconnected(CORPUS, SID)
+    await asyncio.sleep(0.3)
+    assert session._live.get(CORPUS) is lv and main()["attached"]["session"] == SID and stopped == [], \
+        "main is main still, and nothing of thimble's stopped"
+    assert main()["alert"]["text"] == session.AWAY_TEXT and not main().get("ended")
+
+    sub = _subscribe(SID)  # /plugin on: the shim subscribes again
+    session.connected(CORPUS, SID, cwd, 4242)
+    assert session._live.get(CORPUS) is lv and main()["alert"] is None
+
+    events._subs[CORPUS].discard(sub)
+    session.disconnected(CORPUS, SID)
+    runs[4242] = False  # the analyst quit while the shim was gone: no SessionEnd hook ran either
+    await asyncio.sleep(0.3)
+    assert CORPUS not in session._live and main()["attached"] is None and stopped == [CORPUS]
+
+
 # ----------------------------------------------------------------------------- a session that continues in a job
 
 def _subscribe(sid: str, delivery: str = cc_plugin.HOOK) -> events.Sub:
