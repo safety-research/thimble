@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from terminal_fakes import CORPUS, MAIN, write_launch
+from test_delivery import EVENT_TEXT, TOKEN, _Stand
 
 from app import config, event_files, events
 from app import subagent_files as sf
@@ -113,6 +114,35 @@ def test_the_waker_takes_a_queued_event_wakes_main_with_its_text_and_exits_2(tmp
     assert code == 2
     assert err.startswith(f'<thimble-event kind="label_done" event="{out["id"]}"') and "refunds: 12 yes" in err
     assert event_files.waiting(ws) == []
+
+
+def test_a_press_while_main_is_idle_turns_the_waker_to_the_server_and_its_event_wakes_main(tmp_path, ws):
+    """The `thimble` command presses the browser workbench at the session's start, after SessionStart's waker began on
+    local transport and took the session's lock, and no queue file is there yet. Every later hook's waker exits on that
+    lock, and while main is idle none runs, so this waker pulls from the server from the press on: a side thread's
+    event the server holds wakes main."""
+    stand = _Stand([(200, {"id": "e1", "text": EVENT_TEXT})])
+    env = env_for(tmp_path, ws)
+    Path(env["THIMBLE_HOME"], "server.json").write_text(json.dumps({"api": f"http://127.0.0.1:{stand.port}",
+                                                                    "token": TOKEN}))
+    waker = subprocess.Popen([str(WATCHER)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=env, cwd=str(config.corpus_dir(CORPUS)))
+    waker.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "SessionStart", "source": "startup"}))
+    waker.stdin.close()
+    try:
+        time.sleep(0.5)
+        assert waker.poll() is None and not event_files.queue_path(ws).exists()
+        write_launch(ws, session=MAIN, transport="server")  # the press
+        try:
+            code = waker.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            code = None
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+        stand.close()
+    assert code == 2 and waker.stderr.read().strip() == EVENT_TEXT
+    assert [(m, p) for m, p, _ in stand.seen] == [("GET", "/api/events/pull"), ("POST", "/api/events/ack")]
 
 
 def test_no_hook_opens_a_socket_in_terminal_mode_and_each_file_first_hook_starts_the_backend_s_call(
