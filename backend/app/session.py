@@ -208,6 +208,13 @@ SAFETY_ALERT = ("Claude Code is waiting in your terminal: Claude's safety check 
 # agent it stopped is told as any API error's (_sub_error, subagents.run_ended).
 FALLBACK_SUBTYPE = "model_refusal_fallback"
 FALLBACK_TEXT = "Claude's safeguards switched this reply from {model} to {fallback}."
+# main's switch for the rest of the session (the record's scope `session`): Claude Code answers on the fallback from then
+# on, and says the way back is to retry the message on the model it refused. The browser's model line cannot change
+# main's model, so the fix is in the terminal (bug hunt C20: the notice said "this reply")
+SESSION_FALLBACK_TEXT = ("Claude's safeguards switched main from {model} to {fallback} for the rest of this session. In "
+                         "your terminal: run /model to pick {model} again, or edit your message and retry it with "
+                         "{model}.")
+SESSION_SCOPE = "session"
 AGENT_FALLBACK_TEXT = "Claude's safeguards switched a reply of {subject} from {model} to {fallback}."
 FALLBACK_KEY = "safeguards:{chat}"  # the notices' key: a later switch in the same chat updates the notice
 SUB_ERROR_TEXT = "{subject} stopped with an error: {why}."  # a side thread's fork or a helper an API error stopped
@@ -2261,16 +2268,19 @@ def _sub_who(c: str, sub: Sub) -> tuple[str, str]:
     return notices.who("", title)
 
 
-def _switched(c: str, chat: str, model: Any, fallback: Any, *, sub: Sub | None = None) -> None:
+def _switched(c: str, chat: str, model: Any, fallback: Any, *, sub: Sub | None = None, scope: Any = None) -> None:
     """Claude's safeguards switched a reply in chat `chat` (main's, or subagent `sub`'s) from `model` to `fallback`: a
-    notice that says so (FALLBACK_TEXT), one per chat however often it happens (FALLBACK_KEY). Never raises."""
+    notice that says so (FALLBACK_TEXT), one per chat however often it happens (FALLBACK_KEY); for main switched for the
+    rest of the session (`scope`, SESSION_SCOPE), that it stays so and how to go back (SESSION_FALLBACK_TEXT). Never
+    raises."""
     from . import notices  # noqa: PLC0415
 
     was = model_label(str(model or "")) if model else "the model it was asked for"
     now = model_label(str(fallback or ""))
     try:
         if sub is None:
-            name, text = None, FALLBACK_TEXT.format(model=was, fallback=now)
+            whole = scope == SESSION_SCOPE and model
+            name, text = None, (SESSION_FALLBACK_TEXT if whole else FALLBACK_TEXT).format(model=was, fallback=now)
         else:
             name, subject = _sub_who(c, sub)
             text = AGENT_FALLBACK_TEXT.format(subject=subject[0].lower() + subject[1:], model=was, fallback=now)
@@ -3460,7 +3470,7 @@ def translate(lv: Live, line: bytes | str) -> None:
             _safety_stop(lv)
         elif rec.get("subtype") == FALLBACK_SUBTYPE and rec.get("direction", "retry") == "retry":
             lv.wrote = True
-            _switched(lv.c, agents.MAIN_ID, rec.get("originalModel"), rec.get("fallbackModel"))
+            _switched(lv.c, agents.MAIN_ID, rec.get("originalModel"), rec.get("fallbackModel"), scope=rec.get("scope"))
         return
     if t != "assistant":
         return

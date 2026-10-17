@@ -88,10 +88,23 @@ def test_a_reply_main_s_safeguards_switched_leaves_one_notice_row(cwd, tmp_path)
                     _end("c1"), _human("Again."), {**FALLBACK, "scope": "local"},
                     _assistant(_say("Here."), model="claude-opus-4-8"), _end("c2")])
     rows = _notices()
-    assert [r["text"] for r in rows] == ["Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."] * 2
+    assert len(rows) == 2 and rows[-1]["text"] == "Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."
     assert rows[0]["kind"] == "safeguards"
     (shown,) = _open("safeguards:main")
     assert shown["id"] == rows[-1]["id"] and shown["chat"] == agents.MAIN_ID, "one notice in the foreground"
+
+
+def test_main_switched_for_the_session_says_so_and_how_to_go_back(cwd, tmp_path):
+    """Bug hunt C20: Claude Code moved main to Opus 4.8 for the rest of the session (scope `session`), and the notice
+    said "switched this reply". It says main stays on Opus 4.8 and gives the fix the terminal has, since the browser's
+    model line cannot change main's model."""
+    lv, p = _attach(cwd, tmp_path)
+    _append(p, lv, [_human("Look at the logs."), FALLBACK, _assistant(_say("Here."), model="claude-opus-4-8"), _end("c1")])
+    (shown,) = _open("safeguards:main")
+    text = shown["text"]
+    assert "this reply" not in text
+    assert "switched main from Opus 5.5 to Opus 4.8 for the rest of this session" in text
+    assert "In your terminal: run /model to pick Opus 5.5 again" in text
 
 
 def test_a_request_the_safeguards_blocked_marks_its_error_line(cwd, tmp_path):
