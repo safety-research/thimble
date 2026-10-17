@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Spinner } from '../components/Spinner'
-import { api, labelApi } from '../lib/api'
+import { api, isNotFound, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { demoStop } from '../lib/demo'
 import { refreshProposals } from '../lib/proposals'
@@ -43,7 +43,8 @@ export interface LabelRuns {
 }
 
 /** The runs of the labels' applies: a run the labels say is running is polled every RUN_POLL_MS until it ends, and its
- * record carries the progress, then the outcome or the failure the label's row shows. */
+ * record carries the progress, then the outcome or the failure the label's row shows. A label deleted, or one the
+ * server no longer has, is no longer followed. */
 export function useLabelRuns(ws: string, labels: FilesLabels): LabelRuns {
   const [runs, setRuns] = useState<Map<string, ConceptRun>>(new Map())
   const setRun = useCallback((id: string, run: ConceptRun | null) => {
@@ -54,9 +55,22 @@ export function useLabelRuns(ws: string, labels: FilesLabels): LabelRuns {
       return next
     })
   }, [])
+  // the runs no longer followed, by label, with the run's id: a deleted label's, or one the server no longer has, which
+  // a read of the labels from before the delete would otherwise bring back
+  const dropped = useRef(new Map<string, string | null | undefined>())
+  const latest = useRef(runs)
+  latest.current = runs
+  const drop = useCallback(
+    (id: string) => {
+      dropped.current.set(id, latest.current.get(id)?.run_id)
+      setRun(id, null)
+    },
+    [setRun],
+  )
   useEffect(() => {
     for (const k of labels.all) {
       if (k.run?.status !== 'running') continue
+      if (dropped.current.has(k.id) && dropped.current.get(k.id) === k.run.run_id) continue
       const seen = runs.get(k.id)
       if (!seen || (seen.run_id !== k.run.run_id && seen.status !== 'running')) setRun(k.id, k.run)
     }
@@ -78,10 +92,14 @@ export function useLabelRuns(ws: string, labels: FilesLabels): LabelRuns {
         labelApi
           .detail(ws, id)
           .then((k) => setRun(id, k.run ?? null))
-          .catch(() => undefined)
+          // a label the server no longer has is no longer read; any other failure is read again next time
+          .catch((e) => isNotFound(e) && drop(id))
     }, RUN_POLL_MS)
     return () => window.clearInterval(t)
-  }, [polled, ws, setRun])
+  }, [polled, ws, setRun, drop])
+  // a label deleted (here, by main, or in another window) is no longer followed (bug hunt G13: a label deleted while it
+  // ran was read once a second until a reload, 315 times, each a 404)
+  useEffect(() => bus.on('concepts', (e) => void (e.what === 'deleted' && drop(e.concept))), [drop])
   // Retry applies the label again over its glob; the run it starts is polled from the record the server answers, and a
   // refusal shows on the row as the failure did
   const retry = useCallback(
