@@ -40,9 +40,11 @@ follows main. Main is the session launch.json names, followed through the moves 
 every process a Live of it that reads nothing. The mirror runs in passes, from the hooks' backend calls
 (local_hooks.py): catch_up attaches main from sessions.json's cursor as a restarted server would, reads main's and every
 subagent's transcript to their ends and saves the cursor, with no tail task, grace or waits, one pass at a time
-(PASS_LOCK). The cursor keeps what R2 and R3 need across passes. After the press this server follows main: its attach
-waits for a pass under way (PASS_LOCK) and reads on from the cursor that pass saved, so the mirror has no gap and no
-duplicate (H4), and catch_up reads nothing more. Main ends a turn with nothing for the analyst without text, or with
+(PASS_LOCK). The cursor keeps what R2 and R3 need across passes. After the press this server follows main: the press
+moves the transport to the server first, then this server's attach waits for a pass under way (PASS_LOCK) and reads on
+from the cursor that pass saved, so the mirror has no gap and no duplicate (H4), and catch_up reads nothing more. A
+session no pass read yet (a press at the end of the first turn, before the Stop hook's pass) is read from when thimble
+turned on in it (its session marker's time), so main's chat holds that turn too. Main ends a turn with nothing for the analyst without text, or with
 END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat shows END_TOKEN, nor a line that opens with
 TERMINAL_ONLY.
 
@@ -281,6 +283,10 @@ class Live:
         self.config: str | None = None
         self.config_known = False
         self.offset = -1  # bytes of the transcript read; -1 before the first look
+        # an ISO time: at the first look the transcript is read from its first record since then, not from its end
+        # (attach: a session no mirror read yet, from when thimble turned on in it)
+        self.read_from = ""
+        self.attached_at = time.monotonic()  # when this process made it main (sweep)
         self.buf = b""
         self.saved = -1  # the offset the cursor in sessions.json holds (_save_cursor)
         self.subs_saved: dict[str, tuple] = {}  # each subagent's (offset, done) sessions.json holds (_sub_places)
@@ -698,6 +704,11 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
         if after is None and not follow and _runs_elsewhere(c, cur, pid):
             after = cur.sid
         detach(c, cur.sid, "replaced")
+    if _handing_over(c):
+        # H4: a pass of the mirror that runs now on local transport ends first (none starts once the transport is the
+        # server's), and what it kept, main's meta and its cursor, is what this reads on from
+        with _pass_lock(config.workspace_path(c), HANDOVER_S):
+            pass
     meta = agents.ensure_main(c)
     held = meta.get("attached") or {}
     stored = sessions(c).get(sid) or {}
@@ -706,10 +717,11 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
               pid or stored.get("pid"))
     _learn_config(lv, config_dir)
     lv.transcript_path = lv.transcript_path or find_transcript(sid, lv.config_dir)
-    if restored and _handing_over(c):
-        # H4: a pass of the mirror that runs now on local transport ends first, and its cursor is the one read on from
-        with _pass_lock(config.workspace_path(c), HANDOVER_S):
-            stored = sessions(c).get(sid) or {}
+    if not restored and not stored and not follow:
+        # a session no mirror has read: from when thimble turned on in it, so main's chat holds what main said before a
+        # press that came ahead of any pass on local transport (thimble is on from the session's start), not only what
+        # comes after it
+        lv.read_from = _turned_on(c, sid)
     if restored:
         lv.since = str(stored.get("since") or lv.since)
         _restore_cursor(lv, stored.get("cursor"))
@@ -754,6 +766,26 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
     _resume_work(c)
     log.info("%s: session %s attached (%s)", c, sid, "restored" if restored else "new")
     return lv
+
+
+def _turned_on(c: str, sid: str) -> str:
+    """When thimble turned on in session `sid` (its session marker's `at`, which activation writes: contract C1), as an
+    ISO time; '' when the session has no marker or its marker names another workspace."""
+    from . import activate  # noqa: PLC0415 — the standard library only, at its import
+
+    try:
+        marker = activate.read_marker(sid)
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(marker, dict) or str(marker.get("ws") or "") != c:
+        return ""
+    at = marker.get("at")
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return ""
+    try:
+        return datetime.fromtimestamp(float(at), timezone.utc).isoformat(timespec="milliseconds")
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def _handing_over(c: str) -> bool:
@@ -3594,6 +3626,8 @@ def _tail_main(lv: Live) -> None:
         if lv.offset < 0:
             lv.offset = 0  # not written yet: everything it will hold is this session's
         return
+    if lv.offset < 0 and lv.read_from:
+        lv.offset = _offset_since(str(p), lv.read_from)  # a session no mirror read yet: since thimble turned on (attach)
     if lv.offset < 0:
         lv.offset = size  # already there when the session attached: its history is not replayed
         _save_cursor(lv)  # a cursor an earlier attach of this session left would replay that history after a restart
@@ -3747,10 +3781,10 @@ STAMP_SLACK_S = 2.0  # launch.json's time and Claude Code's first record of a re
 
 def sweep() -> list[str]:
     """Detach every recorded main session in a workspace where no shim is subscribed and main's own has not subscribed
-    since
-    this server started. Never while the server is stopping, when every workspace looks unsubscribed. Returns the
-    session
-    ids detached."""
+    since this server started. A session this server made main less than GRACE_S ago (a press just before the sweep,
+    whose shim subscribes a moment later) is not detached at once: its shim gets GRACE_S to subscribe, as after a shim
+    leaves (disconnected). Never while the server is stopping, when every workspace looks unsubscribed. Returns the
+    session ids detached."""
     from . import events  # noqa: PLC0415
 
     if _shutting_down():
@@ -3766,6 +3800,11 @@ def sweep() -> list[str]:
             continue
         sid = held.get("session")
         if not sid:
+            continue
+        lv = _live.get(c)
+        if lv is not None and lv.sid == sid and time.monotonic() - lv.attached_at < GRACE_S:
+            # made main just now (a press, /thimble): its shim gets GRACE_S to subscribe, as after it leaves
+            disconnected(c, str(sid))
             continue
         try:
             if c in _live:

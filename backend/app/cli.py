@@ -3792,11 +3792,13 @@ def take_hook_result(session: str, cwd: Path, action: str, archive: str) -> str 
 
 
 def made_main(name: str, session: str, cwd: Path, via: str = "press") -> None:
-    """After a press (`thimble open`, H1) or /thimble's `up` made `session` main of workspace `name` on the server: the
-    folder marked active for the plugin's hooks (mark_active), thimble on in the session if it was not (activation, so
-    that a later one finds the session marked and keeps its transport), and launch.json written for it through
-    activation's one writer (activate.take_main, then activate.write_launch with transport `server`): from now on the
-    session runs on the server, one way (subagent_files.transport). Never raises."""
+    """A press (`thimble open`, H1) or /thimble's `up` makes `session` main of workspace `name` on the server, before
+    the server attaches it (name_session), so that its attach waits for a pass of the mirror under way and no pass
+    starts after (session.attach, H4): the folder marked active for the plugin's hooks (mark_active), thimble on in the
+    session if it was not (activation, so that a later one finds the session marked and keeps its transport), and
+    launch.json written for it through activation's one writer (activate.take_main, then activate.write_launch with
+    transport `server`): from now on the session runs on the server, one way (subagent_files.transport). Never
+    raises."""
     mark_active(cwd)
     try:
         from . import activate  # noqa: PLC0415 — activation's, needed here alone
@@ -3919,11 +3921,12 @@ def cmd_ensure(args: argparse.Namespace) -> int:
                 if line not in mark:
                     print(line)
         if name and args.session:
+            # the transport first, then the server's attach, as the press does (open_cmd; session.attach, H4)
+            made_main(name, str(args.session), cwd)
             replaced = name_session(url, name, str(args.session), cwd, sandbox=own_sandbox_here(cwd),
                                     warnings=setup_warnings(cwd))
             if replaced:
                 print(TAKEOVER_LINE.format(other=replaced[:8]))
-            made_main(name, str(args.session), cwd)
         if not env["dev"] and not has_ui_build():
             _log(config.NO_UI_BUILD_HINT)
             print(NO_UI_LINE)

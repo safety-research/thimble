@@ -10,7 +10,8 @@ Which session. When CLAUDE_CODE_SESSION_ID is set (a hook's or a Bash command's 
 folder's live main (launch.json and its `claude` process); with none, nothing starts (NO_SESSION). The folder is refused
 as activation refuses it (REFUSED_HOME). The press activates the folder when it is not on (core's app.activate, when it
 is there), starts the server (cli.ensure_running, under its lock), registers the folder (cli.open_workspace), makes this
-session main (cli.name_session, cli.made_main: the press takes main explicitly, and the transport moves to the server).
+session main (cli.made_main, then cli.name_session: the press takes main explicitly, and the transport moves to the
+server before the server attaches the session, which reads on from the mirror's last pass on local transport).
 
 The code. A one-time code (60 s; 300 s for a link a person copies) goes only into the redirect file the opener gets, or
 into a remote terminal's link file (app/opener.py), each readable by the analyst's account alone. stdout and stderr
@@ -253,8 +254,10 @@ def _press(sid: str, cwd: Path, ref: str, link: bool, env: Mapping[str, str]) ->
     name, _ = cli.open_workspace(cwd, data_dir, url, here=True)
     if not name:
         return _error("START", f"thimble could not open {cwd} as a workspace.")
-    cli.name_session(url, name, sid, cwd, sandbox=cli.own_sandbox_here(cwd), warnings=cli.setup_warnings(cwd))
+    # the transport first, then the server's attach: a pass of the mirror under way on local transport ends before the
+    # attach reads on from it, and none starts after (session.attach, H4)
     cli.made_main(name, sid, cwd)
+    cli.name_session(url, name, sid, cwd, sandbox=cli.own_sandbox_here(cwd), warnings=cli.setup_warnings(cwd))
     if not renv.get("dev") and not cli.has_ui_build():
         return _error("NOT_BUILT")
     st = cli.read_state()
