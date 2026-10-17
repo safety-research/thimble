@@ -7,7 +7,8 @@ import type { Engine, Mounted } from 'claude-code/testing'
 
 import { COLOR_NAMES, LABEL_WHEEL, colorName } from '../labels'
 import { LABEL_HUES, PICKED_HUES } from '../paint'
-import { CWD, LABEL, shown, world } from './fixtures'
+import { RELAY } from '../panel'
+import { CWD, LABEL, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -245,6 +246,46 @@ test('after a delete the labels list offers `undo` (u): it sends `label-undelete
   expect(text).toContain('name:')
   expect(text).toContain(LABEL.name)
   expect(w.toasts.join('\n')).toContain(`restored the label "${LABEL.name}"`)
+  await pane.unmount()
+})
+
+test('the labels list ends with the entry box `describe a new label`: ↓ past the last label or a click gives it the keys, and its words go to main', { timeoutMs: 30_000 }, async ($, on) => {
+  // bug hunt 0.9.0, B12: ↓ stopped at the last label, no field was drawn, and a click took the keys from the panel
+  const w = world(on)
+  let pane = await labelPanel($, w)
+  pane = await press($, w, pane, 'hk-list')
+  await takesKeys($)
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.drawn())).toContain('Labels')
+  type Field = { props?: { placeholder?: string; submitLabel?: string } }
+  const box = (await pane.find({ type: 'Input', key: 'make-label' })) as Field | undefined
+  expect(box?.props?.placeholder).toBe('describe a new label')
+  expect(box?.props?.submitLabel).toBe('make it')
+  // the list holds the keys
+  expect(shown(await pane.find({ key: 'h-hints' }))).toContain('↑↓ to choose')
+  await pane.unmount()
+  // the list's one label is its last: ↓ (the ring moved onto the relay's ↓) lands the ring on the box
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  const moved = (await $.ui.focus({ requestId: 'thimble', component: 'Pane', element: RELAY.down, origin: { kind: 'person' } } as never)) as { deny?: string }
+  expect(moved.deny).toBeUndefined()
+  await w.clock.settle()
+  await pane.unmount()
+  // the box holds the keys: no hint row, as Claude Code's prompt box has none
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.find({ key: 'h-hints' })).trim()).toBe('')
+  await pane.unmount()
+  // a click on the box (Claude Code's ui.focus onto it) keeps it holding the keys, not the prompt
+  await takesKeys($)
+  await $.ui.focus({ requestId: 'thimble', component: 'Pane', element: 'make-label', origin: { kind: 'person' } } as never)
+  await w.clock.settle()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.find({ key: 'h-hints' })).trim()).toBe('')
+  // Enter sends main the instruction with the words
+  await pane.input({ key: 'make-label', text: '  edits that add a link  ' })
+  await w.clock.settle()
+  expect(w.submitted).toContain('Make a label with apply_label and try it on a sample of 30: edits that add a link')
   await pane.unmount()
 })
 

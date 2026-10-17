@@ -762,6 +762,41 @@ export async function relayKey(k: string): Promise<boolean> {
   return true
 }
 
+// while the ui.focus hook turns a move of the ring into ↑ or ↓ for the list (relayMoveKey), and the element that key
+// moved the ring onto (ringOnto)
+let ringMoving = false
+let ringTo = ''
+
+/** ↑ or ↓ for the list, from a move of the ring onto the relay's Button (register.tsx, the ui.focus hook): the element
+ *  the key moved the ring onto instead, where the hook lands the person's move (the labels list's ↓ past its last
+ *  label: its entry box), or '' while the ring stays on the relay. A `$.ui.focus` of its own from inside that move would
+ *  not move the ring. */
+export async function relayMoveKey(k: 'up' | 'down'): Promise<string> {
+  ringMoving = true
+  ringTo = ''
+  try {
+    await relayKey(k)
+  } finally {
+    ringMoving = false
+  }
+  const to = ringTo
+  ringTo = ''
+  return to
+}
+
+/** The ring onto the panel's element `key` (an entry box): during a move of the person's the list's key came from, the
+ *  move lands there (relayMoveKey); else the module moves it, which raises no ui.focus, so the hint row follows once
+ *  the ring is there. */
+async function ringOnto(cx: Ctx, key: string): Promise<void> {
+  if (ringMoving) {
+    ringTo = key
+    return
+  }
+  if (!(await cx.focus(key))) return
+  rt.panelFocus = key
+  await cx.bumpPanel()
+}
+
 /** What the person typed into the relay's Input, from its text now (`value`) and the text seen last (`last`): each
  *  character, or `backspace` when the text got shorter. Its text starts as the mark drawn; a key typed before the next
  *  drawing adds to what is there. */
@@ -1021,7 +1056,6 @@ function fieldKey(key: string): string {
 const FIELD_KEYS: [RegExp, string][] = [
   [ENTRY_KEY, 'Enter to ask'],
   [/^(?:lb-glob-|lb-values-)/, 'Enter to save'],
-  [/^lbs-describe$/, 'Enter to make it'],
   [/^lb-name-/, 'Enter to rename'],
 ]
 
@@ -3394,12 +3428,14 @@ export async function refreshUnsure(cx: Ctx): Promise<void> {
 
 /** The legend rows a label takes in the labels list, which has the room home leaves to other sections. */
 const LIST_LEGEND_ROWS = 4
+/** The key of the labels list's entry box, which describes a new label. */
+const NEW_LABEL = 'make-label'
 
 /** The labels (SPEC.md, "The label panel", the labels list): each label as home draws it, its name, its bar and total
- *  and its legend, `❯` on the chosen one; under the second rule `describe a new label`, whose words go to main. */
+ *  and its legend, `❯` on the chosen one; under them the entry box `describe a new label`, whose words go to main. */
 async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
-  const { Box, Button, Input, Text } = cx.els(e)
+  const { Box, Button, Text } = cx.els(e)
   const cols = Math.max(30, e.props.bodyColumns)
   const got = await surfaceValue(cx, 'labels')
   const ls = (got?.ok ? labelsOf(got.value) : []) as LabelFull[]
@@ -3423,8 +3459,15 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     }
   })
   if (!ls.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
+  // under the list, an entry box (entry.tsx) whose words go to main, which makes the label with a trial; ↓ past the last
+  // label or a click gives it the keys
+  const entry =
+    e.surface === 'mobile'
+      ? null
+      : entryEl(cx, e, { key: fieldKey(NEW_LABEL), placeholder: 'describe a new label', submit: 'make it', cols, onSubmit: v => void cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v}`) })
   const step = (d: number) => {
     const at = ls.findIndex(x => x.id === pick)
+    if (d > 0 && at >= ls.length - 1) return entry ? ringOnto(cx, NEW_LABEL) : undefined
     labelPick = ls[Math.max(0, Math.min(ls.length - 1, at + d))]?.id ?? ''
     return cx.bumpPanel()
   }
@@ -3443,8 +3486,10 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     )
   ) : null
   const listHints = ['↑↓ to choose', 'Enter to open', ...(undo ? ['u to undo'] : []), 'b to go back', 'x to close']
-  // the title row, the header, the rule under the list, the field and the hint rows aside
-  const win = windowList('labels-list', lines, hits, pickAt, bodyRows - 3 - (goneRow ? 1 : 0) - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
+  // the title row, the header, the entry box (else the rule under the list), the undo row and the blank row above it,
+  // and the hint rows aside
+  const bottom = entry ? entryHeight(NEW_LABEL, cols, true, 'make it') + (goneRow ? 2 : 0) : 1 + (goneRow ? 1 : 0)
+  const win = windowList('labels-list', lines, hits, pickAt, bodyRows - 1 - bottom - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
   body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
   body.unshift(
     <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
@@ -3454,8 +3499,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       })}
     </Box>,
   )
-  const field = e.surface === 'mobile' ? null : fieldRow(cx, e, 'describe a new label', <Input key={fieldKey('lbs-describe')} submitLabel="make it" onSubmit={v => void (v.trim() ? cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v.trim()}`) : undefined)} />, 'lbs-new')
-  body.push(...bottomRows(cx, e, cols, [], [goneRow, field], listHints))
+  body.push(...entryBottom(cx, e, cols, [], entry, listHints, goneRow ? [goneRow] : []))
   const hk = undo ? hiddenKeys(cx, e, [{ key: 'undo', hotkey: 'u', onPress: undo }]) : null
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
