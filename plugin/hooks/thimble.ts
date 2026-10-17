@@ -76,6 +76,15 @@
 //   background agent for main again ("Task … (description: check: Important details · answers) … completed"), and
 //   main then reported on thimble's checks in its answer (bug hunt H12). The transcript keeps Claude Code's record,
 //   and its row on the screen (`Task "…" completed in background`) stays: no hook draws or drops that row;
+// - session.append: Claude Code's task notification of one of thimble's agents whose report already reached main as its
+//   hand-back ("This agent's report was delivered to you as a message …", ownPointer) is kept as POINTER_NOTE alone,
+//   which the terminal UI draws no row for. Claude Code writes such a notification to main's transcript without a turn
+//   of its own, after the hand-back of an agent whose end it owes main: one main's Agent call started, or one this
+//   module resumed with SendMessage, such as a view's builder sent back for the terminal page; main read it with its
+//   next request and wrote "↳ The view builder finished. I covered its report above." (bug hunt I6). Neither
+//   prompt.submit nor prompt.attachment sees it: it is a stored row, and only session.append reaches its content, which
+//   it can rewrite but not drop. Kept empty, Claude Code stores it as "(no content)" inside its notice's frame, and
+//   main still wrote a line about the agent (live check of I6);
 // - turn.start and turn.complete of main's own turns: the id of main's running turn, which abort names;
 // - turn.complete: posts the end of each run of an agent it started (POST /api/module/ended), with why it ended and,
 //   for a refusal, what the API said of it, since its other hooks skip those agents;
@@ -263,6 +272,7 @@ type State = {
   requests: Record<string, { role: string; values: Values }> // typed starts waiting for main's Agent call
   started: Set<string> // agents this module spawned: their turn.complete is posted
   checks: Map<string, string> // agents of thimble's check role, this module's spawns and main's Agent calls: each one's check (checkName)
+  ours: Set<string> // agents of thimble's types this session started, this module's spawns and main's Agent calls (ownPointer)
   calls: Map<string, string> // agents of the call role this module spawned: the reason their dropped hand-back gives (callDone)
   completions: Map<string, AbortController> // the completions that run now, by their request's id (a cancel aborts one)
   queue: Promise<void> // the requests, one at a time
@@ -279,7 +289,7 @@ function fresh(): State {
   return {
     active: false, interactive: false, user: '', home: '', homeReal: '', rules: null,
     cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
-    requests: {}, started: new Set(), checks: new Map(), calls: new Map(), completions: new Map(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
+    requests: {}, started: new Set(), checks: new Map(), ours: new Set(), calls: new Map(), completions: new Map(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
     dispatching: new Map(), used: new Set(),
     file: false, peer: false, rechecking: null, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
     out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
@@ -639,6 +649,7 @@ async function spawn($: Engine, m: State, role: string, prompt: string, descript
   if (r.deny !== undefined) return LIMIT.test(r.deny) ? { limit: r.deny } : { deny: r.deny }
   if (!r.agentId) return { error: 'Claude Code started no agent' }
   m.started.add(r.agentId)
+  m.ours.add(r.agentId)
   if (role === 'check') m.checks.set(r.agentId, checkOf(description))
   // the card check's type stays out of every listing: no model starts one or sends to one (agent.offer)
   if (role === CALL) m.calls.set(r.agentId, drop || CALL_DONE)
@@ -1311,6 +1322,28 @@ export function ownTask(text: string): string | undefined {
   return [...m.checks.keys(), ...m.calls.keys()].find(id => id !== '' && text.includes(id))
 }
 
+// the words of Claude Code's task notification that only points at the agent's hand-back, which main has already read
+const POINTER = /<result>\s*This agent's report was delivered to you as a message from /
+/** What main reads of such a notification (module note). */
+export const POINTER_NOTE = "Write nothing about this notice: it is about one of thimble's agents, whose report you have already read."
+
+
+/** The agent whose Claude Code task notification `text` only points at the report it handed back to main (`This
+ *  agent's report was delivered to you as a message from "…" … it is not repeated here`), when it is an agent of
+ *  thimble's types this session started (module note); undefined for any other text, and for a batch of notifications. */
+export function ownPointer(text: string): string | undefined {
+  const m = live.m
+  const ids = [...text.matchAll(/<task-notification>\s*<task-id>\s*([^<\s]+)\s*<\/task-id>/g)].map(x => x[1] ?? '')
+  if (!m || ids.length !== 1 || text.split('<task-notification>').length !== 2 || !POINTER.test(text)) return undefined
+  return m.ours.has(ids[0]!) ? ids[0] : undefined
+}
+
+/** A stored row's text: its text blocks, or its content when that is a string. */
+function rowText(content: unknown): string {
+  if (typeof content === 'string') return content
+  return Array.isArray(content) ? content.map(b => (isObj(b) && b.type === 'text' ? text(b.text) : '')).join('\n') : ''
+}
+
 export const register: Register = on => {
   const m = fresh()
   live.m = m
@@ -1330,6 +1363,14 @@ export const register: Register = on => {
   on('prompt.attachment', { type: 'task_status' }, async ($, e, next) => (e.agentId === undefined && ownTask(e.text) !== undefined ? { text: null } : next(e)))
     .catch(($, e, next) => next(e)) // not a guard: if it fails, main reads the row as Claude Code wrote it
 
+  // Claude Code's notification of one of thimble's agents that only points at the hand-back main read: kept as
+  // POINTER_NOTE alone, which asks main for no words and draws no row (module note)
+  on('session.append', { door: 'prompt' }, async ($, e, next) =>
+    e.agentId === undefined && e.origin.kind === 'task-notification' && ownPointer(rowText(e.message.content)) !== undefined
+      ? next({ ...e, message: { ...e.message, content: [{ type: 'text', text: POINTER_NOTE }] } })
+      : next(e))
+    .catch(($, e, next) => next(e)) // not a guard: if it fails, main reads the notification as Claude Code wrote it
+
   // thimble's types are offered to a model only inside an Agent call that names them, or once one started (module note)
   on('agent.offer', async ($, e, next) => (ours(m, e.agent) && !m.dispatching.has(e.agent) && !m.used.has(e.agent) ? { isOffered: false } : next(e)))
     .catch(($, e, next) => next(e)) // not a guard: if it fails, the type is offered as Claude Code offers it
@@ -1346,7 +1387,10 @@ export const register: Register = on => {
     if (!m.active) return next(e)
     const got = await spawning($, m, e)
     const r = await next(got.model ? { ...e, model: got.model } : e)
-    if (r.agentId && ours(m, e.subagentType ?? '')) m.used.add(e.subagentType ?? '') // offered from now on (module note)
+    if (r.agentId && ours(m, e.subagentType ?? '')) {
+      m.used.add(e.subagentType ?? '') // offered from now on (module note)
+      m.ours.add(r.agentId)
+    }
     if (r.agentId) {
       if (got.effort !== undefined) m.efforts[r.agentId] = got.effort
       if (roleOf(e.subagentType ?? '') === 'check') m.checks.set(r.agentId, checkOf(e.description ?? ''))

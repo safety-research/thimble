@@ -53,7 +53,7 @@ import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
 import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble, takeMain } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
-import { callDone, checkName, ownNotice } from '../thimble'
+import { POINTER_NOTE, callDone, checkName, ownNotice } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
 import { openInBrowser, remoteReply } from './offramp'
 import { openChecks } from './checksview'
@@ -980,6 +980,12 @@ export const register: Register = (on, options) => {
   // says nothing, and what came in shows in the lines the held hook prints with the turn (`› ` the analyst's words,
   // `new thread: …`; bug hunt B5); ctrl+o's full view still draws it
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'task-notification' } } }, async ($, e, next) => {
+    // nor is Claude Code's notice that points at the hand-back of one of thimble's agents, kept as the bridge's note
+    // (thimble.ts ownPointer, bug hunt I6)
+    if (rt.sc && !e.props.isExpanded && e.props.text.includes(POINTER_NOTE)) {
+      const { Box } = $.ui.resolve(e)
+      return <Box />
+    }
     if (rt.sc && e.props.text.trim() === REWAKE_SUMMARY && !e.props.task && !e.props.isExpanded) {
       const { Box } = $.ui.resolve(e)
       return <Box />
