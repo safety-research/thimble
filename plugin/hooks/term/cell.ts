@@ -233,6 +233,33 @@ function anyRows(spec: VegaLite, root: VegaLite = spec): Record<string, unknown>
   return sets.find(s => s.length) ?? []
 }
 
+/** A field name as the data's column names it: Vega-Lite reads `.` and `[ ]` in a field as a path into nested data, so a
+ *  column whose name holds them is written escaped (Altair writes `revisions linking to jqp\.vercel\.app`); the
+ *  rows hold the name unescaped (bug hunt B9: such a bar chart drew as a table). */
+export function columnOf(field: string): string {
+  return field.replace(/\\(.)/g, '$1')
+}
+
+/** The spec with each encoding's field (and a sort's) as the data's column names it (columnOf), in every layer and
+ *  part, so a chart matches its fields to its rows' columns. */
+function plainFields(spec: VegaLite): VegaLite {
+  const enc = (e: Enc | undefined): Enc | undefined => {
+    if (!e || typeof e !== 'object') return e
+    const sort = e.sort && typeof e.sort === 'object' && !Array.isArray(e.sort) && typeof (e.sort as { field?: unknown }).field === 'string' ? { ...(e.sort as object), field: columnOf((e.sort as { field: string }).field) } : e.sort
+    return { ...e, ...(typeof e.field === 'string' ? { field: columnOf(e.field) } : {}), ...(sort !== e.sort ? { sort } : {}) }
+  }
+  const parts = (xs: VegaLite[] | undefined) => (Array.isArray(xs) ? xs.map(plainFields) : xs)
+  return {
+    ...spec,
+    ...(spec.encoding ? { encoding: Object.fromEntries(Object.entries(spec.encoding).map(([k, e]) => [k, enc(e)])) } : {}),
+    ...(spec.layer ? { layer: parts(spec.layer) } : {}),
+    ...(spec.hconcat ? { hconcat: parts(spec.hconcat) } : {}),
+    ...(spec.vconcat ? { vconcat: parts(spec.vconcat) } : {}),
+    ...(spec.concat ? { concat: parts(spec.concat) } : {}),
+    ...(spec.spec ? { spec: plainFields(spec.spec) } : {}),
+  }
+}
+
 function markOf(spec: VegaLite): string {
   return typeof spec.mark === 'string' ? spec.mark : spec.mark?.type ?? ''
 }
@@ -481,8 +508,9 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   if (dg?.nodes) return { card: diagramOf(cell, dg), error }
   const tl = first(cell, k => k === TIMELINE) as { events?: unknown[] } | undefined
   if (tl?.events) return { card: timelineOf(cell, tl), error }
-  const vl = first(cell, k => k.startsWith('application/vnd.vegalite')) as VegaLite | undefined
-  if (vl && typeof vl === 'object') {
+  const spec = first(cell, k => k.startsWith('application/vnd.vegalite')) as VegaLite | undefined
+  if (spec && typeof spec === 'object') {
+    const vl = plainFields(spec)
     const chart = chartCard(cell, vl)
     if (chart) return { card: chart, error }
     const table = rowsTable(cell, axisOrder(anyRows(vl), vl))
