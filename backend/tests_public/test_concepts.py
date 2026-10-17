@@ -324,3 +324,32 @@ def test_a_scan_worker_ends_once_the_process_that_made_its_pool_is_killed(tmp_pa
         time.sleep(0.2)
         left = [p for p in left if os.path.exists(f"/proc/{p}") and "Z" not in open(f"/proc/{p}/stat").read().split()[2]]
     assert not left, f"the pool's workers {left} still run after the process that made the pool was killed"
+
+
+def test_the_scan_pool_ends_once_idle_but_never_while_a_run_holds_it(monkeypatch):
+    """The scan pool's workers end SCAN_IDLE_S after the last run let the pool go, and never while a run holds it; the
+    next run starts a new pool. A server kept eight idle workers of about 120 MB each after its first label (bug hunt
+    round 2, ml-tasks)."""
+    import time
+
+    monkeypatch.setattr(concepts, "SCAN_IDLE_S", 0.3)
+    monkeypatch.setattr(concepts, "apply_workers", lambda: 1)
+    concepts._pool_shutdown(end=True)
+    try:
+        with concepts._pool_held():
+            pool = concepts._pool_get()
+            assert pool.submit(abs, -3).result(timeout=60) == 3
+            workers = list(pool._processes.values())
+            time.sleep(1.0)  # past SCAN_IDLE_S, with the pool held
+            assert concepts._pool is pool, "the scan pool ended while a run held it"
+        deadline = time.monotonic() + 10
+        while concepts._pool is not None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert concepts._pool is None, "the scan pool was kept after it was idle for SCAN_IDLE_S"
+        for w in workers:
+            w.join(timeout=20)
+            assert not w.is_alive(), "a worker of the idle scan pool still runs"
+        again = concepts._pool_get()
+        assert again is not pool and again.submit(abs, -4).result(timeout=60) == 4
+    finally:
+        concepts._pool_shutdown(end=True)
