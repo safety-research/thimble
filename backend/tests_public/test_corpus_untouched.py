@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from app import (agent_session, checks, config, critique_session, dev, harness, kernel_wrap, notebook,
-                 orient_session, roles, srt, userconf, write_session)
+from app import (checks, config, critique_session, dev, kernel_wrap, notebook,
+                 orient_session, srt, write_session)
 
 CORPUS = "copy"
 LIVE = os.environ.get("THIMBLE_LIVE_CLAUDE") == "1"
@@ -40,14 +40,6 @@ def snapshot(root: Path) -> dict[str, tuple[int, int]]:
     return out
 
 
-def _settings(argv: list[str]) -> dict:
-    return json.loads(argv[argv.index("--settings") + 1])
-
-
-def _added(argv: list[str]) -> list[str]:
-    return [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
-
-
 def test_every_agent_s_work_folder_lies_outside_the_corpus(corpus):
     """The work folder of every kind of agent, and every folder main's Bash may write, lies outside the corpus folder."""
     from app import subagents
@@ -59,17 +51,6 @@ def test_every_agent_s_work_folder_lies_outside_the_corpus(corpus):
                "view build": dev.view_work_dir(CORPUS, "posts")}
     for kind, folder in folders.items():
         assert not folder.resolve().is_relative_to(corpus), kind
-
-
-def test_a_program_s_session_runs_in_the_role_s_work_folder(corpus, tmp_path, monkeypatch):
-    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
-    part = roles.Part("x", "writer", tmp_path, tmp_path, {"command": ["true"]})
-    work = write_session.work_dir(CORPUS, "report")
-    job = harness.Job(CORPUS, "writer", "writer:report", "Write", {}, ("list_cards",), work)
-    run = harness.Run(job, part, userconf.session(CORPUS, "writer", sandbox=True), "t", "t.s")
-    argv, folder, _env = harness.claude_argv(run, ["-p"])
-    assert folder == work and str(corpus) in _added(argv)
-    assert _settings(argv)["env"][agent_session.HOME_SHELL_ENV] == "1"
 
 
 def _kernel_wraps() -> str:
