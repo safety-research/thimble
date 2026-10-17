@@ -44,7 +44,7 @@ const pw = require('playwright')
 // the one line a browser that is not signed in sees (frontend shell/SignIn), its span in backticks drawn as code
 const SIGN_IN_LINE = "This browser isn't signed in. Type `/thimble browser` in your Claude Code terminal, or press o in thimble's panel."
 // what a stopped page says (frontend shell/ServerDown STOPPED_LINE)
-const STOPPED_LINE = "thimble's page stopped with the Claude Code session. Type /thimble browser in the terminal to open it again."
+const STOPPED_LINE = "thimble's page stopped with the Claude Code session. To start it again, run thimble in a terminal in the folder with your files, or continue the session there with claude -c and type /thimble browser. This tab reloads by itself once the page runs again."
 const DAY_S = 24 * 3600
 const KEY_ITEM = 'thimble-browser-key'
 const WAIT_MS = 30_000

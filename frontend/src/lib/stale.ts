@@ -5,7 +5,9 @@
 // The page stops (stopPage) on the server's `stopping` event (it stops for good: backend main.CompleteStreams), on
 // `session-ended` for its workspace (backend main.session_ended), after MAX_FAILURES failed reconnects in a row
 // (lib/sse), and when the challenge below fails. A stopped page closes its streams, sends no request under its key
-// (guardFetch), and shows the stopped line in place of the app (shell/ServerDown StoppedPage).
+// (guardFetch), and shows the stopped line in place of the app (shell/ServerDown StoppedPage). The stopped line asks
+// now and then, with no credentials, whether the server answers again as itself (serverBack, the challenge below), and
+// reloads the page once it does (bug hunt H6: after `claude -c` and `/thimble browser` the old tab stayed stopped).
 //
 // A stream that fails makes the page suspect (markSuspect). Before the next request under its key (a stream's reopen,
 // any fetch) the page asks the plain path /api/hello with no credentials, naming its key by an id that tells nothing of
@@ -151,6 +153,23 @@ export async function verified(): Promise<'ok' | 'out' | 'down' | 'stopped'> {
     return 'out'
   }
   return 'down'
+}
+
+/** After the page stopped: whether thimble's server answers again as itself (the challenge, asked with no credentials:
+ * `ok`, or `out` for a browser it signed out since, which a reload shows the sign-in line), so a reload brings the page
+ * back. A page that holds no key asks the plain path and takes any answer. Never sends the key or the cookie. */
+export async function serverBack(): Promise<boolean> {
+  const key = browserKey()
+  if (!key) {
+    try {
+      await (plainFetch ?? fetch)(HELLO_PATH, { credentials: 'omit', cache: 'no-store' })
+      return true
+    } catch {
+      return false
+    }
+  }
+  const v = await hello(key)
+  return v === 'ok' || v === 'out'
 }
 
 /** Whether `url` is a request under some browser's key on this page's own origin (one that carries credentials). */

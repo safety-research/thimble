@@ -9,7 +9,8 @@
 // hunt G4). A tab the server signed out learns it from the stale-tab challenge too (lib/stale). Nothing shows while the first check
 // is under way; when the server does not answer it, the app mounts and says so itself. Once the page stopped (lib/stale:
 // the server stopped for good, the session ended, or the server could not be reached or prove itself), the stopped page
-// (shell/ServerDown StoppedPage) takes the app's place for good, so nothing polls and nothing is sent.
+// (shell/ServerDown StoppedPage) takes the app's place, so nothing is sent under the browser's key: it asks only the
+// challenge, with no credentials, until thimble's server answers again, and then reloads (bug hunt H6).
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { claimRefused, signedIn } from '../lib/api'
 import { KEY_ITEM } from '../lib/browserKey'
