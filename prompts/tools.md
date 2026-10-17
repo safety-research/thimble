@@ -515,7 +515,7 @@ File a ticket for thimble's developer agent when thimble itself should change, s
 
 ## view_check
 
-Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get {{if:html-page}}a picture of the page as it opens, whose path Read opens{{end}}{{if:term-page}}the view as it opens, drawn as text as the panel shows it{{end}}.
+Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get {{if:html-page}}a picture of the page as it opens, in the result{{end}}{{if:term-page}}the view as it opens, drawn as text as the panel shows it{{end}}.
 
 ```json
 {
@@ -540,7 +540,7 @@ Finish the view you build: thimble runs the checks as the record of your build. 
 
 ## view_pictures
 
-Take pictures of the view you review, whose paths Read opens. The first call gives the view as it opens; ask for other states in `states`, up to four more.
+Take pictures of the view you review, which the result shows. The first call gives the view as it opens; ask for other states in `states`, up to four more.
 
 ```json
 {
@@ -1111,7 +1111,7 @@ The checks failed on your revision, so the view is as it was before your change.
 
 ## view-pictures
 
-The pictures, which Read opens:
+The pictures, which follow this text in this order:
 
 {paths}
 

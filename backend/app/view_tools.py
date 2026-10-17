@@ -194,7 +194,7 @@ def _check_text(answer: dict[str, Any]) -> str:
     head = "The checks pass." if answer.get("ok") else "The checks fail."
     out = "\n".join([head, *lines])
     if answer.get("png"):
-        out += f"\n\nThe picture of the page as it opens, which Read opens: {answer['png']}"
+        out += f"\n\nThe picture of the page as it opens follows this text ({answer['png']})."
     if answer.get("drawing"):
         out += f"\n\nThe view as it opens, drawn as text as the panel shows it:\n\n{answer['drawing']}"
     return out

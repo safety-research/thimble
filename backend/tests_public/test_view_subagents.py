@@ -235,6 +235,17 @@ def test_the_builder_and_the_reviewer_are_registered_to_keep_a_design_the_propos
     assert ask in reviewer and "keep that design" in reviewer
 
 
+def test_bug_hunt_i12_only_a_code_ticket_s_prompt_names_where_thimble_s_code_is(board):
+    """The builder's preamble, shared with code tickets, named thimble's code folders, which it then searched for what
+    its docs did not say (about 20 of one build's 63 permission asks in Manual mode). Only a code ticket's prompt names
+    them now."""
+    from app import ticket_tools
+
+    builder = subagents.roles(CORPUS)["view-builder"]["prompt"]
+    code = "thimble's own code is the server `backend/app/`"
+    assert code not in builder and code in ticket_tools.definition(CORPUS)["prompt"]
+
+
 # --------------------------------------------------------------------------- the gate tools
 
 
