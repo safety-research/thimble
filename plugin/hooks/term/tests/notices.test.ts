@@ -9,7 +9,7 @@ import { ABOVE_LABEL } from '../band'
 import { cut, width } from '../lib'
 import { modActWords, noticeActWords, seeWords } from '../notices'
 import { COLORS } from '../paint'
-import { CWD, WS, aboveAt, panelWorld, pressBrowser, words } from './fixtures-panel'
+import { CWD, LABEL, WS, aboveAt, panelWorld, pressBrowser, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
 type M = Mounted<'terminal'>
@@ -173,4 +173,22 @@ test("the terminal's own notice: `doctor` reads `how to fix it`, and its press s
   await w.clock.settle()
   expect(w.toasts.at(-1)).toContain('thimble doctor')
   await m.unmount()
+})
+
+// bug hunt C17: a label whose records Claude's safeguards refused in part
+test("bug hunt C17: a label's notice links the label (`see the label ›`) and runs it again on the records it could not label", T, async ($, on) => {
+  const w = panelWorld(on)
+  const id = LABEL.id
+  w.states.home.notices = [{ id: 'n6', key: `label:${id}`, kind: 'label', text: `The label ${LABEL.name} couldn't label 184 of 2,064 records: Claude's safeguards refused them.`, agent: `Label: ${LABEL.name}`, chat: '', at: '2026-10-17T04:47:49Z', acts: [{ label: 'Run again on these 184', act: 'label-again', slug: id }, { label: 'See the label', act: 'label-open', slug: id }] }]
+  await start($, w)
+  const band = (await $.ui.mount(aboveAt(220))) as unknown as M
+  expect(words(await band.find({ type: 'Box', key: 'above-notice-n6' }))).toContain('run again on these 184see the label ›dismiss')
+  await band.press({ key: 'above-notice-n6-act-1' })
+  await w.clock.settle()
+  expect(w.panes.at(-1)!.title).toContain(LABEL.name)
+  await band.press({ key: 'above-notice-n6-act-0' })
+  await w.clock.settle()
+  expect(w.acts).toContainEqual({ kind: 'label-run', payload: { label: id, again: true } })
+  expect(w.acts.filter(a => a.kind === 'notice-dismiss').map(a => a.payload.id)).toEqual(['n6'])
+  await band.unmount()
 })

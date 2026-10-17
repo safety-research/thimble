@@ -17,25 +17,30 @@
 import { useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
-import { api } from '../lib/api'
+import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { dismissNotice, noticeActions, useNotices, useNoticesRead, usePageNotices } from '../lib/notices'
 import { refreshProposals } from '../lib/proposals'
+import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { Notice, NoticeAction } from '../lib/types'
 import type { NoticeRow as NoticeRowT } from './model'
 import { proposalsOff } from './ProposalCard'
 
 /** The actions a notice's button can run; one with another `do` shows no button. */
-export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out']
+export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out', 'label-open', 'label-again']
+
+/** The actions that name what they act on in `slug`. */
+const SLUGGED: readonly string[] = ['view-retry', 'sign-out', 'label-open', 'label-again']
 
 /** Whether `action` is one this page can run. Pure. */
-export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && ((action.do !== 'view-retry' && action.do !== 'sign-out') || !!action.slug)
+export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && (!SLUGGED.includes(action.do) || !!action.slug)
 
 /** Run a notice's action: true when the failure is answered and the notice can go (Open Settings leaves it). A fix the
  * server could not start (a check that cannot run now, a build refused at once) throws with its reason, which the
  * toast says, and the notice stays. Try again names the notice's key, so the check that failed is the one run again.
- * Sign it out signs out the browser a sign-in notice names (its slug). */
+ * Sign it out signs out the browser a sign-in notice names (its slug). A label's notice opens the label (and stays) or
+ * runs it again on the units its last run could not label. */
 export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<Notice, 'key'>): Promise<boolean> {
   switch (action.do) {
     case 'proposals-retry': {
@@ -59,6 +64,13 @@ export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<
     case 'sign-out':
       if (!action.slug) return false
       await api.signOut(action.slug, ws)
+      return true
+    case 'label-open':
+      if (action.slug) teleport(`concept:${action.slug}`)
+      return false
+    case 'label-again':
+      if (!action.slug) return false
+      await labelApi.applyAgain(ws, action.slug)
       return true
     default:
       return false

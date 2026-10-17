@@ -299,9 +299,19 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
  *  notice's Sign it out, which signs that browser out and takes its notice away; or `view-proposals-off`, as
  *  don't ask again, which dismisses it. The notice goes at once; one that thimble refuses stays, with why in a toast.
  *  `settings` (open settings) says in a toast where thimble's config is, which the terminal has in place of the
- *  browser's Settings, and leaves the notice. */
+ *  browser's Settings, and leaves the notice. A label's `label-open` opens its panel and leaves the notice; its
+ *  `label-again` runs it again on the units its last run could not label, in its panel, which says how the run goes
+ *  (a new failure brings a new notice) (bug hunt C17: the analyst always has a next step). */
 export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<void> {
   if (!rt.sc) return
+  if (a.act === 'label-open') return openLabelAt(cx, a.slug, '')
+  if (a.act === 'label-again') {
+    await dismissNotice(cx, n)
+    await openLabelAt(cx, a.slug, '')
+    const name = (await cx.panel())?.title || 'label'
+    void runLabel(cx, a.slug, name, 0, { changed: false, reads: '', again: true })
+    return
+  }
   if (a.act === 'settings') {
     cx.toast(`thimble: Settings are in the browser workbench (/thimble browser) and in thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)
     return

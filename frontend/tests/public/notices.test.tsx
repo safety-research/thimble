@@ -120,4 +120,14 @@ describe('the strip above the composer, and the rows', () => {
       await act(async () => setBrowserId(''))
     }
   })
+  test("a label whose records Claude's safeguards refused runs again on them from its notice, and links the label (bug hunt C17)", async () => {
+    open = [{ id: 'l1', key: 'label:k1', kind: 'label', agent: 'Label: confused', text: "The label confused couldn't label 184 of 2,064 records: Claude's safeguards refused them.", action: [{ label: 'Run again on these 184', do: 'label-again', slug: 'k1' }, { label: 'See the label', do: 'label-open', slug: 'k1' }] }]
+    const el = await strip('nt-label-again')
+    const acts = () => [...el.querySelectorAll('.chat-notice-act')]
+    expect(acts().map((b) => b.textContent)).toEqual(['Run again on these 184', 'See the label'])
+    await click(acts().find((b) => b.textContent === 'Run again on these 184'))
+    await settle()
+    expect(sent).toEqual(['POST /api/ws/nt-label-again/concepts/k1/apply/again', 'POST /api/ws/nt-label-again/notices/l1/dismiss'])
+    expect(el.querySelector('.chat-notice')).toBeNull()
+  })
 })

@@ -19,6 +19,9 @@ a list of them, `do` one of ACTIONS:
   sign-out         POST /api/ui/signout (the browser's id in slug)
   ticket-open      a code ticket that passed its checks opened in the browser workbench, where the analyst allows its
                    change (the ticket's id in `slug`)
+  label-open       the label opened (its id in `slug`): the link of a label's notice
+  label-again      POST /api/ws/{c}/concepts/{slug}/apply/again: a prompt label run again on the units its last run
+                   could not label (concepts.start_again)
 
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
 (a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
@@ -80,7 +83,8 @@ _loop: asyncio.AbstractEventLoop | None = None
 TYPE = "notice"  # the event's type on the workspace stream, and the row's type in a chat's log
 API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
 # shows as its API error card: no row, and the foreground strip leaves it out while main is open
-ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out", "ticket-open")
+ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out", "ticket-open", "label-open",
+           "label-again")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
 # keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"

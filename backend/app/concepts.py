@@ -4,6 +4,8 @@
     workspaces/<c>/labels/<id>.jsonl    one row per application: {ref, label, confidence, rationale?, source, ts},
                                         plus cover and clear lines for runs over whole files (labels_store, covers)
     workspaces/<c>/labels/<id>.sqlite   the store (labels_store.py), derived from the jsonl and rebuilt from it
+    workspaces/<c>/labels/<id>.unlabeled.json  {version, refs}: the units a prompt label's last run could not label
+                                        (Claude's safeguards refused them, a call failed), which start_again labels
     workspaces/<c>/filters.json         the filter per scope: {files?, canvas?, report?}
 
 Kinds: `prompt` sends units to the labels role's model in batches, each batch a part of one model call that subagents of
@@ -36,8 +38,9 @@ Unsure: under each label the terminal panel's Labels view and the label editor l
 then those its classifier was unsure of (confidence under UNSURE_BELOW), least sure first (unsure, labels_store's
 Store.unsure); a record the analyst judged is in neither.
 Notices: a run that fails, or that leaves units it could not label, is told in the foreground (notices.post, under
-`label:<id>`), and so are classifier calls Claude's safeguards switched to the fallback model; a run with no failure
-clears the first (_label_notice).
+`label:<id>`) with a link to the label and, for units it could not label, an act that runs it again on those alone
+(start_again); so are classifier calls Claude's safeguards switched to the fallback model; a run with no failure clears
+the first (_label_notice). Main hears how many units got no value in `label_done` (unlabeled_text).
 """
 from __future__ import annotations
 
@@ -248,6 +251,38 @@ def concepts_dir(ws: Path) -> Path:
 
 def labels_file(ws: Path, concept_id: str) -> Path:
     return ws / "labels" / f"{concept_id}.jsonl"
+
+
+AGAIN_NONE = "The label's last run left no unit without a value, so there is nothing to run again."
+
+
+def unlabeled_file(ws: Path, concept_id: str) -> Path:
+    """The units a prompt label's last run could not label (module note), which start_again labels."""
+    return ws / "labels" / f"{concept_id}.unlabeled.json"
+
+
+def unlabeled_refs(ws: Path, concept: dict) -> list[str]:
+    """The refs of the units the label's last run could not label, while the label is still of the version that run
+    had; [] for none."""
+    try:
+        raw = json.loads(unlabeled_file(ws, concept["id"]).read_text("utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(raw, dict) or raw.get("version") != concept.get("version"):
+        return []
+    return [str(r) for r in raw.get("refs") or [] if isinstance(r, str) and r]
+
+
+def _keep_unlabeled(ws: Path, concept: dict, refs: list[str]) -> None:
+    """Keep the units a run could not label for start_again, or forget them when it labeled every unit."""
+    path = unlabeled_file(ws, concept["id"])
+    if not refs:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"version": concept.get("version"), "refs": refs}), "utf-8")
+    os.replace(tmp, path)
 
 
 def filters_file(ws: Path) -> Path:
@@ -1581,6 +1616,21 @@ def within_units(ws: Path, corpus_dir: Path, sources: list[dict], within: dict, 
     return out
 
 
+def _ref_units_of(corpus_dir: Path, sources: list[dict], refs: set[str]) -> list[Unit]:
+    """The record units of the sources that `refs` name (a run again's, run_apply), in corpus order. Blocking (a
+    thread)."""
+    by_file: dict[str, set[str]] = {}
+    for ref in refs:
+        at = records.split(ref)
+        if at is not None:
+            by_file.setdefault(at[0], set()).add(records.canon(ref))
+    out: list[Unit] = []
+    for src in sources:
+        if src["path"] in by_file:
+            out += ref_units(corpus_dir, src["path"], src["kind"], by_file[src["path"]])
+    return out
+
+
 def ref_units(corpus_dir: Path, rel: str, kind: str, wanted: Any) -> list[Unit]:
     """The record units these refs name in one file, in the file's order: lines read CHUNK at a time (line_units), any
     other record read by its ref. A ref the file does not hold is left out. Blocking."""
@@ -2008,6 +2058,9 @@ _subs: dict[tuple[str, str], set[asyncio.Queue]] = {}
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 _cancels: dict[tuple[str, str], threading.Event] = {}
 _tasks: dict[tuple[str, str], asyncio.Task] = {}
+# (workspace, concept id) -> the refs of the units the prompt run ending now could not label (_apply_prompt), which
+# run_apply keeps for start_again (_keep_unlabeled)
+_unlabeled_now: dict[tuple[str, str], list[str]] = {}
 _pool: ProcessPoolExecutor | None = None
 _pool_workers = 1
 
@@ -2572,6 +2625,11 @@ FALLBACK_MESSAGE = "Downgrading {model} to {fallback}"
 LABEL_FAILED_TEXT = "The label {name} failed: {why}."
 LABEL_UNITS_FAILED_TEXT = "The label {name} couldn't label {failed} of {total}: {why}."
 LABEL_FALLBACK_TEXT = "Claude's safeguards switched {n} of the label {name}'s calls from {model} to {fallback}."
+# a label notice's acts (notices.ACTIONS): the link to the label, and a run again on the units its last run could not
+# label (start_again), whose own words say its count and replace the safeguards' "rephrase" fix
+LABEL_OPEN = {"label": "See the label", "do": "label-open"}
+LABEL_AGAIN = {"label": "Run again on these {n}", "do": "label-again"}
+LABEL_REFUSED_WHY = "Claude's safeguards refused them"
 
 
 def _reason_key(msg: str) -> str:
@@ -2581,16 +2639,18 @@ def _reason_key(msg: str) -> str:
     return head if sep and _STATUS_HEAD.fullmatch(head) else msg
 
 
-def _failures_why(failures: list) -> tuple[str, Any]:
+def _failures_why(failures: list, refused: str | None = None) -> tuple[str, Any]:
     """The words of a notice for a run's failures, [message, units] each (the run's `failures`), and the action that
     fixes the first that has one: one reason in its words, several each after how many units it failed, so they add up
-    to the run's failed units and no reason shows twice."""
+    to the run's failed units and no reason shows twice. With `refused`, the words of the units Claude's safeguards
+    refused, whose fix is the notice's run again."""
     from . import notices  # noqa: PLC0415
 
     merged: dict[str, int] = {}
     fix = None
     for msg, n in failures:
-        words, f = notices.reason(msg, server=True)
+        words, f = ((refused, None) if refused and notices.failure_class(msg) == "refused"
+                    else notices.reason(msg, server=True))
         merged[words] = merged.get(words, 0) + int(n)
         fix = fix or f
     if len(merged) == 1:
@@ -2602,7 +2662,8 @@ def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, 
                   message: str | None = None, failures: list | None = None) -> None:
     """A run of the label ended: an `error`, or `failed` units it could not label, is told in the foreground under
     `label:<id>`, and a run with neither clears it. A prompt label's run says why by its `failures` (_failures_why).
-    Never raises."""
+    The notice links the label (LABEL_OPEN), and for units a prompt label's run could not label it offers a run again on
+    those alone (LABEL_AGAIN, start_again), the next step whatever the reason. Never raises."""
     from . import notices  # noqa: PLC0415
 
     key, name = f"label:{concept['id']}", str(concept.get("name") or concept["id"])
@@ -2610,18 +2671,26 @@ def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, 
         if error is None and not failed:
             notices.clear(c, key)
             return
+        # a label on disk, not one that failed to start
+        real = "kind" in concept and bool(ID_RE.match(str(concept["id"])))
+        again = (real and not error and concept["kind"] == "prompt"
+                 and bool(unlabeled_refs(_ws(c), concept)))
         if error is not None:
             why, fix = notices.reason(error, server=True)
             text = LABEL_FAILED_TEXT.format(name=name, why=why)
         else:
             problems = [m for m in str(message or "").split("; ") if m and not m.startswith("Downgrading ")]
-            why, fix = (_failures_why(failures) if failures else
+            why, fix = (_failures_why(failures, LABEL_REFUSED_WHY if again else None) if failures else
                         notices.reason("; ".join(problems) or NO_LABELS, server=True))
             noun = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}.get(str(concept.get("unit")),
                                                                                          "record")
             of = f"{int(total):,} {noun}s" if isinstance(total, int) and total else f"its {noun}s"
             text = LABEL_UNITS_FAILED_TEXT.format(name=name, failed=f"{failed:,}", total=of, why=why)
-        notices.post(c, kind="label", text=text, agent=f"Label: {name}", action=fix, key=key)
+        acts = [*([{**LABEL_AGAIN, "label": LABEL_AGAIN["label"].format(n=f"{failed:,}"), "slug": concept["id"]}]
+                  if again else []),
+                *([fix] if fix else []),
+                *([{**LABEL_OPEN, "slug": concept["id"]}] if real else [])]
+        notices.post(c, kind="label", text=text, agent=f"Label: {name}", action=acts or None, key=key)
     except Exception:  # noqa: BLE001 — the run has ended either way
         log.exception("the end of a run of the label %s was not told", key)
 
@@ -2732,6 +2801,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
     cut_refs: list[str] = []  # the whole files or runs read in part, in order
     cut_tokens: list[int] = []  # the tokens sent of each, as its call counted them or estimated (CHARS_PER_TOKEN)
     cut_short = 0  # of them, the JSON documents read whole with their long parts shortened (fit_json), not cut
+    unlabeled: list[str] = []  # the refs of the units no call labeled, in order (start_again labels them)
 
     # why units failed, by reason (_reason_key): its first message and the units it failed, so a reason many calls
     # give is said once, with all of its units
@@ -2863,6 +2933,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 cut_short += it.short and not it.cut
             if r is None:
                 n_failed += 1
+                unlabeled.append(it.unit.ref)
             else:
                 rows.append(_row(it.unit.ref, r["label"], r["confidence"], "model", r["rationale"] or None, r.get("spans"), it.unit.line))
         return rows, n_failed, n_skipped
@@ -2947,6 +3018,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         if cut or short or cancel.is_set():
             _progress(c, concept["id"], message=message(), **({"cut": read} if read else {}))
         _progress(c, concept["id"], skipped=skipped, failures=[list(f) for f in failures.values()] or None)
+        _unlabeled_now[key] = unlabeled
         if run_call is not None:
             await run_call.close()
     finally:
@@ -3610,16 +3682,33 @@ def _write_units(units_file: Path, units: Iterable[Unit]) -> None:
 
 
 def _record_application(ws: Path, concept_id: str, app: dict, calibration: dict | None = None,
-                        label_stats: dict | None = None, taught: dict[str, str] | None = None) -> dict | None:
+                        label_stats: dict | None = None, taught: dict[str, str] | None = None,
+                        merge: bool = False) -> dict | None:
     """Append a run summary to the stored concept (re-read: it may have changed meanwhile) and, after a completed
     run, store the recomputed calibration, the rows it wrote for its examples (`taught`, which ends its `teaching`) and
-    the labels file's stats with its key and step its revision, since the run changed its rows (note_change)."""
+    the labels file's stats with its key and step its revision, since the run changed its rows (note_change). With
+    `merge`, a run again over the units the last run could not label (start_again): the last run's record takes in what
+    it labeled and how many units are still without a value, with the run itself under `again`."""
     concept = read_concept(ws, concept_id)
     if concept is None:
         return None
+    last = concept["applications"][-1] if concept["applications"] else None
+    merge = merge and isinstance(last, dict) and last.get("status") == "done" and app.get("status") == "done"
     if app.get("status") == "done":
-        note_change(concept, "ran", ran_text(concept["unit"], app.get("total")))
-    concept["applications"] = (concept["applications"] + [app])[-APPLICATIONS_KEPT:]
+        note_change(concept, "ran", ran_text(concept["unit"], app.get("total"), again=merge))
+    if merge:
+        assert isinstance(last, dict)
+        merged = {**last, "labeled": int(last.get("labeled") or 0) + int(app.get("labeled") or 0),
+                  "failed": int(app.get("failed") or 0),
+                  "matches": int(last.get("matches") or 0) + int(app.get("matches") or 0),
+                  "message": app.get("message"),
+                  "again": {k: app.get(k) for k in ("ts", "total", "labeled", "failed", "created_by")}}
+        merged.pop("refused", None)
+        if app.get("refused"):
+            merged["refused"] = app["refused"]
+        concept["applications"] = [*concept["applications"][:-1], merged]
+    else:
+        concept["applications"] = (concept["applications"] + [app])[-APPLICATIONS_KEPT:]
     if calibration is not None:
         concept["calibration"] = calibration
     if taught is not None:
@@ -3653,13 +3742,21 @@ def _patterns(paths: Any) -> list[str]:
 
 async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, limit: int | None = None, created_by: str = "user",
                     *, comment: bool = True, run_id: str | None = None, started: str | None = None,
-                    sources: list[dict] | None = None) -> dict:
+                    sources: list[dict] | None = None, again: bool = False) -> dict:
     """Apply a concept over its unit's scope, write the label rows and return the run summary. start_apply runs this as a
     task. One run at a time per concept. A prompt kind always carries the analyst's latest values as few-shot examples
-    (few_shot_examples), and the agreement it reports leaves those values out (held_out).
+    (few_shot_examples), and the agreement it reports leaves those values out (held_out). With `again`, a prompt label
+    runs only over the units its last run could not label (unlabeled_refs), and that run's record takes in what this one
+    labeled (_record_application `merge`).
     Raises HTTPException for a missing concept, a bad regex, no matching files or a fatal error."""
     ws, concept = load_concept(c, concept_id)
-    if concept["trial"] and not limit:
+    again_refs: set[str] | None = None
+    if again:
+        found = await asyncio.to_thread(unlabeled_refs, ws, concept) if concept["kind"] == "prompt" else []
+        if not found:
+            raise HTTPException(409, AGAIN_NONE)
+        again_refs, limit = set(found), None
+    if concept["trial"] and not limit and not again:
         # a trial becomes a label once it runs on everything
         concept["trial"] = False
         write_concept(ws, concept)
@@ -3703,7 +3800,15 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             if unit in FILE_UNITS:
                 index = await _index_sources(c, concept_id, corpus_dir, sources, unit, cancel)
                 matched = index["total"]
-                if within:
+                if again_refs is not None:
+                    # the units the last run could not label: a record's read by its ref, a whole file or run picked
+                    # from the stream below
+                    if unit == "record":
+                        units = await asyncio.to_thread(_ref_units_of, corpus_dir, sources, again_refs)
+                        total = len(units)
+                    else:
+                        total = len(again_refs)
+                elif within:
                     parent = read_concept(ws, within["label"])
                     if parent is None:
                         raise HTTPException(400, "within: the label this one runs within is gone; apply it again with "
@@ -3732,13 +3837,15 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             else:
                 units = await asyncio.to_thread(scope_units, c, unit)
                 matched = len(units)
-                if limit:  # a trial over cards or sentences, spread over the canvas or the document as one over files is
+                if again_refs is not None:
+                    units = [u for u in units if u.ref in again_refs]
+                elif limit:  # a trial over cards or sentences, spread over the canvas or the document as one over files is
                     units = [units[i] for i in spread(len(units), limit)]
                 total = len(units)
             _progress(c, concept_id, total=total, matched_total=matched)
             # what the kinds below run over: the sampled records of a trial or the records `within` names, else the
             # whole scope
-            sampled = unit == "record" and (bool(limit) or bool(within))
+            sampled = unit == "record" and (bool(limit) or bool(within) or again_refs is not None)
             if unit == "record" and not sampled:
                 # a file read by another reader than lines gets rows of its own refs: what an earlier run left on its
                 # lines goes first, so no cover of those lines counts records the file no longer has
@@ -3774,6 +3881,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                 cap = whole_read_chars(c, concept) if unit in WHOLE_UNITS else UNIT_TEXT_MAX
                 stream: Iterator[Unit] = (iter_units(corpus_dir, sources, unit, cap) if unit in FILE_UNITS and not sampled
                                           else iter(units))
+                if again_refs is not None and unit in WHOLE_UNITS:
+                    stream = (u for u in stream if u.ref in again_refs)
                 if unit == "record":
                     stream = iter(await asyncio.to_thread(picked_as_changes, corpus_dir, units)) if sampled else as_changes(stream)
                 labeled, failed, message = await _apply_prompt(c, concept, stream, out, cancel, files=[s["path"] for s in sources],
@@ -3814,13 +3923,19 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             # `limit` and `stopped` say what the run covered, which an apply of the same predicate reads (covered)
             # `cut`, the whole files or runs a prompt label read only in part (read_cut), stays on the label with its run
             skipped = int(state.get("skipped") or 0)  # units with no words, which need no label (a prompt label's)
+            refused = refused_units(state.get("failures"))  # of the failed, those Claude's safeguards refused
             app = {"ts": started, "paths": patterns, "total": total, "matched_total": matched, "labeled": labeled, "failed": failed,
-                   **({"skipped": skipped} if skipped else {}),
+                   **({"skipped": skipped} if skipped else {}), **({"refused": refused} if refused else {}),
                    "matches": int(state.get("matches") or 0), "status": "done", "message": message, "created_by": created_by,
                    "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set(),
                    "within": within, "within_rev": within_rev, **({"cut": state["cut"]} if state.get("cut") else {})}
-            concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats), taught)
+            merge = again_refs is not None
+            concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats), taught,
+                                           merge=merge)
                        or {**concept, "calibration": calibration})
+            await asyncio.to_thread(_keep_unlabeled, ws, concept, _unlabeled_now.pop(key, []))
+            if merge and concept.get("applications"):  # the run it ran again for, with what this one labeled taken in
+                app = concept["applications"][-1]
             summary = {**app, "run_id": run_id, "concept": concept_id, "name": concept["name"], "unit": concept["unit"],
                        "kind": concept["kind"], "labels_path": str(out),
                        **stats, "est_precision": concept["calibration"]["est_precision"], "calibration": concept["calibration"]}
@@ -3829,8 +3944,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             whole = not cancel.is_set() and not limit and not failed and state.get("files_total") is not None
             _progress(c, concept_id, status="done", done=labeled + failed + skipped, labeled=labeled, failed=failed, message=message,
                       eta_s=None, phase=None, files_done=state["files_total"] if whole else state.get("files_done", 0), summary=summary)
-            _label_notice(c, concept, failed=failed if not cancel.is_set() else 0, total=total, message=message,
-                          failures=state.get("failures"))
+            _label_notice(c, concept, failed=failed if not cancel.is_set() else 0, total=app.get("total", total),
+                          message=message, failures=state.get("failures"))
         except asyncio.CancelledError:
             _progress(c, concept_id, status="error", message="cancelled", eta_s=None, phase=None)
             raise
@@ -3936,7 +4051,7 @@ def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int 
 
 
 async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, limit: int | None = None, created_by: str = "user",
-                      *, comment: bool = True, sources: list[dict] | None = None) -> dict:
+                      *, comment: bool = True, sources: list[dict] | None = None, again: bool = False) -> dict:
     """Begin an apply in the background and return its run record at once: 404 no such concept, 400 no matching files, 409 an
     apply of this concept is already running (`detail.run_id` names it). `sources` are the files scope_sources already found."""
     ws, concept = load_concept(c, concept_id)
@@ -3965,11 +4080,24 @@ async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, l
     record = _run_record(c, concept_id, run_id, started, created_by, patterns, sources)
     task = asyncio.get_running_loop().create_task(
         run_apply(c, concept_id, patterns, limit, created_by, comment=comment, run_id=run_id, started=started,
-                  sources=sources),
+                  sources=sources, again=again),
         name=f"thimble-apply-{concept_id}")
     _tasks[key] = task
     task.add_done_callback(partial(_apply_finished, key))
     return record
+
+
+async def start_again(c: str, concept_id: str, created_by: str = "user") -> dict:
+    """Begin a run of a prompt label over the units its last run could not label (unlabeled_refs; its notice's act, the
+    0.9.0 bug hunt C17), over the files that run read: the run record at once, as start_apply gives it. 409 when no
+    unit is left without a value, or a run of the label is going on."""
+    ws, concept = load_concept(c, concept_id)
+    if concept["kind"] != "prompt" or not await asyncio.to_thread(unlabeled_refs, ws, concept):
+        raise HTTPException(409, AGAIN_NONE)
+    last = concept["applications"][-1] if concept["applications"] else {}
+    files = concept["unit"] in FILE_UNITS
+    paths = (_patterns(last.get("paths")) or glob_patterns(concept["glob"])) if files else []
+    return await start_apply(c, concept_id, paths, None, created_by, again=True)
 
 
 async def wait_apply(c: str, concept_id: str, timeout: float | None = None, enough: int | None = None) -> dict:
@@ -4270,10 +4398,40 @@ def redefined_text(before: list[str], values: list[str]) -> str:
     return f"redefined, its values now {', '.join(values)}" if list(before) != list(values) else "redefined"
 
 
-def ran_text(unit: str, total: Any) -> str:
+def ran_text(unit: str, total: Any, again: bool = False) -> str:
     one, many = UNIT_NAMES.get(unit, ("unit", "units"))
     n = int(total or 0)
-    return f"run over {n:,} {one if n == 1 else many}"
+    return f"run {'again on' if again else 'over'} {n:,} {one if n == 1 else many}"
+
+
+def refused_units(failures: Any) -> int:
+    """Of a run's failed units (its `failures`, [message, units] each), those Claude's safeguards refused."""
+    from . import notices  # noqa: PLC0415
+
+    out = 0
+    for f in failures or []:
+        if isinstance(f, (list, tuple)) and len(f) == 2 and notices.failure_class(f[0]) == "refused":
+            out += int(f[1] or 0)
+    return out
+
+
+def unlabeled_text(concept: dict, summary: dict) -> str:
+    """What `label_done` tells main of the units a run could not label (label_done-unlabeled): how many of how many,
+    and why in a few words; '' when it labeled every unit or was stopped."""
+    failed = int(summary.get("failed") or 0)
+    if failed <= 0 or summary.get("stopped"):
+        return ""
+    one, many = UNIT_NAMES.get(concept["unit"], ("unit", "units"))
+    total = summary.get("total")
+    units = (f"{failed:,} of its {int(total):,} {many}" if isinstance(total, int) and total
+             else f"{failed:,} {one if failed == 1 else many}")
+    refused = min(failed, int(summary.get("refused") or 0))
+    why = ("Claude's safeguards refused them" if refused == failed else
+           f"Claude's safeguards refused {refused:,} and the model calls of the rest failed" if refused else
+           "their model calls failed")
+    from . import tools  # noqa: PLC0415
+
+    return tools.hint("label_done-unlabeled", units=units, why=why)
 
 
 def changed_since(concept: dict, rev: int) -> str:
@@ -4964,10 +5122,11 @@ def _check_takeaways(c: str, cards: list[dict]) -> None:
             card_check.start(c, str(cell["id"]), str(rec.get("author") or card_check.MAIN))
 
 
-def tell_when_done(c: str, concept_id: str) -> None:
+def tell_when_done(c: str, concept_id: str) -> asyncio.Task:
     """Post `label_done` to main once the label's running apply ends and thimble ran the cards that read it again
-    (rerun_readers): its counts, its card, and those cards whose takeaway is stale or that failed, with their new output.
-    A run that fails or is stopped posts nothing."""
+    (rerun_readers): its counts, how many units got no value and why (unlabeled_text), its card, and those cards whose
+    takeaway is stale or that failed, with their new output. A run that fails or is stopped posts nothing. Returns the
+    task that waits, which a process that ends with the run awaits."""
     from . import events
 
     key = (c, concept_id)
@@ -4993,6 +5152,9 @@ def tell_when_done(c: str, concept_id: str) -> None:
         told = ", ".join(f"{v} {n:,}" for v, n in counts.items()) or "no values"
         if (summary.get("cut") or {}).get("line"):
             told += f". {summary['cut']['line']}"
+        # the units it could not label (bug hunt C17: main heard only the counts of those it labeled)
+        if unlabeled := unlabeled_text(concept, summary):
+            told += f". {unlabeled.rstrip('.')}"
         from . import cardrun  # noqa: PLC0415
 
         if reran and cardrun.defers(c):  # terminal mode: they ran nowhere (rerun_readers)
@@ -5015,6 +5177,7 @@ def tell_when_done(c: str, concept_id: str) -> None:
     task_ = asyncio.get_running_loop().create_task(watch(), name=f"thimble-label-done-{concept_id}")
     _watching.add(task_)
     task_.add_done_callback(_watching.discard)
+    return task_
 
 
 def tell_main(c: str, concept: dict, card: dict | None) -> bool:
@@ -5261,6 +5424,7 @@ def _forget_concept(c: str, ws: Path, concept_id: str, trash: Path | None) -> No
         else:
             path.unlink(missing_ok=True)
     labels_store.remove(labels_file(ws, concept_id))
+    unlabeled_file(ws, concept_id).unlink(missing_ok=True)
     _runs.pop((c, concept_id), None)
     _cancels.pop((c, concept_id), None)
     _clear_filters_of(c, concept_id)
@@ -5344,6 +5508,15 @@ async def apply_route(c: str, concept_id: str, body: ApplyBody, response: Respon
     if result.get("partial"):
         response.status_code = 202
     return result
+
+
+@router.post("/ws/{c}/concepts/{concept_id}/apply/again")
+async def again_route(c: str, concept_id: str) -> dict:
+    """A notice's Run again on these: the label run over the units its last run could not label (start_again), answered
+    with the run record; main hears of it once it ends (`label_done`, tell_when_done). 409 when none is left."""
+    record = await start_again(c, concept_id, "user")
+    tell_when_done(c, concept_id)
+    return record
 
 
 @router.get("/ws/{c}/concepts/{concept_id}/apply/runs")

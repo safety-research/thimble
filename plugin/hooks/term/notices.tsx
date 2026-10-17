@@ -36,11 +36,13 @@ export function modActWords(act: string): string {
 
 /** The words of a workspace notice's act on its row (panel.tsx NoticeAct), which say what its press does: `settings`
  *  says in a toast where thimble's config is, the terminal's Settings (`how to fix it`); `ticket-open` opens the ticket
- *  in the browser workbench, where the analyst allows it (`allow in the browser ›`); the others (`try again`, `retry`,
- *  `turn off view proposals`) as thimble words them. */
+ *  in the browser workbench, where the analyst allows it (`allow in the browser ›`); `label-open` opens the label's
+ *  panel (`see the label ›`); the others (`try again`, `retry`, `run again`, `run again on these 184`, `turn off view
+ *  proposals`) as thimble words them. */
 export function noticeActWords(a: { act: string; label: string }): string {
   if (a.act === 'settings') return 'how to fix it'
   if (a.act === 'ticket-open') return 'allow in the browser ›'
+  if (a.act === 'label-open') return 'see the label ›'
   return oneLine(a.label || a.act).toLowerCase()
 }
 
