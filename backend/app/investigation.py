@@ -276,6 +276,7 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
             for rec in history(stored, last):
                 yield rec
             last = max(last, _top(stored))
+            stored.clear()  # sent: an open stream keeps none of the log's history, which grows with the session
             while True:
                 try:
                     got = await asyncio.wait_for(q.get(), timeout=EVENTS_POLL_S)

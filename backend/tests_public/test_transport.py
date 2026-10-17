@@ -131,6 +131,34 @@ async def test_another_process_s_event_reaches_the_browser_s_stream_when_one_of_
         await stream.aclose()
 
 
+async def test_an_open_stream_keeps_none_of_the_history_it_replayed(ws):
+    """The browser's stream replays the workspace's log from its start, then stays open for the session: once the
+    history is sent the stream holds none of it, since the log grows with the session and each tab holds a stream."""
+    import contextlib  # noqa: PLC0415
+    from types import SimpleNamespace  # noqa: PLC0415
+
+    import asyncio  # noqa: PLC0415
+
+    from app import investigation  # noqa: PLC0415
+
+    for n in range(50):
+        investigation.emit(CORPUS, investigation.MAIN, {"type": "chat", "chat": "main", "n": n})
+    stream = (await investigation._stream(CORPUS, investigation.MAIN, SimpleNamespace(headers={}))).body_iterator
+    try:
+        sent = 0
+        while (rec := await asyncio.wait_for(anext(stream), 2.0)).get("event") != "live":
+            sent += "id" in rec
+        assert sent >= 50
+        stream_task = asyncio.ensure_future(anext(stream))  # the stream goes on past the history, to its wait
+        await asyncio.sleep(0.05)
+        assert stream.ag_frame.f_locals["stored"] == [], "the open stream still holds the history it sent"
+        stream_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await stream_task
+    finally:
+        await stream.aclose()
+
+
 # ----------------------------------------------------------------------------- thimble act
 
 
