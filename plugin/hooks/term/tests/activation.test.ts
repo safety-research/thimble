@@ -1,7 +1,7 @@
-// thimble on from the session's start, as a regular Claude Code plugin (the owner, 10-16): one `thimble activate --mod`,
-// the push of `load_thimble` to the shim with $.mcp.call; a session with no person at the terminal stays off; a refused
-// folder stays off quietly; a hook that throws still answering the Read once; /clear and /resume rekeying; tools that
-// Claude Code lists a moment after the push, and tools it never lists.
+// thimble on from the session's start, as a regular Claude Code plugin (the owner, 10-16): one `thimble activate --mod`
+// and no push of `load_thimble` (the first prompt carries the guide); a session with no person at the terminal stays
+// off; a refused folder stays off quietly; a hook that throws still answering the Read once; /clear and /resume
+// rekeying; tools that Claude Code lists a moment after the start, and tools it never lists.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
@@ -17,17 +17,23 @@ async function dataRead($: Engine, w: World, path = 'events.jsonl', agentId?: st
   return call($, 'Read', { file_path: `${CWD}/${path}` }, agentId)
 }
 
-test('a session start turns thimble on, as a regular plugin: one activate with --mod, one push of load_thimble; reading data starts nothing more', SLOW, async ($, on) => {
+// bug hunt F3: a push at the start was a tool use of the plugin's, which Claude Code asks about in Manual mode before
+// the person has typed anything; the shim lists thimble's tools once it sees the session's marker
+test('a session start turns thimble on, as a regular plugin: one activate with --mod and no load_thimble call; the first prompt carries the guide; reading data starts nothing more', SLOW, async ($, on) => {
   const w = world(on, { active: false })
   reads(w)
   corpus(w, ['events.jsonl', 'prs.csv'])
   await startSession($, w)
   expect(w.activations).toEqual([[CLI, 'activate', '--cwd', CWD, '--session', SID, '--via', 'command', '--mod', '--json']])
-  expect(w.mcp).toEqual([{ server: 'plugin:thimble:thimble', tool: 'load_thimble' }])
+  expect(w.mcp).toEqual([])
+  expect(trailOf(w)).toContain('no-push')
+  const p = (await $.prompt.submit({ text: 'what is in this folder?', origin: { kind: 'composer' }, wait: false } as never)) as { context?: string[] }
+  expect(p.context).toEqual([GUIDE])
   // a data read later: the tool's own result, and no second activation
   const r = await dataRead($, w)
   expect(r.text).toBe('the file')
   expect(w.activations.length).toBe(1)
+  expect(w.mcp).toEqual([])
   expect(w.sleeps).toBe(0)
 })
 

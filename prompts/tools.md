@@ -629,7 +629,7 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
 
 ## read_call
 
-Get a part of your task: its text and its pictures. When you have a part that you did not answer, you get that part again. Else you get the next part.
+thimble's card check reads the card it checks. Get a part of your task: its text and its pictures. When you have a part that you did not answer, you get that part again. Else you get the next part.
 
 ```json
 {
@@ -640,7 +640,7 @@ Get a part of your task: its text and its pictures. When you have a part that yo
 
 ## send_answer
 
-Send your answer to a part of your task. The answer must agree with the schema in your task. When it does not agree, the result gives the errors. Then correct the answer and send it again. When it agrees, the result gives your next part, if there is one.
+thimble's card check sends what it found about the card it checks. Send your answer to a part of your task. The answer must agree with the schema in your task. When it does not agree, the result gives the errors. Then correct the answer and send it again. When it agrees, the result gives your next part, if there is one.
 
 ```json
 {
@@ -674,7 +674,7 @@ The code was stopped after {limit}. Make it faster and run it again with `edit_c
 
 ## card-run
 
-The card's code did not run yet. Run this command with Bash next: `{command}`. thimble shows the card when its code has run.
+The card's code did not run yet. Next, run this command with Bash exactly as it is, with no `cd` before it: `{command}`. thimble shows the card when its code has run.
 
 ## card-run-check-wrote
 
@@ -810,7 +810,7 @@ Checks are off in thimble's Settings, so no check ran. Ask the analyst to turn C
 
 ## label-run
 
-The label's code did not run yet. Run this command with Bash next: `{command}`. It runs your function on each unit and prints the label's result with its counts.
+The label's code did not run yet. Next, run this command with Bash exactly as it is, with no `cd` before it: `{command}`. It runs your function on each unit and prints the label's result with its counts.
 
 ## label_done-unlabeled
 
@@ -818,7 +818,7 @@ The label's code did not run yet. Run this command with Bash next: `{command}`. 
 
 ## cards-stale
 
-{cards} read this label before it changed, so their outputs are old. When the label's counts are final, run them again with Bash: `{command}`. It prints each card whose takeaway the new output leaves behind, or that fails, with that output. Write each of those takeaways again with `edit_card`, and fix each card that fails.
+{cards} read this label before it changed, so their outputs are old. When the label's counts are final, run them again with this command in Bash, exactly as it is, with no `cd` before it: `{command}`. It prints each card whose takeaway the new output leaves behind, or that fails, with that output. Write each of those takeaways again with `edit_card`, and fix each card that fails.
 
 ## show_label-not-files
 
@@ -1442,6 +1442,12 @@ There is no check named {check}. Call `run_check` again with its `instructions` 
 ## run_check-no-passage
 
 None of {passages} is a passage of a written document. `read_ref` on a document gives each passage's id.
+
+## check-task-inline
+
+Your task follows: the check's instructions, the document with the id of every passage, the passages to comment on and what the workspace holds about them. All of it is here, so do not read a task file. Keep your scratch files in your work folder, {work}.
+
+{task}
 
 ## check-task-file
 

@@ -540,9 +540,11 @@ export const register: Register = (on, options) => {
       rt.waiting = (await cx.pending()) !== null
       return started
     }
-    // the `thimble` command: thimble on at once, and the browser opened on home
+    // the `thimble` command: thimble on at once, and the browser opened on home. Neither start calls load_thimble, which
+    // Claude Code would ask about in Manual mode before the person typed anything (bug hunt F3): the first prompt
+    // carries the guide
     if ((await cx.env('THIMBLE_OPEN').catch(() => undefined)) === '1') {
-      const turned = await activateNow(cx, 'launcher')
+      const turned = await activateNow(cx, 'launcher', false)
       if (turned.ok) await openInBrowser(cx, 'home')
       return started
     }
@@ -550,7 +552,7 @@ export const register: Register = (on, options) => {
     // (the owner, 10-16 22:45); a folder thimble refuses (the home folder, `/`) stays off without a notice
     if (act.interactive && act.surface === 'terminal') {
       act.refusedSaid = true
-      await activateNow(cx, 'command')
+      await activateNow(cx, 'command', false)
       act.refusedSaid = false
     }
     return started

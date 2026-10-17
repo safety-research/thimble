@@ -12,7 +12,9 @@
 //   1. `thimble activate --mod --json` (C2): the folder registered, the session marker written
 //   2. the push: `load_thimble` called on the shim with $.mcp.call (C5), which lists thimble's tools and answers the
 //      guide; then one read of listed.json (C4) to learn whether the tools were listed, and when they were not yet, one
-//      more read LISTED_CHECK_MS later before a notice says so
+//      more read LISTED_CHECK_MS later before a notice says so. At session start there is no push, since Claude Code
+//      asks about it in Manual mode before the person typed anything: the shim lists the tools once it sees the marker
+//      (its watch), and only the later read of listed.json runs
 //   3. thimble.ts told at once (bridgeActivated), the timers and the drawing started, the settings synced after the hook
 //   4. the guide handed back: as the call's `context` (main's call), as a hidden user row in main's conversation (a
 //      subagent's call), or kept owed for the next delivery point
@@ -260,6 +262,18 @@ async function listedNow(cx: Ctx, home: string, sid: string): Promise<boolean> {
   }
 }
 
+/** The tools:not-listed notice, in plain words with its fix, when the shim still listed no tools of thimble's
+ *  LISTED_CHECK_MS from now. */
+function checkListedLater(cx: Ctx, home: string, sid: string): void {
+  cx.later(LISTED_CHECK_MS, () => {
+    void (async () => {
+      if (await listedNow(cx, home, sid)) return
+      onNoticeAct('tools:not-listed', NOT_LISTED_ACT, () => cx.command('mcp', ''))
+      postNotice(cx, 'tools:not-listed', NOT_LISTED_TEXT, [NOT_LISTED_ACT, 'doctor'])
+    })().catch(() => undefined)
+  })
+}
+
 /** Waits for `p` at most `ms` (a timer of the session's, not a sleep of the hook's), then gives up with null. */
 export function bounded<T>(cx: Ctx, p: Promise<T>, ms: number): Promise<T | null> {
   return new Promise(resolve => {
@@ -292,10 +306,11 @@ export function waitMs(remainingMs: number): number {
 }
 
 /** thimble on in this session from a call's hook: the one activation, started by the first call and awaited by the
- *  others for at most `waitMs(remainingMs)`. The first call's `deliver` says where the guide goes. */
-export async function activateOnce(cx: Ctx, via: string, deliver: Deliver, remainingMs: number): Promise<{ out: Outcome | null; mine: boolean }> {
+ *  others for at most `waitMs(remainingMs)`. The first call's `deliver` says where the guide goes, and `push` whether
+ *  it calls load_thimble (runActivation). */
+export async function activateOnce(cx: Ctx, via: string, deliver: Deliver, remainingMs: number, push = true): Promise<{ out: Outcome | null; mine: boolean }> {
   if (act.flight) return { out: await bounded(cx, act.flight, waitMs(remainingMs)), mine: false }
-  const flight = runActivation(cx, via, deliver)
+  const flight = runActivation(cx, via, deliver, push)
   act.flight = flight
   try {
     const out = await flight
@@ -308,8 +323,11 @@ export async function activateOnce(cx: Ctx, via: string, deliver: Deliver, remai
   }
 }
 
-/** The steps of one activation (see the file's head). */
-async function runActivation(cx: Ctx, via: string, deliver: Deliver): Promise<Outcome> {
+/** The steps of one activation (see the file's head). Without `push` (at session start) there is no load_thimble call,
+ *  which Claude Code asks about in Manual mode as a tool use of the plugin's, before the person has typed anything
+ *  (bug hunt F3): the shim lists thimble's tools by itself once it sees the session's marker, and the guide stays owed
+ *  for the first prompt, which `thimble guide` gives (owedGuide), as after a restore. */
+async function runActivation(cx: Ctx, via: string, deliver: Deliver, push = true): Promise<Outcome> {
   trail(cx, `activate:${via}`)
   const pre = await preScope(cx)
   const sid = await cx.sessionId()
@@ -341,6 +359,13 @@ async function runActivation(cx: Ctx, via: string, deliver: Deliver): Promise<Ou
   // thimble.ts at once, so the thimble:* agent types are registered in this turn
   trail(cx, 'bridge')
   await cx.bridge(activated).catch(err => cx.log(`thimble: bridgeActivated failed: ${String(err).slice(0, 200)}`))
+  if (!push) {
+    trail(cx, 'no-push')
+    await turnOn(cx, activated)
+    act.owed = true
+    checkListedLater(cx, pre.home, sid)
+    return { ok: true, activated, context: null }
+  }
   trail(cx, 'push')
   let guide = ''
   let pushFailed = ''
@@ -361,13 +386,7 @@ async function runActivation(cx: Ctx, via: string, deliver: Deliver): Promise<Ou
     trail(cx, 'not-listed')
     cx.debug(`thimble: its tools were not listed yet after the push${pushFailed ? `: ${pushFailed}` : ''}`)
     act.owed = true
-    cx.later(LISTED_CHECK_MS, () => {
-      void (async () => {
-        if (await listedNow(cx, pre.home, sid)) return
-        onNoticeAct('tools:not-listed', NOT_LISTED_ACT, () => cx.command('mcp', ''))
-        postNotice(cx, 'tools:not-listed', NOT_LISTED_TEXT, [NOT_LISTED_ACT, 'doctor'])
-      })().catch(() => undefined)
-    })
+    checkListedLater(cx, pre.home, sid)
     return { ok: true, activated, context: deliver === 'context' ? NOT_LISTED_LINE : null }
   }
   const marker = markerOf(guide)
@@ -419,11 +438,11 @@ async function firstToast(cx: Ctx, folder: string): Promise<void> {
   cx.toast(FIRST_TOAST)
 }
 
-/** thimble on from anywhere but a data read (`/thimble`, the launcher, a press; C13): the activation, with the guide
- *  kept owed for the caller's delivery point. */
-export async function activateNow(cx: Ctx, via: 'data' | 'command' | 'tool' | 'launcher' | 'press'): Promise<{ ok: boolean; error?: string }> {
+/** thimble on from anywhere but a data read (`/thimble`, the launcher, a press, session start; C13): the activation,
+ *  with the guide kept owed for the caller's delivery point; at session start with no push (runActivation). */
+export async function activateNow(cx: Ctx, via: 'data' | 'command' | 'tool' | 'launcher' | 'press', push = true): Promise<{ ok: boolean; error?: string }> {
   if (act.active) return { ok: true }
-  const { out } = await activateOnce(cx, via, 'owed', Infinity)
+  const { out } = await activateOnce(cx, via, 'owed', Infinity, push)
   return out?.ok ? { ok: true } : { ok: false, error: out && !out.ok ? out.error : 'thimble is still turning on' }
 }
 

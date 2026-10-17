@@ -1192,10 +1192,14 @@ def add_module_request(state: dict[str, Any], op: str, args: dict[str, Any], ses
 
 
 def end_module_request(state: dict[str, Any], rid: str, how: str) -> None:
-    """The module request `rid` ended: answered or expired (`how`); it leaves the open states, so _prune drops it."""
+    """The module request `rid` ended: answered or expired (`how`); it leaves the open states, so _prune drops it. A
+    spawn's prompt goes with it, since the module takes only pending requests: a check's holds its whole task, which
+    this file, read by every hook, would otherwise keep for DONE_KEEP_S."""
     r = requests(state).get(rid)
     if isinstance(r, dict) and r.get("kind") == MODULE_KIND:
         r.update(module=how, state="done" if how == "answered" else "expired", at=now())
+        if isinstance(r.get("args"), dict) and "prompt" in r["args"]:
+            r["args"] = {k: v for k, v in r["args"].items() if k != "prompt"}
 
 
 FORKING = "forking"  # subagents.json: the forks of threads that are starting, by the call's `thread:<name>` (fork_ref)

@@ -1127,7 +1127,7 @@ export async function runLabel(cx: Ctx, id: string, name: string, limit: number,
   if (got.value.deferred && got.value.command) {
     const reads = asked.reads || (limit ? `a sample of ${limit.toLocaleString('en-US')}` : 'all of its records')
     const what = asked.changed ? `I changed the code label "${name}" in its panel. Run it on ${reads}.` : `Run the code label "${name}" on ${reads}.`
-    await cx.submit(`${what} Use Bash to run this command: ${got.value.command}`)
+    await cx.submit(`${what} Use Bash to run this command exactly as it is, with no \`cd\` before it: ${got.value.command}`)
     await labelSaid(cx, id, 'its code runs in main\'s Bash: main was asked to run it', null)
     return
   }

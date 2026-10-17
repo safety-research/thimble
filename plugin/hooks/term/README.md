@@ -12,7 +12,9 @@ refuses; also at `/thimble` (which asks a refused folder again) and with the `th
 Reading data turns nothing on. Activation runs `thimble activate --mod --json` once (parallel calls share it
 within their hook budget; a refused folder is asked once per session), pushes `load_thimble` to the shim with
 `$.mcp.call` so thimble's tools are listed, tells `thimble.ts` (`bridgeActivated`) and hands thimble's guide to Claude
-as the Read's context. The guide goes again when it is owed: with a prompt, with `/thimble`, after a compaction (a
+as the Read's context. At the session's start it pushes nothing, since Claude Code asks about the push in Manual mode
+before the person typed anything: the shim lists the tools once it sees the session's marker, and the first prompt
+carries the guide. The guide goes again when it is owed: with a prompt, with `/thimble`, after a compaction (a
 hidden user row) and after `/clear`; it is marked sent only once the row that carries it is stored. A module reload
 and a resumed session restore from the session's marker, `<home>/up/<session>.active`.
 

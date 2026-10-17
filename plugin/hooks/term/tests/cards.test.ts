@@ -58,7 +58,7 @@ test("the card pane says how the card's last run ended; `run again` (r) asks mai
   expect(text).toContain('run again')
   expect(text).toContain('c for its code · r to run again · a to ask · b to go back · x to close')
   await pane.press({ key: 'card-again' })
-  expect(w.submitted.at(-1)).toBe('Run this card again with Bash: thimble-run card k0code00')
+  expect(w.submitted.at(-1)).toBe('Run this card again. Use Bash to run this command exactly as it is, with no `cd` before it: thimble-run card k0code00')
   // its code, then what its last run printed
   await pane.press({ key: 'card-code' })
   await w.clock.settle()
@@ -87,7 +87,7 @@ test("a card whose run ended and whose check waits to start: the card says `◌ 
   expect(text).toContain('run again')
   expect(text).toContain('r to run again')
   await pane.press({ key: 'card-again' })
-  expect(w.submitted.at(-1)).toBe('Run this card again with Bash: thimble-run card k0code00')
+  expect(w.submitted.at(-1)).toBe('Run this card again. Use Bash to run this command exactly as it is, with no `cd` before it: thimble-run card k0code00')
   await pane.unmount()
 })
 

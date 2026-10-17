@@ -3415,6 +3415,10 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if sub.skip_prompt:
                 sub.skip_prompt = False
                 return 0
+            if sub.thimble == "check":  # a check's prompt holds its whole task, which its task file records
+                from . import checks  # noqa: PLC0415
+
+                prompt = checks.prompt_row(prompt)
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
             return 1
     if rec.get("type") == "user":
