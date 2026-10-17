@@ -165,8 +165,10 @@ nothing more. A tab whose server went away first asks the address it reconnects 
 that it is the same thimble server; another program that later uses the port can't, and the page stops without sending
 it the cookie. After 6 failed reconnects the page stops too.
 
-Each new sign-in shows a notice in thimble with **Sign it out**, and a line in your terminal. If a sign-in was not you,
-click Sign it out, or run `thimble unpair` in a shell, which signs out every browser.
+Each new sign-in shows a notice with **Sign it out**, in the browser and above the prompt in your terminal; a terminal
+without thimble's panel shows a line under Claude's next reply instead. The browser that signed in can't dismiss its
+own notice. If a sign-in was not you, click Sign it out, or run `thimble unpair` in a shell, which signs out every
+browser.
 
 ## For administrators
 
@@ -224,8 +226,8 @@ Either install:
 - adds thimble's plugin to Claude Code with Claude Code's own commands: `claude plugin marketplace add <install
   folder>`, then `claude plugin install --scope user thimble@<name>` (`thimble-local` for a release, `thimble` for a
   clone). Claude Code records the plugin in `~/.claude/settings.json` (`enabledPlugins`) and `~/.claude/plugins`.
-  `/thimble` then works in any `claude` session. A re-run updates the plugin when its version changed and leaves it on
-  or off as you set it. When Claude Code has another install's thimble plugin, or the one from GitHub, install.sh
+  `/thimble` then works in any `claude` session. A re-run updates the plugin when its version or its files changed and
+  leaves it on or off as you set it. When Claude Code has another install's thimble plugin, or the one from GitHub, install.sh
   leaves it and prints the commands that switch it. Like any Claude Code plugin, thimble is then on in every session;
   `/plugin` turns it off, everywhere or for one project;
 - links the `thimble` command into `~/.local/bin`, and when that folder is not on your PATH (or `THIMBLE_HOME` is not
@@ -614,8 +616,12 @@ how a maintainer makes one.
 which reinstall the frontend's packages when `package-lock.json` changed and rebuild the UI when its sources did.
 `thimble update --from <zip>` installs a zip you downloaded, checked against the release's `SHA256SUMS` when that
 file is beside it. A zip whose digest does not match is refused. Workspaces are kept. A running server keeps the old code
-until `thimble server restart`. It also updates thimble's plugin in Claude Code when its version changed. After an update
-from 0.7, every browser signs in again: type `/thimble browser` in each session.
+until `thimble server restart`. It also updates thimble's plugin in Claude Code when its version changed. When the
+version is the same but the plugin's files changed, as after a `git pull` between releases, and Claude Code loads a copy
+of the plugin, the update uninstalls and installs the plugin again with Claude Code's own commands, keeping its options
+and its on or off. When Claude Code reads the plugin from the install folder itself, nothing needs updating. Either way
+the update says what it did, and a `claude` session open since before uses the new plugin after `/reload-plugins`.
+After an update from 0.7, every browser signs in again: type `/thimble browser` in each session.
 
 ## Uninstall
 

@@ -68,6 +68,9 @@ function askMark(cx: Ctx, e: ResolveInput, key: string, press: () => void): Rend
   )
 }
 
+/** A list item's first line, as Claude Code's Markdown draws it with its `-` or number. */
+const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s/
+
 const CARD_REF = /^(?:card|cell):([A-Za-z0-9_-]+)(?:@[A-Za-z0-9_]+)?(?:#(.*))?$/
 const CALL_REF = /^call:[A-Za-z0-9_-]+(?:#L(\d+)(?:-L?(\d+))?)?$/
 
@@ -429,7 +432,9 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
   let n = 0
   let order = 0 // a card's place among the reply's cards, its name for the analyst ("card 2")
   queueCitations(citations(text))
-  type Ask = { key: string; press?: () => void; words: string; top?: number }
+  // `item`: a list item's row, whose `-` or number marks it, so its margin holds no dot of its own (its "?" still shows
+  // under the pointer): a dot beside the `-` read as a second bullet (README capture 10-17, `· - dse: 13,403`)
+  type Ask = { key: string; press?: () => void; words: string; top?: number; item?: boolean }
   // a heading's "?" asks about its whole section; any other passage's about its words
   const askOf = (words: string): (() => void) | undefined => {
     if (!opts.ask) return undefined
@@ -463,7 +468,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     )
     const flagEl = flag ? linesEl(cx, e, `flag-${ask?.key ?? `${prefix}${n}`}`, [[{ s: FLAG, fg: flag.color }]], [{ y: 0, x0: 0, x1: 1, row: false, run: () => opts.check?.(flag.id) }], 1) : null
     // a ↳ takes the cell; a "?" lies over the ⏺ or a passage's dot, shown only under the pointer
-    const glyph = q?.asked ? null : dot ? <Text>{mark}</Text> : q ? <Text dimColor>{DOT}</Text> : <Text> </Text>
+    const glyph = q?.asked ? null : dot ? <Text>{mark}</Text> : q && !ask?.item ? <Text dimColor>{DOT}</Text> : <Text> </Text>
     const first = (
       <Box key="m0" flexDirection="row">
         {glyph}
@@ -516,7 +521,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
       })
       for (const [j, piece] of pieces.entries()) {
         const press = askOf(piece)
-        const ask: Ask = { key: `${key}-${j}`, words: piece, ...(press ? { press } : {}) }
+        const ask: Ask = { key: `${key}-${j}`, words: piece, ...(press ? { press } : {}), ...(LIST_ITEM.test(piece) ? { item: true } : {}) }
         const el = await row(<Markdown text={piece} />, ask)
         const afterHead = j > 0 && /^#{1,6}\s/.test(pieces[j - 1]!)
         push(el, j === 0 ? gapBefore(i) : !afterHead)
@@ -550,7 +555,7 @@ export async function drawReply(cx: Ctx, e: ResolveInput, text: string, width: n
     for (const k of [...claimCards.keys()].slice(0, Math.max(0, claimCards.size - 2000))) claimCards.delete(k)
     const words = `${block.heading ? `${'#'.repeat(block.heading)} ` : ''}${block.runs.map(r => (r.cite ? r.cite.raw : r.text)).join('')}`
     const press = askOf(words)
-    const ask: Ask = { key, words, ...(press ? { press } : {}) }
+    const ask: Ask = { key, words, ...(press ? { press } : {}), ...(block.prefix.trim() ? { item: true } : {}) }
     if (live) {
       const { Client } = cx.els(e)
       // the checks' passages in this block: tinted in each check's color, a flag on the first row of the first passage
@@ -705,12 +710,14 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     </Box>
   )
   if (!arrow) return framed
-  // the ↗ over the end of the border row: a box laid over the frame from outside it (a box inside a border paints
-  // only within it)
+  // the ↗ over the end of the border row: a row laid over the frame from outside it (a box inside a border paints only
+  // within it), in the flow, so it scrolls with the card. The frame comes first, so the ↗ paints over its border; the
+  // column runs bottom-up, so the ↗'s row stands on top and its -1 margin lays it on the border row. An absolute box
+  // would not do: the engine draws one whose top is above the screen on the screen's top row (README capture 10-17).
   return (
-    <Box flexDirection="column" width={w}>
+    <Box flexDirection="column-reverse" width={w}>
       {framed}
-      <Box key={`arrow-${key}-${id}`} position="absolute" top={0} left={Math.max(0, w - 6)}>
+      <Box key={`arrow-${key}-${id}`} flexDirection="row" marginBottom={-1} paddingLeft={Math.max(0, w - 6)}>
         {arrow}
       </Box>
     </Box>

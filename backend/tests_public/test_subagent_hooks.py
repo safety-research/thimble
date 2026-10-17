@@ -47,6 +47,25 @@ def test_plan_mode_and_a_second_orientation_and_a_call_with_no_request_are_denie
     assert sf.check_call(state, agent_call("p")) is not None, "an orientation already runs"
 
 
+def test_a_subagent_s_message_to_its_own_parent_goes_on_and_any_other_message_with_no_request_is_denied():
+    """A helper whose hand-back was cut off sends the rest to its orientation with SendMessage (B6). Main's message, and
+    one from a subagent of another agent, still need a pending request."""
+    state: dict = {}
+    sf.registry(state).update({"orient1": {"role": "orientation", "key": "orient", "status": "running"},
+                               "helper1": {"role": sf.HELPER, "parent": "orient1", "status": "running"},
+                               "helper2": {"role": sf.HELPER, "parent": "other", "status": "running"}})
+
+    def send(caller: str | None) -> dict:
+        return {"hook_event_name": "PreToolUse", "tool_name": "SendMessage", "session_id": MAIN_SID,
+                "tool_use_id": "toolu_send1", "permission_mode": "auto", **({"agent_id": caller} if caller else {}),
+                "tool_input": {"to": "orient1", "message": "the rest of my report"}}
+
+    assert sf.check_call(state, send("helper1")) is None
+    assert sf.check_call(state, send(None)) is not None
+    assert sf.check_call(state, send("helper2")) is not None
+    assert sf.check_call(state, {**send("helper1"), "permission_mode": "plan"}) is not None
+
+
 # --------------------------------------------------------------------------- the hooks, run as Claude Code runs them
 
 

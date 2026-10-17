@@ -286,7 +286,7 @@ and never what a script got. In the citation panel's bar, a citation still check
     Enter, Space, the panel's own keys, going back, closing. It names only keys that are bound on that panel (`b to go
     back` only where there is a way back). Nothing else in a panel or the chat says which key does
     what. The keys are Buttons with no label of their own, in a Box no row tall (`hiddenKeys`). While a text field
-    holds the panel's focus (a label's name being renamed, the field `describe a new label`), a letter goes into the
+    holds the panel's focus (a label's name being renamed, its scope), a letter goes into the
     field, so the row reads what Enter does and `Esc to leave the field` (`Enter to rename · Esc to leave the field`);
     while an entry box holds it (a new thread's, which takes it as the view opens; any other once `a`, Enter or a click
     gives it the keys) the panel draws no hint row, as Claude Code's prompt box has none (Matt, 2026-10-16: no
@@ -309,13 +309,14 @@ and never what a script got. In the citation panel's bar, a citation still check
     rows shown at the row that leads it: on home its section's heading, and the top for the first row the keys choose,
     so every row can be reached by keys. No letter is a hotkey unless the hint row names it, or, in a view, the list
     its `?` opens: a word typed while the panel holds the keys (`table`) then reaches the prompt whole.
-27. A field: its label dim and lower case on the label column, the field on L, no colon (`describe a new label`, the
-    label panel's `prompt`). A field that shows all of its text (the label's prompt) has a border in the rule gray; a
+27. A field: its label dim and lower case on the label column, the field on L, no colon (the label panel's
+    `prompt`). A field that shows all of its text (the label's prompt) has a border in the rule gray; a
     click gives it the keyboard. An entry box, where the analyst asks a side thread (`entry.tsx`), is Claude Code's own
     prompt box: a rule above and a rule below in the prompt box's border color, each from the margin's edge to R; `❯`
     in the margin; Claude Code's Input on L, two rows tall, taller as its text wraps (at most 10, then it scrolls
     within), its placeholder dim saying what it asks about (`ask about this citation`, `ask about this card`, `ask
-    about this comment`, `ask a follow-up question`, a new thread's `type your question`); Enter's word is `ask`,
+    about this comment`, `ask a follow-up question`, a new thread's `type your question`, the labels list's `describe
+    a new label`); Enter's word is `ask` (`make it` in the labels list),
     Shift+Enter breaks the line. No label, and no other row says how to use it.
 28. An empty region shows `none`, dim, at A2.
 29. A right-click does what a click does. There is no menu.
@@ -414,7 +415,7 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   card itself, drawn after the paragraph that cites it (section 7, "The threads panel"), never `[ card ]`. Brackets main put around it alone are left out
   (`([[card:<id>]])` reads `[ card ]`). A click opens its place as any citation's does (the card, the file at its line,
   the label, the document at its passage); under the pointer it turns bold, nothing more; a place that does not exist
-  is red. The footer does not count a card's chip. Claude Code's tool rows, which draw no link, and a thread's
+  is red. A chip counts as a citation, in the footer, the thimble line and the Citations view alike. Claude Code's tool rows, which draw no link, and a thread's
   subject (`about card "How many pages…"`) name a chip's place in words (`events.jsonl line 12`; a card by its
   question). A label's link with a value
   (`[33](concept:<id>/yes)`) is neither a chip nor a problem in the footer.
@@ -433,13 +434,16 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   again after `thimble --continue` or `--resume`.
 - The margin at column 0, the ⏺'s: a dim `·` beside each passage and card a side thread can be asked about, which
   becomes the `?` (blue) of the passage under the pointer (a heading's asks about its whole section, a card's about the
-  card); a blue `↳` beside a passage or a card a thread was asked about (a passage also
-  when the thread was asked about a citation of a value or a place in it; a card also when the thread was asked about a
-  value it shows or a passage of its takeaway, a citation in it), which stays, and a click on it opens that thread in
-  the threads panel. On the reply's first row the mark takes the ⏺'s cell: the `?` drawn over it under the pointer, a
+  card); none beside a list item, whose `-` or number marks it as Claude Code draws a list, though its `?` shows under
+  the pointer (README capture 10-17: `· - dse: 13,403` read as two bullets); a blue `↳` beside a passage or a card a
+  thread was asked about (a passage also when the thread was asked about a citation of a value or a place in it; a card
+  also when the thread was asked about a value it shows or a passage of its takeaway, a citation in it), which stays,
+  and a click on it opens that thread in the threads panel. On the reply's first row the mark takes the ⏺'s cell: the `?` drawn over it under the pointer, a
   `↳` in its place. A mark never adds indent.
 - The footer, one blank row under the turn's answer (its last part that cites or embeds a card): its facts dim
-  (`· N problems` in red), its control after a gutter, no file path. No footer for the prompts thimble-term gives main
+  (`· N problems` in red), its control after a gutter, no file path. Its citations are those drawn in the answer, its
+  words' and the takeaways' of the cards under it, each once, a label's link left out: counted as the thimble line and
+  the Citations view count the session's (citesview.tsx; the bug hunt of 10-17 saw three counts). No footer for the prompts thimble-term gives main
   itself.
 - A `↳` row: `↳` at 0 and its words at 2, dim (`thread · "question" · answered`, `view · Wiki Pages · built`), `new` in
   green while it is new, `failed` in red. A thread's row names the turn's question; a stop is not news. A view's row
@@ -470,7 +474,7 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   its switch to another model; an API error that stopped the agent; an agent that ended failed or was refused; a view
   build, a check or a label run that failed; a check for a view proposal that failed or that a fallback model
   answered); then the acts that fix it (`try again`, `retry`, `turn off view proposals`, `how to fix it`, `allow in
-  the browser ›` for a code ticket), the press that opens the agent's thread, named for what opens (`see the
+  the browser ›` for a code ticket, `sign it out` for a browser's sign-in), the press that opens the agent's thread, named for what opens (`see the
   orientation ›`, `see the view build ›`, `see the thread ›` for a side thread in the threads panel), and `dismiss`.
   Each act's words say what its press does. A fix that is a command (`/login`, `thimble server restart`) is in the
   notice's words; `how to fix it` says in a toast where thimble's config is (which the terminal has in place of the
@@ -589,7 +593,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - A diagram: boxes and edges in the rule gray, node text in the text color, edge labels dim; a note's number in a dim
   column and its text dim.
 - A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line
-  chart (a bar chart with its values written on its bars is one): a table of its rows.
+  chart (a bar chart with its values written on its bars is one): a table of its rows, in the order its axes put them
+  where the chart sorts an axis (a heatmap's days in the order of its `sort`), else in its data's order.
 - A card that cannot be read: one red line named by its place (`× card 2 cannot be drawn: …`).
 - The card pane: the question is the panel's title and the subtitle reads the card's id (`card:<name>`), its kind, who
   made it, `last run ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or
@@ -1095,9 +1100,9 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
   Enter presses one or gives a field the keyboard), `s to stop` while a run goes, then the way's. The letters r, n, k,
   f, e, d and l stay bound, unnamed.
 - The labels list (`home › labels`): each label as home draws it (its name row with its bar and total, its legend,
-  four rows of it at most), 1-9 the first nine, then under the second rule the field `describe a new label`, whose words go to main, which makes the label
-  with a trial. `l` in a label's panel opens the list in place of the label's step (`home › labels`), the label it came
-  from chosen; b then goes where the path shows, home. A document's `l` does the same for the documents list.
+  four rows of it at most), 1-9 the first nine, then the entry box `describe a new label` (rule 27), whose words go to
+  main, which makes the label with a trial; ↓ past the last label or a click gives it the keys. `l` in a label's panel
+  opens the list in place of the label's step (`home › labels`), the label it came from chosen; b then goes where the path shows, home. A document's `l` does the same for the documents list.
 - The scope's records (`14,591 records`, `run on all 14,591`): the last full run's count, else the scope's size thimble
   counts for a label whose first run never ended.
 

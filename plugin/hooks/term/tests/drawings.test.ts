@@ -169,6 +169,23 @@ const at = (rows: string[], text: string) => rows.findIndex(r => r.includes(text
 
 // ------------------------------------------------------------------------------------------------ main's chat
 
+test("bug hunt B5: a thimble event's wake-up is no bare `● thimble` row in main's chat; a subagent's notification and ctrl+o's full view keep the engine's row", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = world(on)
+  await start($, w)
+  let n = 0
+  const row = async (text: string, more: Record<string, unknown> = {}) =>
+    (await $.ui.mount({ plugin: PANEL, component: 'UserMessage', requestId: `n${++n}`, surface: 'terminal', viewport: { columns: 100, rows: 40 }, props: { text, origin: { kind: 'task-notification' }, isExpanded: false, ...more } } as never)) as unknown as M
+  const wake = await row('thimble')
+  expect(shown(await wake.drawn())).toBe('')
+  await wake.unmount()
+  const full = await row('thimble', { isExpanded: true })
+  expect(shown(await full.drawn())).toBe('thimble')
+  await full.unmount()
+  const agent = await row('Agent "Other wikis, anonymous editors" finished', { task: { id: 'ad443a6700eb440e7', status: 'completed' } })
+  expect(shown(await agent.drawn())).toBe('Agent "Other wikis, anonymous editors" finished')
+  await agent.unmount()
+})
+
 test("the person's message stays Claude Code's own row; the reply under it, or under the tool summary row, keeps the engine's blank row above it", { timeoutMs: 30_000 }, async ($, on) => {
   // Matt, 2026-10-16: in the build's shots the reply sat right under the person's message, with no blank row between
   const w = world(on)

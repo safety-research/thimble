@@ -1,6 +1,7 @@
 /* the chat column, directly on the window paper. At the top the thread tree; the transcript shows the analyst's
    messages as accent tiles, replies as plain text and work as tonal tool-call cards. The composer is glass floating
-   over the transcript, with the task strip behind its top edge. */
+   over the transcript, with the task strip behind its top edge; while cards show above it, the transcript ends above
+   them. */
 .chat {
   position: relative;
   display: flex;
@@ -1491,6 +1492,25 @@ button.model-line-part[aria-expanded='true'] {
   flex-direction: column;
   max-height: 100%;
 }
+/* the cards above the composer (a session's hold, the permission card, the view proposal, the notices) take their own
+   space: while one shows, the foot joins the column under the list, so the transcript ends above the cards and none of
+   its lines shows between them or under the composer */
+.chat-foot-cards {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-foot-cards:empty {
+  display: none;
+}
+.chat-foot:has(> .chat-foot-cards:not(:empty)) {
+  position: relative;
+  flex: none;
+  margin-top: 8px;
+}
+.chat:has(> .chat-foot > .chat-foot-cards:not(:empty)) > .chat-list {
+  padding-bottom: 16px;
+}
 .chat-foot .chat-composer {
   position: relative;
   z-index: 1;
@@ -1770,6 +1790,12 @@ button.model-line-part[aria-expanded='true'] {
 .chat-notice-agent {
   margin-right: 2px;
   color: var(--status-warning);
+  font-weight: 600;
+}
+/* how many open notices say these words (Notice.tsx sameNotices), after the agent */
+.chat-notice-count {
+  color: var(--status-warning);
+  font: var(--type-mono-sm);
   font-weight: 600;
 }
 .chat-notice-text code {

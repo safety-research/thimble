@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 from terminal_fakes import CORPUS, MAIN, write_launch
+from test_delivery import EVENT_TEXT, TOKEN, _Stand
 
 from app import config, event_files, events
 from app import subagent_files as sf
@@ -113,6 +114,76 @@ def test_the_waker_takes_a_queued_event_wakes_main_with_its_text_and_exits_2(tmp
     assert code == 2
     assert err.startswith(f'<thimble-event kind="label_done" event="{out["id"]}"') and "refunds: 12 yes" in err
     assert event_files.waiting(ws) == []
+
+
+def test_a_press_while_main_is_idle_turns_the_waker_to_the_server_and_its_event_wakes_main(tmp_path, ws):
+    """The `thimble` command presses the browser workbench at the session's start, after SessionStart's waker began on
+    local transport and took the session's lock, and no queue file is there yet. Every later hook's waker exits on that
+    lock, and while main is idle none runs, so this waker pulls from the server from the press on: a side thread's
+    event the server holds wakes main."""
+    stand = _Stand([(200, {"id": "e1", "text": EVENT_TEXT})])
+    env = env_for(tmp_path, ws)
+    Path(env["THIMBLE_HOME"], "server.json").write_text(json.dumps({"api": f"http://127.0.0.1:{stand.port}",
+                                                                    "token": TOKEN}))
+    waker = subprocess.Popen([str(WATCHER)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=env, cwd=str(config.corpus_dir(CORPUS)))
+    waker.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "SessionStart", "source": "startup"}))
+    waker.stdin.close()
+    try:
+        time.sleep(0.5)
+        assert waker.poll() is None and not event_files.queue_path(ws).exists()
+        write_launch(ws, session=MAIN, transport="server")  # the press
+        try:
+            code = waker.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            code = None
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+        stand.close()
+    assert code == 2 and waker.stderr.read().strip() == EVENT_TEXT
+    assert [(m, p) for m, p, _ in stand.seen] == [("GET", "/api/events/pull"), ("POST", "/api/events/ack")]
+
+
+def test_with_plain_claude_a_side_thread_asked_after_the_press_wakes_idle_main_through_the_server(tmp_path, ws,
+                                                                                                   monkeypatch):
+    """Bug hunt B4, plain `claude`: main's turn ended on local transport before any event was queued, so its Stop
+    hook's waker holds the session's lock with no queue file to look at. The analyst presses `/thimble browser` while
+    main is idle, then asks in a side thread from the terminal: `thimble act thread` writes the thread's event to the
+    queue file, as every process of the session but the server does, and the server takes it from there at a pull
+    (events._drain_files). The waker must be pulling by then: it used to look at the transport only once a queue file
+    was there, so it saw the press only when the thread's event made the file, and exited with nothing pulled; no other
+    waker runs while main is idle, so the thread waited for the analyst's next prompt."""
+    stand = _Stand([])
+    env = env_for(tmp_path, ws)
+    Path(env["THIMBLE_HOME"], "server.json").write_text(json.dumps({"api": f"http://127.0.0.1:{stand.port}",
+                                                                    "token": TOKEN}))
+    waker = subprocess.Popen([str(WATCHER)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=env, cwd=str(config.corpus_dir(CORPUS)))
+    waker.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "Stop"}))
+    waker.stdin.close()
+    try:
+        time.sleep(0.5)
+        assert waker.poll() is None and not event_files.queue_path(ws).exists()
+        write_launch(ws, session=MAIN, transport="server")  # /thimble browser
+        until = time.monotonic() + 6
+        while time.monotonic() < until and not any(p == "/api/events/pull" for _, p, _ in stand.seen):
+            time.sleep(0.1)
+        monkeypatch.setattr(events, "SERVING", False)  # posted from the terminal's `thimble act`, not the server
+        out = events.post(CORPUS, "label_done", {"text": "the side thread's question", "name": "q"}, check_kind=False,
+                          session=MAIN)
+        assert [r["id"] for r in event_files.waiting(ws)] == [out["id"]], "the terminal's process writes the file"
+        stand.answers.append((200, {"id": out["id"], "text": EVENT_TEXT}))  # the server's pull drained the file
+        try:
+            code = waker.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            code = None
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+        stand.close()
+    assert code == 2 and waker.stderr.read().strip() == EVENT_TEXT
+    assert ("POST", "/api/events/ack") in [(m, p) for m, p, _ in stand.seen]
 
 
 def test_no_hook_opens_a_socket_in_terminal_mode_and_each_file_first_hook_starts_the_backend_s_call(

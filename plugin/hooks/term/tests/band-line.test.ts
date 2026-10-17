@@ -154,8 +154,8 @@ test("citations count the session's answers' and its cards' takeaways' citations
   expect(await looks(m, 'citations')).toEqual([NAME('citations'), { s: ' ' }, { s: '1', bold: true }, { s: ' ' }, { s: '◌', color: COLORS.cite }])
   await m.unmount()
   // checked: the `◌` goes, no mark in its place
-  w.t.verdicts = { [cid(CHAT)]: { status: 'ok' } }
-  // a card shown in the session: its takeaway's two citations count too
+  // a card shown in the session: its takeaway's two citations count too, checked as the card draws them (found here)
+  w.t.verdicts = { [cid(CHAT)]: { status: 'ok' }, [cid('[[4579|card:ff73e071#pages/TOTAL]]')]: { status: 'ok' }, [cid('[[14592|card:ff73e071#revisions/TOTAL]]')]: { status: 'ok' } }
   await $.command.run({ command: 'thimble:thimble', args: 'card ff73e071' } as never)
   await w.clock.settle()
   const m1 = await band($, 184)

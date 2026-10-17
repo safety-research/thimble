@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -191,3 +192,36 @@ async def test_the_shims_watch_starts_the_check_of_a_card_run_with_a_takeaway(te
     mine = [x for x in lines if x.get("card") == cid]
     assert [x["op"] for x in mine] == ["created", "edited"], "the run and its takeaway, in one line from the watch"
     assert mine[-1]["state"]["status"] == "ok" and mine[-1]["state"]["takeaway"].startswith("There are")
+
+
+def test_main_s_bash_runs_thimble_run_by_its_name_from_the_plugin_s_bin(tmp_path, monkeypatch):
+    """Claude Code puts the bin/ of the plugin copy it started the shim from (CLAUDE_PLUGIN_ROOT) on main's Bash's PATH,
+    after its own, and not on the shim's: the command names `thimble-run` alone then. It names the full path when main's
+    Bash would find another `thimble-run` first, when Claude Code leaves that bin/ off (a path with a `$`), when the
+    session's copy is another, and outside the shim."""
+    def plugin_copy(root: Path) -> Path:
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / cardrun.BIN).write_text("#!/bin/sh\n")
+        (root / "bin" / cardrun.BIN).chmod(0o755)
+        return root
+
+    def full(root: Path, *args: str) -> str:
+        return shlex.join([str(root / "bin" / cardrun.BIN), *args])
+
+    copy, other, odd = (plugin_copy(tmp_path / n) for n in ("cache/thimble/0.9.0", "other", "a$b"))
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv(cardrun.PLUGIN_ROOT_ENV, str(copy))
+    monkeypatch.setattr(local, "PLUGIN_ROOT", copy)  # the shim's copy (bin/thimble-mcp)
+    assert cardrun.command("card", "c1") == "thimble-run card c1"
+    assert cardrun.command("stale") == "thimble-run stale"
+    monkeypatch.setenv("PATH", f"{other / 'bin'}:/usr/bin:/bin")
+    assert cardrun.command("card", "c1") == full(copy, "card", "c1"), "another thimble-run comes first on the PATH"
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setenv(cardrun.PLUGIN_ROOT_ENV, str(other))
+    assert cardrun.command("card", "c1") == full(copy, "card", "c1"), "the session's plugin copy is another"
+    monkeypatch.setenv(cardrun.PLUGIN_ROOT_ENV, str(odd))
+    monkeypatch.setattr(local, "PLUGIN_ROOT", odd)
+    assert cardrun.command("label", "l1") == full(odd, "label", "l1"), "Claude Code leaves that bin/ off its PATH"
+    monkeypatch.setenv(cardrun.PLUGIN_ROOT_ENV, str(copy))
+    monkeypatch.setattr(local, "PLUGIN_ROOT", None)  # the server, `thimble act`: no plugin copy of a session
+    assert cardrun.command("card", "c1") == shlex.join([str(cardrun.bin_path()), "card", "c1"])

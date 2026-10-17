@@ -233,6 +233,33 @@ function anyRows(spec: VegaLite, root: VegaLite = spec): Record<string, unknown>
   return sets.find(s => s.length) ?? []
 }
 
+/** A field name as the data's column names it: Vega-Lite reads `.` and `[ ]` in a field as a path into nested data, so a
+ *  column whose name holds them is written escaped (Altair writes `revisions linking to jqp\.vercel\.app`); the
+ *  rows hold the name unescaped (bug hunt B9: such a bar chart drew as a table). */
+export function columnOf(field: string): string {
+  return field.replace(/\\(.)/g, '$1')
+}
+
+/** The spec with each encoding's field (and a sort's) as the data's column names it (columnOf), in every layer and
+ *  part, so a chart matches its fields to its rows' columns. */
+function plainFields(spec: VegaLite): VegaLite {
+  const enc = (e: Enc | undefined): Enc | undefined => {
+    if (!e || typeof e !== 'object') return e
+    const sort = e.sort && typeof e.sort === 'object' && !Array.isArray(e.sort) && typeof (e.sort as { field?: unknown }).field === 'string' ? { ...(e.sort as object), field: columnOf((e.sort as { field: string }).field) } : e.sort
+    return { ...e, ...(typeof e.field === 'string' ? { field: columnOf(e.field) } : {}), ...(sort !== e.sort ? { sort } : {}) }
+  }
+  const parts = (xs: VegaLite[] | undefined) => (Array.isArray(xs) ? xs.map(plainFields) : xs)
+  return {
+    ...spec,
+    ...(spec.encoding ? { encoding: Object.fromEntries(Object.entries(spec.encoding).map(([k, e]) => [k, enc(e)])) } : {}),
+    ...(spec.layer ? { layer: parts(spec.layer) } : {}),
+    ...(spec.hconcat ? { hconcat: parts(spec.hconcat) } : {}),
+    ...(spec.vconcat ? { vconcat: parts(spec.vconcat) } : {}),
+    ...(spec.concat ? { concat: parts(spec.concat) } : {}),
+    ...(spec.spec ? { spec: plainFields(spec.spec) } : {}),
+  }
+}
+
 function markOf(spec: VegaLite): string {
   return typeof spec.mark === 'string' ? spec.mark : spec.mark?.type ?? ''
 }
@@ -357,6 +384,23 @@ function axisValues(enc: Enc): (string | number)[] {
   })
 }
 
+/** A chart's rows in the order its axes put them where a chart says how (a heatmap's `sort=days`), as the browser
+ *  draws them: by the axis of the table's first column, then by the other; each a discrete axis (ordinal or nominal)
+ *  with a `sort` of its own. A chart that says no order keeps its data's: its rows are a table, not its picture
+ *  (README capture 10-17: a heatmap's days, grouped as text, read `Jul 01, Jul 02, Jun 01`). */
+function axisOrder(rows: Record<string, unknown>[], spec: VegaLite): Record<string, unknown>[] {
+  const enc = spec.encoding ?? {}
+  const columns = rows.length ? Object.keys(rows[0]!) : []
+  const axes = (['x', 'y'] as const).filter(ch => {
+    const e = enc[ch]
+    return e?.field && columns.includes(e.field) && (e.type === 'ordinal' || e.type === 'nominal') && e.sort !== undefined && e.sort !== null
+  })
+  // the minor axis first: a stable sort by the major one keeps its order within each of the major's values
+  return axes
+    .sort((a, b) => columns.indexOf(enc[b]!.field!) - columns.indexOf(enc[a]!.field!))
+    .reduce((out, ch) => sortedBars(out, enc, ch, enc[ch]!.field!), rows)
+}
+
 function rowsTable(cell: ThimbleCell, rows: Record<string, unknown>[]): CardData | null {
   const columns = rows.length ? Object.keys(rows[0]!) : []
   if (!columns.length) return null
@@ -464,11 +508,12 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   if (dg?.nodes) return { card: diagramOf(cell, dg), error }
   const tl = first(cell, k => k === TIMELINE) as { events?: unknown[] } | undefined
   if (tl?.events) return { card: timelineOf(cell, tl), error }
-  const vl = first(cell, k => k.startsWith('application/vnd.vegalite')) as VegaLite | undefined
-  if (vl && typeof vl === 'object') {
+  const spec = first(cell, k => k.startsWith('application/vnd.vegalite')) as VegaLite | undefined
+  if (spec && typeof spec === 'object') {
+    const vl = plainFields(spec)
     const chart = chartCard(cell, vl)
     if (chart) return { card: chart, error }
-    const table = rowsTable(cell, anyRows(vl))
+    const table = rowsTable(cell, axisOrder(anyRows(vl), vl))
     if (table) return { card: table, error }
   }
   // a card type's card and a figure: the listing they print

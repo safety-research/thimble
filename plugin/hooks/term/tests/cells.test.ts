@@ -35,6 +35,35 @@ test('a one-layer Altair bar chart draws as text bars; a faceted one as a table 
   expect(facet.columns).toEqual(['day', 'event_type', 'rows'])
 })
 
+test('a bar chart whose field names hold a dot draws as bars: its fields escaped as Altair writes them match their columns', () => {
+  // bug hunt B9: `thimble.chart("bar", df)` with the column "revisions linking to jqp.vercel.app" drew as a table
+  const col = 'revisions linking to jqp.vercel.app'
+  const rows = [
+    { 'author label': 'LinkHelper771', [col]: 165 },
+    { 'author label': 'MapHelper', [col]: 75 },
+  ]
+  const field = 'revisions linking to jqp\\.vercel\\.app'
+  const spec = { mark: 'bar', encoding: { y: { field: 'author label', type: 'nominal', sort: ['LinkHelper771', 'MapHelper'] }, x: { field, type: 'quantitative', title: col } }, data: { values: rows } }
+  const { card } = cardOfCell({ ...of('b0bar000'), id: 'b0dots00', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell)
+  expect(card.kind).toBe('bar')
+  expect(card.y).toBe(col)
+  expect(card.rows as BarRow[]).toEqual([{ label: 'LinkHelper771', value: 165, group: '' }, { label: 'MapHelper', value: 75, group: '' }])
+})
+
+test("a heatmap's rows as a table: in its axes' order, its days by the chart's sort, not as text sorts them", () => {
+  // README capture 10-17: days grouped as text ("Jul 01" before "Jun 01" before "May 24") under `sort=days`
+  const rows = [
+    { day: 'Jul 01', who: 'b', n: 4 },
+    { day: 'Jun 18', who: 'b', n: 9 },
+    { day: 'Jun 18', who: 'a', n: 585 },
+    { day: 'May 24', who: 'a', n: 35 },
+  ]
+  const heat = { mark: 'rect', encoding: { x: { field: 'day', type: 'ordinal', sort: ['May 24', 'Jun 18', 'Jul 01'] }, y: { field: 'who', type: 'nominal', sort: ['a', 'b'] }, color: { field: 'n', type: 'quantitative' } }, data: { values: rows } }
+  const { card } = cardOfCell({ ...of('b0bar000'), id: 'h0heat00', outputs: [{ 'application/vnd.vegalite.v6.json': heat }] } as ThimbleCell)
+  expect(card.kind).toBe('table')
+  expect((card.rows as Cell[][]).map(r => `${r[0]} ${r[1]}`)).toEqual(['May 24 a', 'Jun 18 a', 'Jun 18 b', 'Jul 01 b'])
+})
+
 test('a diagram from its payload (from and to) and a timeline from its output draw directly', () => {
   const d = cardOfCell(of('d0diag00')).card
   expect(d.kind).toBe('diagram')

@@ -97,16 +97,19 @@ export async function runNoticeAct(cx: Ctx, n: ModNotice, act: string): Promise<
 }
 
 /** One toast for each workspace notice not toasted yet. The first look of a session only notes what is there already,
- *  which shows as rows; a notice that comes after is new. */
-export function toastNewNotices(cx: Ctx, notices: readonly { id: string; text: string }[]): void {
+ *  which shows as rows; a notice that comes after is new. A notice that joins a row of the same notices (`ids`) adds to
+ *  its count and toasts nothing again. */
+export function toastNewNotices(cx: Ctx, notices: readonly { id: string; ids?: readonly string[]; text: string }[]): void {
+  const idsOf = (n: { id: string; ids?: readonly string[] }) => (n.ids?.length ? n.ids : [n.id])
   if (!seeded) {
     seeded = true
-    for (const n of notices) toasted.add(`ws:${n.id}`)
+    for (const n of notices) for (const id of idsOf(n)) toasted.add(`ws:${id}`)
     return
   }
   for (const n of notices) {
-    if (toasted.has(`ws:${n.id}`)) continue
-    toasted.add(`ws:${n.id}`)
-    cx.toast(`thimble: ${oneLine(n.text)}`)
+    const ids = idsOf(n)
+    const fresh = ids.every(id => !toasted.has(`ws:${id}`))
+    for (const id of ids) toasted.add(`ws:${id}`)
+    if (fresh) cx.toast(`thimble: ${oneLine(n.text)}`)
   }
 }

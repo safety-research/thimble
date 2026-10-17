@@ -31,6 +31,7 @@ import contextlib
 import logging
 import os
 import queue
+import re
 import shlex
 import signal
 import sys
@@ -82,12 +83,33 @@ def bin_path() -> Path:
     return (local.PLUGIN_ROOT or config.REPO_ROOT / "plugin") / "bin" / BIN
 
 
+# Claude Code (2.1.301) runs main's Bash with its own PATH followed by the bin/ folder of each plugin it loaded, under the
+# plugin's path, which it gives the plugin's MCP server as CLAUDE_PLUGIN_ROOT; it leaves off a bin/ whose path holds one
+# of these characters. The MCP server, the shim, gets no bin/ on its own PATH.
+PLUGIN_ROOT_ENV = "CLAUDE_PLUGIN_ROOT"
+_PATH_UNSAFE = re.compile(r"[:\"'$`\\\n\r]")
+
+
+def bash_path() -> str:
+    """The PATH main's Bash has, as far as this process can tell: in the shim (local.PLUGIN_ROOT), this process's PATH
+    with bin/ of the plugin copy Claude Code started it from (CLAUDE_PLUGIN_ROOT) after it, as Claude Code builds the
+    Bash tool's PATH; elsewhere, or when Claude Code would leave that bin/ off, this process's PATH."""
+    from . import local  # noqa: PLC0415
+
+    path, root = os.environ.get("PATH", ""), os.environ.get(PLUGIN_ROOT_ENV)
+    if local.PLUGIN_ROOT is None or not root:
+        return path
+    plugin_bin = os.path.join(root, "bin")
+    if os.sep != "\\" and _PATH_UNSAFE.search(plugin_bin):
+        return path
+    return os.pathsep.join(p for p in (path, plugin_bin) if p)
+
+
 def on_path() -> bool:
-    """Whether `thimble-run` by its name is this plugin copy's (bin_path) on this process's PATH, as Claude Code puts a
-    plugin's bin/ there."""
+    """Whether `thimble-run` by its name in main's Bash (bash_path) is this plugin copy's (bin_path)."""
     import shutil  # noqa: PLC0415
 
-    found = shutil.which(BIN)
+    found = shutil.which(BIN, path=bash_path())
     try:
         return bool(found) and Path(found).resolve() == bin_path().resolve()
     except OSError:
@@ -95,9 +117,9 @@ def on_path() -> bool:
 
 
 def command(kind: str, ident: str = "") -> str:
-    """The Bash command that runs `thimble-run <kind> [<ident>]`: `thimble-run` by its name when it is on the session's
-    PATH (on_path), so the command's row in the terminal reads `thimble-run card <id>`, else by its full path in this
-    plugin copy."""
+    """The Bash command that runs `thimble-run <kind> [<ident>]`: `thimble-run` by its name when main's Bash finds this
+    plugin copy's by that name (on_path), so the command's row in the terminal reads `thimble-run card <id>`, else by its
+    full path in this plugin copy."""
     return shlex.join([BIN if on_path() else str(bin_path()), kind, *([ident] if ident else [])])
 
 

@@ -43,18 +43,18 @@ import type { On, RenderElement } from 'claude-code'
 
 import type { AnswerComment, CoverageSummary, FeatureSettings, SummarySeen, TermPanel } from './types'
 import type { Ctx } from './ctx'
-import { citations, clean, cut, labelRef, noControls, width } from './lib'
+import { clean, cut, noControls, width } from './lib'
 import { docsOf } from './model'
 import { dismissModNotice, modActWords, modNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
 import { browserShown, copyRemoteLink, copyTunnel, dismissLinks } from './offramp'
-import { answerOffer, dismissNotice, homeNotices, homeOffer, noticeAct, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
+import { answerOffer, dismissNotice, homeNotices, homeOffer, noticeAct, noticeWords, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
 import { COLORS } from './paint'
 import { readState } from './data'
 import { cxOf } from './ctx'
 import { PANEL, closePanel, openPanel, openPending, placedLater, readSurface, retryPending, rt, surfaceValue } from './term'
 import { keepSeen, keptSeen } from './kept'
 import { openChecks } from './checksview'
-import { citeItems, openCitations } from './citesview'
+import { citeCounts, citeItems, openCitations } from './citesview'
 import { openCoverage, percent } from './coverageview'
 
 /** The label column: `  view proposal` and two cells before the words. */
@@ -232,23 +232,10 @@ export function itemWidth(it: Pick<SummaryItem, 'segs'>): number {
 }
 
 /** The citations of the session's answers and of its cards' takeaways: how many, how many are being checked, and how
- *  many failed, as the Citations view lists them (citesview.tsx citeItems: a chat citation not found or refuted, a
- *  takeaway's citation its links check found another value for, typed in or left unchecked). */
+ *  many failed, as the Citations view lists them (citesview.tsx citeItems, where the one definition of a citation that
+ *  counts lives, which the footer under an answer uses too). */
 export async function citationCounts(cx: Ctx): Promise<{ all: number; pending: number; bad: number }> {
-  const items = await citeItems(cx)
-  let all = items.filter(it => it.key.startsWith('chat:')).length
-  let pending = items.filter(it => it.verdict === 'pending').length
-  const bad = items.filter(it => it.verdict !== 'pending' && it.verdict !== 'ok').length
-  for (const id of rt.shown) {
-    const tc = await cx.card(id)
-    if (!tc) continue
-    const l = tc.links as (NonNullable<typeof tc.links> & { quiet?: unknown[] }) | undefined
-    const checked = l ? (Array.isArray(l.ok) ? l.ok.length : 0) + l.broken.length + (l.typed ?? []).length + (Array.isArray(l.quiet) ? l.quiet.length : 0) : 0
-    const n = Math.max(citations(tc.takeaway || '').filter(c => !labelRef(c.ref)).length, checked)
-    all += n
-    if (n && l?.pending) pending++
-  }
-  return { all, pending, bad }
+  return citeCounts(await citeItems(cx))
 }
 
 /** Home opened on the first new card, found by what was seen before this press (else the first new view, report or
@@ -525,7 +512,8 @@ export function registerBand(on: On): void {
     }
     // every agent's open notices, newest first, then the terminal's own: `notice` in red on the label column, the words in
     // the text color, cut to the line; then the acts that fix it, the agent's thread (`see the orientation ›`) and
-    // `dismiss`, each saying what its press does. Each new one posts one toast (notices.tsx)
+    // `dismiss`, each saying what its press does. Notices with the same words are one row, their count first (`3× …`),
+    // and `dismiss` takes them all. Each new one posts one toast (notices.tsx)
     const notices = await homeNotices(cx)
     toastNewNotices(cx, notices)
     const mainFirst = (acts: BandAct[]) => acts.map((a, i) => (i === 0 && acts.length > 1 ? { ...a, primary: true } : a))
@@ -537,7 +525,7 @@ export function registerBand(on: On): void {
         { key: `${key}-dismiss`, label: 'dismiss', press: () => dismissNotice(cx, n) },
       ])
       const { room, own } = wordsRoom(cols, LW, acts)
-      rows.push(trayRow(key, 'notice', foldWords(key, n.text, room), acts, { color: COLORS.problem, own }))
+      rows.push(trayRow(key, 'notice', foldWords(key, noticeWords(n), room), acts, { color: COLORS.problem, own }))
     }
     for (const n of await modNotices(cx)) {
       const key = `above-mod-${n.key.replace(/[^a-z0-9-]+/gi, '-')}`

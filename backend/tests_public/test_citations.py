@@ -106,6 +106,58 @@ async def test_a_6_cited_at_a_line_that_shows_only_a_longer_number_stays_contrad
     assert "6" not in _values(links["resolved"]), links
 
 
+def test_a_tables_check_left_pending_runs_again_when_the_server_starts(workspaces_tmp, monkeypatch):
+    """The ◌ for good of 10-17: a table's or a plot's links check that a stopped server or an ended `thimble-run` left
+    pending is queued again by the rescan at the server's start, as a `code` card's is; the rescan skipped every other
+    kind, so starting the server again left its citations ◌."""
+    cell = card(LOAD + PRINT, [PRINTED], "revisions.jsonl holds [[14,591|card:SELF@out0#L1]] saves.", kind="table")
+    ws = config.workspace_dir(CORPUS)
+    with notebook.editing(ws):
+        nb, stored = notebook._locate(ws, cell["id"])
+        stored["verification"]["links"].update(status="pending", checked=False)
+        notebook.write_notebook(ws, nb)
+    queued: list[str] = []
+    monkeypatch.setattr(verify, "CHECK_JOBS", True)
+    monkeypatch.setattr(verify, "_enqueue_links", lambda c, cell, version: bool(queued.append(cell["id"])) or True)
+    assert verify.rescan(CORPUS) == 1
+    assert queued == [cell["id"]]
+
+
+async def test_a_card_checks_fix_that_runs_at_the_same_count_checks_its_takeaway_again(workspaces_tmp, monkeypatch):
+    """The ◌ for good of the bug hunt (10-17, B8): a card check's fix lands its run (notebook.land_run) with the card's
+    exec_count as it was, and the takeaway as it was, so the links job it queued had the key of the job that had run
+    already; the queue answers such a key with no job, and the takeaway stayed `pending` while the thimble line showed
+    `◌`. Each pass of the links is a job of its own."""
+    done: set[str] = set()
+    queued: list[str] = []
+
+    def enqueue(c: str, cell: dict, version: str) -> bool:  # the queue's rule: a key queued or done is no new job
+        if version in done:
+            return False
+        done.add(version)
+        queued.append(version)
+        return True
+
+    monkeypatch.setattr(verify, "CHECK_JOBS", True)
+    monkeypatch.setattr(verify, "_enqueue_links", enqueue)
+
+    async def run_queued(cid: str) -> dict:
+        while queued:
+            await verify._links_job(CORPUS, cid, queued.pop(0))
+        return notebook.get_cell(CORPUS, cid)["verification"]["links"]
+
+    cell = card(LOAD + PRINT, [PRINTED], "revisions.jsonl holds [[14,591|card:SELF@out0#L1]] saves.")
+    cid = cell["id"]
+    assert (await run_queued(cid))["status"] == "ok"
+    ws = config.workspace_dir(CORPUS)
+    with notebook.editing(ws):
+        nb, stored = notebook._locate(ws, cid)
+        notebook.land_run(CORPUS, nb, stored, LOAD + "\n" + PRINT, [PRINTED], "ok", by="check")
+        notebook.write_notebook(ws, nb)
+    assert notebook.get_cell(CORPUS, cid)["exec_count"] == 1
+    assert (await run_queued(cid))["status"] == "ok"
+
+
 def test_tier2_unique_table_cell():
     html = (
         "<table><thead><tr><th></th><th>assignments</th></tr></thead>"

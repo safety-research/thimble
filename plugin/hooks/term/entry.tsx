@@ -22,18 +22,18 @@ export const ENTRY_MAX = 10
 export const ENTRY_SUBMIT = 'ask'
 
 /** The keys of the panel's entry boxes: a new thread's (`ask-new`), a thread's follow-up (`ask-<thread>`), one about a
- *  citation, a card or a comment (`ask-cite-…`, `ask-card-…`, `ask-check-…`, `ask-cm-…`), and a citation's in a
- *  thread (`follow-<thread>`). */
-export const ENTRY_KEY = /^(?:ask-|follow-)/
+ *  citation, a card or a comment (`ask-cite-…`, `ask-card-…`, `ask-check-…`, `ask-cm-…`), a citation's in a
+ *  thread (`follow-<thread>`), and the labels list's new label (`make-label`). */
+export const ENTRY_KEY = /^(?:ask-|follow-|make-)/
 
 // what each entry box holds, by its key, as its changes come in: the rows it takes are drawn from it
 const drafts = new Map<string, string>()
 
 /** The rows `text` takes in an entry box of a type area `cols` wide: each of its lines wrapped at a word to the field's
- *  width (the type area less the room Claude Code keeps beside the field for Enter's word), at least ENTRY_ROWS and at
- *  most ENTRY_MAX. */
-export function entryRows(text: string, cols: number): number {
-  const room = Math.max(8, cols - width(`⏎ ${ENTRY_SUBMIT}`) - 2)
+ *  width (the type area less the room Claude Code keeps beside the field for Enter's word, `submit`), at least
+ *  ENTRY_ROWS and at most ENTRY_MAX. */
+export function entryRows(text: string, cols: number, submit = ENTRY_SUBMIT): number {
+  const room = Math.max(8, cols - width(`⏎ ${submit}`) - 2)
   let rows = 0
   for (const line of text.split('\n')) {
     let used = 0
@@ -55,9 +55,9 @@ export function entryRows(text: string, cols: number): number {
 }
 
 /** The rows an entry box takes in the panel: its rules (the top one only with `top`) and its field. */
-export function entryHeight(key: string, cols: number, top = true): number {
+export function entryHeight(key: string, cols: number, top = true, submit = ENTRY_SUBMIT): number {
   // the blank row above the box, its rules and its field
-  return 1 + (top ? 1 : 0) + entryRows(drafts.get(key) ?? '', cols) + 1
+  return 1 + (top ? 1 : 0) + entryRows(drafts.get(key) ?? '', cols, submit) + 1
 }
 
 export type EntryOpts = {
@@ -71,6 +71,8 @@ export type EntryOpts = {
   autoFocus?: boolean
   /** its rule above; false where a rule of the panel's stands right above it already */
   top?: boolean
+  /** Enter's word beside the field while it has the keys: `ask` unless given (the labels list's `make it`) */
+  submit?: string
   /** Enter with a question in the box: its words, trimmed and not empty */
   onSubmit: (q: string) => void
 }
@@ -85,7 +87,8 @@ export function entryEl(cx: Ctx, e: PaneEvent, o: EntryOpts): RenderElement {
       <Text color={COLORS.entry}>{'─'.repeat(Math.max(1, o.cols + MARGIN_W))}</Text>
     </Box>
   )
-  const rows = entryRows(drafts.get(o.key) ?? '', o.cols)
+  const submit = o.submit ?? ENTRY_SUBMIT
+  const rows = entryRows(drafts.get(o.key) ?? '', o.cols, submit)
   return (
     <Box key={marginKey(`entry-${o.key}`)} flexDirection="column">
       {/* one blank row between what stands above and the box, as above Claude Code's own prompt */}
@@ -100,15 +103,15 @@ export function entryEl(cx: Ctx, e: PaneEvent, o: EntryOpts): RenderElement {
             key={o.key}
             rows={rows}
             placeholder={o.placeholder}
-            submitLabel={ENTRY_SUBMIT}
+            submitLabel={submit}
             {...(o.autoFocus ? { autoFocus: true as const } : {})}
             onInput={v => {
-              const before = entryRows(drafts.get(o.key) ?? '', o.cols)
+              const before = entryRows(drafts.get(o.key) ?? '', o.cols, submit)
               drafts.set(o.key, v)
-              if (entryRows(v, o.cols) !== before) void cx.bumpPanel()
+              if (entryRows(v, o.cols, submit) !== before) void cx.bumpPanel()
             }}
             onSubmit={v => {
-              const had = entryRows(drafts.get(o.key) ?? '', o.cols)
+              const had = entryRows(drafts.get(o.key) ?? '', o.cols, submit)
               drafts.delete(o.key)
               if (had !== ENTRY_ROWS) void cx.bumpPanel()
               const q = v.trim()

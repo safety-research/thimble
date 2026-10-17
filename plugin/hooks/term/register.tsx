@@ -30,16 +30,16 @@ import type { Ctx } from './ctx'
 import { cxOf } from './ctx'
 import { act as actOn, readState } from './data'
 import type { Sent } from './gestures'
-import { SPIN, chipLook, claimsIn, streamLink, streamStep, streaming } from './cite'
+import { SPIN, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
-import { bareCard, cardWords, cid, citeSpans, citations, clean, clip, cut, embeddedCards, labelRef, needsDrawing, quoted } from './lib'
+import { cardWords, cid, citeSpans, citations, clean, clip, cut, embeddedCards, labelRef, needsDrawing, quoted } from './lib'
 import type { AnswerComment, CiteRow } from './contracts'
 import { lineWidth } from './draw'
 import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, noteLines, reportOf, runIds, runShown, saysWriter, threadOf, withoutEnd, withoutLines, withoutNotes, withoutToldThreads, withoutWriterLines } from './model'
 import { keepLast, keepRow } from './kept'
 import { linesMessage, onListClick } from './lines'
-import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayKey, relayMove, scrollPending, viewWheelAt, wheelWindow } from './panel'
+import { ANSWER_ELEMENT, RELAY, drawPanel, fieldMessage, focusedField, hasList, homeViews, onGesture, openAsk, openCard, openCite, openFile, openLabel, openThread, openView, relayMove, relayMoveKey, scrollPending, viewWheelAt, wheelWindow } from './panel'
 import type { PaneEvent } from './panel'
 // the file browser and a file, drawn by a module of their own (panel.tsx drawsView, term.ts loadsView)
 import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './reply'
@@ -57,7 +57,7 @@ import { callDone, checkName } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
 import { openInBrowser } from './offramp'
 import { openChecks } from './checksview'
-import { openCitations } from './citesview'
+import { answerItems, citeCounts, openCitations } from './citesview'
 import { openCoverage } from './coverageview'
 import { featureOn } from './settings'
 import { setTheme } from './paint'
@@ -76,6 +76,8 @@ const SKILL_ARGS = new Set(['fresh', 'restore', 'status', 'fix', 'feedback'])
 // the text Claude Code stores as the reply of a turn that ended with none (its `<synthetic>` model's)
 const SYNTHETIC_RE = /^\s*No response requested\.\s*$/
 const THIMBLE_TOOL = /^mcp__(plugin_thimble_thimble|thimble-[a-z-]+)__/ // main's shim's tools, and an agent's own shim's
+// what Claude Code's row of a thimble event's wake-up says: the waker hook's rewakeSummary (plugin/hooks/hooks.json)
+const REWAKE_SUMMARY = 'thimble'
 // a message of another agent's as main reads it (a subagent's hand-back)
 const AGENT_MESSAGE = /<agent-message from="([^"]+)"/
 // how long a check's dropped hand-back waits for its run's record (checkDone)
@@ -302,28 +304,21 @@ async function viewRowsEl(cx: Ctx, e: ResolveInput & { requestId: string }): Pro
 /** The footer under a turn's answer (SPEC.md, "Main's chat"; MATT-NOTES "Classic display: no new row"), one blank row
  *  under it at column 2: `N citations · N cards` dim, ` · ◌ checking N` dim while checks run on its citations, then
  *  ` · N failed` in red for the ones that failed for good (none when 0; a press opens the panel's Citations view), then
- *  `ask about this answer ›`. A citation a check rewrote is not counted. The facts are cut first; the counts stay
- *  whole. */
+ *  `ask about this answer ›`. The citations are those drawn in the answer, its words' and its cards' takeaways', a chip
+ *  too, counted as the thimble line and the Citations view count them (citesview.tsx answerItems). The facts are cut
+ *  first; the counts stay whole. */
 async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promise<RenderElement | null> {
   const ans = await cx.answer(e.requestId)
   if (!ans) return null
   const { Box, Text, Button } = cx.els(e)
-  // a card cited whole (`[[card:<id>]]`) is no cited value, and a label's link (`[33](concept:<id>/yes)`) names no place
-  // a check reads: the footer counts the values cited, and only their checks (live check term-fix6, new quirk 1)
-  const cls = claimsIn(ans.text, e.requestId).filter(cl => !bareCard(cl.c) && !labelRef(cl.c.ref))
-  let checking = 0
-  let failed = 0
+  const counts = citeCounts(await answerItems(cx, ans.text, ans.cards))
   // "Citation marks" off: nothing checks them
-  if (featureOn('citationMarks')) {
-    for (const cl of cls) {
-      const look = chipLook((await cx.verdict(cid(cl.c.raw)))?.status ?? 'pending', undefined, undefined)
-      if (look.spin) checking++
-      else if (look.state === 'failed') failed++
-    }
-  }
+  const marks = featureOn('citationMarks')
+  const checking = marks ? counts.pending : 0
+  const failed = marks ? counts.bad : 0
   const num = (n: number) => n.toLocaleString('en-US')
   const plural = (n: number, w: string) => `${num(n)} ${w}${n === 1 ? '' : 's'}`
-  const facts = [...(cls.length ? [plural(cls.length, 'citation')] : []), ...(ans.cards.length ? [plural(ans.cards.length, 'card')] : [])].join(' · ')
+  const facts = [...(counts.all ? [plural(counts.all, 'citation')] : []), ...(ans.cards.length ? [plural(ans.cards.length, 'card')] : [])].join(' · ')
   return (
     <Box key={`footer-${e.requestId}`} marginTop={1} marginLeft={MARGIN} flexDirection="row" columnGap={2}>
       <Box flexShrink={1} flexDirection="row">
@@ -372,8 +367,13 @@ async function writtenEl(cx: Ctx, e: ResolveInput & { requestId: string }, text:
   const { Box, Text, Button } = cx.els(e)
   return (
     <Box key={`written-${e.requestId}`} marginLeft={MARGIN} marginTop={1} flexDirection="row">
-      <Text dimColor>{'↳ document '}</Text>
-      <Button key={`written-open-${e.requestId}`} label={`${quoted(clip(clean(doc.title), 60))} · read and edit it in the browser ↗`} plain onPress={() => void openInBrowser(cx, `report:${doc.slug}`)} />
+      {/* the label never shrinks: a narrow column wraps the link, not `document` (bug hunt 0.9.0, B13) */}
+      <Box flexShrink={0}>
+        <Text dimColor>{'↳ document '}</Text>
+      </Box>
+      <Box flexShrink={1}>
+        <Button key={`written-open-${e.requestId}`} label={`${quoted(clip(clean(doc.title), 60))} · read and edit it in the browser ↗`} plain onPress={() => void openInBrowser(cx, `report:${doc.slug}`)} />
+      </Box>
     </Box>
   )
 }
@@ -635,8 +635,10 @@ export const register: Register = (on, options) => {
 
   // ---------------------------------------------------------------------------------------------- main's turn
 
+  // main's turn only: a subagent's turn (a check, an orientation's helper) starting meanwhile would start main's over and
+  // lose the cards made before it (README capture 10-17: a card made before four checks started was never drawn)
   on('turn.start', { turnId: /^/ }, async ($, e, next) => {
-    if (rt.sc) {
+    if (rt.sc && e.agentId === undefined) {
       const own = rt.own.has(e.text)
       rt.own.delete(e.text)
       rt.turn = { id: e.turnId, at: new Date(await $.clock.now()).toISOString(), cards: [], row: '', parts: [[]], views: [], own }
@@ -929,8 +931,15 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // the row saying a side thread's fork finished names the thread by its first question, never the fork's slug
+  // the row saying a side thread's fork finished names the thread by its first question, never the fork's slug. A
+  // thimble event's wake-up (.thimble-watch's asyncRewake, summary `thimble`, no task) is no row: a bare `● thimble`
+  // says nothing, and what came in shows in the lines the held hook prints with the turn (`› ` the analyst's words,
+  // `new thread: …`; bug hunt B5); ctrl+o's full view still draws it
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'task-notification' } } }, async ($, e, next) => {
+    if (rt.sc && e.props.text.trim() === REWAKE_SUMMARY && !e.props.task && !e.props.isExpanded) {
+      const { Box } = $.ui.resolve(e)
+      return <Box />
+    }
     if (!rt.sc || !/\bthread:/.test(e.props.text)) return next(e)
     const text = namedForks(e.props.text, await cxOf($).threads())
     return text === e.props.text ? next(e) : next({ ...e, props: { ...e.props, text } })
@@ -1035,15 +1044,22 @@ export const register: Register = (on, options) => {
   // since a letter goes into the field; off every element, NO_FOCUS (not '', which is a view just opened)
   const NO_FOCUS = '-'
   // A list's keys reach it through the relay's three Buttons (panel.tsx RELAY): a move of the ring from the middle one
-  // onto a neighbour (↑, ↓, Tab) is that key for the list, and the ring stays; a move onto a neighbour from elsewhere
-  // lands on the middle one. Every move draws the panel again, so its hint row names the keys where the ring is.
+  // onto a neighbour (↑, ↓, Tab) is that key for the list, and the ring stays unless the key moved it off the list
+  // (relayMoveKey); a move onto a neighbour from elsewhere lands on the middle one. Every move draws the panel again, so its hint row names the keys where the ring is.
   on('ui.focus', { requestId: PANEL }, async ($, e, next) => {
     // the person moving the ring while the panel's typing went to the prompt (panel.tsx typeThrough): the panel has its
     // keys again
     if (rt.sc && rt.typeThrough && e.origin.kind === 'person') rt.typeThrough = false
     const how = rt.sc ? relayMove(rt.panelFocus, e.element) : ''
     if (how === 'up' || how === 'down') {
-      await relayKey(how).catch(() => undefined)
+      const to = await relayMoveKey(how).catch(() => '')
+      // the key moved the ring off the list (↓ past the labels list's last label): the person's move lands there
+      if (to) {
+        const moved = await next({ ...e, element: to })
+        if (!moved.deny) rt.panelFocus = to
+        void cxOf($).bumpPanel()
+        return moved
+      }
       void cxOf($).bumpPanel()
       // a document's comment the key chose, scrolled into view once the panel is drawn again
       scrollPending(cxOf($))

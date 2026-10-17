@@ -390,7 +390,8 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
     not one of thimble's roles go on.
 
     SendMessage to a registered agent of a role claims the pending message request with the same text; with none it is
-    denied. TaskStop claims a pending stop request of its agent and is never denied."""
+    denied, unless a subagent sends it to its own parent (the registry's `parent`), which goes on. TaskStop claims a
+    pending stop request of its agent and is never denied."""
     name = str(hook.get("tool_name") or "")
     inp = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
     caller = str(hook.get("agent_id") or "") or None
@@ -452,6 +453,10 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
             return None
         if plan:
             return hint("start-plan-mode")
+        if caller and (registry(state).get(caller) or {}).get("parent") == to:
+            # a subagent's message to its own parent, such as the rest of a cut-off report (B6): it adds no run that a
+            # hand-back of that subagent would not add
+            return None
         text = str(inp.get("message") if inp.get("message") is not None else inp.get("content") or "")
         plugin = call.startswith(PLUGIN_CALL)
 

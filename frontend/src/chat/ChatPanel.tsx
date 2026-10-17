@@ -10,7 +10,8 @@
 // answers it (ProposalCard), except while the product tour runs (lib/touring). A failure of main or of any of thimble's
 // agents shows as a notice with its fix under the proposal's place, above the composer of whichever chat is open, and
 // as a row in the chat it happened in (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode
-// notice shows there in red.
+// notice shows there in red. While any card shows above the composer, the transcript ends above the cards, so none of
+// its lines shows between them or under the composer.
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -821,10 +822,13 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           </CallFocusContext.Provider>
         </div>
         <div ref={footRef} className="chat-foot">
-          <Holds className="chat-main-holds" alert={main.meta?.alert} />
-          {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
-          {!touring && !demo && <ProposalCard ws={ws} />}
-          <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
+          {/* the cards above the composer: while one shows, the foot takes its own space under the transcript (chat.css) */}
+          <div className="chat-foot-cards">
+            <Holds className="chat-main-holds" alert={main.meta?.alert} />
+            {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
+            {!touring && !demo && <ProposalCard ws={ws} />}
+            <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
+          </div>
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
           <DemoNote />
           {orientClosedText ? (
