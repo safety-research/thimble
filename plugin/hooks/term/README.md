@@ -151,7 +151,7 @@ Claude Code's panel chrome, no right-click menu.
   in use on the selection background, the others a click away), a prompt label's `model:` (its model by its id, a
   choice: a click shows the models, a pick saves it, `thimble act label {model}`), `unit:` (records of files, cards or
   sentences, the one it has), `scope:` (its glob in a field, then how many files match and records they hold, `· 1
-  file matches · 44 lines`), for a label over files `mark records in Files and views:  on  off` (f, `thimble act
+  file matches · 44 lines`), for a label over files `highlight:  on  off` (f, `thimble act
   label-show`); then a rule and the prompt (or pattern, or code) whole in a bordered field to edit (`hooks/field.tsx`:
   a click gives it the keyboard, Enter saves it, `thimble act label`; code colored; a pattern says what a match
   gives); then `values:`, each value's `●`, its bar and its count bold, a click on a value showing its `color` (the

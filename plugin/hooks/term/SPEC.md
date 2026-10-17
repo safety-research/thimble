@@ -1009,7 +1009,7 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
   model:     claude-haiku-5-5 ▾
   unit:      records of files   cards   sentences
   scope:     board.jsonl                         · 1 file matches · 44 lines
-  mark records in Files and views:   on   off
+  highlight: on   off
   ──────────────────────────────────────────────────────────────────────────────────────────────
             ╭──────────────────────────────────────────────────────────────────────────────────╮
   prompt:   │ Is this post a message addressed to one or more other agents, rather than a      │
@@ -1047,7 +1047,7 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
     44 lines`; `rows` of a table or CSV file, `pages` of a PDF, `entries` of a JSON document, `records` for files of
     several types; backend local._record_noun; Matt, 2026-10-16: a bare count read as a link). A label over cards or
     sentences: `the canvas's cards · 9 cards`, `the report's sentences · N sentences`.
-  - `mark records in Files and views:  on  off`, a label over files: whether Files and the views mark its records with
+  - `highlight:  on  off`, a label over files: whether Files and the views mark its records with
     its values (f, `thimble act label-show`); a view opens colored by a label that is on (Matt, v9 review: `in files:
     on off` did not say what it turns on).
 - Then the rule and the definition whole in a field to edit (field.tsx), in a round border from the label column to

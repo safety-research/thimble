@@ -2758,8 +2758,8 @@ let labelPainting = ''
 /** The label panel, every field exposed and editable as in the browser's label editor (SPEC.md, section 7, "The label
  *  panel"; Matt's mockup labelpanel2): `name:` in a field, `kind:` (prompt, regex or code, the one in use on the
  *  selection background), a prompt label's `model:` (a choice, `thimble act label {model}`), `unit:`, `scope:` (the
- *  glob in a field, the files it matches and the records they hold), for a label over files `mark records in Files and
- *  views:  on  off` (`thimble act label-show`); then the rule and the prompt (or pattern or code) in a bordered field
+ *  glob in a field, the files it matches and the records they hold), for a label over files `highlight:  on  off`
+ *  (`thimble act label-show`); then the rule and the prompt (or pattern or code) in a bordered field
  *  to edit, Enter saving it (`thimble act label`); `values:` with each value's bar and count, a click on a value showing
  *  its `color`, `filter` (`thimble act label-filter`) and the values to edit; the last run, then the actions underlined
  *  in the accent, `delete` in red: `run on a sample` and `run on all`, which save what was typed first and run it
@@ -2864,7 +2864,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   }
   // the header block, every field exposed and editable as in the browser's label editor (Matt, mockup labelpanel2):
   // `name:`, `kind:`, a prompt label's `model:`, `unit:`, `scope:`, each on the label column, and for a label over files
-  // `mark records in Files and views:`; then the rule and the definition
+  // `highlight:`; then the rule and the definition
   const L = LABEL_COL
   const fieldLine = (label: string, el: RenderElement) => (
     <Box key={`lf-${label}`} flexDirection="row">
@@ -2999,15 +2999,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
         </Text>,
       ),
     )
-  // a label over files: whether Files and the views mark its records with its values, `on  off` after words that say
-  // what it turns on (Matt, v9 review, item l); f flips it
-  if (files)
-    rows.push(
-      <Box key="lb-marks" flexDirection="row" flexWrap="wrap">
-        <Text dimColor>{'mark records in Files and views:  '}</Text>
-        {choices('lo', ON_OFF, shownOn ? 'on' : 'off', running ? undefined : v => void turn(v === 'on')())}
-      </Box>,
-    )
+  // a label over files: `highlight:  on  off`, whether Files and the views mark its records with its values; f flips it
+  if (files) rows.push(fieldLine('highlight:', choices('lo', ON_OFF, shownOn ? 'on' : 'off', running ? undefined : v => void turn(v === 'on')())))
   rows.push(ruleEl(els, cols, 'lb-rule'))
   // the definition, whole, in a field to edit (field.tsx) in a round border from the label column to the pane's edge,
   // its name (`prompt`, `pattern` or `code`) on its first row; a click gives it the keyboard, Enter saves it (in code,

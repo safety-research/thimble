@@ -1,5 +1,5 @@
 // The label panel's parity with the browser's label editor (mockup labelpanel2): every field exposed and editable for
-// each kind of label, a label's records marked in Files and the views or not (`mark records in Files and views:  on
+// each kind of label, a label's records marked in Files and the views or not (`highlight:  on
 // off`), a code label's colored code, a pattern's note, and rename in the name's field. Each change goes through
 // `thimble act` (label-show, label). `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
@@ -167,7 +167,7 @@ const KINDS_SHOWN = [
       /^model: {5}claude-haiku-5-5 ▾$/,
       /^unit: {6}records of files {3}cards {3}sentences$/,
       /^scope: {5}board\.jsonl▏ {24}· 1 file matches · 44 lines$/,
-      /^mark records in Files and views: {3}on {3}off$/,
+      /^highlight: on {3}off$/,
       /^─+$/,
       /^ {10}╭─+╮$/,
       /^prompt: {3}│ Is this post a message addressed to one or more other agents, rather than/,
@@ -188,7 +188,7 @@ const KINDS_SHOWN = [
       /^kind: {6}prompt {3}regex {3}code$/,
       /^unit: {6}records of files {3}cards {3}sentences$/,
       /^scope: {5}agents\/\*\.jsonl▏ +· 48 files match · 840 lines$/,
-      /^mark records in Files and views: {3}on {3}off$/,
+      /^highlight: on {3}off$/,
       /^pattern: {2}│ force\[- \]push\|--force +│$/,
       /^ {10}│ a match is yes, the rest no · case-sensitive +│$/,
       /^ {10}● yes {2}━ {32}9$/,
@@ -247,13 +247,13 @@ for (const c of KINDS_SHOWN)
     await pane.unmount()
   })
 
-test("a label over files marks its records in Files and the views or not: `mark records in Files and views:  on  off`, the one in use lit; f and a click send `label-show`", async ($, on) => {
+test("a label over files marks its records in Files and the views or not: `highlight:  on  off`, the one in use lit; f and a click send `label-show`", async ($, on) => {
   // 0.9.0 (SPEC-v2 J4): `o` opens every view's object in the browser, so the label's marks switch is `f`; (Matt, v9
   // review, item l) `in files: on off` did not say what it turns on; mockup labelpanel2 says it in the row's label
   const w = world(on)
   let pane = await labelPanel($, w)
   let text = shown(await pane.drawn())
-  expect(text).toContain('mark records in Files and views:   on  off ')
+  expect(text).toContain('highlight: on  off ')
   expect(text).not.toContain('in files:')
   expect(text).not.toContain('marks:')
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"backgroundColor":"selectionBg"},"children":[" off "]}')
