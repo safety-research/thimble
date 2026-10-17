@@ -60,7 +60,7 @@ test('the cards a call of main names: add_card, edit_card, apply_label, and a ca
   expect(cardsOfCall('Bash', { command: '/tree/plugin/bin/thimble-run card 69d6b48a' }, 'card:69d6b48a\n...')).toEqual(['69d6b48a'])
   expect(cardsOfCall('Bash', { command: 'ls -la' }, '')).toEqual([])
   // several cards run again in a shell loop: each card its output names
-  const loop = 'B=/mnt/store/x/plugin/bin/thimble-run; for c in 2d10d7f3 9b4bb0cb; do $B card $c; done'
+  const loop = 'B=/opt/x/plugin/bin/thimble-run; for c in 2d10d7f3 9b4bb0cb; do $B card $c; done'
   expect(cardsOfCall('Bash', { command: loop }, 'card:2d10d7f3\n[out0: plot]\n\ncard:9b4bb0cb\n[out0: table]\n')).toEqual(['2d10d7f3', '9b4bb0cb'])
   // its row: each card by its question, never the install path or an id; cards not read yet are counted
   const q = (id: string) => ({ '2d10d7f3': 'How many revisions does each wiki have?', '9b4bb0cb': 'Which ten pages have the most revisions?' })[id]

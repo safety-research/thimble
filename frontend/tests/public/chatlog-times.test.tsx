@@ -23,9 +23,9 @@ const records = [
   line(4, ''),
   line(5, '**00:00:01**'),
   line(6, ''),
-  line(7, '**Matthew Jörke:** Um, so I have a **little**', { speaker: 'Matthew Jörke', at: 19 }),
+  line(7, '**Alex Rivera:** Um, so I have a **little**', { speaker: 'Alex Rivera', at: 17 }),
   line(8, ''),
-  line(9, '**Matthew Jörke:** All right, see you.', { speaker: 'Matthew Jörke', at: 19 }),
+  line(9, '**Alex Rivera:** All right, see you.', { speaker: 'Alex Rivera', at: 17 }),
   line(10, ''),
   line(11, '**00:01:26**'),
   line(12, ''),
@@ -35,10 +35,10 @@ const records = [
 test('a time on its own line heads the turn after it, and no line shows markdown syntax', async () => {
   const page: SourcePage = { path: 'P2/transcript.md', kind: 'text', total_lines: 13, start: 1, records }
   const View = transcript.component
-  const el = await mount(<View workspace="w" path="P2/transcript.md" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'text', score: 0.95, style: 'bold', speakers: ['matthew jörke', 'p2'] }} />)
+  const el = await mount(<View workspace="w" path="P2/transcript.md" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'text', score: 0.95, style: 'bold', speakers: ['alex rivera', 'p2'] }} />)
   const cards = [...el.querySelectorAll('.reader-card')]
   expect(cards.map((c) => c.getAttribute('data-line'))).toEqual(['1', '7', '9', '13'])
-  expect(cards.map((c) => c.querySelector('.reader-record-head')?.textContent ?? '')).toEqual(['', 'Matthew Jörke · 00:00:01', 'Matthew Jörke', 'P2 · ? · 00:01:26'])
+  expect(cards.map((c) => c.querySelector('.reader-record-head')?.textContent ?? '')).toEqual(['', 'Alex Rivera · 00:00:01', 'Alex Rivera', 'P2 · ? · 00:01:26'])
   const words = cards.map((c) => [...c.querySelectorAll('.reader-block')].map((b) => b.textContent).join('|'))
   expect(words[0]).toBe('P2 session transcript||Auto-captions from the session recording; "(?)" marks an uncertain attribution.')
   expect(words[1]).toBe('Um, so I have a little')

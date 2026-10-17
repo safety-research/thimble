@@ -380,7 +380,7 @@ test("a viewer of a file type shows its files on the name's press; why accept co
 
 test("the SSH row of a remote press is one row: its command cut where its acts begin (`copy` bold), whole on a press", { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
-  const tunnel = 'ssh -N -L 29321:127.0.0.1:29321 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 mjoerke@devbox-fellows-matthew.us-central1-a.c.project.internal'
+  const tunnel = 'ssh -N -L 29321:127.0.0.1:29321 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 analyst@devbox.example.internal'
   w.open = { ...w.open, remote: true, opened: false, tunnel }
   await start($, w)
   await pressBrowser($, w)
