@@ -63,3 +63,20 @@ test('the entry box asks a side thread about the passage, told the comment; the 
   expect(w.panes.at(-1)!.title).toBe('Threads')
   await m.unmount()
 })
+
+test("a click on ‹ or › steps to the previous or next comment; a comment's Markdown and citations read as words", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = panelWorld(on)
+  w.t.answerComments = [comment('c1', { quote: '**My guess:** agents used the wiki.' }), comment('c2', { quote: 'One week of June holds most saves.', ref: 'answer:r1#s4' })]
+  await start($, w)
+  const m = await opened($, w)
+  expect(words(await m.drawn())).toContain('My guess: agents used the wiki.')
+  expect(words(await m.drawn())).not.toContain('**')
+  await m.press({ key: 'checks-next' })
+  await w.clock.settle()
+  expect(words(await m.find({ type: 'Box', key: 'way' }))).toContain('2 of 2')
+  expect(words(await m.drawn())).toContain('One week of June holds most saves.')
+  await m.press({ key: 'checks-prev' })
+  await w.clock.settle()
+  expect(words(await m.find({ type: 'Box', key: 'way' }))).toContain('1 of 2')
+  await m.unmount()
+})
