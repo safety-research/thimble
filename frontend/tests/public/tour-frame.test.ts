@@ -3,7 +3,7 @@
 // analyst's page, never over their own files. The workspace it picks, the frame's address, the messages the frame and
 // the page around it take (this origin and that window only), and the storage the demo workspace gets back once the
 // frame closes. And what the cards on the analyst's page say (tour/steps offerTexts): the 0.8.0 welcome, word for word,
-// when a demo is installed; that the demo isn't installed, with the command and only Skip tour, when none is.
+// and that the tour didn't open.
 import { afterEach, describe, expect, test } from 'vitest'
 import { inTourFrame, keepWorkspaceStorage, tourEventOf, tourFrameHref, tourWorkspace } from '../../src/lib/tourFrame.ts'
 import { offerTexts, sessionTexts } from '../../src/tour/steps.ts'
@@ -83,27 +83,17 @@ describe('the demo workspace’s storage', () => {
 })
 
 describe('what the analyst’s page says', () => {
-  test('with a demo installed, the 0.8.0 welcome, word for word', () => {
-    expect(offerTexts('offer', false, true)).toEqual({
+  test('the 0.8.0 welcome, word for word', () => {
+    expect(offerTexts('offer', false)).toEqual({
       title: 'Welcome to thimble',
       says: ['Would you like a short tour? The demo tour uses <b>example data</b>.'],
       begin: 'Take the tour',
       skip: 'Skip',
     })
-    expect(offerTexts('offer', true, true).says).toEqual(['This is example data, not your files. To open your own folder, run <code>thimble</code> in it.', 'Would you like a short tour?'])
-  })
-  test('with none installed, that the demo isn’t installed, how to install it, and only Skip tour', () => {
-    const first = offerTexts('missing', false, true)
-    expect(first).toEqual({
-      title: 'Welcome to thimble',
-      says: ["The tour runs in thimble's demo workspace, on example data, and the demo isn't installed here.", 'To install it, run <code>thimble demo</code> in a terminal. Then take the tour from Settings.'],
-      begin: null,
-      skip: 'Skip tour',
-    })
-    expect(offerTexts('missing', false, false).title).toBe("The demo isn't installed")
+    expect(offerTexts('offer', true).says).toEqual(['This is example data, not your files. To open your own folder, run <code>thimble</code> in it.', 'Would you like a short tour?'])
   })
   test('a frame that did not open: said, with only Close', () => {
-    expect(offerTexts('failed', false, false)).toMatchObject({ title: "The tour didn't open", begin: null, skip: 'Close' })
+    expect(offerTexts('failed', false)).toMatchObject({ title: "The tour didn't open", begin: null, skip: 'Close' })
   })
   test('the steps speak as a demo page does, since they run only on the demo workspace', () => {
     expect(sessionTexts().chat[1]).toMatch(/^This is a demo and thimble isn't connected to a live Claude Code session/)

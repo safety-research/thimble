@@ -26,7 +26,7 @@ export function inTourFrame(): boolean {
 
 /** The workspace the tour runs in: this one when it is a demo page (`demoHere`), else an installed demo dataset (one
  * whose orientation ran in advance first), else a worked example (the tour's own, example-timeline, first); null when
- * none is installed. Pure. */
+ * none is installed, and the frame sets up example-timeline (shell/TourFrame, backend tour.py). Pure. */
 export function tourWorkspace(rows: readonly Pick<WorkspaceRow, 'name' | 'kind' | 'ready'>[], here: string | null, demoHere: boolean): string | null {
   if (demoHere && here) return here
   const demos = rows.filter((r) => r.kind === 'demo')

@@ -7,8 +7,9 @@
 // On a demo page it first says that the page holds example data; elsewhere it says that the tour uses example data. The
 // offer is recorded as it shows, whatever the answer. Settings' Take the tour (the bus's `tour`) opens the frame at
 // once. The tour runs on this workspace when it is a demo page, else on an installed demo dataset or worked example
-// (tourWorkspace); with none installed, a card says so, names `thimble demo`, and offers only to skip. A frame whose
-// tour did not start gets a card that says so. While a card or the frame shows, telemetry records nothing and the chat
+// (tourWorkspace); with none installed, the frame first sets up the tour's example workspace from a sample every
+// install ships (POST /tour/workspace), which a second tour reuses. A frame whose tour did not start, or whose setup
+// failed, gets a card that says so. While a card or the frame shows, telemetry records nothing and the chat
 // shows no view proposal (lib/touring); a session that ends meanwhile closes them, so the shell's own card about it can
 // be used.
 //
@@ -36,14 +37,16 @@ const ready = () => {
 }
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms))
 
-type CardState = 'offer' | 'missing' | 'failed'
+type CardState = 'offer' | 'failed'
+/** The tour's example workspace, set up on the spot when no demo is installed (backend tour.py): its name. */
+const setUp = () => api.tourWorkspace().then((r) => r.name)
 
 export function TourHost({ ws }: { ws: string }) {
-  // the demo workspace the tour's frame shows, while it shows
-  const [frame, setFrame] = useState<string | null>(null)
+  // the tour's frame while it shows, on its demo workspace (null: none installed, so the frame sets one up)
+  const [frame, setFrame] = useState<{ ws: string | null } | null>(null)
   // a card, or the frame, shows or is about to
   const busy = useRef(false)
-  const showCard = useRef<(state: CardState, first: boolean, onBegin?: () => void) => Promise<void>>(async () => undefined)
+  const showCard = useRef<(state: CardState, onBegin?: () => void) => Promise<void>>(async () => undefined)
 
   useEffect(() => (inTourFrame() ? runFramed() : undefined), [])
 
@@ -51,7 +54,7 @@ export function TourHost({ ws }: { ws: string }) {
     if (inTourFrame()) return
     let alive = true
     // the engine's card on this page (../tour/run offerTour): the welcome, or why the tour can't run
-    const card = async (state: CardState, first: boolean, onBegin?: () => void) => {
+    const card = async (state: CardState, onBegin?: () => void) => {
       const { offerTour } = await import('../tour/run')
       if (!alive) return void (busy.current = false)
       hold(true)
@@ -60,7 +63,6 @@ export function TourHost({ ws }: { ws: string }) {
       let stopWatch = (): void => undefined
       const tour = offerTour({
         state,
-        first,
         demo: isDemo(),
         onBegin:
           onBegin &&
@@ -93,9 +95,8 @@ export function TourHost({ ws }: { ws: string }) {
         const rows = await api.workspaces().catch((): WorkspaceRow[] => [])
         if (!alive) return void (busy.current = false)
         const target = tourWorkspace(rows, ws, isDemo())
-        if (!target) await card('missing', welcome)
-        else if (welcome) await card('offer', true, () => setFrame(target))
-        else setFrame(target)
+        if (welcome) await card('offer', () => setFrame({ ws: target }))
+        else setFrame({ ws: target })
       } catch (e) {
         busy.current = false
         hold(false)
@@ -121,10 +122,11 @@ export function TourHost({ ws }: { ws: string }) {
   if (!frame) return null
   return (
     <TourFrame
-      ws={frame}
+      ws={frame.ws}
+      setUp={setUp}
       onClose={(failed) => {
         setFrame(null)
-        if (failed) void showCard.current('failed', false)
+        if (failed) void showCard.current('failed')
         else busy.current = false
       }}
     />

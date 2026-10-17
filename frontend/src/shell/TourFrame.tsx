@@ -1,10 +1,12 @@
 // The tour's frame (lib/tourFrame): thimble's demo workspace in a frame over the whole window, under a banner that says
-// it is the tour, on example data, not the analyst's files, with Exit tour. The page under it is inert and takes no
+// it is the tour, on example data, not the analyst's files, with Exit tour. With no demo installed (`ws` null), the
+// frame first sets up the tour's example workspace (`setUp`, POST /tour/workspace); until the tour in the frame has
+// started, the frame says "Setting up the tour…" in place of the page it loads. The page under it is inert and takes no
 // input, so it stays exactly as it was; Esc on the banner closes the frame, as Esc in the tour does. The frame closes
-// when the tour in it ends (Done, Skip tour, Esc), on Exit tour, when the page's own session ends, or when the tour has
-// not started within START_TIMEOUT_MS (`failed`, which TourHost says). Once it is gone, the browser storage of the demo workspace is put
-// back as it was, so the tour leaves no layout behind there either.
-import { useEffect, useMemo, useRef } from 'react'
+// when the tour in it ends (Done, Skip tour, Esc), on Exit tour, when the page's own session ends, or when the setup
+// fails or the tour has not started within START_TIMEOUT_MS (`failed`, which TourHost says). Once it is gone, the
+// browser storage of the demo workspace is put back as it was, so the tour leaves no layout behind there either.
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { hold } from '../lib/telemetry'
@@ -19,6 +21,8 @@ export const START_TIMEOUT_MS = 30_000
 export const BANNER_NAME = 'Tour'
 export const BANNER_TEXT = 'Example data, not your files'
 export const BANNER_EXIT = 'Exit tour'
+/** What the frame says until the tour in it has started. */
+export const SETTING_UP = 'Setting up the tour…'
 
 /** Calls `fn` once the shell's session is gone (SessionGone's card shows). Returns the stop. */
 export function onSessionGone(fn: () => void): () => void {
@@ -35,17 +39,36 @@ const stop = (e: Event) => {
   e.stopImmediatePropagation()
 }
 
-export function TourFrame({ ws, onClose }: { ws: string; onClose: (failed: boolean) => void }) {
+export function TourFrame({ ws, setUp, onClose }: { ws: string | null; setUp: () => Promise<string>; onClose: (failed: boolean) => void }) {
   const root = useRef<HTMLDivElement>(null)
   const banner = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLIFrameElement>(null)
-  const src = useMemo(() => tourFrameHref(ws, window.location.pathname), [ws])
+  // the workspace the frame shows: `ws`, else the one setUp made
+  const [name, setName] = useState(ws)
+  // the tour in the frame has started: until then the frame says it is setting up
+  const [started, setStarted] = useState(false)
   const closeRef = useRef(onClose)
   closeRef.current = onClose
   const finish = useRef<(failed: boolean) => void>(() => undefined)
 
+  // with no demo installed, the tour's example workspace first
   useEffect(() => {
-    const restore = keepWorkspaceStorage(ws)
+    if (name) return
+    let alive = true
+    setUp().then(
+      (made) => alive && setName(made),
+      () => alive && finish.current(true),
+    )
+    return () => {
+      alive = false
+    }
+  }, [name, setUp])
+
+  // the demo workspace's browser storage, put back once the frame is gone (an effect's cleanup runs after its element
+  // left the page, so nothing in the frame writes after this)
+  useEffect(() => (name ? keepWorkspaceStorage(name) : undefined), [name])
+
+  useEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
     hold(true)
     setTouring(true)
@@ -65,6 +88,8 @@ export function TourFrame({ ws, onClose }: { ws: string; onClose: (failed: boole
       if (ev === 'started') {
         started = true
         window.clearTimeout(timer)
+        setStarted(true)
+        frame.current?.focus()
       } else if (ev === 'end') finish.current(false)
       else if (ev === 'fail') finish.current(true)
     }
@@ -87,17 +112,14 @@ export function TourFrame({ ws, onClose }: { ws: string; onClose: (failed: boole
       stopGone()
       setGuard(null)
       others.forEach((el) => el.removeAttribute('inert'))
-      // the frame is gone by now (an effect's cleanup runs after its element left the page), so nothing in it writes
-      // after this
-      restore()
       hold(false)
       setTouring(false)
       before?.focus({ preventScroll: true })
     }
-  }, [ws])
+  }, [])
 
   return createPortal(
-    <div ref={root} className="tour-frame" role="dialog" aria-modal="true" aria-label="thimble tour" data-tour-frame={ws}>
+    <div ref={root} className="tour-frame" role="dialog" aria-modal="true" aria-label="thimble tour" data-tour-frame={name ?? ''}>
       <div ref={banner} className="tour-banner">
         <span className="tour-banner-name">{BANNER_NAME}</span>
         <span className="tour-banner-sep" aria-hidden="true">
@@ -109,7 +131,14 @@ export function TourFrame({ ws, onClose }: { ws: string; onClose: (failed: boole
           {BANNER_EXIT}
         </Button>
       </div>
-      <iframe ref={frame} className="tour-frame-page" src={src} title="thimble tour on example data" onLoad={() => frame.current?.focus()} />
+      <div className="tour-frame-body">
+        {!started && (
+          <p className="tour-frame-wait" role="status">
+            {SETTING_UP}
+          </p>
+        )}
+        {name && <iframe ref={frame} className="tour-frame-page" data-started={started ? '' : undefined} src={tourFrameHref(name, window.location.pathname)} title="thimble tour on example data" />}
+      </div>
     </div>,
     document.body,
   )
