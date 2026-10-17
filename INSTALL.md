@@ -6,9 +6,9 @@
 > them yourself.
 
 thimble uses whichever auth path you have configured for `claude`: every model call runs through your own `claude`, in
-your config dir with your user settings. thimble's agents run as subagents of your Claude Code session;
-its single model calls (labels, card checks, view proposals) and `thimble fix` run as `claude -p` jobs in folders of
-their own, so auth
+your config dir with your user settings. thimble's agents and its card checks run as subagents of your Claude Code
+session, under its permission mode; its other single model calls (labels, view proposals) and `thimble fix` run as
+`claude -p` jobs in folders of their own, so auth
 set only in a project's `.claude/` settings does not reach them. thimble tells you when `claude` is missing or not
 logged in.
 

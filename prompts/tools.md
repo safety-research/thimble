@@ -629,7 +629,7 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
 
 ## read_call
 
-Get a part of your task: its text and its pictures. When you have a part with pictures that you did not answer, you get that part again. Else you get the next part.
+Get a part of your task: its text and its pictures. When you have a part that you did not answer, you get that part again. Else you get the next part.
 
 ```json
 {
