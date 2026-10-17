@@ -213,10 +213,11 @@ export const chartLabels = (ids: readonly string[] | undefined, concepts: Readon
   (ids ?? []).flatMap((id) => (concepts.has(id) ? [concepts.get(id)!] : []))
 
 /**
- * One bundle. `maxLines` caps text; `maxRows` caps an html table behind "Show all"; `fitWidth` is the room a chart has;
- * `card` drops a chart's own title under a card's question; `labels` colour a chart's classes by label.
+ * One bundle. `maxLines` caps text; `maxRows` caps an html table behind "Show all"; `frameRows` caps a DataFrame's
+ * table behind `… n more rows` (canvas/FrameTable); `fitWidth` is the room a chart has; `card` drops a chart's own
+ * title under a card's question; `labels` colour a chart's classes by label.
  */
-export function Output({ bundle, maxLines, maxRows, fitWidth, card, labels }: { bundle: MimeBundle; maxLines?: number; maxRows?: number; fitWidth?: number; card?: boolean; labels?: ChartLabels }) {
+export function Output({ bundle, maxLines, maxRows, frameRows, fitWidth, card, labels }: { bundle: MimeBundle; maxLines?: number; maxRows?: number; frameRows?: number; fitWidth?: number; card?: boolean; labels?: ChartLabels }) {
   const cap = (s: string) => (maxLines ? capLines(s, maxLines) : s)
   const mime = pickMime(bundle)
   if (mime === ERROR_MIME) return <ErrorOut err={bundle[ERROR_MIME]} maxLines={maxLines} />
@@ -233,7 +234,7 @@ export function Output({ bundle, maxLines, maxRows, fitWidth, card, labels }: { 
   if (isDrawing(mime)) return <DatasetView kind={DRAWING_MIMES[mime]} dataset={data} fitWidth={fitWidth} />
   if (mime === FRAME_MIME) {
     const frame = asFrame(data)
-    return frame ? <FrameTable frame={frame} /> : <pre className="outputs-text">{cap(asText(bundle['text/plain']))}</pre>
+    return frame ? <FrameTable frame={frame} maxRows={frameRows} /> : <pre className="outputs-text">{cap(asText(bundle['text/plain']))}</pre>
   }
   switch (mime) {
     case 'image/png':

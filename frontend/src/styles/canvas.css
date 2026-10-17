@@ -797,6 +797,10 @@ body[data-cmd] .board-stage * {
 .frame-table[data-fit] thead th {
   white-space: normal;
 }
+/* `… n more rows` under a table the card cuts (canvas/FrameTable) starts where the rows do */
+.frame-table .outputs-rows-more {
+  padding-left: 0;
+}
 /* the row names in the body face: in mono a person's or a measure's name reads as code */
 .frame-table tbody th {
   font-family: var(--font-body);

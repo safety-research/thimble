@@ -76,7 +76,7 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
         )
       const output = art ? (
         <div className={`bcell-output bcell-output-${art.kind}`} data-out={outIndex(cell.outputs, art.bundle)}>
-          <Output bundle={art.bundle} maxLines={big ? 80 : 24} maxRows={big ? 40 : 12} fitWidth={width} card labels={chartLabels(cell.labels, concepts)} />
+          <Output bundle={art.bundle} maxLines={big ? 80 : 24} maxRows={big ? 40 : 12} frameRows={big ? undefined : CARD_TABLE_ROWS} fitWidth={width} card labels={chartLabels(cell.labels, concepts)} />
         </div>
       ) : null
       // a code card is its code (what the analyst asked to see), with what it printed or returned under it; a card of
@@ -162,6 +162,10 @@ function highlightTop(el: HTMLElement): number {
 /** the height of a code card's code before Show all: about twelve lines, and more in focus mode */
 const CODE_MAX = 220
 const CODE_MAX_BIG = 520
+/** the rows a table card's DataFrame shows on the board before `… n more rows`, as many as the terminal's card shows
+ * (plugin/hooks/term/draw.ts MAX_TABLE_ROWS), so a long table keeps the board's Fit readable (bug hunt D5); focus mode
+ * shows every row */
+export const CARD_TABLE_ROWS = 15
 
 /** the height a quoted record shows before Show all: one alone, one of several, and each in focus mode */
 const QUOTE_MAX = 330
