@@ -744,10 +744,15 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
            config_dir: str | None = None, *, follow: bool = False, after: str | None = None) -> Live | None:
     """Make the session main; the Live, or None for a malformed id. `config_dir` is the session's CLAUDE_CONFIG_DIR ("" for
     unset, None for what its shim reported); `follow` says the session runs in the process of the one it replaces
-    (_follow); `attached.after` names the previous main when it still runs in another process."""
+    (_follow); `attached.after` names the previous main when it still runs in another process. Main followed again
+    means thimble's page is up (or, in a pass on local transport, that main's tools run without it), so the shim's
+    `page:stopped` notice goes (notices.page_back, bug hunt H4)."""
     sid, cwd = str(sid or ""), str(cwd or "")
     if not SID_RE.match(sid):
         return None
+    from . import notices  # noqa: PLC0415
+
+    notices.page_back(c)
     # `/thimble` names neither; the session's shim reported both when it subscribed
     pid = pid or _shim_pids.get((c, sid))
     config_dir = _shim_configs.get((c, sid)) if config_dir is None else config_dir

@@ -1036,7 +1036,8 @@ def transport(ws: Path | None, sid: str | None = None) -> str:
     session, and for no workspace. A record with no `transport` is 0.8.0's: its `mode` decides (LEGACY_MODES), and a
     workspace no session turned thimble on in (no record, or one with neither field: a demo's, a browser's opened from
     a shell) is the server's, as 0.8.0's browser default was. The switch is one way: nothing writes `local` over
-    `server` for the same main."""
+    `server` for the same main in the same `claude` process; main's session continued in a new one after a quit starts
+    local again (app/activate.py continue_main)."""
     if ws is None:
         return LOCAL
     rec = launch(ws)

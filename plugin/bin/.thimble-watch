@@ -60,15 +60,21 @@ callers.jsonl), and post to the server only when server.json names one; --agent-
 They find the workspace from the session's folder as the server does, importing app/subagent_files.py from the tree
 (which is standard library only). Each hook reads the session's transport from the workspace's launch.json
 (app/subagent_files.py transport): local until a press of the browser workbench, and for a peer, where it uses the
-workspace's files alone (below); the server's after the press, where every other hook but the stream does nothing
-without $THIMBLE_HOME/server.json and the token in it, and nothing switches back when the server is gone. Each request proves it holds the token and each answer must prove the server does (app/hook_auth.py); an
-answer without that proof counts as no server, so a process on the recorded port is neither told anything nor believed.
+workspace's files alone (below); the server's after the press, where every other hook but the stream and the waker
+does nothing without $THIMBLE_HOME/server.json and the token in it. The transport goes back to local only for main's
+session continued in a new `claude` process after a quit (app/activate.py continue_main, which the MCP shim runs).
+Each request proves it holds the token and each answer must prove the server does (app/hook_auth.py); an answer
+without that proof counts as no server, so a process on the recorded port is neither told anything nor believed.
 
 The hook long-polls the server for the session's next event (GET /api/events/pull), writes it to stderr in the
 `<thimble-event …>` form, acknowledges it and exits 2, which makes Claude Code wake the session. It exits 0 in a
-subagent, when another watcher holds the session's lock, when no server listens at first, on 404/410 (STOP), when the
-`claude` process has moved to another session (/clear), and when that process has exited. A server that has answered
-once is waited for across restarts.
+subagent, when another watcher holds the session's lock, on 404/410 (STOP), when the `claude` process has moved to
+another session (/clear), and when that process has exited. A server that has answered once is waited for across
+restarts, and so is one not up yet for a session whose transport is the server's (a quit stopped it, and `/thimble
+browser`, a local command that starts no hook's waker, starts it again: bug hunt H2), tried again with backoff up to
+SERVER_WAIT_S apart, no server.json included; once the transport is local again (continue_main) the waker takes the
+session's events from the queue file. For a folder of no workspace a hook's waker still exits when no server listens
+at first.
 
 The hand-back hook runs on auto mode's SubagentHandback calls, and hooks.json starts it only for an agent of type
 thimble:check or thimble:call (a match on the hook's input in the shell, before Python starts). For such an agent that
@@ -180,6 +186,8 @@ from pathlib import Path
 PULL_WAIT_S = 25  # app/events.py PULL_WAIT_S: the server holds a pull this long
 LIFETIME_S = 23 * 3600  # the hook's own timeout is 86400 s (hooks.json)
 RETRY_S = 2.0
+SERVER_WAIT_S = 5.0  # the longest gap between tries at a server not up yet, on the server's transport (pull)
+LOCAL_AGAIN = object()  # pull's answer once the session's transport is local again (module note)
 LOCK_SWEEP_S = 2 * 86400  # a lock file untouched this long belongs to no running watcher (each takes it anew)
 MAX_HOPS = 8  # claude_pid's walk up the process tree
 STREAM_CHARS = 2_800  # below Claude Code's cut of a Monitor event
@@ -363,12 +371,16 @@ def process_session(pid: int | None) -> str | None:
 
 
 def pull(cwd: str, session: str, until: float, pid: int | None = None, *,
-         follow: bool = False) -> tuple[str, str, str] | None:
+         follow: bool = False, ws: Path | None = None):
     """(id, text, session) of the next event, None when the watcher should stop (module note). A refused connection
-    before any answer is a stop; once a server has answered or taken a request, it is waited for until `until`. With the
-    process's `pid`, each poll first looks at the session the process runs now: the stream (`follow`) polls for that
-    one, and a hook's watcher whose session the process has left (/clear) stops."""
+    before any answer is a stop; once a server has answered or taken a request, it is waited for until `until`. With
+    `ws`, the workspace folder of a hook's session on the server's transport, a server not up yet is waited for as well
+    (no connection, no server.json, or an answer without the server's proof), tried again with backoff up to
+    SERVER_WAIT_S apart, and once the session's transport is local again the answer is LOCAL_AGAIN (bug hunt H2). With
+    the process's `pid`, each poll first looks at the session the process runs now: the stream (`follow`) polls for
+    that one, and a hook's watcher whose session the process has left (/clear) stops."""
     reached = False
+    gap = RETRY_S
     while time.monotonic() < until:
         if pid and not alive(pid):
             return None
@@ -382,15 +394,24 @@ def pull(cwd: str, session: str, until: float, pid: int | None = None, *,
         try:
             status, body = request("GET", f"/api/events/pull?{query}", timeout=PULL_WAIT_S + 15)
         except urllib.error.URLError:  # no connection was made (refused): an HTTP status returns from request()
+            if ws is not None:
+                if local_again(ws, session):
+                    return LOCAL_AGAIN
+                time.sleep(gap)
+                gap = min(gap * 2, SERVER_WAIT_S)
+                continue
             if not reached:
                 return None
             time.sleep(RETRY_S)
             continue
         except (OSError, http.client.HTTPException):  # a server took the poll and the connection dropped
             reached = True
+            if ws is not None and local_again(ws, session):
+                return LOCAL_AGAIN
             time.sleep(RETRY_S)
             continue
         reached = True
+        gap = RETRY_S
         if status == 200 and body.get("text"):
             return str(body.get("id") or ""), str(body["text"]), session
         if status in STOP:
@@ -409,9 +430,17 @@ def ack(cwd: str, session: str, event_id: str, terminal: bool = False) -> None:
         pass
 
 
-def watch(inp: dict, held=None) -> int:
+def local_again(ws: Path, session: str) -> bool:
+    """Whether `session` runs on local transport in the workspace folder `ws` again (pull)."""
+    sf = files()
+    return sf.transport(ws, session or None) == sf.LOCAL
+
+
+def watch(inp: dict, held=None, ws: Path | None = None) -> int:
     """The asyncRewake hook (module note); `held`, the session's lock, which the waker on local transport took before a
-    press turned its session's transport to the server (watch_files)."""
+    press turned its session's transport to the server (watch_files); `ws`, the workspace folder of a session on the
+    server's transport, whose server it waits for until it answers, and whose queue file it takes events from again
+    once the transport is local (pull)."""
     session = str(inp.get("session_id") or "")
     if inp.get("agent_id") or not session:
         return 0
@@ -420,7 +449,9 @@ def watch(inp: dict, held=None) -> int:
         return 0
     cwd = folder(inp)
     pid = claude_pid()
-    got = pull(cwd, session, time.monotonic() + LIFETIME_S, pid)
+    got = pull(cwd, session, time.monotonic() + LIFETIME_S, pid, ws=ws)
+    if got is LOCAL_AGAIN:
+        return watch_files(inp, ws, held)
     if got is None:
         return 0
     if process_session(pid) not in (None, session):
@@ -547,20 +578,21 @@ def events():
 FILE_LOOK_TICKS = 4  # the waker takes again at least every this many ticks, the queue file changed or not
 
 
-def watch_files(inp: dict, ws: Path) -> int:
+def watch_files(inp: dict, ws: Path, held=None) -> int:
     """The waker on local transport (module note): the oldest event for this session that no watcher has taken, from the
     queue, written to stderr with exit 2; 0 in a subagent, for a session with no marker (thimble is not on in it),
     when another waker holds the session's lock, and when the `claude` process has moved to another session or exited.
     Once a press turned this session's transport to the server, it pulls from the server with the lock it holds (watch):
-    another hook's waker exits on that lock, and while main is idle no other hook runs. A new session's waker first
-    waits up to MAIN_WAIT_S for --rekey to record a /clear's move to it, since main's events name no session."""
+    another hook's waker exits on that lock, and while main is idle no other hook runs; `held` is that lock when the
+    waker comes back here from the server's transport (pull's LOCAL_AGAIN). A new session's waker first waits up to
+    MAIN_WAIT_S for --rekey to record a /clear's move to it, since main's events name no session."""
     session = str(inp.get("session_id") or "")
     if not session or inp.get("agent_id") or not (home() / "up" / f"{_safe(session)}.active").exists():
         return 0  # a subagent's hook, or a session thimble is not on in
     sf = files()
     if session not in sf.peers(ws):
         is_main(ws, session, MAIN_WAIT_S)
-    held_lock = lock(session)
+    held_lock = held or lock(session)
     if held_lock is None:
         return 0
     ef = events()
@@ -584,7 +616,7 @@ def watch_files(inp: dict, ws: Path) -> int:
         if stamp != seen or ticks % FILE_LOOK_TICKS == 0:  # with no queue file too: a press writes none
             seen = stamp
             if sf.transport(ws, session) != sf.LOCAL:
-                return watch(inp, held_lock)
+                return watch(inp, held_lock, ws)
             got = ef.take(ws, session)
             if got is not None:
                 sys.stderr.write(str(got.get("text") or "") + "\n")
@@ -1383,7 +1415,8 @@ def main() -> int:
             if flag in args:
                 return fn(hook_input())
         inp = hook_input()
-        ws = local_ws(inp)
+        sf, here = workspace(inp)
+        ws = here if here is not None and on_local(sf, here, inp) else None  # local_ws
         if "--permission" in args:
             return permission(inp, ws)  # decides nothing, on either transport (module note)
         if ws is not None:  # local transport: files only, no server (module note)
@@ -1394,15 +1427,15 @@ def main() -> int:
             if printing(claude_pid()):
                 return 0
             return watch_files(inp, ws)
-        if server() is None:  # no thimble server recorded: every other hook does nothing (module note)
-            return 0
-        if "--held" in args:
-            return held(inp)
-        if "--mode" in args:
-            return mode(inp)
+        if "--held" in args or "--mode" in args:
+            if server() is None:  # no thimble server recorded: these hooks do nothing (module note)
+                return 0
+            return held(inp) if "--held" in args else mode(inp)
         if printing(claude_pid()):
             return 0  # the waker in `claude -p` (module note)
-        return watch(inp)
+        if here is None and server() is None:  # no workspace and no server recorded: nothing to wait for
+            return 0
+        return watch(inp, ws=here)  # on the server's transport it waits for a server not up yet (pull)
     except KeyboardInterrupt:
         return 0
     except Exception:  # noqa: BLE001 — a failure wakes nothing: an exit 2 would show its traceback to the model

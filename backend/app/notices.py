@@ -40,7 +40,9 @@ view builds and code tickets, checks.py for report checks), `proposals` for the 
 `safeguards:<chat>` for a reply Claude's safeguards switched to another model and `stopped:main` for a reply of main's
 they stopped partway (session.py), `thread:<chat>` and
 `helper:<agent id>` for a side thread's or a helper's API error, `main:api` for main's own (session.py), `card-check`
-(card_check.py) and `label:<id>` (concepts.py). post and clear never raise: a failure to tell is logged.
+(card_check.py), `label:<id>` (concepts.py) and `page:stopped` (PAGE_STOPPED_KEY) for the MCP shim's word that thimble's
+page stopped and its tools wait for it (plugin/bin/thimble-mcp), which goes once main attaches to a running server or
+runs on the local transport again (page_back). post and clear never raise: a failure to tell is logged.
 
 Kinds that tell of the setup rather than a failure:
 
@@ -96,6 +98,7 @@ NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, olde
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
 # keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
 REMEMBERED = ("manual-mode", "no-box:")
+PAGE_STOPPED_KEY = "page:stopped"  # the MCP shim's notice that the server stopped (plugin/bin/thimble-mcp)
 OPEN_MAX = 50  # open notices kept; the oldest go first
 TEXT_CHARS = 480  # a notice's text at most, cut at a word (long enough for a fix in the terminal and its words)
 REASON_CHARS = 280  # a failure's own words inside a notice at most
@@ -523,6 +526,16 @@ def agent_refused(c: str, *, role: str, key: Any, why: Any, chat: str | None = N
     except Exception:  # noqa: BLE001
         log.exception("%s: the refusal of %s was not told", c, key)
         return None
+
+
+def page_back(c: str) -> None:
+    """thimble's page answers main again, or main's tools run without it (session.attach, activate.continue_main): the
+    shim's `page:stopped` notice goes (bug hunt H4). Never raises."""
+    try:
+        if any(n.get("key") == PAGE_STOPPED_KEY for n in open_notices(c)):
+            clear(c, PAGE_STOPPED_KEY)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the page:stopped notice was not cleared", c)
 
 
 def cleared(c: str, key: Any) -> None:

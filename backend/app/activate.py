@@ -27,9 +27,10 @@ again under a new marker, for /resume both stay.
 
 launch.json (`<ws>/trusted/launch.json`) has one writer, write_launch, under `<ws>/trusted/launch.lock`:
 {session, pid, config_dir, via, transport, at, peers, moved}, every other field it held kept. A new main runs on the
-local transport until the press (runtime's local.transport); take_main makes a session main in place of a live one,
-which goes to `moved` and is told so by a notice. Until every reader takes `transport`, write_launch also writes the
-0.8.0 `mode` that matches it (LEGACY_MODE).
+local transport until the press (runtime's local.transport), and so does main's session continued in a new `claude`
+process after a quit (continue_main, which the MCP shim and a later activation run); take_main makes a session main in
+place of a live one, which goes to `moved` and is told so by a notice. Until every reader takes `transport`,
+write_launch also writes the 0.8.0 `mode` that matches it (LEGACY_MODE).
 
 load_thimble (contract C5) is answered by the shim directly, through activate() and answer(); tool_load_handler serves
 a call that reaches tools.call instead.
@@ -47,7 +48,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 VIAS = ("data", "command", "tool", "launcher", "press")
 # the triggers that make a session main in place of a live one (take_main); a data read or a model's load_thimble beside
@@ -319,12 +320,14 @@ def _launch_locked(c: str) -> Iterator[Path]:
 
 
 def write_launch(c: str, sid: str, *, role: str, transport: str, via: str, pid: int | None = None,
-                 config_dir: str | None = None, moved: str | None = None) -> dict[str, Any]:
+                 config_dir: str | None = None, moved: str | None = None,
+                 only_if: Callable[[dict[str, Any]], bool] | None = None) -> dict[str, Any] | None:
     """launch.json of workspace `c` changed for session `sid`, read and written under `<ws>/trusted/launch.lock`; the
     one writer of the file (module note). As main: `session`, `pid` (main's `claude`, cc_plugin.claude_pid, unless
     given), `config_dir`, `via`, `transport` and `at` are the session's, `sid` leaves `peers` and `moved`, and `moved`
     names a session this one took main from. As a peer: `sid` joins `peers` and the rest stays. Every other field the
-    file held is kept. Returns the record written."""
+    file held is kept. With `only_if`, nothing is written unless it holds for the record the lock finds. Returns the
+    record written, None when `only_if` kept it from being written."""
     if role not in (MAIN, PEER):
         raise ValueError(f"role {role!r}: one of {MAIN}, {PEER}")
     if transport not in (LOCAL, SERVER):
@@ -333,7 +336,9 @@ def write_launch(c: str, sid: str, *, role: str, transport: str, via: str, pid: 
 
     with _launch_locked(c) as path:
         rec = _read_json(path)
-        peers = [p for p in rec.get("peers") or [] if isinstance(p, str)]
+        if only_if is not None and not only_if(rec):
+            return None
+        peers =[p for p in rec.get("peers") or [] if isinstance(p, str)]
         gone = [p for p in rec.get("moved") or [] if isinstance(p, str)]
         if role == MAIN:
             if pid is None:
@@ -368,6 +373,45 @@ def main_alive(c: str, rec: dict[str, Any] | None = None) -> bool:
         return cli.live_launch({**rec, "via": cli.VIA_SKILL}, c) or cli.live_launch(rec, c)
     except Exception:  # noqa: BLE001 — a record that cannot be checked is no live main
         return False
+
+
+def continue_main(c: str, sid: str, pid: int | None = None) -> bool:
+    """Main's session `sid` continued in a new `claude` process (`claude -c`, `claude --resume`, which keep its id; bug
+    hunt H1): when launch.json names `sid` as main (followed through the moves --rekey recorded), the process it records
+    no longer runs it, and the `claude` process `pid` (cc_plugin.claude_pid unless given) does, that process is main's
+    from now on, on the local transport, as a new main starts (write_launch, with `at` now, from which a pass of the
+    mirror reads a session it saw end). The server that followed the old process stopped with it, so the one-way switch
+    to the server held only for that process; a press, or a signed-in browser on a running server
+    (session.follow_browser), moves the session to the server again. The shim's `page:stopped` notice goes with the move
+    (notices.page_back). True when it wrote launch.json."""
+    from . import cc_plugin, cli, subagent_files  # noqa: PLC0415
+
+    pid = cc_plugin.claude_pid() if pid is None else pid
+    if not pid or pid <= 1:
+        return False
+    ws = _ws(c)
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "")
+
+    def continued(rec: dict[str, Any]) -> bool:
+        named = str(rec.get("session") or "")
+        if not named or rec.get("pid") == pid:
+            return False
+        if subagent_files.moved_to(subagent_files.read(ws), named) != sid or main_alive(c, rec):
+            return False
+        return cli.live_launch({"session": sid, "pid": pid, "config_dir": config_dir}, c)
+
+    rec = read_launch(c)
+    if not continued(rec):  # the common case, looked at without the lock
+        return False
+    done = write_launch(c, sid, role=MAIN, transport=LOCAL, via=str(rec.get("via") or "command"), pid=pid,
+                        config_dir=config_dir, only_if=continued)
+    if done is None:
+        return False
+    cli._log(f"activate: session {sid} of {c} continues in claude pid {pid}, on the local transport")
+    from . import notices  # noqa: PLC0415
+
+    notices.page_back(c)  # its tools run here now, and wait for no page
+    return True
 
 
 def take_main(c: str, sid: str, via: str) -> str | None:
@@ -507,6 +551,11 @@ def activate(cwd: str | os.PathLike[str], sid: str, via: str, *, mod: bool = Fal
                     was = {**was, "mod": True}
                     write_private(marker_path(sid), was)
                 guide.marker(sid)
+                try:  # a session continued in a new `claude` process (claude -c) is main there, locally
+                    with cli.server_dirs():
+                        continue_main(str(was["ws"]), sid)
+                except Exception as e:  # noqa: BLE001 — the activation stands; the shim looks again
+                    cli._log(f"activate: launch.json of {was['ws']} was not moved to this process: {e}")
                 return _answer(was, sid, first=False, took=None, c=str(was["ws"]))
             with cli.server_dirs():
                 first = config.workspace_for_cwd(str(Path(cwd).resolve())) is None

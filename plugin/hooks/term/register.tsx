@@ -533,17 +533,24 @@ export const register: Register = (on, options) => {
       .then(u => u.startedAt)
       .catch(() => $.clock.now())
       .catch(() => Date.now())
+    // the `thimble` command's start (THIMBLE_OPEN), `thimble -c` included
+    const launched = (await cx.env('THIMBLE_OPEN').catch(() => undefined)) === '1'
+    // the session's values outlive a module reload but not the process: none yet is a new `claude` process
+    const reloaded = (await cx.activated()) !== null
     // a module reload (a /config change) or a resumed session where thimble is on: restored quietly from the
     // session's marker, with no push and the guide only if it is owed
     if (await restoreFromMarker(cx)) {
       // a pane that waited undrawn before the module loaded again (its state is the session's)
       rt.waiting = (await cx.pending()) !== null
+      // `thimble -c` opens the browser on home as `thimble` does, which starts the server and moves the continued
+      // session to it (bug hunt H8); a module reload in the same process opens nothing again
+      if (launched && !reloaded) await openInBrowser(cx, 'home')
       return started
     }
     // the `thimble` command: thimble on at once, and the browser opened on home. Neither start calls load_thimble, which
     // Claude Code would ask about in Manual mode before the person typed anything (bug hunt F3): the first prompt
     // carries the guide
-    if ((await cx.env('THIMBLE_OPEN').catch(() => undefined)) === '1') {
+    if (launched) {
       const turned = await activateNow(cx, 'launcher', false)
       if (turned.ok) await openInBrowser(cx, 'home')
       return started

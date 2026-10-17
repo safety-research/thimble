@@ -6,7 +6,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 
 import { KEPT_FILE, resetKept } from '../kept'
 import { cid } from '../lib'
-import { CWD, SID, WS, shown, world } from './fixtures'
+import { CLI, CWD, SID, WS, shown, world } from './fixtures'
 import type { World } from './fixtures'
 import { aboveAt, words } from './fixtures-panel'
 
@@ -68,4 +68,16 @@ test('after a resume the thimble line counts the citations it counted before: th
   const kept = (JSON.parse(w.files.get(KEPT)!) as { sessions: Record<string, { cites: { raw: string }[]; shown: string[] }> }).sessions[SID]!
   expect(kept.shown).toEqual(['ff73e071', 'a0frame0'])
   expect(kept.cites.map(c => c.raw)).toEqual([CARD_CITE, FILE_CITE])
+})
+
+test('`thimble -c` opens the browser on home as `thimble` does, and a module reload in that process opens nothing again (bug hunt H8)', { timeoutMs: 30_000 }, async ($, on) => {
+  resetKept()
+  // the `thimble` command's environment, in a session thimble was on in before the quit (its marker is there)
+  const w = world(on, { env: { THIMBLE_OPEN: '1' } })
+  const opens = () => w.calls.filter(c => c[1] === 'open')
+  await start($, w)
+  expect(opens()).toEqual([[CLI, 'open', '--session', 's1', '--cwd', CWD, '--ref', 'home', '--json']])
+  // a /config change reloads the module in the same process: restored from the marker again, with no second open
+  await start($, w)
+  expect(opens().length).toBe(1)
 })
