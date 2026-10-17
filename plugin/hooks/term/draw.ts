@@ -901,12 +901,57 @@ export function turnTimes(times: readonly string[]): { clock: string; day: strin
   })
 }
 
+// a clock time as thimble.timeline keeps it, with no date: "01:03", "22:14:07" (backend kernel_thimble.timeline)
+const CLOCK = /^(\d{1,3}):([0-5]\d)(?::([0-5]\d))?$/
+// a clock time as an older thimble.timeline wrote it, on 2000-01-01 (the 2nd and on past midnight)
+const CLOCK_DAY = /^2000-01-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/
+
+/**
+ * Clock times as a timeline places and shows them: `at`, ms from the start of the first one's day, in the order given (a
+ * time earlier than the one before starts the next day; with an hour past 23 the hours count from the start), and
+ * `shown`, each as written, after `day 2` where the day changes. Times an older thimble.timeline put on 2000-01-01 read
+ * as the clock times they were. Null when any time is not a clock time (bug hunt B22: they drew as `Jan 1 22:14`).
+ */
+export function clockTimes(times: readonly string[]): { at: number[]; shown: string[] } | null {
+  if (!times.length) return null
+  const at: number[] = []
+  const day: number[] = []
+  let shown: string[]
+  const clock = times.map(t => CLOCK.exec(t.trim()))
+  if (clock.every(Boolean)) {
+    const secs = (clock as RegExpExecArray[]).map(m => Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] ?? 0))
+    const elapsed = secs.some(s => s >= 86400)
+    let d = 0
+    let prev = -1
+    for (const s of secs) {
+      if (!elapsed && prev >= 0 && s + d * 86400 < prev) d++
+      prev = s + d * 86400
+      at.push(prev * 1000)
+      day.push(d)
+    }
+    shown = times.map(t => t.trim())
+  } else {
+    const old = times.map(t => CLOCK_DAY.exec(t.trim()))
+    if (!old.every(Boolean)) return null
+    const ms = old as RegExpExecArray[]
+    const secs = ms.some(m => m[4] !== '00')
+    for (const m of ms) {
+      day.push(Number(m[1]) - 1)
+      at.push(((Number(m[1]) - 1) * 86400 + Number(m[2]) * 3600 + Number(m[3]) * 60 + Number(m[4])) * 1000)
+    }
+    shown = ms.map(m => `${m[2]}:${m[3]}${secs ? `:${m[4]}` : ''}`)
+  }
+  if (new Set(day).size > 1) shown = shown.map((t, i) => (i === 0 || day[i] !== day[i - 1] ? `day ${day[i]! + 1} ${t}` : t))
+  return { at, shown }
+}
+
 function timelineLayout(card: CardData, cols: number, hover: number): Layout {
   const evs = (card.events ?? []).slice(0, 30)
-  const times = evs.map(e => Date.parse(e.time.replace(' ', 'T')))
+  const clock = clockTimes(evs.map(e => e.time))
+  const times = clock ? clock.at : evs.map(e => Date.parse(e.time.replace(' ', 'T')))
   const isTime = times.every(t => !Number.isNaN(t))
-  // the form the card helper wrote beside each time, else the same rule applied here
-  const fallback = shortTimes(evs.map(e => e.time))
+  // the form the card helper wrote beside each time, else the same rule applied here: a clock time as written
+  const fallback = clock ? clock.shown : shortTimes(evs.map(e => e.time))
   const shown = evs.map((e, i) => e.shown || fallback[i]!)
   const lines: Line[] = []
   const items: Item[] = evs.map((e, i) => ({
