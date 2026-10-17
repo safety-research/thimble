@@ -2761,11 +2761,13 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     unit = UNIT_WORDS.get(str(s.get("unit") or ""), s.get("unit") or "unit")
     line = (f"applied label {s.get('name', name)} [[concept:{s.get('concept')}]] over {s.get('total', 0)} {unit}(s)"
             f"{' in ' + ', '.join(paths) if scope == 'files' else ''}{' within ' + within['label'] if within else ''}: "
-            f"{counts or 'no values yet'}.")
+            f"{counts or ('no values' if s.get('none') else 'no values yet')}.")
     if moved:
         before = ", ".join(f"{k} {v}" for k, v in sorted(given.items()))
         line += (f" These counts apply the analyst's verdicts, as thimble.labels() does: {moved} {unit}(s) the analyst set"
                  f" to another value count under that value (the label itself gave {before}).")
+    if s.get("none"):  # files that keep no unit to label (concepts.none_why)
+        line += f" {s['none']}" + (" Its counts from earlier runs are cleared." if s.get("dropped") else "")
     if s.get("failed"):
         line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
     if s.get("skipped"):  # units with no words (a transcript's blank lines), which a prompt label does not ask about

@@ -270,3 +270,51 @@ async def test_a_view_marks_records_that_are_no_lines(api, corpus, workspaces_tm
     probe = views.probe_context()
     hit = [f"forge.db#prs/{n}" for n in range(1, 200) if kernel_thimble._marked(probe, f"forge.db#prs/{n}")]
     assert 10 <= len(hit) <= 50 and kernel_thimble._marked(probe, "a.jsonl#L7") and not kernel_thimble._marked(probe, "a.jsonl#L8")
+
+
+# --------------------------------------------------------------------------- the values of an object
+
+
+CHAT = {"agent": "clerk", "system": [{"type": "text", "text": "You answer the shop's mail."}],
+        "messages": {"m7f": {"id": "m7f", "role": "user", "text": "I want a refund"},
+                     "q2b": {"id": "q2b", "role": "assistant", "text": "Your parcel left today"},
+                     "x9c": {"id": "x9c", "role": "assistant", "text": "The refund is on its way"}},
+        "conversations": {"c1": {"ids": ["m7f", "q2b", "x9c"]}}}
+
+
+async def test_the_values_of_an_object_are_records_and_a_label_over_none_says_why(api, corpus, workspaces_tmp):
+    from app import notices, tools
+
+    (corpus / "chat.json").write_text(json.dumps(CHAT, indent=2))
+    path = corpus / "chat.json"
+    ids = ["m7f", "q2b", "x9c"]
+    # the messages, an object keyed by id, are records keyed by their key, as an array's items are, each with its lines
+    for under in ("/messages", "/messages/*", "messages"):
+        got = _all(corpus, "chat.json", under)
+        assert [r["ref"] for r in got] == [f"chat.json#/messages/{i}" for i in ids], under
+        assert records.count(path, "chat.json", under) == 3
+    assert got[2]["record"]["text"] == "The refund is on its way" and 1 < got[0]["line"] < got[2]["line"]
+    cited = records.read(path, "chat.json", "/messages/q2b")
+    assert cited["record"]["id"] == "q2b" and cited["line"] == got[1]["line"], "a citation reads the record a label made"
+    assert [r["ref"] for r in records.records_at(path, "chat.json", [2], under="/messages")] == ["chat.json#/messages/q2b"]
+
+    async def apply(paths: list[str]) -> str:
+        r = await tools.call(CORPUS, "apply_label", {"scope": "files", "name": "refund", "paths": paths,
+                                                     "predicate": {"kind": "regex", "text": "(?i)refund"}},
+                             actor="analyst", notebook=None, terminal=False)
+        assert not r.is_error, r.text
+        return r.text
+
+    text = await apply(["chat.json#/messages"])
+    assert "over 3 record(s)" in text and "no 1, yes 2" in text, text
+    k = concepts.find_concept(workspaces_tmp / CORPUS, "refund")
+    assert set(await _values(workspaces_tmp / CORPUS, k)) == {f"chat.json#/messages/{i}" for i in ids}
+
+    # a pointer that names nothing: the result and a notice say why, and the counts of the run before are gone
+    text = await apply(["chat.json#/replies"])
+    assert "over 0 record(s)" in text and "chat.json has no value at /replies" in text, text
+    assert "agent, system, messages, conversations" in text, "it names what is there instead"
+    k = concepts.find_concept(workspaces_tmp / CORPUS, "refund")
+    assert concepts.concept_stats(workspaces_tmp / CORPUS, k)["counts"] == {} and k["glob"] == "chat.json#/replies"
+    said = [n for n in notices.open_notices(CORPUS) if n.get("key") == f"label:{k['id']}"]
+    assert said and "has no value at /replies" in said[-1]["text"], said

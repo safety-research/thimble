@@ -2511,6 +2511,7 @@ FALLBACK_MESSAGE = "Downgrading {model} to {fallback}"
 # the notices of a label's runs (module note): {name} the label's, {why} the failure in plain words
 LABEL_FAILED_TEXT = "The label {name} failed: {why}."
 LABEL_UNITS_FAILED_TEXT = "The label {name} couldn't label {failed} of {total}: {why}."
+LABEL_NONE_TEXT = "The label {name} found nothing to label. {why}"  # a run over files that keep no record (none_why)
 LABEL_FALLBACK_TEXT = "Claude's safeguards switched {n} of the label {name}'s calls from {model} to {fallback}."
 # a label notice's acts (notices.ACTIONS): the link to the label, and a run again on the units its last run could not
 # label (start_again), whose own words say its count and replace the safeguards' "rephrase" fix
@@ -2546,15 +2547,20 @@ def _failures_why(failures: list, refused: str | None = None) -> tuple[str, Any]
 
 
 def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, total: Any = None,
-                  message: str | None = None, failures: list | None = None) -> None:
-    """A run of the label ended: an `error`, or `failed` units it could not label, is told in the foreground under
-    `label:<id>`, and a run with neither clears it. A prompt label's run says why by its `failures` (_failures_why).
-    The notice links the label (LABEL_OPEN), and for units a prompt label's run could not label it offers a run again on
-    those alone (LABEL_AGAIN, start_again), the next step whatever the reason. Never raises."""
+                  message: str | None = None, failures: list | None = None, none: str | None = None) -> None:
+    """A run of the label ended: an `error`, `failed` units it could not label, or `none`, why its files kept no unit
+    to label (none_why), is told in the foreground under `label:<id>`, and a run with none of them clears it. A prompt
+    label's run says why by its `failures` (_failures_why). The notice links the label (LABEL_OPEN), and for units a
+    prompt label's run could not label it offers a run again on those alone (LABEL_AGAIN, start_again), the next step
+    whatever the reason. Never raises."""
     from . import notices  # noqa: PLC0415
 
     key, name = f"label:{concept['id']}", str(concept.get("name") or concept["id"])
     try:
+        if none and error is None:
+            notices.post(c, kind="label", text=LABEL_NONE_TEXT.format(name=name, why=none), agent=f"Label: {name}",
+                         action=[{**LABEL_OPEN, "slug": concept["id"]}], key=key)
+            return
         if error is None and not failed:
             notices.clear(c, key)
             return
@@ -3529,6 +3535,62 @@ def whole_kind(corpus_dir: Path, src: dict) -> str:
     return "none"
 
 
+def none_why(ws: Path, corpus_dir: Path, sources: list[dict], patterns: list[str], within: dict | None) -> str:
+    """Why a run over these files has no unit to label, in a sentence for its notice and its caller: what the paths
+    match and what the first file holds instead (records.why_none), or the label `within` names, which gave none of
+    their records its value. Blocking."""
+    n = len(sources)
+    paths = ", ".join(patterns) or "*"
+    one = len(patterns) < 2
+    if not sources:
+        return f"{paths} {'matches' if one else 'match'} no file."
+    files = f"{n:,} file{'' if n == 1 else 's'}"
+    if within:
+        parent = read_concept(ws, within["label"]) or {"name": within["label"]}
+        return f"The label {parent['name']} gave the value {within['value']!r} to no record of the {files} that {paths} " \
+               f"{'matches' if one else 'match'}."
+    src = sources[0]
+    try:
+        why = records.why_none(config.safe_corpus_path(corpus_dir, src["path"]), src["path"], src.get("under"))
+    except (OSError, ValueError, sqlite3.Error):
+        why = f"{src['path']} does not read"
+    return (f"{paths} {'matches' if one else 'match'} {files} but {'keeps' if one else 'keep'} no record of "
+            f"{'it' if n == 1 else 'them'}: {why}{'' if n == 1 else f' (the first of the {n:,})'}.")
+
+
+def _drop_rows(out: Path) -> bool:
+    """The rows of the label's earlier runs dropped, as a run that found nothing to label leaves it: its labels file
+    keeps the analyst's verdicts alone, and its store is built again from that. Whether there was anything to drop.
+    Blocking."""
+    with _store_lock(out):
+        size = (labels_store.file_key(out) or (0, 0))[0]
+        if not size:
+            return False
+        rows = list(labels_store._read_rows(out, 0, size, markers=True))
+        kept = [r for r in rows if not labels_store.is_marker(r) and r.get("source") == "analyst"]
+        if len(kept) == len(rows):
+            return False
+        labels_store.remove(out)
+        if kept:
+            atomic_write_text(out, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in kept))
+        else:
+            out.unlink(missing_ok=True)
+        return True
+
+
+def _found_none(ws: Path, concept_id: str, corpus_dir: Path, sources: list[dict], patterns: list[str],
+                within: dict | None, out: Path) -> tuple[str, bool]:
+    """A run over files that keep no unit to label: why (none_why), and whether it dropped the rows of earlier runs
+    (_drop_rows). The label then applies to these paths alone, which its rows no longer go beyond. Blocking."""
+    why = none_why(ws, corpus_dir, sources, patterns, within)
+    dropped = _drop_rows(out)
+    k = read_concept(ws, concept_id)
+    if k is not None and k.get("glob") != ", ".join(patterns):
+        k["glob"] = ", ".join(patterns)
+        write_concept(ws, k)
+    return why, dropped
+
+
 def _write_parts(parts_file: Path, corpus_dir: Path, sources: list[dict]) -> None:
     """The file the code kind's wrapper reads the records of the files it does not read as lines from (a JSON document's,
     a CSV file's rows, a database's rows, a PDF's pages), for the units of whole files and runs: one JSON line per file,
@@ -3717,20 +3779,29 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                     units = [units[i] for i in spread(len(units), limit)]
                 total = len(units)
             _progress(c, concept_id, total=total, matched_total=matched)
+            # files that keep no unit to label: the run says why, and the counts of earlier runs go
+            none: str | None = None
+            dropped = False
+            if unit in FILE_UNITS and again_refs is None and not matched:
+                none, dropped = await asyncio.to_thread(_found_none, ws, concept_id, corpus_dir, sources, patterns, within,
+                                                        out)
             # what the kinds below run over: the sampled records of a trial or the records `within` names, else the
             # whole scope
             sampled = unit == "record" and (bool(limit) or bool(within) or again_refs is not None)
-            if unit == "record" and not sampled:
+            if none is None and unit == "record" and not sampled:
                 # a file read by another reader than lines gets rows of its own refs: what an earlier run left on its
                 # lines goes first, so no cover of those lines counts records the file no longer has
                 await asyncio.to_thread(_clear_files, out, [s["path"] for s in sources if s["path"] not in index["files"]
                                                             and not s.get("under") and index["counts"].get(s["path"])])
-            if concept["kind"] == "prompt":
+            if none is None and concept["kind"] == "prompt":
                 few = await asyncio.to_thread(few_shot_examples, ws, concept, corpus_dir)
                 concept = {**concept, "examples": few}
                 await asyncio.to_thread(_begin_teaching, ws, concept_id, [str(ex["ref"]) for ex in few], started)
                 _progress(c, concept_id, examples=len(few))
-            if concept["kind"] == "regex":
+            if none is not None:
+                labeled = failed = 0
+                message = None
+            elif concept["kind"] == "regex":
                 # a regex reads a save as what it changed, as a model does, so files that hold saves go record by record
                 saves = unit == "record" and await asyncio.to_thread(holds_saves, corpus_dir, sources)
                 if unit in FILE_UNITS and not sampled and not saves:
@@ -3804,7 +3875,8 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                    **({"skipped": skipped} if skipped else {}), **({"refused": refused} if refused else {}),
                    "matches": int(state.get("matches") or 0), "status": "done", "message": message, "created_by": created_by,
                    "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set(),
-                   "within": within, "within_rev": within_rev, **({"cut": state["cut"]} if state.get("cut") else {})}
+                   "within": within, "within_rev": within_rev, **({"cut": state["cut"]} if state.get("cut") else {}),
+                   **({"none": none, "dropped": dropped} if none else {})}
             merge = again_refs is not None
             concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats), taught,
                                            merge=merge)
@@ -3821,7 +3893,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             _progress(c, concept_id, status="done", done=labeled + failed + skipped, labeled=labeled, failed=failed, message=message,
                       eta_s=None, phase=None, files_done=state["files_total"] if whole else state.get("files_done", 0), summary=summary)
             _label_notice(c, concept, failed=failed if not cancel.is_set() else 0, total=app.get("total", total),
-                          message=message, failures=state.get("failures"))
+                          message=message, failures=state.get("failures"), none=none)
         except asyncio.CancelledError:
             _progress(c, concept_id, status="error", message="cancelled", eta_s=None, phase=None)
             raise
@@ -4625,8 +4697,8 @@ def _follow(c: str, concept: dict) -> Callable[[Any], Any]:
             raise
         counts = ", ".join(f"{k} {v}" for k, v in sorted((s.get("counts") or {}).items()))
         line = f"labeled {s.get('labeled', 0)} of {s.get('total', 0)} {concept['unit']}(s): {counts or 'no values'}"
-        if s.get("message"):
-            line += f" ({s['message']})"
+        if s.get("message") or s.get("none"):
+            line += f" ({s.get('message') or s['none']})"
         rec.text(line)
         return line
 
@@ -4728,7 +4800,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     chosen = _filter_to(c, scope, concept) if filter else None
     if unchanged:
         last = concept["applications"][-1]
-        result = {"total": last.get("total"), "counts": await asyncio.to_thread(_live_counts, ws, concept["id"]), "cut": last.get("cut")}
+        result = {"total": last.get("total"), "counts": await asyncio.to_thread(_live_counts, ws, concept["id"]), "cut": last.get("cut"),
+                  "none": last.get("none")}
     else:
         result = await wait_apply(c, concept["id"], APPLY_WAIT_S, APPLY_ENOUGH if kind == "prompt" else None)
     partial = bool(result.get("partial"))
@@ -4736,7 +4809,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     stale = await asyncio.to_thread(stale_cards, ws, read_concept(ws, concept["id"]) or concept)
     return {"concept": concept["id"], "name": concept["name"], "unit": unit, "total": result.get("total"), "counts": counts or {},
             "failed": result.get("failed") or 0, "skipped": 0 if partial else result.get("skipped") or 0,
-            "message": result.get("message"), "partial": partial,
+            "message": result.get("message"), "partial": partial, "none": None if partial else result.get("none"),
+            "dropped": bool(not partial and result.get("dropped")),
             "cell": made["id"] if made else None, "filter": chosen, "labels_path": str(labels_file(ws, concept["id"])),
             "unchanged": unchanged, "stale": [x["id"] for x in stale], "cut": None if partial else result.get("cut")}
 
