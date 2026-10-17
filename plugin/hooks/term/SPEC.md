@@ -468,14 +468,21 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   accent and underlined under the pointer (no inverse), as the thimble line's names are, the row's main act bold. A
   press on words cut short shows them whole, wrapped, and a second press cuts them again. Where the acts would leave
   the words fewer than 12 cells, they take a row of their own under the words.
-- The view proposal's row above the prompt, while one waits for the analyst's answer, whatever the panel shows:
-  `view proposal` dim on the label column, the view's name in bold, then as much of what the view would show as fits,
-  and not the task a proposal names; then `accept` (bold), `reject`, `don't ask again` and `dismiss`. A press on the
-  name shows what it would show whole (for a viewer of a file type, then the files it claims after `files` dim). Why
-  accept could not start its build, and the fix, is one red row under it. A press shows `◌ accepting` or `◌ rejecting` until
-  thimble has written the answer. The rows go once the proposal is answered, and while view proposals are off; `don't
-  ask again` turns them off (`views.propose: false` in thimble's config) and a toast says how to turn them back on. They
-  bind no key: a letter typed goes to the prompt.
+- The view proposal's row above the prompt, while one waits for the analyst's answer, whatever the panel shows, in
+  words that say what the analyst gets (live feedback, 10-17: "What is this proposal?"): `view` dim on the label
+  column, `thimble can build a page for these records:` and the view's name in bold, what the page would show whole
+  under it, and not the task a proposal names; then `build it` (bold, accept), `don't build it` (reject), `stop
+  suggesting pages` and `dismiss`, on a row of their own under the words where they would cut them. A press on the
+  name shows a viewer of a file type's files after `files` dim. Why the build could not start, and the fix, is one
+  red row under it. A press shows `◌ starting the build` or `◌ declining` until thimble has written the answer. The
+  rows go once the proposal is answered, and while view proposals are off; `stop suggesting pages` turns them off
+  (`views.propose: false` in thimble's config) and a toast says how to turn them back on. They bind no key: a letter
+  typed goes to the prompt.
+- While a side thread's agent is in view (Claude Code's agent list, Enter on it; its fork's agent id, the thread's
+  `fork.agent_id`), one row in place of all the others (live feedback, 10-17: a question typed there by mistake, its
+  answer waited for there 10 minutes): `thread` dim on the label column, `This is side thread "<its question>". What
+  you type here goes to it, and its answers show in the thread.`, then `back to main` (bold, `$.ui.view({})`) and
+  `open the thread` (the panel on it). Any other agent's view keeps Claude Code's band, with no row of thimble's.
 - The notice rows, under them, newest first: every open notice of every agent thimble runs (the orientation and its
   helpers, the critic, writers, view builds and reviews, report checks, code tickets and the dev agent, card checks,
   labels, the view proposer), since Claude Code's own output shows only main's requests (a notice of main's own reply,
@@ -767,7 +774,9 @@ A thread at work, and turns that ended with no answer:
   named as home names it, cut at the type area), then its chat as Claude Code draws one: each question after `❯` (dim)
   in the margin, its words in the text color on Claude Code's prompt background across the type area, unquoted; a
   blank row; the answer after Claude Code's `⏺` in the margin, drawn as main's chat draws a reply; a blank row between
-  turns. A turn at work, after a blank row: `⏺ ◌ N tool calls` dim (`◌ answering` before its first), then its latest
+  turns. A turn at work, after a blank row: `⏺ ◌ starting · 12s` dim from the moment its question is asked until its
+  first step, the time counting each second (the list's row under the thread says the same), then `⏺ ◌ N tool calls`
+  (`◌ answering` while it writes before any), then its latest
   words dim on a row after `⎿` at A0, cut at R, as Claude Code draws a call at work. A turn that ended with no answer
   says so on a `⎿` row right under its question, as Claude Code writes an interrupt or an error under a prompt: a
   stop dim (`stopped by the analyst.`), a failure red after `×`. `stop` while it answers, after a blank row, then the

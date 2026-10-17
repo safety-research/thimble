@@ -28,7 +28,7 @@
 //   views     the views, one row each; view, one view as one line (the browser draws views)
 import type { BoxProps, ButtonProps, ElementConstructor, MatchedEvent, RenderElement, TextProps } from 'claude-code'
 
-import type { ChatNavStep, ChatThread, LabelUnsure, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
+import type { ChatNavStep, ChatThread, ChatThreadTurn, LabelUnsure, TermPanel, TermThread, TermThreadRow, TermVerdict } from './types'
 import { CHECK_WAITS } from './cell'
 import type { ThimbleLabel } from './cell'
 import { ACCENT, FRESH, LINK, MARGIN_W, actionEl, controlsEl, fieldEls, fitHints, fitTo, freshSeg, hasMargin, headerEls, hintLines, hintsEl, lineEl, linkSeg, marginKey, pointed, ruleEl, setBrowser, setHead, spread, subLine, takeBrowser, takeHead } from './chrome'
@@ -277,9 +277,9 @@ async function markOffer(cx: Ctx, slug: string, pressed: '' | 'accept' | 'reject
   await cx.setSurface('home-full', { ok: true, value: { ...home.value, offer: { ...o, pressed, pressedAt: pressed ? at : 0 } } })
 }
 
-/** The analyst's accept or reject of the view proposal, from the row above the prompt: `thimble act view-accept` or
- *  `view-reject` {slug}, which hands the answer to thimble and answers at once. The row shows the answer as pressed
- *  (`◌ accepting`) until home's state is read again or OFFER_PRESS_MS pass; an act that failed or that thimble
+/** The analyst's accept (`build it`) or reject (`don't build it`) of the view proposal, from the row above the prompt:
+ *  `thimble act view-accept` or `view-reject` {slug}, which hands the answer to thimble and answers at once. The row
+ *  shows the answer as pressed (`◌ starting the build`) until home's state is read again or OFFER_PRESS_MS pass; an act that failed or that thimble
  *  refused, or a proposal that no longer waits, brings the controls back with why in the red row under the proposal. */
 export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'reject'): Promise<void> {
   if (!rt.sc) return
@@ -289,7 +289,7 @@ export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'rejec
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, `view-${verb}`, { slug })
   if (!got.ok || got.value.queued === false) {
     const why = got.ok ? got.value.reason || 'the view proposal no longer waits' : got.error
-    offerFailed = { slug, why: `thimble could not ${verb} it: ${why}` }
+    offerFailed = { slug, why: `thimble could not ${verb === 'accept' ? 'start building it' : 'decline it'}: ${why}` }
     await markOffer(cx, slug, '', at, at)
     return
   }
@@ -304,18 +304,18 @@ export async function dismissOffer(cx: Ctx, slug: string): Promise<void> {
   if (!got.ok || got.value.queued === false) cx.toast(`the view proposal still shows in the browser: ${got.ok ? got.value.reason || 'it no longer waits' : got.error}`)
 }
 
-/** The view proposal's `don't ask again`: view proposals off (`thimble act view-proposals-off`, `views.propose: false`
+/** The view proposal's `stop suggesting pages`: view proposals off (`thimble act view-proposals-off`, `views.propose: false`
  *  in thimble's config), the row gone at once, and a toast that says how to turn them back on. */
 export async function proposalsOff(cx: Ctx): Promise<void> {
   if (!rt.sc) return
   const got = await act<{ config?: string }>(cx, rt.sc, 'view-proposals-off', {})
   if (!got.ok) {
-    cx.toast(`view proposals are still on: ${got.error}`)
+    cx.toast(`thimble still suggests pages: ${got.error}`)
     return
   }
   const home = await surfaceValue<Obj>(cx, 'home-full')
   if (home?.ok) await cx.setSurface('home-full', { ok: true, value: { ...home.value, offer: null } })
-  cx.toast(`view proposals are off. To turn them back on, set "views": {"propose": true} in ${got.value.config || "thimble's config"}`)
+  cx.toast(`thimble will suggest no more pages. To turn suggestions back on, set "views": {"propose": true} in ${got.value.config || "thimble's config"}`)
 }
 
 /** A notice's act: `view-propose-now` (try again) or `view-retry` {slug} (retry), which name the notice, so that thimble
@@ -2479,7 +2479,8 @@ async function threadOfRow(cx: Ctx, id: string): Promise<ChatThread | null> {
   // until its chat is read, its turn holds the state its row gives: answered, stopped, failed or running, never words
   // (live check term-fix6, new quirk 9: every row read `answered` for a few seconds, a stopped thread's too)
   const turn = row.running ? { state: 'running' } : row.turn === 'stopped' ? { state: 'error', stopped: true } : row.turn === 'failed' ? { state: 'error' } : row.turn === '' ? { state: 'running' } : { state: 'done' }
-  return { id, label: row.anchorText || row.title, ref: row.anchor, context: '', agentId: '', engine: '', turns: [{ q: row.question || row.title, a: '', tools: 0, partial: '', ...turn }], file: '', parent: row.parent === 'main' ? '' : row.parent, at: Date.parse(row.at) || 0, loading: true }
+  const asked = Date.parse(row.created || row.at)
+  return { id, label: row.anchorText || row.title, ref: row.anchor, context: '', agentId: '', engine: '', turns: [{ q: row.question || row.title, a: '', tools: 0, partial: '', ...turn, ...(Number.isFinite(asked) ? { at: asked } : {}) }], file: '', parent: row.parent === 'main' ? '' : row.parent, at: Date.parse(row.at) || 0, loading: true }
 }
 
 /** A thread title as thimble makes one from the anchor's words when none is given (agents._title_from): its first four
@@ -2535,10 +2536,30 @@ export async function aboutName(cx: Ctx, row: AboutRow | undefined): Promise<str
   return ''
 }
 
+/** A thread's turn that runs and has taken no step yet: no tool call and no words (main has still to hand the question
+ *  to the thread's agent, or the agent has not begun). */
+function starting(turn: Pick<ChatThreadTurn, 'state' | 'tools' | 'partial'>): boolean {
+  return turn.state === 'running' && !turn.tools && !turn.partial.trim()
+}
+
+/** The time since `at` (epoch ms) as Claude Code writes a turn's time: `0s`, `12s`, `1m 5s`. */
+export function waited(at: number, now: number): string {
+  const s = Math.max(0, Math.floor((now - at) / 1000))
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+}
+
+/** What a turn that has taken no step yet shows, from the moment it was asked (live feedback, 10-17: "wasn't sure if
+ *  it was working or waiting"): `◌ starting · 12s`, the time drawn again each second (term.ts startingTick). */
+function startingWords(turn: Pick<ChatThreadTurn, 'at'>, now: number): string {
+  rt.starting = true
+  return turn.at ? `◌ starting · ${waited(turn.at, now)}` : '◌ starting'
+}
+
 /** The first line of a thread's latest answer, or what it is doing. */
-function threadLine(t: ChatThread): Seg {
+function threadLine(t: ChatThread, now: number): Seg {
   const last = t.turns.at(-1)
   if (!last) return dim('nothing asked yet')
+  if (starting(last)) return dim(startingWords(last, now))
   if (last.state === 'running') return dim(`◌ ${plural(last.tools, 'tool call')}`)
   if (last.state === 'error') return stoppedTurn(last) ? dim('stopped') : { s: `× ${plainCites(last.a).split('\n')[0] || 'failed'}`, fg: COLORS.problem }
   const done = [...t.turns].reverse().find(x => x.state === 'done' && x.a.trim())
@@ -2549,6 +2570,18 @@ function threadLine(t: ChatThread): Seg {
 
 // the threads whose subject shows whole under their `about` row, by the thread's id: v, or a press on the row
 const subjectOpen = new Set<string>()
+
+// a question asked in a thread's field that its chat does not hold yet (`thimble act thread-message` runs), by the
+// thread's id, and when it was asked
+const sentAsks = new Map<string, { q: string; at: number }>()
+
+/** A thread with the question its field just sent as its last turn, starting, until its chat holds that question. */
+function withAsking(t: ChatThread): ChatThread {
+  const a = sentAsks.get(t.id)
+  const last = t.turns.at(-1)
+  if (!a || (last && last.q.trim() === a.q.trim() && last.state === 'running')) return t
+  return { ...t, turns: [...t.turns, { q: a.q, a: '', state: 'running', tools: 0, partial: '', at: a.at }] }
+}
 
 /** What a thread's subject shows past its `about` row, in the word its key names (`v to show the passage`): `card`,
  *  `lines` (a file's), `answer` (a whole answer of main's), `passage`; '' when the row holds it whole. */
@@ -2585,15 +2618,16 @@ function promptEl(els: El, q: string, cols: number, key: string): RenderElement 
 }
 
 /** A side thread's turn while it works, as Claude Code draws a turn at work: `⏺` dim in the margin and what it does
- *  (`◌ 2 tool calls`, `◌ answering` before its first), then its latest words dim on a row under it after `⎿`, cut at
- *  the row's end. */
-function workingEl(els: El, turn: { tools: number; partial: string }, cols: number, key: string): RenderElement {
+ *  (`◌ starting · 12s` from the moment it was asked until its first step, then `◌ 2 tool calls`, or `◌ answering`
+ *  while it writes before any), then its latest words dim on a row under it after `⎿`, cut at the row's end. */
+function workingEl(els: El, turn: ChatThreadTurn, cols: number, key: string, now: number): RenderElement {
   const { Box, Text } = els
   const latest = turn.partial.split('\n').map(l => l.trim()).filter(Boolean).at(-1) ?? ''
+  const doing = starting(turn) ? startingWords(turn, now) : `◌ ${turn.tools ? plural(turn.tools, 'tool call') : 'answering'}`
   return (
     <Box key={marginKey(key)} flexDirection="column">
       <Text dimColor wrap="truncate-end">
-        {cut(`⏺ ◌ ${turn.tools ? plural(turn.tools, 'tool call') : 'answering'}`, cols + MARGIN_W)}
+        {cut(`⏺ ${doing}`, cols + MARGIN_W)}
       </Text>
       {latest ? (
         <Text key={`${key}-latest`} dimColor wrap="truncate-end">
@@ -2641,9 +2675,10 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
   const rows = (await cx.threads()) ?? []
   // the threads listed, and the one selected though the list does not hold it yet (one just asked)
   const ids = [...rows.map(r => r.id), ...(selected && !rows.some(r => r.id === selected) ? [selected] : [])]
-  const threads = (await Promise.all(ids.map(id => threadOfRow(cx, id)))).filter((t): t is ChatThread => t !== null)
+  const threads = (await Promise.all(ids.map(id => threadOfRow(cx, id)))).filter((t): t is ChatThread => t !== null).map(withAsking)
   const unreadOf = (id: string) => rows.find(r => r.id === id)?.unread ?? 0
   const t = selected ? threads.find(x => x.id === selected) : undefined
+  const now = await cx.now()
   // one thread, open: no list above it, which would repeat its question and its answer
   const alone = Boolean(t) && threads.length === 1
   // what it is about, on one dim row cut at the type area; the thing itself (a card, a file's lines, a passage) whole
@@ -2724,7 +2759,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       hits.push({ y, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open })
       // the first line of its answer, while no thread is open below the list
       if (!t) {
-        const second = threadLine(r.t)
+        const second = threadLine(r.t, now)
         lines.push(pointed([{ s: lead.slice(0, guide.length), fg: COLORS.rule }, { ...second, s: cut(second.s, Math.max(10, cols - guide.length)) }], false))
         hits.push({ y: y + 1, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: open })
       }
@@ -2800,7 +2835,7 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       // where it cites them and the turn's other cards after it
       const status: { el: RenderElement; gap: boolean } | null =
         turn.state === 'running'
-          ? { el: workingEl(els, turn, cols, `thread-run-${k}`), gap: true }
+          ? { el: workingEl(els, turn, cols, `thread-run-${k}`, now), gap: true }
           : stoppedTurn(turn)
             ? { el: underEl(els, turn.a.trim().replace(/([^.!?])$/, '$1.'), `thread-err-${k}`), gap: false }
             : turn.state === 'error'
@@ -2830,11 +2865,19 @@ async function drawThreads(cx: Ctx, e: PaneEvent, selected = ''): Promise<Render
       placeholder: 'Ask a follow-up question',
       cols,
       onSubmit: q => {
-        // a question asked while the thread answers waits until its answer ends: thimble queues it
-        void threadMessage(cx, t.id, q).then(r => {
+        void (async () => {
+          // the question shows at once, `◌ starting · 0s` under it, until its chat holds it (sentAsks)
+          if (!running) {
+            sentAsks.set(t.id, { q, at: await cx.now() })
+            await cx.bumpPanel()
+          }
+          // a question asked while the thread answers waits until its answer ends: thimble queues it
+          const r = await threadMessage(cx, t.id, q)
+          sentAsks.delete(t.id)
+          await cx.bumpPanel()
           if (r.error) cx.toast(r.error)
           else if (r.queued || running) cx.toast('the side thread is still answering: your question waits until it ends')
-        })
+        })()
       },
     })
     keys.push({ key: 'ask', hotkey: 'a', onPress: () => void focusAsk() })
@@ -4400,6 +4443,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   takeListKeys()
   setHead({})
   setBrowser(null)
+  rt.starting = false
   hotkeysDrawing = new Map()
   listExtraDrawing = { space: false, backspace: false }
   fieldsDrawing = new Set()

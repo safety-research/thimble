@@ -337,7 +337,7 @@ const OFFER = {
   task: 'Find out when the agents edited together.',
   claims: ['revisions.jsonl'],
 }
-const OFFER_ACTS = ['accept', 'reject', "don't ask again", 'dismiss']
+const OFFER_ACTS = ['build it', "don't build it", 'stop suggesting pages', 'dismiss']
 
 /** The Text runs inside an element, each with its look. */
 function texts(n: unknown, out: { s: string; color?: unknown; bold?: unknown; dim?: unknown; hover?: unknown; wrap?: unknown }[] = []): typeof out {
@@ -353,7 +353,7 @@ function texts(n: unknown, out: { s: string; color?: unknown; bold?: unknown; di
   return out
 }
 
-test("the view proposal: `view proposal` dim, the name bold and its acts at the right in the accent (`accept` bold) on one row, and what the view would show whole and wrapped under it", { timeoutMs: 30_000 }, async ($, on) => {
+test("the view proposal says what the analyst gets: `view` dim, `thimble can build a page for these records:` and the name bold, its acts saying what they do at the right in the accent (`build it` bold), and what the page would show whole and wrapped under it", { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.states.home = { ...w.states.home, offer: OFFER } as never
   await start($, w)
@@ -366,9 +366,14 @@ test("the view proposal: `view proposal` dim, the name bold and its acts at the 
     expect(words(row)).not.toContain('…')
     expect(await m.find({ type: 'Box', key: 'above-offer-desc' })).toBeDefined()
     const looks = texts(row)
-    expect(looks[0]).toMatchObject({ s: '  view proposal', dim: true })
+    expect(looks[0]).toMatchObject({ s: '  view', dim: true })
+    expect(words(row)).toContain('thimble can build a page for these records: Page Histories')
     expect(looks.find(l => l.s === 'Page Histories')).toMatchObject({ bold: true, hover: { underline: true } })
-    expect(looks.find(l => l.s === 'accept')).toMatchObject({ color: COLORS.accent, bold: true, hover: { underline: true } })
+    expect(looks.find(l => l.s === 'build it')).toMatchObject({ color: COLORS.accent, bold: true, hover: { underline: true } })
+    // the words whole on their row: at 100 columns the acts take a row of their own under the words
+    const ownActs = await m.find({ type: 'Box', key: 'above-offer-own-acts' })
+    if (cols === 100) expect(words(ownActs)).toBe(`  ${OFFER_ACTS.join('')}`)
+    else expect(ownActs).toBeUndefined()
     for (const a of OFFER_ACTS.slice(1)) {
       expect(looks.find(l => l.s === a)).toMatchObject({ color: COLORS.accent, hover: { underline: true } })
       expect(looks.find(l => l.s === a)!.bold).toBeUndefined()
@@ -397,13 +402,13 @@ test("a viewer of a file type shows its files on the name's press; why accept co
   await open.press({ key: 'above-offer-name' })
   await w.clock.settle()
   await open.unmount()
-  // 60 columns: the label column is 11 (`proposal` and a cell), and the acts would leave the words under MIN_WORDS cells
+  // 60 columns: the label column is 11, and the acts would leave the words under MIN_WORDS cells
   expect(wordsRoom(60, 11, OFFER_ACTS.map(label => ({ label })))).toEqual({ room: 49, own: true })
-  expect(wordsRoom(100, ABOVE_LABEL, OFFER_ACTS.map(label => ({ label })))).toEqual({ room: 41, own: false })
+  expect(wordsRoom(150, ABOVE_LABEL, OFFER_ACTS.map(label => ({ label })))).toEqual({ room: 75, own: false })
   expect(MIN_WORDS).toBe(12)
   const narrow = await band($, 60)
   const row = await narrow.find({ type: 'Box', key: 'above-offer' })
-  expect(words(row).startsWith('  proposalPage Histories  ')).toBe(true)
+  expect(words(row).startsWith('  viewthimble can build a page for these records: Page Histories')).toBe(true)
   expect(words(await narrow.find({ type: 'Box', key: 'above-offer-own-acts' }))).toBe(`  ${OFFER_ACTS.join('')}`)
   await narrow.unmount()
 })

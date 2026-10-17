@@ -92,6 +92,9 @@ export const rt = {
   // pass of the lane runs
   runFiles: new Map<string, { stamp: string; run: Record<string, unknown> | null }>(),
   runsBusy: false,
+  // whether the panel's last drawing showed a side thread's question that has taken no step yet (`◌ starting · 12s`),
+  // whose time the clock (startingTick) draws again each second
+  starting: false,
   // the reads of a surface asked so far, and by key the one whose answer the surface holds: an answer of a read asked
   // before it never replaces it (two lanes read the labels and home)
   reads: 0,
@@ -1560,9 +1563,18 @@ export const applyUi: UiApply = async (cx, kind, args) => {
   if ((kind === 'filter' || kind === 'label') && p?.view.startsWith('file')) await openPanel(cx, p)
 }
 
-/** The refresh loop (every second), the labels' lane and their runs' lane (every second), the citation queue (every
- *  250 ms) and the view
- *  pump, once per module copy, from the moment thimble is on. */
+/** While the panel shows a side thread's question that has taken no step yet, its time so far drawn again each second
+ *  (live feedback, 10-17: "wasn't sure if it was working or waiting", 15-20 s with nothing happening). */
+export async function startingTick(cx: Ctx): Promise<void> {
+  if (!rt.starting) return
+  const p = await cx.panel()
+  if (p?.view === 'thread' || p?.view === 'threads') await cx.bumpPanel()
+  else rt.starting = false
+}
+
+/** The refresh loop (every second), the labels' lane and their runs' lane (every second), the clock of a thread's start
+ *  (every second), the citation queue (every 250 ms) and the view pump, once per module copy, from the moment thimble is
+ *  on. */
 export function startTimers(cx: Ctx): void {
   if (rt.timers) return
   rt.timers = true
@@ -1571,6 +1583,7 @@ export function startTimers(cx: Ctx): void {
   cx.every(1000, () => void tick(cx, applyUi).catch(quiet))
   cx.every(1000, () => void labelsLane(cx).catch(quiet))
   cx.every(1000, () => void runsLane(cx).catch(quiet))
+  cx.every(1000, () => void startingTick(cx).catch(quiet))
   cx.every(250, () => void checkQueued(cx).catch(quiet))
   // the open view matched to what the panel draws, and thimble's view host started the first time a view opens, from a
   // timer of the session's, which lives as long as it (viewhost.ts)

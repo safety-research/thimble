@@ -2162,7 +2162,8 @@ def _tool_use(lv: Live, tool_use_id: str, name: str, tool_input: Any) -> None:
             _spawn(lv, tool_use_id, None, str(ref), inp.get("subagent_type"))
             return
     if name == SEND_TOOL:
-        sub = _sub_by(lv, agent_id=str(inp.get("to") or inp.get("recipient") or ""))
+        to = str(inp.get("to") or inp.get("recipient") or "")
+        sub = _sub_by(lv, agent_id=to) or _fork_named(lv, to)
         if sub is not None and sub.thread:
             lv.hidden.add(tool_use_id)
             lv.forked.add(sub.chat)
@@ -2698,6 +2699,16 @@ def _sub_by(lv: Live, *, tool_use_id: str | None = None, agent_id: str | None = 
         if agent_id and sub.agent_id == agent_id:
             return sub
     return None
+
+
+def _fork_named(lv: Live, name: str) -> Sub | None:
+    """A thread's fork in this session by the name it runs under (the thread's fork name, its Agent call's `name`), as
+    main's SendMessage names it in `to` (live feedback, 10-17: the mirror took a follow-up sent so for no message, and
+    the thread read "Main's turn ended without answering in this thread" while its fork worked on it)."""
+    tid = threads.by_fork_name(lv.c, name)
+    if not tid:
+        return None
+    return next((sub for sub in reversed(lv.subs) if sub.thread and sub.chat == tid), None)
 
 
 def _fork_runs(lv: Live, thread_id: str, tool_use_id: str | None) -> bool:

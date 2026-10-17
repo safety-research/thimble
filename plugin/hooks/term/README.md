@@ -43,7 +43,9 @@ browser's Settings writes. Coverage off draws no line and keeps no facts; Citati
 links and checks none; Checks off draws no tint.
 
 **Colors** (`palette.gen.ts`). The cards' series and the label colors are the browser's tokens (light paper on a light
-Claude Code theme, Dark on any other), written by `scripts/dev/sync_palette.py`.
+Claude Code theme, Dark on any other), written by `scripts/dev/sync_palette.py`. A chart with more than seven series
+takes seven label colors after the seven series (`paint.ts` seriesHue), so up to fourteen series each have a color of
+their own.
 
 ## What it draws
 
@@ -115,12 +117,16 @@ Claude Code's panel chrome, no right-click menu.
   answers the row goes back to home. `/thimble browser` and `o` in a remote terminal open the SSH row there at once.
   `/thimble labels`, like `threads`, `citations`, `checks` and `coverage`, opens a section of the line. Fullscreen
   (`viewport.isFullscreen`, a command's `presentation.isFullscreen`) shows none of this.
-- **A view proposal above the prompt**, while one waits for an answer: `view proposal`, the view's name in bold and as
-  much of what it would show as fits (the name's press shows it all), then `accept` (thimble builds it), `reject`,
-  `don't ask again`, which turns view proposals off, and `dismiss`; why accept could not start the build, and the fix,
-  in red under it. To turn
-  view proposals back on after `don't ask again`, set `"views": {"propose": true}` in thimble's config
+- **A view proposal above the prompt**, while one waits for an answer, saying what the analyst gets: `view`, `thimble
+  can build a page for these records:` and the view's name in bold, what the page would show under it, then `build
+  it` (thimble builds it), `don't build it`, `stop suggesting pages`, which turns view proposals off, and `dismiss`;
+  why the build could not start, and the fix, in red under it. To turn
+  view proposals back on after `stop suggesting pages`, set `"views": {"propose": true}` in thimble's config
   (`~/.thimble/config.json`, or the workspace's `config.json` when it sets the key), or take the key out.
+- **A side thread's agent in view** (Claude Code's agent list, Enter on it): above the prompt one row only, `thread
+  This is side thread "<its question>". What you type here goes to it, and its answers show in the thread.`, then
+  `back to main` (bold), which puts main's transcript back in view, and `open the thread`. Any other agent's view keeps
+  Claude Code's own band, with no row of thimble's.
 - **Every agent's failures above the prompt**, newest first, under the view proposal: a notice for each failure of any
   agent thimble runs (the orientation and its helpers, the critic, writers, view builds, report checks, code tickets,
   card checks, labels, the view proposer), since Claude Code's own output shows only main's: `notice` in red, its
@@ -147,7 +153,8 @@ Claude Code's panel chrome, no right-click menu.
   thread while one is open; the selected thread under it, or alone with no tree when it is the only one: what it is
   about on one dim row, `v` showing it whole (a card in its frame, a file's cited lines, a passage's words), then its
   chat as Claude Code draws one, each question after `❯` on the prompt's background and each answer after `⏺`, its
-  cards where it cites them, a turn at work as `⏺ ◌ N tool calls` with its latest words after `⎿`, a stop or a failure
+  cards where it cites them, a turn at work as `⏺ ◌ starting · 12s` from the moment it is asked until its first step,
+  then `⏺ ◌ N tool calls` with its latest words after `⎿`, a stop or a failure
   on a `⎿` row under its question; a new thread shows its subject above its entry box, cut to 6 rows and `… N more`;
   `stop` while it answers, the entry box); a label; the documents and one document (a report with its
   contents, a deck or a story one slide or beat at a time, the retell controls; its comments, a check's, Claude's or the

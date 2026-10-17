@@ -164,6 +164,9 @@ export type Ctx = {
   setLinks: (l: Links | null) => Promise<void>
   /** text on the clipboard of the surface the person uses: whether it was copied, else why not */
   copy: (text: string) => Promise<{ isCopied: boolean; reason?: string }>
+  /** the main conversation's transcript back in view, from an agent's (a press's: `$.ui.view({})`); '' once it shows,
+   *  else why not */
+  viewMain: () => Promise<string>
   /** what kept.ts kept under a row put back in the state where the state holds none (no write of the file) */
   restoreRow: (row: string, r: KeptRow) => Promise<void>
 }
@@ -419,6 +422,10 @@ export function cxOf($: Dollar): Ctx {
     setPressing: async v => void (await $.state.set(pressingRef, v)),
     links: async () => (await $.state.get(linksRef)).value ?? null,
     setLinks: async v => void (await $.state.set(linksRef, v)),
+    viewMain: async () => {
+      const r = await $.ui.view({}).catch(err => ({ deny: String(err).slice(0, 200) }))
+      return 'deny' in r && r.deny ? String(r.deny) : ''
+    },
     copy: async text => {
       const r = await $.ui.copy({ text }).catch(err => ({ isCopied: false as const, reason: String(err).slice(0, 120) }))
       return r.isCopied ? { isCopied: true } : { isCopied: false, reason: String((r as { reason?: unknown }).reason ?? 'not copied') }
