@@ -5,7 +5,7 @@
 import { axisTicks, numberTicks, ownTicks, placeLabels, wallClock } from './axis'
 import { cut, cw, fmt, formatted, itemsRow, middleCut, prefix, quoted, viewRef, width } from './lib'
 import type { Run, TableRuns } from './lib'
-import { COLORS } from './paint'
+import { COLORS, seriesHue } from './paint'
 import { hueOf } from './labels'
 
 export { COLORS }
@@ -300,7 +300,7 @@ export function valueColour(values: readonly string[], value: string, colors?: R
   const i = values.indexOf(value)
   if (i < 0) return undefined
   if (colors && typeof colors[value] === 'number') return hueOf(colors[value]!)
-  return values.length > 1 && i === values.length - 1 ? COLORS.dim : COLORS.series[i % COLORS.series.length]
+  return values.length > 1 && i === values.length - 1 ? COLORS.dim : seriesHue(i)
 }
 
 /** The labels a card shows: a label card's own, else those its script read. */
@@ -496,7 +496,7 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
     const on = ids.includes(hover)
     // a hue for a value of the card's colour field (its groups, or a label it read); with no colour field the bars are
     // one series, in the first hue (rule 20); the bar under the pointer turns the text colour
-    const hueOf = (r: BarRow) => classColour(card, r.group || r.label) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(r.group)) % COLORS.series.length]! : one())
+    const hueOf = (r: BarRow) => classColour(card, r.group || r.label) ?? (groups.length ? seriesHue(Math.max(0, groups.indexOf(r.group))) : one())
     const segs: Seg[] = []
     const mine: { x0: number; x1: number; i: number }[] = []
     let x = labelW + 2
@@ -550,7 +550,7 @@ function barLayout(card: CardData, cols: number, hover: number): Layout {
   if (own && card.note) lines.push(card.note.startsWith('◌') ? [{ s: card.note }] : [{ s: card.note, fg: COLORS.dim }])
   // the legend on its own row under the chart; none when a label it read names the groups on its label row
   const named = new Set(cardLabels(card).flatMap(l => l.values))
-  if (groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map((g, j) => [{ s: '● ', fg: classColour(card, g) ?? COLORS.series[j % COLORS.series.length] }, { s: g }]), cols))
+  if (groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map((g, j) => [{ s: '● ', fg: classColour(card, g) ?? seriesHue(j) }, { s: g }]), cols))
   // a row's one bar is the row's mark; on a stacked row the part under the pointer, the nearest part off the bar
   const hit = (x: number, y: number): number => {
     const j = owner[y]
@@ -667,7 +667,7 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   }
   const hot = hover >= 0 ? at[hover] : undefined
   // a chart with no colour field is one series, in the first hue (rule 12); with several, each its hue
-  const seriesColour = (si: number) => classColour(card, series[si]?.name) ?? (series.length > 1 ? COLORS.series[si % COLORS.series.length]! : one())
+  const seriesColour = (si: number) => classColour(card, series[si]?.name) ?? (series.length > 1 ? seriesHue(si) : one())
   const lines: Line[] = []
   for (let r = 0; r < plotRows; r++) {
     const yl = yTicks.get(r)
@@ -758,7 +758,7 @@ function dotsLayout(card: CardData, cols: number, hover: number): Layout {
   const area = pw + after
   const cellOf = (v: number) => (x1 === x0 ? Math.floor(pw / 2) : Math.round(((v - x0) / (x1 - x0)) * (pw - 1)))
   const groups = [...new Set(strips.flatMap(r => r.dots.map(d => d.group)).filter(Boolean))]
-  const hue = (g: string) => classColour(card, g) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(g)) % COLORS.series.length]! : one())
+  const hue = (g: string) => classColour(card, g) ?? (groups.length ? seriesHue(Math.max(0, groups.indexOf(g))) : one())
   // each row's cells that hold dots, left to right, with their dots, and each span from its first cell to its last
   // (`end`): the marks the pointer picks, row by row
   type Mark = { row: number; cell: number; end?: number; dots: DotRow['dots'] }

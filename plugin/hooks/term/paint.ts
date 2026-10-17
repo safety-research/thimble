@@ -71,6 +71,20 @@ export function labelHex(place: number, theme: Theme = painted.theme): string {
   return labels[(Math.max(1, Math.round(place)) - 1) % labels.length]!
 }
 
+/** The label color places a chart's series take after the seven of SERIES (live feedback, 10-17: twelve lines in seven
+ *  colors read as "too few colors"): brown, a dark purple (a pale violet on Dark), cerulean, chestnut, red, olive and
+ *  grass green, in that order, a hue the seven lack first and the one nearest a series' last. Picked by place so each
+ *  theme has its own of each, every one of the fourteen at least as far from every other (8.8 in OKLab ×100, in both
+ *  themes) as the seven series are from each other (9.0 on Dark). */
+const MORE_SERIES = [7, 16, 10, 11, 13, 5, 9] as const
+
+/** Series `i`'s color in a chart with a color field: the browser's seven series, then MORE_SERIES; past fourteen the
+ *  colors come round again. */
+export function seriesHue(i: number): string {
+  const k = Math.max(0, Math.floor(i)) % (SERIES.length + MORE_SERIES.length)
+  return k < SERIES.length ? SERIES[k]! : labelHex(MORE_SERIES[k - SERIES.length]!)
+}
+
 /** The flag a passage a check commented on carries in the reply's margin, in the check's color. */
 export const FLAG = '⚑'
 

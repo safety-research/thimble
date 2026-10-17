@@ -43,7 +43,9 @@ browser's Settings writes. Coverage off draws no line and keeps no facts; Citati
 links and checks none; Checks off draws no tint.
 
 **Colors** (`palette.gen.ts`). The cards' series and the label colors are the browser's tokens (light paper on a light
-Claude Code theme, Dark on any other), written by `scripts/dev/sync_palette.py`.
+Claude Code theme, Dark on any other), written by `scripts/dev/sync_palette.py`. A chart with more than seven series
+takes seven label colors after the seven series (`paint.ts` seriesHue), so up to fourteen series each have a color of
+their own.
 
 ## What it draws
 
