@@ -7,13 +7,12 @@ which is that one with the session's --settings `env` over it, as Claude Code bu
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
 import pytest
 
-from app import agent_session, config, dev, hook_auth, tools, userconf
+from app import agent_session, config, hook_auth, tools, userconf
 
 CORPUS = "mini"
 
@@ -39,8 +38,7 @@ def service(tmp_path, monkeypatch, workspaces_tmp):
     script.write_text(f"#!{sys.executable}\n{FAKE}")
     script.chmod(0o755)
     state = tmp_path / "bg"
-    for module in (agent_session, dev):
-        monkeypatch.setattr(module, "CLAUDE_BIN", str(script))
+    monkeypatch.setattr(agent_session, "CLAUDE_BIN", str(script))
     monkeypatch.setenv("FAKE_BG", str(state))
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
@@ -60,46 +58,11 @@ def _calls(state: Path) -> list[dict]:
     return [json.loads(line) for line in (state / "calls.jsonl").read_text().splitlines()]
 
 
-async def _ticket_session(state: Path, c: str = CORPUS) -> dict:
-    """`thimble fix`'s session of the dev agent's (the one `claude -p` job thimble still starts); the stand-in's record
-    of it."""
-    work = config.workspace_dir(c) / "ticket-7"
-    work.mkdir(parents=True, exist_ok=True)
-    sessions = dev.Sessions()
-    got = await sessions.start(work, "Fix the server.", name="thimble fix", workspace=c)
-    await sessions._turns[got["id"]].task
-    return _calls(state)[-1]
-
-
 def _proven(monkeypatch, env: dict, home: str, c: str = CORPUS) -> bool:
     """Whether the session's token proves its name to the stack whose home is `home`."""
     with monkeypatch.context() as m:
         m.setenv("THIMBLE_HOME", home)
         return hook_auth.session_proven(c, env.get("THIMBLE_SESSION", ""), env.get("THIMBLE_SESSION_TOKEN", ""))
-
-
-async def test_each_stack_s_session_sees_its_own_values_and_no_claude_process_carries_thimble_s(
-        service, monkeypatch, tmp_path):
-    """Stack A's `thimble fix` session and stack B's each see only their own values, in their --settings `env`; the
-    `claude` processes themselves carry none of thimble's variables."""
-    a = _stack(monkeypatch, tmp_path / "a", 9721)
-    first = (await _ticket_session(service))["env"]
-    a_home = a["THIMBLE_HOME"]
-    assert first["THIMBLE_SESSION"] == dev.SESSION_KEY and _proven(monkeypatch, first, a_home)
-    assert first["THIMBLE_CALLER_CWD"] == "" and first["THIMBLE_OPEN"] == "", "the `thimble` command's press is main's"
-
-    b = _stack(monkeypatch, tmp_path / "b", 9722)
-    view = (await _ticket_session(service))["env"]
-    assert view["THIMBLE_SESSION"] == dev.SESSION_KEY and _proven(monkeypatch, view, b["THIMBLE_HOME"])
-    assert not _proven(monkeypatch, view, a_home), "a token proves its name to its own stack only"
-    assert view["THIMBLE_HOME"] == view["THIMBLE_PORT"] == view["THIMBLE_CALLER_CWD"] == ""
-    assert view["XDG_CACHE_HOME"] == os.environ.get("XDG_CACHE_HOME", "")
-    assert view["THIMBLE_RENDERED_PROMPTS"] == ""
-    assert view[agent_session.BG_WAIT_ENV] == agent_session.BG_WAIT_MS
-
-    for c in _calls(service):
-        assert not [k for k in c["process"] if k.startswith("THIMBLE_")], c["argv"]
-        assert c["process"].get("XDG_CACHE_HOME") == os.environ.get("XDG_CACHE_HOME"), c["argv"]
 
 
 def test_a_call_names_its_session_only_with_the_token_that_proves_it(monkeypatch, workspaces_tmp, plugin_headers):
@@ -143,43 +106,3 @@ def test_the_session_key_is_private_to_thimble_and_outlives_a_restart(monkeypatc
     assert hook_auth.session_proven(CORPUS, "orient", token)
     assert not hook_auth.session_proven("other", "orient", token) and not hook_auth.session_proven(CORPUS, "dev", token)
     assert hook_auth.session_token(CORPUS, "orient") != token, "each start gets a token of its own"
-
-
-async def test_a_structured_call_runs_no_claude_with_thimble_s_variables(tmp_path, monkeypatch):
-    """The Agent SDK checks the version with a `claude -v` that gets this process's whole environment: it runs none, and
-    the call's own `claude` gets every THIMBLE_* variable empty."""
-    from claude_agent_sdk import query
-
-    from app import sdk
-
-    fake = Path(__file__).parent / "fixtures" / "agents" / "fake_sdk_claude.py"
-    exe = tmp_path / "claude"
-    exe.write_text(f"#!{sys.executable}\n{fake.read_text()}")
-    exe.chmod(0o755)
-    log = tmp_path / "starts.jsonl"
-    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv(sdk.SKIP_VERSION_CHECK_ENV, "")
-    monkeypatch.delenv(sdk.SKIP_VERSION_CHECK_ENV)
-    monkeypatch.setattr(config, "CLI_PATH", str(exe))
-    options = sdk.build(cwd=tmp_path, tools=[], mcp_servers={}, system="", model="claude-opus-5-5", effort="low", env=None)
-    async for _ in query(prompt="hello", options=options):
-        pass
-    starts = [json.loads(line) for line in log.read_text().splitlines()]
-    assert [s["argv"] for s in starts] == [s["argv"] for s in starts if s["argv"][:1] != ["-v"]] != []
-    assert options.env["THIMBLE_HOME"] == ""
-
-
-def test_a_call_takes_the_users_auth_but_not_their_memory_effort_or_mode(tmp_path):
-    """sdk.build: a structured call runs the user's own `claude` with their user settings only, in safe mode (no
-    CLAUDE.md, hooks, plugins or MCP servers of theirs), with its own system prompt, effort, fast mode, ultracode and
-    permission mode."""
-    from app import sdk
-
-    opts = sdk.build(cwd=tmp_path, tools=["mcp__out__x"], mcp_servers={}, system="You are a text classifier.",
-                     model="claude-opus-5-5", effort="low", env=None, speed="standard", persist=False)
-    assert opts.setting_sources == ["user"] and opts.strict_mcp_config
-    assert "safe-mode" in opts.extra_args and "no-session-persistence" in opts.extra_args
-    assert json.loads(opts.settings) == {"fastMode": False, "ultracode": False, "env": {"CLAUDE_CODE_EFFORT_LEVEL": "low"}}
-    assert opts.permission_mode == "dontAsk" and opts.allowed_tools == ["mcp__out__x"] and opts.tools == []
-    assert opts.system_prompt == "You are a text classifier.", "the caller's system prompt, whole, in place of a preset"

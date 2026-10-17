@@ -467,25 +467,6 @@ class Listener:
 
 
 @pytest.fixture(autouse=True)
-def _no_rate_limit_retry_wait(monkeypatch):
-    """model.structured waits before its one 429 retry; tests wait 0 s."""
-    from app import model
-
-    monkeypatch.setattr(model, "RATE_LIMIT_RETRY_S", 0.0)
-
-
-@pytest.fixture(autouse=True)
-def _no_backoff_wait(monkeypatch):
-    """retry.with_retries waits between retries of a transient failure; tests wait 0 s and the retries still run."""
-    from app import retry
-
-    async def no_wait(s: float) -> None:
-        return None
-
-    monkeypatch.setattr(retry, "_sleep", no_wait)
-
-
-@pytest.fixture(autouse=True)
 def _no_plugin_list(monkeypatch):
     """launch_args asks `claude plugin list` which plugin copy the session loads (cli.installed_copy). Tests load
     plugin/."""
@@ -544,7 +525,7 @@ def _claude_stand_in(tmp_path_factory, monkeypatch):
     test and the processes it starts, which prints the version thimble is tested with for `--version` and nothing
     otherwise. `up` warns when claude is missing or older than that version, and the tests must pass the same on a
     machine without Claude Code and never run the real one. A test's own setting still wins."""
-    from app import agent_session, cli, config, dev
+    from app import agent_session, cli, config
 
     bin_dir = tmp_path_factory.getbasetemp() / "claude-stand-in"
     exe = bin_dir / "claude"
@@ -553,7 +534,7 @@ def _claude_stand_in(tmp_path_factory, monkeypatch):
         exe.write_text(f'#!/bin/sh\n[ "$1" = --version ] && echo "{cli.TESTED_CLAUDE_CODE} (Claude Code)"\nexit 0\n')
         exe.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
-    for module, name in ((config, "CLI_PATH"), (config, "CLAUDE_BIN"), (agent_session, "CLAUDE_BIN"), (dev, "CLAUDE_BIN")):
+    for module, name in ((config, "CLI_PATH"), (config, "CLAUDE_BIN"), (agent_session, "CLAUDE_BIN")):
         monkeypatch.setattr(module, name, str(exe))
 
 

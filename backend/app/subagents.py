@@ -207,6 +207,11 @@ TYPES: dict[str, Type] = {
                        "app.ticket_tools:TICKET_TOOLS", "app.dev:ticket_started", "app.dev:ticket_ended",
                        "app.dev:ticket_refused", when="app.dev:tickets_run_here", keeps_chat=True, gated=True,
                        own_notices=True),
+    # a model call's agent (agent_call.py): no chat, since nobody reads it; each start names its own model and effort,
+    # and its caller tells its failures
+    "call": Type("call", tools.CALL_SESSION, None, "verify", "cardCheck", "app.agent_call:definition",
+                 "app.agent_call:OWN_TOOLS", "", "app.agent_call:subagent_ended", "app.agent_call:subagent_refused",
+                 own_notices=True),
     HELPER: Type(HELPER, None, None, "subagents", "orientation", "app.subagents:helper_definition"),
 }
 
@@ -824,7 +829,8 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     in main (R3), and `caller_role` the role of the agent that makes a typed call itself (the critic's start, made by
     the orientation). A typed start whose tool call a thread's fork or another subagent of main's made keeps that
     subagent (`caller_agent`, typed_caller): only its Agent call claims the request. `fields` are more fields of the
-    request, such as an orientation's continuation's `continues` (ensure_chat)."""
+    request, such as an orientation's continuation's `continues` (ensure_chat), a model call's `drop`, and `fork`, a
+    model call that runs as a fork of main (agent_call.py), whose call names Claude Code's fork type."""
     if role not in TYPES or role == HELPER:
         raise ValueError(f"no role {role!r}")
     if check and not caller_role:
@@ -836,6 +842,8 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     rid = request_id or files.request_id()
     prompt = with_request_line(task, rid) if route == TYPED else task
     inp = call_input(role, prompt, description or role)
+    if (fields or {}).get("fork"):
+        inp["subagent_type"] = files.FORK_TYPE
     caller_agent = await typed_caller(c, call) if route == TYPED and not caller_role else None
     rid = new_request(c, "start", key, inp, values, route, role=role, rid=rid, chat=dict(chat or {}),
                       work=str(work) if work else None, call=call, caller_role=caller_role,
@@ -865,7 +873,8 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
         make_work(c, Path(str(r["work"])))
     inp = r.get("input") or {}
     ans = await _bridge(c, "spawn", role=r.get("role"), values=r.get("values") or {}, prompt=inp.get("prompt"),
-                        description=inp.get("description"), request=rid, what=_what(r), route=r.get("route") or CLICK)
+                        description=inp.get("description"), request=rid, what=_what(r), route=r.get("route") or CLICK,
+                        **({"drop": str(r["drop"])} if r.get("drop") else {}), **({"fork": True} if r.get("fork") else {}))
     if ans.started:
         meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (the started agent's thread)
         return Answer({**ans, "request": rid, **({"chat": meta["id"]} if meta and meta.get("id") else {})})
@@ -1199,10 +1208,13 @@ class Run:
 
 
 def _run(c: str, agent_id: str, a: dict[str, Any]) -> Run | None:
-    if not a.get("chat") or a.get("role") not in TYPES:
+    """The Run of a registered agent; None for one with no role, or with no chat yet where its type has one (a type
+    with no chat role, a model call's, runs with none: its Run's chat is '')."""
+    t = TYPES.get(str(a.get("role") or ""))
+    if t is None or (not a.get("chat") and t.chat_role is not None):
         return None
     sessions = a.get("sessions") or []
-    return Run(c, str(a.get("key") or ""), str(a["role"]), str(a["chat"]), agent_id, int(a.get("run") or 0),
+    return Run(c, str(a.get("key") or ""), str(a["role"]), str(a.get("chat") or ""), agent_id, int(a.get("run") or 0),
                str(sessions[-1]) if sessions else "", dict(a.get("values") or {}), bool(a.get("plugin_started")),
                str(a.get("route") or ""), str(a.get("request") or ""))
 

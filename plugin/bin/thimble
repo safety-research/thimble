@@ -118,7 +118,7 @@ EOF
   cat <<'EOF'
 
 in a development install (a git clone of thimble):
-       thimble fix                        repair a server that will not start, with thimble's dev agent
+       thimble fix                        a server that will not start: what doctor finds, and how to repair it
        thimble revert                     undo the last change thimble's dev agent applied
 EOF
 }

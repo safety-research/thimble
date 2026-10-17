@@ -106,6 +106,8 @@ def _args(c: str, corpus: Path) -> dict[str, dict]:
         "finish_review": {},
         "ticket_checks": {},
         "finish_ticket": {},
+        "read_call": {},
+        "send_answer": {"answer": {}},
     }
 
 

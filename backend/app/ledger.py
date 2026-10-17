@@ -405,8 +405,8 @@ def features_payload(c: str | None) -> dict[str, bool]:
 
 def agent_rows(c: str | None) -> dict[str, Any]:
     """Who runs each agent thimble starts and what it may do. `main`'s row: thimble's rules for main and its agents (web,
-    data) and the extensions that add to main's prompt; and `dev`'s, the fence `thimble fix` and an extension's program
-    that runs the dev agent keep (its sandbox, whether the sandbox can run here, its network, web tools and edits). Each other agent's row
+    data) and the extensions that add to main's prompt; and `dev`'s, the fence an extension's program
+    that runs the dev agent keeps (its sandbox, whether the sandbox can run here, its network, web tools and edits). Each other agent's row
     (orient, writer, critic, checks) names its role's agent (roles.public: thimble's own, or an extension's prompt, Agent SDK program or command,
     with the extensions that add to its prompt and a conflict) and its own `web`, "off" or main's. `labels` and
     `cardCheck` (userconf.CALLS) follow, by their config names: who runs their tasks (`tasks`, the first one an

@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, PRIVATE_FALLBACK, checkName, hmac, register } from './thimble'
+import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, forksFile, hmac, register } from './thimble'
 
 type Json = Record<string, any>
 
@@ -214,8 +214,8 @@ class Server {
 }
 
 // `marker`: the session's marker (default on); `launch`: the workspace's launch.json (default main on the server's
-// transport after a press; null for none)
-type Options = { env?: Json; interactive?: boolean; server?: Server; serverUp?: boolean; marker?: boolean; launch?: Json | null }
+// transport after a press; null for none); `files`: more files there at the start
+type Options = { env?: Json; interactive?: boolean; server?: Server; serverUp?: boolean; marker?: boolean; launch?: Json | null; files?: Json }
 
 /** A fake engine: the module's hooks, `$`, and a record of what the module asked Claude Code for. */
 function engine(opts: Options = {}) {
@@ -227,6 +227,7 @@ function engine(opts: Options = {}) {
     ...(opts.serverUp === false ? {} : { [`${HOME}/.thimble/server.json`]: JSON.stringify({ port: 21125, token: TOKEN }) }),
     ...(opts.marker === false ? {} : { [MARKER]: JSON.stringify(MARKED) }),
     ...(launch === null ? {} : { [`${WSD}/trusted/launch.json`]: JSON.stringify(launch) }),
+    ...(opts.files ?? {}),
   }
   const mtimes: Json = {} // each file's mtime, which a write moves on
   const links: Json = {} // symbolic links: path -> where it points
@@ -588,6 +589,48 @@ describe('typed starts', () => {
     expect(await e.step('aT1', null)).toBeUndefined() // a model without effort takes none
   })
 
+})
+
+describe('model calls', () => {
+  it("spawns a model call's agent with no note, never offers its type, and keeps the reason its dropped hand-back gives", async () => {
+    const server = new Server()
+    server.roles = { ...structuredClone(ROLES), call: { name: 'call', description: 'Does one task for thimble.', prompt: 'You do one task for thimble.', background: true, model: OPUS, effort: 'low' } }
+    const e = await started({ server })
+    const call = await e.server.answer(e.server.push('spawn', { role: 'call', prompt: '[thimble call abc]', description: 'thimble card check: Q?', values: { model: OPUS, effort: 'low' }, note: '', drop: 'thimble checked the card "Q?"' }))
+    expect(e.$.agent.spawn).toHaveBeenCalledWith({ subagentType: 'thimble:call', prompt: '[thimble call abc]', description: 'thimble card check: Q?' })
+    expect(callDone(String(call.agentId))).toBe('thimble checked the card "Q?"')
+    expect(e.notes()).toEqual([])
+    expect(await e.offer('thimble:call')).toBe(false) // no model starts one or sends to one
+    const bare = await e.server.answer(e.server.push('spawn', { role: 'call', prompt: 'p', description: 'd', values: {}, note: '' }))
+    const writer = await e.server.answer(e.server.push('spawn', { role: 'writer', prompt: 'p', description: 'writer: report', values: {}, note: '' }))
+    expect([callDone(String(bare.agentId)), callDone(String(writer.agentId))]).toEqual([CALL_DONE, undefined])
+    await e.complete(String(call.agentId), 'Done')
+    await until(() => e.server.ended.length === 1)
+    expect(e.server.ended[0]).toMatchObject({ agentId: call.agentId, answer: 'Done' }) // its end reaches the server
+  })
+
+  it("spawns a model call's fork of main with Claude Code's fork type, lists it for the fork guard while it runs, and posts its report", async () => {
+    const e = await started()
+    const list = forksFile(`${HOME}/.thimble`, MAIN)
+    const fork = await e.server.answer(e.server.push('spawn', { role: 'call', fork: true, prompt: 'Decide.', description: 'thimble: view proposal', values: {}, note: '', drop: 'thimble checked for a view proposal' }))
+    expect(e.$.agent.spawn).toHaveBeenCalledWith({ subagentType: 'fork', prompt: 'Decide.', description: 'thimble: view proposal' })
+    expect(e.$.agent.register).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'call' })) // a fork needs no type
+    expect(callDone(String(fork.agentId))).toBe('thimble checked for a view proposal')
+    expect(e.notes()).toEqual([])
+    expect(e.files[list]).toBe(`${fork.agentId}\n`)
+    await e.complete(String(fork.agentId), '{"show": false, "why": "Nothing new.", "proposal": null}')
+    await until(() => e.server.ended.length === 1)
+    expect(e.server.ended[0]).toMatchObject({ agentId: fork.agentId, answer: '{"show": false, "why": "Nothing new.", "proposal": null}' })
+    expect(e.files[list]).toBe('') // it ended: the guard has nothing to refuse
+  })
+
+  it('empties a list of forks an earlier load left, and makes none where there is none', async () => {
+    const list = forksFile(`${HOME}/.thimble`, MAIN)
+    const e = await started({ files: { [list]: 'aGone\n' } })
+    expect(e.files[list]).toBe('')
+    const fresh = await started()
+    expect(list in fresh.files).toBe(false)
+  })
 })
 
 describe('ends and sessions', () => {

@@ -708,10 +708,15 @@ def _checks(c: str) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _stale(decision: dict[str, Any]) -> bool:
-    """Whether a failed check has stood RETRY_S, so a refresh asks again."""
+def _stale(decision: dict[str, Any], c: str) -> bool:
+    """Whether a failed check has stood RETRY_S, so a refresh asks again; or failed for want of a Claude Code session
+    (view_fit.decide's `no_session`) and one runs thimble here now (module_bridge.live)."""
     from datetime import datetime, timezone  # noqa: PLC0415
 
+    from . import module_bridge  # noqa: PLC0415
+
+    if decision.get("no_session") and module_bridge.live(c):
+        return True
     try:
         at = datetime.fromisoformat(str(decision.get("ts") or ""))
     except ValueError:
@@ -768,9 +773,10 @@ async def _fit(c: str, name: str, v: dict[str, Any], files: list[tuple[Any, ...]
         kept = {**(ans if "fits" in ans or "fits" not in kept else kept), "stale": True, "ts": ans.get("ts") or _now()}
         kept.pop("pending", None)
         got = None
-    if kept.get("key") == at and not kept.get("pending") and ("fits" in kept or (kept.get("error") and not _stale(kept))):
+    if kept.get("key") == at and not kept.get("pending") and ("fits" in kept
+                                                              or (kept.get("error") and not _stale(kept, c))):
         return kept
-    if got is None and kept.get("stale") and not _stale(kept):
+    if got is None and kept.get("stale") and not _stale(kept, c):
         return kept
     if got is None:
         _start(c, key, at, v, files)
@@ -1367,7 +1373,6 @@ def agent_models(c: str | None) -> dict[str, dict[str, Any]]:
             model = str(mine["model"] or front.get("model") or "")
             out[key] = {"model": config.exact_model(model) if model else subagents,
                         "effort": config.effort_level(mine["effort"] or front.get("effort")) or helper["effort"],
-                        "fast": False,
                         "extension": e["name"]}
     return out
 
@@ -1519,7 +1524,8 @@ def _row(kind: str, name: str, about: str) -> str:
 
 
 WAYS = {"prompt": "adds to {who}'s prompt", "replace": "replaces {who}'s prompt",
-        "sdk": "runs {who} as an Agent SDK program", "command": "runs {who} as a program of its own"}
+        "sdk": "runs {who} as an Agent SDK program, which thimble no longer starts",
+        "command": "runs {who} as a program of its own"}
 ROLE_NAMES = {"main": "main", "orientation": "the orientation", "critic": "the critic", "writer": "the writer",
               "dev": "the dev agent"}  # each role as a sentence names it
 

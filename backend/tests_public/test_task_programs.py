@@ -1,5 +1,5 @@
-"""An extension can run any of thimble's seven tasks with its own program (tasks.py, harness.py), as it can a role: an
-Agent SDK program or any command gets the task's input and returns the object thimble's own implementation returns,
+"""An extension can run any of thimble's seven tasks with its own program (tasks.py, harness.py), as it can a role: a
+command gets the task's input and returns the object thimble's own implementation returns,
 which it can call as thimble.default(input). One extension that replaces a task runs it; two leave it thimble's. A
 program's output is checked before thimble uses it, and a program runs in its task's box, which never reads
 server.json. The example in docs/examples/vote-labels runs end to end with the model calls faked. An extension whose
@@ -8,14 +8,12 @@ stand."""
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-from app import agent_session, concepts, config, extensions, harness, kernel_wrap, model, tasks, userconf
+from app import agent_session, call_result, concepts, config, extensions, harness, kernel_wrap, tasks, userconf
 
-FAKE = Path(__file__).parent / "fixtures" / "agents" / "fake_sdk_claude.py"
 CORPUS = "mini"
 
 
@@ -131,8 +129,8 @@ async def test_a_task_program_s_output_is_checked_and_a_failing_one_fails_the_ca
     assert got.value.detail.startswith("probe's label-draft program gave no label: "), got.value.detail
 
 
-def model_result(output: dict) -> model.CallResult:
-    return model.CallResult(status="ok", output=output, model_requested="m")
+def model_result(output: dict) -> call_result.CallResult:
+    return call_result.CallResult(status="ok", output=output, model_requested="m")
 
 
 @pytest.mark.skipif(not kernel_wrap.srt_works(*(lambda s: (s.node(), s.package(config.REPO_ROOT)))(
@@ -170,42 +168,33 @@ thimble.serve(run)
 
 SESSION = '''import thimble
 async def run(input):
-    await thimble.session("Read the items.")
-    return {"labels": []}
+    said = []
+    for ask in (lambda: thimble.session("Read the items."), lambda: thimble.arequest("session", {"prompt": "Read."})):
+        try:
+            await ask()
+            said.append("ran")
+        except thimble.ThimbleError as e:
+            said.append(str(e))
+    return {"fits": False, "reason": " | ".join(said)}
 thimble.serve(run)
 '''
 
 
-async def test_a_task_program_s_sessions_refuse_what_they_would_ask_since_nobody_can_answer(
-        tmp_path, data_tmp, workspaces_tmp, active, unboxed, monkeypatch):
-    """A task's program has no thread, so its sessions are refused what they would ask: corpus edits, the web and
-    installs, and any other request is denied with a line that says why, not one about an ended session."""
+async def test_a_program_s_session_request_is_refused_and_starts_no_claude(tmp_path, data_tmp, workspaces_tmp, active,
+                                                                           unboxed, monkeypatch):
+    """thimble starts no Claude Code session for a program (NOCLAUDE.md): the kit's session() refuses at once, and a
+    `session` request a program writes itself is answered with the same error; no `claude` starts."""
     log_file = tmp_path / "claude.log"
     fake = tmp_path / "claude"
-    fake.write_text(f"#!/bin/sh\nexec {sys.executable} {FAKE} \"$@\"\n")
+    fake.write_text(f"#!/bin/sh\necho \"$@\" >> {log_file}\n")
     fake.chmod(0o755)
     monkeypatch.setattr(agent_session, "CLAUDE_BIN", str(fake))
-    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log_file))
-    active.append(_program(tmp_path, "asker", "labels", SESSION))
-    res = await tasks.call(CORPUS, "labels", {"items": []})
+    monkeypatch.setattr(config, "CLAUDE_BIN", str(fake))
+    active.append(_program(tmp_path, "asker", "view-fit", SESSION))
+    res = await tasks.call(CORPUS, "view-fit", {"view": {"name": "Board"}})
     assert res.status == "ok", res.detail
-    [start] = [json.loads(line) for line in log_file.read_text().splitlines()]
-    argv = start["argv"]
-    settings = json.loads(argv[argv.index("--settings") + 1])
-    corpus = Path(userconf.session(CORPUS, "labels", sandbox=False).corpus() or config.corpus_dir(CORPUS))
-    assert f"Edit(/{corpus}/**)" in settings["permissions"]["deny"]
-    asked = settings["permissions"].get("ask") or []
-    assert not any(str(corpus) in r or r.startswith("Bash(") or r.startswith("Web") for r in asked), asked
-    assert {"WebFetch", "WebSearch"} <= set(argv[argv.index("--disallowedTools") + 1].split(","))
-    key = start["session"]
-    assert key.startswith("task:labels:")
-    agent_session.unanswered(CORPUS, key, True)
-    try:
-        got = await agent_session.ask(CORPUS, key, "Bash", {"command": "ls"})
-    finally:
-        agent_session.unanswered(CORPUS, key, False)
-    assert got == {"behavior": "deny", "message": agent_session.NO_ONE_LINE}
-    assert (await agent_session.ask(CORPUS, key, "Bash", {"command": "ls"}))["message"] == agent_session.GONE_LINE
+    assert res.output["reason"] == f"{harness.NO_SESSION} | {harness.NO_SESSION}"
+    assert not log_file.exists(), "no claude started"
 
 
 PEEK = '''import thimble
@@ -240,11 +229,11 @@ async def test_thimble_reads_for_a_program_only_pictures_its_box_may_read(tmp_pa
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 32)
     seen: list[list[tuple[bytes, str]]] = []
 
-    async def structured(prompt, *, tool, model, images=(), **k):
+    async def structured(c, prompt, *, tool, model, images=(), **k):
         seen.append(list(images))
         return model_result({"text": f"{len(images)} pictures"})
 
-    monkeypatch.setattr(model, "structured", structured)
+    monkeypatch.setattr(__import__("app.agent_call", fromlist=["agent_call"]), "structured", structured)
     monkeypatch.setattr(__import__("app.card_check", fromlist=["card_check"]), "fit_image", lambda b: b)
     active.append(_program(tmp_path, "peek", "card-check", PEEK))
     res = await tasks.call(CORPUS, "card-check", {"secret": str(secret), "png": str(png)})

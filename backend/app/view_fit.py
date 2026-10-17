@@ -3,7 +3,8 @@ task (tasks.py), which an extension's program may run instead (fit_input, fit_ta
 
 thimble sends the view's description, the files it claims folded into patterns (groups) and a few records of the files
 likeliest to hold records (samples) to the labels role's model at its effort (low unless thimble's config sets
-another), as one structured call on the user's own `claude` with no tools (model.structured). The answer is {fits,
+another), as one structured call that a subagent of the analyst's Claude Code session answers (agent_call.structured).
+With no session running thimble in the folder the call fails, and its reason is the fix. The answer is {fits,
 reason}: whether the view fits, and one sentence the analyst reads in Settings. A call that fails decides nothing: the
 view stays hidden here, and the reason says why."""
 from __future__ import annotations
@@ -16,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from . import capture, config, prompts
+from . import config, prompts
 
 log = logging.getLogger("thimble.view_fit")
 
@@ -32,6 +33,11 @@ RECORD_EXTS = (".jsonl", ".ndjson", ".csv", ".tsv", ".json")  # files of records
 TEXT_EXTS = (".log", ".txt", ".md", ".html", ".xml", ".yaml", ".yml")
 
 TOOL_NAME = "decision"
+# the call's agent in Claude Code: its line in the task list, and the reason in main's terminal when the terminal UI
+# drops its hand-back
+TITLE = "thimble view fit: {name}"
+DONE = 'thimble decided whether the view "{name}" fits'
+
 SCHEMA = {
     "type": "object",
     "properties": {
@@ -188,17 +194,20 @@ def prompt(c: str, name: str, description: str, files: list[tuple[Any, ...]]) ->
     return _render(c, fit_input(c, name, description, files))
 
 
-async def ask(c: str, text: str, model: str | None = None) -> Any:
-    """The call: model.structured on `model`, else the labels role's model, at the labels role's effort and speed, and
-    on the refusal row's after a refusal (config.call_settings). Never raises."""
-    from . import model as model_mod  # noqa: PLC0415
+async def ask(c: str, text: str, model: str | None = None, name: str = "") -> Any:
+    """The call, as a subagent of the analyst's Claude Code session (agent_call.structured) on `model`, else the labels
+    role's model, at the labels role's effort, and on the refusal row's after a refusal (config.call_settings); `name`
+    the view's, for the agent's task line. Never raises."""
+    from . import agent_call  # noqa: PLC0415
+    from .call_result import ToolSpec  # noqa: PLC0415
 
     role = config.call_settings(c, "labels")
-    tool = model_mod.ToolSpec(name=TOOL_NAME, description="Your decision on whether the view fits this corpus.",
-                              input_schema=SCHEMA)
-    with capture.scope("view fit", keep=True):
-        return await model_mod.structured(text, tool=tool, model=model or role["model"], effort=role["effort"],
-                                          speed=role["speed"], refusal=role["refusal"], cwd=config.corpus_dir(c))
+    tool = ToolSpec(name=TOOL_NAME, description="Your decision on whether the view fits this corpus.",
+                    input_schema=SCHEMA)
+    name = name or "a view"
+    return await agent_call.structured(c, text, tool=tool, model=model or role["model"], effort=role["effort"],
+                                       refusal=role["refusal"], what="view fit", title=TITLE.format(name=name),
+                                       done=DONE.format(name=name))
 
 
 async def fit_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:
@@ -207,15 +216,17 @@ async def fit_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> 
     try:
         text = await asyncio.to_thread(_render, c, inp)
     except (OSError, ValueError, prompts.PromptError) as e:
-        from . import model as model_mod  # noqa: PLC0415
+        from .call_result import CallResult  # noqa: PLC0415
 
-        return model_mod.CallResult(status="error", detail=f"its prompt could not be made ({e})")
-    return await ask(c, text, **({"model": model} if model else {}))
+        return CallResult(status="error", detail=f"its prompt could not be made ({e})")
+    view = inp.get("view") if isinstance(inp.get("view"), dict) else {}
+    return await ask(c, text, **({"model": model} if model else {}), name=str(view.get("name") or ""))
 
 
 async def decide(c: str, name: str, description: str, files: list[tuple[Any, ...]], at: str) -> dict[str, Any]:
     """The decision on one view in workspace `c`: {key, fits, reason, by: "model", ts} or, when the call failed, {key,
-    error, ts}. `files` are the files it claims here, `at` the key it is made for (key)."""
+    error, ts}, with `no_session` when no Claude Code session ran thimble here, so that the decision is asked again
+    once one does (extensions._stale). `files` are the files it claims here, `at` the key it is made for (key)."""
     from . import tasks  # noqa: PLC0415
 
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -226,6 +237,7 @@ async def decide(c: str, name: str, description: str, files: list[tuple[Any, ...
     res = await tasks.call(c, "view-fit", inp, schema=SCHEMA)
     if res.status != "ok" or not isinstance(res.output, dict):
         log.warning("%s: whether the view %s fits is not known: %s %s", c, name, res.status, res.detail)
-        return {"key": at, "error": res.detail or f"the model call ended {res.status.replace('_', ' ')}", "ts": ts}
+        return {"key": at, "error": res.detail or f"the model call ended {res.status.replace('_', ' ')}", "ts": ts,
+                **({"no_session": True} if res.status == "no_session" else {})}
     reason = " ".join(str(res.output.get("reason") or "").split())
     return {"key": at, "fits": res.output.get("fits") is True, "reason": reason, "by": "model", "ts": ts}

@@ -5073,8 +5073,13 @@ ORDINARY_SUFFIXES = frozenset(
 _TYPE_GLOB = re.compile(r"^(?:\*\*/)?\*(\.[A-Za-z0-9_+-]{1,16})$")
 SUGGEST_HEAD_LINES, SUGGEST_LINE_CHARS = 40, 300  # of a text file's start the proposal is written from
 SUGGEST_HEX_BYTES, SUGGEST_SCAN_BYTES, SUGGEST_RUN_MIN = 512, 65536, 6  # of a binary file's start
-# the file-viewer call's wait, a refused call's rerun on the refusal row's model included (model.structured)
+# the file-viewer call's wait, a refused call's rerun on the refusal row's model included: its agent, a subagent of the
+# analyst's Claude Code session (agent_call.structured), is stopped past it
 SUGGEST_TIMEOUT_S = 90.0
+# the call's agent in Claude Code: its line in the task list, and the reason in main's terminal when the terminal UI
+# drops its hand-back
+SUGGEST_TITLE = "thimble viewer suggestion: {files}"
+SUGGEST_DONE = "thimble checked whether {files} need a viewer"
 SUGGEST_PROMPT = "file-viewer"
 # A file type's check for a view proposal that failed (suggest) is a notice in the foreground under SUGGEST_NOTICE_KEY
 # (notices.post), whose Try again (POST /views/propose-now) checks that file type again (_suggest_failed); a check that
@@ -5205,25 +5210,29 @@ def _fmt_size(n: int) -> str:
     return f"{n} bytes"
 
 
-async def _suggest_call(c: str, system: str, user: str, tool: Any, model: str | None = None) -> Any:
-    """The proposal's one model call: `model`, else the viewer suggestion's model (Settings' `suggest` row), at that
-    row's effort and speed, and on the refusal row's after a refusal (config.call_settings). Tests replace it."""
-    from . import model as model_mod  # noqa: PLC0415
+async def _suggest_call(c: str, system: str, user: str, tool: Any, model: str | None = None, suffix: str = "") -> Any:
+    """The proposal's one model call, as a subagent of the analyst's Claude Code session (agent_call.structured):
+    `model`, else the viewer suggestion's model (Settings' `suggest` row), at that row's effort, and on the refusal
+    row's after a refusal (config.call_settings); `suffix` the file type's, for the agent's task line. Tests replace
+    it."""
+    from . import agent_call  # noqa: PLC0415
 
     role = config.call_settings(c, "suggest")
-    return await model_mod.structured(user, tool=tool, model=model or role["model"], effort=role["effort"],
-                                      speed=role["speed"], refusal=role["refusal"], system=system,
-                                      cwd=config.corpus_dir(c))
+    files = f"{suffix} files" if suffix else "files without a suffix"
+    return await agent_call.structured(c, user, tool=tool, model=model or role["model"], effort=role["effort"],
+                                       refusal=role["refusal"], system=system, what="viewer suggestion",
+                                       title=SUGGEST_TITLE.format(files=files), done=SUGGEST_DONE.format(files=files))
 
 
 def _suggest_sections(c: str) -> tuple[dict[str, str], Any]:
-    """file-viewer.md's sections as the active extensions change them, and the proposal's model.ToolSpec."""
-    from . import model, prompts, tasks, tools  # noqa: PLC0415
+    """file-viewer.md's sections as the active extensions change them, and the proposal's call_result.ToolSpec."""
+    from . import prompts, tasks, tools  # noqa: PLC0415
+    from .call_result import ToolSpec  # noqa: PLC0415
 
     with prompts.custom(tasks.files(c, SUGGEST_PROMPT)):
         secs = {name: prompts.section(SUGGEST_PROMPT, name).strip() for name in ("suggest", "file", "proposal")}
     desc, schema = tools.split_section(secs["proposal"])
-    return secs, model.ToolSpec(name="proposal", description=desc, input_schema=schema)
+    return secs, ToolSpec(name="proposal", description=desc, input_schema=schema)
 
 
 async def file_viewer_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:
@@ -5236,7 +5245,8 @@ async def file_viewer_task(c: str, inp: dict[str, Any], *, model: str | None = N
     system = prompts._fill(secs["suggest"], {}, f"{SUGGEST_PROMPT}.md")
     user = prompts._fill(secs["file"], {k: str(inp.get(k) or "") for k in ("path", "size", "count", "suffix", "what",
                                                                           "head")}, f"{SUGGEST_PROMPT}.md")
-    return await _suggest_call(c, system, user, tool, **({"model": model} if model else {}))
+    return await _suggest_call(c, system, user, tool, **({"model": model} if model else {}),
+                               suffix=str(inp.get("suffix") or ""))
 
 
 async def suggest(c: str, rel: str) -> str | None:

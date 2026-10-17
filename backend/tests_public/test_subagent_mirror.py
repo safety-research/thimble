@@ -238,3 +238,32 @@ async def test_a_descendant_of_the_orientation_is_a_step_of_its_chat_with_number
     from app import calls
 
     assert [c.get("agent") for c in calls.listing(CORPUS, chat)] == ["h1"], "numbered in the orientation's sequence"
+
+
+async def test_a_model_call_s_agent_and_fork_get_no_chat_of_their_own(bridge, project, monkeypatch):
+    """A model call's agent and a model call's fork of main (agent_call.py) have no chat: the mirror leaves their
+    transcripts alone, the fork's while its start waits for the module's answer too, and any other agent of main's still
+    gets its chat."""
+    from app import agent_call
+
+    lv = _attach(project)
+    before = {m["id"] for m in agents.list_chats(CORPUS)}
+    spawned = {"agentId": "acall000000000001"}
+    bridge.answers.append(spawned)
+    ans = await subagents.start_job(CORPUS, agent_call.ROLE, "call:abc123", "Judge it.", {}, subagents.FOLLOW_ON,
+                                    description="thimble: a check", fields={"drop": "done", "fork": True})
+    assert ans.agent_id == "acall000000000001" and subagents.agent(CORPUS, ans.agent_id)["type"] == sf.FORK_TYPE
+    _agent_file(project, "acall000000000001", agentType="fork", isFork=True, description="thimble: a check",
+                toolUseId=sf.PLUGIN_CALL + "1")
+    # a fork whose start still waits for the module's answer: not adopted while it waits
+    with sf.update(config.workspace_dir(CORPUS)) as state:
+        sf.requests(state)["req_wait000001"] = {"kind": "start", "route": "follow-on", "role": "call",
+                                                "key": "call:def456", "state": "pending", "input": {}}
+    _agent_file(project, "acall000000000002", agentType="fork", isFork=True, description="thimble: another",
+                toolUseId=sf.PLUGIN_CALL + "2")
+    _agent_file(project, "aplain00000000003", agentType="general-purpose", description="Look around",
+                toolUseId="toolu_01main")
+    session._scan_subs(lv)  # as the mirror's pass does once main's turn ended
+    made = [m for m in agents.list_chats(CORPUS) if m["id"] not in before]
+    assert [m.get("title") for m in made] == ["Look around"], made
+    assert str(project / SID / "subagents" / "agent-acall000000000002.jsonl") not in lv.sub_paths, "it waits"

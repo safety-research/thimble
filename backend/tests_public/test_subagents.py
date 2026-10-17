@@ -215,7 +215,8 @@ def test_the_shim_of_main_lists_every_tool_but_the_agents_private_ones_which_the
 
     names = [t["name"] for t in tools.list()]
     assert "message_orientation" in names and "add_comment" in names and "load_thimble" not in names
-    private = ["critique", "view_check", "finish_view", "view_pictures", "finish_review", "ticket_checks", "finish_ticket"]
+    private = ["critique", "view_check", "finish_view", "view_pictures", "finish_review", "ticket_checks", "finish_ticket",
+               "read_call", "send_answer"]
     assert not set(private) & set(names), "main never lists a tool only thimble's agents call"
     assert [s.name for s in tools.REGISTRY.values() if tools.private(s)] == private
     assert [t["name"] for t in tools.private_list(tools.ORIENT_SESSION)] == ["critique"]
@@ -227,7 +228,7 @@ def test_the_shim_of_main_lists_every_tool_but_the_agents_private_ones_which_the
     assert "critique" in [t["name"] for t in tools.list(session="orient")]
     # each type with private tools declares its own shim, which Claude Code starts with the agent
     for role, kind in (("orientation", "orient"), ("view-builder", "view"), ("view-reviewer", "review"),
-                       ("dev-ticket", "ticket")):
+                       ("dev-ticket", "ticket"), ("call", "call")):
         got = subagents.private_server(CORPUS, subagents.TYPES[role])
         assert list(got) == [f"thimble-{role}"]
         server = got[f"thimble-{role}"]
@@ -237,7 +238,7 @@ def test_the_shim_of_main_lists_every_tool_but_the_agents_private_ones_which_the
         assert subagents.private_server(CORPUS, subagents.TYPES[role]) is None
     specs = subagents.roles(CORPUS)
     assert [s for s in specs if specs[s].get("mcpServers")] == ["orientation", "view-builder", "view-reviewer"] + (
-        ["dev-ticket"] if "dev-ticket" in specs else [])
+        ["dev-ticket"] if "dev-ticket" in specs else []) + ["call"]
     # a type whose thimble tools are limited takes away the others' private tools, which a parent's shim brings
     assert "mcp__thimble-orientation__critique" in specs["critic"]["disallowedTools"]
     assert "mcp__thimble-orientation__critique" not in specs["orientation"]["disallowedTools"]

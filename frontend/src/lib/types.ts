@@ -1198,7 +1198,7 @@ export interface DevStatus {
 
 /** Every role that runs a model, as the settings popover lists them (backend config.MODEL_ROLES), main first, whose
  * model, effort and fast mode are its session's and the composer chip's: the agents (each runs exactly the model and
- * effort of its row), then the classifiers, then the row a refused classifier call runs again on. */
+ * effort of its row), then the model calls, then the row a refused model call runs again on. */
 export const ROLES = ['main', 'orient', 'subagents', 'critic', 'writer', 'dev', 'checks', 'labels', 'verify', 'suggest', 'refusal'] as const
 export type Role = (typeof ROLES)[number]
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -1208,11 +1208,11 @@ export interface ModelConf {
   model: string
   /** '' for a model Claude Code runs with no effort (Haiku) */
   effort: Effort | string
-  /** fast mode: the classifiers' rows only (labels, verify, suggest); the agents have none */
-  fast: boolean
+  /** fast mode: main's alone; thimble's agents and model calls run as subagents of main, which have none of their own */
+  fast?: boolean
   /** the role whose model this one takes while the analyst has picked none (the orientation's subagents: `orient`) */
   follows?: string
-  /** the refusal row: no second call when a classifier's model refuses */
+  /** the refusal row: no second call when a model call's model refuses */
   off?: boolean
 }
 
