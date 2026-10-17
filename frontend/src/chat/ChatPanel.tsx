@@ -52,7 +52,7 @@ import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
 import { ThreadRows } from './ThreadRows'
 import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
-import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
+import { answeredSince, composerTarget, pickItems, replyIn, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
 import { pendingAsks, TERMINAL_WAIT, terminalWaits, waitingAt, waitingChats } from './waiting'
@@ -748,17 +748,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         data-thread-kind={kind ?? undefined}
         data-chat-current={current}
         aria-label="Chat"
-        onPointerDown={(e) => {
-          // a press anywhere in the chat outside the tree's card folds the open tree. It folds only after the click has landed:
-          // folding at the press would move the thread under the pointer and the click would go there
-          if (treeCollapsed || (e.target as Element).closest?.('.tt')) return
-          const fold = () =>
-            window.setTimeout(() => {
-              writeStorage(treeKey, true)
-              setTreeCollapsed(true)
-            }, 0)
-          window.addEventListener('pointerup', fold, { once: true })
-        }}
       >
         <header className="chat-head">
           <ThreadTree
@@ -838,7 +827,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               chip={roleChip}
               onSend={send}
               sending={target.to === 'orient' ? sendingOrient : target.to === 'view' ? sendingView : target.to === 'main' ? main.streaming : chat.streaming}
-              placeholder={`Reply in ${target.to === 'main' ? 'main' : target.to === 'orient' ? labels.get(target.chat) ?? 'orient' : curPath}…`}
+              placeholder={replyIn(target.to === 'main' ? 'main' : target.to === 'orient' ? labels.get(target.chat) ?? 'orient' : curPath)}
               disabled={demo || chat.loading || !!chat.error}
               tip={demo ? DEMO_NOTE : undefined}
               stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
