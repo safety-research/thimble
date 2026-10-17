@@ -162,6 +162,11 @@ UNIT_TEXT_MAX = 30_000    # chars of a card a prompt label reads, and of a unit 
 WHOLE_UNITS = ("agent", "run")
 CHARS_PER_TOKEN = 3
 READ_RESERVE_TOKENS = 100_000  # of the window, for the label's instructions and examples, Claude Code's own and the answer
+# a prompt label over whole files or runs is refused before anything runs when a unit holds more than WHOLE_FAR times
+# the text its model reads (whole_too_long): a value from so small a part of a unit is not the unit's value, and one
+# agent of the call would read the part in many pages (agent_call.PAGE_CHARS) for a long time
+WHOLE_FAR = 2
+SIZE_SCAN = 8  # a unit's text is counted only when its files' bytes are more than 1/SIZE_SCAN of that limit
 CUT_REFS_KEPT = 500       # the units a run read in part that its `cut` names, which the Labels pane lists
 # bytes of a file a whole-file unit holds whole: a code label's `data` (a JSON document parsed, a file's text), and the
 # JSON document a prompt label reads whole, shortened to what it reads (fit_json); a larger file is read by its records
@@ -1248,7 +1253,7 @@ def units_at_least(corpus_dir: Path, sources: list[dict], unit: str, cap: int) -
     """(units counted, files read) over the matched sources, stopping once the count passes `cap`: records are lines
     (corpus.line_count, memoised per file), agents and runs are groups. Blocking (a thread)."""
     if unit != "record":
-        return len(groups_for(sources, unit)), len(sources)
+        return len(groups_for(sources, unit, corpus_dir)), len(sources)
     n = 0
     for i, src in enumerate(sources, 1):
         try:
@@ -1266,6 +1271,70 @@ def prompt_apply_too_wide(count: int, files_read: int, n_files: int, unit: str) 
     seen = f"{count:,} in the first {files_read} of {n_files} files alone" if files_read < n_files else f"{count:,} in {n_files} files"
     return (f"This prompt label would run over more than {PROMPT_APPLY_MAX:,} {what} ({seen}); "
             f"pass limit to cap the run or paths to narrow it to some files.")
+
+
+class TooLong(HTTPException):
+    """A prompt apply over whole files or runs refused before anything runs: some hold far more text than its model
+    reads (too_long_units). Its detail says why and what to do instead (whole_too_long)."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(400, detail)
+
+
+def too_long_units(corpus_dir: Path, sources: list[dict], unit: str, read: int,
+                   limit: int | None = None) -> tuple[list[dict], int]:
+    """The whole files or runs of a prompt apply (those a trial of `limit` samples, as trial_groups picks them) that
+    hold more than WHOLE_FAR times `read`, the characters its model reads of each (whole_read_chars), as [{ref, bytes,
+    biggest}] (`biggest` the path of its largest file), and how many units were looked at. A unit whose files hold no
+    more than that limit's 1/SIZE_SCAN in bytes is not read; another is read until its text passes the limit. Blocking."""
+    groups = groups_for(sources, unit, corpus_dir)
+    if limit:
+        groups = [groups[i] for i in spread(len(groups), limit)]
+    far = WHOLE_FAR * read
+    by_path = {s["path"]: s for s in sources}
+    out: list[dict] = []
+    for g in groups:
+        sizes = {p: int(by_path[p].get("size_bytes") or 0) for p in g["paths"]}
+        if sum(sizes.values()) * SIZE_SCAN <= far:
+            continue
+        n = 0
+        for u in iter_units(corpus_dir, [by_path[p] for p in g["paths"]], unit, read):
+            for _ref, text in u.texts():
+                n += len(text) + 2
+                if n > far:
+                    break
+        if n > far:
+            out.append({"ref": g["ref"], "bytes": sum(sizes.values()), "biggest": max(sizes, key=lambda p: sizes[p])})
+    return out, len(groups)
+
+
+def _size_words(n: int) -> str:
+    """A size in bytes as the Files tab reads it: 1.4 KB, 40 MB."""
+    size = float(n)
+    for name in ("bytes", "KB", "MB"):
+        if size < 1024:
+            return f"{int(size):,} bytes" if name == "bytes" else f"{size:,.{1 if size < 10 else 0}f} {name}"
+        size /= 1024
+    return f"{size:,.1f} GB"
+
+
+def whole_too_long(units: list[dict], checked: int, unit: str, read: int) -> str:
+    """Why a prompt apply over whole files or runs was refused (too_long_units) and what to do instead: the first sentence
+    says why and the last what to do, so a notice that keeps only those two (notices.reason) says both."""
+    noun = "file" if unit == "agent" else "run"
+    big = max(units, key=lambda u: u["bytes"])
+    if noun == "run" and big["ref"] != ".":
+        example = "*/" + big["biggest"][len(big["ref"]) + 1:]
+    else:
+        example = big["biggest"]
+    instead = "label a smaller part of each run, such as its reports" if noun == "run" else "leave these files out"
+    return (f"{len(units):,} of {checked:,} {noun}s are too long for a prompt label to read whole. "
+            f"Its model reads about {tokens_word(read // CHARS_PER_TOKEN)} tokens of a {noun}, and "
+            f"{'this one holds' if len(units) == 1 else 'these hold'} more than "
+            f"{'twice' if WHOLE_FAR == 2 else f'{WHOLE_FAR} times'} that "
+            f"(the biggest, {big['ref']}, has {_size_words(big['bytes'])}). "
+            f"A value from a small part of a {noun} would not be correct, so nothing ran. "
+            f"Label their records instead (unit records), such as the lines of {example}, or {instead}.")
 
 
 def _iter_records(corpus_dir: Path, src: dict) -> Iterator[dict]:
@@ -1342,13 +1411,15 @@ def _one(ref: str, text: str, record: Any) -> Unit:
     return Unit(ref, [], lambda: iter([(ref, text)]), record)
 
 
-def groups_for(sources: list[dict], unit: str) -> list[dict]:
-    """[{ref, paths}] per file unit: one group per file for records and agents, one per run directory for runs."""
+def groups_for(sources: list[dict], unit: str, corpus_dir: Path) -> list[dict]:
+    """[{ref, paths}] per file unit: one group per file for records and agents, one per run folder for runs, the outermost
+    folder below the corpus root that holds files itself (corpus.run_dir), whatever depth the matched files lie at."""
     if unit in ("record", "agent"):
         return [{"ref": s["path"], "paths": [s["path"]]} for s in sources]
+    holders = corpus.file_folders(corpus_dir)
     runs: dict[str, list[str]] = {}
     for s in sources:
-        runs.setdefault(corpus.run_dir(s["path"]) or ".", []).append(s["path"])
+        runs.setdefault(corpus.run_dir(s["path"], holders) or ".", []).append(s["path"])
     return [{"ref": run, "paths": paths} for run, paths in runs.items()]
 
 
@@ -1364,7 +1435,7 @@ def iter_units(corpus_dir: Path, sources: list[dict], unit: str, cap: int = UNIT
                 yield _record_unit(src["path"], r)
         return
     by_path = {s["path"]: s for s in sources}
-    for g in groups_for(sources, unit):
+    for g in groups_for(sources, unit, corpus_dir):
         srcs = [by_path[p] for p in g["paths"]]
         u = Unit(g["ref"], g["paths"], lambda: iter(()))
 
@@ -1852,10 +1923,10 @@ def trial_sample(corpus_dir: Path, sources: list[dict], limit: int, lines: dict[
     return out
 
 
-def trial_groups(sources: list[dict], unit: str, limit: int) -> tuple[list[dict], int]:
+def trial_groups(sources: list[dict], unit: str, limit: int, corpus_dir: Path) -> tuple[list[dict], int]:
     """(the sources of a trial's files or runs, the number of files or runs in scope): `limit` of them spread over the
     matched ones in corpus order, so a trial of an agent or run label runs as a full run does, over fewer of them."""
-    groups = groups_for(sources, unit)
+    groups = groups_for(sources, unit, corpus_dir)
     by_path = {s["path"]: s for s in sources}
     picked = [groups[i] for i in spread(len(groups), limit)]
     return [by_path[p] for g in picked for p in g["paths"]], len(groups)
@@ -2903,7 +2974,7 @@ async def _index_sources(c: str, concept_id: str, corpus_dir: Path, sources: lis
     pool, and the records of the others counted (records.count). Returns {total, files: {path: index}, counts: {path:
     records}}."""
     if unit != "record":
-        return {"total": len(groups_for(sources, unit)), "files": {}, "counts": {}}
+        return {"total": len(groups_for(sources, unit, corpus_dir)), "files": {}, "counts": {}}
     lined = await asyncio.to_thread(lambda: [s for s in sources if line_source(corpus_dir, s)])
     keep = {s["path"] for s in lined}
     others = [s for s in sources if s["path"] not in keep]
@@ -2998,7 +3069,7 @@ async def _apply_regex(c: str, concept: dict, corpus_dir: Path, sources: list[di
                                       cap is None)))
     else:
         sizes = {s["path"]: int(s.get("size_bytes") or 0) for s in sources}
-        groups = groups_for(sources, unit)
+        groups = groups_for(sources, unit, corpus_dir)
         for g in (groups[:limit] if limit else groups):
             tasks.append((g["ref"], sum(sizes.get(p, 0) for p in g["paths"]), 1,
                           partial(concept_scan.scan_group, str(corpus_dir), g["ref"], [(p, kinds[p]) for p in g["paths"]], spec, pos, neg)))
@@ -3445,11 +3516,11 @@ async def _apply_code(c: str, concept: dict, sources: list[dict], units: list[Un
             # the wrapper reads files of lines itself; the records of the others go to it in the units file
             lined = await asyncio.to_thread(lambda: [line_source(corpus_dir, s) for s in sources])
             rest = [s for s, ok in zip(sources, lined) if not ok]
-            groups = groups_for([s for s, ok in zip(sources, lined) if ok], "record")
+            groups = groups_for([s for s, ok in zip(sources, lined) if ok], "record", corpus_dir)
         else:
             # the wrapper reads the files of lines of each unit, and the records of its other files (a JSON document's,
             # a CSV file's rows, a database's rows, a PDF's pages) from a file; each file whole as its kind says
-            groups = groups_for(sources, concept["unit"])
+            groups = groups_for(sources, concept["unit"], corpus_dir)
             kinds = await asyncio.to_thread(lambda: {s["path"]: whole_kind(corpus_dir, s) for s in sources})
             others = await asyncio.to_thread(lambda: [s for s in sources if not line_source(corpus_dir, s)])
             if others:
@@ -3611,7 +3682,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
     # records picks its records once the files are indexed (trial_sample)
     scope_groups: int | None = None
     if limit and unit in ("agent", "run"):
-        sources, scope_groups = await asyncio.to_thread(trial_groups, sources, unit, limit)
+        sources, scope_groups = await asyncio.to_thread(trial_groups, sources, unit, limit, corpus_dir)
     key = (c, concept_id)
     lock = _locks.setdefault(key, asyncio.Lock())
     async with lock:
@@ -3841,9 +3912,12 @@ def no_files_match(corpus_dir: Path, patterns: list[str]) -> str:
     return f"no files match {patterns}"
 
 
-def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int | None, within: bool = False) -> list[dict]:
-    """The sources an apply of a file unit runs over, or HTTPException(400) when it cannot run: no file matches, or a
-    prompt label would run over the whole of a big corpus with neither a limit nor `within`. Blocking (a thread)."""
+def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int | None, within: bool = False,
+                  read: int | None = None) -> list[dict]:
+    """The sources an apply of a file unit runs over, or HTTPException(400) when it cannot run: no file matches, a
+    prompt label would run over the whole of a big corpus with neither a limit nor `within`, or (TooLong) a prompt
+    label over whole files or runs, which reads `read` characters of each (whole_read_chars), would run over some that
+    hold far more (too_long_units). Blocking (a thread)."""
     corpus_dir = config.corpus_dir(c)
     sources = match_paths(corpus_dir, patterns)
     if not sources:
@@ -3851,9 +3925,13 @@ def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int 
     if kind == "prompt" and not limit and not within and not narrowing(patterns):
         # a prompt label needs a model call per BATCH_ITEMS units; over a whole big corpus that is unbounded, so past
         # PROMPT_APPLY_MAX units the analyst must cap it or name the files
-        n, read = units_at_least(corpus_dir, sources, unit, PROMPT_APPLY_MAX)
+        n, read_files = units_at_least(corpus_dir, sources, unit, PROMPT_APPLY_MAX)
         if n > PROMPT_APPLY_MAX:
-            raise HTTPException(400, prompt_apply_too_wide(n, read, len(sources), unit))
+            raise HTTPException(400, prompt_apply_too_wide(n, read_files, len(sources), unit))
+    if kind == "prompt" and unit in WHOLE_UNITS and read:
+        far, checked = too_long_units(corpus_dir, sources, unit, read, limit)
+        if far:
+            raise TooLong(whole_too_long(far, checked, unit, read))
     return sources
 
 
@@ -3870,8 +3948,14 @@ async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, l
     limit = int(limit) if limit else None
     if concept["unit"] in FILE_UNITS:
         if sources is None:
-            sources = await asyncio.to_thread(scope_sources, c, concept["unit"], concept["kind"], patterns, limit,
-                                              bool(concept.get("within")))
+            read = (whole_read_chars(c, concept) if concept["kind"] == "prompt" and concept["unit"] in WHOLE_UNITS
+                    else None)
+            try:
+                sources = await asyncio.to_thread(scope_sources, c, concept["unit"], concept["kind"], patterns, limit,
+                                                  bool(concept.get("within")), read)
+            except TooLong as e:  # a run the analyst or a card started: the label's notice says why and what to do
+                _label_notice(c, concept, error=str(e.detail))
+                raise
     else:
         patterns, sources = [], []
     if running_apply(c, concept_id) is not None:
@@ -4550,8 +4634,19 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     narrowed = resolve_within(ws, within)
     if narrowed and prior is not None and prior["id"] == narrowed["label"]:
         raise HTTPException(400, f"within names the label {prior['name']!r} itself; narrow it by another label")
-    sources = (await asyncio.to_thread(scope_sources, c, unit, kind, _patterns(paths), limit, bool(narrowed))
-               if unit in FILE_UNITS else None)
+    # a prompt label over whole files or runs far longer than its model reads is refused here, before it is defined, and
+    # the analyst's notice says why, as the caller's answer does; the next apply under the name takes a new label's away
+    read = whole_read_chars(c, prior or {}) if kind == "prompt" and unit in WHOLE_UNITS else None
+    try:
+        sources = (await asyncio.to_thread(scope_sources, c, unit, kind, _patterns(paths), limit, bool(narrowed), read)
+                   if unit in FILE_UNITS else None)
+    except TooLong as e:
+        _label_notice(c, prior if prior is not None else {"id": f"new:{name}", "name": name}, error=str(e.detail))
+        raise
+    if prior is None:
+        from . import notices  # noqa: PLC0415
+
+        await asyncio.to_thread(notices.clear, c, f"label:new:{name}")
     if narrowed and kind == "prompt" and not limit:
         found = await asyncio.to_thread(within_refs, ws, sources or [], narrowed, PROMPT_APPLY_MAX + 1)
         if (n := sum(len(v) for v in found.values())) > PROMPT_APPLY_MAX:
