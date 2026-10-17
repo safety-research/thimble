@@ -590,7 +590,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - A diagram: boxes and edges in the rule gray, node text in the text color, edge labels dim; a note's number in a dim
   column and its text dim.
 - A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line
-  chart (a bar chart with its values written on its bars is one): a table of its rows.
+  chart (a bar chart with its values written on its bars is one): a table of its rows, in the order its axes put them
+  where the chart sorts an axis (a heatmap's days in the order of its `sort`), else in its data's order.
 - A card that cannot be read: one red line named by its place (`× card 2 cannot be drawn: …`).
 - The card pane: the question is the panel's title and the subtitle reads the card's id (`card:<name>`), its kind, who
   made it, `last run ok` or `last run failed` (in red), and, when its card check ended in an error, `its check's revision would not run` or
