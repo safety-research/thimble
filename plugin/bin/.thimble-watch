@@ -106,7 +106,9 @@ fork_check), and records each fork it lets through by its tool_use id, by which 
 The waker polls the workspace's events/queue.jsonl (app/event_files.py) for an event of its own session that no watcher
 has taken (an event names its session, and one that names none is main's), takes it, writes it to stderr and exits 2;
 once a press turned its session's transport to the server, it pulls from the server with the session's lock it holds,
-since no other hook's waker runs while main is idle (the `thimble` command presses at the session's start).
+since no other hook's waker runs while main is idle. It looks at the transport every few ticks, queue file or not: the
+`thimble` command presses at the session's start, and `/thimble browser` in a `claude` session often presses before
+anything was queued; the side thread asked next goes to the queue file, which the server drains at a pull.
 --held prints the session's held events from held-events.json and the lines of the events the waker wrote out.
 --mode records main's permission mode in subagents.json, and when it turns into or out of Manual mode starts the
 backend's `mode-notice` call, which shows or clears the `manual-mode` notice in the terminal UI's band
