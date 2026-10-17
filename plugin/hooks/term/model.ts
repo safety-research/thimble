@@ -451,6 +451,13 @@ export function chatOf(v: unknown): { meta: Obj; events: Obj[] } {
   return { meta: isObj(v.meta) ? v.meta : {}, events: Array.isArray(v.events) ? v.events.filter(isObj) : [] }
 }
 
+/** A thread question's words with each picture the analyst pasted with it (Claude Code's `[Image #1]`, when its
+ *  record names `pictures` the thread keeps) as a chip, `[ picture 1 ]`, so the terminal says a picture came with it
+ *  rather than showing Claude Code's placeholder (bug hunt I5). */
+export function pictureChips(text: string, pictures: number): string {
+  return pictures ? text.replace(/\[Image #(\d+)\]/g, (_, n: string) => `[ picture ${n} ]`) : text
+}
+
 /** A chat as a side thread's turns: each analyst message a question, the text after it its answer, its tool calls
  *  counted, answered by its first reply (`reply_in_thread`'s `text` record, marked `reply`) or `done`, failed (or
  *  stopped) by `error`. In terminal mode main often answers with `reply_in_thread` alone, and no `done` follows. The
@@ -470,7 +477,7 @@ export function threadOf(meta: Obj, events: readonly Obj[]): ChatThread {
   for (const e of events) {
     const t = str(e.type)
     if (t === 'user') {
-      open(str(e.text))
+      open(pictureChips(str(e.text), Array.isArray(e.images) ? e.images.length : 0))
       continue
     }
     if (t === 'again' && (!cur || (cur as ChatThreadTurn).state !== 'running')) open(str(e.text))

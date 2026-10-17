@@ -7,7 +7,7 @@ import { changed, cliOf, parsePrinted } from '../data'
 import { cardsInline, citations, valueIn } from '../lib'
 import { showsValue } from '../cite'
 import { labelCard } from '../cell'
-import { cardsOfCall, labelOf, labelsOf, resolutionOf, runShown, turnWords, verdictOf } from '../model'
+import { cardsOfCall, labelOf, labelsOf, resolutionOf, runShown, threadOf, turnWords, verdictOf } from '../model'
 import { RESOLVE } from './fixtures'
 
 const check = (raw: string) => {
@@ -141,4 +141,14 @@ test('an example quotes a markdown chat log\'s line as its speaker and its words
   expect(turnWords(v)).toEqual({ speaker: 'R3', words: 'I could not find the stop button. It sat under the menu somewhere.' })
   // a place with no turn (a line of any other file) is quoted as before
   expect(turnWords(verdictOf(citations('[[R3/notes.md#L12]]')[0]!, { ...res, ref: 'R3/notes.md#L12', kind: 'record', meta: {} } as never))).toBeNull()
+})
+
+// bug hunt I5: a picture pasted into `/thimble:ask` showed in the thread panel as Claude Code's placeholder `[Image #1]`
+test("a thread's question names each picture pasted with it as a chip, and leaves Claude Code's placeholder alone without one", () => {
+  const thread = threadOf({ id: 't1', title: 'why so many dots' }, [
+    { type: 'user', text: '[Image #1] What do the red X marks mean?', images: ['t1-e1-1.png'] },
+    { type: 'text', delta: 'A red X is a check with no answer.', reply: true },
+    { type: 'user', text: 'And [Image #2] here?' },
+  ])
+  expect(thread.turns.map(t => t.q)).toEqual(['[ picture 1 ] What do the red X marks mean?', 'And [Image #2] here?'])
 })

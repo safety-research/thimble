@@ -340,7 +340,8 @@ Send a message the analyst typed in this terminal to a thread, as that thread's 
   "type": "object",
   "properties": {
     "thread": {"type": "string", "description": "The thread's name or id as the thread list shows it, such as main/why-the-spike, orient or dev/board."},
-    "message": {"type": "string", "description": "The analyst's message, word for word. Leave it out to ask a side thread's unanswered questions again."}
+    "message": {"type": "string", "description": "The analyst's message, word for word. Leave it out to ask a side thread's unanswered questions again."},
+    "pictures": {"type": "array", "items": {"type": "string"}, "description": "The path of each picture the analyst pasted into the message (`[Image #1]` …), in order, from Claude Code's `[Image: source: …]` lines. A side thread shows them and its fork reads them."}
   },
   "required": ["thread"]
 }
@@ -394,7 +395,7 @@ Get a picture of a card as thimble draws it. Once the analyst has opened the bro
 {
   "type": "object",
   "properties": {
-    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, report:<slug> of a video, thread:<id>, or an http address of thimble's own interface on this machine."},
+    "ref": {"type": "string", "description": "card:<id>, view:<slug>, a file ref a view opens, report:<slug>#<id> of a figure, report:<slug> of a video, thread:<id>, picture:<name> of a picture the analyst pasted, or an http address of thimble's own interface on this machine."},
     "selector": {"type": "string", "description": "With an http address, the CSS selector of the one element to shoot."},
     "t": {"type": "array", "items": {"type": "number"}, "description": "With a video, the seconds of its film to shoot, up to six frames, such as [2, 12.5]. Left out, a frame in the middle of each line, up to six."}
   },
@@ -1856,6 +1857,14 @@ The analyst asks the thread {thread} its questions again. Handle the thread's ev
 ## message_thread-queued
 
 The message is in the thread {thread}, which waits for the fork you started for it and gets the message once that fork is known, so this turn needs no words from you.
+
+## message_thread-pictures
+
+The message names {names}, but no picture came with it. Call message_thread again with the same message and, as `pictures`, the path of each picture from Claude Code's `[Image: source: …]` lines. When Claude Code shows no path for them, pass an empty list.
+
+## message_thread-no-picture
+
+{path} is not a picture that thimble can keep: it takes a PNG, JPEG, GIF or WebP file of at most 8 MB. Pass the path from Claude Code's `[Image: source: …]` line.
 
 ## message_thread-empty
 

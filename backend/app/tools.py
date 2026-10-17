@@ -2370,6 +2370,10 @@ async def _h_screenshot(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     if not ref:
         return err("screenshot: `ref` is empty")
+    from . import threads  # noqa: PLC0415
+
+    if ref.startswith(threads.PICTURE_REF):  # a picture the analyst pasted, which needs no page
+        return await _delegate("app.threads:tool_screenshot", ctx, {**args, "ref": ref})
     if not _paged(ctx.c) and not cite.is_card_ref(ref):  # no page to shoot before the press: a card alone
         return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} before the browser opens")
     if urlsplit(ref).scheme in ("http", "https"):
