@@ -200,6 +200,47 @@ function spanCitation(inner: string): Citation | null {
   return ref ? make(display, ref) : null
 }
 
+// The files the session's texts cite, by their names: a chip names a file by its name alone while no other cited file
+// has that name, else by the shortest path that no other cited file's path ends in (bug hunt B25: `P1/transcript.md`
+// and `P2/transcript.md` both read `transcript.md line 5`). A text's citations are noted before any of its chips is
+// drawn (citations, parseReply, inlineRuns).
+const citedFiles = new Map<string, Set<string>>()
+
+/** The path of a citation of a file's place (`P1/transcript.md#L5`), '' for a citation of anything else. */
+function citedPath(ref: string): string {
+  const base = ref.split('#', 1)[0]!.trim()
+  return !base || /^[A-Za-z][\w-]*:/.test(base) ? '' : base.replace(/^\.\//, '')
+}
+
+function noteCited(cs: readonly Citation[]): void {
+  for (const c of cs) {
+    const path = citedPath(c.ref)
+    if (!path) continue
+    const name = path.split('/').at(-1) ?? path
+    const known = citedFiles.get(name)
+    if (known) known.add(path)
+    else citedFiles.set(name, new Set([path]))
+  }
+}
+
+/** Forget the files cited so far (tests). */
+export function forgetCitedFiles(): void {
+  citedFiles.clear()
+}
+
+/** How a chip names a cited file: its name alone, or the shortest end of its path that no other cited file's path ends
+ *  in. */
+export function citedFileName(path: string): string {
+  const parts = path.split('/')
+  const name = parts.at(-1) ?? path
+  const twins = [...(citedFiles.get(name) ?? [])].filter(p => p !== path)
+  for (let k = 1; twins.length && k < parts.length; k++) {
+    const tail = parts.slice(-k).join('/')
+    if (!twins.some(p => p === tail || p.endsWith(`/${tail}`))) return tail
+  }
+  return twins.length ? path : name
+}
+
 const CITE_MAX = 2000 // characters a citation may span, so a stray [[ costs little
 
 /** Where the citation that opens with the `[[` at `at` ends (just past its `]]`), or -1 when none opens there. A shown
@@ -278,10 +319,12 @@ export function citations(text: string): Citation[] {
     if (c) found.push({ at: m.index ?? 0, c })
   }
   const seen = new Set<string>()
-  return found
+  const out = found
     .sort((a, b) => a.at - b.at)
     .map(f => f.c)
     .filter(c => !seen.has(c.raw) && Boolean(seen.add(c.raw)))
+  noteCited(out)
+  return out
 }
 
 /** A text with each Markdown link that is a citation (`[4,579](README.md#L3)`, the form main writes for the terminal)
@@ -419,8 +462,10 @@ export function chipWords(c: Citation): string {
     return call ? (call[2] && call[2] !== call[1] ? `output lines ${call[1]}-${call[2]}` : `output line ${call[1]}`) : 'output'
   }
   // a file's place in words, its name as written (`events.jsonl line 12`, `agent-chat.jsonl lines 1-2`), never
-  // `events:1063`, which reads as an id (live check term-fix9, low quirk); a long name cut in its middle, its line kept
-  const name = base.split('/').at(-1) ?? base
+  // `events:1063`, which reads as an id (live check term-fix9, low quirk); with as much of its path as tells it from
+  // another cited file of that name (`P1/transcript.md line 5`, citedFileName); a long name cut in its middle, its line
+  // and its file's name kept
+  const name = citedFileName(citedPath(c.ref) || base)
   const lines = /^L(\d+)(?:-L?(\d+)|\.b\d+(?::c\d+-\d+)?)?$/.exec(frag)
   const row = /^row=(\d+)$/.exec(frag)
   const page = /^p(\d+)$/.exec(frag)
@@ -429,6 +474,9 @@ export function chipWords(c: Citation): string {
   const where = lines ? (lines[2] && lines[2] !== lines[1] ? ` lines ${lines[1]}-${lines[2]}` : ` line ${lines[1]}`) : row ? ` row ${row[1]}` : page ? ` page ${page[1]}` : item ? ` item ${Number(item[1]) + 1}` : frag ? ` ${frag}` : ''
   if (width(`${name}${where}`) <= CHIP_MAX) return `${name}${where}`
   const room = CHIP_MAX - width(where)
+  const slash = name.lastIndexOf('/')
+  const file = name.slice(slash + 1)
+  if (slash > 0 && room - width(file) - 1 >= 4) return `${middleCut(name.slice(0, slash), room - width(file) - 1)}/${file}${where}`
   return room >= 8 ? `${middleCut(name, room)}${where}` : cut(`${name}${where}`, CHIP_MAX)
 }
 
@@ -703,6 +751,8 @@ export function curlyQuotes(s: string): string {
 /** A line of Markdown as styled runs: bold, italic, code, links (their text), citations (one run each). */
 export function inlineRuns(text: string): Run[] {
   const out: Run[] = []
+  // the files this text cites, before any chip names one (citedFileName)
+  noteCited(citeSpans(text.replace(FENCE_RE, m => ' '.repeat(m.length))).flatMap(sp => spanCitation(text.slice(sp.at + 2, sp.end - 2)) ?? []))
   // each citation outside code is masked to one token of its length, so the brackets, stars and underscores of a
   // quoted value neither end it nor start emphasis
   let masked = ''
@@ -800,6 +850,7 @@ export function tableRuns(lines: string[]): TableRuns {
  *  every paragraph, list item, heading and quote is a rich block, citations or not (a passage a check commented on is
  *  drawn by the terminal UI, which knows where it wraps). */
 export function parseReply(text: string, opts: { all?: boolean } = {}): Block[] {
+  citations(text) // the files the reply cites, noted before any chip of it names one (citedFileName)
   const lines = text.split('\n')
   const lineAt: number[] = []
   for (let i = 0, at = 0; i < lines.length; i++) {
