@@ -6,8 +6,8 @@
 // chips of what it points at. Label runs in a row are one Label card, a step per label. A notice (a failure with its
 // fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx). In main's
 // chat a check's comments on an answer tint their passages; a click on one, or a deep link to `answer:<turn>#s<n>`,
-// opens the comment under the answer (chat/answerComments.ts, AnswerComment.tsx). A reply's citation of a card reads
-// `[ card:<name> ]`, as the terminal draws it (components/RefChip CardWordCites).
+// opens the comment under the answer as the canvas's comment card (chat/answerComments.ts, AnswerComment.tsx). A
+// reply's citation of a card reads `[ card:<name> ]`, as the terminal draws it (components/RefChip CardWordCites).
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -208,7 +208,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
                     <ChatMarkdown text={r.text} streaming={r === lastText} marks={own?.marks} />
                   </CardWordCites.Provider>
                 </div>
-                {open && <AnswerCommentCard comment={open} ws={ws} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
+                {open && <AnswerCommentCard key={open.id} comment={open} ws={ws} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
               </div>
             )
           }

@@ -1991,39 +1991,21 @@ button.view-chip-values[aria-expanded='true'] {
 .chat-text mark.answer-tint:focus-visible {
   outline: 1px solid var(--tint);
 }
-.answer-comment {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--tint);
-  border-radius: var(--radius-card);
-  background: var(--surface-card);
+/* a check's comment under Claude's answer (chat/AnswerComment.tsx) is the canvas's comment card (report.css .wu-cm,
+   canvas.css .ccm) in the column's flow: as wide as a comment on the canvas, with the same shadow, which grows while
+   it is hovered or active */
+.wu-cm.answer-cm {
+  position: relative;
+  left: auto;
+  right: auto;
+  max-width: 300px;
+  margin-top: 8px;
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1), 0 10px 28px -18px rgba(var(--ink-rgb), 0.35);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
 }
-.answer-comment-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.answer-comment-swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--tint);
-}
-.answer-comment-check {
-  font-weight: 600;
-}
-.answer-comment-text {
-  margin: 0;
-}
-.answer-comment-details summary {
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.answer-comment-acts {
-  display: flex;
-  justify-content: flex-end;
+.wu-cm.answer-cm:hover,
+.wu-cm.answer-cm:focus-within,
+.wu-cm.answer-cm.wu-cm-active {
+  left: auto;
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.16), 0 14px 32px -12px rgba(0, 0, 0, 0.3);
 }
