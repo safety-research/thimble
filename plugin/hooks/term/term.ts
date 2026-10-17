@@ -31,6 +31,8 @@ export const LABEL_UI_EMPTY: TermLabelUi = { open: [], kind: {}, runs: {}, said:
 export const FILES_UI_EMPTY: TermFilesUi = { folded: [], unfolded: [], pick: '' }
 /** The one pane thimble-term opens: home, a card, a citation, a thread, a label, a document, the files, an agent. */
 export const PANEL = 'thimble'
+/** The roles an orientation's chat and row carry (its chat's `role`, its row's): its panel offers `run again`. */
+export const ORIENT_ROLES = new Set(['orient', 'orientation'])
 
 /** The threads whose chats the threads panel reads, the newest. */
 const THREADS_READ = 30
@@ -65,6 +67,9 @@ export const rt = {
   // the pane was drawn without the keys since the typing went to the prompt: a ring, a press or a drawing with the keys
   // after that is the person's giving the panel its keys back (bug hunt D8)
   typeAway: false,
+  // the orientation run whose rerun the analyst asked from thimble (panel.tsx orientAgain), and the orientation runs
+  // listed then: the panel on that run shows the first run listed after it (followRerun)
+  rerun: null as { chat: string; known: string[] } | null,
   // when home was last seen before the open that shows it now (ms): a card made since is new on it
   homeSince: 0,
   // a link to a label whose name no read gave yet was drawn (reply.tsx chipOf): the session's timer reads the labels
@@ -1221,6 +1226,25 @@ async function refreshAgents(cx: Ctx): Promise<void> {
   if (got.ok) await cx.setAgents(agentsOf(got.value))
 }
 
+/** The orientation run again from thimble (panel.tsx orientAgain) once its new run is listed: a panel that shows the run
+ *  it replaces shows the new one in its place, running, then done (bug hunt E13: the panel kept the old failure for the
+ *  whole of the new run). True when the panel changed. */
+export async function followRerun(cx: Ctx): Promise<boolean> {
+  const r = rt.rerun
+  if (!r) return false
+  const next = (await cx.agents()).filter(a => ORIENT_ROLES.has(a.role) && a.chat && !r.known.includes(a.chat)).at(-1)
+  if (!next) return false
+  rt.rerun = null
+  const p = await cx.panel()
+  if (p?.view !== 'agent' || p.thread !== r.chat) return false
+  const now: TermPanel = { ...p, title: next.label || p.title, thread: next.chat }
+  const nav = (await cx.nav()) ?? NAV_EMPTY
+  if (nav.trail.length) await cx.setNav({ ...nav, trail: [...nav.trail.slice(0, -1), stepOf(now)] })
+  await cx.setPanel(now)
+  await readThread(cx, next.chat)
+  return true
+}
+
 async function refreshHome(cx: Ctx): Promise<void> {
   if (!rt.sc) return
   const asked = ++rt.reads
@@ -1287,7 +1311,7 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
       const first = rt.sig === null
       rt.sig = sig
       if (!areas.size) break
-      const panel = await cx.panel()
+      let panel = await cx.panel()
       if (areas.has('cards') || areas.has('labels')) {
         const before = [...rt.shown]
         await refreshCards(cx, areas.has('labels'))
@@ -1298,7 +1322,10 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
       }
       // a key's answer written from a view's index: the citations of views' keys that did not resolve are checked again
       if (areas.has('viewKeys') && !first) retryViewCites()
-      if (areas.has('chats') || areas.has('agents')) await refreshAgents(cx)
+      if (areas.has('chats') || areas.has('agents')) {
+        await refreshAgents(cx)
+        if (await followRerun(cx)) panel = await cx.panel()
+      }
       if (areas.has('chats')) {
         await refreshThreads(cx)
         if (panel?.thread && (panel.view === 'thread' || panel.view === 'agent')) await readThread(cx, panel.thread)

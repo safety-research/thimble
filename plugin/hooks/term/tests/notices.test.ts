@@ -245,13 +245,14 @@ test("bug hunt C18: a failed orientation's notice runs it again; its panel offer
   await pane.unmount()
   pane = (await $.ui.mount(paneAt(120, 60))) as unknown as M
   expect(words(await pane.drawn())).toContain('Request ID: req_011CgFAKE')
-  // `run again` asks main to start it with its last request; a focus typed in the field is added to it (bug hunt E11)
-  await pane.press({ key: 'agent-again' })
-  await w.clock.settle()
-  expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with this brief, word for word: "what stands out in the transcript?".')
+  // a focus typed in the field is added to its last request (bug hunt E11); `run again` asks main to start it with its
+  // last request, and stays while main is asked (the field is gone then, bug hunt E13)
   await pane.input({ key: 'make-orient-again-c-orient', text: 'only the registry steps' })
   await w.clock.settle()
   expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with this brief, word for word: "what stands out in the transcript? Narrower focus for this run: only the registry steps".')
+  await pane.press({ key: 'agent-again' })
+  await w.clock.settle()
+  expect(w.submitted.at(-1)).toBe('Run the orientation again: call start_orientation with this brief, word for word: "what stands out in the transcript?".')
   await pane.unmount()
   // the notice's own act does what `run again` does, and the notice goes
   const again = (await $.ui.mount(aboveAt(220))) as unknown as M
@@ -289,6 +290,101 @@ test("bug hunt E11: run again with a focus keeps the last run's brief and adds t
   expect(focusedBrief(once, ' ')).toBe(once)
   expect(focusedBrief('zorb trade routes', 'the grelk dates')).toBe('zorb trade routes. Narrower focus for this run: the grelk dates')
   expect(focusedBrief('', 'the grelk dates')).toBe('the grelk dates')
+})
+
+// bug hunt E13: the focus box kept the keys after the rerun started, the panel kept the old failure, and a later `/exit`
+// became the brief of a third orientation
+test('bug hunt E13: after a rerun from the focus box the keys are the panel\'s again and the panel shows the new run; a slash command typed into an entry box goes to the prompt, never to main', T, async ($, on) => {
+  const w = panelWorld(on)
+  const BOX = 'make-orient-again-c-vell'
+  w.states.home.notices = [{ ...ORIENT_FAILED, id: 'n9', chat: 'c-vell' }]
+  w.states.agents = { rows: [{ name: 'thimble:orient', label: 'Orientation', state: 'failed', kind: 'subagent', chat: 'c-vell', role: 'orient' }], line: '', text: '' }
+  w.chats['c-vell'] = {
+    meta: { id: 'c-vell', kind: 'agent', role: 'orient', key: 'orient', title: 'Orientation', status: 'failed', brief: 'How do the vellum barges move cargo?' },
+    events: [{ type: 'notice', key: 'agent:orient', kind: 'agent', text: ORIENT_FAILED.text }, { type: 'error', message: RAW, kind: 'failed' }],
+  }
+  await start($, w)
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  const band = (await $.ui.mount(aboveAt(220))) as unknown as M
+  await band.press({ key: 'above-notice-n9-open' })
+  await w.clock.settle()
+  await band.unmount()
+  const asked = () => w.submitted.filter(s => s.startsWith('Run the orientation again')).length
+  const look = async (focused = true) => {
+    w.paneFocused = focused
+    const at = paneAt(120, 60) as unknown as { props: Record<string, unknown> }
+    return (await $.ui.mount({ ...at, props: { ...at.props, isFocused: focused } } as never)) as unknown as M
+  }
+  // `/` typed into the box goes to the prompt, and the box draws no field, so the rest of `/exit` and its Enter reach
+  // the prompt
+  let pane = await look()
+  await pane.input({ key: BOX, text: '/', kind: 'change' })
+  await w.clock.settle()
+  await pane.unmount()
+  expect(w.filled.join('')).toBe('/')
+  pane = await look()
+  expect(await pane.find({ type: 'Input', key: BOX })).toBeUndefined()
+  await pane.unmount()
+  // the prompt has the keys; a click gives them back, and the box is drawn with its field again
+  await (await look(false)).unmount()
+  pane = await look()
+  expect(await pane.find({ type: 'Input', key: BOX })).toBeDefined()
+  // a slash command sent whole (a paste and Enter) waits in the prompt for the Enter that runs it there
+  await pane.input({ key: BOX, text: '/exit' })
+  await w.clock.settle()
+  await pane.unmount()
+  expect(w.filled.join('')).toBe('//exit')
+  expect(w.toasts.at(-1)).toContain('press Enter there')
+  expect(asked()).toBe(0)
+  await (await look(false)).unmount()
+  // a focus typed and Enter: main is asked once; the box is gone, so the keys are the panel's: `x to close`
+  pane = await look()
+  await pane.input({ key: BOX, text: 'only the barge manifests' })
+  await w.clock.settle()
+  await pane.unmount()
+  expect(asked()).toBe(1)
+  expect(w.submitted.at(-1)).toContain('How do the vellum barges move cargo? Narrower focus for this run: only the barge manifests')
+  pane = await look()
+  let text = words(await pane.drawn())
+  expect(await pane.find({ type: 'Input', key: BOX })).toBeUndefined()
+  expect(text).toContain('main was asked to run it again')
+  expect(text).toContain('x to close')
+  expect(text).not.toContain('f for a focus')
+  expect(await pane.find({ type: 'Button', key: 'hk-close' })).toBeDefined()
+  await pane.unmount()
+  // the new run is listed: the panel shows it in place of the failure, running, then done
+  w.states.agents.rows.push({ name: 'thimble:orient', label: 'Orientation', state: 'running', kind: 'subagent', chat: 'c-vell-2', role: 'orient' })
+  // its chat as the route answers it whole (`total`)
+  const run2 = { meta: { id: 'c-vell-2', kind: 'agent', role: 'orient', key: 'orient', title: 'Orientation', status: 'running' }, events: [{ type: 'tool_use', id: 'u1', name: 'Bash', input: { command: 'wc -l manifests.jsonl' } }] as Record<string, unknown>[], total: 1 }
+  w.chats['c-vell-2'] = run2
+  w.stamps.set(`${WS}/chats/c-vell-2.json`, 5)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  pane = await look()
+  text = words(await pane.drawn())
+  await pane.unmount()
+  expect(text).toContain('running')
+  expect(text).toContain('wc -l manifests.jsonl')
+  expect(text).not.toContain('The orientation failed')
+  expect(text).not.toContain('main was asked')
+  w.states.agents.rows[1]!.state = 'done'
+  run2.meta.status = 'done'
+  run2.events.push({ type: 'done', result: 'The barges move cargo in three hops.' })
+  run2.total = 2
+  w.stamps.set(`${WS}/chats/c-vell-2.json`, 6)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  pane = await look()
+  text = words(await pane.drawn())
+  await pane.unmount()
+  expect(text).toContain('done')
+  expect(text).not.toContain('running')
+  expect(text).not.toContain('The orientation failed')
 })
 
 // bug hunt C17: a label whose records Claude's safeguards refused in part
