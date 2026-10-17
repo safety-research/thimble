@@ -40,7 +40,8 @@ async def chat(workspaces_tmp, monkeypatch):
 def told(monkeypatch) -> list[dict]:
     """The events main was told, as tell_main posts them."""
     out: list[dict] = []
-    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: out.append({"kind": kind, **payload}))
+    monkeypatch.setattr(subagents, "tell_main",
+                        lambda c, kind, payload, run=None: out.append({"kind": kind, **payload}))
     return out
 
 

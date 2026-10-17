@@ -1713,12 +1713,14 @@ def _task_notice(lv: Live, fields: dict, at: float = 0.0) -> None:
     _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 
 
-def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None) -> None:
+def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None, *, main: bool = True) -> None:
     """A task notification of one of thimble's agents ends its run once (subagents.run_ended): killed or stopped by a
     TaskStop or Esc, or cut off by main's quit (DIDNT_FINISH, after `thimble --continue`), which marks its chat
     `continue: here`; or, in default mode, a later run's end with its whole report. A notification older than the
     agent's latest start is about an earlier run, and so is the `completed` a plugin-started agent's later run brings
-    after its hand-back: neither ends anything (subagents.run_ended ignores a run that ended)."""
+    after its hand-back: neither ends anything (subagents.run_ended ignores a run that ended). A failure in main's own
+    transcript (`main`) is one main has read, so thimble's event of it would be old news (subagents.failure_seen, bug
+    hunt C22)."""
     from . import subagents  # noqa: PLC0415
 
     agent_id = str(fields.get("task-id") or (sub.agent_id if sub is not None else "") or "")
@@ -1736,6 +1738,8 @@ def _thimble_notice(lv: Live, fields: dict, at: float, sub: "Sub | None" = None)
         subagents.mark_stopped_by(lv.c, agent_id, subagents.STOPPED_USER)
     elif status == "stopped" and not cut and not a.get("stopped_by"):
         subagents.mark_stopped_by(lv.c, agent_id, subagents.STOPPED_ANALYST)
+    if main and status == "failed":
+        subagents.failure_seen(lv.c, agent_id)
     subagents.run_ended(lv.c, agent_id, status, report or summary or None, source="notification", interrupted=cut)
     if by_user:
         subagents.mark_cancelled(lv.c, agent_id)
@@ -1760,7 +1764,7 @@ def _child_finished(lv: Live, text: str) -> None:
             continue
         _tail_sub(lv, sub)
         if sub.thimble:
-            _thimble_notice(lv, fields, 0.0, sub)
+            _thimble_notice(lv, fields, 0.0, sub, main=False)
             continue
         _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 

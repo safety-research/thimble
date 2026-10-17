@@ -181,7 +181,7 @@ def subagent_ended(c: str, run: subagents.Run, status: str, summary: str) -> Non
     chat's end), and its work folder lets go of what it no longer needs (work_files.after_run)."""
     doc = run.key.split(":", 1)[-1]
     work_files.after_run(c, work_dir(c, doc), status)
-    subagents.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc})
+    subagents.tell_main(c, WRITTEN_KIND, {"text": summary or "", "status": status, "doc": doc}, run=run)
 
 
 def left_work(c: str, run: subagents.Run) -> bool:

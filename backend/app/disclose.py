@@ -12,7 +12,8 @@ the session's guide marker:
   and so does a call of one of thimble's agents (its own prompt holds every part), a call without a tool_use_id (a
   program's) or one thimble's module made, and a thread's fork's start of an agent, whose Agent call main makes;
 - with main's first event of a kind that uses it (EVENT_SECTIONS, with_event): after the event's text, or for a quiet
-  event, which rides along on one line under `meanwhile:`, after those lines (events.meanwhile).
+  event, which rides along on one line under `meanwhile:`, after those lines (events.meanwhile); a quiet event that
+  goes before it reaches main (events.drop_held) gives its parts back (untold).
 Each part reaches each conversation once. A conversation is main's (its Claude Code session, launch.json's session
 followed through the moves --rekey records, so /clear starts a new one), or a subagent's, by its agent id from the
 caller hook's line of the call (callers.jsonl). A thread's fork starts from main's context, so it is not given a part
@@ -269,18 +270,24 @@ def _main_marker(ws: Path) -> str | None:
 def _given(c: str, ws: Path, conv: str, names: "list[str] | tuple[str, ...]",
            inherits: "tuple[str, ...]" = ()) -> str:
     """The text of the parts of `names` that `conv` has not had, marked had; '' for none."""
+    return _given_parts(c, ws, conv, names, inherits)[1]
+
+
+def _given_parts(c: str, ws: Path, conv: str, names: "list[str] | tuple[str, ...]",
+                 inherits: "tuple[str, ...]" = ()) -> tuple[list[str], str]:
+    """(the parts of `names` that `conv` has not had, marked had, their text); ([], '') for none."""
     marker = _main_marker(ws)
     if marker is None:
-        return ""
+        return [], ""
     new = take(ws, conv, names, inherits)
     if not new:
-        return ""
+        return [], ""
     try:
         text = text_of(c, new, marker)
     except Exception:  # noqa: BLE001 — a part that cannot be rendered goes with the next use
         untake(ws, conv, new)
         raise
-    return text
+    return new, text
 
 
 # --------------------------------------------------------------------------- what a call or an event gives
@@ -328,8 +335,8 @@ def after_call(c: str, name: str, args: dict[str, Any] | None, res: Any, session
 
 def with_event(c: str, kind: str, note: dict[str, Any], quiet: bool) -> dict[str, Any]:
     """`note`, main's event of `kind`, with the later parts of its kind's first event that main has not had: after its
-    text, or for a `quiet` event, which rides along on one line, as its `told`, which events.meanwhile puts after the
-    lines (module note)."""
+    text, or for a `quiet` event, which rides along on one line, as its `told` (and their names, `told_parts`), which
+    events.meanwhile puts after the lines (module note)."""
     names = EVENT_SECTIONS.get(kind)
     if not names:
         return note
@@ -337,16 +344,28 @@ def with_event(c: str, kind: str, note: dict[str, Any], quiet: bool) -> dict[str
         from . import config  # noqa: PLC0415
 
         ws = config.workspace_dir(c)
-        text = _given(c, ws, main_key(ws), names)
+        parts, text = _given_parts(c, ws, main_key(ws), names)
     except Exception:  # noqa: BLE001 — a part left out never fails the event
         log.exception("%s: the later parts of the first %s event were left out", c, kind)
         return note
     if not text:
         return note
     if quiet:
-        return {**note, "told": text}
+        return {**note, "told": text, "told_parts": parts}
     body = str(note.get("content") or "")
     return {**note, "content": f"{body}\n\n{text}" if body else text}
+
+
+def untold(ws: Path, notes: "list[dict[str, Any]]") -> None:
+    """Quiet events that went before they reached main (events.drop_held): main has not had the later parts they carried
+    (`told_parts`), which go with the next event that uses them. Never raises."""
+    parts = [str(p) for n in notes if isinstance(n, dict) for p in n.get("told_parts") or []]
+    if not parts:
+        return
+    try:
+        untake(ws, main_key(ws), parts)
+    except Exception:  # noqa: BLE001 — a part main has not had is at worst left out
+        log.exception("the later parts of main's guidance that dropped events carried were not given back")
 
 
 def told(notes: "list[dict[str, Any]]") -> str:

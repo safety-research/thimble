@@ -832,7 +832,7 @@ async def _measured(c: str, run: subagents.Run, status: str, summary: str, stopp
     except asyncio.CancelledError:
         _closed(c)
         try:
-            _tell_main(c, status, 0, made)
+            _tell_main(c, status, 0, made, run=run)
         except Exception:  # noqa: BLE001 — the server is stopping either way
             log.exception("%s: main did not hear the orientation's end", c)
         raise
@@ -859,7 +859,7 @@ def _go_on(c: str, run: subagents.Run, status: str, summary: str, stopped: "bool
            coverage: str = "") -> None:
     """What follows a run's end once its record is closed: main hears it, with the first run's coverage line, thimble's
     view proposer is told when the first run ended done (_tell_proposer), and the work folder is cleared."""
-    _tell_main(c, status, run.k, made, error=summary if status == "failed" else "", coverage=coverage)
+    _tell_main(c, status, run.k, made, error=summary if status == "failed" else "", coverage=coverage, run=run)
     if run.k == 0 and status == "done" and not run.interrupted:
         _tell_proposer(c)
     work_files.after_run(c, work_dir(c), "stopped" if status != "failed" and stopped else status)
@@ -992,11 +992,12 @@ def failure_line(summary: str | None, chars: int = FAILURE_CHARS) -> str:
 
 
 def _tell_main(c: str, status: str, k: int = 0, made: "dict[str, Any] | None" = None, error: str = "",
-               coverage: str = "") -> None:
+               coverage: str = "", run: "subagents.Run | None" = None) -> None:
     """The `orient` browser event: a run of the orientation ended, with status_text as its text (prompts/main.md). It
-    waits for main's next event, since it asks main for nothing."""
+    waits for main's next event, since it asks main for nothing; a failure of `run` that main read in Claude Code's own
+    line is no event (subagents.tell_main)."""
     subagents.tell_main(c, orientation.ORIENT_KIND, {"text": status_text(c, status, k, made, error, coverage),
-                                                     "status": status, **({"run": k} if k else {})})
+                                                     "status": status, **({"run": k} if k else {})}, run=run)
 
 
 def _wrote_since(c: str, since: str, chat: str = agents.MAIN_ID) -> bool:

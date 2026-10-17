@@ -37,7 +37,7 @@ def unmeasured(monkeypatch):
         return ""
 
     monkeypatch.setattr(orient_session, "measure", measure)
-    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: None)
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload, run=None: None)
 
 
 async def _ended(agent: str) -> None:
@@ -176,7 +176,7 @@ async def test_the_end_of_the_first_run_tells_main_and_the_view_proposer_and_sta
     import asyncio
 
     told: list[tuple] = []
-    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append((kind, payload)))
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload, run=None: told.append((kind, payload)))
 
     async def measured(c, chat):
         return ""
@@ -207,7 +207,7 @@ async def test_an_orientation_an_api_error_stopped_says_so_and_why_in_its_thread
     failed with the error, and main's chat gets the orientation's landing (which the browser shows as failed, with the
     API error's card) although there are no cards. No report pass starts."""
     told: list[tuple] = []
-    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append((kind, payload)))
+    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload, run=None: told.append((kind, payload)))
     ans = await orient_session.start(CORPUS, "", route=subagents.CLICK)
     chat = orientation.read_run(CORPUS)["chats"]["orient"]
     assert subagents.ended(CORPUS, ans.agent_id, SAFEGUARD, "refusal")
