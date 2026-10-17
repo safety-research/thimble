@@ -614,7 +614,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   first the fields the claim is about (those holding words the card quotes from the row or a value its takeaway cites
   there, else its words, such as its title or body), each its name dim and its value in quotation marks and italic,
   its line ends kept; then its other fields as `name value · name value` on up to two dim rows, those the card's question
-  and takeaway name first (`merged_by` where it says "merged"). A blank row between records.
+  and takeaway name first (`merged_by` where it says "merged"). A blank row between records. A record's words read
+  back where they were decoded twice, and a control character left in them shows as a sign (`␛`, `␇`, `�` for a C1
+  control), never raw, so the card draws.
 - A plan: per step, its number, its state's glyph (`○` not started dim, `◌` running in the accent, `●` done, `!` needs
   you in red) and its title in bold, the clause before the first colon, its time dim at the right edge; under the
   title, indented to it, the rest of its words in the text color, then what it makes (`→ 7 participant memos`) and its

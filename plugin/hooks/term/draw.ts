@@ -3,7 +3,7 @@
 // returns its lines and a hit test from a cell to an item. The `note` and `text` kinds (noteLayout, textLayout) are the
 // cards drawn as their words.
 import { axisTicks, numberTicks, ownTicks, placeLabels, wallClock } from './axis'
-import { cut, cw, fmt, formatted, itemsRow, middleCut, prefix, quoted, viewRef, width } from './lib'
+import { cut, cw, fmt, formatted, itemsRow, middleCut, prefix, quoted, viewRef, visibleControls, width } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS, seriesHue } from './paint'
 import { hueOf } from './labels'
@@ -1616,8 +1616,18 @@ function restLines(rest: readonly [string, string][], room: number, max: number)
  */
 const HEAD_FIELDS = 2 // of a line's fields its words leave out, drawn before its words (exampleLayout)
 
+/** A record's words as an example draws them: read back where they were decoded twice (demojibake), a control
+ *  character left shown as a sign (lib.ts visibleControls), so the card draws. */
+const recordWords = (s: string) => visibleControls(demojibake(s))
+
 function exampleLayout(card: CardData, cols: number, hover: number): Layout {
-  const exs = (card.examples ?? []).slice(0, 8)
+  const exs = (card.examples ?? []).slice(0, 8).map(e => ({
+    ...e,
+    note: visibleControls(e.note),
+    quote: recordWords(e.quote),
+    ...(e.head ? { head: e.head.map(([k, v]): [string, string] => [visibleControls(k), recordWords(v)]) } : {}),
+    ...(e.fields ? { fields: { read: e.fields.read.map(([k, v]): [string, string] => [visibleControls(k), recordWords(v)]), rest: e.fields.rest.map(([k, v]): [string, string] => [visibleControls(k), recordWords(v)]) } } : {}),
+  }))
   const lines: Line[] = []
   const owner: number[] = []
   const words = (e: CardExample) => e.note || e.quote || (e.fields?.read[0]?.[1] ?? '').replace(/\s+/g, ' ').trim()
@@ -1635,9 +1645,9 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
     const lead = () => (rows.length ? { s: '  ' } : glyph)
     const note = e.note ? wrapCell(e.note.replace(/\s+/g, ' ').trim(), room, 3).filter(Boolean) : []
     for (const t of note) rows.push([lead(), { s: t }])
-    for (const [k, v] of (e.head ?? []).slice(0, HEAD_FIELDS)) for (const l of fieldLines(k, demojibake(v), room, 1)) rows.push([lead(), ...l])
+    for (const [k, v] of (e.head ?? []).slice(0, HEAD_FIELDS)) for (const l of fieldLines(k, v, room, 1)) rows.push([lead(), ...l])
     if (e.fields && (e.fields.read.length || e.fields.rest.length)) {
-      const read = e.fields.read.map(([k, v]): [string, string] => [k, demojibake(v)])
+      const read = e.fields.read
       // the claim's fields share four rows, the first its three at most; the other fields two
       let left = 4
       for (const [k, v] of read) {
@@ -1646,9 +1656,9 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
         for (const l of got) rows.push([lead(), ...l])
         if (left <= 0) break
       }
-      for (const l of restLines(e.fields.rest.map(([k, v]) => [k, demojibake(v)]), room, 2)) rows.push([lead(), ...l])
+      for (const l of restLines(e.fields.rest, room, 2)) rows.push([lead(), ...l])
     } else {
-      const said = demojibake(e.quote).replace(/\s+/g, ' ').trim()
+      const said = e.quote.replace(/\s+/g, ' ').trim()
       const quote = said ? quoteLines(said, room, 3) : []
       for (const t of quote) rows.push([lead(), { s: t, i: true }])
     }

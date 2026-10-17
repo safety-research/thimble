@@ -681,6 +681,21 @@ export function noControls(s: string): string {
   return INVISIBLE.test(plain) ? plain.replace(INVISIBLES, '') : plain
 }
 
+/** A record's words with each control character shown as a sign, never raw, where the words are the point (an example
+ *  card's quote; bug hunt J6+: a save's text decoded twice held C1 controls and the card did not draw): a C0 control as
+ *  its picture (`␛` for ESC, `␇` for a bell), DEL as `␡`, a C1 control (U+0080-U+009F, a byte of a character read
+ *  twice) as `�`; a tab, a line end and a return are kept, as the drawing breaks lines itself. The bidi, zero-width and
+ *  byte order mark characters are left out, as noControls leaves them. Pure. */
+export function visibleControls(s: string): string {
+  const shown = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/.test(s)
+    ? s.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, ch => {
+        const c = ch.charCodeAt(0)
+        return c < 0x20 ? String.fromCharCode(0x2400 + c) : c === 0x7f ? '\u2421' : '\ufffd'
+      })
+    : s
+  return INVISIBLE.test(shown) ? shown.replace(INVISIBLES, '') : shown
+}
+
 /** Every data-derived string the terminal draws (file names, quotes, comments, toasts) goes through this: noControls. */
 export function clean(s: string): string {
   return noControls(s)
