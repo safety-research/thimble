@@ -40,6 +40,11 @@
 // threads, checks) or its item is pressed; the counts as last seen are `$.state.seen` (C13), and a session's first
 // count is what was there already, so nothing is new at activation.
 //
+// Claude Code's main screen (the classic renderer, where a fresh config starts) takes no clicks, so none of this can
+// be pressed there (bug hunt F1). There the thimble line ends, where it fits, with `/thimble to use these with keys`
+// dim: home lists the rows that wait first, each opening its acts on digit keys (waitItems, waitview.tsx), and
+// `/thimble <section>` opens each item's section. Fullscreen shows neither.
+//
 // register.tsx calls registerBand once; each hook builds its context with register.tsx's cxOf (imported, so `claude
 // plugin validate` follows `$` into it). refreshSummary (views.ts re-exports it; term.ts tick calls it when the workspace
 // changes) reads the labels' unsure counts, notes the seen counts on the session's first pass, toasts each new notice of
@@ -51,12 +56,13 @@ import type { Ctx } from './ctx'
 import { clean, cut, noControls, width } from './lib'
 import { docsOf } from './model'
 import { dismissModNotice, modActWords, modNotices, moreNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
-import { browserShown, copyRemoteLink, copyTunnel, dismissLinks } from './offramp'
-import { answerOffer, dismissNotice, dismissOffer, homeNotices, homeOffer, noticeAct, noticeWords, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
+import { BROWSER_ITEM, browserShown, copyRemoteLink, copyTunnel, dismissLinks, remoteWords } from './offramp'
+import { answerOffer, dismissNotice, dismissOffer, homeNotices, homeOffer, noticeAct, noticeWords, noticesRead, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
+import type { HomeOffer } from './panel'
 import { COLORS } from './paint'
 import { readState } from './data'
 import { cxOf } from './ctx'
-import { PANEL, closePanel, openPanel, openPending, placedLater, readSurface, retryPending, rt, surfaceValue } from './term'
+import { PANEL, classicScreen, closePanel, noteScreen, openPanel, openPending, placedLater, readSurface, retryPending, rt, surfaceValue } from './term'
 import { keepSeen, keptSeen } from './kept'
 import { openChecks } from './checksview'
 import { citeCounts, citeItems, openCitations } from './citesview'
@@ -169,7 +175,7 @@ export async function refreshSummary(cx: Ctx): Promise<void> {
     await refreshUnsure(cx)
   }
   await firstSeen(cx)
-  toastNewNotices(cx, await homeNotices(cx))
+  toastNewNotices(cx, await noticesRead(cx))
   await noteWriters(cx)
 }
 
@@ -314,8 +320,9 @@ export const ACT_GAP = 2
 export const MIN_WORDS = 12
 
 /** An act of a row above the prompt: its key, its words and its press; `primary`, the row's main act, is bold. One with
- *  no press is a state drawn dim in the acts' place (`◌ accepting`). */
-export type BandAct = { key: string; label: string; press?: () => Promise<void> | void; primary?: boolean }
+ *  no press is a state drawn dim in the acts' place (`◌ accepting`). `stay`: its press leaves the row (a copy), so the
+ *  panel's `waiting` view stays on it. */
+export type BandAct = { key: string; label: string; press?: () => Promise<void> | void; primary?: boolean; stay?: boolean }
 
 /** The cells a row's acts take, ACT_GAP apart. */
 export function actsWidth(acts: readonly Pick<BandAct, 'label'>[]): number {
@@ -384,6 +391,84 @@ async function toggleNotices(cx: Ctx): Promise<void> {
  *  what `dismiss` does, which `dismiss all` does for each. */
 type NoticeRow = { key: string; at: number; words: string; acts: BandAct[]; dismiss: () => Promise<void> }
 
+/** The view proposal's acts: `accept` (bold), `reject`, `don't ask again`, which turns view proposals off, and
+ *  `dismiss`; once one is pressed, its state (`◌ accepting`) in their place. */
+function offerActs(cx: Ctx, offer: HomeOffer): BandAct[] {
+  return offer.pressed
+    ? [{ key: 'above-offer-pressed', label: offer.pressed === 'accept' ? '◌ accepting' : '◌ rejecting' }]
+    : [
+        { key: 'above-offer-accept', label: 'accept', primary: true, press: () => answerOffer(cx, offer.slug, 'accept') },
+        { key: 'above-offer-reject', label: 'reject', press: () => answerOffer(cx, offer.slug, 'reject') },
+        { key: 'above-offer-off', label: "don't ask again", press: () => proposalsOff(cx) },
+        { key: 'above-offer-dismiss', label: 'dismiss', press: () => hideOffer(cx, offer.slug) },
+      ]
+}
+
+/** The view proposal the band shows: the one waiting for an answer, while view proposals are on and it is not
+ *  dismissed here. */
+async function shownOffer(cx: Ctx): Promise<HomeOffer | null> {
+  const offer = (await featuresOf(cx)).viewProposals ? await homeOffer(cx) : null
+  return offer && !hiddenOffers.has(offer.slug) ? offer : null
+}
+
+/** Every open notice, every agent's and the terminal's own, newest first, each with its acts and `dismiss` last; the
+ *  first act bold where there are several. */
+async function noticeRows(cx: Ctx): Promise<NoticeRow[]> {
+  const notices = await homeNotices(cx)
+  const mainFirst = (acts: BandAct[]) => acts.map((a, i) => (i === 0 && acts.length > 1 ? { ...a, primary: true } : a))
+  return [
+    ...notices.map(n => {
+      const key = 'above-notice-' + n.id
+      const dismiss = () => dismissNotice(cx, n)
+      const acts = mainFirst([
+        ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: noticeActWords(a), press: () => noticeAct(cx, n, a) })),
+        ...(n.open ? [{ key: `${key}-open`, label: seeWords(n), press: () => openNoticeChat(cx, n) }] : []),
+        { key: `${key}-dismiss`, label: 'dismiss', press: dismiss },
+      ])
+      return { key, at: n.at, words: noticeWords(n), acts, dismiss }
+    }),
+    ...(await modNotices(cx)).map(n => {
+      const key = `above-mod-${n.key.replace(/[^a-z0-9-]+/gi, '-')}`
+      const dismiss = () => dismissModNotice(cx, n.key)
+      const acts = mainFirst([
+        ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: modActWords(a), press: () => runNoticeAct(cx, n, a) })),
+        { key: `${key}-dismiss`, label: 'dismiss', press: dismiss },
+      ])
+      return { key, at: n.at, words: n.text, acts, dismiss }
+    }),
+  ].sort((a, b) => b.at - a.at)
+}
+
+/** The SSH row's acts: `copy` the tunnel command, `copy link` (a one-time link, never drawn), `dismiss`. `stay`: the
+ *  press leaves the row, so the next act is a key away. */
+function remoteActs(cx: Ctx): BandAct[] {
+  return [
+    { key: 'above-remote-copy', label: 'copy', primary: true, stay: true, press: () => copyTunnel(cx) },
+    { key: 'above-remote-link', label: 'copy link', stay: true, press: () => copyRemoteLink(cx) },
+    { key: 'above-remote-dismiss', label: 'dismiss', press: () => dismissLinks(cx) },
+  ]
+}
+
+/** A row above the prompt that waits for the analyst, as home lists it on Claude Code's main screen, where the band
+ *  takes no clicks (bug hunt F1): its key, its label (the band's label column), its name (the view proposal's), its
+ *  words, why its last act failed (`problem`, the view proposal's red row), and its acts, which the panel's `waiting`
+ *  view presses with keys (waitview.tsx). */
+export type WaitItem = { key: string; label: string; name: string; words: string; problem?: string; acts: BandAct[] }
+
+/** What waits above the prompt, in the band's order: the view proposal, the notices, newest first, the SSH row. */
+export async function waitItems(cx: Ctx): Promise<WaitItem[]> {
+  const out: WaitItem[] = []
+  const offer = await shownOffer(cx)
+  if (offer) out.push({ key: `offer:${offer.slug}`, label: 'view proposal', name: oneLine(offer.name), words: oneLine(offer.description), ...(offer.refused && !offer.pressed ? { problem: oneLine(offer.refused) } : {}), acts: offerActs(cx, offer) })
+  for (const r of await noticeRows(cx)) out.push({ key: r.key, label: 'notice', name: '', words: oneLine(r.words), acts: r.acts })
+  const links = await cx.links()
+  if (links) out.push({ key: BROWSER_ITEM, label: 'browser', name: '', words: oneLine(remoteWords(links)), acts: remoteActs(cx) })
+  return out
+}
+
+/** The thimble line's last words on Claude Code's main screen, which takes no clicks: where its keys are (bug hunt F1). */
+export const CLASSIC_HINT = '/thimble to use these with keys'
+
 export function registerBand(on: On): void {
   // the panel showing a section's list clears that section's `new`; any view but the checks' lets its comment go
   on('state.set', { plugin: 'thimble', key: 'panel' }, async ($, e, next) => {
@@ -409,6 +494,7 @@ export function registerBand(on: On): void {
     await cx.panelTick()
     const panes = await cx.panes()
     if (e.surface === 'terminal' && e.viewport?.columns && !panes.some(p => p.isPlaced)) rt.termColumns = e.viewport.columns
+    noteScreen(e.surface, (e.viewport as { isFullscreen?: unknown } | undefined)?.isFullscreen)
     const cols = Math.max(20, (e.props as { bodyColumns?: number }).bodyColumns ?? e.viewport?.columns ?? 100)
     const narrow = cols < NARROW
     const LW = narrow ? NARROW_LABEL : ABOVE_LABEL
@@ -498,16 +584,9 @@ export function registerBand(on: On): void {
     // a press on the name shows all of it, wrapped, and for a viewer of a file type its files; `accept` (bold), `reject`,
     // `don't ask again`, which turns view proposals off, and `dismiss`; why accept could not start its build, in red,
     // under it
-    const offer = (await featuresOf(cx)).viewProposals ? await homeOffer(cx) : null
-    if (offer && !hiddenOffers.has(offer.slug)) {
-      const acts: BandAct[] = offer.pressed
-        ? [{ key: 'above-offer-pressed', label: offer.pressed === 'accept' ? '◌ accepting' : '◌ rejecting' }]
-        : [
-            { key: 'above-offer-accept', label: 'accept', primary: true, press: () => answerOffer(cx, offer.slug, 'accept') },
-            { key: 'above-offer-reject', label: 'reject', press: () => answerOffer(cx, offer.slug, 'reject') },
-            { key: 'above-offer-off', label: "don't ask again", press: () => proposalsOff(cx) },
-            { key: 'above-offer-dismiss', label: 'dismiss', press: () => hideOffer(cx, offer.slug) },
-          ]
+    const offer = await shownOffer(cx)
+    if (offer) {
+      const acts = offerActs(cx, offer)
       const { own } = wordsRoom(cols, LW, acts)
       const open = unfolded.has(`offer:${offer.slug}`)
       // the name on the row with the acts; what the view would show, whole and wrapped, on the rows under it (the
@@ -537,30 +616,8 @@ export function registerBand(on: On): void {
     // …`), and `dismiss` takes them all. The newest shows; the others wait behind one row under it, `5 more notices ›`,
     // whose press shows them there and turns into `show fewer`, with `dismiss all` at the right. Each new one posts one
     // toast (notices.tsx)
-    const notices = await homeNotices(cx)
-    toastNewNotices(cx, notices)
-    const mainFirst = (acts: BandAct[]) => acts.map((a, i) => (i === 0 && acts.length > 1 ? { ...a, primary: true } : a))
-    const all: NoticeRow[] = [
-      ...notices.map(n => {
-        const key = 'above-notice-' + n.id
-        const dismiss = () => dismissNotice(cx, n)
-        const acts = mainFirst([
-          ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: noticeActWords(a), press: () => noticeAct(cx, n, a) })),
-          ...(n.open ? [{ key: `${key}-open`, label: seeWords(n), press: () => openNoticeChat(cx, n) }] : []),
-          { key: `${key}-dismiss`, label: 'dismiss', press: dismiss },
-        ])
-        return { key, at: n.at, words: noticeWords(n), acts, dismiss }
-      }),
-      ...(await modNotices(cx)).map(n => {
-        const key = `above-mod-${n.key.replace(/[^a-z0-9-]+/gi, '-')}`
-        const dismiss = () => dismissModNotice(cx, n.key)
-        const acts = mainFirst([
-          ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: modActWords(a), press: () => runNoticeAct(cx, n, a) })),
-          { key: `${key}-dismiss`, label: 'dismiss', press: dismiss },
-        ])
-        return { key, at: n.at, words: n.text, acts, dismiss }
-      }),
-    ].sort((a, b) => b.at - a.at)
+    toastNewNotices(cx, await noticesRead(cx))
+    const all = await noticeRows(cx)
     if (all.length < 2) noticesOpen = false
     const noticeEl = (r: NoticeRow) =>
       trayRow(r.key, 'notice', <Text wrap="wrap">{oneLine(r.words)}</Text>, r.acts, { color: COLORS.problem, own: wordsRoom(cols, LW, r.acts).own })
@@ -586,21 +643,21 @@ export function registerBand(on: On): void {
         : []
       rows.push(trayRow('above-notices-more', '', toggle, acts))
     }
-    // the one SSH row of a remote press: the tunnel command (its Eternal Terminal form when there is one), `copy` it,
-    // `copy link` (a one-time link, never drawn), `dismiss`
+    // the one SSH row of a press that opened no browser here: in plain words, the tunnel command (its Eternal Terminal
+    // form when there is one) to run on your own computer, then `copy link` (bug hunt F11); `copy` the command, `copy
+    // link` (a one-time link, never drawn), `dismiss`. It goes once a browser claims the link (offramp.ts watchLink)
     const links = await cx.links()
     if (links) {
-      const acts: BandAct[] = [
-        { key: 'above-remote-copy', label: 'copy', primary: true, press: () => copyTunnel(cx) },
-        { key: 'above-remote-link', label: 'copy link', press: () => copyRemoteLink(cx) },
-        { key: 'above-remote-dismiss', label: 'dismiss', press: () => dismissLinks(cx) },
-      ]
+      const acts = remoteActs(cx)
       const { room, own } = wordsRoom(cols, LW, acts)
-      rows.push(trayRow('above-remote', 'browser', foldWords('above-remote', links.et ?? links.tunnel, room), acts, { own }))
+      rows.push(trayRow('above-remote', 'browser', foldWords('above-remote', remoteWords(links), room), acts, { own }))
     }
     // the thimble line, the one row that stays while thimble is on: `thimble` bold, in the accent and underlined, which
     // opens home; then the items that fit. Under the pointer an item's name underlines, nothing else changes
     const fit = fitItems(await summaryItems(cx), cols - LINE_LABEL_W)
+    // on Claude Code's main screen nothing here takes a click: the line ends with where the keys are, where it fits
+    const used = fit.shown.reduce((n, it) => n + itemWidth(it), 0) + fit.gap * fit.shown.length + (fit.cut ? fit.gap + 1 : 0)
+    const keysHint = classicScreen() && cols - LINE_LABEL_W - used >= width(CLASSIC_HINT) + fit.gap ? CLASSIC_HINT : ''
     const segEl = (s: ItemSeg) =>
       s.fg || s.bold || s.dim || s.name ? (
         <Text {...(s.fg ? { color: s.fg } : {})} {...(s.bold ? { bold: true } : {})} {...(s.dim ? { dimColor: true } : {})} {...(s.name ? { hover: { underline: true } } : {})}>
@@ -632,6 +689,7 @@ export function registerBand(on: On): void {
             </Box>
           ))}
           {fit.cut ? <Text key="above-summary-cut" dimColor>…</Text> : null}
+          {keysHint ? <Text key="above-summary-keys" dimColor>{keysHint}</Text> : null}
         </Box>
       </Box>,
     )

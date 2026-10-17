@@ -102,6 +102,17 @@ Claude Code's panel chrome, no right-click menu.
   Code's agent tray, so no row repeats them.
 - **Every row above the prompt is one line**: a dim label column, the words cut with `…` where the acts begin (a press
   shows them whole), the acts at the right in the accent, underlined under the pointer, the main one bold.
+- **A press where no browser opens** (SSH, Eternal Terminal, no display): `/thimble browser` says so and what to do, and
+  one row above the prompt does too, `browser  No browser here. On your own computer, run ssh -N -L … <your ssh host>,
+  then press copy link and open the link there.  copy  copy link  dismiss` (offramp.ts remoteWords, bug hunt F11); the
+  row goes once a browser claims the one-time link (its claim file, watched for the link's 5 minutes).
+- **Claude Code's main screen** (the classic renderer) takes no clicks, so nothing above the prompt can be pressed there
+  (bug hunt F1). There the thimble line ends with `/thimble to use these with keys` dim, where it fits; home lists the
+  rows that wait first, under `Above the prompt` (the view proposal, the notices, the SSH row), and Enter on one opens
+  the `waiting` view (waitview.tsx), its acts on digit keys (`1 accept  2 reject …`, `1 copy  2 copy link`); an act that
+  answers the row goes back to home. `/thimble browser` and `o` in a remote terminal open the SSH row there at once.
+  `/thimble labels`, like `threads`, `citations`, `checks` and `coverage`, opens a section of the line. Fullscreen
+  (`viewport.isFullscreen`, a command's `presentation.isFullscreen`) shows none of this.
 - **A view proposal above the prompt**, while one waits for an answer: `view proposal`, the view's name in bold and as
   much of what it would show as fits (the name's press shows it all), then `accept` (thimble builds it), `reject`,
   `don't ask again`, which turns view proposals off, and `dismiss`; why accept could not start the build, and the fix,
@@ -175,7 +186,7 @@ Claude Code's panel chrome, no right-click menu.
   text), where a question typed and Enter start the thread about them, opened over them; while a box has the keys the
   panel draws no key-hint row.
 - **`/thimble`** turns thimble on in the folder and opens the home panel, with no model turn; `/thimble browser` opens the
-  browser workbench; `/thimble coverage`, `citations`, `checks`, `threads`, `cite [n]` (the n-th citation of the last
+  browser workbench; `/thimble coverage`, `citations`, `checks`, `threads`, `labels`, `cite [n]` (the n-th citation of the last
   reply), `card [n|id]`, `files <path[:line]>` and `documents` open those; `fresh`, `restore`, `status`, `fix` and
   `feedback` are the skill's.
 - **A card's ↗.** In fullscreen a card's border row ends with a `↗` that opens the card in the browser; a custom card
@@ -245,7 +256,7 @@ too); `ctx.ts` builds from each hook's `$` the context the other files take (`cx
 a function of its own file or one imported from the module's files); `contracts.ts` the contracts with the panel's files;
 `activate.ts` turning on and the guide, `tracker.ts` coverage facts, `settings.ts` the switches, `band.tsx` the rows above
 the prompt. `hooks/term.ts` keeps what it read and the panel's moves, `hooks/reply.tsx` draws main's chat,
-`hooks/panel.tsx` the panel, `hooks/filesview.tsx` a file, `hooks/lines.tsx` the parts drawn from styled lines (homeview.tsx), `hooks/cell.ts` turns a
+`hooks/panel.tsx` the panel, `hooks/waitview.tsx` a row above the prompt with its acts on keys, `hooks/filesview.tsx` a file, `hooks/lines.tsx` the parts drawn from styled lines (homeview.tsx), `hooks/cell.ts` turns a
 thimble cell into the drawing's card form, `hooks/model.ts` reads the other surfaces, `hooks/data.ts` runs the command.
 The drawing itself: `draw.ts` lays out cards and charts as styled lines, `card.tsx` draws a card (its border the
 drawing's, its title a hot spot, everything but the title below the plot), `cite.ts` and `para.tsx` citations and their

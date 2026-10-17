@@ -3,19 +3,31 @@
 // person's browser through a redirect file only they can read; it prints status alone, never a sign-in code. This file
 // shows what happens: the toast `starting thimble's page…` at once; then, on this machine, a watch of the claim file for
 // 12 s, which ends in the toast `opened in the browser · 127.0.0.1:<port>` or the notice `open:not-claimed`; over SSH
-// the one row above the prompt with the tunnel command (band.tsx), whose `copy link` copies a one-time link that the
-// open wrote to a file only the person can read. A failure posts its notice (notices.tsx) with the acts that fix it.
+// or with no display, where no browser opens, the one row above the prompt that says so in plain words (remoteWords:
+// run the tunnel command on your own computer, then copy link), whose `copy link` copies a one-time link that the open
+// wrote to a file only the person can read; the row goes once a browser claims the link (watchLink). On Claude Code's
+// main screen, which takes no clicks, the panel also opens on that row with its acts on keys (waitview.tsx).
+// `/thimble browser` says which of these happened (openInBrowser's answer, register.tsx). A failure posts its notice
+// (notices.tsx) with the acts that fix it.
 //
 // Callers: `/thimble browser`, `o` and the title row's `↗` in every panel view (panel.tsx wayRow), a card's `↗`, the
 // checks' `open in the browser`, a notice's `open ›` for a code ticket.
 import type { Ctx } from './ctx'
+import type { Links } from './types'
 import { noControls } from './lib'
 import { dismissModNotice, onNoticeAct, postNotice } from './notices'
-import { rt } from './term'
+import { classicScreen, openPanel, rt } from './term'
+
+/** The key of the SSH row as home and the panel's `waiting` view name it (band.tsx waitItems, waitview.tsx). */
+export const BROWSER_ITEM = 'browser'
 
 /** How long the claim of a sign-in is watched for, and how often. */
 export const CLAIM_MS = 12_000
 const CLAIM_STEP_MS = 500
+/** How long the SSH row waits for a browser to claim its one-time link (the link works for 5 minutes), and how often it
+ *  looks. */
+export const LINK_MS = 5 * 60_000
+const LINK_STEP_MS = 1000
 /** A second press on the same object this soon after the first runs no second open. */
 const AGAIN_MS = 5_000
 
@@ -35,6 +47,58 @@ export function browserShown(): boolean {
 }
 // the ref of the last open, for a notice's `try again` and `copy link`
 let lastRef = 'home'
+// the claim file of the SSH row's latest one-time link and until when it is watched (watchLink), and whether a watch runs
+let remoteClaim: { file: string; until: number } | null = null
+let watchingLink = false
+
+/** What happened on a press: the page opens in a browser here (`opening`), no browser opens here and the SSH row says
+ *  what to do (`remote`), it failed and a notice says why (`failed`), or a press on the same object a moment ago still
+ *  runs (`again`). */
+export type OpenOutcome = 'opening' | 'remote' | 'failed' | 'again'
+
+/** The SSH row's words (bug hunt F11: `opening thimble's page in the browser` said nothing of what to do): no browser
+ *  opens here, the tunnel command to run on your own computer, then copy link. */
+export function remoteWords(l: Pick<Links, 'tunnel' | 'et'>): string {
+  return `No browser here. On your own computer, run ${l.et ?? l.tunnel}, then press copy link and open the link there.`
+}
+
+/** What `/thimble browser` says after a press that opened no browser here: the command to run on your own computer, and
+ *  where the one-time link is copied from: `copy link` above the prompt, or on Claude Code's main screen, which takes
+ *  no clicks, `2` in the panel (waitview.tsx). */
+export function remoteReply(l: Pick<Links, 'tunnel' | 'et'>, classic: boolean): string {
+  const host = /<your ssh host>/.test(l.et ?? l.tunnel) ? ' Put the host you reach this machine by in place of <your ssh host> (THIMBLE_SSH_HOST fills it in).' : ''
+  const copy = classic ? "press 2 in thimble's panel to copy a one-time link" : 'press copy link above the prompt to copy a one-time link'
+  return `thimble: no browser opens here (a remote terminal, or no display). On your own computer, run ${l.et ?? l.tunnel}, then ${copy} and open it in your browser there; it works once, for 5 minutes.${host}`
+}
+
+/** The SSH row's one-time link in `file` watched until a browser claims it, from timers: then the row goes, since the
+ *  browser is signed in (bug hunt F11). A newer link's file takes the place of an older one's; the watch ends with the
+ *  row, or LINK_MS after the newest link. */
+async function watchLink(cx: Ctx, file: string | null | undefined): Promise<void> {
+  if (!file) return
+  remoteClaim = { file, until: (await cx.now()) + LINK_MS }
+  if (watchingLink) return
+  watchingLink = true
+  const look = (): void => {
+    cx.later(LINK_STEP_MS, () => {
+      void (async () => {
+        const w = remoteClaim
+        if (!w || !(await cx.links())) return void (watchingLink = false)
+        if (await cx.stat(w.file).then(() => true, () => false)) {
+          watchingLink = false
+          remoteClaim = null
+          claimed = true
+          linkFile = ''
+          await cx.setLinks(null)
+          return
+        }
+        if ((await cx.now()) > w.until) return void (watchingLink = false)
+        look()
+      })().catch(() => void (watchingLink = false))
+    })
+  }
+  look()
+}
 
 /** What a run of `thimble open` printed, as C12's answer; a run that printed no JSON is an error of its own. */
 export function openResult(r: { exitCode: number; stdout: string; stderr: string }): OpenResult {
@@ -80,6 +144,8 @@ export async function copyLink(cx: Ctx, ref = lastRef): Promise<void> {
     const got = await runOpen(cx, ref, ['--link'])
     if (!got.ok) return postFailed(cx, ref, got.error)
     file = got.link_file ?? ''
+    // the SSH row goes once a browser claims this new link
+    if (await cx.links()) await watchLink(cx, got.claim_file)
   }
   const link = file ? linkIn(await cx.read(file).catch(() => '')) : ''
   // a link works once: the next copy needs a new one
@@ -124,18 +190,19 @@ function watchClaim(cx: Ctx, file: string, port: number, ref: string, left = CLA
 
 /** thimble's page opened in the browser on `ref` (SPEC-v2 C13): see the file's head. Never a code in a row, a toast or
  *  a log; the SSH row shows the tunnel command alone. */
-export async function openInBrowser(cx: Ctx, ref: string): Promise<void> {
-  if (!rt.sc) return
+export async function openInBrowser(cx: Ctx, ref: string): Promise<OpenOutcome> {
+  if (!rt.sc) return 'failed'
   const now = await cx.now()
   const pressing = await cx.pressing()
-  if (pressing && pressing.ref === ref && now - pressing.at < AGAIN_MS) return
+  if (pressing && pressing.ref === ref && now - pressing.at < AGAIN_MS) return 'again'
   lastRef = ref
   await cx.setPressing({ at: now, ref })
   cx.toast("starting thimble's page…")
   const got = await runOpen(cx, ref)
   if (!got.ok) {
     await cx.setPressing(null)
-    return postFailed(cx, ref, got.error)
+    postFailed(cx, ref, got.error)
+    return 'failed'
   }
   if (got.proxy) postNotice(cx, 'open:proxy', 'A proxy is set for this session; the browser link may not reach thimble. Set NO_PROXY=127.0.0.1,localhost.', [])
   if (got.remote) {
@@ -143,13 +210,19 @@ export async function openInBrowser(cx: Ctx, ref: string): Promise<void> {
     linkFile = got.link_file ?? ''
     const tunnel = noControls(got.tunnel ?? `ssh -N -L ${got.port}:127.0.0.1:${got.port} <your ssh host>`)
     await cx.setLinks({ tunnel, et: got.et ? noControls(got.et) : null, url: noControls(got.url) })
-    return
+    await watchLink(cx, got.claim_file)
+    // Claude Code's main screen takes no clicks, so the SSH row's `copy link` cannot be pressed there: the panel shows
+    // the row with its acts on keys (waitview.tsx; bug hunt F1)
+    if (classicScreen()) await openPanel(cx, { view: 'waiting', title: 'browser', slug: BROWSER_ITEM })
+    return 'remote'
   }
   if (!got.opened) {
     await cx.setPressing(null)
-    return postFailed(cx, ref, { code: 'NO_OPENER', message: '', fix: '' })
+    postFailed(cx, ref, { code: 'NO_OPENER', message: '', fix: '' })
+    return 'failed'
   }
   watchClaim(cx, got.claim_file, got.port, ref)
+  return 'opening'
 }
 
 /** The SSH row's `copy`: the tunnel command (its Eternal Terminal form when the open gave one). */
@@ -168,5 +241,6 @@ export async function copyRemoteLink(cx: Ctx): Promise<void> {
 /** The SSH row gone. */
 export async function dismissLinks(cx: Ctx): Promise<void> {
   linkFile = ''
+  remoteClaim = null
   await cx.setLinks(null)
 }

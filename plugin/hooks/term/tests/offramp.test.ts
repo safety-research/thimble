@@ -72,3 +72,26 @@ test("open's answer and a link file read as C12 writes them", () => {
   expect(linkIn(`${LINK}\n`)).toBe(LINK)
   expect(linkIn('{"code": "x"}')).toBe('')
 })
+
+test("bug hunt F11: `/thimble browser` where no browser opens says so in plain words, with the command to run on your own computer and copy link; the SSH row says it too, and goes once a browser claims the link", T, async ($, on) => {
+  const w = panelWorld(on)
+  const tunnel = 'ssh -N -L 29321:127.0.0.1:29321 <your ssh host>'
+  w.open = { ...w.open, remote: true, opened: false, tunnel, link_file: LINK_FILE }
+  w.files.set(LINK_FILE, JSON.stringify({ url: LINK }))
+  await start($, w)
+  const said = ((await $.command.run({ command: 'thimble:thimble', args: 'browser' } as never)) as { text?: string }).text ?? ''
+  expect(said).not.toContain("opening thimble's page")
+  expect(said).toContain(`no browser opens here (a remote terminal, or no display). On your own computer, run ${tunnel}, then press copy link above the prompt`)
+  expect(said).toContain('in place of <your ssh host>')
+  await w.clock.settle()
+  let m = (await $.ui.mount(aboveAt(200))) as unknown as M
+  expect(words(await m.find({ type: 'Box', key: 'above-remote' }))).toBe(`  browserNo browser here. On your own computer, run ${tunnel}, then press copy link and open the link there.copycopy linkdismiss`)
+  await m.unmount()
+  // the browser signs in with the link: the row goes
+  w.exists.add(CLAIM)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  m = (await $.ui.mount(aboveAt(200))) as unknown as M
+  expect(await m.find({ type: 'Box', key: 'above-remote' })).toBeUndefined()
+  await m.unmount()
+})

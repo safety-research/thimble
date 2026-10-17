@@ -142,9 +142,11 @@ the page's address with the code into a file in `~/.thimble/open/`, and gives yo
 page trades the code for a cookie: the server deletes the file and the code then works no more. When the default
 browser is a snap or a flatpak, which can't read hidden folders, and in VS Code's remote terminal, the opener gets the
 address itself; thimble's log says so, without the code. In a remote terminal (SSH, Eternal Terminal, or no display),
-thimble opens no browser: its panel shows one row with the tunnel command, `ssh -N -L <port>:127.0.0.1:<port> <your ssh
-host>` (set `THIMBLE_SSH_HOST` to fill in the host), and **copy link**, which copies a one-time link that works for 5
-minutes. `thimble open` in a shell prints where the page runs, never the code.
+thimble opens no browser. `/thimble browser` then says so, and a row above the prompt says what to do: run the tunnel
+command, `ssh -N -L <port>:127.0.0.1:<port> <your ssh host>`, on your own computer (set `THIMBLE_SSH_HOST` to fill in
+the host), then press **copy link**, which copies a one-time link that works for 5 minutes, and open the link in your
+browser there. The row goes once a browser signs in with it. On Claude Code's main screen, which takes no clicks, the
+panel opens on that row, and `2` copies the link. `thimble open` in a shell prints where the page runs, never the code.
 
 Same user only. A sign-in code is only in two places: the file the press writes (readable by your account alone, in a
 folder only your account can open, in `~/.thimble`, which only your account can open) and, for a remote terminal, the
@@ -168,8 +170,9 @@ nothing more. A tab whose server went away first asks the address it reconnects 
 that it is the same thimble server; another program that later uses the port can't, and the page stops without sending
 it the cookie. After 6 failed reconnects the page stops too.
 
-Each new sign-in shows a notice with **Sign it out**, in the browser and above the prompt in your terminal; a terminal
-without thimble's panel shows a line under Claude's next reply instead. The browser that signed in can't dismiss its
+Each new sign-in shows a notice with **Sign it out**, in the browser and above the prompt in your terminal (only in the
+Claude Code session it happened in: a later session's terminal does not show it again); a terminal without thimble's
+panel shows a line under Claude's next reply instead. The browser that signed in can't dismiss its
 own notice. If a sign-in was not you, click Sign it out, or run `thimble unpair` in a shell, which signs out every
 browser.
 
@@ -269,7 +272,12 @@ it off, use `/plugin` (everywhere, or for one project). `/thimble` opens its pan
 Once on, Claude makes cards and checked citations, which the terminal draws under its replies, and one dim line under an
 answer that read data says how much of the data Claude's tool calls saw (Coverage). The line above the prompt sums up
 what is new; a press on an item opens thimble's panel at that section: Coverage, Citations, Labels, Threads, Views and
-Checks, then Cards, Documents and Files. The panel opens on the right from 144 columns, and above the prompt below that.
+Checks, then Cards, Documents and Files. In Claude Code's fullscreen layout the panel opens on the right (from 110
+columns when you open it, from 144 when thimble opens it), and above the prompt below that. On Claude Code's main
+screen (the classic renderer) it always opens above the prompt, and nothing takes a click there: the line above the
+prompt then ends with `/thimble to use these with keys`. `/thimble` opens home, which lists the rows above the prompt
+first (a view proposal, notices, the browser's sign-in row); Enter on one shows its actions on number keys.
+`/thimble coverage`, `citations`, `labels`, `threads` and `checks` open the line's sections.
 
 `/thimble browser`, or `o` in the panel, opens the browser workbench on the same session ([Signing in](#signing-in)): the
 chat, the canvas, the File browser, labels, views and report writing. The report is written and edited in the browser;

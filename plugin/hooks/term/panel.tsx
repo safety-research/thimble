@@ -53,9 +53,9 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { ORIENT_ROLES, PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, keysBack, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, readThread, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
+import { ORIENT_ROLES, PANEL, citePage, classicScreen, closePanel, deleteLabel, filterLabel, inPanelNow, keysBack, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, readThread, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, runReads, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
-import { featuresOf, openComments, openSection } from './band'
+import { featuresOf, openComments, openSection, waitItems } from './band'
 import { openChecks } from './checksview'
 import { citeItems, citePlace, openCitations } from './citesview'
 import { coverageTitle, openCoverage } from './coverageview'
@@ -216,10 +216,25 @@ export type NoticeAct = { label: string; act: string; slug: string; config: stri
 /** `ids`: the open notices this one row stands for, the newest (`id`) first: notices with the same words, agent and
  *  acts (three of an orientation's helpers switched to another model) show as one row with their count (bug hunt B5).
  *  `at`: when the newest was posted, in ms (0 when not known), which places it among the terminal's own (band.tsx). */
-export type HomeNotice = { id: string; ids: string[]; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[]; at: number }
+export type HomeNotice = { id: string; ids: string[]; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[]; at: number; kind: string }
+
+/** Whether a notice is a browser's sign-in told in an earlier session (bug hunt F12): it showed there, above that
+ *  session's prompt and with its toast, and does not come back in a later one. A resumed session (`claude -c`) is the
+ *  same session (rt.startedAt is its first launch). */
+export function earlierSignIn(n: { kind?: unknown; at?: unknown }, startedAt: number): boolean {
+  const at = Date.parse(str(n.at)) || 0
+  return str(n.kind) === 'sign-in' && startedAt > 0 && at > 0 && at < startedAt
+}
 
 // the notices dismissed or fixed from here in this session, by id: a later notice of the same failure has an id of its own
 const dismissed = new Set<string>()
+
+/** The open notices as homeNotices gives them, or null while home's state has not been read: the toasts' first look
+ *  must not take "none read yet" for "none there" (bug hunt F12: the band drew before the first read, and every notice
+ *  already there toasted as new). */
+export async function noticesRead(cx: Ctx): Promise<HomeNotice[] | null> {
+  return (await surfaceValue<Obj>(cx, 'home-full'))?.ok ? homeNotices(cx) : null
+}
 
 export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
   const home = await surfaceValue<Obj>(cx, 'home-full')
@@ -227,10 +242,10 @@ export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
   const out: HomeNotice[] = []
   const same = new Map<string, HomeNotice>()
   for (const n of rows) {
-    if (!str(n.id) || !str(n.text) || dismissed.has(str(n.id))) continue
+    if (!str(n.id) || !str(n.text) || dismissed.has(str(n.id)) || earlierSignIn(n, rt.startedAt)) continue
     const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
     const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
-    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config), text: str(a.text) })), at: Date.parse(str(n.at)) || 0 }
+    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config), text: str(a.text) })), at: Date.parse(str(n.at)) || 0, kind: str(n.kind) }
     const key = JSON.stringify([row.text, row.agent, row.open, row.acts])
     const first = same.get(key)
     if (first) first.ids.push(row.id)
@@ -349,7 +364,7 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
     return proposalsOff(cx)
   }
   // a code ticket that passed its checks waits for the analyst's Allow, which the browser's card asks (SPEC-v2 3.16)
-  if (a.act === 'ticket-open') return openInBrowser(cx, `ticket:${a.slug || n.id.replace(/^ticket:/, '')}`)
+  if (a.act === 'ticket-open') return void (await openInBrowser(cx, `ticket:${a.slug || n.id.replace(/^ticket:/, '')}`))
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, a.act, { ...(a.slug ? { slug: a.slug } : {}), notice: n.id })
   if (!got.ok || got.value.queued === false) {
     cx.toast(`thimble: ${got.ok ? got.value.reason || 'it could not start' : got.error}`)
@@ -573,6 +588,8 @@ function crumbText(s: ChatNavStep): string {
       return 'documents'
     case 'ask':
       return 'new thread'
+    case 'waiting':
+      return s.title
     case 'coverage': {
       // a folder drilled into by its path, a group of its files by its pattern or type; the corpus's top as the view's
       // name
@@ -1327,7 +1344,10 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   const coverage = f.coverage ? noControls((await cx.coverageSummary())?.line ?? '') : null
   const cites: HomeCite[] | null = f.citationMarks ? (await citeItems(cx)).map(c => ({ key: c.key, value: noControls(c.value), place: noControls(c.chip ?? citePlace(c.ref)), verdict: c.verdict, why: c.why, ref: c.ref, ...(c.card ? { card: c.card, n: c.n } : {}) })) : null
   const comments: HomeComment[] | null = f.checks ? (await openComments(cx)).map(c => ({ id: c.id, check: noControls(c.checkName), colour: hueOf(c.color || 2), quote: noControls(c.quote), ref: c.ref })) : null
-  return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels }
+  // on Claude Code's main screen, which takes no clicks, the rows above the prompt, first, with their acts on keys (bug
+  // hunt F1); in fullscreen they take clicks there, and home leaves them out
+  const waiting = classicScreen() ? (await waitItems(cx)).map(w => ({ key: w.key, label: w.label, title: w.name || w.words })) : null
+  return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels, waiting }
 }
 
 /** The labels as home and the labels list draw them (home.ts labelBlocks): each with its values' counts and colors, its
@@ -1474,6 +1494,8 @@ async function homeOpen(cx: Ctx, o: HomeOpen): Promise<void> {
       return o.card ? openCard(cx, o.card) : openCite(cx, o.ref, o.display)
     case 'comment':
       return openChecks(cx, o.id)
+    case 'waiting':
+      return openPanel(cx, { view: 'waiting', title: o.label, slug: o.key })
     case 'pane': {
       // a section's list: its `new` on the summary line cleared (band.tsx)
       if (o.view === 'reports') return openSection(cx, 'docs')

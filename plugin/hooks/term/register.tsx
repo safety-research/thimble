@@ -46,16 +46,16 @@ import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './rep
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
-import { PANEL, cardDeleted, cardMade, keepKeys, keysBack, liveCards, loadCards, navOrigin, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
+import { PANEL, cardDeleted, cardMade, classicScreen, keepKeys, keysBack, liveCards, loadCards, navOrigin, noteScreen, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rt, surfaceValue, takeKeys, threadsNow } from './term'
 import { turns } from './turns'
-import { registerBand } from './band'
+import { openSection, registerBand } from './band'
 import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
 import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
 import { callDone, checkName, ownNotice } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
-import { openInBrowser } from './offramp'
+import { openInBrowser, remoteReply } from './offramp'
 import { openChecks } from './checksview'
 import { answerItems, citeCounts, openCitations } from './citesview'
 import { openCoverage } from './coverageview'
@@ -65,8 +65,8 @@ import { setTheme } from './paint'
 
 /** /thimble's description and argument hint (the command.describe hook). */
 export const THIMBLE_DESCRIPTION =
-  "Opens thimble's panel in this terminal. `/thimble browser` opens the browser workbench; `coverage`, `citations`, `checks`, `threads`, `cite <n>`, `card <n>`, `files <path[:line]>` and `documents` open those."
-export const THIMBLE_ARGS = '[browser | coverage | citations | checks | threads | cite <n> | card <n> | files <path[:line]> | documents]'
+  "Opens thimble's panel in this terminal. `/thimble browser` opens the browser workbench; `coverage`, `citations`, `checks`, `threads`, `labels`, `cite <n>`, `card <n>`, `files <path[:line]>` and `documents` open those."
+export const THIMBLE_ARGS = '[browser | coverage | citations | checks | threads | labels | cite <n> | card <n> | files <path[:line]> | documents]'
 /** What `/thimble` says (the model reads it too; logged in PROMPT-CHANGES.md): thimble is on, its panel is open, and how
  *  to reach the browser workbench. */
 export const HOME_LINE = 'thimble is on in this folder. Its panel is open in the terminal; /thimble browser opens the browser workbench.'
@@ -118,7 +118,7 @@ const panelTickA = atom(panelTickRef, 0)
 
 /** `/thimble <what>`, a keyboard way to what the chat and the panel draw: `browser` (the browser workbench; `open`
  *  too), `coverage`,
- *  `citations`, `checks`, `threads`, `cite [n]` (the n-th citation of the last reply), `card [n|id]` (the n-th card of
+ *  `citations`, `checks`, `threads`, `labels`, `cite [n]` (the n-th citation of the last reply), `card [n|id]` (the n-th card of
  *  the last turn, or a card by its id), `files <path[:line]>`, `documents`. What it says, or null for plain `/thimble`
  *  (home). */
 async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
@@ -129,9 +129,15 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
     case '':
       return null
     case 'browser':
-    case 'open':
-      await openInBrowser(cx, 'home')
+    case 'open': {
+      // what happened, in plain words: where no browser opens (SSH, no display), what to run and how to get the link
+      // (bug hunt F11)
+      const how = await openInBrowser(cx, 'home')
+      const links = await cx.links()
+      if ((how === 'remote' || how === 'again') && links) return remoteReply(links, classicScreen())
+      if (how === 'failed') return "thimble: thimble's page did not open: the notice above the prompt says why and how to fix it"
       return "thimble: opening thimble's page in the browser"
+    }
     case 'coverage':
       await openCoverage(cx, arg || undefined)
       return 'thimble: the Coverage view is open'
@@ -144,6 +150,12 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
     case 'threads': {
       await openPanel(cx, { view: 'threads', title: 'Threads' })
       return `thimble: ${plural((await cx.threads()).length, 'side thread')}`
+    }
+    case 'labels': {
+      // the thimble line's `labels` by keys, for a screen that takes no clicks (bug hunt F1)
+      await openSection(cx, 'labels')
+      const got = await surfaceValue(cx, 'labels')
+      return `thimble: ${plural(got?.ok ? labelsOf(got.value).length : 0, 'label')}`
     }
     case 'documents':
     case 'docs':
@@ -190,7 +202,7 @@ async function thimbleCommand(cx: Ctx, args: string): Promise<string | null> {
       return `thimble: ${path}${line ? ` line ${line}` : ''} is open`
     }
     default:
-      return `thimble: \`/thimble\` opens home; \`/thimble browser\` opens the browser; \`coverage\`, \`citations\`, \`checks\`, \`threads\`, \`cite [n]\`, \`card [n]\`, \`files <path[:line]>\` and \`documents\` open those`
+      return `thimble: \`/thimble\` opens home; \`/thimble browser\` opens the browser; \`coverage\`, \`citations\`, \`checks\`, \`threads\`, \`labels\`, \`cite [n]\`, \`card [n]\`, \`files <path[:line]>\` and \`documents\` open those`
   }
 }
 
@@ -553,6 +565,7 @@ export const register: Register = (on, options) => {
     if (SKILL_ARGS.has((args.split(/\s+/)[0] ?? '').toLowerCase())) return next(e)
     const cx = cxOf($)
     if (e.presentation?.columns > 0) rt.termColumns = e.presentation.columns
+    noteScreen(undefined, e.presentation?.isFullscreen)
     if (!isActive()) {
       const turned = await activateNow(cx, 'command')
       if (!turned.ok) return { text: `thimble: ${turned.error ?? 'thimble could not turn on in this folder'}` }
@@ -1001,6 +1014,7 @@ export const register: Register = (on, options) => {
     if (!rt.sc) return next(e)
     const pe = e as PaneEvent
     const cx = cxOf($)
+    noteScreen(pe.surface, (pe.viewport as { isFullscreen?: unknown } | undefined)?.isFullscreen)
     // a pane that waited undrawn is drawn now (Claude Code placed it once the terminal was wide enough): the row above
     // the prompt that offered it goes
     if (rt.waiting) {

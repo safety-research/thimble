@@ -1,5 +1,6 @@
 // The home panel (/thimble, and the title row's first step): one panel listing what this session read and what this
-// folder's sessions made, in SPEC-v2 J4's order: coverage (what Claude read or searched of the data files),
+// folder's sessions made, in SPEC-v2 J4's order, after, on Claude Code's main screen only (which takes no clicks), the
+// rows above the prompt that wait for the analyst, each opening its acts on keys (bug hunt F1): coverage (what Claude read or searched of the data files),
 // citations (the problems first), labels with the distribution of their values, side threads (those
 // with answers not yet read first), views (built, building, proposed), the checks' open comments on answers, cards
 // grouped by the question that made them, and documents. Each heading opens its section's view, each row the panel that
@@ -21,7 +22,7 @@ import { plainProse } from './cite'
 import { curlyQuotes, cutMiddle, quoted } from './lib'
 import { noFitValues } from './labels'
 
-export type SectionId = 'coverage' | 'citations' | 'checks' | 'views' | 'reports' | 'threads' | 'cards' | 'labels'
+export type SectionId = 'waiting' | 'coverage' | 'citations' | 'checks' | 'views' | 'reports' | 'threads' | 'cards' | 'labels'
 
 /** What a click opens: an item in its own panel, or a section's own panel. */
 export type HomeOpen =
@@ -32,6 +33,7 @@ export type HomeOpen =
   | { kind: 'label'; name: string }
   | { kind: 'cite'; ref: string; display: string | null; card?: string }
   | { kind: 'comment'; id: string }
+  | { kind: 'waiting'; key: string; label: string }
   | { kind: 'pane'; view: 'views' | 'reports' | 'threads' | 'labels' | 'coverage' | 'citations' | 'checks'; title: string }
 
 /** A click's act: open something, fold or unfold a card group (`key`, `open` as it is drawn now), show a section
@@ -64,6 +66,9 @@ export type HomeCite = { key: string; value: string; place: string; verdict: str
 /** A check's open comment on a passage of an answer (C9): the passage as the answer wrote it (`quote`) and its anchor
  *  (`ref`, `answer:<turn>#s<n>`). */
 export type HomeComment = { id: string; check: string; colour: string; quote: string; ref?: string }
+/** A row above the prompt that waits for the analyst (band.tsx waitItems): its key, its label (`view proposal`,
+ *  `notice`, `browser`) and what it says. */
+export type HomeWait = { key: string; label: string; title: string }
 export type HomeData = {
   views: HomeView[]
   reports: HomeReport[]
@@ -79,6 +84,9 @@ export type HomeData = {
   comments?: HomeComment[] | null
   /** labels are off: no Labels section */
   noLabels?: boolean
+  /** the rows above the prompt, on Claude Code's main screen only, which takes no clicks (bug hunt F1): home lists them
+   *  first, each opening its acts with keys; null in fullscreen, where the rows take clicks */
+  waiting?: HomeWait[] | null
 }
 
 /** The cards of answers, threads and reports, each under the first question that made it (`groups` in the order the
@@ -519,6 +527,25 @@ export function labelBlocks(ls: readonly HomeLabel[], w: number, rows = LEGEND_R
   })
 }
 
+/** Waiting (bug hunt F1): on Claude Code's main screen, which takes no clicks, the rows above the prompt that wait for
+ *  the analyst, first: the view proposal, the notices and the browser's SSH row, each a row that Enter opens with its
+ *  acts on keys (the `waiting` view). A notice's glyph is a red `!`, as its row's label is red. */
+function waitingSection(ws: readonly HomeWait[]): HomeSection {
+  return {
+    id: 'waiting',
+    name: 'Above the prompt',
+    count: ws.length,
+    summary: [],
+    rows: ws.map(w => ({
+      key: `waiting:${w.key}`,
+      glyph: w.label === 'notice' ? { mark: '!', fg: COLORS.problem } : null,
+      title: w.title,
+      right: rightOf([w.label]),
+      act: { op: 'open', open: { kind: 'waiting', key: w.key, label: w.label } },
+    })),
+  }
+}
+
 /** Coverage (SPEC-v2 J5): this session's coverage line, its heading opening the Coverage view. */
 function coverageSection(line: string): HomeSection {
   return {
@@ -586,12 +613,13 @@ function isOpen(ui: HomeUi, key: string, byDefault: boolean): boolean {
   return byDefault ? !ui.folded.includes(key) : ui.unfolded.includes(key)
 }
 
-/** Every section, in SPEC-v2 J4's order: what this session read and how its citations and labels stand, what it asked
- *  and made, what the checks said, then its cards and documents. A section of a feature that is off is left out
+/** Every section, in SPEC-v2 J4's order: on the main screen what waits above the prompt, then what this session read and
+ *  how its citations and labels stand, what it asked and made, what the checks said, then its cards and documents. A section of a feature that is off is left out
  *  (coverage, citations, labels, checks), and so are coverage, citations and checks while they hold nothing. */
 export function homeSections(d: HomeData, ui: HomeUi = HOME_UI_EMPTY): HomeSection[] {
   // the sections of what this session read, its citations and the checks' comments show once they hold something
   return [
+    ...(d.waiting?.length ? [waitingSection(d.waiting)] : []),
     ...(d.coverage ? [coverageSection(d.coverage)] : []),
     ...(d.cites?.length ? [citationsSection(d.cites)] : []),
     ...(d.noLabels ? [] : [labelsSection(d.labels)]),

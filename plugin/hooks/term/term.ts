@@ -92,6 +92,10 @@ export const rt = {
   // the latest row of main's chat a line can stand under (signal.ts isAnchor)
   anchor: '',
   termColumns: 0,
+  // which of Claude Code's two screens the terminal draws (a command's `presentation`, a drawing's `viewport`, fixed per
+  // session): true fullscreen, the only one that takes clicks; false the main screen (the classic renderer), where
+  // nothing above the prompt can be pressed and home lists those rows with keys; null before either said
+  fullscreen: null as boolean | null,
   // the terminal's width the docked panel was last opened or fitted at
   fittedFor: 0,
   // the pane waits undrawn (its open answered `isPlaced: false`): its first drawing takes the row above the prompt
@@ -172,6 +176,17 @@ export const rt = {
 }
 
 const iso = (ms: number) => new Date(ms).toISOString()
+
+/** Which screen the terminal draws, as a command's `presentation` or a terminal drawing's `viewport` says it. */
+export function noteScreen(surface: string | undefined, fullscreen: unknown): void {
+  if ((surface === undefined || surface === 'terminal') && typeof fullscreen === 'boolean') rt.fullscreen = fullscreen
+}
+
+/** Whether the terminal draws Claude Code's main screen (the classic renderer), which takes no clicks: the rows above the
+ *  prompt and the thimble line cannot be pressed there, so home lists them with keys (band.tsx waitItems). */
+export function classicScreen(): boolean {
+  return rt.fullscreen === false
+}
 
 export function panelColumns(): number {
   return rt.termColumns ? Math.max(36, Math.min(PANEL_COLS, rt.termColumns - MAIN_KEEP - 1)) : PANEL_COLS

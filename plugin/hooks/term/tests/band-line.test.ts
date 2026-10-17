@@ -14,6 +14,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 import { ABOVE_LABEL, ACT_GAP, LINE_LABEL_W, MIN_WORDS, actsWidth, fitItems, percent, wordsRoom } from '../band'
 import { cid, cut, width } from '../lib'
 import { COLORS } from '../paint'
+import { remoteWords } from '../offramp'
 import { CWD, PANEL, SUMMARY, WS, aboveAt, comment, featuresOff, paneAt, panelWorld, pressBrowser, shown, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
@@ -407,7 +408,7 @@ test("a viewer of a file type shows its files on the name's press; why accept co
   await narrow.unmount()
 })
 
-test("the SSH row of a remote press is one row: its command cut where its acts begin (`copy` bold), whole on a press", { timeoutMs: 30_000 }, async ($, on) => {
+test("the SSH row of a remote press is one row: its words (no browser here, the command to run, then copy link) cut where its acts begin (`copy` bold), whole on a press", { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   const tunnel = 'ssh -N -L 29321:127.0.0.1:29321 -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 analyst@devbox.example.internal'
   w.open = { ...w.open, remote: true, opened: false, tunnel }
@@ -418,12 +419,12 @@ test("the SSH row of a remote press is one row: its command cut where its acts b
   const m = await band($, 120)
   const row = await m.find({ type: 'Box', key: 'above-remote' })
   const room = 120 - ABOVE_LABEL - 24 - ACT_GAP
-  expect(words(row)).toBe(`  browser${cut(tunnel, room)}copycopy linkdismiss`)
+  expect(words(row)).toBe(`  browser${cut(remoteWords({ tunnel, et: null }), room)}copycopy linkdismiss`)
   expect(texts(row).find(l => l.s === 'copy')).toMatchObject({ color: COLORS.accent, bold: true })
   await m.press({ key: 'above-remote-more' })
   await w.clock.settle()
   await m.unmount()
   const open = await band($, 120)
-  expect(words(await open.find({ type: 'Box', key: 'above-remote' }))).toBe(`  browser${tunnel}copycopy linkdismiss`)
+  expect(words(await open.find({ type: 'Box', key: 'above-remote' }))).toBe(`  browser${remoteWords({ tunnel, et: null })}copycopy linkdismiss`)
   await open.unmount()
 })
