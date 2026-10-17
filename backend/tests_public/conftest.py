@@ -658,15 +658,17 @@ def _kill_kernel_pid(pid: int, wait_s: float = 3.0) -> None:
 
 @pytest.fixture(autouse=True)
 def _kernels_left_by_the_test():
-    """After every test, a kernel still in notebook's tables is terminated through its recorded pid and its files
-    dropped."""
+    """After every test, a kernel still in notebook's tables, or launched and named by none (notebook._launched), is
+    terminated through its recorded pid and its files dropped."""
     yield
     nb = sys.modules.get("app.notebook")
     if nb is None or not hasattr(nb, "_kernels"):
         return  # never imported, or a test's stand-in module is still in place
-    left = [*nb._kernels.values(), *nb._exec_kernels.values()]
+    launched = getattr(nb, "_launched", set())
+    left = list(dict.fromkeys([*nb._kernels.values(), *nb._exec_kernels.values(), *launched]))
     nb._kernels.clear()
     nb._exec_kernels.clear()
+    launched.clear()
     for k in left:
         pid, pgid = k.pid, k.pgid
         if pid is None:

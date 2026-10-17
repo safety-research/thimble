@@ -579,20 +579,31 @@ async function mediaAnswer(file, type, size, rangeHeader) {
 const answers = new Map()
 const raw = new Set() // the requests whose answer is the line's text
 let seq = 0
-createInterface({ input: process.stdin }).on('line', (line) => {
-  let msg
-  try {
-    msg = JSON.parse(line)
-  } catch {
-    return
-  }
-  const fn = answers.get(msg.id)
-  if (fn) {
-    answers.delete(msg.id)
-    fn(raw.has(msg.id) ? line : msg)
-    raw.delete(msg.id)
-  }
-})
+// The server keeps this process's stdin open until it has read the `done` line. An end before that means it stopped,
+// died or gave up on the run, so the process exits rather than wait ANSWER_MS for answers that will not come, and so it
+// does on SIGTERM and SIGHUP (the launch leaves those to this file: Playwright's own handlers close the browser but
+// keep the process). Playwright's exit handler kills the browser.
+let finished = false
+createInterface({ input: process.stdin })
+  .on('line', (line) => {
+    let msg
+    try {
+      msg = JSON.parse(line)
+    } catch {
+      return
+    }
+    const fn = answers.get(msg.id)
+    if (fn) {
+      answers.delete(msg.id)
+      fn(raw.has(msg.id) ? line : msg)
+      raw.delete(msg.id)
+    }
+  })
+  .on('close', () => {
+    if (!finished) process.exit(1)
+  })
+process.on('SIGTERM', () => process.exit(143))
+process.on('SIGHUP', () => process.exit(129))
 /** One request to the server and its answer: parsed, or with `text` the line as the server wrote it. */
 function ask(kind, body, text = false) {
   const id = `${kind[0]}${++seq}`
@@ -887,7 +898,7 @@ async function main() {
   const states = JSON.parse(readFileSync(opt.states, 'utf8') || '[]')
   // the system's Chrome, Edge or Chromium when thimble's config picks it (backend/app/userconf.py)
   const executablePath = process.env.THIMBLE_BROWSER_PATH || undefined
-  const browser = await chromium.launch({ executablePath })
+  const browser = await chromium.launch({ executablePath, handleSIGTERM: false, handleSIGHUP: false })
   const out = new Array(states.length)
   let next = 0
   const worker = async () => {
@@ -905,10 +916,12 @@ async function main() {
   } finally {
     await browser.close()
   }
+  finished = true
   say({ done: true, states: out })
 }
 
 main().catch((e) => {
+  finished = true
   say({ done: true, states: [], error: plain(e) })
   process.exit(1)
 })

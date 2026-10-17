@@ -1939,10 +1939,11 @@ def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
 # killed. Every signal goes to a pid whose command line was just checked.
 #
 # Kernels end with the server: shutdown() kills them unless the server is restarting, when it detaches them for the next
-# server. A restart says so with <THIMBLE_HOME>/kernels-handoff.json (cli.hand_over_kernels); a `--reload` worker writes
-# it for itself. An exit that skips the lifespan still kills kernels from an atexit hook. Explicit shutdown sends
-# SIGTERM to the process group, SIGKILL after KILL_WAIT_S, and removes the record. A watchdog inside the kernel exits
-# once the recorded server has been gone for KERNEL_TTL_S. Interrupt is SIGINT to the process group.
+# server, and no kernel starts after it began (stopping). A restart says so with <THIMBLE_HOME>/kernels-handoff.json
+# (cli.hand_over_kernels); a `--reload` worker writes it for itself. An exit that skips the lifespan still kills kernels
+# from an atexit hook. Explicit shutdown sends SIGTERM to the process group, SIGKILL after KILL_WAIT_S, and removes the
+# record. A watchdog inside the kernel exits once the recorded server has been gone for KERNEL_TTL_S. Interrupt is SIGINT
+# to the process group.
 #
 # With `kernel_wrap: bwrap` the argv runs inside bubblewrap: the recorded pid is bwrap's outer process, which leads the
 # process group. The kernel cannot see the server's pid there, so its watchdog reads a LEASE instead: an flock on
@@ -2287,10 +2288,32 @@ class _Kernel:
 
 _kernels: dict[str, _Kernel] = {}  # the shared per-workspace kernel: the run session's exploration notebooks
 _exec_kernels: dict[tuple[str, str], _Kernel] = {}  # named dedicated execution kernels, keyed (workspace, name)
+# Every kernel this server launched that it has not stopped or left for the next server, also one that neither table
+# names any more: a start that waited for its kernel's lock while the kernel was shut down (shutdown_kernel,
+# shutdown_all) launches on an object the tables have dropped. shutdown_all and the atexit hook stop these too.
+_launched: set[_Kernel] = set()
 # In a card runner (`thimble-run`, cardrun.py), the in-process shell that stands in for every kernel: a function of
 # (workspace, kernel name) returning an object with the kernel's fields and `local = True`, which _ensure_started and
 # _execute hand over to (cardrun.LocalKernel). None everywhere else.
 local_kernel: Any = None
+
+
+_stopped_on: asyncio.AbstractEventLoop | None = None  # the loop of the server that began to stop (shutdown)
+
+
+def stopping() -> bool:
+    """Whether this server has begun to stop for good (shutdown ran on its loop), from when no kernel starts (_launch)
+    and no view's headless run (views._shoot_in): a start then, such as a reader kernel's after its call was cancelled by
+    the stop, would outlive the server. It is the loop's state, not the process's, since a test's app stops on a loop of
+    its own."""
+    try:
+        return asyncio.get_running_loop() is _stopped_on
+    except RuntimeError:
+        return False
+
+
+class Stopping(RuntimeError):
+    """A kernel did not start because the server is stopping (stopping)."""
 
 
 class TerminalRun(RuntimeError):
@@ -2688,7 +2711,10 @@ def _release_lease(k: _Kernel, drop: bool = False) -> None:
 
 
 async def _launch(k: _Kernel, workspace: str) -> None:
-    """A fresh kernel process in the workspace's scratch mirror, recorded and connected. Call with k.lock held."""
+    """A fresh kernel process in the workspace's scratch mirror, recorded and connected. Call with k.lock held. Stopping
+    once the server has begun to stop, also when it began while the start was under way."""
+    if stopping():
+        raise Stopping("the server is stopping, so the kernel did not start")
     corpus = config.corpus_dir(workspace)
     cwd = await asyncio.to_thread(scratch_dir, workspace, corpus)  # the scratch mirror (module docstring)
     k.record.parent.mkdir(parents=True, exist_ok=True)
@@ -2713,6 +2739,8 @@ async def _launch(k: _Kernel, workspace: str) -> None:
             await asyncio.to_thread(_fresh_home, k)
         if wrapped:
             await asyncio.to_thread(_hold_lease, k)  # before the process exists: its watchdog never sees a free lease
+        if stopping():  # it began during the awaits above; nothing is awaited from here to the Popen
+            raise Stopping("the server is stopping, so the kernel did not start")
         log.info("starting kernel %s for %s in %s (a mirror of %s)%s", k.key, workspace, cwd, corpus,
                  f"; wrapped in {wrap} ({source})" if wrapped else "")
         with k.log.open("wb") as out:
@@ -2720,6 +2748,7 @@ async def _launch(k: _Kernel, workspace: str) -> None:
                                     stdout=out, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
         k.proc = proc
         k.pid = k.pgid = proc.pid
+        _launched.add(k)
         k.wrap = wrap
         _write_record(k, {"name": k.name, "workspace": workspace, "pid": proc.pid, "pgid": proc.pid,
                           "connection_file": str(k.conn), "cwd": str(cwd), "started": _now(), "server_pid": os.getpid(),
@@ -2790,6 +2819,7 @@ def _detach(k: _Kernel) -> None:
     if kc is not None:
         _close_client(kc)
     _release_lease(k)  # the file stays: the next server's _attach takes the lease back
+    _launched.discard(k)
 
 
 async def _kill(k: _Kernel) -> None:
@@ -2804,6 +2834,7 @@ async def _kill(k: _Kernel) -> None:
         rec = _read_record(k.record) or {}
         pid, pgid = _record_pid(rec), _record_pid(rec, "pgid")
     k.pid = k.pgid = None
+    _launched.discard(k)
     if pid is not None:
         ours = proc is not None and proc.pid == pid and proc.poll() is None
         await asyncio.to_thread(_terminate, pid, pgid or pid, k.conn, ours)
@@ -2832,9 +2863,9 @@ async def shutdown_workspace(workspace: str) -> None:
 
 
 async def shutdown_all() -> None:
-    """Explicit shutdown of every kernel this server holds, all at once, so a stopping server ends them within
-    KILL_WAIT_S."""
-    ks = [*_kernels.values(), *_exec_kernels.values()]
+    """Explicit shutdown of every kernel this server holds or launched (_launched), all at once, so a stopping server
+    ends them within KILL_WAIT_S."""
+    ks = _held()
     _kernels.clear()
     _exec_kernels.clear()
     for r in await asyncio.gather(*(_kill(k) for k in ks), return_exceptions=True):
@@ -2843,11 +2874,18 @@ async def shutdown_all() -> None:
 
 
 async def detach_all() -> None:
-    """Leave every kernel this server holds running with its record, for the next server to take back (a restart)."""
+    """Leave every kernel this server holds running with its record, for the next server to take back (a restart). One
+    that neither table names is left too, for the next server's start to take back or stop (reconnect_all)."""
     for k in [*_kernels.values(), *_exec_kernels.values()]:
         _detach(k)
     _kernels.clear()
     _exec_kernels.clear()
+    _launched.clear()
+
+
+def _held() -> list[_Kernel]:
+    """Every kernel this server holds in its tables or launched (_launched), each once."""
+    return list(dict.fromkeys([*_kernels.values(), *_exec_kernels.values(), *_launched]))
 
 
 def _home() -> Path:
@@ -2869,16 +2907,18 @@ def _server_alive(pid: int | None) -> bool:
 
 
 async def shutdown() -> None:
-    """Lifespan shutdown and dev's pre-execv hook: kernels end with the server, unless it is restarting, when they are
-    detached for the next server."""
+    """Lifespan shutdown and dev's pre-execv hook: kernels end with the server, and none starts after (stopping),
+    unless it is restarting, when they are detached for the next server (and a restart whose execv fails goes on)."""
+    global _stopped_on
     from . import cli  # noqa: PLC0415
 
-    held = len(_kernels) + len(_exec_kernels)
+    held = len(_held())
     if cli.kernel_handoff() == os.getpid() or (held and _under_reloader() and cli.hand_over_kernels(os.getpid())):
         if held:
             log.info("restarting: %d kernel(s) left running for the next server", held)
         await detach_all()
         return
+    _stopped_on = asyncio.get_running_loop()
     await shutdown_all()
     if held:
         log.info("stopped %d kernel(s) with the server", held)
@@ -2887,9 +2927,10 @@ async def shutdown() -> None:
 def _kill_left_at_exit() -> None:
     """The interpreter exits with kernels still held (uvicorn skipped the lifespan on a forced exit): terminate them as
     shutdown_all would; nothing when shutdown ran."""
-    ks = [*_kernels.values(), *_exec_kernels.values()]
+    ks = _held()
     _kernels.clear()
     _exec_kernels.clear()
+    _launched.clear()
     for k in ks:
         try:
             if k.pid:

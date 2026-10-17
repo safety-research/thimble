@@ -325,8 +325,9 @@ async def _drain(w: Worker) -> None:
             w.holds.clear()
             for k in [k for k, n in _affinity.items() if k[0] == w.c and n == w.name]:
                 del _affinity[k]
-    except Exception:  # noqa: BLE001
-        log.exception("%s: the reader kernel %s did not settle after an interrupt", w.c, w.name)
+    except Exception as e:  # noqa: BLE001
+        if not _stopping(e):
+            log.exception("%s: the reader kernel %s did not settle after an interrupt", w.c, w.name)
         with contextlib.suppress(Exception):
             await _stop(w.c, w.name)
         _forget(w)
@@ -403,7 +404,8 @@ def _spare(c: str) -> None:
         except Exception as e:  # noqa: BLE001
             _forget(w)
             _wake()
-            _spare_failure(c, w.name, e)
+            if not _stopping(e):
+                _spare_failure(c, w.name, e)
             return
         if w not in _pools.get(c, []):  # the workspace's kernels were forgotten while this one started
             with contextlib.suppress(Exception):
@@ -415,6 +417,13 @@ def _spare(c: str) -> None:
         _release(w)
 
     asyncio.get_running_loop().create_task(warm(), name=f"view-kernel-spare-{w.name}")
+
+
+def _stopping(e: BaseException) -> bool:
+    """The kernel did not start because the server is stopping (notebook.Stopping), which the log need not report."""
+    from . import notebook  # noqa: PLC0415
+
+    return isinstance(e, notebook.Stopping)
 
 
 def _spare_failure(c: str, name: str, e: BaseException) -> None:
