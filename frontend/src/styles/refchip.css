@@ -2,8 +2,7 @@
    the accent chip. Here: the inline citation, its states, the links toggle, the hover label that names the evidence,
    and a table's cited cell. A citation is always purple and underlined while the links are on; a small spinner
    follows it while it is checked, and one that failed is red with ×. */
-.refchip.refchip-value,
-.refchip.refchip-words {
+.refchip.refchip-value {
   display: inline;
   margin: 0;
   padding: 0;
@@ -25,20 +24,11 @@
   transition: var(--transition-color), text-decoration-color var(--dur-fast) var(--ease-out);
 }
 .refchip.refchip-value:hover,
-.refchip.refchip-value:focus-visible,
-.refchip.refchip-words:hover,
-.refchip.refchip-words:focus-visible {
+.refchip.refchip-value:focus-visible {
   color: var(--text-accent);
   text-decoration-color: var(--accent);
   text-decoration-thickness: 2px;
   outline: none;
-}
-/* a chat reply's citation of a card in words, `[ card:<name> ]` as the terminal draws it: the card's name in mono,
-   never broken across lines */
-.refchip.refchip-words {
-  font-family: var(--font-mono);
-  font-size: 0.9em;
-  white-space: nowrap;
 }
 /* what follows a citation: the spinner while it is checked, × in red when it failed */
 .refchip-mark {
@@ -76,9 +66,7 @@
 }
 /* states: unable to verify, red with its underline (× follows it); not linked and unknown, dotted and quiet */
 .refchip.refchip-value.broken,
-.refchip.refchip-value.broken:hover,
-.refchip.refchip-words.broken,
-.refchip.refchip-words.broken:hover {
+.refchip.refchip-value.broken:hover {
   color: var(--status-negative);
   text-decoration-color: var(--status-negative);
 }
@@ -99,8 +87,8 @@
   color: var(--text-tertiary);
   background: none;
 }
-.refchip.broken:not(.refchip-value):not(.refchip-words),
-.refchip.broken:not(.refchip-value):not(.refchip-words):hover {
+.refchip.broken:not(.refchip-value),
+.refchip.broken:not(.refchip-value):hover {
   border: 1px dashed var(--status-negative);
   color: var(--status-negative);
   background: none;
