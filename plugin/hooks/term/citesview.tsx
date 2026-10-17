@@ -17,7 +17,7 @@ import { MARGIN_W, headerEls, marginKey, pointed, setBrowser, spread, subLine } 
 import type { Ctx } from './ctx'
 import { placeWords } from './draw'
 import type { Line, Seg } from './draw'
-import { cid, citations, clip, labelRef, noControls, noteQuestion, width } from './lib'
+import { cid, citations, clip, decodeLabel, labelRef, noControls, noteQuestion, width } from './lib'
 import type { Citation } from './lib'
 import { linesEl } from './lines'
 import type { LineHit } from './lines'
@@ -192,8 +192,9 @@ function verdictLook(it: CiteItem): { glyph: Seg; words: string } {
 /** A cited place in words: a card's cell by its column and row (`merged agent-02`), its output by its lines, a file's
  *  line as draw.ts placeWords says it. */
 export function citePlace(ref: string): string {
+  // a card's column and row as the labels they stand for (bug hunt B18: `mean merged PRs managed%5Fprs`)
   const cell = /^(?:card|cell):[A-Za-z0-9_-]+#([^/]+)\/(.+)$/.exec(ref)
-  if (cell) return `${cell[1]} ${cell[2]}`
+  if (cell) return `${decodeLabel(cell[1]!)} ${decodeLabel(cell[2]!)}`
   const out = /^(?:card|cell):[A-Za-z0-9_-]+@out\d*#L(\d+)(?:-L?(\d+))?$/.exec(ref)
   if (out) return out[2] && out[2] !== out[1] ? `output lines ${out[1]}-${out[2]}` : `output line ${out[1]}`
   if (/^(?:card|cell):[A-Za-z0-9_-]+$/.test(ref)) return 'the card'

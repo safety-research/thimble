@@ -35,7 +35,7 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { bareCard, cardTag, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
+import { bareCard, cardTag, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, decodeLabel, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, FLAG, labelHex, paintLines, passageTint } from './paint'
@@ -95,10 +95,17 @@ export async function placeName(cx: Ctx, ref: string): Promise<string> {
   }
   const m = CARD_REF.exec(ref)
   // a card's output line (`card:<id>@out0#L8`) by its line, a cell by its column and row
-  if (m) return m[2] ? `${await cardName(cx, m[1]!)} · ${/^L\d+$/.test(m[2]) ? `line ${m[2].slice(1)}` : m[2].replace('/', ' ')}` : cardName(cx, m[1]!)
+  if (m) return m[2] ? `${await cardName(cx, m[1]!)} · ${/^L\d+$/.test(m[2]) ? `line ${m[2].slice(1)}` : cellWords(m[2])}` : cardName(cx, m[1]!)
   const call = CALL_REF.exec(ref)
   if (call) return `the command's output${call[1] ? ` · line ${call[1]}${call[2] && call[2] !== call[1] ? `-${call[2]}` : ''}` : ''}`
   return placeWords(ref)
+}
+
+/** A card's cell as a ref names it (`<column>/<row>`), in words: the column and the row as the labels they stand for
+ *  (`mean merged PRs managed_prs`, never `managed%5Fprs`). */
+function cellWords(part: string): string {
+  const at = part.indexOf('/')
+  return at < 0 ? decodeLabel(part) : `${decodeLabel(part.slice(0, at))} ${decodeLabel(part.slice(at + 1))}`
 }
 
 /** A reason as the analyst reads it: citations as their shown words, a card by its question, a command's output as

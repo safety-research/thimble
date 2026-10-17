@@ -32,6 +32,19 @@ const REPORT_REF = /^report:([A-Za-z0-9_-]+)(?:#(p?[A-Za-z0-9_-]+))?$/
 // a view's slug as the backend writes it (views.SLUG_RE), then any key the view defines
 const VIEW_REF = /^view:([a-z0-9][a-z0-9-]{0,39})(?:\/(\S+))?$/
 
+/** A card's column or row label as a ref writes it (`managed%5Fprs`), as the label it stands for (`managed_prs`), as
+ *  backend cite.decode_label reads it: each run of %XX decoded; a run that is no UTF-8 kept as written. */
+export function decodeLabel(s: string): string {
+  if (!s.includes('%')) return s
+  return s.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
+    try {
+      return decodeURIComponent(run)
+    } catch {
+      return run
+    }
+  })
+}
+
 /** A link to a view, or to a unit only that view defines (`view:<slug>/<key>`, backend views.py): the view's slug and
  *  the key ('' for the whole view); null for any other ref. */
 export function viewRef(ref: string): { slug: string; key: string } | null {
