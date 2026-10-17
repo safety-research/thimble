@@ -278,7 +278,8 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
 }
 
 /** A notice's act: `view-propose-now` (try again) or `view-retry` {slug} (retry), which name the notice, so that thimble
- *  dismisses it before the act runs and a failure that comes again shows as a new notice; or `view-proposals-off`, as
+ *  dismisses it before the act runs and a failure that comes again shows as a new notice; `sign-out` {slug}, a sign-in
+ *  notice's Sign it out, which signs that browser out and takes its notice away; or `view-proposals-off`, as
  *  don't ask again, which dismisses it. The notice goes at once; one that thimble refuses stays, with why in a toast.
  *  `settings` (open settings) says in a toast where thimble's config is, which the terminal has in place of the
  *  browser's Settings, and leaves the notice. */
@@ -300,7 +301,7 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
     return
   }
   await hideNotice(cx, n.id)
-  cx.toast(a.act === 'view-propose-now' ? 'thimble: checking for a view proposal' : 'thimble: building the view again')
+  cx.toast(a.act === 'view-propose-now' ? 'thimble: checking for a view proposal' : a.act === 'sign-out' ? 'thimble: that browser is signed out' : 'thimble: building the view again')
 }
 
 /** The notice's row gone at once (home's state read again no longer has it once thimble has written why). */

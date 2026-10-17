@@ -3,8 +3,9 @@ signed_in). The page opens on a one-time code after `#p=`, made when the page is
 link is shown (300 s); the page trades it for a cookie and a key, and the server keeps only the sha256 of each code,
 cookie and key, so no file, transcript or link holds a credential that lasts. The cookie is scoped to the path of that
 browser's key, /b/<key>/api/, counts only there, lasts 30 days and is renewed by each signed request. Each new sign-in
-shows twice: a notice with Sign it out, and a line under main's next reply. A stale tab asks /api/hello before it sends
-its cookie again, and a claim from another account's connection is refused."""
+shows a notice with Sign it out, which the terminal panel shows above the prompt; a terminal without the panel gets a
+line under main's next reply instead. A stale tab asks /api/hello before it sends its cookie again, and a claim from
+another account's connection is refused."""
 from __future__ import annotations
 
 import json
@@ -128,7 +129,7 @@ def test_unpair_with_the_token_signs_every_browser_out_and_signout_with_a_cookie
     mine, theirs = client.get("/api/ui/paired").json()["id"], other.get("/api/ui/paired").json()["id"]
     assert mine and theirs and mine != theirs
     session.attach(CORPUS, SID, "/data/mini")
-    notices.post(CORPUS, kind="sign-in", key=f"sign-in:{theirs}", text="A browser signed in.",
+    notices.post(CORPUS, kind="sign-in", key=main.signin_key(theirs), text="A browser signed in.",
                  action={"label": "Sign it out", "do": "sign-out", "slug": theirs})
 
     bare = TestClient(client.app, base_url="http://testserver")
@@ -137,7 +138,7 @@ def test_unpair_with_the_token_signs_every_browser_out_and_signout_with_a_cookie
     r = client.post("/api/ui/signout", json={"id": theirs, "ws": CORPUS})
     assert r.json() == {"signed_out": True}
     assert other.get("/api/ui/paired").json()["paired"] is False and client.get("/api/ui/paired").json()["paired"]
-    assert not [n for n in notices.open_notices(CORPUS) if n["key"] == f"sign-in:{theirs}"], "its notice went"
+    assert not [n for n in notices.open_notices(CORPUS) if n["key"] == main.signin_key(theirs)], "its notice went"
     assert client.post("/api/ui/signout", json={"id": theirs}).json() == {"signed_out": False}
     assert client.post("/api/ui/signout", json={"id": ""}).json() == {"signed_out": False}
 
@@ -182,6 +183,43 @@ def test_a_new_sign_in_shows_a_notice_in_the_named_and_the_attached_workspace_an
     r = another.post("/api/ui/key", json={"code": hook_auth.mint(), "ws": "no-such-workspace"})
     assert r.status_code == 200, "a link of no registered workspace still signs in, and tells the attached main"
     assert line != (hook_auth.home() / "links" / SID).read_text()
+
+
+@pytest.mark.real_write_guard
+async def test_with_the_terminal_panel_a_sign_in_is_one_notice_and_its_sign_it_out_works_in_the_terminal(
+        client, monkeypatch, plugin_headers):
+    """Bug hunt B3: main's session runs thimble's terminal panel (its marker's `mod`), whose rows above the prompt show
+    the sign-in's notice, so no second line goes under main's next reply (`Stop says: thimble: a browser signed in…`).
+    The row has the notice's Sign it out, as INSTALL.md says: `thimble act sign-out` signs that browser out with the
+    token (POST /api/ui/unpair {browser}) and its notice goes. The browser that signed in cannot dismiss that notice,
+    so the row in the terminal tells of a sign-in that was not the analyst's whatever that browser does."""
+    from app import activate, cli, local
+
+    session.attach(CORPUS, SID, "/data/mini")
+    activate.write_private(activate.marker_path(SID), {"cwd": "/data/mini", "ws": CORPUS, "mod": True})
+    sign_in(client, hook_auth.mint(CORPUS), CORPUS)
+    browser = client.get("/api/ui/paired").json()["id"]
+    [n] = [n for n in notices.open_notices(CORPUS) if n["key"] == main.signin_key(browser)]
+    assert not (hook_auth.home() / "links" / SID).exists(), "one notice: no line under main's next reply"
+    [row] = [r for r in local._notices(CORPUS) if r["id"] == n["id"]]
+    assert row["acts"] == [{"label": "Sign it out", "act": "sign-out", "slug": browser}]
+    r = client.post(f"/api/ws/{CORPUS}/notices/{n['id']}/dismiss")
+    assert r.status_code == 403 and r.json()["detail"] == notices.OWN_SIGN_IN, "its own browser cannot hide it"
+    bare = TestClient(client.app, base_url="http://testserver")
+
+    def request(method, url, body=None, timeout=5.0, cookie=None):  # cli._request, through the app
+        r = bare.request(method, "/" + url.split("/", 3)[3], json=body, headers=plugin_headers())
+        return r.status_code, (r.json() if r.content else None)
+
+    monkeypatch.setattr(cli, "_request", request)
+    out = await local.act(CORPUS, "sign-out", {"slug": browser, "notice": n["id"]})
+    assert out == {"ok": True, "queued": True, "signed_out": browser}
+    assert client.get("/api/ui/paired").json()["paired"] is False
+    assert not [x for x in notices.open_notices(CORPUS) if x["key"] == main.signin_key(browser)], "its notice went"
+    # a terminal without the panel shows the line under main's next reply, which no browser can hide
+    activate.write_private(activate.marker_path(SID), {"cwd": "/data/mini", "ws": CORPUS, "mod": False})
+    sign_in(TestClient(client.app, base_url="http://testserver"), hook_auth.mint(CORPUS), CORPUS)
+    assert "a browser signed in to thimble's page" in (hook_auth.home() / "links" / SID).read_text()
 
 
 @pytest.mark.real_read_guard

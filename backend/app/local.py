@@ -500,7 +500,7 @@ def _offer(c: str) -> dict[str, Any] | None:
 # "ticket-open" is no `thimble act` kind: the terminal UI opens the ticket in the browser workbench (its `ref`), where
 # the analyst allows its change.
 NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
-               "settings": "settings", "ticket-open": "ticket-open"}
+               "settings": "settings", "ticket-open": "ticket-open", "sign-out": "sign-out"}
 
 
 def _notice_acts(action: Any) -> list[dict[str, str]]:
@@ -1074,7 +1074,7 @@ ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id
              "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
              "stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
-             "view-propose-now {notice?}, view-retry {slug, notice?}, notice-dismiss {id}")
+             "view-propose-now {notice?}, view-retry {slug, notice?}, notice-dismiss {id}, sign-out {slug}")
 
 
 # The acts whose state thimble's server holds in memory once main's transport is server: the comments of a document and
@@ -1532,13 +1532,28 @@ async def _act_notice_dismiss(c: str, payload: dict[str, Any]) -> dict[str, Any]
     return _queued("notice-dismiss", c, {"id": _text(payload, "id")})
 
 
+async def _act_sign_out(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A sign-in notice's Sign it out in the terminal: the browser the notice names (`slug`, its id) signed out by
+    thimble's server, as `thimble unpair` signs out every browser (POST /api/ui/unpair {browser}, a token route), and
+    its notice gone. {queued: true}; StateError when the server does not take it."""
+    from . import cli  # noqa: PLC0415
+
+    browser = _text(payload, "slug")
+    status, body = await asyncio.to_thread(cli._request, "POST", f"{cli.api_url()}/api/ui/unpair",
+                                           {"browser": browser}, SERVER_ACT_TIMEOUT_S)
+    if status not in (200, 204):
+        why = body.get("detail") if isinstance(body, dict) else body
+        raise StateError(f"thimble's server did not sign that browser out ({status or 'no answer'}: {why})")
+    return {"queued": True, "signed_out": browser}
+
+
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
          "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete,
          "label-undelete": _act_label_undelete, "label-show": _act_label_show, "label-filter": _act_label_filter,
          "seen": _act_seen, "stop": _act_stop, "view-accept": _act_view_accept,
          "view-reject": _act_view_reject, "view-proposals-off": _act_view_proposals_off,
          "view-propose-now": _act_view_propose_now, "view-retry": _act_view_retry,
-         "notice-dismiss": _act_notice_dismiss}
+         "notice-dismiss": _act_notice_dismiss, "sign-out": _act_sign_out}
 
 
 # --------------------------------------------------------------------------- the command line

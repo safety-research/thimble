@@ -166,8 +166,10 @@ nothing more. A tab whose server went away first asks the address it reconnects 
 that it is the same thimble server; another program that later uses the port can't, and the page stops without sending
 it the cookie. After 6 failed reconnects the page stops too.
 
-Each new sign-in shows a notice in thimble with **Sign it out**, and a line in your terminal. If a sign-in was not you,
-click Sign it out, or run `thimble unpair` in a shell, which signs out every browser.
+Each new sign-in shows a notice with **Sign it out**, in the browser and above the prompt in your terminal; a terminal
+without thimble's panel shows a line under Claude's next reply instead. The browser that signed in can't dismiss its
+own notice. If a sign-in was not you, click Sign it out, or run `thimble unpair` in a shell, which signs out every
+browser.
 
 ## For administrators
 

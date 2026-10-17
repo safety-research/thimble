@@ -465,12 +465,38 @@ SIGNED_IN_LINE = "thimble: a browser signed in to thimble's page at {at}. If it 
 SIGNIN_KEY = "signin:new"  # the notice's key, with the browser's id after a colon (one notice per browser)
 
 
+def signin_key(browser: str) -> str:
+    """The key of the notice of `browser`'s sign-in (signed_in), which its Sign it out clears."""
+    return f"{SIGNIN_KEY}:{browser}"
+
+
+def signin_cleared(browser: str, ws: object = None) -> None:
+    """The notice of `browser`'s sign-in gone wherever it was posted (the workspace `ws` names, each this server
+    follows), once that browser is signed out, also when it was signed out already."""
+    from . import notices, session  # noqa: PLC0415
+
+    for c in dict.fromkeys([*([str(ws)] if ws else []), *session.attached_workspaces()]):
+        with contextlib.suppress(ValueError):
+            config.corpus_dir(c)
+            notices.clear(c, signin_key(browser))
+
+
+def _panel_shows_notices(c: str) -> bool:
+    """Whether main's session of workspace `c` runs thimble's terminal UI (its session marker's `mod`), whose rows above
+    the prompt show every open notice, a sign-in's with its Sign it out."""
+    from . import activate, session  # noqa: PLC0415
+
+    lv = session.current(c)
+    return bool(lv is not None and lv.sid and activate.read_marker(lv.sid).get("mod") is True)
+
+
 def signed_in(ws: object, browser: str) -> None:
-    """A browser signed in with a code (hook_auth.claim): each workspace it may act in hears of it twice, as the notice
-    `signin:new:<browser>` with Sign it out (and the notice's own dismiss) in the browser and the terminal panel, and as a
-    line under main's next reply in its terminal (session.tell_terminal), which the browser cannot hide. The workspaces
-    are the one the page named, when it is registered, and each whose main this server follows. The browser that signed
-    in shows no notice of its own sign-in (its id, GET /api/ui/paired)."""
+    """A browser signed in with a code (hook_auth.claim): each workspace it may act in hears of it as the notice
+    `signin:new:<browser>` with Sign it out (and the notice's own dismiss) in the browser and in the terminal panel's
+    rows above the prompt, which the browser that signed in cannot dismiss (notices.dismiss_route). A terminal without
+    thimble's panel shows a line under main's next reply instead (session.tell_terminal), which no browser can hide. The
+    workspaces are the one the page named, when it is registered, and each whose main this server follows. The browser
+    that signed in shows no notice of its own sign-in (its id, GET /api/ui/paired)."""
     from . import notices, session  # noqa: PLC0415
 
     name = ws if isinstance(ws, str) else ""
@@ -484,9 +510,10 @@ def signed_in(ws: object, browser: str) -> None:
     places += [c for c in session.attached_workspaces() if c not in places]
     at = datetime.now().strftime("%H:%M")
     for c in places:
-        notices.post(c, kind="sign-in", key=f"{SIGNIN_KEY}:{browser}", text=SIGNED_IN_NOTICE.format(at=at),
+        notices.post(c, kind="sign-in", key=signin_key(browser), text=SIGNED_IN_NOTICE.format(at=at),
                      action={"label": "Sign it out", "do": "sign-out", "slug": browser})
-        session.tell_terminal(c, SIGNED_IN_LINE.format(at=at))
+        if not _panel_shows_notices(c):  # one notice in the terminal, with its Sign it out (bug hunt B3)
+            session.tell_terminal(c, SIGNED_IN_LINE.format(at=at))
     log.warning("a browser signed in to thimble (%s)", name or "the start page")
 
 
@@ -588,6 +615,7 @@ def create_app() -> FastAPI:
         browser = str(body.get("browser") or "") if isinstance(body, dict) else ""
         if browser:
             hook_auth.sign_out(browser)
+            signin_cleared(browser)
         else:
             hook_auth.unpair()
 
@@ -602,16 +630,10 @@ def create_app() -> FastAPI:
 
     @app.post("/api/ui/signout")  # cookie: a sign-in notice's "Sign it out"
     def ui_signout(body: dict = Body(...)) -> dict:
-        from . import notices, session  # noqa: PLC0415
-
         browser = str(body.get("id") or "")
         done = hook_auth.sign_out(browser)
         if browser:  # its notice goes wherever it was posted, also when the browser was signed out already
-            ws = body.get("ws")
-            for c in dict.fromkeys([*([str(ws)] if ws else []), *session.attached_workspaces()]):
-                with contextlib.suppress(ValueError):
-                    config.corpus_dir(c)
-                    notices.clear(c, f"sign-in:{browser}")
+            signin_cleared(browser, body.get("ws"))
         return {"signed_out": done}
 
     @app.get("/api/ui/paired")
