@@ -286,6 +286,23 @@ def test_export_scrubs_the_user_name_and_paths_a_summary_cut_short(tmp_path):
     assert m["user_name_scrubbed"] == 2 and m["flagged"] == []
 
 
+def test_f6_a_shipped_precache_keeps_the_citation_verdicts_today_s_check_gives():
+    """Bug hunt F6: the collusion-wiki demo's first card showed "posted its answer" red, a citation in words that names
+    a record and shows no value, which the check of its orientation compared with the number on the cited line. Today's
+    check never marks such a citation red, nor leaves a card's check pending; the shipped pre-caches carry its verdicts
+    (scripts/dev/recheck_precache_citations.py)."""
+    from app import cite
+
+    found = []
+    for p in sorted((Path(__file__).resolve().parents[2] / "demos").glob("*/workspace/notebooks/*.json")):
+        for cell in json.loads(p.read_text("utf-8")).get("cells") or []:
+            links = (cell.get("verification") or {}).get("links") or {}
+            found += [(p.parent.parent.parent.name, cell["id"], b.get("value")) for b in links.get("broken") or []
+                      if not cite.shows_value(str(b.get("value") or ""))]
+            found += [(p.parent.parent.parent.name, cell["id"], "pending")] if links.get("status") == "pending" else []
+    assert found == []
+
+
 def test_install_fills_the_placeholders_and_marks_the_workspace_precached(tmp_path):
     out, corpus, _ = made(tmp_path)
     old = out / "workspace" / "chats" / "o1.meta.json"  # as an export whose META_KEYS kept `background` wrote it
