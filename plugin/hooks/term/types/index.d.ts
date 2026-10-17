@@ -119,7 +119,11 @@ export type TermVerdict = {
   /** the line of its file the cited place starts on, where its file opens: its line, or a record's first line (a JSON
    *  document's record cited by its pointer, `…json#/messages/<id>`, whose resolution has no line of its own) */
   fileLine?: number
-  lines: { n: number; text: string; hit: boolean; spans?: number[][] }[]
+  /** `field`: a row of a field the record's words leave out (`fields`), under the record's lines */
+  lines: { n: number; text: string; hit: boolean; spans?: number[][]; field?: boolean }[]
+  /** a line's record's fields of words its blocks leave out, as the server resolved them (`fields`: a wiki save's
+   *  edit summary beside its page text), [key, words] */
+  fields?: [string, string][]
   card?: string
   column?: string
   row?: string

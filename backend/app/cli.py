@@ -3416,12 +3416,40 @@ def _hooks_fix(why: str) -> str:
 
 # no session here has turned thimble on yet, which it does by itself at a session's first read of data (activate.py)
 AGENTS_NOT_YET = "thimble's agents start once a claude session runs here"
+# the checklist run in thimble's own files (an install's folder, a clone, an unzipped release) or in a folder thimble
+# opens for no data (activate.refusal: the home folder, /): its agents never run there (bug hunt J1)
+AGENTS_INSTALL_FOLDER = "thimble's agents run where your files are, not in thimble's own folder"
+AGENTS_NO_DATA_FOLDER = "thimble's agents run in a folder of your files, not in this one"
+
+
+def thimble_tree(p: Path) -> bool:
+    """Whether the folder `p` holds thimble's own files: this install's folder, or another copy of thimble (a clone, an
+    unzipped release), which has thimble's install script and plugin."""
+    try:
+        here = p.expanduser().resolve()
+    except (OSError, RuntimeError):
+        return False
+    if here == config.REPO_ROOT.resolve():
+        return True
+    manifest = _read_json(here / "plugin" / ".claude-plugin" / "plugin.json")
+    return (here / "scripts" / "install.sh").is_file() and isinstance(manifest, dict) and manifest.get("name") == PLUGIN_NAME
 
 
 def _agents_check(cwd: Path) -> Check:
+    """The checklist's line on thimble's agents in a session in `cwd`: what keeps Claude Code from loading thimble's
+    hooks module there (its hooks off, an untrusted folder), else what the last session there recorded. In thimble's own
+    files, or a folder thimble opens for no data, the agents never run, since Claude Code loads the plugin from its own
+    copy and the agents run in the analyst's session in the folder of their data, so the line says so (a doctor run in
+    the install folder at the end of an install, bug hunt J1)."""
     why = modules_off(cwd)
     if why:
         return Check(False, "thimble's agents can't start: Claude Code's hooks are off", _hooks_fix(why))
+    if thimble_tree(cwd):
+        return Check(True, AGENTS_INSTALL_FOLDER)
+    from . import activate  # noqa: PLC0415 — activate imports this module
+
+    if activate.refusal(cwd) is not None:
+        return Check(True, AGENTS_NO_DATA_FOLDER)
     if folder_trusted(cwd) is False:  # Claude Code asks when claude starts there, and loads the module only on a yes
         return Check(False, "Claude Code doesn't trust this folder yet", "In a shell: run claude here and accept the prompt")
     c = config.workspace_for_cwd(str(cwd))

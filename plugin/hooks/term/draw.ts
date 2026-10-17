@@ -29,8 +29,9 @@ export type CardLabel = { slug: string; name: string; values: string[]; marks?: 
 export type LabelInfo = { slug: string; name: string; kind: string; values: string[]; labeled: number; total: number; trial: boolean; paths?: string[]; colors?: Record<string, number>; runId?: string }
 /** An example: its record, its words, and on a label card its value now, why, and whether the analyst set or agreed
  *  with it (`set`; `was` the value the label gave). `kept`: the words the card quotes from the record (its payload's
- *  `quotes`); `fields`: a database row's fields (lib.ts claimFields), which it shows in place of its words. */
-export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string; kept?: string; fields?: { read: [string, string][]; rest: [string, string][] } }
+ *  `quotes`); `fields`: a database row's fields (lib.ts claimFields), which it shows in place of its words; `head`: a
+ *  line's fields its words leave out (a wiki save's edit summary, bug hunt J6), each on a row before its words. */
+export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string; kept?: string; fields?: { read: [string, string][]; rest: [string, string][] }; head?: [string, string][] }
 /** A plan card's step (cell.ts planSteps, backend notebook.plan_step_of): its words, its status (`not started`,
  *  `running`, `done`, `needs you`), what it makes, the note its agent left, and its time ('' for none). */
 export type PlanStep = { text: string; status: string; makes: string[]; note: string; time: string }
@@ -1506,8 +1507,12 @@ function restLines(rest: readonly [string, string][], room: number, max: number)
  * the record's words in quotation marks and italic, up to three rows, then ↗ and its place in purple and underlined, on
  * the quote's last row where it fits, else on the row under it. A database row shows its fields in place of its words
  * (bug hunt B17): the fields the claim is about, each its name dim and its value as words are quoted, its line ends
- * kept, then its other fields on up to two dim rows, those the card names first. A blank row between records.
+ * kept, then its other fields on up to two dim rows, those the card names first. A line's fields its words leave out
+ * (`head`: a wiki save's edit summary) come before its words, at most HEAD_FIELDS, each on one row, as a field is drawn.
+ * A blank row between records.
  */
+const HEAD_FIELDS = 2 // of a line's fields its words leave out, drawn before its words (exampleLayout)
+
 function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   const exs = (card.examples ?? []).slice(0, 8)
   const lines: Line[] = []
@@ -1527,6 +1532,7 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
     const lead = () => (rows.length ? { s: '  ' } : glyph)
     const note = e.note ? wrapCell(e.note.replace(/\s+/g, ' ').trim(), room, 3).filter(Boolean) : []
     for (const t of note) rows.push([lead(), { s: t }])
+    for (const [k, v] of (e.head ?? []).slice(0, HEAD_FIELDS)) for (const l of fieldLines(k, demojibake(v), room, 1)) rows.push([lead(), ...l])
     if (e.fields && (e.fields.read.length || e.fields.rest.length)) {
       const read = e.fields.read.map(([k, v]): [string, string] => [k, demojibake(v)])
       // the claim's fields share four rows, the first its three at most; the other fields two

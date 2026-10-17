@@ -303,7 +303,7 @@ async def _ref_check(corpus: Path, ref: str, display: str | None, *, decrease: b
         return f"could not be checked: {type(e).__name__}: {e}"
     if (out.get("meta") or {}).get("span_missing"):
         return WHY_SPAN_MISSING
-    if display is not None and not _value_matches(display, str(out.get("excerpt") or ""), decrease=decrease):
+    if display is not None and not _value_matches(display, refs.checked_text(out), decrease=decrease):
         return WHY_VALUE
     return None
 

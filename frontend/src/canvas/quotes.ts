@@ -3,10 +3,13 @@
 // fields on one line and long text fields under them, never a JSON dump. A span is the passage with the words around
 // it. Prose written in markdown is marked `md`; a text that is JSON reads as its fields, and a passage of JSON as the
 // decoded string values it covers (jsonSpanParts). A line of a chat log that starts a turn (the server's `meta.turn`) is
-// its speaker's words under the speaker's name, a markdown line's without its syntax (turnParts). Pure.
+// its speaker's words under the speaker's name, a markdown line's without its syntax (turnParts). A line's record whose
+// blocks leave some of its fields of words out (a wiki save's edit summary beside its page text) shows them too, each
+// under its name (withFields). Pure.
 import { plainMd } from '../lib/mdPlain'
 import { findQuote } from '../lib/quoteFind'
-import type { ChatTurn, ResolvedRef } from '../lib/types'
+import type { ChatTurn, RecordField, ResolvedRef } from '../lib/types'
+import { recordFacts } from './facts'
 
 /** where a passage an example card quotes sits in a part's text, as [start, end) offsets (markQuotes) */
 export type Mark = [number, number]
@@ -391,10 +394,52 @@ function trail(text: string): string {
   return s.length < text.length ? s.replace(/\s+$/, '') + '…' : s
 }
 
-/** What an example card shows of one resolved ref, as parts (module note), its text cleaned and its code dedented;
- * `about`, what the card says of a database row it quotes (recordParts). */
+/** What an example card shows of one resolved ref, as parts (module note), its text cleaned and its code dedented, with
+ * the fields of a line's record its blocks leave out (withFields); `about`, what the card says of the record it quotes
+ * (recordParts, withFields). */
 export function quoteParts(r: ResolvedRef, about?: ClaimAbout): QuotePart[] {
-  return rawParts(r, about).map(tidyPart)
+  return withFields(r, rawParts(r, about), about).map(tidyPart)
+}
+
+/** a field a record's blocks leave out reads before its words when it is this short and on one line (an edit summary, a
+ * title), and after them when longer (a tool's result beside its call) */
+const HEAD_FIELD = 200
+
+/** One field of a record under its name: output (a tool's result) in mono, markdown marked; null when it is blank. */
+function fieldPart(key: string, value: string): QuotePart | null {
+  const text = value.replace(/^\s*\n/, '').replace(/\s+$/, '')
+  if (!text) return null
+  return { kind: 'field', key, text, ...(OUTPUT_KEYS.test(key.split('.').pop() ?? key) ? { mono: true } : looksMarkdown(text) ? { md: true } : {}) }
+}
+
+/** A record's parts with the fields its blocks leave out (the server's `fields`), each under its name: a short one
+ * before the parts, a longer one after them; those in `skip` (the facts line shows them) left out. Pure. */
+export function aroundParts(fields: readonly RecordField[] | undefined, parts: readonly QuotePart[], skip: ReadonlySet<string> = new Set()): QuotePart[] {
+  const shown = (fields ?? []).filter((f) => !skip.has(f.key))
+  const head = (f: RecordField) => f.text.trim().length <= HEAD_FIELD && !f.text.trim().includes('\n')
+  const as = (fs: readonly RecordField[]) => fs.map((f) => fieldPart(f.key, f.text)).filter((p): p is QuotePart => p !== null)
+  return [...as(shown.filter(head)), ...parts, ...as(shown.filter((f) => !head(f)))]
+}
+
+/**
+ * A line's record's parts with what its blocks leave out (bug hunt J6: a wiki save's text without its edit summary,
+ * where the card's quote came from): the server's `fields` (aroundParts), less those the facts line shows
+ * (canvas/facts), and first any other field of the record that holds words the card quotes or a value its takeaway
+ * cites there (claimedKeys) that nothing shows. A view's unit stays as its reader wrote it. Pure.
+ */
+export function withFields(r: ResolvedRef, parts: readonly QuotePart[], about?: ClaimAbout): QuotePart[] {
+  if (r.view || !['record', 'block', 'span'].includes(r.kind)) return [...parts]
+  const facts = new Set(recordFacts(r).map((f) => f.key))
+  const listed = new Set((r.fields ?? []).map((f) => f.key))
+  const rec = r.record && typeof r.record === 'object' && !Array.isArray(r.record) ? (r.record as Record<string, unknown>) : null
+  const blocks = fold((r.blocks ?? []).map((b) => b.text ?? '').join(' '))
+  const others: [string, unknown][] =
+    rec && about?.quotes?.length
+      ? Object.entries(rec).filter(([k, v]) => !facts.has(k) && !listed.has(k) && (typeof v === 'string' || typeof v === 'number') && !blocks.includes(fold(String(v))))
+      : []
+  const claimed = claimedKeys(others, about?.quotes)
+  const extra = others.filter(([k]) => claimed.has(k)).map(([k, v]) => fieldPart(k, String(v))).filter((p): p is QuotePart => p !== null)
+  return [...extra, ...aroundParts(r.fields, parts, facts)]
 }
 
 function tidyPart(p: QuotePart): QuotePart {
@@ -464,11 +509,12 @@ function rawParts(r: ResolvedRef, about?: ClaimAbout): QuotePart[] {
     const said = turn && k === 0 && blocks[0]?.kind === 'text' ? turnParts(blocks[0].text, turn, kind === 'md') : null
     return said ?? (blocks[k] ? blockParts(blocks[k], kind) : [])
   }
-  const records = (r as { records?: { blocks?: Block[]; meta?: unknown }[] }).records
+  const records = (r as { records?: { blocks?: Block[]; meta?: unknown; fields?: RecordField[] }[] }).records
   if (r.kind === 'range' && Array.isArray(records) && records.length) {
-    // the lines of a text file are one text, a line to a line; the records of a JSONL file each read as a record
+    // the lines of a text file are one text, a line to a line; the records of a JSONL file each read as a record, with
+    // the fields its blocks leave out (aroundParts: a wiki save's edit summary)
     const lines = records.map((x) => x.blocks ?? [])
-    if (lines.every((bs) => bs.length <= 1 && (bs[0]?.kind ?? 'text') === 'text')) {
+    if (!records.some((x) => x.fields?.length) && lines.every((bs) => bs.length <= 1 && (bs[0]?.kind ?? 'text') === 'text')) {
       // a chat log's lines as the Transcript mode shows them: a markdown line without its syntax, so a speaker reads
       // `P7:` where the file writes `**P7:**`
       const chat = kind === 'md' && records.some((x) => turnOf(x.meta))
@@ -476,7 +522,7 @@ function rawParts(r: ResolvedRef, about?: ClaimAbout): QuotePart[] {
       if (!text) return []
       return kind === 'code' ? [{ kind: 'code', text }] : [{ kind: 'text', text, ...(kind === 'md' && !chat ? { md: true } : {}) }]
     }
-    return lines.flatMap((bs) => bs.flatMap((b) => blockParts(b, kind)))
+    return records.flatMap((x) => aroundParts(x.fields, (x.blocks ?? []).flatMap((b) => blockParts(b, kind))))
   }
   const said = turn && blocks.length === 1 && blocks[0].kind === 'text' ? turnParts(blocks[0].text, turn, kind === 'md') : null
   if (said) return said

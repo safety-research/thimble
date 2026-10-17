@@ -8,6 +8,8 @@ import type { Engine, Mounted } from 'claude-code/testing'
 import { cardOfCell } from '../cell'
 import type { ThimbleCell } from '../cell'
 import { cardLayout, stepParts } from '../draw'
+import { citations } from '../lib'
+import { verdictOf } from '../model'
 import type { Line } from '../draw'
 import { COLORS } from '../paint'
 import { CELLS, CWD, shown, world } from './fixtures'
@@ -221,5 +223,30 @@ test("an example quotes a database row by its fields, never as one line of JSON:
   expect(lines[at]).toBe('● body  "Reviewed: verified clean merge onto current main')
   expect(lines[at + 1]).toBe('        and ran the full set of touched test modules."')
   expect(lines[at + 2]).toMatch(/^ {2}id 14 · pr 66972 · reviewer agent-16 · verdict approve/)
+  await ui.unmount()
+})
+
+test("an example of a wiki save draws its edit summary before its page text, and a citation of the summary's words is at its place (bug hunt J6)", { timeoutMs: 30_000 }, async ($, on) => {
+  // the card drew the save's text alone, and the summary its quote came from read as not in the record
+  const w = world(on)
+  const ref = 'revisions.jsonl#L2'
+  const record = { rev_id: 'Tomatoes@4', name: 'Tomatoes', label: 'Rowan', body: '= Tomatoes =\nPlant them out after the last frost.', change_summary: 'undo the seed shop advert' }
+  const res = { ref, kind: 'record', path: 'revisions.jsonl', line: 2, record, blocks: [{ kind: 'text', text: record.body }], excerpt: record.body, meta: {}, fields: [{ key: 'change_summary', text: record.change_summary }] }
+  w.resolve[ref] = res
+  w.cells.x0save00 = {
+    id: 'x0save00', notebook: 'g1', kind: 'example', title: "What did Rowan's save on the Tomatoes page undo?", labels: [], created_by: 'main', ts: '2026-10-06T10:00:00+00:00',
+    takeaway: `Rowan's save says [["undo the seed shop advert"|${ref}]].`,
+    payload: { refs: [ref], quotes: ['undo the seed shop advert'] },
+  }
+  await start($, w)
+  await turn($, w, 'x0save00')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const client = (await ui.find({ type: 'Client', key: 'card-t0-x0save00' })) as unknown as { props: { props: { card: Parameters<typeof cardLayout>[0] } } }
+  const lines = cardLayout(client.props.props.card, 100, -1).lines.map(l => l.map(x => x.s).join(''))
+  expect(lines[0]).toBe('● change_summary  "undo the seed shop advert"')
+  expect(lines[1]).toContain('Plant them out after the last frost.')
+  const v = verdictOf(citations(`[["undo the seed shop advert"|${ref}]]`)[0]!, res as never)
+  expect(v.status).toBe('ok')
+  expect(v.lines.at(-1)).toMatchObject({ text: 'change_summary: undo the seed shop advert', hit: true, field: true })
   await ui.unmount()
 })

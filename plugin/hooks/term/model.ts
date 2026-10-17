@@ -269,7 +269,7 @@ export function withoutEnd(text: string): string {
 
 // ------------------------------------------------------------------------------------------------ a citation's check
 
-type Resolution = Obj & { error?: unknown; retry?: unknown; excerpt?: unknown; meta?: unknown; path?: unknown; line?: unknown; kind?: unknown; record?: unknown; context?: unknown; blocks?: unknown; end_line?: unknown }
+type Resolution = Obj & { error?: unknown; retry?: unknown; excerpt?: unknown; meta?: unknown; path?: unknown; line?: unknown; kind?: unknown; record?: unknown; context?: unknown; blocks?: unknown; end_line?: unknown; fields?: unknown }
 
 /** The resolution of one ref out of what `thimble state resolve` printed: `{ref: resolution}`, a list of resolutions
  *  (each naming its `ref`), or `{refs: …}` around either. */
@@ -339,8 +339,16 @@ export function aroundLine(r: unknown): string {
   return words.trim() ? words.replace(/\s*\n\s*/g, ' ') : recordLine(r)
 }
 
-/** The lines of a resolved place, the cited ones hit (a record over its rows, at most 31), each record around them one
- *  line, drawn as the cited one is (aroundLine). */
+/** A resolved line's fields of words its blocks leave out (the server's `fields`: a wiki save's edit summary beside its
+ *  page text), of its record or of each record of a range, as [key, words]. */
+export function fieldsOf(res: Resolution): [string, string][] {
+  const recs = Array.isArray(res.records) && res.records.length ? res.records : [res]
+  return recs.flatMap(r => (isObj(r) && Array.isArray(r.fields) ? r.fields : []).filter(isObj).map((f): [string, string] => [str(f.key), str(f.text)]).filter(([k, t]) => k !== '' && t.trim() !== ''))
+}
+
+/** The lines of a resolved place, the cited ones hit (a record over its rows, at most 31), with the fields its words
+ *  leave out under them, each `key: words` on a hit row (fieldsOf: the value a citation shows may stand there), each
+ *  record around them one line, drawn as the cited one is (aroundLine). */
 function linesOf(res: Resolution, display: string | null): TermVerdict['lines'] {
   const out: TermVerdict['lines'] = []
   const line = typeof res.line === 'number' ? res.line : 0
@@ -357,6 +365,10 @@ function linesOf(res: Resolution, display: string | null): TermVerdict['lines'] 
   before.forEach((r, i) => around(isObj(r) && typeof r.line === 'number' ? r.line : line - before.length + i, r))
   if (Array.isArray(res.records) && res.records.length) res.records.forEach((r, i) => push(isObj(r) && typeof r.line === 'number' ? r.line : line + i, recordText(r), true))
   else push(line, line ? blocksText(res.blocks) || str(res.excerpt) : str(res.excerpt), true)
+  for (const [k, t] of fieldsOf(res)) {
+    const text = `${k}: ${t.replace(/\s+/g, ' ').trim()}`
+    out.push({ n: 0, text, hit: true, field: true, spans: spansIn(text, display) })
+  }
   after.forEach((r, i) => around(isObj(r) && typeof r.line === 'number' ? r.line : line + 1 + i, r))
   return out
 }
@@ -402,6 +414,8 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0, final = f
     const fileLine = typeof res.line === 'number' ? res.line : typeof meta.line === 'number' ? meta.line : 0
     if (fileLine > 0) out.fileLine = fileLine
     out.lines = linesOf(res, c.display)
+    const fields = fieldsOf(res)
+    if (fields.length) out.fields = fields
     // a row's fields, which an example card shows by their names, never as the JSON its excerpt is
     if ((kind === 'row' || kind === 'csvrow') && isObj(res.record)) out.record = res.record
     // a command's output: the command that printed it, as its row names it (calls.py chip_line)
