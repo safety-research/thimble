@@ -473,11 +473,19 @@ def _home_views(c: str) -> list[dict[str, Any]]:
             status = str(p["status"])
         else:
             status = "proposed" if p else "not built"
-        rows.append({"slug": slug, "name": str(p.get("name") or (v or {}).get("name") or slug), "status": status,
-                     "ts": str(p.get("ts") or (v or {}).get("built") or ""),
-                     "files": [str(x) for x in ((v or {}).get("claims") or p.get("claims") or [])],
-                     # whether the terminal draws it: a view.term.js among the files its last pass covered
-                     "term": status == "built" and term_views.has_term(v)})
+        term = status == "built" and term_views.has_term(v)
+        row = {"slug": slug, "name": str(p.get("name") or (v or {}).get("name") or slug), "status": status,
+               "ts": str(p.get("ts") or (v or {}).get("built") or ""),
+               "files": [str(x) for x in ((v or {}).get("claims") or p.get("claims") or [])],
+               # whether the terminal draws it: a view.term.js among the files its last pass covered
+               "term": term}
+        if status == "built" and not term:
+            # where the terminal page of a view built for the browser stands: building, failed (and why) or missing,
+            # which its first open in the terminal builds (views.page_ask)
+            row["page"], why = views.page_state(c, slug, views.TERM_PAGE, view=v, prop=p)
+            if why:
+                row["page_why"] = why
+        rows.append(row)
     return rows
 
 
@@ -1084,7 +1092,7 @@ ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id
              "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
              "stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
-             "view-propose-now {notice?}, view-retry {slug, notice?}, notice-dismiss {id}, sign-out {slug}")
+             "view-propose-now {notice?}, view-retry {slug, notice?}, view-term-page {slug}, notice-dismiss {id}, sign-out {slug}")
 
 
 # The acts whose state thimble's server holds in memory once main's transport is server: the comments of a document and
@@ -1100,6 +1108,7 @@ SERVER_ACTS = {
     "view-accept": "/api/ws/{c}/views/proposals/{slug}/accept",
     "view-reject": "/api/ws/{c}/views/proposals/{slug}/reject",
     "view-retry": "/api/ws/{c}/views/proposals/{slug}/retry",
+    "view-term-page": "/api/ws/{c}/views/{slug}/frame",  # the browser's first open of a view builds its page there
     "view-propose-now": "/api/ws/{c}/views/propose-now",
     "notice-dismiss": "/api/ws/{c}/notices/{id}/dismiss",
 }
@@ -1534,6 +1543,19 @@ async def _act_view_retry(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     return _queued("view-retry", c, {"slug": slug, **_notice_ref(payload)})
 
 
+async def _act_view_term_page(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The terminal's open of a built view that has no terminal page (built for the browser): its build queued as the
+    browser's first open of a terminal-built view queues one (views.ensure_page), handed to the holder (local_hooks
+    `view-term-page`), which follows the build. {queued: true} at once, also while a build of the view goes; {ready:
+    true} when it has the page; {queued: false, reason} with the fix when it cannot be built now (views.page_ask)."""
+    from . import views  # noqa: PLC0415
+
+    got = views.page_ask(c, _text(payload, "slug"), views.TERM_PAGE)
+    if got.pop("build", False):
+        return _queued("view-term-page", c, {"slug": _text(payload, "slug")})
+    return got
+
+
 def _notice_ref(payload: dict[str, Any]) -> dict[str, Any]:
     """The id of the notice whose act the press was (`notice`), which the holder dismisses before it runs the act, so
     that a failure that comes again shows as a notice of its own: {notice: id}, or {} for none."""
@@ -1568,7 +1590,7 @@ _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict"
          "seen": _act_seen, "stop": _act_stop, "view-accept": _act_view_accept,
          "view-reject": _act_view_reject, "view-proposals-off": _act_view_proposals_off,
          "view-propose-now": _act_view_propose_now, "view-retry": _act_view_retry,
-         "notice-dismiss": _act_notice_dismiss, "sign-out": _act_sign_out}
+         "view-term-page": _act_view_term_page, "notice-dismiss": _act_notice_dismiss, "sign-out": _act_sign_out}
 
 
 # --------------------------------------------------------------------------- the command line

@@ -3,7 +3,7 @@
 // returns its lines and a hit test from a cell to an item. The `note` and `text` kinds (noteLayout, textLayout) are the
 // cards drawn as their words.
 import { axisTicks, numberTicks, ownTicks, placeLabels, wallClock } from './axis'
-import { cut, cw, fmt, formatted, itemsRow, quoted, viewRef, width } from './lib'
+import { cut, cw, fmt, formatted, itemsRow, middleCut, quoted, viewRef, width } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 import { hueOf } from './labels'
@@ -16,7 +16,8 @@ export type Line = Seg[]
 export type BarRow = { label: string; value: number; group: string }
 /** A row of a dots card (cell.ts dotsCard): its name, its dots (each its x, a number or a time as written, and the
  *  value of the chart's color field it is colored by, '' for none), and the words a text layer writes beside them. */
-export type DotRow = { name: string; dots: { x: string | number; group: string }[]; notes: { x: string | number; text: string }[] }
+/** A dots card's row: its dots, each at `x`, or a bar from `x` to `x2` (a start-to-end chart's), and words beside them. */
+export type DotRow = { name: string; dots: { x: string | number; x2?: string | number; group: string }[]; notes: { x: string | number; text: string }[] }
 export type Cell = string | number | boolean | null
 export type CardParam = { name: string; value: string | number; default: string | number; choices: (string | number)[] }
 export type DiagramNode = { id: string; label: string; ref?: string; detail?: string }
@@ -107,8 +108,9 @@ export function demojibake(s: string): string {
   })
 }
 
-/** `s` in at most two lines of `n` columns: broken at the last space that fits, else as wrapLabel breaks a word; the
- *  second line cut. */
+/** `s` in at most two lines of `n` columns: broken at the last space that fits, the second line cut; a name with no
+ *  space that fits is never broken inside a word (bug hunt C9: `annotation-` over `platform__underspecified-fan-out`)
+ *  but cut in its middle on one line (middleCut), its start and its end kept. */
 export function fold(s: string, n: number): string[] {
   const t = s.replace(/\s+/g, ' ').trim()
   if (width(t) <= n) return [t]
@@ -122,7 +124,7 @@ export function fold(s: string, n: number): string[] {
     i += ch.length
   }
   if (t[i] === ' ') sp = i
-  if (sp < 0) return wrapLabel(t, n)
+  if (sp < 0) return [middleCut(t, n)]
   return [t.slice(0, sp), cut(t.slice(sp + 1), n)]
 }
 
@@ -730,12 +732,14 @@ export function dotGlyph(n: number, most: number): string {
  * dots on one x axis for all rows, a cell's glyph saying how many dots it holds (dotGlyph), in the first hue or its
  * group's; the words a text layer writes stand a cell after their dot, or after the row's last dot where something
  * stands there. Under the rows, the x axis's ticks, as a line chart names them, and the groups' legend. The first
- * MAX_BARS rows, then `… N more`. A cell's dots are one mark: the readout names its row, its x and how many.
+ * MAX_BARS rows, then `… N more`. A cell's dots are one mark: the readout names its row, its x and how many. A
+ * start-to-end chart's span (cell.ts spansCard) is a bar from its start's cell to its end's, one mark whose readout
+ * names its start, its end and how long it lasts.
  */
 function dotsLayout(card: CardData, cols: number, hover: number): Layout {
   const all = (card.strips ?? []).filter(r => r.dots.length || r.notes.length)
   const strips = all.slice(0, MAX_BARS)
-  const xs = strips.flatMap(r => [...r.dots.map(d => d.x), ...r.notes.map(n => n.x)])
+  const xs = strips.flatMap(r => [...r.dots.flatMap(d => (d.x2 === undefined ? [d.x] : [d.x, d.x2])), ...r.notes.map(n => n.x)])
   const kind: 'num' | 'time' = xs.every(x => typeof x === 'number' || (x.trim() !== '' && !Number.isNaN(Number(x)))) ? 'num' : 'time'
   const xOf = (x: string | number) => (kind === 'num' ? Number(x) : wallClock(String(x)))
   const vals = xs.map(xOf).filter(Number.isFinite)
@@ -755,21 +759,37 @@ function dotsLayout(card: CardData, cols: number, hover: number): Layout {
   const cellOf = (v: number) => (x1 === x0 ? Math.floor(pw / 2) : Math.round(((v - x0) / (x1 - x0)) * (pw - 1)))
   const groups = [...new Set(strips.flatMap(r => r.dots.map(d => d.group)).filter(Boolean))]
   const hue = (g: string) => classColour(card, g) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(g)) % COLORS.series.length]! : one())
-  // each row's cells that hold dots, left to right, with their dots: the marks the pointer picks, row by row
-  type Mark = { row: number; cell: number; dots: { x: string | number; group: string }[] }
+  // each row's cells that hold dots, left to right, with their dots, and each span from its first cell to its last
+  // (`end`): the marks the pointer picks, row by row
+  type Mark = { row: number; cell: number; end?: number; dots: DotRow['dots'] }
   const marks: Mark[] = []
   strips.forEach((r, row) => {
     const by = new Map<number, Mark['dots']>()
+    const mine: Mark[] = []
     for (const d of r.dots) {
       const v = xOf(d.x)
       if (!Number.isFinite(v)) continue
+      if (d.x2 !== undefined) {
+        const v2 = xOf(d.x2)
+        if (Number.isFinite(v2)) mine.push({ row, cell: cellOf(Math.min(v, v2)), end: cellOf(Math.max(v, v2)), dots: [d] })
+        continue
+      }
       const c = cellOf(v)
       by.set(c, [...(by.get(c) ?? []), d])
     }
-    for (const cell of [...by.keys()].sort((a, b) => a - b)) marks.push({ row, cell, dots: by.get(cell)! })
+    for (const cell of by.keys()) mine.push({ row, cell, dots: by.get(cell)! })
+    marks.push(...mine.sort((a, b) => a.cell - b.cell))
   })
-  const most = Math.max(1, ...marks.map(m => m.dots.length))
+  const most = Math.max(1, ...marks.filter(m => m.end === undefined).map(m => m.dots.length))
   const items: Item[] = marks.map(m => {
+    if (m.end !== undefined) {
+      const d = m.dots[0]!
+      const at = `${xName(d.x)} to ${xName(d.x2!)}`
+      const span = Math.abs(xOf(d.x2!) - xOf(d.x))
+      const open = `card:${card.id}#${card.x}/${strips[m.row]!.name}`
+      const group = groups.length > 1 && d.group ? ` · ${d.group}` : ''
+      return { label: names[m.row]!, value: `${at} · ${kind === 'time' ? lasting(span) : amount(span)}${group}`, cite: cite(xName(d.x), open), open, kind: 'mark', text: at }
+    }
     const v = m.dots.map(d => xOf(d.x))
     const lo = m.dots[v.indexOf(Math.min(...v))]!.x
     const hi = m.dots[v.indexOf(Math.max(...v))]!.x
@@ -789,6 +809,13 @@ function dotsLayout(card: CardData, cols: number, hover: number): Layout {
       const tally = new Map<string, number>()
       for (const d of m.dots) tally.set(d.group, (tally.get(d.group) ?? 0) + 1)
       const group = [...tally].sort((a, b) => b[1] - a[1])[0]![0]
+      // a span: a bar over its cells, as a bar card's, in its group's hue, the text color under the pointer
+      if (m.end !== undefined) {
+        if (used.slice(m.cell, m.end + 1).some(Boolean)) continue
+        cells[m.cell] = { s: '█'.repeat(m.end - m.cell + 1), fg: hot === m ? COLORS.text : hue(group) }
+        for (let k = m.cell; k <= m.end; k++) used[k] = true
+        continue
+      }
       cells[m.cell] = { s: dotGlyph(m.dots.length, most), fg: hot === m ? COLORS.text : hue(group), ...(hot === m ? { inv: true } : {}) }
       used[m.cell] = true
     }
@@ -850,12 +877,26 @@ function dotsLayout(card: CardData, cols: number, hover: number): Layout {
     if (row === undefined) return -1
     const cx = x - labelW - 2
     let best = -1
+    // how far the pointer's cell is from a mark: none within a span
+    const off = (m: Mark) => (m.end === undefined ? Math.abs(m.cell - cx) : cx < m.cell ? m.cell - cx : cx > m.end ? cx - m.end : 0)
     marks.forEach((m, i) => {
-      if (m.row === row && (best < 0 || Math.abs(m.cell - cx) < Math.abs(marks[best]!.cell - cx))) best = i
+      if (m.row === row && (best < 0 || off(m) < off(marks[best]!))) best = i
     })
     return best
   }
   return { lines, items, hit }
+}
+
+/** How long a span of `ms` lasts, in its two largest units: `45 s`, `12 min`, `2 h 24 min`, `3 d 4 h`. */
+export function lasting(ms: number): string {
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s} s`
+  const min = Math.round(s / 60)
+  if (min < 60) return `${min} min`
+  const h = Math.floor(min / 60)
+  if (h < 24) return min % 60 ? `${h} h ${min % 60} min` : `${h} h`
+  const d = Math.floor(h / 24)
+  return h % 24 ? `${d} d ${h % 24} h` : `${d} d`
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

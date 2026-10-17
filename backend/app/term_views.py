@@ -85,7 +85,8 @@ IDLE_S = 600.0  # the host ends this long after its last view closed
 LINE_MAX = 8 * 1024 * 1024
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
 TOKEN_HEADER = "x-thimble-token"
-# what the panel shows while the page a view lacks for the terminal is built (views.ensure_page)
+# what the panel shows while the page a view lacks for the terminal is built (views.ensure_page, which the panel's
+# `thimble act view-term-page` asks for)
 BUILDING = "building the terminal page…"
 
 
@@ -102,9 +103,9 @@ class SandboxError(TermViewError):
 
 def term_view(c: str, slug: str, *, live: bool = False) -> tuple[dict[str, Any], str]:
     """(the view as it last passed its checks, its view.term.js) for workspace `c`; TermViewError for a view that is
-    not there or never passed, and for one with no view.term.js yet (built for the browser), whose first open here
-    builds it (views.ensure_page) while the panel shows BUILDING. `live`: the view's live folder, its draft, which the
-    view's checks draw (draw_check)."""
+    not there or never passed, and for one with no view.term.js yet (built for the browser), whose build the panel asks
+    for (`thimble act view-term-page`: views.ensure_page in the process that follows builds, not this host) while it
+    shows BUILDING. `live`: the view's live folder, its draft, which the view's checks draw (draw_check)."""
     from . import views  # noqa: PLC0415
 
     view = views.read_view(c, slug) if live else views.read_built(c, slug)
@@ -112,8 +113,6 @@ def term_view(c: str, slug: str, *, live: bool = False) -> tuple[dict[str, Any],
         raise TermViewError(f"there is no view {slug!r}")
     path = Path(view["dir"]) / VIEW_TERM
     if not path.is_file():
-        if not live and view.get("origin") == "workspace":
-            views.ensure_page(c, slug, views.TERM_PAGE)
         raise TermViewError(BUILDING)
     return view, path.read_text("utf-8")
 

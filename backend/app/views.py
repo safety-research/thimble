@@ -3573,6 +3573,49 @@ def ensure_page(c: str, slug: str, target: str) -> bool:
     return True
 
 
+def page_state(c: str, slug: str, target: str, *, view: dict[str, Any] | None = None,
+               prop: dict[str, Any] | None = None) -> tuple[str, str]:
+    """Where the page the built view `slug` lacks for `target` stands: ('ready', '') when it has it, ('building', '')
+    while a build of the view is queued or runs, ('failed', why) when the last build of that page failed (it waits for
+    Retry), ('missing', '') when ensure_page would build it, and ('none', why) for no built view of the workspace's.
+    `view` and `prop`, the built view and its proposal when the caller read them already."""
+    view = view if view is not None else read_built(c, slug)
+    if view is None:
+        return "none", f"there is no built view {slug!r}"
+    if has_page(view, target):
+        return "ready", ""
+    if view.get("origin") != "workspace":
+        name = str(view.get("name") or slug)
+        return "none", f"the view {name!r} is thimble's own and has no page for {MISSING_PAGE_PLACE[target]}"
+    prop = prop if prop is not None else read_proposal(c, slug) or {}
+    if prop.get("status") in PENDING:
+        return "building", ""
+    if prop.get("failed_change") == MISSING_PAGE_REQUEST.format(page=PAGE_OF[target], place=MISSING_PAGE_PLACE[target]):
+        return "failed", " ".join(str(prop.get("error") or "").split())
+    return "missing", ""
+
+
+def page_ask(c: str, slug: str, target: str) -> dict[str, Any]:
+    """The open of a built view in the place whose page it lacks, before ensure_page (`thimble act view-term-page`):
+    {build: true} when ensure_page builds that page now, {queued: true} while a build of the view goes, {ready: true}
+    when it has the page, and {queued: false, reason} when it cannot be built now, the reason with its fix: its last
+    build failed (Retry builds it again) or the machine lacks what the build needs (build_problem_for)."""
+    state, why = page_state(c, slug, target)
+    if state == "ready":
+        return {"queued": False, "ready": True}
+    if state == "building":
+        return {"queued": True}
+    if state == "none":
+        return {"queued": False, "reason": why}
+    place = MISSING_PAGE_PLACE[target]
+    if state == "failed":
+        return {"queued": False, "failed": True,
+                "reason": f"The build of its page for {place} failed{f': {why}' if why else ''}. Retry builds it again."}
+    if problem := build_problem_for(c, target):
+        return {"queued": False, "reason": f"Its page for {place} cannot be built here. {problem}"}
+    return {"build": True}
+
+
 def build_problem_for(c: str, target: str | None = None) -> str:
     """Why a view cannot be built and checked in workspace `c` for `target` (default_target when None), '' when it can:
     build_problem, but for a `term-page`, whose checks draw the view's program as text rather than load a page, only

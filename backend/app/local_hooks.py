@@ -25,6 +25,8 @@ memory):
     view-reject       the view proposal rejected (views.answer_offer)
     view-retry        a failed build of a view run again, a notice's Retry (views.retry)
     view-propose-now  a check for a view proposal now, a notice's Try again (proposer.run_now)
+    view-term-page    the terminal page of a view built for the browser, built on its first open in the terminal
+                      (views.ensure_page)
     notice-dismiss    a notice dismissed, its × (notices.dismiss)
 
 One process holds the workspace's MIRROR_LOCK at a time. A call that finds it held adds its kind and input to TODO and
@@ -65,7 +67,7 @@ from . import subagent_files as sf
 log = logging.getLogger("thimble.local_hooks")
 
 KINDS = ("started", "stopped", "denied", "end", "rekey", "main-stop", "mode-notice", "view-accept", "view-reject",
-         "view-retry", "view-propose-now", "notice-dismiss")
+         "view-retry", "view-propose-now", "view-term-page", "notice-dismiss")
 MIRROR_LOCK = "mirror.lock"  # in the workspace folder: held by the one process that runs passes
 TODO = "mirror.todo.jsonl"  # in the workspace folder: the calls that found the lock held, for the holder
 TICK_S = 1.0
@@ -329,9 +331,20 @@ def _fixing(c: str, body: dict[str, Any]) -> None:
         _step("the notice's dismissal", _dismiss, c, {"id": body["notice"]})
 
 
+def _term_page(c: str, body: dict[str, Any]) -> None:
+    """A view built for the browser opened in the terminal: its terminal page's build queued (views.ensure_page), which
+    this process follows (_busy)."""
+    from . import views  # noqa: PLC0415
+
+    slug = str(body.get("slug") or "")
+    if slug and not views.ensure_page(c, slug, views.TERM_PAGE):
+        log.warning("%s: no build of the terminal page of %s was queued: %s", c, slug,
+                    views.page_ask(c, slug, views.TERM_PAGE))
+
+
 # the analyst's answers that `thimble act` hands to the holder (module note), each called with the act's body
 ANSWERS = {"view-accept": _accept, "view-reject": _reject, "view-retry": _retry, "view-propose-now": _propose_now,
-           "notice-dismiss": _dismiss}
+           "view-term-page": _term_page, "notice-dismiss": _dismiss}
 
 
 def _step(what: str, fn: Any, *args: Any) -> Any:

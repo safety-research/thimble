@@ -87,6 +87,20 @@ async def _view(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     return _view_answer(views.retry, c, slug)
 
 
+async def _term_page(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A view built for the browser opened in the terminal: its terminal page's build queued (views.ensure_page), as
+    local_hooks._term_page queues it, answered as local._act_view_term_page answers (views.page_ask)."""
+    from . import views  # noqa: PLC0415
+
+    views._bind_loop()
+    slug = _field(payload, "slug")
+    got = views.page_ask(c, slug, views.TERM_PAGE)
+    if got.pop("build", False):
+        views.ensure_page(c, slug, views.TERM_PAGE)
+        return {"queued": True}
+    return got
+
+
 async def _propose_now(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """A notice's Try again: the notice dismissed first, then a check for a view proposal now (proposer.run_now), as
     local_hooks._propose_now runs it; {queued: false, reason} while view proposals are off or one waits for an answer,
@@ -127,6 +141,8 @@ async def act_route(c: str, body: ActBody) -> dict[str, Any]:
         return await _answer_comment(c, payload)
     if kind in ("view-accept", "view-reject", "view-retry"):
         return await _view(c, kind, payload)
+    if kind == "view-term-page":
+        return await _term_page(c, payload)
     if kind == "view-propose-now":
         return await _propose_now(c, payload)
     if kind == "notice-dismiss":

@@ -748,6 +748,26 @@ export function curlyQuotes(s: string): string {
 
 // ---------------------------------------------------------------------------------------- inline runs
 
+// Emphasis by CommonMark's flanking rules (spec 6.2): a `*` run opens when the next character is not a space and, when
+// it is punctuation, the one before is a space or punctuation too; it closes the other way round. A `_` run opens only
+// after a space or punctuation and closes only before one, so `__` and `_` inside a word (`fan-out__goal`) are words.
+const PUNCT = String.raw`\p{P}\p{S}`
+const starOpen = (n: number) => String.raw`(?<!\*)\*{${n}}(?![\s*])(?:(?![${PUNCT}])|(?<=(?:^|[\s${PUNCT}])\*{${n}}))`
+const starClose = (n: number) => String.raw`(?<![\s*])\*{${n}}(?!\*)(?:(?<![${PUNCT}]\*{${n}})|(?=$|[\s${PUNCT}]))`
+const lineOpen = (n: number) => String.raw`(?<![^\s${PUNCT}])(?<!_)_{${n}}(?![\s_])`
+const lineClose = (n: number) => String.raw`(?<![\s_])_{${n}}(?!_)(?![^\s${PUNCT}])`
+const BOLD = String.raw`${starOpen(2)}[^*\n]+${starClose(2)}|${lineOpen(2)}[^_\n]+${lineClose(2)}`
+const ITALIC = String.raw`${starOpen(1)}[^*\n]+${starClose(1)}|${lineOpen(1)}[^_\n]+${lineClose(1)}`
+// tokens: code span, citation (masked), link (citation form or web), bold, italic
+const TOKEN = new RegExp(String.raw`(\x60[^\x60\n]+\x60)|(\uE000\uE001*)|((?<![\[!])\[[^\[\]\n]*\]\([^()\s]*(?:\([^()\s]*\)[^()\s]*)*\))|(${BOLD})|(${ITALIC})`, 'gu')
+const EMPHASIS = new RegExp(String.raw`(${BOLD})|(${ITALIC})|\x60([^\x60\n]+)\x60`, 'gu')
+
+/** Text with the marks of its bold, italic and code spans left out, by the same rules inlineRuns draws them by: an
+ *  underscore inside a word stays (`fan-out__goal`). */
+export function plainMarks(text: string): string {
+  return text.replace(EMPHASIS, (m: string, bold?: string, italic?: string, code?: string) => (bold ? m.slice(2, -2) : italic ? m.slice(1, -1) : (code ?? m)))
+}
+
 /** A line of Markdown as styled runs: bold, italic, code, links (their text), citations (one run each). */
 export function inlineRuns(text: string): Run[] {
   const out: Run[] = []
@@ -762,8 +782,6 @@ export function inlineRuns(text: string): Run[] {
     from = sp.end
   }
   masked += text.slice(from)
-  // tokens: code span, citation, link (citation form or web), bold, italic
-  const TOKEN = /(`[^`\n]+`)|(\uE000\uE001*)|((?<![\[!])\[[^\[\]\n]*\]\([^()\s]*(?:\([^()\s]*\)[^()\s]*)*\))|(\*\*[^*\n]+\*\*|__[^_\n]+__)|((?<![\w*])\*[^*\n]+\*(?!\w)|(?<![\w_])_[^_\n]+_(?![\w]))/g
   let last = 0
   const push = (r: Run) => {
     if (r.text) out.push(r)

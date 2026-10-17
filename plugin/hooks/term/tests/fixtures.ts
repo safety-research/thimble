@@ -203,6 +203,8 @@ export type World = {
   labelRun: Record<string, unknown> | null
   /** acts thimble refuses, by kind, with why */
   refuse?: Record<string, string>
+  /** what an act answers besides `ok: true`, by kind (`{queued: false, reason}`) */
+  answers?: Record<string, Record<string, unknown>>
   /** a document by its slug, over the fixtures' */
   docs: Record<string, unknown>
   /** the slash commands run, as `/name args` */
@@ -545,6 +547,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
       const payload = JSON.parse(rest[0] ?? '{}') as Record<string, unknown>
       w.acts.push({ kind: what!, payload })
       if (w.refuse?.[what!]) return out({ error: w.refuse[what!] }, 1)
+      if (w.answers?.[what!]) return out({ ok: true, ...w.answers[what!] })
       if (what === 'thread') return out({ ok: true, thread: 't9' })
       // a label deleted leaves the labels and home; one that is not there is refused, as thimble refuses it
       if (what === 'label-delete') {

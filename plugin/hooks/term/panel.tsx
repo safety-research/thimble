@@ -38,9 +38,9 @@ import type { BarRow, CardData, Cell, Item, Layout, Line, Seg } from './draw'
 import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
-import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelBlocks, labelHue } from './home'
+import { FIRST as HOME_FIRST, HOME_HINTS, NO_FIT_MARK, UNSURE_MARK, groupCards, homeLayout, homePick, homeReduce, labelBlocks, labelHue, labelParts } from './home'
 import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, viewRef, windowAt } from './lib'
+import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, plainMarks, quoted, recordFields, reportRef, stoppedTurn, viewRef, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
@@ -53,7 +53,7 @@ import type { Focus } from './anim'
 import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, threadOnTrail, threadTitle, threadTree, withBack } from './nav'
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
-import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
+import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, loadsView, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
 import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, runReads, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
 import { featuresOf, openComments, openSection } from './band'
 import { openChecks } from './checksview'
@@ -181,7 +181,7 @@ export async function homeViews(cx: Ctx): Promise<HomeView[]> {
     const state = st === 'built' ? 'built' : st === 'building' ? 'building' : st === 'failed' ? 'failed' : 'proposed'
     const slug = str(v.slug)
     const fresh = state === 'built' && !rt.viewsSeen.has(slug) && rt.viewsBuiltBefore !== null && !rt.viewsBuiltBefore.has(slug)
-    return { slug, name: str(v.name) || slug, state, words: '', files: Array.isArray(v.files) ? (v.files as unknown[]).map(String) : [], unit: '', drawable: state === 'built', left: 0, at: Date.parse(str(v.ts)) || 0, ...(fresh ? { fresh: true } : {}), ...(v.term === true ? { term: true } : {}) }
+    return { slug, name: str(v.name) || slug, state, words: '', files: Array.isArray(v.files) ? (v.files as unknown[]).map(String) : [], unit: '', drawable: state === 'built', left: 0, at: Date.parse(str(v.ts)) || 0, ...(fresh ? { fresh: true } : {}), ...(v.term === true ? { term: true } : {}), ...(str(v.page) ? { page: str(v.page) } : {}), ...(str(v.page_why) ? { pageWhy: str(v.page_why) } : {}) }
   })
 }
 
@@ -2251,7 +2251,7 @@ function passageRows(text: string, cols: number): Line[] {
   const out: Line[] = []
   for (const raw of plainCites(text).replace(/\[([^\[\]\n]*)\]\([^()\s]*\)/g, '$1').split('\n')) {
     const head = /^#{1,6}\s+/.test(raw)
-    const words = raw.replace(/^#{1,6}\s+/, '').replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim()
+    const words = plainMarks(raw.replace(/^#{1,6}\s+/, '')).replace(/\s+/g, ' ').trim()
     if (!words) continue
     for (const r of wrapRows(words, Math.max(10, cols), 999)) out.push([{ s: r, ...(head ? { b: true } : {}) }])
   }
@@ -2443,7 +2443,7 @@ function threadLine(t: ChatThread): Seg {
   const done = [...t.turns].reverse().find(x => x.state === 'done' && x.a.trim())
   const first = plainCites(done?.a ?? '').replace(/^#+\s*/gm, '').split('\n').find(l => l.trim()) ?? ''
   // an answer not read yet shows nothing until it is
-  return dim(first.replace(/\*\*|__|`/g, '').trim() || (t.loading ? '' : 'answered'))
+  return dim(plainMarks(first).trim() || (t.loading ? '' : 'answered'))
 }
 
 // the threads whose subject shows whole under their `about` row, by the thread's id: v, or a press on the row
@@ -2496,7 +2496,7 @@ function workingEl(els: El, turn: { tools: number; partial: string }, cols: numb
       </Text>
       {latest ? (
         <Text key={`${key}-latest`} dimColor wrap="truncate-end">
-          {cut(`  ⎿  ${plainCites(latest).replace(/\*\*|__|`/g, '')}`, cols + MARGIN_W)}
+          {cut(`  ⎿  ${plainMarks(plainCites(latest))}`, cols + MARGIN_W)}
         </Text>
       ) : null}
     </Box>
@@ -2765,7 +2765,9 @@ const NAME_W = 40
 const GLOB_W = 36
 const BAR_W = 30
 const KINDS = ['prompt', 'regex', 'code'] as const
-const UNIT_CHOICES = [['files', 'records of files'], ['cards', 'cards'], ['sentences', 'sentences']] as const
+// what a label labels, by its unit, as the browser's label editor offers it: a file's records, whole files, runs (each
+// run's folder), the canvas's cards, the report's sentences
+const UNIT_CHOICES = [['record', 'records of files'], ['agent', 'whole files'], ['run', 'runs'], ['cell', 'cards'], ['span', 'sentences']] as const
 const ON_OFF = [['on', 'on'], ['off', 'off']] as const
 
 /** A label's definition as its panel edits it: a prompt label's prompt, else its pattern or code. */
@@ -3057,9 +3059,9 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       ),
     )
   }
-  // unit: what it labels; only the one it has, since its rows are of that unit (the browser's `Over`, fixed once made)
-  const over = files ? 'files' : l.unit === 'cell' ? 'cards' : 'sentences'
-  rows.push(fieldLine('unit:', choices('lu', UNIT_CHOICES, over)))
+  // unit: what it labels, the one it has lit (a whole-file label's `whole files`, a run label's `runs`: bug hunt C14);
+  // only that one, since its rows are of that unit (the browser's `Over`, fixed once made)
+  rows.push(fieldLine('unit:', choices('lu', UNIT_CHOICES, UNIT_CHOICES.some(([u]) => u === l.unit) ? l.unit! : 'record')))
   // scope: a label over files, its glob in a field and how many files it matches and records they hold (Matt, 19:05: a
   // bare count read as a link); a label over cards or sentences, what it holds and how many
   const noun = files ? l.scope_unit || unit : unit
@@ -3129,10 +3131,14 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   rows.push(<Text key="lb-gap-values"> </Text>)
   const notes = [setByYou ? `${num(setByYou)} set by you` : '', filtered ? `filtered to ${filtered}` : ''].filter(Boolean).join(' · ')
   rows.push(fieldLine('values:', <Text dimColor wrap="truncate-end">{notes}</Text>))
-  const most = Math.max(0, ...values.map(v => counts[v] ?? 0))
-  const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(1, ...values.map(v => width(v))))
+  // its records of no fit and unsure, counted as home counts them (labelParts), while labels are on
+  const u = (await featuresOf(cx)).labels ? (await cx.labelUnsure()).find(x => x.id === id) : undefined
+  const parts = labelParts({ slug: id, name, kind, trial: Boolean(l.trial), counts, values: l.labels ?? Object.keys(counts), paths: [], running: Boolean(running), ...(u ? { noFit: u.noFit, unsure: u.unsure } : {}) })
+  const extraNs = [parts.unsure, ...parts.parts.filter(x => x.mark === NO_FIT_MARK).map(x => x.n)].filter(n => n > 0)
+  const most = Math.max(0, ...values.map(v => counts[v] ?? 0), ...extraNs)
+  const vw = Math.min(Math.max(12, Math.floor(cols / 3)), Math.max(1, ...values.map(v => width(v)), ...(extraNs.length ? [width('unsure')] : [])))
   const cs = values.map(v => num(counts[v] ?? 0))
-  const cw = Math.max(3, ...cs.map(c => c.length))
+  const cw = Math.max(3, ...cs.map(c => c.length), ...extraNs.map(n => num(n).length))
   const barW = Math.max(4, Math.min(BAR_W, cols - L - 2 - vw - 2 - 1 - cw))
   const openValue = (v: string) => async () => {
     labelValueOpen = labelValueOpen === `${id}\n${v}` ? '' : `${id}\n${v}`
@@ -3223,6 +3229,27 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
       )
   })
   if (!values.length) rows.push(<Box key="lb-no-values" marginLeft={L}><Text dimColor>none</Text></Box>)
+  // then the records it is unsure of (among its values' counts) and those no category fit that no value names, as home
+  // and the Labels view count them (home.ts labelParts: bug hunt C14, home's `▒ unsure 18` missing here)
+  const extra: [string, string, number][] = [
+    ...(parts.unsure ? [[UNSURE_MARK, 'unsure', parts.unsure] as [string, string, number]] : []),
+    ...parts.parts.filter(x => x.mark === NO_FIT_MARK).map((x): [string, string, number] => [NO_FIT_MARK, x.name, x.n]),
+  ]
+  for (const [mark, what, n] of extra) {
+    const cells = most > 0 ? Math.max(1, Math.round((barW * n) / most)) : 0
+    rows.push(
+      <Box key={`lb-x-${what}`} flexDirection="row" marginLeft={L}>
+        <Text dimColor>{`${mark} `}</Text>
+        <Text dimColor>{clip(what, vw).padEnd(vw)}</Text>
+        <Text wrap="truncate-end">
+          <Text>{'  '}</Text>
+          <Text dimColor>{mark.repeat(cells)}</Text>
+          <Text>{' '.repeat(Math.max(0, barW + 1 - cells))}</Text>
+          <Text dimColor>{num(n).padStart(cw)}</Text>
+        </Text>
+      </Box>,
+    )
+  }
   // the whole files or runs its last run read only in part, one dim line under the values as the browser's Labels pane
   // has it, until a run cuts none (backend concepts.read_cut)
   if (!running && last?.cut?.line) rows.push(<Box key="lb-cut" marginLeft={L}><Text wrap="wrap" dimColor>{last.cut.line}</Text></Box>)
@@ -3985,6 +4012,47 @@ const VIEW_CHROME = 3
 // the panel's own keys, which a view never takes (term_kit/kit.mjs PANEL_KEYS): back, the threads, close
 const PANEL_KEYS = ['b', 't', 'x']
 
+// what thimble answered this open's ask for the terminal page of a view built for the browser, by the view's slug: null
+// while it asks or once it builds; `why` when it is not built, with the fix, `failed` when Retry is the fix
+const pageAsks = new Map<string, { why: string; failed: boolean } | null>()
+
+/** Each open of a view built for the browser (the panel's load of it, term.ts loadPanel; a drawing writes nothing):
+ *  thimble asked to build its terminal page (`thimble act view-term-page`), as the browser's first open of a
+ *  terminal-built view builds that view's page (views.page_ask, ensure_page), unless home's row says it builds or failed. */
+async function askTermPage(cx: Ctx, p: TermPanel): Promise<void> {
+  const slug = p.slug ?? ''
+  const find = async () => (await homeViews(cx)).find(x => x.slug === slug)
+  // a view opened before home was read (open_view in a new session): home read first
+  const v = (await find()) ?? (await readSurface(cx, 'home-full', 'home'), await find())
+  const sc = rt.sc
+  if (!v || v.term || v.state !== 'built' || (v.page && v.page !== 'missing') || !sc) return
+  pageAsks.set(slug, null)
+  const got = await act<{ queued?: boolean; reason?: string; failed?: boolean }>(cx, sc, 'view-term-page', { slug })
+  pageAsks.set(slug, !got.ok ? { why: `thimble did not start the build of its terminal page: ${got.error}`, failed: false } : got.value.queued === false && got.value.reason ? { why: got.value.reason, failed: got.value.failed === true } : null)
+  await cx.bumpPanel()
+}
+
+/** Where the terminal page of a view built for the browser stands, as the panel says it: why it is not built, with the
+ *  fix (home's row: its build failed, or thimble has none for it; or thimble's answer to this open's ask), else `why`
+ *  empty while it builds. */
+function termPage(v: HomeView): { why: string; failed: boolean } {
+  if (v.page === 'failed') return { why: `The build of its terminal page failed${v.pageWhy ? `: ${v.pageWhy.replace(/\.$/, '')}` : ''}. r builds it again.`, failed: true }
+  if (v.page === 'none') return { why: v.pageWhy || 'thimble has no terminal page for this view.', failed: false }
+  return (v.page !== 'building' && pageAsks.get(v.slug)) || { why: '', failed: false }
+}
+
+/** `r` on a terminal page whose build failed: the view built again with that change (`thimble act view-retry`). */
+async function retryPage(cx: Ctx, v: HomeView): Promise<void> {
+  if (!rt.sc) return
+  const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, 'view-retry', { slug: v.slug })
+  if (!got.ok || got.value.queued === false) {
+    cx.toast(`thimble: ${got.ok ? got.value.reason || 'it could not start' : got.error}`)
+    return
+  }
+  pageAsks.delete(v.slug)
+  cx.toast('thimble: building the terminal page again')
+}
+
 /** One view (docs/terminal-views.md): a view with a terminal page is drawn by its program (hooks/viewhost.ts) under
  *  the panel's header, its subtitle the facts the program gives, its hint row the keys it binds; its keys reach it
  *  through the list's relay (↑↓, Enter, Space, Backspace) and as hotkeys (a letter, a digit, a sign), every key while a
@@ -3998,12 +4066,20 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const slug = p.slug ?? ''
   const v = (await homeViews(cx)).find(x => x.slug === slug)
   if (!v?.term || !rt.sc || (e.surface !== 'terminal' && e.surface !== 'desktop')) {
+    const page = v && !v.term && v.state === 'built' ? termPage(v) : null
+    const retry = page?.failed ? hiddenKeys(cx, e, [{ key: 'page-retry', hotkey: 'r', onPress: () => void retryPage(cx, v!) }]) : null
     return (
       <Box flexDirection="column">
         {[
+          ...(retry ? [retry] : []),
           ...headerEls(els, { title: p.title || slug || 'view', cols, sub: subLine(['view']) }),
-          <Text key="view-words" wrap="wrap">{v && !v.term && v.state === 'built' ? 'building the terminal page… The browser draws this view now: o or ↗ opens it there.' : 'The view is not built yet. Its row on home says when it is.'}</Text>,
-          hintsRow(els, ['o to open it in the browser', 'b to go back', 'x to close'], cols),
+          page?.why ? (
+            <Text key="view-words" color={COLORS.problem} wrap="wrap">{`× ${page.why}`}</Text>
+          ) : (
+            <Text key="view-words" wrap="wrap">{page ? 'building the terminal page… The browser draws this view now: o or ↗ opens it there.' : 'The view is not built yet. Its row on home says when it is.'}</Text>
+          ),
+          ...(page?.why ? [<Text key="view-browser" wrap="wrap">The browser draws this view now: o or ↗ opens it there.</Text>] : []),
+          hintsRow(els, [...(page?.failed ? ['r to build it again'] : []), 'o to open it in the browser', 'b to go back', 'x to close'], cols),
         ]}
       </Box>
     )
@@ -4079,6 +4155,7 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
 /** What the view's acts do in the panel: a record's place in the citation panel, a side thread about a row, a label's
  *  panel (views.ts registerPanelViews calls it once). */
 export function registerViewActs(): void {
+  loadsView('view', askTermPage)
   onViewAct(async (cx, a) => {
     if (a.kind === 'open' && a.ref) return openCite(cx, a.ref, null)
     if (a.kind === 'ask' && a.ref) return openAsk(cx, { kind: 'record', ref: a.ref, text: a.text ?? '' }, { anchor: a.ref, anchorText: a.text ?? '' })
