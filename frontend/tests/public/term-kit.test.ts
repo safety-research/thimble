@@ -68,6 +68,32 @@ describe('the drawing', () => {
     expect(last().lines[0][1].fg).toBe('error')
     expect(last().keys).toEqual([])
   })
+
+  test("a lane's minutes, each a chart cell with its own words and click, are one region per row: each cell's words in `tips`, a click going to its own cell (bug hunt J12)", async () => {
+    const pressed: string[] = []
+    init({ cols: 60, rows: 4 })
+    kit.draw((d: any) => {
+      for (const agent of ['agent-a', 'agent-b']) {
+        const r = d.row().add(`${agent} `)
+        for (let m = 0; m < 30; m++) r.add('█', {}, { cursor: true, tip: `${agent} · minute ${m}`, on: () => pressed.push(`${agent}:${m}`) })
+        r.end()
+      }
+      d.row().add('menu', {}, { on: () => pressed.push('menu') }).add('x', {}, { on: () => pressed.push('x') }).end()
+    })
+    await tick()
+    const f = last()
+    // a region per lane, not a region per minute; the controls side by side stay apart
+    expect(f.hits.filter((h: any) => h.y < 2)).toEqual([
+      { y: 0, x0: 10, x1: 40, cursor: true, tips: Array.from({ length: 30 }, (_, m) => `agent-a · minute ${m}`) },
+      { y: 1, x0: 10, x1: 40, cursor: true, tips: Array.from({ length: 30 }, (_, m) => `agent-b · minute ${m}`) },
+    ])
+    expect(f.hits.filter((h: any) => h.y === 2)).toHaveLength(2)
+    // a click on a cell is that cell's: x counted from the region's start
+    kit.handle({ t: 'click', i: 1, seq: f.seq, x: 7, n: ++n })
+    await tick()
+    await click('menu')
+    expect(pressed).toEqual(['agent-b:7', 'menu'])
+  })
 })
 
 describe('acts', () => {

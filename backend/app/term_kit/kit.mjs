@@ -781,9 +781,10 @@ export function frame() {
   state.typer = d.typer
   const lines = d.lines.slice(0, state.rows)
   const shown = d.hits.filter((h) => h.y < lines.length && h.x1 > h.x0)
-  // the rows a list stands on (`wheel`) are no hot region: the wheel and a click there find the list (listAt)
-  const hits = shown.filter((h) => !h.wheel)
-  for (const h of hits) if (h.cursor === undefined && !h.row && chartCells(lines[h.y], h.x0, h.x1)) h.cursor = true
+  // the rows a list stands on (`wheel`) are no hot region: the wheel and a click there find the list (listAt); a chart's
+  // cells side by side on a row are one region (chartRegions)
+  for (const h of shown) if (!h.wheel && h.cursor === undefined && !h.row && chartCells(lines[h.y], h.x0, h.x1)) h.cursor = true
+  const hits = chartRegions(shown.filter((h) => !h.wheel))
   state.hits.set(seq, hits)
   state.areas.set(seq, shown.filter((h) => h.wheel))
   for (const k of [...state.hits.keys()]) if (k < seq - 4) state.hits.delete(k)
@@ -892,6 +893,44 @@ const CHART = new Set([...' ▁▂▃▄▅▆▇█▏▎▍▌▋▊▉─│�
 
 // whether the cells [x0, x1) of a line are a chart's alone (at least four of them), whose hit is marked by its cell under
 // the pointer rather than drawn inverse, which would turn the chart into a band
+/** The hot regions of a frame with each run of a chart's cells that stand side by side on one row, each a region of its
+ *  own (a lane's minutes, each with its tip and its click), as one region: its cells' words in `tips` and a click on a
+ *  cell going to that cell's own `on` with its own x. thimble-term's panel draws a frame's regions as the props of one
+ *  Client, which hold at most 100,000 characters; a lane view's 2,000 one-cell regions took 280,000 and the panel drew
+ *  nothing (bug hunt J12). */
+function chartRegions(hits) {
+  const out = []
+  for (const h of hits) {
+    const prev = out.at(-1)
+    const joins = (g) => g.cursor && !g.row && !g.drag
+    if (prev && joins(prev) && joins(h) && prev.y === h.y && prev.x1 === h.x0) {
+      const cells = prev.cells || [prev]
+      const all = [...cells, h]
+      const x0 = all[0].x0
+      const tipOf = (g, x) => (Array.isArray(g.tips) && g.tips[x - g.x0]) || g.tip || ''
+      const tips = []
+      for (const g of all) for (let x = g.x0; x < g.x1; x++) tips.push(tipOf(g, x))
+      const same = all.every((g) => !g.tips && g.tip === all[0].tip)
+      out[out.length - 1] = {
+        y: h.y,
+        x0,
+        x1: h.x1,
+        cursor: true,
+        cells: all,
+        ...(same ? { tip: all[0].tip } : { tips }),
+        on: all.some((g) => g.on)
+          ? (x) => {
+              const at = x0 + x
+              const g = all.find((c) => at >= c.x0 && at < c.x1)
+              if (g && g.on) g.on(at - g.x0)
+            }
+          : undefined,
+      }
+    } else out.push(h)
+  }
+  return out
+}
+
 function chartCells(line, x0, x1) {
   if (!line || x1 - x0 < 4) return false
   const text = line.runs.map((r) => r.s).join('')
