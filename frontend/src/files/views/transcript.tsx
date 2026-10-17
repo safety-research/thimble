@@ -19,6 +19,7 @@ import { Button } from '../../components/Button'
 import { Chip } from '../../components/Chip'
 import { Spinner } from '../../components/Spinner'
 import { api } from '../../lib/api'
+import { mdSyntax, plainMd } from '../../lib/mdPlain'
 import { findQuote } from '../../lib/quoteFind'
 import { cleanTerminal, needsClean } from '../../lib/terminal'
 import type { Block, ChatTurn, SourceKind, SourceRecord, SourceTurn, SourceTurns, TranscriptHint } from '../../lib/types'
@@ -669,49 +670,6 @@ const CLOCK_LINE = /^[[(]?((?:\d{4}-\d{2}-\d{2}[ T,]+)?\d{1,2}:\d{2}(?::\d{2})?(
 export function clockLine(text: string, md: boolean): string | null {
   const m = CLOCK_LINE.exec((md ? plainMd(text) : text).trim())
   return m ? m[1] : null
-}
-
-// a markdown line's syntax: a heading's or a quote's lead, and inline the marks of code, a link (its target too), bold
-// and italic, as a reader of the rendered text would not see them
-const MD_LEAD = /^\s{0,3}(?:#{1,6}\s+|>\s?)/
-const MD_INLINE = /(`[^`\n]+`)|(\[[^[\]\n]*\]\([^()\s]*\))|(\*\*[^*\n]+\*\*|__[^_\n]+__)|((?<![\w*])\*[^*\s][^*\n]*\*(?!\w)|(?<![\w_])_[^_\s][^_\n]*_(?!\w))/g
-
-/** The ranges of a markdown line that are its syntax (mdSyntax's), in order. Pure. */
-export function mdSyntax(line: string): [number, number][] {
-  const out: [number, number][] = []
-  const lead = MD_LEAD.exec(line)?.[0] ?? ''
-  if (lead) out.push([0, lead.length])
-  inlineSyntax(line, lead.length, line.length, out)
-  return out.sort((a, b) => a[0] - b[0])
-}
-
-function inlineSyntax(line: string, from: number, to: number, out: [number, number][]): void {
-  for (const m of line.slice(from, to).matchAll(MD_INLINE)) {
-    const a = from + (m.index ?? 0)
-    const b = a + m[0].length
-    if (m[1]) out.push([a, a + 1], [b - 1, b])
-    else if (m[2]) {
-      const close = a + m[0].indexOf('](')
-      out.push([a, a + 1], [close, b])
-      inlineSyntax(line, a + 1, close, out)
-    } else {
-      const w = m[3] ? 2 : 1
-      out.push([a, a + w], [b - w, b])
-      inlineSyntax(line, a + w, b - w, out)
-    }
-  }
-}
-
-/** A markdown line's words from `from` on, without its syntax (mdSyntax). Pure. */
-export function plainMd(text: string, from = 0): string {
-  let out = ''
-  let at = from
-  for (const [a, b] of mdSyntax(text)) {
-    if (b <= at) continue
-    if (a > at) out += text.slice(at, a)
-    at = b
-  }
-  return out + text.slice(at)
 }
 
 /** A chat log turn's head: its speaker, the time its own line gives, else the time a line before it gave (chatTurns);

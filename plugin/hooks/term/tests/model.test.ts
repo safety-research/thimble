@@ -7,7 +7,7 @@ import { changed, cliOf, parsePrinted } from '../data'
 import { cardsInline, citations, valueIn } from '../lib'
 import { showsValue } from '../cite'
 import { labelCard } from '../cell'
-import { cardsOfCall, labelOf, labelsOf, resolutionOf, runShown, verdictOf } from '../model'
+import { cardsOfCall, labelOf, labelsOf, resolutionOf, runShown, turnWords, verdictOf } from '../model'
 import { RESOLVE } from './fixtures'
 
 const check = (raw: string) => {
@@ -131,4 +131,14 @@ test("a clock time is a value a citation shows: found where the line writes that
 test('a card cited by a chip alone stands after the paragraph that cites it, its chip taken out of the sentence', () => {
   const md = 'Yes. The transcripts are under 1 MB [[card:a1b2c3d4]].\nThe logs are the rest.\n\nThat is all.'
   expect(cardsInline(md)).toBe('Yes. The transcripts are under 1 MB.\nThe logs are the rest.\n\n[[card:a1b2c3d4]]\n\nThat is all.')
+})
+
+test('an example quotes a markdown chat log\'s line as its speaker and its words, without the markdown (bug hunt D9)', () => {
+  // `**R3:** …` read `"**R3:** I could not find the stop button…"` in the card, its speaker's bold marks kept
+  const line = '**R3:** I could not find the *stop* button. It sat under [the menu](https://example.org) somewhere.'
+  const res = { ref: 'R3/notes.md#L12.b0:c8-46', kind: 'span', path: 'R3/notes.md', line: 12, blocks: [{ kind: 'text', text: line }], excerpt: 'I could not find the *stop* button.', meta: { turn: { speaker: 'R3', at: 8 } } }
+  const v = verdictOf(citations('[[R3/notes.md#L12.b0:c8-46]]')[0]!, res as never)
+  expect(turnWords(v)).toEqual({ speaker: 'R3', words: 'I could not find the stop button. It sat under the menu somewhere.' })
+  // a place with no turn (a line of any other file) is quoted as before
+  expect(turnWords(verdictOf(citations('[[R3/notes.md#L12]]')[0]!, { ...res, ref: 'R3/notes.md#L12', kind: 'record', meta: {} } as never))).toBeNull()
 })

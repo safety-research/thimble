@@ -204,10 +204,12 @@ WAIT_NOTE_S = 2.0  # a wait shorter than this (a prompt the analyst answered at 
 # analyst answered it in the terminal. A subagent's or fork's prompt is never released this way.
 ASK_RELEASE_S = 10.0
 # a reply of main's that Claude's safeguards stopped partway (the model's own reply ends with stop_reason refusal, not
-# Claude Code's API error line), after which Claude Code goes on once (SAFETY_RE): a notice in the browser and the
-# terminal says so, and names the card the stopped reply was making when that card was not added, with the fixes: Make
-# the card again (`card-again`, CARD_AGAIN sent to main as the analyst's) and Ask again (`ask-again`, the analyst's last
-# message to main put back in the prompt to send in other words) (bug hunt C23)
+# Claude Code's API error line), after which Claude Code goes on once (SAFETY_RE): when the turn ends, a notice in the
+# browser and the terminal says so, and names the card the stopped reply was making when that card was not added, with
+# the fixes: Make the card again (`card-again`, CARD_AGAIN sent to main as the analyst's) and Ask again (`ask-again`,
+# the analyst's last message to main put back in the prompt to send in other words) (bug hunt C23). When main went on
+# after the stop and ended its turn, the request ran to its end: no Ask again, and a notice only for a card still
+# missing (STOP_CARD_WENT_ON_TEXT) (bug hunt D11)
 STOP_KEY = "stopped:main"
 STOP_KIND = "stopped"
 STOP_TEXT = "Claude's safeguards stopped main's reply partway. Ask again in other words."
@@ -215,6 +217,10 @@ STOP_CARD_TEXT = ("Claude's safeguards stopped main's reply partway, so the card
                   "Make the card again, or ask again in other words.")
 STOP_CARDS_TEXT = ("Claude's safeguards stopped main's reply partway, so the {n} cards it was making weren't added. "
                    "Make the cards again, or ask again in other words.")
+STOP_CARD_WENT_ON_TEXT = ("Claude's safeguards stopped main's reply partway. Main went on, but the card it was making "
+                          "wasn't added{question}. Make the card again.")
+STOP_CARDS_WENT_ON_TEXT = ("Claude's safeguards stopped main's reply partway. Main went on, but the {n} cards it was "
+                           "making weren't added. Make the cards again.")
 CARD_AGAIN = ("Claude's safeguards stopped your reply while you were adding the card{question}, and the card was not "
               "added. Make that card again.")
 CARDS_AGAIN = ("Claude's safeguards stopped your reply while you were adding these cards, and they were not added. "
@@ -329,6 +335,8 @@ class Live:
         # tool_use id -> question of each card call in main's reply the safeguards are stopping, until the stop is told
         # (_stop_notice); a call that ran to its end and made its card leaves (_tool_result)
         self.stopped_cards: dict[str, str] = {}
+        self.stop_pending = False  # the safeguards stopped a reply in this turn, which is told when the turn ends
+        self.went_on = False  # main replied after that stop (no API error, no second stop)
         self.buf = b""
         self.saved = -1  # the offset the cursor in sessions.json holds (_save_cursor)
         self.subs_saved: dict[str, tuple] = {}  # each subagent's (offset, done) sessions.json holds (_sub_places)
@@ -1446,6 +1454,8 @@ def _open_turn(lv: Live) -> None:
     """A record that starts main's turn: the analyst's line, an event, a task notification. Several before the first
     assistant record open the same turn."""
     if not lv.turn_open or not lv.fresh:
+        if lv.stop_pending:  # a turn with a stop that ended with no record of its end
+            _stop_notice(lv)
         lv.turn_open, lv.fresh, lv.wrote, lv.turn_threads, lv.forked = True, True, False, list(lv.handed), set()
         lv.flagged, lv.answered, lv.held_by_check, lv.stop_noted = False, True, False, False
         lv.turn_calls, lv.turn_text, lv.turn_since = set(), "", _now()
@@ -1473,6 +1483,8 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
     _asked(lv, False)  # a relayed prompt the terminal answered before the tail saw the wait
     if lv.flagged and not lv.answered:
         _stopped(lv, SAFETY_STOP_TEXT)
+    if lv.stop_pending:
+        _stop_notice(lv)
     if lv.wrote:
         agents.mirror(lv.c, "done", by=TERMINAL, session_id=lv.sid)
     was_open = lv.turn_open
@@ -1587,9 +1599,11 @@ def _note(lv: Live, text: str) -> None:
 
 
 def _safety_stop(lv: Live) -> None:
+    """Claude's safeguards stopped main's reply and Claude Code tries once more: the chat's note now, the notice when
+    the turn ends (_stop_notice), which knows by then whether main went on."""
     lv.flagged, lv.answered = True, False
+    lv.stop_pending, lv.went_on = True, False
     _note(lv, SAFETY_TEXT)
-    _stop_notice(lv)
 
 
 def _stopped_cards(lv: Live, rec: dict) -> None:
@@ -1605,23 +1619,33 @@ def _stopped_cards(lv: Live, rec: dict) -> None:
 
 
 def _stop_notice(lv: Live) -> None:
-    """Claude's safeguards stopped main's reply partway (STOP_TEXT): a notice in the foreground, in the browser and the
-    terminal, that says so, names the card the reply was making when that card was not added, and offers Make the card
-    again and Ask again (the analyst's last message to main). Never raises."""
+    """The turn in which Claude's safeguards stopped main's reply partway ended (STOP_TEXT): a notice in the foreground,
+    in the browser and the terminal, that says so, names the card the reply was making when that card was not added,
+    and offers Make the card again and Ask again (the analyst's last message to main). When main went on after the stop,
+    its request ran to its end: Ask again would send it twice, so only a card still missing is told
+    (STOP_CARD_WENT_ON_TEXT), and nothing else. Never raises."""
     from . import notices  # noqa: PLC0415
 
+    went_on = lv.went_on
+    lv.stop_pending = lv.went_on = False
     cards = [q for q in lv.stopped_cards.values() if not _card_made(lv.c, q)]
     lv.stopped_cards = {}
+    if went_on and not cards:
+        return
     try:
         acts: list[dict[str, str]] = []
         if cards:
             acts.append({"label": CARD_AGAIN_LABELS[len(cards) > 1], "do": "card-again", "text": _card_again(cards)})
-        asked = _last_asked(lv.c)
+        asked = "" if went_on else _last_asked(lv.c)
         if asked:
             acts.append({"label": ASK_AGAIN_LABEL, "do": "ask-again", "text": asked})
         question = f": \"{notices._short(cards[0], STOP_QUESTION_CHARS)}\"" if cards and cards[0] else ""
-        text = (STOP_CARDS_TEXT.format(n=len(cards)) if len(cards) > 1 else
-                STOP_CARD_TEXT.format(question=question) if cards else STOP_TEXT)
+        if went_on:
+            text = (STOP_CARDS_WENT_ON_TEXT.format(n=len(cards)) if len(cards) > 1 else
+                    STOP_CARD_WENT_ON_TEXT.format(question=question))
+        else:
+            text = (STOP_CARDS_TEXT.format(n=len(cards)) if len(cards) > 1 else
+                    STOP_CARD_TEXT.format(question=question) if cards else STOP_TEXT)
         notices.post(lv.c, kind=STOP_KIND, text=text, chat=agents.MAIN_ID, key=STOP_KEY, action=acts or None)
     except Exception:  # noqa: BLE001 — the chat's note says it all the same
         log.exception("%s: the stop of main's reply was not told", lv.c)
@@ -1670,6 +1694,8 @@ def _interrupted(lv: Live) -> None:
     a stop held the turn, it was the safety check that ended the turn; else the analyst did."""
     if lv.turn_open:
         _stopped(lv, SAFETY_STOP_TEXT if lv.held_by_check or (lv.flagged and not lv.answered) else INTERRUPTED_TEXT)
+        if lv.stop_pending:
+            _stop_notice(lv)
 
 
 def turn_stopped(c: str, *, stopped: bool = True) -> None:
@@ -3605,6 +3631,9 @@ def translate(lv: Live, line: bytes | str) -> None:
     lv.fresh = False
     # the retry after a stop, if there was one, is writing; after the dialog, the analyst chose to go on
     lv.answered, lv.held_by_check = True, False
+    msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+    if lv.stop_pending and not api and msg.get("stop_reason") != REFUSAL:
+        lv.went_on = True  # the retry after the stop replies: main goes on with the request
     for b in _blocks(rec):
         if b["type"] == "text":
             if not isinstance(b.get("text"), str):

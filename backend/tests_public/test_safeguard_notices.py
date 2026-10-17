@@ -107,12 +107,14 @@ def test_main_switched_for_the_session_says_so_and_how_to_go_back(cwd, tmp_path)
     assert "In your terminal: run /model to pick Opus 5.5 again" in text
 
 
+BLOCKED = {"type": "assistant", "isApiErrorMessage": True, "error": "invalid_request",
+           "message": {"role": "assistant", "model": "<synthetic>", "stop_reason": "refusal",
+                       "content": [_say("API Error: Claude can't help with this. Start a new session to continue.")]}}
+
+
 def test_a_request_the_safeguards_blocked_marks_its_error_line(cwd, tmp_path):
     lv, p = _attach(cwd, tmp_path)
-    block = {"type": "assistant", "isApiErrorMessage": True, "error": "invalid_request",
-             "message": {"role": "assistant", "model": "<synthetic>", "stop_reason": "refusal",
-                         "content": [_say("API Error: Claude can't help with this. Start a new session to continue.")]}}
-    _append(p, lv, [_human("Look at the logs."), block, _end("c1")])
+    _append(p, lv, [_human("Look at the logs."), BLOCKED, _end("c1")])
     (text,) = [r for r in _log() if r["type"] == "text"]
     assert text["refusal"] is True and text["delta"].startswith("API Error:")
 
@@ -141,7 +143,7 @@ def test_a_reply_of_main_s_the_safeguards_stopped_says_what_it_cost_with_its_fix
         {"type": "system", "subtype": "informational", "level": "notice",
          "content": "Opus 5.5's safeguards stopped the response above · continuing once with that noted"},
         {"type": "user", "isMeta": True, "message": {"role": "user", "content": "Your response above was stopped."}},
-        _assistant(_say("My last reply was stopped partway.")), _end("c1")])
+        BLOCKED, _end("c1")])
     (shown,) = _open("stopped:main")
     assert shown["text"] == ("Claude's safeguards stopped main's reply partway, so the card it was making wasn't added: "
                              f"\"{question}\". Make the card again, or ask again in other words.")
@@ -151,3 +153,38 @@ def test_a_reply_of_main_s_the_safeguards_stopped_says_what_it_cost_with_its_fix
     (row,) = [n for n in local._notices(CORPUS) if n["key"] == "stopped:main"]
     assert [(a["act"], a["text"]) for a in row["acts"]] == [("card-again", again["text"]), ("ask-again", asked)], (
         "the terminal shows it too, with the same fixes")
+
+
+def _stopped_reply(block: dict, said: str) -> list[dict]:
+    """main's reply the safeguards stop in the middle of the call `block`, Claude Code's line that it goes on once, and
+    main's reply after it, `said`."""
+    rec = _assistant(block)
+    return [{**rec, "message": {**rec["message"], "stop_reason": "refusal"}},
+            {"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": block["id"], "is_error": True, "content": "Interrupted: stopped."}]}},
+            {"type": "system", "subtype": "informational", "level": "notice",
+             "content": "Opus 5.5's safeguards stopped the response above · continuing once with that noted"},
+            {"type": "user", "isMeta": True, "message": {"role": "user", "content": "Your response above was stopped."}},
+            _assistant(_say(said), model="claude-opus-4-8")]
+
+
+def test_a_stopped_reply_main_went_on_from_offers_no_ask_again(cwd, tmp_path):
+    """Bug hunt D11: the safeguards stopped main's reply in the middle of a label call, and main went on, started the
+    label over every message and answered. The stopped-reply notice stayed up with Ask again, which would send the
+    request, and its label run, a second time. A turn main went on in has no Ask again, and a notice only for a card
+    the stop cost."""
+    lv, p = _attach(cwd, tmp_path)
+    label = {"type": "tool_use", "id": "toolu_l1", "name": "mcp__plugin_thimble_thimble__apply_label",
+             "input": {"name": "rival talk", "scope": "files", "paths": ["notes/*.json#/messages"]}}
+    _append(p, lv, [_human("Label the rival talk in every message."), *_stopped_reply(label, "Labeling every message now.")])
+    assert not _open("stopped:main"), "no notice while main goes on"
+    _append(p, lv, [_end("c1")])
+    assert not _open("stopped:main"), "the request ran to its end"
+
+    question = "How many messages talk of a rival?"
+    card = {"type": "tool_use", "id": "toolu_c2", "name": "mcp__plugin_thimble_thimble__add_card",
+            "input": {"question": question, "kind": "table", "code": "import json"}}
+    _append(p, lv, [_human("Count them."), *_stopped_reply(card, "Here is the count."), _end("c2")])
+    (shown,) = _open("stopped:main")
+    assert "Main went on" in shown["text"] and question in shown["text"]
+    assert shown["action"]["do"] == "card-again", "Make the card again alone, no Ask again"

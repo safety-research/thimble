@@ -126,6 +126,9 @@ export type TermVerdict = {
   command?: string
   /** a database row's or a CSV row's fields, as its place resolved them */
   record?: Record<string, unknown>
+  /** the turn a chat log's cited line starts: its speaker, and where its words start in the line (UTF-16 code units),
+   *  as the server read it (`meta.turn`) */
+  turn?: { speaker: string; at: number }
   at: number
 }
 

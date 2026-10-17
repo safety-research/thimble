@@ -55,3 +55,23 @@ describe("a database row's fields, those the card's claim is about first (bug hu
     expect(marked(parts)).toEqual(['verified clean merge'])
   })
 })
+
+describe("a markdown chat log's line, quoted (bug hunt D9)", () => {
+  // `**R3:** …` showed as `**R3:** I could not find…`: the speaker's markdown kept, as the Transcript mode no longer shows it
+  const LINE = '**R3:** I could not find the *stop* button. It sat under [the menu](https://example.org) somewhere.'
+  const turn = { speaker: 'R3', at: 8 }
+  const span = (start: number, end: number): ResolvedRef =>
+    ({ ref: `R3/notes.md#L12.b0:c${start}-${end}`, kind: 'span', path: 'R3/notes.md', line: 12, block: 0, start, end, blocks: [{ kind: 'text', text: LINE }], excerpt: LINE.slice(start, end), meta: { turn } }) as unknown as ResolvedRef
+
+  test("a passage of a speaker's line shows under the speaker's name, the words around it without markdown", () => {
+    const at = LINE.indexOf('It sat')
+    const r = span(at, LINE.length)
+    const [part] = entryParts(exampleEntries([r.ref])[0], () => r)!
+    expect(part).toEqual({ kind: 'span', key: 'R3', before: 'I could not find the stop button. ', text: 'It sat under the menu somewhere.', after: '' })
+  })
+
+  test("a speaker's whole line shows its words under the speaker's name, on one line", () => {
+    const r = { ...span(0, 0), ref: 'R3/notes.md#L12', kind: 'record' } as unknown as ResolvedRef
+    expect(entryParts(exampleEntries([r.ref])[0], () => r)).toEqual([{ kind: 'field', key: 'R3', text: 'I could not find the stop button. It sat under the menu somewhere.' }])
+  })
+})

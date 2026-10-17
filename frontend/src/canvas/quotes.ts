@@ -2,9 +2,11 @@
 // one-string excerpt: the record's text, its tool call and output, or for a JSON record of unknown shape its short
 // fields on one line and long text fields under them, never a JSON dump. A span is the passage with the words around
 // it. Prose written in markdown is marked `md`; a text that is JSON reads as its fields, and a passage of JSON as the
-// decoded string values it covers (jsonSpanParts). Pure.
+// decoded string values it covers (jsonSpanParts). A line of a chat log that starts a turn (the server's `meta.turn`) is
+// its speaker's words under the speaker's name, a markdown line's without its syntax (turnParts). Pure.
+import { plainMd } from '../lib/mdPlain'
 import { findQuote } from '../lib/quoteFind'
-import type { ResolvedRef } from '../lib/types'
+import type { ChatTurn, ResolvedRef } from '../lib/types'
 
 /** where a passage an example card quotes sits in a part's text, as [start, end) offsets (markQuotes) */
 export type Mark = [number, number]
@@ -411,11 +413,31 @@ function tidyPart(p: QuotePart): QuotePart {
   }
 }
 
+/** The turn a chat log's line starts (the server's `meta.turn`, as the Transcript mode reads it), or null. */
+function turnOf(meta: unknown): ChatTurn | null {
+  const t = meta && typeof meta === 'object' ? (meta as { turn?: unknown }).turn : null
+  return t && typeof t === 'object' && typeof (t as ChatTurn).speaker === 'string' && typeof (t as ChatTurn).at === 'number' ? (t as ChatTurn) : null
+}
+
+/** A chat log's line that starts a turn, quoted (bug hunt D9): its words under its speaker's name, on one line, a
+ * markdown line's without its syntax as the Transcript mode shows them (mdPlain, bug hunt B20); a passage of it (a span
+ * from `start` to `end` past the speaker) with the words around it. Null for a line its turn does not fit. */
+function turnParts(line: string, turn: ChatTurn, md: boolean, start?: number, end?: number): QuotePart[] | null {
+  if (turn.at > line.length || (start !== undefined && start < turn.at)) return null
+  const words = (a: number, b: number) => (md ? plainMd(line, a, b) : line.slice(a, b)).replace(/\s+/g, ' ')
+  if (start === undefined || end === undefined) {
+    const text = words(turn.at, line.length).trim()
+    return text ? [{ kind: 'field', key: turn.speaker, text }] : null
+  }
+  return [{ kind: 'span', key: turn.speaker, before: lead(words(turn.at, start).trimStart()), text: words(start, end), after: trail(words(end, line.length)) }]
+}
+
 function rawParts(r: ResolvedRef, about?: ClaimAbout): QuotePart[] {
   const kind = fileKind(r.path)
   // a view's reader wrote the excerpt (a post of a message board): its words are the record's
   if (r.view) return r.excerpt ? [{ kind: 'text', text: r.excerpt, ...(kind === 'md' || looksMarkdown(r.excerpt) ? { md: true } : {}) }] : []
   const blocks = (r.blocks ?? []) as Block[]
+  const turn = turnOf(r.meta)
   if (r.kind === 'span') {
     const k = typeof (r as { block?: unknown }).block === 'number' ? ((r as { block?: number }).block as number) : 0
     const whole = blocks[k]?.text ?? ''
@@ -423,6 +445,8 @@ function rawParts(r: ResolvedRef, about?: ClaimAbout): QuotePart[] {
     const end = (r as { end?: number }).end
     if (whole && typeof start === 'number' && typeof end === 'number' && end > start) {
       const bk = blocks[k]?.kind
+      const said = turn && k === 0 && bk === 'text' ? turnParts(whole, turn, kind === 'md', start, end) : null
+      if (said) return said
       // a passage of a record kept as its JSON, of a tool call's input, or of a text or output that is JSON: the string
       // values it covers, decoded (jsonSpanParts)
       const nl = whole.indexOf('\n')
@@ -437,19 +461,25 @@ function rawParts(r: ResolvedRef, about?: ClaimAbout): QuotePart[] {
   }
   if (r.kind === 'block') {
     const k = (r as { block?: number }).block ?? 0
-    return blocks[k] ? blockParts(blocks[k], kind) : []
+    const said = turn && k === 0 && blocks[0]?.kind === 'text' ? turnParts(blocks[0].text, turn, kind === 'md') : null
+    return said ?? (blocks[k] ? blockParts(blocks[k], kind) : [])
   }
-  const records = (r as { records?: { blocks?: Block[] }[] }).records
+  const records = (r as { records?: { blocks?: Block[]; meta?: unknown }[] }).records
   if (r.kind === 'range' && Array.isArray(records) && records.length) {
     // the lines of a text file are one text, a line to a line; the records of a JSONL file each read as a record
     const lines = records.map((x) => x.blocks ?? [])
     if (lines.every((bs) => bs.length <= 1 && (bs[0]?.kind ?? 'text') === 'text')) {
-      const text = lines.map((bs) => bs[0]?.text ?? '').join('\n').replace(/^\n+|\s+$/g, '')
+      // a chat log's lines as the Transcript mode shows them: a markdown line without its syntax, so a speaker reads
+      // `P7:` where the file writes `**P7:**`
+      const chat = kind === 'md' && records.some((x) => turnOf(x.meta))
+      const text = lines.map((bs) => (chat ? plainMd(bs[0]?.text ?? '') : (bs[0]?.text ?? ''))).join('\n').replace(/^\n+|\s+$/g, '')
       if (!text) return []
-      return kind === 'code' ? [{ kind: 'code', text }] : [{ kind: 'text', text, ...(kind === 'md' ? { md: true } : {}) }]
+      return kind === 'code' ? [{ kind: 'code', text }] : [{ kind: 'text', text, ...(kind === 'md' && !chat ? { md: true } : {}) }]
     }
     return lines.flatMap((bs) => bs.flatMap((b) => blockParts(b, kind)))
   }
+  const said = turn && blocks.length === 1 && blocks[0].kind === 'text' ? turnParts(blocks[0].text, turn, kind === 'md') : null
+  if (said) return said
   if (blocks.length) return blocks.flatMap((b) => blockParts(b, kind))
   // a database row or a CSV row reads as a record's fields, never as the JSON its excerpt is
   if ((r.kind === 'row' || r.kind === 'csvrow') && r.record && typeof r.record === 'object' && !Array.isArray(r.record)) return recordParts(r.record, about)

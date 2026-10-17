@@ -6,7 +6,7 @@
 // is left out rather than failing the drawing.
 import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from './types'
 import type { ThimbleCell, ThimbleLabel } from './cell'
-import { STOP_KINDS, clip, curlyQuotes, dateSpans, quoted, shownMatches, valueIn } from './lib'
+import { STOP_KINDS, clip, curlyQuotes, dateSpans, plainMarks, quoted, shownMatches, valueIn } from './lib'
 import type { Citation } from './lib'
 import { quotedWords, showsValue } from './cite'
 
@@ -406,11 +406,41 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0, final = f
     if ((kind === 'row' || kind === 'csvrow') && isObj(res.record)) out.record = res.record
     // a command's output: the command that printed it, as its row names it (calls.py chip_line)
     if (kind === 'call' && str(meta.line)) out.command = str(meta.line)
+    // the turn a chat log's line starts, so an example card quotes its words under its speaker (turnWords)
+    const turn = isObj(meta.turn) ? meta.turn : null
+    if (turn && typeof turn.speaker === 'string' && typeof turn.at === 'number') out.turn = { speaker: turn.speaker, at: turn.at }
   }
   if (!showsValue(c.display)) return { ...out, why: 'the place resolves; the citation shows no value' }
   const where = span && 'value' in span ? str(span.value) : span && 'text' in span ? str(span.text) : kind === 'cell' ? str(res.excerpt) : out.lines.filter(l => l.hit).map(l => l.text).join('\n') || str(res.excerpt)
   const holds = span && 'value' in span ? shownMatches(str(span.value), c.display!) || valueIn(c.display!, where) : valueIn(c.display!, where)
   return holds ? { ...out, why: 'the value is at its place' } : { ...out, status: 'differs', why: span && 'value' in span ? `the place shows ${str(span.value)}` : 'the value is not at its place' }
+}
+
+const MD_FILE = /\.(?:md|markdown|mdx)$/i
+const MD_LINK = /\[([^[\]\n]*)\]\([^()\s]*\)/g
+
+/** A line of a markdown file as its words: its bold, italic and code marks and a link's target left out, as the
+ *  browser's Transcript mode shows a markdown chat log (bug hunt B20). */
+function plainMdLine(text: string): string {
+  return plainMarks(text.replace(/^\s{0,3}(?:#{1,6}\s+|>\s?)/, '').replace(MD_LINK, '$1'))
+}
+
+/** What an example card quotes of a chat log's cited place (bug hunt D9): for a line that starts a turn, its speaker and
+ *  its words from where they start; for lines of a markdown chat log, their words, the speakers as plain text; on one
+ *  line, a markdown line's without its syntax. Null for any other place. Pure. */
+export function turnWords(v: TermVerdict): { speaker: string; words: string } | null {
+  if (!v.turn) return null
+  const md = MD_FILE.test(v.path ?? '')
+  const hits = v.lines.filter(l => l.hit)
+  if (v.kind === 'range') {
+    const words = hits.map(l => (md ? plainMdLine(l.text) : l.text)).join(' ').replace(/\s+/g, ' ').trim()
+    return words ? { speaker: '', words } : null
+  }
+  const line = hits[0]?.text ?? ''
+  if (v.turn.at > line.length) return null
+  const rest = line.slice(v.turn.at)
+  const words = (md ? plainMdLine(rest) : rest).replace(/\s+/g, ' ').trim()
+  return words ? { speaker: v.turn.speaker, words } : null
 }
 
 // ------------------------------------------------------------------------------------------------ threads and agents
