@@ -1805,10 +1805,12 @@ def _alike(a: str, b: str) -> bool:
 
 def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
     """The files the claims leave out of each folder beside a claimed file's folder that holds the same files, such as
-    another run's beside the one run a view claims. Such a folder has a name of the claimed one's kind (_alike) and
-    holds at least half of the paths the claimed files have below the claimed folder (of SIBLING_SAMPLE of them). Of its
-    files, those returned have a path below it that a claimed file has below the claimed folder, or are in the same
-    subfolder and of the same type as files the claimed folder holds only claimed ones of."""
+    another run's beside the one run a view claims. Such a folder has a name of the claimed one's kind (_alike), holds
+    no claimed file itself (a folder the claims reach chose its files: a run's README.md beside its claimed prompt.md is
+    no other run's, bug hunt I11) and holds at least half of the paths the claimed files have below the claimed folder
+    (of SIBLING_SAMPLE of them). Of its files, those returned have a path below it that a claimed file has below the
+    claimed folder, or are in the same subfolder and of the same type as files the claimed folder holds only claimed
+    ones of."""
     mine = set(claimed)
     under: dict[tuple[str, str], set[str]] = {}
     for p in mine:
@@ -1833,7 +1835,8 @@ def sibling_files(claimed: list[str], every: list[str]) -> list[str]:
     have = set(every)
     out: set[str] = set()
     for (q, r), rests in under.items():
-        beside = [(s, by_kind) for s, by_kind in (tree.get(q) or {}).items() if s != r and _alike(r, s)]
+        beside = [(s, by_kind) for s, by_kind in (tree.get(q) or {}).items()
+                  if s != r and (q, s) not in under and _alike(r, s)]
         if not beside:
             continue
         kinds = {(os.path.dirname(x), os.path.splitext(x)[1]) for x in rests}
@@ -1886,15 +1889,16 @@ def _size(corpus: Path, rel: str) -> int:
 
 
 async def shown(c: str, slug: str, version: str | None = None, path: str | None = None) -> dict[str, Any]:
-    """What thimble draws above the view: {files, not_shown: {count, unexplained, unclaimed, files}, missing, derived,
-    errors}. `files` is the count of claimed files and not_shown the ones the view does not show whole (not_shown),
-    then the files of folders like the claimed ones that the claims leave out (sibling_files, `claimed` false, counted
-    in `unclaimed`), the first FILES_LISTED of them, `unexplained` counting those hidden() gives no why for; missing is
-    what the claims expect and the corpus lacks (missing_files); unplaced the records the reader's unplaced(index) says
-    it could not place, as clean_problems gives them; derived is view.json's list, then the fields the reader's
-    derived(index) adds; errors say what failed of hidden(), derived() and unplaced(). With `path`, as a file viewer
-    shows one file: only that file, whether the view shows it whole and the records of it not placed, with no other
-    files, siblings or missing ones."""
+    """What thimble draws above the view: {files, not_shown: {count, unexplained, files}, missing, derived, errors},
+    and for the checks `beside`. `files` is the count of claimed files and not_shown the ones the view does not show
+    whole (not_shown), the first FILES_LISTED of them, `unexplained` counting those hidden() gives no why for: a file
+    the head calls not read is always one of the view's scope (bug hunt I11). missing is what the claims expect and the
+    corpus lacks (missing_files); unplaced the records the reader's unplaced(index) says it could not place, as
+    clean_problems gives them; derived is view.json's list, then the fields the reader's derived(index) adds; errors say
+    what failed of hidden(), derived() and unplaced(). `beside` {count, files} holds the files of folders like the
+    claimed ones that the claims leave out (sibling_files), which only the builder's checks name (view-not-claimed).
+    With `path`, as a file viewer shows one file: only that file, whether the view shows it whole and the records of it
+    not placed, with no other files, siblings or missing ones."""
     view, req, files = await asyncio.to_thread(_prepared, c, slug, version)
     corpus = config.corpus_dir(c)
     if path:
@@ -1918,18 +1922,16 @@ async def shown(c: str, slug: str, version: str | None = None, path: str | None 
             r["size"] = await asyncio.to_thread(_size, corpus, r["path"])
     if path:
         return {"files": len(files),
-                "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]), "unclaimed": 0,
-                              "files": rows},
+                "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]), "files": rows},
+                "beside": {"count": 0, "files": []},
                 "missing": [], "unplaced": problems_of_file(parts["unplaced"], path),
                 "derived": _derived([*view["derived"], *(parts["derived"] if isinstance(parts["derived"], list) else [])]),
                 "errors": errors}
     siblings = await asyncio.to_thread(sibling_files, [f[0] for f in files], every)
-    listed = max(0, FILES_LISTED - len(rows))
-    rows += [{"path": p, "size": _size(corpus, p) if i < listed else 0, "read": 0, "why": hidden.get(p, ""),
-              "claimed": False} for i, p in enumerate(siblings)]
     return {"files": len(files),
             "not_shown": {"count": len(rows), "unexplained": sum(1 for r in rows if not r["why"]),
-                          "unclaimed": sum(1 for r in rows if r.get("claimed") is False), "files": rows[:FILES_LISTED]},
+                          "files": rows[:FILES_LISTED]},
+            "beside": {"count": len(siblings), "files": siblings[:FILES_LISTED]},
             "missing": missing_files(view["claims"], [f[0] for f in files]),
             "unplaced": clean_problems(parts["unplaced"]),
             "derived": _derived([*view["derived"], *(parts["derived"] if isinstance(parts["derived"], list) else [])]),
@@ -3314,8 +3316,8 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
         lines.append(f"unread: {unread['count']} line(s) the reader could not parse, such as {first['ref']}: {first['why']}")
     if cov := report.get("coverage"):
         ns = cov["not_shown"]
-        beside = ns.get("unclaimed", 0)
-        lines.append(f"files: {cov['files'] - (ns['count'] - beside)} of {cov['files']} read to the end, "
+        beside = (cov.get("beside") or {}).get("count", 0)
+        lines.append(f"files: {cov['files'] - ns['count']} of {cov['files']} read to the end, "
                      + (f"{beside} unclaimed beside them, " if beside else "")
                      + f"{ns['count'] - ns['unexplained']} hidden with a why"
                      + (f", {len(cov['missing'])} missing" if cov.get("missing") else "")
@@ -4205,14 +4207,14 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
     else:
         report["problems"] += cov["errors"]
         if cov["not_shown"]["unexplained"]:
-            rows = [r for r in cov["not_shown"]["files"] if not r["why"] and r.get("claimed", True)]
+            rows = [r for r in cov["not_shown"]["files"] if not r["why"]]
             if rows:
                 report["problems"].append(_hint("view-not-shown", count=len(rows), files="; ".join(
                     f"{r['path']} (read {r['read']:,} of {r['size']:,} bytes)" for r in rows[:NOT_SHOWN_NAMED])
                     + (" and more" if len(rows) > NOT_SHOWN_NAMED else "")))
-        beside = [r["path"] for r in cov["not_shown"]["files"] if not r["why"] and not r.get("claimed", True)]
+        beside = cov["beside"]["files"]
         if beside:
-            report["notes"].append(_hint("view-not-claimed", count=cov["not_shown"]["unclaimed"], files="; ".join(
+            report["notes"].append(_hint("view-not-claimed", count=cov["beside"]["count"], files="; ".join(
                 beside[:NOT_SHOWN_NAMED]) + (" and more" if len(beside) > NOT_SHOWN_NAMED else "")))
         if cov["missing"]:
             report["notes"].append(_hint("view-missing", files="; ".join(
@@ -4225,8 +4227,7 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
     # out has no records in the view
     if any(_is_line_form(f["form"]) for f in view["accepts"]):
         corpus = config.corpus_dir(c)
-        hid = {r["path"] for r in (report.get("coverage") or {}).get("not_shown", {}).get("files", [])
-               if r["why"] and r.get("claimed", True)}
+        hid = {r["path"] for r in (report.get("coverage") or {}).get("not_shown", {}).get("files", []) if r["why"]}
         texts = [f for f in files if not f[0].lower().endswith(_UNSAMPLED) and f[0] not in hid]
         for rel in _sample_files(texts):
             if not await asyncio.to_thread(_texty, corpus, rel):

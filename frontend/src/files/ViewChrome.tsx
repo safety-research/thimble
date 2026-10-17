@@ -79,8 +79,8 @@ export function fileLineShows(notes: ViewNotes, shownLabels: readonly Concept[])
 
 type ResidueFile = ViewShown['not_shown']['files'][number]
 
-/** What a view leaves out, by kind: the claimed files and those beside them it neither read to the end nor hid, those
- * its reader hid with a why, what the claims expect and the corpus lacks, the lines its reader could not parse and the
+/** What a view leaves out, by kind: the claimed files it neither read to the end nor hid, those its reader hid with a
+ * why, what the claims expect and the corpus lacks, the lines its reader could not parse and the
  * records it could not place. */
 export interface Residue {
   /** the files listed, and how many there are in all, which the server counts beyond those it lists */
@@ -263,7 +263,7 @@ export function ResidueList({ notes, onPick }: { notes: ViewNotes; onPick: (ref:
   const file = (f: ResidueFile) => (
     <button key={f.path} type="button" className="view-pane-list-item" onClick={() => onPick(f.path)}>
       <span className="mono">{f.path}</span>
-      <span className="view-pane-list-why">{f.why || (f.read ? `read ${fmtSize(f.read)} of ${fmtSize(f.size)}` : f.claimed === false ? 'not claimed' : 'not read')}</span>
+      <span className="view-pane-list-why">{f.why || (f.read ? `read ${fmtSize(f.read)} of ${fmtSize(f.size)}` : 'not read')}</span>
     </button>
   )
   return (

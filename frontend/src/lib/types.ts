@@ -651,7 +651,7 @@ export interface ViewDerived {
  * reader could not place; and the fields its reader derived, by kind of record, the inferred ones first in each. */
 export interface ViewShown {
   files: number
-  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string; claimed?: boolean }[] }
+  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string }[] }
   missing?: { path: string; why: string }[]
   unplaced?: ViewProblems
   derived: ViewDerived[]

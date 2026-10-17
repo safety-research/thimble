@@ -245,6 +245,61 @@ async def test_the_harness_counts_what_build_index_reads_and_the_checks_fail_on_
     assert not any("(read" in p for p in rep["problems"]), rep["problems"]
 
 
+RUNS_READER = '''
+def build_index(paths):
+    for path in paths:
+        with open(path, "rb") as f:
+            f.read()
+    return {"paths": sorted(paths)}
+
+
+def records(index, query):
+    return index["paths"]
+
+
+def resolve(index, locator):
+    return None
+'''
+
+
+async def test_the_head_counts_only_the_files_of_the_view_s_scope_and_names_a_folder_the_claims_miss_to_the_builder(
+        ws, inproc, bound, monkeypatch):
+    """Bug hunt I11: a view that claims every run's transcript and prompt, and reads them all, shows nothing as not
+    read, though each run folder holds other notes (README.md, SPEC.md) beside its prompt; a run folder the claims
+    leave out is no file of the view's either, so the head never calls it not read, and only the builder's checks name
+    it."""
+    async def no_page(c, slug, states, **k):
+        return [{"ok": True, "errors": [], "fetches": 0, "records": 1} for _ in states]
+
+    monkeypatch.setattr(views, "shoot_states", no_page)
+    corpus = config.corpus_dir(CORPUS)
+    for run, extra in (("maple__plain", []), ("maple__fanout", ["README.md"]), ("cedar__plain", ["SPEC.md", "NOTES.md"]),
+                       ("cedar__fanout", [])):
+        (corpus / run).mkdir()
+        (corpus / run / "transcript.jsonl").write_text('{"role": "user", "text": "go"}\n')
+        (corpus / run / "prompt.md").write_text("Build the thing.\n")
+        for name in extra:
+            (corpus / run / name).write_text("# notes\n")
+    views.write_view(CORPUS, "runs", name="Runs", description="Each run's session.", html=THREADS_HTML,
+                     claims=["*/transcript.jsonl", "*/prompt.md"], reader=RUNS_READER)
+    out = await views.shown(CORPUS, "runs")
+    assert out["files"] == 8
+    assert out["not_shown"] == {"count": 0, "unexplained": 0, "files": []}, "every claimed file is read"
+    assert out["beside"]["count"] == 0, "a run folder the claims reach is no folder beside them"
+
+    # a view of two runs: the other two run folders are beside it, named to the builder, never in the head
+    views.write_view(CORPUS, "two", name="Two", description="Two runs.", html=THREADS_HTML,
+                     claims=["maple__plain/transcript.jsonl", "maple__plain/prompt.md", "cedar__fanout/transcript.jsonl",
+                             "cedar__fanout/prompt.md"], reader=RUNS_READER)
+    out = await views.shown(CORPUS, "two")
+    assert out["files"] == 4 and out["not_shown"]["count"] == 0
+    assert "maple__fanout/transcript.jsonl" in out["beside"]["files"] and out["beside"]["count"] >= 4
+    rep = await views.check(CORPUS, "two")
+    assert any(out["beside"]["files"][0] in n for n in rep["notes"]), rep["notes"]
+    assert not any("maple__fanout" in p for p in rep["problems"]), rep["problems"]
+    assert any(x.startswith("files: 4 of 4 read to the end") for x in views.gate_lines(rep))
+
+
 DERIVING_READER = THREADS_READER.replace(
     '[{"ref": f"{p}#L{n}", "author": a, "body": b}',
     '[{"ref": f"{p}#L{n}", "author": a.upper(), "body": b, "score": len(b) * 1.5, "replies": 7, "thread_key": "k" + a,'
