@@ -87,6 +87,9 @@ export type HomeData = {
   /** the rows above the prompt, on Claude Code's main screen only, which takes no clicks (bug hunt F1): home lists them
    *  first, each opening its acts with keys; null in fullscreen, where the rows take clicks */
   waiting?: HomeWait[] | null
+  /** the sections whose lists are not read yet, which say so rather than `none` (bug hunt J9: `Cards (0) none` for 5 s
+   *  with 6 cards in the workspace) */
+  reading?: SectionId[]
 }
 
 /** The cards of answers, threads and reports, each under the first question that made it (`groups` in the order the
@@ -137,7 +140,8 @@ export type HomeRow = {
 
 /** A section: its heading's name and count, what is new, the panel its heading opens, the column heads at the right,
  *  and its rows. `summary` says in words what the glyphs show (for the tests and a thread about the panel). */
-export type HomeSection = { id: SectionId; name: string; count: number; news?: number; heads?: Seg[]; summary: Seg[]; rows: HomeRow[]; pane?: HomeOpen }
+/** `reading`: its list is not read yet (the panel opened before the session's first read): `◌ reading`, no count. */
+export type HomeSection = { id: SectionId; name: string; count: number; news?: number; heads?: Seg[]; summary: Seg[]; rows: HomeRow[]; pane?: HomeOpen; reading?: boolean }
 
 // state glyphs (SPEC.md, "The visual system", section 5): done ● and working ◌ in the text colour, not started ○
 // dim, a problem × or ! in red
@@ -618,7 +622,7 @@ function isOpen(ui: HomeUi, key: string, byDefault: boolean): boolean {
  *  (coverage, citations, labels, checks), and so are coverage, citations and checks while they hold nothing. */
 export function homeSections(d: HomeData, ui: HomeUi = HOME_UI_EMPTY): HomeSection[] {
   // the sections of what this session read, its citations and the checks' comments show once they hold something
-  return [
+  const sections = [
     ...(d.waiting?.length ? [waitingSection(d.waiting)] : []),
     ...(d.coverage ? [coverageSection(d.coverage)] : []),
     ...(d.cites?.length ? [citationsSection(d.cites)] : []),
@@ -629,6 +633,7 @@ export function homeSections(d: HomeData, ui: HomeUi = HOME_UI_EMPTY): HomeSecti
     cardsSection(d.cardGroups, ui),
     reportsSection(d.reports),
   ]
+  return d.reading?.length ? sections.map(sec => (d.reading!.includes(sec.id) && !sec.rows.length ? { ...sec, reading: true } : sec)) : sections
 }
 
 // ------------------------------------------------------------------------------------------------ the layout
@@ -702,10 +707,10 @@ const NEW_W = '  new'.length
 
 function sectionLines(out: Lines, sec: HomeSection, ui: HomeUi, w: number): void {
   if (sec.rows.some(r => r.fresh || (r.open && r.kids?.some(k => k.fresh)))) sec = { ...sec, rows: sec.rows.map(r => ({ ...besideNew(r), ...(r.kids ? { kids: r.kids.map(besideNew) } : {}) })) }
-  const head = headingLine(sec.name, sec.count, sec.news ?? 0)
+  const head = headingLine(sec.name, sec.reading ? undefined : sec.count, sec.news ?? 0)
   out.push(spread(head, sec.heads ?? [], w), sec.pane ? { x0: 0, x1: lineWidth(head), row: false, act: { op: 'open', open: sec.pane } } : undefined)
   if (!sec.rows.length) {
-    out.push([{ s: '  ' }, dim('none')])
+    out.push([{ s: '  ' }, dim(sec.reading ? '◌ reading' : 'none')])
     return
   }
   const whole = ui.more.includes(sec.id) || sec.rows.length <= FIRST + 1

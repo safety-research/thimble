@@ -101,8 +101,8 @@ Claude Code's panel chrome, no right-click menu.
   <name> · building|built|proposed` under the answer that proposed a view (`failed` in red, `new` once built until
   opened).
 - **The thimble line above the prompt**, while thimble is on, after one blank row: `thimble` (its press opens home),
-  then `cards`, `threads`, `citations`, `labels`, `checks` and `coverage` with their counts, a purple `•` for what is
-  new; each name's press opens its section (band.tsx). Side threads have their `↳` rows and thimble's agents Claude
+  then `cards`, `threads`, `citations`, `labels`, `checks` and `coverage` with their counts (`…` dim until the session
+  first read the workspace, which it reads before anything else), a purple `•` for what is new; each name's press opens its section (band.tsx). Side threads have their `↳` rows and thimble's agents Claude
   Code's agent tray, so no row repeats them.
 - **Every row above the prompt is one line**: a dim label column, the words cut with `…` where the acts begin (a press
   shows them whole), the acts at the right in the accent, underlined under the pointer, the main one bold.

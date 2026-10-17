@@ -1374,6 +1374,14 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
   }
   rt.busy = true
   try {
+    // the session's first pass reads what the thimble line counts before anything else: a resumed session draws its old
+    // answers, whose cards it reads next, one by one, and the line said `cards 0 … labels 0` until they were read (bug
+    // hunt J9)
+    const early = rt.sig === null && !(await cx.home())
+    if (early) {
+      await Promise.all([refreshHome(cx), refreshThreads(cx), ...(featureOn('checks') ? [readAnswerComments(cx)] : [])])
+      await refreshSummary(cx)
+    }
     // the labels a link with no words names (reply.tsx chipOf), and the cards a drawing named and could not read while
     // it drew (a drawing writes no state): read now
     if (rt.wantLabels) {
@@ -1417,7 +1425,7 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
       if (areas.has('coverage') && featureOn('coverage')) await readCoverage(cx)
       // the checks' comments on Claude's answers, and the checks reading one now
       if (areas.has('answers') && featureOn('checks')) await readAnswerComments(cx)
-      if (first || areas.has('cards') || areas.has('labels') || areas.has('docs') || areas.has('chats') || areas.has('views') || areas.has('agents')) await refreshHome(cx)
+      if ((first && !early) || areas.has('cards') || areas.has('labels') || areas.has('docs') || areas.has('chats') || areas.has('views') || areas.has('agents')) await refreshHome(cx)
       // the summary line above the prompt counts these (the panel lane's band.tsx)
       if (SUMMARY_AREAS.some(a => areas.has(a))) await refreshSummary(cx)
       if (panel && !first) {

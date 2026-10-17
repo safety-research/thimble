@@ -39,7 +39,7 @@ import { fileRef } from './files'
 import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { FIRST as HOME_FIRST, HOME_HINTS, NO_FIT_MARK, UNSURE_MARK, groupCards, homeLayout, homePick, homeReduce, labelBlocks, labelHue, labelParts } from './home'
-import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
+import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView, SectionId } from './home'
 import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, plainMarks, quoted, recordFields, reportRef, stoppedTurn, viewRef, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
@@ -1351,7 +1351,9 @@ export async function homeData(cx: Ctx): Promise<HomeData> {
   // on Claude Code's main screen, which takes no clicks, the rows above the prompt, first, with their acts on keys (bug
   // hunt F1); in fullscreen they take clicks there, and home leaves them out
   const waiting = classicScreen() ? (await waitItems(cx)).map(w => ({ key: w.key, label: w.label, title: w.name || w.words })) : null
-  return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels, waiting }
+  // a list not read yet says so, not `none` (bug hunt J9)
+  const reading: SectionId[] = [...(canvas === undefined ? (['cards'] as const) : []), ...(labelsRaw === undefined ? (['labels'] as const) : [])]
+  return { views, reports, threads, cardGroups, labels, coverage, cites, comments, noLabels: !f.labels, waiting, ...(reading.length ? { reading } : {}) }
 }
 
 /** The labels as home and the labels list draw them (home.ts labelBlocks): each with its values' counts and colors, its
