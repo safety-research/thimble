@@ -516,9 +516,11 @@ def _offer(c: str) -> dict[str, Any] | None:
 # is left out, as Claude Code shows it there. Each action maps to the act that takes it in the terminal: a `thimble act` kind, or for `settings` (Open
 # Settings: the terminal has no Settings pane) "settings", which says where thimble's config is, since Settings writes it.
 # "ticket-open" is no `thimble act` kind: the terminal UI opens the ticket in the browser workbench (its `ref`), where
-# the analyst allows its change.
+# the analyst allows its change. Nor are a label's "label-open" (the terminal UI opens the label's panel), "label-again"
+# (it runs `thimble act label-run` with `again`) and the orientation's "orient-again" (it asks main to start it again).
 NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
-               "settings": "settings", "ticket-open": "ticket-open", "sign-out": "sign-out"}
+               "settings": "settings", "ticket-open": "ticket-open", "sign-out": "sign-out", "label-open": "label-open",
+               "label-again": "label-again", "orient-again": "orient-again"}
 
 
 def _notice_acts(action: Any) -> list[dict[str, str]]:
@@ -533,7 +535,7 @@ def _notice_acts(action: Any) -> list[dict[str, str]]:
         if not isinstance(a, dict) or (act := NOTICE_ACTS.get(str(a.get("do") or ""))) is None:
             continue
         slug = str(a.get("slug") or "")
-        if act == "view-retry" and not slug:
+        if act in ("view-retry", "label-open", "label-again") and not slug:
             continue
         ticket = " ".join(str(a.get("slug") or a.get("ticket") or "").split()).removeprefix("ticket:")
         if act == "ticket-open" and not ticket:
@@ -1089,7 +1091,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 
 
 ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id>]; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
-             "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
+             "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?, again?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
              "stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
              "view-propose-now {notice?}, view-retry {slug, notice?}, view-term-page {slug}, notice-dismiss {id}, sign-out {slug}")
@@ -1262,7 +1264,8 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     waits for `thimble-run label` (concepts.PENDING_RUN), and the answer gives its command (`deferred`); a code label
     whose last run already covers this one (the same version over the same files and sample, concepts.covered) runs
     nothing and waits for nothing, and the answer says so (`unchanged`), so main is not asked to run what apply_label
-    would answer with the old rows (bug hunt B31)."""
+    would answer with the old rows (bug hunt B31). With `again`, a prompt label runs only over the units its last run
+    could not label (a label notice's act, concepts.start_again), and main hears of it once it ends (`label_done`)."""
     from . import cardrun, concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -1270,12 +1273,13 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     if found is None:
         raise StateError(f"no label {payload.get('label')!r}")
     cid = str(found["id"])
-    limit = _int(str(payload["limit"]), 0, "limit") if payload.get("limit") not in (None, "") else 0
+    again = payload.get("again") is True
+    limit = _int(str(payload["limit"]), 0, "limit") if payload.get("limit") not in (None, "") and not again else 0
     if limit < 0:
         raise StateError("limit must be 1 or more, or left out for every record")
     files = found["unit"] in concepts.FILE_UNITS
     paths = concepts.glob_patterns(found["glob"]) if files else []
-    if found["kind"] == "code" and cardrun.defers(c):
+    if found["kind"] == "code" and cardrun.defers(c) and not again:
         if concepts.running_apply(c, cid) is None and await asyncio.to_thread(concepts.covered, c, found, paths, limit or None):
             return {"label": cid, "unchanged": True}
         args: dict[str, Any] = {"scope": concepts.SCOPE_OF_UNIT.get(found["unit"], "files"), "name": found["name"],
@@ -1287,12 +1291,17 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     ran_before = bool(found["applications"])
     stop = _label_stop_file(c, cid)
     stop.unlink(missing_ok=True)
-    await concepts.start_apply(c, cid, paths, limit or None, "user")
-    cards = await asyncio.to_thread(concepts._label_cards, ws, cid)
-    card = dict(cards[0][1]) if cards else None
-    if card is None and not ran_before:
-        card = await asyncio.to_thread(concepts.label_card, c, found, None, "user")
-    concepts.tell_main(c, found, card)
+    told = None
+    if again:
+        await concepts.start_again(c, cid, "user")
+        told = concepts.tell_when_done(c, cid)
+    else:
+        await concepts.start_apply(c, cid, paths, limit or None, "user")
+        cards = await asyncio.to_thread(concepts._label_cards, ws, cid)
+        card = dict(cards[0][1]) if cards else None
+        if card is None and not ran_before:
+            card = await asyncio.to_thread(concepts.label_card, c, found, None, "user")
+        concepts.tell_main(c, found, card)
     # `label-stop` from another process asks this run to stop after its current unit, as the browser's Stop does; so does
     # `label-delete` from another process, which removes the label's file
     ended = threading.Event()
@@ -1310,10 +1319,14 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
         summary = await concepts.wait_apply(c, cid, float("inf"))
     finally:
         ended.set()
+    if told is not None:  # this process ends with the run: main's `label_done` goes out first
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.shield(told), LABEL_DONE_WAIT_S)
     return {"label": cid, "summary": summary}
 
 
 LABEL_STOP_POLL_S = 0.5
+LABEL_DONE_WAIT_S = 30.0  # how long a `label-run` with `again` waits for its `label_done` to go out
 
 
 def _label_stop_file(c: str, cid: str) -> Path:

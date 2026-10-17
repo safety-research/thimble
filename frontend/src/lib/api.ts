@@ -612,6 +612,9 @@ export const api = {
   // ---- orientation ----
   /** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): {} before any was asked for. */
   orientation: (c: string) => j<OrientRun>(`${ws(c)}/orientation`),
+  /** A failed orientation's Run again (`POST /ws/{c}/orientation/again`, its notice's act): a click start with the
+   * focus given, else the request its last run had. */
+  orientAgain: (c: string, text = '') => j<StartAnswer>(`${ws(c)}/orientation/again`, { method: 'POST', body: JSON.stringify({ text }) }).then(startAnswer),
 
   // ---- documents ----
   frame: (c: string, slug: DocumentType) => j<Writeup>(`${inv(c, slug)}/frame`),
@@ -753,6 +756,9 @@ export const labelApi = {
     j<VerdictResult>(`${ws(c)}/concepts/${enc(id)}/labels`, { method: 'POST', body: JSON.stringify({ ref, label, note }) }),
   /** `POST /concepts/{id}/apply`: start a run (202 with the run record); a prompt label's carries the analyst's values as examples. */
   apply: (c: string, id: string, body: ApplyBody) => j<ConceptRun>(`${ws(c)}/concepts/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify(body) }),
+  /** `POST /concepts/{id}/apply/again`: a prompt label run again on the units its last run could not label (its notice's
+   * act); 409 when none is left. */
+  applyAgain: (c: string, id: string) => j<ConceptRun>(`${ws(c)}/concepts/${enc(id)}/apply/again`, { method: 'POST' }),
 }
 
 // --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---

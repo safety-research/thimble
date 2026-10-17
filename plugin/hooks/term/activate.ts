@@ -11,7 +11,8 @@
 // What activation does, inside the hook of the call that set it off, after the call itself ran:
 //   1. `thimble activate --mod --json` (C2): the folder registered, the session marker written
 //   2. the push: `load_thimble` called on the shim with $.mcp.call (C5), which lists thimble's tools and answers the
-//      guide; then one read of listed.json (C4) to learn whether the tools were listed
+//      guide; then one read of listed.json (C4) to learn whether the tools were listed, and when they were not yet, one
+//      more read LISTED_CHECK_MS later before a notice says so
 //   3. thimble.ts told at once (bridgeActivated), the timers and the drawing started, the settings synced after the hook
 //   4. the guide handed back: as the call's `context` (main's call), as a hidden user row in main's conversation (a
 //      subagent's call), or kept owed for the next delivery point
@@ -25,7 +26,7 @@ import type { Activated } from './contracts'
 import type { Ctx } from './ctx'
 import { binOf, envOf, homeOf, parsePrinted } from './data'
 import { clean } from './lib'
-import { postNotice } from './notices'
+import { onNoticeAct, postNotice } from './notices'
 import { syncSoon } from './settings'
 import { setTheme } from './paint'
 import { restoreKept, rt, startTimers } from './term'
@@ -140,7 +141,7 @@ export const act = {
   pending: '',
   /** a /clear or /resume ended the conversation `from`: the next call of the new one rekeys */
   rekey: null as { from: string; reason: string } | null,
-  /** when the activation started (unix seconds), which a listed.json record must be newer than */
+  /** when the activation started (unix seconds) */
   started: 0,
   /** what activation did, in order (the debug log and the tests read it) */
   trail: [] as string[],
@@ -223,7 +224,9 @@ export async function anyDataRead(cx: Ctx, pre: Pre, paths: readonly string[]): 
 export const NOT_LISTED_LINE = "thimble's tools did not load in this session; do not call them."
 /** The notices of 3.20 this module posts. */
 export const REFUSED_TEXT = 'thimble does not open this folder (your home folder, `/`, a folder above them or a mount root). cd into the data folder and start `claude` there.'
-export const NOT_LISTED_TEXT = "thimble's tools did not load in this session."
+export const NOT_LISTED_TEXT = "thimble's tools did not load in this session, so Claude can't use thimble here. Reconnect thimble in /mcp."
+/** The act of that notice that opens Claude Code's /mcp, where the analyst reconnects thimble's server. */
+export const NOT_LISTED_ACT = 'reconnect in /mcp'
 /** The toast of the first activation in a folder, which names the switch that stops it. */
 export const FIRST_TOAST = 'thimble is on in this folder · /thimble browsers its panel · to turn it off, /plugin'
 /** The shim, as /mcp lists the plugin's server, and the tool the push calls. */
@@ -245,11 +248,13 @@ export function resultText(r: unknown): string {
   return Array.isArray(blocks) ? blocks.map(b => (b && typeof b === 'object' && typeof (b as { text?: unknown }).text === 'string' ? (b as { text: string }).text : '')).join('\n') : ''
 }
 
-/** Whether `<home>/up/<sid>/listed.json` holds a record newer than `since` (unix seconds). */
-async function listedSince(cx: Ctx, home: string, sid: string, since: number): Promise<boolean> {
+/** Whether `<home>/up/<sid>/listed.json` holds a record: the shim writes one only for a tools/list it answered with
+ *  thimble's tools in this conversation, and never takes them back, so a record written before this activation (the
+ *  shim went live on the session's marker first) counts as well as one the push brought. */
+async function listedNow(cx: Ctx, home: string, sid: string): Promise<boolean> {
   try {
     const v = JSON.parse(await cx.read(`${home}/up/${sid}/listed.json`)) as { at?: unknown }
-    return typeof v.at === 'number' && v.at >= since
+    return typeof v.at === 'number'
   } catch {
     return false
   }
@@ -346,17 +351,21 @@ async function runActivation(cx: Ctx, via: string, deliver: Deliver): Promise<Ou
   } catch (err) {
     pushFailed = String(err).slice(0, 300)
   }
-  const listed = !pushFailed && (await listedSince(cx, pre.home, sid, act.started))
+  const listed = !pushFailed && (await listedNow(cx, pre.home, sid))
   await turnOn(cx, activated)
   if (via === 'data') await firstToast(cx, pre.real)
   if (pushFailed || !listed) {
+    // Claude Code's tools/list often comes a moment after the push answered (the shim went live on the session's marker
+    // first, bug hunt C15): nothing is said in main's chat now; the notice comes only when the tools are still not
+    // listed LISTED_CHECK_MS later, in plain words with its fix
     trail(cx, 'not-listed')
-    cx.log(`thimble: its tools did not load after the push${pushFailed ? `: ${pushFailed}` : ' (no listed.json record)'}`)
+    cx.debug(`thimble: its tools were not listed yet after the push${pushFailed ? `: ${pushFailed}` : ''}`)
     act.owed = true
-    const started = act.started
     cx.later(LISTED_CHECK_MS, () => {
       void (async () => {
-        if (!(await listedSince(cx, pre.home, sid, started))) postNotice(cx, 'tools:not-listed', NOT_LISTED_TEXT, ['/mcp (reconnect thimble)', 'doctor'])
+        if (await listedNow(cx, pre.home, sid)) return
+        onNoticeAct('tools:not-listed', NOT_LISTED_ACT, () => cx.command('mcp', ''))
+        postNotice(cx, 'tools:not-listed', NOT_LISTED_TEXT, [NOT_LISTED_ACT, 'doctor'])
       })().catch(() => undefined)
     })
     return { ok: true, activated, context: deliver === 'context' ? NOT_LISTED_LINE : null }

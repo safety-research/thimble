@@ -800,6 +800,10 @@ Checks are off in thimble's Settings, so no check ran. Ask the analyst to turn C
 
 The label's code did not run yet. Run this command with Bash next: `{command}`. It runs your function on each unit and prints the label's result with its counts.
 
+## label_done-unlabeled
+
+{units} got no value, since {why}, and these counts leave them out. Say so in your answer, since they may differ from those it labeled. thimble's notice lets the analyst run the label again on them.
+
 ## cards-stale
 
 {cards} read this label before it changed, so their outputs are old. When the label's counts are final, run them again with Bash: `{command}`. It prints each card whose takeaway the new output leaves behind, or that fails, with that output. Write each of those takeaways again with `edit_card`, and fix each card that fails.

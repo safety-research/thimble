@@ -65,11 +65,12 @@ export type ChatRecord =
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
 
 /** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
- * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
- * sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
+ * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), sign
+ * out the browser whose id is `slug` (`sign-out`, a sign-in notice's), open the label `slug` (`label-open`), run it again
+ * on the units its last run could not label (`label-again`), or run the orientation again (`orient-again`). */
 export interface NoticeAction {
   label: string
-  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | (string & {})
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | 'label-open' | 'label-again' | 'orient-again' | (string & {})
   slug?: string
 }
 
