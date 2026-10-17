@@ -108,6 +108,7 @@ HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no
 # in auto mode Claude Code makes an agent that ended with text call SubagentHandback, a model step later
 AUTO_HANDBACK_WAIT_S = 30.0
 CALLER_WAIT_S = 2.0  # how long caller() waits for a transcript to hold a call the caller hook wrote no line for
+STARTED_PROMPT_CHARS = 2_000  # of a module start's prompt, kept in its request once its agent started (_keep_prompt_short)
 STOPPED_QUIT = "quit"  # `stopped_by` of a chat that main's quit stopped
 STOPPED_ANALYST = "analyst"
 STOPPED_REFUSED = "refused"
@@ -925,11 +926,23 @@ def bind(c: str, agent_id: str, rid: str) -> dict[str, Any] | None:
             if u is not None:
                 state[files.UNSETTLED].pop(agent_id, None)
         r.update(state="started", agent=agent_id, at=files.now())
+        _keep_prompt_short(r)
         left = files.eliminate(state)
     meta = ensure_chat(c, agent_id)
     for other in left:
         hook_started(c, {"agent_id": other})
     return meta
+
+
+def _keep_prompt_short(r: dict[str, Any]) -> None:
+    """A click's or a follow-on start's request once its agent started: its prompt cut to its first STARTED_PROMPT_CHARS
+    (`prompt_chars` keeps its length). --agent-check matched the whole prompt before the start, and nothing reads it
+    after it; a check's prompt holds its whole task (checks.task_prompt), which subagents.json, read by every hook,
+    would otherwise keep for DONE_KEEP_S."""
+    inp = r.get("input")
+    prompt = str(inp.get("prompt") or "") if isinstance(inp, dict) else ""
+    if r.get("route") in (CLICK, FOLLOW_ON) and len(prompt) > STARTED_PROMPT_CHARS:
+        r["input"] = {**inp, "prompt": prompt[:STARTED_PROMPT_CHARS], "prompt_chars": len(prompt)}  # type: ignore[dict-item]
 
 
 def settle(c: str, agent_id: str, call: str) -> list[str]:

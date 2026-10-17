@@ -19,11 +19,14 @@ extension's report checks, checks/<slug>/check.json (its name and colour)
 and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, read from the extension until
 first changed as the built-ins are, and off. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
-work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, holds the context engine's part
-(context.render) and then the document, the check's prompt and the passages it covers; a task too large for one Read
-call is written as task.md, task-2.md… (read_parts), each small enough that Read returns it whole. Its prompt names that
-file or those files in order (`## check-task-file`, `## check-task-files`). It comments with add_comment and hands back
-one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
+work folder of its own, check-work/<id>-<doc>/. Its task holds the context engine's part (context.render) and then the
+document, the check's prompt and the passages it covers. A run thimble's module starts (a click or a follow-on start)
+gets its task whole in its prompt (`## check-task-inline`), so it makes no Read call for it: in Manual mode each Read
+outside the analyst's folder is a permission ask (bug hunt F2: 42 of 87 asks were checks reading their task files).
+A typed start (main's run_check) gets a prompt main types out whole, so its task is a file there, task.md, written as
+task.md, task-2.md… when too large for one Read call (read_parts), each small enough that Read returns it whole, and its
+prompt names that file or those files in order (`## check-task-file`, `## check-task-files`). Every run writes the task
+file, its record. A check comments with add_comment and hands back one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
 analyst's Stop ends it (through thimble's plugin module, subagents.stop). A check made or changed (its name, prompt,
 colour, shown or covers) emits `checks` on the stream, so every Comments pane, the Report's and the canvas's in any tab,
 reads the checks again.
@@ -94,7 +97,9 @@ WRITER_ROLE = "writer"  # the chat role of a writer, whose end starts the shown 
 AUTHOR = "check"  # a check's comment's author (report.CHECK_AUTHOR)
 DIR = "checks"  # workspaces/<c>/checks/<id>.json
 WORK_DIR = "check-work"  # workspaces/<c>/check-work/<id>-<doc>/, a run's own folder, where its Bash may write
-TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first, with task-2.md… when one file is too large
+TASK_FILE = "task.md"  # in a run's own folder: its task's record, which a typed start's agent reads first, with
+# task-2.md… when one file is too large
+PROMPT_ROW_CHARS = 2_000  # a check's prompt longer than this holds its task, and its chat keeps only its lead (prompt_row)
 OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
 BUILTINS = ("judgment", "unverified", "important-details")  # prompts/checks/<id>.md, listed first in this order
 RETIRED = ("verified",)  # a former built-in: listed only where the workspace stored it, and no new check takes its id
@@ -969,7 +974,8 @@ async def _go(act: _Active) -> None:
 
 async def _launch(act: _Active) -> None:
     """Write the run's task file (first_message), then start its agent (subagents.start_job, `thimble:check`) on
-    Settings' checks row, as its route says; or the run as an extension's program of the checks task (_program)."""
+    Settings' checks row, as its route says, with its task in its prompt (task_prompt); or the run as an extension's
+    program of the checks task (_program)."""
     from . import subagents, tasks  # noqa: PLC0415 — tasks reads the extensions
 
     c = act.c
@@ -992,7 +998,7 @@ async def _launch(act: _Active) -> None:
     if act.ended:
         return
     ans = await subagents.start_job(
-        c, ROLE, session_key(act.check, act.doc), read_parts.named(paths, "check-task-file", "check-task-files"),
+        c, ROLE, session_key(act.check, act.doc), task_prompt(act.route, work, text, paths),
         subagents.values_for(c, ROLE), act.route,
         description=f"check: {check['name']} · "
                     f"{CANVAS_NAME if act.doc == CANVAS else ANSWERS_NAME if act.doc == ANSWERS else act.doc}",
@@ -1007,6 +1013,22 @@ async def _launch(act: _Active) -> None:
         return  # a request refused went through subagent_refused
     if not act.agent:  # a typed start's request, until its agent starts (subagent_started)
         act.request = str(ans.get("request") or "") or None
+
+
+def task_prompt(route: str, work: Path, text: str, paths: list[Path]) -> str:
+    """A run's prompt: its task `text` whole, with its work folder `work` (`## check-task-inline`), so that its agent
+    reads no file for it; for a typed start, which main types out whole, the task file or files `paths` named in order
+    (read_parts.named)."""
+    if route == TYPED:
+        return read_parts.named(paths, "check-task-file", "check-task-files")
+    return tools.hint("check-task-inline", work=str(work), task=text) or text
+
+
+def prompt_row(text: str) -> str:
+    """What a check's chat keeps of a prompt: the lines before the task that `## check-task-inline` holds whole (its
+    first paragraph), not the task, which the run's task file records; any other prompt as it is."""
+    head, sep, _ = text.partition("\n\n")
+    return head if sep and len(text) > PROMPT_ROW_CHARS else text
 
 
 def _write_task(c: str, path: Path, text: str) -> list[Path]:

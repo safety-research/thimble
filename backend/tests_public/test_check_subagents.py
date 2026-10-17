@@ -78,7 +78,7 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     other = "judgment" if cid == "unverified" else "unverified"
     path = checks.work_dir(CORPUS, cid, "report") / checks.TASK_FILE
     assert path.is_file() and "report:report" in path.read_text()
-    assert str(path) in spawn["prompt"] and spawn["role"] == "check"
+    assert path.read_text().strip() in spawn["prompt"] and spawn["role"] == "check"
     assert spawn["values"] == {"model": "claude-opus-5-5", "effort": "high"}
     assert subagents.request(CORPUS, spawn["request"])["route"] == "follow-on"
     assert _run(other).get("waiting") == checks.WAITING_QUEUED
@@ -89,6 +89,51 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     await _until(lambda: len(bridge.ops("spawn")) == 2, "the queued check never started")
     assert _run(cid)["status"] == "done" and _run(cid)["summary"] == "Commented on 0 of 3 passages."
     assert _run(cid)["stale"] == 0
+
+
+async def test_a_module_start_gives_the_check_its_whole_task_and_a_typed_start_names_its_files(doc, bridge, monkeypatch):
+    """Bug hunt F2: in Manual mode each Read of a file outside the analyst's folder is a permission ask, and checks
+    reading their task files made 42 of one session's 87 asks. A run the module starts gets its whole task in its
+    prompt, with its work folder, so it reads no file for it: 0 Read calls, where it made one per part (six in that
+    session's workspace). Its chat keeps only the prompt's lead, and its request in subagents.json the start of it once
+    its agent started. A typed start (main's run_check), whose Agent call main types out, still names its files."""
+    from app import read_parts
+
+    monkeypatch.setattr(read_parts, "READ_UNITS", 300)  # a large workspace: the task in several parts
+    await _write()
+    await _started("unverified")
+    [spawn] = bridge.ops("spawn")
+    work = checks.work_dir(CORPUS, "unverified", "report")
+    files = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
+    assert len(files) > 1 and all(p.is_file() for p in files)
+    task = "".join(p.read_text() for p in files).strip()
+    prompt = spawn["prompt"]
+    assert task in prompt and str(work) in prompt
+    assert not any(str(p) in prompt for p in files), "no task file to read: before, one Read per part"
+    row = checks.prompt_row(prompt)
+    assert str(work) in row and "report:report" not in row and len(row) < 1_000
+    req = subagents.request(CORPUS, spawn["request"])
+    assert req["input"]["prompt"] == prompt[:subagents.STARTED_PROMPT_CHARS]
+    assert req["input"]["prompt_chars"] == len(prompt)
+
+    rec = await checks.start_run(CORPUS, "judgment", "report", force=True, route=checks.TYPED, call="toolu_main1")
+    typed = rec["_answer"]["input"]["prompt"]
+    jwork = checks.work_dir(CORPUS, "judgment", "report")
+    jfiles = read_parts.paths(jwork / checks.TASK_FILE, len(list(jwork.glob("task*.md"))))
+    assert len(jfiles) > 1 and typed.index(str(jfiles[0])) < typed.index(str(jfiles[-1]))
+    assert len(typed) < 2_000 and len(bridge.ops("spawn")) == 1, "main makes the typed Agent call"
+
+
+def test_a_module_request_s_prompt_goes_once_the_request_ended():
+    """On local transport a spawn's arguments wait in subagents.json, which every hook reads: once the module answered
+    or the request expired, its prompt (a check's whole task) goes, and its other arguments stay."""
+    from app import subagent_files as files
+
+    state: dict = {}
+    rid = files.add_module_request(state, "spawn", {"role": "check", "prompt": "x" * 50_000, "description": "d"}, "s", 5.0)
+    files.end_module_request(state, rid, "answered")
+    r = files.requests(state)[rid]
+    assert r["args"] == {"role": "check", "description": "d"} and r["state"] == "done"
 
 
 async def test_a_hand_back_the_hook_took_ends_the_run_done_with_its_report_whichever_end_comes_first(doc, bridge):

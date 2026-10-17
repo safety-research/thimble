@@ -1443,6 +1443,12 @@ There is no check named {check}. Call `run_check` again with its `instructions` 
 
 None of {passages} is a passage of a written document. `read_ref` on a document gives each passage's id.
 
+## check-task-inline
+
+Your task follows: the check's instructions, the document with the id of every passage, the passages to comment on and what the workspace holds about them. All of it is here, so do not read a task file. Keep your scratch files in your work folder, {work}.
+
+{task}
+
 ## check-task-file
 
 Your task is in {path}: the check's instructions, the document with the id of every passage, the passages to comment on and what the workspace holds about them. Read it whole first.
