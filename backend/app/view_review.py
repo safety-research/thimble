@@ -32,8 +32,9 @@ The state rides on the proposal as `review {state, round, ts, revised, left, not
 and goes out with the `view` event, `shots` counting the pictures the review took. views/.reviewed/<slug>/ keeps the
 view as it was built for Undo until the next build or change passes, and <slug>.last the last version that passed,
 restored when a revision fails. A review run again keeps what the review before it revised, so Undo still reaches the
-view as it was built. A new change to the view stops its review; a view replaced or deleted stops it with no trace
-(forget)."""
+view as it was built. A new change to the view stops its review, which a notice tells (_changed_notice); a view
+replaced or deleted stops it with no trace (forget). The page of the view's other place, which its first open there
+builds, is no change: it waits for the review's end (views.ensure_page, _page_after)."""
 from __future__ import annotations
 
 import asyncio
@@ -368,6 +369,8 @@ async def _ended(c: str, run: subagents.Run, status: str, report: str, why: str,
             a = subagents.agent(c, run.agent_id) or {}
             quit_ = a.get("stopped_by") == subagents.STOPPED_QUIT
             _set(c, slug, state="stopped", note=note or (QUIT_NOTE if quit_ else why or STOPPED_NOTE))
+            if why == CHANGED_NOTE and not quit_:
+                _changed_notice(c, run, prop)
         elif status == "failed" and report == subagents.plan_failed_line(REVIEWER):  # main's plan mode held it
             _set(c, slug, state="failed", note=note or report)
         elif status == "failed":
@@ -382,9 +385,41 @@ async def _ended(c: str, run: subagents.Run, status: str, report: str, why: str,
     finally:
         if forget:
             _drop_copies(c, slug)
+        # the page an open in the view's other place asked for while it ran, whose pass starts the next review
+        queued = not forget and _page_after(c, slug)
         if (c, slug) in _restart:
             _restart.discard((c, slug))
-            after_built(c, slug)
+            if not queued:
+                after_built(c, slug)
+
+
+def _page_after(c: str, slug: str) -> bool:
+    """Build the page of the view's other place that an open asked for while the review ran (views.ensure_page, the
+    proposal's `page_wanted`), now that it ended; whether its build was queued."""
+    try:
+        wanted = str((views.read_proposal(c, slug) or {}).get("page_wanted") or "")
+        if wanted not in views.TARGETS:
+            return False
+        views.update_proposal(c, slug, page_wanted=None)
+        return views.ensure_page(c, slug, wanted)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the page %s waited for after its review was not built", c, slug)
+        return False
+
+
+def _changed_notice(c: str, run: subagents.Run, prop: dict[str, Any] | None) -> None:
+    """A review that thimble stopped because the view changed (CHANGED_NOTE) is told in the foreground, with Open on its
+    chat (bug hunt E4: it ended with no word); the next review's start takes the notice away. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    try:
+        name, subject = notices.who(REVIEWER, str((prop or {}).get("name") or ""))
+        then = ("A new review starts once the change passes its checks." if enabled() and auto(c) else
+                "Review again runs it on the changed view.")
+        notices.post(c, kind="agent", text=f"{subject} stopped because the view changed while it was reviewed. {then}",
+                     agent=name, chat=run.chat or None, key=notices.agent_key(run.key))
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the stop of the review %s was not told", c, run.key)
 
 
 def stop(c: str, slug: str, reason: str = STOPPED_NOTE, forget: bool = False) -> bool:
