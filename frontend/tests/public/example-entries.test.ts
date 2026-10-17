@@ -27,3 +27,31 @@ describe('example entries', () => {
     expect(marked(entryParts(entries[0], got))).toEqual(quotes)
   })
 })
+
+describe("a database row's fields, those the card's claim is about first (bug hunt B17)", () => {
+  const row = (ref: string, table: string, record: Record<string, unknown>): ResolvedRef =>
+    ({ ref, kind: 'row', path: 'runs/s3/forge.db', table, record, excerpt: JSON.stringify(record) }) as unknown as ResolvedRef
+  const PR = 'runs/s3/forge.db#prs/66972'
+  const REVIEW = 'runs/s3/forge.db#reviews/14'
+  const ROWS: Record<string, ResolvedRef> = {
+    [PR]: row(PR, 'prs', { number: 66972, body: '- [ ] closes #66675\r\n\r\n- [x] I used AI to develop this pull request.', title: 'DEPS: Remove hypothesis', author: 'gh:mroeschke', state: 'merged', claimed_by: 'agent-16', merged_by: 'agent-16' }),
+    [REVIEW]: row(REVIEW, 'reviews', { id: 14, pr: 66972, created_at: '2026-08-28T22:32:26Z', verdict: 'approve', reviewer: 'agent-16', body: 'Reviewed: verified clean merge onto current main and ran the full set of touched test modules.' }),
+  }
+  const words = 'What do merges look like when one agent claimed and merged a PR alone? Agent-16 wrote the only review.'
+  const kinds = (parts: QuotePart[] | null) => (parts ?? []).map((p) => (p.kind === 'field' ? `field ${p.key}` : p.kind === 'fields' ? `fields ${p.pairs.map(([k]) => k).join(' ')}` : p.kind))
+
+  test('the value its takeaway cites first, under its name; the fields its words name first on the fields line; the body with its line ends', () => {
+    const [e] = exampleEntries([PR], [''])
+    const parts = entryParts(e, (r) => ROWS[r], { said: ['"DEPS: Remove hypothesis"'], words })
+    expect(kinds(parts)).toEqual(['field title', 'fields claimed_by merged_by number author state', 'field body'])
+    const body = parts!.find((p) => p.kind === 'field' && p.key === 'body') as Extract<QuotePart, { kind: 'field' }>
+    expect(body.text).toBe('- [ ] closes #66675\n\n- [x] I used AI to develop this pull request.')
+  })
+
+  test('the words it quotes from a review: that field first, marked; the reviewer its words name first on the line', () => {
+    const [e] = exampleEntries([REVIEW], ['verified clean merge'])
+    const parts = entryParts(e, (r) => ROWS[r], { words })
+    expect(kinds(parts)).toEqual(['field body', 'fields reviewer id pr created_at verdict'])
+    expect(marked(parts)).toEqual(['verified clean merge'])
+  })
+})

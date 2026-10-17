@@ -3,7 +3,7 @@
 // returns its lines and a hit test from a cell to an item. The `note` and `text` kinds (noteLayout, textLayout) are the
 // cards drawn as their words.
 import { axisTicks, numberTicks, ownTicks, placeLabels, wallClock } from './axis'
-import { cut, cw, fmt, formatted, quoted, viewRef, width } from './lib'
+import { cut, cw, fmt, formatted, itemsRow, quoted, viewRef, width } from './lib'
 import type { Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 import { hueOf } from './labels'
@@ -27,8 +27,9 @@ export type CardLabel = { slug: string; name: string; values: string[]; marks?: 
 /** A label card's own label (cell.ts labelCard, from `thimble state label`): how its records were labeled and how many. */
 export type LabelInfo = { slug: string; name: string; kind: string; values: string[]; labeled: number; total: number; trial: boolean; paths?: string[]; colors?: Record<string, number> }
 /** An example: its record, its words, and on a label card its value now, why, and whether the analyst set or agreed
- *  with it (`set`; `was` the value the label gave). */
-export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string }
+ *  with it (`set`; `was` the value the label gave). `kept`: the words the card quotes from the record (its payload's
+ *  `quotes`); `fields`: a database row's fields (lib.ts claimFields), which it shows in place of its words. */
+export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string; kept?: string; fields?: { read: [string, string][]; rest: [string, string][] } }
 /** A plan card's step (cell.ts planSteps, backend notebook.plan_step_of): its words, its status (`not started`,
  *  `running`, `done`, `needs you`), what it makes, the note its agent left, and its time ('' for none). */
 export type PlanStep = { text: string; status: string; makes: string[]; note: string; time: string }
@@ -1346,18 +1347,65 @@ function quoteLines(words: string, room: number, max: number): string[] {
   return lines
 }
 
+/** A field of a record the claim is about, in `room` cells: its name dim, then its value in quotation marks and italic,
+ *  its line ends kept (its blank lines left out), wrapped under the value's first row, in at most `max` rows; words that
+ *  do not fit end in `…` and the closing mark. */
+function fieldLines(key: string, value: string, room: number, max: number): Line[] {
+  const keyW = width(key) + 2
+  const w = Math.max(8, room - keyW)
+  const q = quoted(value)
+  const [open, close] = q === value ? ['', ''] : [q[0]!, q.at(-1)!]
+  const parts = value.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const rows: string[] = []
+  let cutShort = false
+  parts.forEach((part, i) => {
+    if (rows.length >= max) return void (cutShort = true)
+    const got = wrapCell(`${i === 0 ? open : ''}${part}${i === parts.length - 1 ? close : ''}`, w, max - rows.length).filter(Boolean)
+    rows.push(...got)
+    if (got.at(-1)?.endsWith('…')) cutShort = true
+  })
+  if (cutShort && rows.length) {
+    const t = rows.at(-1)!.replace(/…$/, '').trimEnd()
+    const kept = width(t) + 1 + close.length <= w ? t : cut(t, w - close.length).slice(0, -1)
+    rows[rows.length - 1] = `${kept.replace(/[\s,;:.!?]+$/, '')}…${close}`
+  }
+  return rows.map((r, i) => [{ s: i === 0 ? key : ' '.repeat(width(key)), fg: COLORS.dim }, { s: '  ' }, { s: r, i: true }])
+}
+
+/** A record's other fields as `name value` items parted by ` · `, dim, in at most `max` rows of `room` cells: whole items
+ *  while they fit, then ` · +N` for those left out (lib.ts itemsRow). */
+function restLines(rest: readonly [string, string][], room: number, max: number): Line[] {
+  const items = rest.map(([k, v]) => `${k} ${cut(v.replace(/\s+/g, ' ').trim(), 48)}`)
+  const out: Line[] = []
+  let k = 0
+  while (k < items.length && out.length < max) {
+    if (out.length === max - 1) {
+      out.push([{ s: itemsRow(items.slice(k), room), fg: COLORS.dim }])
+      break
+    }
+    let j = k + 1
+    while (j < items.length && width(items.slice(k, j + 1).join(' · ')) <= room) j++
+    out.push([{ s: cut(items.slice(k, j).join(' · '), room), fg: COLORS.dim }])
+    k = j
+  }
+  return out
+}
+
 /**
  * Example records: per record, a ● at the content's edge (in its value's hue when a label the card read marks it, dim
  * when it marks it not, else the citation's purple, as its ↗ and place: one evidence color in a card, the owner 10-17:
  * "card bullet and citations are different colors") and thimble's note after it, regular; under the note, 2 cells in,
  * the record's words in quotation marks and italic, up to three rows, then ↗ and its place in purple and underlined, on
- * the quote's last row where it fits, else on the row under it. A blank row between records.
+ * the quote's last row where it fits, else on the row under it. A database row shows its fields in place of its words
+ * (bug hunt B17): the fields the claim is about, each its name dim and its value as words are quoted, its line ends
+ * kept, then its other fields on up to two dim rows, those the card names first. A blank row between records.
  */
 function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   const exs = (card.examples ?? []).slice(0, 8)
   const lines: Line[] = []
   const owner: number[] = []
-  const items: Item[] = exs.map(e => ({ label: placeWords(e.ref), value: e.note || e.quote.slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: e.note || e.quote }))
+  const words = (e: CardExample) => e.note || e.quote || (e.fields?.read[0]?.[1] ?? '').replace(/\s+/g, ' ').trim()
+  const items: Item[] = exs.map(e => ({ label: placeWords(e.ref), value: words(e).slice(0, 60), cite: `[[${e.ref}]]`, open: e.ref, kind: 'record', text: words(e) }))
   const valued = cardLabels(card).length > 0
   const room = Math.max(10, cols - 2)
   exs.forEach((e, i) => {
@@ -1371,9 +1419,22 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
     const lead = () => (rows.length ? { s: '  ' } : glyph)
     const note = e.note ? wrapCell(e.note.replace(/\s+/g, ' ').trim(), room, 3).filter(Boolean) : []
     for (const t of note) rows.push([lead(), { s: t }])
-    const words = demojibake(e.quote).replace(/\s+/g, ' ').trim()
-    const quote = words ? quoteLines(words, room, 3) : []
-    for (const t of quote) rows.push([lead(), { s: t, i: true }])
+    if (e.fields && (e.fields.read.length || e.fields.rest.length)) {
+      const read = e.fields.read.map(([k, v]): [string, string] => [k, demojibake(v)])
+      // the claim's fields share four rows, the first its three at most; the other fields two
+      let left = 4
+      for (const [k, v] of read) {
+        const got = fieldLines(k, v, room, Math.min(3, left))
+        left -= got.length
+        for (const l of got) rows.push([lead(), ...l])
+        if (left <= 0) break
+      }
+      for (const l of restLines(e.fields.rest.map(([k, v]) => [k, demojibake(v)]), room, 2)) rows.push([lead(), ...l])
+    } else {
+      const said = demojibake(e.quote).replace(/\s+/g, ' ').trim()
+      const quote = said ? quoteLines(said, room, 3) : []
+      for (const t of quote) rows.push([lead(), { s: t, i: true }])
+    }
     // the place after the quote's last row (or the note's, with no quote) when it fits there with a gutter
     const last = rows.at(-1)
     const want = 2 + width(placeWords(e.ref))

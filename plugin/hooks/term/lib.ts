@@ -1244,6 +1244,32 @@ export function recordFields(text: string, rule: { kind?: string; spec?: string;
   }
 }
 
+/** A database row's fields as an example card shows them (bug hunt B17: a row read as one line of JSON with literal
+ *  `\r\n`): `read`, the fields the card's claim is about, each its whole value, at most two: those whose value holds
+ *  words the card quotes from the row or a value its takeaway cites there (`about.quotes`), else the row's words (its
+ *  text field, else its longest words, as recordFields picks them); `rest`, its other fields with a value, those whose
+ *  name the card's words name first (`merged_by` where the card says "merged", `reviewer` where it says "review"), then
+ *  in the row's order. A value as text: a string with its line ends as `\n`, a list or an object as its JSON. Pure. */
+export function claimFields(record: Record<string, unknown>, about: { quotes?: readonly string[]; words?: string } = {}): { read: [string, string][]; rest: [string, string][] } {
+  const text = (v: unknown): string => (typeof v === 'string' ? v.replace(/\r\n?/g, '\n') : v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v))
+  const fields = Object.entries(record).map(([k, v]): [string, string] => [k, text(v)]).filter(([, v]) => v.trim() !== '')
+  const flat = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase()
+  const quotes = (about.quotes ?? []).map(q => flat(q).replace(/^["“'‘]+|["”'’]+$/g, '').trim()).filter(Boolean)
+  // a quote of a few characters (a count, `PR`) holds only where it is the whole value
+  const holds = (v: string) => quotes.some(q => (q.length >= 4 && flat(v).includes(q)) || flat(v) === q)
+  let read = fields.filter(([, v]) => holds(v)).slice(0, 2)
+  if (!read.length) {
+    const words = fields.find(([k]) => /^(text|content|message|body|msg|comment|title|name|summary)$/i.test(k) && typeof record[k] === 'string')
+    const longest = fields.filter(([k]) => typeof record[k] === 'string').sort((a, b) => b[1].length - a[1].length)[0]
+    read = [words ?? longest ?? fields[0]].filter((f): f is [string, string] => Boolean(f))
+  }
+  const said = new Set(flat(about.words ?? '').split(/[^a-z0-9]+/).filter(w => w.length >= 4))
+  // a name's word the card says, or one that starts the other (`merge` and "merged", `reviewer` and "review")
+  const named = (k: string) => k.toLowerCase().split(/[^a-z0-9]+/).some(p => p.length >= 4 && [...said].some(w => w === p || (Math.min(w.length, p.length) >= 5 && (w.startsWith(p) || p.startsWith(w)))))
+  const others = fields.filter(f => !read.includes(f))
+  return { read, rest: [...others.filter(([k]) => named(k)), ...others.filter(([k]) => !named(k))] }
+}
+
 /** The sentence of a reply that holds a citation, for the prompt that asks for its verification script. */
 export function sentenceOf(text: string, raw: string): string {
   const at = text.indexOf(raw)

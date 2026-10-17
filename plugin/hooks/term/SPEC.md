@@ -592,7 +592,11 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   marks the record) and thimble's note after it, regular; under the note, at
   +2, the record's words in quotation marks and italic, up to three rows, then `↗` and its place in the citation's
   purple, the place underlined (MATT-NOTES "Mockup feedback": no two underline colors in a card; the link blue stays
-  for actions), on the quote's last row if it fits, else on the next. A blank row between records.
+  for actions), on the quote's last row if it fits, else on the next. A database row shows its fields, never its JSON:
+  first the fields the claim is about (those holding words the card quotes from the row or a value its takeaway cites
+  there, else its words, such as its title or body), each its name dim and its value in quotation marks and italic,
+  its line ends kept; then its other fields as `name value · name value` on up to two dim rows, those the card's question
+  and takeaway name first (`merged_by` where it says "merged"). A blank row between records.
 - A plan: per step, its number, its state's glyph (`○` not started dim, `◌` running in the accent, `●` done, `!` needs
   you in red) and its title in bold, the clause before the first colon, its time dim at the right edge; under the
   title, indented to it, the rest of its words in the text color, then what it makes (`→ 7 participant memos`) and its

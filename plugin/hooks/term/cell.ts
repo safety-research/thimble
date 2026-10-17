@@ -536,9 +536,14 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   if (kind === 'plan') return { card: { ...blank(cell, 'plan'), steps: planSteps(payload?.steps) }, error }
   if (kind === 'example') {
     const refs = Array.isArray(payload?.refs) ? (payload!.refs as unknown[]) : []
-    const examples: CardExample[] = refs.map(r =>
-      typeof r === 'string' ? { ref: r.replace(/^\[\[|\]\]$/g, ''), quote: '', note: '' } : { ref: String((r as { ref?: unknown }).ref ?? ''), quote: String((r as { quote?: unknown }).quote ?? ''), note: '' },
-    )
+    // the words add_card kept beside each ref (`quotes`, one per ref), which the card quotes from its record
+    const quotes = Array.isArray(payload?.quotes) ? (payload!.quotes as unknown[]) : []
+    const examples: CardExample[] = refs.map((r, i) => {
+      const kept = typeof quotes[i] === 'string' ? (quotes[i] as string).trim() : ''
+      return typeof r === 'string'
+        ? { ref: r.replace(/^\[\[|\]\]$/g, ''), quote: '', note: '', ...(kept ? { kept } : {}) }
+        : { ref: String((r as { ref?: unknown }).ref ?? ''), quote: String((r as { quote?: unknown }).quote ?? ''), note: '' }
+    })
     return { card: { ...blank(cell, 'example'), examples }, error }
   }
   if (kind === 'label') return { card: labelCard(cell, label ?? null), error }

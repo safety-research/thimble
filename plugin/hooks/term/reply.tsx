@@ -35,7 +35,7 @@ import type { CardData, CardExample } from './draw'
 import { focusFromRef, focusItem } from './anim'
 import type { Focus } from './anim'
 import type { Target } from './gestures'
-import { bareCard, cardTag, cardWords, chipPlace, cid, questionOf, citations, clip, curlyQuotes, decodeLabel, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
+import { bareCard, cardTag, cardWords, chipPlace, cid, claimFields, questionOf, citations, clip, curlyQuotes, decodeLabel, isChip, labelRef, labelRunning, mdPieces, noteLabelName, noteQuestion, outputLine, parseReply, quoted, sectionsOf } from './lib'
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, FLAG, labelHex, paintLines, passageTint } from './paint'
@@ -615,11 +615,21 @@ async function captionFocus(cx: Ctx, id: string, caption: string): Promise<Focus
 
 // ------------------------------------------------------------------------------------------------ a card
 
-/** A card's drawing data with what the check of its records found: an example's words, read from its places. */
-async function withQuotes(cx: Ctx, data: CardData): Promise<CardData> {
+/** A card's drawing data with what the check of its records found: an example's words, read from its places; a database
+ *  row's fields (lib.ts claimFields), those the card quotes or its takeaway cites from the row first, then those its
+ *  question and takeaway name. */
+async function withQuotes(cx: Ctx, data: CardData, takeaway = ''): Promise<CardData> {
   if (data.kind !== 'example' || !data.examples?.length) return data
   const examples: CardExample[] = []
+  const cited = citations(takeaway)
+  const words = `${data.question} ${plainCites(takeaway)}`
   for (const x of data.examples) {
+    const row = (await cx.verdict(cid(`[[${x.ref}]]`)))?.record
+    if (row) {
+      const said = cited.filter(c => c.ref === x.ref && c.display !== null).map(c => c.display!)
+      examples.push({ ...x, fields: claimFields(row, { quotes: [x.kept ?? '', x.quote, ...said].filter(Boolean), words }) })
+      continue
+    }
     if (x.quote) {
       examples.push(x)
       continue
@@ -657,7 +667,7 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
     const name = opts.in === 'report' ? 'this card' : opts.order ? `card ${opts.order}` : 'the card'
     return <Text color={COLORS.problem} wrap="wrap">{`× ${name} cannot be drawn: ${tc.error || 'the card is not in this workspace'}`}</Text>
   }
-  let data = await withQuotes(cx, tc.data as CardData)
+  let data = await withQuotes(cx, tc.data as CardData, tc.takeaway)
   // a label whose run is going (a chat follows it): `◌ labeling`, with the records labeled so far once its bars show
   // them, never `not run yet` or `stopped at` (live check term-fix9, quirk 4)
   if (data.kind === 'label' && data.label && labelRunning((await cx.agents()) ?? [], data.label.name)) {

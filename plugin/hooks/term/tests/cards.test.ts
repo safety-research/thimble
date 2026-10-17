@@ -172,3 +172,35 @@ test("a plan card: each step's number, its state glyph and its title in bold, it
   // a step with no colon is all title
   expect(text).toContain('3. ○ Label every session with the codebook')
 })
+
+test("an example quotes a database row by its fields, never as one line of JSON: those the card quotes or cites first, its line ends kept, then those it names (bug hunt B17)", { timeoutMs: 30_000 }, async ($, on) => {
+  const w = world(on)
+  const pr = 'runs/s3/forge.db#prs/66972'
+  const review = 'runs/s3/forge.db#reviews/14'
+  const prRow = { number: 66972, title: 'DEPS: Remove hypothesis', body: '- [ ] closes #66675\r\n\r\n- [x] I used AI to develop this pull request.', author: 'gh:mroeschke', state: 'merged', claimed_by: 'agent-16', merged_by: 'agent-16', closed_by: null }
+  const reviewRow = { id: 14, pr: 66972, reviewer: 'agent-16', verdict: 'approve', body: 'Reviewed: verified clean merge onto current main\r\nand ran the full set of touched test modules.' }
+  w.resolve[pr] = { ref: pr, kind: 'row', path: 'runs/s3/forge.db', table: 'prs', pk: '66972', record: prRow, excerpt: JSON.stringify(prRow) }
+  w.resolve[review] = { ref: review, kind: 'row', path: 'runs/s3/forge.db', table: 'reviews', pk: '14', record: reviewRow, excerpt: JSON.stringify(reviewRow) }
+  w.cells.x0rows00 = {
+    id: 'x0rows00', notebook: 'g1', kind: 'example', title: 'What do merges look like when one agent claimed and merged a PR alone?', labels: [], created_by: 'main', ts: '2026-10-06T10:00:00+00:00',
+    takeaway: 'Agent-16 merged [["DEPS: Remove hypothesis"|runs/s3/forge.db#prs/66972]] a minute after claiming it.',
+    payload: { refs: [pr, review], quotes: ['', 'verified clean merge'] },
+  }
+  await start($, w)
+  await turn($, w, 'x0rows00')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const client = (await ui.find({ type: 'Client', key: 'card-t0-x0rows00' })) as unknown as { props: { props: { card: Parameters<typeof cardLayout>[0] } } }
+  const lines = cardLayout(client.props.props.card, 100, -1).lines.map(l => l.map(x => x.s).join(''))
+  const text = lines.join('\n')
+  expect(text).not.toContain('{"')
+  expect(text).not.toContain('\\r\\n')
+  // the PR: the title its takeaway cites first, then the fields the card names (claimed, merged), then the others
+  expect(lines[0]).toBe('● title  "DEPS: Remove hypothesis"')
+  expect(lines[1]).toMatch(/^ {2}claimed_by agent-16 · merged_by agent-16 · number 66972/)
+  // the review: the body the card quotes from it, its line end kept, then its other fields
+  const at = lines.findIndex(l => l.startsWith('● body'))
+  expect(lines[at]).toBe('● body  "Reviewed: verified clean merge onto current main')
+  expect(lines[at + 1]).toBe('        and ran the full set of touched test modules."')
+  expect(lines[at + 2]).toMatch(/^ {2}id 14 · pr 66972 · reviewer agent-16 · verdict approve/)
+  await ui.unmount()
+})
