@@ -10,7 +10,9 @@ and every subagent share, runs the same `tools.call` in its own process (call); 
 server's GET routes give the browser with `thimble state <surface>` (state), and makes the changes the browser's POST
 routes make with `thimble act <kind>` (act). Each of these writes the same workspace files the server writes, so a
 workspace opens the same way in either transport. After the press, an act whose state the server holds in memory (a
-comment dismissed or opened again) goes to the server's route (SERVER_ACTS), and the others run here.
+comment dismissed or opened again, a view proposal's answer, a notice's dismissal: SERVER_ACTS) goes to the server's
+route for `thimble act`, POST /api/ws/{c}/act (app/term_acts.py), a token route of this command's own, and the others
+run here. The browser's routes for those changes take only the browser's cookie, never the token this command proves.
 
 The transport is read from the workspace's `trusted/launch.json` (subagent_files.transport), which only activation
 writes (app/activate.py write_launch). A tool call here refuses a folder that holds no workspace (no tool call
@@ -1077,8 +1079,10 @@ ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id
 
 # The acts whose state thimble's server holds in memory once main's transport is server: the comments of a document and
 # of Claude's answers, which its routes change and announce to the browser, and the view proposals, builds and notices,
-# whose queue and writer then live in the server (H6). After the press each goes to the server's route,
-# `kind -> the route's path`, with {c} and the payload's fields filled; every other act runs here.
+# whose queue and writer then live in the server (H6). After the press each goes to ACT_ROUTE (app/term_acts.py), which
+# makes the change the browser's route `kind -> the route's path` makes, the fields that path names checked here first;
+# every other act runs here.
+ACT_ROUTE = "/api/ws/{c}/act"
 SERVER_ACTS = {
     "comment-resolve": "/api/ws/{c}/investigations/main/types/{doc}/comments/{comment}/dismiss",
     "comment-reopen": "/api/ws/{c}/investigations/main/types/{doc}/comments/{comment}/reopen",
@@ -1112,11 +1116,15 @@ def server_route(c: str, kind: str, payload: dict[str, Any]) -> str | None:
     return path.format(**{k: quote(v, safe="") for k, v in values.items()})
 
 
-def _post_to_server(path: str) -> dict[str, Any]:
-    """POST `path` to thimble's server with the token's proof (cli._request): its JSON answer, or StateError with why."""
+def _post_to_server(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The act `kind` posted to thimble's server (ACT_ROUTE) with the token's proof (cli._request): its JSON answer, or
+    StateError with why."""
+    from urllib.parse import quote  # noqa: PLC0415
+
     from . import cli  # noqa: PLC0415
 
-    status, body = cli._request("POST", f"{cli.api_url()}{path}", {}, timeout=SERVER_ACT_TIMEOUT_S)
+    status, body = cli._request("POST", f"{cli.api_url()}/api/ws/{quote(c, safe='')}/act",
+                                {"kind": kind, "payload": payload}, timeout=SERVER_ACT_TIMEOUT_S)
     if status != 200:
         why = body.get("detail") if isinstance(body, dict) else body
         raise StateError(f"thimble's server did not take this change ({status or 'no answer'}: {why})")
@@ -1134,9 +1142,8 @@ async def act(c: str, kind: str, payload: dict[str, Any], session: str | None = 
     if not isinstance(payload, dict):
         raise StateError("the act's argument must be a JSON object")
     if kind in SERVER_ACTS and transport(c, session) == SERVER:
-        path = server_route(c, kind, payload)
-        if path is not None:
-            got = await asyncio.to_thread(_post_to_server, path)
+        if server_route(c, kind, payload) is not None:
+            got = await asyncio.to_thread(_post_to_server, c, kind, payload)
             return {"ok": True, **{k: v for k, v in got.items() if k != "ok"}, "via": "server"}
     if fn is None:
         raise StateError(f"no act {kind!r}; {ACT_USAGE}")

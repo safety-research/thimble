@@ -164,6 +164,8 @@ ROUTER_MODULES = [
     # programs and a code ticket's own questions (shut down with the server), and the orientation's calls, stored whole
     # and citable
     "subagents", "agent_session", "calls", "orient_session", "write_session",
+    # the terminal's changes after the press whose state this server holds (`thimble act`, a token route)
+    "term_acts",
     # the programs an extension runs a role with (an Agent SDK program or a command), and their sessions
     "harness",
     # the orientation's, its critic's and the writers' tray entries in the analyst's terminal

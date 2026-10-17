@@ -117,7 +117,9 @@ CLI_PATHS = frozenset({
     "/api/corpora/register", "/api/dev/announce", "/api/dev/revert", "/api/extensions/refresh", "/api/subagents/caller",
     "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
 })
-CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(session|precached/context|archive|restore|rename)")  # POST
+# POST; `act` is the terminal's change after the press (`thimble act`, app/term_acts.py), which the browser's own routes
+# for the same change take only with its cookie
+CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(session|precached/context|archive|restore|rename|act)")
 CLI_WS_DELETE = re.compile(r"/api/ws/[^/]+")  # DELETE: a workspace removed (`thimble rm`)
 NONCE_HEADER = "x-thimble-nonce"
 AGENT_HEADER = "x-thimble-agent"  # the id of an agent's token (module note)

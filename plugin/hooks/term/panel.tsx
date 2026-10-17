@@ -192,12 +192,17 @@ export async function homeViews(cx: Ctx): Promise<HomeView[]> {
  *  `pressed`, the answer pressed here that thimble has not written yet (answerOffer). */
 export type HomeOffer = { slug: string; name: string; description: string; task: string; claims: string[]; refused: string; pressed: '' | 'accept' | 'reject' }
 
+// why the last answer pressed here did not reach thimble (`thimble act` failed, or thimble refused it), by the proposal's
+// slug: the red row under the proposal says it until the next press, since no file changes to say it (bug hunt B11)
+let offerFailed: { slug: string; why: string } | null = null
+
 export async function homeOffer(cx: Ctx): Promise<HomeOffer | null> {
   const home = await surfaceValue<Obj>(cx, 'home-full')
   const o = home?.ok && isObj(home.value.offer) ? home.value.offer : null
   if (!o || !str(o.slug)) return null
   const pressed = o.pressed === 'accept' || o.pressed === 'reject' ? o.pressed : ''
-  return { slug: str(o.slug), name: str(o.name) || str(o.slug), description: str(o.description), task: str(o.task), claims: Array.isArray(o.claims) ? (o.claims as unknown[]).map(String) : [], refused: str(o.refused), pressed }
+  const failed = offerFailed?.slug === str(o.slug) ? offerFailed.why : ''
+  return { slug: str(o.slug), name: str(o.name) || str(o.slug), description: str(o.description), task: str(o.task), claims: Array.isArray(o.claims) ? (o.claims as unknown[]).map(String) : [], refused: str(o.refused) || failed, pressed }
 }
 
 /** Every agent's open notices, as home's state gives them (`notices`, newest first): a failure with its fix, from the
@@ -241,16 +246,18 @@ async function markOffer(cx: Ctx, slug: string, pressed: '' | 'accept' | 'reject
 
 /** The analyst's accept or reject of the view proposal, from the row above the prompt: `thimble act view-accept` or
  *  `view-reject` {slug}, which hands the answer to thimble and answers at once. The row shows the answer as pressed
- *  (`◌ accepting`) until home's state is read again or OFFER_PRESS_MS pass; an act refused, or a proposal that no
- *  longer waits, is a toast. */
+ *  (`◌ accepting`) until home's state is read again or OFFER_PRESS_MS pass; an act that failed or that thimble
+ *  refused, or a proposal that no longer waits, brings the controls back with why in the red row under the proposal. */
 export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'reject'): Promise<void> {
   if (!rt.sc) return
   const at = await cx.now()
+  if (offerFailed?.slug === slug) offerFailed = null
   await markOffer(cx, slug, verb, at)
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, `view-${verb}`, { slug })
   if (!got.ok || got.value.queued === false) {
+    const why = got.ok ? got.value.reason || 'the view proposal no longer waits' : got.error
+    offerFailed = { slug, why: `thimble could not ${verb} it: ${why}` }
     await markOffer(cx, slug, '', at, at)
-    cx.toast(`thimble: ${got.ok ? got.value.reason || 'the view proposal no longer waits' : got.error}`)
     return
   }
   cx.later(OFFER_PRESS_MS, () => void markOffer(cx, slug, '', at, at))
