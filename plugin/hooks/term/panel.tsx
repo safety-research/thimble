@@ -3550,8 +3550,9 @@ const NEW_LABEL = 'make-label'
 
 /** The labels (SPEC.md, "The label panel", the labels list): each label as home draws it, its name, its bar and total
  *  and its legend, `❯` on the chosen one while the entry box does not hold the keys; under them the entry box `describe
- *  a new label`, whose words go to main. With no label the list has no keys: the box takes them (bug hunt C2: the
- *  list's keys took a letter of the description and sent the rest to main's prompt). */
+ *  a new label`, whose words go to main, its `❯` drawn only while it holds them, so one row shows the cursor. With no
+ *  label the list has no keys: the box takes them (bug hunt C2: the list's keys took a letter of the description and
+ *  sent the rest to main's prompt). */
 async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Button, Text } = cx.els(e)

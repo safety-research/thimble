@@ -330,6 +330,21 @@ test('the labels list ends with the entry box `describe a new label`: ↓ past t
   await pane.unmount()
 })
 
+test('one row shows the cursor: while the labels list holds the keys, its chosen label has the `❯` and the entry box none (bug hunt C2)', { timeoutMs: 30_000 }, async ($, on) => {
+  // bug hunt C2: the list drew two `❯` at once, on the chosen label and, dim, on `describe a new label`
+  const w = world(on)
+  let pane = await labelPanel($, w)
+  pane = await press($, w, pane, 'hk-list')
+  await takesKeys($)
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(shown(await pane.find({ key: 'h-hints' }))).toContain('↑↓ to choose')
+  expect(shown(await pane.drawn({ in: 'm:labels-list' }))).toContain('❯')
+  expect(shown(await pane.find({ type: 'Box', key: 'entry-row-make-label' }))).not.toContain('❯')
+  await pane.unmount()
+})
+
 test('with no label the labels list has no keys of its own: its entry box takes them as the list opens, the words typed go into it, and one row shows the cursor (bug hunt C2)', { timeoutMs: 30_000 }, async ($, on) => {
   // bug hunt C2: with no label, `labels 0` opened the list with `❯ describe a new label` and the hint `↑↓ to choose ·
   // Enter to open`; the description went to main's prompt as a bare question, its `o` taken as a panel key
