@@ -27,6 +27,15 @@ const MD_COMPONENTS: Components = {
   img: MdImage,
 }
 
+/** Words written in Markdown, rendered as a markdown file is (a transcript's system prompt, a reply). */
+export function MarkdownText({ text }: { text: string }) {
+  return (
+    <Markdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} rehypePlugins={[rehypeNumericCells]} components={MD_COMPONENTS}>
+      {text}
+    </Markdown>
+  )
+}
+
 /** rehype plugin: a top-level block gets `data-anchor` from the source line it starts on (`lines` maps the joined text's
  * line index to the record's line number). */
 export function rehypeBlockAnchors(path: string, lines: number[]) {

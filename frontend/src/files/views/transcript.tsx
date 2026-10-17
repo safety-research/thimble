@@ -3,7 +3,8 @@
 // as the Agent SDK's messages kept in a database row, shows the nested records); messages (JSON lines, a CSV or TSV file's
 // rows) as posts with their authors and times; JSON lines that each hold a whole conversation as one card per line,
 // its turns inside; a text or markdown chat log as one card per turn, a turn's lines under its speaker; and a
-// whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it, a page at a time.
+// whole-file JSON transcript (a chat export, an eval log) as the turns the server parses from it, a page at a time, its
+// system prompt and replies rendered as Markdown.
 // JSON lines in a file the server pages as text are parsed here, line by line. While system records are hidden, a long
 // run of them (HIDDEN_RUN_NOTE or more) says in one line how many it hides, so the view is never blank while the reader
 // pages past them. A record with no words to show (a turn that holds only redacted thinking, a post with an empty body)
@@ -24,6 +25,7 @@ import type { Block, ChatTurn, SourceKind, SourceRecord, SourceTurn, SourceTurns
 import { FilterContext } from '../useFilterBy'
 import { BlockEl, citedQuote, Collapsible, compact, errMsg, FOLD_LINES, foldsByDefault, isTargetLine, lineCount, oneLine, quoteTarget, RecordCard, recordExcerpt, targetOf, useTarget, type RecordFold, type Target, type ViewDef, type ViewProps } from './common'
 import { useDelimited } from './table'
+import { MarkdownText } from './text'
 
 export const CONVERSATIONAL = new Set(['assistant', 'user'])
 /** hidden system records in a row from which the run says how many it hides */
@@ -165,8 +167,8 @@ export interface FoldPart {
 /** pieces a folded record's one line holds at most */
 const FOLD_PARTS = 4
 
-/** A record's blocks as the pieces of its one folded line: its words, each tool call as its name and the first telling
- * string of its input (callGloss: the command, the path), each result's output from its start (terminal output
+/** A record's blocks as the pieces of its one folded line: its words, each tool call as its name and what it acts on
+ * (callGloss: a Read's path, a Bash call's command), each result's output from its start (terminal output
  * cleaned), the rest as text; its thinking only when it holds nothing else. Pure (clean-up aside). */
 export function foldParts(blocks: readonly { kind: string; text: string }[]): FoldPart[] {
   const out: FoldPart[] = []
@@ -179,7 +181,7 @@ export function foldParts(blocks: readonly { kind: string; text: string }[]): Fo
       const rest = nl < 0 ? '' : b.text.slice(nl + 1)
       let gloss: string
       try {
-        gloss = callGloss(JSON.parse(rest))
+        gloss = callGloss(JSON.parse(rest), name)
       } catch {
         gloss = firstLine(rest)
       }
@@ -944,21 +946,38 @@ function lineHolder(turns: readonly SourceTurn[], line: number): SourceTurn | nu
   return turns.find((t) => t.line === line || t.rec_line === line) ?? turns.reduce<SourceTurn | null>((best, t) => (t.line < line ? t : best), null)
 }
 
+// the roles whose words a whole-file JSON transcript renders as Markdown, as Claude Code renders a reply; a user's words
+// show as written
+const MARKDOWN_ROLES: ReadonlySet<string> = new Set(['system', 'assistant'])
+
+/** Words, rendered as Markdown (`md`) unless a citation quotes words in them, which then show as written, highlighted;
+ * else as written. */
+function Words({ block, line, index, target, hit, md }: { block: Block; line: number; index: number; target: Target | null; hit: boolean; md: boolean }) {
+  if (!md || target?.start != null) return <BlockEl block={block} line={line} index={index} target={target} hit={hit} />
+  return (
+    <div className="reader-block reader-text reader-md" data-line={line} data-block={index}>
+      <MarkdownText text={block.text} />
+    </div>
+  )
+}
+
 /** One turn of a whole-file JSON transcript, whose gutter shows the labels of its line and of the lines up to the next
- * turn's (`end`), and the words a citation quotes (`quote`) highlighted. Its row shows the turn's own number (its step's,
- * else its place in its conversation), not the line of the file, which shows on hover and which refs keep. */
+ * turn's (`end`), and the words a citation quotes (`quote`) highlighted. A system prompt's and a reply's words render as
+ * Markdown (MARKDOWN_ROLES). Its row shows the turn's own number (its step's, else its place in its conversation), not
+ * the line of the file, which shows on hover and which refs keep. */
 function TurnCard({ path, turn, end, target, hit, quote }: { path: string; turn: SourceTurn; end: number; target: Target | null; hit: boolean; quote: string | null }) {
   const header = [turn.speaker || turn.role, turn.time ? timeOf(turn.time) : null].filter(Boolean).join(' · ')
   const block: Block = { kind: 'text', text: turn.text }
+  const md = MARKDOWN_ROLES.has(turn.role)
   const blocks = useMemo(() => (turn.blocks?.length ? madeTurnBlocks(turn.blocks) : null), [turn.blocks])
   const fold = useMemo(() => (blocks ? blocksFold(blocks) : textFold(turn.text)), [blocks, turn.text])
   const cut = turn.blocks?.find((b) => b.cut != null)
   return (
     <RecordCard path={path} line={turn.line} from={turn.rec_line} end={end} target={target} hit={hit} className={`reader-msg reader-turn-${turn.role}`} header={header} text={turn.text.slice(0, 500)} fold={fold} no={turn.n ?? turn.i + 1}>
       {blocks ? (
-        <MadeBlocks blocks={blocks} line={turn.line} target={target} hit={hit} quote={quote} />
+        <MadeBlocks blocks={blocks} line={turn.line} target={target} hit={hit} quote={quote} md={md} />
       ) : turn.text.trim() ? (
-        <BlockEl block={block} line={turn.line} index={0} target={quoteTarget(target, turn.line, 0, turn.text, quote)} hit={hit} />
+        <Words block={block} line={turn.line} index={0} target={quoteTarget(target, turn.line, 0, turn.text, quote)} hit={hit} md={md} />
       ) : (
         <div className="reader-msg-empty">(empty)</div>
       )}
@@ -1019,6 +1038,22 @@ const TOOL_CALL_KEYS = ['tool_call', 'tool_input', 'tool_args', 'arguments', 'fu
 const TOOL_RESULT_KEYS = ['tool_result', 'tool_response', 'observation']
 // the keys of a call whose value glosses it on one line (a command, a path, a query), most telling first
 const GLOSS_KEYS = ['command', 'text', 'cmd', 'input', 'path', 'file', 'query', 'url', 'pattern', 'name', 'session_name']
+// the argument a call of each of Claude Code's tools is named by, as Claude Code and the terminal name it (`Read
+// README.md`, `Grep TODO`), before GLOSS_KEYS
+const TOOL_GLOSS_KEYS: Readonly<Record<string, readonly string[]>> = {
+  Read: ['file_path', 'path'],
+  Edit: ['file_path', 'path'],
+  MultiEdit: ['file_path', 'path'],
+  Write: ['file_path', 'path'],
+  NotebookEdit: ['notebook_path', 'file_path'],
+  Grep: ['pattern'],
+  Glob: ['pattern'],
+  WebFetch: ['url'],
+  WebSearch: ['query'],
+  Bash: ['command'],
+}
+// characters of an argument callGloss takes as a short string, when no key names the call
+const SHORT_GLOSS = 120
 
 const firstVal = (r: any, keys: readonly string[]): unknown => {
   for (const k of keys) {
@@ -1052,15 +1087,19 @@ export function splitThinking(text: string): { thinking: string | null; reply: s
   return m ? { thinking: m[1].trim(), reply: text.slice(m[0].length) } : { thinking: null, reply: text }
 }
 
-/** A tool call on one line for the overview: the first telling string it holds (a command, a path), else its keys, else
- * the call as written. Pure. */
-export function callGloss(call: unknown): string {
+/** A tool call on one line for the overview: the argument its tool is named by (TOOL_GLOSS_KEYS: a Read's file_path, a
+ * Grep's pattern), else the first telling string it holds (GLOSS_KEYS: a command, a path), else its first short string,
+ * else its keys, else the call as written. Pure. */
+export function callGloss(call: unknown, tool = ''): string {
   if (call == null) return ''
   if (typeof call === 'string') return firstLine(call)
   if (typeof call === 'object' && !Array.isArray(call)) {
-    const v = firstVal(call, GLOSS_KEYS)
-    if (typeof v === 'string') return firstLine(v)
-    const keys = Object.keys(call as object)
+    const args = call as Record<string, unknown>
+    const key = [...(TOOL_GLOSS_KEYS[tool] ?? []), ...GLOSS_KEYS].find((k) => typeof args[k] === 'string' && (args[k] as string).trim())
+    if (key) return firstLine(args[key] as string)
+    const short = Object.values(args).find((v): v is string => typeof v === 'string' && !!v.trim() && v.length <= SHORT_GLOSS && !v.includes('\n'))
+    if (short) return short.trim()
+    const keys = Object.keys(args)
     if (keys.length) return keys.join(', ')
   }
   return firstLine(compact(call, 200))
@@ -1094,7 +1133,7 @@ export function agentDisplay(r: any, keys: MessageKeys): AgentMsg {
       const stored = textOf(tool.result) ?? (typeof tool.result === 'string' ? tool.result : callText(tool.result))
       blocks.push({ kind: 'tool_result', text: cleanTerminal(stored), raw: needsClean(stored) ? stored : undefined })
     }
-    const gloss = callGloss(tool.call)
+    const gloss = callGloss(tool.call, tool.name)
     return { kind: 'tool', toolName: tool.name, blocks, summary: gloss ? `${tool.name}  ${gloss}` : tool.name }
   }
   const body = textOf(pick(r, keys.body))
@@ -1128,9 +1167,10 @@ function AgentResult({ block, line, index, target, hit, quote }: { block: AgentB
 }
 
 /** Blocks the view makes, not the file's own (a span's offsets do not apply to them): a tool result's cleaned output
- * with Raw (AgentResult), reasoning, a tool call and a raw record folded past COLLAPSE_LINES, words as they are; the words
- * a citation quotes (`quote`) highlighted in the block that holds them, which opens. */
-function MadeBlocks({ blocks, line, target, hit, quote }: { blocks: readonly AgentBlock[]; line: number; target: Target | null; hit: boolean; quote: string | null }) {
+ * with Raw (AgentResult), reasoning, a tool call and a raw record folded past COLLAPSE_LINES, words as they are, or
+ * rendered as Markdown with `md` (Words); the words a citation quotes (`quote`) highlighted in the block that holds
+ * them, which opens. */
+function MadeBlocks({ blocks, line, target, hit, quote, md = false }: { blocks: readonly AgentBlock[]; line: number; target: Target | null; hit: boolean; quote: string | null; md?: boolean }) {
   return (
     <>
       {blocks.map((b, k) =>
@@ -1141,7 +1181,7 @@ function MadeBlocks({ blocks, line, target, hit, quote }: { blocks: readonly Age
             <BlockEl block={b} line={line} index={k} target={quoteTarget(target, line, k, b.text, quote)} hit={hit} />
           </Collapsible>
         ) : (
-          <BlockEl key={k} block={b} line={line} index={k} target={quoteTarget(target, line, k, b.text, quote)} hit={hit} />
+          <Words key={k} block={b} line={line} index={k} target={quoteTarget(target, line, k, b.text, quote)} hit={hit} md={md && b.kind === 'text'} />
         ),
       )}
     </>

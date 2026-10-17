@@ -2702,6 +2702,13 @@
   max-width: 820px;
   padding: 8px 8px 24px;
 }
+/* a transcript turn's words rendered as Markdown: the elements break the lines, not the text's own line breaks */
+.reader-block.reader-md {
+  white-space: normal;
+}
+.reader-block.reader-md > :last-child {
+  margin-bottom: 0;
+}
 .reader-md > :first-child {
   margin-top: 0;
 }
