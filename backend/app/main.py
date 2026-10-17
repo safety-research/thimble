@@ -339,6 +339,9 @@ class BuiltUI(StaticFiles):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    from . import heap
+
+    heap.start()  # first, so malloc's arena cap holds before the worker threads start (heap.py)
     if raised := raise_open_files():
         log.info("%s", raised)
     quiet_accept_errors(asyncio.get_running_loop())
@@ -410,6 +413,7 @@ async def _lifespan(app: FastAPI):
 
     loop_watch.start(asyncio.get_running_loop())
     yield
+    heap.stop()
     loop_watch.stop()
     # shutdown: modules that own subprocesses expose `shutdown()`, so a restart never leaves an orphan running
     for name in ROUTER_MODULES:
