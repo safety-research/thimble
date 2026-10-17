@@ -8,7 +8,8 @@
 // column (`notice` in red), then its words cut with `…` at the room its acts leave them, then its acts at the right,
 // each in the accent and underlined under the pointer as the thimble line's names are, the row's main act bold:
 //
-//   view proposal  Page Histories  Each wiki page as a strip of its…   accept  reject  don't ask again  dismiss
+//   view proposal  Page Histories                                       accept  reject  don't ask again  dismiss
+//                  Each wiki page as a strip of its saves over time, colored by the author, whole and wrapped
 //   notice         Claude's safeguards switched a reply of the orientation…    see the orientation ›  dismiss
 //
 // A press on words cut short shows them whole, wrapped, and a second press cuts them again; on the view proposal the
@@ -499,20 +500,20 @@ export function registerBand(on: On): void {
             { key: 'above-offer-off', label: "don't ask again", press: () => proposalsOff(cx) },
             { key: 'above-offer-dismiss', label: 'dismiss', press: () => hideOffer(cx, offer.slug) },
           ]
-      const { room, own } = wordsRoom(cols, LW, acts)
+      const { own } = wordsRoom(cols, LW, acts)
       const open = unfolded.has(`offer:${offer.slug}`)
-      const w = open ? { name: oneLine(offer.name), rest: oneLine(offer.description) } : offerWords(offer.name, offer.description, room)
+      // the name on the row with the acts; what the view would show, whole and wrapped, on the rows under it (the
+      // owner, 10-17: the full text must be readable); a press on the name shows a file-type viewer's files
       const words = (
         <Button key="above-offer-name" plain hover={NO_INVERSE} onPress={() => toggleRow(cx, `offer:${offer.slug}`)}>
-          <Text wrap={open ? 'wrap' : 'truncate-end'}>
-            <Text bold hover={{ underline: true }}>
-              {w.name}
-            </Text>
-            {w.rest ? `  ${w.rest}` : ''}
+          <Text bold wrap="truncate-end" hover={{ underline: true }}>
+            {oneLine(offer.name)}
           </Text>
         </Button>
       )
       const more: RenderElement[] = []
+      const description = oneLine(offer.description)
+      if (description) more.push(under('above-offer-desc', <Text wrap="wrap">{description}</Text>))
       if (open && !offer.task && offer.claims.length) {
         more.push(under('above-offer-files', <Text wrap="wrap"><Text dimColor>{'files  '}</Text>{oneLine(offer.claims.join(', '))}</Text>))
       }

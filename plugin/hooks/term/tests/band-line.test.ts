@@ -11,7 +11,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { ABOVE_LABEL, ACT_GAP, LINE_LABEL_W, MIN_WORDS, actsWidth, fitItems, offerWords, percent, wordsRoom } from '../band'
+import { ABOVE_LABEL, ACT_GAP, LINE_LABEL_W, MIN_WORDS, actsWidth, fitItems, percent, wordsRoom } from '../band'
 import { cid, cut, width } from '../lib'
 import { COLORS } from '../paint'
 import { CWD, PANEL, SUMMARY, WS, aboveAt, comment, featuresOff, panelWorld, pressBrowser, shown, words } from './fixtures-panel'
@@ -323,21 +323,18 @@ function texts(n: unknown, out: { s: string; color?: unknown; bold?: unknown; di
   return out
 }
 
-test("the view proposal is one row: `view proposal` dim, the name bold, as much of what it would show as fits, cut with `…`, its acts at the right in the accent with `accept` bold; a press on the name shows it all", { timeoutMs: 30_000 }, async ($, on) => {
+test("the view proposal: `view proposal` dim, the name bold and its acts at the right in the accent (`accept` bold) on one row, and what the view would show whole and wrapped under it", { timeoutMs: 30_000 }, async ($, on) => {
   const w = panelWorld(on)
   w.states.home = { ...w.states.home, offer: OFFER } as never
   await start($, w)
   for (const cols of [150, 100]) {
     const m = await band($, cols)
     const row = await m.find({ type: 'Box', key: 'above-offer' })
-    // the label column (17), the name, two cells, the description cut; two cells; the acts (40 cells) at the right
     expect(ABOVE_LABEL).toBe(17)
-    const room = cols - ABOVE_LABEL - 40 - 2
-    const ow = offerWords(OFFER.name, OFFER.description, room)
-    expect(ow).toEqual({ name: 'Page Histories', rest: cut(OFFER.description, room - 'Page Histories'.length - 2), cut: true })
-    expect(words(row)).toBe(`  view proposalPage Histories  ${ow.rest}${OFFER_ACTS.join('')}`)
-    expect(width(`Page Histories  ${ow.rest}`)).toBeLessThanOrEqual(room)
-    expect(ow.rest.endsWith('…')).toBe(true)
+    // the whole description, never cut (the owner, 10-17)
+    expect(words(row)).toContain(OFFER.description)
+    expect(words(row)).not.toContain('…')
+    expect(await m.find({ type: 'Box', key: 'above-offer-desc' })).toBeDefined()
     const looks = texts(row)
     expect(looks[0]).toMatchObject({ s: '  view proposal', dim: true })
     expect(looks.find(l => l.s === 'Page Histories')).toMatchObject({ bold: true, hover: { underline: true } })
@@ -346,24 +343,9 @@ test("the view proposal is one row: `view proposal` dim, the name bold, as much 
       expect(looks.find(l => l.s === a)).toMatchObject({ color: COLORS.accent, hover: { underline: true } })
       expect(looks.find(l => l.s === a)!.bold).toBeUndefined()
     }
-    // one row: no description or files under it
-    expect(await m.find({ type: 'Box', key: 'above-offer-description' })).toBeUndefined()
     expect(await m.find({ type: 'Box', key: 'above-offer-files' })).toBeUndefined()
     await m.unmount()
   }
-  // the name's press: all of it, wrapped; a second press cuts it again
-  const m = await band($, 100)
-  await m.press({ key: 'above-offer-name' })
-  await w.clock.settle()
-  await m.unmount()
-  const open = await band($, 100)
-  expect(words(await open.find({ type: 'Box', key: 'above-offer' }))).toContain(`Page Histories  ${OFFER.description}`)
-  await open.press({ key: 'above-offer-name' })
-  await w.clock.settle()
-  await open.unmount()
-  const shut = await band($, 100)
-  expect(words(await shut.find({ type: 'Box', key: 'above-offer' }))).not.toContain(OFFER.description)
-  await shut.unmount()
 })
 
 test("a viewer of a file type shows its files on the name's press; why accept could not start is one red row under it; on a narrow band the acts take a row of their own", { timeoutMs: 30_000 }, async ($, on) => {
