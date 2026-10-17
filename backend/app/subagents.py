@@ -94,6 +94,8 @@ AUTO_MODE, NO_CALL, LIMIT, HOOK, EARLIER, NO_MODULE, ERROR = (
     "auto-mode", "no-call", "limit", "hook", "earlier-session", "no-module", "error")
 # a refused start in the first seconds after main attached says thimble's plugin is still connecting (refusal_before)
 CONNECT_GRACE_S = 30.0
+# how long a follow-on start waits for that module first (module_settled), looking every CONNECT_STEP_S
+CONNECT_WAIT_S, CONNECT_STEP_S = 10.0, 0.25
 HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
 # in auto mode Claude Code makes an agent that ended with text call SubagentHandback, a model step later
 AUTO_HANDBACK_WAIT_S = 30.0
@@ -670,6 +672,20 @@ def refusal_before(c: str, click: bool = False) -> Answer | None:
     return None
 
 
+async def module_settled(c: str, wait_s: float | None = None) -> None:
+    """Before a follow-on start (a check after main's turn, a view's build): while main's session attached just now and
+    Claude Code's module has not said hello yet (connecting, NOT_LOADED), wait up to CONNECT_WAIT_S for it. At a press
+    the server reads main's turn as it attaches the session, a moment before the module, which switches to the server
+    at the same press, says hello; a start then would be refused as still connecting. Returns at once otherwise, and
+    refusal_before says why after a wait that ran out."""
+    from . import module_bridge  # noqa: PLC0415
+
+    end = time.monotonic() + (CONNECT_WAIT_S if wait_s is None else wait_s)
+    while (not module_bridge.live(c) and connecting(c) and module_bridge.why_not(c) == module_bridge.NOT_LOADED
+           and time.monotonic() < end):
+        await asyncio.sleep(CONNECT_STEP_S)
+
+
 # --------------------------------------------------------------------------- starts
 
 
@@ -781,6 +797,8 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     if role not in TYPES or role == HELPER:
         raise ValueError(f"no role {role!r}")
     if check and not caller_role:
+        if route == FOLLOW_ON:
+            await module_settled(c)
         before = refusal_before(c, click=route == CLICK)
         if before is not None:
             return before
