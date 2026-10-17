@@ -255,8 +255,28 @@ export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?
  * none it can state; `sample` for a trial, run on a sample of its units), or a failed run with its message. */
 export type LabelStatus =
   | { state: 'running'; done: number; total: number | null; unit: string }
-  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null; sample?: boolean; stopped?: boolean }
+  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null; sample?: boolean; stopped?: boolean; stoppedAt?: StoppedAt }
   | { state: 'error'; message: string }
+
+/** Where a run that was stopped stopped: the units it read, of how many it would have read (null when the run kept no
+ * count above them), and whether quitting Claude Code stopped it rather than the analyst's Stop (backend
+ * concepts._keep_quit_stop, bug hunt H3). */
+export interface StoppedAt {
+  read: number
+  of: number | null
+  quit: boolean
+}
+
+/** A stopped run's StoppedAt from its read units and its total. Pure. */
+const stoppedAt = (read: number, total: number | null | undefined, by: string | null | undefined): StoppedAt => ({ read, of: total != null && total > read ? total : null, quit: by === 'quit' })
+
+/** Where a stopped run stopped, as the Labels pane's row and the label's card say it: "stopped at 8,447 of 14,591
+ * records when Claude Code quit", "stopped at 1,700 of 42,205 records", or "stopped" when the run kept no count above
+ * the units it read. Pure. */
+export function stoppedText(st: StoppedAt, unit: string): string {
+  const at = st.of != null ? ` at ${st.read.toLocaleString()} of ${st.of.toLocaleString()} ${unitWord(unit, st.of)}` : ''
+  return `stopped${at}${st.quit ? ' when Claude Code quit' : ''}`
+}
 
 /** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
  * (0 for a run whose files were never counted). Pure. */
@@ -285,16 +305,17 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   if (run && (run.status === 'error' || run.status === 'done') && (!last || later(run.started, last.ts))) {
     if (run.status === 'error') return { state: 'error', message: run.message || 'the run failed' }
     const matches = run.matches ?? 0
-    // a run the analyst stopped states the units it read, not those it would have read
-    const stopped = !!(run.summary as { stopped?: boolean } | null | undefined)?.stopped
+    // a run the analyst stopped states the units it read, not those it would have read, and says where it stopped
+    const summary = run.summary as { stopped?: boolean; stopped_by?: string | null } | null | undefined
+    const stopped = !!summary?.stopped
     const total = stopped ? run.done ?? null : run.total
-    return { state: 'done', matches, total: statedTotal(total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null, ...sample, ...(stopped ? { stopped } : {}) }
+    return { state: 'done', matches, total: statedTotal(total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null, ...sample, ...(stopped ? { stopped, stoppedAt: stoppedAt(run.done ?? 0, run.total, summary?.stopped_by) } : {}) }
   }
   if (!last) return null
   if (last.status === 'error') return { state: 'error', message: last.message || 'the run failed' }
   const total = last.stopped ? last.labeled + last.failed + (last.skipped ?? 0) : last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
-  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null, ...sample, ...(last.stopped ? { stopped: true } : {}) }
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null, ...sample, ...(last.stopped ? { stopped: true, stoppedAt: stoppedAt(total, last.total, last.stopped_by) } : {}) }
 }
 
 /** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, a trial's as

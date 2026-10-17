@@ -20,7 +20,7 @@ import { useDemo } from '../lib/demo'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptRun } from '../lib/types'
-import { classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, outcomeText, progressText, unitWord, type LabelFilter, type LabelStatus } from './labels'
+import { classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, outcomeText, progressText, stoppedText, unitWord, type LabelFilter, type LabelStatus } from './labels'
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { LabelMark } from './LabelMark'
 import { LabelPalette } from './LabelPalette'
@@ -246,9 +246,10 @@ function FilterButton({ pressed, label, onClick }: { pressed: boolean; label: st
   return <Button variant="icon" size="sm" icon="filter" title={pressed ? 'Show all records' : 'Show only these records'} aria-label={label} active={pressed} className="files-label-filter" onClick={onClick} />
 }
 
-/** The line under a label's name: the run's progress, its outcome with how many records it could not label, how many
- * the analyst marked by hand (in a view, the Files reader or the label's card) and how many whole files it read only in
- * part (ReadCutLine), each on a line of its own, or its failure with Retry. */
+/** The line under a label's name: the run's progress, its outcome with how many records it could not label, where a
+ * stopped run stopped with Run again, how many the analyst marked by hand (in a view, the Files reader or the label's
+ * card) and how many whole files it read only in part (ReadCutLine), each on a line of its own, or its failure with
+ * Retry. */
 function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelStatus; name: string; marked: number; onRetry: () => Promise<void> }) {
   const [retrying, setRetrying] = useState(false)
   if (s.state === 'running') {
@@ -287,12 +288,6 @@ function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelSt
   return (
     <div className="files-label-status">
       <span className="files-label-count">{outcomeText(s)}</span>
-      {s.stopped && (
-        <>
-          <span className="files-label-sep">·</span>
-          <span className="files-label-stopped">stopped</span>
-        </>
-      )}
       {s.ts && (
         <>
           <span className="files-label-sep">·</span>
@@ -302,6 +297,25 @@ function LabelStatusLine({ status: s, name, marked, onRetry }: { status: LabelSt
         </>
       )}
       {failed && <span className="files-label-failed">{failed}</span>}
+      {/* a run that was stopped, by the analyst or by quitting Claude Code, says how far it got, and runs again on its
+          line (bug hunt H3: a run the quit stopped at 8,447 of 14,591 records read as finished) */}
+      {s.stopped && (
+        <span className="files-label-stopped">
+          <span className="files-label-stopped-text">{stoppedText(s.stoppedAt ?? { read: s.total ?? 0, of: null, quit: false }, s.unit)}</span>
+          <Button
+            size="sm"
+            className="files-label-retry"
+            aria-label={`Run ${name} again`}
+            busy={retrying}
+            onClick={() => {
+              setRetrying(true)
+              void onRetry().finally(() => setRetrying(false))
+            }}
+          >
+            Run again
+          </Button>
+        </span>
+      )}
       {marked > 0 && (
         <span className="files-label-marked">
           {marked.toLocaleString()} {unitWord(s.unit, marked)} marked by hand

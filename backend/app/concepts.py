@@ -2051,6 +2051,8 @@ _subs: dict[tuple[str, str], set[asyncio.Queue]] = {}
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 _cancels: dict[tuple[str, str], threading.Event] = {}
 _tasks: dict[tuple[str, str], asyncio.Task] = {}
+# the runs main's quit stopped (stop_workspace), which run_apply keeps as stopped runs as they end (_keep_quit_stop)
+_quit_stops: set[tuple[str, str]] = set()
 # (workspace, concept id) -> the refs of the units the prompt run ending now could not label (_apply_prompt), which
 # run_apply keeps for start_again (_keep_unlabeled)
 _unlabeled_now: dict[tuple[str, str], list[str]] = {}
@@ -2515,6 +2517,10 @@ LABEL_FAILED_TEXT = "The label {name} failed: {why}."
 LABEL_UNITS_FAILED_TEXT = "The label {name} couldn't label {failed} of {total}: {why}."
 LABEL_NONE_TEXT = "The label {name} found nothing to label. {why}"  # a run over files that keep no record (none_why)
 LABEL_FALLBACK_TEXT = "Claude's safeguards switched {n} of the label {name}'s calls from {model} to {fallback}."
+# a run main's quit stopped part way (_keep_quit_stop): {read} of {total} as `8,447 of 14,591 records`
+LABEL_QUIT_TEXT = ("Claude Code quit and stopped the label {name} at {read} of {total}. Its counts are of those {noun} "
+                   "only. Run the label again to label all of them.")
+STOPPED_BY_QUIT = "quit"  # a stopped run's `stopped_by` when main's quit stopped it, not the analyst's Stop
 # a label notice's acts (notices.ACTIONS): the link to the label, and a run again on the units its last run could not
 # label (start_again), whose own words say its count and replace the safeguards' "rephrase" fix
 LABEL_OPEN = {"label": "See the label", "do": "label-open"}
@@ -2905,6 +2911,11 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             _progress(c, concept["id"], message=message(), **({"cut": read} if read else {}))
         _progress(c, concept["id"], skipped=skipped, failures=[list(f) for f in failures.values()] or None)
         _unlabeled_now[key] = unlabeled
+    except asyncio.CancelledError:
+        # the counts as far as the run got, not as the last progress event had them: a run main's quit stopped is kept
+        # with them (_keep_quit_stop)
+        _progress(c, concept["id"], done=done, labeled=labeled, failed=failed, skipped=skipped, matches=matches)
+        raise
     finally:
         for task, _b in pending:
             task.cancel()
@@ -3777,6 +3788,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
     key = (c, concept_id)
     lock = _locks.setdefault(key, asyncio.Lock())
     async with lock:
+        _quit_stops.discard(key)
         cancel = _cancel_event(c, concept_id)
         cancel.clear()
         out = labels_file(ws, concept_id)
@@ -3907,6 +3919,10 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
             raise
         except asyncio.CancelledError:
             _progress(c, concept_id, status="error", message="cancelled", eta_s=None, phase=None)
+            if key in _quit_stops:
+                _keep_quit_stop(c, ws, concept, again_refs is None and {
+                    "ts": started, "paths": patterns, "total": total, "matched_total": matched, "created_by": created_by,
+                    "version": version, "limit": limit, "within": within, "within_rev": within_rev})
             raise
         except Exception as e:  # noqa: BLE001
             log.exception("apply failed")
@@ -3938,7 +3954,10 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                    "matches": int(state.get("matches") or 0), "status": "done", "message": message, "created_by": created_by,
                    "version": version, "examples": len(concept.get("examples") or []), "limit": limit, "stopped": cancel.is_set(),
                    "within": within, "within_rev": within_rev, **({"cut": state["cut"]} if state.get("cut") else {}),
-                   **({"none": none, "dropped": dropped} if none else {})}
+                   **({"none": none, "dropped": dropped} if none else {}),
+                   # main's quit set the cancel flag before the run's task was cancelled (stop_workspace)
+                   **({"stopped_by": STOPPED_BY_QUIT} if cancel.is_set() and key in _quit_stops else {})}
+            _quit_stops.discard(key)
             merge = again_refs is not None
             concept = (_record_application(ws, concept_id, app, calibration, _stored_stats(file_key, stats), taught,
                                            merge=merge)
@@ -3958,6 +3977,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                           message=message, failures=state.get("failures"), none=none)
         except asyncio.CancelledError:
             _progress(c, concept_id, status="error", message="cancelled", eta_s=None, phase=None)
+            _quit_stops.discard(key)  # every unit was read: nothing is left part way
             raise
         except Exception as e:  # noqa: BLE001
             log.exception("apply: the end-of-run summary failed")
@@ -4010,8 +4030,58 @@ def _stop_apply(key: tuple[str, str]) -> asyncio.Task | None:
 
 
 def stop_workspace(c: str) -> int:
-    """End every apply running for workspace `c` (agents.stop_all), keeping its run records. Returns how many ran."""
-    return sum(_stop_apply(key) is not None for key in [k for k in list(_tasks) if k[0] == c])
+    """End every apply running for workspace `c` (agents.stop_all), keeping its run records: each run is kept on its
+    label as stopped part way by the quit, with a notice (_keep_quit_stop). Returns how many ran."""
+    n = 0
+    for key in [k for k in list(_tasks) if k[0] == c]:
+        if not _tasks[key].done():
+            _quit_stops.add(key)
+        n += _stop_apply(key) is not None
+    return n
+
+
+def _keep_quit_stop(c: str, ws: Path, concept: dict, run: dict | bool) -> None:
+    """Main's quit stopped a run of label `concept` part way (stop_workspace): `run` (the run's scope, False for a run
+    again, whose last run stays as it was) is kept on the label as a stopped run, as the analyst's Stop keeps one, with
+    the units it read (`stopped`, `stopped_by` quit), so the browser, the terminal and read_ref say where it stopped and
+    offer to run it again; a notice says so, until the label's next run ends (bug hunt H3: the browser showed the
+    partial counts as final, and main had to guess). Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    key = (c, str(concept["id"]))
+    _quit_stops.discard(key)
+    if not run:
+        return
+    try:
+        state = _runs.get(key) or {}
+        labeled, failed, skipped = (int(state.get(k) or 0) for k in ("labeled", "failed", "skipped"))
+        app = {**run, "labeled": labeled, "failed": failed, **({"skipped": skipped} if skipped else {}),
+               "matches": int(state.get("matches") or 0), "status": "done", "message": None, "stopped": True,
+               "stopped_by": STOPPED_BY_QUIT}
+        if _record_application(ws, key[1], app) is None:
+            return
+        _notify(c, key[1], "applied")
+        notices.post(c, kind="label", key=f"label:{key[1]}", agent=f"Label: {concept['name']}",
+                     text=LABEL_QUIT_TEXT.format(name=concept["name"], **stopped_words(concept["unit"], app)),
+                     action=[{**LABEL_OPEN, "slug": key[1]}])
+    except Exception:  # noqa: BLE001 — the run has stopped either way
+        log.exception("%s: the run of the label %s that the quit stopped was not kept", c, key[1])
+
+
+def stopped_at(app: dict) -> tuple[int, int | None]:
+    """The units a run read (labeled, failed or skipped) and those it would have read (None when it kept no count)."""
+    read = sum(int(app.get(k) or 0) for k in ("labeled", "failed", "skipped"))
+    total = app.get("total")
+    return read, total if isinstance(total, int) and not isinstance(total, bool) and total >= read else None
+
+
+def stopped_words(unit: str, app: dict) -> dict[str, str]:
+    """A run that stopped part way in words: `read` the units it read with `total` the units it would have read
+    (`8,447` of `14,591 records`, `its records` when the run kept no count), and `noun` the units' plural."""
+    one, many = UNIT_NAMES.get(unit, ("unit", "units"))
+    read, total = stopped_at(app)
+    return {"read": f"{read:,}", "total": f"{total:,} {one if total == 1 else many}" if total is not None else f"its {many}",
+            "noun": many}
 
 
 def workspaces_at_work() -> set[str]:
@@ -4612,9 +4682,27 @@ def resolve_concept_ref(corpus: Path | str, ref: str) -> dict:
         so_far = f"{run.get('done', 0):,} of {total:,}" if isinstance(total, int) else f"{run.get('done', 0):,}"
         excerpt += (f"\nan apply is running ({so_far} {card['unit']}s so far; these counts are from before it — read this "
                     f"ref again once it ends)")
+    elif stop := stopped_part_way(card):
+        excerpt += f"\n{stop}; run the label again to label all of them"
     return {"ref": ref, "kind": "concept", "concept_id": card["id"], "record": card, "excerpt": excerpt[:refs.EXCERPT_MAX],
             "meta": {"name": card["name"], "kind": card["kind"], "unit": card["unit"], "n_labeled": card["n_labeled"],
                      "est_precision": card["est_precision"]}}
+
+
+def stopped_part_way(card: dict) -> str:
+    """Where the label's last run stopped, when it stopped before it read every unit (the analyst's Stop, or Claude
+    Code's quit: _keep_quit_stop), in the words a read_ref of the label adds to its counts; '' for a run that ended
+    whole."""
+    apps = card.get("applications") or ([card["last_run"]] if card.get("last_run") else [])
+    last = apps[-1] if apps else None
+    if not isinstance(last, dict) or not last.get("stopped"):
+        return ""
+    read, total = stopped_at(last)
+    if total is not None and read >= total:
+        return ""
+    w = stopped_words(str(card.get("unit") or ""), last)
+    by = " when Claude Code quit" if last.get("stopped_by") == STOPPED_BY_QUIT else ""
+    return f"its last run stopped{by} at {w['read']} of {w['total']}, so these counts are of those {w['noun']} only"
 
 
 def label_share(count: int, total: int) -> str:
@@ -4647,6 +4735,8 @@ def _resolve_value(name: str, card: dict, value: str, ref: str) -> dict:
         excerpt += ", with the analyst's verdicts"
     if _applying(name, card["id"]):
         excerpt += "; an apply is running, so this count is from before it"
+    elif stop := stopped_part_way(card):
+        excerpt += f"; {stop}"
     return {"ref": ref, "kind": "concept", "concept_id": card["id"], "excerpt": excerpt[:refs.EXCERPT_MAX],
             "meta": {"name": card["name"], "kind": card["kind"], "unit": unit, "label_value": value, "count": n,
                      "shown": f"{n:,}", "n_labeled": total}}

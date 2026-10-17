@@ -640,11 +640,11 @@ export function labelCard(cell: ThimbleCell, label: ThimbleLabel | null): CardDa
   const colors = classColors(label.classes)
   const info = { slug: label.id, name: label.name ?? label.id, kind: label.kind ?? '', values, labeled, total, trial: Boolean(label.trial), paths, ...(colors ? { colors } : {}) }
   // a label with no run says so, as home and its panel do, with no bars and no counts (live check term-fix8, quirk 8:
-  // the card a stopped thread left showed yes 0, no 0 and all 0); one whose first run stopped part way shows the counts
-  // it has, and says where it stopped (live check term-fix9, quirk 4)
+  // the card a stopped thread left showed yes 0, no 0 and all 0); one whose run stopped part way shows the counts it has,
+  // and says where it stopped (live check term-fix9, quirk 4; bug hunt H3)
   const st = labelState(label, [])
   if (!run && !st.stopped) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows: [], examples: [], note: 'not run yet', label: { ...info, total: st.total ?? labeled } }
-  if (!run) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows, total: labeled, examples, note: labelStateWords(st), label: { ...info, total: st.total ?? labeled } }
+  if (!run || st.stopped) return { ...card, question: card.question || label.name || '', x: 'value', y: label.unit ?? 'record', rows, total: labeled, examples, note: labelStateWords(st), label: { ...info, total: st.total ?? labeled } }
   return {
     ...card,
     question: card.question || label.name || '',

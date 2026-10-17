@@ -7,7 +7,7 @@ import type { Elements, EngineInterface, FsEntry, FsStat, HttpInit, HttpResponse
 
 import type { ChatHomeUi, ChatNav, ChatNews, ChatSignal, LabelUnsure, Links, Pressing, SummarySeen, TermAgent, TermAnswer, TermCard, TermFilesUi, TermHome, TermLabelUi, TermPanel, TermPending, TermThread, TermThreadRow, TermVerdict } from './types'
 import { HOME_UI_EMPTY } from './home'
-import { keepRow } from './kept'
+import { keepRow, keepSession } from './kept'
 import type { KeptRow } from './kept'
 import { NAV_EMPTY } from './nav'
 import { themeFrom } from './paint'
@@ -393,7 +393,12 @@ export function cxOf($: Dollar): Ctx {
     coverageSummary: async () => (await $.state.get(coverageSummaryRef)).value ?? null,
     setCoverageSummary: async v => void (await $.state.set(coverageSummaryRef, v)),
     citeIndex: async () => (await $.state.get(citeIndexRef)).value ?? [],
-    setCiteIndex: async rows => void (await $.state.set(citeIndexRef, rows)),
+    setCiteIndex: async rows => {
+      await $.state.set(citeIndexRef, rows)
+      // kept by the session's id, so a resumed session counts its answers' citations still (kept.ts)
+      const sid = rt.sc ? await $.session.id().catch(() => '') : ''
+      if (rt.sc && sid) await keepSession(io, rt.sc.ws, sid, { cites: rows })
+    },
     answerComments: async () => (await $.state.get(answerCommentsRef)).value ?? [],
     setAnswerComments: async c => void (await $.state.set(answerCommentsRef, c)),
     checksRunning: async () => (await $.state.get(checksRunningRef)).value ?? 0,

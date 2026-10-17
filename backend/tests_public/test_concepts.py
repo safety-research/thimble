@@ -176,6 +176,49 @@ async def test_a_labels_coverage_counts_every_file_and_lists_a_page_of_each_grou
     assert not walks
 
 
+async def test_h3_a_run_the_quit_stopped_part_way_is_kept_as_stopped_told_and_read_as_such(api, workspaces_tmp, monkeypatch):
+    """Bug hunt H3: main's quit stopped a prompt label at 8,447 of 14,591 records, and the browser and main's read_ref
+    gave the partial counts as final, with no notice. The run is kept on the label as stopped by the quit with how far
+    it got, a notice says so, and read_ref of the label and of a value say it."""
+    from app import notices
+
+    monkeypatch.setattr(concepts, "BATCH_ITEMS", 3)
+    asked: list[int] = []
+
+    async def classify(c, concept, items, comment=True, on_retry=None):
+        asked.append(len(items))
+        if len(asked) > 1:  # the first batch is answered; the others wait until the quit
+            await asyncio.Event().wait()
+        return _ok(FakeClassify.rule(items))
+
+    monkeypatch.setattr(concepts, "classify_structured", classify)
+    k = await _create(api, description="a board post that claims a PR")
+    r = await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"paths": ["board.jsonl"]})
+    assert r.status_code == 202, r.text
+    for _ in range(200):
+        if (concepts._runs.get((CORPUS, k["id"])) or {}).get("labeled") == 3:
+            break
+        await asyncio.sleep(0.02)
+    assert concepts.stop_workspace(CORPUS) == 1  # main's session ended (agents.stop_all)
+    await asyncio.sleep(0.2)
+    last = concepts.read_concept(workspaces_tmp / CORPUS, k["id"])["applications"][-1]
+    assert last["stopped"] is True and last["stopped_by"] == "quit" and last["status"] == "done"
+    assert (last["labeled"], last["total"]) == (3, 8)
+    told = [n for n in notices.open_notices(CORPUS) if n["key"] == f"label:{k['id']}"]
+    assert len(told) == 1 and "stopped the label claims a PR at 3 of 8 records" in told[0]["text"]
+    assert told[0]["action"] == {"label": "See the label", "do": "label-open", "slug": k["id"]}
+    read = refs.resolve(MINI, f"concept:{k['id']}")["excerpt"]
+    assert "its last run stopped when Claude Code quit at 3 of 8 records" in read, read
+    assert "stopped when Claude Code quit at 3 of 8 records" in refs.resolve(MINI, f"concept:{k['id']}/yes")["excerpt"]
+    # the label's next run that ends takes the notice away and reads as whole again
+    monkeypatch.setattr(concepts, "classify_structured", FakeClassify.call)
+    FakeClassify.plan = []
+    r = await api.post(f"/api/ws/{CORPUS}/concepts/{k['id']}/apply", json={"wait": True, "paths": ["board.jsonl"]})
+    assert r.status_code == 200 and r.json()["stopped"] is False
+    assert not [n for n in notices.open_notices(CORPUS) if n["key"] == f"label:{k['id']}"]
+    assert "stopped" not in refs.resolve(MINI, f"concept:{k['id']}")["excerpt"]
+
+
 async def test_prompt_apply_batches_rows(api, workspaces_tmp, fake_classify, monkeypatch):
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 3)
     k = await _create(api, description="a board post that claims a PR")

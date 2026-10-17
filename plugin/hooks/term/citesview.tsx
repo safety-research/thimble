@@ -132,7 +132,8 @@ function inOrder(items: CiteItem[]): CiteItem[] {
 }
 
 /** Every citation of the session, the problems first (see the file's head): main's words', then the takeaways' of the
- *  cards the session drew (`rt.shown`, numbered in that order), each once. */
+ *  cards the session drew (`rt.shown`, numbered in that order), each once. Both are kept by the session's id, so a
+ *  resumed session counts the same ones (kept.ts; bug hunt H7). */
 export async function citeItems(cx: Ctx): Promise<CiteItem[]> {
   const out: CiteItem[] = []
   const seen = new Set<string>()

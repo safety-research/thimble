@@ -3356,7 +3356,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   const agents = (await cx.agents()) ?? []
   const st = labelState(l, agents)
   const ranOn = (n: number) => `${num(n)} ${n === 1 ? oneOf(noun) : noun}`
-  const lastWords = last ? (l.trial || last.limit ? `last run on a sample of ${ranOn(last.labeled ?? 0)}` : `last run on all ${ranOn(last.labeled ?? 0)}`) : labelStateWords(st)
+  const lastWords = last && !st.stopped ? (l.trial || last.limit ? `last run on a sample of ${ranOn(last.labeled ?? 0)}` : `last run on all ${ranOn(last.labeled ?? 0)}`) : labelStateWords(st)
   // the run main's chat follows, which a stop of that chat stops (as the agent panel's stop)
   const follower = !running && st.running ? agents.find(a => a.role === 'labels' && a.state === 'running' && a.label === `label ${name}`) : undefined
   const stop = follower && rt.sc ? () => void act(cx, rt.sc!, 'stop', { agent: follower.chat || follower.name, name: follower.name }) : () => void stopLabel(cx, id)

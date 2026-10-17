@@ -11,9 +11,9 @@ import { refIcon, refTone } from '../components/RefChip'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { useTooltip } from '../components/Tooltip'
-import { classesOf, colourVar, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
+import { classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, mainColour, stoppedText } from '../files/labels'
 import { ReadCutLine } from '../files/ReadCutLine'
-import { api } from '../lib/api'
+import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { loadSettings, modelLabel } from '../lib/models'
@@ -34,6 +34,8 @@ import { TypeCard } from './TypeCard'
 import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
+/** Words as a sentence: the first letter capitalized and a period at the end. */
+const sentenceOf = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}.`
 
 export function CardBody({ cell, width, label, big = false }: { cell: Cell; width: number; label: ConceptDetailState; big?: boolean }) {
   const { ws, concepts } = useContext(CanvasContext)
@@ -56,7 +58,7 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
     }
     case 'label': {
       const concept = typeof payload.concept === 'string' ? payload.concept : ''
-      return concept ? <LabelBody cellId={cell.id} conceptId={concept} concept={label.concept} error={label.error} /> : null
+      return concept ? <LabelBody cellId={cell.id} conceptId={concept} concept={label.concept} error={label.error} reload={label.reload} /> : null
     }
     case 'custom': {
       const html = typeof payload.html === 'string' ? payload.html : ''
@@ -321,13 +323,16 @@ export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' |
  * card's details (DetailPanel LabelDetails); it shows only on the board and in focus mode, where those details open,
  * not in a report's figure or the card harness's picture. The card shows no record of the corpus itself (Matt
  * 2026-10-15: "examples in label card should always be collapsed by default, and we have to be very careful here").
- * While a run goes on, a line says how far it has come.
+ * While a run goes on, a line says how far it has come. A last run that was stopped (by the analyst, or by quitting
+ * Claude Code) says where it stopped, so its counts do not read as the whole scope's, with Run again on the board (bug
+ * hunt H3: a run the quit stopped at 8,447 of 14,591 records read as finished).
  */
-function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conceptId: string; concept: ConceptDetail | null; error: string | null }) {
+function LabelBody({ cellId, conceptId, concept, error, reload }: { cellId: string; conceptId: string; concept: ConceptDetail | null; error: string | null; reload?: () => Promise<void> }) {
   const ctx = useContext(CanvasContext)
   const { ws } = ctx
   const [pending, setPending] = useState<string | null>(null)
   const [ruleOpen, setRuleOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
   const known = concept ?? ctx.concepts.get(conceptId) ?? null
   const counts = known?.counts ?? {}
   const run = (known as ConceptDetail | null)?.run
@@ -366,6 +371,22 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
     track('ui-click', { target: `cell:${cellId}`, detail: { action: 'label-records' } })
     ctx.openDetail?.(cellId)
   }
+  // where its last run stopped, when it was stopped; Run again runs it as that run ran (a trial on its sample)
+  const lastRun = known.last_run ?? (known as ConceptDetail).applications?.at(-1) ?? null
+  const status = running ? null : labelStatus({ ...known, last_run: lastRun }, run ?? null)
+  const stopped = status?.state === 'done' && status.stopped ? status.stoppedAt ?? null : null
+  const again = async () => {
+    setStarting(true)
+    try {
+      track('label-apply', { target: `concept:${conceptId}`, detail: { again: 'stopped', via: 'label-card' } })
+      await labelApi.apply(ws, conceptId, lastRun?.limit ? { limit: lastRun.limit } : {})
+      await reload?.()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setStarting(false)
+    }
+  }
   return (
     <div className="bcell-label" data-body="" data-settled="true">
       {values.length > 0 && (
@@ -397,6 +418,16 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
             })}
           </tbody>
         </table>
+      )}
+      {stopped && (
+        <div className="bcell-label-stopped">
+          <span>{sentenceOf(stoppedText(stopped, known.unit))}</span>
+          {ctx.openDetail && (
+            <Button variant="secondary" size="sm" busy={starting} onMouseDown={(e) => e.stopPropagation()} onClick={() => void again()}>
+              Run again
+            </Button>
+          )}
+        </div>
       )}
       {!running && cut && <ReadCutLine cut={cut} className="bcell-label-cut" />}
       {running && (

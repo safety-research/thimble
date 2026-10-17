@@ -794,6 +794,11 @@ def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: 
             _take_copied(lv)
             lv.offset = max(lv.offset, 0)
         lv.continued = _continued_in(lv.transcript_path)  # it moved while no server followed it: tail_once follows
+    elif stored.get("reason") == "ended" and not follow:
+        # a session that ended (the analyst quit) and came back under its id (`claude -c`, `--resume`): read on from where
+        # the mirror stopped, so main's chat holds the turns it answered while no server followed it, each once (bug hunt
+        # H5: the answer to "where were we?" before `/thimble browser` never reached the browser)
+        _restore_cursor(lv, stored.get("cursor"))
     # A session followed before comes back under the same id when resumed, so its subagents' and forks' transcripts are
     # picked up where they stand rather than read from their start.
     _restore_subs(lv, stored.get(SUBS_KEY), revive=restored)
