@@ -32,7 +32,7 @@ test('d dismisses the comment through `thimble act answer-comment-resolve` and t
   await m.press({ key: 'hk-checks-m' })
   await w.clock.settle()
   expect(w.filled.at(-1)).toBe(promptDraft(comment('c1')))
-  expect(w.filled.at(-1)).toMatch(/^About "After 19 June there are 0 new messages to other agents on any page\." in your answer at \d{1,2}:\d{2} [AP]M, the Important details check says: "The label could not read 899 revisions whose text the dump hides\."$/)
+  expect(w.filled.at(-1)).toMatch(/^About "After 19 June there are 0 new messages to other agents on any page\." in your answer at \d{2}:\d{2}, the Important details check says: "The label could not read 899 revisions whose text the dump hides\."$/)
   expect(w.submitted).toEqual([])
   await m.press({ key: 'hk-browser' })
   await w.clock.settle()
@@ -45,6 +45,14 @@ test('d dismisses the comment through `thimble act answer-comment-resolve` and t
   expect(after).not.toContain('After 19 June')
   expect(words(await m.find({ type: 'Box', key: 'way' }))).toContain('1 of 1')
   await m.unmount()
+})
+
+test('m puts the whole comment and its details in the draft, never cut mid-sentence, and says its time as the notices do (bug hunt B10)', () => {
+  const text = "159 of LinkHelper771's 165 linking revisions are saves of one page, the dse wiki's WillkommenImWiki, so the count is one page saved again and again."
+  const details = 'The page was an edit war: other labels kept saving it with no links, and LinkHelper771 kept putting 13 back [[revisions.jsonl#L12546]].'
+  const at = new Date(2026, 9, 17, 1, 34).toISOString()
+  const draft = promptDraft(comment('c9', { quote: 'LinkHelper771 links to jqp.vercel.app most, in 165 revisions.', text, details, at }))
+  expect(draft).toBe(`About "LinkHelper771 links to jqp.vercel.app most, in 165 revisions." in your answer at 01:34, the Important details check says: "${text}" Its details: "${details}"`)
 })
 
 test('the entry box asks a side thread about the passage, told the comment; the thread opens over the comment', { timeoutMs: 30_000 }, async ($, on) => {

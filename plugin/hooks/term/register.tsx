@@ -30,10 +30,10 @@ import type { Ctx } from './ctx'
 import { cxOf } from './ctx'
 import { act as actOn, readState } from './data'
 import type { Sent } from './gestures'
-import { SPIN, chipLook, claimsIn, streamLink, streamStep, streaming } from './cite'
+import { SPIN, streamLink, streamStep, streaming } from './cite'
 import type { StreamLook, Streaming } from './cite'
 import type { CardData } from './draw'
-import { bareCard, cardWords, cid, citeSpans, citations, clean, clip, cut, embeddedCards, labelRef, needsDrawing, quoted } from './lib'
+import { cardWords, cid, citeSpans, citations, clean, clip, cut, embeddedCards, labelRef, needsDrawing, quoted } from './lib'
 import type { AnswerComment, CiteRow } from './contracts'
 import { lineWidth } from './draw'
 import { cardsOfCall, docsOf, forkDescription, labelsOf, namedForks, namedThreads, noteLines, reportOf, runIds, runShown, saysWriter, threadOf, withoutEnd, withoutLines, withoutNotes, withoutToldThreads, withoutWriterLines } from './model'
@@ -57,7 +57,7 @@ import { checkName } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
 import { openInBrowser } from './offramp'
 import { openChecks } from './checksview'
-import { openCitations } from './citesview'
+import { answerItems, citeCounts, openCitations } from './citesview'
 import { openCoverage } from './coverageview'
 import { featureOn } from './settings'
 import { setTheme } from './paint'
@@ -302,28 +302,21 @@ async function viewRowsEl(cx: Ctx, e: ResolveInput & { requestId: string }): Pro
 /** The footer under a turn's answer (SPEC.md, "Main's chat"; MATT-NOTES "Classic display: no new row"), one blank row
  *  under it at column 2: `N citations · N cards` dim, ` · ◌ checking N` dim while checks run on its citations, then
  *  ` · N failed` in red for the ones that failed for good (none when 0; a press opens the panel's Citations view), then
- *  `ask about this answer ›`. A citation a check rewrote is not counted. The facts are cut first; the counts stay
- *  whole. */
+ *  `ask about this answer ›`. The citations are those drawn in the answer, its words' and its cards' takeaways', a chip
+ *  too, counted as the thimble line and the Citations view count them (citesview.tsx answerItems). The facts are cut
+ *  first; the counts stay whole. */
 async function footerEl(cx: Ctx, e: ResolveInput & { requestId: string }): Promise<RenderElement | null> {
   const ans = await cx.answer(e.requestId)
   if (!ans) return null
   const { Box, Text, Button } = cx.els(e)
-  // a card cited whole (`[[card:<id>]]`) is no cited value, and a label's link (`[33](concept:<id>/yes)`) names no place
-  // a check reads: the footer counts the values cited, and only their checks (live check term-fix6, new quirk 1)
-  const cls = claimsIn(ans.text, e.requestId).filter(cl => !bareCard(cl.c) && !labelRef(cl.c.ref))
-  let checking = 0
-  let failed = 0
+  const counts = citeCounts(await answerItems(cx, ans.text, ans.cards))
   // "Citation marks" off: nothing checks them
-  if (featureOn('citationMarks')) {
-    for (const cl of cls) {
-      const look = chipLook((await cx.verdict(cid(cl.c.raw)))?.status ?? 'pending', undefined, undefined)
-      if (look.spin) checking++
-      else if (look.state === 'failed') failed++
-    }
-  }
+  const marks = featureOn('citationMarks')
+  const checking = marks ? counts.pending : 0
+  const failed = marks ? counts.bad : 0
   const num = (n: number) => n.toLocaleString('en-US')
   const plural = (n: number, w: string) => `${num(n)} ${w}${n === 1 ? '' : 's'}`
-  const facts = [...(cls.length ? [plural(cls.length, 'citation')] : []), ...(ans.cards.length ? [plural(ans.cards.length, 'card')] : [])].join(' · ')
+  const facts = [...(counts.all ? [plural(counts.all, 'citation')] : []), ...(ans.cards.length ? [plural(ans.cards.length, 'card')] : [])].join(' · ')
   return (
     <Box key={`footer-${e.requestId}`} marginTop={1} marginLeft={MARGIN} flexDirection="row" columnGap={2}>
       <Box flexShrink={1} flexDirection="row">

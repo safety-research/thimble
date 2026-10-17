@@ -67,7 +67,7 @@ export const rt = {
   busy: false,
   again: false,
   turn: null as Turn | null,
-  // the cards a drawing named and no drawing read yet, which the session's timer reads (tick)
+  // the cards a drawing named and no drawing read yet, which the session's timer reads (tick) to name them
   wanted: new Set<string>(),
   // the latest row of main's chat a line can stand under (signal.ts isAnchor)
   anchor: '',
@@ -230,11 +230,13 @@ async function putCard(cx: Ctx, cell: ThimbleCell): Promise<void> {
   if (cell.kind === 'example') queueCitations(((cell.payload?.refs as unknown[]) ?? []).map(r => ({ raw: `[[${String(r)}]]`, ref: String(r), display: null })))
 }
 
-/** Read these cards now (a turn's call named them, or a panel shows one). */
-export async function loadCards(cx: Ctx, ids: readonly string[]): Promise<void> {
+/** Read these cards now (a turn's call named them, or a panel shows one). `named`: read only to name them where a chip
+ *  cites them (`card "How many…"`), not drawn, so not among the cards the session drew (`rt.shown`), whose takeaways'
+ *  citations the thimble line counts (citesview.tsx citeItems). */
+export async function loadCards(cx: Ctx, ids: readonly string[], opts: { named?: boolean } = {}): Promise<void> {
   if (!rt.sc) return
   for (const id of ids) {
-    rt.shown.add(id)
+    if (!opts.named) rt.shown.add(id)
     const got = await readState(cx, rt.sc, 'card', [id])
     const cell = got.ok ? cellOf(got.value) : null
     if (cell) await putCard(cx, cell)
@@ -1148,7 +1150,7 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
     if (rt.wanted.size) {
       const ids = [...rt.wanted]
       rt.wanted.clear()
-      await loadCards(cx, ids)
+      await loadCards(cx, ids, { named: true })
     }
     do {
       rt.again = false

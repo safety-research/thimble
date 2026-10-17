@@ -34,7 +34,8 @@ test('after a resume the row draws its cards and its footer again, and `/thimble
   const ui = (await $.ui.mount(MESSAGE('r1', ANSWER))) as unknown as M
   expect(await ui.find({ type: 'Client', key: 'card-t0-ff73e071' })).toBeDefined()
   const text = shown(await ui.drawn())
-  expect(text).toContain('1 citation · 1 card')
+  // the answer's citation and its card's takeaway's other one (citesview.tsx answerItems)
+  expect(text).toContain('2 citations · 1 card')
   expect(text).toContain('ask about this answer ›')
   await ui.unmount()
   const said = await $.command.run({ command: 'thimble:thimble', args: 'card 1' } as never)

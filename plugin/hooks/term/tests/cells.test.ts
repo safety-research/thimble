@@ -35,6 +35,21 @@ test('a one-layer Altair bar chart draws as text bars; a faceted one as a table 
   expect(facet.columns).toEqual(['day', 'event_type', 'rows'])
 })
 
+test('a bar chart whose field names hold a dot draws as bars: its fields escaped as Altair writes them match their columns', () => {
+  // bug hunt B9: `thimble.chart("bar", df)` with the column "revisions linking to jqp.vercel.app" drew as a table
+  const col = 'revisions linking to jqp.vercel.app'
+  const rows = [
+    { 'author label': 'LinkHelper771', [col]: 165 },
+    { 'author label': 'MapHelper', [col]: 75 },
+  ]
+  const field = 'revisions linking to jqp\\.vercel\\.app'
+  const spec = { mark: 'bar', encoding: { y: { field: 'author label', type: 'nominal', sort: ['LinkHelper771', 'MapHelper'] }, x: { field, type: 'quantitative', title: col } }, data: { values: rows } }
+  const { card } = cardOfCell({ ...of('b0bar000'), id: 'b0dots00', outputs: [{ 'application/vnd.vegalite.v6.json': spec }] } as ThimbleCell)
+  expect(card.kind).toBe('bar')
+  expect(card.y).toBe(col)
+  expect(card.rows as BarRow[]).toEqual([{ label: 'LinkHelper771', value: 165, group: '' }, { label: 'MapHelper', value: 75, group: '' }])
+})
+
 test("a heatmap's rows as a table: in its axes' order, its days by the chart's sort, not as text sorts them", () => {
   // README capture 10-17: days grouped as text ("Jul 01" before "Jun 01" before "May 24") under `sort=days`
   const rows = [

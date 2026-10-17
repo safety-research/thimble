@@ -2,7 +2,7 @@
 // the transcript's lane from `thimble state answer-comments`), one at a time:
 //
 //   home › checks › Important details                                    ‹ 1 of 2 ›  ↗
-//   on your answer at 4:06 PM · it looks for what a reader would likely miss
+//   on your answer at 16:06 · it looks for what a reader would likely miss
 //   ───────────────────────────────────────────────────────────────────────────────
 //   ⚑ passage   After 19 June there are 0 new messages to other agents on any page.
 //     comment   The label could not read 899 revisions whose text the dump hides …
@@ -41,27 +41,34 @@ import { openInBrowser } from './offramp'
 
 /** The flag a commented passage carries in the reply's margin (the transcript's paint.ts FLAG). */
 export const FLAG = '⚑'
-/** The most characters of a passage or a comment a draft in the prompt quotes, on one line (SPEC-v2 S20). */
+/** The most characters of the passage a draft in the prompt quotes, on one line (SPEC-v2 S20): main finds its own
+ *  words by them; the comment and its details go whole. */
 const QUOTE_MAX = 80
 
 const dim = (s: string): Seg => ({ s, fg: COLORS.dim })
 
-/** When a comment was made, as the view says it (`4:06 PM`). */
+/** When a comment was made, as the rest of the terminal says a time (`16:06`, the notices' `at 01:16`): the local
+ *  clock's hours and minutes. */
 export function timeWords(at: string): string {
   const t = Date.parse(at)
   if (!Number.isFinite(t)) return ''
-  return new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  const d = new Date(t)
+  const two = (n: number) => String(n).padStart(2, '0')
+  return `${two(d.getHours())}:${two(d.getMinutes())}`
 }
 
-/** Words quoted into the prompt: one line, cut at QUOTE_MAX characters. */
+/** Words put into the prompt: one line. */
 function oneLine(s: string): string {
-  return clip(noControls(s).replace(/\s+/g, ' ').trim(), QUOTE_MAX)
+  return noControls(s).replace(/\s+/g, ' ').trim()
 }
 
-/** The draft `m` puts in the prompt, which the person edits before sending. */
+/** The draft `m` puts in the prompt, which the person edits before sending: the passage by its first words, and the
+ *  check's comment and its details whole, so main reads all the check said (bug hunt B10: the comment was cut
+ *  mid-sentence and its details left out, and main did the check's work again). */
 export function promptDraft(c: AnswerComment): string {
   const when = timeWords(c.at)
-  return `About "${oneLine(c.quote)}" in your answer${when ? ` at ${when}` : ''}, the ${oneLine(c.checkName)} check says: "${oneLine(c.text)}"`
+  const details = oneLine(c.details)
+  return `About "${clip(oneLine(c.quote), QUOTE_MAX)}" in your answer${when ? ` at ${when}` : ''}, the ${oneLine(c.checkName)} check says: "${oneLine(c.text)}"${details ? ` Its details: "${details}"` : ''}`
 }
 
 // the comment the view shows, by its id ('' for the first open one)

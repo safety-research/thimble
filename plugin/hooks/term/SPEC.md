@@ -414,7 +414,7 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   card itself, drawn after the paragraph that cites it (section 7, "The threads panel"), never `[ card ]`. Brackets main put around it alone are left out
   (`([[card:<id>]])` reads `[ card ]`). A click opens its place as any citation's does (the card, the file at its line,
   the label, the document at its passage); under the pointer it turns bold, nothing more; a place that does not exist
-  is red. The footer does not count a card's chip. Claude Code's tool rows, which draw no link, and a thread's
+  is red. A chip counts as a citation, in the footer, the thimble line and the Citations view alike. Claude Code's tool rows, which draw no link, and a thread's
   subject (`about card "How many pages…"`) name a chip's place in words (`events.jsonl line 12`; a card by its
   question). A label's link with a value
   (`[33](concept:<id>/yes)`) is neither a chip nor a problem in the footer.
@@ -440,7 +440,9 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   and a click on it opens that thread in the threads panel. On the reply's first row the mark takes the ⏺'s cell: the `?` drawn over it under the pointer, a
   `↳` in its place. A mark never adds indent.
 - The footer, one blank row under the turn's answer (its last part that cites or embeds a card): its facts dim
-  (`· N problems` in red), its control after a gutter, no file path. No footer for the prompts thimble-term gives main
+  (`· N problems` in red), its control after a gutter, no file path. Its citations are those drawn in the answer, its
+  words' and the takeaways' of the cards under it, each once, a label's link left out: counted as the thimble line and
+  the Citations view count the session's (citesview.tsx; the bug hunt of 10-17 saw three counts). No footer for the prompts thimble-term gives main
   itself.
 - A `↳` row: `↳` at 0 and its words at 2, dim (`thread · "question" · answered`, `view · Wiki Pages · built`), `new` in
   green while it is new, `failed` in red. A thread's row names the turn's question; a stop is not news. A view's row
