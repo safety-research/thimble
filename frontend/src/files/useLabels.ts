@@ -1,6 +1,6 @@
-// The labels of the Files pane: the ones its Labels list holds (listedInFiles) in the server's order, the labels over
-// files that are on in the order they were turned on (kept per workspace in the browser), the focused one, and which
-// values each left on each file (GET /labels/presence, re-read on `concepts` events).
+// The labels of the Files pane: every label, a trial among them (backend concepts.py, Trials), in the server's order,
+// the labels over files that are on in the order they were turned on (kept per workspace in the browser), the focused
+// one, and which values each left on each file (GET /labels/presence, re-read on `concepts` events).
 // On/off, highlights and colours are saved at once (PUT /concepts/{id}) and applied optimistically as overrides until
 // the concepts are read again.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -10,11 +10,11 @@ import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import type { Concept, ConceptPatch, LabelClass } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
-import { classesOf, focusOf, isFilesLabel, listedInFiles, turnedOnOrder, withClassColour, type LabelFilter } from './labels'
+import { classesOf, focusOf, isFilesLabel, turnedOnOrder, withClassColour, type LabelFilter } from './labels'
 
 export interface FilesLabels {
-  /** the labels the Labels list holds, oldest first: the labels over files but a trial that is off, and the labels over
-   * cards and report sentences */
+  /** the labels the Labels list holds, oldest first: every label, a trial (run on a sample) among them, over files,
+   * cards or report sentences */
   all: Concept[]
   /** the labels over files that are on in Files, in the order they were turned on: label N of this list is lane N of
    * the reader's ruler and column N of a record's gutter and of the Table's dots */
@@ -92,7 +92,7 @@ export function useFilesLabels(ws: string): FilesLabels {
   const all = useMemo(
     () =>
       [...concepts.values()]
-        .filter((k) => listedInFiles(k) && !gone.has(k.id))
+        .filter((k) => !gone.has(k.id))
         .map((k) => {
           const o = overrides.get(k.id)
           return o ? { ...k, ...o.patch } : k

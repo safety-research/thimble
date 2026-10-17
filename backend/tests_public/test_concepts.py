@@ -132,6 +132,20 @@ async def test_regex_apply_records_for_real(api, workspaces_tmp):
     assert len(concepts.read_labels(workspaces_tmp / CORPUS, k["id"])) == 3 + 2
 
 
+def test_a_trial_counts_as_a_label_wherever_labels_are_listed_or_counted(workspaces_tmp):
+    """Bug hunt 2, C3: a trial (a label run on a sample) was in the terminal's Labels list and home's count but not in
+    the thimble line's count, which read the workspace's holdings. One rule: every list and count holds it, and it
+    keeps its `trial` mark, by which the browser and the terminal say it ran on a sample."""
+    from app import tools
+
+    concepts.define_concept(CORPUS, "claims a PR", kind="regex", spec=PATTERN, created_by="test")
+    concepts.define_concept(CORPUS, "asks for review", "The post asks for a review.", created_by="test", trial=True)
+    listed = {k["name"]: k["trial"] for k in concepts.list_concepts_route(CORPUS)}
+    assert listed == {"claims a PR": False, "asks for review": True}
+    assert tools.holdings(CORPUS)["labels"] == 2
+    assert {x["name"] for x in concepts.unsure_state(CORPUS, counts_only=True)["labels"]} == set(listed)
+
+
 async def test_a_labels_coverage_counts_every_file_and_lists_a_page_of_each_group(api, workspaces_tmp, monkeypatch):
     """GET /coverage counts the corpus's files, those the label covers and their rows, and lists only a page of the
     covered files and of the others, by path, the others paged by offset; it reads the folder tree, never stats each

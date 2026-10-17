@@ -2297,7 +2297,7 @@ def holdings(c: str) -> dict[str, Any]:
 
     ws = config.workspace_path(c)  # a read: validated, never created (report_types is asked only for a dir that exists)
     cards = sum(int(r.get("n_cells") or 0) for r in notebook.list_notebooks(ws, figures=False))
-    labels = len(concepts.list_concepts(ws, trials=False))
+    labels = len(concepts.list_concepts(ws))  # a trial too, as every Labels list holds it (concepts.py, Trials)
     docs = [t["slug"] for t in (report_types.list_types(c) if ws.is_dir() else [])
             if report_types.doc_file(c, investigation.MAIN, t["slug"]).is_file()]
     return {"workspace": c, "cards": cards, "labels": labels, "documents": docs, "chats": agents.held_chats(ws),
