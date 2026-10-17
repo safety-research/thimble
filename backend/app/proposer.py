@@ -14,22 +14,26 @@ pending until that turn ends. A running fork is never cancelled; a trigger that 
 
 The gate (due): view proposals are on (the View proposals feature switch, features.auto `proposer`, which reads
 views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
-main is attached and idle with a cut to fork at, no view proposal card waits (views.open_offer), and views can be built
-here (views.build_problem_for). There is no other limit.
+main is attached and idle with a finished turn, not in plan mode (which starts nothing of thimble's), no view proposal card
+waits (views.open_offer), and views can be built here (views.build_problem_for). There is no other limit.
 
-The call (_argv): `claude -p --resume <main> --resume-session-at <cut> --fork-session --no-session-persistence` with no
-tools, no MCP server, no slash command, `--safe-mode` (no plugin hook moves thimble's main to the fork) and the server-
-side advisor off, on the `suggest` row's model and effort (config.call_settings) with Claude Code's 1M-token window when
-main's context needs it. The fork writes nothing into the analyst's projects (spike: a-notes.md). Its prompt (assemble)
-is prompts/view-propose.md, the threads, the orientation, the views the analyst has (built, building, failed, accepted
-and rejected proposals, deleted views) and what just happened; the answer is one JSON object (parse).
+The call (_fork): a fork of main, a subagent of the analyst's own Claude Code session that thimble's plugin module starts
+with Claude Code's `fork` type (agent_call.structured with `fork`; NOCLAUDE.md). It inherits main's conversation as it
+stands, with main's model and effort, so the API serves main's context from its prompt cache. Its message (assemble) is
+prompts/view-propose.md, the threads (cut to the room main's context leaves, _threads_budget), the orientation, the views
+the analyst has (built, building, failed, accepted and rejected proposals, deleted views) and what just happened, then
+the answer's schema (prompts/call-task.md `fork`); its answer is its report, one JSON object (parse). It keeps main's
+tools, and thimble's fork guard refuses each of its tool calls. It never interrupts main: it runs in the background,
+and its hand-back, when Claude Code sends one, is dropped before it enters main, with the row `thimble checked for a
+view proposal` (DONE). It shows in Claude Code's /tasks while it runs, as `thimble: view proposal` (TITLE).
 
 Each run appends a line to the run log (LOG_FILE). Every failure tells the analyst in the foreground with an easy fix
 (notices.post, NOTICE_KEY): a request Claude's safeguards blocked (Try again, Turn off view proposals), Claude Code not
 signed in (in the terminal: /login, as main's own card says it; Try again), access refused for the account or its
-organization (403: in the terminal, /login, or the organization's settings; Try again), and any other failure (Try
-again). A proposal that came from a fallback model is shown with a notice saying so. A run that works
-clears the notice.
+organization (403: in the terminal, /login, or the organization's settings; Try again), no Claude Code session that
+runs thimble here (the fix; Try again), and any other failure (Try again). A proposal that came from a fallback model
+(the fork's transcript says which model replied, fallback_of) is shown with a notice saying so. A run that works clears
+the notice.
 """
 from __future__ import annotations
 
@@ -37,15 +41,13 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 import re
-import signal
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import agents, capture, config, ledger, model, notices, prompts, sdk, views
+from . import agent_call, agents, capture, config, ledger, notices, prompts, views
+from .call_result import CallResult, ToolSpec
 
 log = logging.getLogger("thimble.proposer")
 
@@ -54,8 +56,30 @@ PROPOSE_ENV = views.PROPOSE_ENV  # "off" turns view proposals off whatever Setti
 DEBOUNCE_MAIN_S = 2.0
 DEBOUNCE_OTHER_S = 45.0  # above subagents' 30 s hand-back wait in auto mode
 FORK_TIMEOUT_S = 300.0
-CONTEXT_CHARS = 120_000  # of the threads part
-RESERVE_TOKENS = 20_000  # main's context plus the prompt above CONTEXT_TOKENS less this runs on the 1M-token window
+CONTEXT_CHARS = 120_000  # of the threads part, at most
+MIN_CONTEXT_CHARS = 8_000  # of the threads part, at least, however full main's context is
+RESERVE_TOKENS = 20_000  # of main's context window, kept free for the fork's answer and Claude Code's own text
+TITLE = "thimble: view proposal"  # the fork's description, which Claude Code's /tasks shows while it runs
+DONE = "thimble checked for a view proposal"  # the row of its dropped hand-back (agent_call.Spec.done)
+# the answer's schema, which the fork's message shows (call-task.md `fork`) and its report must fit; parse reads it then
+_TEXT = {"type": "string", "minLength": 1}
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "show": {"type": "boolean"},
+        "why": {"type": "string"},
+        "proposal": {"anyOf": [{"type": "null"}, {
+            "type": "object",
+            "properties": {"name": _TEXT, "description": _TEXT, "task": _TEXT,
+                           "claims": {"anyOf": [_TEXT, {"type": "array", "items": _TEXT, "minItems": 1}]}},
+            "required": ["name", "description", "task", "claims"]}]},
+    },
+    "required": ["show", "why", "proposal"],
+    "if": {"properties": {"show": {"const": True}}},
+    "then": {"properties": {"proposal": {"type": "object"}}},
+}
+ANSWER = ToolSpec(name="view_proposal", input_schema=SCHEMA,
+                  description="Your decision, as the section \"Your answer\" above describes it.")
 LOG_FILE = "proposer.jsonl"  # in the views state folder: one line per run
 # in the views state folder: {job: the pending job {after, sid, cut, since} or null}, read through
 # views.proposer_state and changed under the file's lock (ledger.update_json) by whichever process triggers
@@ -87,7 +111,6 @@ REASONS = {"timeout": f"Claude didn't answer within {int(FORK_TIMEOUT_S // 60)} 
 
 _tasks: dict[str, asyncio.Task] = {}  # workspace -> its loop (_loop) or a run_now run
 _running: set[str] = set()  # workspaces whose fork runs now
-_procs: set[asyncio.subprocess.Process] = set()  # the forks that run now, which shutdown ends
 
 
 def _now() -> str:
@@ -253,8 +276,10 @@ async def _run_popped(c: str) -> None:
 
 
 def due(c: str, lv: Any, job: dict[str, Any]) -> tuple[str | None, str]:
-    """(the cut to fork main at, '') when the job may run now, else (None, why not): view proposals off, no main, main
-    answering, no cut, a card waiting, or views that cannot be built here."""
+    """(the cut of main's turn the job comes after, '') when the job may run now, else (None, why not): view proposals
+    off, no main, main answering, no finished turn, plan mode, a card waiting, or views that cannot be built here."""
+    from . import session  # noqa: PLC0415
+
     if not enabled(c):
         return None, "View proposals are off."
     if lv is None or not getattr(lv, "transcript_path", None):
@@ -264,6 +289,8 @@ def due(c: str, lv: Any, job: dict[str, Any]) -> tuple[str | None, str]:
     cut = job.get("cut") if job.get("sid") == lv.sid and job.get("cut") else lv.last_cut
     if not cut:
         return None, "Main has no finished turn to start from."
+    if session.main_mode(c) == "plan":
+        return None, "Claude Code is in plan mode, in which thimble starts nothing."
     if views.open_offer(c) is not None:
         return None, "A view proposal waits for the analyst."
     if problem := views.build_problem_for(c):
@@ -296,10 +323,10 @@ def nest_headings(md: str, by: int = 2) -> str:
     return "\n".join(out)
 
 
-def _threads_section(c: str) -> str:
+def _threads_section(c: str, budget: int = CONTEXT_CHARS) -> str:
     from . import context  # noqa: PLC0415 — context imports session, which imports this module lazily
 
-    text = context.render(c, parts=("threads",), budget=CONTEXT_CHARS).strip()
+    text = context.render(c, parts=("threads",), budget=budget).strip()
     return text or "## The threads\n\nThe analyst has asked nothing in a side thread."
 
 
@@ -403,53 +430,36 @@ def _now_section(c: str, after: list[str]) -> str:
     return "## Now\n\n" + " ".join(said)
 
 
-def assemble(c: str, job: dict[str, Any]) -> str:
-    """The fork's message (module note): the proposer prompt, the threads, the orientation, the views the analyst has
-    and what just happened (job's `after`)."""
+def _threads_budget(lv: Any, rest: int) -> int:
+    """The characters the threads part may take: what main's context window leaves after main's context, RESERVE_TOKENS
+    and the rest of the message (`rest` characters), at four characters a token; between MIN_CONTEXT_CHARS and
+    CONTEXT_CHARS. A context past the plain window is on the 1M-token one."""
+    used = int(getattr(lv, "context_tokens", 0) or 0)
+    window = config.LONG_CONTEXT_TOKENS if used > config.CONTEXT_TOKENS - RESERVE_TOKENS else config.CONTEXT_TOKENS
+    room = (window - used - RESERVE_TOKENS) * 4 - rest
+    return max(MIN_CONTEXT_CHARS, min(CONTEXT_CHARS, room))
+
+
+def assemble(c: str, job: dict[str, Any], lv: Any = None) -> str:
+    """The fork's message (module note): the proposer prompt, the threads (cut to the room main's context leaves,
+    _threads_budget), the orientation, the views the analyst has and what just happened (job's `after`)."""
     # the page a proposal it makes builds: view.term.js on the local transport, view.html after the press
     flags = views.target_flags(c, views.default_target(c))
-    parts = [prompts.load(PROMPT, flags).strip(), _threads_section(c), _orientation_section(c), _views_section(c),
-             _now_section(c, list(job.get("after") or []))]
+    head = prompts.load(PROMPT, flags).strip()
+    tail = [_orientation_section(c), _views_section(c), _now_section(c, list(job.get("after") or []))]
+    budget = _threads_budget(lv, len(head) + sum(len(t) for t in tail) + 2_000)
+    parts = [head, _threads_section(c, budget), *tail]
     return "\n\n".join(p for p in parts if p) + "\n"
 
 
 # --------------------------------------------------------------------------- the answer
 
 
-def _json_candidates(text: str) -> list[str]:
-    t = text.strip()
-    out = [m.group(1).strip() for m in re.finditer(r"```(?:json|JSON)?\s*\n(.*?)\n\s*```", t, re.S)]
-    out.append(t)
-    i, j = t.find("{"), t.rfind("}")
-    if 0 <= i < j:
-        out.append(t[i:j + 1])
-    return out
-
-
-def _object(text: str) -> tuple[dict[str, Any] | None, str]:
-    err = "no JSON object in the answer"
-    for cand in _json_candidates(text or ""):
-        if "{" not in cand:
-            continue
-        try:
-            got = json.loads(cand)
-        except ValueError as e:
-            err = f"invalid JSON: {e}"
-            try:  # an object followed by more text
-                got, _ = json.JSONDecoder().raw_decode(cand[cand.find("{"):])
-            except ValueError:
-                continue
-        if isinstance(got, dict):
-            return got, ""
-        err = "the JSON is not an object"
-    return None, err
-
-
 def parse(text: str) -> tuple[dict[str, Any] | None, str | None]:
     """The answer's object {show, why, proposal} and None, or None and what is wrong. `show` is a boolean; with `show`
     true the proposal's name, description and task are non-empty strings and its claims a non-empty list of strings (a
     string is one claim); with `show` false the proposal may be null. A missing `why` reads as ''."""
-    obj, err = _object(text)
+    obj, err = agent_call.json_object(text)
     if obj is None:
         return None, err
     if not isinstance(obj.get("show"), bool):
@@ -472,198 +482,104 @@ def parse(text: str) -> tuple[dict[str, Any] | None, str | None]:
 
 
 def read_stream(text: str) -> dict[str, Any]:
-    """Claude Code's stream-json output: the init event, the result event, the models of the replies, their stop
-    reasons, their texts, the error kinds of Claude Code's own error lines and their texts, and a safeguard fallback
-    record if one came."""
-    out: dict[str, Any] = {"init": None, "result": None, "models": [], "stop_reasons": [], "texts": [], "errors": [],
-                           "error_texts": [], "fallback": None}
+    """The replies of a Claude Code transcript (or stream-json): the models of the replies, their stop reasons, their
+    texts, and the error kinds of Claude Code's own error lines and their texts."""
+    out: dict[str, Any] = {"models": [], "stop_reasons": [], "texts": [], "errors": [], "error_texts": []}
     for line in (text or "").splitlines():
         try:
             ev = json.loads(line)
         except ValueError:
             continue
-        if not isinstance(ev, dict):
+        if not isinstance(ev, dict) or ev.get("type") != "assistant":
             continue
-        kind = ev.get("type")
-        if kind == "system" and ev.get("subtype") == "init":
-            out["init"] = ev
-        elif kind == "system" and ev.get("subtype") == "model_refusal_fallback":
-            out["fallback"] = str(ev.get("fallbackModel") or ev.get("fallback_model") or "") or None
-        elif kind == "assistant":
-            m = ev.get("message") if isinstance(ev.get("message"), dict) else {}
-            texts = [str(b.get("text") or "") for b in m.get("content") or []
-                     if isinstance(b, dict) and b.get("type") == "text"]
-            if ev.get("is_api_error_message") or ev.get("isApiErrorMessage"):
-                out["errors"].append(str(ev.get("error") or ""))
-                out["error_texts"] += texts
-                if m.get("stop_reason"):
-                    out["stop_reasons"].append(str(m["stop_reason"]))
-                continue
-            if isinstance(m.get("model"), str) and m["model"] and not m["model"].startswith("<"):
-                out["models"].append(m["model"])
-            if m.get("stop_reason"):
-                out["stop_reasons"].append(str(m["stop_reason"]))
-            out["texts"] += texts
-        elif kind == "result":
-            out["result"] = ev
+        m = ev.get("message") if isinstance(ev.get("message"), dict) else {}
+        texts = [str(b.get("text") or "") for b in m.get("content") or []
+                 if isinstance(b, dict) and b.get("type") == "text"]
+        if ev.get("is_api_error_message") or ev.get("isApiErrorMessage"):
+            out["errors"].append(str(ev.get("error") or ""))
+            out["error_texts"] += texts
+            continue
+        if isinstance(m.get("model"), str) and m["model"] and not m["model"].startswith("<"):
+            out["models"].append(m["model"])
+        if m.get("stop_reason"):
+            out["stop_reasons"].append(str(m["stop_reason"]))
+        out["texts"] += texts
     return out
 
 
-def answer_text(st: dict[str, Any]) -> str:
-    res = st.get("result") or {}
-    if isinstance(res.get("result"), str) and res["result"].strip() and not res.get("is_error"):
-        return res["result"]
-    return "\n".join(st.get("texts") or [])
-
-
-def fallback_of(st: dict[str, Any], asked: str) -> str | None:
+def fallback_of(st: dict[str, Any], asked: str | None) -> str | None:
     """The model that answered when it is not the one asked for (a `[1m]` tag aside): Claude's safeguards switched."""
+    if not asked:
+        return None
     want = config.base_model(asked)
     other = [m for m in st.get("models") or [] if config.base_model(m) != want]
-    return other[-1] if other else (st.get("fallback") if st.get("fallback") and
-                                    config.base_model(st["fallback"]) != want else None)
+    return other[-1] if other else None
 
 
-def classify(st: dict[str, Any], obj: dict[str, Any] | None, timed_out: bool = False) -> str:
+def classify(res: CallResult, obj: dict[str, Any] | None) -> str:
     """ok (a valid answer, from whichever model), refused (Claude's safeguards blocked the request), auth (Claude Code
     has no working sign-in: 401), forbidden (the account or its organization may not make the request: 403), timeout,
-    unparsed (an answer that is not the object) or error."""
+    no_session (no Claude Code session runs thimble here), stopped (the server stopped it), unparsed (an answer that is
+    not the object) or error."""
     if obj is not None:
         return "ok"
-    if timed_out:
-        return "timeout"
-    res = st.get("result") or {}
-    said = "\n".join([*(st.get("error_texts") or []), str(res.get("result") or ""),
-                      *[str(e) for e in res.get("errors") or []]])
-    if REFUSED_RE.search(said) or (REFUSAL in (st.get("stop_reasons") or []) and not st.get("texts")):
+    if res.status in ("ok", "no_tool_call"):
+        return "unparsed"
+    if res.status in ("timeout", "no_session", "stopped", "refused"):
+        return res.status
+    said = res.detail or ""
+    if REFUSED_RE.search(said):
         return "refused"
     named = STATUS_RE.search(said)
-    status = res.get("api_error_status") or (int(named.group(1)) if named else None)
+    status = int(named.group(1)) if named else None
     if status == 403:
         return "forbidden"
-    if "authentication_failed" in (st.get("errors") or []) or status == 401 or AUTH_RE.search(said):
+    if status == 401 or AUTH_RE.search(said):
         return "auth"
     if FORBIDDEN_RE.search(said):
         return "forbidden"
-    if res.get("is_error") or st.get("errors") or res.get("subtype", "success") != "success" or not st.get("texts"):
-        return "error"
-    return "unparsed"
+    return "error"
 
 
-def error_line(st: dict[str, Any], stderr: str = "", code: Any = None) -> str:
-    """What went wrong in a few words, for the notice: Claude Code's own error line, else its result's, else its exit."""
-    res = st.get("result") or {}
-    for t in [*(st.get("error_texts") or []), *[str(e) for e in res.get("errors") or []],
-              str(res.get("result") or "") if res.get("is_error") else ""]:
-        if t.strip():
-            line = _one(t).rstrip(".")
-            return line if len(line) <= 160 else line[:159].rstrip() + "…"
-    tail = _one((stderr or "").strip().splitlines()[-1] if (stderr or "").strip() else "")
-    if tail:
-        return tail[:160]
-    return f"Claude Code exited with code {code}" if code not in (None, 0) else REASONS["error"]
+def error_line(detail: str) -> str:
+    """What went wrong in a few words, for the notice."""
+    line = _one(detail).rstrip(".")
+    if not line:
+        return REASONS["error"]
+    return line if len(line) <= 160 else line[:159].rstrip() + "…"
 
 
 # --------------------------------------------------------------------------- the fork
 
 
-def _model(c: str, lv: Any, prompt: str) -> tuple[str, str, str]:
-    """(model, effort, speed) of the `suggest` row, the model with Claude Code's 1M-token window when main's context and
-    the prompt would not fit the plain one."""
-    conf = config.call_settings(c, "suggest")
-    m = conf["model"]
-    if int(getattr(lv, "context_tokens", 0) or 0) + len(prompt) // 4 > config.CONTEXT_TOKENS - RESERVE_TOKENS:
-        m = config.long_context(m)
-    return m, conf["effort"], conf["speed"]
+def fork_transcript(lv: Any, agent_id: str | None) -> Path | None:
+    """Where Claude Code writes the transcript of main's subagent `agent_id`: <main's transcript without .jsonl>/subagents/
+    agent-<id>.jsonl."""
+    tp = getattr(lv, "transcript_path", None)
+    if not tp or not agent_id or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", agent_id):
+        return None
+    return Path(str(tp)).with_suffix("") / "subagents" / f"agent-{agent_id}.jsonl"
 
 
-def _argv(lv: Any, cut: str, model_id: str, effort: str, speed: str) -> list[str]:
-    sent = effort if config.has_effort(model_id) else None
-    settings = {**json.loads(sdk.cli_settings(model_id, sent, speed)), "advisorModel": "off"}
-    return [str(config.CLI_PATH or config.CLAUDE_BIN), "-p", "--resume", str(lv.sid), "--resume-session-at", cut,
-            "--fork-session", "--no-session-persistence", "--model", model_id, *(["--effort", sent] if sent else []),
-            "--tools", "", "--strict-mcp-config", "--disable-slash-commands", "--safe-mode", "--setting-sources", "user",
-            "--permission-mode", "dontAsk", "--settings", json.dumps(settings), "--output-format", "stream-json",
-            "--verbose"]
-
-
-def _env(lv: Any) -> dict[str, str]:
-    """The fork's environment: the one every `claude` thimble runs gets (config.launch_environ), in main's own config
-    dir when its shim reported it (unset stays unset), with the model and effort variables blanked (sdk.SCRUBBED_ENV)."""
-    env = config.launch_environ()
-    if getattr(lv, "config_known", False):
-        if lv.config:
-            env[config.CONFIG_DIR_ENV] = str(lv.config)
-        else:
-            env.pop(config.CONFIG_DIR_ENV, None)
-    env.update(dict.fromkeys(sdk.SCRUBBED_ENV, ""))
-    env["SHLVL"] = "1"
-    return env
-
-
-def _kill(proc: asyncio.subprocess.Process) -> None:
-    if proc.returncode is None:
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(proc.pid, signal.SIGKILL)
-
-
-async def _fork(lv: Any, cut: str, prompt: str, model_id: str, effort: str, speed: str) -> dict[str, Any]:
-    """Run the fork (_argv) with the prompt on stdin: {code, stdout, stderr, timed_out, seconds}. Tests replace it."""
-    argv = _argv(lv, cut, model_id, effort, speed)
-    cap = capture.begin("view-propose", model=model_id, effort=effort, speed=speed, path="fork")
-    cap.fenced("Command", [a if a else '""' for a in argv])
-    cap.text("Prompt", prompt)
-    t0 = time.monotonic()
-    out: dict[str, Any] = {"code": None, "stdout": "", "stderr": "", "timed_out": False}
-    async with model._semaphore():
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *argv, cwd=str(lv.cwd), env=_env(lv), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE, start_new_session=True)
-        except OSError as e:
-            out.update(stderr=f"Claude Code could not start: {e}", seconds=0.0)
-            cap.finish("error", out["stderr"])
-            return out
-        _procs.add(proc)
-        model._STRUCTURED_CHILDREN[proc.pid] = time.monotonic()
-        try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(prompt.encode("utf-8")), FORK_TIMEOUT_S)
-            out.update(code=proc.returncode, stdout=stdout.decode("utf-8", "replace"),
-                       stderr=stderr.decode("utf-8", "replace"))
-        except asyncio.TimeoutError:
-            _kill(proc)
-            out["timed_out"] = True
-        except asyncio.CancelledError:
-            _kill(proc)
-            raise
-        finally:
-            _procs.discard(proc)
-            model._STRUCTURED_CHILDREN.pop(proc.pid, None)
-            if proc.returncode is None:
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(proc.wait(), 5)
-    out["seconds"] = round(time.monotonic() - t0, 1)
-    cap.text("Output (stream-json)", out["stdout"])
-    cap.finish("timeout" if out["timed_out"] else f"exit {out['code']}", out["stderr"][-600:])
-    return out
-
-
-def session_cost(path: str | None) -> float:
-    """main's running cost as the last cost-state record of its transcript has it (0 for none): a fork's
-    total_cost_usd includes it (spike E)."""
-    cost = 0.0
+def _read_fork(lv: Any, agent_id: str | None) -> dict[str, Any]:
+    p = fork_transcript(lv, agent_id)
     try:
-        with open(str(path), encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if '"cost-state"' not in line:
-                    continue
-                with contextlib.suppress(ValueError, TypeError):
-                    r = json.loads(line)
-                    if r.get("type") == "cost-state":
-                        cost = float(r.get("totalCostUSD") or 0)
-    except (OSError, TypeError):
-        pass
-    return cost
+        return read_stream(p.read_text("utf-8", errors="replace")) if p is not None else read_stream("")
+    except OSError:
+        return read_stream("")
+
+
+async def _fork(c: str, lv: Any, prompt: str) -> CallResult:
+    """The fork (module note): a model call of agent_call's that runs as a fork of main, with the answer's schema, at
+    most FORK_TIMEOUT_S. Tests replace it."""
+    model_id, effort = str(getattr(lv, "model", "") or ""), str(getattr(lv, "effort", "") or "")
+    cap = capture.begin("view-propose", model=model_id or None, effort=effort or None, path="fork of main")
+    cap.text("Prompt", prompt)
+    res = await agent_call.structured(c, prompt, tool=ANSWER, model=model_id, effort=effort, fork=True,
+                                      what="view proposal", title=TITLE, done=DONE, timeout_s=FORK_TIMEOUT_S)
+    cap.text("Answer", json.dumps(res.output, ensure_ascii=False, indent=1) if res.output is not None else res.detail)
+    cap.finish(res.status, res.detail[:600])
+    return res
 
 
 # --------------------------------------------------------------------------- one run
@@ -712,8 +628,8 @@ def _tell(c: str, status: str, *, reason: str = "", fallback: str | None = None,
         tell(NOTICE_AUTH, TRY_AGAIN)
     elif status == "forbidden":
         tell(NOTICE_FORBIDDEN, TRY_AGAIN)
-    elif status in ("timeout", "unparsed", "error"):
-        tell(NOTICE_FAILED.format(reason=reason or REASONS[status]), TRY_AGAIN)
+    elif status in ("timeout", "unparsed", "error", "no_session"):
+        tell(NOTICE_FAILED.format(reason=reason or REASONS.get(status) or REASONS["error"]), TRY_AGAIN)
     elif offered and fallback:
         tell(NOTICE_FALLBACK.format(fallback=session.model_label(fallback)))
     else:
@@ -731,23 +647,20 @@ async def run_once(c: str, job: dict[str, Any]) -> dict[str, Any]:
         log.debug("%s: no view proposal run: %s", c, why)
         return {"status": "skipped", "why": why}
     after = list(job.get("after") or [])
-    prompt = await asyncio.to_thread(assemble, c, job)
-    model_id, effort, speed = _model(c, lv, prompt)
-    base = await asyncio.to_thread(session_cost, lv.transcript_path)
-    line: dict[str, Any] = {"at": _now(), "after": after, "sid": lv.sid, "cut": cut, "model": model_id,
-                            "effort": effort}
+    prompt = await asyncio.to_thread(assemble, c, job, lv)
+    asked = str(getattr(lv, "model", "") or "") or None
+    line: dict[str, Any] = {"at": _now(), "after": after, "sid": lv.sid, "cut": cut, "model": asked,
+                            "effort": getattr(lv, "effort", None)}
     _running.add(c)
     try:
-        res = await _fork(lv, cut, prompt, model_id, effort, speed)
+        res = await _fork(c, lv, prompt)
     finally:
         _running.discard(c)
-    st = read_stream(res.get("stdout") or "")
-    obj, err = parse(answer_text(st))
-    status = classify(st, obj, bool(res.get("timed_out")))
-    fallback = fallback_of(st, model_id) if obj is not None else None
-    total = (st.get("result") or {}).get("total_cost_usd")
-    line.update(status=status, fallback=fallback, seconds=res.get("seconds"),
-                cost_usd=round(total - base, 4) if isinstance(total, (int, float)) else None,
+    obj, err = parse(json.dumps(res.output)) if res.status == "ok" and res.output is not None else (None, "")
+    status = classify(res, obj)
+    st = await asyncio.to_thread(_read_fork, lv, res.session_id)
+    fallback = fallback_of(st, asked) if obj is not None else None
+    line.update(status=status, fallback=fallback, seconds=res.duration_s, agent=res.session_id,
                 input_tokens=int(getattr(lv, "context_tokens", 0) or 0) + len(prompt) // 4)
     offered = None
     if obj is not None:
@@ -762,10 +675,12 @@ async def run_once(c: str, job: dict[str, Any]) -> dict[str, Any]:
             offered = (row or {}).get("slug")
             line.update(offered=offered, refused_offer=refused or None)
     else:
-        line["error"] = err if status == "unparsed" else error_line(st, res.get("stderr") or "", res.get("code"))
+        line["error"] = err if status == "unparsed" and err else error_line(res.detail)
     await asyncio.to_thread(_log_line, c, line)
+    if status == "stopped":
+        return line  # the server stopped it: nothing to tell
     # on the loop: the notice's row and event reach the browser from here (agents.notify, investigation.emit)
-    _tell(c, status, reason=line.get("error", "") if status == "error" else "", fallback=fallback,
+    _tell(c, status, reason=line.get("error", "") if status in ("error", "no_session") else "", fallback=fallback,
           offered=bool(offered))
     if status != "ok":
         log.warning("%s: view proposer run %s: %s", c, status, line.get("error") or "")
@@ -773,9 +688,7 @@ async def run_once(c: str, job: dict[str, Any]) -> dict[str, Any]:
 
 
 async def shutdown() -> None:
-    """The server stops: every loop and run ends, and every fork's process group with it."""
-    for proc in list(_procs):
-        _kill(proc)
+    """The server stops: every loop and run ends, and every fork with it (a cancelled call stops its agents)."""
     tasks = [t for t in _tasks.values() if not t.done()]
     for t in tasks:
         t.cancel()
