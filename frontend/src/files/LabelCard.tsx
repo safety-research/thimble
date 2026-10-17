@@ -225,6 +225,21 @@ export function trialOf(k: Pick<Concept, 'trial' | 'last_run'> | null): { sample
 /** The button that runs a trial on everything, with the count of its scope where known: "Run on all 9,921". */
 export const runAllText = (t: { all: number | null }): string => (t.all ? `Run on all ${t.all.toLocaleString()}` : 'Run on all')
 
+/** What each unit holds for a code label's label(unit), as the Code box's hint says it. */
+const UNIT_HOLDS: Record<string, string> = {
+  record: "# a line of text is unit['text']",
+  agent: "# unit['data']: the whole file",
+  cell: "# unit['text']: the card's text",
+  span: "# unit['text']: the sentence",
+}
+
+/** What the Code box shows while it is empty: the function thimble runs, what its unit holds, and what it returns, None
+ * for no value, which leaves the unit unmarked (bug hunt G7: the box was empty, and a None became a value "None").
+ * Pure. */
+export function codeHint(unit: string): string {
+  return `def label(unit):\n    ${UNIT_HOLDS[unit] ?? UNIT_HOLDS.record}\n    # return (value, confidence),\n    # or None to leave it unmarked`
+}
+
 /** The accessible name of a label's edit card. */
 export const labelCardName = (label: Concept | null): string => (label ? `Edit ${label.name}` : 'New label')
 
@@ -517,7 +532,7 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
     <div className={'label-card-body' + (clamped ? ' is-clamped' : '') + (cut ? ' is-cut' : '')}>
       {draft.kind === 'code' ? (
         // the code kind's `label(unit)` runs in a Python kernel, and is coloured as Python as it is typed
-        <CodeArea ref={bodyEl} {...clamp} lang="python" block autoGrow rows={4} mono spellCheck={false} value={draft.body} onChange={(v) => set({ body: v })} aria-label="Code" className="label-card-text" />
+        <CodeArea ref={bodyEl} {...clamp} lang="python" block autoGrow rows={4} mono spellCheck={false} value={draft.body} onChange={(v) => set({ body: v })} placeholder={codeHint(unitOfOver(draft.over, draft.marks))} aria-label="Code" className="label-card-text" />
       ) : (
         <TextArea
           block
