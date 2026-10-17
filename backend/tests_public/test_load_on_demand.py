@@ -102,7 +102,8 @@ def test_the_guide_and_its_later_parts_hold_main_s_whole_prompt_word_for_word():
                  "A follow-up for the orientation goes through `message_orientation`"):
         assert kept in core, kept
     for left in ("    Analyst   What do customers complain about?", "## Threads", "## Permission requests",
-                 "- `thread` opens or continues", "- `label_done` says"):
+                 "- `thread` opens or continues", "- `label_done` says", "thimble's events arrive as",
+                 "In a thread, you only need to reply", "`apply_label` defines it"):
         assert left not in core, left
 
 
@@ -147,7 +148,8 @@ def test_a_feature_s_later_parts_join_its_first_call_once(ws):
     assert len(got.content) == 2
     told = got.content[1]["text"]
     assert told.startswith(guide.LATER_LEAD.format(marker=marker))
-    assert "\n\n## Labels\n\nThe result is a count per value" in told
+    assert "\n\n## Labels\n\n`apply_label` defines it and applies it to every unit" in told
+    assert "against your description. The result is a count per value" in told
     assert "    Analyst   What do customers complain about?" in told and "concept:<id>/<value>" in told
     assert not told.startswith(guide.LEAD_PREFIX.format(marker=marker)), "never taken for the guide itself"
     _caller(ws, "toolu_2")
@@ -213,10 +215,12 @@ def test_main_s_first_event_of_a_kind_carries_its_parts(ws):
     got = disclose.with_event(CORPUS, "thread", note, quiet=False)
     assert got["content"].startswith("the analyst's question\n\n" + guide.LATER_LEAD.format(marker=guide.marker(SID)))
     assert "- `thread` opens or continues" in got["content"] and "## Threads" in got["content"]
+    assert "thimble's events arrive as" in got["content"] and "In a thread, you only need to reply" in got["content"]
     assert disclose.with_event(CORPUS, "thread", note, quiet=False) == note
     quiet = {"content": "the orientation made 7 cards", "meta": {"kind": "orient", "event": "e2"}}
     held = disclose.with_event(CORPUS, "orient", quiet, quiet=True)
     assert held["content"] == quiet["content"] and "- `orient` says" in held["told"]
+    assert "thimble's events arrive as" not in held["told"], "the events part goes with main's first event alone"
     lines = events.meanwhile([held])
     assert lines.startswith("meanwhile:\n[") and lines.split("\n")[1].count("\n") == 0
     assert lines.endswith(held["told"]) and "do not start a turn of their own" in held["told"]

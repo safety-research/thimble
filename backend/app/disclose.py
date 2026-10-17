@@ -47,15 +47,16 @@ FORK_TYPE = "fork"  # subagent_files.FORK_TYPE
 
 # The later parts (main.md and shared.md), by name: where each sits in the guide.
 SECTIONS = {
-    "labels": "Labels: what a label's result is, the label card and its colors, and the three examples; the label row "
-              "of Citations",
+    "labels": "Labels: what apply_label does with a predicate of each kind (its schema's words), what a label's result "
+              "is, the label card and its colors, and the three examples; the label row of Citations",
     "documents": "the passage row of Citations",
     "orientation": "The orientation: following up a finished orientation, and its three rows; the call rows of "
                    "Citations",
     "views": "Citations: how to cite a viewer and a view, the forms of the workspace's views, and the view example",
     "agents": "thimble's agents: a message for one and a stop of one; Permission requests",
     "checks": "Checks: how a running check shows its comments and runs again",
-    "threads": "Threads",
+    "threads": "Chat and cards: when a thread needs a reply; Threads",
+    "events": "Events from thimble: how an event arrives, and the line of an event with no text",
     "event-quiet": "Events from thimble: the events that ride along under `meanwhile:`",
     **{f"event-{k}": f"Events from thimble: the `{k}` bullet" for k in (
         "main", "thread", "start_agent", "orient", "card", "written", "checked", "labeled", "view", "card_types",
@@ -70,7 +71,7 @@ TOOL_SECTIONS: dict[str, tuple[str, ...]] = {
     "run_check": ("checks", "agents"), "stop_check": ("checks",),
     "open_view": ("views",),
     "write_document": ("documents",), "edit_document": ("documents",),
-    "message_thread": ("event-thread", "threads"), "reply_in_thread": ("threads",),
+    "message_thread": ("events", "event-thread", "threads"), "reply_in_thread": ("threads",),
     "rename_thread": ("threads",), "delete_thread": ("threads",),
 }
 # read_ref, add_comment and resolve_comment, by the start of the ref they name
@@ -78,18 +79,18 @@ REF_SECTIONS: dict[str, tuple[str, ...]] = {"view:": ("views",), "report:": ("do
 REF_TOOLS = {"read_ref": "ref", "add_comment": "ref", "resolve_comment": "comment"}
 # main's first event of each kind
 EVENT_SECTIONS: dict[str, tuple[str, ...]] = {
-    "main": ("event-main",),
-    "thread": ("event-thread", "threads"),
-    "start_agent": ("event-start_agent", "agents"),
-    "orient": ("event-orient", "event-quiet", "orientation", "agents"),
-    "card": ("event-card",),
-    "written": ("event-written", "event-quiet", "agents"),
-    "checked": ("event-checked", "checks", "agents"),
-    "labeled": ("event-labeled", "event-quiet", "labels"),
-    "view": ("event-view", "event-quiet", "views"),
-    "card_types": ("event-card_types", "event-quiet"),
-    "label_done": ("event-label_done", "labels"),
-    "rerun": ("event-rerun", "labels"),
+    "main": ("events", "event-main"),
+    "thread": ("events", "event-thread", "threads"),
+    "start_agent": ("events", "event-start_agent", "agents"),
+    "orient": ("events", "event-orient", "event-quiet", "orientation", "agents"),
+    "card": ("events", "event-card"),
+    "written": ("events", "event-written", "event-quiet", "agents"),
+    "checked": ("events", "event-checked", "checks", "agents"),
+    "labeled": ("events", "event-labeled", "event-quiet", "labels"),
+    "view": ("events", "event-view", "event-quiet", "views"),
+    "card_types": ("events", "event-card_types", "event-quiet"),
+    "label_done": ("events", "event-label_done", "labels"),
+    "rerun": ("events", "event-rerun", "labels"),
 }
 # the start tools whose call by a thread's fork main carries out (tools._ask_main): the fork only files the request, and
 # main gets those parts with the `start_agent` event
