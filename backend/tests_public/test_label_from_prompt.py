@@ -143,3 +143,45 @@ async def test_the_terminal_s_and_thimble_label_s_way_refuses_before_the_label_i
                                     chat=None, group=None, card=False)
     assert refused.value.status_code == 400
     assert await _labels(api) == []
+
+
+def _chats(data: "Path") -> str:
+    """A corpus of chat transcripts shaped as one JSON document each: one system prompt in an array, and the messages
+    as the entries of an object, which thimble does not read as records by default (it reads `#/system/0`)."""
+    root = data / "chats"
+    for ep in (1, 2, 3):
+        doc = {"agent": f"bot-{ep}", "system": [{"role": "system", "content": "You maintain the build."}],
+               "messages": {f"m{i}": {"from": f"bot-{ep}", "text": f"message {i}: shall we vote on who owns deploys?"}
+                            for i in range(1, 5)},
+               "conversations": {"c1": {"members": ["bot-1", "bot-2"]}, "c2": {"members": ["bot-2", "bot-3"]}}}
+        (root / f"ep{ep}" / "transcripts").mkdir(parents=True)
+        (root / f"ep{ep}" / "transcripts" / "u1_conversations.json").write_text(json.dumps(doc, indent=1))
+    (root / "manifest.json").write_text(json.dumps({"name": "chats"}))
+    return "chats"
+
+
+async def test_a_draft_with_applies_to_left_at_every_file_chooses_the_records_the_description_names(api, bridge, data_tmp):
+    """Bug hunt I8: a label of the agents' messages, drafted with Applies to left at `*`, ran on each transcript's system
+    prompt alone (`#/system/0`, the records thimble reads by default) and reported a confident 0. The draft is shown the
+    other places of records the files hold, and the records it names are what the label applies to; Applies to that the
+    analyst gave stays, and a place that holds no records leaves `*`."""
+    c = _chats(data_tmp)
+    asked = {**DRAFTED, "kind": "prompt", "text": "The message proposes a rule to settle who owns deploys.",
+             "records": "*/transcripts/*.json#/messages"}
+    bridge.respond = lambda op, args: {"text": json.dumps(asked)}
+    r = await api.post(f"/api/ws/{c}/concepts/draft", json={"text": "agent messages that propose a rule", "paths": []})
+    assert r.status_code == 200, r.text
+    assert r.json()["glob"] == "*/transcripts/*.json#/messages"
+    sent = json.dumps(bridge.calls[-1][1])
+    assert "#/messages" in sent and "12 entries of an object, in 3 files" in sent and "`#/system`" in sent
+    r = await api.get(f"/api/ws/{c}/labels/glob", params={"pattern": r.json()["glob"], "unit": "record"})
+    assert r.json()["units"] == 12, "the 12 messages, not the 3 system prompts"
+    # Applies to the analyst gave stays, and the model is not asked to choose
+    r = await api.post(f"/api/ws/{c}/concepts/draft", json={"text": "agent messages that propose a rule",
+                                                           "paths": ["ep1/transcripts/u1_conversations.json"]})
+    assert r.json()["glob"] == "ep1/transcripts/u1_conversations.json"
+    assert "entries of an object" not in json.dumps(bridge.calls[-1][1]), "no places shown"
+    # records that match no record leave every file
+    asked["records"] = "*.json#/nowhere"
+    r = await api.post(f"/api/ws/{c}/concepts/draft", json={"text": "agent messages that propose a rule", "paths": []})
+    assert r.json()["glob"] == "*"

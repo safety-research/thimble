@@ -6311,6 +6311,9 @@ def glob_route(c: str, pattern: str = "", unit: str = "") -> dict:
 SAMPLE_RECORDS = 6     # records of the first file a draft reads
 SAMPLE_CUT = 700       # characters of each of them
 DRAFT_OVER = {"files": "files", "canvas": "cards", "report": "sentences"}  # a draft's scope as the edit card's Over
+PLACES_FILES = 50      # files a draft with no Applies to of the analyst's looks in for places of records (record_places)
+PLACES_PARSE_MAX = 32 * 1024 * 1024  # bytes of a JSON document it parses to find them
+PLACES_SHOWN = 4       # places it names, the most records first
 
 
 class DraftBody(BaseModel):
@@ -6318,14 +6321,61 @@ class DraftBody(BaseModel):
     paths: list[str] = Field(default_factory=list)  # the globs the label would apply to (the new-label card's Applies to)
 
 
-def sample_records(c: str, paths: list[str]) -> dict[str, str]:
+def record_places(corpus_dir: Path, sources: list[dict]) -> dict[str, str] | None:
+    """The slots of labels.md's `places` part (bug hunt I8: a draft over chat transcripts, each one JSON document whose
+    messages are the entries of one object, read only each file's system prompt, the records thimble reads by default):
+    among the first PLACES_FILES of `sources` that are JSON documents, the records thimble reads by default (`default`)
+    and the other places that hold several objects (`list`, the most records first: the place, what it holds, in how
+    many files, and its first item cut at SAMPLE_CUT characters). None when no such place is there. Blocking."""
+    default: dict[str, int] = {}
+    places: dict[str, dict] = {}
+    for src in sources[:PLACES_FILES]:
+        rel = src["path"]
+        if src.get("under"):
+            continue
+        try:
+            p = config.safe_corpus_path(corpus_dir, rel)
+            if records.reader_of(p, rel) != "json" or p.stat().st_size > PLACES_PARSE_MAX:
+                continue
+            doc = json.loads(p.read_bytes())
+            idx = records.json_index(p)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        read = {f"#{q.rsplit('/', 1)[0] or q}" for q in (idx.pointers if idx is not None else [])}
+        for q in read:
+            default[q] = default.get(q, 0) + 1
+        for k, v in doc.items():
+            items = list(v.values()) if isinstance(v, dict) else v if isinstance(v, list) else []
+            place = f"#/{records.pointer_escape(str(k))}"
+            if len(items) < 2 or place in read or not any(isinstance(x, (dict, list)) for x in items):
+                continue
+            g = places.setdefault(place, {"what": "entries of an object" if isinstance(v, dict) else "items of an array",
+                                          "n": 0, "files": 0, "example": rel,
+                                          "first": " ".join(json.dumps(items[0], ensure_ascii=False).split())[:SAMPLE_CUT]})
+            g["n"] += len(items)
+            g["files"] += 1
+    if not places:
+        return None
+    shown = sorted(places.items(), key=lambda kv: -kv[1]["n"])[:PLACES_SHOWN]
+    lines = [f"- `{q}`: {g['n']:,} {g['what']}, in {g['files']:,} file{'' if g['files'] == 1 else 's'} such as "
+             f"{g['example']}. Its first: {g['first']}" for q, g in shown]
+    return {"default": ", ".join(f"the items under `{q}`" for q in sorted(default)) or "each file's lines",
+            "list": "\n".join(lines)}
+
+
+def sample_records(c: str, paths: list[str], places: bool = False) -> dict[str, str]:
     """The slots of labels.md's `records` part for a draft: the files the globs name (the first few and how many), the
-    first of them and its first SAMPLE_RECORDS non-empty lines, each cut at SAMPLE_CUT characters. Empty `lines` when no
+    first of them and its first SAMPLE_RECORDS non-empty lines, each cut at SAMPLE_CUT characters; with `places`, the
+    other places of records the files hold (record_places), for a draft that chooses its records. Empty `lines` when no
     file matches or the first is binary. Blocking (a thread)."""
     corpus_dir = config.corpus_dir(c)
     found = match_paths(corpus_dir, _patterns(paths)) if paths else []
     if not found:
-        return {"paths": "no file yet", "path": "", "cut": str(SAMPLE_CUT), "lines": ""}
+        return {"paths": "no file yet", "path": "", "cut": str(SAMPLE_CUT), "lines": "", "places": ""}
+    where = record_places(corpus_dir, found) if places else None
+    shown_places = labels_part("places", **where) if where else ""
     names = ", ".join(s["path"] for s in found[:5]) + (f" and {len(found) - 5} more files" if len(found) > 5 else "")
     first = found[0]["path"]
     p = config.safe_corpus_path(corpus_dir, first)
@@ -6346,7 +6396,7 @@ def sample_records(c: str, paths: list[str]) -> dict[str, str]:
                     lines.append(text[:SAMPLE_CUT])
                 if len(lines) >= SAMPLE_RECORDS:
                     break
-    return {"paths": names, "path": first, "cut": str(SAMPLE_CUT), "lines": "\n".join(lines)}
+    return {"paths": names, "path": first, "cut": str(SAMPLE_CUT), "lines": "\n".join(lines), "places": shown_places}
 
 
 def draft_tool() -> Any:
@@ -6365,6 +6415,9 @@ def draft_tool() -> Any:
                 "text": {"type": "string", "description": "The pattern, the function or the definition."},
                 "values": {"type": "array", "items": {"type": "string"}, "minItems": 2},
                 "marks": {"type": "string", "enum": list(MARKS)},
+                "records": {"type": "string", "description": "The files and the place of their records, such as "
+                                                              "*.json#/messages, when they are not the records thimble "
+                                                              "reads by default."},
             },
             "required": ["name", "scope", "kind", "text", "values"],
             "additionalProperties": False,
@@ -6404,7 +6457,7 @@ async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
     from . import model_call, prompts, tasks  # noqa: PLC0415
 
     records = inp.get("records") if isinstance(inp.get("records"), dict) else {}
-    slots = {k: str(records.get(k) or "") for k in ("paths", "path", "cut", "lines")}
+    slots = {k: str(records.get(k) or "") for k in ("paths", "path", "cut", "lines", "places")}
     with prompts.custom(tasks.files(c, "labels")):
         prompt = labels_part("draft", description=str(inp.get("description") or ""),
                              records=labels_part("records", **slots) if slots["lines"] else "")
@@ -6431,14 +6484,19 @@ async def draft_route(c: str, body: DraftBody) -> dict:
     """Label from prompt, the new-label card's top row: the labels model defines a label from the analyst's description
     (labels.md `draft`), reading the first records of the files it would apply to, and the route answers the draft
     (draft_of) without storing anything. No paths is every file (`*`, as the card's Applies to says by default), so a
-    drafted label over files always names what it runs over (0.9.0 bug hunt D1). 400 for an empty description; 422 for
-    a draft that could not run; 429 or 502 when the call gave none."""
+    drafted label over files always names what it runs over (0.9.0 bug hunt D1). While the card's Applies to is still
+    that default, the model is shown the places of records the files hold besides those thimble reads by default
+    (record_places), and the records it names (`records`, such as `*.json#/messages`) are what the label applies to when
+    they hold records (bug hunt I8: a label of chat messages ran on each transcript's system prompt alone); paths the
+    analyst gave stay. 400 for an empty description; 422 for a draft that could not run; 429 or 502 when the call gave
+    none."""
     text = " ".join(body.text.split())
     if not text:
         raise HTTPException(400, "describe the label")
     paths = [p for given in body.paths for p in glob_patterns(given)] or ["*"]
+    chooses = paths == ["*"]
     try:
-        records = await asyncio.to_thread(sample_records, c, paths)
+        records = await asyncio.to_thread(sample_records, c, paths, chooses)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
     from . import tasks  # noqa: PLC0415
@@ -6447,7 +6505,19 @@ async def draft_route(c: str, body: DraftBody) -> dict:
                             schema=draft_tool().input_schema)
     if call.status != "ok":
         raise _call_failed(call)
+    if chooses and records.get("places"):
+        paths = await asyncio.to_thread(drafted_records, c, (call.output or {}).get("records")) or paths
     return draft_of(call.output, paths)
+
+
+def drafted_records(c: str, chosen: Any) -> list[str] | None:
+    """The globs a draft named as its records (`records`), when they match files that hold records; else None. Blocking."""
+    patterns = glob_patterns(chosen) if isinstance(chosen, str) else []
+    if not patterns:
+        return None
+    corpus_dir = config.corpus_dir(c)
+    sources = match_paths(corpus_dir, patterns)
+    return patterns if sources and units_at_least(corpus_dir, sources, "record", 1)[0] > 0 else None
 
 
 @router.get("/ws/{c}/filters")
