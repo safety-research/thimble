@@ -424,3 +424,48 @@ def test_a_thread_s_fork_joins_its_thread_whatever_main_passes_and_whichever_com
                     _assistant(_say("The thread is answered.")), END])
     assert not agents.running(CORPUS, tid)
     assert [r["type"] for r in _log(tid) if r["type"] in ("done", "error")] == ["done"]
+
+
+def test_main_s_message_to_a_thread_s_fork_by_its_name_keeps_the_thread_running(cwd, project, quits):
+    """Live feedback, 10-17 ("wasn't sure if it was working or waiting"): main relays a follow-up to the thread's fork
+    with SendMessage `to` the fork's name, as it named the fork; the mirror took that for no message, so at the end of
+    main's turn the thread read "Main's turn ended without answering in this thread", in red, while the fork worked on
+    the question. A message to the fork by its name counts as one by its agent id: the thread keeps running, with no
+    such end."""
+    from app import subagent_files as files
+    from app import subagents
+
+    p = project / f"{SID}.jsonl"
+    p.write_text("")
+    _subscribe(SID, cc_plugin.HOOK)
+    lv = _attach(cwd, p, pid=100)
+    session.tail_once(lv)
+    thread = agents.new_thread(CORPUS, None, None, "Days the page changed")
+    tid = thread["id"]
+    events.post(CORPUS, "thread", {"thread": tid, "text": QUESTION})
+    name = agents.read_meta(CORPUS, tid)[threads.FORK_NAME_KEY]
+    call = {"subagent_type": "fork", "name": name, "description": f"thread:{name}", "prompt": f"thread:{name}"}
+    with subagents.update(CORPUS) as state:
+        assert files.fork_check(state, {**call, "description": f"thread: {QUESTION}"}, None, "toolu_f1") is None
+    _append(p, lv, [_human("Look into the thread"), _assistant(_use("toolu_f1", "Agent", call)),
+                    _result("toolu_f1", "Async agent launched successfully.\nagentId: f0e1d2c3")])
+    path = _fork_files(project, "f0e1d2c3", "toolu_f1", name, None)
+    _fork_works(path, "f0e1d2c3")
+    session._scan_subs(lv)
+    session.tail_once(lv)
+    note = ("<task-notification>\n<task-id>f0e1d2c3</task-id>\n<tool-use-id>toolu_f1</tool-use-id>\n"
+            "<status>completed</status>\n<summary>Agent finished</summary>\n</task-notification>")
+    _append(p, lv, [END, {"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": note}},
+                    _assistant(_say("The thread is answered.")), END])
+    assert not agents.running(CORPUS, tid)
+    # the follow-up, as main gets it, relayed to the fork by its name
+    sent = events.post(CORPUS, "thread", {"thread": tid, "text": "And by whom?"})
+    event = f'<{events.TAG} kind="thread" thread="{tid}" event="{sent["id"]}">\nAnd by whom?\n</{events.TAG}>'
+    relay = {"to": name, "summary": "Relay follow-up", "message": f"thread:{name} — the analyst asks in the thread: \"And by whom?\""}
+    _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": event}},
+                    _assistant(_use("toolu_s1", "SendMessage", relay)),
+                    _result("toolu_s1", "Message sent; the agent resumes."), END])
+    log = _log(tid)
+    after = log[max(i for i, r in enumerate(log) if r["type"] == "user"):]
+    assert not [r for r in after if r["type"] == "error"], after
+    assert agents.running(CORPUS, tid)
