@@ -230,12 +230,12 @@ def test_the_shim_of_main_lists_every_tool_but_the_agents_private_ones_which_the
 
     names = [t["name"] for t in tools.list()]
     assert "message_orientation" in names and "add_comment" in names and "load_thimble" not in names
-    private = ["critique", "view_check", "finish_view", "view_pictures", "finish_review", "ticket_checks", "finish_ticket",
-               "read_call", "send_answer"]
+    private = ["critique", "view_check", "finish_view", "view_reference", "view_pictures", "finish_review", "ticket_checks",
+               "finish_ticket", "read_call", "send_answer"]
     assert not set(private) & set(names), "main never lists a tool only thimble's agents call"
     assert [s.name for s in tools.REGISTRY.values() if tools.private(s)] == private
     assert [t["name"] for t in tools.private_list(tools.ORIENT_SESSION)] == ["critique"]
-    assert tools.private_names(tools.VIEW_SESSION) == ["view_check", "finish_view"]
+    assert tools.private_names(tools.VIEW_SESSION) == ["view_check", "finish_view", "view_reference"]
     assert tools.private_names(tools.REVIEW_SESSION) == ["view_check", "view_pictures", "finish_review"]
     assert tools.private_names(tools.TICKET_SESSION) == ["ticket_checks", "finish_ticket"]
     assert tools.private_names(tools.CRITIQUE_SESSION) == [] and tools.private_names(None) == []

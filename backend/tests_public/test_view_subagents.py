@@ -267,6 +267,29 @@ async def test_finish_view_registers_a_passing_view_once_and_tells_main(board, b
         "a second finish runs no gate and tells main nothing more"
 
 
+async def test_bug_hunt_i12_view_reference_gives_the_builder_the_docs_and_examples_it_names_in_one_call(
+        board, bridge, gates):
+    """In Manual mode the builder's Reads of thimble's docs and examples were one permission ask each (and it went on
+    into thimble's code). view_reference gives the docs and worked examples it names, whole, for the page its build
+    makes, in one call; a name it does not know lists the names; it is the builder's alone."""
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    key = view_tools.build_key(slug)
+    res = await _call("view_reference", {"docs": ["color", "charts.md"], "examples": ["repository"]}, agent, key)
+    assert not res.is_error
+    color = (config.REPO_ROOT / "docs" / "color.md").read_text().strip()
+    reader = (views.EXAMPLES_DIR / "repository" / "reader.py").read_text().strip()
+    assert f'<doc name="color">\n{color}\n</doc>' in res.text and '<doc name="charts">' in res.text
+    assert f'<example view="repository" file="reader.py">\n{reader}\n</example>' in res.text
+    page = "view.term.js" if views.target_of(CORPUS, slug) == views.HTML_PAGE else "view.html"
+    assert 'file="view.json"' in res.text and f'file="{page}"' not in res.text
+    assert '<doc name="time-range">' not in res.text and 'view="timeline"' not in res.text, "only what it named"
+    res = await _call("view_reference", {"docs": ["kernel_thimble"]}, agent, key)
+    assert res.is_error and "rows-and-filters" in res.text and "kernel_thimble" in res.text
+    res = await tools.call(CORPUS, "view_reference", {"docs": ["color"]}, session=None, tool_use_id="toolu_main")
+    assert res.is_error, "main's own call"
+
+
 async def test_the_gate_tools_refuse_main_another_view_s_builder_and_a_builder_s_own_subagent(board, bridge, gates):
     slug, other = _propose(asked=True), _propose("Threads", asked=True)
     agent = await _started(slug)

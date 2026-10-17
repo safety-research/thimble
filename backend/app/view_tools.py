@@ -6,6 +6,8 @@ server ran around a `claude -p` session are tools they call (plan, lane E):
                  and a picture of the page as it opens when it asks for one, in the result (with_pictures)
   finish_view    the builder's end: the gates of record (views.gate); a pass registers the view (views.mark_built) and
                  tells main (the `view` event), a failure answers what failed and the attempt, up to dev.MAX_ATTEMPTS
+  view_reference thimble's docs of the view kit and the worked examples the builder names, whole, for the page its build
+                 makes (reference), so it reads none of thimble's files
   view_pictures  the reviewer's pictures (view_review.shoot): the overview first, then up to view_review.EXTRA_SHOTS
                  more states a round, into views-work/<slug>/review/<round>/, each in the result (with_pictures)
   finish_review  the reviewer's end of a round: the gate over its revision, which stays (a round counted, up to
@@ -34,7 +36,7 @@ log = logging.getLogger("thimble.view_tools")
 
 BUILDER = "view-builder"  # subagents.TYPES
 REVIEWER = "view-reviewer"
-BUILDER_TOOLS = ("read_ref", "view_check", "finish_view")  # a builder's thimble tools
+BUILDER_TOOLS = ("read_ref", "view_check", "finish_view", "view_reference")  # a builder's thimble tools
 REVIEWER_TOOLS = ("read_ref", "view_check", "view_pictures", "finish_review")  # a reviewer's
 FINISH_GRACE_S = 120.0  # after a pass or the last attempt, how long the agent may still run before it is stopped
 # the fixed descriptions main's agent list shows (V5: main keeps the first description it sees)
@@ -42,6 +44,14 @@ BUILDER_DESCRIPTION = ("thimble's builder of one view of the analyst's corpus. t
                        "Agent call that starts it.")
 REVIEWER_DESCRIPTION = ("thimble's reviewer of one view it built: it looks at pictures of the view and fixes clear "
                         "problems in how it draws. thimble starts it.")
+# view_reference's docs of the view kit for each page a build makes, by the names the builder gives them, and the
+# worked examples' files for that page (reference)
+REFERENCE_DOCS = {
+    "html-page": ("color", "time-range", "rows-and-filters", "search-table-diff", "charts"),
+    "term-page": ("terminal-views",)}
+EXAMPLES = ("timeline", "repository", "linked-sessions")  # plugin/viewers/<name> (views.EXAMPLES_DIR)
+EXAMPLE_FILES = {"html-page": ("view.json", "reader.py", "view.html"),
+                 "term-page": ("view.json", "reader.py", "view.term.js")}
 UNCHANGED_REPORT = "the view's files are as they were before the change, so the change is not made yet"
 NOT_YOURS = "{tool} is the tool of the agent thimble started for this view, and this call is not that agent's"
 
@@ -271,6 +281,54 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     views.update_proposal(c, slug, last_report=lines[:dev.ERROR_CHARS])
     # an error result: the build's thread shows the failed gate on its finish_view row, not a ✓ (live check L25)
     return tools.err(tools.hint("finish-view-fail", report=lines, n=str(attempt), of=str(dev.MAX_ATTEMPTS)))
+
+
+# --------------------------------------------------------------------------- view_reference
+
+
+def _names(raw: Any) -> list[str]:
+    raw = [raw] if isinstance(raw, str) else raw if isinstance(raw, list) else []
+    return list(dict.fromkeys(str(x).strip().removesuffix(".md") for x in raw if str(x).strip()))
+
+
+def reference(target: str, docs: list[str], examples: list[str]) -> str:
+    """The docs `docs` of the view kit for a build of the page `target` (REFERENCE_DOCS, docs/<name>.md), then each
+    worked example of `examples` with its files for that page (EXAMPLE_FILES), each whole in a tag that names it. A
+    file that cannot be read is left out."""
+    from . import views  # noqa: PLC0415
+
+    def text(path: Path) -> str | None:
+        try:
+            return path.read_text("utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            log.warning("view_reference leaves out %s, which cannot be read", path)
+            return None
+
+    parts = [f'<doc name="{name}">\n{t}\n</doc>' for name in docs
+             if (t := text(config.REPO_ROOT / "docs" / f"{name}.md")) is not None]
+    parts += [f'<example view="{ex}" file="{name}">\n{t}\n</example>' for ex in examples for name in EXAMPLE_FILES[target]
+              if (t := text(views.EXAMPLES_DIR / ex / name)) is not None]
+    return "\n\n".join(parts)
+
+
+async def tool_view_reference(ctx: Any, args: dict[str, Any]) -> Any:
+    """`view_reference`: the docs and the worked examples the builder names, for the page its build makes
+    (views.target_of), whole in one result (reference), so that it reads none of thimble's files: in Manual mode each
+    Read outside the analyst's folder is a permission ask, and bug hunt 8's builder read thimble's docs, examples and
+    code in about 25 of one build's 63 asks. A name it does not know is an error result that lists the names."""
+    from . import views  # noqa: PLC0415
+
+    try:
+        slug, _ = await _caller(ctx, "view_reference", BUILDER)
+    except Refused as e:
+        return tools.err(str(e))
+    target = views.target_of(ctx.c, slug)
+    docs, examples = _names(args.get("docs")), _names(args.get("examples"))
+    unknown = [d for d in docs if d not in REFERENCE_DOCS[target]] + [x for x in examples if x not in EXAMPLES]
+    if unknown or not (docs or examples):
+        return tools.err(f"view_reference: name docs among {', '.join(REFERENCE_DOCS[target])} and examples among "
+                         f"{', '.join(EXAMPLES)}" + (f" ({', '.join(unknown)} is none of them)" if unknown else ""))
+    return tools.ok(await asyncio.to_thread(reference, target, docs, examples))
 
 
 # --------------------------------------------------------------------------- view_pictures

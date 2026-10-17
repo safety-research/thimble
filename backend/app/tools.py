@@ -252,6 +252,9 @@ REGISTRY: dict[str, Spec] = {
         Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION),
              drop_stops=True),
         Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,), drop_stops=True),
+        # thimble's docs of the view kit and the worked examples a builder names, whole, in one result, so it reads none
+        # of thimble's files (each Read outside the analyst's folder is a permission ask in Manual mode)
+        Spec("view_reference", (ANALYST,), "app.view_tools:tool_view_reference", sessions=(VIEW_SESSION,)),
         Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,),
              drop_stops=True),
         Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,),
