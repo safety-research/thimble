@@ -1,8 +1,8 @@
 """The card check: once a card has its takeaway, it is drawn offscreen, one model reading of the picture assesses it
 against five criteria (prompts/card-check.md) and gives the card that replaces it, and the replacement is applied in
 place, with Undo in the card's details. The card shows the check only for a real problem: a red ✕ for numbers its code
-types in, or for a replacement that would not run. Nothing of the check goes back to the card's author. Label cards
-are drawn from their label and get no reading.
+types in, or for a replacement that would not run. Of the check, only a fix of a card main made goes back to main: one
+line at main's next turn (tell_main). Label cards are drawn from their label and get no reading.
 
 tools.call hands every thimble tool result to after_tool(); an add_card or edit_card result starts a check of its card
 when wants_check() holds and the workspace's automatic check is on (auto: thimble's config `agents.cardCheck.auto`). A
@@ -22,6 +22,10 @@ new change to the card cancels a running check and starts the next. At most READ
    New code that would break a citation into the card, from main's replies or a takeaway (a cited cell of a table or
    a line, or its value: checkstore.broken_citations), is refused and the rest is tried alone (_breaks): a check
    changes how a card draws its data, never the data or the names of its rows and columns (C7).
+4. Tell main: a fix that changed what a card of main's shows is told to main in one line, the parts it changed and the
+   problems the reading found (tell_main), held for main's next turn as a quiet event (events.QUIET_KINDS, FIXED_EVENT)
+   with no line in main's terminal and no row in its chat. So main neither repeats a claim the fix took out nor guesses
+   who changed its card (bug hunt D6). The check's agent itself ends without a hand-back to main (agent_call.py).
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -208,7 +212,8 @@ def _feature_on(c: str) -> bool:
 async def after_tool(c: str, name: str, args: dict[str, Any] | None, res: Any, *, session: str | None = None,
                      anchor: str | None = None) -> Any:
     """Called by tools.call with every result: starts the check of the card an add_card or edit_card result names. The
-    result goes back unchanged, since nothing of the check reaches the card's author. Never raises."""
+    result goes back unchanged, since the check runs after it: only a fix of main's card reaches main, at its next turn
+    (tell_main). Never raises."""
     if not enabled() or name not in CHECK_TOOLS:
         return res
     try:
@@ -837,6 +842,49 @@ def _problems(cell: dict[str, Any], failed: list[str], patch: dict[str, Any]) ->
     return [TYPED_REASON.format(values=values, lines=("line " if len(lines) == 1 else "lines ") + ", ".join(lines))]
 
 
+# the event that tells main of a fix of a card it made (events.QUIET_KINDS: it waits for main's next turn, and main's
+# terminal prints no line for it), the words for the parts a fix changes, in the card's order, and how much of the
+# problems the line quotes
+FIXED_EVENT = "card_fixed"
+PART_WORDS = {"title": "question", "code": "code", "takeaway": "takeaway"}
+TOLD_CHARS = 800
+
+
+def parts_words(fields: list[str] | tuple[str, ...]) -> str:
+    """The parts of a card as one phrase: `question`, `question and takeaway`, `question, code and takeaway`."""
+    words = [w for f, w in PART_WORDS.items() if f in fields]
+    return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}" if words else ""
+
+
+def tell_main(c: str, cid: str, author: str, fix: dict[str, Any], problems: list[str]) -> bool:
+    """Tell main of a fix of card `cid` when main made the card (`author` MAIN): one line held for main's next turn
+    (FIXED_EVENT, `## card-fixed` and `## card-fixed-why` of prompts/tools.md), the parts the fix changed and the
+    problems the reading found. It rides along with main's next prompt or event as context, so main's chat gets no row,
+    and the event sets no line for main's terminal. The card of another agent (the orientation's) is not told. Whether
+    the line was held; never raises."""
+    if author != MAIN:
+        return False
+    from . import events, tools  # noqa: PLC0415
+    from . import subagent_files as files  # noqa: PLC0415
+
+    parts = parts_words(list(fix.get("fields") or []))
+    if not parts:
+        return False
+    said = " ".join(p if p[-1] in ".!?" else f"{p}." for p in (" ".join(str(x).split()) for x in problems) if p)
+    if len(said) > TOLD_CHARS:
+        said = said[: TOLD_CHARS - 1].rsplit(" ", 1)[0] + "…"
+    line = tools.hint("card-fixed", cid=cid, parts=parts)
+    if said:
+        line = f"{line} {tools.hint('card-fixed-why', problems=said)}"
+    try:
+        main = files.main_session(config.workspace_path(c)) or None
+        events.post(c, FIXED_EVENT, {"text": line, "card": f"card:{cid}"}, line="", session=main)
+    except Exception as e:  # noqa: BLE001 — no session listens (409), or the workspace is gone: the fix stands
+        log.info("card check: main was not told of the fix of card:%s (%s)", cid, getattr(e, "detail", e))
+        return False
+    return True
+
+
 async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], failed: list[str],
                    timing: dict[str, Any]) -> None:
     """Apply the replacement once, kept only when its code runs clean and the replaced card draws; otherwise the card stays,
@@ -915,6 +963,8 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
         same = applied.get("state") == checkstore.SAME
         timing["replacement"] = "same outputs" if same else "applied"
         _end(run, "ok" if same else "fixed")
+        if not same:
+            tell_main(c, cid, run.author, applied, failed)
         await _settle(c, cid, tid, keep=True)
     finally:
         if not settled and tid:  # stopped or past its time before the settle began
