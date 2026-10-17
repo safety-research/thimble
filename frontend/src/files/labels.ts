@@ -445,13 +445,14 @@ export interface PageLabel {
 }
 
 /** A label over files as a view's page lists it (thimble.onLabels `all`): whether it is on, whether it marks records in
- * the view's files (`here`), every value with its colour and highlight, and how many records it marks once a run is
- * done. */
+ * the view's files (`here`), whether it gives one of them a value it highlights (`marking`: Color by opens on a label
+ * that is on only then), every value with its colour and highlight, and how many records it marks once a run is done. */
 export interface PageLabelItem {
   id: string
   name: string
   on: boolean
   here: boolean
+  marking: boolean
   colour: string
   values: { name: string; colour: string; highlight: boolean }[]
   count: number | null
@@ -483,8 +484,8 @@ export function pageLabels(
 }
 
 /** Every label over files as a view's page lists it, in the Labels pane's order, with those that mark the view's files
- * (`first`) ahead and `here`. Pure. */
-export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) => string, first?: ReadonlySet<string>): PageLabelItem[] {
+ * (`first`) ahead and `here`, and `marking` for those of `marking` (every label without it). Pure. */
+export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) => string, first?: ReadonlySet<string>, marking?: ReadonlySet<string>): PageLabelItem[] {
   const files = [...all].filter(isFilesLabel)
   const ordered = first ? [...files.filter((k) => first.has(k.id)), ...files.filter((k) => !first.has(k.id))] : files
   return ordered.map((k) => {
@@ -496,6 +497,7 @@ export function pageLabelList(all: Iterable<Concept>, resolve: (token: string) =
       name: k.name,
       on: !!k.shown,
       here: !!first?.has(k.id),
+      marking: marking ? marking.has(k.id) : true,
       colour: resolve(colourToken((lit[0] ?? cls[0])?.color ?? 1)),
       values: cls.map((c) => ({ name: c.name, colour: resolve(colourToken(c.color)), highlight: c.highlight })),
       count: status?.state === 'done' ? status.matches : null,
@@ -696,6 +698,22 @@ export function viewLabels(all: readonly Concept[], presence: ReadonlyMap<string
     if (!isFilesLabel(k)) continue
     const files = Object.keys(presence.get(k.id) ?? {})
     if (files.some((f) => claims.some((c) => claimMatches(f, c)))) out.add(k.id)
+  }
+  return out
+}
+
+/** The labels over files that give a record of a view's files a value they highlight, the values Color by colors by: a
+ * label that marks none of them (its run found nothing, or only its unhighlighted values fall there) colors no row, so
+ * the view does not open on it. Undefined before the presence is first read, when no label can be told apart; then a
+ * label the read does not hold yet (one just made) marks none. Pure. */
+export function viewMarking(all: readonly Concept[], presence: ReadonlyMap<string, Record<string, Record<string, number>>>, claims: readonly string[]): Set<string> | undefined {
+  if (!presence.size) return undefined
+  const out = new Set<string>()
+  for (const k of all) {
+    if (!isFilesLabel(k)) continue
+    const lit = new Set(classesOf(k).filter((c) => c.highlight).map((c) => c.name))
+    const files = Object.entries(presence.get(k.id) ?? {})
+    if (files.some(([f, values]) => Object.keys(values).some((v) => lit.has(v)) && claims.some((c) => claimMatches(f, c)))) out.add(k.id)
   }
   return out
 }

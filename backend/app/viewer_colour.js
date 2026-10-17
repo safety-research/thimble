@@ -27,7 +27,7 @@
 // One menu takes several choices: Off, then the view's own fields under "Fields" and every label over files under
 // "Labels", those that mark the view's files first, a label a choice as a field is (no switch of its own). The first
 // checked is the colour; each checked after it is a lane of its own in the list's tracks; with none checked the view is
-// Off. The view opens Off, or as its `initial` says, unless a label is on (below). Each field and label says how many
+// Off. The view opens Off, or as its `initial` says, unless a label is on and marks some of its records (below). Each field and label says how many
 // values it colors by and shows them as chips on a line under its name, cut off with … where they do not fit; a field
 // that declares no values shows those its records take on the page (the records the page hands valueOf, attr and
 // keeps), the commonest first. Checking a label turns it on in Files and every view and
@@ -41,8 +41,8 @@
 // frame as window.__thimbleLabelOrder), so the first five are five hues with no second blue; a place a value names or
 // keeps is the same hue whatever the order. --label-13 to --label-18, red, purple and pink, a value takes only when the
 // analyst picks it. A label colors by its values on each anchored record, in the label's own colours; a label the
-// analyst turns on anywhere in thimble takes the first place. Off colors nothing: no chips, no bars, no lanes, the tracks
-// a plain scrollbar. Colour marks the records alone, the anchored elements: a group's row takes none, and may show its
+// analyst turns on anywhere in thimble takes the first place once it marks some of the view's records (one whose run
+// found nothing colors no row). Off colors nothing: no chips, no bars, no lanes, the tracks a plain scrollbar. Colour marks the records alone, the anchored elements: a group's row takes none, and may show its
 // records' mix with thimble.mix.
 // Color by is thimble's small secondary button with the choice in it. The chosen field's values are key chips in the
 // top row (viewer_kit.css .chip-key), each a square swatch of its colour, its name and its count; a click turns a
@@ -293,8 +293,17 @@
     for (var h = 0; h < holds.length; h++) held = held.concat(safe(holds[h], []) || [])
     return held.map(String)
   }
+  // The labels that are on and mark some of the view's records with a value they colour by (`marking` in thimble's list
+  // of every label, from the label's rows): a label that marks none of them, such as one whose run found nothing,
+  // colours no row, so the view neither opens on it nor takes it when it is turned on, until it marks some.
+  function markingLabels() {
+    return onLabels().filter(function (l) {
+      var a = labelById(l.id)
+      return !a || a.marking !== false
+    })
+  }
   function notice() {
-    var ids = onLabels().map(function (l) {
+    var ids = markingLabels().map(function (l) {
       return String(l.id)
     })
     var before = S.seen || []
@@ -667,11 +676,11 @@
     if (S.picks && !S.picks.length) return { off: true, title: 'Off', key: OFF }
     return this.picks()[0] || { off: true, title: 'Off', key: OFF }
   }
-  // Color by's choices as the view opens: a label that is on and no part holds (the last of them), as the view opens
-  // colored by it, else its `initial` field, else none (Off)
+  // Color by's choices as the view opens: a label that is on, marks some of its records and no part holds (the last of
+  // them), as the view opens colored by it, else its `initial` field, else none (Off)
   Control.prototype.homePicks = function () {
     var held = heldLabels()
-    var on = onLabels().filter(function (l) {
+    var on = markingLabels().filter(function (l) {
       return held.indexOf(String(l.id)) < 0
     })
     if (on.length) return ['l:' + on[on.length - 1].id]
