@@ -167,7 +167,8 @@ type `/thimble browser` in your Claude Code terminal, or press `o` in thimble's 
 When the Claude Code session ends, the page stops: it shows that it stopped and how to open it again, and it sends
 nothing more. A tab whose server went away first asks the address it reconnects to to prove, without any credential,
 that it is the same thimble server; another program that later uses the port can't, and the page stops without sending
-it the cookie. After 6 failed reconnects the page stops too.
+it the cookie. After 6 failed reconnects the page stops too. A demo (`thimble demo`) needs no session: while its page
+is open, the server stays up when the last session ends, and a demo page that stops says to run `thimble demo` again.
 
 Each new sign-in shows a notice with **Sign it out**, in the browser and above the prompt in your terminal; a terminal
 without thimble's panel shows a line under Claude's next reply instead. The browser that signed in can't dismiss its

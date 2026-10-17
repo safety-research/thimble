@@ -133,6 +133,41 @@ def test_the_server_waits_before_it_stops_so_the_page_reads_main_s_end_and_a_new
     assert asyncio.run(main_ends(back=False)) == [] and stops == [1], "it stops only after the wait"
 
 
+def test_f7_a_page_that_shows_a_demo_keeps_the_server_up_when_the_last_session_ends(monkeypatch, workspaces_tmp):
+    """Bug hunt F7: `thimble demo` opened on the server a `claude` session started, and the demo's page died with that
+    session, though a demo needs none. While a page shows a demo workspace (a pre-cache's, no session attached), the
+    server stays up, as `thimble demo`'s own server does; with no such page it stops as before."""
+    import json  # noqa: PLC0415
+
+    from app import config, investigation, precached  # noqa: PLC0415
+
+    async def stop_all(c):
+        return []
+
+    monkeypatch.setattr(agents, "stop_all", stop_all)
+    monkeypatch.setattr(agents, "at_work", lambda: set())
+    stops: list[int] = []
+    monkeypatch.setattr(cli, "stop_self", lambda: stops.append(1))
+    monkeypatch.setattr(session, "STOP_AFTER_S", 0.05)
+    ws = config.workspace_dir("mini")
+    (ws / precached.MARKER).write_text(json.dumps({"dataset": "made-up-wiki"}), "utf-8")
+
+    async def main_ends(page: bool) -> None:
+        key = ("mini", investigation.MAIN)
+        if page:
+            investigation._subscribers.setdefault(key, set()).add(asyncio.Queue())
+        try:
+            session._stop_agents("analysts-own-folder")
+            await asyncio.sleep(0.2)
+        finally:
+            investigation._subscribers.pop(key, None)
+
+    asyncio.run(main_ends(page=True))
+    assert stops == [], "the demo's page keeps the server up"
+    asyncio.run(main_ends(page=False))
+    assert stops == [1], "with no demo page open, the server stops"
+
+
 async def _running_build(c: str, slug: str) -> "asyncio.Task":
     """The view ticket `slug` as a build that runs, taken off the queue and leaving the pool as dev's own do."""
     run = dev.Run(ticket_id=f"view:{slug}", title=slug, ts_start="")

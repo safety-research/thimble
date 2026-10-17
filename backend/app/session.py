@@ -1346,14 +1346,21 @@ STOP_AFTER_S = 3.0  # after main's end, how long the server waits before it stop
 async def _stop_server() -> None:
     """No workspace has a main session: what still runs in any workspace stops as main's end stops it, the kernels end,
     and the server stops itself (cli.stop_self), STOP_AFTER_S later, so a page that is open reads main's end and shows
-    the session-gone card before its stream closes (live check L10), and a session that attaches meanwhile keeps it."""
-    from . import cli, notebook  # noqa: PLC0415
+    the session-gone card before its stream closes (live check L10), and a session that attaches meanwhile keeps it. A
+    page that shows a demo workspace (demo_guard.is_demo), which needs no session, keeps it up, as `thimble demo`'s
+    own server stays up (bug hunt F7)."""
+    from . import cli, demo_guard, investigation, notebook  # noqa: PLC0415
 
     for c in sorted(agents.at_work()):
         with contextlib.suppress(Exception):
             await agents.stop_all(c)
     await asyncio.sleep(STOP_AFTER_S)
     if _live or _shutting_down():
+        return
+    demos = sorted(c for c in investigation.watched() if demo_guard.is_demo(c))
+    if demos:
+        log.info("no workspace has a main session, but a page shows the demo %s, which needs none: the server stays up",
+                 ", ".join(demos))
         return
     with contextlib.suppress(Exception):
         await notebook.shutdown_all()

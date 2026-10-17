@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { claimRefused, signedIn } from '../lib/api'
 import { bus } from '../lib/bus'
+import { isDemo } from '../lib/demo'
 import { pageStopped } from '../lib/stale'
 import { StoppedPage } from './ServerDown'
 
@@ -26,6 +27,8 @@ type State = 'wait' | 'in' | 'out' | 'stopped'
 export function SignInGate({ children }: { children: ReactNode }) {
   const [state, setState] = useState<State>(pageStopped() ? 'stopped' : 'wait')
   const [gone, setGone] = useState(false)
+  // the page was a demo page as it stopped, read before the app unmounts and the demo flag with it
+  const [demoStopped, setDemoStopped] = useState(false)
   const shown = useRef<State>('wait')
   shown.current = state
   useEffect(() => {
@@ -52,7 +55,10 @@ export function SignInGate({ children }: { children: ReactNode }) {
       setGone(false)
       setState('out')
     })
-    const offStopped = bus.on('pageStopped', () => setState('stopped'))
+    const offStopped = bus.on('pageStopped', () => {
+      setDemoStopped(isDemo())
+      setState('stopped')
+    })
     const offLink = bus.on('newLink', () => void check())
     document.addEventListener('visibilitychange', visible)
     return () => {
@@ -64,7 +70,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
     }
   }, [])
   if (state === 'wait') return null
-  if (state === 'stopped') return <StoppedPage />
+  if (state === 'stopped') return <StoppedPage demo={demoStopped} />
   if (state === 'in') return <>{children}</>
   const text = gone ? CODE_GONE_LINE : SIGN_IN_LINE
   return (

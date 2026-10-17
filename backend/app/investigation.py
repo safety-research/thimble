@@ -141,6 +141,11 @@ _left: dict[tuple[str, str], int] = {}  # the offset just after this process's l
 _RESET = object()  # queued to a subscriber when the workspace's log was replaced (reset_streams)
 
 
+def watched() -> set[str]:
+    """The workspaces a page holds an open event stream of."""
+    return {c for (c, _), queues in _subscribers.items() if queues}
+
+
 def log_id(c: str, inv_id: str = MAIN) -> str:
     """Which log the stream serves: the investigation's creation stamp. The tab sends it back on reopen (?log=), so a
     reopen onto another log is told apart even when seq numbers overlap."""
