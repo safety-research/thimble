@@ -281,8 +281,9 @@ export type World = {
   sidFails?: boolean
   /** a compaction's answer: skipped with this reason, else done */
   compactSkip?: string
-  /** each line of the log, the debug log's too */
+  /** each line of the log, the debug log's too; and the lines main's chat shows (the log's, not the debug log's) */
   logs: string[]
+  said: string[]
   /** each file written, each state value set (by key), each interval started, each sleep */
   writes: string[]
   stateSets: string[]
@@ -400,6 +401,7 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     store: new Map(),
     writes: [],
     logs: [],
+    said: [],
     stateSets: [],
     state: new Map(),
     timers: 0,
@@ -722,7 +724,9 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
     return { value: undefined } as never
   })
   on('ui.log', ($, e) => {
-    w.logs.push(String((e as { text?: unknown }).text ?? ''))
+    const text = String((e as { text?: unknown }).text ?? '')
+    w.logs.push(text)
+    if ((e as { to?: unknown }).to !== 'debug') w.said.push(text)
     return { value: undefined } as never
   })
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
