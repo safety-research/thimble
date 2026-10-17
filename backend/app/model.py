@@ -48,6 +48,7 @@ if TYPE_CHECKING:  # annotations only: the names are bound at first use (_bind_s
     )
 
 from . import capture, config, retry, sdk
+from .call_result import CallResult, Status, ToolSpec  # noqa: F401 — named here for model.structured's callers
 from .sdk import bind_sdk, sdk_attr
 
 
@@ -99,7 +100,6 @@ MODEL_CONCURRENCY = int(os.environ.get("THIMBLE_MODEL_CONCURRENCY", "32"))
 # long silent generation is normal.
 DEFAULT_IDLE_TIMEOUT_S = float(os.environ.get("THIMBLE_MODEL_IDLE_TIMEOUT_S", "900"))
 
-Status = Literal["ok", "refused", "rate_limited", "truncated", "no_tool_call", "timeout", "error"]
 
 # The MCP server name is always 'out', so the allowed tool is f"mcp__out__{name}".
 _SERVER = "out"
@@ -119,37 +119,8 @@ def _semaphore() -> asyncio.Semaphore:
     return _sem
 
 
-@dataclass(frozen=True)
-class ToolSpec:
-    """The output schema, presented to the model as an in-process MCP tool."""
-
-    name: str
-    description: str
-    input_schema: dict
-
-
-@dataclass
-class CallResult:
-    """What one structured call returned and what actually happened. structured() NEVER raises; read `status`."""
-
-    status: Status
-    output: dict | None = None  # jsonschema-validated input of the model's LAST tool call; None unless status == "ok"
-    model_requested: str = ""  # what the CLI was asked for
-    model_used: str | None = None  # from ResultMessage.model_usage keys
-    fallback_note: str = ""  # "" when the requested model really ran
-    duration_s: float = 0.0  # wall, retries included
-    cost_usd: float | None = None  # ResultMessage.total_cost_usd
-    session_id: str | None = None
-    attempts: int = 0  # turns sent
-    detail: str = ""  # one plain sentence for run.json and logs; "" when ok
-    text: str = ""  # assistant prose from the final attempt, for no_tool_call/refused diagnostics
-    # status == "truncated" only: the output tool's last call as far as it got before the cut (a cut-off tool_use is
-    # parsed leniently); None when no tool call had started
-    partial: dict | None = None
-    # {input_tokens, output_tokens, …} as the CLI reported them; None when it did not say
-    usage: dict | None = None
-    # the model that refused the call when this result is its rerun on the refusal row's model; "" otherwise
-    refused_by: str = ""
+# ToolSpec, CallResult and Status are call_result.py's, which every caller reads now (agent_call.py runs a call as a
+# subagent of main); they are named here too for the callers model.structured still serves.
 
 
 class CallState:
