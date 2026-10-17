@@ -152,6 +152,22 @@ describe('Colour by', () => {
     await wait()
     expect(c.by).toEqual({ field: 'kind', title: 'Kind' })
   })
+
+  test("a label on that marks none of the view's records leaves it on its own field, and takes the colour once it marks some", async () => {
+    await load()
+    const zebra = { id: 'z1', name: 'Zebra sightings', colour: '#025ac3', values: [{ name: 'zebra', colour: '#025ac3' }] }
+    const send = (marking: boolean) =>
+      fromPage({ type: 'thimble:labels', marks: {}, on: [zebra], filter: null, palette: ['#025ac3'],
+        all: [{ ...zebra, on: true, here: true, marking, values: [{ name: 'zebra', colour: '#025ac3', highlight: true }], count: 0 }] })
+    send(false)
+    await wait()
+    const c = mount()
+    await wait()
+    expect(c.by).toEqual({ field: 'kind', title: 'Kind' })
+    send(true)
+    await wait()
+    expect(c.by).toEqual({ label: 'z1', title: 'Zebra sightings' })
+  })
 })
 
 describe('a view whose rows are its own units (bug hunt C13)', () => {

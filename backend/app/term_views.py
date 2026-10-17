@@ -125,8 +125,10 @@ def has_term(view: dict[str, Any] | None) -> bool:
 
 def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]]:
     """Every label over files as the kit's Color by lists it: views.label_definition's {id, name, kind, text, spec,
-    scope, values: [{name, highlight, meaning, n}]}, with `here` for a label whose scope holds one of the view's files
-    and `on` for one the analyst turned on in Files or filters by, which the view opens colored by, as in the browser."""
+    scope, values: [{name, highlight, meaning, n}]}, with `here` for a label whose scope holds one of the view's files,
+    `on` for one the analyst turned on in Files or filters by, and for one on and here `marking`, whether it gives some
+    record of the view's files a value it colors by. The view opens colored by a label on, here and marking, as in the
+    browser, else on its own field: a label that marks none of them (its run found nothing) colors no row."""
     from . import concepts, views  # noqa: PLC0415
 
     try:
@@ -138,6 +140,7 @@ def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]
         f = concepts.read_filters(ws).get("files") or {}
     except Exception:  # noqa: BLE001
         f = {}
+    files = set(claimed) if claimed is not None else None
     out: list[dict[str, Any]] = []
     for k in ks:
         if k.get("unit") not in concepts.FILE_UNITS or k.get("marks") == "file":
@@ -150,8 +153,23 @@ def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]
         globs = [g for g in re.split(r",\s+", glob) if g.strip()]
         d["here"] = not globs or claimed is None or any(views.glob_matches(p, g) for g in globs for p in claimed)
         d["on"] = bool(k.get("shown") or f.get("concept") == k["id"])
+        if d["on"] and d["here"]:
+            d["marking"] = _marking(ws, k["id"], d, files)
         out.append(d)
     return out
+
+
+def _marking(ws: Path, concept_id: str, d: dict[str, Any], files: set[str] | None) -> bool:
+    """Whether label `d` gives a record of `files` (of any file for None, before the corpus is walked) one of the values
+    it colors by, those it highlights; true while its rows cannot be read yet, as before it was asked."""
+    from . import concepts  # noqa: PLC0415
+
+    values = d.get("values") or []
+    lit = {str(v.get("name")) for v in values if v.get("highlight", True)} if values else None
+    try:
+        return concepts.marks_some(ws, concept_id, files, lit) is not False
+    except Exception:  # noqa: BLE001 — a label whose rows cannot be read may mark them
+        return True
 
 
 def probe_label() -> dict[str, Any]:
@@ -163,7 +181,7 @@ def probe_label() -> dict[str, Any]:
     return {"id": kernel_thimble.PROBE_ID, "name": name, "kind": "", "text": "", "spec": "", "scope": "",
             "values": [{"name": name, "highlight": True, "n": None,
                         "meaning": f"the checks' test label: about one record in {views.PROBE_EVERY}"}],
-            "here": True, "on": True}
+            "here": True, "on": True, "marking": True}
 
 
 def labels_signature(c: str) -> str:
