@@ -772,6 +772,29 @@ export function offView(content: Rect | null, view: View, vw: number, vh: number
 }
 
 /**
+ * How far the plane pans so the cards in view stay where they are on screen when the layout changes from `before` to
+ * `after` without the analyst moving anything (a card above the view grew as its chart, takeaway or status changed, or
+ * one was added): the plane's move, in plane pixels, of the first card in view (the topmost of those the view shows, in
+ * part or whole, as a browser's scroll anchoring picks it), which comes after every card above the view in its flow.
+ * Null when no card of `cards` is in view in both layouts or it did not move. Pure.
+ */
+export function anchorShift(before: ReadonlyMap<string, Rect>, after: ReadonlyMap<string, Rect>, cards: Iterable<string>, view: View, vw: number, vh: number): { dx: number; dy: number } | null {
+  const v = { ...toPlane(view, 0, 0), w: vw / view.scale, h: vh / view.scale }
+  let first: Rect | null = null
+  let moved: Rect | null = null
+  for (const id of cards) {
+    const r = before.get(id)
+    const n = after.get(id)
+    if (!r || !n || !overlaps(v, r)) continue
+    if (!first || r.y < first.y || (r.y === first.y && r.x < first.x)) [first, moved] = [r, n]
+  }
+  if (!first || !moved) return null
+  const dx = moved.x - first.x
+  const dy = moved.y - first.y
+  return Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 ? null : { dx, dy }
+}
+
+/**
  * Where the "Content" pill sits: on the viewport's edge, in the direction of the content's centre, `inset` px in; and
  * the arrow's angle in degrees.
  */

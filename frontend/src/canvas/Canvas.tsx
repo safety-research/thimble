@@ -47,6 +47,7 @@ import {
   PAD,
   activeFrame,
   analystGroup,
+  anchorShift,
   boardOf,
   cardCount,
   cardsIn,
@@ -107,6 +108,8 @@ const SETTLE_MS = 1500
 const WAIT_MS = 5000
 /** how long a card stays in view on the shown tab before it counts as seen (landing.ts) */
 const SEEN_MS = 800
+/** how long after the analyst changed the board the view does not pan to keep the cards in view still (anchorShift) */
+const ANALYST_QUIET_MS = 2000
 /** the controls' column at the bottom right, which Fit leaves clear */
 const CONTROLS_W = 180 + 14 + 16
 
@@ -372,9 +375,12 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
 
   // a change the route has not made yet, shown at once; the reload after the route agrees with it
   const demo = useDemo()
+  // when the analyst last changed the board here (a move, a delete, a rename), which the view does not pan to undo
+  const analystAt = useRef(0)
   const change = useCallback(
     async (local: (d: CanvasResponse) => CanvasResponse, remote: () => Promise<unknown>) => {
       if (isDemo()) return
+      analystAt.current = performance.now()
       setData((d) => (d ? local(d) : d))
       try {
         await remote()
@@ -486,6 +492,29 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   // the latest of everything, for the window listeners a press installs
   const live = useRef({ data, board, lay, view, sel, open, heights })
   live.current = { data, board, lay, view, sel, open, heights }
+
+  // the board does not move under the analyst: when the layout changes while they move nothing (a card above the view
+  // grew or shrank as its chart, takeaway or status changed, or a card was added), the view pans by the move of the first
+  // card in view (anchorShift), before the change is painted. Not while they drag or size a card or right after they
+  // changed the board, open or collapse a frame, or when a card went (their delete moves the cards after it up); nor
+  // before the view is placed or the cards are first measured, which places them where the kept view saw them.
+  const anchorPrev = useRef<{ lay: NonNullable<typeof lay>; open: ReadonlySet<string>; cards: string[]; measured: boolean; busy: boolean } | null>(null)
+  useLayoutEffect(() => {
+    const prev = anchorPrev.current
+    const cards = shownBoard ? shownBoard.cells.map((c) => c.id) : []
+    const busy = !!drag || !!sizing
+    anchorPrev.current = lay ? { lay, open, cards, measured: Object.keys(heights).length > 0, busy } : null
+    if (!prev || !lay || prev.lay === lay || !active || !vpReady || !placed.current || busy || prev.busy || !prev.measured || prev.open !== open) return
+    if (performance.now() - analystAt.current < ANALYST_QUIET_MS || prev.cards.some((id) => !lay.rects.has(id))) return
+    const shift = anchorShift(prev.lay.rects, lay.rects, prev.cards, live.current.view, vpSize.w, vpSize.h)
+    if (!shift) return
+    setViewState((v) => {
+      const next = { ...v, x: v.x - shift.dx * v.scale, y: v.y - shift.dy * v.scale }
+      writeStorage(viewKey, next)
+      return next
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lay])
 
   // frames opened by a click on their collapsed deck or by a teleport (not by their title): each collapses again at a
   // click on the bare board outside it, never at a click on a card or a frame's title. Kept for the page's life only.
