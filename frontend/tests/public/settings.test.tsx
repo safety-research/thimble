@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
 // The settings popover (src/shell/SettingsPopover.tsx): one model table with a row per role and exactly the model and
 // effort that runs, Claude Code's levels in every agent's effort menu and none for a model that runs with none, fast
-// mode only for main, the viewer suggestion's and the refusal's rows, the orientation subagents' row with its effort, a web switch per agent; the View proposals switch, sent only
-// when it changed; thimble's rules for main and its agents, code tickets' among them (web and data follow the session's
-// mode, and the shell runs in Claude Code's sandbox where /thimble saw one); one permission row, the dev agent's
-// program's, only where an extension runs one, with Manual and Auto and no Bypass (0.9.0: a session or a row in Bypass
-// counts as Manual); cardWait; no installs row; the Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a
-// Mac), sent only when it changed and taken by the page at once; thimble's feature switches, the same rows as /config →
-// thimble, in its order, each sent only when it changed (false off, null back on).
+// mode only for main, beside its effort, the viewer suggestion's and the refusal's rows (the refusal's Off in its model
+// menu), the orientation subagents' row with its effort, a web switch per agent in the web column, under the popover's
+// title; the View proposals switch, sent only when it changed; thimble's rules for main and its agents, code tickets'
+// among them (web and data follow the session's mode, and the shell runs in Claude Code's sandbox where /thimble saw
+// one); one permission row, the dev agent's program's, only where an extension runs one, with Manual and Auto and no
+// Bypass (0.9.0: a session or a row in Bypass counts as Manual); cardWait; no installs row; the Ask key choice, ⌘-click
+// or ⌥-click (Ctrl-click or Alt-click off a Mac), sent only when it changed and taken by the page at once; thimble's
+// feature switches, the same rows as /config → thimble, in its order, each sent only when it changed (false off, null
+// back on).
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { MODE_OPTIONS, SettingsPopover, agentMode, changedRoles, changedWeb, webRows } from '../../src/shell/SettingsPopover.tsx'
@@ -108,6 +110,32 @@ describe('the popover', () => {
     await settle()
     expect(chip().textContent).toBe("Manual (your session's)")
     expect(document.body.textContent).not.toMatch(/Bypass/)
+  })
+})
+
+describe('the table, as a newcomer reads it (bug hunt F17)', () => {
+
+  test("Settings opens under its title, main's model is the one main's meta names, its fast bolt sits by its effort, the last column is web alone, and the refusal row's Off is in its model menu", async () => {
+    attached = { session: 's1', cwd: '/c', since: '', model: 'claude-opus-5-5', effort: 'medium' } as Attached
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    expect(document.body.querySelector('.settings-title')?.textContent).toBe('Settings')
+    const heads = [...document.body.querySelectorAll('.settings-models .settings-headrow .label')].map((h) => h.textContent)
+    expect(heads).toEqual(['role', 'model', 'effort', 'web'])
+    expect(document.body.querySelector('.settings-models .settings-headrow .label:last-child')?.getAttribute('title')).toMatch(/web/)
+    const main = document.body.querySelector('[data-role="main"]')!
+    expect(main.querySelector('.settings-model, .settings-locked')?.textContent).toBe('Opus 5.5')
+    expect(main.querySelector('.settings-effort-cell .settings-fast')).not.toBeNull()
+    const refusal = () => document.body.querySelector('[data-role="refusal"]')!
+    expect(refusal().querySelector('[role="switch"], input[type="checkbox"]')).toBeNull()
+    await act(async () => refusal().querySelector<HTMLButtonElement>('.settings-model')!.click())
+    const off = [...document.querySelectorAll<HTMLElement>('.menu-item')].find((m) => m.textContent === 'Off')!
+    await act(async () => off.click())
+    expect(refusal().querySelector('.settings-model')?.textContent).toBe('Off')
+    expect(refusal().classList.contains('settings-row-off')).toBe(true)
   })
 })
 

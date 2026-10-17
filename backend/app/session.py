@@ -3901,6 +3901,40 @@ def _size(path: Path) -> int:
         return 0
 
 
+EARLIER_RUN_BYTES = 512 * 1024  # of a transcript's history before the tail's first place, read for main's model
+
+
+def _note_earlier_run(lv: Live, p: Path) -> None:
+    """Main's model and effort as the last record before the tail's first place names them (_note_model,
+    _note_request), for the history the tail does not replay: a session resumed with `claude -c` has answered already,
+    and the composer and Settings showed its model as not known until its next reply (bug hunt F17). Reads at most
+    EARLIER_RUN_BYTES back; a record it cannot read is skipped."""
+    if lv.model is not None or lv.offset <= 0:
+        return
+    try:
+        with p.open("rb") as f:
+            start = max(0, lv.offset - EARLIER_RUN_BYTES)
+            f.seek(start)
+            lines = f.read(lv.offset - start).split(b"\n")
+    except OSError:
+        return
+    for line in reversed(lines[1:] if start else lines):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("isSidechain"):
+            continue
+        msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+        att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+        if rec.get("type") == "assistant" and isinstance(msg.get("model"), str) and not msg["model"].startswith("<"):
+            _note_model(lv, rec)
+        elif (rec.get("type") == "attachment" and att.get("type") == "model") or rec.get("type") == "api-request":
+            _note_request(lv, rec)
+        if lv.model is not None:
+            return
+
+
 def _tail_main(lv: Live) -> None:
     if lv.degraded or not lv.transcript_path:
         return
@@ -3911,12 +3945,16 @@ def _tail_main(lv: Live) -> None:
         if lv.offset < 0:
             lv.offset = 0  # not written yet: everything it will hold is this session's
         return
+    first = lv.offset < 0
     if lv.offset < 0 and lv.read_from:
         lv.offset = _offset_since(str(p), lv.read_from)  # a session no mirror read yet: since thimble turned on (attach)
     if lv.offset < 0:
         lv.offset = size  # already there when the session attached: its history is not replayed
         _save_cursor(lv)  # a cursor an earlier attach of this session left would replay that history after a restart
+        _note_earlier_run(lv, p)
         return
+    if first:
+        _note_earlier_run(lv, p)
     if size < lv.offset:  # truncated or rewritten
         lv.offset, lv.buf = 0, b""
     if size == lv.offset:

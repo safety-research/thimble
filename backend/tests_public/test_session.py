@@ -203,6 +203,22 @@ def test_mains_model_and_effort_are_known_from_the_first_prompt_and_never_guesse
     assert not lv.degraded
 
 
+def test_f17_a_resumed_session_s_model_is_known_from_the_reply_it_gave_before_the_attach(cwd, tmp_path):
+    """Bug hunt F17: after `claude -c`, main had answered before the restart, yet the composer and Settings said its
+    model was not known yet, since the tail does not replay the history it finds at the attach. The model and effort of
+    the last reply before the tail's first place are read once."""
+    p = tmp_path / f"{SID}.jsonl"
+    reply = {"type": "assistant", "effort": "high", "message": {"role": "assistant", "model": "claude-opus-5-5",
+                                                                "content": [_say("Agent-07 edited the most pages.")]}}
+    error = {"type": "assistant", "message": {"role": "assistant", "model": "<synthetic>", "content": [_say("API Error")]}}
+    p.write_text("".join(json.dumps(r) + "\n" for r in (_human("Who edited the most?"), reply, END, error)))
+    lv = _attach(cwd, p)
+    session.tail_once(lv)
+    attached = (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {})["attached"]
+    assert (attached.get("model"), attached.get("effort")) == ("claude-opus-5-5", "high")
+    assert _mirror() == [], "the history is not replayed"
+
+
 # ----------------------------------------------------------------------------- the startup sweep
 
 

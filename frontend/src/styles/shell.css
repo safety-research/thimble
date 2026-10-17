@@ -392,8 +392,8 @@
   pointer-events: none;
 }
 
-/* -------- settings popover (shell/SettingsPopover, inside a glass Popover): one table, role · model · effort · fast,
-   caps headers, the names in the body face, rows on hairlines -------- */
+/* -------- settings popover (shell/SettingsPopover, inside a glass Popover): its title, then one table, role · model ·
+   effort · web, caps headers, the names in the body face, rows on hairlines -------- */
 .settings-pop {
   max-width: calc(100vw - 16px);
 }
@@ -403,6 +403,11 @@
   gap: 8px;
   width: min(480px, calc(100vw - 32px));
   padding: 4px 6px;
+}
+.settings-title {
+  margin: 2px 6px 0;
+  color: var(--text-primary);
+  font: var(--type-subheading);
 }
 .settings-loading {
   display: flex;
@@ -416,7 +421,7 @@
 }
 .settings-row {
   display: grid;
-  grid-template-columns: 84px minmax(0, 1fr) 108px 40px;
+  grid-template-columns: 84px minmax(0, 1fr) 128px 40px;
   gap: 8px;
   align-items: center;
   min-height: 30px;
@@ -445,6 +450,14 @@
 }
 .settings-effort {
   justify-self: start;
+}
+/* the effort's cell: its menu, and on main's row fast mode's bolt beside it, as the composer's model line draws them */
+.settings-effort-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  justify-self: start;
+  min-width: 0;
 }
 /* a cell that cannot be changed here (SettingsPopover's lockedWhy): dimmed as a menu's disabled item, still focusable,
    its reason in the tooltip; no wash on hover, since a click does nothing */
