@@ -526,17 +526,25 @@ export function chipPlace(c: Citation): string {
 // a chip as written (`[[<ref>]]`, `[↗](<ref>)`, `[](<ref>)`) inside one or two brackets of any kind its writer put
 // around it: `([[card:<id>]])`, `[[↗](transcript.jsonl#L88)]` (bug hunt C19: a side thread's fork wrote it so), `{[↗](a#L3)}`
 const WRAPPED_CHIP_RE = /[(\[{]{1,2}[ \t]*(\[\[[^\[\]\n|]+\]\]|\[[ \t]*↗?[ \t]*\]\([^()\s]+\))[ \t]*[)\]}]{1,2}/g
+// a citation written as a link whose words are in double brackets, `[[↗]](card:<id>)` or `[[31]](card:<id>#a/b)` (bug
+// hunt E2: main mixed the chat form `[↗](ref)` with the takeaway form `[[…]]`), Markdown's link with the words `[↗]`
+const MIXED_LINK_RE = /\[\[([^\[\]\n|]*)\]\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
 
 /** A text's chips with the brackets their writer put around them taken away, whatever the brackets (`([[card:<id>]])`
  *  and `[[↗](a.jsonl#L88)]` read `[ card ]` and `[ a.jsonl line 88 ]`, never `([ card ])` or `[↗ (a.jsonl#L88)]`): a
- *  chip carries its own brackets. Code spans and fences stay as written. */
+ *  chip carries its own brackets. A link whose words are in double brackets reads as the link it means (`[[↗]](card:<id>)`
+ *  as `[↗](card:<id>)`, the card's chip). Code spans and fences stay as written. */
 export function withoutOwnBrackets(text: string): string {
   if (!/[(\[{][ \t]*\[/.test(text)) return text
   const unwrap = (s: string) =>
-    s.replace(WRAPPED_CHIP_RE, (m, inner: string) => {
-      const c = citations(inner)[0]
-      return c && isChip(c) ? inner : m
-    })
+    s
+      .replace(MIXED_LINK_RE, (m, shown: string, a?: string, b?: string) =>
+        !REF_SHAPE.test(shown.trim()) && linkCitation(shown, a ?? b ?? '') ? `[${shown}]${m.slice(shown.length + 4)}` : m,
+      )
+      .replace(WRAPPED_CHIP_RE, (m, inner: string) => {
+        const c = citations(inner)[0]
+        return c && isChip(c) ? inner : m
+      })
   let out = ''
   let from = 0
   for (const m of text.matchAll(FENCE_RE)) {

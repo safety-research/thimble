@@ -264,9 +264,10 @@ def format_ref(p: dict[str, Any]) -> str:
 
 
 def extract_refs(text: str) -> list[str]:
-    """All `[[ref]]` occurrences in order, deduplicated (same as frontend refs.ts)."""
+    """All `[[ref]]` occurrences in order, deduplicated (same as frontend refs.ts); a link whose words are in double
+    brackets, `[[↗]](card:<id>)`, cites its target (cite.mixed_links), never a ref named `↗`."""
     out: list[str] = []
-    for m in _BRACKETS.finditer(text):
+    for m in _BRACKETS.finditer(cite.mixed_links(text)):
         r = m[1].strip()
         if "|" in r:  # value-ref [[<display>|<ref>]]: keep only the ref part
             r = r.split("|", 1)[1].strip()

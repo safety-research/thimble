@@ -871,6 +871,9 @@ function streamLine(line: string, partial: boolean, look: StreamLook): string {
       if (partial) return out
     } else if (ch === '[' && line[i + 1] === '[') {
       const end = citeEnd(line, i)
+      // a citation at the end of an unfinished line, or before a `(` not closed yet, may still turn out to be the words
+      // of a link (`[[↗]](card:<id>)`, bug hunt E2), which withoutOwnBrackets reads once it closes
+      if (partial && end >= 0 && /^(?:\([^()\n]*)?$/.test(line.slice(end))) return out
       const c = end >= 0 ? citations(line.slice(i, end))[0] : undefined
       if (c) {
         out += look.link(c)
@@ -914,7 +917,7 @@ export function streamStep(st: Streaming, more: string, end: boolean, look: Stre
   let now = st.doneShown
   if (end) now += rest ? streamDone(st, rest, look) : ''
   else if (st.fence) now += rest
-  else if (!EMBED_PREFIX.test(rest)) now += streamLine(rest, true, look)
+  else if (!EMBED_PREFIX.test(rest)) now += streamLine(withoutOwnBrackets(rest), true, look)
   // what was handed over stands (the record is put back as written at its append)
   if (!now.startsWith(st.shown)) return ''
   const out = now.slice(st.shown.length)
