@@ -474,7 +474,7 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   its switch to another model; an API error that stopped the agent; an agent that ended failed or was refused; a view
   build, a check or a label run that failed; a check for a view proposal that failed or that a fallback model
   answered); then the acts that fix it (`try again`, `retry`, `turn off view proposals`, `how to fix it`, `allow in
-  the browser ›` for a code ticket), the press that opens the agent's thread, named for what opens (`see the
+  the browser ›` for a code ticket, `sign it out` for a browser's sign-in), the press that opens the agent's thread, named for what opens (`see the
   orientation ›`, `see the view build ›`, `see the thread ›` for a side thread in the threads panel), and `dismiss`.
   Each act's words say what its press does. A fix that is a command (`/login`, `thimble server restart`) is in the
   notice's words; `how to fix it` says in a toast where thimble's config is (which the terminal has in place of the

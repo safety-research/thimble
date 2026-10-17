@@ -10,7 +10,9 @@ and every subagent share, runs the same `tools.call` in its own process (call); 
 server's GET routes give the browser with `thimble state <surface>` (state), and makes the changes the browser's POST
 routes make with `thimble act <kind>` (act). Each of these writes the same workspace files the server writes, so a
 workspace opens the same way in either transport. After the press, an act whose state the server holds in memory (a
-comment dismissed or opened again) goes to the server's route (SERVER_ACTS), and the others run here.
+comment dismissed or opened again, a view proposal's answer, a notice's dismissal: SERVER_ACTS) goes to the server's
+route for `thimble act`, POST /api/ws/{c}/act (app/term_acts.py), a token route of this command's own, and the others
+run here. The browser's routes for those changes take only the browser's cookie, never the token this command proves.
 
 The transport is read from the workspace's `trusted/launch.json` (subagent_files.transport), which only activation
 writes (app/activate.py write_launch). A tool call here refuses a folder that holds no workspace (no tool call
@@ -498,7 +500,7 @@ def _offer(c: str) -> dict[str, Any] | None:
 # "ticket-open" is no `thimble act` kind: the terminal UI opens the ticket in the browser workbench (its `ref`), where
 # the analyst allows its change.
 NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
-               "settings": "settings", "ticket-open": "ticket-open"}
+               "settings": "settings", "ticket-open": "ticket-open", "sign-out": "sign-out"}
 
 
 def _notice_acts(action: Any) -> list[dict[str, str]]:
@@ -1072,13 +1074,15 @@ ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id
              "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
              "stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
-             "view-propose-now {notice?}, view-retry {slug, notice?}, notice-dismiss {id}")
+             "view-propose-now {notice?}, view-retry {slug, notice?}, notice-dismiss {id}, sign-out {slug}")
 
 
 # The acts whose state thimble's server holds in memory once main's transport is server: the comments of a document and
 # of Claude's answers, which its routes change and announce to the browser, and the view proposals, builds and notices,
-# whose queue and writer then live in the server (H6). After the press each goes to the server's route,
-# `kind -> the route's path`, with {c} and the payload's fields filled; every other act runs here.
+# whose queue and writer then live in the server (H6). After the press each goes to ACT_ROUTE (app/term_acts.py), which
+# makes the change the browser's route `kind -> the route's path` makes, the fields that path names checked here first;
+# every other act runs here.
+ACT_ROUTE = "/api/ws/{c}/act"
 SERVER_ACTS = {
     "comment-resolve": "/api/ws/{c}/investigations/main/types/{doc}/comments/{comment}/dismiss",
     "comment-reopen": "/api/ws/{c}/investigations/main/types/{doc}/comments/{comment}/reopen",
@@ -1112,11 +1116,15 @@ def server_route(c: str, kind: str, payload: dict[str, Any]) -> str | None:
     return path.format(**{k: quote(v, safe="") for k, v in values.items()})
 
 
-def _post_to_server(path: str) -> dict[str, Any]:
-    """POST `path` to thimble's server with the token's proof (cli._request): its JSON answer, or StateError with why."""
+def _post_to_server(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """The act `kind` posted to thimble's server (ACT_ROUTE) with the token's proof (cli._request): its JSON answer, or
+    StateError with why."""
+    from urllib.parse import quote  # noqa: PLC0415
+
     from . import cli  # noqa: PLC0415
 
-    status, body = cli._request("POST", f"{cli.api_url()}{path}", {}, timeout=SERVER_ACT_TIMEOUT_S)
+    status, body = cli._request("POST", f"{cli.api_url()}/api/ws/{quote(c, safe='')}/act",
+                                {"kind": kind, "payload": payload}, timeout=SERVER_ACT_TIMEOUT_S)
     if status != 200:
         why = body.get("detail") if isinstance(body, dict) else body
         raise StateError(f"thimble's server did not take this change ({status or 'no answer'}: {why})")
@@ -1134,9 +1142,8 @@ async def act(c: str, kind: str, payload: dict[str, Any], session: str | None = 
     if not isinstance(payload, dict):
         raise StateError("the act's argument must be a JSON object")
     if kind in SERVER_ACTS and transport(c, session) == SERVER:
-        path = server_route(c, kind, payload)
-        if path is not None:
-            got = await asyncio.to_thread(_post_to_server, path)
+        if server_route(c, kind, payload) is not None:
+            got = await asyncio.to_thread(_post_to_server, c, kind, payload)
             return {"ok": True, **{k: v for k, v in got.items() if k != "ok"}, "via": "server"}
     if fn is None:
         raise StateError(f"no act {kind!r}; {ACT_USAGE}")
@@ -1525,13 +1532,28 @@ async def _act_notice_dismiss(c: str, payload: dict[str, Any]) -> dict[str, Any]
     return _queued("notice-dismiss", c, {"id": _text(payload, "id")})
 
 
+async def _act_sign_out(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A sign-in notice's Sign it out in the terminal: the browser the notice names (`slug`, its id) signed out by
+    thimble's server, as `thimble unpair` signs out every browser (POST /api/ui/unpair {browser}, a token route), and
+    its notice gone. {queued: true}; StateError when the server does not take it."""
+    from . import cli  # noqa: PLC0415
+
+    browser = _text(payload, "slug")
+    status, body = await asyncio.to_thread(cli._request, "POST", f"{cli.api_url()}/api/ui/unpair",
+                                           {"browser": browser}, SERVER_ACT_TIMEOUT_S)
+    if status not in (200, 204):
+        why = body.get("detail") if isinstance(body, dict) else body
+        raise StateError(f"thimble's server did not sign that browser out ({status or 'no answer'}: {why})")
+    return {"queued": True, "signed_out": browser}
+
+
 _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict": _act_verdict, "label": _act_label,
          "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete,
          "label-undelete": _act_label_undelete, "label-show": _act_label_show, "label-filter": _act_label_filter,
          "seen": _act_seen, "stop": _act_stop, "view-accept": _act_view_accept,
          "view-reject": _act_view_reject, "view-proposals-off": _act_view_proposals_off,
          "view-propose-now": _act_view_propose_now, "view-retry": _act_view_retry,
-         "notice-dismiss": _act_notice_dismiss}
+         "notice-dismiss": _act_notice_dismiss, "sign-out": _act_sign_out}
 
 
 # --------------------------------------------------------------------------- the command line

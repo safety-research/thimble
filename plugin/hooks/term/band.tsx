@@ -47,7 +47,7 @@ import { clean, cut, noControls, width } from './lib'
 import { docsOf } from './model'
 import { dismissModNotice, modActWords, modNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
 import { browserShown, copyRemoteLink, copyTunnel, dismissLinks } from './offramp'
-import { answerOffer, dismissNotice, homeNotices, homeOffer, noticeAct, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
+import { answerOffer, dismissNotice, homeNotices, homeOffer, noticeAct, noticeWords, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
 import { COLORS } from './paint'
 import { readState } from './data'
 import { cxOf } from './ctx'
@@ -512,7 +512,8 @@ export function registerBand(on: On): void {
     }
     // every agent's open notices, newest first, then the terminal's own: `notice` in red on the label column, the words in
     // the text color, cut to the line; then the acts that fix it, the agent's thread (`see the orientation ›`) and
-    // `dismiss`, each saying what its press does. Each new one posts one toast (notices.tsx)
+    // `dismiss`, each saying what its press does. Notices with the same words are one row, their count first (`3× …`),
+    // and `dismiss` takes them all. Each new one posts one toast (notices.tsx)
     const notices = await homeNotices(cx)
     toastNewNotices(cx, notices)
     const mainFirst = (acts: BandAct[]) => acts.map((a, i) => (i === 0 && acts.length > 1 ? { ...a, primary: true } : a))
@@ -524,7 +525,7 @@ export function registerBand(on: On): void {
         { key: `${key}-dismiss`, label: 'dismiss', press: () => dismissNotice(cx, n) },
       ])
       const { room, own } = wordsRoom(cols, LW, acts)
-      rows.push(trayRow(key, 'notice', foldWords(key, n.text, room), acts, { color: COLORS.problem, own }))
+      rows.push(trayRow(key, 'notice', foldWords(key, noticeWords(n), room), acts, { color: COLORS.problem, own }))
     }
     for (const n of await modNotices(cx)) {
       const key = `above-mod-${n.key.replace(/[^a-z0-9-]+/gi, '-')}`

@@ -192,12 +192,17 @@ export async function homeViews(cx: Ctx): Promise<HomeView[]> {
  *  `pressed`, the answer pressed here that thimble has not written yet (answerOffer). */
 export type HomeOffer = { slug: string; name: string; description: string; task: string; claims: string[]; refused: string; pressed: '' | 'accept' | 'reject' }
 
+// why the last answer pressed here did not reach thimble (`thimble act` failed, or thimble refused it), by the proposal's
+// slug: the red row under the proposal says it until the next press, since no file changes to say it (bug hunt B11)
+let offerFailed: { slug: string; why: string } | null = null
+
 export async function homeOffer(cx: Ctx): Promise<HomeOffer | null> {
   const home = await surfaceValue<Obj>(cx, 'home-full')
   const o = home?.ok && isObj(home.value.offer) ? home.value.offer : null
   if (!o || !str(o.slug)) return null
   const pressed = o.pressed === 'accept' || o.pressed === 'reject' ? o.pressed : ''
-  return { slug: str(o.slug), name: str(o.name) || str(o.slug), description: str(o.description), task: str(o.task), claims: Array.isArray(o.claims) ? (o.claims as unknown[]).map(String) : [], refused: str(o.refused), pressed }
+  const failed = offerFailed?.slug === str(o.slug) ? offerFailed.why : ''
+  return { slug: str(o.slug), name: str(o.name) || str(o.slug), description: str(o.description), task: str(o.task), claims: Array.isArray(o.claims) ? (o.claims as unknown[]).map(String) : [], refused: str(o.refused) || failed, pressed }
 }
 
 /** Every agent's open notices, as home's state gives them (`notices`, newest first): a failure with its fix, from the
@@ -207,7 +212,9 @@ export async function homeOffer(cx: Ctx): Promise<HomeOffer | null> {
  *  (`open`: a side thread, an agent's chat, or none). One dismissed here is left out at once, before thimble has
  *  written it. */
 export type NoticeAct = { label: string; act: string; slug: string; config: string }
-export type HomeNotice = { id: string; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[] }
+/** `ids`: the open notices this one row stands for, the newest (`id`) first: notices with the same words, agent and
+ *  acts (three of an orientation's helpers switched to another model) show as one row with their count (bug hunt B5). */
+export type HomeNotice = { id: string; ids: string[]; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[] }
 
 // the notices dismissed or fixed from here in this session, by id: a later notice of the same failure has an id of its own
 const dismissed = new Set<string>()
@@ -215,13 +222,27 @@ const dismissed = new Set<string>()
 export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
   const home = await surfaceValue<Obj>(cx, 'home-full')
   const rows = home?.ok && Array.isArray(home.value.notices) ? (home.value.notices as unknown[]).filter(isObj) : []
-  return rows
-    .filter(n => str(n.id) && str(n.text) && !dismissed.has(str(n.id)))
-    .map(n => {
-      const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
-      const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
-      return { id: str(n.id), text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config) })) }
-    })
+  const out: HomeNotice[] = []
+  const same = new Map<string, HomeNotice>()
+  for (const n of rows) {
+    if (!str(n.id) || !str(n.text) || dismissed.has(str(n.id))) continue
+    const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
+    const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
+    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config) })) }
+    const key = JSON.stringify([row.text, row.agent, row.open, row.acts])
+    const first = same.get(key)
+    if (first) first.ids.push(row.id)
+    else {
+      same.set(key, row)
+      out.push(row)
+    }
+  }
+  return out
+}
+
+/** A notice row's words: its count first when it stands for several notices (`3× …`), where a cut does not hide it. */
+export function noticeWords(n: HomeNotice): string {
+  return n.ids.length > 1 ? `${n.ids.length}× ${n.text}` : n.text
 }
 
 /** How long an answer pressed on the view proposal shows as pressed, at most: the holder of the workspace's passes
@@ -241,16 +262,18 @@ async function markOffer(cx: Ctx, slug: string, pressed: '' | 'accept' | 'reject
 
 /** The analyst's accept or reject of the view proposal, from the row above the prompt: `thimble act view-accept` or
  *  `view-reject` {slug}, which hands the answer to thimble and answers at once. The row shows the answer as pressed
- *  (`◌ accepting`) until home's state is read again or OFFER_PRESS_MS pass; an act refused, or a proposal that no
- *  longer waits, is a toast. */
+ *  (`◌ accepting`) until home's state is read again or OFFER_PRESS_MS pass; an act that failed or that thimble
+ *  refused, or a proposal that no longer waits, brings the controls back with why in the red row under the proposal. */
 export async function answerOffer(cx: Ctx, slug: string, verb: 'accept' | 'reject'): Promise<void> {
   if (!rt.sc) return
   const at = await cx.now()
+  if (offerFailed?.slug === slug) offerFailed = null
   await markOffer(cx, slug, verb, at)
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, `view-${verb}`, { slug })
   if (!got.ok || got.value.queued === false) {
+    const why = got.ok ? got.value.reason || 'the view proposal no longer waits' : got.error
+    offerFailed = { slug, why: `thimble could not ${verb} it: ${why}` }
     await markOffer(cx, slug, '', at, at)
-    cx.toast(`thimble: ${got.ok ? got.value.reason || 'the view proposal no longer waits' : got.error}`)
     return
   }
   cx.later(OFFER_PRESS_MS, () => void markOffer(cx, slug, '', at, at))
@@ -271,7 +294,8 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
 }
 
 /** A notice's act: `view-propose-now` (try again) or `view-retry` {slug} (retry), which name the notice, so that thimble
- *  dismisses it before the act runs and a failure that comes again shows as a new notice; or `view-proposals-off`, as
+ *  dismisses it before the act runs and a failure that comes again shows as a new notice; `sign-out` {slug}, a sign-in
+ *  notice's Sign it out, which signs that browser out and takes its notice away; or `view-proposals-off`, as
  *  don't ask again, which dismisses it. The notice goes at once; one that thimble refuses stays, with why in a toast.
  *  `settings` (open settings) says in a toast where thimble's config is, which the terminal has in place of the
  *  browser's Settings, and leaves the notice. */
@@ -293,7 +317,9 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
     return
   }
   await hideNotice(cx, n.id)
-  cx.toast(a.act === 'view-propose-now' ? 'thimble: checking for a view proposal' : 'thimble: building the view again')
+  // the same notices this row stood for go with it: the act was the fix for each
+  for (const id of n.ids.slice(1)) await dismissOne(cx, id)
+  cx.toast(a.act === 'view-propose-now' ? 'thimble: checking for a view proposal' : a.act === 'sign-out' ? 'thimble: that browser is signed out' : 'thimble: building the view again')
 }
 
 /** The notice's row gone at once (home's state read again no longer has it once thimble has written why). */
@@ -303,12 +329,16 @@ async function hideNotice(cx: Ctx, id: string): Promise<void> {
   if (home?.ok && Array.isArray(home.value.notices)) await cx.setSurface('home-full', { ok: true, value: { ...home.value, notices: (home.value.notices as unknown[]).filter(x => !isObj(x) || str(x.id) !== id) } })
 }
 
-/** A notice dismissed, as its × does in the browser: gone at once, and `thimble act notice-dismiss` {id} has thimble
- *  write it, so it stays gone after a relaunch. */
+/** A notice dismissed, as its × does in the browser, with every notice its row stands for: gone at once, and `thimble
+ *  act notice-dismiss` {id} has thimble write each, so they stay gone after a relaunch. */
 export async function dismissNotice(cx: Ctx, n: HomeNotice): Promise<void> {
-  await hideNotice(cx, n.id)
+  for (const id of n.ids) await dismissOne(cx, id)
+}
+
+async function dismissOne(cx: Ctx, id: string): Promise<void> {
+  await hideNotice(cx, id)
   if (!rt.sc) return
-  const got = await act(cx, rt.sc, 'notice-dismiss', { id: n.id })
+  const got = await act(cx, rt.sc, 'notice-dismiss', { id })
   if (!got.ok) cx.toast(`thimble: the notice was not dismissed: ${got.error}`)
 }
 

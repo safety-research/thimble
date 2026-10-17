@@ -40,7 +40,8 @@ Kinds that tell of the setup rather than a failure:
   sandbox      key `no-box:<extension>`: an extension's program runs without a sandbox (harness.py)
   setup        keys `env:<NAME>` and `proxy`: what /thimble found in the shell (events.session_route), in words this
                module writes from the key (setup_text), never words from the request
-  sign-in      key `sign-in:<id>`: a browser signed in to thimble (main.signed_in), with Sign it out
+  sign-in      key `signin:new:<id>`: a browser signed in to thimble (main.signed_in), with Sign it out; the browser
+               that signed in cannot dismiss it (dismiss_route)
 
 A failure of Anthropic's API is told in plain words with its fix, and each fix says where it runs (reason, API_WORDS):
 in the browser with its button, or "In your terminal: …" for one only Claude Code's terminal can run, such as /login or
@@ -527,8 +528,27 @@ async def list_route(c: str) -> list[dict[str, Any]]:
 async def dismiss_route(c: str, notice_id: str, request: Request) -> dict[str, Any]:
     """The analyst's x: {dismissed: bool}. 403 without the analyst's browser cookie: the server's token, which main's
     shim holds, does not take a notice away from the analyst (subagents.analyst_only)."""
-    from . import subagents  # noqa: PLC0415
+    from . import hook_auth, subagents  # noqa: PLC0415
 
     subagents.analyst_only(request)
     config.workspace_dir(c)
+    if _own_sign_in(c, notice_id, hook_auth.browser_id(request)):
+        raise HTTPException(403, OWN_SIGN_IN)
     return {"dismissed": dismiss(c, notice_id)}
+
+
+# a dismiss_route's 403 for the notice of the asking browser's own sign-in: the notice is how the analyst sees a sign-in
+# that was not theirs, in the browser and above the terminal's prompt, so the browser it tells of cannot hide it
+OWN_SIGN_IN = "This notice tells of this browser's own sign-in, so only another browser or the terminal can dismiss it."
+
+
+def _own_sign_in(c: str, notice_id: str, browser: str) -> bool:
+    """Whether the open notice `notice_id` is the notice of the sign-in of the browser whose id is `browser`."""
+    if not browser:
+        return False
+    for n in open_notices(c):
+        if n.get("id") != notice_id or n.get("kind") != "sign-in":
+            continue
+        acts = n.get("action") if isinstance(n.get("action"), list) else [n.get("action")]
+        return any(isinstance(a, dict) and a.get("do") == "sign-out" and a.get("slug") == browser for a in acts)
+    return False

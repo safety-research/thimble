@@ -96,10 +96,15 @@ def test_h2_h3_main_s_events_written_to_the_file_after_the_press_reach_main_thro
 
 async def test_after_the_press_an_act_whose_state_the_server_holds_goes_to_the_server_s_route(ws, monkeypatch):
     """Comments of a document and of Claude's answers, and the view proposals and notices, after the press: the act
-    posts to the server's route (with the token's proof) instead of changing the files here. Before the press, and for
-    a peer, it runs here; an act the server holds nothing of always runs here."""
+    posts its kind and payload to the server's route for `thimble act` (with the token's proof) instead of changing the
+    files here. Before the press, and for a peer, it runs here; an act the server holds nothing of always runs here."""
     sent: list[str] = []
-    monkeypatch.setattr(local, "_post_to_server", lambda path: sent.append(path) or {"ok": True, "status": "dismissed"})
+
+    def post(c, kind, payload):
+        sent.append(local.server_route(c, kind, payload))
+        return {"ok": True, "status": "dismissed"}
+
+    monkeypatch.setattr(local, "_post_to_server", post)
     ran: list[str] = []
 
     async def fake_resolve(c, payload):
@@ -122,3 +127,43 @@ async def test_after_the_press_an_act_whose_state_the_server_holds_goes_to_the_s
     assert ran == ["c1", "c3"], "a peer's act runs here"
     with pytest.raises(local.StateError):
         await local.act(CORPUS, "comment-resolve", {"comment": "c4"}, session=MAIN)
+
+
+@pytest.mark.real_write_guard
+async def test_after_the_press_the_terminal_s_accept_reaches_the_server_with_the_token_alone(ws, monkeypatch,
+                                                                                              plugin_headers):
+    """Bug hunt B11: after the press, `accept` on the terminal's view proposal row posted the token's proof to the
+    browser's accept route, which takes only a signed-in browser's cookie, and got 403. `thimble act` now posts to the
+    server's route of its own (term_acts.py), a token route, which accepts the view proposal as the browser's Accept
+    does, and answers {queued: false, reason} when thimble refuses the click; the browser's route still refuses the
+    token."""
+    from fastapi.testclient import TestClient
+
+    from app import cli, hook_auth, main, views
+
+    monkeypatch.setenv("THIMBLE_PORT", "8300")
+    monkeypatch.delenv("THIMBLE_DEV", raising=False)
+    plugin_headers()  # the token in the test's server.json, which cli._request proves
+    client = TestClient(main.create_app(), base_url="http://testserver")
+    asked: list[tuple[str, str]] = []
+
+    def request(method, url, body=None, timeout=5.0, cookie=None):  # cli._request, through the app
+        assert cookie is None, "the terminal holds no browser's cookie"
+        path = "/" + url.split("/", 3)[3]
+        asked.append((method, path))
+        r = client.request(method, path, json=body, headers=hook_auth.headers(hook_auth.token(), 80))
+        return r.status_code, r.json()
+
+    monkeypatch.setattr(cli, "_request", request)
+    accepted: list[str] = []
+    refusal = {"kind": "no-module", "reason": "Claude Code's session is not ready for thimble yet"}
+    answers = iter([{"slug": "board", "status": "queued"}, {"slug": "board", "status": "suggested", "refused": refusal}])
+    monkeypatch.setattr(views, "accept", lambda c, slug: accepted.append(slug) or next(answers))
+    _press(ws)
+    out = await local.act(CORPUS, "view-accept", {"slug": "board"}, session=MAIN)
+    assert accepted == ["board"] and out == {"ok": True, "queued": True, "via": "server"}
+    assert asked == [("POST", f"/api/ws/{CORPUS}/act")] and hook_auth.guarded("POST", asked[0][1])
+    out = await local.act(CORPUS, "view-accept", {"slug": "board"}, session=MAIN)
+    assert out["queued"] is False and out["reason"] == refusal["reason"], "a refusal comes back with its reason"
+    r = client.post(f"/api/ws/{CORPUS}/views/proposals/board/accept", headers=hook_auth.headers(hook_auth.token(), 80))
+    assert r.status_code == 403, "the browser's route takes only the browser's cookie"

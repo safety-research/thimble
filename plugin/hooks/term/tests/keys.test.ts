@@ -267,7 +267,7 @@ async function above($: E): Promise<M> {
   return (await $.ui.mount(ABOVE)) as unknown as M
 }
 
-test('the view proposal row · accept and reject hand the answer to thimble (`thimble act view-accept|view-reject {slug}`); the row says so until home is read again; one thimble refuses is a toast and the controls come back', { timeoutMs: 30_000 }, async ($, on) => {
+test('the view proposal row · accept and reject hand the answer to thimble (`thimble act view-accept|view-reject {slug}`); the row says so until home is read again; one that fails or that thimble refuses brings the controls back, with why in the red row under the proposal', { timeoutMs: 30_000 }, async ($, on) => {
   const w = world(on)
   w.states.home = { ...w.states.home, offer: OFFER }
   await start($, w)
@@ -287,7 +287,8 @@ test('the view proposal row · accept and reject hand the answer to thimble (`th
   row = await above($)
   expect(await row.find({ type: 'Box', key: 'above-offer' })).toBeUndefined()
   await row.unmount()
-  // a new proposal, rejected; one thimble refuses (it no longer waits) is a toast, and the controls come back
+  // a new proposal, rejected; one thimble refuses (it no longer waits): the controls come back, and the red row under
+  // the proposal says why
   w.states.home = { ...w.states.home, offer: { ...OFFER, slug: 'board-threads', name: 'Board Threads' } }
   w.stamps.set(`${WS}/views/proposals.json`, 3)
   await w.clock.advance(1100)
@@ -296,9 +297,29 @@ test('the view proposal row · accept and reject hand the answer to thimble (`th
   await row.press({ key: 'above-offer-reject' })
   await w.clock.settle()
   expect(w.acts.at(-1)).toEqual({ kind: 'view-reject', payload: { slug: 'board-threads' } })
-  expect(w.toasts.at(-1)).toBe("thimble: the view proposal 'Board Threads' no longer waits")
   await row.unmount()
   row = await above($)
   expect(await row.find({ type: 'Button', key: 'above-offer-reject' })).toBeDefined()
+  expect(shown(await row.find({ type: 'Box', key: 'above-offer-refused' }))).toContain("thimble could not reject it: the view proposal 'Board Threads' no longer waits")
+  await row.unmount()
+  // bug hunt B11: an accept whose `thimble act` fails (the server answered 403) says why in the red row, as no toast
+  // that goes by does
+  w.refuse = { 'view-accept': "thimble's server did not take this change (403: open thimble's page)" }
+  row = await above($)
+  await row.press({ key: 'above-offer-accept' })
+  await w.clock.settle()
+  await row.unmount()
+  row = await above($)
+  expect(await row.find({ type: 'Button', key: 'above-offer-accept' })).toBeDefined()
+  expect(shown(await row.find({ type: 'Box', key: 'above-offer-refused' }))).toContain("thimble could not accept it: thimble's server did not take this change (403")
+  await row.unmount()
+  // the next press clears it while it runs
+  w.refuse = {}
+  row = await above($)
+  await row.press({ key: 'above-offer-accept' })
+  await w.clock.settle()
+  await row.unmount()
+  row = await above($)
+  expect(await row.find({ type: 'Box', key: 'above-offer-refused' })).toBeUndefined()
   await row.unmount()
 })
