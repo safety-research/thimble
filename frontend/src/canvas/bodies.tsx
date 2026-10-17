@@ -20,7 +20,7 @@ import { loadSettings, modelLabel } from '../lib/models'
 import { addressLabel, hiddenPath } from '../lib/refs'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
-import type { Cell, Concept, ConceptDetail, ResolvedRef } from '../lib/types'
+import type { Cell, Concept, ConceptDetail, FilterScope, ResolvedRef } from '../lib/types'
 import { CanvasContext } from './context'
 import { CustomFrame, DatasetView } from './DataViz'
 import { conceptName, type ConceptDetailState } from './concepts'
@@ -317,7 +317,7 @@ export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' |
 /**
  * A label card's body, drawn by a fixed template (a label card is deterministic, so no model checks it); the label row
  * above it names the label (LabelHead, CardFace CardLabels). The value table: value · units · share, each value a
- * button that sets the scope's filter, every value's share of the same total (details labelShares); the units that
+ * button that sets the scope's filter, its tooltip saying what the click shows (ValueButton), every value's share of the same total (details labelShares); the units that
  * total is of the label row states. Under it the Rule disclosure, closed, which opens the classifier's prompt, pattern
  * or code, and Definition and records, which opens the label's definition and its records under each value in the
  * card's details (DetailPanel LabelDetails); it shows only on the board and in focus mode, where those details open,
@@ -406,10 +406,7 @@ function LabelBody({ cellId, conceptId, concept, error, reload }: { cellId: stri
                 <tr key={v}>
                   <td>
                     {classes ? <span className={`bcell-value-square${cls?.highlight ? ' is-lit' : ''}`} style={{ '--c': colourVar(cls?.color) } as CSSProperties} title={cls?.highlight ? 'highlighted in Files' : undefined} /> : null}
-                    <button type="button" className={`bcell-value${on ? ' is-on' : ''}`} aria-pressed={on} disabled={!scope || pending != null} onClick={() => void toggle(v)} onMouseDown={(e) => e.stopPropagation()}>
-                      {pending === v ? <Spinner size={10} label="setting the filter" /> : null}
-                      {v}
-                    </button>
+                    <ValueButton value={v} on={on} cue={scope ? labelValueCue(scope, known.unit, noCounts ? null : (counts[v] ?? 0), on) : null} pending={pending === v} disabled={!scope || pending != null} onToggle={() => void toggle(v)} />
                   </td>
                   <td className="num">{noCounts ? '—' : (counts[v] ?? 0).toLocaleString()}</td>
                   <td className="num">{noCounts ? '—' : shares[v]}</td>
@@ -463,6 +460,30 @@ function LabelBody({ cellId, conceptId, concept, error, reload }: { cellId: stri
         </div>
       )}
     </div>
+  )
+}
+
+/** What a click on a value of a label card does, as its tooltip says it: shows only the `n` units with that value
+ * where the label's scope shows them (Files, the canvas, the report), or, while that filter is `on`, shows them all
+ * again; `n` null while a run has counted none. Pure. */
+export function labelValueCue(scope: FilterScope, unit: string | undefined, n: number | null, on: boolean): string {
+  const all = unitWord(unit, 2)
+  const these = n == null ? `the ${all} with this value` : n === 1 ? `this ${unitWord(unit, 1)}` : `these ${n.toLocaleString()} ${unitWord(unit, n)}`
+  if (scope === 'files') return on ? `Show all ${all} in Files` : `Show ${these} in Files`
+  if (scope === 'canvas') return on ? `Show all ${all}` : `Show only ${these}`
+  return on ? `Show all ${all} in the report` : `Show only ${these} in the report`
+}
+
+/** A value of a label card's table: a button that sets the scope's filter to it, its tooltip saying what the click does
+ * (labelValueCue), on hover and at keyboard focus. */
+function ValueButton({ value, on, cue, pending, disabled, onToggle }: { value: string; on: boolean; cue: string | null; pending: boolean; disabled: boolean; onToggle: () => void }) {
+  const { props, tip } = useTooltip(disabled ? null : cue, undefined, 'start')
+  return (
+    <button type="button" className={`bcell-value${on ? ' is-on' : ''}`} aria-pressed={on} disabled={disabled} onClick={onToggle} onMouseDown={(e) => e.stopPropagation()} {...props}>
+      {pending ? <Spinner size={10} label="setting the filter" /> : null}
+      {value}
+      {tip}
+    </button>
   )
 }
 
