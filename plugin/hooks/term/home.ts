@@ -17,7 +17,8 @@ import type { Line, Seg } from './draw'
 import { lineWidth, valueColour, width } from './draw'
 import { FRESH, MARGIN_W, fitTo, headingLine, hintLines, pointed, ruleLine, spread } from './chrome'
 import { COLORS } from './paint'
-import { cutMiddle, quoted } from './lib'
+import { plainProse } from './cite'
+import { curlyQuotes, cutMiddle, quoted } from './lib'
 import { noFitValues } from './labels'
 
 export type SectionId = 'coverage' | 'citations' | 'checks' | 'views' | 'reports' | 'threads' | 'cards' | 'labels'
@@ -58,8 +59,9 @@ export type HomeCardGroup = { head: string; from: 'answer' | 'thread' | 'report'
 export type HomeLabel = { slug: string; name: string; kind: string; trial: boolean; counts: Record<string, number>; values: string[]; paths: string[]; running: boolean; ran?: boolean; state?: string; fresh?: boolean; colors?: Record<string, number>; noFit?: number; unsure?: number }
 /** A citation as home lists it (citesview.tsx): its value, its place in words, how it stands, the card it is on. */
 export type HomeCite = { key: string; value: string; place: string; verdict: string; why: string; ref: string; card?: string; n?: number }
-/** A check's open comment on a passage of an answer (C9). */
-export type HomeComment = { id: string; check: string; colour: string; quote: string }
+/** A check's open comment on a passage of an answer (C9): the passage as the answer wrote it (`quote`) and its anchor
+ *  (`ref`, `answer:<turn>#s<n>`). */
+export type HomeComment = { id: string; check: string; colour: string; quote: string; ref?: string }
 export type HomeData = {
   views: HomeView[]
   reports: HomeReport[]
@@ -551,15 +553,29 @@ function citationsSection(cs: readonly HomeCite[]): HomeSection {
   }
 }
 
-/** Checks (SPEC-v2 J7): the checks' open comments on passages of answers, each by its check, the flag in its color. */
+/** Checks (SPEC-v2 J7): the checks' open comments on passages of answers, one row per passage with its comments'
+ *  count and their checks, the flag in its first check's color; the passage in plain words with its chips
+ *  (plainProse), in straight quotation marks as every row's, its own straight ones curly. The section's count is the
+ *  comments', as the thimble line's. */
 function checksSection(cs: readonly HomeComment[]): HomeSection {
+  const passages = new Map<string, HomeComment[]>()
+  for (const c of cs) {
+    const key = c.ref || c.quote
+    passages.set(key, [...(passages.get(key) ?? []), c])
+  }
   return {
     id: 'checks',
     name: 'Checks',
     count: cs.length,
     summary: [],
     pane: { kind: 'pane', view: 'checks', title: 'Checks' },
-    rows: cs.map(c => ({ key: `comment:${c.id}`, glyph: { mark: '⚑', fg: c.colour }, title: quoted(c.quote), right: rightOf([c.check]), act: { op: 'open', open: { kind: 'comment', id: c.id } } })),
+    rows: [...passages.values()].map(([c, ...more]) => ({
+      key: `comment:${c!.id}`,
+      glyph: { mark: '⚑', fg: c!.colour },
+      title: quoted(curlyQuotes(plainProse(c!.quote).replace(/\s+/g, ' ').trim())),
+      right: rightOf([more.length ? `${num(more.length + 1)} comments` : '', ...new Set([c!, ...more].map(x => x.check))]),
+      act: { op: 'open', open: { kind: 'comment', id: c!.id } },
+    })),
   }
 }
 
