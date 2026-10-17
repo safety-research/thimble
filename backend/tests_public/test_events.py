@@ -106,3 +106,17 @@ def test_a_side_thread_is_named_by_its_question_and_one_named_by_its_answer_s_fi
     renamed = "main/what did bot-07 write on the welcome page?"
     assert notebook.read_notebook(agents._ws(CORPUS), old_group)["title"] == renamed
     assert [m["id"] for m in threads.find_threads(CORPUS, "main/i-ran-the-sweep")] == [old["id"]]
+
+
+def test_an_agent_s_thread_is_found_by_the_name_the_browser_gives_it_and_by_its_old_slug(client):
+    """Bug hunt G11: the browser's thread tree names a view build by the view's name and a writer by its document's
+    name, so /thimble:ask takes those names, as it still takes the slugs the tree gave before."""
+    from app import threads
+
+    build = agents.new_agent(CORPUS, "dev", "view: Tea Board", view="tea-board", announce=False)
+    review = agents.new_agent(CORPUS, "dev", "review: Tea Board", view="tea-board", review=True, announce=False)
+    writer = agents.new_agent(CORPUS, "writer", "Write report", doc="report", announce=False)
+    found = lambda name: [m["id"] for m in threads.find_threads(CORPUS, name)]  # noqa: E731
+    assert found("dev/Tea Board") == found("dev/tea-board") == [build["id"]]
+    assert found("dev/Tea Board review") == found("dev/tea-board-review") == [review["id"]]
+    assert found("Report") == [writer["id"]]

@@ -763,28 +763,49 @@ LISTED_ROLES = ("orient", "writer", "check", "dev", agents.STEP_ROLE)
 _TICKET_PREFIX_RE = re.compile(r"^ticket #\d+:\s*", re.I)
 
 
-def view_names(chats: list[dict]) -> dict[str, str]:
-    """The thread tree's names of a view's builds and reviews, by chat id, as the browser's tree gives them
-    (frontend chat/threads.ts): the first build `<view>`, its first review `<view>-review`, each later one the next
-    number (`<view>-2`, `<view>-review-2`), so no two share a name (live check L25)."""
-    out: dict[str, str] = {}
+_VIEW_TITLE_RE = re.compile(r"^(?:view|review):\s*", re.I)
+
+
+def view_names(chats: list[dict]) -> dict[str, list[str]]:
+    """The names of a view's builds and reviews, by chat id: the browser's thread tree's (frontend chat/threads.ts),
+    the view's name from the chat's title, the first build `<View>`, its first review `<View> review`, each later one
+    the next number (`<View> (2)`, bug hunt G11); and the slug's that the tree gave before 0.9.0, `<view>`,
+    `<view>-review`, `<view>-2`, so no two share a name (live check L25)."""
+    out: dict[str, list[str]] = {}
     seen: dict[str, int] = {}
     for m in sorted((m for m in chats if m.get("role") == "dev" and m.get("view")),
                     key=lambda m: str(m.get("created_at") or "")):
         base = f"{m['view']}-review" if m.get("review") else str(m["view"])
         seen[base] = seen.get(base, 0) + 1
-        out[str(m["id"])] = base if seen[base] == 1 else f"{base}-{seen[base]}"
+        n = seen[base]
+        name = _VIEW_TITLE_RE.sub("", str(m.get("title") or "")).strip() or str(m["view"])
+        shown = f"{name} review" if m.get("review") else name
+        out[str(m["id"])] = [base if n == 1 else f"{base}-{n}", shown if n == 1 else f"{shown} ({n})"]
     return out
 
 
-def _names(meta: dict, views: dict[str, str] | None = None) -> set[str]:
+def _doc_name(c: str | None, meta: dict) -> str:
+    """A writer's document's name, which names its thread in the browser's thread tree; '' for another chat."""
+    doc = str(meta.get("doc") or "") if meta.get("role") == "writer" else ""
+    if not doc or not c:
+        return ""
+    from . import report_types  # noqa: PLC0415
+
+    try:
+        return str((report_types.read_type(c, doc) or {}).get("name") or "")
+    except Exception:  # noqa: BLE001 - a name only helps find the thread
+        return ""
+
+
+def _names(meta: dict, views: dict[str, list[str]] | None = None, c: str | None = None) -> set[str]:
     """What names a chat in the thread tree, lower case: its title, the analyst's name for it, a ticket's slug as
-    the tree shows it (group-board-by-round), a view build's or review's tree name (view_names), a thread's fork
-    name, and the name a thread had before its question named it (agents.retitle_threads)."""
+    the tree shows it (group-board-by-round), a view build's or review's tree names (view_names), a writer's
+    document's name, a thread's fork name, and the name a thread had before its question named it
+    (agents.retitle_threads)."""
     title = str(meta.get("title") or "")
     words = re.findall(r"[^\W_]+", _TICKET_PREFIX_RE.sub("", title))
-    view = (views or {}).get(str(meta.get("id"))) or (str(meta.get("view") or "") if meta.get("role") == "dev" else "")
-    return {n.lower() for n in (title, str(meta.get("name") or ""), "-".join(words[:4]), view,
+    view = (views or {}).get(str(meta.get("id"))) or ([str(meta.get("view") or "")] if meta.get("role") == "dev" else [])
+    return {n.lower() for n in (title, str(meta.get("name") or ""), "-".join(words[:4]), *view, _doc_name(c, meta),
                                 str(meta.get(FORK_NAME_KEY) or ""), str(meta.get(agents.SLUG_KEY) or "")) if n.strip()}
 
 
@@ -800,7 +821,7 @@ def find_threads(c: str, name: str) -> list[dict]:
         return by_id
     low = q.lower()
     names = view_names(listed)
-    return [m for m in listed if any(low == n or low.endswith(f"/{n}") for n in _names(m, names))]
+    return [m for m in listed if any(low == n or low.endswith(f"/{n}") for n in _names(m, names, c))]
 
 
 def _one_thread(c: str, tool: str, name: str) -> tuple[dict | None, str]:

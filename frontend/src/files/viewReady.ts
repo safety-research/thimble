@@ -7,6 +7,7 @@
 // workspace in localStorage.
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { bus } from '../lib/bus'
+import { registerViewNames } from '../lib/cellName'
 import { isReplay } from '../lib/events'
 import { teleport } from '../lib/teleport'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -103,6 +104,8 @@ export function onBuilt(e: { status: string; asked?: boolean; accepted?: boolean
 export function useOpenAskedViews(ws: string, names: ReadonlyMap<string, string>): void {
   const known = useRef(names)
   known.current = names
+  // a chip of a view (the toast's, a citation's) names it by its name
+  useEffect(() => registerViewNames(names), [names])
   useEffect(
     () =>
       bus.on('view', (e) => {

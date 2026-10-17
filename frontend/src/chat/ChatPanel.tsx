@@ -20,7 +20,7 @@ import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { Icon } from '../components/Icon'
 import { UserMessage } from '../components/Message'
-import { RefChip } from '../components/RefChip'
+import { CardQuestions, RefChip } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { ThreadTree } from '../components/ThreadTree'
 import { useTooltip } from '../components/Tooltip'
@@ -56,6 +56,7 @@ import { ThreadRows } from './ThreadRows'
 import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from './threadStatus'
 import { answeredSince, composerTarget, pickItems, replyIn, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
+import { useDocNames } from './SurfaceChips'
 import { useChat, type ChatState } from './useChat'
 import { pendingAsks, TERMINAL_WAIT, terminalWaits, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
@@ -257,10 +258,12 @@ export function buildStatus(stages: readonly string[], live: boolean): { label: 
   return { label: last.label, state, tip: all.map((s) => (s.detail ? `${s.label}: ${s.detail}` : s.label)).join('\n') }
 }
 
-/** A running agent's progress at its row's edge: its calls answered of those made (30/31); '' before its first. Pure. */
+/** A running agent's progress at its row's edge, beside its spinner: how many steps it took so far (`31 steps`); ''
+ * before its first. Never a fraction of the steps made, which read as done (`27/27`) while it still worked (bug hunt
+ * G11). Pure. */
 export function stepProgress(rows: readonly Row[]): string {
-  const steps = toolSteps(rows.filter((r) => r.kind === 'tool'), true)
-  return steps.length ? `${steps.filter((s) => s.state === 'done').length}/${steps.length}` : ''
+  const n = toolSteps(rows.filter((r) => r.kind === 'tool'), true).length
+  return n ? `${n} ${n === 1 ? 'step' : 'steps'}` : ''
 }
 
 /** The strip's count: its subagents ended (done or failed) of those started (5/8), `8 done` once all have ended; ''
@@ -505,15 +508,17 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   }, [chats, main.meta?.permissions])
   // the chats of thimble's agents that wait in the terminal, where Claude Code asks them, and the chats they run under
   const terminalIds = useMemo(() => terminalWaits(main.meta, chats), [chats, main.meta])
+  // a writer's thread is named by its document's name
+  const docName = useDocNames(ws)
   const items = useMemo(
     () =>
       pickItems(
         chats,
         (m) => (m.id === current ? chat.running : !!m.running),
         (m) => (m.id === current ? false : isUnread(seen, m.id, m.n_messages)),
-        { current, waiting: waitingIds, terminal: terminalIds },
+        { current, waiting: waitingIds, terminal: terminalIds, docName },
       ),
-    [chats, current, chat.running, seen, waitingIds, terminalIds],
+    [chats, current, chat.running, seen, waitingIds, terminalIds, docName],
   )
   const labels = useMemo(() => threadLabels(items), [items])
   // a thread the analyst left while it answered says so once its answer is in: a toast with its chip, beside the dot
@@ -791,6 +796,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   return (
     <ThreadsContext.Provider value={{ labels, metas, main: main.meta }}>
+      <CardQuestions.Provider value={true}>
       <section
         className="chat"
         data-panel="chat"
@@ -915,6 +921,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           )}
         </div>
       </section>
+      </CardQuestions.Provider>
     </ThreadsContext.Provider>
   )
 }

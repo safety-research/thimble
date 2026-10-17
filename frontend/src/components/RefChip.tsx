@@ -18,7 +18,7 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { openCited } from '../lib/citeTargets'
 import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../lib/calls'
-import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
+import { cellLabel, cellQuestion, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames, viewLabel } from '../lib/cellName'
 import { callDetail, callFile, callTarget } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
 import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, noteCitedRef, onCitedFiles, parseRef, refLabel, shownValue } from '../lib/refs'
@@ -73,16 +73,24 @@ export const GlyphCites = createContext(false)
  * failed. */
 export const CardChipCites = createContext(false)
 
+/** True where a chip names a card by its question, cut (lib/cellName cellQuestion), rather than its short name: the
+ * browser chat, where the analyst reads which card a step made or a reply cites (bug hunt G11). */
+export const CardQuestions = createContext(false)
+
 /** A random card id of an older card, never shown. */
 const RANDOM_CARD_ID = /^[0-9a-f]{8}$/
+
+/** A card's name on a chip: its question, cut, where chips name cards by their questions (`questions`, CardQuestions),
+ * else its short name; undefined while the card is not known. */
+const cardName = (id: string, questions: boolean): string | undefined => (questions ? cellQuestion(id) : undefined) ?? cellLabel(id)
 
 /** The name a chat reply's citation of a card shows on its chip: its chip's label (chipLabel), the card named by its
  * id while the canvas's name for it is not known yet, since a card made since ids are names is named by its id; an
  * older card's random id is never shown. */
-export function cardCiteLabel(ref: string, home?: string | null, ws = ''): string {
+export function cardCiteLabel(ref: string, home?: string | null, ws = '', questions = false): string {
   const p = parseRef(ref)
-  const known = p?.kind === 'cell' ? cellLabel(p.cellId) : undefined
-  if (p?.kind !== 'cell' || (known && known !== 'card') || RANDOM_CARD_ID.test(p.cellId)) return chipLabel(ref, home, ws)
+  const known = p?.kind === 'cell' ? cardName(p.cellId, questions) : undefined
+  if (p?.kind !== 'cell' || (known && known !== 'card') || RANDOM_CARD_ID.test(p.cellId)) return chipLabel(ref, home, ws, questions)
   return cardPartLabel(p, p.cellId, home === p.cellId) ?? p.cellId + (p.exec != null ? `@${p.exec}` : '')
 }
 
@@ -111,7 +119,7 @@ export function compactLabel(ref: string): string {
 
 /** A chip's name: a cell's or view's name alone, and for a ref into part of a card its table cell or lines (lib/refs
  * cardPartLabel), without the card's name when the chip sits in that card (`home`). Other refs read as compactLabel. */
-export function chipLabel(ref: string, home?: string | null, ws = ''): string {
+export function chipLabel(ref: string, home?: string | null, ws = '', questions = false): string {
   const p = parseRef(ref)
   if (p?.kind === 'call') {
     // what the call points at in plain words, once a thread or a read registered it; its step number until then
@@ -120,10 +128,12 @@ export function chipLabel(ref: string, home?: string | null, ws = ''): string {
     return p.line != null ? `${line} · ${p.endLine != null ? `lines ${p.line}–${p.endLine}` : `line ${p.line}`}` : line
   }
   if (p?.kind === 'cell') {
-    const name = cellLabel(p.cellId) ?? 'card'
+    const name = cardName(p.cellId, questions) ?? 'card'
     return cardPartLabel(p, name, home === p.cellId) ?? name + (p.exec != null ? `@${p.exec}` : '')
   }
   if (p?.kind === 'view' && p.key) return p.slug
+  // a whole view by its name, once Files listed it, never its slug
+  if (p?.kind === 'view') return viewLabel(p.slug) ?? compactLabel(ref)
   return compactLabel(ref)
 }
 
@@ -314,7 +324,9 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   // a standalone citation of a card in a chat reply (CardChipCites) is the card's chip with its name, as a step row
   // draws the cards it made
   const cardChip = useContext(CardChipCites) && value == null && !!cite && parsed?.kind === 'cell'
-  const name = () => (cardChip ? cardCiteLabel(ref, home, ws) : chipLabel(ref, home, ws))
+  // in the chat a card is named by its question, in the body face
+  const questions = useContext(CardQuestions)
+  const name = () => (cardChip ? cardCiteLabel(ref, home, ws, questions) : chipLabel(ref, home, ws, questions))
   const label = useSyncExternalStore(onNames, name, name)
   // the citation's check: one that failed is red with ×, as a ref the link pass named broken is; one the check
   // rewrote keeps its revisions for a click
@@ -559,7 +571,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
           {shownValue(value ?? '')}
         </span>
       ) : (
-        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={failed ? 'x' : icon} face={(kind && NAME_KINDS.has(kind)) || (call && !wordsFile(call)) ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
+        <Chip kind="ref" tone={refTone(ref)} as="span" ref={chipEl} icon={failed ? 'x' : icon} face={(kind && NAME_KINDS.has(kind)) || (call && !wordsFile(call)) || (questions && kind === 'cell') ? 'sans' : 'mono'} className={cls} data-ref={ref} {...anchorAttrs} aria-label={iconOnly ? label : undefined} tabIndex={interactive ? -1 : undefined} role={interactive ? 'link' : undefined} {...handlers}>
           {iconOnly ? null : label}
         </Chip>
       )}

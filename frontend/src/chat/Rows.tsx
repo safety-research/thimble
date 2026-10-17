@@ -16,7 +16,7 @@ import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
 import { Mark } from '../components/Marks'
 import { UserMessage } from '../components/Message'
-import { CardChipCites, RefChip, scrubIds } from '../components/RefChip'
+import { CardChipCites, CardQuestions, RefChip, scrubIds } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { ChipRun, ToolCard, type ToolState } from '../components/ToolCard'
 import { api } from '../lib/api'
@@ -185,6 +185,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
   }, [asked, answers.comments])
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
+      <CardQuestions.Provider value={true}>
       <AnswerMarksContext.Provider value={marksCtx}>
       {shown.map((r, i) => {
         switch (r.kind) {
@@ -262,6 +263,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
       })}
       {streaming && !toolPending && <Working />}
       </AnswerMarksContext.Provider>
+      </CardQuestions.Provider>
     </ChipContext.Provider>
   )
 }

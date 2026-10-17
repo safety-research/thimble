@@ -1,7 +1,7 @@
 // The chips that name a document, a canvas group or a label. In the chat each is drawn as a view's chip (ViewTab) with
 // its glyph; a label's row chip, in a view's list of its fields and labels, is its row in the Labels pane, a size
 // smaller. Each is a button when it goes somewhere.
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties, MouseEvent, ReactNode } from 'react'
 import { useConcepts } from '../canvas/concepts'
 import { Icon } from '../components/Icon'
@@ -51,6 +51,26 @@ function loadTypes(ws: string): void {
       typesLoading.delete(ws)
       typesListeners.forEach((fn) => fn())
     })
+}
+
+/** Each document's name by its slug (docLabel), read again when a document is made or renamed: what names a writer's
+ * thread in the thread tree. */
+export function useDocNames(ws: string): (slug: string) => string {
+  const [n, bump] = useState(0)
+  useEffect(() => {
+    if (!ws) return
+    const fn = () => bump((k) => k + 1)
+    typesListeners.add(fn)
+    if (!typesCache.has(ws)) loadTypes(ws)
+    const off = bus.on('report', () => loadTypes(ws))
+    return () => {
+      typesListeners.delete(fn)
+      off()
+    }
+  }, [ws])
+  // a new function when the names may have changed, so what is computed from it is computed again
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useCallback((slug: string) => docLabel(slug, typesCache.get(ws)), [ws, n])
 }
 
 function useDocName(ws: string, slug: string): string {
