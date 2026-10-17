@@ -632,8 +632,10 @@ export const register: Register = (on, options) => {
 
   // ---------------------------------------------------------------------------------------------- main's turn
 
+  // main's turn only: a subagent's turn (a check, an orientation's helper) starting meanwhile would start main's over and
+  // lose the cards made before it (README capture 10-17: a card made before four checks started was never drawn)
   on('turn.start', { turnId: /^/ }, async ($, e, next) => {
-    if (rt.sc) {
+    if (rt.sc && e.agentId === undefined) {
       const own = rt.own.has(e.text)
       rt.own.delete(e.text)
       rt.turn = { id: e.turnId, at: new Date(await $.clock.now()).toISOString(), cards: [], row: '', parts: [[]], views: [], own }

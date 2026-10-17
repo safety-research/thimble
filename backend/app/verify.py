@@ -515,11 +515,10 @@ def _heals_at_start(links: dict) -> bool:
 
 
 def rescan(c: str | None = None) -> int:
-    """Derive the pending cell jobs from state: a code cell that ran clean whose `verification.exec_count` differs gets
-    a
-    fresh record, a pending record is re-enqueued, and a hybrid-form record (_heals_at_start) is re-run once. Returns
-    the
-    number of cells touched. Nothing under the tests' switch (CHECK_JOBS)."""
+    """Derive the pending cell jobs from state: a card with code (notebook.RUNNABLE_KINDS) that ran clean whose
+    `verification.exec_count` differs gets a fresh record, a pending record is re-enqueued, and a hybrid-form record
+    (_heals_at_start) is re-run once. Returns the number of cells touched. Nothing under the tests' switch
+    (CHECK_JOBS)."""
     if not CHECK_JOBS:
         return 0
     if c is not None:
@@ -540,8 +539,11 @@ def rescan(c: str | None = None) -> int:
                     continue
                 changed = False
                 for cell in nb.get("cells") or []:
-                    if not isinstance(cell, dict) or cell.get("kind", "code") != "code" or not cell.get("id"):
+                    if not isinstance(cell, dict) or not cell.get("id"):
                         continue
+                    # every kind that runs code (a table, a plot, a timeline), not only `code`: a table's or a plot's
+                    # check that a stopped server or an ended `thimble-run` left pending was never run again, so its
+                    # citations stayed ◌ for good (README capture 10-17)
                     if not _runnable(cell):
                         continue
                     v = cell.get("verification")

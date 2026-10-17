@@ -106,6 +106,23 @@ async def test_a_6_cited_at_a_line_that_shows_only_a_longer_number_stays_contrad
     assert "6" not in _values(links["resolved"]), links
 
 
+def test_a_tables_check_left_pending_runs_again_when_the_server_starts(workspaces_tmp, monkeypatch):
+    """The ◌ for good of 10-17: a table's or a plot's links check that a stopped server or an ended `thimble-run` left
+    pending is queued again by the rescan at the server's start, as a `code` card's is; the rescan skipped every other
+    kind, so starting the server again left its citations ◌."""
+    cell = card(LOAD + PRINT, [PRINTED], "revisions.jsonl holds [[14,591|card:SELF@out0#L1]] saves.", kind="table")
+    ws = config.workspace_dir(CORPUS)
+    with notebook.editing(ws):
+        nb, stored = notebook._locate(ws, cell["id"])
+        stored["verification"]["links"].update(status="pending", checked=False)
+        notebook.write_notebook(ws, nb)
+    queued: list[str] = []
+    monkeypatch.setattr(verify, "CHECK_JOBS", True)
+    monkeypatch.setattr(verify, "_enqueue_links", lambda c, cell, version: bool(queued.append(cell["id"])) or True)
+    assert verify.rescan(CORPUS) == 1
+    assert queued == [cell["id"]]
+
+
 def test_tier2_unique_table_cell():
     html = (
         "<table><thead><tr><th></th><th>assignments</th></tr></thead>"

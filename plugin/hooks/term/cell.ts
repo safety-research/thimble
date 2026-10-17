@@ -357,6 +357,23 @@ function axisValues(enc: Enc): (string | number)[] {
   })
 }
 
+/** A chart's rows in the order its axes put them where a chart says how (a heatmap's `sort=days`), as the browser
+ *  draws them: by the axis of the table's first column, then by the other; each a discrete axis (ordinal or nominal)
+ *  with a `sort` of its own. A chart that says no order keeps its data's: its rows are a table, not its picture
+ *  (README capture 10-17: a heatmap's days, grouped as text, read `Jul 01, Jul 02, Jun 01`). */
+function axisOrder(rows: Record<string, unknown>[], spec: VegaLite): Record<string, unknown>[] {
+  const enc = spec.encoding ?? {}
+  const columns = rows.length ? Object.keys(rows[0]!) : []
+  const axes = (['x', 'y'] as const).filter(ch => {
+    const e = enc[ch]
+    return e?.field && columns.includes(e.field) && (e.type === 'ordinal' || e.type === 'nominal') && e.sort !== undefined && e.sort !== null
+  })
+  // the minor axis first: a stable sort by the major one keeps its order within each of the major's values
+  return axes
+    .sort((a, b) => columns.indexOf(enc[b]!.field!) - columns.indexOf(enc[a]!.field!))
+    .reduce((out, ch) => sortedBars(out, enc, ch, enc[ch]!.field!), rows)
+}
+
 function rowsTable(cell: ThimbleCell, rows: Record<string, unknown>[]): CardData | null {
   const columns = rows.length ? Object.keys(rows[0]!) : []
   if (!columns.length) return null
@@ -468,7 +485,7 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   if (vl && typeof vl === 'object') {
     const chart = chartCard(cell, vl)
     if (chart) return { card: chart, error }
-    const table = rowsTable(cell, anyRows(vl))
+    const table = rowsTable(cell, axisOrder(anyRows(vl), vl))
     if (table) return { card: table, error }
   }
   // a card type's card and a figure: the listing they print
