@@ -954,6 +954,25 @@ describe('local transport', () => {
     expect(e.notes()).toEqual(['before the press', 'after the press'])
   })
 
+  // bug hunt 7, H17: main continued after a quit runs locally (activate.continue_main), and its module, which had read
+  // launch.json before the move, said hello to the server every 2 s for as long as the session ran
+  it('over HTTP, a hello the server asks again while launch.json moved main to the local transport goes on through the files', async () => {
+    const server = new Server()
+    server.helloStatus = () => 409
+    const e = engine({ server })
+    e.writeFile(`${T}/roles.json`, { at: 'now', digest: 'd1', roles: ROLES })
+    e.writeFile(`${T}/subagents.json`, {})
+    await e.start()
+    await until(() => server.hellos.length >= 1)
+    e.writeFile(`${T}/launch.json`, launch()) // continue_main: this process is main, on the local transport
+    await until(() => `${T}/module.json` in e.files)
+    const asked = server.hellos.length
+    ask(e, 'mod_c', 'note', { text: 'through the files' })
+    expect(await answered(e, 'mod_c')).toEqual({ ok: true })
+    await new Promise(r => setTimeout(r, 40))
+    expect(server.hellos.length).toBe(asked)
+  })
+
   // bug hunt 7, H14: a session another took main from went idle at its refused hello, so after its /thimble took main
   // back its module said nothing until its next turn ended
   it('a refused hello goes on through the files as a peer, and takes main over HTTP again once launch.json makes it main', async () => {

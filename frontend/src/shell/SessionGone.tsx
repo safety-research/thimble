@@ -78,13 +78,25 @@ function Wrapped({ text }: { text: string }) {
   )
 }
 
-/** The agents of thimble's that main's quit stopped (route `subagent`, stopped by `quit`), as the card names them: the
- * orientation, the writer of a document, a check; '' when none. Pure. */
-export function stoppedAgentsLine(metas: Iterable<ChatMeta>): string {
+/** Whether the agent of `m`, stopped by a quit, stopped with the session that ended (`ended`), not with an earlier
+ * one (bug hunt 7, H17: the card named an orientation an earlier quit had stopped): it stopped once that session was
+ * attached (`since`), or, where the end does not say when that was, it ran in that session. Pure. */
+export function stoppedWith(m: ChatMeta, ended: SessionEnded | null | undefined): boolean {
+  if (!ended) return true
+  const stopped = Date.parse(String(m.ts_end ?? ''))
+  const since = Date.parse(String(ended.since ?? ''))
+  if (!Number.isNaN(stopped) && !Number.isNaN(since)) return stopped >= since
+  return !m.session || m.session === ended.session || (m.sessions ?? []).includes(ended.session)
+}
+
+/** The agents of thimble's that main's quit stopped (route `subagent`, stopped by `quit`) with the session that ended
+ * (`ended`, stoppedWith), as the card names them: the orientation, the writer of a document, a check; '' when none.
+ * Pure. */
+export function stoppedAgentsLine(metas: Iterable<ChatMeta>, ended?: SessionEnded | null): string {
   const names: string[] = []
   let orient = false
   for (const m of metas) {
-    if (m.route !== 'subagent' || m.status !== 'stopped' || m.stopped_by !== 'quit') continue
+    if (m.route !== 'subagent' || m.status !== 'stopped' || m.stopped_by !== 'quit' || !stoppedWith(m, ended)) continue
     const name = m.role === 'orient' ? 'the orientation' : m.role === 'writer' ? (m.doc ? `the writer of the ${m.doc}` : 'a writer') : m.role === 'check' ? (m.title ? `the ${m.title} check` : 'a check') : m.title || 'an agent'
     if (m.role === 'orient') orient = true
     if (!names.includes(name)) names.push(name)
@@ -208,7 +220,7 @@ export function SessionGone({ gone, ws }: { gone: Gone; ws: string }) {
   const [copied, setCopied] = useState(false)
   const scrim = useRef<HTMLDivElement>(null)
   const { asks, metas, labels } = useAsks(ws)
-  const stopped = stoppedAgentsLine(metas.values())
+  const stopped = stoppedAgentsLine(metas.values(), gone.ended)
   useEffect(() => {
     const others = [...document.body.children].filter((el) => el !== scrim.current && !el.hasAttribute('inert'))
     others.forEach((el) => el.setAttribute('inert', ''))

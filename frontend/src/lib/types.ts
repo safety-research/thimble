@@ -2108,6 +2108,8 @@ export interface SessionEnded {
   session: string
   cwd: string
   at: string
+  /** when it was attached: the agents that stopped before then stopped with an earlier session */
+  since?: string
 }
 export interface ChatMeta {
   /** a thread: the fork of main that answers it, once main forked it (backend threads.fork_started); `ended` once it

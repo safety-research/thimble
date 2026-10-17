@@ -18,9 +18,9 @@
 // session turned on beside a live main) and a session another took main from always use the files, and as a peer it
 // registers the agent types but takes no requests and writes no module.json. It reads launch.json again whenever the
 // file changes and at the end of each of main's turns; at the switch it takes the requests still waiting in
-// subagents.json, then goes on over HTTP. Over HTTP, once the server refuses its hello, a session that launch.json no
-// longer makes main (one another took main from) goes on through the files again, as a peer (toFiles). Over HTTP every
-// request proves the token of
+// subagents.json, then goes on over HTTP. Over HTTP, once the server asks for its hello again or refuses it, a session
+// that launch.json no longer makes main on the server's transport (main continued after a quit, which runs locally; a
+// session another took main from) goes on through the files again (toFiles). Over HTTP every request proves the token of
 // server.json and every answer proves it back (app/hook_auth.py), so a process on the port can neither hand it requests
 // nor read them.
 //
@@ -324,10 +324,11 @@ async function refuse($: Engine, m: State): Promise<void> {
   if (!(await toFiles($, m))) stop(m)
 }
 
-/** Over the server's transport, once the server refused the hello: when launch.json no longer makes this session main
- *  on the server's transport (another session took main), the module goes on through the workspace's files, main or a
- *  peer by launch.json (fileBegin), which follow launch.json from then on, rather than going idle (bug hunt 7, H14).
- *  True when it moved. */
+/** Over the server's transport, while the server asks for the hello again or refused it: when launch.json no longer
+ *  makes this session main on the server's transport (main continued after a quit runs on the local transport,
+ *  activate.continue_main; another session took main), the module goes on through the workspace's files, main or a peer
+ *  by launch.json (fileBegin), which follow launch.json from then on, rather than saying hello every RETRY_MS for as
+ *  long as the session runs (bug hunt 7, H13 and H17). True when it moved. */
 async function toFiles($: Engine, m: State): Promise<boolean> {
   if (!m.active || m.file || !m.ws) return false
   const launch = await readJson($, `${m.ws}/trusted/launch.json`)
@@ -489,6 +490,7 @@ async function begin($: Engine, m: State, cwd: string): Promise<void> {
     let state: Hello = first
     while (state === 'wait' && m.active && gen === m.gen) {
       await $.clock.sleep(RETRY_MS)
+      if (gen !== m.gen || (await toFiles($, m))) return
       state = await connect($, m)
     }
     if (gen !== m.gen) return
@@ -557,6 +559,7 @@ async function poll($: Engine, m: State, gen: number): Promise<void> {
       const said = await hello($, m)
       if (said === 'refused') return refuse($, m)
       if (said === 'ok') continue
+      if (await toFiles($, m)) return
     }
     await $.clock.sleep(RETRY_MS)
   }

@@ -17,6 +17,7 @@ from app import cc_plugin, config, hook_auth, module_bridge, session, tools
 
 
 CORPUS = "mini"
+REAL_OPENED = module_bridge._opened  # _fresh stands in for it in every test; the H17 test takes the real one
 MAIN = "11111111-1111-4111-8111-111111111111"
 CHILD = "33333333-3333-4333-8333-333333333333"
 NOTE = "The analyst started {role} {agent} ({what}) in thimble; its report goes to them there."
@@ -147,6 +148,47 @@ async def test_a_hello_from_a_session_that_is_not_the_workspace_s_main_is_refuse
     # a folder that is no workspace: 404 (a module /thimble turned on stays idle then; a launched one asks again later)
     r = await client.post("/api/module/hello", json={"cwd": "/nowhere", "session": MAIN}, headers=plugin_headers())
     assert r.status_code == 404
+
+
+async def test_a_live_main_launch_json_names_is_followed_at_its_hello_and_one_on_local_transport_waits(
+        client, plugin_headers, monkeypatch):
+    """Bug hunt 7, H17 (and H13's loop): the server answered the hello of the main launch.json names with 409 every 2 s
+    for as long as that session ran, since the server followed another session or none, so the browser never followed
+    it and its agents could not start; and a watcher of a session that had just taken main was told it was gone. The
+    live main launch.json names on the server's transport is followed at its hello, or its watcher's pull, and let in
+    at once. Main continued after a quit on the local transport (activate.continue_main) waits (LOCAL_NOW, so its
+    module goes on through the files) rather than being let in to a long poll no request reaches."""
+    from app import activate
+
+    monkeypatch.setattr(module_bridge, "_opened", REAL_OPENED)
+    attached: list[tuple[str, int | None]] = []
+
+    def attach(c, sid, cwd, transcript_path=None, pid=None, config_dir=None, **kw):
+        attached.append((sid, pid))
+        session._live[c] = session.Live(c, sid, cwd, None, pid)
+        return session._live[c]
+
+    monkeypatch.setattr(session, "attach", attach)
+    monkeypatch.setattr(activate, "main_alive", lambda c, rec=None: str((rec or {}).get("session")) == MAIN)
+    _launch(transport="server", pid=4242)
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 200, r.text
+    assert attached == [(MAIN, 4242)] and session.current(CORPUS).sid == MAIN
+    # the server follows another session, and main's watcher asks first: followed, not told it is gone
+    session._live[CORPUS] = session.Live(CORPUS, CHILD, _cwd(), None, 5151)
+    r = await client.get("/api/events/pull", params={"cwd": _cwd(), "session": MAIN, "wait": 0},
+                         headers=plugin_headers())
+    assert r.status_code == 204, r.text
+    assert attached == [(MAIN, 4242)] * 2 and session.current(CORPUS).sid == MAIN
+    # a session launch.json does not name is still refused, and nothing follows it
+    r = await Module(client, plugin_headers, CHILD).hello()
+    assert r.status_code == 403 and attached == [(MAIN, 4242)] * 2
+    # main continued after a quit, on the local transport: its hello waits
+    session._live.clear()
+    _launch(transport="local", pid=4242)
+    r = await Module(client, plugin_headers).hello()
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == module_bridge.LOCAL_NOW and attached == [(MAIN, 4242)] * 2
 
 
 # ----------------------------------------------------------------------------------------------- requests
