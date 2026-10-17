@@ -3,11 +3,12 @@ queue). Every process of the session that posts an event (the MCP shim, the hook
 acts) writes it to a file in the workspace, and the session's watcher (plugin/bin/.thimble-watch, the asyncRewake hook)
 takes it from there:
 
-  events/queue.jsonl   one line per event, as the model reads it: {id, kind, text, line, said, at, to?}; then, once a
-                       watcher took it, {taken: id, session, at}, which wakes that session with `text`; once main's held
-                       hook printed its `said` in the terminal, {shown: id}. A line for main's terminal that sends main no
-                       event (events.show) is {show: line, at}. Trimmed to the lines still needed once it grows past
-                       TRIM_BYTES.
+  events/queue.jsonl   one line per event, as the model reads it: {id, kind, text, line, said, at, to?, riders?,
+                       told_parts?, analyst?}; then, once a watcher took it, {taken: id, session, at}, which wakes that session
+                       with `text`, or one whose session is CANCELLED, for an event the analyst's Stop took back before
+                       any watcher took it; once main's held hook printed its `said` in the terminal, {shown: id}. A
+                       line for main's terminal that sends main no event (events.show) is {show: line, at}. Trimmed to
+                       the lines still needed once it grows past TRIM_BYTES.
   held-events.json     the quiet events (events.QUIET_KINDS) as notes, which ask for nothing: they ride along with the
                        next event under MEANWHILE, or with the session's next prompt (the held hook). The server keeps
                        main's here too. A note of a failed run of one of thimble's agents names the run in `about`, and
@@ -54,6 +55,7 @@ SAID = "› "  # events.SAID: opens the analyst's own words in an event's line
 TOLD_IN_CHAT = ("thread", "written")
 SHORT_CHARS = 60  # of a thread's question, or of a message to it, in its short line
 SERVER_TAKER = "server"  # the `session` of a {taken} record the server wrote as it took the event into its queue (drain)
+CANCELLED = "cancelled"  # the `session` of a {taken} record for an event the analyst's Stop took back (cancel)
 
 
 def queue_path(ws: Path) -> Path:
@@ -301,7 +303,9 @@ def append(ws: Path, note: dict[str, Any], render: Callable[[dict[str, Any]], st
            to: str | None = None) -> dict[str, Any]:
     """An event for session `to` (main's when None; events.post on local transport): the note ({content, meta,
     terminal}) with the session's held events riding along under MEANWHILE, as the model reads it (`render`,
-    events.render), appended to the queue. The record."""
+    events.render), appended to the queue. The record keeps those held events (`riders`), the names of the later
+    parts of main's guidance the note carries (`told_parts`), which a Stop gives back (cancel), and whether it is the
+    analyst's own message (`analyst`), which a Stop takes back."""
     path = queue_path(ws)
     with locked(path):
         riders = pop_held(ws, to)
@@ -312,7 +316,8 @@ def append(ws: Path, note: dict[str, Any], render: Callable[[dict[str, Any]], st
         meta = note.get("meta") or {}
         rec = {"id": str(meta.get("event") or secrets.token_hex(4)), "kind": str(meta.get("kind") or ""),
                "text": render(note), "line": str(note.get("terminal") or ""), "said": shown, "at": time.time(),
-               **({"to": to} if to else {})}
+               **({"to": to} if to else {}), **({"riders": riders} if riders else {}),
+               **({k: note[k] for k in ("told_parts", "analyst") if note.get(k)})}
         _append(path, rec)
     return rec
 
@@ -350,6 +355,21 @@ def take(ws: Path, session: str) -> dict[str, Any] | None:
         rec = left[0]
         _append(path, {"taken": rec["id"], "session": session, "at": time.time()})
     return rec
+
+
+def cancel(ws: Path) -> list[dict[str, Any]]:
+    """The analyst's own messages to main (`analyst`) that no watcher has taken, oldest first, each now taken by
+    CANCELLED, so that no watcher and no server takes them (the analyst's Stop, events.cancel_waiting); [] when none
+    waits."""
+    path = queue_path(ws)
+    if not path.exists():
+        return []
+    with locked(path):
+        gone = [r for r in waiting(ws) if r.get("analyst")]
+        if gone:
+            now = time.time()
+            _append(path, *({"taken": r["id"], "session": CANCELLED, "at": now} for r in gone))
+    return gone
 
 
 def drain(ws: Path) -> list[dict[str, Any]]:

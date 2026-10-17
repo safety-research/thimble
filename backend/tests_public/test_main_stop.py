@@ -106,3 +106,77 @@ async def test_main_s_stop_and_a_thread_s_take_the_analyst_s_cookie(bridge, plug
             await agents.interrupt_route(CORPUS, chat, bare)
         assert no.value.status_code == 403 and "start, message or stop thimble's agents" in no.value.detail
     assert bridge.calls == [], "the module is never asked"
+
+
+class _Req:
+    async def is_disconnected(self) -> bool:
+        return False
+
+
+def _idle_main(tmp_path, transport: str) -> tuple[Path, session.Live]:
+    """Main attached and idle at its prompt (no turn yet), its transport `transport` as launch.json records it, and on
+    the server its shim subscribed, as after the `thimble` command."""
+    from terminal_fakes import write_launch
+
+    import os
+
+    ws = config.workspace_dir(CORPUS)
+    write_launch(ws, session=SID, transport=transport, pid=os.getpid())
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)), str(p))
+    assert lv is not None
+    session.tail_once(lv)
+    events._subs.setdefault(CORPUS, set()).add(events.Sub(SID))
+    assert not lv.turn_open
+    return ws, lv
+
+
+async def test_a_stop_of_a_question_idle_main_has_not_got_takes_it_back_so_main_never_runs_it(bridge, tmp_path, analyst):
+    """Bug hunt G1: the analyst's first question from the browser waited for main's watcher, and Stop answered "It had
+    already ended." with the button spinning on, and the question ran minutes later. Stop takes back a message main has
+    not got: main stops running, its chat says so, no watcher gets it, the held event that rode along waits again and
+    the later parts of main's guidance it carried go with the next question."""
+    ws, lv = _idle_main(tmp_path, "server")
+    events.post(CORPUS, "labeled", {"text": "refunds: 12 yes", "name": "refunds"})
+    asked = events.post(CORPUS, "main", {"text": "What are these runs?"})
+    waiting = events._pending[(CORPUS, SID)][0]
+    assert asked["delivered"] == 1 and agents.running(CORPUS, agents.MAIN_ID)
+    assert "thimble's events arrive as" in waiting["content"] and "meanwhile:" in waiting["content"]
+    assert events.held(CORPUS) == [], "the held event rides along with the question"
+    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True, "cancelled": 1}
+    assert bridge.calls == [], "no turn of main's runs, so the module is asked nothing"
+    assert not agents.running(CORPUS, agents.MAIN_ID)
+    assert _notes() == [session.CANCELLED_TEXT]
+    assert (await events.pull_route(_Req(), cwd=str(config.corpus_dir(CORPUS)), session=SID, wait=0.2)).status_code == 204
+    assert [n["meta"]["kind"] for n in events.held(CORPUS)] == ["labeled"]
+    events.post(CORPUS, "main", {"text": "Which setup merged the most PRs?"})
+    again = events._pending[(CORPUS, SID)][0]
+    assert "Which setup" in again["content"] and "thimble's events arrive as" in again["content"]
+    assert [r["meta"]["kind"] for r in again["riders"]] == ["labeled"]
+
+
+async def test_on_local_transport_stop_takes_the_question_back_from_the_queue_file(bridge, tmp_path, analyst):
+    """Before a press the question waits in the workspace's queue file for main's watcher, which must never take it. A
+    request server code wrote to main (to stop the analyst's own subagent) is not the analyst's message, and stays."""
+    from app import event_files
+
+    ws, lv = _idle_main(tmp_path, "local")
+    request = events.post(CORPUS, "main", {"text": "Stop the subagent a1."}, mirror=False, line="› Stop a1")
+    asked = events.post(CORPUS, "main", {"text": "What are these runs?"})
+    assert [r["id"] for r in event_files.waiting(ws)] == [request["id"], asked["id"]]
+    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True, "cancelled": 1}
+    assert [r["id"] for r in event_files.waiting(ws)] == [request["id"]]
+    assert event_files.take(ws, SID)["id"] == request["id"] and event_files.take(ws, SID) is None
+    assert not agents.running(CORPUS, agents.MAIN_ID) and _notes() == [session.CANCELLED_TEXT]
+
+
+async def test_a_stop_while_main_runs_a_turn_ends_it_and_takes_back_the_question_that_waits(bridge, turn, analyst):
+    p, lv = turn
+    events._subs.setdefault(CORPUS, set()).add(events.Sub(SID))
+    events.post(CORPUS, "main", {"text": "And per day?"})
+    bridge.answers = [{"ok": True}]
+    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True}
+    assert [op for op, _ in bridge.calls] == ["abort", "note"]
+    assert not events._pending.get((CORPUS, SID)) and not agents.running(CORPUS, agents.MAIN_ID)
+    assert _notes() == [session.CANCELLED_TEXT, session.STOPPED_TEXT]

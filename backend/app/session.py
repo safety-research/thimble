@@ -196,6 +196,7 @@ SAFETY_TEXT = "Claude's safety check stopped a response, and the session is tryi
 SAFETY_STOP_TEXT = "The session stopped: Claude's safety check ended this turn"
 INTERRUPTED_TEXT = "The turn was interrupted in the terminal"
 STOPPED_TEXT = "The turn was stopped in the browser"
+CANCELLED_TEXT = "Stopped in the browser before main got it"  # a message the analyst's Stop took back (cancelled)
 WAITING_TEXT = "The session is waiting for you in the terminal"
 WAITING_FOR = {"permission prompt": "a permission prompt", "dialog open": "a dialog is open",
                "input needed": "a request for input", "sandbox request": "a sandboxed command asks for network access"}
@@ -1763,6 +1764,22 @@ def turn_stopped(c: str, *, stopped: bool = True) -> None:
     _end_turn(lv)
     lv.saved = -1  # _save_cursor writes the ended turn even when the transcript did not grow
     _save_cursor(lv)
+
+
+def cancelled(c: str, event_ids: list[str]) -> bool:
+    """The analyst's Stop took back messages main had not got yet (events.cancel_waiting): the mirror expects them no
+    more, main's chat says so (CANCELLED_TEXT), and main stops running unless a turn of its own runs, which the Stop
+    then ends too. Whether such a turn runs, as the transcript holds it now."""
+    for event_id in event_ids:
+        _expected.discard(event_id)
+    lv = _live.get(c)
+    if lv is not None:
+        _read_now(lv)
+    agents.chip(c, CHIP_KIND, CANCELLED_TEXT)
+    turn = lv is not None and lv.turn_open
+    if not turn:
+        agents.set_running(c, agents.MAIN_ID, False)
+    return turn
 
 
 def _user_line(lv: Live, text: str, by: str = TERMINAL, *, analyst: bool = True, **extra: Any) -> None:

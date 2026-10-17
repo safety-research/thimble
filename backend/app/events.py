@@ -346,6 +346,8 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         if mirror:
             agents.mirror(c, "user", by=agents.BROWSER, text=words, event=event_id)
         note = build_note(kind, event_id, words, {**payload, **_ultracode(c), **_filters(c)})
+        if mirror:  # the analyst's own message, which their Stop of main takes back while it waits (cancel_waiting)
+            note["analyst"] = True
     elif kind == THREAD:
         words = str(payload.get("text") or "")
         built = threads.event(c, payload, event_id)
@@ -439,7 +441,8 @@ def _drain_files(c: str) -> int:
     main = _main_sid(c) or files.main_session(ws)
     for rec in got:
         note = {"rendered": str(rec.get("text") or ""), "terminal": str(rec.get("said") or rec.get("line") or ""),
-                "meta": {"kind": str(rec.get("kind") or ""), "event": str(rec.get("id") or "")}}
+                "meta": {"kind": str(rec.get("kind") or ""), "event": str(rec.get("id") or "")},
+                **{k: rec[k] for k in ("riders", "told_parts", "analyst") if rec.get(k)}}
         _pending.setdefault((c, main or ""), deque()).append(note)
     if got:
         log.info("%s: %d event(s) from the queue file queued for main's watcher", c, len(got))
@@ -633,7 +636,7 @@ def _publish(c: str, note: dict[str, Any]) -> int:
     if held(c):
         riders = pop_held(c)
         note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}",
-                "terminal": _joined([note, *riders])}
+                "terminal": _joined([note, *riders]), "riders": riders}
     _pending.setdefault((c, to), deque()).append(note)
     _wake(c)
     if mine:
@@ -735,6 +738,39 @@ def queued_line(c: str, sid: str | None, chars: int = 110) -> str:
     line = f"thimble · {QUEUED if ws is None else QUEUED_TERMINAL}{waiting[0]}"
     room = chars - len(more)
     return (line if len(line) <= room else line[: room - 1].rstrip() + "…") + more
+
+
+def cancel_waiting(c: str) -> list[str]:
+    """The analyst's Stop of main (agents.interrupt_route): the messages they sent main (`analyst`, post) that no
+    watcher has taken yet are taken back, from this server's queue and from the queue file (event_files.cancel), so
+    that main never gets them, while a question that already reached main's turn is the turn's to stop. A request
+    server code wrote to main, such as one to stop the analyst's own subagent, stays. The held events that rode along
+    with them wait again for main's next event, and the later parts of main's guidance they carried go with the next
+    event that uses them (disclose.untold). Their ids, oldest first."""
+    from . import disclose  # noqa: PLC0415
+
+    gone: list[dict[str, Any]] = []
+    for key in [k for k in _pending if k[0] == c]:
+        mine = [n for n in _pending[key] if n.get("analyst")]
+        if mine:
+            _pending[key] = deque(n for n in _pending[key] if not any(n is m for m in mine))
+            gone += mine
+    try:
+        ws = config.workspace_path(c)
+    except ValueError:
+        ws = None
+    if ws is not None:
+        gone += event_files.cancel(ws)
+        disclose.untold(ws, gone)
+    riders = [r for n in gone for r in n.get("riders") or [] if isinstance(r, dict)]
+    if riders:
+        _keep_held(c, [*riders, *held(c)])
+    ids = [str((n.get("meta") or {}).get("event") or n.get("id") or "") for n in gone]
+    for key in [k for k in _notices if k[0] == c]:
+        _notices[key] = [x for x in _notices[key] if x[0] not in ids]
+    if ids:
+        log.info("%s: the analyst's Stop took back %d message(s) main had not got: %s", c, len(ids), " ".join(ids))
+    return [i for i in ids if i]
 
 
 def pending(c: str) -> int:
