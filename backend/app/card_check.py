@@ -1119,7 +1119,11 @@ def typed_links(cell: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _citations_text(c: str, cell: dict[str, Any]) -> str:
     """What each of the card's links resolves to, one line each: the value the source shows and its excerpt, or why
-    the link does not resolve; a link to a value the code types in says so (typed_links)."""
+    the link does not resolve; a link to a value the code types in says so (typed_links). A line's record gives first
+    the fields of words its excerpt leaves out (refs.checked_text: a wiki save's edit summary), so the check reads the
+    record itself and not only what the card draws of it."""
+    from . import refs as refs_mod  # noqa: PLC0415 — refs imports views and notebook lazily; kept off import time
+
     refs = render.cited_refs(cell)
     if not refs:
         return ""
@@ -1133,13 +1137,15 @@ def _citations_text(c: str, cell: dict[str, Any]) -> str:
         if "error" in r and "status" in r:
             lines.append(f"- {ref} does not resolve ({r['error']})")
             continue
-        excerpt = str(r.get("excerpt") or "").strip().replace("\n", " ")
+        excerpt = refs_mod.checked_text(r).strip().replace("\n", " ")
         meta = r.get("meta") if isinstance(r.get("meta"), dict) else {}
         shown = meta.get("value") or meta.get("shown")
         bit = f"{ref} shows {shown}" if shown not in (None, "") else ref
         if typed.get(ref):
             bit += ", " + "; ".join(typed[ref])
-        lines.append(f"- {bit}: {excerpt[:CITE_CHARS]}" if excerpt else f"- {bit}")
+        # a record cut short ends in `…`, so the check knows the rest of it may hold words the line does not
+        cut = excerpt[:CITE_CHARS].rstrip() + "…" if len(excerpt) > CITE_CHARS else excerpt
+        lines.append(f"- {bit}: {cut}" if excerpt else f"- {bit}")
     return "\n".join(lines)
 
 

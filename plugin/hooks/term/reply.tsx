@@ -615,26 +615,28 @@ async function captionFocus(cx: Ctx, id: string, caption: string): Promise<Focus
 
 // ------------------------------------------------------------------------------------------------ a card
 
-/** A card's drawing data with what the check of its records found: an example's words, read from its places; a database
- *  row's fields (lib.ts claimFields), those the card quotes or its takeaway cites from the row first, then those its
- *  question and takeaway name. */
+/** A card's drawing data with what the check of its records found: an example's words, read from its places, with a
+ *  line's fields its words leave out (`head`: a wiki save's edit summary); a database row's fields (lib.ts claimFields),
+ *  those the card quotes or its takeaway cites from the row first, then those its question and takeaway name. */
 async function withQuotes(cx: Ctx, data: CardData, takeaway = ''): Promise<CardData> {
   if (data.kind !== 'example' || !data.examples?.length) return data
   const examples: CardExample[] = []
   const cited = citations(takeaway)
   const words = `${data.question} ${plainCites(takeaway)}`
   for (const x of data.examples) {
-    const row = (await cx.verdict(cid(`[[${x.ref}]]`)))?.record
+    const v = await cx.verdict(cid(`[[${x.ref}]]`))
+    const row = v?.record
+    // a line's fields its words leave out, such as a wiki save's edit summary, drawn before its words (bug hunt J6)
+    const head = v?.fields?.length ? { head: v.fields } : {}
     if (row) {
       const said = cited.filter(c => c.ref === x.ref && c.display !== null).map(c => c.display!)
       examples.push({ ...x, fields: claimFields(row, { quotes: [x.kept ?? '', x.quote, ...said].filter(Boolean), words }) })
       continue
     }
     if (x.quote) {
-      examples.push(x)
+      examples.push({ ...x, ...head })
       continue
     }
-    const v = await cx.verdict(cid(`[[${x.ref}]]`))
     // a chat log's line: its words under its speaker's name, as a database row's field is drawn (bug hunt D9)
     const said = v ? turnWords(v) : null
     if (said) {
@@ -642,8 +644,8 @@ async function withQuotes(cx: Ctx, data: CardData, takeaway = ''): Promise<CardD
       examples.push({ ...x, quote, ...(said.speaker ? { fields: { read: [[said.speaker, quote]], rest: [] } } : {}) })
       continue
     }
-    const quote = v ? v.lines.filter(l => l.hit).map(l => l.text).join(' ').slice(0, 600) : ''
-    examples.push({ ...x, quote })
+    const quote = v ? v.lines.filter(l => l.hit && !l.field).map(l => l.text).join(' ').slice(0, 600) : ''
+    examples.push({ ...x, quote, ...head })
   }
   return { ...data, examples }
 }

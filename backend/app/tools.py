@@ -1315,12 +1315,20 @@ def _example_ref(c: str | None, item: Any) -> tuple[str, str]:
 
 def _kept_quote(item: Any, ref: str) -> str:
     """The quote of a {ref, quote} item whose ref stays as given (a JSON value, a row, a page or a view's unit, which
-    span_of_quote keeps), which the card highlights in that record; '' when the ref itself is the quoted passage (a span)
-    or the item quotes nothing."""
+    span_of_quote keeps) or names a record (a line whose field its blocks leave out holds the quote, such as a wiki
+    save's edit summary), which the card highlights in that record; '' when span_of_quote made the ref the quoted
+    passage (a span) or the item quotes nothing."""
+    from . import refs as refs_mod
+
     if not isinstance(item, dict):
         return ""
     quote = str(item.get("quote") or "").strip()
-    return quote if quote and str(item.get("ref") or "").strip().strip("[]") == ref else ""
+    if not quote or str(item.get("ref") or "").strip().strip("[]") == ref:
+        return quote
+    try:
+        return "" if refs_mod.parse_ref(ref)["kind"] == "span" else quote
+    except ValueError:
+        return ""
 
 
 async def _warm_view_refs(c: str | None, args: dict[str, Any]) -> None:
@@ -2201,7 +2209,8 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
 
 async def _read_excerpt(ctx: Ctx, ref: str) -> ToolResult:
     """The excerpt refs.resolve gives a reader of `ref`: a file, a line or a range, a record's block, a database row, a
-    label, a passage of a document."""
+    label, a passage of a document; a line's record with the fields its excerpt leaves out first (refs.checked_text: a
+    wiki save's edit summary)."""
     from . import refs
 
     try:
@@ -2212,7 +2221,7 @@ async def _read_excerpt(ctx: Ctx, ref: str) -> ToolResult:
     lines = [f"{ref} ({res.get('kind', 'record')})"]
     if meta.get("span_missing"):
         lines.append("(the cited span is not in the card's current output; the whole card follows)")
-    lines.append(str(res.get("excerpt") or "").strip() or "(empty)")
+    lines.append(refs.checked_text(res).strip() or "(empty)")
     return ok("\n".join(lines))
 
 

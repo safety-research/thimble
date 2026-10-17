@@ -314,3 +314,43 @@ async def test_main_learns_of_a_fix_of_its_card_in_one_line_at_its_next_turn_and
     event_files.pop_held(ws)
     assert not card_check.tell_main(CORPUS, cid, "orient:o1", cell["fixes"][-1], [problem])
     assert event_files.held(ws) == []
+
+
+async def test_a_quote_of_a_wiki_save_s_edit_summary_is_kept_shown_and_read_by_the_card_check(tmp_path):
+    """Bug hunt J6: a wiki save's record shows its page's text and left its edit summary out, so add_card refused a true
+    quote of that summary, the card drew the save without it, and the card check, reading only the text, called the
+    quote "not found in the admin's record". The summary is now a field of the record: the quote is kept beside the
+    record, the record resolves with it (an example card shows it), and the check of a value and the card check read
+    it."""
+    root = tmp_path / "garden-wiki"
+    root.mkdir()
+    saves = [{"rev_id": "Tomatoes@3", "name": "Tomatoes", "label": "SeedBot", "time": "2026-05-02T09:14:00Z",
+              "body": "= Tomatoes =\nBuy cheap seeds at the Example Seed Shop!", "change_summary": "*"},
+             {"rev_id": "Tomatoes@4", "name": "Tomatoes", "label": "Rowan", "time": "2026-05-02T09:20:00Z",
+              "body": "= Tomatoes =\nPlant them out after the last frost.", "change_summary": "undo the seed shop advert"}]
+    (root / "revisions.jsonl").write_text("".join(json.dumps(s) + "\n" for s in saves))
+    c = config.register_corpus(root, exact=True)["name"]
+    group = notebook.create_notebook(config.workspace_dir(c), "Your work", role="analyst")["id"]
+    res = await tools.call(c, "add_card", {
+        "kind": "example", "question": "What did Rowan's save on the Tomatoes page undo?",
+        "refs": [{"ref": "revisions.jsonl#L1", "quote": "Example Seed Shop"},
+                 {"ref": "revisions.jsonl#L2", "quote": "undo the seed shop advert"}],
+        "takeaway": "Rowan's save [[undid the seed shop advert|revisions.jsonl#L2]] that SeedBot had added."},
+        actor="analyst", notebook=group, terminal=False)
+    assert not res.is_error, res.text
+    cid = res.text.split("card:", 1)[1].split()[0]
+    cell = notebook.get_cell(c, cid)
+    assert cell["payload"]["refs"][1] == "revisions.jsonl#L2", "the record itself, its summary holds the quote"
+    assert cell["payload"]["quotes"] == ["", "undo the seed shop advert"], "the quote kept beside it, for the card"
+
+    got = refs.resolve(config.corpus_dir(c), "revisions.jsonl#L2")
+    assert got["fields"] == [{"key": "change_summary", "text": "undo the seed shop advert"}]
+    assert "fields" not in refs.resolve(config.corpus_dir(c), "revisions.jsonl#L1"), "a summary of no words is no field"
+    from app import verify  # noqa: PLC0415
+
+    assert await verify._ref_check(config.corpus_dir(c), "revisions.jsonl#L2", "undo the seed shop advert") is None, \
+        "a citation of the summary's words finds them at its place"
+
+    lines = card_check._citations_text(c, cell).splitlines()
+    line = next(x for x in lines if x.startswith("- revisions.jsonl#L2:"))
+    assert line.startswith("- revisions.jsonl#L2: change_summary: undo the seed shop advert"), line

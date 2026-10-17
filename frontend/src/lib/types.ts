@@ -1648,6 +1648,12 @@ export interface GrepDone {
   complete: boolean
 }
 
+/** A field of a record, by its key (`outer.inner` one object down), and its words. */
+export interface RecordField {
+  key: string
+  text: string
+}
+
 export interface ResolvedRef {
   ref: string
   kind: 'record' | 'range' | 'block' | 'span' | 'row' | 'table' | 'cell' | string
@@ -1657,6 +1663,9 @@ export interface ResolvedRef {
   blocks?: Block[]
   excerpt: string
   meta?: Record<string, any>
+  /** a line's record: its fields of words its blocks leave out (backend refs.left_out_fields: a wiki save's edit
+   * summary beside its page text), which an example card shows with the blocks */
+  fields?: RecordField[]
   /** a view ref: the short label its reader gives, and the file refs it stands for */
   label?: string
   refs?: string[]

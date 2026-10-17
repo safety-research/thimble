@@ -75,3 +75,16 @@ describe("a markdown chat log's line, quoted (bug hunt D9)", () => {
     expect(entryParts(exampleEntries([r.ref])[0], () => r)).toEqual([{ kind: 'field', key: 'R3', text: 'I could not find the stop button. It sat under the menu somewhere.' }])
   })
 })
+
+describe("a wiki save's edit summary, which its blocks leave out (bug hunt J6)", () => {
+  // the card showed the save's page text and not its summary, so a true quote of the summary read as unconfirmed
+  const record = { rev_id: 'Tomatoes@4', name: 'Tomatoes', label: 'Rowan', time: '2026-05-02T09:20:00Z', body: '= Tomatoes =\nPlant them out after the last frost.', change_summary: 'undo the seed shop advert' }
+  const save = { ref: 'revisions.jsonl#L2', kind: 'record', path: 'revisions.jsonl', line: 2, record, blocks: [{ kind: 'text', text: record.body }], excerpt: record.body, meta: {}, fields: [{ key: 'change_summary', text: record.change_summary }] } as unknown as ResolvedRef
+
+  test('the summary shows under its name before the page text, the words the card quotes from it marked', () => {
+    const [e] = exampleEntries([save.ref], ['undo the seed shop advert'])
+    const parts = entryParts(e, () => save)!
+    expect(parts.map((p) => (p.kind === 'field' ? `field ${p.key}` : p.kind))).toEqual(['field change_summary', 'text'])
+    expect(marked(parts)).toEqual(['undo the seed shop advert'])
+  })
+})
