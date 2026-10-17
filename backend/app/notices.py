@@ -350,6 +350,9 @@ REFUSED_RE = re.compile(r"safeguards|usage polic|can't help with this", re.I)
 AUTH_RE = re.compile(r"not logged in|invalid api key|please run /login|authentication_failed|authentication failed|"
                      r"failed to authenticate|oauth token|\b401\b", re.I)
 FORBIDDEN_RE = re.compile(r"\b403\b|forbidden|permission_error", re.I)
+# Anthropic's API refusing a request for the account's credit ("Credit balance is too low"; Claude Code's error kind
+# billing_error)
+BILLING_RE = re.compile(r"credit balance|billing_error", re.I)
 NOT_FOUND_RE = re.compile(r"\b404\b|not_found_error|model_not_found|issue with the selected model|"
                           r"model\b[^.]{0,80}(?:not found|does not exist|isn't available)", re.I)
 # the HTTP status an error line names ("Please run /login · API Error: 401 …", "API Error: 403 {…}"), which decides
@@ -359,8 +362,8 @@ STATUS_RE = re.compile(r"\b(?:API Error|Error code|HTTP|status(?: code)?):?\s*(\
 # its class before its words, which change between versions (session.api_error_class)
 STATUS_CLASS = {401: "auth", 403: "forbidden", 404: "not_found", 429: "rate_limited", 500: "server_error",
                 502: "server_error", 503: "server_error", 504: "server_error", 529: "overloaded"}
-ERROR_CLASS = {"authentication_failed": "auth", "model_not_found": "not_found", "rate_limit": "rate_limited",
-               "overloaded": "overloaded", "server_error": "server_error"}
+ERROR_CLASS = {"authentication_failed": "auth", "billing_error": "billing", "model_not_found": "not_found",
+               "rate_limit": "rate_limited", "overloaded": "overloaded", "server_error": "server_error"}
 # Claude Code 2.1.300's words for a request that got no answer from Anthropic's API, which it records with `error`
 # server_error and no apiErrorStatus: "API Error: Connection refused — a firewall or proxy may be blocking it
 # (ECONNREFUSED)", "Unable to connect to API (…)", "Can't reach the API server — check your internet or DNS (ENOTFOUND)",
@@ -380,6 +383,8 @@ API_WORDS: dict[str, tuple[str, str, str]] = {
     "refused": ("Claude's safeguards stopped its request", "rephrase or narrow the request and try again", BROWSER),
     "auth": ("Claude Code isn't signed in", "In your terminal: run /login (or `claude auth login` in a shell)",
              TERMINAL),
+    "billing": ("the credit balance of Claude Code's sign-in is too low",
+                "In your terminal: run /login to sign in another way, or add credits to that account", TERMINAL),
     "forbidden": ("your account may not make this request (403)",
                   "In your terminal: check your sign-in (/login) and your account's or organization's settings",
                   TERMINAL),
@@ -392,11 +397,50 @@ API_WORDS: dict[str, tuple[str, str, str]] = {
 # a model main's session asked for, which only Claude Code's /model changes (a side thread's fork runs on main's)
 MAIN_MODEL_FIX = "In your terminal: run /model to pick another model"
 
-# the fix of a sign-in failure of a call thimble's server makes itself (the view proposer, card checks, labels), whose
-# environment is the one the server started with
-SERVER_AUTH = ("Claude Code isn't signed in for thimble's server",
-               "In your terminal: run /login (or `claude auth login` in a shell), or if you changed your sign-in (for "
-               "example exported ANTHROPIC_API_KEY), run `thimble server restart`", TERMINAL)
+# A failure of Claude Code's sign-in (auth) or of its credit (billing) names the login Claude Code reports
+# (config.login), since a key the shell exports overrides a /login: an API key in an environment variable, which the fix
+# unsets (quit, so Claude Code starts again without it), the key apiKeyHelper prints, a Console login's key, or a Claude
+# login. Every model call of thimble's runs in the analyst's Claude Code session, on its sign-in: the agents as its
+# subagents, the other calls through the session's own API client (model_call.py), so the fix is always the session's.
+ENV_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]*")
+SIGN_IN_WORDS = {"auth": "Anthropic's API refused Claude Code's sign-in, {what}",
+                 "billing": "Claude Code signs in with {what}, and its credit balance is too low"}
+LOGIN_FIX = "In your terminal: run /login"
+
+
+def _login_words() -> tuple[str, str] | None:
+    """(the login Claude Code reports, in words; its fix) for SIGN_IN_WORDS, else None."""
+    try:
+        login = config.login() or {}
+    except Exception:  # noqa: BLE001 — a notice without the login is still a notice
+        log.debug("the login Claude Code reports was not read", exc_info=True)
+        return None
+    source, method = login.get("source", ""), login.get("method", "")
+    if source and ENV_NAME_RE.fullmatch(source):
+        return (f"the API key in {source}",
+                f"In your terminal: quit, unset {source} (in your shell's startup file too) and start claude again, or "
+                "run /login")
+    if source == "apiKeyHelper":
+        return ("the API key your apiKeyHelper setting prints",
+                "In your terminal: fix or remove apiKeyHelper in your Claude Code settings, or run /login")
+    if source == "/login managed key":
+        return "the API key of your Anthropic Console login", LOGIN_FIX
+    if source:
+        return f"the API key from {source}", LOGIN_FIX
+    if method == "claude.ai":
+        return "your Claude login (claude.ai)", LOGIN_FIX
+    return None
+
+
+def sign_in_words(cls: str) -> str:
+    """The words and the fix of a failure of class `auth` or `billing` ("…. In your terminal: …"), naming the login
+    Claude Code reports where it reports one (_login_words), else API_WORDS'."""
+    got = _login_words() if cls in SIGN_IN_WORDS else None
+    if got is None:
+        words, fix, _ = API_WORDS[cls]
+        return f"{words}. {fix}"
+    what, fix = got
+    return f"{SIGN_IN_WORDS[cls].format(what=what)}. {fix}"
 
 
 def fix_where(cls: Any) -> str:
@@ -421,6 +465,8 @@ def failure_class(text: Any, *, status: Any = None, error: Any = None) -> str | 
         return ERROR_CLASS[str(error)]
     if (m := STATUS_RE.search(t)) and int(m.group(1)) in STATUS_CLASS:
         return STATUS_CLASS[int(m.group(1))]
+    if BILLING_RE.search(t):
+        return "billing"
     if AUTH_RE.search(t):
         return "auth"
     if FORBIDDEN_RE.search(t):
@@ -430,17 +476,19 @@ def failure_class(text: Any, *, status: Any = None, error: Any = None) -> str | 
     return retry.transient_class(None, t)
 
 
-def reason(text: Any, *, server: bool = False, cls: str | None = None, main_model: bool = False) -> tuple[str, Any]:
+def reason(text: Any, *, cls: str | None = None, main_model: bool = False) -> tuple[str, Any]:
     """A failure's words for a notice and the action that fixes it: an API failure (of class `cls` when the caller read
     it from Claude Code's record, else by its words) in plain words with its fix, a fix in the terminal after "In your
     terminal:" (TERMINAL) and one in the browser with its button (Open Settings for a model the account cannot use);
-    for a sign-in failure of a call the server made itself (`server`) the server's fix, and for a model main's session
-    asked for (`main_model`, a side thread's fork) Claude Code's /model. Any other failure in its own words,
-    shortened."""
+    for a failed sign-in or a credit balance too low the login Claude Code reports with its fix (sign_in_words), and
+    for a model main's session asked for (`main_model`, a side thread's fork) Claude Code's /model. Any other failure
+    in its own words, shortened."""
     cls = cls if cls in API_WORDS else failure_class(text)
     if cls is None:
         return _gist(text, REASON_CHARS).rstrip(".") or "no reason was given", None
-    words, fix, where = SERVER_AUTH if server and cls == "auth" else API_WORDS[cls]
+    if cls in SIGN_IN_WORDS:
+        return sign_in_words(cls), None
+    words, fix, where = API_WORDS[cls]
     if cls == "not_found" and main_model:
         fix, where = MAIN_MODEL_FIX, TERMINAL
     if where == TERMINAL:

@@ -38,7 +38,7 @@ Code session, on its sign-in. Any way you sign in to Claude Code works.
 
 - **Claude login.** Run `claude auth login`, or `/login` in a `claude` session.
 - **API key.** Export `ANTHROPIC_API_KEY` in your shell before you start `claude` or `thimble`. Claude Code asks once
-  whether to use the key.
+  whether to use the key, which then overrides a Claude login.
 - **apiKeyHelper (most robust).** Put `"apiKeyHelper": "<a command that prints the key>"` in `~/.claude/settings.json`
   (your Claude Code config dir). It reaches your session whatever your shell exports, and with it every model call of
   thimble's, which runs in your session.
@@ -679,10 +679,11 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - A start or a view proposal's Accept is refused with a line about plan mode: your session is in plan mode, where an
   agent would ask before every card. Leave it with shift+tab in the terminal, then try again.
 - A notice says thimble couldn't check for a view proposal: it gives the reason, with Try again and Turn off view
-  proposals. When it says Claude Code isn't signed in for thimble's server, run `/login` in your terminal (or
-  `claude auth login` in a shell); if you changed your sign-in after the server started, such as by exporting
-  `ANTHROPIC_API_KEY`, run `thimble server restart` from that shell. Then press Try again. An accepted view that fails
-  to build has a notice with Retry.
+  proposals. An accepted view that fails to build has a notice with Retry.
+- A notice says Anthropic's API refused Claude Code's sign-in, or that its credit balance is too low: it names the login
+  Claude Code uses, as `claude auth status` reports it. An API key your shell exports, such as `ANTHROPIC_API_KEY`,
+  overrides a `/login`: quit, unset it (in your shell's startup file too) and start claude again in a new terminal,
+  or run `/login`. Then press Try again where the notice has it.
 - A chat says Claude's safeguards stopped a request: rephrase or narrow the request and send it again. A notice that
   Claude's safeguards switched a reply to another model names both models; the reply, or the view proposal, came from
   the second.

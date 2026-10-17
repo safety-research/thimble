@@ -5303,9 +5303,9 @@ SUGGEST_NOTICE_KEY = "view-proposal-file"
 SUGGEST_AGENT = "View proposals"  # the name its notices give, as the proposer's do
 SUGGEST_FAILED = "Couldn't check for a view proposal for {files}: {reason}."
 SUGGEST_REFUSED = "Claude's safeguards blocked the request"
-# no sign-in, and access refused for the account or its organization (403): each fix runs in the terminal, with Try
-# again here, in the words the proposer's notices use (proposer.NOTICE_AUTH, NOTICE_FORBIDDEN)
-SUGGEST_AUTH = "Claude Code isn't signed in. In your terminal: run /login (or `claude auth login` in a shell)"
+# a failed sign-in or a credit balance too low (notices.sign_in_words, which names the login), and access refused for
+# the account or its organization (403): each fix runs in the terminal, with Try again here, in the words the
+# proposer's notices use (proposer.NOTICE_SIGN_IN, NOTICE_FORBIDDEN); a reason with such a fix is never cut
 SUGGEST_FORBIDDEN = ("access was refused for this account or organization (403). In your terminal: run /login to check "
                      "the account, or check your organization's settings")
 SUGGEST_FALLBACK = "This view proposal came from {model}: Claude's safeguards switched models."
@@ -5527,8 +5527,8 @@ async def suggest(c: str, rel: str) -> str | None:
 
 def _failure_of(res: Any) -> str:
     """Why a file type's check for a view proposal gave no answer, in a few words for its notice: Claude's safeguards
-    (SUGGEST_REFUSED), no sign-in (SUGGEST_AUTH), access refused (SUGGEST_FORBIDDEN), an answer that could not be read,
-    or the call's own detail."""
+    (SUGGEST_REFUSED), a failed sign-in or a credit balance too low (notices.sign_in_words), access refused
+    (SUGGEST_FORBIDDEN), an answer that could not be read, or the call's own detail."""
     from . import notices  # noqa: PLC0415 — notices imports agents, which imports this module
 
     status, detail = str(getattr(res, "status", "") or ""), _one(getattr(res, "detail", "") or "")
@@ -5537,8 +5537,8 @@ def _failure_of(res: Any) -> str:
     cls = notices.failure_class(detail)
     if cls == "forbidden":
         return SUGGEST_FORBIDDEN
-    if cls == "auth":
-        return SUGGEST_AUTH
+    if cls in ("auth", "billing"):
+        return notices.sign_in_words(cls)
     if status in ("ok", "truncated", "no_tool_call"):
         return "Claude's answer couldn't be read"
     return detail or f"the call ended {status or 'without an answer'}"
@@ -5551,7 +5551,7 @@ def _check_failed(c: str, rel: str, suffix: str, reason: str) -> None:
     log.info("no viewer suggestion for %s/%s: %s", c, rel, reason)
     _suggest_failed[c] = rel
     action = [SUGGEST_TRY_AGAIN, SUGGEST_TURN_OFF] if reason == SUGGEST_REFUSED else SUGGEST_TRY_AGAIN
-    if reason not in (SUGGEST_REFUSED, SUGGEST_AUTH, SUGGEST_FORBIDDEN):
+    if reason != SUGGEST_REFUSED and "In your terminal:" not in reason:
         reason = reason.rstrip(".")
         reason = reason if len(reason) <= SUGGEST_REASON_CHARS else reason[:SUGGEST_REASON_CHARS - 1].rstrip() + "…"
     files = f"{suffix} files" if suffix else "files without a suffix"

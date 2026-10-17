@@ -311,7 +311,7 @@ def _notice(run: _Run, key: str, text: str, *, why: str = "", **words: str) -> N
     from . import notices  # noqa: PLC0415
 
     try:
-        reason, fix = notices.reason(why, server=True) if why else ("", None)
+        reason, fix = notices.reason(why) if why else ("", None)
         notices.post(run.c, kind="card-check", text=text.format(card=_card_words(run), why=reason, **words),
                      agent=AGENT, action=fix, key=key)
     except Exception:  # noqa: BLE001 — the check has ended either way
