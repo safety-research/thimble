@@ -212,7 +212,9 @@ export async function homeOffer(cx: Ctx): Promise<HomeOffer | null> {
  *  (`open`: a side thread, an agent's chat, or none). One dismissed here is left out at once, before thimble has
  *  written it. */
 export type NoticeAct = { label: string; act: string; slug: string; config: string }
-export type HomeNotice = { id: string; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[] }
+/** `ids`: the open notices this one row stands for, the newest (`id`) first: notices with the same words, agent and
+ *  acts (three of an orientation's helpers switched to another model) show as one row with their count (bug hunt B5). */
+export type HomeNotice = { id: string; ids: string[]; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[] }
 
 // the notices dismissed or fixed from here in this session, by id: a later notice of the same failure has an id of its own
 const dismissed = new Set<string>()
@@ -220,13 +222,27 @@ const dismissed = new Set<string>()
 export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
   const home = await surfaceValue<Obj>(cx, 'home-full')
   const rows = home?.ok && Array.isArray(home.value.notices) ? (home.value.notices as unknown[]).filter(isObj) : []
-  return rows
-    .filter(n => str(n.id) && str(n.text) && !dismissed.has(str(n.id)))
-    .map(n => {
-      const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
-      const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
-      return { id: str(n.id), text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config) })) }
-    })
+  const out: HomeNotice[] = []
+  const same = new Map<string, HomeNotice>()
+  for (const n of rows) {
+    if (!str(n.id) || !str(n.text) || dismissed.has(str(n.id))) continue
+    const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
+    const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
+    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config) })) }
+    const key = JSON.stringify([row.text, row.agent, row.open, row.acts])
+    const first = same.get(key)
+    if (first) first.ids.push(row.id)
+    else {
+      same.set(key, row)
+      out.push(row)
+    }
+  }
+  return out
+}
+
+/** A notice row's words: its count first when it stands for several notices (`3× …`), where a cut does not hide it. */
+export function noticeWords(n: HomeNotice): string {
+  return n.ids.length > 1 ? `${n.ids.length}× ${n.text}` : n.text
 }
 
 /** How long an answer pressed on the view proposal shows as pressed, at most: the holder of the workspace's passes
@@ -301,6 +317,8 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
     return
   }
   await hideNotice(cx, n.id)
+  // the same notices this row stood for go with it: the act was the fix for each
+  for (const id of n.ids.slice(1)) await dismissOne(cx, id)
   cx.toast(a.act === 'view-propose-now' ? 'thimble: checking for a view proposal' : a.act === 'sign-out' ? 'thimble: that browser is signed out' : 'thimble: building the view again')
 }
 
@@ -311,12 +329,16 @@ async function hideNotice(cx: Ctx, id: string): Promise<void> {
   if (home?.ok && Array.isArray(home.value.notices)) await cx.setSurface('home-full', { ok: true, value: { ...home.value, notices: (home.value.notices as unknown[]).filter(x => !isObj(x) || str(x.id) !== id) } })
 }
 
-/** A notice dismissed, as its × does in the browser: gone at once, and `thimble act notice-dismiss` {id} has thimble
- *  write it, so it stays gone after a relaunch. */
+/** A notice dismissed, as its × does in the browser, with every notice its row stands for: gone at once, and `thimble
+ *  act notice-dismiss` {id} has thimble write each, so they stay gone after a relaunch. */
 export async function dismissNotice(cx: Ctx, n: HomeNotice): Promise<void> {
-  await hideNotice(cx, n.id)
+  for (const id of n.ids) await dismissOne(cx, id)
+}
+
+async function dismissOne(cx: Ctx, id: string): Promise<void> {
+  await hideNotice(cx, id)
   if (!rt.sc) return
-  const got = await act(cx, rt.sc, 'notice-dismiss', { id: n.id })
+  const got = await act(cx, rt.sc, 'notice-dismiss', { id })
   if (!got.ok) cx.toast(`thimble: the notice was not dismissed: ${got.error}`)
 }
 

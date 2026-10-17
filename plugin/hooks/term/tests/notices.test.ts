@@ -108,6 +108,43 @@ test("a notice is one row: `notice` in red on the label column, its words in the
   await wide.unmount()
 })
 
+test("bug hunt B5: notices with the same words are one row with their count first (`3× …`): one toast, and `dismiss` takes them all", T, async ($, on) => {
+  const w = panelWorld(on)
+  await start($, w)
+  const m0 = (await $.ui.mount(aboveAt(150))) as unknown as M
+  await w.clock.settle()
+  await m0.unmount()
+  // three of the orientation's helpers switched to another model: three notices, one row
+  const helper = (id: string, chat: string) => ({ ...ORIENT, id, key: `safeguards:${chat}`, agent: 'Orientation helper', chat })
+  w.states.home.notices = [helper('h3', 'c3'), helper('h2', 'c2'), helper('h1', 'c1'), NOTICE]
+  w.stamps.set(`${WS}/notices.json`, 9)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  const m = (await $.ui.mount(aboveAt(150))) as unknown as M
+  expect(words(await m.find({ type: 'Box', key: 'above-notice-h3' }))).toBe(`  notice3× ${SWITCHED}see the orientation helper ›dismiss`)
+  expect(await m.find({ type: 'Box', key: 'above-notice-h2' })).toBeUndefined()
+  expect(await m.find({ type: 'Box', key: 'above-notice-h1' })).toBeUndefined()
+  expect(words(await m.find({ type: 'Box', key: 'above-notice-n1' }))).toContain(NOTICE.text)
+  expect(w.toasts.filter(t => t === `thimble: ${SWITCHED}`).length).toBe(1)
+  // a fourth joins the row and toasts nothing
+  w.states.home.notices = [helper('h4', 'c4'), helper('h3', 'c3'), helper('h2', 'c2'), helper('h1', 'c1'), NOTICE]
+  w.stamps.set(`${WS}/notices.json`, 10)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  await m.unmount()
+  const four = (await $.ui.mount(aboveAt(150))) as unknown as M
+  expect(words(await four.find({ type: 'Box', key: 'above-notice-h4' }))).toContain(`4× ${SWITCHED}`)
+  expect(w.toasts.filter(t => t === `thimble: ${SWITCHED}`).length).toBe(1)
+  await four.press({ key: 'above-notice-h4-dismiss' })
+  await w.clock.settle()
+  expect(w.acts.filter(a => a.kind === 'notice-dismiss').map(a => a.payload.id)).toEqual(['h4', 'h3', 'h2', 'h1'])
+  await four.unmount()
+  const after = (await $.ui.mount(aboveAt(150))) as unknown as M
+  expect(await after.find({ type: 'Box', key: 'above-notice-h4' })).toBeUndefined()
+  expect(words(await after.find({ type: 'Box', key: 'above-notice-n1' }))).toContain(NOTICE.text)
+  await after.unmount()
+})
+
 test("a notice's acts say what their press does: `how to fix it` for a toast that says how, `allow in the browser ›` for a ticket, the agent or the thread a press opens", () => {
   expect(noticeActWords({ act: 'settings', label: 'open settings' })).toBe('how to fix it')
   expect(noticeActWords({ act: 'ticket-open', label: 'open ›' })).toBe('allow in the browser ›')

@@ -76,6 +76,8 @@ const SKILL_ARGS = new Set(['fresh', 'restore', 'status', 'fix', 'feedback'])
 // the text Claude Code stores as the reply of a turn that ended with none (its `<synthetic>` model's)
 const SYNTHETIC_RE = /^\s*No response requested\.\s*$/
 const THIMBLE_TOOL = /^mcp__(plugin_thimble_thimble|thimble-[a-z-]+)__/ // main's shim's tools, and an agent's own shim's
+// what Claude Code's row of a thimble event's wake-up says: the waker hook's rewakeSummary (plugin/hooks/hooks.json)
+const REWAKE_SUMMARY = 'thimble'
 // a message of another agent's as main reads it (a subagent's hand-back)
 const AGENT_MESSAGE = /<agent-message from="([^"]+)"/
 // how long a check's dropped hand-back waits for its run's record (checkDone)
@@ -928,8 +930,15 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // the row saying a side thread's fork finished names the thread by its first question, never the fork's slug
+  // the row saying a side thread's fork finished names the thread by its first question, never the fork's slug. A
+  // thimble event's wake-up (.thimble-watch's asyncRewake, summary `thimble`, no task) is no row: a bare `● thimble`
+  // says nothing, and what came in shows in the lines the held hook prints with the turn (`› ` the analyst's words,
+  // `new thread: …`; bug hunt B5); ctrl+o's full view still draws it
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'task-notification' } } }, async ($, e, next) => {
+    if (rt.sc && e.props.text.trim() === REWAKE_SUMMARY && !e.props.task && !e.props.isExpanded) {
+      const { Box } = $.ui.resolve(e)
+      return <Box />
+    }
     if (!rt.sc || !/\bthread:/.test(e.props.text)) return next(e)
     const text = namedForks(e.props.text, await cxOf($).threads())
     return text === e.props.text ? next(e) : next({ ...e, props: { ...e.props, text } })
