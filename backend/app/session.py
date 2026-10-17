@@ -352,6 +352,9 @@ class Live:
         self.went_on = False  # main replied after that stop (no API error, no second stop)
         self.buf = b""
         self.saved = -1  # the offset the cursor in sessions.json holds (_save_cursor)
+        # sessions.json as this process last wrote it (_disk_stamp): on local transport another process's pass wrote it
+        # since when it differs, and what this Live holds is stale (_catch_up)
+        self.disk: tuple[int, int, int] | None = None
         self.subs_saved: dict[str, tuple] = {}  # each subagent's (offset, done) sessions.json holds (_sub_places)
         self.degraded = False
         self.seen: set[str] = set()  # `use:<id>` and `result:<id>` written to main
@@ -468,6 +471,16 @@ def sessions(c: str) -> dict[str, dict]:
     return d if isinstance(d, dict) else {}
 
 
+def _disk_stamp(c: str) -> tuple[int, int, int] | None:
+    """sessions.json's inode, change time and size, which each write changes (atomic_write_text replaces the file); None
+    when there is none."""
+    try:
+        st = _sessions_path(c).stat()
+    except (OSError, ValueError):
+        return None
+    return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+
 def _persist(lv: Live, *, keep_subs: bool = True) -> None:
     """Write the session's record in sessions.json, keeping the tail's cursor and, unless `keep_subs` is false (a new
     attach, whose subagents are followed anew), the subagents' places (SUBS_KEY)."""
@@ -479,6 +492,7 @@ def _persist(lv: Live, *, keep_subs: bool = True) -> None:
                  **({"cursor": cursor} if cursor else {}), **({SUBS_KEY: subs} if isinstance(subs, dict) else {}),
                  **({FROM_KEY: lv.came_from} if lv.came_from else {})}
     atomic_write_text(_sessions_path(lv.c), json.dumps(d, indent=1))
+    lv.disk = _disk_stamp(lv.c)
 
 
 def _mark_ended(c: str, sid: str, reason: str | None) -> None:
@@ -507,6 +521,7 @@ def _save_cursor(lv: Live) -> None:
     # kept even when empty: a record with places says that a file it names no place for was never read (_restore_subs)
     rec[SUBS_KEY] = places
     atomic_write_text(_sessions_path(lv.c), json.dumps(d, indent=1))
+    lv.disk = _disk_stamp(lv.c)
     if main_moved:
         lv.saved = at
     lv.subs_saved = offsets
@@ -4197,6 +4212,15 @@ def _catch_up(c: str, ws: Path) -> Live | None:
     if not sid:
         return None
     lv = _live.get(c)
+    if lv is not None and lv.disk is not None and _disk_stamp(c) != lv.disk:
+        # a pass of another process ran since this process's last (local_hooks: the holder of the lock changes while
+        # this one lives on, as the follower does), so what this Live holds is stale: main is attached again from what
+        # that pass kept, as a new process attaches it. Read on from its own memory, it took the subagents the other
+        # process found for new ones, and gave each orientation helper a second chat, the copy no process followed to
+        # its end staying running for good (bug hunt round 9, J4).
+        log.info("%s: another process's pass ran since this one's, so main is attached again", c)
+        _live.pop(c, None)
+        lv = None
     if lv is None:
         held = str(((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session") or "")
         state = sfiles.read(ws)
@@ -4271,8 +4295,10 @@ def sweep() -> list[str]:
     """Detach every recorded main session in a workspace where no shim is subscribed and main's own has not subscribed
     since this server started. A session this server made main less than GRACE_S ago (a press just before the sweep,
     whose shim subscribes a moment later) is not detached at once: its shim gets GRACE_S to subscribe, as after a shim
-    leaves (disconnected). Never while the server is stopping, when every workspace looks unsubscribed. Returns the
-    session ids detached."""
+    leaves (disconnected). A workspace whose main runs on local transport has no shim here: the processes its hooks
+    start follow it (catch_up), and the server leaves it to them (bug hunt round 9, J4: a server started for another
+    workspace marked a terminal session stale, and its next pass read its subagents' files as new). Never while the
+    server is stopping, when every workspace looks unsubscribed. Returns the session ids detached."""
     from . import events  # noqa: PLC0415
 
     if _shutting_down():
@@ -4280,7 +4306,7 @@ def sweep() -> list[str]:
     gone: list[str] = []
     for path in sorted(config.WORKSPACES_DIR.glob("*/sessions.json")):
         c = path.parent.name
-        if c in _came_back or events.listening(c):
+        if c in _came_back or events.listening(c) or _local_ws(c) is not None:
             continue
         try:
             held = (agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}
