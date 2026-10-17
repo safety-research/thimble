@@ -223,7 +223,7 @@ def test_doctor_names_the_readme_s_tested_version_and_marks_a_folder_claude_code
     assert not check.ok and check.line == "Claude Code doesn't trust this folder yet", check
     claude_global_config.write_text(json.dumps({"projects": {str(folder.resolve()): {"hasTrustDialogAccepted": True}}}))
     check = cli._agents_check(folder)
-    assert check.ok and check.line == "thimble's agents start once a claude session here reads your files", check
+    assert check.ok and check.line == "thimble's agents start once a claude session runs here", check
 
 
 def test_fix_and_revert_run_only_in_a_development_install(home, monkeypatch, capsys):

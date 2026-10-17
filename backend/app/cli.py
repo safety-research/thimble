@@ -2707,8 +2707,7 @@ def transport_line(cwd: Path) -> str:
 
     c = config.workspace_for_cwd(str(cwd))
     if not c:
-        return ("thimble is not on in this folder yet; it turns on by itself when a claude session here first reads "
-                "your files")
+        return "thimble is not on in this folder yet; it turns on when a claude session starts here"
     ws = config.workspace_path(c)
     rec = read_launch(c)
     kind = subagent_files.transport(ws)
@@ -3412,7 +3411,7 @@ def _hooks_fix(why: str) -> str:
 
 
 # no session here has turned thimble on yet, which it does by itself at a session's first read of data (activate.py)
-AGENTS_NOT_YET = "thimble's agents start once a claude session here reads your files"
+AGENTS_NOT_YET = "thimble's agents start once a claude session runs here"
 
 
 def _agents_check(cwd: Path) -> Check:
