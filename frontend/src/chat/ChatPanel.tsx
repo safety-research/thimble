@@ -1,5 +1,5 @@
-// The chat column: the thread tree at the top, the transcript of the thread being read, and the composer floating over
-// it. Main is the analyst's Claude Code session and leaves out what shows elsewhere (model.mainSkips). A thread is a
+// The chat column: the thread tree at the top, the transcript of the thread being read, and the composer under it.
+// Main is the analyst's Claude Code session and leaves out what shows elsewhere (model.mainSkips). A thread is a
 // fork of main: main's conversation up to where it branched, then its own rows. The orientation and a writer show their
 // card, then their whole session; a dev ticket shows its request and run; a view build its proposal and runs. While a
 // thread works, a strip of its steps rides behind the composer, and every permission request waits on one card above
@@ -10,8 +10,9 @@
 // answers it (ProposalCard), except while the product tour runs (lib/touring). A failure of main or of any of thimble's
 // agents shows as a notice with its fix under the proposal's place, above the composer of whichever chat is open, and
 // as a row in the chat it happened in (Notice.tsx); while main runs in Claude Code's Manual mode, the Manual-mode
-// notice shows there in red. While any card shows above the composer, the transcript ends above the cards, so none of
-// its lines shows between them or under the composer.
+// notice shows there in red. The transcript ends above the composer and the cards over it, so none of its lines shows
+// between them or under the composer. A transcript at its end stays there as rows come, until the analyst scrolls up;
+// sending a message takes it to its end.
 import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -310,8 +311,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const sendSeq = useRef(0)
   const listRef = useRef<HTMLDivElement>(null)
   const flowRef = useRef<HTMLDivElement>(null)
-  const rootRef = useRef<HTMLElement>(null)
-  const footRef = useRef<HTMLDivElement>(null)
   // the tree: collapsed to one row by default
   const treeKey = storageKey(ws, 'threads-collapsed')
   const [treeCollapsed, setTreeCollapsed] = useState(() => readStorage<boolean>(treeKey, true))
@@ -405,8 +404,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     setSeen(markSeen(ws, current, nMessages))
   }, [ws, current, nMessages, chat.loading])
 
-  // follow the newest record while the list is near its end; a thread opens at its end
+  // follow the newest record while the list is near its end; a thread opens at its end. Only the analyst scrolling up
+  // stops it (followScroll), never rows that grow under a scroll of the list's own
   const nearEnd = useRef(true)
+  const lastTop = useRef(0)
   useEffect(() => {
     nearEnd.current = true
     setStripOpen(false)
@@ -420,24 +421,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     if (!el || !nearEnd.current) return
     el.scrollTop = el.scrollHeight
   }, [chat.rows, chat.streaming, main.rows, current])
-  // the composer floats over the transcript, so the list keeps its height clear at the bottom; a growing foot only moves
-  // the list's padding, which no scroll follows, so a list followed to its end is taken to its new end
-  useEffect(() => {
-    const foot = footRef.current
-    const root = rootRef.current
-    if (!foot || !root) return
-    const set = () => {
-      root.style.setProperty('--composer-h', `${foot.offsetHeight}px`)
-      const el = listRef.current
-      if (el && nearEnd.current) el.scrollTop = el.scrollHeight
-    }
-    set()
-    const ro = new ResizeObserver(set)
-    ro.observe(foot)
-    return () => ro.disconnect()
-  }, [])
   // rows that fill in later (a card reading its agent's log, a chip learning its name) and a list that shrinks (the
-  // tree opened) keep the end in view
+  // tree opened, the foot grown by a card or the task strip) keep the end in view
   useEffect(() => {
     const el = listRef.current
     const flow = flowRef.current
@@ -450,7 +435,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       })
     })
     ro.observe(flow)
-    // the list's own box, not its content box: the composer's height moves the list's padding, never its box
+    // the list's own box: the foot under it takes its height from it
     ro.observe(el, { box: 'border-box' })
     return () => {
       cancelAnimationFrame(frame)
@@ -691,6 +676,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
     if (demoStop()) return Promise.resolve(false)
+    // the question sent is where the analyst looks next: the list goes to its end and follows it there
+    nearEnd.current = true
+    const list = listRef.current
+    if (list) list.scrollTop = list.scrollHeight
     if (target.to === 'orient') {
       // the latest orientation takes the analyst's message itself: it resumes the finished session, or waits for the run
       // going on to end; from one of its steps, its thread opens, where the message and the reply show
@@ -751,7 +740,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   return (
     <ThreadsContext.Provider value={{ labels, metas, main: main.meta }}>
       <section
-        ref={rootRef}
         className="chat"
         data-panel="chat"
         data-thread-kind={kind ?? undefined}
@@ -794,7 +782,8 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           ref={listRef}
           onScroll={(e) => {
             const el = e.currentTarget
-            nearEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+            nearEnd.current = followScroll(nearEnd.current, lastTop.current, el)
+            lastTop.current = el.scrollTop
           }}
         >
           <CallFocusContext.Provider value={focus}>
@@ -821,7 +810,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           </div>
           </CallFocusContext.Provider>
         </div>
-        <div ref={footRef} className="chat-foot">
+        <div className="chat-foot">
           {/* the cards above the composer: while one shows, the foot takes its own space under the transcript (chat.css) */}
           <div className="chat-foot-cards">
             <Holds className="chat-main-holds" alert={main.meta?.alert} />
@@ -857,6 +846,17 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       </section>
     </ThreadsContext.Provider>
   )
+}
+
+/** How near its end a list still counts as at its end, in px. */
+export const NEAR_END_PX = 80
+
+/** Whether the list follows its end after a scroll: at its end (within NEAR_END_PX) it does; away from it, it stops
+ * only when the analyst scrolled up (its scrollTop went down from `lastTop`). Rows that grow below a scroll the list
+ * made itself leave it away from its end without the analyst doing anything, and it keeps following. Pure. */
+export function followScroll(following: boolean, lastTop: number, el: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>): boolean {
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_END_PX) return true
+  return el.scrollTop < lastTop ? false : following
 }
 
 /** The kinds of a thread's `error` record that end a run without a reply the analyst can read (backend
