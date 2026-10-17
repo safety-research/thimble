@@ -7,6 +7,7 @@
 // which stays as a quiet line once the notice is closed.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { Composer } from '../../src/chat/Composer.tsx'
 import { NoticeStrip, sameNotices } from '../../src/chat/Notice.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { noticeActions, parseNotice, setBrowserId } from '../../src/lib/notices.ts'
@@ -164,6 +165,36 @@ describe('the strip above the composer, and the rows', () => {
     await settle()
     expect(sent).toEqual(['POST /api/ws/nt-label-again/concepts/k1/apply/again', 'POST /api/ws/nt-label-again/notices/l1/dismiss'])
     expect(el.querySelector('.chat-notice')).toBeNull()
+  })
+  test("main's reply Claude's safeguards stopped: its notice makes the lost card again, or puts the analyst's question back in main's composer (bug hunt C23)", async () => {
+    const opened: unknown[] = []
+    const offOpen = bus.on('openChat', (e) => void opened.push(e))
+    try {
+      const again = { label: 'Make the card again', do: 'card-again', text: 'Claude\'s safeguards stopped your reply while you were adding the card "Which runs failed?", and the card was not added. Make that card again.' }
+      const ask = { label: 'Ask again', do: 'ask-again', text: 'Which runs failed, and why?' }
+      const stopped = { key: 'stopped:main', kind: 'stopped', chat: 'main', text: "Claude's safeguards stopped main's reply partway, so the card it was making wasn't added: \"Which runs failed?\". Make the card again, or ask again in other words.", action: [again, ask] }
+      open = [{ id: 's1', ...stopped }]
+      let el = await strip('nt-stopped-ask')
+      const acts = () => [...el.querySelectorAll('.chat-notice-act')]
+      expect(acts().map((b) => b.textContent)).toEqual(['Make the card again', 'Ask again'])
+      await click(acts().find((b) => b.textContent === 'Ask again'))
+      await settle()
+      expect(opened).toEqual([{ chatId: 'main', draft: ask.text }])
+      expect(sent).toEqual(['POST /api/ws/nt-stopped-ask/notices/s1/dismiss'])
+      // main's composer takes the question as its draft, to change and send
+      const box = await mount(<Composer onSend={() => undefined} sending={false} thread="main" fill={{ thread: 'main', text: ask.text, n: 1 }} />)
+      await settle()
+      expect(box.querySelector('textarea')?.value).toBe(ask.text)
+      // Make the card again sends main its words
+      open = [{ id: 's2', ...stopped }]
+      el = await strip('nt-stopped-card')
+      await click(acts().find((b) => b.textContent === 'Make the card again'))
+      await settle()
+      expect(opened.at(-1)).toEqual({ chatId: 'main', send: again.text })
+      expect(sent.at(-1)).toBe('POST /api/ws/nt-stopped-card/notices/s2/dismiss')
+    } finally {
+      offOpen()
+    }
   })
   test('a failed orientation runs again from its notice, with the request its last run had (bug hunt C18)', async () => {
     open = [{ id: 'o1', key: 'agent:orient', kind: 'agent', agent: 'Orientation', chat: 'orient-1', text: "The orientation failed: Claude's safeguards stopped its request; rephrase or narrow the request and try again.", action: { label: 'Run again', do: 'orient-again' } }]

@@ -212,7 +212,7 @@ export async function homeOffer(cx: Ctx): Promise<HomeOffer | null> {
  *  where the terminal can take one (`try again`, `retry`, `turn off view proposals`), and how its own thread opens
  *  (`open`: a side thread, an agent's chat, or none). One dismissed here is left out at once, before thimble has
  *  written it. */
-export type NoticeAct = { label: string; act: string; slug: string; config: string }
+export type NoticeAct = { label: string; act: string; slug: string; config: string; text: string }
 /** `ids`: the open notices this one row stands for, the newest (`id`) first: notices with the same words, agent and
  *  acts (three of an orientation's helpers switched to another model) show as one row with their count (bug hunt B5).
  *  `at`: when the newest was posted, in ms (0 when not known), which places it among the terminal's own (band.tsx). */
@@ -230,7 +230,7 @@ export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
     if (!str(n.id) || !str(n.text) || dismissed.has(str(n.id))) continue
     const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
     const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
-    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config) })), at: Date.parse(str(n.at)) || 0 }
+    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config), text: str(a.text) })), at: Date.parse(str(n.at)) || 0 }
     const key = JSON.stringify([row.text, row.agent, row.open, row.acts])
     const first = same.get(key)
     if (first) first.ids.push(row.id)
@@ -303,7 +303,9 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
  *  browser's Settings, and leaves the notice. A label's `label-open` opens its panel and leaves the notice; its
  *  `label-again` runs it again on the units its last run could not label, in its panel, which says how the run goes
  *  (a new failure brings a new notice); the orientation's `orient-again` asks main to start it again with its last
- *  request (bug hunt C17, C18: the analyst always has a next step). */
+ *  request (bug hunt C17, C18: the analyst always has a next step). For main's reply Claude's safeguards stopped,
+ *  `card-again` sends main the act's words, which ask it to make the card the reply did not add, and `ask-again` puts
+ *  the act's words, the analyst's last message to main, in the prompt to change and send (bug hunt C23). */
 export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<void> {
   if (!rt.sc) return
   if (a.act === 'label-open') return openLabelAt(cx, a.slug, '')
@@ -317,6 +319,18 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
   if (a.act === 'orient-again') {
     await dismissNotice(cx, n)
     return orientAgain(cx, '', n.chat)
+  }
+  if (a.act === 'card-again' && a.text.trim()) {
+    await dismissNotice(cx, n)
+    await cx.submit(a.text)
+    cx.toast('thimble: main was asked to make the card again')
+    return
+  }
+  if (a.act === 'ask-again' && a.text.trim()) {
+    await dismissNotice(cx, n)
+    await cx.fill(a.text)
+    cx.toast('thimble: your question is back in the prompt, to change and send')
+    return
   }
   if (a.act === 'settings') {
     cx.toast(`thimble: Settings are in the browser workbench (/thimble browser) and in thimble's config: ${a.config || 'config.json in thimble\'s home'} (its keys: docs/config.md)`)

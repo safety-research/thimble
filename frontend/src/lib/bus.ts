@@ -66,8 +66,9 @@ export type Events = {
   /** open a label's edit card in Files, with the Labels pane open in the sidebar that holds it (Open in Files in a
    * label's popover on a card, files/LabelCard LabelSheet) */
   editLabel: { id: string }
-  /** show a chat in the panel; `send` is a first message to post once it is shown */
-  openChat: { chatId: string; send?: string }
+  /** show a chat in the panel; `send` is a first message to post once it is shown, `draft` words put in its composer for
+   * the analyst to change and send (a notice's Ask again) */
+  openChat: { chatId: string; send?: string; draft?: string }
   /** A toast (shell/Toasts) only confirms or fails the analyst's own click, or reports news with a link to it: `ref`
    * puts a chip of what it names on it, `thread` the chip of a thread (chat/Notes ThreadChip). A state that lasts, such
    * as a refused start or a write that failed, shows once next to what it concerns and is never also a toast. */

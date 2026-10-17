@@ -115,3 +115,39 @@ def test_a_request_the_safeguards_blocked_marks_its_error_line(cwd, tmp_path):
     _append(p, lv, [_human("Look at the logs."), block, _end("c1")])
     (text,) = [r for r in _log() if r["type"] == "text"]
     assert text["refusal"] is True and text["delta"].startswith("API Error:")
+
+
+def test_a_reply_of_main_s_the_safeguards_stopped_says_what_it_cost_with_its_fixes(cwd, tmp_path):
+    """Bug hunt C23: Claude's safeguards stopped main's reply in the middle of add_card (stop_reason refusal on the
+    model's own reply), Claude Code went on once, and thimble told only the chat's note: the card was lost, with no fix.
+    A notice, in the browser and the terminal, says the card wasn't added and offers Make the card again and Ask again,
+    which puts the analyst's last question back in the prompt."""
+    from app import local
+
+    lv, p = _attach(cwd, tmp_path)
+    asked, question = "Which of these packages look risky?", "For each package, what starts its code?"
+    card = {"type": "tool_use", "id": "toolu_c1", "name": "mcp__plugin_thimble_thimble__add_card",
+            "input": {"question": question, "kind": "table", "code": "import json"}}
+    interrupted = ("Interrupted: the response that made this tool call was stopped by a safety classifier while the call "
+                   "was running; it may have partially or fully completed.")
+    def stopped(block: dict) -> dict:  # a record of the reply the safeguards stopped
+        rec = _assistant(block)
+        return {**rec, "message": {**rec["message"], "stop_reason": "refusal"}}
+
+    _append(p, lv, [
+        _human(asked), stopped({"type": "thinking", "thinking": ""}), stopped(card),
+        {"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_c1", "is_error": True, "content": interrupted}]}},
+        {"type": "system", "subtype": "informational", "level": "notice",
+         "content": "Opus 5.5's safeguards stopped the response above · continuing once with that noted"},
+        {"type": "user", "isMeta": True, "message": {"role": "user", "content": "Your response above was stopped."}},
+        _assistant(_say("My last reply was stopped partway.")), _end("c1")])
+    (shown,) = _open("stopped:main")
+    assert shown["text"] == ("Claude's safeguards stopped main's reply partway, so the card it was making wasn't added: "
+                             f"\"{question}\". Make the card again, or ask again in other words.")
+    again, ask = shown["action"]
+    assert again["label"] == "Make the card again" and again["do"] == "card-again" and question in again["text"]
+    assert ask == {"label": "Ask again", "do": "ask-again", "text": asked}
+    (row,) = [n for n in local._notices(CORPUS) if n["key"] == "stopped:main"]
+    assert [(a["act"], a["text"]) for a in row["acts"]] == [("card-again", again["text"]), ("ask-again", asked)], (
+        "the terminal shows it too, with the same fixes")

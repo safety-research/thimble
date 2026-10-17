@@ -15,7 +15,9 @@
 // once. The Manual-mode notice (kind `manual-mode`, while main runs in Claude Code's Manual mode) is drawn in the
 // problem red instead (styles/chat.css). However many notices are open, the strip shows the newest in full and the rest
 // as one row under it, "5 more notices ›", which opens them in place, each with its fix, Open and ×, and Dismiss all; so
-// the chat keeps most of its column and no notice is cut off (bug hunt C21).
+// the chat keeps most of its column and no notice is cut off (bug hunt C21). When Claude's safeguards stop main's reply
+// partway, its notice offers Make the card again, which sends main the words that ask for the card the reply did not
+// add, and Ask again, which puts the analyst's last message back in main's composer to change and send (bug hunt C23).
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -30,20 +32,24 @@ import type { NoticeRow as NoticeRowT } from './model'
 import { proposalsOff } from './ProposalCard'
 
 /** The actions a notice's button can run; one with another `do` shows no button. */
-export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out', 'label-open', 'label-again', 'orient-again']
+export const NOTICE_DOS: readonly string[] = ['proposals-retry', 'proposals-off', 'settings', 'view-retry', 'sign-out', 'label-open', 'label-again', 'orient-again', 'card-again', 'ask-again']
 
 /** The actions that name what they act on in `slug`. */
 const SLUGGED: readonly string[] = ['view-retry', 'sign-out', 'label-open', 'label-again']
 
+/** The actions whose words are their `text`. */
+const TEXTED: readonly string[] = ['card-again', 'ask-again']
+
 /** Whether `action` is one this page can run. Pure. */
-export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && (!SLUGGED.includes(action.do) || !!action.slug)
+export const runnable = (action: NoticeAction): boolean => NOTICE_DOS.includes(action.do) && (!SLUGGED.includes(action.do) || !!action.slug) && (!TEXTED.includes(action.do) || !!action.text?.trim())
 
 /** Run a notice's action: true when the failure is answered and the notice can go (Open Settings leaves it). A fix the
  * server could not start (a check that cannot run now, a build refused at once) throws with its reason, which the
  * toast says, and the notice stays. Try again names the notice's key, so the check that failed is the one run again.
  * Sign it out signs out the browser a sign-in notice names (its slug). A label's notice opens the label (and stays) or
  * runs it again on the units its last run could not label; a failed orientation's runs it again, a start the module
- * refused saying why. */
+ * refused saying why. A stopped reply's Make the card again sends main its words, and Ask again opens main with the
+ * analyst's last message in the composer. */
 export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<Notice, 'key'>): Promise<boolean> {
   switch (action.do) {
     case 'proposals-retry': {
@@ -80,6 +86,14 @@ export async function runNotice(ws: string, action: NoticeAction, notice?: Pick<
       if (!got.agentId && !got.program && got.kind) throw new Error(got.reason || 'the orientation did not start')
       return true
     }
+    case 'card-again':
+      if (!action.text?.trim()) return false
+      bus.emit('openChat', { chatId: 'main', send: action.text })
+      return true
+    case 'ask-again':
+      if (!action.text?.trim()) return false
+      bus.emit('openChat', { chatId: 'main', draft: action.text })
+      return true
     default:
       return false
   }

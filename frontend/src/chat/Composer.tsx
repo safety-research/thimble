@@ -3,8 +3,9 @@
 // are kept for its next launch (events.effort_route, events.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
 // (`chip`, RoleChip). A thread whose run the browser can stop (main's turn, a side thread's fork, the orientation, a
 // writer, a check's run, a dev ticket, a view's build or its review) passes `stop`, and while it runs the send square is
-// its Stop until text is typed (ComposerFrame), as Esc is in Claude Code. Each thread keeps its own draft.
-import { useRef, useState, type ReactNode } from 'react'
+// its Stop until text is typed (ComposerFrame), as Esc is in Claude Code. Each thread keeps its own draft, which words
+// handed to it replace (`fill`: a notice's Ask again puts the analyst's last message back to change and send).
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ComposerFrame, type ComposerFrameProps } from '../components/Composer'
 import type { MainEffort } from '../lib/types'
 import { MODEL_TIP, ModelLine } from './ModelLine'
@@ -36,6 +37,15 @@ export interface ComposerProps {
   stop?: ComposerFrameProps['stop']
   /** the thread shown: each thread keeps its own draft, so text typed in one is never sent from another */
   thread?: string
+  /** words that become `fill.thread`'s draft, once for each `n` (bus openChat's `draft`) */
+  fill?: ComposerFill | null
+}
+
+/** Words for a thread's draft (ComposerProps.fill); a new `n` puts them there again. */
+export interface ComposerFill {
+  thread: string
+  text: string
+  n: number
 }
 
 /** `drafts` with `thread`'s draft set to `text`, an empty draft dropped. Pure. */
@@ -47,10 +57,17 @@ export function withDraft(drafts: Readonly<Record<string, string>>, thread: stri
   return next
 }
 
-export function Composer({ model, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, tip, stop, thread = 'main' }: ComposerProps) {
+export function Composer({ model, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, tip, stop, thread = 'main', fill = null }: ComposerProps) {
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({})
   const input = drafts[thread] ?? ''
   const taRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!fill) return
+    setDrafts((d) => withDraft(d, fill.thread, fill.text))
+    taRef.current?.focus()
+    // once for each handed-over `n`
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fill?.n])
   const send = () => {
     const text = input.trim()
     if (!text || disabled || sending) return

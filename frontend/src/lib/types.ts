@@ -67,11 +67,14 @@ export type ChatRecord =
 /** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
  * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), sign
  * out the browser whose id is `slug` (`sign-out`, a sign-in notice's), open the label `slug` (`label-open`), run it again
- * on the units its last run could not label (`label-again`), or run the orientation again (`orient-again`). */
+ * on the units its last run could not label (`label-again`), run the orientation again (`orient-again`), or, for main's
+ * reply Claude's safeguards stopped, send main `text`, which asks it to make the lost card again (`card-again`), or put
+ * `text`, the analyst's last message to main, back in main's composer (`ask-again`). */
 export interface NoticeAction {
   label: string
-  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | 'label-open' | 'label-again' | 'orient-again' | (string & {})
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | 'label-open' | 'label-again' | 'orient-again' | 'card-again' | 'ask-again' | (string & {})
   slug?: string
+  text?: string
 }
 
 /** A failure the analyst should know of, with an easy fix (backend notices.post), as `GET /ws/{c}/notices` lists the

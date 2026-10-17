@@ -517,17 +517,21 @@ def _offer(c: str) -> dict[str, Any] | None:
 # Settings: the terminal has no Settings pane) "settings", which says where thimble's config is, since Settings writes it.
 # "ticket-open" is no `thimble act` kind: the terminal UI opens the ticket in the browser workbench (its `ref`), where
 # the analyst allows its change. Nor are a label's "label-open" (the terminal UI opens the label's panel), "label-again"
-# (it runs `thimble act label-run` with `again`) and the orientation's "orient-again" (it asks main to start it again).
+# (it runs `thimble act label-run` with `again`), the orientation's "orient-again" (it asks main to start it again),
+# and, for main's reply the safeguards stopped, "card-again" (it sends main the act's `text`) and "ask-again" (it puts
+# the act's `text`, the analyst's last message, back in Claude Code's prompt).
 NOTICE_ACTS = {"proposals-retry": "view-propose-now", "proposals-off": "view-proposals-off", "view-retry": "view-retry",
                "settings": "settings", "ticket-open": "ticket-open", "sign-out": "sign-out", "label-open": "label-open",
-               "label-again": "label-again", "orient-again": "orient-again"}
+               "label-again": "label-again", "orient-again": "orient-again", "card-again": "card-again",
+               "ask-again": "ask-again"}
+TEXT_ACTS = ("card-again", "ask-again")  # the acts that take the action's `text`
 
 
 def _notice_acts(action: Any) -> list[dict[str, str]]:
-    """A notice's `action` (one {label, do, slug?} or a list of them) as the terminal takes it: {label, act, slug?,
-    config?, ref?} each, in its order, `config` the file of thimble's config for "settings" and `ref` the ticket to open
-    in the browser (`ticket:<slug>`) for "ticket-open"; a Retry with no view, and a ticket's open with no ticket, are
-    left out."""
+    """A notice's `action` (one {label, do, slug?, text?} or a list of them) as the terminal takes it: {label, act,
+    slug?, config?, ref?, text?} each, in its order, `config` the file of thimble's config for "settings", `ref` the
+    ticket to open in the browser (`ticket:<slug>`) for "ticket-open" and `text` the words of a TEXT_ACTS act; a Retry
+    with no view, a ticket's open with no ticket, and a TEXT_ACTS act with no words, are left out."""
     from . import userconf  # noqa: PLC0415
 
     out: list[dict[str, str]] = []
@@ -540,10 +544,14 @@ def _notice_acts(action: Any) -> list[dict[str, str]]:
         ticket = " ".join(str(a.get("slug") or a.get("ticket") or "").split()).removeprefix("ticket:")
         if act == "ticket-open" and not ticket:
             continue
+        text = str(a.get("text") or "") if act in TEXT_ACTS else ""
+        if act in TEXT_ACTS and not text.strip():
+            continue
         out.append({"label": str(a.get("label") or "") or act, "act": act,
                     **({"slug": slug} if slug and act != "ticket-open" else {}),
                     **({"config": str(userconf.global_file())} if act == "settings" else {}),
-                    **({"ref": f"ticket:{ticket}"} if act == "ticket-open" else {})})
+                    **({"ref": f"ticket:{ticket}"} if act == "ticket-open" else {}),
+                    **({"text": text} if text else {})})
     return out
 
 
