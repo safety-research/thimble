@@ -5,7 +5,7 @@
 #
 # install.sh adds thimble's plugin to Claude Code with Claude Code's own commands: it adds this install's folder as a
 # marketplace (claude plugin marketplace add) and installs thimble from it at user scope (claude plugin install --scope
-# user), so /thimble works in any claude session; a re-run updates it when its version or its files changed. `status`
+# user), so thimble is on in every claude session; a re-run updates it when its version or its files changed. `status`
 # says which thimble plugin Claude Code has, and whether it is on. /plugin in Claude Code turns it off or on.
 set -euo pipefail
 # How it works (not printed by --help):
@@ -235,7 +235,7 @@ plugin_apply() {  # thimble's plugin from this install's folder in Claude Code, 
     note "In a shell: claude plugin install --scope user thimble@$mp_name"
     return 1
   fi
-  ok "Added thimble's plugin to Claude Code (thimble@$mp_name): /thimble works in any claude session (in one open since before, run /reload-plugins first)"
+  ok "Added thimble's plugin to Claude Code (thimble@$mp_name): thimble is on in every claude session (in one open since before, run /reload-plugins first)"
   plugin_done
 }
 

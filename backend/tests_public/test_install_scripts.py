@@ -379,9 +379,11 @@ def test_install_sh_adds_the_plugin_with_claude_code_s_commands_and_uninstall_re
     record.write_text(json.dumps({"answer": "no", "registered": ""}))  # 0.7's no
     out, changes = install()
     assert changes == [f"plugin marketplace add {dest}", "plugin install --scope user thimble@thimble-local"], out
-    assert "✓ Added thimble's plugin to Claude Code (thimble@thimble-local): /thimble works in any claude session" in out
-    assert "Next: in a folder of transcripts, start claude and type /thimble (in a session that was open before, " \
-           "/reload-plugins first), or run thimble there." in out, out
+    assert "✓ Added thimble's plugin to Claude Code (thimble@thimble-local): thimble is on in every claude session" in out
+    assert ("\nNext: run claude in a folder with your files. thimble is on in every session.\n"
+            "  /thimble browser opens the same session in the browser workbench.\n"
+            "  /plugin turns thimble on or off.\n") in out, "the README's way to start: " + out
+    assert "thimble mode" not in out and "type /thimble" not in out, out
     assert not record.exists(), "0.7's record goes once the plugin is in place"
     assert run(uninstall)[1] == ["plugin uninstall thimble@thimble-local", "plugin marketplace remove thimble-local"]
 

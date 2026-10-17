@@ -11,7 +11,7 @@
 # Every command it runs, with its output, goes to $THIMBLE_HOME/install.log (~/.thimble/install.log).
 #
 # It adds thimble's plugin to Claude Code with Claude Code's own commands: claude plugin marketplace add <the install
-# folder>, then claude plugin install --scope user thimble@<marketplace>, so /thimble works in any claude session. A
+# folder>, then claude plugin install --scope user thimble@<marketplace>, so thimble is on in every claude session. A
 # re-run updates the plugin when its version or its files changed. It writes no shell startup file: when ~/.local/bin is
 # not on PATH, or THIMBLE_HOME is not ~/.thimble, it prints the line a new terminal needs. It installs no system package
 # and never runs sudo.
@@ -1365,9 +1365,22 @@ doctor_check() {  # thimble doctor --verbose, its report in the log; the line na
   else ok "Checked with thimble doctor$( [ "${auth#logged in}" != "$auth" ] && echo ': Claude Code is logged in') (thimble doctor shows a checklist; --verbose the details)"; fi
 }
 
-finish() {  # doctor, a server that runs another tree, then what to run next: /thimble in claude when Claude Code has this
-  # install's plugin, else the `thimble` command; then the line a new terminal needs for `thimble`, if any, and the
-  # command that works in this terminal until then (shell_advice)
+next_lines() {  # next_lines NAME: how to start thimble, in the README's words: claude in a folder, where thimble is on,
+  # when Claude Code has this install's plugin; else NAME, the `thimble` command, which loads the plugin itself
+  if [ "$plugin_ok" != 1 ]; then
+    showf "Next: run $1 in a folder with your files. It starts Claude Code with thimble and opens the browser workbench."
+  elif [ "$plugin_on" = off ]; then
+    showf "Next: run claude in a folder with your files. thimble is off now: /plugin turns it on."
+    show "  /thimble browser opens the same session in the browser workbench."
+  else
+    showf "Next: run claude in a folder with your files. thimble is on in every session."
+    show "  /thimble browser opens the same session in the browser workbench."
+    show "  /plugin turns thimble on or off."
+  fi
+}
+
+finish() {  # doctor, a server that runs another tree, then what to run next (next_lines); then the line a new terminal
+  # needs for `thimble`, if any, and the command that works in this terminal until then (shell_advice)
   local name here pid repo
   doctor_check
   # a server started from another tree keeps running that tree's code until it is restarted
@@ -1394,13 +1407,8 @@ finish() {  # doctor, a server that runs another tree, then what to run next: /t
     [ "$cli_linked" = 1 ] || name="$here"
   fi
   heading "Done: thimble $version is installed in $(tilde "$dir")"
-  if [ "$plugin_ok" = 1 ]; then
-    showf "Next: in a folder of transcripts, start claude and type /thimble (in a session that was open before, /reload-plugins first), or run $name there."
-  else
-    showf "Next: run $name in a folder of transcripts. It starts Claude Code with thimble and prints the dashboard's link."
-  fi
+  next_lines "$name"
   shell_advice "$here"
-  showf "Optional: \`thimble mode terminal\` in a folder shows thimble's work in the terminal, with no server or browser."
 }
 
 main() {
