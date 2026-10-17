@@ -107,6 +107,12 @@ STOP_WAIT_S = 6.0
 HEALTH_TIMEOUT_S = 1.0
 LOG_TAIL = 15
 FIX_INSTRUCTION = "File a `file_dev_ticket` titled 'fix: …' describing what broke; the dev agent runs it as a ticket."
+# `thimble fix` with the server down: thimble starts no Claude Code session of its own (NOCLAUDE.md), and a code ticket
+# needs the server and a Claude Code session that runs thimble, so the analyst's own Claude Code makes the repair
+FIX_IN_SESSION = ("thimble fix starts no Claude Code session of its own: thimble's model calls run only as subagents of "
+                  "your Claude Code session. To repair the server, open Claude Code in thimble's checkout ({repo}) and "
+                  "ask it to fix what thimble doctor reports above, then run `thimble server restart`. While the "
+                  "server runs, ask Claude in a thimble session to file a code ticket instead.")
 # `thimble fix` and `thimble revert` change thimble's own code, which only a development install (a git clone of thimble)
 # can do: a release install has no dev agent to repair it and no applied change to take back (dev.RELEASE_LINE)
 DEV_ONLY_LINES = {
@@ -3550,51 +3556,6 @@ def restart(*, keep_vite: bool = False) -> list[str]:
     return lines
 
 
-FIX_NO_TERMINAL = ("thimble fix did not run: it asks you before its change reaches thimble's own code, and only in a "
-                   "terminal. Run `thimble fix` in your own terminal.")
-FIX_DECLINED = "thimble fix did not run: you did not allow it."
-
-
-def fix_refusal() -> str:
-    """'' when `thimble fix` may start, else why it did not: it needs a terminal to ask in, and where its ticket is not
-    contained (dev.fix_contained) the analyst's Allow before it starts (dev.FIX_QUESTION)."""
-    from . import dev  # noqa: PLC0415
-
-    if not sys.stdin.isatty():
-        return FIX_NO_TERMINAL
-    if dev.fix_contained():
-        return ""
-    try:
-        answer = input(f"thimble fix: {dev.FIX_QUESTION} [y/N] ")
-    except EOFError:
-        answer = ""
-    return "" if answer.strip().lower() in ("y", "yes") else FIX_DECLINED
-
-
-async def fix_approve(_t: dict[str, Any], touched: list[str]) -> bool:
-    """The terminal's y/N before `thimble fix`'s change is applied (dev.APPLY_QUESTION)."""
-    import asyncio  # noqa: PLC0415
-
-    from . import dev  # noqa: PLC0415
-
-    try:
-        answer = await asyncio.to_thread(input, f"thimble fix: {dev.APPLY_QUESTION} It changes "
-                                                f"{dev.files_words(touched)}. [y/N] ")
-    except EOFError:
-        answer = ""
-    return answer.strip().lower() in ("y", "yes")
-
-
-def fix() -> str:
-    """Server down: the ticket runner on prompts/dev-fix.md in the live checkout, once fix_refusal passed; its change is
-    applied on the analyst's yes (fix_approve). `dev` is imported lazily."""
-    import asyncio  # noqa: PLC0415
-
-    from . import dev  # noqa: PLC0415
-
-    return asyncio.run(dev.fix_offline(doctor_text(commands=False), fix_approve))
-
-
 def revert() -> dict[str, Any]:
     """Revert the last dev apply: through the server when it answers (POST /api/dev/revert, which restarts it when the
     change needs that), else in the checkout here. dev.revert_last_apply's answer, with `error` for a refusal."""
@@ -3997,20 +3958,8 @@ def _action(args: argparse.Namespace, up: bool, url: str) -> int:
         if not is_git_checkout():
             print(DEV_ONLY_LINES["fix"])
             return 0
-        if up:
-            print(doctor_text(commands=False))
-            print(FIX_INSTRUCTION)
-            return 0
-        if refused := fix_refusal():
-            print(refused)
-            return 0
-        try:
-            result = fix()
-        except Exception as e:  # noqa: BLE001 — never a traceback in the skill text
-            result = f"fix failed: {type(e).__name__}: {e}"
-        for ln in restart():
-            print(ln)
-        print(result[:1000])
+        print(doctor_text(commands=False))
+        print(FIX_INSTRUCTION if up else FIX_IN_SESSION.format(repo=config.REPO_ROOT))
         return 0
     print(f"thimble: unknown action {a!r}; one of status, fix, fresh, restore, feedback.")
     return 0
@@ -4095,18 +4044,10 @@ def cmd_fix(_: argparse.Namespace) -> int:
     if not is_git_checkout():
         print(DEV_ONLY_LINES["fix"])
         return 1
-    if healthy():
-        print(doctor_text())
-        print(FIX_INSTRUCTION)
-        return 0
-    if refused := fix_refusal():
-        print(refused)
-        return 1
-    result = fix()
-    for ln in restart():
-        print(ln)
-    print(result[:2000])
-    return 0 if healthy() else 1
+    up = healthy()
+    print(doctor_text())
+    print(FIX_INSTRUCTION if up else FIX_IN_SESSION.format(repo=config.REPO_ROOT))
+    return 0 if up else 1
 
 
 def cmd_revert(_: argparse.Namespace) -> int:
@@ -4479,8 +4420,8 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--verbose", action="store_true", help="the full detail: paths, pids, ports, every switch, the log")
     dr.set_defaults(fn=cmd_doctor)
     for name, fn, help_ in (("unpair", cmd_unpair, "sign out every browser"),
-                            ("fix", cmd_fix, "development install, server down: run the fix ticket in the live checkout, "
-                                                    "then restart"),
+                            ("fix", cmd_fix, "development install: what thimble doctor finds, and how to repair it "
+                                             "in your own Claude Code session"),
                             ("revert", cmd_revert, "development install: undo the last change thimble's dev agent applied")):
         sub.add_parser(name, help=help_).set_defaults(fn=fn)
     fb = sub.add_parser("feedback", help="write a problem report (a zip) to send the developer, and say how to send it")

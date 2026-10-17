@@ -56,16 +56,3 @@ async def test_a_large_context_is_written_in_files_a_read_call_returns_whole(bri
     assert "".join(p.read_text() for p in paths) == big + "\n", "the parts are the whole context"
     [spawn] = bridge.ops("spawn")
     assert f"READ {len(paths)} FILES" in spawn["prompt"] and all(str(p) in spawn["prompt"] for p in paths)
-
-
-# --------------------------------------------------------------------------- permission requests
-
-
-def test_a_code_ticket_s_runner_reads_no_project_settings(workspaces_tmp, monkeypatch):
-    """A `claude -p` job the server starts (a code ticket, `thimble fix`) runs none of the folder's own hooks, settings or
-    MCP servers (U17)."""
-    from app import dev, userconf
-
-    monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
-    flags = dev.Sessions()._flags(CORPUS, "thimble:dev · mini")
-    assert flags[flags.index("--setting-sources") + 1] == "user" and "--strict-mcp-config" in flags
