@@ -30,7 +30,8 @@
 /* -------- the list: the transcript, which ends above the foot; it reaches 2px past the column on either side so a
    row's flash ring is not cut -------- */
 .chat-list {
-  flex: 1 1 auto;
+  /* the room the head and the foot leave: the foot keeps its height, and gives up its notices' only when it cannot */
+  flex: 1 1 0;
   min-height: 0;
   margin: 0 -2px;
   overflow-y: auto;
@@ -1485,17 +1486,20 @@ button.model-line-part[aria-expanded='true'] {
 .chat-foot {
   position: relative;
   z-index: var(--z-sticky);
-  flex: none;
+  flex: 0 1 auto;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   max-height: 100%;
   margin-top: 8px;
 }
-/* the cards above the composer: a session's hold, the permission card, the view proposal, the notices */
+/* the cards above the composer: a session's hold, the permission card, the view proposal, the notices. Where they do
+   not fit under the head, the notices shown by their row give up room first (.chat-notices-rest) */
 .chat-foot-cards {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 .chat-foot-cards:empty {
   display: none;
@@ -1712,19 +1716,67 @@ button.model-line-part[aria-expanded='true'] {
   font: var(--type-body-sm);
 }
 /* -------- notices (chat/Notice.tsx): a failure of main or of one of thimble's agents with its fix. Above the composer,
-   the open ones stack under the view proposal's place, each one line on the warning's wash mixed into the card's own
-   surface (the foot floats over the rows), with the warning's edge: the glyph, the agent in bold, the failure and Open,
-   ×, and under the words its fix. In a chat's rows the same line without buttons, quiet once the notice is closed
-   -------- */
+   under the view proposal's place, the newest open one in full, on the warning's wash mixed into the card's own surface
+   (the foot floats over the rows), with the warning's edge: the glyph, the agent in bold, the failure and Open, ×, and
+   under the words its fix; the others behind one row under it, `5 more notices ›` (bug hunt C21: stacked, they left the
+   chat 9 lines and the last one was cut off). In a chat's rows the same line without buttons, quiet once the notice is
+   closed -------- */
 .chat-notices {
   display: flex;
   flex: none;
   flex-direction: column;
   gap: 6px;
-  max-height: 40vh;
   margin-bottom: 12px;
-  overflow-y: auto;
   border-radius: var(--radius-card);
+}
+/* the other notices, opened by the row: newest first under the newest, each whole, while the transcript above gives up
+   its room; only where the column cannot hold them all do they scroll here, the newest and the row staying whole */
+.chat-notices[data-open] {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.chat-notices-rest {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-card);
+}
+/* the row: `5 more notices ›`, or Show fewer and Dismiss all, links in the notice's own inset */
+.chat-notices-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px 0 10px;
+  font: var(--type-body-sm);
+}
+.chat-notices-toggle,
+.chat-notices-all {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-accent);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chat-notices-all {
+  color: var(--text-secondary);
+}
+.chat-notices-toggle:hover,
+.chat-notices-all:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-notices-toggle:focus-visible,
+.chat-notices-all:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-chip);
 }
 .chat-notice {
   display: flex;

@@ -2,7 +2,8 @@
 // homeNotices): a press that could not open the browser, a proxy that may stop the link, and the like. Each is a row
 // above the prompt (band.tsx), `notice` in red, with the acts that fix it and `dismiss`, each act's words saying what
 // its press does (modActWords, noticeActWords, seeWords), and each new key posts one toast; so does each new notice of
-// the workspace's. Notices draw with every feature off and never reach the model.
+// the workspace's. The band shows the newest of all in full and the others behind one row (moreNotices). Notices draw
+// with every feature off and never reach the model.
 //
 // The rows live in the panel's surface state under NOTICES (so the band draws again when they change); what an act
 // does is kept here by the notice's key and the act's words (onNoticeAct).
@@ -53,6 +54,11 @@ export function seeWords(n: { open: string; agent: string }): string {
   if (n.open === 'thread') return 'see the thread ›'
   const who = oneLine(n.agent).split(':')[0]!.trim().toLowerCase().replace(/^the\s+/, '')
   return `see the ${who || 'agent'} ›`
+}
+
+/** The words of the row that shows the band's other notices (bug hunt B5, C21): `5 more notices ›`. */
+export function moreNotices(n: number): string {
+  return `${n} more ${n === 1 ? 'notice' : 'notices'} ›`
 }
 
 /** The terminal's notices as the band draws them, newest first. */

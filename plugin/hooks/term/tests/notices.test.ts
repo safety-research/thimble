@@ -1,13 +1,11 @@
 // Notices (notices.tsx, SPEC-v2 3.20): each new notice, the workspace's or the terminal's own, posts one toast, once;
 // those there at activation post none. Each is one row above the prompt (band.tsx): `notice` in red, its words in the
-// text color cut with `…` where its acts begin (a press shows them whole), its acts at the right in the accent, each
-// saying what its press does. `claude plugin test plugin`.
+// text color, whole and wrapped where its acts begin, its acts at the right in the accent, each saying what its press
+// does. The newest shows; the others wait behind one row, `5 more notices ›`. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { ABOVE_LABEL } from '../band'
-import { cut, width } from '../lib'
-import { modActWords, noticeActWords, seeWords } from '../notices'
+import { modActWords, moreNotices, noticeActWords, seeWords } from '../notices'
 import { COLORS } from '../paint'
 import { CWD, LABEL, WS, aboveAt, paneAt, panelWorld, pressBrowser, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
@@ -65,47 +63,31 @@ function texts(n: unknown, out: { s: string; color?: unknown; bold?: unknown; di
   return out
 }
 
-test("a notice is one row: `notice` in red on the label column, its words in the text color cut with `…` where its acts begin, the act that opens its agent's chat named for it (`see the orientation ›`)", T, async ($, on) => {
+test("a notice is one row: `notice` in red on the label column, its words in the text color whole and wrapped where its acts begin, the act that opens its agent's chat named for it (`see the orientation ›`)", T, async ($, on) => {
   const w = panelWorld(on)
   w.states.home.notices = [ORIENT]
   await start($, w)
   // 100 columns: the label column (17), the words, two cells, `see the orientation ›  dismiss` (30) at the right
   const m = (await $.ui.mount(aboveAt(100))) as unknown as M
   const row = await m.find({ type: 'Box', key: 'above-notice-n2' })
-  const room = 100 - ABOVE_LABEL - 30 - 2
-  expect(words(row)).toBe(`  notice${cut(SWITCHED, room)}see the orientation ›dismiss`)
-  expect(cut(SWITCHED, room).endsWith('…')).toBe(true)
-  expect(width(cut(SWITCHED, room))).toBeLessThanOrEqual(room)
+  expect(words(row)).toBe(`  notice${SWITCHED}see the orientation ›dismiss`)
   const looks = texts(row)
-  // the label in red; the words in the text color, not a red paragraph
+  // the label in red; the words in the text color, not a red paragraph, whole and wrapped (bug hunt C21: never cut off)
   expect(looks[0]).toMatchObject({ s: '  notice', color: COLORS.problem })
+  expect(looks[1]).toMatchObject({ s: SWITCHED, wrap: 'wrap' })
   expect(looks[1]!.color).toBeUndefined()
   // the acts in the accent, underlined under the pointer, the first bold
   expect(looks.find(l => l.s === 'see the orientation ›')).toMatchObject({ color: COLORS.accent, bold: true, hover: { underline: true } })
   expect(looks.find(l => l.s === 'dismiss')).toMatchObject({ color: COLORS.accent, hover: { underline: true } })
   expect(looks.find(l => l.s === 'dismiss')!.bold).toBeUndefined()
   expect(JSON.stringify(row)).not.toContain('open ›')
+  // one notice: no row of more
+  expect(await m.find({ type: 'Box', key: 'above-notices-more' })).toBeUndefined()
   // the press opens the orientation's chat in the panel, as its words say
   await m.press({ key: 'above-notice-n2-open' })
   await w.clock.settle()
   expect(w.panes.at(-1)!.title).toBe('Orientation')
-  // a press on the words cut short shows them whole, wrapped; a second press cuts them again
-  await m.press({ key: 'above-notice-n2-more' })
-  await w.clock.settle()
   await m.unmount()
-  const open = (await $.ui.mount(aboveAt(100))) as unknown as M
-  expect(texts(await open.find({ type: 'Box', key: 'above-notice-n2' }))[1]).toMatchObject({ s: SWITCHED, wrap: 'wrap' })
-  await open.press({ key: 'above-notice-n2-more' })
-  await w.clock.settle()
-  await open.unmount()
-  const again = (await $.ui.mount(aboveAt(100))) as unknown as M
-  expect(words(await again.find({ type: 'Box', key: 'above-notice-n2' }))).toContain(cut(SWITCHED, room))
-  await again.unmount()
-  // 150 columns: the words whole, nothing to press on them
-  const wide = (await $.ui.mount(aboveAt(150))) as unknown as M
-  expect(words(await wide.find({ type: 'Box', key: 'above-notice-n2' }))).toBe(`  notice${SWITCHED}see the orientation ›dismiss`)
-  expect(await wide.find({ type: 'Button', key: 'above-notice-n2-more' })).toBeUndefined()
-  await wide.unmount()
 })
 
 test("bug hunt B5: notices with the same words are one row with their count first (`3× …`): one toast, and `dismiss` takes them all", T, async ($, on) => {
@@ -124,7 +106,8 @@ test("bug hunt B5: notices with the same words are one row with their count firs
   expect(words(await m.find({ type: 'Box', key: 'above-notice-h3' }))).toBe(`  notice3× ${SWITCHED}see the orientation helper ›dismiss`)
   expect(await m.find({ type: 'Box', key: 'above-notice-h2' })).toBeUndefined()
   expect(await m.find({ type: 'Box', key: 'above-notice-h1' })).toBeUndefined()
-  expect(words(await m.find({ type: 'Box', key: 'above-notice-n1' }))).toContain(NOTICE.text)
+  // the older notice waits behind its row
+  expect(words(await m.find({ type: 'Box', key: 'above-notices-more' }))).toBe(`  ${moreNotices(1)}`)
   expect(w.toasts.filter(t => t === `thimble: ${SWITCHED}`).length).toBe(1)
   // a fourth joins the row and toasts nothing
   w.states.home.notices = [helper('h4', 'c4'), helper('h3', 'c3'), helper('h2', 'c2'), helper('h1', 'c1'), NOTICE]
@@ -142,7 +125,52 @@ test("bug hunt B5: notices with the same words are one row with their count firs
   const after = (await $.ui.mount(aboveAt(150))) as unknown as M
   expect(await after.find({ type: 'Box', key: 'above-notice-h4' })).toBeUndefined()
   expect(words(await after.find({ type: 'Box', key: 'above-notice-n1' }))).toContain(NOTICE.text)
+  expect(await after.find({ type: 'Box', key: 'above-notices-more' })).toBeUndefined()
   await after.unmount()
+})
+
+// bug hunt B5 note and C21: a view proposal, six notices and the SSH row took 14 of 58 rows above the prompt
+const LABEL_FAILED = { id: 'n7', key: 'label:k1', kind: 'label', text: "The label retry storms couldn't label 184 of 2,064 records: Claude's safeguards stopped its request; rephrase or narrow the label and run it again.", agent: 'Label: retry storms', chat: '', at: '2026-10-17T04:48:00Z', acts: [{ label: 'See the label', act: 'label-open', slug: 'k1' }] }
+const BUILD_FAILED = { id: 'n8', key: 'agent:view:run-map', kind: 'agent', text: 'The view Run Map failed to build: the page did not load.', agent: 'View build: Run Map', chat: '', at: '2026-10-17T04:40:00Z', acts: [{ label: 'Retry', act: 'view-retry', slug: 'run-map' }] }
+
+test('bug hunt B5 and C21: the newest notice shows in full and the others behind one row, `5 more notices ›`, which shows them there, newest first, with their acts and `dismiss all`', T, async ($, on) => {
+  const w = panelWorld(on)
+  const helper = (id: string, chat: string, min: number) => ({ ...ORIENT, id, key: `safeguards:${chat}`, agent: 'Orientation helper', chat, at: `2026-10-17T04:${min}:00Z` })
+  w.states.home.notices = [LABEL_FAILED, BUILD_FAILED, ORIENT_FAILED, helper('h2', 'c2', 33), helper('h1', 'c1', 32), { ...NOTICE, at: '2026-10-17T04:20:00Z' }]
+  await start($, w)
+  // and one of the terminal's own, posted before them by the test's clock
+  w.open = { ok: false, error: { code: 'START', message: 'no server', fix: '' } }
+  await pressBrowser($, w)
+  await w.clock.settle()
+  const m = (await $.ui.mount(aboveAt(100))) as unknown as M
+  // the newest, whole and wrapped, then one row for the five others (the two helpers' notices are one)
+  expect(texts(await m.find({ type: 'Box', key: 'above-notice-n7' }))[1]).toMatchObject({ s: LABEL_FAILED.text, wrap: 'wrap' })
+  for (const key of ['above-notice-n8', 'above-notice-n5', 'above-notice-h2', 'above-notice-n1', 'above-mod-open-failed']) expect(await m.find({ type: 'Box', key })).toBeUndefined()
+  expect(words(await m.find({ type: 'Box', key: 'above-notices-more' }))).toBe('  5 more notices ›')
+  await m.press({ key: 'above-notices-toggle' })
+  await w.clock.settle()
+  await m.unmount()
+  const open = (await $.ui.mount(aboveAt(100))) as unknown as M
+  const drawn = JSON.stringify(await open.drawn())
+  const order = ['above-notice-n7', 'above-notice-n8', 'above-notice-n5', 'above-notice-h2', 'above-notice-n1', 'above-mod-open-failed', 'above-notices-more'].map(k => drawn.indexOf(`"${k}"`))
+  expect(order.every(i => i >= 0)).toBe(true)
+  expect([...order].sort((a, b) => a - b)).toEqual(order)
+  expect(words(await open.find({ type: 'Box', key: 'above-notices-more' }))).toBe('  show fewerdismiss all')
+  // each notice's acts work from the list: the view build's `retry`
+  await open.press({ key: 'above-notice-n8-act-0' })
+  await w.clock.settle()
+  expect(w.acts.filter(a => a.kind === 'view-retry').map(a => a.payload)).toEqual([{ slug: 'run-map', notice: 'n8' }])
+  await open.unmount()
+  const rest = (await $.ui.mount(aboveAt(100))) as unknown as M
+  expect(await rest.find({ type: 'Box', key: 'above-notice-n8' })).toBeUndefined()
+  // `dismiss all`: every notice, the workspace's and the terminal's own
+  await rest.press({ key: 'above-notices-all' })
+  await w.clock.settle()
+  expect(w.acts.filter(a => a.kind === 'notice-dismiss').map(a => a.payload.id)).toEqual(['n7', 'n5', 'h2', 'h1', 'n1'])
+  await rest.unmount()
+  const none = (await $.ui.mount(aboveAt(100))) as unknown as M
+  expect(JSON.stringify(await none.drawn())).not.toMatch(/"above-(notice|mod|notices)-/)
+  await none.unmount()
 })
 
 test("a notice's acts say what their press does: `how to fix it` for a toast that says how, `allow in the browser ›` for a ticket, the agent or the thread a press opens", () => {

@@ -113,7 +113,9 @@ Claude Code's panel chrome, no right-click menu.
   card checks, labels, the view proposer), since Claude Code's own output shows only main's: `notice` in red, its
   words, which name the agent and the failure, then the acts that fix it (`try again`, `retry`, `turn off view
   proposals`; `how to fix it` says where thimble's config is, the terminal's Settings), the agent's thread named for
-  what opens (`see the orientation ›`), and `dismiss`.
+  what opens (`see the orientation ›`), and `dismiss`. The newest shows in full, its words wrapped; the others wait
+  behind one row under it, `5 more notices ›`, whose press shows them there, newest first, and turns into `show fewer`
+  with `dismiss all`, as the browser's strip above the composer does.
 - **One panel**, on Claude Code's panel chrome: one title row, the path from home, its earlier steps dim and a click
   away and the current step last in the accent color and bold (`home › Threads`; on home, `show all threads` and
   `N new` at the right; no `‹ back`, b goes back), a dim subtitle, a rule, the actions at the bottom after a second rule, and a dim italic row of key hints (`b to go back` only where there is a way back),

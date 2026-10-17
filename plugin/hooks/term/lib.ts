@@ -173,7 +173,7 @@ export function cardsInline(text: string, also: readonly string[] = []): string 
       out.push(line)
       continue
     }
-    const kept = line.replace(CARD_CHIP_RE, (_m: string, a?: string, b?: string, c?: string, d?: string) => {
+    const kept = withoutOwnBrackets(line).replace(CARD_CHIP_RE, (_m: string, a?: string, b?: string, c?: string, d?: string) => {
       const id = (a ?? b ?? c ?? d)!
       if (!placed.has(id)) {
         placed.add(id)
@@ -308,6 +308,7 @@ function linkCitation(shown: string, target: string): Citation | null {
 
 /** Every citation of a text in order, deduplicated by its `[[...]]` spelling; code spans and fences left out. */
 export function citations(text: string): Citation[] {
+  text = withoutOwnBrackets(text)
   const found: { at: number; c: Citation }[] = []
   const clean = text.replace(FENCE_RE, m => ' '.repeat(m.length))
   for (const sp of citeSpans(clean)) {
@@ -522,13 +523,27 @@ export function chipPlace(c: Citation): string {
   return ''
 }
 
-/** A text's chips with the brackets main put around one of its own taken away (`([[card:<id>]])` reads `[ card ]`, never
- *  `([ card ])`): a chip carries its own brackets. */
-export function withoutOwnParens(text: string): string {
-  return text.replace(/\(\s*(\[\[[^\[\]\n|]+\]\]|\[\s*↗?\s*\]\([^()\s]+\))\s*\)/g, (m, inner: string) => {
-    const c = citations(inner)[0]
-    return c && isChip(c) ? inner : m
-  })
+// a chip as written (`[[<ref>]]`, `[↗](<ref>)`, `[](<ref>)`) inside one or two brackets of any kind its writer put
+// around it: `([[card:<id>]])`, `[[↗](transcript.jsonl#L88)]` (bug hunt C19: a side thread's fork wrote it so), `{[↗](a#L3)}`
+const WRAPPED_CHIP_RE = /[(\[{]{1,2}[ \t]*(\[\[[^\[\]\n|]+\]\]|\[[ \t]*↗?[ \t]*\]\([^()\s]+\))[ \t]*[)\]}]{1,2}/g
+
+/** A text's chips with the brackets their writer put around them taken away, whatever the brackets (`([[card:<id>]])`
+ *  and `[[↗](a.jsonl#L88)]` read `[ card ]` and `[ a.jsonl line 88 ]`, never `([ card ])` or `[↗ (a.jsonl#L88)]`): a
+ *  chip carries its own brackets. Code spans and fences stay as written. */
+export function withoutOwnBrackets(text: string): string {
+  if (!/[(\[{][ \t]*\[/.test(text)) return text
+  const unwrap = (s: string) =>
+    s.replace(WRAPPED_CHIP_RE, (m, inner: string) => {
+      const c = citations(inner)[0]
+      return c && isChip(c) ? inner : m
+    })
+  let out = ''
+  let from = 0
+  for (const m of text.matchAll(FENCE_RE)) {
+    out += unwrap(text.slice(from, m.index)) + m[0]
+    from = (m.index ?? 0) + m[0].length
+  }
+  return out + unwrap(text.slice(from))
 }
 
 // ---------------------------------------------------------------------------------------- text width and cuts
@@ -770,6 +785,7 @@ export function plainMarks(text: string): string {
 
 /** A line of Markdown as styled runs: bold, italic, code, links (their text), citations (one run each). */
 export function inlineRuns(text: string): Run[] {
+  text = withoutOwnBrackets(text)
   const out: Run[] = []
   // the files this text cites, before any chip names one (citedFileName)
   noteCited(citeSpans(text.replace(FENCE_RE, m => ' '.repeat(m.length))).flatMap(sp => spanCitation(text.slice(sp.at + 2, sp.end - 2)) ?? []))

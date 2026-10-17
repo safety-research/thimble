@@ -214,8 +214,9 @@ export async function homeOffer(cx: Ctx): Promise<HomeOffer | null> {
  *  written it. */
 export type NoticeAct = { label: string; act: string; slug: string; config: string }
 /** `ids`: the open notices this one row stands for, the newest (`id`) first: notices with the same words, agent and
- *  acts (three of an orientation's helpers switched to another model) show as one row with their count (bug hunt B5). */
-export type HomeNotice = { id: string; ids: string[]; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[] }
+ *  acts (three of an orientation's helpers switched to another model) show as one row with their count (bug hunt B5).
+ *  `at`: when the newest was posted, in ms (0 when not known), which places it among the terminal's own (band.tsx). */
+export type HomeNotice = { id: string; ids: string[]; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[]; at: number }
 
 // the notices dismissed or fixed from here in this session, by id: a later notice of the same failure has an id of its own
 const dismissed = new Set<string>()
@@ -229,7 +230,7 @@ export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
     if (!str(n.id) || !str(n.text) || dismissed.has(str(n.id))) continue
     const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
     const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
-    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config) })) }
+    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config) })), at: Date.parse(str(n.at)) || 0 }
     const key = JSON.stringify([row.text, row.agent, row.open, row.acts])
     const first = same.get(key)
     if (first) first.ids.push(row.id)

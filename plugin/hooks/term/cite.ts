@@ -18,7 +18,7 @@
 import type { ChatCorrection, ChatEnd, ChatFix, ChatFixItem, ChatVerify } from './types'
 import { lineWidth, placeWords, width } from './draw'
 import type { Line, Seg } from './draw'
-import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, inlineRuns, isChip, isClock, labelRef, linksAsSpans, noControls, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnParens } from './lib'
+import { EMBED_RE, bareCard, cardWords, chipLabel, chipPlace, chipText, chipWords, cid, citations, citeEnd, citeSpans, dayMonth, inlineRuns, isChip, isClock, labelRef, linksAsSpans, noControls, outputLine, parseReply, plainLinks, prefix, questionOf, reportRef, shownMatches, valueIn, windowAt, withoutOwnBrackets } from './lib'
 import type { Citation, Run, TableRuns } from './lib'
 import { COLORS } from './paint'
 
@@ -538,7 +538,7 @@ export function claimsIn(text: string, answer: string): Claim[] {
  *  `chips` false for a tool's own words in Claude Code's rows, where a chip reads as its words (`events.jsonl line 12`). */
 export function plainCites(text: string, chips = true): string {
   // a citation written as a Markdown link reads as its `[[…]]` spelling first
-  const spans = withoutOwnParens(linksAsSpans(text))
+  const spans = linksAsSpans(withoutOwnBrackets(text))
   return plainLinks(citations(spans).reduce((t, c) => t.replaceAll(c.raw, c.display ?? (chips ? chipText(c) : chipWords(c))), spans))
 }
 
@@ -896,7 +896,7 @@ function streamDone(st: Streaming, line: string, look: StreamLook): string {
   if (st.fence) return line
   const embed = EMBED_RE.exec(line)
   if (embed) return look.card((embed[1] ?? embed[2])!)
-  return streamLine(line, false, look)
+  return streamLine(withoutOwnBrackets(line), false, look)
 }
 
 /** More of a block's text arrived (or, with `end`, the block is whole): the text to hand the engine now, so that what
