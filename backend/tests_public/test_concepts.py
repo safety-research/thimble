@@ -346,9 +346,12 @@ def test_the_scan_pool_ends_once_idle_but_never_while_a_run_holds_it(monkeypatch
         while concepts._pool is not None and time.monotonic() < deadline:
             time.sleep(0.05)
         assert concepts._pool is None, "the scan pool was kept after it was idle for SCAN_IDLE_S"
-        for w in workers:
-            w.join(timeout=20)
-            assert not w.is_alive(), "a worker of the idle scan pool still runs"
+        # the pool's own manager thread joins its workers as it ends; a join here would race it for the exit status
+        # (os.waitpid answers ECHILD to the loser, whose Process then reads as alive until the winner records it)
+        deadline = time.monotonic() + 20
+        while any(w.exitcode is None for w in workers) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert all(w.exitcode is not None for w in workers), "a worker of the idle scan pool still runs"
         again = concepts._pool_get()
         assert again is not pool and again.submit(abs, -4).result(timeout=60) == 4
     finally:
