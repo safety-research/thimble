@@ -335,13 +335,15 @@ async def _lifespan(app: Any):
 
 def prune_indexes() -> int:
     """Every workspace's view indexes pruned (view_indexes.prune_workspace: those of views that are gone deleted, the
-    rest kept to their newest fingerprints), then held to the cap across them; the bytes freed."""
+    rest kept to their newest fingerprints), then held to the cap across them; the bytes freed. It walks only the
+    workspaces' folders (config.workspace_folders) of corpora thimble still knows: an archive's folder, and one whose
+    corpus is gone, have no views to read."""
     freed = 0
-    try:
-        names = sorted(d.name for d in config.WORKSPACES_DIR.iterdir() if d.is_dir() and config._valid_name(d.name))
-    except OSError:
-        names = []
-    for c in names:
+    for c in (d.name for d in config.workspace_folders()):
+        try:
+            config.corpus_dir(c)
+        except ValueError:
+            continue
         try:
             if (config.workspace_dir(c) / INDEXES_SUBDIR).is_dir():
                 freed += view_indexes.prune_workspace(c, lambda slug, c=c: read_view(c, slug) is not None)

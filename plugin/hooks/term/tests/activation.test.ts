@@ -6,7 +6,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { LISTED_CHECK_MS, NOT_LISTED_TEXT, REFUSED_TEXT } from '../activate'
-import { CLI, CWD, GUIDE, HOME, SID, call, corpus, reads, startSession, trailOf, world } from './fixtures'
+import { CLI, CWD, GUIDE, HOME, SID, WS, aTurn, call, corpus, reads, startSession, trailOf, world } from './fixtures'
+import { words } from './fixtures-panel'
 import type { World } from './fixtures'
 
 const SLOW = { timeoutMs: 30000 }
@@ -97,6 +98,38 @@ test('/clear: the next prompt of the new conversation rekeys thimble and carries
   expect(w.activations.length).toBe(2)
   expect(w.activations[1]).toContain('s3')
   expect(q.context ?? []).toEqual([])
+})
+
+// bug hunt H18: right after /clear the thimble line read `threads 0  citations 0  checks 0`, and with the next answer
+// threads was back while checks stayed 0: the workspace's counts (threads, the checks' comments) stay across /clear, and
+// the conversation's (its citations) start over from none, as in any new conversation
+test("/clear: the thimble line counts the workspace's threads and the checks' comments as before, and the new conversation's citations alone", SLOW, async ($, on) => {
+  const w = world(on)
+  const comment = (id: string) => ({ id, check: 'important-details', check_name: 'Important details', color: 2, turn: 'r1', row: 'r1', ref: `answer:r1#s${id.slice(1)}`, start: 0, end: 10, quote: 'The wiki h', text: 'which wiki?', status: 'open', at: '2026-10-16T16:06:00Z', sid: SID })
+  w.comments = [comment('k1'), comment('k2')]
+  await startSession($, w)
+  await aTurn($, w, 'r1', 'The wiki has [4579](README.md#L3) pages.')
+  w.stamps.set(`${WS}/answer-comments.json`, 2)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  const line = async () => {
+    const m = (await $.ui.mount(ABOVE)) as unknown as Mounted<'terminal'>
+    const said = words(await m.find({ type: 'Box', key: 'above-summary' })).replace(/ +/g, ' ').trim()
+    await m.unmount()
+    return said
+  }
+  expect(await line()).toMatch(/threads 2 citations 1 (◌ )?labels 1 checks 2/)
+  await $.session.end({ reason: 'clear', sessionId: SID, resume: { id: SID } } as never)
+  w.sid = 's2'
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  expect(await line()).toMatch(/threads 2 citations 0 labels 1 checks 2/)
+  // the new conversation's first answer: its own citation, the same threads and comments
+  await aTurn($, w, 'r2', 'There are [14592](README.md#L5) revisions.')
+  w.stamps.set(`${WS}/answer-comments.json`, 3)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  expect(await line()).toMatch(/threads 2 citations 1 (◌ )?labels 1 checks 2/)
 })
 
 // bug hunt C15: the shim went live on the session's marker before the push, so Claude Code's tools/list (and the shim's

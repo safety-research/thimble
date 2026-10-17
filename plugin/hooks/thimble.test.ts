@@ -351,6 +351,10 @@ function engine(opts: Options = {}) {
       return seen.effort
     },
     complete: (agentId: string | undefined, answer = 'Done.', more: Json = {}) => hooks['turn.complete']($, { agentId, answer, reason: 'answer', durationMs: 5, isAborted: false, turnId: 't', ...more }, async () => ({ text: answer })),
+    /** a `task_status` row as a request of main's (or of an agent's) carries it, through the prompt.attachment hook: the
+     *  text the model reads, null when it is left out */
+    taskStatus: async (text: string, agentId?: string): Promise<string | null> =>
+      (await hooks['prompt.attachment']($, { type: 'task_status', text, origin: { kind: 'engine' }, ...(agentId === undefined ? {} : { agentId }) }, async (x: Json) => ({ text: x.text }))).text,
   }
 }
 
@@ -709,6 +713,27 @@ describe('ends and sessions', () => {
     expect(ownNotice(`${notice(check)}\n${notice(call)}`)).toBe(check)
     // the writer's reaches main, and so does a batch that holds it, and any other prompt
     expect([ownNotice(notice(writer)), ownNotice(`${notice(check)}\n${notice(writer)}`), ownNotice(`<agent-message from="${check}">`)]).toEqual([undefined, undefined, undefined])
+  })
+
+  // bug hunt H12: after /compact, main's next answer ended with "The Important details · answers check finished; thimble
+  // shows its comments": Claude Code had listed thimble's own agents for main again, as task_status rows
+  it("leaves Claude Code's task_status rows of its own check and call agents out of main's requests, and no other", async () => {
+    const server = new Server()
+    server.roles = { ...structuredClone(ROLES), call: { name: 'call', description: 'Does one task for thimble.', prompt: 'You do one task for thimble.', background: true, model: OPUS, effort: 'low' } }
+    const e = await started({ server })
+    const check = String((await e.server.answer(e.server.push('spawn', { role: 'check', prompt: 'p', description: 'check: Important details · answers', values: {}, note: '' }))).agentId)
+    const call = String((await e.server.answer(e.server.push('spawn', { role: 'call', prompt: 'p', description: 'thimble card check: Which IP ranges?', values: {}, note: '' }))).agentId)
+    const writer = String((await e.server.answer(e.server.push('spawn', { role: 'writer', prompt: 'p', description: 'writer: report', values: {}, note: '' }))).agentId)
+    await e.agentCall({ subagentType: 'thimble:check', prompt: 'Check the answer.', description: 'check: Important details · cards' }, 'aTypedCheck')
+    const done = (id: string, what: string) => `Task ${id} (type: local_agent) (status: completed) (description: ${what}) Read the output file to retrieve the result: /tmp/tasks/${id}.output`
+    const running = (id: string, what: string) => `Background agent "${what}" (${id}) is still running. Do NOT spawn a duplicate. You will be notified when it completes.`
+    expect(await e.taskStatus(done(check, 'check: Important details · answers'))).toBeNull()
+    expect(await e.taskStatus(done(call, 'thimble card check: Which IP ranges?'))).toBeNull()
+    expect(await e.taskStatus(running('aTypedCheck', 'check: Important details · cards'))).toBeNull()
+    // the writer's and the analyst's own agents reach main, and so does a subagent's own request
+    expect(await e.taskStatus(done(writer, 'writer: report'))).toBe(done(writer, 'writer: report'))
+    expect(await e.taskStatus(running('aMine000', 'count the pages'))).toBe(running('aMine000', 'count the pages'))
+    expect(await e.taskStatus(done(check, 'check: Important details · answers'), 'aSub')).toBe(done(check, 'check: Important details · answers'))
   })
 
   it('keeps its poll across /clear: a hello under the new id, polls under it, the record again and a note per running agent', async () => {

@@ -2,6 +2,7 @@
 a deleted view's folder goes, and all of them together stay under the cap, least recently used first."""
 from __future__ import annotations
 
+import logging
 import os
 import time
 from pathlib import Path
@@ -32,3 +33,15 @@ def test_the_cap_deletes_the_least_recently_used_but_none_in_use(workspaces_tmp,
     assert live.exists(), "an index used within IN_USE_S stays even over the cap"
     assert freed == 3 * (100 + 2)
     assert view_indexes.usage()["indexes"] == 1
+
+
+def test_pruning_walks_only_the_workspaces(workspaces_tmp, caplog):
+    """`/thimble fresh` puts a workspace away in workspaces/.archive/, which is no workspace, and a workspace's corpus
+    can be gone: the prune at each server start passes both without an error in the log (bug hunt H15)."""
+    from app import views
+
+    (workspaces_tmp / ".archive" / "wiki-2026-01-02-030405" / view_indexes.INDEXES_SUBDIR).mkdir(parents=True)
+    (workspaces_tmp / "gone" / view_indexes.INDEXES_SUBDIR).mkdir(parents=True)
+    with caplog.at_level(logging.ERROR, logger="thimble.views"):
+        views.prune_indexes()
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR] == []

@@ -79,6 +79,9 @@ export const rt = {
   // which folder the workspace is (`thimble state home`'s `instance`), '' before the first read: /thimble fresh and
   // restore put another folder in its place (followWorkspace)
   instance: '',
+  // the conversation ($.session.id()) the refresh loop last read the workspace in, '' before its first pass: /clear and
+  // /resume put another in its place (followConversationCounts)
+  sid: '',
   busy: false,
   again: false,
   // the labels' lane (labelsLane): the label definitions' folder as last listed (null before the first listing), and
@@ -1338,6 +1341,7 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
       rt.wanted.clear()
       await loadCards(cx, ids, { named: true })
     }
+    await followConversationCounts(cx)
     do {
       rt.again = false
       const sig = await signature(cx, rt.sc)
@@ -1447,11 +1451,12 @@ export function answerCommentOf(v: unknown): AnswerComment | null {
   }
 }
 
-/** The checks' open comments on this session's answers and the checks reading an answer now (`thimble state
- *  answer-comments`, C9). */
+/** The checks' open comments on main's answers in the workspace and the checks reading an answer now (`thimble state
+ *  answer-comments`, C9). They are the workspace's, as the browser's chat shows them: those on the answers before a
+ *  /clear stay, as the side threads do (bug hunt H18). */
 export async function readAnswerComments(cx: Ctx): Promise<void> {
   if (!rt.sc) return
-  const got = await readState(cx, rt.sc, 'answer-comments', ['--session', await cx.sessionId(), '--status', 'open'])
+  const got = await readState(cx, rt.sc, 'answer-comments', ['--status', 'open'])
   if (!got.ok) return
   const v = (got.value ?? {}) as { comments?: unknown; running?: unknown }
   const comments = (Array.isArray(v.comments) ? v.comments : []).map(answerCommentOf).filter((c): c is AnswerComment => c !== null && c.status === 'open')
@@ -1525,6 +1530,29 @@ export async function followWorkspace(cx: Ctx, instance: string): Promise<void> 
   }
   if (cites.length) await resolveCitations(cx, cites.map(c => ({ raw: c.raw, ref: c.ref, display: c.display })))
   await refreshSummary(cx)
+}
+
+/** The conversation the refresh loop reads in, followed: after a /clear or /resume this process runs another, and
+ *  Claude Code starts the state the drawings read over. The thimble line then counts by one rule (bug hunt H18: right
+ *  after /clear `threads 0  citations 0  checks 0`, then threads back at 1 with the next answer and checks still 0): what
+ *  is the workspace's (cards, threads, labels, the checks' comments) is read again at once and counts as before; what
+ *  is the conversation's (the citations of its answers and of the cards it drew) starts from what the new conversation
+ *  holds, as in any new one: none after /clear, and after /resume what kept.ts kept of it. */
+async function followConversationCounts(cx: Ctx): Promise<void> {
+  const sid = await cx.sessionId().catch(() => '')
+  if (!sid || sid === rt.sid) return
+  const was = rt.sid
+  rt.sid = sid
+  if (!was) return
+  rt.shown.clear()
+  rt.cardCites.clear()
+  rt.queue.clear()
+  rt.retries.clear()
+  const mine = keptSession(sid)
+  for (const id of mine?.shown ?? []) if (!rt.deleted.has(id)) rt.shown.add(id)
+  await cx.setCiteIndex(mine?.cites ?? [])
+  // every area read again in this pass, as at activation
+  rt.sig = null
 }
 
 /** What main's chat drew under its rows in earlier processes of this conversation (kept.ts), put in the state where it

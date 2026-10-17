@@ -435,6 +435,22 @@ test("bug hunt C23: a stopped reply's notice puts the analyst's question back in
   await band.unmount()
 })
 
+// bug hunt H16: the stopped page's notice had only `dismiss`; its act starts the page as /thimble browser does
+test("bug hunt H16: the stopped page's notice comes as its file changes, and its act starts the page as /thimble browser does", T, async ($, on) => {
+  const w = panelWorld(on)
+  await start($, w)
+  w.states.home.notices = [{ id: 'n9', key: 'page:stopped', kind: 'server', text: "thimble's page stopped, so thimble's tools wait for it. In your terminal: type /thimble browser to start it again.", agent: '', chat: '', at: '2026-10-17T17:11:10Z', acts: [{ label: 'start it again', act: 'page-start' }] }]
+  w.stamps.set(`${WS}/notices.json`, 9)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  const band = (await $.ui.mount(aboveAt(220))) as unknown as M
+  expect(words(await band.find({ type: 'Box', key: 'above-notice-n9' }))).toContain('start it againdismiss')
+  await band.press({ key: 'above-notice-n9-act-0' })
+  await w.clock.settle()
+  expect(w.pressed).toEqual([['/tree/plugin/bin/thimble', 'open', '--session', 's1', '--cwd', CWD, '--ref', 'home', '--json']])
+  await band.unmount()
+})
+
 test('bug hunt F12: the notice of a sign-in from an earlier session shows once, in that session: a new one draws no row for it and posts no toast, even when the band draws before home is read', T, async ($, on) => {
   const w = panelWorld(on)
   // signed in at 12:39 the day before this session began (the test's clock starts on 2026-09-21); a sign-in during

@@ -328,7 +328,8 @@ export async function proposalsOff(cx: Ctx): Promise<void> {
  *  (a new failure brings a new notice); the orientation's `orient-again` asks main to start it again with its last
  *  request (bug hunt C17, C18: the analyst always has a next step). For main's reply Claude's safeguards stopped,
  *  `card-again` sends main the act's words, which ask it to make the card the reply did not add, and `ask-again` puts
- *  the act's words, the analyst's last message to main, in the prompt to change and send (bug hunt C23). */
+ *  the act's words, the analyst's last message to main, in the prompt to change and send (bug hunt C23). The stopped
+ *  page's `page-start` does what /thimble browser does (bug hunt H16). */
 export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<void> {
   if (!rt.sc) return
   if (a.act === 'label-open') return openLabelAt(cx, a.slug, '')
@@ -365,6 +366,9 @@ export async function noticeAct(cx: Ctx, n: HomeNotice, a: NoticeAct): Promise<v
   }
   // a code ticket that passed its checks waits for the analyst's Allow, which the browser's card asks (SPEC-v2 3.16)
   if (a.act === 'ticket-open') return void (await openInBrowser(cx, `ticket:${a.slug || n.id.replace(/^ticket:/, '')}`))
+  // thimble's page stopped (the MCP shim's `page:stopped` notice): started again as /thimble browser starts it; the
+  // notice goes once main is attached again (notices.page_back), so a start that fails leaves it, with its own notice
+  if (a.act === 'page-start') return void (await openInBrowser(cx, 'home'))
   const got = await act<{ queued?: boolean; reason?: string }>(cx, rt.sc, a.act, { ...(a.slug ? { slug: a.slug } : {}), notice: n.id })
   if (!got.ok || got.value.queued === false) {
     cx.toast(got.ok ? got.value.reason || 'it could not start' : got.error)

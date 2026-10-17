@@ -207,7 +207,7 @@ switches and coverage have their own:
 | `thimble features --cwd <dir> --json [--set <key>=on\|off …]` | the seven switches thimble holds (C6), after any change |
 | `thimble act coverage --cwd <dir> --stdin` | a turn's coverage facts on standard input (C7): the session's summary and its line |
 | `thimble state coverage --cwd <dir> --session <sid> --summary` | the session's coverage summary, read again when the coverage folder changes |
-| `thimble state answer-comments --cwd <dir> --session <sid> --status open` | the checks' comments on this session's answers and the checks reading one now (C9) |
+| `thimble state answer-comments --cwd <dir> --status open` | the checks' comments on main's answers in the workspace and the checks reading one now (C9) |
 
 
 | Call | Read as |

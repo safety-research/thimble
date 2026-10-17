@@ -35,7 +35,11 @@ report MCP progress every PROGRESS_S, since Claude Code aborts a call that is si
 address and token are read per call from $THIMBLE_HOME/server.json; every request proves the shim holds the token, and
 an answer is believed only when it proves the server does, as the plugin's hooks do (app/hook_auth.py). After the press
 the transport stays the server's for as long as that `claude` process runs main: when the server does not answer twice,
-STOPPED_GAP_S apart, a call answers PAGE_STOPPED and the shim posts the `page:stopped` notice. A session continued in a
+STOPPED_GAP_S apart, a call answers PAGE_STOPPED and the shim posts the `page:stopped` notice, whose act in the terminal
+is `/thimble browser`. The subscription (below) posts it too, without a call, once no server has answered for
+STOPPED_NOTICE_S since the subscription it held dropped, so the terminal says the page stopped within seconds of a
+server killed or crashed, as the browser does, and a restart (`thimble server restart`, about ten seconds) posts
+nothing (bug hunt H16). A session continued in a
 new `claude` process (`claude -c` after a quit, which stopped the server with the old process) is main there on the
 local transport, as a new main starts (activate.continue_main, bug hunt H1): the shim moves launch.json to its process
 as the session watch begins, at each new session id, and before a call would answer PAGE_STOPPED, so thimble's tools
@@ -124,10 +128,17 @@ RETRY_S = 2.0  # between subscriptions, and between looks for the session marker
 LIVE_POLL_S = 1.0  # once thimble is on: between looks at the session id and the session's transport (watch_session)
 LIST_WAIT_S = 2.0  # how long load_thimble waits for Claude Code's tools/list after its list_changed
 STOPPED_GAP_S = 2.0  # between the two looks that find the server down after the press (call_server_or_stopped)
+# how long no server answers after the subscription dropped before the subscription posts PAGE_STOPPED_KEY (module note)
+STOPPED_NOTICE_S = 15.0
+STOPPED_ENV = "THIMBLE_MCP_STOPPED_S"
 # after the press, a call when the server answers neither look (module note); the shim also posts PAGE_STOPPED_KEY
 PAGE_STOPPED = "thimble's page stopped. Ask the analyst to type /thimble browser to start it again."
 PAGE_STOPPED_KEY = "page:stopped"  # notices.PAGE_STOPPED_KEY: it goes once main is followed again (notices.page_back)
-PAGE_STOPPED_NOTICE = "thimble's page stopped. thimble's tools wait for it."
+PAGE_STOPPED_NOTICE = ("thimble's page stopped, so thimble's tools wait for it. In your terminal: type /thimble "
+                       "browser to start it again.")
+# the notice's act (notices.ACTIONS `page-start`): in the terminal what /thimble browser does; the browser, whose page
+# stopped, shows no button for it
+PAGE_START = {"label": "start it again", "do": "page-start"}
 # load_thimble when Claude Code's record of this process names no session
 NO_SESSION = ("thimble could not tell which Claude Code session this is, so it did not turn on. Ask the analyst to type "
               "/thimble in this terminal.")
@@ -442,16 +453,27 @@ async def call_server_or_stopped(name: str, args: dict[str, Any], tool_use_id: s
                 if (await anyio.to_thread.run_sync(continued)
                         or await anyio.to_thread.run_sync(transport_now) != activate.SERVER):
                     return await call_local(name, args, tool_use_id)
-                c = workspace()
-                if c:
-                    try:
-                        from app import notices  # noqa: PLC0415
-
-                        notices.post(c, kind="server", text=PAGE_STOPPED_NOTICE, key=PAGE_STOPPED_KEY)
-                    except Exception:  # noqa: BLE001 — the call still says so
-                        log.warning("the page:stopped notice was not posted", exc_info=True)
+                await anyio.to_thread.run_sync(page_stopped)
                 return _error(PAGE_STOPPED)
     return await call_server(name, args, tool_use_id)
+
+
+def page_stopped() -> bool:
+    """The `page:stopped` notice posted in the shim's workspace, with its act (PAGE_START), unless it is open already,
+    so the terminal toasts it once however many calls find the server down. True when it is open now. Never raises."""
+    c = workspace()
+    if not c:
+        return False
+    try:
+        from app import notices  # noqa: PLC0415
+
+        if any(n.get("key") == PAGE_STOPPED_KEY for n in notices.open_notices(c)):
+            return True
+        posted = notices.post(c, kind="server", text=PAGE_STOPPED_NOTICE, key=PAGE_STOPPED_KEY, action=PAGE_START)
+        return posted is not None
+    except Exception:  # noqa: BLE001 — a call still says so
+        log.warning("the page:stopped notice was not posted", exc_info=True)
+        return False
 
 
 async def _reachable(client: httpx.AsyncClient) -> bool:
@@ -691,7 +713,10 @@ async def subscription(route: str) -> None:
     """Hold the subscription for as long as the session lives on the server transport (module note). Never raises: a
     failure, a missing server.json or an answer without the server's proof waits RETRY_S and subscribes again; a new
     session id (checked at each keep-alive) resubscribes at once. It ends once the transport is local again (a session
-    continued in this process after a quit: continued), and the session watch starts it again at the next press."""
+    continued in this process after a quit: continued), and the session watch starts it again at the next press. Once a
+    subscription it held dropped and no server has answered for STOPPED_NOTICE_S, it posts the `page:stopped` notice
+    (stopped_look), once until it subscribes again."""
+    down = _Down()
     while True:
         if await anyio.to_thread.run_sync(main_transport) != activate.SERVER:
             LIVE.subscribed = False
@@ -711,6 +736,7 @@ async def subscription(route: str) -> None:
                     if resp.status_code != 200 or not proven(resp, proof):
                         await resp.aread()
                         raise ConnectionError(f"HTTP {resp.status_code}" + ("" if proven(resp, proof) else ", unproven"))
+                    down.live()
                     async for line in resp.aiter_lines():
                         if line.startswith(":") and session_id() != sid:  # the server's keep-alive
                             moved = True
@@ -720,7 +746,43 @@ async def subscription(route: str) -> None:
         except Exception:  # noqa: BLE001 — the subscription never takes the tools down with it
             log.exception("subscription failed")
         if not moved:
+            await stopped_look(down)
             await anyio.sleep(RETRY_S)
+
+
+class _Down:
+    """What the subscription knows of the server going away: whether a subscription it held was live, when no server
+    answered first since then (None while one answers), and whether it posted the notice for this stop."""
+
+    def __init__(self) -> None:
+        self.was_live = False
+        self.since: float | None = None
+        self.told = False
+
+    def live(self) -> None:
+        self.was_live, self.since, self.told = True, None, False
+
+
+async def stopped_look(down: _Down) -> None:
+    """One look after the subscription ended: when a subscription was live before and no server answers (_reachable),
+    the time since the first such look grows, and once it reaches STOPPED_NOTICE_S while this session is still main's on
+    the server transport, the `page:stopped` notice is posted (page_stopped), as a call would post it. A server that
+    answers (a refusal, an unproven answer) starts the count over."""
+    if not down.was_live or down.told:
+        return
+    async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
+        reached = await _reachable(client)
+    now = anyio.current_time()
+    if reached:
+        down.since = None
+        return
+    if down.since is None:
+        down.since = now
+    if now - down.since < _env_s(STOPPED_ENV, STOPPED_NOTICE_S):
+        return
+    if await anyio.to_thread.run_sync(continued) or await anyio.to_thread.run_sync(transport_now) != activate.SERVER:
+        return
+    down.told = await anyio.to_thread.run_sync(page_stopped)
 
 
 async def watch_session(tg: Any) -> None:

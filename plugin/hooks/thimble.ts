@@ -69,6 +69,11 @@
 //   the agent it starts that request's effort, which turn.step sets on its every request;
 //   a child of such an agent whose type is not thimble's gets the same effort (its model it inherits already). These
 //   hooks never see a run of an agent this module started, which is why clicks register instead;
+// - prompt.attachment: Claude Code's `task_status` rows that name a check's or the card check's agent this module knows
+//   (checkName, callDone) are left out of main's requests (ownTask): after a compaction Claude Code lists each
+//   background agent for main again ("Task … (description: check: Important details · answers) … completed"), and
+//   main then reported on thimble's checks in its answer (bug hunt H12). The transcript keeps Claude Code's record,
+//   and its row on the screen (`Task "…" completed in background`) stays: no hook draws or drops that row;
 // - turn.start and turn.complete of main's own turns: the id of main's running turn, which abort names;
 // - turn.complete: posts the end of each run of an agent it started (POST /api/module/ended), with why it ended and,
 //   for a refusal, what the API said of it, since its other hooks skip those agents;
@@ -1274,6 +1279,16 @@ export function ownNotice(text: string): string | undefined {
   return ids.every(id => m.checks.has(id) || m.calls.has(id)) ? ids[0] : undefined
 }
 
+/** The agent a `task_status` row of Claude Code's names (its text, as a request carries it: `Task <id> (type:
+ *  local_agent) (status: completed) (description: …)`, `Background agent "…" (<id>) is still running`), when it is an
+ *  agent of thimble's check or call role that this session started (checkName, callDone), whose end thimble shows
+ *  itself; undefined for any other. */
+export function ownTask(text: string): string | undefined {
+  const m = live.m
+  if (!m) return undefined
+  return [...m.checks.keys(), ...m.calls.keys()].find(id => id !== '' && text.includes(id))
+}
+
 export const register: Register = on => {
   const m = fresh()
   live.m = m
@@ -1288,6 +1303,10 @@ export const register: Register = on => {
     if (marker) await start($, m, marker)
     return r
   })
+
+  // Claude Code's word to main of thimble's own check and card check agents, after a compaction: left out (module note)
+  on('prompt.attachment', { type: 'task_status' }, async ($, e, next) => (e.agentId === undefined && ownTask(e.text) !== undefined ? { text: null } : next(e)))
+    .catch(($, e, next) => next(e)) // not a guard: if it fails, main reads the row as Claude Code wrote it
 
   // thimble's types are offered to a model only inside an Agent call that names them, or once one started (module note)
   on('agent.offer', async ($, e, next) => (ours(m, e.agent) && !m.dispatching.has(e.agent) && !m.used.has(e.agent) ? { isOffered: false } : next(e)))

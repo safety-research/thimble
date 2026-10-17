@@ -885,6 +885,17 @@ def workspace_dir(name: str) -> Path:
     return p
 
 
+def workspace_folders(base: Path | None = None) -> list[Path]:
+    """The workspaces' folders in `base` (WORKSPACES_DIR when None), sorted: each folder with a corpus's name. A
+    leading-dot folder is thimble's own and no workspace (ledger.ARCHIVE_DIR, where `/thimble fresh` puts a workspace
+    away), and neither is a file; a folder that cannot be listed has none."""
+    try:
+        return sorted(d for d in (base or WORKSPACES_DIR).iterdir()
+                      if d.is_dir() and _valid_name(d.name) and not d.name.startswith("."))
+    except OSError:
+        return []
+
+
 def registry_dir(name: str) -> Path:
     """The workspace's registry folder, created on demand (private_dir): the card types and extensions the server found
     there, which a wrapped kernel may only read (kernel_wrap.READ_ONLY_DIRS)."""
