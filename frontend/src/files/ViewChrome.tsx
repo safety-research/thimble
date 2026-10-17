@@ -7,6 +7,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 import { LabelRowChip } from '../chat/SurfaceChips'
 import { FilterChip } from '../components/FilterChip'
 import { Popover } from '../components/Menu'
+import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
 import type { Concept, ViewDerived, ViewProblems, ViewShown } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -320,6 +321,13 @@ export function ResidueList({ notes, onPick }: { notes: ViewNotes; onPick: (ref:
   )
 }
 
+/** What "Derived data" holds, for its tooltip: the fields the view worked out rather than read, and the labels it shows.
+ * Pure. */
+export function derivedTip(fields: number, labels: number): string {
+  const what = [fields ? 'fields the view worked out from the records, rather than read from them as they are' : '', labels ? 'the labels it shows' : ''].filter(Boolean).join(', and ')
+  return what ? `${what[0].toUpperCase()}${what.slice(1)}. Click to list them.` : ''
+}
+
 /** "Derived data" with how many fields the view's reader made rather than read and how many labels it shows, which a
  * click lists: the fields of each kind of record under its name, the computed ones first and marked so, each with how
  * and from what, then each label with its description. */
@@ -327,14 +335,17 @@ function DerivedData({ ws, shown, labels, name }: { ws: string; shown: ViewShown
   const [at, setAt] = useState<HTMLButtonElement | null>(null)
   const [open, setOpen] = useState(false)
   const fields = shown?.derived ?? []
+  // what "Derived data" means, in plain words (bug hunt G11)
+  const { props: tipProps, tip } = useTooltip(open ? null : derivedTip(fields.length, labels.length))
   if (!fields.length && !labels.length) return null
   const counts = [fields.length ? count(fields.length, 'field', 'fields') : '', labels.length ? count(labels.length, 'label', 'labels') : ''].filter(Boolean)
   const groups = byRecord(fields)
   return (
     <>
-      <button ref={setAt} type="button" className="view-pane-files" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button ref={setAt} type="button" className="view-pane-files" aria-expanded={open} onClick={() => setOpen((o) => !o)} {...tipProps}>
         Derived data: {counts.join(', ')}
       </button>
+      {tip}
       <Popover anchor={at} open={open} onClose={() => setOpen(false)} label={`What ${name} derived`} className="view-pane-list">
         {groups.map(([record, ds]) => (
           <section key={record} className="view-pane-list-group">

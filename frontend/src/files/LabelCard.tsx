@@ -21,7 +21,7 @@ import { Icon } from '../components/Icon'
 import { MidCut } from '../components/MidCut'
 import { Menu, Popover } from '../components/Menu'
 import { Switch } from '../components/Switch'
-import { TipButton } from '../components/Tooltip'
+import { TipButton, Tipped } from '../components/Tooltip'
 import { labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { loadSettings, modelChoices, modelLabel } from '../lib/models'
@@ -71,6 +71,10 @@ const OVER: { value: LabelOver; label: string; icon: 'files' | 'canvas' | 'repor
   { value: 'cards', label: 'Cards', icon: 'canvas' },
   { value: 'sentences', label: 'Sentences', icon: 'report', title: 'Report sentences' },
 ]
+
+/** What Over and Marks mean, in plain words, on their keys' tooltips (bug hunt G11). */
+export const OVER_TIP = 'What the label reads and gives a value: records in the files, cards on the canvas, or sentences of the report.'
+export const MARKS_TIP = 'What a value marks in a file: the words that show it (Span), the whole record they are in (Record), or the whole file (File).'
 
 /** What a label over files marks. */
 const MARKS: { value: LabelMarks; label: string; icon: 'span' | 'lines' | 'doc' }[] = [
@@ -448,7 +452,9 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
 
   const grid = (
     <div className="label-card-grid">
-      <span className="label-card-key">Over</span>
+      <Tipped text={OVER_TIP} className="label-card-key">
+        Over
+      </Tipped>
       <Segmented
         label="Over"
         size="sm"
@@ -459,7 +465,9 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
       />
       {draft.over === 'files' && (
         <>
-          <span className="label-card-key">Marks</span>
+          <Tipped text={MARKS_TIP} className="label-card-key">
+            Marks
+          </Tipped>
           <Segmented
             label="Marks"
             size="sm"

@@ -1188,7 +1188,7 @@ export interface NewTicketBody {
   title: string
   body: string
   target?: unknown
-  /** where it was filed: `ui` for the browser's File a code ticket (backend dev.SOURCES) */
+  /** where it was filed: `ui` for the browser's Ask Claude to fix it (backend dev.SOURCES) */
   source?: 'ui'
 }
 
