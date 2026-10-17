@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -140,6 +141,11 @@ def _link_now(c: str, cell: dict, v: dict, *, rerun: bool = False) -> None:
         return
     v["links"] = links
     if _runnable(cell) or _value_refs(typed.text) or _bare_refs(typed.text):
+        # each pass is a job of its own (`pass` in its version): a run that keeps the card's exec_count (a card check's
+        # fix, notebook.land_run; a kernel started again counts from 1) or a takeaway stored as it was would queue the key
+        # of a job done already, which the queue answers with no job, and the links stayed pending for good (◌ on the
+        # thimble line, bug hunt 10-17)
+        v["pass"] = uuid.uuid4().hex[:8]
         _enqueue_links(c, cell, _links_version(cell))
     else:  # an errored or silent cell with numbers in its takeaway: nothing here can vouch for them
         links["status"] = _links_status(resolved, unresolved, [], True, typed=typed_links)
@@ -173,12 +179,13 @@ def _apply_typed(typed: cite.Typed, resolved: list[dict]) -> tuple[list[dict], l
 
 
 def _links_version(cell: dict) -> str:
-    """The links job's version: the run, the takeaway's text, and the relink count (`_relink`), so a relink is a new
-    job."""
+    """The links job's version: the run, the takeaway's text, the relink count (`_relink`), so a relink is a new job,
+    and the pass that queued it (`_link_now`)."""
     h = hashlib.sha1(str(cell.get("takeaway") or "").encode("utf-8", "surrogatepass")).hexdigest()[:10]
     v = cell.get("verification") if isinstance(cell.get("verification"), dict) else {}
     n = v.get("relinks") if isinstance(v.get("relinks"), int) and not isinstance(v.get("relinks"), bool) else 0
-    return f"{cell.get('exec_count')}:{h}" + (f":r{n}" if n > 0 else "")
+    p = v.get("pass") if isinstance(v.get("pass"), str) else ""
+    return f"{cell.get('exec_count')}:{h}" + (f":r{n}" if n > 0 else "") + (f":p{p}" if p else "")
 
 
 def _enqueue_links(c: str, cell: dict, version: str) -> bool:

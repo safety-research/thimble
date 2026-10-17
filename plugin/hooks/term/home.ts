@@ -543,7 +543,8 @@ function citationsSection(cs: readonly HomeCite[]): HomeSection {
         key: `cite:${c.key}`,
         glyph: problem ? { mark: c.verdict === 'typed' || c.verdict === 'quiet' ? '!' : '×', fg: COLORS.problem } : c.verdict === 'pending' ? WORKING : DONE,
         title: c.value || c.place,
-        right: rightOf([c.place, problem ? c.why || c.verdict : '', c.card ? `card ${c.n}` : '']),
+        // a chip's place is its title (a card by its question): not said again
+        right: rightOf([c.value ? c.place : '', problem ? c.why || c.verdict : '', c.card ? `card ${c.n}` : '']),
         act: { op: 'open', open: { kind: 'cite', ref: c.ref, display: c.value || null, ...(c.card ? { card: c.card } : {}) } },
       }
     }),

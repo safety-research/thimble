@@ -5,7 +5,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
 import { cid } from '../lib'
-import { CWD, paneAt, panelWorld, words } from './fixtures-panel'
+import { CWD, aboveAt, paneAt, panelWorld, shown, words } from './fixtures-panel'
 import type { PanelWorld } from './fixtures-panel'
 
 type M = Mounted<'terminal'>
@@ -54,5 +54,53 @@ test('the citations, problems first: a card\'s refuted citation and the chat\'s 
   // found: no glyph, never a ✓
   expect(rows[4]).toBe('    4579 · README.md line 3 · found')
   expect(words(await m.drawn())).toContain('5 citations · ◌ checking 1 · 3 failed')
+  await m.unmount()
+})
+
+const MESSAGE = (requestId: string, text: string) =>
+  ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface: 'terminal', viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
+
+test('one count everywhere (bug hunt B8): the footer under an answer, the thimble line and the view count the same citations, the answer\'s words with a chip among them and the takeaway of the card drawn under it, each once; a chip\'s row names its card', { timeoutMs: 30_000 }, async ($, on) => {
+  const w = panelWorld(on)
+  await start($, w)
+  // main's answer cites a value of the card it made, as the card's takeaway does, and another card whole (a chip)
+  const VALUE = '[[4579|card:ff73e071#pages/TOTAL]]'
+  const CHIP = '[[card:a0frame0]]'
+  const TAKEAWAY_ONLY = '[[14592|card:ff73e071#revisions/TOTAL]]'
+  const answer = `The export holds ${VALUE} pages; each file's records are on their own card ${CHIP}.`
+  w.toolText = 'card:ff73e071\n[out0: table]'
+  await $.turn.start({ text: 'How big?', turnId: 't1' } as never)
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u1' } as never)
+  await $.session.append({ door: 'response', origin: { kind: 'model', model: 'm' }, uuid: 'r1', message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: answer }] } } as never).catch(() => undefined)
+  await $.turn.complete({ turnId: 't1', answer, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  // the answer's citations as the transcript's lane keeps them (C13 citeIndex), all three checked and found
+  w.t.citeIndex = [
+    { id: cid(VALUE), raw: VALUE, display: '4579', ref: 'card:ff73e071#pages/TOTAL', row: 'r1', at: 1 },
+    { id: cid(CHIP), raw: CHIP, display: null, ref: 'card:a0frame0', row: 'r1', at: 1 },
+  ]
+  const ok = (ref: string) => ({ ref, display: null, status: 'ok', why: '', kind: 'cell', lines: [], at: 1 })
+  w.t.verdicts = { [cid(VALUE)]: ok('card:ff73e071#pages/TOTAL'), [cid(CHIP)]: ok('card:a0frame0'), [cid(TAKEAWAY_ONLY)]: ok('card:ff73e071#revisions/TOTAL') }
+  let ui = (await $.ui.mount(MESSAGE('r1', answer))) as unknown as M
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('r1', answer))) as unknown as M
+  // 4579 (the words and the takeaway cite it alike: once), the chip, and the takeaway's 14592
+  expect(shown(await ui.find({ key: 'footer-r1' }))).toContain('3 citations · 1 card')
+  await ui.unmount()
+  const band = (await $.ui.mount(aboveAt(184))) as unknown as M
+  expect(words(await band.find({ type: 'Box', key: 'above-summary' }))).toContain('citations 3 ')
+  expect(words(await band.find({ type: 'Box', key: 'above-summary' }))).not.toContain('◌')
+  await band.unmount()
+  await $.command.run({ command: 'thimble:thimble', args: 'citations' } as never)
+  await w.clock.settle()
+  const m = (await $.ui.mount(paneAt(96))) as unknown as M
+  expect(words(await m.drawn())).toContain('3 citations')
+  const rows = await listText(m, 'm:citations-list')
+  expect(rows).toHaveLength(3)
+  // the chip by its card's question, never `(no words) · the card`
+  expect(rows).toContain('    card "How many records does each file hold?" · found')
+  expect(rows.join('\n')).not.toContain('(no words)')
+  expect(rows.find(r => r.includes('14592'))).toMatch(/^ {4}14592 · revisions TOTAL · found +card 1$/)
   await m.unmount()
 })
