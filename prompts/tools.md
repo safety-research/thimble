@@ -69,11 +69,11 @@ Change a card in place and run it again, rather than adding a second card. It ta
     "refs": {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "object", "properties": {"ref": {"type": "string"}, "quote": {"type": "string"} } } ] } },
     "text": {"type": "string"},
     "html": {"type": "string"},
-    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string", "description": "What happened in the step, in a line or two."}, "runs": {"type": "array", "items": {"type": "string"}, "description": "The description of each Agent call that runs the step, as you pass it to Agent. The card shows each one live."}, "details": {"type": "string", "description": "More about the step, such as how it works, which the analyst opens under it."} }, "required": ["text"] }, "description": "A plan's steps in order. They replace its steps, so you can change a step's status, note, runs or details at any time."},
+    "steps": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "makes": {"type": "array", "items": {"type": "string"} }, "status": {"type": "string", "enum": ["not started", "running", "done", "needs you"]}, "note": {"type": "string"}, "runs": {"type": "array", "items": {"type": "string"} }, "details": {"type": "string"} }, "required": ["text"] }, "description": "A plan's steps in order. They replace its steps, so you can change a step's status, note, runs or details at any time."},
     "libs": {"type": "array", "items": {"type": "string"} },
     "group": {"type": "string", "description": "The group to move the card to, its title or id. A new title makes a group."},
     "after": {"type": "string", "description": "The card to place it right after, card:<id>, or first."},
-    "takeaway": {"type": "string", "description": "The answer to the question in one or two sentences. Link its numbers and claims as Citations says for a takeaway."}
+    "takeaway": {"type": "string"}
   },
   "required": ["card"]
 }
@@ -95,7 +95,7 @@ Remove a copy of a card, or an attempt another card replaced. Fix a wrong card w
 
 ## apply_label
 
-Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. In files, a unit is a record, a whole file or a run directory (`unit`). A prompt label over many files takes minutes.
+Define a category, apply it to every unit of a scope, and get the counts per value and a card where the analyst checks each unit. A prompt label over many files takes minutes.
 
 ```json
 {
@@ -233,7 +233,7 @@ Open a card of a card type as its view in Files, as the card's Open as view does
 
 ## propose_view
 
-Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes. Call it only when the analyst asks for a view; thimble shows the analyst view proposals of its own. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
+Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes. Call it only when the analyst asks for a view; thimble shows the analyst view proposals of its own.
 
 ```json
 {
@@ -404,7 +404,7 @@ Get a picture of a card as thimble draws it. Once the analyst has opened the bro
 
 ## start_orientation
 
-Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which leaves its findings as cards in the group `Orientation`. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. Call it when the analyst asks for an orientation, or when their question needs a broad analysis of the corpus, such as "what's going on in this dataset?". A new orientation adds to the cards the earlier ones left. Call `message_orientation` to explore further within one that has finished. Its result is the exact Agent call that starts the orientation, which you then make. Pass a model or an effort only when the analyst names one, so that the orientation otherwise runs on the values thimble's Settings give it. One orientation runs at a time, so while one runs the call starts nothing.
+Start an orientation, a broad analysis of the corpus that helps the analyst understand it, as a subagent of this session, which leaves its findings as cards in the group `Orientation`. thimble shows it as a thread, Claude Code's agent tray shows it as a row, and an `orient` event tells you when it ends. A new orientation adds to the cards the earlier ones left. Call `message_orientation` to explore further within one that has finished. Its result is the exact Agent call that starts the orientation, which you then make. One orientation runs at a time, so while one runs the call starts nothing.
 
 ```json
 {
@@ -419,7 +419,7 @@ Start an orientation, a broad analysis of the corpus that helps the analyst unde
 
 ## start_writing
 
-Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document. Pass a model or an effort only when the analyst names one, so that the writer otherwise runs on the values thimble's Settings give it.
+Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make.
 
 ```json
 {
@@ -648,7 +648,7 @@ The code was stopped after {limit}. Make it faster and run it again with `edit_c
 
 ## card-run
 
-The card's code did not run yet. Run this command with Bash next: `{command}`. It runs the code and prints the card's result with the start of each output. thimble shows the card when its code has run.
+The card's code did not run yet. Run this command with Bash next: `{command}`. thimble shows the card when its code has run.
 
 ## kind-mismatch
 
@@ -1694,10 +1694,6 @@ This workspace was installed from a pre-cache: its orientation ran in advance on
 ## precached-context-kept
 
 This workspace was installed from a full export: its orientation ran in advance on these same files ({made}), as a subagent of the exporter's Claude Code session, so `message_orientation` cannot reach it, though its thread shows every step it took. What it left follows: the cards, the views and the documents, with the full text of each one written. Take it as what the analyst sees in thimble; read a card, a view or a ref with `read_ref` before you rely on its details, and answer what its cards already answer yourself.
-
-## thimble-terminal-home
-
-thimble: this session runs in terminal mode, so thimble shows this workspace here in the terminal and starts no server. To switch to browser mode, quit, run `thimble mode browser` and start `thimble` again.
 
 ## agents-none
 
