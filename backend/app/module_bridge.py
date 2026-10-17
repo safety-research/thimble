@@ -174,7 +174,12 @@ PROXY_IN_WAY = ("your shell sets a proxy without 127.0.0.1 and localhost in NO_P
 # (session.current), and its `claude` process is known only then (session.main_pid), unless launch.json's pid names it
 # (_launched)
 NOT_OPEN = "main's session has not opened thimble yet"
-WAIT_REASONS = (NO_MAIN, NOT_OPEN)  # a hello refused for one of these is asked again later (409), never refused for good
+# main runs on the local transport (a session continued after a quit: activate.continue_main), so its module takes its
+# requests from the workspace's files, not from this server's long poll (bug hunt 7, H17)
+LOCAL_NOW = "main's session runs thimble without the server now"
+# a hello refused for one of these is asked again later (409), never refused for good; the module reads launch.json
+# again meanwhile and goes on through the files when it says so (thimble.ts toFiles)
+WAIT_REASONS = (NO_MAIN, NOT_OPEN, LOCAL_NOW)
 ENDED_STATES = frozenset({"ended", "stopped", "killed", "completed", "failed", "done", "refused", "expired"})
 TYPED_LIVE = frozenset({"", "pending", "claimed"})  # a typed start's request still waiting for main's Agent call
 ROLE_TYPE = re.compile(r"thimble:(.+)")
@@ -398,15 +403,41 @@ def _launched(c: str, sid: str) -> bool:
 
 def _refusal(c: str, sid: str) -> str:
     """'' when a hello from `sid` may be accepted, else why not. Before main's session opened thimble, the process
-    launch.json names shows main (_launched), else the hello waits (NOT_OPEN)."""
+    launch.json names shows main (_launched), else the hello waits (NOT_OPEN). A hello of main's while main runs on the
+    local transport waits too (LOCAL_NOW): its requests go through the workspace's files, which a module that polls this
+    server never reads."""
     main = main_session(c)
     if not main:
         return NO_MAIN
     if sid != main:
         return NOT_MAIN
+    if transport(c) == FILE:
+        return LOCAL_NOW
     if not _opened(c, sid):
         return "" if _launched(c, sid) else NOT_OPEN
     return ""
+
+
+def follow_launch(c: str, sid: str, cwd: str) -> bool:
+    """launch.json names `sid` as main on the server's transport and its `claude` runs it (activate.main_alive), while
+    this server follows another session or none: the server follows `sid` now (session.attach), as a press would have
+    it, since launch.json, which activation alone writes, says which session is main (bug hunt 7, H13 and H17: a
+    session that took main, or was continued, was asked for its hello again every 2 s for as long as it ran, and the
+    browser kept following the session before it). Its module's hello (NOT_OPEN) and its watcher's pull
+    (events.pull_route), whichever comes first, make the server follow it. True when it attached `sid`."""
+    from . import activate, session  # noqa: PLC0415
+
+    rec = _launch(c)
+    if not sid or str(rec.get("session") or "") != sid or transport(c) != HTTP or not activate.main_alive(c, rec):
+        return False
+    pid = rec.get("pid") if isinstance(rec.get("pid"), int) and not isinstance(rec.get("pid"), bool) else None
+    config_dir = rec.get("config_dir") if isinstance(rec.get("config_dir"), str) else None
+    log.info("%s: launch.json names session %s as main and its claude runs it: this server follows it", c, sid)
+    try:
+        return session.attach(c, sid, cwd, None, pid, config_dir) is not None
+    except Exception:  # noqa: BLE001 — the hello is asked again, as before
+        log.exception("%s: session %s was not attached", c, sid)
+        return False
 
 
 def _accepted(c: str, sid: str) -> bool:
@@ -524,6 +555,49 @@ def why_not(c: str) -> str:
     if not file and _proxy_found(c):
         return PROXY_IN_WAY
     return NOT_LOADED
+
+
+# why_not's reasons that say which session the server follows, or that main's module stopped answering: a restart of
+# Claude Code is no fix for them while a session runs thimble in the folder (session_runs)
+FOLLOW_REASONS = (NO_MAIN, NOT_MAIN, NOT_OPEN, LOCAL_NOW)
+
+
+def session_runs(c: str) -> bool:
+    """Whether a Claude Code session runs thimble in workspace `c`'s folder now: the main launch.json names runs
+    (activate.main_alive), or this server follows a session as main. Never raises."""
+    try:
+        from . import activate, session  # noqa: PLC0415
+
+        return c in session.attached_workspaces() or activate.main_alive(c, _launch(c))
+    except Exception:  # noqa: BLE001 — a record that cannot be read shows no session
+        return False
+
+
+def needs_restart(c: str, why: str) -> bool:
+    """Whether restarting Claude Code in the folder is a fix for `why` (why_not): no session runs thimble there
+    (session_runs), or the reason is one that only a new `claude` process takes up once its cause is fixed (hooks
+    modules off, THIMBLE_NO_MODULE, a proxy, a module Claude Code did not load). Never for FOLLOW_REASONS, nor for a
+    module that stopped answering, while a session runs (bug hunt 7, H13: a check failed with "restart Claude Code in
+    this folder" while two sessions ran thimble there)."""
+    if not session_runs(c):
+        return True
+    return not (why in FOLLOW_REASONS or why.startswith(NOT_ANSWERING))
+
+
+def no_session_text(c: str) -> str:
+    """Why a model call or the card check's agent found no module to run it (model_call, agent_call): call_result's
+    NO_SESSION, with its fix to start a session, only when no Claude Code session runs thimble in the folder
+    (session_runs); else that the session's module did not answer, and why (why_not), with no fix that starts a session
+    (bug hunt 7, H13 and H17: "no Claude Code session runs thimble in this folder" while one did). Never raises."""
+    from .call_result import NO_SESSION  # noqa: PLC0415
+
+    if not session_runs(c):
+        return NO_SESSION
+    try:
+        why = why_not(c)
+    except Exception:  # noqa: BLE001
+        why = ""
+    return f"{NOT_ANSWERING}: {why}" if why and not why.startswith(NOT_ANSWERING) else (why or NOT_ANSWERING)
 
 
 def _proxy_found(c: str) -> bool:
@@ -1201,12 +1275,15 @@ class HelloBody(BaseModel):
 async def hello_route(body: HelloBody) -> dict[str, Any]:
     """The module's hello: accepted (200) from main's session, held up to HELLO_HOLD_S for a rekey that names a new
     main, else refused (403, with the reason recorded for why_not). 404 for a folder that is no workspace (a module that
-    /thimble turned on stays idle then, until the next /thimble), and 409 while no main session is known or main's
-    session has not opened thimble yet and launch.json's process cannot show main (WAIT_REASONS): the module says hello
-    again later."""
+    /thimble turned on stays idle then, until the next /thimble), and 409 while no main session is known, main runs on
+    the local transport, or main's session has not opened thimble yet and launch.json's process cannot show main
+    (WAIT_REASONS): the module says hello again later. A hello of the live main launch.json names on the server's
+    transport makes the server follow it first (follow_launch)."""
     _remember_loop()
     c = _workspace(body.cwd)
     b = _bridge(c)
+    if _refusal(c, body.session) == NOT_OPEN:
+        follow_launch(c, body.session, body.cwd)
     end = time.monotonic() + HELLO_HOLD_S
     while True:
         why = _refusal(c, body.session)

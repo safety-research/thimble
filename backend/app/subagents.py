@@ -702,7 +702,8 @@ def refusal_before(c: str, click: bool = False) -> Answer | None:
     """Why no agent of thimble's can start now in workspace `c`, before any request is made: main is in plan mode
     (hook, start-plan-mode), or the module does not hold the long-poll (no-module): still connecting in the first
     CONNECT_GRACE_S after main attached when Claude Code has not loaded it yet (start-refused-connecting), else
-    start-refused-no-module with why. None when nothing stands in the way. A `click` leaves plan mode to
+    start-refused-no-module with why, or start-refused-waiting where a restart of Claude Code is no fix
+    (module_bridge.needs_restart). None when nothing stands in the way. A `click` leaves plan mode to
     --agent-check, which reads main's mode as the module's call runs: thimble hears main's mode only at main's turns, so
     after a shift+tab while main is idle the mode it keeps is stale (live check L21), and the click would stay refused
     after the analyst left plan mode."""
@@ -714,7 +715,9 @@ def refusal_before(c: str, click: bool = False) -> Answer | None:
         why = module_bridge.why_not(c)
         if connecting(c) and why == module_bridge.NOT_LOADED:
             return refusal(NO_MODULE, tools.hint("start-refused-connecting"))
-        return refusal(NO_MODULE, tools.hint("start-refused-no-module", reason=str(why or "")))
+        # its fix restarts Claude Code only where that fixes it (bug hunt 7, H13: two sessions ran thimble here)
+        name = "start-refused-no-module" if module_bridge.needs_restart(c, str(why or "")) else "start-refused-waiting"
+        return refusal(NO_MODULE, tools.hint(name, reason=str(why or "")))
     return None
 
 

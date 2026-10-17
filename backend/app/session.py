@@ -1120,8 +1120,9 @@ def _take_place(sub: Sub, path: Path, place: Any, at_end: bool) -> None:
 
 def detach(c: str, sid: str, reason: str | None = None) -> bool:
     """The session is no longer main: the tail stops, a running subagent is stopped, main's meta drops `attached` and
-    names the session in `ended` ({session, cwd, at}), and the Manual-mode notice of the session goes. True when this
-    session was main."""
+    names the session in `ended` ({session, cwd, at, since}: `since` when it was attached, so the browser names only the
+    agents that stopped with this session, not an earlier one's: bug hunt 7, H17), and the Manual-mode notice of the
+    session goes. True when this session was main."""
     lv = _live.get(c)
     if lv is not None and lv.sid == sid:
         _live.pop(c, None)
@@ -1143,7 +1144,8 @@ def detach(c: str, sid: str, reason: str | None = None) -> bool:
         return False
     meta["attached"] = None
     meta["alert"] = None
-    meta["ended"] = {"session": sid, "cwd": str(held.get("cwd") or ""), "at": _now()}
+    meta["ended"] = {"session": sid, "cwd": str(held.get("cwd") or ""), "at": _now(),
+                     **({"since": str(held["since"])} if held.get("since") else {})}
     agents.write_meta(c, meta)
     agents.notify(c, agents.MAIN_ID)
     if held.get(MANUAL_KEY):  # the Manual-mode notice was this session's; the next main reports its own mode

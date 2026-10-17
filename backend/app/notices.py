@@ -31,6 +31,10 @@ text?} or a list of them, `do` one of ACTIONS:
   page-start       thimble's page started again as /thimble browser starts it, in the terminal only (the `page:stopped`
                    notice's; the browser, whose page stopped, shows no button for it)
 
+A notice addressed to one Claude Code session (`session`, such as the takeover notice of the session another took main
+from: activate.take_main) shows only in that session's terminal (local._notices): the browser, which follows main, gets
+neither its event nor its row in GET /api/ws/{c}/notices (for_browser).
+
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
 (a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
 for the workspace: dismiss records the key in DISMISSED_FILE, and post then writes no notice under it. Each change is a `notice` event on
@@ -239,12 +243,13 @@ def _row(c: str, chat: str, rec: dict[str, Any]) -> None:
 
 
 def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | None = None, action: Any = None,
-         key: str | None = None, row: bool = True) -> dict[str, Any] | None:
+         key: str | None = None, row: bool = True, session: str | None = None) -> dict[str, Any] | None:
     """Tell the analyst in the foreground that something failed (module note): an open notice, replacing the one under
     the same `key`, a row in the agent's chat `chat` when it has one (not with `row` false: the chat shows the failure
     itself, as main's API error card does), and the `notice` event. `kind` names what failed ("agent", "safeguards",
-    "view", "proposals", "card-check", "label", API for main's own request, or a setup kind of the module note). The
-    notice, or None when it was not written, as for a REMEMBERED key the analyst dismissed (dismissed)."""
+    "view", "proposals", "card-check", "label", API for main's own request, or a setup kind of the module note). With
+    `session`, the notice is that Claude Code session's alone: its terminal shows it, the browser does not (module
+    note). The notice, or None when it was not written, as for a REMEMBERED key the analyst dismissed (dismissed)."""
     text = _short(text, TEXT_CHARS)
     if not text:
         raise ValueError("a notice says something")
@@ -252,7 +257,7 @@ def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | 
         return None
     rec: dict[str, Any] = {"id": secrets.token_hex(6), "key": str(key) if key else None, "kind": str(kind or "agent"),
                            "text": text, "agent": str(agent) if agent else None, "chat": str(chat) if chat else None,
-                           "action": _actions(action), "ts": _now()}
+                           "action": _actions(action), "ts": _now(), **({"session": str(session)} if session else {})}
 
     def change(raw: Any) -> list[dict[str, Any]]:
         kept = [n for n in _rows(raw) if not (rec["key"] and n.get("key") == rec["key"])]
@@ -269,8 +274,9 @@ def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | 
             _row(c, rec["chat"], rec)
         except (OSError, ValueError, HTTPException):
             log.debug("%s: the notice's row in %s was not written", c, rec["chat"], exc_info=True)
-    _emit(c, {"type": TYPE, **{k: rec[k] for k in ("id", "key", "kind", "text", "agent", "chat", "action")},
-              "foreground": True})
+    if not rec.get("session"):
+        _emit(c, {"type": TYPE, **{k: rec[k] for k in ("id", "key", "kind", "text", "agent", "chat", "action")},
+                  "foreground": True})
     log.info("%s: notice%s: %s", c, f" ({rec['key']})" if rec["key"] else "", text)
     return rec
 
@@ -551,11 +557,16 @@ def cleared(c: str, key: Any) -> None:
 # --------------------------------------------------------------------------- routes
 
 
+def for_browser(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The notices the browser shows: every one but those addressed to one Claude Code session (module note)."""
+    return [n for n in rows if not n.get("session")]
+
+
 @router.get("/ws/{c}/notices")
 async def list_route(c: str) -> list[dict[str, Any]]:
-    """The open notices, oldest first (module note)."""
+    """The open notices the browser shows, oldest first (module note, for_browser)."""
     config.workspace_dir(c)
-    return open_notices(c)
+    return for_browser(open_notices(c))
 
 
 @router.post("/ws/{c}/notices/{notice_id}/dismiss")

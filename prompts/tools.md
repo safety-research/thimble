@@ -1355,6 +1355,10 @@ The analyst asked for this in the side thread {thread}, which they opened on thi
 
 thimble's agents can't start in this session: {reason}. Main, its threads, cards and labels still work. Once that is fixed, restart Claude Code in this folder (`claude -c`) and type /thimble, or run `thimble -c`.
 
+## start-refused-waiting
+
+thimble's agents can't start in this session: {reason}. Main, its threads, cards and labels still work. Try again in a few seconds.
+
 ## start-refused-connecting
 
 thimble's plugin is still connecting to this session, so thimble's agents can't start yet. Try again in a few seconds.

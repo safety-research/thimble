@@ -1,15 +1,16 @@
 """Activation: thimble turned on for one Claude Code session in one folder, and the command line of thimble's session
 files.
 
-    thimble activate --cwd DIR --session SID --via data|command|tool|launcher|press [--rekey-from OLD [--reason
-                     clear|resume]] [--mod] [--hook] [--json]
+    thimble activate --cwd DIR --session SID --via data|command|tool|launcher|press|start [--rekey-from OLD [--reason
+                     clear|resume]] [--take] [--mod] [--hook] [--json]
     thimble guide --cwd DIR --session SID [--mark | --unmark] [--if-owed]
     thimble features [--cwd DIR] [--json] [--set KEY=on|off …]
 
 A session starts with thimble off: the plugin's MCP shim lists only load_thimble and nothing is written. activate()
 turns it on, at the first data read the terminal mod sees, at /thimble, at a call of load_thimble, from the `thimble`
-command or at a press. It refuses a folder that is too broad to be a corpus (refusal: the home folder, /, a folder above
-the home folder, thimble's home, Claude Code's config folder, a mount root, or a path that resolves to one of them).
+command, at a press or, as a regular plugin, at an interactive session's start (`start`). It refuses a folder that is
+too broad to be a corpus (refusal: the home folder, /, a folder above the home folder, thimble's home, Claude Code's
+config folder, a mount root, or a path that resolves to one of them).
 Otherwise, under the session's lock (`<home>/up/<sid>.lock`), it registers the folder as a corpus (cli.register_here),
 marks it active for the plugin's hooks (cli.mark_active), finds its extensions (cli.local_extensions), writes the hooks
 module's roles file (cli.write_roles), records the session in launch.json (write_launch, as main, or as a peer beside
@@ -21,17 +22,20 @@ a live main), and writes the session's files under `<home>/up/` (contract C1):
     <sid>/guide.json      {digest, at}: the guide as last sent (guide.mark)
     <sid>/listed.json     {digest, count, names, at}: the tools the shim last listed (write_listed, contract C4)
 
-A second activation of the same session is cheap and changes nothing but `mod` (from false to true). --rekey-from
-copies an earlier session's files to a new session id after /clear or /resume (rekey): for /clear the guide is owed
-again under a new marker, for /resume both stay.
+A second activation of the same session is cheap and changes nothing but `mod` (from false to true), unless it is an
+explicit /thimble (--take), which makes the session main, as the refusal of a session another took main from says
+(_take_here). --rekey-from copies an earlier session's files to a new session id after /clear or /resume (rekey): for
+/clear the guide is owed again under a new marker, for /resume both stay.
 
 launch.json (`<ws>/trusted/launch.json`) has one writer, write_launch, under `<ws>/trusted/launch.lock`:
 {session, pid, config_dir, via, transport, at, peers, moved}, every other field it held kept. A new main runs on the
 local transport until the press (runtime's local.transport), and so does main's session continued in a new `claude`
 process after a quit (continue_main, which the MCP shim and a later activation run); take_main makes a session main in
-place of a live one, which goes to `moved` and is told so by a notice. The conversation main's own `claude` process moved
-to (/clear, /resume) is the same session, not another one (same_session): it takes main with no notice. Until every
-reader takes `transport`, write_launch also writes the 0.8.0 `mode` that matches it (LEGACY_MODE).
+place of a live one, which goes to `moved` and is told so by a notice addressed to it alone, and when main ran on the
+server, the server is told at once (follow_main), so that the server, launch.json and the browser follow one main. The
+conversation main's own `claude` process moved to (/clear, /resume) is the same session, not another one (same_session):
+it takes main with no notice. Until every reader takes `transport`, write_launch also writes the 0.8.0 `mode` that
+matches it (LEGACY_MODE).
 
 load_thimble (contract C5) is answered by the shim directly, through activate() and answer(); tool_load_handler serves
 a call that reaches tools.call instead.
@@ -51,9 +55,10 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-VIAS = ("data", "command", "tool", "launcher", "press")
-# the triggers that make a session main in place of a live one (take_main); a data read or a model's load_thimble beside
-# a live main makes a peer
+VIAS = ("data", "command", "tool", "launcher", "press", "start")
+# the triggers that make a session main in place of a live one (take_main); a data read, a model's load_thimble or the
+# plugin's own activation at an interactive session's start (`start`) beside a live main makes a peer (bug hunt 7, H13:
+# a second plain `claude` in the folder took main at its start, though the browser kept following the first)
 TAKES_MAIN = ("command", "launcher", "press")
 MAIN, PEER = "main", "peer"
 LOCAL, SERVER = "local", "server"
@@ -70,9 +75,11 @@ LOCK_WAIT_S = 20.0  # how long a caller waits for the session's lock before it f
 # all read `transport` (module note)
 LEGACY_MODE = {LOCAL: "terminal", SERVER: "browser"}
 REKEY_REASONS = ("clear", "resume")
-TAKEOVER_KEY = "takeover"  # the notice the session that lost main gets (notices.post)
-TAKEOVER_TEXT = "thimble's browser follows the other session in this folder now."
-# the notice's act, `/thimble` (take it back), is the terminal's: local.NOTICE_ACTS maps the key to it (runtime lane)
+TAKEOVER_KEY = "takeover"  # the notice the session that lost main gets (notices.post, addressed to that session alone)
+TAKEOVER_TEXT = "thimble's browser follows the other session in this folder now. Type /thimble here to take it back."
+# the same when no browser follows main (local transport)
+TAKEOVER_LOCAL_TEXT = ("Another Claude Code session in this folder took over thimble. Type /thimble here to take it "
+                       "back.")
 
 # the refusals, as {"code", "message", "fix"} (contract C2)
 REFUSED_MESSAGE = ("thimble does not open this folder (your home folder, /, a folder above them or a mount root). cd "
@@ -434,9 +441,10 @@ def same_session(c: str, rec: dict[str, Any], sid: str) -> bool:
 
 def take_main(c: str, sid: str, via: str) -> str | None:
     """Make session `sid` main of workspace `c` in place of a live main (a press, /thimble or the `thimble` command):
-    the old main goes to `moved` (write_launch) and gets the TAKEOVER_KEY notice. The previous main's id, None when
+    the old main goes to `moved` (write_launch) and gets the TAKEOVER_KEY notice, addressed to it alone (bug hunt 7,
+    H14: notices are the workspace's, so the session that took main showed it too). The previous main's id, None when
     there was none or it was `sid` or a conversation it moved to (same_session), which takes main with no notice and
-    leaves `moved` as it was. The transport stays what the record had for main."""
+    leaves `moved` as it was. The transport stays what the record had for main; follow_main makes the server agree."""
     rec = read_launch(c)
     old = str(rec.get("session") or "") or None
     was = transport_of(rec)
@@ -447,13 +455,48 @@ def take_main(c: str, sid: str, via: str) -> str | None:
         try:
             from . import notices  # noqa: PLC0415
 
-            notices.post(c, kind="session", text=TAKEOVER_TEXT, key=TAKEOVER_KEY)
+            notices.post(c, kind="session", text=TAKEOVER_TEXT if was == SERVER else TAKEOVER_LOCAL_TEXT,
+                         key=TAKEOVER_KEY, session=old)
         except Exception as e:  # noqa: BLE001 — the takeover stands without its notice
             from . import cli  # noqa: PLC0415
 
             cli._log(f"activate: the takeover notice of {c} was not posted: {e}")
         return old
+    _main_again(c, sid)
     return None
+
+
+def _main_again(c: str, sid: str) -> None:
+    """Session `sid` is main of workspace `c`: a takeover notice addressed to it, from when another took main from it,
+    goes. Never raises."""
+    try:
+        from . import notices  # noqa: PLC0415
+
+        if any(n.get("key") == TAKEOVER_KEY and n.get("session") == sid for n in notices.open_notices(c)):
+            notices.clear(c, TAKEOVER_KEY)
+    except Exception:  # noqa: BLE001 — a notice left open is the analyst's to dismiss
+        pass
+
+
+def follow_main(c: str, sid: str, cwd: str, *, local_if_down: bool = True) -> str:
+    """Session `sid` took main of workspace `c` from another session (take_main) while main ran on the server (bug hunt
+    7, H13): the server is told at once (`POST /api/ws/{c}/session`, cli.name_session, as a press tells it), so the
+    server, launch.json and the browser follow the same main and the new main's hooks module is let in rather than asked
+    again every 2 s. When no server answers, nothing follows main any more: with `local_if_down` the session runs on
+    the local transport, as a new main starts. The transport main has now."""
+    from . import cli  # noqa: PLC0415
+
+    url = cli.api_url()
+    if cli.serves(url):
+        folder = Path(cwd)
+        cli.name_session(url, c, sid, folder, sandbox=cli.own_sandbox_here(folder),
+                         warnings=cli.setup_warnings(folder))
+        return SERVER
+    if not local_if_down:
+        return transport_of(read_launch(c), sid)
+    write_launch(c, sid, role=MAIN, transport=LOCAL, via=str(read_launch(c).get("via") or "command"))
+    cli._log(f"activate: no server answers, so session {sid} of {c} is main on the local transport")
+    return LOCAL
 
 
 # --------------------------------------------------------------------------- activation
@@ -547,12 +590,37 @@ def _answer(rec: dict[str, Any], sid: str, *, first: bool, took: str | None, c: 
             "took_over": took, "first_in_folder": first, "settings": _settings(c)}
 
 
+def _take_here(c: str, sid: str, via: str, cwd: str) -> str | None:
+    """An explicit /thimble in session `sid`, active already in workspace `c` (activate's `take`, bug hunt 7, H14: the
+    refusal says "type /thimble in this terminal to take it back", and /thimble only opened the home panel): `sid` is
+    main from now on, in place of a live main (take_main, follow_main), or as main's own conversation or with no live
+    main (write_launch, on the local transport as a new main starts). Nothing when it is main already. The session that
+    lost main, else None."""
+    rec = read_launch(c)
+    if str(rec.get("session") or "") == sid and sid not in (rec.get("moved") or []):
+        _main_again(c, sid)
+        if transport_of(rec) == SERVER:  # a server that followed another session follows main as launch.json names it
+            follow_main(c, sid, cwd, local_if_down=False)
+        return None
+    role, took = _role_for(c, sid, via)
+    if took:
+        took = take_main(c, sid, via)
+        if took and transport_of(read_launch(c)) == SERVER:
+            follow_main(c, sid, cwd)
+        return took
+    kept = rec.get("session") not in (None, "", sid) and same_session(c, rec, sid)
+    write_launch(c, sid, role=MAIN, transport=transport_of(rec) if kept else LOCAL, via=via)
+    _main_again(c, sid)
+    return None
+
+
 def activate(cwd: str | os.PathLike[str], sid: str, via: str, *, mod: bool = False, rekey_from: str | None = None,
-             reason: str = "clear") -> dict[str, Any]:
+             reason: str = "clear", take: bool = False) -> dict[str, Any]:
     """Turn thimble on for session `sid` in the folder `cwd` (module note): the contract's answer (C2), {"ok": true,
     session, ws, path, role, took_over, first_in_folder, settings} or {"ok": false, "error": {code, message, fix}}.
     Idempotent under the session's lock: a session already active keeps its role and `via`, and takes `mod` true when
-    this call has it."""
+    this call has it; with `take` (an explicit /thimble, `via` one of TAKES_MAIN) it is main from now on (_take_here).
+    A takeover of a main the server follows makes the server follow the new main (follow_main)."""
     if via not in VIAS:
         return {"ok": False, "error": {"code": "IO", "message": f"via {via!r} is not one of {', '.join(VIAS)}",
                                        "fix": "Pass one of them."}}
@@ -577,7 +645,14 @@ def activate(cwd: str | os.PathLike[str], sid: str, via: str, *, mod: bool = Fal
                         continue_main(str(was["ws"]), sid)
                 except Exception as e:  # noqa: BLE001 — the activation stands; the shim looks again
                     cli._log(f"activate: launch.json of {was['ws']} was not moved to this process: {e}")
-                return _answer(was, sid, first=False, took=None, c=str(was["ws"]))
+                took = None
+                if take and via in TAKES_MAIN:
+                    with cli.server_dirs():
+                        took = _take_here(str(was["ws"]), sid, via, cwd)
+                    if was.get("role") != MAIN:
+                        was = {**was, "role": MAIN}
+                        write_private(marker_path(sid), was)
+                return _answer(was, sid, first=False, took=took, c=str(was["ws"]))
             with cli.server_dirs():
                 first = config.workspace_for_cwd(str(Path(cwd).resolve())) is None
                 c = _register(cwd)
@@ -588,7 +663,12 @@ def activate(cwd: str | os.PathLike[str], sid: str, via: str, *, mod: bool = Fal
                         took = take_main(c, sid, via)
                     # the conversation main's process moved to keeps main's transport, as a takeover does
                     kept = took or (rec.get("session") not in (None, "", sid) and same_session(c, rec, sid))
-                    write_launch(c, sid, role=MAIN, transport=transport_of(rec) if kept else LOCAL, via=via)
+                    now = transport_of(rec) if kept else LOCAL
+                    write_launch(c, sid, role=MAIN, transport=now, via=via)
+                    if took and now == SERVER:
+                        follow_main(c, sid, cwd)
+                    elif not took:
+                        _main_again(c, sid)
                 else:
                     write_launch(c, sid, role=PEER, transport=LOCAL, via=via)
                 path = str(config.workspace_dir(c))
@@ -668,7 +748,7 @@ def cmd_activate(a: argparse.Namespace) -> int:
     if not sid:
         _print({"ok": False, "error": {"code": "IO", "message": "no session id", "fix": "Pass --session."}})
         return 0
-    got = activate(_cwd_arg(a.cwd), sid, a.via, mod=a.mod, rekey_from=a.rekey_from, reason=a.reason)
+    got = activate(_cwd_arg(a.cwd), sid, a.via, mod=a.mod, rekey_from=a.rekey_from, reason=a.reason, take=a.take)
     if a.json or a.hook or not sys.stdout.isatty():
         _print(got)
     elif got.get("ok"):
@@ -749,6 +829,7 @@ def parser() -> argparse.ArgumentParser:
     a.add_argument("--via", choices=VIAS, default="command")
     a.add_argument("--rekey-from", dest="rekey_from")
     a.add_argument("--reason", choices=REKEY_REASONS, default="clear")
+    a.add_argument("--take", action="store_true", help="an explicit /thimble: this session is main from now on")
     a.add_argument("--mod", action="store_true")
     a.add_argument("--hook", action="store_true")
     a.add_argument("--json", action="store_true")

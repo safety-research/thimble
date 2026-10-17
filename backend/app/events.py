@@ -964,12 +964,19 @@ def _stopping() -> bool:
 async def pull_route(request: Request, cwd: str, session: str | None = None, wait: float = PULL_WAIT_S,
                      pid: int | None = None) -> Any:
     """The watcher's long poll: `{id, text}` for the next event of the session, 204 when none came within `wait` seconds, 404
-    when the folder is no workspace, 410 when another session is main (see _pull_state). The event stays in flight until
-    the watcher acknowledges it (ack_route)."""
+    when the folder is no workspace, 410 when another session is main (see _pull_state). The live main launch.json names
+    is followed first (module_bridge.follow_launch). The event stays in flight until the watcher acknowledges it
+    (ack_route)."""
     c = config.workspace_for_cwd(cwd)
     if not c:
         raise HTTPException(404, f"{cwd} is not a thimble workspace")
     sid = session or ""
+    if sid and _main_sid(c) not in (None, sid):
+        # the session launch.json names main now, whose watcher came before its module's hello: the server follows it
+        # rather than telling the watcher it is gone (bug hunt 7, H13: the new main never heard the browser)
+        from . import module_bridge  # noqa: PLC0415
+
+        module_bridge.follow_launch(c, sid, cwd)
     deadline = time.monotonic() + min(max(wait, 0.0), PULL_WAIT_MAX_S)
     while True:
         _requeue(c)
