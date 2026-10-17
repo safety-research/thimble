@@ -47,16 +47,19 @@ def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
 
 
 # uv's stand-in: `uv venv DIR` makes DIR/bin/python the base interpreter without site-packages, so it holds no package
-# (and install.sh fetches no browser for one); `uv pip …` is written to $STUB_LOG, and `uv pip sync` of a
-# requirements.txt prints $STUB_SYNC_OUT and exits with $STUB_SYNC_RC. `uv sync` makes .venv the same way and says, as
-# uv does, that it checked the packages, or with $STUB_UV_SYNC set that it installed those
+# (and install.sh fetches no browser for one), which says it is arm64 when uv was asked for an aarch64 Python; `uv venv …`
+# and `uv pip …` are written to $STUB_LOG, and `uv pip sync` of a
+# requirements.txt prints $STUB_SYNC_OUT and exits with $STUB_SYNC_RC. `uv sync` makes .venv the same way (and is written
+# to $STUB_LOG) and says, as uv does, that it checked the packages, or with $STUB_UV_SYNC set that it installed those
 UV_STUB = f"""#!/bin/sh
 case "$1" in
   --version) echo "uv 0.0.0";;
-  venv) for a; do d="$a"; done; mkdir -p "$d/bin"
-        printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > "$d/bin/python"; chmod +x "$d/bin/python";;
-  sync) mkdir -p .venv/bin
-        printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > .venv/bin/python; chmod +x .venv/bin/python
+  venv) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"; for a; do d="$a"; done; mkdir -p "$d/bin"
+        case "$*" in *aarch64*) arch='case "$*" in *platform.machine*) echo arm64; exit 0;; esac\\n';; *) arch="";; esac
+        printf "#!/bin/sh\\n$arch"'exec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > "$d/bin/python"; chmod +x "$d/bin/python";;
+  sync) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"; mkdir -p .venv/bin
+        case "$*" in *aarch64*) arch='case "$*" in *platform.machine*) echo arm64; exit 0;; esac\\n';; *) arch="";; esac
+        printf "#!/bin/sh\\n$arch"'exec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > .venv/bin/python; chmod +x .venv/bin/python
         if [ -n "${{STUB_UV_SYNC:-}}" ]; then echo "Installed 1 package in 1ms"; echo "$STUB_UV_SYNC"
         else echo "Checked 3 packages in 1ms"; fi;;
   pip) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"
@@ -558,3 +561,270 @@ STARTUP_FILES = (".bash_login", ".bash_profile", ".bashrc", ".config/fish/conf.d
 def startup(home: Path) -> dict[str, str]:
     """{each startup file under HOME: its text}."""
     return {f: (home / f).read_text() for f in STARTUP_FILES if (home / f).exists()}
+
+
+# ----------------------------------------------------------------------------- a Mac with Apple silicon
+
+
+def mac_bin(tmp_path: Path, *, uv: bool = True, translated: str = "1", pythons: dict[str, str] | None = None) -> Path:
+    """Stand-ins for a Mac with Apple silicon whose shell runs under Rosetta (`uname -m` says x86_64 and sysctl's
+    proc_translated 1, or `translated` "0" and arm64 for a native shell): uname, sysctl, a node too old for the frontend
+    step (stub_bin's), uv (UV_STUB) unless
+    `uv` is False, and `pythons`, each a python by its name that reports the given machine (an Intel build reports
+    x86_64 under Rosetta). The python found first on /usr/bin reports this Linux machine's, x86_64, as an Intel one."""
+    bin_ = tmp_path / "macbin"
+    bin_.mkdir(exist_ok=True)
+    arm = translated != "1"
+    real = os.path.realpath(sys.executable)
+    files = {"uname": f'#!/bin/sh\ncase "$1" in -m) echo {"arm64" if arm else "x86_64"};; *) echo Darwin;; esac\n',
+             "sysctl": f'#!/bin/sh\n[ "$2" = sysctl.proc_translated ] && echo {translated}\n',
+             "node": '#!/bin/sh\necho v18.0.0\n'}
+    if uv:
+        files["uv"] = UV_STUB
+    for name, machine in (pythons or {}).items():
+        files[name] = f'#!/bin/sh\ncase "$*" in *platform.machine*) echo {machine}; exit 0;; esac\nexec {real} -S "$@"\n'
+    for name, body in files.items():
+        (bin_ / name).write_text(body)
+        (bin_ / name).chmod(0o755)
+    return bin_
+
+
+def mac_install(tmp_path: Path, bin_: Path, *flags: str, tree: Path | None = None, **extra: str):
+    """install.sh --deps-only --verbose of a release (with a backend/requirements.txt) into tmp_path/app, on mac_bin's
+    stand-ins first on PATH."""
+    if tree is None:
+        tree = fake_tree(tmp_path / "release")
+        (tree / "backend" / "requirements.txt").write_text("idna==3.10 --hash=sha256:00\n")
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(tmp_path / "uv.log"), **extra)
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"), "--deps-only",
+                           "--verbose", *ANSWERS, *flags], capture_output=True, text=True, env=env,
+                          stdin=subprocess.DEVNULL, timeout=60)
+
+
+def test_under_rosetta_uv_makes_the_environment_with_a_native_python_and_builds_nothing_from_source(tmp_path):
+    """The feedback's Mac: iTerm under Rosetta, where the first python3 is an Intel build. uv makes backend/.venv with a
+    native arm64 Python (which it gets when the Mac lacks one), never the Intel one, and installs wheels alone, so no
+    package is built from source, which needs Xcode and its license. The opening screen says which Python it uses."""
+    r = mac_install(tmp_path, mac_bin(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = (tmp_path / "uv.log").read_text().splitlines()
+    assert any(c.startswith("uv venv --quiet --python cpython-3.12-macos-aarch64-none ") for c in log), log
+    [sync] = [c for c in log if c.startswith("uv pip sync")]
+    assert sync.endswith("--no-build"), sync
+    assert "installs thimble's pinned Python packages, and a native arm64 Python 3.12 if this machine lacks one; not " \
+           "the Intel Python at /usr/bin/python3, which would need Xcode to build packages" in r.stdout, r.stdout
+
+
+def test_under_rosetta_without_uv_a_native_python_is_used_and_without_one_install_sh_says_how_to_get_one(tmp_path):
+    """Without uv the first native arm64 Python is used, with pip's wheels alone; with only an Intel one, install.sh
+    stops before it changes anything, in one line that says why and how to get a native Python."""
+    bin_ = mac_bin(tmp_path, uv=False, pythons={"python3": "x86_64", "python3.12": "arm64"})
+    r = mac_install(tmp_path, bin_, "--dry-run")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"+ {bin_}/python3.12 -I -m venv " in r.stdout, r.stdout
+    assert "pip install --quiet --disable-pip-version-check --only-binary=:all: --require-hashes" in r.stdout, r.stdout
+
+    (bin_ / "python3.12").unlink()
+    r = mac_install(tmp_path, bin_)
+    assert r.returncode == 1 and not (tmp_path / "app").exists(), r.stdout + r.stderr
+    [line] = [ln for ln in r.stderr.splitlines() if ln.startswith("install.sh: ")]
+    assert line.startswith(f"install.sh: this Mac has Apple silicon, and no native arm64 Python 3.12+ was found "
+                           f"({bin_}/python3 is an Intel build, which would need Xcode to build thimble's packages). "
+                           "Install uv (https://docs.astral.sh/uv/getting-started/installation/), which gets a native "
+                           "Python, then run this again. Node as well: Node v18.0.0"), r.stderr
+
+
+# ----------------------------------------------------------------------------- a re-run after a failed install
+
+
+def test_a_re_run_makes_again_the_environment_a_failed_run_left(tmp_path):
+    """The feedback's re-run: the first run made backend/.venv and failed while it installed into it (a build that
+    failed). The next run finds the environment install.sh made unfinished, removes it and makes it again, and says so
+    on its opening screen and in one line; the environment it ends with holds no mark of an unfinished run."""
+    tree = fake_tree(tmp_path / "release")
+    (tree / "backend" / "requirements.txt").write_text("cryptography==50.0.1 --hash=sha256:00\n")
+    venv = tmp_path / "app" / "backend" / ".venv"
+    r = install(tree, tmp_path / "app", tmp_path, "--require-pinned", STUB_SYNC_RC="1",
+                STUB_SYNC_OUT="  × Failed to build `cryptography==50.0.1`", STUB_LOG=str(tmp_path / "uv.log"))
+    assert r.returncode == 1 and "Failed to build" in r.stdout, r.stdout + r.stderr
+    assert (venv / ".thimble-made").is_file() and (venv / ".thimble-installing").is_file(), "marked as unfinished"
+
+    r = install(tree, tmp_path / "app", tmp_path, STUB_LOG=str(tmp_path / "uv.log"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "(made again: an earlier run did not finish installing into it)" in r.stdout, r.stdout
+    assert f"✓ {venv} was broken (an earlier run did not finish installing into it), so it is made again" in r.stdout
+    assert [c.split(" --python")[0] for c in (tmp_path / "uv.log").read_text().splitlines()
+            if c.startswith("uv venv")] == ["uv venv --quiet"] * 2, "made twice"
+    assert (venv / ".thimble-made").is_file() and not (venv / ".thimble-installing").exists()
+    r = install(tree, tmp_path / "app", tmp_path, STUB_LOG=str(tmp_path / "uv.log"))
+    assert r.returncode == 0 and "made again" not in r.stdout, "a finished environment stays"
+
+
+def test_on_apple_silicon_an_intel_environment_install_sh_made_is_made_again_with_a_native_python(tmp_path):
+    """An environment install.sh made earlier with an Intel Python (as under Rosetta before) is made again with a native
+    one, since packages without an Intel wheel would need Xcode to build."""
+    venv = tmp_path / "app" / "backend" / ".venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").write_text(f"#!/bin/sh\nexec {os.path.realpath(sys.executable)} -S \"$@\"\n")
+    (venv / "bin" / "python").chmod(0o755)
+    (venv / ".thimble-made").write_text("")
+    (tmp_path / "app" / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (tmp_path / "app" / "plugin" / ".claude-plugin" / "plugin.json").write_text("{}")
+    r = mac_install(tmp_path, mac_bin(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (f"✓ {venv} was broken (its Python is an Intel build, which needs Xcode to build packages), so it is made "
+            "again") in r.stdout, r.stdout
+    assert "uv venv --quiet --python cpython-3.12-macos-aarch64-none" in (tmp_path / "uv.log").read_text()
+
+
+def test_a_broken_environment_install_sh_did_not_make_is_never_removed(tmp_path):
+    """A checkout's backend/.venv made by hand whose Python no longer runs: install.sh stops before it changes
+    anything, says why and what to do, and leaves every file of it as it was."""
+    tree = fake_tree(tmp_path / "thimble", checkout=True)
+    (tree / "backend" / "uv.lock").write_text("version = 1\n")
+    venv = tree / "backend" / ".venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").write_text("#!/bin/sh\nexit 1\n")
+    (venv / "bin" / "python").chmod(0o755)
+    (venv / "mine.txt").write_text("keep\n")
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", STUB_NODE="v22.13.0")
+    r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--deps-only", *ANSWERS], capture_output=True,
+                       text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert (f"install.sh: {venv} is broken (its Python does not run), and install.sh did not make it, so it leaves it "
+            "as it is. Move it away or delete it, then run this again") in r.stderr, r.stderr
+    assert (venv / "mine.txt").read_text() == "keep\n" and (venv / "bin" / "python").read_text() == "#!/bin/sh\nexit 1\n"
+
+
+# ----------------------------------------------------------------------------- the browser for screenshots
+
+
+def browser_install(tmp_path: Path, *, browser: str = "", tty: bool = False) -> tuple[subprocess.CompletedProcess, Path]:
+    """install.sh --deps-only of a release with no --browser, on a terminal (a pty as stdin) when `tty`, with `browser`
+    as the Chrome found where Playwright looks: '' for none, `starts` for one that starts under automation, `blocked`
+    for one that does not. Returns the run and thimble's config.json."""
+    import pty
+
+    tree = fake_tree(tmp_path / "release")
+    extra = {}
+    if browser:
+        chrome = tmp_path / "chrome"
+        chrome.write_text('#!/bin/sh\necho "DevTools listening on ws://127.0.0.1:9/devtools/browser/x" >&2; sleep 30\n'
+                          if browser == "starts" else '#!/bin/sh\necho "remote debugging is off by policy" >&2; exit 1\n')
+        chrome.chmod(0o755)
+        extra["THIMBLE_TEST_SYSTEM_BROWSER"] = f"chrome|Google Chrome|{chrome}"
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", **extra)
+    leader, follower = pty.openpty() if tty else (None, None)
+    try:
+        r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"), "--deps-only"],
+                           capture_output=True, text=True, env=env, timeout=60,
+                           stdin=follower if tty else subprocess.DEVNULL)
+    finally:
+        for fd in (leader, follower):
+            if fd is not None:
+                os.close(fd)
+    return r, Path(env["THIMBLE_HOME"]) / "config.json"
+
+
+def test_install_sh_asks_nothing_and_says_in_one_line_which_browser_it_picked(tmp_path):
+    """No question about the browser, without a terminal or on one: with no Chrome or Edge it picks Playwright's headless
+    Chromium and says in one line what it downloads, from where, into where, and the flag that skips it."""
+    r, conf = browser_install(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert ("  ✓ Screenshots of thimble's cards and views: Playwright's headless Chromium, since no Chrome or Edge was "
+            "found. It downloads about 210 MB from Microsoft's Playwright CDN (cdn.playwright.dev) into "
+            "~/.cache/ms-playwright (650 MB on disk). --browser off skips it\n") in r.stdout, r.stdout
+    assert "Question" not in r.stdout and not re.search(r"\?\s*$|\[[yY]/[nN]\]", r.stdout, re.M), r.stdout
+    assert not conf.exists(), "a default is not recorded: the server picks the same"
+
+
+def test_on_a_terminal_a_chrome_that_starts_is_used_and_one_that_does_not_gives_way_to_the_bundled_one(tmp_path):
+    """On a terminal nothing is asked either. A Chrome that starts under automation is used, and nothing is downloaded;
+    one that does not start (a policy) gives way to the headless Chromium, which is recorded so the server does not
+    pick that Chrome, and the line names the flag that tries Chrome anyway."""
+    r, conf = browser_install(tmp_path / "a", browser="starts", tty=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (f"  ✓ Screenshots of thimble's cards and views: Google Chrome at {tmp_path / 'a' / 'chrome'}, so nothing is "
+            "downloaded. --browser bundled or --browser off changes it\n") in r.stdout, r.stdout
+    assert not conf.exists()
+
+    r, conf = browser_install(tmp_path / "b", browser="blocked", tty=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (f"Playwright's headless Chromium, since Google Chrome at {tmp_path / 'b' / 'chrome'} did not start under "
+            "automation here, which a policy can block. It downloads about 210 MB from Microsoft's Playwright CDN") \
+        in r.stdout, r.stdout
+    assert "--browser system tries Google Chrome anyway; --browser off skips it\n" in r.stdout, r.stdout
+    assert json.loads(conf.read_text()) == {"browser": "bundled"}
+
+
+# ----------------------------------------------------------------------------- Node
+
+
+def node_install(tmp_path: Path, node: str, *flags: str, checkout: bool = False, nvm: str = "", tools: tuple = (),
+                 python: bool = True) -> subprocess.CompletedProcess:
+    """install.sh --deps-only --dry-run of a release (or a checkout) with `node` as the node on PATH (a version it
+    prints, or `broken` for one that does not start); `nvm` installs nvm with that version of Node in ~/.nvm; `tools`
+    are stand-ins on PATH (brew); without `python` no uv, and every python on PATH is too old."""
+    tree = fake_tree(tmp_path / ("thimble" if checkout else "release"), checkout=checkout)
+    bin_ = tmp_path / "nodebin"
+    bin_.mkdir(exist_ok=True)
+    (bin_ / "node").write_text('#!/bin/sh\necho "Segmentation fault: 11" >&2; exit 139\n' if node == "broken"
+                               else f"#!/bin/sh\necho {node}\n")
+    for name in tools:
+        (bin_ / name).write_text("#!/bin/sh\n")
+    real = os.path.realpath(sys.executable)
+    if python:
+        (bin_ / "uv").write_text(UV_STUB)
+    else:  # json_get still reads JSON with python3; py_ok's check of the version fails
+        for name in ("python3", "python3.12", "python3.13", "python3.14"):
+            (bin_ / name).write_text(f'#!/bin/sh\ncase "$*" in *version_info*) exit 1;; esac\nexec {real} "$@"\n')
+    for f in bin_.iterdir():
+        f.chmod(0o755)
+    home = tmp_path / "home"
+    if nvm:
+        (home / ".nvm" / "versions" / "node" / nvm / "bin").mkdir(parents=True)
+        (home / ".nvm" / "nvm.sh").write_text("# nvm\n")
+        (home / ".nvm" / "versions" / "node" / nvm / "bin" / "node").write_text(f"#!/bin/sh\necho {nvm}\n")
+        (home / ".nvm" / "versions" / "node" / nvm / "bin" / "node").chmod(0o755)
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin")
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"), "--deps-only",
+                           *ANSWERS, *flags], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
+                          timeout=60)
+
+
+def test_an_old_node_is_named_first_with_the_version_thimble_needs_and_one_command_that_gets_it(tmp_path):
+    """The feedback's Node 0.12: the opening screen says it is too old, what needs Node 20, and the one command that
+    gets Node 22 with the tool that manages Node here (nvm), or Homebrew's."""
+    r = node_install(tmp_path / "a", "v0.12.18", "--dry-run", nvm="v18.20.0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (f"  ! Node v0.12.18 at {tmp_path / 'a' / 'nodebin' / 'node'} is too old: the web interface needs a build, "
+            "which needs Node 20 or newer; everything else installs. To get Node 22: nvm install 22\n") in r.stdout, r.stdout
+    r = node_install(tmp_path / "b", "broken", "--dry-run", tools=("brew",))
+    assert (f"  ! Node at {tmp_path / 'b' / 'nodebin' / 'node'} does not start (Segmentation fault: 11): the web "
+            "interface needs a build, which needs Node 20 or newer; everything else installs. To get a current Node: "
+            "brew install node\n") in r.stdout, r.stdout
+
+
+def test_a_newer_node_installed_but_later_on_path_is_named_with_its_folder(tmp_path):
+    """A Node 22 that nvm installed while an old one comes first on PATH (the feedback's fish config): the line names
+    the folder to put first, not a command that installs Node again."""
+    r = node_install(tmp_path, "v0.12.18", "--dry-run", nvm="v22.13.0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert ("To get" not in r.stdout and "Node v22.13.0 is installed at ~/.nvm/versions/node/v22.13.0/bin/node, but "
+            "not first on PATH: put ~/.nvm/versions/node/v22.13.0/bin first on PATH, in your shell's startup file "
+            "too\n") in r.stdout, r.stdout
+
+
+def test_node_is_checked_before_anything_else_can_fail(tmp_path):
+    """A checkout whose Node is too old for its tests stops on that first, with the command; when Python is missing
+    too, the stop for Python names Node's problem as well, so one run says both."""
+    r = node_install(tmp_path / "a", "v20.1.0", checkout=True, tools=("brew",), python=False)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert (f"install.sh: Node v20.1.0 at {tmp_path / 'a' / 'nodebin' / 'node'} is too old: a checkout's frontend "
+            "tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+. To get a current Node: brew "
+            "install node, then run this script again\n") in r.stderr, r.stderr
+    r = node_install(tmp_path / "b", "v0.12.18", python=False, tools=("brew",))
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert ("install.sh: neither uv nor Python 3.12+ was found. Install uv "
+            "(https://docs.astral.sh/uv/getting-started/installation/) or Python 3.12+, then run this again. Node as "
+            f"well: Node v0.12.18 at {tmp_path / 'b' / 'nodebin' / 'node'} is too old") in r.stderr, r.stderr

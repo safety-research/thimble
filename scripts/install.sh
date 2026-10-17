@@ -7,7 +7,7 @@
 #
 # It opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card code and
 # the terminal's views can run in bubblewrap), what it installs where and about how big, what it changes in your Claude
-# Code setup, and whether a question remains. It asks it, then prints a line per step, and ends with what to run next.
+# Code setup, and that nothing is asked. Then it prints a line per step, and ends with what to run next.
 # A re-run with nothing to do says so in one line, and one that changes something shows only what changed.
 # Every command it runs, with its output, goes to $THIMBLE_HOME/install.log (~/.thimble/install.log).
 #
@@ -17,16 +17,16 @@
 # not on PATH, or THIMBLE_HOME is not ~/.thimble, it prints the line a new terminal needs. It installs no system package
 # and never runs sudo.
 #
-# The question, asked only when it remains, and the flag that answers it without asking:
-#   --browser bundled|system|off   a browser for screenshots, asked only when no Chrome or Edge that starts under
-#                          automation is found where Playwright looks (one that does is used, and nothing is downloaded).
-#                          bundled downloads Playwright's headless Chromium (about 210 MB to download, 650 MB on disk);
-#                          system uses the Chrome or Edge found anyway; off takes no screenshots
-# The answer is kept in $THIMBLE_HOME, so a re-run or `thimble update` doesn't ask it again; its flag changes it. Without a
-# terminal install.sh stops while the question remains without its flag, and says so.
+# It asks nothing. The browser for screenshots of thimble's cards and views is a default, which the opening screen names
+# in one line with what it downloads, from where, and the flag that changes it:
+#   --browser bundled|system|off   without it, a Chrome or Edge found where Playwright looks that starts under automation
+#                          (nothing is downloaded), else Playwright's headless Chromium (about 210 MB to download from
+#                          Microsoft's Playwright CDN, 650 MB on disk). bundled downloads that one; system uses the
+#                          Chrome or Edge found anyway; off takes no screenshots
+# A --browser is kept in $THIMBLE_HOME, so a re-run or `thimble update` keeps it; the flag changes it again.
 #
-#   --dry-run              print the opening screen and the question if it remains, with its flags; change nothing.
-#                          An agent installing thimble for someone asks exactly that question (CLAUDE.md, Installing).
+#   --dry-run              print the opening screen; change nothing. An agent installing thimble for someone shows it
+#                          (CLAUDE.md, Installing).
 #                          `thimble update --dry-run` runs it too (scripts/update.sh, which sets THIMBLE_INSTALL_VIA)
 #   --verbose              also print each command it runs and its output; with --dry-run, every step's commands
 #   --no-plugin            for thimble's own release tests only: add nothing to Claude Code (no marketplace, no
@@ -43,24 +43,26 @@
 # THIMBLE_BIN_DIR, when set, is the folder the `thimble` link goes into in place of ~/.local/bin.
 set -euo pipefail
 # How it works (not printed by --help).
-# Steps: what it finds (check_prerequisites) and plans (plan: the question's plan, the plugin, the link, the lines a new
-# terminal needs) · the opening screen · the question · copy the release into --dir, and commit it as the install's git
+# Steps: what it finds (check_prerequisites) and plans (plan: the browser's plan, the plugin, the link, the lines a new
+# terminal needs) · the opening screen · copy the release into --dir, and commit it as the install's git
 # baseline (git_baseline), so code tickets run in a release install too · backend/.venv · the frontend's
 # packages and frontend/dist · the browser · the app-dir pointer and `thimble` on PATH (~/.local/bin/thimble → the
 # tree's plugin/bin/thimble) · the plugin, unless --no-plugin (scripts/plugin.sh) · doctor · what to run next, with the
 # line for a shell startup file when a new terminal needs one. Nothing is left in a list for the user: a step that needs
 # them says so with a ! line and what fixes it under it.
 # Each question is one block of functions named after it, which adds its name to QUESTIONS; the rest of the script
-# reaches a question only through those functions, so deleting its block removes it.
-# The browser answer is kept in $THIMBLE_HOME (config.json's "browser"). A Chrome or Edge used because it was found and
-# started is not recorded: the server picks it too when config.json names no browser (backend/app/userconf.py browser),
-# and a later run asks only if it stops working.
+# reaches a question only through those functions, so deleting its block removes it. The browser's block is one that is
+# never asked (browser_pending), so none remains.
+# A --browser is kept in $THIMBLE_HOME (config.json's "browser"). A Chrome or Edge used because it was found and
+# started is not recorded: the server picks it too when config.json names no browser (backend/app/userconf.py browser).
+# The headless Chromium picked by default is recorded only when a Chrome or Edge was found that did not start, which the
+# server would pick otherwise.
 # Another install's plugin registration (a marketplace added from another folder, or from GitHub) is never changed:
 # install.sh names it and prints the commands that switch it. A ~/.local/bin/thimble linked into another install is
 # changed only on a yes, asked on a terminal.
-# Re-running it (after `git pull`, over a newer release, or to answer a question again with its flag) skips the steps that
+# Re-running it (after `git pull`, over a newer release, or to change the browser with its flag) skips the steps that
 # are done: the same release is not copied again, pinned packages already installed are kept, and the browser is fetched
-# only on a yes and only when the build thimble's Playwright needs is missing.
+# only when the build thimble's Playwright needs is missing.
 # A checkout gets backend/.venv from uv.lock with uv sync, and npm ci when package-lock.json changed since the packages were
 # installed; it rebuilds frontend/dist when it is older than the frontend's sources or the lockfile, so a pulled clone ends
 # with the current UI.
@@ -243,6 +245,30 @@ py_ok() {  # py_ok PYTHON: it runs and is at least pyproject's requires-python
   (cd / && "$1" -I -c "import sys; sys.exit(0 if sys.version_info >= tuple(int(x) for x in '$req_py'.split('.')) else 1)") 2>/dev/null
 }
 
+# A Mac with Apple silicon gets a native arm64 Python, with packages from wheels alone: an Intel Python (which a shell
+# under Rosetta, such as an Intel build of iTerm, finds first) gets no wheel for some of thimble's packages, so pip or uv
+# would build them from source, which needs Xcode and its license. uv fetches a native Python where none is installed.
+apple_silicon=0 rosetta=0 uv_python="" uv_nobuild=() pip_nobuild=()
+mac_arch() {  # apple_silicon=1 on a Mac with Apple silicon, rosetta=1 when this shell runs under Rosetta there; then
+  # uv_python, the Python uv makes an environment with, is a native one, and nothing is built from source
+  uv_python=">=$req_py"
+  [ "$(uname -s)" = Darwin ] || return 0
+  if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then rosetta=1; fi
+  if [ "$rosetta" = 1 ] || [ "$(uname -m)" = arm64 ]; then apple_silicon=1; fi
+  if [ "$apple_silicon" = 1 ]; then
+    uv_python="cpython-$req_py-macos-aarch64-none" uv_nobuild=(--no-build) pip_nobuild=(--only-binary=:all:)
+    say "Apple silicon$( [ "$rosetta" = 0 ] || echo ', this shell under Rosetta'): a native arm64 Python ($uv_python for uv), and packages from wheels alone"
+  fi
+}
+
+py_native() {  # py_native PYTHON: it runs as arm64 here (an Intel Python reports x86_64)
+  [ "$(cd / && "$1" -I -c 'import platform; print(platform.machine())' 2>/dev/null)" = arm64 ]
+}
+
+wheels_only() {  # the words a failed install of Python packages adds on Apple silicon, where nothing is built from source
+  [ "$apple_silicon" = 0 ] || printf '%s' ". On a Mac with Apple silicon install.sh installs prebuilt wheels alone, never a build from source, which needs Xcode"
+}
+
 sets_key() {  # sets_key REGEX FILE…: a line of one of the existing FILEs matches REGEX
   local re="$1" f; shift
   for f in "$@"; do if [ -n "$f" ] && [ -f "$f" ] && grep -qiE "$re" "$f"; then return 0; fi; done
@@ -278,7 +304,9 @@ check_byo() {  # --python, before anything changes: the environment it belongs t
   [ "$(cd / && "$byo_prefix/bin/python" -I -c 'import sys; print(sys.prefix)' 2>/dev/null)" = "$byo_prefix" ] \
     || die "--python $byo: its environment $byo_prefix has no bin/python of its own; give the python of a virtual environment (<venv>/bin/python)"
   if [ -e "$dir/backend/.venv" ] && [ ! -L "$dir/backend/.venv" ] && [ ! "$dir/backend/.venv" -ef "$byo_prefix" ]; then
-    die "$dir/backend/.venv is the environment an earlier install made; to use $byo_prefix in its place, delete it (rm -rf $dir/backend/.venv) and run this again"
+    venv_ours "$dir/backend/.venv" \
+      || die "$dir/backend/.venv is an environment install.sh did not make, so it leaves it as it is; to use $byo_prefix in its place, delete it (rm -rf $dir/backend/.venv) and run this again"
+    say "backend/.venv is the environment install.sh made: the link to $byo_prefix replaces it"
   fi
   if ! lacking="$(cd / && "$byo_prefix/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" 2>&1)"; then
     die "the environment $byo_prefix lacks what thimble's backend needs. Install these into it, then run this again:
@@ -291,62 +319,77 @@ $lacking"
   fi
 }
 
-check_prerequisites() {  # uv or python >= pyproject's requires-python, or --python's environment; node >= 20 unless
-  # frontend/dist is built; the claude CLI. Each sets its line of the opening screen (found_*: a mark and a text)
-  req_py="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' "$src/backend/pyproject.toml")"; req_py="${req_py:-3.12}"
-  have_uv=0 py="" pytool=pip
-  ! command -v uv >/dev/null 2>&1 || have_uv=1
-  for cand in python3 python3.14 python3.13 python3.12; do
-    if command -v "$cand" >/dev/null 2>&1 && py_ok "$cand"; then py="$(command -v "$cand")"; break; fi
+# Node: a release needs Node 20+ for custom views and the sandbox card code and code tickets run in (everything else
+# installs without it); a checkout needs 20.19+, 22.13+ or 24+, whose frontend tests a code ticket's checks run (jsdom and
+# the packages it loads require() ES modules; their engines: ^20.19.0 || ^22.13.0 || >=24; cli.NODE_TESTS_FLOOR). It is
+# checked first, and a Node that is missing, too old or does not start is named with the one command that gets one here
+# (node_fix), or the folder of one installed but later on PATH.
+node_meets() {  # node_meets vMAJOR.MINOR…: that version is what this tree needs
+  local major minor
+  major="$(printf '%s' "$1" | sed -n 's/^v\([0-9]*\)\..*/\1/p')"; minor="$(printf '%s' "$1" | sed -n 's/^v[0-9]*\.\([0-9]*\).*/\1/p')"
+  [ -n "$major" ] && [ "$major" -ge 20 ] || return 1
+  [ "$checkout" = 0 ] || [ "$major" -ge 24 ] || { [ "$major" = 22 ] && [ "${minor:-0}" -ge 13 ]; } \
+    || { [ "$major" = 20 ] && [ "${minor:-0}" -ge 19 ]; }
+}
+
+node_fix() {  # how to get the Node this tree needs: the folder of one installed where a Node manager or Homebrew keeps it
+  # but not first on PATH, else the one command of the tool that manages Node here, else nodejs.org's download page
+  local n v on_path
+  on_path="$(command -v node 2>/dev/null || true)"
+  local dirs=("${NVM_DIR:-$HOME/.nvm}"/versions/node/*/bin/node "$HOME"/.local/share/fnm/node-versions/*/installation/bin/node
+              "$HOME/.volta/bin/node")
+  [ "$(uname -s)" != Darwin ] || dirs+=(/opt/homebrew/bin/node /opt/homebrew/opt/node@*/bin/node /usr/local/bin/node
+                                       /usr/local/opt/node@*/bin/node)
+  for n in "${dirs[@]}"; do
+    [ -x "$n" ] || continue
+    [ -z "$on_path" ] || [ ! "$n" -ef "$on_path" ] || continue
+    v="$("$n" -v 2>/dev/null | head -n 1)" || continue
+    if node_meets "$v"; then
+      printf '%s\n' "Node $v is installed at $(tilde "$n"), but not first on PATH: put $(tilde "${n%/node}") first on PATH, in your shell's startup file too"
+      return 0
+    fi
   done
-  if [ "$have_uv" = 1 ] && { uv_index_set || ! pip_index_set; }; then pytool=uv; fi
-  local uv_v="" py_v=""
-  [ "$have_uv" = 0 ] || uv_v="uv $(uv --version 2>/dev/null | sed -e 's/^uv //' -e 's/ (.*//')"
-  [ -z "$py" ] || py_v="Python $("$py" -I -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')"
-  found_py=ok
-  if [ -n "$byo" ]; then
-    check_byo
-    found_py_text="Python $byo_v: your environment $(tilde "$byo_prefix"), which holds what thimble needs; nothing is installed into it"
-  elif [ "$checkout" = 1 ] && [ "$have_uv" = 1 ]; then
-    found_py_text="$uv_v: installs thimble's Python packages at their tested versions, and Python $req_py if this machine lacks it"
-  elif [ "$have_uv" = 0 ] && [ -z "$py" ]; then
-    die "neither uv nor Python $req_py+ was found. Install uv (https://docs.astral.sh/uv/getting-started/installation/) or Python $req_py+, then run this again"
-  elif [ "$checkout" = 1 ]; then
-    found_py=warn
-    found_py_text="$py_v at $(tilde "$py"), and no uv: thimble's Python packages get the lowest versions it allows, not the tested ones (uv installs those: https://docs.astral.sh/uv/getting-started/installation/)"
-  elif [ "$pytool" = uv ]; then
-    found_py_text="$uv_v: installs thimble's pinned Python packages, and Python $req_py if this machine lacks it"
-  elif [ "$have_uv" = 1 ]; then
-    found_py_text="${py_v:-Python} with pip, which is set up with a package index (uv is not): pip installs thimble's pinned Python packages from it"
-  else
-    found_py_text="$py_v at $(tilde "$py"): pip installs thimble's pinned Python packages from the package index it is set up with"
-  fi
-  say "python: $found_py_text"
+  if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then echo "To get Node 22: nvm install 22"
+  elif command -v fnm >/dev/null 2>&1; then echo "To get Node 22: fnm install 22"
+  elif command -v volta >/dev/null 2>&1; then echo "To get Node 22: volta install node@22"
+  elif command -v brew >/dev/null 2>&1; then echo "To get a current Node: brew install node"
+  else echo "To get Node 22: https://nodejs.org/en/download gives the command for this system"; fi
+}
+
+node_too() {  # what a stop for another reason adds when Node is missing or too old as well
+  [ "$found_node" = ok ] || printf '%s' ". Node as well: $found_node_text"
+}
+
+node_check() {  # node_found (a version, or none), node_ok, and the opening screen's Node line (found_node, found_node_text);
+  # a checkout that needs a newer Node, or has no frontend/dist to fall back on, stops here
+  local where="" ran="" fix
   has_dist=0; [ -f "$src/frontend/dist/index.html" ] && has_dist=1
   stale=""; if [ "$has_dist" = 1 ] && [ "$checkout" = 1 ] && [ "$in_place" = 1 ]; then stale="$(dist_stale "$src/frontend")"; fi
-  node_found="$(command -v node >/dev/null 2>&1 && node -v || echo none)"
-  major="$(printf '%s' "$node_found" | sed -n 's/^v\([0-9]*\).*/\1/p')"
-  node_ok=0; [ "${major:-0}" -ge 20 ] && node_ok=1
-  # a checkout's frontend tests, which a code ticket's checks run, need more: jsdom and the packages it loads require()
-  # ES modules (their engines: ^20.19.0 || ^22.13.0 || >=24; cli.NODE_TESTS_FLOOR)
-  minor="$(printf '%s' "$node_found" | sed -n 's/^v[0-9]*\.\([0-9]*\).*/\1/p')"
-  if [ "$checkout" = 1 ] && [ "$node_ok" = 1 ] && ! { [ "$major" -ge 24 ] || { [ "$major" = 22 ] && [ "${minor:-0}" -ge 13 ]; } || { [ "$major" = 20 ] && [ "${minor:-0}" -ge 19 ]; }; }; then
-    old_node="node $node_found at $(command -v node) is older than a checkout needs: the frontend's tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+. Upgrade Node and run this script again"
-    if [ "$dry" = 1 ]; then show "install.sh stops here: $old_node"; else die "$old_node"; fi
+  node_found=none node_ok=0
+  if where="$(command -v node 2>/dev/null)"; then
+    ran="$( (node -v 2>&1 || true) | head -n 1)"
+    case "$ran" in v[0-9]*.[0-9]*) node_found="$ran";; esac
   fi
-  local no_node="Node 20+ not found"
-  [ "$node_found" = none ] || no_node="Node $node_found is older than the 20 thimble needs"
+  ! node_meets "$node_found" || node_ok=1
   found_node=ok found_node_text="Node $node_found"
-  if [ "$node_ok" = 1 ]; then :
+  if [ "$node_ok" = 1 ]; then say "node: $found_node_text"; return 0; fi
+  fix="$(node_fix)"
+  local no_node="Node not found"
+  if [ "$node_found" != none ]; then no_node="Node $node_found at $(tilde "$where") is too old"
+  elif [ -n "$where" ]; then no_node="Node at $(tilde "$where") does not start (${ran:-it printed nothing})"; fi
+  if [ "$checkout" = 1 ] && [ "$node_found" != none ] && [ "$(printf '%s' "$node_found" | sed -n 's/^v\([0-9]*\).*/\1/p')" -ge 20 ]; then
+    local old_node="$no_node: a checkout's frontend tests, which a code ticket's checks run, need Node 20.19+, 22.13+ or 24+. $fix, then run this script again"
+    if [ "$dry" = 1 ]; then show "install.sh stops here: $old_node"; else die "$old_node"; fi
+    node_ok=1  # a dry run goes on as the install would after the upgrade
   elif [ -n "$stale" ]; then
-    found_node=warn found_node_text="$no_node, so the web interface stays at its last build, older than its sources, until Node 20+ (https://nodejs.org) is installed and this runs again"
+    found_node=warn found_node_text="$no_node, so the web interface stays at its last build, older than its sources, until this runs again with Node 20+. $fix"
   elif [ "$has_dist" = 1 ]; then
-    found_node=warn found_node_text="$no_node: custom views, and the sandbox card code and code tickets run in, need it (https://nodejs.org); everything else installs"
+    found_node=warn found_node_text="$no_node: custom views, and the sandbox card code and code tickets run in, need Node 20 or newer; everything else installs. $fix"
   elif [ "$checkout" = 1 ]; then
     slug="$(json_get "$src/plugin/.claude-plugin/plugin.json" repository | sed -e 's#^https\{0,1\}://github\.com/##' -e 's#\.git$##')"
-    die "no frontend/dist and no node >= 20 (found: $node_found). Install Node 20+ (https://nodejs.org) and re-run this script, or install from the release zip, which carries the built UI: gh release download --repo $slug --pattern 'thimble-*.zip' --dir ~/Downloads"
+    die "$no_node, and this checkout has no frontend/dist, whose build needs Node 20.19+, 22.13+ or 24+. $fix, then run this script again, or install from the release zip, which carries the built UI: gh release download --repo $slug --pattern 'thimble-*.zip' --dir ~/Downloads"
   else
-    found_node=warn found_node_text="$no_node: the web interface needs a build, which needs it (https://nodejs.org); everything else installs"
+    found_node=warn found_node_text="$no_node: the web interface needs a build, which needs Node 20 or newer; everything else installs. $fix"
   fi
   say "node: $found_node_text"
   if [ "$node_ok" != 1 ]; then
@@ -357,10 +400,59 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
     fi
     say "without node >= 20 a code ticket's checks run outside the sandbox, so thimble asks you before each code ticket starts"
   fi
+}
+
+check_prerequisites() {  # uv or python >= pyproject's requires-python, or --python's environment; node >= 20 unless
+  # frontend/dist is built; the claude CLI. Each sets its line of the opening screen (found_*: a mark and a text)
+  node_check  # first, so a missing or old Node is named, with how to get one, before anything else can fail on it
+  req_py="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' "$src/backend/pyproject.toml")"; req_py="${req_py:-3.12}"
+  have_uv=0 py="" pytool=pip intel_py=""
+  ! command -v uv >/dev/null 2>&1 || have_uv=1
+  mac_arch
+  for cand in python3 python3.14 python3.13 python3.12; do
+    if command -v "$cand" >/dev/null 2>&1 && py_ok "$cand"; then
+      if [ "$apple_silicon" = 1 ] && ! py_native "$cand"; then intel_py="${intel_py:-$(command -v "$cand")}"; continue; fi
+      py="$(command -v "$cand")"; break
+    fi
+  done
+  [ -z "$intel_py" ] || say "$intel_py is an Intel Python, which this Mac runs under Rosetta: not used"
+  if [ "$have_uv" = 1 ] && { uv_index_set || ! pip_index_set; }; then pytool=uv; fi
+  local uv_v="" py_v="" get_py="Python $req_py if this machine lacks it" intel=""
+  [ "$have_uv" = 0 ] || uv_v="uv $(uv --version 2>/dev/null | sed -e 's/^uv //' -e 's/ (.*//')"
+  [ -z "$py" ] || py_v="Python $("$py" -I -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')"
+  [ "$apple_silicon" = 0 ] || get_py="a native arm64 Python $req_py if this machine lacks one"
+  [ -z "$intel_py" ] || intel="; not the Intel Python at $(tilde "$intel_py"), which would need Xcode to build packages"
+  found_py=ok
+  if [ -n "$byo" ]; then
+    check_byo
+    found_py_text="Python $byo_v: your environment $(tilde "$byo_prefix"), which holds what thimble needs; nothing is installed into it"
+  elif [ "$apple_silicon" = 1 ] && [ "$have_uv" = 0 ] && [ -z "$py" ]; then
+    die "this Mac has Apple silicon, and no native arm64 Python $req_py+ was found$( [ -z "$intel_py" ] || echo " ($(tilde "$intel_py") is an Intel build, which would need Xcode to build thimble's packages)"). Install uv (https://docs.astral.sh/uv/getting-started/installation/), which gets a native Python, then run this again$(node_too)"
+  elif [ "$checkout" = 1 ] && [ "$have_uv" = 1 ]; then
+    found_py_text="$uv_v: installs thimble's Python packages at their tested versions, and $get_py$intel"
+  elif [ "$have_uv" = 0 ] && [ -z "$py" ]; then
+    die "neither uv nor Python $req_py+ was found. Install uv (https://docs.astral.sh/uv/getting-started/installation/) or Python $req_py+, then run this again$(node_too)"
+  elif [ "$checkout" = 1 ]; then
+    found_py=warn
+    found_py_text="$py_v at $(tilde "$py"), and no uv: thimble's Python packages get the lowest versions it allows, not the tested ones (uv installs those: https://docs.astral.sh/uv/getting-started/installation/)$intel"
+  elif [ "$pytool" = uv ]; then
+    found_py_text="$uv_v: installs thimble's pinned Python packages, and $get_py$intel"
+  elif [ "$have_uv" = 1 ]; then
+    found_py_text="${py_v:-Python} with pip, which is set up with a package index (uv is not): pip installs thimble's pinned Python packages from it$intel"
+  else
+    found_py_text="$py_v at $(tilde "$py"): pip installs thimble's pinned Python packages from the package index it is set up with$intel"
+  fi
+  say "python: $found_py_text"
+  venv_plan
   have_claude=0 found_claude=warn
   found_claude_text="Claude Code not found: thimble runs inside it, so install it before you run thimble (https://docs.anthropic.com/en/docs/claude-code)"
   if command -v claude >/dev/null 2>&1; then
-    have_claude=1 found_claude=ok found_claude_text="Claude Code $(claude --version 2>/dev/null | head -n 1 | sed 's/ (Claude Code)$//')"
+    local cc_v; cc_v="$( (claude --version 2>/dev/null || true) | head -n 1 | sed 's/ (Claude Code)$//')"
+    have_claude=1 found_claude=ok found_claude_text="Claude Code $cc_v"
+    case "$cc_v" in
+      [0-9]*) ;;
+      *) found_claude=warn found_claude_text="Claude Code at $(tilde "$(command -v claude)") did not start (\`claude --version\` printed no version): thimble runs inside it, so fix that before you run thimble";;
+    esac
   fi
   say "claude: $found_claude_text"
   say "auth: thimble uses whichever auth path you have configured for claude"
@@ -418,18 +510,77 @@ git_baseline() {  # a release install as a git repository whose last commit is t
   fi
 }
 
+# backend/.venv that install.sh made holds VENV_MADE, and VENV_PENDING while install.sh installs into it, so a run that
+# failed leaves it. A re-run makes such an environment again when it is broken (venv_problem): left unfinished, a Python
+# that does not run or is too old, or an Intel one on Apple silicon. An environment install.sh did not make (a manual
+# install's, one made by hand in a checkout) is never removed: a broken one stops the install with how to fix it.
+VENV_MADE=.thimble-made VENV_PENDING=.thimble-installing
+venv_why="" venv_redo=0 venv_fresh=0
+
+venv_ours() { [ -d "$1" ] && [ ! -L "$1" ] && [ -f "$1/$VENV_MADE" ]; }  # venv_ours VENV: install.sh made it
+
+venv_problem() {  # venv_problem VENV: why the environment there is broken, or nothing
+  local v="$1"
+  if [ -f "$v/$VENV_PENDING" ]; then echo "an earlier run did not finish installing into it"
+  elif ! { [ -x "$v/bin/python" ] && (cd / && "$v/bin/python" -I -c '') 2>/dev/null; }; then echo "its Python does not run"
+  elif ! py_ok "$v/bin/python"; then echo "its Python is older than the $req_py thimble needs"
+  elif [ "$apple_silicon" = 1 ] && ! py_native "$v/bin/python"; then echo "its Python is an Intel build, which needs Xcode to build packages"
+  fi
+}
+
+venv_plan() {  # before anything changes: venv_why, why backend/.venv is broken, when install.sh made it; one it did not
+  # make that is broken stops the install
+  local venv="$dir/backend/.venv" stop
+  venv_why=""
+  [ -z "$byo" ] && [ -d "$venv" ] && [ ! -L "$venv" ] || return 0
+  venv_why="$(venv_problem "$venv")"
+  [ -n "$venv_why" ] || return 0
+  say "backend/.venv is broken: $venv_why"
+  venv_ours "$venv" && return 0
+  stop="$(tilde "$venv") is broken ($venv_why), and install.sh did not make it, so it leaves it as it is. Move it away or delete it, then run this again"
+  venv_why=""
+  if [ "$dry" = 1 ]; then show "install.sh stops here: $stop"; else die "$stop"; fi
+}
+
+venv_again() {  # a broken environment install.sh made (venv_plan) goes, so the install step makes it again
+  [ -n "$venv_why" ] || return 0
+  run rm -rf "$dir/backend/.venv"
+  venv_redo=1
+  ok "$(tilde "$dir/backend/.venv") was broken ($venv_why), so it is made again"
+}
+
+venv_mark() {  # venv_mark made|pending|finished: backend/.venv as install.sh's (made, when this run made it), as being
+  # installed into (pending, only one install.sh made) or no longer (finished)
+  local venv="$dir/backend/.venv"
+  [ "$dry" = 0 ] && [ -d "$venv" ] && [ ! -L "$venv" ] || return 0
+  case "$1" in
+    made) if [ "$venv_fresh" = 1 ]; then : > "$venv/$VENV_MADE"; : > "$venv/$VENV_PENDING"; fi;;
+    pending) if venv_ours "$venv"; then : > "$venv/$VENV_PENDING"; fi;;
+    finished) rm -f "$venv/$VENV_PENDING";;
+  esac
+}
+
 make_venv() {  # --python's environment linked; a linked one kept and checked; a checkout's from uv.lock (uv sync, else
   # venv + pip from pyproject); a release's from backend/requirements.txt (release_venv)
-  local venv="$dir/backend/.venv" lacking where
+  local venv="$dir/backend/.venv" lacking where pyreq=()
   where="$(tilde "$venv")"
   extra=(); if [ "$dev" = 1 ]; then extra=(--extra dev); fi
   busy "Installing thimble's Python packages"
+  if [ -z "$byo" ] && [ ! -L "$venv" ]; then
+    venv_again
+    venv_fresh=0; if [ ! -e "$venv" ] || [ "$venv_redo" = 1 ]; then venv_fresh=1; fi
+    venv_mark pending
+  fi
+  # uv sync makes backend/.venv with the Python it finds, unless a native one is asked for (mac_arch)
+  if [ "$apple_silicon" = 1 ] && [ "$venv_fresh" = 1 ]; then pyreq=(--python "$uv_python"); fi
   if [ -n "$byo" ] && [ "$venv" -ef "$byo_prefix" ]; then
     say "backend/.venv is $byo_prefix already; used as it is"
     same "Python packages: your environment $(tilde "$byo_prefix"), used as it is"
   elif [ -n "$byo" ]; then
+    local was=""
+    if [ -d "$venv" ] && [ ! -L "$venv" ]; then run rm -rf "$venv"; was=", in place of the one install.sh made"; fi
     run ln -sfn "$byo_prefix" "$venv"
-    ok "Python packages: your environment $(tilde "$byo_prefix"), linked as $where; nothing installed into it"
+    ok "Python packages: your environment $(tilde "$byo_prefix"), linked as $where$was; nothing installed into it"
   elif [ -L "$venv" ]; then
     say "backend/.venv → $(readlink "$venv"): an environment of your own (install.sh --python), used as it is"
     if [ "$dry" = 0 ] && ! lacking="$(cd / && "$venv/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" 2>&1)"; then
@@ -440,9 +591,12 @@ make_venv() {  # --python's environment linked; a linked one kept and checked; a
     fi
   elif [ "$checkout" = 0 ]; then
     release_venv
+    venv_mark finished
   elif [ "$have_uv" = 1 ] && [ -f "$src/backend/uv.lock" ]; then
     run_in "$dir/backend" uv sync --frozen --no-dev --no-install-project ${extra[@]+"${extra[@]}"} \
-      || { tail_out; die "uv sync could not install the backend's packages (above)"; }
+      ${pyreq[@]+"${pyreq[@]}"} ${uv_nobuild[@]+"${uv_nobuild[@]}"} \
+      || { venv_mark made; tail_out; die "uv sync could not install the backend's packages (above)$(wheels_only)"; }
+    venv_mark made; venv_mark finished
     # uv says "Checked N packages" (older: "Audited") when it changed nothing, and lists what it installed or removed
     if grep -qE '^(Checked|Audited) [0-9]+ package' "$tmp/out" && ! grep -qE '^ [-+~] |^(Installed|Uninstalled) [0-9]' "$tmp/out"; then
       same "Python packages up to date in $where (the versions backend/uv.lock pins)"
@@ -452,34 +606,44 @@ make_venv() {  # --python's environment linked; a linked one kept and checked; a
   elif [ "$have_uv" = 1 ]; then
     [ "$require_pinned" = 0 ] || die "backend/uv.lock is missing, so nothing pins the backend's versions, and --require-pinned installs only pinned ones"
     run_in "$dir/backend" uv sync --no-dev --no-install-project ${extra[@]+"${extra[@]}"} \
-      || { tail_out; die "uv sync could not install the backend's packages (above)"; }
+      ${pyreq[@]+"${pyreq[@]}"} ${uv_nobuild[@]+"${uv_nobuild[@]}"} \
+      || { venv_mark made; tail_out; die "uv sync could not install the backend's packages (above)$(wheels_only)"; }
+    venv_mark made; venv_mark finished
     ok "Python packages installed in $where (backend/uv.lock is missing, so at the newest versions allowed, not the tested ones)"
   else
     [ "$require_pinned" = 0 ] || die "without uv the backend's pinned versions (backend/uv.lock) can't be installed, and --require-pinned installs only pinned ones; install uv (https://docs.astral.sh/uv/getting-started/installation/)"
-    [ -x "$venv/bin/python" ] || run "$py" -I -m venv "$venv" || { tail_out; die "python -m venv failed (above)"; }
+    if [ "$venv_fresh" = 1 ]; then run "$py" -I -m venv "$venv" || { venv_mark made; tail_out; die "python -m venv failed (above)"; }; venv_mark made; fi
     say "pip from pyproject.toml (the minimum versions, not the pinned ones in uv.lock)"
     run "$venv/bin/python" -I -m pip install --quiet --upgrade pip || { tail_out; die "pip could not upgrade itself (above)"; }
-    if [ "$dev" = 1 ]; then run "$venv/bin/python" -I -m pip install --quiet -e "$dir/backend[dev]" || { tail_out; die "pip could not install the backend's packages (above)"; }
-    else run "$venv/bin/python" -I -m pip install --quiet -e "$dir/backend" || { tail_out; die "pip could not install the backend's packages (above)"; }; fi
+    if [ "$dev" = 1 ]; then run "$venv/bin/python" -I -m pip install --quiet ${pip_nobuild[@]+"${pip_nobuild[@]}"} -e "$dir/backend[dev]" || { tail_out; die "pip could not install the backend's packages (above)$(wheels_only)"; }
+    else run "$venv/bin/python" -I -m pip install --quiet ${pip_nobuild[@]+"${pip_nobuild[@]}"} -e "$dir/backend" || { tail_out; die "pip could not install the backend's packages (above)$(wheels_only)"; }; fi
+    venv_mark finished
     ok "Python packages installed in $where, at the lowest versions allowed (without uv, not the tested ones)"
   fi
 }
 
-new_venv() {  # new_venv VENV: a release's backend/.venv, made by uv, else by the venv module, with pip in it when pip installs
-  local venv="$1" clear=()
-  [ ! -e "$venv" ] || clear=(--clear)  # a venv whose python no longer runs
+new_venv() {  # new_venv VENV: a release's backend/.venv, made by uv, else by the venv module, with pip in it when pip
+  # installs; marked as install.sh's (venv_mark), also when the command that makes it fails halfway
+  local venv="$1" made=0
   if [ "$pytool" = pip ] && [ -n "$py" ]; then
-    run "$py" -I -m venv ${clear[@]+"${clear[@]}"} "$venv" || { tail_out; die "python -m venv failed (above)"; }
+    run "$py" -I -m venv "$venv" && made=1
   else
-    run uv venv --quiet ${clear[@]+"${clear[@]}"} --python ">=$req_py" "$venv" || { tail_out; die "uv venv failed (above)"; }
-    [ "$pytool" = uv ] || run "$venv/bin/python" -I -m ensurepip --quiet || { tail_out; die "ensurepip failed (above)"; }
+    run uv venv --quiet --python "$uv_python" "$venv" && made=1
   fi
+  venv_mark made
+  if [ "$made" = 0 ]; then
+    tail_out
+    [ "$pytool" != pip ] || [ -z "$py" ] || die "python -m venv failed (above)"
+    [ "$apple_silicon" = 0 ] || die "uv could not get a native arm64 Python $req_py (above). In a shell: uv python install $uv_python, then run this again"
+    die "uv venv failed (above)"
+  fi
+  [ "$pytool" = uv ] || [ -n "$py" ] || run "$venv/bin/python" -I -m ensurepip --quiet || { tail_out; die "ensurepip failed (above)"; }
 }
 
 py_install() {  # py_install LOG ARGS…: uv pip or pip installs ARGS into backend/.venv; LOG keeps the output
   local log="$1" venv="$dir/backend/.venv"; shift
-  if [ "$pytool" = uv ]; then logged "$log" uv pip "$@" --python "$venv/bin/python"
-  else logged "$log" "$venv/bin/python" -I -m pip install --quiet --disable-pip-version-check "$@"; fi
+  if [ "$pytool" = uv ]; then logged "$log" uv pip "$@" --python "$venv/bin/python" ${uv_nobuild[@]+"${uv_nobuild[@]}"}
+  else logged "$log" "$venv/bin/python" -I -m pip install --quiet --disable-pip-version-check ${pip_nobuild[@]+"${pip_nobuild[@]}"} "$@"; fi
 }
 
 py_ranges() {  # py_ranges WHICH: pyproject's dependencies (all, or dev: the dev extra alone), at the versions it allows
@@ -490,7 +654,7 @@ dev = p.get("optional-dependencies", {}).get("dev", []) if sys.argv[3] == "1" el
 print("\n".join(dev if sys.argv[2] == "dev" else p.get("dependencies", []) + dev))' "$src/backend/pyproject.toml" "$1" "$dev" > "$req"
   say "+ the requirements of backend/pyproject.toml$( [ "$1" = dev ] && echo "'s dev extra" ) into $req"
   if [ "$pytool" = uv ]; then set -- install -r "$req"; else set -- -r "$req"; fi
-  py_install "$tmp/py.log" "$@" || { tail_out; die "the backend's packages could not be installed (above)"; }
+  py_install "$tmp/py.log" "$@" || { tail_out; die "the backend's packages could not be installed (above)$(wheels_only)"; }
 }
 
 py_differs() {  # py_differs REQ: the packages in backend/.venv at a version other than the one REQ pins
@@ -521,12 +685,12 @@ release_venv() {  # the pinned packages of backend/requirements.txt (uv.lock's, 
   # pyproject.toml allows that it has (py_ranges), and the list of those that differ from the pins
   local venv="$dir/backend/.venv" req="$src/backend/requirements.txt" stamp="$dir/backend/.venv/.thimble-requirements.txt" args
   local where; where="$(tilde "$venv")"
-  if [ "$dev" = 0 ] && [ -f "$req" ] && cmp -s "$req" "$stamp" && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; then
+  if [ "$venv_redo" = 0 ] && [ "$dev" = 0 ] && [ -f "$req" ] && cmp -s "$req" "$stamp" && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; then
     say "backend/.venv holds the packages backend/requirements.txt pins, installed by an earlier run"
     same "Python packages up to date in $where"
     return 0
   fi
-  if ! { [ -x "$venv/bin/python" ] && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; }; then new_venv "$venv"
+  if [ "$venv_fresh" = 1 ]; then new_venv "$venv"
   elif [ "$pytool" = pip ] && ! (cd / && "$venv/bin/python" -I -c 'import pip') 2>/dev/null; then
     run "$venv/bin/python" -I -m ensurepip --quiet || { tail_out; die "ensurepip failed (above)"; }  # a venv an earlier install made with uv, which holds no pip
   fi
@@ -570,8 +734,8 @@ prefer_pins() {  # prefer_pins REQ (uv): backend/pyproject.toml resolved from th
   say "so install.sh keeps each pin the index has, and for the others installs the newest versions backend/pyproject.toml allows that the index has"
   run cp "$1" "$out"  # uv pip compile keeps the versions its output file already names where it can
   logged "$tmp/py.log" uv pip compile "$src/backend/pyproject.toml" ${extra[@]+"${extra[@]}"} -o "$out" --generate-hashes \
-    --quiet --python "$py" || return 1
-  logged "$tmp/py.log" uv pip sync --require-hashes "$out" --python "$py"
+    --quiet --python "$py" ${uv_nobuild[@]+"${uv_nobuild[@]}"} || return 1
+  logged "$tmp/py.log" uv pip sync --require-hashes "$out" --python "$py" ${uv_nobuild[@]+"${uv_nobuild[@]}"}
 }
 
 dist_stale() {  # dist_stale FRONTEND: the first file frontend/dist is built from that is newer than its index.html (git
@@ -684,7 +848,7 @@ build_ui() {  # with node >= 20 the frontend's packages, which custom views need
     else
       warn "Node packages not installed and the web interface not built, since both need Node 20+"
     fi
-    note "Install Node 20+ (https://nodejs.org), then run bash $(tilde "$dir")/scripts/install.sh again."
+    note "$(node_fix), then run bash $(tilde "$dir")/scripts/install.sh again."
     return 0
   fi
   busy "Installing thimble's Node packages"
@@ -719,7 +883,8 @@ build_ui() {  # with node >= 20 the frontend's packages, which custom views need
   fi
 }
 
-# ---------------------------------------------------------------------------------- the browser question
+# ---------------------------------------------------------------------------------- the browser for screenshots
+# Not a question any more: install.sh picks a default (browser_plan) and says so in one line; --browser changes it.
 QUESTIONS+=(browser)
 browser=""  # --browser's value: bundled, system or off
 browser_flag() {  # browser_flag ARG…: --browser VALUE or --browser=VALUE (took: how many arguments)
@@ -768,7 +933,8 @@ probe_browser() {  # sys_starts=1 when the system browser starts headless with r
   say "$sys_name at $sys_path $( [ "$sys_starts" = 1 ] && echo 'starts' || echo 'does not start' ) headless with remote debugging"
 }
 
-BUNDLED_SIZE="about 210 MB to download, 650 MB on disk"  # both headless Chromium builds and ffmpeg, measured
+BUNDLED_DOWNLOAD="about 210 MB" BUNDLED_DISK="650 MB"  # both headless Chromium builds and ffmpeg, measured
+BUNDLED_SIZE="$BUNDLED_DOWNLOAD to download, $BUNDLED_DISK on disk"
 
 pw_cache() {  # the folder Playwright downloads its browsers into, as Playwright resolves it
   case "${PLAYWRIGHT_BROWSERS_PATH:-}" in
@@ -804,7 +970,7 @@ record_browser() {  # record_browser VALUE: config.json's "browser" (the file is
   say "+ set \"browser\": \"$1\" in $home/config.json"
   [ "$dry" = 1 ] && return 0
   mkdir -p "$home"
-  "$py" -I - "$home/config.json" "$1" <<'PY' >&4 2>&1 || note "(the answer was not recorded, so a later run asks again)"
+  "$py" -I - "$home/config.json" "$1" <<'PY' >&4 2>&1 || note "(the choice was not recorded, so a later run picks again)"
 import json, os, sys, tempfile
 path, value = sys.argv[1:]
 try:
@@ -878,25 +1044,29 @@ fetch_bundled() {  # the headless Chromium each of thimble's Playwrights launche
   done
 }
 
-browser_plan() {  # before the opening screen: the earlier answer (browser_was, and browser_how, where it came from) and,
-  # without it or a flag, whether the Chrome or Edge found starts under automation (browser_auto=system: used without
-  # asking, and not recorded); bundled_there=1 when the backend's headless Chromium is downloaded already
+browser_plan() {  # before the opening screen: the earlier choice (browser_was, and browser_how, where it came from) and,
+  # without it or a flag, the default (browser_auto), which nobody is asked for: the Chrome or Edge found when it starts
+  # under automation, else Playwright's headless Chromium (browser_why says why); bundled_there=1 when the backend's
+  # headless Chromium is downloaded already
   local loc=""
-  browser_was="$(browser_prev)" browser_auto="" sys_starts="" bundled_there=0
-  browser_how="your earlier answer; --browser changes it"
+  browser_was="$(browser_prev)" browser_auto="" browser_why="" sys_starts="" bundled_there=0
+  browser_how="kept from an earlier run; --browser changes it"
   if [ -n "$browser_was" ] && [ "$(json_get "$home/config.json" browser 2>/dev/null)" != "$browser_was" ]; then
     browser_how="an earlier install downloaded it; --browser changes it"
   fi
   if earlier_install; then loc="$(pw_location "$dir/backend/.venv/bin/python" -I -m playwright)" || loc=""; fi
   [ -z "$loc" ] || [ ! -f "$loc/INSTALLATION_COMPLETE" ] || bundled_there=1
   system_browser
-  if [ -z "$browser$browser_was" ] && [ -n "$sys_path" ]; then
-    probe_browser
-    [ "$sys_starts" = 0 ] || browser_auto=system
+  [ -z "$browser$browser_was" ] || return 0
+  [ -z "$sys_path" ] || probe_browser
+  if [ "$sys_starts" = 1 ]; then browser_auto=system
+  else
+    browser_auto=bundled browser_why="no Chrome or Edge was found"
+    [ -z "$sys_path" ] || browser_why="$sys_name at $(tilde "$sys_path") did not start under automation here, which a policy can block"
   fi
 }
-browser_pending() { [ -z "$browser$browser_was$browser_auto" ]; }
-browser_unchanged() {  # nothing for its step to do (nothing_planned): the answer stays, and a bundled browser is there
+browser_pending() { return 1; }  # never asked: browser_plan picks a default, and --browser changes it
+browser_unchanged() {  # nothing for its step to do (nothing_planned): the choice stays, and a bundled browser is there
   [ -z "$browser" ] || [ "$browser" = "$browser_was" ] || return 1
   case "${browser:-${browser_was:-$browser_auto}}" in
     bundled) [ "$bundled_there" = 1 ];;
@@ -905,45 +1075,43 @@ browser_unchanged() {  # nothing for its step to do (nothing_planned): the answe
     *) return 1;;
   esac
 }
-browser_found() {  # its line in the opening screen's Found
-  local how="$browser_how"
+pw_host() {  # where Playwright downloads its headless Chromium from
+  local h="${PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST:-${PLAYWRIGHT_DOWNLOAD_HOST:-}}"
+  if [ -n "$h" ]; then printf '%s\n' "$h (PLAYWRIGHT_DOWNLOAD_HOST)"; else printf '%s\n' "Microsoft's Playwright CDN (cdn.playwright.dev)"; fi
+}
+browser_found() {  # its line in the opening screen's Found; for a default, the one line that says what it picked, what it
+  # downloads and from where, and the flag that changes it
+  local how="$browser_how" what="Screenshots of thimble's cards and views" flags
   [ -z "$browser" ] || how="--browser $browser"
   case "${browser:-$browser_was}" in
     system) if [ -n "$sys_path" ]; then found ok "$sys_name at $(tilde "$sys_path") for screenshots ($how)"
             else found warn "Chrome or Edge for screenshots ($how), but neither is where Playwright looks, so no screenshots"; fi;;
     bundled) found ok "Playwright's headless Chromium for screenshots ($how)";;
     off) found ok "no browser, so no screenshots ($how)";;
-    *) if [ "$browser_auto" = system ]; then found ok "$sys_name at $(tilde "$sys_path"): screenshots use it, so nothing is downloaded"
-       elif [ -n "$sys_path" ]; then found warn "$sys_name at $(tilde "$sys_path") did not start under automation here, which a policy can block: a question below"
-       else found warn "No Chrome or Edge for screenshots: a question below"; fi;;
+    *) if [ "$browser_auto" = system ]; then
+         found ok "$what: $sys_name at $(tilde "$sys_path"), so nothing is downloaded. --browser bundled or --browser off changes it"
+       else
+         flags="--browser off skips it"
+         [ -z "$sys_path" ] || flags="--browser system tries $sys_name anyway; $flags"
+         if [ "$bundled_there" = 1 ]; then
+           found ok "$what: Playwright's headless Chromium, since $browser_why. It is downloaded already, in $(tilde "$(pw_cache)"). $flags"
+         else
+           found ok "$what: Playwright's headless Chromium, since $browser_why. It downloads $BUNDLED_DOWNLOAD from $(pw_host) into $(tilde "$(pw_cache)") ($BUNDLED_DISK on disk). $flags"
+         fi
+       fi;;
   esac
 }
 browser_installs() {  # its row in the opening screen's Installs, when it downloads
-  [ "${browser:-$browser_was}" = bundled ] || browser_pending || return 0
+  [ "${browser:-${browser_was:-$browser_auto}}" = bundled ] || return 0
   if [ "$bundled_there" = 1 ]; then row "headless Chromium" "$(tilde "$(pw_cache)")" "downloaded already"
-  else row "headless Chromium" "$(tilde "$(pw_cache)")" "$BUNDLED_SIZE$(browser_pending && echo ', only on a yes')"; fi
+  else row "headless Chromium" "$(tilde "$(pw_cache)")" "$BUNDLED_SIZE"; fi
 }
-browser_title()  { echo "Download a browser for screenshots?"; }
-browser_text() {
-  local why="No Chrome or Edge was found."
-  [ -z "$sys_path" ] || why="$sys_name at $(tilde "$sys_path") did not start under automation here, which a policy on this machine can block."
-  echo "thimble takes screenshots of the cards and views it draws, to check how they look. $why Playwright's headless Chromium does the job: $BUNDLED_SIZE, in $(tilde "$(pw_cache)")."
-  if [ -n "$sys_path" ]; then echo "With a no, thimble tries $sys_name anyway."; else echo "With a no, thimble works without screenshots."; fi
-}
-browser_prompt()  { echo "Download it?"; }
-browser_default() { echo y; }
-browser_choices() {
-  echo "yes, download it: --browser bundled"
-  [ -z "$sys_path" ] || echo "no, try $sys_name anyway: --browser system"
-  echo "no screenshots: --browser off"
-}
-browser_need()   { echo "a browser for screenshots: --browser bundled$( [ -z "$sys_path" ] || echo ', --browser system') or --browser off"; }
-browser_answer() { if [ "$1" = y ]; then browser=bundled; elif [ -n "$sys_path" ]; then browser=system; else browser=off; fi; }
 browser_phase()  { echo deps; }
-browser_step() {  # after the packages, since it launches the browser with thimble's Playwright: the answer's browser,
-  # downloaded only when it is bundled; a new answer is recorded in config.json
+browser_step() {  # after the packages, since it launches the browser with thimble's Playwright: the chosen browser,
+  # downloaded only when it is bundled. A --browser that changes the choice is recorded in config.json, and so is the
+  # headless Chromium picked over a Chrome or Edge that did not start, which the server would otherwise pick
   local choice="${browser:-${browser_was:-$browser_auto}}" fix="bash $(tilde "$dir")/scripts/install.sh --browser bundled"
-  local line=same  # ok for a new answer, which is a change
+  local line=same  # ok for a new choice, which is a change
   [ -z "$browser" ] || [ "$browser" = "$browser_was" ] || line=ok
   case "$choice" in
     system)
@@ -960,7 +1128,7 @@ browser_step() {  # after the packages, since it launches the browser with thimb
         fi
       fi;;
     bundled)
-      busy "Downloading Playwright's headless Chromium (about 210 MB)"
+      busy "Downloading Playwright's headless Chromium ($BUNDLED_DOWNLOAD)"
       fetch_bundled
       launch_check
       if [ "$fetch_failed" = 1 ]; then
@@ -975,10 +1143,9 @@ browser_step() {  # after the packages, since it launches the browser with thimb
       else "$line" "Screenshots use Playwright's headless Chromium, downloaded already ($(tilde "$(pw_cache)"))"; fi;;
     off)
       "$line" "No screenshots, as you chose: thimble can't check how its cards and views look (--browser bundled or --browser system turns them on)";;
-    *)
-      say "(the answer to the browser question, above)";;
   esac
-  if [ -n "$browser" ] && [ "$browser" != "$browser_was" ]; then record_browser "$browser"; fi
+  if [ -n "$browser" ] && [ "$browser" != "$browser_was" ]; then record_browser "$browser"
+  elif [ -z "$browser$browser_was" ] && [ "$browser_auto" = bundled ] && [ -n "$sys_path" ]; then record_browser bundled; fi
 }
 
 # ------------------------------------------------------------------------- card code's sandbox (Linux)
@@ -1238,6 +1405,7 @@ nothing_planned() {  # a re-run with nothing to do, as far as the plan can tell:
     if "${q}_pending" || { declare -F "${q}_unchanged" >/dev/null && ! "${q}_unchanged"; }; then return 1; fi
   done
   [ "$in_place" = 1 ] || { [ -f "$src/RELEASE.json" ] && cmp -s "$src/RELEASE.json" "$dir/RELEASE.json" && [ -d "$dir/.git" ]; } || return 1
+  [ -z "$venv_why" ] || return 1
   if [ -n "$byo" ]; then [ "$venv" -ef "$byo_prefix" ] || return 1
   elif [ -L "$venv" ]; then :
   elif [ "$checkout" = 0 ]; then
@@ -1253,8 +1421,8 @@ nothing_planned() {  # a re-run with nothing to do, as far as the plan can tell:
   case "$plugin_files" in inplace | same) return 0;; *) return 1;; esac
 }
 
-opening() {  # the one screen before the questions: what install.sh found, what it installs where, what it changes in
-  # Claude Code's setup, and how many questions remain
+opening() {  # the one screen before the steps: what install.sh found, what it installs where, what it changes in
+  # Claude Code's setup, and how many questions remain when any does
   local q n=0 venv="$dir/backend/.venv" fe="$dir/frontend/node_modules"
   for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do if "${q}_pending"; then n=$((n + 1)); fi; done
   heading "$(title)"
@@ -1270,6 +1438,7 @@ opening() {  # the one screen before the questions: what install.sh found, what 
   if [ "$in_place" = 1 ]; then row "thimble $version" "$(tilde "$dir")" "runs from here; nothing is copied"
   else row "thimble $version" "$(tilde "$dir")" "$(size_of "$src")"; fi
   if [ -n "$byo" ]; then row "Python packages" "your environment $(tilde "$byo_prefix")" "nothing installed into it"
+  elif [ -n "$venv_why" ]; then row "Python packages" "$(tilde "$venv")" "made again: $venv_why"
   elif [ -e "$venv" ]; then row "Python packages" "$(tilde "$venv")" "there already; updated if needed"
   else row "Python packages" "$(tilde "$venv")" "$PY_SIZE"; fi
   if [ "$node_ok" = 1 ]; then
@@ -1298,10 +1467,10 @@ opening() {  # the one screen before the questions: what install.sh found, what 
     for q in ${QUESTIONS[@]+"${QUESTIONS[@]}"}; do if declare -F "${q}_setup" >/dev/null; then "${q}_setup"; fi; done
   fi
   if [ "${#ignored[@]}" -gt 0 ]; then show ""; ignored_line; fi
-  show ""
-  if [ "$n" = 0 ]; then show "Questions: none."
-  elif [ "$dry" = 1 ]; then show "Questions: $n, listed below."
-  else show "Questions: $n, next."; fi
+  # with no question (the usual case) nothing more: a dry run ends with "Nothing to ask" (ask), a run goes on
+  if [ "$n" = 0 ]; then [ "$dry" = 0 ] || show ""
+  elif [ "$dry" = 1 ]; then show ""; show "Questions: $n, listed below."
+  else show ""; show "Questions: $n, next."; fi
 }
 
 plugin_setup() {  # the plugin's line in "Your Claude Code setup"

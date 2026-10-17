@@ -28,6 +28,8 @@ bubblewrap can create a sandbox, and otherwise with your user's access; `thimble
 - macOS or Linux, and Python 3.12+. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
   installs the pinned versions and fetches Python when the machine has none.
 - Node 20+ for custom views and for the sandbox card code and code tickets run in; a Dev install needs 20.19+, 22.13+ or 24+, which the frontend's tests need.
+  install.sh checks Node first: when it is missing or too old, it says so with the command that gets Node 22 on your
+  machine (nvm, fnm, Volta or Homebrew), or the folder to put first on PATH when a newer Node is installed already.
 
 ## Authentication
 
@@ -36,7 +38,7 @@ Code session, on its sign-in. Any way you sign in to Claude Code works.
 
 - **Claude login.** Run `claude auth login`, or `/login` in a `claude` session.
 - **API key.** Export `ANTHROPIC_API_KEY` in your shell before you start `claude` or `thimble`. Claude Code asks once
-  whether to use the key.
+  whether to use the key, which then overrides a Claude login.
 - **apiKeyHelper (most robust).** Put `"apiKeyHelper": "<a command that prints the key>"` in `~/.claude/settings.json`
   (your Claude Code config dir). It reaches your session whatever your shell exports, and with it every model call of
   thimble's, which runs in your session.
@@ -233,7 +235,7 @@ Dev install, a clone installed in place with the backend's test tools:
 
 Either install:
 
-- installs the Python and Node packages and, if you want one, a browser for screenshots;
+- installs the Python and Node packages and a browser for screenshots;
 - adds thimble's plugin to Claude Code with Claude Code's own commands: `claude plugin marketplace add <install
   folder>`, then `claude plugin install --scope user thimble@<name>` (`thimble-local` for a release, `thimble` for a
   clone). Claude Code records the plugin in `~/.claude/settings.json` (`enabledPlugins`) and `~/.claude/plugins`.
@@ -249,19 +251,20 @@ install.sh changes nothing else in your Claude Code setup: no permission rule, n
 no system package and never runs sudo.
 
 install.sh opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card
-code and terminal-mode views can run in bubblewrap), what it installs where and about how big, what it changes in your
-Claude Code setup, and whether a question remains. Then it prints a line per step: ✓ when the step is done, ! when it
-needs you, with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`. A
-re-run that finds nothing to do says so in one line, and one that changes something shows only what changed.
+code and terminal-mode views can run in bubblewrap), what it installs where and about how big, and what it changes in
+your Claude Code setup. It asks nothing. Then it prints a line per step: ✓ when the step is done, ! when it needs you,
+with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`. A re-run that
+finds nothing to do says so in one line, and one that changes something shows only what changed. After a failed
+install, run it again: it makes the Python environment again when the failed run left it unfinished or broken. It
+removes only an environment it made itself; for one you made, it says what to do.
 
-It asks one question, and only when it finds no Chrome or Edge that starts under automation: **a browser for
-screenshots**. thimble takes screenshots of the cards and views it draws, to check how they look. It offers Playwright's
-headless Chromium (about 210 MB to download, 650 MB on disk); with a no, thimble works without screenshots.
-`--browser bundled`, `--browser system` or `--browser off` answers it.
+**A browser for screenshots.** thimble takes screenshots of the cards and views it draws, to check how they look.
+install.sh uses a Chrome or Edge it finds that starts under automation, and downloads nothing. Otherwise it downloads
+Playwright's headless Chromium (about 210 MB from Microsoft's Playwright CDN, cdn.playwright.dev, 650 MB on disk) into
+Playwright's cache. The opening screen says which, in one line. `--browser off` takes no screenshots and downloads
+nothing; `--browser bundled` or `--browser system` picks one of the two. The flag is kept, so an update keeps it.
 
-Without a terminal, install.sh runs only when the question, if it remains, has its flag. The answer is kept, so an update
-doesn't ask it again. `install.sh --dry-run` prints the opening screen and the question, and changes nothing;
-`--verbose` also prints every command.
+`install.sh --dry-run` prints the opening screen and changes nothing; `--verbose` also prints every command.
 
 ## Start thimble
 
@@ -333,6 +336,11 @@ workspaces in `$T/workspaces`. Keep that folder when you replace `$T`.
 
 thimble needs Python 3.12 or later. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
 installs the tested versions, and it gets Python if the machine has none.
+
+On a Mac with Apple silicon, use a native Python: an Intel one, which a terminal under Rosetta finds first, gets no
+wheel for some packages and builds them from source, which needs Xcode. With uv, write
+`--python cpython-3.12-macos-aarch64-none` in place of `--python '>=3.12'` below, and add `--no-build` to its install
+commands.
 
 From a release, with uv:
 
@@ -671,17 +679,18 @@ that one and prints each path it deleted. The folder it read and your Claude Cod
 - A start or a view proposal's Accept is refused with a line about plan mode: your session is in plan mode, where an
   agent would ask before every card. Leave it with shift+tab in the terminal, then try again.
 - A notice says thimble couldn't check for a view proposal: it gives the reason, with Try again and Turn off view
-  proposals. When it says Claude Code isn't signed in for thimble's server, run `/login` in your terminal (or
-  `claude auth login` in a shell); if you changed your sign-in after the server started, such as by exporting
-  `ANTHROPIC_API_KEY`, run `thimble server restart` from that shell. Then press Try again. An accepted view that fails
-  to build has a notice with Retry.
+  proposals. An accepted view that fails to build has a notice with Retry.
+- A notice says Anthropic's API refused Claude Code's sign-in, or that its credit balance is too low: it names the login
+  Claude Code uses, as `claude auth status` reports it. An API key your shell exports, such as `ANTHROPIC_API_KEY`,
+  overrides a `/login`: quit, unset it (in your shell's startup file too) and start claude again in a new terminal,
+  or run `/login`. Then press Try again where the notice has it.
 - A chat says Claude's safeguards stopped a request: rephrase or narrow the request and send it again. A notice that
   Claude's safeguards switched a reply to another model names both models; the reply, or the view proposal, came from
   the second.
 - Cards are not checked, views are checked without loading their page, or screenshots are unavailable: there is no
-  browser (the install's answer, or no Chrome or Edge found), or the machine lacks the headless Chromium's system
-  libraries. thimble never downloads a browser by itself. `install.sh --browser system` or `--browser bundled` sets one
-  up, and `thimble doctor --verbose` names the command for missing libraries. Then run `thimble restart`.
+  browser (`--browser off`, or its download failed), or the machine lacks the headless Chromium's system libraries.
+  `install.sh --browser system` or `--browser bundled` sets one up, and `thimble doctor --verbose` names the command for
+  missing libraries. Then run `thimble restart`.
 - `/thimble` is not recognized in a `claude` session: Claude Code doesn't have thimble's plugin, or it is off. `thimble
   doctor` says which. `bash <install folder>/scripts/install.sh` adds it, `/plugin` turns it on, and a session open
   since before then needs `/reload-plugins`.

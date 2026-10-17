@@ -2719,7 +2719,7 @@ def _failures_why(failures: list, refused: str | None = None) -> tuple[str, Any]
     fix = None
     for msg, n in failures:
         words, f = ((refused, None) if refused and notices.failure_class(msg) == "refused"
-                    else notices.reason(msg, server=True))
+                    else notices.reason(msg))
         merged[words] = merged.get(words, 0) + int(n)
         fix = fix or f
     if len(merged) == 1:
@@ -2750,12 +2750,12 @@ def _label_notice(c: str, concept: dict, *, error: Any = None, failed: int = 0, 
         again = (real and not error and concept["kind"] == "prompt"
                  and bool(unlabeled_refs(_ws(c), concept)))
         if error is not None:
-            why, fix = notices.reason(error, server=True)
+            why, fix = notices.reason(error)
             text = LABEL_FAILED_TEXT.format(name=name, why=why)
         else:
             problems = [m for m in str(message or "").split("; ") if m and not m.startswith("Downgrading ")]
             why, fix = (_failures_why(failures, LABEL_REFUSED_WHY if again else None) if failures else
-                        notices.reason("; ".join(problems) or NO_LABELS, server=True))
+                        notices.reason("; ".join(problems) or NO_LABELS))
             noun = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}.get(str(concept.get("unit")),
                                                                                          "record")
             of = f"{int(total):,} {noun}s" if isinstance(total, int) and total else f"its {noun}s"

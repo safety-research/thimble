@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -223,7 +224,8 @@ def passed_environ(environ: Mapping[str, str] | None = None) -> dict[str, str]:
 AUTH_STATUS_TIMEOUT_S = 20.0
 
 
-def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = None) -> dict[str, Any] | None:
+def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = None,
+                timeout: float = AUTH_STATUS_TIMEOUT_S) -> dict[str, Any] | None:
     """What `claude auth status --json` reports for the login a `claude` thimble starts would use (`env`, default
     launch_environ()), in the folder `cwd` (a temporary one when it is none): loggedIn, authMethod,
     apiKeySource, apiProvider and the like. None when `claude` is missing, the command fails to print an object, or
@@ -234,11 +236,36 @@ def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = N
         r = subprocess.run([CLI_PATH, "auth", "status", "--json"], capture_output=True, text=True,
                            env=dict(env) if env is not None else launch_environ(),
                            cwd=str(cwd) if cwd and Path(cwd).is_dir() else tempfile.gettempdir(),
-                           stdin=subprocess.DEVNULL, timeout=AUTH_STATUS_TIMEOUT_S)
+                           stdin=subprocess.DEVNULL, timeout=timeout)
         d = json.loads(r.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
     return d if isinstance(d, dict) else None
+
+
+# How Claude Code signs in, for a notice of a failed sign-in or a credit balance too low, which names it (notices.
+# sign_in_words): `claude auth status --json`'s authMethod and apiKeySource, the same apiKeySource Claude Code's init
+# records carry (ANTHROPIC_API_KEY, apiKeyHelper, /login managed key). thimble reads only those names: never the key, the
+# variable that holds it, or the account's id or email. A process thimble runs in Claude Code's session (its hooks, its
+# MCP shim, the server /thimble starts) has the session's environment, so the answer is the session's. Kept LOGIN_TTL_S.
+LOGIN_TTL_S = 60.0
+LOGIN_TIMEOUT_S = 5.0
+_login: tuple[float, dict[str, str] | None] | None = None
+
+
+def login() -> dict[str, str] | None:
+    """{method: authMethod, source: apiKeySource, provider: apiProvider}, each where `claude auth status` reports it, as
+    the note above says; None when it reports nothing (no `claude`, THIMBLE_SKIP_KEY, a status that cannot be read)."""
+    global _login
+    now = time.monotonic()
+    if _login is not None and now - _login[0] < LOGIN_TTL_S:
+        return _login[1]
+    st = auth_status(timeout=LOGIN_TIMEOUT_S)
+    got = None if st is None else {k: v for k, f in (("method", "authMethod"), ("source", "apiKeySource"),
+                                                      ("provider", "apiProvider"))
+                                   if isinstance(v := st.get(f), str) and v}
+    _login = (now, got or None)
+    return _login[1]
 
 
 # how to give Claude Code a login, for every "not logged in" message: the login, and where the other ways are

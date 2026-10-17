@@ -128,3 +128,74 @@ async def test_h16_the_shim_tells_of_a_server_gone_within_seconds_with_its_fix_a
 ])
 def test_a_failure_s_words_name_the_fix(line, words, fix):
     assert notices.reason(line) == (words, fix)
+
+
+# --------------------------------------------------------------------------- which login failed
+
+CREDIT_RECORD = {"type": "assistant", "isApiErrorMessage": True, "error": "billing_error", "apiErrorStatus": 400,
+                 "message": {"role": "assistant", "model": "<synthetic>",
+                             "content": [{"type": "text", "text": "Credit balance is too low"}]}}
+
+
+@pytest.fixture()
+def reported(fake_claude, monkeypatch):
+    """The login `claude auth status --json` reports, as Claude Code's own stand-in prints it (conftest.fake_claude):
+    set it with the fields Claude Code names; each test starts with no login read yet."""
+    import json
+
+    from app import config
+
+    monkeypatch.setattr(config, "_login", None, raising=False)
+
+    def report(**fields: str) -> None:
+        fake_claude.write_text(json.dumps({"loggedIn": True, "apiProvider": "firstParty", **fields}))
+        monkeypatch.setattr(config, "_login", None, raising=False)
+    return report
+
+
+def test_a_credit_balance_too_low_names_the_api_key_claude_code_reports_and_how_to_drop_it(sent, reported):
+    """The feedback's failure: a key with no credits, exported in the shell, made the orientation fail with "Credit
+    balance is too low", and nothing said which login was in use. The notice names the source Claude Code reports
+    (apiKeySource) and the fix: unset it, or /login."""
+    from app import session
+
+    reported(authMethod="api_key", apiKeySource="ANTHROPIC_API_KEY")
+    cls = session.api_error_class(CREDIT_RECORD)
+    assert cls == "billing"
+    n = notices.agent_failed(CORPUS, role="orientation", key="orientation", cls=cls,
+                             error=session.api_error_of(CREDIT_RECORD))
+    assert n["text"] == ("The orientation failed: Claude Code signs in with the API key in ANTHROPIC_API_KEY, and its "
+                         "credit balance is too low. In your terminal: quit, unset ANTHROPIC_API_KEY (in your shell's "
+                         "startup file too) and start claude again, or run /login.")
+    reported(authMethod="api_key_helper", apiKeySource="apiKeyHelper")
+    assert notices.reason("API Error: 401 Invalid API key")[0] == (
+        "Anthropic's API refused Claude Code's sign-in, the API key your apiKeyHelper setting prints. In your terminal: "
+        "fix or remove apiKeyHelper in your Claude Code settings, or run /login")
+    reported(authMethod="claude.ai")
+    assert notices.reason("API Error: 400 (billing_error)")[0] == (
+        "Claude Code signs in with your Claude login (claude.ai), and its credit balance is too low. In your terminal: "
+        "run /login")
+
+
+def test_without_a_reported_login_the_words_say_what_failed_and_the_fix(reported, monkeypatch):
+    """When Claude Code reports no login (no claude, or none configured), the words are the failure's own and the fix
+    is /login; a model call's billing failure reads as one by its words."""
+    reported(authMethod="none")
+    assert notices.reason("Credit balance is too low") == (
+        "the credit balance of Claude Code's sign-in is too low. In your terminal: run /login to sign in another way, or "
+        "add credits to that account", None)
+    assert notices.reason("API Error: 401 Invalid API key") == (
+        "Claude Code isn't signed in. In your terminal: run /login (or `claude auth login` in a shell)", None)
+
+
+def test_thimble_reads_where_the_key_comes_from_never_the_key():
+    """thimble names the login from what Claude Code reports: no module of the backend's reads an API key variable."""
+    import re
+    from pathlib import Path
+
+    from app import config
+
+    reads = re.compile(r"(environ\b[^\n]*|getenv\([^)\n]*)ANTHROPIC_(API_KEY|AUTH_TOKEN)")
+    hits = [str(p) for p in sorted((Path(config.REPO_ROOT) / "backend" / "app").rglob("*.py"))
+            if reads.search(p.read_text(encoding="utf-8"))]
+    assert hits == []

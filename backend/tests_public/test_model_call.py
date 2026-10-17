@@ -80,6 +80,7 @@ async def test_a_reply_with_no_text_runs_once_more_on_the_refusal_row_s_model(br
     ({"failed": "api-error", "status": 429, "kind": "rate_limit"}, "rate_limited", "rate_limited"),
     ({"failed": "api-error", "status": 529, "kind": "overloaded"}, "rate_limited", "overloaded"),
     ({"failed": "api-error", "status": 401, "kind": "authentication_failed"}, "error", "auth"),
+    ({"failed": "api-error", "status": 400, "kind": "billing_error"}, "error", "billing"),
     ({"failed": "api-error", "status": None, "kind": "unknown"}, "error", None),
     ({"error": "thimble: $.model.complete: model \"x\" is not in this organization's allowlist"}, "error", None),
 ])

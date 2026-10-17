@@ -93,8 +93,9 @@ REPLY_CHARS = 1_500  # of a thread's question quoted in the Now section
 REFUSED_RE, AUTH_RE, FORBIDDEN_RE, STATUS_RE = notices.REFUSED_RE, notices.AUTH_RE, notices.FORBIDDEN_RE, notices.STATUS_RE
 
 NOTICE_REFUSED = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
-# its fix runs in the terminal, in the words of main's own sign-in card (notices.API_WORDS), with Try again here
-NOTICE_AUTH = f"Couldn't check for a view proposal: {notices.API_WORDS['auth'][0]}. {notices.API_WORDS['auth'][1]}."
+# a failed sign-in or a credit balance too low: its fix runs in the terminal, in the words that name the login Claude Code
+# uses (notices.sign_in_words), with Try again here
+NOTICE_SIGN_IN = "Couldn't check for a view proposal: {why}."
 NOTICE_FORBIDDEN = ("Couldn't check for a view proposal: access was refused for this account or organization (403). In "
                     "your terminal: run /login to check the account, or check your organization's settings.")
 NOTICE_FAILED = "Couldn't check for a view proposal: {reason}."
@@ -477,9 +478,9 @@ def parse(text: str) -> tuple[dict[str, Any] | None, str | None]:
 
 def classify(res: CallResult, obj: dict[str, Any] | None) -> str:
     """ok (a valid answer, from whichever model), refused (Claude's safeguards blocked the request), auth (Claude Code
-    has no working sign-in: 401), forbidden (the account or its organization may not make the request: 403), timeout,
-    no_session (no Claude Code session runs thimble here), stopped (the server stopped it), unparsed (an answer that is
-    not the object) or error."""
+    has no working sign-in: 401), billing (its credit balance is too low), forbidden (the account or its organization
+    may not make the request: 403), timeout, no_session (no Claude Code session runs thimble here), stopped (the server
+    stopped it), unparsed (an answer that is not the object) or error."""
     if obj is not None:
         return "ok"
     if res.status in ("ok", "no_tool_call"):
@@ -493,7 +494,11 @@ def classify(res: CallResult, obj: dict[str, Any] | None) -> str:
     status = int(named.group(1)) if named else None
     if status == 403:
         return "forbidden"
-    if status == 401 or AUTH_RE.search(said):
+    if status == 401:
+        return "auth"
+    if notices.BILLING_RE.search(said):
+        return "billing"
+    if AUTH_RE.search(said):
         return "auth"
     if FORBIDDEN_RE.search(said):
         return "forbidden"
@@ -564,8 +569,8 @@ def _tell(c: str, status: str, *, reason: str = "") -> None:
 
     if status == "refused":
         tell(NOTICE_REFUSED, [TRY_AGAIN, TURN_OFF])
-    elif status == "auth":
-        tell(NOTICE_AUTH, TRY_AGAIN)
+    elif status in ("auth", "billing"):
+        tell(NOTICE_SIGN_IN.format(why=notices.sign_in_words(status)), TRY_AGAIN)
     elif status == "forbidden":
         tell(NOTICE_FORBIDDEN, TRY_AGAIN)
     elif status in ("timeout", "unparsed", "error", "no_session"):
