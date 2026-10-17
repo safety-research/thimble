@@ -14,7 +14,7 @@ import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
 type E = Engine
-type ChipProps = { props: { props: { chips: { label: string; state: string; mark: string; spin: boolean; tip: string }[] } } }
+type ChipProps = { props: { props: { chips: { label: string; state: string; mark: string; spin: boolean; tip: string; chip?: boolean }[] } } }
 
 const MESSAGE = (requestId: string, text: string, surface = 'terminal') =>
   ({ plugin: 'thimble', component: 'AssistantMessage', requestId, surface, viewport: { columns: 140, rows: 40 }, props: { text, isFirstOfReply: true } }) as never
@@ -96,6 +96,24 @@ test("a time's tip says one state: found where its line writes it, red where it 
   ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
   const tk = await chipsOf(ui, 'para-tk-t0-1')
   expect(tk.map(c => c.tip)).toEqual(['found in events.jsonl line 197, and a script got the same value', 'found in events.jsonl line 197; only its place is checked'])
+  await ui.unmount()
+})
+
+test("a view's link reads as a chip like any place's, never its raw ref in parentheses (bug hunt B14)", async ($, on) => {
+  const w = world(on)
+  const ref = 'view:page-histories/dse~WillkommenImWiki'
+  w.resolve[ref] = { ref, kind: 'view', excerpt: 'WillkommenImWiki: 2,327 revisions', meta: { name: 'Page Histories' } }
+  await start($, w)
+  const text = 'The welcome page has the longest history: 2,327 revisions by 342 author labels [↗](view:page-histories/dse~WillkommenImWiki).'
+  let ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  const chips = await chipsOf(ui, 'para-1')
+  expect(chips.length).toBe(1)
+  expect(chips[0]).toMatchObject({ label: '[ page-histories · dse~Wi…ImWiki ]', state: 'link', chip: true })
+  expect(chips[0]!.tip).toBe('view page-histories · dse~WillkommenImWiki · found')
+  expect(shown(await ui.drawn())).not.toContain('(view:')
   await ui.unmount()
 })
 

@@ -39,7 +39,7 @@ import { citationOf, placeOf, targetLabel } from './gestures'
 import type { Gesture, Target } from './gestures'
 import { FIRST as HOME_FIRST, HOME_HINTS, groupCards, homeLayout, homePick, homeReduce, labelBlocks, labelHue } from './home'
 import type { HomeAct, HomeCardGroup, HomeCite, HomeComment, HomeData, HomeLabel, HomeLayout, HomeOpen, HomeReport, HomeThread, HomeUi, HomeView } from './home'
-import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, windowAt } from './lib'
+import { cardTag, cardsInline, chipLabel, chipWords, cid, clip, cutLine, fmt, formatted, itemsRow, labelRef, middleCut, labelState, labelStateWords, noControls, outputLine, quoted, recordFields, reportRef, stoppedTurn, viewRef, windowAt } from './lib'
 import type { Citation } from './lib'
 import { linesEl, setListKeys, takeListKeys } from './lines'
 import type { LineHit } from './lines'
@@ -376,7 +376,16 @@ export async function openView(cx: Ctx, slug: string, name: string): Promise<voi
   await openPanel(cx, { view: 'view', title: name || slug, slug })
 }
 
-/** A citation's panel, its step named by the cited value (or its place, for a citation that shows none). */
+/** A view opened from a link to it (`view:<slug>` or `view:<slug>/<key>`), at the unit the key names, under the view's
+ *  name as the views list names it. */
+async function openViewAt(cx: Ctx, slug: string, ref: string): Promise<void> {
+  const got = await surfaceValue(cx, 'views')
+  const views = got?.ok && Array.isArray((got.value as { views?: unknown })?.views) ? ((got.value as { views: { slug?: unknown; name?: unknown }[] }).views) : []
+  const name = views.find(v => v?.slug === slug)?.name
+  rt.viewsSeen.add(slug)
+  await openPanel(cx, { view: 'view', title: typeof name === 'string' && name ? name : slug, slug, ...(ref !== `view:${slug}` ? { ref } : {}) })
+}
+
 /** A citation by its words, or, for a place cited without words, the place in words (`revisions.jsonl line 10879`, a
  *  card by its question): the citation panel's title and its step in the path. */
 async function citeTitle(cx: Ctx, c: Citation): Promise<string> {
@@ -394,6 +403,9 @@ export async function openCite(cx: Ctx, ref: string, display: string | null, mor
   // a document's link: the document, from the section that holds the passage
   const rr = reportRef(ref)
   if (rr) return openDocAt(cx, rr.slug, rr.unit)
+  // a view's link: the view, at the unit its key names
+  const vr = viewRef(ref)
+  if (vr) return openViewAt(cx, vr.slug, ref)
   // its step in the path: its words cut at a word; for a place cited with no words, the words of the chip the reply
   // draws (`agent-chat.jsonl line 2`)
   const c = { raw: '', ref, display }

@@ -26,9 +26,18 @@ export type TableRuns = { rows: Run[][][]; align: ('left' | 'right' | 'center')[
 const FENCE_RE = /```[\s\S]*?```|`[^`\n]*`/g
 const LINK_RE = /(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
 const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
-const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|report:[A-Za-z0-9_-]+(?:#p?[A-Za-z0-9_-]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
+const REF_SHAPE = /^(?:call:[A-Za-z0-9_-]+(?:#L\d+(?:-L?\d+)?)?|view:[a-z0-9][a-z0-9-]{0,39}(?:\/[^\s()]+)?|card:[A-Za-z0-9_-]+(?:@[A-Za-z0-9_]+)?(?:#.*)?|concept:[A-Za-z0-9_-]+(?:\/[^\s()]+)?|report:[A-Za-z0-9_-]+(?:#p?[A-Za-z0-9_-]+)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7})$/
 const LABEL_REF = /^concept:([A-Za-z0-9_-]+)(?:\/(.+))?$/
 const REPORT_REF = /^report:([A-Za-z0-9_-]+)(?:#(p?[A-Za-z0-9_-]+))?$/
+// a view's slug as the backend writes it (views.SLUG_RE), then any key the view defines
+const VIEW_REF = /^view:([a-z0-9][a-z0-9-]{0,39})(?:\/(\S+))?$/
+
+/** A link to a view, or to a unit only that view defines (`view:<slug>/<key>`, backend views.py): the view's slug and
+ *  the key ('' for the whole view); null for any other ref. */
+export function viewRef(ref: string): { slug: string; key: string } | null {
+  const m = VIEW_REF.exec(ref.trim())
+  return m ? { slug: m[1]!, key: m[2] ?? '' } : null
+}
 
 /** A link to a document, or to one of its paragraphs (`p<id>`), sentences or headings (`report:<slug>#<unit>`): the
  *  document's slug and the unit; null for any other ref. */
@@ -376,6 +385,14 @@ export function chipWords(c: Citation): string {
   }
   const rr = reportRef(c.ref)
   if (rr) return rr.slug === 'slides' || rr.slug === 'story' ? rr.slug : 'report'
+  // a view by its slug, a unit of it by the view's slug and the unit's key, as the browser's chip names them (bug hunt
+  // B14: `↗ (view:page-histories/dse~WillkommenImWiki)` showed in a reply)
+  const vr = viewRef(c.ref)
+  if (vr) {
+    if (!vr.key) return cut(`view ${vr.slug}`, CHIP_MAX)
+    const head = `${vr.slug} · `
+    return CHIP_MAX - width(head) >= 8 ? `${head}${middleCut(vr.key, CHIP_MAX - width(head))}` : cut(`${head}${vr.key}`, CHIP_MAX)
+  }
   const [base = '', frag = ''] = c.ref.split('#', 2)
   const out = outputLine(c.ref)
   if (out) return out.last !== out.first ? `card output lines ${out.first}-${out.last}` : `card output line ${out.first}`
