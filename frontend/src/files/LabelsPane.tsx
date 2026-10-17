@@ -20,7 +20,7 @@ import { useDemo } from '../lib/demo'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptRun, LabelResume } from '../lib/types'
-import { againWords, classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, outcomeText, progressText, stoppedText, unitWord, type LabelFilter, type LabelStatus } from './labels'
+import { againWords, classesOf, colourVar, isFilesLabel, failedText, isMultiClass, labelStatus, mainColour, noValueText, outcomeText, progressText, stoppedText, unitWord, type LabelFilter, type LabelStatus } from './labels'
 import { DeleteLabelConfirm, type DeleteLabelAsk } from './DeleteLabelConfirm'
 import { LabelMark } from './LabelMark'
 import { LabelPalette } from './LabelPalette'
@@ -298,6 +298,8 @@ function LabelStatusLine({ status: s, name, marked, resume, onRetry }: { status:
         </>
       )}
       {failed && <span className="files-label-failed">{failed}</span>}
+      {/* the units it gave no value, which its counts leave out (bug hunt I10) */}
+      {noValueText(s) && <span className="files-label-none">{noValueText(s)}</span>}
       {/* a run that was stopped, by the analyst or by quitting Claude Code, says how far it got, and runs again on its
           line (bug hunt H3: a run the quit stopped at 8,447 of 14,591 records read as finished) */}
       {s.stopped && (

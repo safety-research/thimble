@@ -510,3 +510,18 @@ test("a run's count in the panel follows its run file each second, and a run who
   expect(text).not.toContain('s to stop')
   await pane.unmount()
 })
+
+test("a run stopped after a trial says its counts are the label's records with a value, the trial's among them (bug hunt I10)", { timeoutMs: 30_000 }, async ($, on) => {
+  // the panel said `stopped after 370: claims done 9 · does not 391`, 400 records under `stopped at 370`, where the
+  // browser counted 370
+  const w = world(on)
+  let pane = await labelPanel($, w)
+  w.labelRun = { ok: true, label: LABEL.id, summary: { status: 'done', stopped: true, labeled: 370, failed: 0, counts: { 'proxy-link': 9, none: 391 } } }
+  pane = await press($, w, pane, 'lb-all')
+  expect(shown(await pane.drawn())).toContain("stopped after 370; the label's 400 with a value: proxy-link 9 · none 391")
+  // a run whose records are the label's says its counts plainly
+  w.labelRun = { ok: true, label: LABEL.id, summary: { status: 'done', labeled: 400, failed: 0, counts: { 'proxy-link': 9, none: 391 } } }
+  pane = await press($, w, pane, 'lb-all')
+  expect(shown(await pane.drawn())).toContain('ran on all 400: proxy-link 9 · none 391')
+  await pane.unmount()
+})

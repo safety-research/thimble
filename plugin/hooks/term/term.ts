@@ -1158,7 +1158,11 @@ export async function runLabel(cx: Ctx, id: string, name: string, limit: number,
     return
   }
   const s = got.value.summary ?? {}
-  const counts = Object.entries(s.counts ?? {}).map(([v, n]) => `${v} ${n.toLocaleString('en-US')}`).join(' · ')
+  // the label's counts, the records it holds with a value (those of earlier runs it kept among them): when they are not
+  // the records this run labeled, the words say of how many they are (bug hunt I10: `stopped after 370: … 9 · … 391`)
+  const valued = Object.values(s.counts ?? {}).reduce((a, b) => a + b, 0)
+  const list = Object.entries(s.counts ?? {}).map(([v, n]) => `${v} ${n.toLocaleString('en-US')}`).join(' · ')
+  const counts = !list ? '' : valued !== (s.labeled ?? 0) ? `; the label's ${valued.toLocaleString('en-US')} with a value: ${list}` : `: ${list}`
   const failed = s.failed ? ` · ${plural(s.failed, 'record')} failed` : ''
   await readSurface(cx, `label:${id}`, 'label', labelArgs(id))
   // the label cards that count it are read again
@@ -1172,7 +1176,7 @@ export async function runLabel(cx: Ctx, id: string, name: string, limit: number,
         : `ran on ${limit ? `a sample of ${(s.labeled ?? limit).toLocaleString('en-US')}` : `all ${(s.labeled ?? 0).toLocaleString('en-US')}`}`
   // a run with failures says the first error on a row of its own, `!` in red
   const err = s.failed && s.message && !s.stopped ? `\n! ${s.message}` : ''
-  await labelSaid(cx, id, `${how}${counts ? `: ${counts}` : ''}${failed}${err}`, null)
+  await labelSaid(cx, id, `${how}${counts}${failed}${err}`, null)
 }
 
 /** Stop a label's run after its current record, whichever process runs it (`thimble act label-stop`, as the browser's

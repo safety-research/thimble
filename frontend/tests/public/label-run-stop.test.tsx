@@ -6,7 +6,7 @@
 // stopped says so on its row, with the records it read rather than all it would have read.
 import { act, useState } from 'react'
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest'
-import { labelStatus, outcomeText, stoppedText } from '../../src/files/labels.ts'
+import { labelStatus, noValueText, outcomeText, stoppedText } from '../../src/files/labels.ts'
 import type { FilesLabels } from '../../src/files/useLabels.ts'
 import { useLabelRuns, useLabelSide } from '../../src/files/ViewSide.tsx'
 import type { Concept, ConceptRun } from '../../src/lib/types.ts'
@@ -209,5 +209,30 @@ describe('Run again after a stop (bug hunt I3)', () => {
     await act(async () => button(row, 'Run again on all 29,555')!.click())
     await settle()
     expect(calls.filter((c) => c.method === 'POST' && c.path.endsWith('/concepts/s1/apply')).map((c) => c.body)).toEqual([{}])
+  })
+})
+
+describe('one count for a label everywhere (bug hunt I10)', () => {
+  // the terminal, main's card and read_ref count the records a label gave a value, as its rows hold them; the Labels
+  // pane counted a stopped run's records read (9 of 370, the terminal 9 + 391 after a trial) and a code label's every
+  // record (1,521 of 71,298, the terminal 8,496)
+  test("a stopped run after a trial counts the label's records with a value, the trial's among them", () => {
+    const STOPPED = { ts: '2026-10-17T19:21:55Z', paths: ['*'], total: 1521, matched_total: 1521, labeled: 370, failed: 0, matches: 9, status: 'done', stopped: true }
+    const s = labelStatus({ ...label('t1', 'claims task done'), last_run: STOPPED, counts: { match: 9, 'no match': 391 } } as unknown as Concept)!
+    const done = s as Extract<typeof s, { state: 'done' }>
+    expect(outcomeText(done)).toBe('9 of 400 records')
+    expect(stoppedText(done.stoppedAt!, 'record')).toBe('stopped at 370 of 1,521 records')
+  })
+
+  test("a code label's records its code returned None for are no part of its total, and its row says so", async () => {
+    const DONE = { ts: '2026-10-17T19:19:53Z', paths: ['*/transcript.jsonl'], total: 71298, matched_total: 71298, labeled: 8496, failed: 0, skipped: 62802, matches: 1521, status: 'done' }
+    const code = { ...label('c1', 'assistant text message'), kind: 'code', last_run: DONE, counts: { match: 1521, 'no match': 6975 } } as unknown as Concept
+    const s = labelStatus(code)! as Extract<ReturnType<typeof labelStatus>, { state: 'done' }>
+    expect(outcomeText(s)).toBe('1,521 of 8,496 records')
+    expect(noValueText(s)).toBe('62,802 records got no value from its code')
+    const el = await mount(<Side start={labelsOf([code])} />)
+    expect(el.querySelector('[data-anchor="concept:c1"] .files-label-none')?.textContent).toBe('62,802 records got no value from its code')
+    // a prompt label's records with no words
+    expect(noValueText(labelStatus({ ...code, kind: 'prompt' } as Concept) as typeof s)).toBe('62,802 records had no words to read')
   })
 })
