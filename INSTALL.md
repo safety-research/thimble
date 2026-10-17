@@ -6,11 +6,12 @@
 > them yourself.
 
 thimble uses whichever auth path you have configured for `claude`, and starts no Claude Code session of its own: its
-agents and its single model calls (card checks, prompt labels, label drafts, whether an extension's view fits, viewer
-suggestions) run as subagents of your Claude Code session, under its permission mode and sign-in, and so do view
-proposals, as a fork of your session that reads its conversation and uses no tools. With no Claude Code session running
-thimble in the folder, these features say so and how to start one. thimble tells you when `claude` is missing or not
-logged in.
+agents (the orientation, its critic, writers, view builds and reviews, code tickets, the checks and the card check) run
+as subagents of your Claude Code session, under its permission mode and sign-in, and its single model calls (prompt
+labels, label drafts, whether an extension's view fits, viewer suggestions, view proposals) run through your session's
+own API client and sign-in, with no tools, so they ask nothing and leave no row in your terminal. A view proposal reads
+your session's conversation. With no Claude Code session running thimble in the folder, these features say so and how
+to start one. thimble tells you when `claude` is missing or not logged in.
 
 What thimble's agents may do, and on which models, is set in `~/.thimble/config.json`: [docs/config.md](docs/config.md).
 Card code runs in the notebook kernel with your network, whatever that file says. The kernel runs in Anthropic's sandbox
@@ -63,9 +64,9 @@ you opened, such as an agent's notes in thimble's workspaces folder, Claude Code
 In Manual mode Claude Code asks before the first call of each thimble tool, before each edit thimble's agents make in
 their work folders (which are outside the folder you opened), and before most commands. Every permission request shows
 in the terminal, and you answer it there: the browser shows a waiting request read-only, with a line that says to answer
-it in the terminal. A model call of thimble's (a card check, a prompt label, a label draft, a viewer suggestion) runs as
-a subagent with two tools of its own, and Claude Code asks before it reads its task and before it sends its answer; a
-prompt label asks about once per batch of 50 records. While your session reports Manual mode, thimble shows a red row
+it in the terminal. A card check runs as a subagent with two tools of its own, and Claude Code asks before it reads its
+task and before it sends its answer. A model call of thimble's (a prompt label, a label draft, a viewer suggestion, a
+view proposal) has no tools and asks nothing, in any mode. While your session reports Manual mode, thimble shows a red row
 above the prompt (and a red notice above the browser's chat) that says how to switch, or who turned auto mode off; it
 goes when you switch, and once you dismiss it, it stays off for that workspace.
 
@@ -451,8 +452,9 @@ session. Claude Code's agent tray (↓) lists them, and each has its thread in t
   above the reply box, with the view's name, what it shows and the task it serves, until you answer it: Accept builds
   the view, Reject drops the proposal, and Don't ask again turns view proposals off. Nothing builds before you accept.
   When you open a file that only Raw can show, the same card can propose a viewer for its type. Deciding whether to
-  propose takes a fork of your session, a subagent that reads its conversation, uses no tools and runs on its model
-  and sign-in. In the terminal the proposal is a row above the prompt with accept, reject and don't ask again. Settings'
+  propose takes one model call over your session's conversation, which uses no tools, runs on its model and sign-in
+  and reads most of the conversation from the prompt cache. In the terminal the proposal is a row above the prompt
+  with accept, reject and don't ask again. Settings'
   View proposals switch and `/config` → thimble → "View proposals" turn them on and off
   ([docs/config.md](docs/config.md)).
 - **Models and efforts.** Each agent runs on exactly the model and effort that Settings name for it, and a change

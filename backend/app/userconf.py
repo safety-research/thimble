@@ -29,9 +29,10 @@ mode, since Claude Code obeys an explicit ask rule there (live check: the checks
 mode). The keys earlier builds read for this,
 `installs`, each agent's own `fast` (no agent has a fast mode of its own: each runs as a subagent of main), and
 `permissionMode` and `web` other than "off" but the dev agent's (IGNORED_KEYS), are read and ignored, so an earlier
-config stays valid; `ignored` lists those a file holds, and a save from the Settings pane drops them. `labels`,
-`cardCheck` and `suggest` (the viewer suggestion) are model calls, each a `thimble:call` subagent of main, and
-`refusal` is the model and effort a refused call's agent runs on again, which `off` turns off.
+config stays valid; `ignored` lists those a file holds, and a save from the Settings pane drops them. `labels` and
+`suggest` (the viewer suggestion) are model calls through main's own API client (model_call.py), `cardCheck` is the
+card check's `thimble:call` subagent of main, which reads the card's picture, and `refusal` is the model and effort a
+refused call runs on again, which `off` turns off.
 
 Extensions' programs. An extension's program that runs an agent or one of its tasks (harness.py) is no subagent of main:
 it runs in a box of its own and keeps its power. So it takes its agent's own `env`, `sandbox`, `network` and `data`
@@ -96,6 +97,12 @@ ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 # (card_wait_s), at most half the permission hook's own timeout, so the hook is never ended first
 CARD_WAIT_MINUTES = 10
 CARD_WAIT_MAX = permission_hook.TIMEOUT // 120
+# `modelCalls`: how many model calls thimble runs at once through the analyst's Claude Code session, at most (model_call):
+# a prompt label's batches, a label draft, a view fit, a viewer suggestion, a program's ask, a view proposal's fork. The
+# server path before 0.9.0 ran 24; 12 stays under Claude Code's 20 background agents' worth of requests and leaves the
+# analyst's own session room, and a run that the API pushes back on (429, 529) halves its own share (concepts)
+MODEL_CALLS = 12
+MODEL_CALLS_MAX = 64
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
 MAIN_MODES = "main-modes.json"  # in thimble's home: the permission mode main last reported, per workspace (session.note_mode)
 SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
@@ -127,6 +134,7 @@ DEFAULTS: dict[str, Any] = {
     "sandbox": {"use": "when-available", "enforce": False},
     "browser": None,
     "cardWait": CARD_WAIT_MINUTES,
+    "modelCalls": MODEL_CALLS,
     "askKey": None,
     "extensions": {},
     "agents": {
@@ -327,6 +335,23 @@ def card_wait_s() -> float:
     return (got if got is not None else CARD_WAIT_MINUTES) * 60.0
 
 
+def _model_calls(value: Any) -> int | None:
+    """A `modelCalls` value, None when it is not a whole number from 1 to MODEL_CALLS_MAX."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MODEL_CALLS_MAX:
+        return None
+    return value
+
+
+def model_calls() -> int:
+    """How many model calls run at once, at most (model_call): `modelCalls` of the file in thimble's home, else
+    MODEL_CALLS, also when the file has an error."""
+    try:
+        got = _model_calls(_raw(global_file()).get("modelCalls"))
+    except ConfigError:
+        got = None
+    return got if got is not None else MODEL_CALLS
+
+
 def ask_key() -> str:
     """The key held with a click to ask in the browser: `askKey` of the file in thimble's home, else "meta", also when
     the file has an error."""
@@ -377,8 +402,8 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
                            f"{', '.join(known)}{more}")
         return True
 
-    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "askKey", "extensions", "agents", "views",
-                    "features"))
+    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "modelCalls", "askKey", "extensions", "agents",
+                    "views", "features"))
     if "features" in data:
         if scope != "global":
             out.append("features are set for the whole machine, in the config in thimble's home, not per workspace")
@@ -397,6 +422,12 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
         elif data["cardWait"] is not None and _card_wait(data["cardWait"]) is None:
             out.append(f"cardWait is {json.dumps(data['cardWait'])}; it takes a number of minutes above 0 and up to "
                        f"{CARD_WAIT_MAX}, or null")
+    if "modelCalls" in data:
+        if scope != "global":
+            out.append("modelCalls is set for the whole machine, in the config in thimble's home, not per workspace")
+        elif data["modelCalls"] is not None and _model_calls(data["modelCalls"]) is None:
+            out.append(f"modelCalls is {json.dumps(data['modelCalls'])}; it takes a whole number from 1 to "
+                       f"{MODEL_CALLS_MAX}, or null")
     if "askKey" in data:
         if scope != "global":
             out.append("askKey is set for the whole machine, in the config in thimble's home, not per workspace")

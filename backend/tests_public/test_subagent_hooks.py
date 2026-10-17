@@ -179,37 +179,9 @@ def test_the_hooks_json_runs_each_new_mode():
     assert any({"clear", "resume"} <= set(m.split("|")) and '.thimble-watch" --rekey;' in c for m, c in commands("SessionStart"))
 
 
-def test_the_fork_guard_refuses_each_call_of_a_listed_fork_and_starts_no_python_without_one(tmp_path):
-    """A model call's fork of main (agent_call.py) keeps main's tools, so the fork guard refuses each tool call of an
-    agent the module lists in <home>/up/<session>/forks; any other call goes on undecided. With no list, the hook's
-    first shell line exits, before Python starts (here: no interpreter on PATH, and none needed)."""
-    home = tmp_path / "home"
-
-    def guard(stdin: dict, *, python: bool = True) -> subprocess.CompletedProcess:
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "THIMBLE"))}
-        env.update(THIMBLE_HOME=str(home), CLAUDE_CODE_SESSION_ID=MAIN_SID)
-        if not python:
-            env["PATH"] = "/nonexistent"
-        return subprocess.run(["/bin/sh", str(WATCHER), "--fork-guard"], input=json.dumps(stdin),
-                              capture_output=True, text=True, env=env, timeout=30)
-
-    call = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": MAIN_SID, "agent_id": "afork1",
-            "tool_input": {"command": "ls"}}
-    none = guard(call, python=False)
-    assert none.returncode == 0 and none.stdout == "", none.stderr
-    (home / "up" / MAIN_SID).mkdir(parents=True)
-    (home / "up" / MAIN_SID / "forks").write_text("afork1\n")
-    out = json.loads(guard(call).stdout)["hookSpecificOutput"]
-    assert out["permissionDecision"] == "deny" and "no tools" in out["permissionDecisionReason"]
-    for other in ({**call, "agent_id": "anotherone"}, {k: v for k, v in call.items() if k != "agent_id"}):
-        done = guard(other)
-        assert done.returncode == 0 and done.stdout == "", "another agent's call, or main's, goes on undecided"
-    (home / "up" / MAIN_SID / "forks").write_text("")
-    assert guard(call, python=False).stdout == "", "the fork ended: the list is empty"
-
-
-def test_the_hooks_json_runs_the_fork_guard_on_every_tool():
+def test_no_hook_guards_forks_of_main_any_more():
+    """A view proposal is a completion over main's transcript ($.model.fork), not a forked agent, so no PreToolUse hook
+    runs on every tool call to guard one."""
     hooks = json.loads((WATCHER.parent.parent / "hooks" / "hooks.json").read_text())["hooks"]
-    assert {"matcher": "*", "hooks": [{"type": "command", "timeout": 5,
-                                       "command": '"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch" --fork-guard'}]} \
-        in hooks["PreToolUse"]
+    assert not any("--fork-guard" in h["command"] for e in hooks["PreToolUse"] for h in e["hooks"])
+    assert "fork-guard" not in WATCHER.read_text()

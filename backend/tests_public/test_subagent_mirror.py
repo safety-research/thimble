@@ -240,10 +240,9 @@ async def test_a_descendant_of_the_orientation_is_a_step_of_its_chat_with_number
     assert [c.get("agent") for c in calls.listing(CORPUS, chat)] == ["h1"], "numbered in the orientation's sequence"
 
 
-async def test_a_model_call_s_agent_and_fork_get_no_chat_of_their_own(bridge, project, monkeypatch):
-    """A model call's agent and a model call's fork of main (agent_call.py) have no chat: the mirror leaves their
-    transcripts alone, the fork's while its start waits for the module's answer too, and any other agent of main's still
-    gets its chat."""
+async def test_the_card_check_s_agent_gets_no_chat_of_its_own(bridge, project, monkeypatch):
+    """The card check's agent (agent_call.py) has no chat: the mirror leaves its transcript alone, while its start waits
+    for the module's answer too, and any other agent of main's still gets its chat."""
     from app import agent_call
 
     lv = _attach(project)
@@ -251,15 +250,15 @@ async def test_a_model_call_s_agent_and_fork_get_no_chat_of_their_own(bridge, pr
     spawned = {"agentId": "acall000000000001"}
     bridge.answers.append(spawned)
     ans = await subagents.start_job(CORPUS, agent_call.ROLE, "call:abc123", "Judge it.", {}, subagents.FOLLOW_ON,
-                                    description="thimble: a check", fields={"drop": "done", "fork": True})
-    assert ans.agent_id == "acall000000000001" and subagents.agent(CORPUS, ans.agent_id)["type"] == sf.FORK_TYPE
-    _agent_file(project, "acall000000000001", agentType="fork", isFork=True, description="thimble: a check",
+                                    description="thimble card check: Q?", fields={"drop": "done"})
+    assert ans.agent_id == "acall000000000001" and subagents.agent(CORPUS, ans.agent_id)["type"] == "thimble:call"
+    _agent_file(project, "acall000000000001", agentType="thimble:call", description="thimble card check: Q?",
                 toolUseId=sf.PLUGIN_CALL + "1")
-    # a fork whose start still waits for the module's answer: not adopted while it waits
+    # an agent whose start still waits for the module's answer: not adopted while it waits
     with sf.update(config.workspace_dir(CORPUS)) as state:
         sf.requests(state)["req_wait000001"] = {"kind": "start", "route": "follow-on", "role": "call",
                                                 "key": "call:def456", "state": "pending", "input": {}}
-    _agent_file(project, "acall000000000002", agentType="fork", isFork=True, description="thimble: another",
+    _agent_file(project, "acall000000000002", agentType="thimble:call", description="thimble card check: R?",
                 toolUseId=sf.PLUGIN_CALL + "2")
     _agent_file(project, "aplain00000000003", agentType="general-purpose", description="Look around",
                 toolUseId="toolu_01main")

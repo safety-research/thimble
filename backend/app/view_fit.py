@@ -3,7 +3,7 @@ task (tasks.py), which an extension's program may run instead (fit_input, fit_ta
 
 thimble sends the view's description, the files it claims folded into patterns (groups) and a few records of the files
 likeliest to hold records (samples) to the labels role's model at its effort (low unless thimble's config sets
-another), as one structured call that a subagent of the analyst's Claude Code session answers (agent_call.structured).
+another), as one model call through the analyst's Claude Code session (model_call.structured).
 With no session running thimble in the folder the call fails, and its reason is the fix. The answer is {fits,
 reason}: whether the view fits, and one sentence the analyst reads in Settings. A call that fails decides nothing: the
 view stays hidden here, and the reason says why."""
@@ -33,10 +33,6 @@ RECORD_EXTS = (".jsonl", ".ndjson", ".csv", ".tsv", ".json")  # files of records
 TEXT_EXTS = (".log", ".txt", ".md", ".html", ".xml", ".yaml", ".yml")
 
 TOOL_NAME = "decision"
-# the call's agent in Claude Code: its line in the task list, and the reason in main's terminal when the terminal UI
-# drops its hand-back
-TITLE = "thimble view fit: {name}"
-DONE = 'thimble decided whether the view "{name}" fits'
 
 SCHEMA = {
     "type": "object",
@@ -195,19 +191,18 @@ def prompt(c: str, name: str, description: str, files: list[tuple[Any, ...]]) ->
 
 
 async def ask(c: str, text: str, model: str | None = None, name: str = "") -> Any:
-    """The call, as a subagent of the analyst's Claude Code session (agent_call.structured) on `model`, else the labels
-    role's model, at the labels role's effort, and on the refusal row's after a refusal (config.call_settings); `name`
-    the view's, for the agent's task line. Never raises."""
-    from . import agent_call  # noqa: PLC0415
+    """The call, one model call through the analyst's Claude Code session (model_call.structured) on `model`, else the
+    labels role's model, at the labels role's effort, and on the refusal row's after a refusal (config.call_settings);
+    `name` the view's, for the logs. Never raises."""
+    from . import model_call  # noqa: PLC0415
     from .call_result import ToolSpec  # noqa: PLC0415
 
     role = config.call_settings(c, "labels")
     tool = ToolSpec(name=TOOL_NAME, description="Your decision on whether the view fits this corpus.",
                     input_schema=SCHEMA)
     name = name or "a view"
-    return await agent_call.structured(c, text, tool=tool, model=model or role["model"], effort=role["effort"],
-                                       refusal=role["refusal"], what="view fit", title=TITLE.format(name=name),
-                                       done=DONE.format(name=name))
+    return await model_call.structured(c, text, tool=tool, model=model or role["model"], effort=role["effort"],
+                                       refusal=role["refusal"], what=f"view fit: {name}")
 
 
 async def fit_task(c: str, inp: dict[str, Any], *, model: str | None = None) -> Any:

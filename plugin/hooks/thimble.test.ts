@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, forksFile, hmac, register } from './thimble'
+import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, hmac, register } from './thimble'
 
 type Json = Record<string, any>
 
@@ -125,8 +125,13 @@ const ROLES: Json = Object.fromEntries(ROLE_NAMES.map((name, i) => [name, {
   model: name === 'orient-helper' ? 'claude-sonnet-5-5' : OPUS, effort: name === 'orient-helper' ? 'medium' : ['high', 'xhigh', 'max'][i % 3],
 }]))
 const NOTE = 'The analyst started the writer {agent} (report) in thimble; leave it unless they ask.'
+const USAGE = { input_tokens: 40, output_tokens: 12, cache_read_input_tokens: 1800, cache_creation_input_tokens: 0 }
+// a model call as backend/app/model_call.py asks it: the instructions marked for the cache, the part, the caps
+const ASK = { model: 'claude-opus-5-5', effort: 'low', system: [{ text: 'Judge each post.', cache: true }], prompt: [{ text: 'Post 4 by tidal-wren.' }], maxTokens: 16000, timeoutMs: 600000 }
 
 const sign = (role: string, nonce: string, token = TOKEN) => hmacSha256(token, `${role}:${nonce}`)
+/** A model call's prompt as text: its blocks' texts, or the fork's string. */
+const text = (request: Json): string => (typeof request.prompt === 'string' ? request.prompt : (request.prompt ?? []).map((b: Json) => b.text).join(''))
 const until = async (ok: () => boolean, ms = 2000) => {
   const end = Date.now() + ms
   while (!ok()) {
@@ -241,6 +246,9 @@ function engine(opts: Options = {}) {
   const spawnAnswer = (args: Json): Json => ({ agentId: `agent-${log.length}`, model: now[args.subagentType]?.model })
   let toolAnswer = (input: Json): Json => ({ result: { success: true }, text: `Resuming agent ${input.to}` })
   let abortAnswer = async (_input: Json): Promise<void> => undefined
+  // what $.model.complete and $.model.fork resolve to (a completion is handed its options, the AbortSignal among them)
+  let completeAnswer = async (_request: Json, _options?: { signal?: AbortSignal }): Promise<Json> => ({ isAnswered: true, text: '{}', usage: USAGE })
+  let forkAnswer = async (_request: Json): Promise<Json> => ({ isAnswered: true, text: '{}', usage: USAGE })
   const messages: Json[] = [] // main's transcript as $.session.messages() returns it
   const checkReason = 'Claude requested permissions to write, but you haven\'t granted it yet.' // Claude Code's decision for a write
   /** where a path lands, every link followed; undefined when it leads nowhere (no file, and no folder of one) */
@@ -282,6 +290,10 @@ function engine(opts: Options = {}) {
     },
     tool: { call: vi.fn(async (input: Json) => toolAnswer(input)), check: vi.fn(async (_input: Json) => ({ decision: 'ask', reason: checkReason })) },
     turn: { abort: vi.fn(async (input: Json) => abortAnswer(input)) },
+    model: {
+      complete: vi.fn((request: Json, options?: { signal?: AbortSignal }) => completeAnswer(request, options)),
+      fork: vi.fn((request: Json) => forkAnswer(request)),
+    },
     session: {
       id: vi.fn(async () => sid),
       append: vi.fn(async (args: Json) => ({ uuid: 'u1', message: args.message })),
@@ -297,6 +309,10 @@ function engine(opts: Options = {}) {
     onTool: (f: (input: Json) => Json) => { toolAnswer = f },
     /** what $.turn.abort does: resolves, or rejects with Claude Code's reason */
     onAbort: (f: (input: Json) => Promise<void>) => { abortAnswer = f },
+    /** what $.model.complete resolves to, or rejects with */
+    onComplete: (f: (request: Json, options?: { signal?: AbortSignal }) => Promise<Json>) => { completeAnswer = f },
+    /** what $.model.fork resolves to */
+    onFork: (f: (request: Json) => Promise<Json>) => { forkAnswer = f },
     /** a model turn's start through the turn.start hook: main's (no agentId) or an agent's */
     turnStart: (agentId: string | undefined, turnId: string) => hooks['turn.start']($, { text: '', turnId, ...(agentId === undefined ? {} : { agentId }) }, async () => ({ turnId })),
     start: () => hooks['session.start']($, { cwd: CWD, surface: opts.interactive === false ? null : 'terminal', isInteractive: opts.interactive ?? true }, async () => ({ cwd: CWD })),
@@ -609,27 +625,52 @@ describe('model calls', () => {
     expect(e.server.ended[0]).toMatchObject({ agentId: call.agentId, answer: 'Done' }) // its end reaches the server
   })
 
-  it("spawns a model call's fork of main with Claude Code's fork type, lists it for the fork guard while it runs, and posts its report", async () => {
+  it('runs a completion through $.model.complete beside the queue, as the server asked it, and posts its text and usage', async () => {
     const e = await started()
-    const list = forksFile(`${HOME}/.thimble`, MAIN)
-    const fork = await e.server.answer(e.server.push('spawn', { role: 'call', fork: true, prompt: 'Decide.', description: 'thimble: view proposal', values: {}, note: '', drop: 'thimble checked for a view proposal' }))
-    expect(e.$.agent.spawn).toHaveBeenCalledWith({ subagentType: 'fork', prompt: 'Decide.', description: 'thimble: view proposal' })
-    expect(e.$.agent.register).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'call' })) // a fork needs no type
-    expect(callDone(String(fork.agentId))).toBe('thimble checked for a view proposal')
-    expect(e.notes()).toEqual([])
-    expect(e.files[list]).toBe(`${fork.agentId}\n`)
-    await e.complete(String(fork.agentId), '{"show": false, "why": "Nothing new.", "proposal": null}')
-    await until(() => e.server.ended.length === 1)
-    expect(e.server.ended[0]).toMatchObject({ agentId: fork.agentId, answer: '{"show": false, "why": "Nothing new.", "proposal": null}' })
-    expect(e.files[list]).toBe('') // it ended: the guard has nothing to refuse
+    let release = () => {}
+    e.onComplete(async request => {
+      if (text(request) === 'slow') await new Promise<void>(r => { release = r })
+      return { isAnswered: true, text: `{"labels": [], "for": "${text(request)}"}`, usage: USAGE }
+    })
+    const slow = e.server.push('complete', { ...ASK, prompt: [{ text: 'slow' }] })
+    const quick = e.server.push('complete', ASK)
+    const stop = e.server.push('stop', { agent: 'a1' })
+    expect(await e.server.answer(quick)).toEqual({ text: '{"labels": [], "for": "Post 4 by tidal-wren."}', usage: USAGE })
+    await e.server.answer(stop) // the queue does not wait for a model call
+    expect(e.server.results.some(r => r.id === slow)).toBe(false)
+    release()
+    expect((await e.server.answer(slow)).text).toBe('{"labels": [], "for": "slow"}')
+    const [request, options] = e.$.model.complete.mock.calls[1] ?? []
+    expect(request).toEqual(ASK)
+    expect(options?.signal).toBeInstanceOf(AbortSignal)
+    expect(e.$.agent.spawn).not.toHaveBeenCalled()
+    expect(e.notes()).toEqual([]) // no row in main
   })
 
-  it('empties a list of forks an earlier load left, and makes none where there is none', async () => {
-    const list = forksFile(`${HOME}/.thimble`, MAIN)
-    const e = await started({ files: { [list]: 'aGone\n' } })
-    expect(e.files[list]).toBe('')
-    const fresh = await started()
-    expect(list in fresh.files).toBe(false)
+  it('aborts a completion when the server cancels it, and says why a call gave no text', async () => {
+    const e = await started()
+    e.onComplete((_request, options) => new Promise(resolve => {
+      options?.signal?.addEventListener('abort', () => resolve({ isAnswered: false, reason: 'aborted', usage: USAGE }))
+    }))
+    const running = e.server.push('complete', ASK)
+    await until(() => e.$.model.complete.mock.calls.length === 1)
+    e.server.push('cancel', { request: running })
+    expect(await e.server.answer(running)).toEqual({ failed: 'aborted', usage: USAGE })
+    e.onComplete(async () => ({ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage: USAGE }))
+    expect(await e.server.answer(e.server.push('complete', ASK))).toEqual({ failed: 'api-error', status: 529, kind: 'overloaded', usage: USAGE })
+    e.onComplete(async () => { throw new Error('thimble: $.model.complete: model "nope" is not in this organization\'s allowlist') })
+    expect((await e.server.answer(e.server.push('complete', ASK))).error).toContain('allowlist')
+    expect(await e.server.answer(e.server.push('complete', { ...ASK, prompt: [] }))).toEqual({ error: 'a model call with no model or no prompt' })
+  })
+
+  it("runs a fork over main's transcript through $.model.fork, and says when there is nothing to fork", async () => {
+    const e = await started()
+    e.onFork(async request => ({ isAnswered: true, text: `{"show": false, "asked": ${JSON.stringify(text(request))}}`, usage: USAGE }))
+    expect(await e.server.answer(e.server.push('fork', { prompt: 'Would a view help?' }))).toEqual({ text: '{"show": false, "asked": "Would a view help?"}', usage: USAGE })
+    expect(e.$.model.fork).toHaveBeenCalledWith({ prompt: 'Would a view help?' })
+    e.onFork(async () => ({ isAnswered: false, reason: 'nothing-to-fork' }))
+    expect(await e.server.answer(e.server.push('fork', { prompt: 'Again?' }))).toEqual({ failed: 'nothing-to-fork' })
+    expect(e.$.agent.spawn).not.toHaveBeenCalled()
   })
 })
 
@@ -907,6 +948,24 @@ describe('local transport', () => {
     e.writeFile(`${T}/subagents.json`, JSON.parse(e.files[`${T}/subagents.json`])) // the file changes again
     await new Promise(r => setTimeout(r, 30))
     expect(e.$.agent.spawn).toHaveBeenCalledTimes(1)
+    expect(e.$.http.fetch).not.toHaveBeenCalled()
+  })
+
+  it('answers a model call in a file of its own beside its request file, beside the queue, and keeps module.json free of it', async () => {
+    const e = await begun()
+    const id = '0123456789abcdef'
+    e.writeFile(`${T}/completions/${id}.json`, ASK)
+    e.onComplete(async request => ({ isAnswered: true, text: `{"for": ${JSON.stringify(text(request))}}`, usage: USAGE }))
+    ask(e, 'mod_call1', 'complete', { call: id })
+    await until(() => `${T}/completions/${id}.answer.json` in e.files)
+    expect(JSON.parse(e.files[`${T}/completions/${id}.answer.json`])).toEqual({ text: '{"for": "Post 4 by tidal-wren."}', usage: USAGE })
+    expect(e.$.model.complete.mock.calls[0]?.[0]).toEqual(ASK)
+    await until(() => out(e).taken.includes('mod_call1'))
+    expect(out(e).answers).toEqual({}) // the answer is in its own file, not module.json
+    ask(e, 'mod_call2', 'complete', { call: '../../server' }) // a request that names no file of its own
+    await until(() => out(e).taken.includes('mod_call2'))
+    await new Promise(r => setTimeout(r, 30))
+    expect(e.$.model.complete).toHaveBeenCalledTimes(1)
     expect(e.$.http.fetch).not.toHaveBeenCalled()
   })
 

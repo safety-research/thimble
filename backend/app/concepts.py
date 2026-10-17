@@ -8,8 +8,8 @@
                                         (Claude's safeguards refused them, a call failed), which start_again labels
     workspaces/<c>/filters.json         the filter per scope: {files?, canvas?, report?}
 
-Kinds: `prompt` sends units to the labels role's model in batches, each batch a part of one model call that subagents of
-the analyst's Claude Code session answer (agent_call.run, the `labels` schema; _LabelCall); `regex` matches a pattern,
+Kinds: `prompt` sends units to the labels role's model in batches, each batch one model call through the analyst's
+Claude Code session (model_call.structured, the `labels` schema), up to model_call.parallel() at once; `regex` matches a pattern,
 in the scan pool (concept_scan.py) for file units; `code` runs a Python `label(unit)` in a dedicated kernel. Units:
 `record` (a line, `<path>#L<n>`), `agent` (a file), `run` (a run directory), `cell` (a card, `card:<id>`, `cell:<id>`
 read as the same unit) and `span` (a report sentence). An apply runs as a background task
@@ -45,7 +45,6 @@ the first (_label_notice). Main hears how many units got no value in `label_done
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import fnmatch
 import itertools
 import json
@@ -63,7 +62,7 @@ import time
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from functools import partial
@@ -139,20 +138,10 @@ DEFAULT_LABELS = ["yes", "no"]
 REPORT_SLUG = "report"
 CODE_KERNEL = "labels"  # the dedicated kernel the code kind runs in
 
-BATCH_ITEMS = 50          # items per classifier batch, a part of the run's model call (prompt kind)
-# or fewer when their texts add up to this many chars (about 10k tokens), as with long records; with the items' heads a
-# batch stays under the 40,000 characters of text one read_call gives its agent whole (agent_call.PAGE_CHARS)
+BATCH_ITEMS = 50          # items per classifier batch, one model call (prompt kind)
+# or fewer when their texts add up to this many chars (about 10k tokens), as with long records
 BATCH_CHARS = 36_000
-CONCURRENCY = 24          # classifier batches a prompt label asks at once, at most (halved on a 429 or 529)
-# the subagents of main that answer a prompt label's batches at once, at most (_LabelCall): Claude Code runs 20 of a
-# plugin's spawns at once (CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS), which leaves room for thimble's other agents
-LABEL_AGENTS = 4
-# a prompt label's agents in Claude Code: the line in its task list, and the reason in main's terminal when the terminal
-# UI drops an agent's hand-back
-LABEL_TITLE = "thimble label: {name}"
-LABEL_DONE = 'thimble labeled {noun}s for the label "{name}"'
-DRAFT_TITLE = "thimble label draft"
-DRAFT_DONE = "thimble drafted a label"
+# a prompt label asks up to model_call.parallel() batches at once (thimble's config `modelCalls`), halved on a 429 or 529
 RETRY_DELAYS = (1.0, 2.0, 4.0, 8.0)  # seconds before each retry of a rate-limited batch
 RETRY_JITTER = 0.25
 BACKOFF_POLL = 0.2        # seconds between cancel checks while a retry waits
@@ -166,8 +155,7 @@ WHOLE_UNITS = ("agent", "run")
 CHARS_PER_TOKEN = 3
 READ_RESERVE_TOKENS = 100_000  # of the window, for the label's instructions and examples, Claude Code's own and the answer
 # a prompt label over whole files or runs is refused before anything runs when a unit holds more than WHOLE_FAR times
-# the text its model reads (whole_too_long): a value from so small a part of a unit is not the unit's value, and one
-# agent of the call would read the part in many pages (agent_call.PAGE_CHARS) for a long time
+# the text its model reads (whole_too_long): a value from so small a part of a unit is not the unit's value
 WHOLE_FAR = 2
 SIZE_SCAN = 8  # a unit's text is counted only when its files' bytes are more than 1/SIZE_SCAN of that limit
 CUT_REFS_KEPT = 500       # the units a run read in part that its `cut` names, which the Labels pane lists
@@ -178,7 +166,7 @@ CHUNK = 500               # records read per corpus.load_records call
 RATIONALE_MAX = 500       # chars of a classifier's rationale kept on a row
 APPLICATIONS_KEPT = 50    # run summaries kept on the concept
 APPLY_WAIT_S = 60.0       # apply_scoped and `wait: true` wait this long for the summary, then answer with the run so far
-APPLY_ENOUGH = 2 * CONCURRENCY * BATCH_ITEMS  # labeled units before apply_scoped may answer a prompt label with the run so far
+APPLY_ENOUGH = 2_400       # labeled units before apply_scoped may answer a prompt label with the run so far
 PROGRESS_EVERY_S = 0.25   # a run's progress record is streamed at most this often
 SCAN_INFLIGHT_PER_WORKER = 2
 SCAN_STOPPED = "a scan worker stopped; the rows so far are kept, apply again to finish"
@@ -2300,195 +2288,32 @@ def _label_models(c: str, model_name: str, long: bool) -> tuple[str, dict | None
     return model_name, refusal
 
 
-def _unit_noun(unit: str) -> str:
-    return {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}.get(str(unit), "record")
-
-
-def label_spec(c: str, concept: dict, comment: bool = True, cap: int = UNIT_TEXT_MAX) -> Any:
-    """The model call a prompt label's run makes (agent_call.Spec): labels.md's head as the instructions (the label's
-    definition, values and examples, as the active extensions change it), the `labels` schema, the label's own model,
-    else the labels role's, at the role's effort, LABEL_AGENTS agents at once. A run over whole files or runs that reads
-    more of each than a 200k-token window holds (`cap`, whole_read_chars) runs on the model's 1M-token window."""
-    from . import agent_call, prompts, userconf  # noqa: PLC0415
-
-    inp = label_input(concept, [], comment)
-    with prompts.custom(userconf.prompt_files(c, "labels")):
-        system, _ = build_classify_prompt(inp)
-    long = concept["unit"] in WHOLE_UNITS and _long_read(cap)
-    model_name, refusal = _label_models(c, label_model(c, concept), long)
-    name = str(concept.get("name") or concept.get("id") or "")
-    return agent_call.Spec(what="labels", instructions=system, tool=labels_tool(inp["label"]), model=model_name,
-                           effort=labels_model(c)["effort"], refusal=refusal, agents=LABEL_AGENTS,
-                           title=LABEL_TITLE.format(name=name),
-                           done=LABEL_DONE.format(noun=_unit_noun(concept["unit"]), name=name))
-
-
 async def labels_task(c: str, inp: dict, *, model: str | None = None, **_ignored: Any) -> Any:
-    """thimble's own labels task (tasks.py): one classifier batch as a model call of one part (agent_call.structured,
-    a subagent of the analyst's Claude Code session; never raises, read the CallResult's status), on `model` when given,
-    else the label's own model, else the labels role's. A batch longer than a 200k-token window holds, a whole file read
-    as far as the model's context holds (whole_read_chars), runs on the model's 1M-token window, and so does its
-    refusal rerun. A prompt label's run asks its batches as parts of one call instead (_LabelCall); an extension's
-    program that runs the labels task gets this as `thimble.default(input)`."""
-    from . import agent_call, prompts, userconf  # noqa: PLC0415
+    """thimble's own labels task (tasks.py): one classifier batch as one model call through the analyst's Claude Code
+    session (model_call.structured; never raises, read the CallResult's status), on `model` when given, else the
+    label's own model, else the labels role's. labels.md's head is the call's instructions, the same for every batch of
+    a run, so the API reads it from the prompt cache after the first. A batch longer than a 200k-token window holds, a
+    whole file read as far as the model's context holds (whole_read_chars), runs on the model's 1M-token window, and so
+    does its refusal rerun. An extension's program that runs the labels task gets this as `thimble.default(input)`."""
+    from . import model_call, prompts, userconf  # noqa: PLC0415
 
     with prompts.custom(userconf.prompt_files(c, "labels")):
         system, user = build_classify_prompt(inp)
     label = inp["label"]
     model_name, refusal = _label_models(c, model or str(label.get("model") or "") or labels_model(c)["model"],
                                         _long_read(len(user)))
-    name = str(label.get("name") or "")
-    return await agent_call.structured(
-        c, user, tool=labels_tool(label), model=model_name, effort=labels_model(c)["effort"], refusal=refusal,
-        system=system, what="labels", title=LABEL_TITLE.format(name=name),
-        done=LABEL_DONE.format(noun=_unit_noun(str(label.get("unit") or "")), name=name))
-
-
-class _LabelCall:
-    """A prompt label's run as one model call of many parts (agent_call.run), whose agents are subagents of the
-    analyst's Claude Code session: each classifier batch the run asks (classify_structured) is a part, added as the run
-    asks it (a source that yields agent_call.WAIT until the run closes it), and its answer comes back as the CallResult
-    the batch waits for. A run of one batch gives it in its agent's first message (agent_call.structured; `single`).
-    The call starts on the first batch. A call that could not start its agents (no Claude Code session runs thimble
-    here, main's plan mode, a hook) answers every batch after it as it answered the first (`fatal`); a call that ended
-    with nothing left to answer, such as one idle past agent_call.IDLE_S, starts again on the next batch. stop() ends
-    it at once (the analyst's cancel): its agents are stopped, and the batches not answered get `stopped`."""
-
-    def __init__(self, c: str, spec: Any) -> None:
-        self.c, self.spec = c, spec
-        self.queue: deque[tuple[Any, asyncio.Future]] = deque()  # parts not yet given to the call
-        self.closed = False
-        self.single = False
-        self.fatal: Any = None
-        self.task: asyncio.Task | None = None
-        self.singles: set[asyncio.Task] = set()  # the calls of one batch that run (`single`)
-
-    def _result(self, o: Any) -> Any:
-        from .call_result import CallResult  # noqa: PLC0415
-
-        used = o.model or self.spec.model
-        ok = o.status == "ok" and isinstance(o.output, dict)
-        return CallResult(status="ok" if ok else (o.status if o.status != "ok" else "error"),  # type: ignore[arg-type]
-                          output=o.output if ok else None, model_requested=used, model_used=used if ok else None,
-                          session_id=o.agent or None, attempts=1, detail=o.detail, refused_by=o.refused_by)
-
-    async def _source(self, waiting: dict[int, asyncio.Future]) -> Any:
-        from . import agent_call  # noqa: PLC0415
-
-        n = 0
-        while True:
-            if self.queue:
-                part, fut = self.queue.popleft()
-                if fut.done():  # its batch was cancelled before the call took it
-                    continue
-                n += 1
-                waiting[n] = fut
-                yield part
-            elif self.closed:
-                return
-            else:
-                yield agent_call.WAIT
-
-    def _start(self) -> None:
-        from . import agent_call  # noqa: PLC0415
-
-        waiting: dict[int, asyncio.Future] = {}
-
-        def heard(o: Any) -> None:
-            fut = waiting.pop(o.part, None)
-            if fut is not None and not fut.done():
-                fut.set_result(self._result(o))
-
-        task = asyncio.get_running_loop().create_task(
-            agent_call.run(self.c, self.spec, self._source(waiting), on_answer=heard), name=f"labels-{self.c}")
-        task.add_done_callback(lambda t: self._ended(t, waiting))
-        self.task = task
-
-    def _ended(self, task: asyncio.Task, waiting: dict[int, asyncio.Future]) -> None:
-        from . import agent_call  # noqa: PLC0415
-        from .call_result import CallResult  # noqa: PLC0415
-
-        if self.task is task:
-            self.task = None
-        if task.cancelled():
-            left = CallResult(status="stopped", detail="the run was stopped")
-        else:
-            failed = [o for o in task.result() if o.status != "ok"]
-            left = self._result(failed[-1]) if failed else CallResult(
-                status="error", detail="the labels call ended before it answered")
-            if failed and not self.closed and left.status in ("no_session", "error"):
-                self.fatal = left  # its agents could not start, nor would the next call's
-        for fut in [*waiting.values(), *(f for _p, f in self.queue if self.fatal or self.closed)]:
-            if not fut.done():
-                fut.set_result(left)
-        waiting.clear()
-        if self.fatal or self.closed:
-            self.queue.clear()
-        elif self.queue:  # it ended with batches still to ask: a fresh call takes them
-            self._start()
-        log.debug("%s: a labels call ended (%s)", self.c, agent_call.ROLE)
-
-    async def ask(self, text: str) -> Any:
-        """The CallResult for one batch, its items' text as build_classify_prompt gives it."""
-        from . import agent_call  # noqa: PLC0415
-        from .call_result import CallResult  # noqa: PLC0415
-
-        if self.fatal is not None:
-            return self.fatal
-        if self.closed:
-            return CallResult(status="stopped", detail="the run was stopped")
-        sp = self.spec
-        if self.single:
-            one = asyncio.ensure_future(agent_call.structured(
-                self.c, text, tool=sp.tool, model=sp.model, effort=sp.effort, system=sp.instructions,
-                refusal=sp.refusal, what=sp.what, title=sp.title, done=sp.done))
-            self.singles.add(one)
-            try:
-                return await one
-            except asyncio.CancelledError:
-                if one.cancelled() and self.closed:  # stop() ended it, not a cancel of this batch
-                    return CallResult(status="stopped", detail="the run was stopped")
-                raise
-            finally:
-                self.singles.discard(one)
-        fut: asyncio.Future = asyncio.get_running_loop().create_future()
-        self.queue.append((agent_call.Part(text), fut))
-        if self.task is None:
-            self._start()
-        return await fut
-
-    def stop(self) -> None:
-        self.closed = True
-        if self.task is not None:
-            self.task.cancel()
-        for one in list(self.singles):
-            one.cancel()
-
-    async def close(self) -> None:
-        """No more batches: the call ends once the batches it holds are answered."""
-        self.closed = True
-        task = self.task
-        if task is not None:
-            with suppress(asyncio.CancelledError):
-                await task
-
-
-# the run of a prompt label that classify_structured asks its batches through (_apply_prompt sets it for its run)
-_label_run: contextvars.ContextVar[_LabelCall | None] = contextvars.ContextVar("label_run", default=None)
+    return await model_call.structured(c, user, tool=labels_tool(label), model=model_name,
+                                       effort=labels_model(c)["effort"], refusal=refusal, system=system, what="labels")
 
 
 async def classify_structured(c: str, concept: dict, items: list[tuple[str, str]], comment: bool = True,
                               on_retry: Callable[[int, float, str, BaseException | None], Any] | None = None) -> Any:
-    """One classifier batch; never raises, read the CallResult's status. In a prompt label's run that thimble's own
-    labels task runs, a part of the run's call (_LabelCall); else the labels task (tasks.call: an extension's program,
-    else labels_task, on the concept's `model` when it names one). `on_retry` hears each retry a program's call waits
-    for."""
+    """One classifier batch; never raises, read the CallResult's status: the labels task (tasks.call: an extension's
+    program, else labels_task, one model call, on the concept's `model` when it names one). `on_retry` hears each retry
+    a program's call waits for."""
     from . import tasks  # noqa: PLC0415
 
     inp = label_input(concept, items, comment)
-    run = _label_run.get()
-    if run is not None:
-        return await run.ask(build_classify_prompt(inp)[1])
     if concept.get("model"):
         inp["label"]["model"] = str(concept["model"])
     return await tasks.call(c, "labels", inp, schema=labels_tool(inp["label"]).input_schema, on_retry=on_retry)
@@ -2765,24 +2590,22 @@ _BATCH_STOPPED = object()  # a batch the analyst's cancel stopped before it was 
 async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path, cancel: threading.Event,
                         files: list[str] | None = None, comment: bool = True,
                         cap: int = UNIT_TEXT_MAX) -> tuple[int, int, str | None]:
-    """The classifier batches of a prompt label, BATCH_ITEMS units per batch and up to CONCURRENCY batches asked at
-    once. thimble's own labels task asks them as parts of one model call (_LabelCall, agent_call.run), which
-    LABEL_AGENTS subagents of the analyst's Claude Code session answer; with no session the run ends with the fix. An
-    extension's program that runs the labels task gets each batch as a call of its own (tasks.call), and a 429 or 529
-    there halves the calls let run, each round of answered calls letting one more run again. Rows are committed in the
-    units' order. `cancel` stops new batches, and stops the agents of thimble's own call at once; a rate-limited batch
-    is asked again with backoff; the items a batch's answer left out are asked again, in halves while the answer is not
-    usable; batches that ran on the fallback model are counted in the run's message. A whole file or run is read to
-    `cap` characters (whole_read_chars), and the units read in part are the run record's `cut` (read_cut)."""
-    from . import tasks  # noqa: PLC0415
+    """The classifier batches of a prompt label, BATCH_ITEMS units per batch and up to model_call.parallel() batches
+    (thimble's config `modelCalls`) asked at once, each a call of its own (classify_structured): one model call through
+    the analyst's Claude Code session for thimble's own labels task, with no session the run ends with the fix; a run
+    of an extension's program for one that replaces it. A 429 or 529 halves the calls let run, each round of answered
+    calls letting one more run again. Rows are committed in the units' order. `cancel` stops new batches, and aborts
+    thimble's own calls that run at once (the batches not answered are neither labeled nor failed); a rate-limited
+    batch is asked again with backoff; the items a batch's answer left out are asked again, in halves while the answer
+    is not usable; batches that ran on the fallback model are counted in the run's message. A whole file or run is read
+    to `cap` characters (whole_read_chars), and the units read in part are the run record's `cut` (read_cut)."""
+    from . import model_call, tasks  # noqa: PLC0415
 
-    run_call: _LabelCall | None = None
-    if await asyncio.to_thread(tasks.program, c, "labels") is None:
-        run_call = _LabelCall(c, await asyncio.to_thread(label_spec, c, concept, comment, cap))
-    else:
+    own = await asyncio.to_thread(tasks.program, c, "labels") is None
+    if not own:
         await asyncio.to_thread(_require_model_access)
     unit = concept["unit"]
-    per_call, in_flight = BATCH_ITEMS, CONCURRENCY
+    per_call, in_flight = BATCH_ITEMS, model_call.parallel()
     allowed = float(in_flight)  # the calls let run now
     slowdowns = 0  # a call started before the last slowdown does not slow the run again
     labeled = failed = skipped = matches = cut = short = 0
@@ -2842,9 +2665,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 call = await classify_structured(
                     c, concept, items, comment,
                     on_retry=lambda _n, _wait, cls, _e, since=since: slow(since) if cls in ("rate_limited", "overloaded") else None)
-            if call.status == "no_session" or (run_call is not None and run_call.fatal is call):
-                # no Claude Code session runs thimble here, or its agents could not start (plan mode, a hook): no batch
-                # can run
+            if call.status == "no_session":  # no Claude Code session runs thimble here: no batch can run
                 raise HTTPException(502, f"prompt labels cannot run: {call.detail}")
             if call.status == "stopped":
                 return {}, None, "stopped"
@@ -2957,19 +2778,17 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                   message=message())
 
     async def watch() -> None:
-        """The analyst's cancel stops thimble's own call at once (_LabelCall.stop)."""
+        """The analyst's cancel aborts thimble's own calls that run (each in the module, by its AbortSignal)."""
         while not cancel.is_set():
             await asyncio.sleep(BACKOFF_POLL)
-        if run_call is not None:
-            run_call.stop()
+        for task, _b in list(pending):
+            task.cancel()
 
     writer = _LabelsWriter(out).start()
     pending: deque[tuple[asyncio.Task, list[_Item]]] = deque()  # started calls, in the units' order
     ready: deque[list[_Item]] = deque()  # batches read and not started
     exhausted = stopped = False
-    first = True
-    token = _label_run.set(run_call)
-    watcher = asyncio.get_running_loop().create_task(watch()) if run_call is not None else None
+    watcher = asyncio.get_running_loop().create_task(watch()) if own else None
     try:
         while True:
             running = sum(1 for task, _b in pending if not task.done())
@@ -2977,9 +2796,6 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 if not ready and not exhausted:
                     got = await asyncio.to_thread(take, in_flight)
                     exhausted = not got
-                    if first and run_call is not None:  # a run of one batch gives it in its agent's first message
-                        run_call.single = len(got) == 1 and in_flight > 1
-                    first = False
                     ready.extend(got)
                 if not ready:
                     break
@@ -2993,7 +2809,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
                 await asyncio.wait([task for task, _b in pending if not task.done()], return_when=asyncio.FIRST_COMPLETED)
                 continue
             pending.popleft()
-            answers, msg = head.result()
+            answers, msg = (None, _BATCH_STOPPED) if head.cancelled() else head.result()
             if msg is _BATCH_STOPPED:  # the analyst's cancel stopped the call: the batches after it are not answered
                 stopped = True
                 break
@@ -3019,16 +2835,11 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
             _progress(c, concept["id"], message=message(), **({"cut": read} if read else {}))
         _progress(c, concept["id"], skipped=skipped, failures=[list(f) for f in failures.values()] or None)
         _unlabeled_now[key] = unlabeled
-        if run_call is not None:
-            await run_call.close()
     finally:
         for task, _b in pending:
             task.cancel()
         if watcher is not None:
             watcher.cancel()
-        if run_call is not None:
-            run_call.stop()
-        _label_run.reset(token)
         await asyncio.to_thread(writer.close)
     _fallback_notice(c, concept, fell_back)
     return labeled, failed, message()
@@ -5882,9 +5693,10 @@ def draft_of(output: dict | None, paths: list[str]) -> dict:
 async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
     """thimble's own label-draft task (tasks.py): from the analyst's `description` and the `records` of the files the
     label would apply to (sample_records), one structured call of the labels role, on `model` when given, whose output
-    is a label definition (draft_tool): a subagent of the analyst's Claude Code session (agent_call.structured). Never
-    raises; read the CallResult's status (`no_session`, its detail the fix, when no session runs thimble here)."""
-    from . import agent_call, prompts, tasks  # noqa: PLC0415
+    is a label definition (draft_tool): one model call through the analyst's Claude Code session
+    (model_call.structured). Never raises; read the CallResult's status (`no_session`, its detail the fix, when no
+    session runs thimble here)."""
+    from . import model_call, prompts, tasks  # noqa: PLC0415
 
     records = inp.get("records") if isinstance(inp.get("records"), dict) else {}
     slots = {k: str(records.get(k) or "") for k in ("paths", "path", "cut", "lines")}
@@ -5892,9 +5704,8 @@ async def draft_task(c: str, inp: dict, *, model: str | None = None) -> Any:
         prompt = labels_part("draft", description=str(inp.get("description") or ""),
                              records=labels_part("records", **slots) if slots["lines"] else "")
     role = labels_model(c)
-    return await agent_call.structured(c, prompt, tool=draft_tool(), model=model or role["model"],
-                                       effort=role["effort"], refusal=role["refusal"], what="label draft",
-                                       title=DRAFT_TITLE, done=DRAFT_DONE)
+    return await model_call.structured(c, prompt, tool=draft_tool(), model=model or role["model"],
+                                       effort=role["effort"], refusal=role["refusal"], what="label draft")
 
 
 def _call_failed(call: Any) -> HTTPException:

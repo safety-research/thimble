@@ -1,6 +1,6 @@
 """Prompt capture: THIMBLE_PROMPT_CAPTURE=<dir> writes each model call the server sends as text of its own (the check
-for a view proposal, a fork of main), as it is sent, to one file, so its prompt can be reviewed with its templates
-filled. The calls that run as `thimble:call` subagents of main are in main's transcript folder instead.
+for a view proposal, a fork of main's conversation), as it is sent, to one file, so its prompt can be reviewed with its
+templates filled. The card check's `thimble:call` subagent of main is in main's transcript folder instead.
 
 Off by default. Set, each call becomes `<dir>/<utc stamp>-<seq>-<caller>.md` with a header (caller, model, effort and
 path), then its sections (## Prompt, ## Answer, ## Status). Callers name themselves with `scope(name)` (a contextvar).

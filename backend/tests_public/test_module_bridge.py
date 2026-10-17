@@ -174,15 +174,73 @@ async def test_the_long_poll_hands_requests_to_main_s_session_alone(client, plug
     assert (await child.next(wait=0)).status_code == 409
     await mod.result(req["id"], {"agentId": "a7", "model": "claude-opus-5-5[1m]", "junk": 1})
     assert await ask == {"agentId": "a7", "model": "claude-opus-5-5[1m]"}
-    # a model call's fork of main (agent_call.py): its drop line and the fork flag, and no note in main
-    fork = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="call", prompt="Decide.", fork=True,
-                                                     description="thimble: view proposal", values={}, request="r-2",
-                                                     drop="thimble checked for a view proposal"))
+    # the card check's agent (agent_call.py): its drop line, and no note in main; no fork flag reaches the module
+    check = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="call", prompt="Check.", fork=True,
+                                                      description="thimble card check: Q?", values={}, request="r-2",
+                                                      drop='thimble checked the card "Q?"'))
     req = (await mod.next()).json()["request"]
-    assert req["args"] == {"role": "call", "prompt": "Decide.", "description": "thimble: view proposal", "values": {},
-                           "request": "r-2", "note": "", "drop": "thimble checked for a view proposal", "fork": True}
+    assert req["args"] == {"role": "call", "prompt": "Check.", "description": "thimble card check: Q?", "values": {},
+                           "request": "r-2", "note": "", "drop": 'thimble checked the card "Q?"'}
     await mod.result(req["id"], {"agentId": "a8", "model": "claude-opus-5-5"})
-    assert (await fork)["agentId"] == "a8"
+    assert (await check)["agentId"] == "a8"
+
+
+# ----------------------------------------------------------------------------------------------- model calls
+
+
+ASK = {"model": "claude-opus-5-5", "effort": "low", "system": [{"text": "Judge it.", "cache": True}],
+       "prompt": [{"text": "Post 3 by marble-heron."}], "maxTokens": 16000, "timeoutMs": 30000}
+
+
+async def test_model_calls_run_together_and_answer_their_own_callers_and_a_cancel_reaches_the_module(
+        client, plugin_headers):
+    """The long poll hands model calls out as they come, each answered on its own, many at once; a spawn waits for none
+    of them; a caller cancelled sends the module `cancel` for its request, and its late answer goes nowhere."""
+    _launch()
+    mod = Module(client, plugin_headers)
+    poll = await _live(mod)
+    first = asyncio.create_task(module_bridge.model(CORPUS, "complete", ASK, timeout_s=30))
+    second = asyncio.create_task(module_bridge.model(CORPUS, "fork", {"prompt": "Propose?"}, timeout_s=30))
+    a = (await poll).json()["request"]
+    b = (await mod.next()).json()["request"]
+    assert (a["op"], a["args"]) == ("complete", ASK) and (b["op"], b["args"]) == ("fork", {"prompt": "Propose?"})
+    spawn = asyncio.create_task(module_bridge.request(CORPUS, "stop", agent="a5"))
+    s = (await mod.next()).json()["request"]
+    await mod.result(s["id"], {"agentId": "a5"})
+    assert (await spawn)["agentId"] == "a5", "a request answers while two model calls run"
+    await mod.result(b["id"], {"text": '{"show": false}', "usage": {"cache_read_input_tokens": 9}, "junk": 1})
+    assert await second == {"text": '{"show": false}', "usage": {"cache_read_input_tokens": 9}}
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    cancel = (await mod.next()).json()["request"]
+    assert cancel["op"] == "cancel" and cancel["args"] == {"request": a["id"]}
+    late = await mod.result(a["id"], {"text": "too late"})
+    assert late.json()["ok"] is False
+    assert module_bridge._answer("complete", {"failed": "api-error", "status": 529, "kind": "overloaded",
+                                              "usage": {}}) == {"failed": "api-error", "status": 529,
+                                                                "kind": "overloaded", "usage": {}}
+    assert module_bridge._answer("fork", {"agentId": "x"}) == {"error": "the module gave no answer to a model call"}
+    with pytest.raises(ValueError):
+        await module_bridge.model(CORPUS, "spawn", {}, timeout_s=1)
+
+
+async def test_a_model_call_no_module_takes_expires_and_one_whose_module_stops_ends(client, plugin_headers,
+                                                                                     monkeypatch):
+    _launch()
+    monkeypatch.setattr(module_bridge, "REQUEST_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(module_bridge, "MODEL_LIVE_S", 0.05)
+    mod = Module(client, plugin_headers)
+    assert (await mod.hello()).status_code == 200
+    assert (await mod.next(wait=0)).status_code == 204  # live for LIVE_GAP_S, and polls no more
+    got = await module_bridge.model(CORPUS, "complete", ASK, timeout_s=30)
+    assert got == {"no-module": module_bridge.NOT_ANSWERING, "expired": True}
+    poll = asyncio.create_task(mod.next())
+    call = asyncio.create_task(module_bridge.model(CORPUS, "complete", ASK, timeout_s=30))
+    assert (await poll).json()["request"]["op"] == "complete"
+    monkeypatch.setattr(module_bridge, "LIVE_GAP_S", 0.05)  # the module took it, then stopped polling
+    assert await asyncio.wait_for(call, 5) == {"error": module_bridge.NOT_LIVE}
+    assert await module_bridge.model(CORPUS, "complete", ASK, timeout_s=30) == {"no-module": module_bridge.why_not(CORPUS)}
 
 
 async def test_answers_reach_their_own_callers_in_any_order_and_take_one_shape(client, plugin_headers):

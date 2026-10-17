@@ -1,10 +1,11 @@
-"""A model call as a subagent of the analyst's Claude Code session (main): how thimble asks a model for structured data
-now that its server and its MCP shim start no `claude` of their own (NOCLAUDE.md).
+"""A model call that reads pictures, as a subagent of the analyst's Claude Code session (main): the card check's reading
+of a card's picture (card_check.py), and a program's ask that carries pictures (harness.ask). Every other model call of
+thimble's is a completion through main's own API client (model_call.py), which takes text alone.
 
 A call is a job its caller describes (Spec): instructions, the answer's JSON schema (a call_result.ToolSpec), the model
 and effort of its role's row in Settings, and one or more parts, each a text with pictures. The answer to each part is a
-JSON object that fits the schema. structured() is a call of one part; run() is a call of
-many parts, such as a prompt label's batches of records, and hands each answer to the caller as it comes (on_answer).
+JSON object that fits the schema. structured() is a call of one part; run() is the call of one or more parts that it
+makes, and hands each answer to the caller as it comes (on_answer).
 
 How it runs. run() writes the call's folder, trusted/calls/<id>/ in the workspace (call.json, each part's text and
 pictures, an answer file per part), then starts an agent of the `call` role through thimble's plugin module
@@ -30,23 +31,14 @@ starts a fresh agent for the parts left, so no agent's context grows past what o
 started only for a part that no agent waits to take, so a call of few parts starts few agents. send_answer's result
 gives the agent its next part, which saves it a read_call. A part longer than PAGE_CHARS reaches the agent in pages,
 one per read_call, since Claude Code saves a longer tool result to a file the agent cannot read; a call of one part
-gives it in the agent's first message when it is at most INLINE_CHARS. A lazy part source is read only AHEAD parts
-ahead of the answers, and may yield WAIT when it has no part yet and is not spent (a caller that adds parts as it goes,
-such as a prompt label's run). A start refused at Claude Code's subagent limit waits LIMIT_WAIT_S and tries again. Any other refusal ends the call: `no_session` when no Claude Code session runs thimble in the folder
+gives it in the agent's first message when it is at most INLINE_CHARS. A part source is read only AHEAD parts ahead of
+the answers. A start refused at Claude Code's subagent limit waits LIMIT_WAIT_S and tries again. Any other refusal
+ends the call: `no_session` when no Claude Code session runs thimble in the folder
 (no module answers, such as a browser opened with no session), with NO_SESSION's fix; `error` with the refusal's own
 words (main's plan mode, a hook). An agent whose run ends with a part it took and did not answer gives the part back; a
 part given back MAX_TRIES times fails with the agent's last words (no_tool_call), or its API error (refused, rate_limited,
 error). A run the model's safeguards refused runs again, once, on the refusal row's model (Spec.refusal); the result's
 refused_by names the model that refused.
-
-A fork (Spec.fork). A call that needs main's conversation, the view proposer's, runs its one part as a fork of main
-(`$.agent.spawn` with Claude Code's `fork` type), which inherits main's context, model and effort: its first message is
-the part's text with the schema (call-task.md `fork`), and its answer is its report, one JSON object, checked against
-the schema when its run ends (_agent_ended). A fork has main's tools, which thimble's module cannot take away, so the
-module lists each running fork in <home>/up/<session>/forks and the fork guard (plugin/bin/.thimble-watch --fork-guard,
-a PreToolUse hook) refuses every tool call one of them makes. A fork that ends without an answer that fits gives the
-part back once, as any agent of a call; a refusal or an API error fails the part at once, since a fork cannot change
-its model. A fork takes no pictures.
 
 Stops. A caller cancelled (a card that changed, a check past its time) stops the call: every agent of it is stopped
 (subagents.stop, TaskStop through the module) and the call is marked `stopped`, so a late send_answer is refused. A call
@@ -59,7 +51,7 @@ How a caller uses it (NOCLAUDE.md has more):
                                       what="card check", title="card check: How many …", done="thimble checked …")
     if res.status == "ok": use(res.output)
 
-    outcomes = await agent_call.run(c, Spec(...), parts, on_answer=heard)   # many parts: a list or an async iterator
+    outcomes = await agent_call.run(c, Spec(...), parts, on_answer=heard)   # a list or an iterator of parts
 """
 from __future__ import annotations
 
@@ -80,7 +72,7 @@ from pathlib import Path
 from typing import Any, AsyncIterable, Awaitable, Callable, Iterable, Iterator, Sequence
 
 from . import config, tools
-from .call_result import CallResult, ToolSpec
+from .call_result import NO_SESSION, CallResult, ToolSpec, schema_errors
 
 log = logging.getLogger("thimble.agent_call")
 
@@ -93,7 +85,7 @@ DIR = "calls"  # in the workspace's trusted folder
 CALL_FILE = "call.json"
 LOCK_FILE = "call.lock"
 POLL_S = 0.2  # how often the caller reads call.json
-PART_WAIT_S = 20.0  # how long read_call waits for a part a lazy source has not given yet
+PART_WAIT_S = 20.0  # how long read_call waits for a part the caller has not written yet
 BUDGET_CHARS = 200_000  # the part text one agent reads before a fresh agent takes the rest (Spec.budget_chars)
 MAX_AGENTS = 4  # a call's agents at once, at most
 # chars of a part's text one read_call gives: Claude Code (2.1.301) saves a tool result of more than 50,000 characters
@@ -101,7 +93,7 @@ MAX_AGENTS = 4  # a call's agents at once, at most
 PAGE_CHARS = 40_000
 PAGE_SEEK = 2_000  # of a page's end, where a page ends at a line break when one is there
 INLINE_CHARS = 100_000  # a call of one part gives its text in the agent's first message up to this many chars
-AHEAD = 2  # parts of a lazy source written ahead of the answers, per agent
+AHEAD = 2  # parts of the source written ahead of the answers, per agent
 MAX_TRIES = 2  # an agent that ends without the answer gives its part back; past this many tries the part fails
 LIMIT_WAIT_S = 5.0  # a start refused at Claude Code's subagent limit is tried again after this
 END_GRACE_S = 3.0  # how long after the registry heard an agent's end its call takes the end from there (_Call._running)
@@ -112,9 +104,6 @@ TITLE_CHARS = 72  # of the agent's description, which Claude Code's task list sh
 OPEN = ("queued", "given")  # the states of a part without an outcome
 # the reason a dropped hand-back's row gives when the caller named none (Spec.done)
 DONE_DEFAULT = "thimble finished a task"
-# why a call could not start when no Claude Code session runs thimble in the folder (no module): the feature's notice
-NO_SESSION = ("no Claude Code session runs thimble in this folder. Run `thimble` in the corpus folder, or open Claude "
-              "Code there and type /thimble")
 
 
 @dataclass(frozen=True)
@@ -142,7 +131,6 @@ class Spec:
     refusal: dict[str, str] | None = None
     agents: int = 1
     budget_chars: int = BUDGET_CHARS
-    fork: bool = False  # a fork of main that answers with its report (module note); one part, no pictures
 
 
 @dataclass
@@ -161,16 +149,6 @@ class Outcome:
 
 class Refused(Exception):
     """A tool call that may not run: its message is the tool's error result."""
-
-
-class _Wait:
-    """WAIT: what a lazy part source yields when it has no part yet and is not spent."""
-
-    def __repr__(self) -> str:
-        return "agent_call.WAIT"
-
-
-WAIT = _Wait()
 
 
 # --------------------------------------------------------------------------- the files
@@ -303,42 +281,6 @@ def subagent_refused(c: str, req: dict[str, Any]) -> None:
                  str(req.get("reason") or "")[:200])
 
 
-def json_object(text: str) -> tuple[dict[str, Any] | None, str]:
-    """The JSON object a model's text holds: the text itself, a fenced block of it, or the span from its first `{` to
-    its last `}`, an object followed by more text included. (None, why) when it holds none."""
-    t = str(text or "").strip()
-    cands = [m.group(1).strip() for m in re.finditer(r"```(?:json|JSON)?\s*\n(.*?)\n\s*```", t, re.S)]
-    cands.append(t)
-    i, j = t.find("{"), t.rfind("}")
-    if 0 <= i < j:
-        cands.append(t[i:j + 1])
-    err = "no JSON object in the answer"
-    for cand in cands:
-        if "{" not in cand:
-            continue
-        try:
-            got = json.loads(cand)
-        except ValueError as e:
-            err = f"invalid JSON: {e}"
-            try:  # an object followed by more text
-                got, _ = json.JSONDecoder().raw_decode(cand[cand.find("{"):])
-            except ValueError:
-                continue
-        if isinstance(got, dict):
-            return got, ""
-        err = "the JSON is not an object"
-    return None, err
-
-
-def _fork_answer(rec: dict[str, Any], report: str) -> tuple[dict[str, Any] | None, str]:
-    """A fork's answer from its report: the JSON object it holds when that fits the call's schema, else (None, why)."""
-    got, why = json_object(report)
-    if got is None:
-        return None, why
-    why = _invalid((rec.get("tool") or {}).get("schema") or {"type": "object"}, got)
-    return (None, why) if why else (got, "")
-
-
 def _failure(report: str) -> tuple[str, str]:
     """(status, detail) of a part whose agent ended without its answer, from the agent's last words: refused,
     rate_limited or error for an API error, else no_tool_call."""
@@ -366,12 +308,8 @@ def _agent_ended(c: str, cid: str, agent_id: str, status: str, report: str) -> N
         if a.get("state") == "ended":
             return
         a.update(state="ended", status=status, report=str(report or "")[:2000], ended=time.time())
-        fork = bool(rec.get("fork"))
-        # a fork's report that fits the schema is its answer, whatever words it holds
-        answer, why = _fork_answer(rec, report) if fork and status == "done" else (None, "")
-        cls = notices.failure_class(report) if report and answer is None else None
-        refused = cls == "refused"
-        fallback = (rec.get("refusal") or {}).get("model") if refused and not fork else None
+        cls = notices.failure_class(report) if report else None
+        fallback = (rec.get("refusal") or {}).get("model") if cls == "refused" else None
         if fallback and not rec.get("refused_by") and not str(rec.get("model") or "").startswith(str(fallback)):
             rec["refused_by"] = str(rec.get("model") or "")
             rec["model"], rec["effort"] = str(fallback), str((rec.get("refusal") or {}).get("effort") or "")
@@ -379,27 +317,15 @@ def _agent_ended(c: str, cid: str, agent_id: str, status: str, report: str) -> N
                         rec["refused_by"], fallback)
         else:
             fallback = None
-        if fork:
-            _held(rec, agent_id)  # a fork that ended before its start's answer named it still holds its part
         for n, p in (rec.get("parts") or {}).items():
             if p.get("state") != "given" or p.get("agent") != agent_id:
                 continue
-            if answer is not None:  # a fork's report that fits: its answer
-                _answer_path(c, cid, int(n)).write_text(json.dumps(answer, ensure_ascii=False), "utf-8")
-                p.update(state="answered", answered=time.time(), model=str(rec.get("model") or ""))
-                a["answered"] = int(a.get("answered") or 0) + 1
-            elif fork and cls is not None:  # a fork cannot change its model: a refusal or an API error fails at once
-                st, detail = _failure(report)
-                p.update(state="failed", status=st, detail=detail)
-            elif fallback or int(p.get("tries") or 0) < MAX_TRIES:
+            if fallback or int(p.get("tries") or 0) < MAX_TRIES:
                 p.update(state="queued", agent="")
                 if fallback:
                     p["tries"] = 0
             else:
                 st, detail = _failure(report)
-                if fork and why:
-                    words = " ".join(str(report or "").split())[:300]
-                    st, detail = "no_tool_call", f"the fork's answer did not fit ({why})" + (f": {words}" if words else "")
                 p.update(state="failed", status=st, detail=detail)
             log.info("%s: call %s part %s %s after agent %s ended %s", c, cid, n, p["state"], agent_id, status)
 
@@ -528,16 +454,6 @@ async def tool_read_call(ctx: Any, args: dict[str, Any]) -> Any:
     return tools.ok(tools.hint(hint[what]) or what)
 
 
-def _invalid(schema: dict[str, Any], answer: Any) -> str:
-    """What about `answer` does not fit `schema`, '' when it fits."""
-    import jsonschema  # noqa: PLC0415
-
-    if not isinstance(answer, dict):
-        return f"$: the answer must be a JSON object, not {type(answer).__name__}"
-    found = sorted(jsonschema.Draft202012Validator(schema).iter_errors(answer), key=str)
-    return "; ".join(f"{e.json_path}: {e.message}" for e in found[:5])
-
-
 def _record(c: str, cid: str, agent_id: str, part: int | None, answer: dict[str, Any]) -> tuple[str, Any]:
     """send_answer's record of a fitting answer under the call's lock: ("more" | "last", n) once recorded, ("which",
     held) when the agent holds several parts and named none, ("not-held", n) for a part it does not hold, ("stopped",
@@ -576,7 +492,7 @@ async def tool_send_answer(ctx: Any, args: dict[str, Any]) -> Any:
     if isinstance(answer, str):  # an answer sent as JSON text
         with contextlib.suppress(ValueError):
             answer = json.loads(answer)
-    why = await asyncio.to_thread(_invalid, (rec.get("tool") or {}).get("schema") or {"type": "object"}, answer)
+    why = await asyncio.to_thread(schema_errors, (rec.get("tool") or {}).get("schema") or {"type": "object"}, answer)
     if why:
         return tools.err(tools.hint("send_answer-invalid", errors=why) or why)
     raw = args.get("part")
@@ -614,10 +530,6 @@ def task_text(cid: str, spec: Spec, first: Part | None) -> str:
     the parts."""
     from . import prompts  # noqa: PLC0415
 
-    if spec.fork:  # a fork of main: the part's text and the schema of its report, which is its answer
-        text = "\n\n".join(t for t in (spec.instructions.strip(), (first.text if first else "").strip()) if t)
-        return prompts.render_section(TASK_PROMPT, "fork", {
-            "text": text, "tool": spec.tool.description.strip(), "schema": _schema_text(spec.tool.input_schema)}).strip()
     if first is not None:
         parts = prompts.render_section(TASK_PROMPT, "one-part", {"text": first.text.strip()})
         if first.images:
@@ -675,7 +587,7 @@ class _Call:
         added: dict[int, dict[str, Any]] = {}
         while not self.exhausted and open_ + len(added) < want:
             part = await self._next()
-            if part is None or part is WAIT:
+            if part is None:
                 break
             self.n += 1
             added[self.n] = await asyncio.to_thread(_write_part, self.c, self.cid, self.n, part)
@@ -694,15 +606,14 @@ class _Call:
         spec = self.spec
         with _locked(self.c, self.cid) as rec:
             rec.update(id=self.cid, what=spec.what, title=spec.title, done=spec.done, status="running", closed=False,
-                       created=time.time(), model=spec.model, effort=spec.effort,
-                       refusal=None if spec.fork else spec.refusal, fork=spec.fork,
+                       created=time.time(), model=spec.model, effort=spec.effort, refusal=spec.refusal,
                        budget=spec.budget_chars, refused_by="",
                        tool={"name": spec.tool.name, "description": spec.tool.description,
                              "schema": spec.tool.input_schema},
                        parts={}, agents={})
         single = list(self.source) if isinstance(self.source, (list, tuple)) and len(self.source) == 1 else None
-        # read in pages through read_call instead; a fork has no tools, so its part is always in its first message
-        if single and len(single[0].text) > INLINE_CHARS and not spec.fork:
+        # read in pages through read_call instead
+        if single and len(single[0].text) > INLINE_CHARS:
             single = None
         await self._top_up(read(self.c, self.cid))
         return single[0] if single else None
@@ -726,7 +637,7 @@ class _Call:
                              inline=True)
         self.starts += 1
         title = _short(self.spec.title or f"thimble: {self.spec.what}", TITLE_CHARS)
-        fields: dict[str, Any] = {"drop": self.spec.done or DONE_DEFAULT, **({"fork": True} if self.spec.fork else {})}
+        fields: dict[str, Any] = {"drop": self.spec.done or DONE_DEFAULT}
         ans = await subagents.start_job(self.c, ROLE, _key(self.cid), prompt, values, subagents.FOLLOW_ON,
                                         description=title, fields=fields)
         if ans.started:
@@ -905,23 +816,17 @@ async def run(c: str, spec: Spec, parts: Iterable[Part] | AsyncIterable[Part], *
 
 async def structured(c: str, prompt: str, *, tool: ToolSpec, model: str, effort: str, system: str = "",
                      images: Sequence[tuple[bytes, str]] = (), refusal: dict[str, str] | None = None,
-                     what: str = "", title: str = "", done: str = "", timeout_s: float | None = None,
-                     fork: bool = False) -> CallResult:
+                     what: str = "", title: str = "", done: str = "", timeout_s: float | None = None) -> CallResult:
     """One structured call of one part: `system` the instructions, `prompt` the part's text, `images` its pictures, the
     answer's schema `tool`, on `model` at `effort`, again on `refusal`'s model when the model refused. Never raises but
     for the caller's cancel; read the CallResult's status (call_result.Status: `no_session` when no Claude Code session
-    runs thimble here, its detail the fix). Claude Code retries the API itself and runs a subagent at main's speed.
-    With `fork` the call runs as a fork of main (module note), on main's model and
-    effort, which `model` and `effort` then only name."""
-    if not fork and (not str(model or "").strip() or not str(effort or "").strip()):
+    runs thimble here, its detail the fix). Claude Code retries the API itself and runs a subagent at main's speed."""
+    if not str(model or "").strip() or not str(effort or "").strip():
         return CallResult(status="error", detail=f"the {tool.name} call names no model or no effort",
-                          model_requested=model)
-    if fork and images:
-        return CallResult(status="error", detail=f"the {tool.name} call is a fork, which takes no pictures",
                           model_requested=model)
     t0 = time.monotonic()
     spec = Spec(what=what or tool.name, instructions=system, tool=tool, model=model, effort=effort, title=title,
-                done=done, refusal=refusal, fork=fork)
+                done=done, refusal=refusal)
     outs = await run(c, spec, [Part(prompt, tuple(images))], timeout_s=timeout_s)
     o = outs[0] if outs else Outcome(1, "error", detail="the call gave no outcome")
     used = o.model or (str((refusal or {}).get("model") or model) if o.refused_by else model)

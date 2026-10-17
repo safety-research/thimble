@@ -1,8 +1,8 @@
 """Programs that run one of thimble's roles or tasks: the command (`command`) an extension's agents/<role>/agent.json
 (roles.py) or tasks/<task>/task.json (tasks.py) names. docs/agents.md documents what a program gets and how it answers.
 
-thimble starts no Claude Code session of its own (NOCLAUDE.md): every model call runs as a subagent of the analyst's
-Claude Code session. So a program never gets a session of thimble's. An Agent SDK program (`sdk`), whose work is its
+thimble starts no Claude Code session of its own (NOCLAUDE.md): every model call runs through the analyst's Claude Code
+session (model_call.py). So a program never gets a session of thimble's. An Agent SDK program (`sdk`), whose work is its
 sessions, does not start (NO_SDK, a RuntimeError its caller tells as any start that may not run); a `session` request
 is answered with an error (NO_SESSION), and so is the session route a program's Agent SDK `query()` would reach
 (SESSION_PATH, which answers only `claude -v`). A program asks a model with `ask`.
@@ -85,8 +85,8 @@ NO_SDK = ("The {name} extension runs the {who} as an Agent SDK program, which st
           "thimble no longer starts any: each model call runs as a subagent of your Claude Code session. Turn the "
           "extension off in Settings to run thimble's own {who}, or ask its author for a `command` program, which "
           "asks a model with `ask`.")
-NO_SESSION = ("thimble starts no Claude Code session for a program: each model call runs as a subagent of the analyst's "
-              "Claude Code session. Ask a model with `ask` instead.")
+NO_SESSION = ("thimble starts no Claude Code session for a program: each model call runs through the analyst's Claude "
+              "Code session. Ask a model with `ask` instead.")
 NO_DEFAULT = ("thimble lends no implementation of the {role} role to a program. Run the role's work in your program, "
               "or add to thimble's prompt for it with the prompt way.")
 TASK_WORK = ("tasks", "work")  # under the workspace: each task run's work folder, removed when the run ends
@@ -394,16 +394,20 @@ def _images(run: Run, paths: Any) -> list[tuple[bytes, str]]:
     return out
 
 
-ASK_TITLE = "thimble {who}: ask"  # an ask's agent's line in Claude Code's task list
-ASK_DONE = "thimble answered {who}"  # the reason in main's terminal when the terminal UI drops its hand-back
+# an ask with pictures runs as the card check's reading does, a subagent of main (agent_call.py), since a model call
+# through the session's client takes text alone: its line in Claude Code's task list, and the reason in main's terminal
+# when the terminal UI drops its hand-back
+ASK_TITLE = "thimble {who}: ask"
+ASK_DONE = "thimble answered {who}"
 
 
 async def ask(run: Run, payload: dict[str, Any]) -> Any:
-    """A program's `ask`: one structured call on its role's Settings row, as a subagent of the analyst's Claude Code
-    session (agent_call.structured), whose answer is the request's result: the text of a plain ask, else the object
-    that fits its `schema`. HarnessError when the call gives no answer, such as with no session running thimble in the
-    folder (its fix in the error)."""
-    from . import agent_call  # noqa: PLC0415
+    """A program's `ask`: one structured call on its role's Settings row, whose answer is the request's result: the
+    text of a plain ask, else the object that fits its `schema`. One model call through the analyst's Claude Code
+    session (model_call.structured); an ask with `images`, which a model call cannot carry, runs as a subagent of that
+    session that reads them (agent_call.structured), as the card check's reading does. HarnessError when the call gives
+    no answer, such as with no session running thimble in the folder (its fix in the error)."""
+    from . import agent_call, model_call  # noqa: PLC0415
     from .call_result import ToolSpec  # noqa: PLC0415
 
     prompt = str(payload.get("prompt") or "")
@@ -412,14 +416,18 @@ async def ask(run: Run, payload: dict[str, Any]) -> Any:
     schema = payload.get("schema")
     plain = not isinstance(schema, dict)
     images = await asyncio.to_thread(_images, run, payload["images"]) if payload.get("images") else []
-    spec = ToolSpec("answer", "Give your answer with this tool.", ANSWER_TOOL if plain else schema)
+    spec = ToolSpec("answer", "Your answer to the task above.", ANSWER_TOOL if plain else schema)
     role = config.call_settings(run.c, run.job.model_role)
     part = getattr(run, "part", None)
     who = f"{part.extension}'s program" if part is not None and getattr(part, "extension", "") else "a program"
-    res = await agent_call.structured(run.c, prompt, tool=spec, model=str(payload.get("model") or role["model"]),
-                                      effort=role["effort"], refusal=role["refusal"], images=images,
-                                      what="program ask", title=ASK_TITLE.format(who=who),
-                                      done=ASK_DONE.format(who=who))
+    model = str(payload.get("model") or role["model"])
+    if images:
+        res = await agent_call.structured(run.c, prompt, tool=spec, model=model, effort=role["effort"],
+                                          refusal=role["refusal"], images=images, what="program ask",
+                                          title=ASK_TITLE.format(who=who), done=ASK_DONE.format(who=who))
+    else:
+        res = await model_call.structured(run.c, prompt, tool=spec, model=model, effort=role["effort"],
+                                          refusal=role["refusal"], what=f"ask of {who}")
     if res.status != "ok" or res.output is None:
         raise HarnessError(f"the model call ended {res.status}: {res.detail or res.text[:300]}")
     return res.output.get("text", "") if plain else res.output

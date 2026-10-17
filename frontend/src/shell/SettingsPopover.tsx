@@ -68,15 +68,20 @@ export function agentMode(rows: Settings['permission_modes'], agent: ModeAgent, 
   return [manual(rows?.[agent]), manual(permissionChoice(sessionMode)), 'manual' as const].find((m): m is OrientPermissions => !!m && !off.includes(m))!
 }
 
+/** What a CALL_ROWS row shows where the dev agent's program shows its permission mode, and why: a model call through
+ * the session's own client asks nothing; the card check, a subagent of the session that reads the card's picture,
+ * follows its permission mode. */
+const PROGRAM_TIP = "An extension's program that runs its tasks has no thread to ask you in."
+export const CALL_CELLS = {
+  model: { cell: 'Asks nothing', tip: `It is one model call through your Claude Code session's own sign-in, with no tools, so it asks nothing in any mode.\n${PROGRAM_TIP}` },
+  subagent: { cell: "Your session's", tip: `It runs as a subagent of your Claude Code session, in its permission mode: Manual mode asks before it reads its task and before it sends its answer.\n${PROGRAM_TIP}` },
+} as const
 /** The agents of thimble's config that are one model call each, listed after the dev agent's program; their settings
  * reach an extension's program that runs their tasks (backend userconf.CALLS). */
-export const CALL_ROWS: { agent: CallAgent; label: string }[] = [
-  { agent: 'labels', label: 'Labels' },
-  { agent: 'cardCheck', label: 'Card check' },
+export const CALL_ROWS: { agent: CallAgent; label: string; runs: keyof typeof CALL_CELLS }[] = [
+  { agent: 'labels', label: 'Labels', runs: 'model' },
+  { agent: 'cardCheck', label: 'Card check', runs: 'subagent' },
 ]
-/** What a CALL_ROWS row shows where the dev agent's program shows its permission mode, and why. */
-export const CALL_CELL = "Your session's"
-const CALL_CELL_TIP = "It runs as a subagent of your Claude Code session, in its permission mode: Manual mode asks before it reads its task and before it sends its answer.\nAn extension's program that runs its tasks has no thread to ask you in."
 
 const DATA_WORDS: Record<NonNullable<AgentRow['data']>, string> = { ask: 'asks to edit data', allow: 'may edit data', off: 'never edits data' }
 const DATA_TIP: Record<NonNullable<AgentRow['data']>, string> = {
@@ -180,12 +185,13 @@ function FenceLine({ fence, sandbox }: { fence: MainFence; sandbox?: boolean | n
 }
 
 /** A CALL_ROWS row's cell where the code tickets have their permission mode. */
-function CallCell({ label }: { label: string }) {
-  const { props, tip } = useTooltip(CALL_CELL_TIP, 'tip-lines', 'start')
+function CallCell({ label, runs }: { label: string; runs: keyof typeof CALL_CELLS }) {
+  const { cell, tip: why } = CALL_CELLS[runs]
+  const { props, tip } = useTooltip(why, 'tip-lines', 'start')
   return (
     <>
-      <Chip kind="plain" face="sans" className="settings-cell settings-mode settings-mode-none" tabIndex={0} aria-label={`${label}: ${CALL_CELL}`} {...props}>
-        {CALL_CELL}
+      <Chip kind="plain" face="sans" className="settings-cell settings-mode settings-mode-none" tabIndex={0} aria-label={`${label}: ${cell}`} {...props}>
+        {cell}
       </Chip>
       {tip}
     </>
@@ -228,7 +234,8 @@ export const ROLE_NOTE: Record<string, string> = {
 }
 /** thimble's agents, whose rows apply to their next start. */
 export const AGENT_ROLES = ['orient', 'subagents', 'critic', 'writer', 'dev', 'checks'] as const
-/** The model calls: one `thimble:call` subagent of main each, with no fast mode of its own, as every agent. */
+/** The model calls: labels and the viewer suggestion through main's own client, the card check a `thimble:call`
+ * subagent of main; none has a fast mode of its own. */
 export const CLASSIFIER_ROLES = ['labels', 'verify', 'suggest'] as const
 /** The agents whose web switch the table offers (backend userconf.SUBAGENT_ROLES less the orientation, whose web is
  * main's rule). */
@@ -710,12 +717,12 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
                 </div>
               )
             })}
-            {CALL_ROWS.map(({ agent, label }) => {
+            {CALL_ROWS.map(({ agent, label, runs }) => {
               const row = settings.agents?.[agent]
               return row ? (
                 <div className="settings-row" role="row" key={agent} data-call-agent={agent}>
                   <span className="settings-role">{label}</span>
-                  <CallCell label={label} />
+                  <CallCell label={label} runs={runs} />
                   <AgentLine row={row} />
                 </div>
               ) : null
