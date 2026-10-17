@@ -28,6 +28,7 @@ class Server:
         self.mints: list[dict] = []
         self.named: list[tuple] = []
         self.made: list[tuple] = []
+        self.steps: list[str] = []  # name_session and made_main, in the order the press ran them
 
     def request(self, method, url, body=None, timeout=5.0, **kw):
         assert url.endswith("/api/ui/pair"), url
@@ -64,8 +65,9 @@ def server(monkeypatch, tmp_path):
         "api_url": lambda p=None: f"http://127.0.0.1:{PORT}", "refuse_foreign": lambda url=None: False,
         "ensure_running": ensure_running, "serves": lambda url=None: True,
         "open_workspace": lambda cwd, d, url, here=False: ("mini", False),
-        "name_session": lambda url, name, session, cwd, **kw: s.named.append((name, session)),
-        "made_main": lambda name, session, cwd: s.made.append((name, session)),
+        "name_session": lambda url, name, session, cwd, **kw: (s.named.append((name, session)),
+                                                               s.steps.append("name_session")),
+        "made_main": lambda name, session, cwd: (s.made.append((name, session)), s.steps.append("made_main")),
         "has_ui_build": lambda: True, "read_state": lambda: {"url": f"http://127.0.0.1:{PORT}"},
         "own_sandbox_here": lambda cwd: False, "setup_warnings": lambda cwd: [], "_request": s.request,
     }.items():
@@ -142,6 +144,8 @@ def test_a_press_opens_the_page_with_a_sixty_second_code_in_a_redirect_file_and_
     assert page == opener.open_dir() / f"{mint['open']}.html" and f"#p={code}" in page.read_text()
     assert stat.S_IMODE(page.stat().st_mode) == 0o600
     assert server.started == 1 and server.named == [("mini", SID)] and server.made == [("mini", SID)]
+    assert server.steps == ["made_main", "name_session"], \
+        "the transport moves to the server before the server attaches the session (session.attach, H4)"
 
 
 def test_a_remote_terminal_gets_a_300_second_link_in_its_link_file_and_the_tunnel_row(

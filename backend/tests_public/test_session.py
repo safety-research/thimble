@@ -3,6 +3,7 @@ other record, and main follows its session when Claude Code moves it into a back
 written by the test in Claude Code's record shapes."""
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -117,6 +118,31 @@ def test_the_tail_translates_a_turn_and_skips_every_other_record(cwd, tmp_path):
     n = len(_log(agents.MAIN_ID))
     session.tail_once(lv)
     assert len(_log(agents.MAIN_ID)) == n  # nothing new
+
+
+# ----------------------------------------------------------------------------- the startup sweep
+
+
+async def test_the_sweep_gives_a_session_made_main_just_before_it_time_for_its_shim(cwd, tmp_path, monkeypatch):
+    """0.8.0's live capture: on a new workspace a press attached main 0.5 s before the sweep, 30 s after the server's
+    start, which detached it before its shim subscribed, and the browser said the session was disconnected until
+    /thimble ran again. A session made main less than GRACE_S before the sweep gets GRACE_S for its shim, as after a
+    shim leaves; one made main earlier whose shim never came is detached at once, as before."""
+    stopped: list[str] = []
+    monkeypatch.setattr(session, "_stop_agents", stopped.append)
+    monkeypatch.setattr(session, "_shutting_down", lambda: False)
+    monkeypatch.setattr(session, "GRACE_S", 0.3)
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = _attach(cwd, p)
+    assert session.sweep() == [] and session._live[CORPUS] is lv
+    _subscribe(SID)  # its shim, a moment later
+    await asyncio.sleep(0.5)
+    assert session._live[CORPUS] is lv
+    assert (agents.meta_or_none(CORPUS, agents.MAIN_ID) or {})["attached"]["session"] == SID
+    events._subs.clear()
+    lv.attached_at -= 60  # made main a minute before the sweep, and its shim never came
+    assert session.sweep() == [SID] and CORPUS not in session._live and stopped == []
 
 
 # ----------------------------------------------------------------------------- a session that continues in a job

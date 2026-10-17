@@ -4,6 +4,9 @@ runs and their one end, main's quit and moves, the caller of a thimble tool, and
 cookie."""
 from __future__ import annotations
 
+import asyncio
+import sys
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -110,6 +113,35 @@ async def test_a_click_start_writes_the_request_then_spawns_through_the_module(b
     meta = agents.read_meta(CORPUS, a["chat"])
     assert meta["route"] == "subagent" and meta["agent_id"] == ans.agent_id and meta["doc"] == "report"
     assert meta["values"] == {"model": "m", "effort": "high"} and meta["started_by"] == "click"
+
+
+async def test_a_follow_on_start_waits_for_the_module_of_a_session_attached_just_now(bridge, models, monkeypatch):
+    """At a press the server reads main's turn as it attaches the session, a moment before Claude Code's module, which
+    switches to the server at the same press, says hello: a check that the turn's end starts waits for the module
+    (module_settled) instead of being refused as still connecting. A click is answered at once, and a module that does
+    not come is refused once the wait runs out."""
+    not_loaded = "Claude Code did not load thimble's module"
+    monkeypatch.setattr(sys.modules["app.module_bridge"], "NOT_LOADED", not_loaded, raising=False)
+    monkeypatch.setattr(subagents, "connecting", lambda c: True)
+    monkeypatch.setattr(subagents, "CONNECT_STEP_S", 0.01)
+    bridge.is_live, bridge.reason = False, not_loaded
+
+    async def hello() -> None:
+        await asyncio.sleep(0.1)
+        bridge.is_live, bridge.reason = True, ""
+
+    said = asyncio.create_task(hello())
+    ans = await subagents.start_job(CORPUS, "check", "check:c1:answers", "check it", {}, subagents.FOLLOW_ON,
+                                    description="check: c1")
+    await said
+    assert ans.started and len(bridge.ops("spawn")) == 1
+    bridge.is_live, bridge.reason = False, not_loaded
+    t0 = time.monotonic()
+    click = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
+    assert click.kind == "no-module" and time.monotonic() - t0 < 0.5, "a click waits for nothing"
+    monkeypatch.setattr(subagents, "CONNECT_WAIT_S", 0.1)
+    late = await subagents.start_job(CORPUS, "check", "check:c2:answers", "check it", {}, subagents.FOLLOW_ON)
+    assert late.kind == "no-module" and len(bridge.ops("spawn")) == 1
 
 
 async def test_a_typed_start_answers_the_exact_agent_call_with_the_request_id_on_its_first_line(bridge, models):
