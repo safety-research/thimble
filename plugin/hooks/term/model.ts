@@ -394,6 +394,10 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerd
   } else {
     out.path = str(res.path)
     if (typeof res.line === 'number') out.line = res.line
+    // where its file opens: the cited line, or the first line of a record cited by its pointer (bug hunt B29: a
+    // transcript's message opened its file at the first turn)
+    const fileLine = typeof res.line === 'number' ? res.line : typeof meta.line === 'number' ? meta.line : 0
+    if (fileLine > 0) out.fileLine = fileLine
     out.lines = linesOf(res, c.display)
     // a row's fields, which an example card shows by their names, never as the JSON its excerpt is
     if ((kind === 'row' || kind === 'csvrow') && isObj(res.record)) out.record = res.record

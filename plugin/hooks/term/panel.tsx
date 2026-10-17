@@ -984,7 +984,7 @@ function windowFit(top: number, len: number, room: number): { up: number; down: 
  *  choosing (live check term-fix8, quirk 1). The wheel and a click on a count row move the rows shown (wheelWindow)
  *  until the choice moves again; the lines cut off above and below are counted on a dim row each, which a click moves
  *  by a page. A list that fits, or a pane whose rows are not known, is drawn whole. */
-export function windowList(key: string, lines: Line[], hits: LineHit[], at: number, room: number, bump: () => Promise<void>, lead?: number): { lines: Line[]; hits: LineHit[] } {
+export function windowList(key: string, lines: Line[], hits: LineHit[], at: number, room: number, bump: () => Promise<void>, lead?: number, count?: (top: number, end: number) => { above: number; below: number }): { lines: Line[]; hits: LineHit[] } {
   windowed = key
   const len = lines.length
   if (room < 5 || len <= room) {
@@ -1017,15 +1017,18 @@ export function windowList(key: string, lines: Line[], hits: LineHit[], at: numb
   }
   const out: Line[] = []
   const outHits: LineHit[] = []
+  // what the count rows count: the lines cut off, or with `count` the units its list counts (a transcript's turns, as
+  // its header counts them, those of the pages not read with them too: bug hunt B29)
+  const counted = count?.(top, top + f.n) ?? { above: top, below: len - top - f.n }
   if (f.up) {
-    const words = `↑ ${num(top)} more`
+    const words = `↑ ${num(counted.above)} more`
     outHits.push({ y: 0, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + width(words), row: false, run: move(top - page) })
     out.push(pointed([{ s: '  ' }, dim(words)], false))
   }
   out.push(...lines.slice(top, top + f.n))
   for (const h of hits) if (h.y >= top && h.y < top + f.n) outHits.push({ ...h, y: h.y - top + f.up })
   if (f.down) {
-    const words = `↓ ${num(len - top - f.n)} more`
+    const words = `↓ ${num(counted.below)} more`
     outHits.push({ y: out.length, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + width(words), row: false, run: move(top + page) })
     out.push(pointed([{ s: '  ' }, dim(words)], false))
   }
@@ -2028,7 +2031,10 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // the title: the value highlighted on the citation's purple (red once it failed), not underlined; no ◌ or × after
   // it, the bar says its state
   const titleSegs: Line = [bad ? { s: label, b: true, fg: COLORS.problem } : { s: label, b: true, bg: citeHighlight() }]
-  const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5), f.line) : cardId ? () => openCard(cx, cardId) : null
+  // its file opens at the cited line, or at the record a pointer cites (`…json#/messages/<id>`), lit there (bug hunt B29:
+  // a transcript's message opened its file at the first turn, the message neither shown nor marked)
+  const at = f?.line ?? v?.fileLine
+  const opens = f ? () => openFile(cx, f.path, Math.max(1, (at ?? 1) - 5), at) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
   // the title row's current step: the value as its link, a click on it opening its place
   setHead({ line: titleSegs, key: 'cite-title', ...(opens ? { press: () => void opens() } : {}) })

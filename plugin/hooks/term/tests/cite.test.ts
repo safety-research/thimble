@@ -366,6 +366,44 @@ test("a cited value's literal is found in code as code types it, never inside a 
 // ------------------------------------------------------------------------------------------------ a file citation's window
 
 /** A file of 900 lines, paged as thimble pages it: 200 lines from the line `--start` names. */
+test("`f` on a transcript's message cited by its pointer opens the transcript at that message, lit, its window counting turns as its header does (bug hunt B29)", { timeoutMs: 30_000 }, async ($, on) => {
+  // bug hunt B29: `…json#/messages/<id>` → f opened at turn 1 (`turns 1-200 of 440`) over `↓ 695 more`, the message
+  // neither shown nor marked
+  const w = world(on)
+  const path = 'conv.json'
+  const ref = `${path}#/messages/5f0e2a9b7c1d4e38`
+  // a whole-file JSON transcript of 440 messages, message k a record of three lines from line 3 + 3k, its words on the
+  // second
+  w.pages[path] = (start: number) => ({ path, kind: 'text', total_lines: 1325, start, transcript: { format: 'json', score: 0.95 }, records: Array.from({ length: 200 }, (_, i) => ({ line: start + i, record: { _raw: `line ${start + i}` } })) })
+  const page = (from: number) => ({ path, total: 440, start: from, n_groups: 1, groups: {}, turns: Array.from({ length: Math.min(200, 440 - from) }, (_, k) => ({ i: from + k, n: from + k + 1, line: 4 + 3 * (from + k), rec_line: 3 + 3 * (from + k), speaker: (from + k) % 2 ? 'assistant' : 'user', role: (from + k) % 2 ? 'assistant' : 'user', text: `message ${from + k}` })) })
+  // `--line n`: from a few turns before the turn whose record starts on it, as thimble pages it
+  w.turns[path] = (args: string[]) => (args[0] === '--line' ? page(Math.max(0, Math.floor((Number(args[1]) - 3) / 3) - 5)) : page(args[0] === '--start' ? Number(args[1]) : 0))
+  w.resolve[ref] = { ref, kind: 'pointer', path, record: { id: '5f0e2a9b7c1d4e38', role: 'assistant', content: 'message 300' }, blocks: [{ kind: 'text', text: 'message 300' }], excerpt: 'message 300', meta: { n: 301, line: 903, end_line: 905 } }
+  await start($, w)
+  let pane = await clickCite($, w, `It says [message 300](${ref}) late.`, 10)
+  expect(shown(await pane.find({ key: 'h-hints' }))).toContain('f for its file')
+  await pane.press({ key: 'hk-files' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  // the turns read are those around the message's record, and the header counts them
+  expect(w.calls.filter(c => c[2] === 'turns').map(c => c.slice(5).join(' '))).toContain(`${path} --line 903`)
+  expect(shown(await pane.drawn())).toContain('turns 296-440 of 440')
+  // the message shows, chosen (`❯` on its speaker's row, its words under it)
+  const rows = (((await pane.drawn({ in: 'm:file-body' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  const lit = rows.findIndex(r => r.startsWith('❯'))
+  expect(lit).toBeGreaterThanOrEqual(0)
+  expect(rows[lit + 1]).toContain('message 300')
+  // one count: the row below counts turns, as the header does, those of the pages not read with them too (the page's
+  // first turn shows, so no row counts any above it; `earlier` reads them)
+  const shownTurns = rows.flatMap(r => /message (\d+)/.exec(r)?.slice(1).map(Number) ?? [])
+  expect(shownTurns[0]).toBe(295)
+  // each turn shown starts on its speaker's row
+  const started = rows.filter(r => /● (?:user|assistant)$/.test(r)).length
+  expect(rows.at(-1)!.trim()).toBe(`↓ ${439 - (295 + started - 1)} more`)
+  await pane.unmount()
+})
+
 const LOG = (start: number) => ({ path: 'log.txt', kind: 'text', total_lines: 900, start, records: Array.from({ length: Math.max(0, Math.min(200, 901 - start)) }, (_, i) => ({ line: start + i, record: { text: `line ${start + i} of the log` } })) })
 const logLine = (n: number) => ({ line: n, record: { text: `line ${n} of the log` } })
 const LOG_450 = { ref: 'log.txt#L450', kind: 'record', path: 'log.txt', line: 450, record: { text: 'line 450 of the log' }, blocks: [{ text: 'line 450 of the log' }], excerpt: 'line 450 of the log', context: { before: [447, 448, 449].map(logLine), after: [451, 452, 453].map(logLine) } }
