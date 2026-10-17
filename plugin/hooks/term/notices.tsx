@@ -106,9 +106,11 @@ export async function runNoticeAct(cx: Ctx, n: ModNotice, act: string): Promise<
 
 /** One toast for each workspace notice not toasted yet. The first look of a session only notes what is there already,
  *  which shows as rows; a notice that comes after is new. A notice that joins a row of the same notices (`ids`) adds to
- *  its count and toasts nothing again. */
-export function toastNewNotices(cx: Ctx, notices: readonly { id: string; ids?: readonly string[]; text: string }[]): void {
+ *  its count and toasts nothing again. `null`: home's state is not read yet, so this is no look (bug hunt F12: a look
+ *  before the first read noted nothing, and each notice of an earlier session then toasted as new). */
+export function toastNewNotices(cx: Ctx, notices: readonly { id: string; ids?: readonly string[]; text: string }[] | null): void {
   const idsOf = (n: { id: string; ids?: readonly string[] }) => (n.ids?.length ? n.ids : [n.id])
+  if (!notices) return
   if (!seeded) {
     seeded = true
     for (const n of notices) for (const id of idsOf(n)) toasted.add(`ws:${id}`)

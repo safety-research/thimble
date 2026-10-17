@@ -57,7 +57,7 @@ import { clean, cut, noControls, width } from './lib'
 import { docsOf } from './model'
 import { dismissModNotice, modActWords, modNotices, moreNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
 import { BROWSER_ITEM, browserShown, copyRemoteLink, copyTunnel, dismissLinks, remoteWords } from './offramp'
-import { answerOffer, dismissNotice, dismissOffer, homeNotices, homeOffer, noticeAct, noticeWords, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
+import { answerOffer, dismissNotice, dismissOffer, homeNotices, homeOffer, noticeAct, noticeWords, noticesRead, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
 import type { HomeOffer } from './panel'
 import { COLORS } from './paint'
 import { readState } from './data'
@@ -175,7 +175,7 @@ export async function refreshSummary(cx: Ctx): Promise<void> {
     await refreshUnsure(cx)
   }
   await firstSeen(cx)
-  toastNewNotices(cx, await homeNotices(cx))
+  toastNewNotices(cx, await noticesRead(cx))
   await noteWriters(cx)
 }
 
@@ -616,7 +616,7 @@ export function registerBand(on: On): void {
     // …`), and `dismiss` takes them all. The newest shows; the others wait behind one row under it, `5 more notices ›`,
     // whose press shows them there and turns into `show fewer`, with `dismiss all` at the right. Each new one posts one
     // toast (notices.tsx)
-    toastNewNotices(cx, await homeNotices(cx))
+    toastNewNotices(cx, await noticesRead(cx))
     const all = await noticeRows(cx)
     if (all.length < 2) noticesOpen = false
     const noticeEl = (r: NoticeRow) =>

@@ -216,10 +216,25 @@ export type NoticeAct = { label: string; act: string; slug: string; config: stri
 /** `ids`: the open notices this one row stands for, the newest (`id`) first: notices with the same words, agent and
  *  acts (three of an orientation's helpers switched to another model) show as one row with their count (bug hunt B5).
  *  `at`: when the newest was posted, in ms (0 when not known), which places it among the terminal's own (band.tsx). */
-export type HomeNotice = { id: string; ids: string[]; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[]; at: number }
+export type HomeNotice = { id: string; ids: string[]; text: string; agent: string; chat: string; open: '' | 'thread' | 'agent'; acts: NoticeAct[]; at: number; kind: string }
+
+/** Whether a notice is a browser's sign-in told in an earlier session (bug hunt F12): it showed there, above that
+ *  session's prompt and with its toast, and does not come back in a later one. A resumed session (`claude -c`) is the
+ *  same session (rt.startedAt is its first launch). */
+export function earlierSignIn(n: { kind?: unknown; at?: unknown }, startedAt: number): boolean {
+  const at = Date.parse(str(n.at)) || 0
+  return str(n.kind) === 'sign-in' && startedAt > 0 && at > 0 && at < startedAt
+}
 
 // the notices dismissed or fixed from here in this session, by id: a later notice of the same failure has an id of its own
 const dismissed = new Set<string>()
+
+/** The open notices as homeNotices gives them, or null while home's state has not been read: the toasts' first look
+ *  must not take "none read yet" for "none there" (bug hunt F12: the band drew before the first read, and every notice
+ *  already there toasted as new). */
+export async function noticesRead(cx: Ctx): Promise<HomeNotice[] | null> {
+  return (await surfaceValue<Obj>(cx, 'home-full'))?.ok ? homeNotices(cx) : null
+}
 
 export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
   const home = await surfaceValue<Obj>(cx, 'home-full')
@@ -227,10 +242,10 @@ export async function homeNotices(cx: Ctx): Promise<HomeNotice[]> {
   const out: HomeNotice[] = []
   const same = new Map<string, HomeNotice>()
   for (const n of rows) {
-    if (!str(n.id) || !str(n.text) || dismissed.has(str(n.id))) continue
+    if (!str(n.id) || !str(n.text) || dismissed.has(str(n.id)) || earlierSignIn(n, rt.startedAt)) continue
     const acts = Array.isArray(n.acts) ? (n.acts as unknown[]).filter(isObj).filter(a => str(a.act)) : []
     const open = n.open === 'thread' || n.open === 'agent' ? n.open : ''
-    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config), text: str(a.text) })), at: Date.parse(str(n.at)) || 0 }
+    const row: HomeNotice = { id: str(n.id), ids: [str(n.id)], text: str(n.text), agent: str(n.agent), chat: str(n.chat), open: str(n.chat) ? open : '', acts: acts.map(a => ({ label: str(a.label).toLowerCase() || str(a.act), act: str(a.act), slug: str(a.slug), config: str(a.config), text: str(a.text) })), at: Date.parse(str(n.at)) || 0, kind: str(n.kind) }
     const key = JSON.stringify([row.text, row.agent, row.open, row.acts])
     const first = same.get(key)
     if (first) first.ids.push(row.id)

@@ -494,7 +494,8 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   clears (a later success) goes when home's state is read again. Two notices that are not failures show the same way:
   the Manual-mode notice while main runs in Claude Code's Manual mode, which says how to switch to auto mode and goes by
   itself when main reports auto mode, and the notice of a browser's sign-in, with no act (its words name `thimble
-  unpair`). Only the newest row shows, its words whole and wrapped; the others wait behind one row under it, `5 more
+  unpair`), which shows only in the session the sign-in happened in (a resumed session is the same one; bug hunt F12).
+  A notice there before the session's first read of home's state toasts nothing. Only the newest row shows, its words whole and wrapped; the others wait behind one row under it, `5 more
   notices ›`, whose press shows them there, newest first, each with its acts, and turns into `show fewer` with `dismiss
   all`, which dismisses every notice (bug hunt C21).
 - The panel's row above the prompt, only while Claude Code leaves the panel undrawn (an open it was not asked for, from

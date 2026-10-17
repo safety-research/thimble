@@ -434,3 +434,33 @@ test("bug hunt C23: a stopped reply's notice puts the analyst's question back in
   expect(w.acts.filter(a => a.kind === 'notice-dismiss').map(a => a.payload.id)).toEqual(['n7', 'n8'])
   await band.unmount()
 })
+
+test('bug hunt F12: the notice of a sign-in from an earlier session shows once, in that session: a new one draws no row for it and posts no toast, even when the band draws before home is read', T, async ($, on) => {
+  const w = panelWorld(on)
+  // signed in at 12:39 the day before this session began (the test's clock starts on 2026-09-21); a sign-in during
+  // this session still shows
+  const earlier = { id: 'si1', key: 'signin:new:b1', kind: 'sign-in', text: "A browser signed in to thimble's page at 12:39.", agent: '', chat: '', at: '2026-09-20T12:39:00Z', acts: [{ label: 'Sign it out', act: 'sign-out', slug: 'b1' }] }
+  const old = { ...NOTICE, id: 'n0', text: 'An old failure.', at: '2026-09-20T12:00:00Z' }
+  w.states.home.notices = [earlier, old]
+  await $.session.start({ cwd: CWD, surface: 'terminal', isInteractive: true } as never)
+  const first = (await $.ui.mount(aboveAt(160))) as unknown as M
+  await first.unmount()
+  await w.clock.settle()
+  const m = (await $.ui.mount(aboveAt(160))) as unknown as M
+  expect(await m.find({ type: 'Box', key: 'above-notice-si1' })).toBeUndefined()
+  expect(JSON.stringify(await m.drawn())).not.toContain('signed in')
+  await m.unmount()
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  expect(w.toasts.filter(t => /signed in|An old failure/.test(t))).toEqual([])
+  // a sign-in in this session shows, with one toast
+  const now = { ...earlier, id: 'si2', key: 'signin:new:b2', text: "A browser signed in to thimble's page at 09:15.", at: '2026-10-16T09:15:00Z', acts: [{ label: 'Sign it out', act: 'sign-out', slug: 'b2' }] }
+  w.states.home.notices = [now, earlier, old]
+  w.stamps.set(`${WS}/notices.json`, 9)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  const after = (await $.ui.mount(aboveAt(160))) as unknown as M
+  expect(words(await after.find({ type: 'Box', key: 'above-notice-si2' }))).toContain('at 09:15.')
+  await after.unmount()
+  expect(w.toasts.filter(t => /signed in/.test(t))).toEqual(["thimble: A browser signed in to thimble's page at 09:15."])
+})
