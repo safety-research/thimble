@@ -6,11 +6,16 @@
 //
 // Every row but the thimble line is one line (the owner's live test, 10-17: "bottom tray is a mess"): a dim label
 // column (`notice` in red), then its words cut with `…` at the room its acts leave them, then its acts at the right,
-// each in the accent and underlined under the pointer as the thimble line's names are, the row's main act bold:
+// each in the accent and underlined under the pointer as the thimble line's names are, the row's main act bold. A
+// notice's words show whole instead, wrapped, so none is cut off; only the newest notice shows, and the others wait
+// behind one row under it, `5 more notices ›`, whose press shows them there, newest first, and turns into `show fewer`
+// with `dismiss all` (bug hunt B5 and C21: stacked, a view proposal, six notices and the SSH row took 14 of 58 rows):
 //
 //   view proposal  Page Histories                                       accept  reject  don't ask again  dismiss
 //                  Each wiki page as a strip of its saves over time, colored by the author, whole and wrapped
-//   notice         Claude's safeguards switched a reply of the orientation…    see the orientation ›  dismiss
+//   notice         Claude's safeguards switched a reply of the orientation    see the orientation ›  dismiss
+//                  from Opus 5.5 to Opus 4.8.
+//                  5 more notices ›
 //
 // A press on words cut short shows them whole, wrapped, and a second press cuts them again; on the view proposal the
 // press is its name's. Where the acts would leave the words fewer than MIN_WORDS cells, they take a row of their own
@@ -45,7 +50,7 @@ import type { AnswerComment, CoverageSummary, FeatureSettings, SummarySeen, Term
 import type { Ctx } from './ctx'
 import { clean, cut, noControls, width } from './lib'
 import { docsOf } from './model'
-import { dismissModNotice, modActWords, modNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
+import { dismissModNotice, modActWords, modNotices, moreNotices, noticeActWords, runNoticeAct, seeWords, toastNewNotices } from './notices'
 import { browserShown, copyRemoteLink, copyTunnel, dismissLinks } from './offramp'
 import { answerOffer, dismissNotice, homeNotices, homeOffer, noticeAct, noticeWords, openHomeNew, openNoticeChat, proposalsOff, refreshUnsure } from './panel'
 import { COLORS } from './paint'
@@ -363,6 +368,20 @@ async function toggleRow(cx: Ctx, key: string): Promise<void> {
   await cx.bumpPanel()
 }
 
+// whether the notices besides the newest show (`5 more notices ›` pressed), in this session; false again once only one
+// is left, so the next that comes waits behind the row
+let noticesOpen = false
+
+/** The notices besides the newest shown, or behind their row again. */
+async function toggleNotices(cx: Ctx): Promise<void> {
+  noticesOpen = !noticesOpen
+  await cx.bumpPanel()
+}
+
+/** One notice above the prompt: its row's key, when it was posted (ms), its words, its acts with `dismiss` last, and
+ *  what `dismiss` does, which `dismiss all` does for each. */
+type NoticeRow = { key: string; at: number; words: string; acts: BandAct[]; dismiss: () => Promise<void> }
+
 export function registerBand(on: On): void {
   // the panel showing a section's list clears that section's `new`; any view but the checks' lets its comment go
   on('state.set', { plugin: 'thimble', key: 'panel' }, async ($, e, next) => {
@@ -510,31 +529,60 @@ export function registerBand(on: On): void {
       }
       rows.push(trayRow('above-offer', narrow ? 'proposal' : 'view proposal', words, acts, { own, more }))
     }
-    // every agent's open notices, newest first, then the terminal's own: `notice` in red on the label column, the words in
-    // the text color, cut to the line; then the acts that fix it, the agent's thread (`see the orientation ›`) and
-    // `dismiss`, each saying what its press does. Notices with the same words are one row, their count first (`3× …`),
-    // and `dismiss` takes them all. Each new one posts one toast (notices.tsx)
+    // every open notice, every agent's and the terminal's own, newest first: `notice` in red on the label column, the
+    // words in the text color, whole and wrapped; then the acts that fix it, the agent's thread (`see the orientation ›`)
+    // and `dismiss`, each saying what its press does. Notices with the same words are one row, their count first (`3×
+    // …`), and `dismiss` takes them all. The newest shows; the others wait behind one row under it, `5 more notices ›`,
+    // whose press shows them there and turns into `show fewer`, with `dismiss all` at the right. Each new one posts one
+    // toast (notices.tsx)
     const notices = await homeNotices(cx)
     toastNewNotices(cx, notices)
     const mainFirst = (acts: BandAct[]) => acts.map((a, i) => (i === 0 && acts.length > 1 ? { ...a, primary: true } : a))
-    for (const n of notices) {
-      const key = 'above-notice-' + n.id
-      const acts = mainFirst([
-        ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: noticeActWords(a), press: () => noticeAct(cx, n, a) })),
-        ...(n.open ? [{ key: `${key}-open`, label: seeWords(n), press: () => openNoticeChat(cx, n) }] : []),
-        { key: `${key}-dismiss`, label: 'dismiss', press: () => dismissNotice(cx, n) },
-      ])
-      const { room, own } = wordsRoom(cols, LW, acts)
-      rows.push(trayRow(key, 'notice', foldWords(key, noticeWords(n), room), acts, { color: COLORS.problem, own }))
-    }
-    for (const n of await modNotices(cx)) {
-      const key = `above-mod-${n.key.replace(/[^a-z0-9-]+/gi, '-')}`
-      const acts = mainFirst([
-        ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: modActWords(a), press: () => runNoticeAct(cx, n, a) })),
-        { key: `${key}-dismiss`, label: 'dismiss', press: () => dismissModNotice(cx, n.key) },
-      ])
-      const { room, own } = wordsRoom(cols, LW, acts)
-      rows.push(trayRow(key, 'notice', foldWords(key, n.text, room), acts, { color: COLORS.problem, own }))
+    const all: NoticeRow[] = [
+      ...notices.map(n => {
+        const key = 'above-notice-' + n.id
+        const dismiss = () => dismissNotice(cx, n)
+        const acts = mainFirst([
+          ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: noticeActWords(a), press: () => noticeAct(cx, n, a) })),
+          ...(n.open ? [{ key: `${key}-open`, label: seeWords(n), press: () => openNoticeChat(cx, n) }] : []),
+          { key: `${key}-dismiss`, label: 'dismiss', press: dismiss },
+        ])
+        return { key, at: n.at, words: noticeWords(n), acts, dismiss }
+      }),
+      ...(await modNotices(cx)).map(n => {
+        const key = `above-mod-${n.key.replace(/[^a-z0-9-]+/gi, '-')}`
+        const dismiss = () => dismissModNotice(cx, n.key)
+        const acts = mainFirst([
+          ...n.acts.map((a, i) => ({ key: `${key}-act-${i}`, label: modActWords(a), press: () => runNoticeAct(cx, n, a) })),
+          { key: `${key}-dismiss`, label: 'dismiss', press: dismiss },
+        ])
+        return { key, at: n.at, words: n.text, acts, dismiss }
+      }),
+    ].sort((a, b) => b.at - a.at)
+    if (all.length < 2) noticesOpen = false
+    const noticeEl = (r: NoticeRow) =>
+      trayRow(r.key, 'notice', <Text wrap="wrap">{oneLine(r.words)}</Text>, r.acts, { color: COLORS.problem, own: wordsRoom(cols, LW, r.acts).own })
+    for (const r of noticesOpen ? all : all.slice(0, 1)) rows.push(noticeEl(r))
+    if (all.length > 1) {
+      const toggle = (
+        <Button key="above-notices-toggle" plain hover={NO_INVERSE} onPress={() => toggleNotices(cx)}>
+          <Text color={COLORS.accent} wrap="truncate-end" hover={{ underline: true }}>
+            {noticesOpen ? 'show fewer' : moreNotices(all.length - 1)}
+          </Text>
+        </Button>
+      )
+      const acts: BandAct[] = noticesOpen
+        ? [
+            {
+              key: 'above-notices-all',
+              label: 'dismiss all',
+              press: async () => {
+                for (const r of all) await r.dismiss()
+              },
+            },
+          ]
+        : []
+      rows.push(trayRow('above-notices-more', '', toggle, acts))
     }
     // the one SSH row of a remote press: the tunnel command (its Eternal Terminal form when there is one), `copy` it,
     // `copy link` (a one-time link, never drawn), `dismiss`
