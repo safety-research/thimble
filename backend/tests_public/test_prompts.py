@@ -180,6 +180,19 @@ def _skill(name: str) -> "tuple[dict, str]":
     return yaml.safe_load(head), body
 
 
+def test_the_skills_usage_has_no_angle_brackets():
+    """Claude Code escapes `<` and `>` in a skill's description in the `/thimble` typeahead, which then read
+    `/thimble:ask &lt;thread&gt;` (bug hunt F10): each skill's description and argument hint name a placeholder in
+    capitals (`THREAD`, `NAME`) instead, as `[limit=N]` does."""
+    for d in sorted((PLUGIN / "skills").iterdir()):
+        if not (d / "SKILL.md").is_file():
+            continue
+        front, _ = _skill(d.name)
+        for key in ("description", "argument-hint"):
+            text = str(front.get(key) or "")
+            assert not re.search(r"[<>&]", text), (d.name, key, text)
+
+
 def test_the_skills_flags_match_their_tools_arguments():
     """/thimble:orient's flags are one set, each naming one argument of start_orientation, with every argument but the
     brief set by one; /thimble:label's keys are apply_label's arguments, its kinds the predicate's; /thimble:write
@@ -193,7 +206,7 @@ def test_the_skills_flags_match_their_tools_arguments():
     booleans = {f for f, arg in flags.items() if schema[arg].get("type") == "boolean"}
     hint = front["argument-hint"]
     assert all(f"[--[no-]{f}]" in hint for f in booleans), hint
-    assert all(f"[--{f} <" in hint for f in set(flags) - booleans), hint
+    assert all(re.search(rf"\[--{f} [A-Z]+\]", hint) for f in set(flags) - booleans), hint
     assert hint.removeprefix("[focus] ") in front["description"]
 
     front, body = _skill("label")
