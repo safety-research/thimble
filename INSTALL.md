@@ -21,7 +21,7 @@ bubblewrap can create a sandbox, and otherwise with your user's access; `thimble
 
 ## Requirements
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.300), logged in (`claude auth status`)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (tested with 2.1.301), logged in (`claude auth status`)
   or set up with an API key or a cloud provider ([Authentication](#authentication)), with
   its hooks modules on, which thimble's agents need: managed settings with `disableAllHooks` or
   `allowManagedHooksOnly`, or a folder Claude Code doesn't trust, turn them off.
@@ -243,7 +243,8 @@ no system package and never runs sudo.
 install.sh opens with one screen: what it found (Claude Code, Python or uv, Node, a browser, and on Linux whether card
 code and terminal-mode views can run in bubblewrap), what it installs where and about how big, what it changes in your
 Claude Code setup, and whether a question remains. Then it prints a line per step: ✓ when the step is done, ! when it
-needs you, with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`.
+needs you, with what fixes it under it. Every command it runs, with its output, goes to `~/.thimble/install.log`. A
+re-run that finds nothing to do says so in one line, and one that changes something shows only what changed.
 
 It asks one question, and only when it finds no Chrome or Edge that starts under automation: **a browser for
 screenshots**. thimble takes screenshots of the cards and views it draws, to check how they look. It offers Playwright's
@@ -627,13 +628,21 @@ and its on or off. When Claude Code reads the plugin from the install folder its
 the update says what it did, and a `claude` session open since before uses the new plugin after `/reload-plugins`.
 After an update from 0.7, every browser signs in again: type `/thimble browser` in each session.
 
+`thimble update --dry-run` shows what the update would do and changes nothing: the `git pull` it would run, or the
+release zip's check, then the install's own dry run (what it would install where, and the question it would ask). In a
+Dev install that dry run reads the files as they are before the pull.
+
 ## Uninstall
 
 `thimble uninstall` asks, then removes the trust entry an install before 0.6.0 added, thimble's plugin and marketplace
 when their folder is this install's, `~/.local/bin/thimble`, the lines an install before 0.8.0 added to your shell's
 startup files (and a startup file it created, once nothing else is in it), and `~/.thimble`, which holds a Global
-install's workspaces. `--keep-home` keeps `~/.thimble`. A clone stays where it is, and so does a downloaded headless Chromium, in
-Playwright's cache folder.
+install's workspaces. Before it asks, it lists what it removes and what stays. `--keep-home` keeps `~/.thimble`: your
+settings, the demo datasets you downloaded, the logs and thimble's own state, and in a Global install thimble itself with
+your workspaces. It still removes the browsers' sign-in files and keys in it, so every browser signs in again, and the
+markers of the sessions and folders thimble was on in. A Dev install keeps your workspaces in the clone's `workspaces/`
+folder, and the clone stays where it is. So does a downloaded headless Chromium, in Playwright's cache folder
+(`~/.cache/ms-playwright`; on macOS `~/Library/Caches/ms-playwright`), which other programs may use too.
 
 To delete one workspace and keep the install, `thimble list` shows the workspaces by id and `thimble purge <id>` deletes
 that one and prints each path it deleted. The folder it read and your Claude Code transcripts stay.

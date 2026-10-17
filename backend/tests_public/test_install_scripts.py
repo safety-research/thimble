@@ -48,12 +48,17 @@ def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
 
 # uv's stand-in: `uv venv DIR` makes DIR/bin/python the base interpreter without site-packages, so it holds no package
 # (and install.sh fetches no browser for one); `uv pip …` is written to $STUB_LOG, and `uv pip sync` of a
-# requirements.txt prints $STUB_SYNC_OUT and exits with $STUB_SYNC_RC
+# requirements.txt prints $STUB_SYNC_OUT and exits with $STUB_SYNC_RC. `uv sync` makes .venv the same way and says, as
+# uv does, that it checked the packages, or with $STUB_UV_SYNC set that it installed those
 UV_STUB = f"""#!/bin/sh
 case "$1" in
   --version) echo "uv 0.0.0";;
   venv) for a; do d="$a"; done; mkdir -p "$d/bin"
         printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > "$d/bin/python"; chmod +x "$d/bin/python";;
+  sync) mkdir -p .venv/bin
+        printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > .venv/bin/python; chmod +x .venv/bin/python
+        if [ -n "${{STUB_UV_SYNC:-}}" ]; then echo "Installed 1 package in 1ms"; echo "$STUB_UV_SYNC"
+        else echo "Checked 3 packages in 1ms"; fi;;
   pip) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"
        case "$2 $*" in sync*requirements.txt*) printf '%s\\n' "${{STUB_SYNC_OUT:-}}"; exit "${{STUB_SYNC_RC:-0}}";; esac;;
 esac
@@ -254,23 +259,33 @@ def test_update_keeps_the_changes_since_the_release_on_a_branch_and_resets_to_th
 
 
 def test_uninstall_with_keep_home_still_removes_the_sign_in_files_and_the_session_markers(tmp_path):
-    """3.15 and 3.21: a kept home keeps its server state and workspaces, but not the press's sign-in files and one-time
-    links (open/, links/), the sessions' markers with their guide markers (up/) or the folders' markers (active/)."""
-    tree = fake_tree(tmp_path / "app")
+    """3.15 and 3.21, bug hunt F15: a kept home keeps its settings, server state and the rest, but not the browsers'
+    sign-in keys (paired.json, session.key), the press's sign-in files and one-time links (open/, links/), the sessions'
+    markers with their guide markers (up/) or the folders' markers (active/). The plan names what stays exactly, says
+    that a Dev install's workspaces are in the clone, and that the downloaded headless Chromium stays."""
+    tree = fake_tree(tmp_path / "thimble", checkout=True)
     env = env_for(tmp_path)
     home = Path(env["THIMBLE_HOME"])
     home.mkdir()
     (home / "app-dir").write_text(f"{tree}\n")
     (home / "plugin.json").write_text(json.dumps({"registered": ""}))  # install.sh registered no plugin
-    for rel in ("open/a1.html", "links/s1.json", "up/s1.active", "up/s1/guide-marker", "active/%w%corpus",
-                "workspaces/w/notebook.json"):
+    for rel in ("open/a1.html", "links/s1.json", "up/s1.active", "up/s1/guide-marker", "active/%w%corpus", "paired.json",
+                "session.key", "config.json", "demo/collusion-wiki/f", "server.log", "tour.json"):
         (home / rel).parent.mkdir(parents=True, exist_ok=True)
         (home / rel).write_text("x")
+    browsers = tmp_path / "home" / ".cache" / "ms-playwright"
+    (browsers / "chromium_headless_shell-1200").mkdir(parents=True)
     r = subprocess.run(["bash", str(tree / "plugin" / "bin" / "thimble"), "uninstall", "--yes", "--keep-home"],
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
     assert r.returncode == 0, r.stdout + r.stderr
-    assert sorted(p.name for p in home.iterdir()) == ["app-dir", "workspaces"]
-    assert "the browser's sign-in files and one-time links, and the markers of the sessions and folders" in r.stdout
+    assert sorted(p.name for p in home.iterdir()) == ["app-dir", "config.json", "demo", "server.log", "tour.json"]
+    assert ": the browsers' sign-in files and keys (every browser signs in again), the one-time links, and the markers " \
+           "of the sessions and folders thimble was on in" in r.stdout, r.stdout
+    assert (f"  {home} stays (--keep-home), with your settings (config.json); the demo datasets you downloaded (demo/); "
+            "logs (server.log); thimble's own state (app-dir, tour.json)\n") in r.stdout, r.stdout
+    assert f"the clone at {tree} is left in place, with your workspaces (notebooks, labels, reports) in {tree}/workspaces" \
+           in r.stdout
+    assert f"the headless Chromium for screenshots stays in {browsers}" in r.stdout
 
 
 def release_zip(tmp_path: Path, name: str = "thimble-0.0.2-abc1234") -> Path:
@@ -345,6 +360,32 @@ esac
     assert r.returncode == 1 and "no SHA256SUMS beside the zip" in r.stderr and "install.sh ran" not in r.stdout
 
 
+@pytest.mark.skipif(not shutil.which("unzip"), reason="update.sh unpacks with unzip")
+def test_update_dry_run_shows_the_install_s_own_dry_run_and_thimble_help_lists_it(tmp_path):
+    """`thimble update --dry-run` changes nothing. From a zip it checks it, unpacks it into a temporary folder and runs
+    that release's install.sh with --dry-run; in a checkout it prints the pull and runs install.sh's dry run, which
+    names `thimble update` as the command that installs. `thimble help` lists --dry-run."""
+    zp = release_zip(tmp_path / "rel")
+    inst = fake_tree(tmp_path / "rel" / "inst")
+    before = sorted(p.relative_to(inst).as_posix() for p in inst.rglob("*"))
+    r = update(tmp_path / "rel", "--from", str(zp), "--dry-run")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "thimble update --dry-run: what the update would do; nothing changes" in r.stdout and "update.sh" not in r.stdout
+    assert f"the release install.sh ran: --dir {inst} --dry-run" in r.stdout, r.stdout
+    assert sorted(p.relative_to(inst).as_posix() for p in inst.rglob("*")) == before, "nothing changed"
+
+    clone = fake_tree(tmp_path / "dev" / "inst", checkout=True)
+    r = update(tmp_path / "dev", "--dry-run", "--browser", "off", path=f"{stub_bin(tmp_path / 'dev')}:/usr/bin:/bin",
+               STUB_NODE="v22.13.0")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"+ git -C {clone} pull --ff-only" in r.stdout and "installer · Dev install" in r.stdout, r.stdout
+    assert "Nothing to ask: install with  thimble update" in r.stdout and not (clone / "backend" / ".venv").exists()
+
+    usage = subprocess.run(["bash", str(inst / "plugin" / "bin" / "thimble"), "help"], capture_output=True, text=True,
+                           env=env_for(tmp_path / "rel"), timeout=60)
+    assert "thimble update [--from <zip>] [--dry-run]" in usage.stdout, usage.stdout
+
+
 def test_install_sh_adds_the_plugin_with_claude_code_s_commands_and_uninstall_removes_what_it_added(tmp_path):
     """install.sh adds this install's folder as a marketplace and installs thimble from it at user scope, with Claude
     Code's own commands, and says so on its opening screen; it removes the record 0.7's plugin question left. --no-plugin
@@ -379,9 +420,11 @@ def test_install_sh_adds_the_plugin_with_claude_code_s_commands_and_uninstall_re
     record.write_text(json.dumps({"answer": "no", "registered": ""}))  # 0.7's no
     out, changes = install()
     assert changes == [f"plugin marketplace add {dest}", "plugin install --scope user thimble@thimble-local"], out
-    assert "✓ Added thimble's plugin to Claude Code (thimble@thimble-local): /thimble works in any claude session" in out
-    assert "Next: in a folder of transcripts, start claude and type /thimble (in a session that was open before, " \
-           "/reload-plugins first), or run thimble there." in out, out
+    assert "✓ Added thimble's plugin to Claude Code (thimble@thimble-local): thimble is on in every claude session" in out
+    assert ("\nNext: run claude in a folder with your files. thimble is on in every session.\n"
+            "  /thimble browser opens the same session in the browser workbench.\n"
+            "  /plugin turns thimble on or off.\n") in out, "the README's way to start: " + out
+    assert "thimble mode" not in out and "type /thimble" not in out, out
     assert not record.exists(), "0.7's record goes once the plugin is in place"
     assert run(uninstall)[1] == ["plugin uninstall thimble@thimble-local", "plugin marketplace remove thimble-local"]
 
@@ -449,6 +492,48 @@ def test_a_re_run_installs_the_plugin_again_when_its_files_changed_at_the_same_v
     (tree / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "thimble", "version": "0.0.2"}))
     out, changes = install()
     assert changes == ["plugin marketplace update thimble-local", f"plugin update --scope user {pid}"], out
+
+
+def test_a_re_run_with_nothing_to_do_says_so_in_one_line_and_one_that_changes_something_shows_only_that(tmp_path):
+    """A re-run of a Dev install that finds every step done prints no opening screen and no step lines: one line that
+    nothing needed doing, and how to start. When a step does change something, the title and that step's line show,
+    and the last line says the rest was up to date."""
+    tree = fake_tree(tmp_path / "thimble", checkout=True)
+    (tree / "backend" / "uv.lock").write_text("version = 1\n")
+    fe = tree / "frontend"
+    (fe / "dist").mkdir(parents=True)
+    (fe / "package-lock.json").write_text("{}\n")
+    (fe / "dist" / "index.html").write_text("<html></html>")
+    os.utime(fe / "package-lock.json", (1, 1))  # older than the build, which is then current
+    bin_ = stub_bin(tmp_path)
+    claude_stub(bin_)
+    (bin_ / "npm").write_text('#!/bin/sh\nwhile [ $# -gt 1 ]; do [ "$1" = --prefix ] && mkdir -p "$2/node_modules"; '
+                              'shift; done\n')  # npm ci makes node_modules
+    # the lines of `thimble doctor --verbose` that install.sh reads
+    (tree / "plugin" / "bin" / "thimble").write_text('#!/bin/sh\necho "  auth: logged in (stub)"\n'
+                                                     'echo "  network: api.anthropic.com answers"\n')
+    env = env_for(tmp_path, PATH=f"{tmp_path / 'home' / '.local' / 'bin'}:{bin_}:/usr/bin:/bin", STUB_NODE="v22.13.0",
+                  CLAUDE_STATE=str(tmp_path / "claude.json"))
+
+    def install(**extra: str) -> str:
+        r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), *ANSWERS], capture_output=True, text=True,
+                           env={**env, **extra}, stdin=subprocess.DEVNULL, timeout=60)
+        assert r.returncode == 0, r.stdout + r.stderr
+        return r.stdout
+
+    where = tree.resolve()
+    first = install()
+    assert "\nInstalling\n" in first and f"\nDone: thimble 0.0.1 is installed in {where}\n" in first, first
+    assert "installer · Dev install: thimble runs from this folder\n" in first, "in plain words"
+    assert f"  your workspaces       {where}/workspaces (the cards, labels and reports thimble makes)\n" in first, first
+    assert install().strip() == (f"thimble 0.0.1 is installed in {where} and up to date: nothing needed doing.\n"
+                                 "Next: run claude in a folder with your files. thimble is on in every session.\n"
+                                 "  /thimble browser opens the same session in the browser workbench.\n"
+                                 "  /plugin turns thimble on or off.")
+    lines = install(STUB_UV_SYNC=" + idna==3.10").strip().splitlines()
+    assert lines[0].startswith("thimble 0.0.1 installer · ") and lines[1:4] == [
+        f"✓ Python packages installed in {where}/backend/.venv (the versions backend/uv.lock pins)", "",
+        f"Done: thimble 0.0.1 is installed in {where}; the rest was up to date."], lines
 
 
 def test_install_sh_leaves_out_what_thimble_doctor_leaves_out_when_it_compares_plugin_copies():

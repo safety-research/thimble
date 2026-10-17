@@ -2707,7 +2707,8 @@ def transport_line(cwd: Path) -> str:
 
     c = config.workspace_for_cwd(str(cwd))
     if not c:
-        return "thimble is not on in this folder yet (a data read, /thimble or load_thimble turns it on)"
+        return ("thimble is not on in this folder yet; it turns on by itself when a claude session here first reads "
+                "your files")
     ws = config.workspace_path(c)
     rec = read_launch(c)
     kind = subagent_files.transport(ws)
@@ -2780,7 +2781,7 @@ def terminal_checks_line() -> str:
 # free disk, who holds the port, how a session started here would hear the browser, and whether the API host answers.
 # Each reader returns a short phrase and never raises, since the doctor must print even on a broken machine.
 
-TESTED_CLAUDE_CODE = "2.1.300"  # INSTALL.md and README.md name the same version (test_cli.py)
+TESTED_CLAUDE_CODE = "2.1.301"  # INSTALL.md and README.md name the same version (test_cli.py)
 MODS_CLAUDE_CODE = "2.1.287"  # the first Claude Code that loads plugin mods, thimble's hooks module, by default
 CLAUDE_CODE_SEEN_FILE = "claude_code.json"  # in <home>: the newer Claude Codes the analyst was told about
 NODE_MIN_MAJOR = 20  # custom views are built with Node 20+ (views.py)
@@ -3148,6 +3149,7 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  server: {'up' if up else 'down'} at {url}; pid {pid or '-'} "
                  f"({'alive' if pid_alive(pid) else 'gone'}); started {st.get('started') or '-'}"
                  + (f"; stopped {st['stopped']}" if st.get("stopped") else "")
+                 + ("" if up else "; only the browser workbench needs it, and /thimble browser starts it")
                  + (f"; {STUCK_LINE.format(pid=stuck)}" if isinstance(stuck, int) else ""))
     ui = int(st.get("ui_port") or ui_port())
     if env["dev"]:
@@ -3324,7 +3326,7 @@ def _server_check() -> Check:
     if listening(p) and explicit_port() is not None:  # without THIMBLE_PORT the next start passes over it (pick_port)
         return Check(False, f"Port {p} is taken by another program",
                      "In a shell: stop that program, then thimble server restart")
-    return Check(True, "Server not running (it starts when you press ↗ or type /thimble browser)")
+    return Check(True, "Server not running (only the browser needs it: /thimble browser starts it)")
 
 
 def _plugin_check(cwd: Path) -> Check:
@@ -3409,13 +3411,17 @@ def _hooks_fix(why: str) -> str:
     return f"In your Claude Code settings: remove {setting}, then restart claude"
 
 
+# no session here has turned thimble on yet, which it does by itself at a session's first read of data (activate.py)
+AGENTS_NOT_YET = "thimble's agents start once a claude session here reads your files"
+
+
 def _agents_check(cwd: Path) -> Check:
     why = modules_off(cwd)
     if why:
         return Check(False, "thimble's agents can't start: Claude Code's hooks are off", _hooks_fix(why))
-    c = config.workspace_for_cwd(str(cwd))
-    if c and folder_trusted(cwd) is False:  # a folder thimble never opened: Claude Code asks when claude starts there
+    if folder_trusted(cwd) is False:  # Claude Code asks when claude starts there, and loads the module only on a yes
         return Check(False, "Claude Code doesn't trust this folder yet", "In a shell: run claude here and accept the prompt")
+    c = config.workspace_for_cwd(str(cwd))
     launch = read_launch(c)
     again = "In the Claude Code terminal: /thimble"
     if launch.get("modules_off"):
@@ -3430,7 +3436,7 @@ def _agents_check(cwd: Path) -> Check:
                          f"{again}, then see {VERBOSE_FIX}")
         if isinstance(out, dict) and out.get("session"):
             return Check(True, "thimble's agents can start in this folder")
-        return Check(True, "thimble's agents start once thimble is on here")
+        return Check(True, AGENTS_NOT_YET)
     try:
         from . import subagent_files  # noqa: PLC0415 — standard library only
 
@@ -3441,7 +3447,7 @@ def _agents_check(cwd: Path) -> Check:
         return Check(False, "thimble's agents didn't start in the last session", f"{again}; {VERBOSE_FIX} says why")
     if isinstance(rec, dict) and rec.get("session"):
         return Check(True, "thimble's agents can start in this folder")
-    return Check(True, "thimble's agents start after /thimble here")
+    return Check(True, AGENTS_NOT_YET)
 
 
 def _extension_checks() -> list[Check]:
@@ -4449,7 +4455,8 @@ def build_parser() -> argparse.ArgumentParser:
     ex.set_defaults(fn=cmd_extension)
     u = sub.add_parser("update", help="bring the install up to date: the latest GitHub release via gh, or --from <zip>")
     u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
-    u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")
+    u.add_argument("--dry-run", action="store_true",
+                   help="show what the update would do, with the install's own dry run; change nothing")
     u.add_argument("--browser", choices=("bundled", "system", "off"), help="passed on to install.sh")
     for flag in INSTALL_FLAGS:
         u.add_argument(flag, dest="install_flags", action="append_const", const=flag, help="passed on to install.sh")

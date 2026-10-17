@@ -209,6 +209,23 @@ def test_doctor_says_what_claude_reports_about_its_login_and_never_a_value(home,
     assert config.AUTH_HELP in said and "ANTHROPIC_API_KEY" not in said, "the login and the pointer, nothing longer"
 
 
+def test_doctor_names_the_readme_s_tested_version_and_marks_a_folder_claude_code_does_not_trust(
+        home, monkeypatch, tmp_path, claude_global_config):
+    """The doctor's tested Claude Code is the one README.md and INSTALL.md name. Its checklist marks a folder Claude Code
+    does not trust with !, where thimble's agents cannot start, whether or not thimble opened it; in a trusted folder
+    that no session has used, it says the agents start at a session's first read, which turns thimble on by itself."""
+    for doc in ("README.md", "INSTALL.md"):
+        assert f"(tested with {cli.TESTED_CLAUDE_CODE})" in (config.REPO_ROOT / doc).read_text(), doc
+    monkeypatch.setattr(cli, "modules_off", lambda cwd, given="": "")
+    folder = tmp_path / "data"
+    folder.mkdir()
+    check = cli._agents_check(folder)  # the config trusts no folder
+    assert not check.ok and check.line == "Claude Code doesn't trust this folder yet", check
+    claude_global_config.write_text(json.dumps({"projects": {str(folder.resolve()): {"hasTrustDialogAccepted": True}}}))
+    check = cli._agents_check(folder)
+    assert check.ok and check.line == "thimble's agents start once a claude session here reads your files", check
+
+
 def test_fix_and_revert_run_only_in_a_development_install(home, monkeypatch, capsys):
     """`thimble fix` and `thimble revert` change thimble's own code, which a release install cannot: each says so and
     exits 1 before it asks or touches anything, and /thimble fix says the same to the session."""

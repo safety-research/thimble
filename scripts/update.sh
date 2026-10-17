@@ -18,6 +18,9 @@
 # the frontend's packages; in a checkout it also rebuilds frontend/dist when the pull changed a file it is built from (a
 # release brings its own build). Claude Code takes the new plugin copy only when plugin.json's version changed, and a
 # running session only when it restarts; a running server is not restarted here (one line says how for each).
+# --dry-run (thimble update --dry-run) changes nothing: it prints the pull or the zip's check, then runs install.sh's own
+# dry run, which shows what the install would do and the question it would ask. In a checkout that dry run reads the
+# files as they are before the pull; a zip on disk is unpacked into a temporary folder for it, and a URL is not fetched.
 set -euo pipefail
 
 usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
@@ -41,12 +44,12 @@ while [ $# -gt 0 ]; do
     --browser=* | --no-plugin | --require-pinned | --sandbox-deps | --no-sandbox-deps | --plugin | --no-modify-path \
       | --modify-path) install_flags+=("$1"); shift;;
     -h|--help) usage; exit 0;;
-    *) echo "update.sh: unknown argument $1" >&2; usage >&2; exit 2;;
+    *) echo "thimble update: unknown argument $1" >&2; usage >&2; exit 2;;
   esac
 done
 
 say() { printf '%s\n' "$*"; }
-die() { printf 'update.sh: %s\n' "$*" >&2; exit 1; }
+die() { printf 'thimble update: %s\n' "$*" >&2; exit 1; }
 run() { printf '+'; printf ' %q' "$@"; printf '\n'; [ "$dry" = 1 ] || "$@"; }
 json_get() {
   if command -v python3 >/dev/null 2>&1; then
@@ -86,7 +89,14 @@ installed_args=()
 [ -n "$mp_name" ] && installed_args+=(--marketplace-name "$mp_name")
 [ "$dry" = 1 ] && installed_args+=(--dry-run)
 installed_args+=(${install_flags[@]+"${install_flags[@]}"})
-[ "$dry" = 1 ] && say "update.sh --dry-run: printing the steps; nothing changes"
+[ "$dry" = 1 ] && say "thimble update --dry-run: what the update would do; nothing changes"
+# install.sh's dry run then names `thimble update` as the command that installs
+export THIMBLE_INSTALL_VIA=update
+dry_install() {  # dry_install INSTALL.SH: install.sh's own dry run, which changes nothing, for what the install would do
+  local sh="$1"; shift
+  say "+ bash $sh --dir $dir${installed_args[*]+ ${installed_args[*]}}"
+  bash "$sh" --dir "$dir" ${installed_args[@]+"${installed_args[@]}"}
+}
 
 # keep_local_fixes: on a release install, the commits after its baseline and the edits not committed, on a new branch
 # local-fixes-<date>, and the install's branch back at the baseline, so install.sh replaces only the release's files
@@ -117,6 +127,11 @@ keep_local_fixes() {
 if [ -e "$dir/.git" ] && [ ! -f "$dir/RELEASE.json" ]; then
   say "thimble $old_version at $dir (git checkout)"
   run git -C "$dir" pull --ff-only
+  if [ "$dry" = 1 ]; then
+    say "(the pull does not run in a dry run, so install.sh's dry run below reads the files as they are now)"
+    dry_install "$dir/scripts/install.sh"
+    exit 0
+  fi
   new_version="$(json_get "$dir/plugin/.claude-plugin/plugin.json" version)"
   run bash "$dir/scripts/install.sh" --dir "$dir" ${installed_args[@]+"${installed_args[@]}"}
 else
@@ -155,11 +170,9 @@ else
   else
     say "no SHA256SUMS beside $zip_path and no --sums: its SHA-256 is not checked"
   fi
-  run unzip -q "$zip_path" -d "$tmp/unpacked"
-  if [ "$dry" = 1 ]; then
-    say "+ bash <unpacked>/scripts/install.sh --dir $dir ${installed_args[*]+"${installed_args[*]}"}"
-    exit 0
-  fi
+  # into a temporary folder, removed on exit, so a dry run unpacks it too, for install.sh's own dry run
+  say "+ unzip -q $zip_path -d $tmp/unpacked"
+  unzip -q "$zip_path" -d "$tmp/unpacked"
   root=""
   if is_tree "$tmp/unpacked"; then root="$tmp/unpacked"; else
     for cand in "$tmp/unpacked"/*/; do
@@ -170,6 +183,7 @@ else
   new_version="$(json_get "$root/plugin/.claude-plugin/plugin.json" version)"
   say "release $new_version ($(json_get "$root/RELEASE.json" commit 2>/dev/null || echo '?')) → $dir"
   keep_local_fixes
+  if [ "$dry" = 1 ]; then dry_install "$root/scripts/install.sh"; exit 0; fi
   run bash "$root/scripts/install.sh" --dir "$dir" ${installed_args[@]+"${installed_args[@]}"}
 fi
 
