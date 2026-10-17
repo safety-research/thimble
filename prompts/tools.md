@@ -1243,7 +1243,7 @@ its text and graphics span {used} of its {width} px, so the rest of the pane is 
 
 ## view-not-claimed
 
-{count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The analyst sees each one above the view as not read. If the view is for all of them, claim them and let the analyst choose among the folders.
+{count} files sit in folders beside the ones the view claims and hold the same files, such as another run's: {files}. The view leaves them out. If the view is for all of them, claim them and let the analyst choose among the folders.
 
 ## view-derived-unlisted
 
