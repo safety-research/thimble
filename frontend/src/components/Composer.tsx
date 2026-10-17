@@ -33,9 +33,9 @@ export interface ComposerFrameProps {
   /** rows above the text (a title field) */
   head?: ReactNode
   /** the running agent's Stop, which takes the send square's place while the field is empty: `label` names it in the
-   * tooltip and to a screen reader (Stop the orientation), and `busy` shows the ring while the stop request is in
-   * flight */
-  stop?: { label: string; onStop: () => void; busy?: boolean }
+   * tooltip and to a screen reader (Stop the orientation), or `tip` in the tooltip when it differs (a line above the
+   * composer says the rest), and `busy` shows the ring while the stop request is in flight */
+  stop?: { label: string; onStop: () => void; busy?: boolean; tip?: string }
   sendIcon?: IconName
   sendLabel?: string
   mono?: boolean
@@ -88,7 +88,7 @@ export function ComposerFrame({ value, onChange, onSubmit, placeholder, label, d
         <span className="composer-spacer" />
         {tools}
         {stop && !value.trim() ? (
-          <Button variant="primary" size="sm" icon="stop" title={stop.label} aria-label={stop.label} type="button" className="composer-send" busy={stop.busy} onClick={stop.onStop} />
+          <Button variant="primary" size="sm" icon="stop" title={stop.tip ?? stop.label} aria-label={stop.label} type="button" className="composer-send" busy={stop.busy} onClick={stop.onStop} />
         ) : (
           <Button variant={ready ? 'primary' : 'secondary'} size="sm" icon={sendIcon} title={sendLabel} aria-label={sendLabel} type="submit" className="composer-send" disabled={!ready} busy={busy} />
         )}

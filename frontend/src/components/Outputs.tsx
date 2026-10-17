@@ -364,8 +364,12 @@ type Embedded = DrawnChart & { spec: unknown; fitWidth: number | undefined; them
 
 /** One chart: embeds once its container has a box, drawn as lib/vegaDraw draws every chart (a card's defaults, fitted
  * to its box, on the paper of what shows it, measured and refitted); re-fits when the box changes and re-embeds when
- * the theme or label colours change. */
-function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: number; card?: boolean; labels?: ChartLabels }) {
+ * the spec, the theme or the label colours change. A spec equal to the one drawn is the same chart: the canvas reads
+ * its cards again whenever anything on it changes, and each read hands every chart a new copy of its spec, which drew
+ * every chart again and moved the cards under them as each embed emptied and refilled its box. While a chart draws
+ * again, its box keeps the height it had, so the cards around it move once, by the change, if at all. */
+function Vega({ spec: given, fitWidth, card, labels }: { spec: unknown; fitWidth?: number; card?: boolean; labels?: ChartLabels }) {
+  const spec = useSameValue(given)
   const ref = useRef<HTMLDivElement>(null)
   // the labels' classes as a string, so a new list of the same labels embeds nothing again and a changed colour does
   const colours = JSON.stringify((labels ?? []).map((k) => classesOf(k).map((c) => [c.name, c.color ?? 0])))
@@ -379,6 +383,7 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
   const plain = useMemo(() => specObject(spec), [spec])
   useEffect(() => {
     const el = ref.current
+    if (el && (width <= 0 || !plain)) el.style.minHeight = ''
     if (!el || width <= 0 || !plain) return
     const cur = live.current
     if (cur && cur.spec === spec && cur.fitWidth === fitWidth && cur.theme === theme && cur.colours === colours) {
@@ -388,6 +393,13 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
     let alive = true
     setError(null)
     setDrawn(false)
+    // the box keeps the height of the chart drawn before until this one is drawn (each embed empties it first)
+    const held = cur ? el.offsetHeight : 0
+    if (held > 0) el.style.minHeight = `${held}px`
+    // only the latest draw lets go: one that a new draw replaced leaves the hold to it
+    const release = () => {
+      if (alive) el.style.minHeight = ''
+    }
     // the label colours are read per theme
     const classes = (JSON.parse(colours) as [string, number][][]).map((k): LabelClassColour[] => k.map(([name, n]) => ({ name, colour: token(colourToken(n)), none: !n })))
     drawChart(el, plain, () => loadChunk(() => import('vega-embed')), {
@@ -403,8 +415,12 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
         live.current = { ...d, spec, fitWidth, theme, colours }
       },
     })
-      .then(() => alive && setDrawn(true))
+      .then(() => {
+        release()
+        if (alive) setDrawn(true)
+      })
       .catch((e) => {
+        release()
         if (!alive) return
         setError(failureText(e))
         setDrawn(true)
@@ -427,6 +443,21 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
       {plain && error && <pre className="outputs-text outputs-error">Chart failed: {error}</pre>}
     </div>
   )
+}
+
+/** `value` as first seen while it stays equal by value (JSON) to it: a new copy of the same spec is the same spec. */
+export function useSameValue<T>(value: T): T {
+  const kept = useRef<{ value: T; key: string | null }>({ value, key: null })
+  const key = useMemo(() => {
+    try {
+      return JSON.stringify(value) ?? null
+    } catch {
+      return null
+    }
+  }, [value])
+  if (kept.current.value !== value && (key == null || key !== kept.current.key)) kept.current = { value, key }
+  else if (kept.current.key == null) kept.current.key = key
+  return kept.current.value
 }
 
 function ErrorOut({ err, maxLines }: { err: any; maxLines?: number }) {

@@ -1166,6 +1166,12 @@ button.model-line-part[aria-expanded='true'] {
 .chat-strip-retry {
   flex: none;
 }
+/* the composer's Stop did not stop the run: why and what to do, whole, under the bar, in the warning color */
+.chat-strip-note {
+  padding: 0 12px 8px 29px;
+  font: var(--type-ui-sm);
+  color: var(--status-warning);
+}
 .chat-strip-steps {
   display: flex;
   flex-direction: column;
