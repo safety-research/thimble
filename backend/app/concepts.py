@@ -5333,8 +5333,9 @@ def _classes_in(body: list[ClassBody] | None) -> list[dict] | None:
 
 @router.post("/ws/{c}/concepts")
 async def create_concept_route(c: str, body: NewConcept) -> dict:
-    """A new label, answered as its card (with_stats). With `run` (the browser's Run and Label from prompt) it runs at
-    once and is kept only once its run starts (create_and_run), and the answer's `run` is its run record."""
+    """A new label, answered as its card (with_stats). With `run` (the new-label card's Run, a Label from prompt draft's
+    too) it runs at once and is kept only once its run starts (create_and_run), and the answer's `run` is its run
+    record."""
     ws = _ws(c)
     concept = new_concept(body.name, body.description, body.kind, body.spec, body.unit, body.labels, body.created_by,
                           marks=body.marks, glob=body.glob, model=body.model, classes=_classes_in(body.classes), shown=body.shown)
@@ -5350,10 +5351,11 @@ APPLIES_TO_EMPTY = "Applies to is empty. Name the files the label runs over, suc
 
 
 async def create_and_run(c: str, ws: Path, concept: dict) -> dict:
-    """A new label that the browser runs at once (its edit card's Run, Label from prompt), not yet written: what its run
-    would refuse is refused before the label is written, in the words of the edit card's fields, and a run that still
-    does not start takes the label away again, so a failed run never leaves an empty label behind (0.9.0 bug hunt D1).
-    Answered as the label's card (with_stats) with its run record as `run`."""
+    """A new label that the browser runs at once (its edit card's Run, which a Label from prompt draft fills for the
+    analyst to check, 0.9.0 bug hunt G12), not yet written: what its run would refuse is refused before the label is
+    written, in the words of the edit card's fields, and a run that still does not start takes the label away again, so
+    a failed run never leaves an empty label behind (0.9.0 bug hunt D1). Answered as the label's card (with_stats) with
+    its run record as `run`."""
     files = concept["unit"] in FILE_UNITS
     paths = glob_patterns(concept["glob"]) if files else []
     if files and not paths:
@@ -5783,6 +5785,7 @@ async def labels_for_refs_route(c: str, body: RefsBody) -> list[dict]:
 PRESENCE_CACHE: dict[Path, tuple[tuple[int, int] | None, dict]] = {}  # labels file -> (its key, the store's presence)
 RULER_BINS = 400      # the overview ruler's resolution by default
 GLOB_LISTED = 200     # files the glob route lists
+GLOB_COUNTED = 1_000_000  # units the glob route counts at most before it answers "more than" (units_at_least)
 
 
 def _presence(ws: Path, concept_id: str) -> dict[str, dict[str, int]]:
@@ -5867,15 +5870,21 @@ def ruler_route(c: str, path: str, bins: int = RULER_BINS, turns: bool = False) 
 
 
 @router.get("/ws/{c}/labels/glob")
-def glob_route(c: str, pattern: str = "") -> dict:
+def glob_route(c: str, pattern: str = "", unit: str = "") -> dict:
     """{files: [path, ...], total}: the corpus files a label's glob (comma-separated patterns) applies to, the first
-    GLOB_LISTED of them."""
+    GLOB_LISTED of them. With a file `unit`, also `units`, how many units a run over them reads, which the new-label
+    card's Run names, and `units_more` when there are more than GLOB_COUNTED (0.9.0 bug hunt G12: Label from prompt ran
+    a prompt label over 42,205 records with no count shown)."""
     try:
         corpus_dir = config.corpus_dir(c)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
     found = match_paths(corpus_dir, glob_patterns(pattern))
-    return {"files": [s["path"] for s in found[:GLOB_LISTED]], "total": len(found)}
+    out: dict[str, Any] = {"files": [s["path"] for s in found[:GLOB_LISTED]], "total": len(found)}
+    if unit in FILE_UNITS:
+        n, _read = units_at_least(corpus_dir, found, unit, GLOB_COUNTED)
+        out.update(units=min(n, GLOB_COUNTED), units_more=n > GLOB_COUNTED)
+    return out
 
 
 # --------------------------------------------------------------------------- a label from a description

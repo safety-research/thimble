@@ -222,6 +222,17 @@ export function useFilesLabels(ws: string): FilesLabels {
   return useMemo(() => ({ all, on, focus, setFocus, byId, presence, toggle, setClasses, setColour, save, remove }), [all, on, focus, setFocus, byId, presence, toggle, setClasses, setColour, save, remove])
 }
 
+/** Stop a label's run (POST /concepts/{id}/apply/cancel): it ends after the batch it is on, the rows written so far
+ * stay, and its end reaches the label's row as any run's end does. A refusal says so in a toast. */
+export async function stopLabelRun(ws: string, id: string, name: string): Promise<void> {
+  track('label-apply', { target: `concept:${id}`, detail: { stop: true } })
+  try {
+    await labelApi.cancel(ws, id)
+  } catch (e) {
+    bus.emit('toast', { text: `Could not stop ${name}. ${(e as Error).message}`, kind: 'error' })
+  }
+}
+
 /** The Files label filter, {concept, value} or null: read once, then kept from the `filter` events of the Files scope. A
  * view keeps its records by it. */
 export function useFilesFilter(ws: string): LabelFilter | null {

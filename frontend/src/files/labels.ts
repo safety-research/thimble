@@ -255,7 +255,7 @@ export const unitWord = (unit: string, n: number): string => (UNIT_WORDS[unit] ?
  * none it can state; `sample` for a trial, run on a sample of its units), or a failed run with its message. */
 export type LabelStatus =
   | { state: 'running'; done: number; total: number | null; unit: string }
-  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null; sample?: boolean }
+  | { state: 'done'; matches: number; total: number | null; failed: number; ts: string; unit: string; cut?: ReadCut | null; sample?: boolean; stopped?: boolean }
   | { state: 'error'; message: string }
 
 /** A run's total as its outcome can state it: none when the run kept none, or kept one below the units that matched
@@ -285,13 +285,16 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   if (run && (run.status === 'error' || run.status === 'done') && (!last || later(run.started, last.ts))) {
     if (run.status === 'error') return { state: 'error', message: run.message || 'the run failed' }
     const matches = run.matches ?? 0
-    return { state: 'done', matches, total: statedTotal(run.total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null, ...sample }
+    // a run the analyst stopped states the units it read, not those it would have read
+    const stopped = !!(run.summary as { stopped?: boolean } | null | undefined)?.stopped
+    const total = stopped ? run.done ?? null : run.total
+    return { state: 'done', matches, total: statedTotal(total, matches), failed: run.failed ?? 0, ts: run.started ?? '', unit: k.unit, cut: run.cut ?? null, ...sample, ...(stopped ? { stopped } : {}) }
   }
   if (!last) return null
   if (last.status === 'error') return { state: 'error', message: last.message || 'the run failed' }
-  const total = last.total ?? last.matched_total ?? last.labeled
+  const total = last.stopped ? last.labeled + last.failed + (last.skipped ?? 0) : last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
-  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null, ...sample }
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null, ...sample, ...(last.stopped ? { stopped: true } : {}) }
 }
 
 /** An outcome as the label row says it: "468 of 2,392,002 records", or "468 records" without a total, a trial's as

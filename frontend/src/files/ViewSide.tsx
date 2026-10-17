@@ -4,11 +4,11 @@
 // its own label controls and thimble draws none in its head; they open the label editor in a popover over the view
 // (ViewPane), never this sidebar, which opens beside a view built without label controls while a label is on or a label
 // marks the view's files, with the offer to add them (AddLabelControls). useLabelRuns keeps the runs of the labels'
-// applies, polled while they run, and Retry.
+// applies, polled while they run, Retry and Stop run, and brings the row of a run the analyst starts into view.
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
 import { Spinner } from '../components/Spinner'
-import { api, labelApi } from '../lib/api'
+import { api, isNotFound, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { demoStop } from '../lib/demo'
 import { refreshProposals } from '../lib/proposals'
@@ -20,7 +20,7 @@ import { LabelEditor } from './LabelEditor'
 import { viewLabels } from './labels'
 import { LabelsPane } from './LabelsPane'
 import { TREE } from './params'
-import { useFilesFilter, type FilesLabels } from './useLabels'
+import { stopLabelRun, useFilesFilter, type FilesLabels } from './useLabels'
 import type { BuiltView } from './ViewsBar'
 
 /** How often a label whose apply runs is read again, until the run ends. */
@@ -32,10 +32,19 @@ export interface LabelRuns {
   setRun: (id: string, run: ConceptRun | null) => void
   /** apply a label again after a failed run */
   retry: (id: string) => Promise<void>
+  /** a run the analyst started here (an edit card's Run or Re-run): followed as setRun follows a run, and its label's
+   * row brought into view in the Labels pane (bug hunt G12: a new label ran at the bottom of a scrolled list) */
+  start: (id: string, run: ConceptRun) => void
+  /** the label whose row the Labels pane brings into view once it lists it, null once it has (`revealed`) */
+  reveal: string | null
+  revealed: () => void
+  /** stop a label's run: it ends after the batch it is on, and the poll then reads its end */
+  stop: (id: string) => Promise<void>
 }
 
 /** The runs of the labels' applies: a run the labels say is running is polled every RUN_POLL_MS until it ends, and its
- * record carries the progress, then the outcome or the failure the label's row shows. */
+ * record carries the progress, then the outcome or the failure the label's row shows. A label deleted, or one the
+ * server no longer has, is no longer followed. */
 export function useLabelRuns(ws: string, labels: FilesLabels): LabelRuns {
   const [runs, setRuns] = useState<Map<string, ConceptRun>>(new Map())
   const setRun = useCallback((id: string, run: ConceptRun | null) => {
@@ -46,9 +55,22 @@ export function useLabelRuns(ws: string, labels: FilesLabels): LabelRuns {
       return next
     })
   }, [])
+  // the runs no longer followed, by label, with the run's id: a deleted label's, or one the server no longer has, which
+  // a read of the labels from before the delete would otherwise bring back
+  const dropped = useRef(new Map<string, string | null | undefined>())
+  const latest = useRef(runs)
+  latest.current = runs
+  const drop = useCallback(
+    (id: string) => {
+      dropped.current.set(id, latest.current.get(id)?.run_id)
+      setRun(id, null)
+    },
+    [setRun],
+  )
   useEffect(() => {
     for (const k of labels.all) {
       if (k.run?.status !== 'running') continue
+      if (dropped.current.has(k.id) && dropped.current.get(k.id) === k.run.run_id) continue
       const seen = runs.get(k.id)
       if (!seen || (seen.run_id !== k.run.run_id && seen.status !== 'running')) setRun(k.id, k.run)
     }
@@ -70,10 +92,14 @@ export function useLabelRuns(ws: string, labels: FilesLabels): LabelRuns {
         labelApi
           .detail(ws, id)
           .then((k) => setRun(id, k.run ?? null))
-          .catch(() => undefined)
+          // a label the server no longer has is no longer read; any other failure is read again next time
+          .catch((e) => isNotFound(e) && drop(id))
     }, RUN_POLL_MS)
     return () => window.clearInterval(t)
-  }, [polled, ws, setRun])
+  }, [polled, ws, setRun, drop])
+  // a label deleted (here, by main, or in another window) is no longer followed (bug hunt G13: a label deleted while it
+  // ran was read once a second until a reload, 315 times, each a 404)
+  useEffect(() => bus.on('concepts', (e) => void (e.what === 'deleted' && drop(e.concept))), [drop])
   // Retry applies the label again over its glob; the run it starts is polled from the record the server answers, and a
   // refusal shows on the row as the failure did
   const retry = useCallback(
@@ -86,7 +112,19 @@ export function useLabelRuns(ws: string, labels: FilesLabels): LabelRuns {
     },
     [ws, setRun],
   )
-  return useMemo(() => ({ runs, setRun, retry }), [runs, setRun, retry])
+  const [reveal, setReveal] = useState<string | null>(null)
+  const start = useCallback(
+    (id: string, run: ConceptRun) => {
+      setRun(id, run)
+      setReveal(id)
+    },
+    [setRun],
+  )
+  const revealed = useCallback(() => setReveal(null), [])
+  const names = useRef(labels.byId)
+  names.current = labels.byId
+  const stop = useCallback((id: string) => stopLabelRun(ws, id, names.current.get(id)?.name ?? 'the label'), [ws])
+  return useMemo(() => ({ runs, setRun, retry, start, reveal, revealed, stop }), [runs, setRun, retry, start, reveal, revealed, stop])
 }
 
 export interface LabelSideProps {
@@ -135,6 +173,9 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
       onEdit={onEdit}
       runs={runs.runs}
       onRetry={runs.retry}
+      onStop={runs.stop}
+      reveal={runs.reveal}
+      onRevealed={runs.revealed}
       onHide={p.onHide}
       first={p.first}
       onFilter={p.filterable ? onFilter : undefined}
@@ -149,7 +190,7 @@ export function useLabelSide(p: LabelSideProps): { pane: ReactNode; card: ReactN
   const card =
     editing && p.open && (editing === 'new' || labels.byId.has(editing)) ? (
       <div className="label-card-slot" style={{ '--side-w': `${width}px` } as CSSProperties}>
-        <LabelEditor ws={ws} labels={labels} editing={editing} drafted={drafted} appliesTo={appliesTo} onEdit={onEdit} onDraft={onDraft} onRun={runs.setRun} />
+        <LabelEditor ws={ws} labels={labels} editing={editing} drafted={drafted} appliesTo={appliesTo} onEdit={onEdit} onDraft={onDraft} onRun={runs.start} run={editing === 'new' ? null : runs.runs.get(editing)} />
       </div>
     ) : null
   const resizer = <Resizer side="left" width={width} min={TREE.min} max={Math.max(TREE.min, Math.min(TREE.max, Math.floor(p.maxWidth)))} defaultWidth={TREE.def} onResize={p.onWidth} onEnd={p.onWidthEnd} />
