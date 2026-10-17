@@ -1115,7 +1115,7 @@ def _session_chat(c: str, cell: dict[str, Any], author: str) -> str | None:
 
 
 def _role(c: str) -> dict[str, Any]:
-    """The model, effort and speed of the `verify` role's calls (config.call_settings)."""
+    """The model and effort of the `verify` role's calls (config.call_settings)."""
     return config.call_settings(c, "verify")
 
 

@@ -3,7 +3,7 @@ now that its server and its MCP shim start no `claude` of their own (NOCLAUDE.md
 
 A call is a job its caller describes (Spec): instructions, the answer's JSON schema (a call_result.ToolSpec), the model
 and effort of its role's row in Settings, and one or more parts, each a text with pictures. The answer to each part is a
-JSON object that fits the schema. structured() is a call of one part, in place of model.structured; run() is a call of
+JSON object that fits the schema. structured() is a call of one part; run() is a call of
 many parts, such as a prompt label's batches of records, and hands each answer to the caller as it comes (on_answer).
 
 How it runs. run() writes the call's folder, trusted/calls/<id>/ in the workspace (call.json, each part's text and
@@ -36,8 +36,8 @@ such as a prompt label's run). A start refused at Claude Code's subagent limit w
 (no module answers, such as a browser opened with no session), with NO_SESSION's fix; `error` with the refusal's own
 words (main's plan mode, a hook). An agent whose run ends with a part it took and did not answer gives the part back; a
 part given back MAX_TRIES times fails with the agent's last words (no_tool_call), or its API error (refused, rate_limited,
-error). A run the model's safeguards refused runs again, once, on the refusal row's model (Spec.refusal), as
-model.structured did; the result's refused_by names the model that refused.
+error). A run the model's safeguards refused runs again, once, on the refusal row's model (Spec.refusal); the result's
+refused_by names the model that refused.
 
 A fork (Spec.fork). A call that needs main's conversation, the view proposer's, runs its one part as a fork of main
 (`$.agent.spawn` with Claude Code's `fork` type), which inherits main's context, model and effort: its first message is
@@ -906,13 +906,12 @@ async def run(c: str, spec: Spec, parts: Iterable[Part] | AsyncIterable[Part], *
 async def structured(c: str, prompt: str, *, tool: ToolSpec, model: str, effort: str, system: str = "",
                      images: Sequence[tuple[bytes, str]] = (), refusal: dict[str, str] | None = None,
                      what: str = "", title: str = "", done: str = "", timeout_s: float | None = None,
-                     fork: bool = False, **_ignored: Any) -> CallResult:
-    """One structured call of one part, as model.structured made it: `system` the instructions, `prompt` the part's
-    text, `images` its pictures, the answer's schema `tool`, on `model` at `effort`, again on `refusal`'s model when
-    the model refused. Never raises but for the caller's cancel; read the CallResult's status (call_result.Status:
-    `no_session` when no Claude Code session runs thimble here, its detail the fix). Arguments only an Agent SDK
-    session took (speed, cwd, idle_timeout_s, on_retry, on_fallback) are ignored: Claude Code retries the API itself
-    and runs a subagent at main's speed. With `fork` the call runs as a fork of main (module note), on main's model and
+                     fork: bool = False) -> CallResult:
+    """One structured call of one part: `system` the instructions, `prompt` the part's text, `images` its pictures, the
+    answer's schema `tool`, on `model` at `effort`, again on `refusal`'s model when the model refused. Never raises but
+    for the caller's cancel; read the CallResult's status (call_result.Status: `no_session` when no Claude Code session
+    runs thimble here, its detail the fix). Claude Code retries the API itself and runs a subagent at main's speed.
+    With `fork` the call runs as a fork of main (module note), on main's model and
     effort, which `model` and `effort` then only name."""
     if not fork and (not str(model or "").strip() or not str(effort or "").strip()):
         return CallResult(status="error", detail=f"the {tool.name} call names no model or no effort",

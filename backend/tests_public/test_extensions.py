@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 
-from app import (cardtypes, config, extensions, model, orient_session,
+from app import (call_result, cardtypes, config, extensions, orient_session,
                  prompts, report_types, view_fit, views)
 
 FIXTURE = Path(__file__).parent / "fixtures" / "ext-min"
@@ -57,9 +57,9 @@ def fit(monkeypatch) -> dict:
     """The check on whether a view fits, in place: it answers `answer`, and keeps the prompts it got in `asked`."""
     got: dict = {"asked": [], "answer": {"status": "ok", "output": {"fits": True, "reason": "Each record says who did a task."}}}
 
-    async def ask(c: str, text: str, **_kw) -> model.CallResult:
+    async def ask(c: str, text: str, **_kw) -> call_result.CallResult:
         got["asked"].append(text)
-        return model.CallResult(**got["answer"])
+        return call_result.CallResult(**got["answer"])
 
     monkeypatch.setattr(view_fit, "ask", ask)
     return got

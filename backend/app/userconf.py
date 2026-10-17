@@ -22,16 +22,16 @@ One fence for main and its agents. thimble's agents are subagents of main and ru
 adds no rule, working directory or sandbox to main's session, only the hooks module's denies (module_rules). So the
 orientation's `web`, `network` and `data` are main's keys, which every agent shares; the other agents keep only `web:
 off`, which keeps that one agent off the web tools. Code tickets' agents are subagents of main too. The dev agent alone
-keeps its own permission mode, fast mode and fence keys, for an extension's program that runs the dev agent, a job of
-the server (its fast mode was `thimble fix`'s, which starts no Claude Code session now).
+keeps its own permission mode and fence keys, for an extension's program that runs the dev agent, a job of the server.
 Installs follow Claude Code's permission mode: thimble adds no rule for them. The web tools do too at `web` "ask":
 Manual asks for them as Claude Code does, and auto mode's classifier judges them. An `ask` rule would also ask in auto
 mode, since Claude Code obeys an explicit ask rule there (live check: the checks asked three times for the web in auto
 mode). The keys earlier builds read for this,
-`installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
-(IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
-from the Settings pane drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
-again on, which `off` turns off) are classifier rows.
+`installs`, each agent's own `fast` (no agent has a fast mode of its own: each runs as a subagent of main), and
+`permissionMode` and `web` other than "off" but the dev agent's (IGNORED_KEYS), are read and ignored, so an earlier
+config stays valid; `ignored` lists those a file holds, and a save from the Settings pane drops them. `labels`,
+`cardCheck` and `suggest` (the viewer suggestion) are model calls, each a `thimble:call` subagent of main, and
+`refusal` is the model and effort a refused call's agent runs on again, which `off` turns off.
 
 Extensions' programs. An extension's program that runs an agent or one of its tasks (harness.py) is no subagent of main:
 it runs in a box of its own and keeps its power. So it takes its agent's own `env`, `sandbox`, `network` and `data`
@@ -70,6 +70,7 @@ SUBAGENT_ROLES = ("orientation", "critic", "writer", "checks")  # the agents tha
 # the keys of each agent that earlier builds read and this one reads and ignores (module note, one fence)
 IGNORED_KEYS: dict[str, tuple[str, ...]] = {
     **{a: ("fast", "permissionMode") for a in ("orientation", "critic", "writer", "checks")},
+    **{a: ("fast",) for a in ("dev", "labels", "cardCheck", "suggest")},
 }
 IGNORED_TOP = ("installs",)  # top-level keys read and ignored
 # the keys of an agent that runs as a subagent of main which only an extension's program running the agent reads (module
@@ -110,7 +111,7 @@ ASK_WITHOUT_SANDBOX = ("dev",)
 
 
 def _session_agent(web: str, network: str = "on") -> dict[str, Any]:
-    return {"model": None, "effort": None, "fast": None, "permissionMode": None, "web": web, "network": network,
+    return {"model": None, "effort": None, "permissionMode": None, "web": web, "network": network,
             "sandbox": "on", "data": "ask", "env": [], "memory": "inherit", "prompt": None}
 
 
@@ -136,11 +137,11 @@ DEFAULTS: dict[str, Any] = {
         "critic": _subagent(None),
         "writer": _subagent(None),
         "checks": _subagent(None),
-        "dev": _session_agent("off"),  # its `fast` was `thimble fix`'s (config.FAST_OF_TICKETS)
+        "dev": _session_agent("off"),
         # `network`, `data` and `env` reach only an extension's program that runs one of their tasks (harness.py)
-        **{a: {"model": None, "effort": None, "fast": None, "network": "on", "data": "ask", "env": [], "prompt": None}
+        **{a: {"model": None, "effort": None, "network": "on", "data": "ask", "env": [], "prompt": None}
            for a in CALLS},
-        "suggest": {"model": None, "effort": None, "fast": None},
+        "suggest": {"model": None, "effort": None},
         "refusal": {"model": None, "effort": None, "off": None},
     },
     # `views.propose`: whether thimble shows the analyst view proposals, after a turn and for a file type
@@ -459,7 +460,7 @@ def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
             efforts = config.role_efforts(ROLES[name]) if name in ROLES and k == "effort" else config.ROLE_EFFORTS
             if v not in efforts and not (name == "orientation" and k == "effort" and v in config.LEGACY_EFFORTS):
                 out.append(f"{at} is {json.dumps(v)}; it takes {_words(tuple(e for e in efforts if e))} or null")
-        elif k in ("fast", "auto", "off"):
+        elif k in ("auto", "off"):
             if not isinstance(v, bool):
                 out.append(f"{at} is {json.dumps(v)}; it takes true, false or null")
         elif k == "permissionMode":
@@ -701,9 +702,8 @@ _STRICT = {"manual": 0, "auto": 1, "bypass": 2}
 
 def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
     """An earlier build's `models` (less main's) and `permission_modes` as settings of this file: each role's model and
-    effort, and its fast mode where the agent still takes one, the orientation subagents' model and effort as the
-    orientation's subagentModel and subagentEffort, and the dev agent's row, or `views` where its own row is not set, the
-    stricter of the two when both are. The other agents' rows are left out: they run in main's mode now (module note, one
+    effort, the orientation subagents' model and effort as the orientation's subagentModel and subagentEffort, and the
+    dev agent's row, or `views` where its own row is not set, the stricter of the two when both are. The other agents' rows are left out: they run in main's mode now (module note, one
     fence)."""
     by_role = {role: name for name, role in ROLES.items()}
     agents: dict[str, dict[str, Any]] = {}
@@ -726,8 +726,6 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
             mine["model"] = conf["model"].strip()
         if effort and (effort in config.role_efforts(role) or role == "orient" and effort in config.LEGACY_EFFORTS):
             mine["effort"] = effort
-        if isinstance(conf.get("fast"), bool) and "fast" in DEFAULTS["agents"][name]:
-            mine["fast"] = conf["fast"]
         if mine:
             agents.setdefault(name, {}).update(mine)
     got = {a: m for a, m in rows.items() if m in PERMISSION_MODES and a in ("dev", "views")}
@@ -740,9 +738,9 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
 
 
 def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> dict[str, Any]:
-    """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, fast?, off?}} (main's left
+    """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, off?}} (main's left
     out, '' for back to the default; `subagents` is thimble:orient-helper's row, the orientation's subagentModel and
-    subagentEffort; `fast` only for an agent that takes it, `off` only for the refusal row; an extension's agent,
+    subagentEffort; `off` only for the refusal row; a `fast` an earlier tab sends is left out; an extension's agent,
     "<ext>:<name>", takes its model and effort only) and `rows` {row of modes.AGENTS: mode, None for main's}, `views`
     being the dev agent's row of earlier builds. A row of an agent that runs in main's mode now, which an earlier tab may
     send, is left out (modes.IGNORED_ROWS)."""
@@ -766,7 +764,7 @@ def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> di
             continue
         if name is None:
             raise ConfigError(f"no role {role!r}; one of {', '.join(by_role)}, or an extension's agent")
-        for k in ("model", "effort", "fast", "off"):
+        for k in ("model", "effort", "off"):
             if k in conf and k in DEFAULTS["agents"][name]:
                 v = conf[k]
                 agents.setdefault(name, {})[k] = (str(v).strip() or None) if k in ("model", "effort") and v is not None else v

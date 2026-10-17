@@ -81,8 +81,8 @@ def _conf(data) -> None:
 def test_every_role_resolves_to_a_full_model_id_and_an_explicit_effort(tmp_path, monkeypatch):
     """No role resolves to an empty model or effort: the agents, thimble:orient-helper's row (`subagents`), the classifiers,
     the viewer suggestion and the refusal row each name a full id and a level Claude Code takes, also when an agent
-    file names none. A stored `ultracode` runs at xhigh, the orientation's default is xhigh, and `fast` is kept only for
-    the classifiers."""
+    file names none. A stored `ultracode` runs at xhigh, the orientation's default is xhigh, and an earlier build's `fast`
+    is read and ignored: every role runs as a subagent of main, which has no fast mode of its own."""
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
     for k in [k for k in __import__("os").environ if k.startswith("THIMBLE_") and k.endswith(("_MODEL", "_EFFORT"))]:
         monkeypatch.delenv(k)
@@ -105,9 +105,9 @@ def test_every_role_resolves_to_a_full_model_id_and_an_explicit_effort(tmp_path,
     assert models["orient"]["effort"] == "xhigh", "a stored ultracode runs at xhigh"
     assert (models["subagents"]["model"], models["subagents"]["effort"]) == ("claude-sonnet-5", "medium")
     assert "follows" not in models["subagents"]
-    assert models["writer"]["effort"] == "max" and not models["writer"]["fast"]
-    assert models["dev"]["fast"], "code tickets keep the dev row's fast mode"
-    assert models["labels"]["fast"], "a classifier keeps its fast mode"
+    assert models["writer"]["effort"] == "max"
+    assert not any("fast" in conf for conf in models.values()), "no role has a fast mode"
+    assert "speed" not in config.call_settings(None, "labels")
     assert models["suggest"]["effort"] == "high"
     assert config.call_settings(None, "labels")["refusal"] == {"model": "claude-sonnet-5", "effort": "low"}
     _conf({"agents": {"refusal": {"off": True}}})

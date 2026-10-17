@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
 // The settings popover (src/shell/SettingsPopover.tsx): one model table with a row per role and exactly the model and
 // effort that runs, Claude Code's levels in every agent's effort menu and none for a model that runs with none, fast
-// mode only for the classifiers, main and `thimble fix` (on the dev row), the view proposals' and the refusal's
-// rows, the orientation subagents' row with its effort, a web switch per agent; the View proposals switch, sent only
+// mode only for main, the viewer suggestion's and the refusal's rows, the orientation subagents' row with its effort, a web switch per agent; the View proposals switch, sent only
 // when it changed; thimble's rules for main and its agents, code tickets' among them (web and data follow the session's
 // mode, and the shell runs in Claude Code's sandbox where /thimble saw one); one permission row, the dev agent's
 // program's, only where an extension runs one, with Manual and Auto and no Bypass (0.9.0: a session or a row in Bypass

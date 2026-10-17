@@ -467,25 +467,6 @@ class Listener:
 
 
 @pytest.fixture(autouse=True)
-def _no_rate_limit_retry_wait(monkeypatch):
-    """model.structured waits before its one 429 retry; tests wait 0 s."""
-    from app import model
-
-    monkeypatch.setattr(model, "RATE_LIMIT_RETRY_S", 0.0)
-
-
-@pytest.fixture(autouse=True)
-def _no_backoff_wait(monkeypatch):
-    """retry.with_retries waits between retries of a transient failure; tests wait 0 s and the retries still run."""
-    from app import retry
-
-    async def no_wait(s: float) -> None:
-        return None
-
-    monkeypatch.setattr(retry, "_sleep", no_wait)
-
-
-@pytest.fixture(autouse=True)
 def _no_plugin_list(monkeypatch):
     """launch_args asks `claude plugin list` which plugin copy the session loads (cli.installed_copy). Tests load
     plugin/."""

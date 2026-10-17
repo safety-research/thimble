@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from app import concepts, config, notebook, tools
-from app import model as model_mod
+from app import call_result as model_mod
 
 CORPUS = "mini"
 FILES = ["agents/agent-01.jsonl", "agents/agent-02.jsonl", "agents/agent-03.jsonl"]

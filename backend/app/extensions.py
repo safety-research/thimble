@@ -1373,7 +1373,6 @@ def agent_models(c: str | None) -> dict[str, dict[str, Any]]:
             model = str(mine["model"] or front.get("model") or "")
             out[key] = {"model": config.exact_model(model) if model else subagents,
                         "effort": config.effort_level(mine["effort"] or front.get("effort")) or helper["effort"],
-                        "fast": False,
                         "extension": e["name"]}
     return out
 

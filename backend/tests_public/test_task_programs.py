@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from app import agent_session, concepts, config, extensions, harness, kernel_wrap, model, tasks, userconf
+from app import agent_session, call_result, concepts, config, extensions, harness, kernel_wrap, tasks, userconf
 
 CORPUS = "mini"
 
@@ -129,8 +129,8 @@ async def test_a_task_program_s_output_is_checked_and_a_failing_one_fails_the_ca
     assert got.value.detail.startswith("probe's label-draft program gave no label: "), got.value.detail
 
 
-def model_result(output: dict) -> model.CallResult:
-    return model.CallResult(status="ok", output=output, model_requested="m")
+def model_result(output: dict) -> call_result.CallResult:
+    return call_result.CallResult(status="ok", output=output, model_requested="m")
 
 
 @pytest.mark.skipif(not kernel_wrap.srt_works(*(lambda s: (s.node(), s.package(config.REPO_ROOT)))(

@@ -201,7 +201,7 @@ def apply_workers() -> int:
 
 
 def labels_model(c: str) -> dict[str, Any]:
-    """The model, effort and speed of the labels role's calls for a workspace, and the refusal row's
+    """The model and effort of the labels role's calls for a workspace, and the refusal row's
     (config.call_settings)."""
     return config.call_settings(c, "labels")
 

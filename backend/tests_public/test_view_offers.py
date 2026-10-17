@@ -176,11 +176,11 @@ def _calls_answering(monkeypatch, results: list) -> list[str]:
 ])
 async def test_a_file_type_check_s_notice_says_why_it_failed_and_how_to_fix_it(corpus, monkeypatch, result, reason,
                                                                                turn_off):
-    from app import model
+    from app import call_result
 
     told = _fake_notices(monkeypatch)
     monkeypatch.setattr(views, "_suggest_failed", {})
-    _calls_answering(monkeypatch, [model.CallResult(**result)])
+    _calls_answering(monkeypatch, [call_result.CallResult(**result)])
     assert await views.suggest(CORPUS, "run.trace") is None
     [(_, _, kw)] = told
     assert kw["text"] == f"Couldn't check for a view proposal for .trace files: {reason}"

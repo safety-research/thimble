@@ -37,12 +37,10 @@ The assertions (each one line of results.jsonl, {step, title, status, detail}; s
                    answers an agent id;
   stop             TaskStop through the bridge (subagents.stop) stops that agent as soon as it runs: the agent ends
                    stopped, makes no request after it, and main gets no call, notification or hand-back for it;
-  classifier       one structured call (Settings' labels row) runs `claude` with that row's --model and --effort while
-                   CLAUDE_CODE_EFFORT_LEVEL is set in the environment, which the call's own environment blanks;
   quit             /exit and "Exit and stop tasks" end main.
 It quits with /exit and "Exit and stop tasks", never ←, and stops its tmux session (never the tmux server). Everything
 goes to <out folder>: events.jsonl (each step), screens/, hooks.jsonl, server.log is the caller's, transcripts/ (main's
-and the agents', copied), workspace/ (subagents.json, launch.json), classifier/ and summary.json. Exit 0 when every
+and the agents', copied), workspace/ (subagents.json, launch.json) and summary.json. Exit 0 when every
 assertion passed, 1 otherwise.
 """
 from __future__ import annotations
@@ -97,7 +95,6 @@ ASSERTIONS = {
     "descendants": "A general-purpose child runs on its parent's run values, a thimble:orient-helper child on the helper's",
     "clear": "After /clear the hello arrives under the new session id and a spawn through it answers",
     "stop": "TaskStop through the bridge stops an agent with nothing reaching main",
-    "classifier": "A structured call's claude argv carries --model and --effort while CLAUDE_CODE_EFFORT_LEVEL is set",
     "quit": "/exit and Exit and stop tasks end main",
 }
 
@@ -236,25 +233,6 @@ def origin_of(rec: dict) -> dict:
 def answered_after(rows: list[dict], at: float) -> bool:
     """Whether main wrote an assistant record after `at` (its answer to a row it got then)."""
     return any(r.get("type") == "assistant" and when(r) > at for r in rows)
-
-
-def flag_value(argv: list[str], flag: str) -> str | None:
-    for i, a in enumerate(argv):
-        if a == flag and i + 1 < len(argv):
-            return argv[i + 1]
-        if a.startswith(flag + "="):
-            return a.split("=", 1)[1]
-    return None
-
-
-def check_classifier(calls: list[dict], want: dict, status: str) -> tuple[bool, str]:
-    if not calls:
-        return False, f"no `claude` was run (the call ended {status})"
-    argv, env = calls[0].get("argv") or [], calls[0].get("effort_env")
-    model, effort = flag_value(argv, "--model"), flag_value(argv, "--effort")
-    ok = model == want["model"] and effort == want["effort"] and not env and status == "ok"
-    return ok, (f"argv --model {model!r} --effort {effort!r} (Settings' labels row {want['model']!r}, {want['effort']!r}); "
-                f"CLAUDE_CODE_EFFORT_LEVEL in the call's environment {env!r} (the test set it to high); call {status}")
 
 
 # --------------------------------------------------------------------------------------------- the terminal
@@ -403,14 +381,9 @@ class Check:
         except Exception as e:  # noqa: BLE001 — every assertion not reached fails with this
             self.note("error", error=f"{type(e).__name__}: {e}", trace=traceback.format_exc())
             for name in ASSERTIONS:
-                if name not in self.results and name not in ("classifier", "quit"):
+                if name not in self.results and name != "quit":
                     self.results[name] = (False, f"not reached: {type(e).__name__}: {e}")
         finally:
-            try:
-                if "classifier" not in self.results:
-                    self.classifier()
-            except Exception as e:  # noqa: BLE001
-                self.result("classifier", False, f"{type(e).__name__}: {e}")
             self.quit()
             self.evidence()
             if self.server is not None:
@@ -653,21 +626,6 @@ class Check:
         env.update({"CLAUDE_CODE_DISABLE_AGENT_VIEW": "1", "DISABLE_AUTOUPDATER": "1"})
         return env
 
-    def classifier(self) -> None:
-        folder = self.out / "classifier"
-        folder.mkdir(parents=True, exist_ok=True)
-        env = {k: v for k, v in self.environ.items() if not SESSION_VARS.match(k)}
-        env["CLAUDE_CODE_EFFORT_LEVEL"] = "high"
-        r = subprocess.run([sys.executable, "-I", str(Path(__file__).resolve()), "--classifier-smoke", str(self.tree),
-                            str(folder)], env=env, capture_output=True, text=True, timeout=600, check=False)
-        (folder / "smoke.log").write_text(r.stdout + r.stderr, "utf-8")
-        try:
-            got = json.loads((folder / "smoke.json").read_text("utf-8"))
-        except (OSError, ValueError):
-            self.result("classifier", False, f"the smoke wrote no result (exit {r.returncode}; {folder / 'smoke.log'})")
-            return
-        self.result("classifier", *check_classifier(jsonl(folder / "argv.jsonl"), got["want"], got["status"]))
-
     def quit(self) -> None:
         term = self.term
         if term is None or not term.alive():
@@ -712,33 +670,6 @@ class Check:
                     shutil.copy2(ws / "trusted" / name, self.out / "workspace" / name)
 
 
-# --------------------------------------------------------------------------------------------- the classifier smoke
-
-def classifier_smoke(tree: Path, folder: Path) -> int:
-    """One structured call on Settings' labels row with CLAUDE_CODE_EFFORT_LEVEL set (the caller set it), its `claude`
-    a wrapper that logs its argv and that variable as the call gives it, then runs the real `claude`."""
-    real = shutil.which("claude") or "claude"
-    wrapper = folder / "claude"
-    log = folder / "argv.jsonl"
-    wrapper.write_text("#!/bin/sh\n"
-                       f"{shlex.quote(sys.executable)} -I -c 'import json, os, sys; print(json.dumps({{\"argv\": sys.argv[1:], "
-                       f"\"effort_env\": os.environ.get(\"CLAUDE_CODE_EFFORT_LEVEL\")}}))' \"$@\" >> {shlex.quote(str(log))}\n"
-                       f"exec {shlex.quote(real)} \"$@\"\n")
-    wrapper.chmod(0o755)
-    os.environ["THIMBLE_CLAUDE_BIN"] = str(wrapper)
-    sys.path.insert(0, str(tree / "backend"))
-    from app import config, model  # noqa: PLC0415
-
-    want = config.call_settings(None, "labels")
-    tool = model.ToolSpec("answer", "Your answer.", {"type": "object", "properties": {"ok": {"type": "boolean"}},
-                                                     "required": ["ok"]})
-    res = asyncio.run(model.structured("Call the answer tool with ok true.", tool=tool, cwd=str(folder), **want))
-    (folder / "smoke.json").write_text(json.dumps({"want": {"model": want["model"], "effort": want["effort"]},
-                                                    "status": res.status, "detail": res.detail,
-                                                    "model_used": res.model_used}, indent=1))
-    return 0
-
-
 # --------------------------------------------------------------------------------------------- main
 
 def serve(check: Check) -> None:
@@ -772,8 +703,6 @@ def serve(check: Check) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
-    if argv[:1] == ["--classifier-smoke"]:
-        return classifier_smoke(Path(argv[1]).resolve(), Path(argv[2]).resolve())
     ap = argparse.ArgumentParser()
     ap.add_argument("tree")
     ap.add_argument("corpus")

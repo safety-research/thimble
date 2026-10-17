@@ -14,7 +14,7 @@ import pytest
 from fastapi import FastAPI
 
 from app import concepts, config, refs
-from app import model as model_mod
+from app import call_result as model_mod
 
 CORPUS = "mini"
 MINI = config.corpus_dir(CORPUS)
