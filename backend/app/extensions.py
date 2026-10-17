@@ -1872,11 +1872,7 @@ def switch(name: str, on: bool, workspaces_dir: Path | None = None) -> dict[str,
 
 def off_in(name: str, workspaces_dir: Path | None = None) -> list[str]:
     """The workspaces under `workspaces_dir` whose own switch in Settings keeps extension `name` off."""
-    try:
-        base = workspaces_dir or config.WORKSPACES_DIR
-        folders = sorted(d for d in base.iterdir() if d.is_dir() and config._valid_name(d.name))
-    except OSError:
-        return []
+    folders = config.workspace_folders(workspaces_dir)
     return [d.name for d in folders
             if name in _words(_renamed_state(_json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE)).get("off"))]
 
@@ -1898,11 +1894,8 @@ def list_lines(workspaces_dir: Path) -> list[str]:
     if not got:
         return ["No extensions added. `thimble extension add <folder | git URL | built-in name>` adds one.", *idle]
     off = userconf.extensions_off()
-    try:
-        folders = sorted(d for d in workspaces_dir.iterdir() if d.is_dir() and config._valid_name(d.name))
-    except OSError:
-        folders = []
-    states = {d.name: _renamed_state(_json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE)) for d in folders}
+    folders = config.workspace_folders(workspaces_dir)
+    states ={d.name: _renamed_state(_json(d / kernel_wrap.REGISTRY_DIR / STATE_FILE)) for d in folders}
     width = max((len(d.name) for d in folders), default=0)
     out = []
     for name, root in got.items():
