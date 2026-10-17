@@ -831,7 +831,7 @@ def ask_again(c: str, rid: str, call: str, event_id: str) -> dict[str, Any] | No
 async def start_job(c: str, role: str, key: str, task: str, values: dict[str, Any], route: str, *,
                     description: str = "", request_id: str | None = None, chat: dict[str, Any] | None = None,
                     work: Path | str | None = None, call: str | None = None, caller_role: str | None = None,
-                    check: bool = True, fields: dict[str, Any] | None = None) -> Answer:
+                    check: bool = True, fields: dict[str, Any] | None = None, inline: str | None = None) -> Answer:
     """One start of any role, for the agent of `key`, with the prompt `task` and the run's values. A click or a
     follow-on start writes the pending request, then asks the module to spawn it, and answers what the module did
     (Answer); a typed one records the request and answers the exact Agent call for the start tool's result. Without a
@@ -843,7 +843,10 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     the orientation). A typed start whose tool call a thread's fork or another subagent of main's made keeps that
     subagent (`caller_agent`, typed_caller): only its Agent call claims the request. `fields` are more fields of the
     request, such as an orientation's continuation's `continues` (ensure_chat) and the card check's `drop`
-    (agent_call.py)."""
+    (agent_call.py). `inline`, for a typed start, is the whole prompt its agent gets in place of `task`, the short one
+    main types: written to the trusted folder (subagent_files.write_inline) and marked on the request, so the module's
+    spawn hook gives it to the agent (bug hunt I12: a check main started read its task from files, one permission ask
+    each in Manual mode); the agent gets `task` where the module cannot read it."""
     if role not in TYPES or role == HELPER:
         raise ValueError(f"no role {role!r}")
     if check and not caller_role:
@@ -856,9 +859,12 @@ async def start_job(c: str, role: str, key: str, task: str, values: dict[str, An
     prompt = with_request_line(task, rid) if route == TYPED else task
     inp = call_input(role, prompt, description or role)
     caller_agent = await typed_caller(c, call) if route == TYPED and not caller_role else None
+    if inline and route == TYPED:
+        await asyncio.to_thread(files.write_inline, ws(c), rid, with_request_line(inline, rid))
     rid = new_request(c, "start", key, inp, values, route, role=role, rid=rid, chat=dict(chat or {}),
                       work=str(work) if work else None, call=call, caller_role=caller_role,
-                      **({"caller_agent": caller_agent} if caller_agent else {}), **(fields or {}))
+                      **({"caller_agent": caller_agent} if caller_agent else {}),
+                      **({"inline": True} if inline and route == TYPED else {}), **(fields or {}))
     if route == TYPED:
         if work:
             make_work(c, Path(work))
@@ -931,6 +937,8 @@ def bind(c: str, agent_id: str, rid: str) -> dict[str, Any] | None:
         r.update(state="started", agent=agent_id, at=files.now())
         _keep_prompt_short(r)
         left = files.eliminate(state)
+    if r.get("inline"):
+        files.drop_inline(ws(c), rid)
     meta = ensure_chat(c, agent_id)
     for other in left:
         hook_started(c, {"agent_id": other})
@@ -1862,12 +1870,15 @@ def _workspace(body: HookBody) -> str:
 
 
 def hook_started(c: str, hook: dict[str, Any]) -> dict[str, Any]:
-    """SubagentStart: an agent the hook registered gets its chat (ensure_chat); a child of a waiting agent wakes nothing.
+    """SubagentStart: an agent the hook registered gets its chat (ensure_chat), and its start's whole prompt, which the
+    module gave it, goes from the trusted folder (start_job's `inline`); a child of a waiting agent wakes nothing.
     {agent, chat}."""
     agent_id = str(hook.get("agent_id") or "")
     a = agent(c, agent_id)
     if a is None:
         return {"agent": None}
+    if a.get("request"):
+        files.drop_inline(ws(c), str(a["request"]))
     meta = ensure_chat(c, agent_id) if a.get("role") in ROLES else None
     if a.get("parent") and a.get("role") in ROLES:
         set_paused(c, str(a["parent"]), "critique" if a.get("role") == "critic" else None)

@@ -387,6 +387,41 @@ async def _reviewed(slug: str) -> tuple[str, str]:
     return str(ans.agent_id), view_tools.review_key(slug)
 
 
+async def test_bug_hunt_i12_the_check_s_and_the_review_s_pictures_come_in_the_tool_s_result(
+        board, bridge, gates, pictures, hints, tmp_path, monkeypatch):
+    """In Manual mode each picture the builder or the reviewer looked at was a Read of its path outside the analyst's
+    folder, so one more permission ask each (6 in one build and review). view_check's picture and view_pictures'
+    pictures are image blocks of the tool's result, so no Read is needed; a check without a picture has none."""
+    import base64
+
+    slug = _propose(asked=True)
+    agent = await _started(slug)
+    key = view_tools.build_key(slug)
+    _draft(slug)
+    png = tmp_path / "check.png"
+    png.write_bytes(b"\x89PNG\r\n\x1a\nthe page")
+
+    async def answer(c, s, locators, picture):
+        return {"ok": True, "lines": ["the checks passed"], "png": str(png) if picture else None, "drawing": None}
+
+    real = views.check_answer
+    monkeypatch.setattr(views, "check_answer", answer)
+    res = await _call("view_check", {"picture": True}, agent, key)
+    images = [b for b in res.content if b["type"] == "image"]
+    assert not res.is_error and len(images) == 1 and images[0]["mimeType"] == "image/png"
+    assert base64.b64decode(images[0]["data"]) == png.read_bytes()
+    res = await _call("view_check", {}, agent, key)
+    assert [b["type"] for b in res.content] == ["text"], "no picture asked, none given"
+    monkeypatch.setattr(views, "check_answer", real)
+
+    other = _propose("Threads", asked=True)
+    reviewer, rkey = await _reviewed(other)
+    res = await _call("view_pictures", {"states": [{"state": "narrow", "why": "fit"}]}, reviewer, rkey)
+    images = [b for b in res.content if b["type"] == "image"]
+    assert not res.is_error and len(images) == 2, "the overview and the narrow page"
+    assert all(base64.b64decode(b["data"]).startswith(b"\x89PNG") for b in images)
+
+
 async def test_finish_review_restores_a_failing_revision_and_ends_the_review(board, bridge, gates, pictures, hints):
     """A revision that fails the view's checks is undone, back to the view as it last passed, and ends the review."""
     slug = _propose(asked=True)

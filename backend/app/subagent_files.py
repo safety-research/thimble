@@ -62,6 +62,9 @@ LAUNCH = "launch.json"
 FILES = (STATE, CALLERS, LAUNCH)  # in DIR
 ROLES_FILE = "roles.json"  # in DIR, local transport: the roles the module registers (module note)
 MODULE_OUT = "module.json"  # in DIR, local transport: what the module writes, and only the module (module note)
+# in DIR: a typed start's whole prompt, <request id>.md, which the module's spawn hook gives its agent in place of the
+# short prompt main typed (subagents.start_job's `inline`); it goes when the agent takes up its start (subagents.bind)
+INLINE = "inline"
 LOCAL, SERVER = "local", "server"  # a session's transport, launch.json's `transport` (transport)
 TRANSPORTS = (LOCAL, SERVER)
 # launch.json of 0.8.0 named a mode instead: its browser mode ran on the server, its terminal mode had none
@@ -140,6 +143,33 @@ def trusted_dir(ws: Path) -> Path:
 
 def state_path(ws: Path) -> Path:
     return trusted_dir(ws) / STATE
+
+
+def inline_path(ws: Path, rid: str) -> Path:
+    """Where the typed start `rid` keeps the whole prompt its agent gets (INLINE)."""
+    return trusted_dir(ws) / INLINE / f"{rid}.md"
+
+
+def write_inline(ws: Path, rid: str, prompt: str) -> None:
+    """The typed start `rid`'s whole prompt, written whole (a temporary file renamed), private to this user; the files
+    of starts that ended without taking theirs up go once older than DONE_KEEP_S."""
+    path = inline_path(ws, rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    t = time.time()
+    for old in path.parent.glob("*.md"):
+        with contextlib.suppress(OSError):
+            if t - old.stat().st_mtime > DONE_KEEP_S:
+                old.unlink()
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(prompt)
+    os.replace(tmp, path)
+
+
+def drop_inline(ws: Path, rid: str) -> None:
+    with contextlib.suppress(OSError):
+        inline_path(ws, rid).unlink()
 
 
 def callers_path(ws: Path) -> Path:

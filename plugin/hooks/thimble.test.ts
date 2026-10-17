@@ -622,6 +622,26 @@ describe('typed starts', () => {
     expect(await e.step('aT1', null)).toBeUndefined() // a model without effort takes none
   })
 
+  it("gives a typed start's agent the whole prompt its request keeps in the trusted folder, in place of the one main typed (bug hunt I12)", async () => {
+    const e = await started()
+    e.server.state = { ...e.server.state, requests: { req5c0de001: { role: 'check', values: { model: OPUS, effort: 'high' }, inline: true } } }
+    const typed = '[thimble request req5c0de001]\nYour task is in /w/check-work/units/task.md. Read it whole first.'
+    const whole = '[thimble request req5c0de001]\nYour task follows. All of it is here, so do not read a task file.\n\nThe cards: …'
+    e.files[`${WSD}/trusted/inline/req5c0de001.md`] = whole
+    const { seen } = await e.agentCall({ subagentType: 'thimble:check', prompt: typed }, 'aC1')
+    expect(seen.prompt).toBe(whole)
+    expect(seen.model).toBe(OPUS)
+    // a file that names another request, a request without one, or no file: the prompt main typed
+    e.files[`${WSD}/trusted/inline/req5c0de001.md`] = '[thimble request req0ther999]\nanother task'
+    expect((await e.agentCall({ subagentType: 'thimble:check', prompt: typed }, 'aC2')).seen.prompt).toBe(typed)
+    delete e.files[`${WSD}/trusted/inline/req5c0de001.md`]
+    expect((await e.agentCall({ subagentType: 'thimble:check', prompt: typed }, 'aC3')).seen.prompt).toBe(typed)
+    e.server.state = { ...e.server.state, requests: { req5c0de002: { role: 'check', values: { model: OPUS } } } }
+    e.files[`${WSD}/trusted/inline/req5c0de002.md`] = '[thimble request req5c0de002]\nnot asked for'
+    const plain = '[thimble request req5c0de002]\nYour task is in task.md.'
+    expect((await e.agentCall({ subagentType: 'thimble:check', prompt: plain }, 'aC4')).seen.prompt).toBe(plain)
+  })
+
 })
 
 describe('model calls', () => {

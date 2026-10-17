@@ -3,11 +3,11 @@
 server ran around a `claude -p` session are tools they call (plan, lane E):
 
   view_check     the draft check (views.check_answer), as often as the agent wants: the gate with the locators it names,
-                 and a picture of the page as it opens when it asks for one
+                 and a picture of the page as it opens when it asks for one, in the result (with_pictures)
   finish_view    the builder's end: the gates of record (views.gate); a pass registers the view (views.mark_built) and
                  tells main (the `view` event), a failure answers what failed and the attempt, up to dev.MAX_ATTEMPTS
   view_pictures  the reviewer's pictures (view_review.shoot): the overview first, then up to view_review.EXTRA_SHOTS
-                 more states a round, into views-work/<slug>/review/<round>/, whose paths it opens with Read
+                 more states a round, into views-work/<slug>/review/<round>/, each in the result (with_pictures)
   finish_review  the reviewer's end of a round: the gate over its revision, which stays (a round counted, up to
                  view_review.ROUNDS) or is undone (the view as it last passed)
 
@@ -22,8 +22,10 @@ view_review.subagent_ended read the outcome the tool kept on the proposal)."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import logging
+from pathlib import Path
 from typing import Any
 
 from . import config, subagents, tools
@@ -173,6 +175,20 @@ def cancel_grace(c: str, agent_id: str) -> None:
 # --------------------------------------------------------------------------- view_check
 
 
+def with_pictures(text: str, paths: list[str]) -> tools.ToolResult:
+    """A result of `text` with each picture of `paths` after it as an image block, so the agent sees it with no Read
+    call of its own: in Manual mode each Read outside the analyst's folder is a permission ask (bug hunt I12). A
+    picture that cannot be read is left out; its path stays in the text."""
+    content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+    for path in paths:
+        try:
+            data = Path(path).read_bytes()
+        except OSError:
+            continue
+        content.append({"type": "image", "data": base64.b64encode(data).decode("ascii"), "mimeType": "image/png"})
+    return tools.ToolResult(content)
+
+
 def _check_text(answer: dict[str, Any]) -> str:
     lines = [str(x) for x in answer.get("lines") or []]
     head = "The checks pass." if answer.get("ok") else "The checks fail."
@@ -201,7 +217,7 @@ async def tool_view_check(ctx: Any, args: dict[str, Any]) -> Any:
     raw = [raw] if isinstance(raw, str) else raw
     locators = [str(x).strip() for x in raw if str(x).strip()]
     answer = await views.check_answer(ctx.c, slug, locators, bool(args.get("picture")))
-    return tools.ok(_check_text(answer))
+    return with_pictures(_check_text(answer), [str(answer["png"])] if answer.get("png") else [])
 
 
 # --------------------------------------------------------------------------- finish_view
@@ -262,8 +278,9 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
 
 async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_pictures`: pictures of the view the caller reviews, the overview first in each round, then the states it
-    asks for, up to view_review.EXTRA_SHOTS more a round, with the records the pages fetched, what the checks found and
-    what an extension's program that replaces the view-review task found in them (view_review.pictures)."""
+    asks for, up to view_review.EXTRA_SHOTS more a round, each in the result (with_pictures), with the records the
+    pages fetched, what the checks found and what an extension's program that replaces the view-review task found in
+    them (view_review.pictures)."""
     from . import view_review  # noqa: PLC0415
 
     try:
@@ -271,10 +288,11 @@ async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     except Refused as e:
         return tools.err(str(e))
     try:
-        paths, records, reading = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
+        paths, records, reading, pngs = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
     except view_review.NoPictures as e:
         return tools.err(str(e))
-    return tools.ok("\n\n".join(x for x in (tools.hint("view-pictures", paths=paths, records=records), reading) if x))
+    text = "\n\n".join(x for x in (tools.hint("view-pictures", paths=paths, records=records), reading) if x)
+    return with_pictures(text, pngs)
 
 
 # --------------------------------------------------------------------------- finish_review

@@ -124,6 +124,38 @@ async def test_a_module_start_gives_the_check_its_whole_task_and_a_typed_start_n
     assert len(typed) < 2_000 and len(bridge.ops("spawn")) == 1, "main makes the typed Agent call"
 
 
+async def test_bug_hunt_i12_a_typed_start_keeps_the_check_s_whole_task_for_the_module_to_give_its_agent(
+        doc, bridge, monkeypatch):
+    """Bug hunt I12: a check main started with run_check still read task.md and task-2.md before its first command, a
+    permission ask each in Manual mode. Main's Agent call stays short and names the files, and the request keeps the
+    whole task, as a module start's prompt gives it, in the trusted folder, which the module's spawn hook gives the
+    agent in its place; the module's view of the request says so, and the file goes once the agent started."""
+    from app import read_parts
+    from app import subagent_files as sf
+    from subagent_fakes import real_bridge
+
+    monkeypatch.setattr(read_parts, "READ_UNITS", 300)  # the task in several parts
+    await _write()
+    rec = await checks.start_run(CORPUS, "judgment", "report", force=True, route=checks.TYPED, call="toolu_main1")
+    rid = rec["_answer"]["request"]
+    typed = rec["_answer"]["input"]["prompt"]
+    work = checks.work_dir(CORPUS, "judgment", "report")
+    files = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
+    assert str(files[0]) in typed and len(typed) < 2_000, "main types the short prompt"
+    whole = sf.inline_path(config.workspace_dir(CORPUS), rid)
+    text = whole.read_text()
+    task = "".join(p.read_text() for p in files).strip()
+    assert text.split("\n", 1)[0] == typed.split("\n", 1)[0] and rid in text.split("\n", 1)[0], "the same request line"
+    assert task in text and not any(str(p) in text for p in files), "the whole task, no file to read"
+    assert (whole.stat().st_mode & 0o777) == 0o600
+    assert subagents.request(CORPUS, rid)["inline"] is True
+    assert real_bridge._typed(subagents.read(CORPUS))[rid]["inline"] is True
+    with subagents.update(CORPUS) as state:  # the SubagentStart hook took up the start
+        sf._take(state, "aCheck1", rid, sf.requests(state)[rid], "")
+    subagents.hook_started(CORPUS, {"agent_id": "aCheck1"})
+    assert not whole.exists(), "the whole prompt goes once the agent started"
+
+
 def test_a_module_request_s_prompt_goes_once_the_request_ended():
     """On local transport a spawn's arguments wait in subagents.json, which every hook reads: once the module answered
     or the request expired, its prompt (a check's whole task) goes, and its other arguments stay."""
