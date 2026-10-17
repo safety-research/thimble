@@ -5,7 +5,8 @@
 // order they opened with (inKeptOrder), a new thread going after them. A row's right edge is its
 // state (progress, spinner, waiting dot, unread dot, or a finished agent's result and end time) and ⋯ on hover for
 // Rename and Delete. With many threads a search field at the card's foot filters the rows. Picking a row shows that
-// thread's conversation; picking main also folds the tree.
+// thread's conversation and folds the tree, as do Escape and a press anywhere outside the card and its menu (folded
+// once the press's click has landed, since the open card pushes the chat down).
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { Mark } from './Marks'
@@ -195,6 +196,10 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
   const [query, setQuery] = useState('')
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set())
   const inputRef = useRef<HTMLInputElement>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const summaryRef = useRef<HTMLDivElement>(null)
+  // the keys go back to the folded card when the tree folds from within (a pick, Escape)
+  const refocus = useRef(false)
   const editingId = editing?.id
   useEffect(() => {
     if (editingId) inputRef.current?.select()
@@ -207,6 +212,51 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
     const ids = above.split(' ')
     setFolded((f) => (ids.some((id) => f.has(id)) ? new Set([...f].filter((id) => !ids.includes(id))) : f))
   }, [above])
+
+  // the open tree folds on Escape and on a press outside it, anywhere on the page or in a view's frame; not while a row
+  // is renamed or its menu is open (the menu takes that Escape)
+  const busy = useRef(false)
+  busy.current = !!editing || !!menu
+  const foldRef = useRef(onCollapsedChange)
+  foldRef.current = onCollapsedChange
+  useEffect(() => {
+    if (collapsed) return
+    const fold = () => foldRef.current(true)
+    const inside = (t: EventTarget | null) => {
+      if (!(t instanceof Node)) return false
+      const el = t instanceof Element ? t : t.parentElement
+      return !!rootRef.current?.contains(t) || !!el?.closest('.tt-menu')
+    }
+    const onDown = (e: PointerEvent) => {
+      if (inside(e.target)) return
+      window.addEventListener('pointerup', () => window.setTimeout(fold, 0), { once: true })
+    }
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape' || busy.current) return
+      refocus.current = !!rootRef.current?.contains(document.activeElement)
+      fold()
+    }
+    let blurred: number | null = null
+    const onBlur = () => {
+      blurred = window.setTimeout(() => {
+        blurred = null
+        if (document.activeElement instanceof HTMLIFrameElement && document.hasFocus()) fold()
+      }, 0)
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    document.addEventListener('keydown', onKey)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true)
+      document.removeEventListener('keydown', onKey)
+      window.removeEventListener('blur', onBlur)
+      if (blurred != null) window.clearTimeout(blurred)
+    }
+  }, [collapsed])
+  useEffect(() => {
+    if (collapsed && refocus.current) summaryRef.current?.focus()
+    refocus.current = false
+  }, [collapsed])
 
   const cur = nodes.find((n) => n.id === current)
   const att = attention(nodes, current, starter)
@@ -231,10 +281,16 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
     setMenu(null)
     setConfirming(null)
   }
+  const pick = (id: string, keys = false) => {
+    onPick(id)
+    if (collapsed) return
+    refocus.current = keys
+    onCollapsedChange(true)
+  }
   const pickKeys = (e: KeyboardEvent, id: string) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
-      onPick(id)
+      pick(id, true)
     }
   }
   const hasActions = (n: ThreadNode) => !n.fixed && !!(onRename || onDelete)
@@ -263,9 +319,7 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
         onClick={() => {
           if (isEditing) return
           if (n.group) return toggleFold(n.id)
-          onPick(n.id)
-          // main is where the analyst goes back to: picking it folds the open tree
-          if (n.fixed && !collapsed) onCollapsedChange(true)
+          pick(n.id)
         }}
         onKeyDown={(e) => !isEditing && (n.group ? (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggleFold(n.id)) : pickKeys(e, n.id))}
       >
@@ -355,9 +409,9 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
 
   const menuNode = menu ? nodes.find((n) => n.id === menu.id) : null
   return (
-    <div className={`tt${collapsed ? ' tt-collapsed' : ''}${className ? ` ${className}` : ''}`} data-panel="threads">
+    <div ref={rootRef} className={`tt${collapsed ? ' tt-collapsed' : ''}${className ? ` ${className}` : ''}`} data-panel="threads">
       {collapsed ? (
-        <div className="tt-row tt-summary" role="button" tabIndex={0} aria-expanded={false} aria-label="Show threads" onClick={() => onCollapsedChange(false)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onCollapsedChange(false))}>
+        <div ref={summaryRef} className="tt-row tt-summary" role="button" tabIndex={0} aria-expanded={false} aria-label="Show threads" onClick={() => onCollapsedChange(false)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onCollapsedChange(false))}>
           <span className="tt-caret tt-caret-on" aria-hidden="true">
             <Icon name="chevron-right" size={13} />
           </span>
@@ -401,7 +455,11 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => {
                   e.stopPropagation()
-                  if (e.key === 'Escape') setQuery('')
+                  if (e.key !== 'Escape') return
+                  // Escape clears the search, and folds the tree once it is clear
+                  if (query) return setQuery('')
+                  refocus.current = true
+                  onCollapsedChange(true)
                 }}
               />
             </div>

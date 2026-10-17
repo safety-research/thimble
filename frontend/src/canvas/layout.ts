@@ -1,7 +1,8 @@
 // The board's layout math, pure.
 //
 // The board is an infinite plane of frames (groups) and cards (cells). A frame's children are laid out by its flow (a
-// column, or a row for a split group) in order: the group's cards, with a nested group after `order` of them. A child
+// column, or a row for a split group) in order: the group's cards, with a nested group after `order` of them; nested
+// groups that follow each other in a column wrap into rows (gridOf), so Fit shows a frame of many groups readably. A child
 // with a `pos` is placed free inside the frame. A thread's frame that no one has placed stands right of the card it is
 // about. A collapsed frame shows its nested groups and its first card, with the edges of the others stacked under it. Root frames sit at their `pos`, or below the root before them; loose cards sit
 // at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
@@ -179,6 +180,48 @@ export interface Layout {
   depth: Map<string, number>
 }
 
+/** About the shape (width over height) of the room Fit fills on the canvas beside the chat, which a run of nested frames
+ * is wrapped to fill. */
+export const GRID_ASPECT = 1.2
+
+/** A run of boxes wrapped into rows: each box's place (its top left, from the run's top left) and the run's size. */
+export interface Grid {
+  cols: number
+  x: number[]
+  y: number[]
+  w: number
+  h: number
+}
+
+/**
+ * Boxes in order, wrapped row by row into the number of columns at which a viewport of GRID_ASPECT shows them whole at
+ * the largest zoom (the fewer columns on a tie), GAP apart, so a few short boxes stay a column. A column is as wide as
+ * its widest box, a row as tall as its tallest. Pure.
+ */
+export function gridOf(boxes: readonly { w: number; h: number }[]): Grid {
+  const at = (cols: number): Grid => {
+    const colW = Array.from({ length: cols }, (_, j) => Math.max(0, ...boxes.filter((_, i) => i % cols === j).map((b) => b.w)))
+    const rows = Math.ceil(boxes.length / cols)
+    const rowH = Array.from({ length: rows }, (_, r) => Math.max(0, ...boxes.slice(r * cols, (r + 1) * cols).map((b) => b.h)))
+    const left = colW.map((_, j) => colW.slice(0, j).reduce((a, b) => a + b + GAP, 0))
+    const top = rowH.map((_, r) => rowH.slice(0, r).reduce((a, b) => a + b + GAP, 0))
+    return {
+      cols,
+      x: boxes.map((_, i) => left[i % cols]),
+      y: boxes.map((_, i) => top[Math.floor(i / cols)]),
+      w: colW.reduce((a, b) => a + b, 0) + GAP * (cols - 1),
+      h: rowH.reduce((a, b) => a + b, 0) + GAP * Math.max(0, rows - 1),
+    }
+  }
+  let best = at(1)
+  const need = (gr: Grid) => Math.max(gr.w / GRID_ASPECT, gr.h)
+  for (let cols = 2; cols <= boxes.length; cols++) {
+    const next = at(cols)
+    if (need(next) < need(best)) best = next
+  }
+  return best
+}
+
 /** A card's height: its own, else the measured content, else a guess until it is measured. */
 export const cellHeight = (c: BoardCell, heights: Readonly<Record<string, number>>): number => c.h ?? heights[c.id] ?? UNMEASURED_H
 
@@ -208,8 +251,27 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
     // what stands in the frame, a frame with its title's room above it, which a frame beside a card does not cover
     const taken: Rect[] = []
     const besides: { k: Kid & { t: 'g' }; at: Pos | null; card: BoardCell | null }[] = []
-    for (const k of ks) {
+    const put = (k: Kid, p: Pos, s: { w: number; h: number }, title: number) => {
+      rel.set(k.it.id, p)
+      taken.push({ x: p.x, y: p.y - title, w: s.w, h: s.h + title })
+      maxW = Math.max(maxW, p.x + s.w)
+      maxH = Math.max(maxH, p.y + s.h)
+    }
+    const inFlow = (k: Kid | undefined): k is Kid & { t: 'g' } => !!k && k.t === 'g' && !k.it.pos && !k.it.beside
+    for (let i = 0; i < ks.length; i++) {
+      const k = ks[i]
       if (k.t === 'g' && k.it.beside) continue
+      // nested frames that follow each other in a column wrap into rows, so a frame of many groups is not one tall column
+      if (g.flow === 'col' && inFlow(k)) {
+        const run: (Kid & { t: 'g' })[] = []
+        while (inFlow(ks[i])) run.push(ks[i++] as Kid & { t: 'g' })
+        i--
+        const sizes = run.map((r) => measure(r.it))
+        const grid = gridOf(sizes.map((s) => ({ w: s.w, h: s.h + TITLE })))
+        run.forEach((r, n) => put(r, { x: PAD + grid.x[n], y: y + grid.y[n] + TITLE }, sizes[n], TITLE))
+        y += grid.h + GAP
+        continue
+      }
       const s = k.t === 'g' ? measure(k.it) : { w: k.it.w, h: cellHeight(k.it, heights) }
       const title = k.t === 'g' ? TITLE : 0
       let p: Pos
@@ -221,10 +283,7 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
         p = { x: PAD, y: y + title }
         y += s.h + GAP + title
       }
-      rel.set(k.it.id, p)
-      taken.push({ x: p.x, y: p.y - title, w: s.w, h: s.h + title })
-      maxW = Math.max(maxW, p.x + s.w)
-      maxH = Math.max(maxH, p.y + s.h)
+      put(k, p, s, title)
     }
     for (const k of ks) {
       if (k.t !== 'g' || !k.it.beside) continue

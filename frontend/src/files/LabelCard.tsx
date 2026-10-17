@@ -321,7 +321,8 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
     setCut(clamped && !!el && el.scrollHeight > el.clientHeight + 1)
   }, [clamped, draft.body, draft.kind])
   const [scopeOpen, setScopeOpen] = useState(false)
-  const [scope, setScope] = useState<{ files: string[]; total: number } | null>(null)
+  // the files the glob applies to, and the glob they were read for
+  const [scope, setScope] = useState<{ files: string[]; total: number; glob: string } | null>(null)
   const [models, setModels] = useState<{ choices: string[]; role: string }>({ choices: [], role: '' })
   // the class whose palette is open, and its swatch
   const [painting, setPainting] = useState<number | null>(null)
@@ -344,15 +345,17 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ws])
 
-  // the files the glob applies to, read when the list is opened and as the glob changes
+  // the files the glob applies to, read as the glob changes, once the typing pauses, whether the list is open or not, and
+  // again when the list is opened
   useEffect(() => {
-    if (!scopeOpen && scope) return
+    if (!scopeOpen && scope?.glob === draft.glob) return
     let alive = true
+    const glob = draft.glob
     const t = window.setTimeout(() => {
       labelApi
-        .glob(ws, draft.glob)
-        .then((r) => alive && setScope(r))
-        .catch(() => alive && setScope({ files: [], total: 0 }))
+        .glob(ws, glob)
+        .then((r) => alive && setScope({ ...r, glob }))
+        .catch(() => alive && setScope({ files: [], total: 0, glob }))
     }, 200)
     return () => {
       alive = false

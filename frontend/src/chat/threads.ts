@@ -315,6 +315,10 @@ export function threadNodes(items: readonly PickItem[]): ThreadNode[] {
   return nodes
 }
 
+/** The composer's placeholder for a chat named `name`: `Reply in main/why-the-spike…`, with one ellipsis when the
+ * name was cut to one already. Pure. */
+export const replyIn = (name: string): string => `Reply in ${name.replace(/\s*…$/, '')}…`
+
 /** The label of every listed chat by id, for the chips that point at a thread (main/why-the-spike, orient). Pure. */
 export function threadLabels(items: readonly PickItem[]): Map<string, string> {
   return new Map(items.map((it) => [it.id, it.label]))
