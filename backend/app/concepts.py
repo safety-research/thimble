@@ -45,6 +45,7 @@ the first (_label_notice). Main hears how many units got no value in `label_done
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import fnmatch
 import itertools
@@ -717,15 +718,14 @@ def _rebuild_in_background(st: labels_store.Store) -> threading.Thread:
 
 def _rebuild_store(st: labels_store.Store) -> int:
     try:
-        with _pool_lock:
-            pool = _pool_get()
-        return pool.submit(labels_store.rebuild_file, str(st.jsonl)).result()
+        with _pool_held():
+            return _pool_get().submit(labels_store.rebuild_file, str(st.jsonl)).result()
     except Exception:  # noqa: BLE001
         log.info("labels store %s: rebuilding in-process (the scan pool did not take it)", st.db.name, exc_info=True)
         return st.rebuild()
 
 
-_pool_lock = threading.Lock()
+_pool_lock = threading.RLock()  # the scan pool, its holds and its idle timer (_pool_get, _pool_held, _pool_idle)
 
 
 def _store_ready(ws: Path, concept_id: str, *, wait: bool = True) -> labels_store.Store | None:
@@ -2063,6 +2063,12 @@ _tasks: dict[tuple[str, str], asyncio.Task] = {}
 _unlabeled_now: dict[tuple[str, str], list[str]] = {}
 _pool: ProcessPoolExecutor | None = None
 _pool_workers = 1
+# The scan pool's workers end once no label run or store rebuild has held the pool for SCAN_IDLE_S (0: never), so the
+# server does not keep apply_workers() idle interpreters of about 120 MB each between labels; the next run starts a pool.
+SCAN_IDLE_S = float(os.environ.get("THIMBLE_SCAN_IDLE_S", "120") or "120")
+_pool_holds = 0  # the runs and rebuilds that may use the pool now (_pool_held)
+_pool_used = 0.0  # time.monotonic() when the pool was last taken or let go
+_pool_timer: threading.Timer | None = None  # the pending idle check (_pool_idle)
 
 RUN_FIELDS: dict[str, Any] = {
     "run_id": None, "status": "running", "started": None, "created_by": None, "paths": None,
@@ -2094,21 +2100,74 @@ def _watch_parent(parent: int) -> None:
 
 
 def _pool_get() -> ProcessPoolExecutor:
-    """The scan pool: spawned interpreters, apply_workers() of them, kept for the process's life, each ending once this
-    process has gone (_watch_parent)."""
-    global _pool, _pool_workers
-    if _pool is None:
-        _pool_workers = apply_workers()
-        _pool = ProcessPoolExecutor(max_workers=_pool_workers, mp_context=multiprocessing.get_context("spawn"),
-                                    initializer=_watch_parent, initargs=(os.getpid(),))
-    return _pool
+    """The scan pool: spawned interpreters, apply_workers() of them, each ending once this process has gone
+    (_watch_parent). It is kept while a run holds it (_pool_held) and ends SCAN_IDLE_S after the last let it go
+    (_pool_idle); the next call starts a new one."""
+    global _pool, _pool_workers, _pool_used
+    with _pool_lock:
+        _pool_used = time.monotonic()
+        if _pool is None:
+            _pool_workers = apply_workers()
+            _pool = ProcessPoolExecutor(max_workers=_pool_workers, mp_context=multiprocessing.get_context("spawn"),
+                                        initializer=_watch_parent, initargs=(os.getpid(),))
+            _arm_idle(SCAN_IDLE_S)
+        return _pool
+
+
+@contextlib.contextmanager
+def _pool_held() -> Iterator[None]:
+    """While a label run's scan or a store rebuild may use the scan pool, which then does not end for idleness."""
+    global _pool_holds, _pool_used
+    with _pool_lock:
+        _pool_holds += 1
+    try:
+        yield
+    finally:
+        with _pool_lock:
+            _pool_holds -= 1
+            _pool_used = time.monotonic()
+            if not _pool_holds:
+                _arm_idle(SCAN_IDLE_S)
+
+
+def _arm_idle(after: float) -> None:
+    """The idle check in `after` seconds, unless one is pending, the pool is gone or SCAN_IDLE_S is 0. The caller holds
+    _pool_lock."""
+    global _pool_timer
+    if SCAN_IDLE_S <= 0 or _pool is None or _pool_timer is not None:
+        return
+    t = threading.Timer(max(0.0, after), _pool_idle)
+    t.daemon = True
+    _pool_timer = t
+    t.start()
+
+
+def _pool_idle() -> None:
+    """The timer's check: the pool ends when nothing holds it and nothing took or let it go for SCAN_IDLE_S; else the
+    check is armed again for the time left (a hold arms it as it lets go)."""
+    global _pool_timer
+    with _pool_lock:
+        _pool_timer = None
+        if _pool is None or _pool_holds:
+            return
+        left = _pool_used + SCAN_IDLE_S - time.monotonic()
+        if left > 0:
+            _arm_idle(left)
+            return
+        workers = _pool_workers
+        _pool_shutdown()
+    log.info("scan pool: unused for %.0f s, so its %d worker(s) end until the next label run", SCAN_IDLE_S, workers)
 
 
 def _pool_shutdown(end: bool = False) -> None:
-    """Drop the scan pool, its queued chunks cancelled. `end`, for the server's shutdown, also ends its workers and
-    waits for them: uvicorn exits by SIGTERM right after, which would leave a worker running."""
-    global _pool
-    pool, _pool = _pool, None
+    """Drop the scan pool, its queued chunks cancelled, and its idle check. `end`, for the server's shutdown, also ends
+    its workers and waits for them: uvicorn exits by SIGTERM right after, which would leave a worker running."""
+    global _pool, _pool_timer
+    with _pool_lock:
+        pool, _pool = _pool, None
+        timer, _pool_timer = _pool_timer, None
+    if timer is not None:
+        timer.cancel()
     if pool is None:
         return
     if end:
@@ -3059,7 +3118,8 @@ async def _index_sources(c: str, concept_id: str, corpus_dir: Path, sources: lis
                                                         s.get("under"))
         except (OSError, ValueError, sqlite3.Error):
             counts[s["path"]] = 0
-    found = await _index_lines(c, concept_id, corpus_dir, lined, cancel)
+    with _pool_held():
+        found = await _index_lines(c, concept_id, corpus_dir, lined, cancel)
     counts.update({p: int(i.get("lines") or 0) for p, i in found["files"].items()})
     return {"total": sum(counts.values()), "files": found["files"], "counts": counts}
 
@@ -3865,7 +3925,9 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
                     labeled = failed = 0
                     message = None
                     if scanned:
-                        labeled, failed, message = await _apply_regex(c, concept, corpus_dir, scanned, index, None, out, cancel)
+                        with _pool_held():
+                            labeled, failed, message = await _apply_regex(c, concept, corpus_dir, scanned, index, None, out,
+                                                                          cancel)
                     if rest and not cancel.is_set():
                         more = await _apply_regex_units(c, concept, iter_units(corpus_dir, rest, unit), out, cancel,
                                                         base=(labeled, failed, int((_runs.get((c, concept_id)) or {}).get("matches") or 0)))
