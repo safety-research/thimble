@@ -83,6 +83,21 @@ test("a turn's card is drawn once, under the turn's last reply, in its border wi
   expect(w.calls.filter(c => c[2] === 'resolve').length).toBe(1)
 })
 
+test("a list item has no dot of its own in the margin, as Claude Code draws a list; a paragraph keeps its dot", { timeoutMs: 30_000 }, async ($, on) => {
+  // README capture 10-17: `· - dse: 13,403`, a dot beside the item's `-`
+  const w = world(on)
+  await start($, w)
+  const text = 'The export holds two wikis.\n\nPer wiki [[card:ff73e071]]:\n- **dse:** [[4579|card:ff73e071#pages/TOTAL]]\n- **probier:** [[14592|card:ff73e071#revisions/TOTAL]]'
+  await turn($, w, [['r1', text]])
+  const ui = (await $.ui.mount(MESSAGE('r1', text))) as unknown as M
+  // a row's first cell is its margin's glyph
+  const margin = async (key: string) => shown(await ui.find({ key }))[0]
+  expect(await margin('row-2')).toBe('·')
+  expect(await margin('row-3')).toBe(' ')
+  expect(await margin('row-4')).toBe(' ')
+  await ui.unmount()
+})
+
 test("a card made by add_card waits for its run, then shows what `thimble-run` wrote, though its stamp did not move", { timeoutMs: 30_000 }, async ($, on) => {
   const w = world(on)
   await start($, w)

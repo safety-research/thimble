@@ -433,10 +433,11 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   again after `thimble --continue` or `--resume`.
 - The margin at column 0, the ⏺'s: a dim `·` beside each passage and card a side thread can be asked about, which
   becomes the `?` (blue) of the passage under the pointer (a heading's asks about its whole section, a card's about the
-  card); a blue `↳` beside a passage or a card a thread was asked about (a passage also
-  when the thread was asked about a citation of a value or a place in it; a card also when the thread was asked about a
-  value it shows or a passage of its takeaway, a citation in it), which stays, and a click on it opens that thread in
-  the threads panel. On the reply's first row the mark takes the ⏺'s cell: the `?` drawn over it under the pointer, a
+  card); none beside a list item, whose `-` or number marks it as Claude Code draws a list, though its `?` shows under
+  the pointer (README capture 10-17: `· - dse: 13,403` read as two bullets); a blue `↳` beside a passage or a card a
+  thread was asked about (a passage also when the thread was asked about a citation of a value or a place in it; a card
+  also when the thread was asked about a value it shows or a passage of its takeaway, a citation in it), which stays,
+  and a click on it opens that thread in the threads panel. On the reply's first row the mark takes the ⏺'s cell: the `?` drawn over it under the pointer, a
   `↳` in its place. A mark never adds indent.
 - The footer, one blank row under the turn's answer (its last part that cites or embeds a card): its facts dim
   (`· N problems` in red), its control after a gutter, no file path. No footer for the prompts thimble-term gives main
