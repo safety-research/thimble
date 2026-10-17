@@ -193,7 +193,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return (
               <div key={r.index} className="chat-msg chat-user" data-event={r.event}>
                 {r.by === 'main' && <Note className="chat-origin" text="From" chips={<ThreadChip id="main" />} />}
-                {byLabel(r.by, chat, r.tray) && <Note className="chat-origin chat-by" data-by={r.by} text={byLabel(r.by, chat, r.tray)!} />}
+                {byLabel(r.by, chat, r.tray, r.plugin) && <Note className="chat-origin chat-by" data-by={r.plugin ? 'plugin' : r.by} text={byLabel(r.by, chat, r.tray, r.plugin)!} />}
                 <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined} data-by={r.by}>
                   <RefText text={stripHarness(r.text)} workspace={ws} />
                 </UserMessage>
@@ -275,10 +275,12 @@ export function devStarted(r: { view?: string; title?: string | null }): string 
   return r.view || (r.title ?? '').startsWith('view: ') ? 'View build started in' : 'Dev ticket started'
 }
 
-/** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`
- * with `tray`, the record's origin `human`) or sent from thimble's browser (`browser`); none for a prompt main's call
- * sent (`terminal` alone), and none in main, whose own messages are the analyst's. Pure. */
-export function byLabel(by: string | undefined, chat: string | undefined, tray?: boolean): string | null {
+/** Where a message came from: in any chat, a prompt a plugin sent as the analyst's, as Claude Code's terminal says it
+ * (thimble's terminal panel's `run again` or new label); in one of thimble's agents' threads, typed in Claude Code's
+ * agent tray (`terminal` with `tray`, the record's origin `human`) or sent from thimble's browser (`browser`); none for
+ * a prompt main's call sent (`terminal` alone), and none for the analyst's own messages in main. Pure. */
+export function byLabel(by: string | undefined, chat: string | undefined, tray?: boolean, plugin?: string): string | null {
+  if (plugin) return `Prompt from the ${plugin} plugin`
   if (!chat || chat === 'main') return null
   if (by === 'terminal') return tray ? 'typed in the agent tray' : null
   if (by === 'browser') return 'sent from thimble'
