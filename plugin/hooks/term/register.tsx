@@ -18,7 +18,7 @@
 //   - side threads: the blue "?" beside a passage or a card, or a selection's "ask"; a `↳ thread` row under main's
 //     latest row when an answer comes in while the panel shows something else, and a blue ↳ beside the passage asked
 //     about. A right-click does what a click does: there is no menu
-//   - `/thimble` turns thimble on and opens the home panel, with no model turn
+//   - `/thimble` turns thimble on, makes this session thimble's main, and opens the home panel, with no model turn
 //   - keeps the feature switches in step between /config and thimble's config (settings.ts)
 // It hides main's end token, `(shown in the dashboard)`, as the browser does.
 //
@@ -51,7 +51,7 @@ import { turns } from './turns'
 import { openSection, registerBand } from './band'
 import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
-import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
+import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble, takeMain } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
 import { callDone, checkName, ownNotice } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
@@ -556,18 +556,22 @@ export const register: Register = (on, options) => {
       return started
     }
     // as a regular Claude Code plugin: on from the start of every interactive session where the plugin is enabled
-    // (the owner, 10-16 22:45); a folder thimble refuses (the home folder, `/`) stays off without a notice
+    // (the owner, 10-16 22:45); a folder thimble refuses (the home folder, `/`) stays off without a notice. Beside a
+    // live main it is a peer (`start` takes no main): only an explicit /thimble, `thimble` or a press does (bug hunt 7,
+    // H13: a second plain `claude` in the folder took main, though the browser kept following the first)
     if (act.interactive && act.surface === 'terminal') {
       act.refusedSaid = true
-      await activateNow(cx, 'command', false)
+      await activateNow(cx, 'start', false)
       act.refusedSaid = false
     }
     return started
   })
 
-  // /thimble: thimble on in this folder (a refused folder is asked again: the person asked), the home panel or the view
-  // its argument names, with no model turn; the guide goes with its answer when it is owed. The skill's own arguments
-  // (fresh, restore, status, fix, feedback) go to the skill.
+  // /thimble: thimble on in this folder (a refused folder is asked again: the person asked) and this session thimble's
+  // main, in place of another session in the folder that is main (takeMain: bug hunt 7, H14, the refusal says "type
+  // /thimble in this terminal to take it back"), then the home panel or the view its argument names, with no model turn;
+  // the guide goes with its answer when it is owed. The skill's own arguments (fresh, restore, status, fix, feedback)
+  // go to the skill.
   on('command.run', async ($, e, next) => {
     if (e.command !== 'thimble:thimble' && e.command !== 'thimble') return next(e)
     const args = String(e.args ?? '').trim()
@@ -575,11 +579,13 @@ export const register: Register = (on, options) => {
     const cx = cxOf($)
     if (e.presentation?.columns > 0) rt.termColumns = e.presentation.columns
     noteScreen(undefined, e.presentation?.isFullscreen)
-    if (!isActive()) {
+    const wasOn = isActive()
+    if (!wasOn) {
       const turned = await activateNow(cx, 'command')
       if (!turned.ok) return { text: `thimble: ${turned.error ?? 'thimble could not turn on in this folder'}` }
     }
     await followConversation(cx)
+    if (wasOn) await takeMain(cx)
     await navOrigin(cx, false)
     const said = await thimbleCommand(cx, args)
     // the guide goes into main's conversation as a hidden row now: a command's `context` did not reach the model in

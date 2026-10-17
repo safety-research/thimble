@@ -954,6 +954,35 @@ describe('local transport', () => {
     expect(e.notes()).toEqual(['before the press', 'after the press'])
   })
 
+  // bug hunt 7, H14: a session another took main from went idle at its refused hello, so after its /thimble took main
+  // back its module said nothing until its next turn ended
+  it('a refused hello goes on through the files as a peer, and takes main over HTTP again once launch.json makes it main', async () => {
+    const server = new Server()
+    let mainNow = MAIN
+    server.helloStatus = body => (body.session === mainNow ? 200 : 403)
+    const e = engine({ server })
+    e.writeFile(`${T}/roles.json`, { at: 'now', digest: 'd1', roles: ROLES })
+    e.writeFile(`${T}/subagents.json`, {})
+    await e.start()
+    await until(() => server.polls.length > 0)
+    // another session took main: its poll is refused, and so is its hello
+    mainNow = NEW
+    e.writeFile(`${T}/launch.json`, launch({ session: NEW, transport: 'server', moved: [MAIN] }))
+    server.nextStatus = 409
+    await until(() => server.hellos.filter(h => h.session === MAIN).length >= 2)
+    await new Promise(r => setTimeout(r, 40))
+    ask(e, 'mod_peer', 'note', { text: 'for main' }, { session: NEW })
+    await new Promise(r => setTimeout(r, 40))
+    expect(e.notes()).toEqual([])
+    // /thimble here took it back: main again, over HTTP
+    mainNow = MAIN
+    const polled = server.polls.length
+    e.writeFile(`${T}/launch.json`, launch({ transport: 'server', moved: [NEW] }))
+    await until(() => server.polls.length > polled)
+    expect(await server.answer(server.push('note', { text: 'main again' }))).toEqual({ ok: true })
+    expect(e.notes()).toEqual(['main again'])
+  })
+
   it('answers a spawn subagents.json addresses to it in module.json, with the agent id, and takes it once', async () => {
     const e = await begun()
     ask(e, 'mod_spawn1', 'spawn', { role: 'writer', prompt: 'Write the report.', description: 'writer: report', values: { model: OPUS, effort: ROLES.writer.effort }, note: NOTE })

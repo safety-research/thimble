@@ -441,11 +441,43 @@ async function firstToast(cx: Ctx, folder: string): Promise<void> {
 }
 
 /** thimble on from anywhere but a data read (`/thimble`, the launcher, a press, session start; C13): the activation,
- *  with the guide kept owed for the caller's delivery point; at session start with no push (runActivation). */
-export async function activateNow(cx: Ctx, via: 'data' | 'command' | 'tool' | 'launcher' | 'press', push = true): Promise<{ ok: boolean; error?: string }> {
+ *  with the guide kept owed for the caller's delivery point; at session start (`start`, a peer beside a live main) with
+ *  no push (runActivation). */
+export async function activateNow(cx: Ctx, via: 'data' | 'command' | 'tool' | 'launcher' | 'press' | 'start', push = true): Promise<{ ok: boolean; error?: string }> {
   if (act.active) return { ok: true }
   const { out } = await activateOnce(cx, via, 'owed', Infinity, push)
   return out?.ok ? { ok: true } : { ok: false, error: out && !out.ok ? out.error : 'thimble is still turning on' }
+}
+
+/** An explicit /thimble in a session thimble is on in already: `thimble activate --take` makes it thimble's main, in
+ *  place of another session in the folder that is main, and the server follows it when main ran on the server
+ *  (backend activate._take_here; bug hunt 7, H14: the refusal of a session another took main from says "type /thimble
+ *  in this terminal to take it back", and /thimble only opened the home panel). thimble.ts follows launch.json by
+ *  itself. The session's role from now on, or '' when the call failed (logged). */
+export async function takeMain(cx: Ctx): Promise<string> {
+  const a = act.active
+  if (!a) return ''
+  const pre = await preScope(cx)
+  const sid = await cx.sessionId()
+  try {
+    const r = await cx.run([pre.bin, 'activate', '--cwd', pre.cwd, '--session', sid, '--via', 'command', '--take', '--mod', '--json'], { cwd: pre.cwd, env: await envOf(cx), timeoutMs: ACTIVATE_TIMEOUT_MS })
+    const got = parsePrinted(r)
+    const v = (got.ok ? got.value : {}) as { ok?: unknown; role?: unknown; took_over?: unknown }
+    if (!got.ok || v.ok !== true) {
+      cx.log(`thimble: /thimble did not make this session thimble's main: ${got.ok ? JSON.stringify(v).slice(0, 200) : got.error}`)
+      return ''
+    }
+    const role = v.role === 'peer' ? 'peer' : 'main'
+    if (role !== a.role) {
+      act.active = { ...a, role }
+      await cx.setActivated(act.active)
+    }
+    trail(cx, typeof v.took_over === 'string' && v.took_over ? 'took-main' : 'main')
+    return role
+  } catch (err) {
+    cx.log(`thimble: /thimble did not make this session thimble's main: ${String(err).slice(0, 200)}`)
+    return ''
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ the guide
@@ -553,7 +585,9 @@ export async function followConversation(cx: Ctx): Promise<void> {
   act.pending = ''
   const pre = await preScope(cx)
   try {
-    await cx.run([pre.bin, 'activate', '--cwd', pre.cwd, '--session', sid, '--via', act.active.via === 'data' ? 'data' : 'command', '--rekey-from', k.from, '--mod', '--json'], { cwd: pre.cwd, env: await envOf(cx), timeoutMs: ACTIVATE_TIMEOUT_MS })
+    // the session's own way in, so a /clear makes a peer no main (only --take, an explicit /thimble, does)
+    const via = act.active.via === 'data' || act.active.via === 'start' ? act.active.via : 'command'
+    await cx.run([pre.bin, 'activate', '--cwd', pre.cwd, '--session', sid, '--via', via, '--rekey-from', k.from, '--mod', '--json'], { cwd: pre.cwd, env: await envOf(cx), timeoutMs: ACTIVATE_TIMEOUT_MS })
   } catch (err) {
     cx.log(`thimble: the new conversation could not take over thimble: ${String(err).slice(0, 200)}`)
   }

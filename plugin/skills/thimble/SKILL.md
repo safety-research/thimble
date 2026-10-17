@@ -5,7 +5,7 @@ disable-model-invocation: true
 allowed-tools: Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble activate *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble guide *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/thimble server up *) Bash(${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch --stream *)
 ---
 
-!`${CLAUDE_PLUGIN_ROOT}/bin/thimble activate --via command --session "${CLAUDE_SESSION_ID}" --cwd "${CLAUDE_PROJECT_DIR}" --json 2>&1`
+!`${CLAUDE_PLUGIN_ROOT}/bin/thimble activate --via command --take --session "${CLAUDE_SESSION_ID}" --cwd "${CLAUDE_PROJECT_DIR}" --json 2>&1`
 
 !`${CLAUDE_PLUGIN_ROOT}/bin/thimble guide --if-owed --mark --session "${CLAUDE_SESSION_ID}" --cwd "${CLAUDE_PROJECT_DIR}" 2>&1`
 

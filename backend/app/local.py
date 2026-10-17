@@ -571,16 +571,20 @@ def _notice_acts(action: Any) -> list[dict[str, str]]:
     return out
 
 
-def _notices(c: str) -> list[dict[str, Any]]:
+def _notices(c: str, session: str | None = None) -> list[dict[str, Any]]:
     """Every agent's open notices (notices.open_notices), newest first: {id, key, kind, text, agent, chat, at, acts,
     open}. `text` reads alone (it names the agent and the failure), `agent` names the agent ("Orientation", "View build:
     Agent Network"), `acts` are its actions as `thimble act` takes them (_notice_acts), and `open` says how its own
     thread opens: "thread" for a side thread, "agent" for an agent's chat, "" for main's, for none, or for a chat that
-    is gone."""
+    is gone. A notice addressed to one Claude Code session (its `session`: the takeover notice) is left out for every
+    other session, the one asking being `session`, else the one this process runs under (session_here; bug hunt 7, H14:
+    the session that took main showed "thimble's browser follows the other session in this folder now")."""
     from . import agents, notices  # noqa: PLC0415
 
+    here = session if session is not None else (session_here() or "")
     rows = [n for n in notices.open_notices(c) if isinstance(n, dict) and str(n.get("text") or "").strip()
-            and not (n.get("chat") == agents.MAIN_ID and n.get("kind") in ("safeguards", notices.API))]
+            and not (n.get("chat") == agents.MAIN_ID and n.get("kind") in ("safeguards", notices.API))
+            and (not n.get("session") or n.get("session") == here)]
     rows = sorted(reversed(rows), key=lambda n: str(n.get("ts") or ""), reverse=True)  # newest first, ties as given
     out: list[dict[str, Any]] = []
     for n in rows:

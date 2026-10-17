@@ -661,8 +661,10 @@ class _Call:
             self.retry_at = time.monotonic() + LIMIT_WAIT_S
             log.info("%s: call %s waits for a place under Claude Code's subagent limit", self.c, self.cid)
             return
-        if ans.kind == subagents.NO_MODULE:
-            self.ended = Outcome(0, "no_session", detail=NO_SESSION)
+        if ans.kind == subagents.NO_MODULE:  # NO_SESSION only when no session runs thimble here (module_bridge)
+            from . import module_bridge  # noqa: PLC0415
+
+            self.ended = Outcome(0, "no_session", detail=module_bridge.no_session_text(self.c))
         else:
             self.ended = Outcome(0, "error", detail=ans.reason or f"its agent did not start ({ans.kind})")
         log.warning("%s: call %s (%s) could not start its agent: %s", self.c, self.cid, self.spec.what,

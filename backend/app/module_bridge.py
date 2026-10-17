@@ -526,6 +526,49 @@ def why_not(c: str) -> str:
     return NOT_LOADED
 
 
+# why_not's reasons that say which session the server follows, or that main's module stopped answering: a restart of
+# Claude Code is no fix for them while a session runs thimble in the folder (session_runs)
+FOLLOW_REASONS = (NO_MAIN, NOT_MAIN, NOT_OPEN)
+
+
+def session_runs(c: str) -> bool:
+    """Whether a Claude Code session runs thimble in workspace `c`'s folder now: the main launch.json names runs
+    (activate.main_alive), or this server follows a session as main. Never raises."""
+    try:
+        from . import activate, session  # noqa: PLC0415
+
+        return c in session.attached_workspaces() or activate.main_alive(c, _launch(c))
+    except Exception:  # noqa: BLE001 — a record that cannot be read shows no session
+        return False
+
+
+def needs_restart(c: str, why: str) -> bool:
+    """Whether restarting Claude Code in the folder is a fix for `why` (why_not): no session runs thimble there
+    (session_runs), or the reason is one that only a new `claude` process takes up once its cause is fixed (hooks
+    modules off, THIMBLE_NO_MODULE, a proxy, a module Claude Code did not load). Never for FOLLOW_REASONS, nor for a
+    module that stopped answering, while a session runs (bug hunt 7, H13: a check failed with "restart Claude Code in
+    this folder" while two sessions ran thimble there)."""
+    if not session_runs(c):
+        return True
+    return not (why in FOLLOW_REASONS or why.startswith(NOT_ANSWERING))
+
+
+def no_session_text(c: str) -> str:
+    """Why a model call or the card check's agent found no module to run it (model_call, agent_call): call_result's
+    NO_SESSION, with its fix to start a session, only when no Claude Code session runs thimble in the folder
+    (session_runs); else that the session's module did not answer, and why (why_not), with no fix that starts a session
+    (bug hunt 7, H13 and H17: "no Claude Code session runs thimble in this folder" while one did). Never raises."""
+    from .call_result import NO_SESSION  # noqa: PLC0415
+
+    if not session_runs(c):
+        return NO_SESSION
+    try:
+        why = why_not(c)
+    except Exception:  # noqa: BLE001
+        why = ""
+    return f"{NOT_ANSWERING}: {why}" if why and not why.startswith(NOT_ANSWERING) else (why or NOT_ANSWERING)
+
+
 def _proxy_found(c: str) -> bool:
     """Whether main's /thimble found a shell proxy that NO_PROXY does not keep off thimble's server: the open `setup`
     notice cli.PROXY_KEY of workspace `c` (events.session_route), which a later /thimble that finds none clears."""

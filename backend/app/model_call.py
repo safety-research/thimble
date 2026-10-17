@@ -170,6 +170,10 @@ async def _answered(c: str, op: str, first: dict[str, Any], again: Any, tool: To
         ans = await _ask(c, op, args, timeout_s)
         usage = _sum(usage, ans.get("usage") if isinstance(ans.get("usage"), dict) else None)
         status, detail = _read(ans, model, time.monotonic() - t0, timeout_s)
+        if status == "no_session":  # NO_SESSION's fix only when no session runs thimble here (module_bridge)
+            from . import module_bridge  # noqa: PLC0415
+
+            detail = module_bridge.no_session_text(c)
         if status != "ok":
             return CallResult(status=status, model_requested=model, detail=detail, usage=usage,  # type: ignore[arg-type]
                               attempts=attempt, text=text)

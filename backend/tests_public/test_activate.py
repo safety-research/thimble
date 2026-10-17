@@ -188,3 +188,92 @@ def test_the_conversation_main_s_process_moved_to_takes_main_with_no_takeover(co
     monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: None)
     assert _ok(activate.activate(corpus, "s-other", "press"))["took_over"] == "s-later"
     assert any(n.get("key") == activate.TAKEOVER_KEY for n in notices.open_notices(c))
+
+
+def _other_claude(tmp_path: Path, sid: str):
+    """A second process named `claude` whose Claude Code record names `sid`: (its Popen, its pid)."""
+    exe = tmp_path / "bin2" / "claude"
+    exe.parent.mkdir(exist_ok=True)
+    if not exe.exists():
+        exe.symlink_to("/bin/sleep")
+    p = subprocess.Popen([str(exe), "60"])
+    sessions = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    (sessions / f"{p.pid}.json").write_text(json.dumps({"sessionId": sid, "pid": p.pid}))
+    return p
+
+
+def test_a_session_started_beside_a_live_main_is_a_peer_and_a_takeover_moves_the_server_too(corpus, live_claude,
+                                                                                            monkeypatch):
+    """Bug hunt 7, H13: a second plain `claude` in the folder took main at its start (the plugin's activation ran as
+    /thimble), while the server kept following the first session and asked the second for its hello every 2 s. The
+    start's activation (`start`) beside a live main makes a peer; an explicit /thimble takes main, and when the server
+    followed main, the server is told at once, so it follows the new main too; with no server answering, the new main
+    runs on the local transport."""
+    from app import cc_plugin
+
+    pid = live_claude("s-first")
+    monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: pid)
+    assert _ok(activate.activate(corpus, "s-first", "start"))["role"] == "main", "no live main: the start makes main"
+    c = config.workspace_for_cwd(str(corpus))
+    activate.write_launch(c, "s-first", role="main", transport="server", via="press")  # the browser follows it
+    monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: None)
+    second = _ok(activate.activate(corpus, "s-second", "start"))
+    assert second["role"] == "peer" and second["took_over"] is None
+    rec = activate.read_launch(c)
+    assert (rec["session"], rec["peers"], rec["transport"]) == ("s-first", ["s-second"], "server")
+    assert activate.transport(c, "s-second") == "local"
+    told: list[tuple[str, str]] = []
+    monkeypatch.setattr(cli, "serves", lambda url=None: True)
+    monkeypatch.setattr(cli, "name_session", lambda url, name, session, cwd, sandbox=None, warnings=():
+                        told.append((name, session)))
+    third = _ok(activate.activate(corpus, "s-third", "command"))
+    assert third["took_over"] == "s-first" and third["role"] == "main"
+    assert told == [(c, "s-third")], "the server follows the session that took main"
+    rec = activate.read_launch(c)
+    assert (rec["session"], rec["transport"], rec["moved"]) == ("s-third", "server", ["s-first"])
+    # no server answers: nothing follows main, which runs locally
+    monkeypatch.setattr(cli, "serves", lambda url=None: False)
+    activate.write_launch(c, "s-first", role="main", transport="server", via="press", pid=pid)
+    assert _ok(activate.activate(corpus, "s-fourth", "command"))["took_over"] == "s-first"
+    assert activate.read_launch(c)["transport"] == "local" and told == [(c, "s-third")]
+
+
+def test_thimble_in_a_session_that_lost_main_takes_it_back_and_only_that_session_sees_the_takeover(
+        corpus, live_claude, tmp_path, monkeypatch):
+    """Bug hunt 7, H14: the refusal of a session another took main from says "type /thimble in this terminal to take
+    it back", but /thimble in a session thimble was on in only opened its home panel; and the takeover notice was the
+    workspace's, so the session that took main showed "thimble's browser follows the other session" too. /thimble
+    (--take) makes the session main again, and the notice is addressed to the session that lost main alone: its
+    terminal shows it, the other's and the browser do not."""
+    from app import cc_plugin, local, notices
+
+    one = live_claude("s-one")
+    monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: one)
+    _ok(activate.activate(corpus, "s-one", "start"))
+    c = config.workspace_for_cwd(str(corpus))
+    two = _other_claude(tmp_path, "s-two")
+    try:
+        monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: two.pid)
+        assert _ok(activate.activate(corpus, "s-two", "start"))["role"] == "peer"
+        took = _ok(activate.activate(corpus, "s-two", "command", take=True))
+        assert took["took_over"] == "s-one" and took["role"] == "main"
+        assert activate.read_marker("s-two")["role"] == "main"
+        assert activate.read_launch(c)["session"] == "s-two" and activate.transport(c, "s-one") == "local"
+        said = [n["text"] for n in local._notices(c, session="s-one")]
+        assert activate.TAKEOVER_LOCAL_TEXT in said and "/thimble" in activate.TAKEOVER_LOCAL_TEXT
+        assert not any(n["key"] == activate.TAKEOVER_KEY for n in local._notices(c, session="s-two"))
+        assert not any(n.get("key") == activate.TAKEOVER_KEY for n in notices.for_browser(notices.open_notices(c)))
+        # /thimble in the first session takes it back; the notice is now the second's alone
+        monkeypatch.setattr(cc_plugin, "claude_pid", lambda environ=None: one)
+        back = _ok(activate.activate(corpus, "s-one", "command", take=True))
+        assert back["took_over"] == "s-two" and activate.read_launch(c)["session"] == "s-one"
+        assert "s-one" not in activate.read_launch(c)["moved"]
+        assert not any(n["key"] == activate.TAKEOVER_KEY for n in local._notices(c, session="s-one"))
+        assert any(n["key"] == activate.TAKEOVER_KEY for n in local._notices(c, session="s-two"))
+        # /thimble in main itself changes nothing
+        assert _ok(activate.activate(corpus, "s-one", "command", take=True))["took_over"] is None
+        assert activate.read_launch(c)["session"] == "s-one"
+    finally:
+        two.kill()
+        two.wait()

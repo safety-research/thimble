@@ -18,7 +18,9 @@
 // session turned on beside a live main) and a session another took main from always use the files, and as a peer it
 // registers the agent types but takes no requests and writes no module.json. It reads launch.json again whenever the
 // file changes and at the end of each of main's turns; at the switch it takes the requests still waiting in
-// subagents.json, then goes on over HTTP, and nothing switches back. Over HTTP every request proves the token of
+// subagents.json, then goes on over HTTP. Over HTTP, once the server refuses its hello, a session that launch.json no
+// longer makes main (one another took main from) goes on through the files again, as a peer (toFiles). Over HTTP every
+// request proves the token of
 // server.json and every answer proves it back (app/hook_auth.py), so a process on the port can neither hand it requests
 // nor read them.
 //
@@ -315,9 +317,26 @@ function stop(m: State): void {
   m.gen += 1
 }
 
-/** A refused hello (the server follows another session as main): idle; the end of main's next turn looks again. */
-function refuse(m: State): void {
-  stop(m)
+/** A refused hello (another session is main): through the workspace's files as a peer, which follow launch.json, so
+ *  the module takes main's requests again once an explicit /thimble makes this session main (toFiles; bug hunt 7, H14);
+ *  idle when launch.json cannot be read, and the end of main's next turn looks again. */
+async function refuse($: Engine, m: State): Promise<void> {
+  if (!(await toFiles($, m))) stop(m)
+}
+
+/** Over the server's transport, once the server refused the hello: when launch.json no longer makes this session main
+ *  on the server's transport (another session took main), the module goes on through the workspace's files, main or a
+ *  peer by launch.json (fileBegin), which follow launch.json from then on, rather than going idle (bug hunt 7, H14).
+ *  True when it moved. */
+async function toFiles($: Engine, m: State): Promise<boolean> {
+  if (!m.active || m.file || !m.ws) return false
+  const launch = await readJson($, `${m.ws}/trusted/launch.json`)
+  if (!launch) return false
+  const state = (await readJson($, `${m.ws}/trusted/subagents.json`)) ?? {}
+  if (serverOf(launch) && isMain(launch, state, m.session)) return false
+  m.gen += 1 // the polls over HTTP stop
+  await fileBegin($, m, m.cwd, m.ws, launch)
+  return true
 }
 
 // ------------------------------------------------------------------------------------------------ the server
@@ -464,7 +483,7 @@ async function begin($: Engine, m: State, cwd: string): Promise<void> {
   // a server that is up now: hello, roles and registrations before this returns, so the types are registered in the
   // turn that turned thimble on
   const first = await connect($, m)
-  if (first === 'refused') return refuse(m)
+  if (first === 'refused') return refuse($, m)
   const gen = m.gen
   void (async () => {
     let state: Hello = first
@@ -476,7 +495,7 @@ async function begin($: Engine, m: State, cwd: string): Promise<void> {
     if (state === 'ok') {
       void watchPlan($, m, gen)
       await poll($, m, gen)
-    } else if (state === 'refused') refuse(m)
+    } else if (state === 'refused') await refuse($, m)
   })()
 }
 
@@ -536,7 +555,7 @@ async function poll($: Engine, m: State, gen: number): Promise<void> {
     if (r?.status === 409) {
       // not the accepted session (a server that restarted, or main moved): say hello again
       const said = await hello($, m)
-      if (said === 'refused') return refuse(m)
+      if (said === 'refused') return refuse($, m)
       if (said === 'ok') continue
     }
     await $.clock.sleep(RETRY_MS)
@@ -778,7 +797,7 @@ async function follow($: Engine, m: State, old: string): Promise<void> {
     await $.clock.sleep(RETRY_MS)
     said = await hello($, m)
   }
-  if (said === 'refused') return refuse(m)
+  if (said === 'refused') return refuse($, m)
   if (said !== 'ok' || m.session !== sid) return
   for (const line of await fetchState($, m)) await note($, line)
 }

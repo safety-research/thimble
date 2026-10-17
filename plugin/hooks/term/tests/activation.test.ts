@@ -24,7 +24,7 @@ test('a session start turns thimble on, as a regular plugin: one activate with -
   reads(w)
   corpus(w, ['events.jsonl', 'prs.csv'])
   await startSession($, w)
-  expect(w.activations).toEqual([[CLI, 'activate', '--cwd', CWD, '--session', SID, '--via', 'command', '--mod', '--json']])
+  expect(w.activations).toEqual([[CLI, 'activate', '--cwd', CWD, '--session', SID, '--via', 'start', '--mod', '--json']])
   expect(w.mcp).toEqual([])
   expect(trailOf(w)).toContain('no-push')
   const p = (await $.prompt.submit({ text: 'what is in this folder?', origin: { kind: 'composer' }, wait: false } as never)) as { context?: string[] }
@@ -35,6 +35,22 @@ test('a session start turns thimble on, as a regular plugin: one activate with -
   expect(w.activations.length).toBe(1)
   expect(w.mcp).toEqual([])
   expect(w.sleeps).toBe(0)
+})
+
+// bug hunt 7, H13: a second plain `claude` in the folder took main at its start, as /thimble does, though the browser
+// kept following the first session; H14: /thimble in a session another took main from only opened the home panel,
+// though the refusal says "type /thimble in this terminal to take it back"
+test('the start activates as `start`, a peer beside a live main; /thimble in a session thimble is on in makes it main (--take)', SLOW, async ($, on) => {
+  const w = world(on, { active: false })
+  w.activate = { ...w.activate, role: 'peer' }
+  await startSession($, w)
+  expect(w.activations).toEqual([[CLI, 'activate', '--cwd', CWD, '--session', SID, '--via', 'start', '--mod', '--json']])
+  w.activate = { ...w.activate, role: 'main', took_over: 'sess-other' }
+  await $.command.run({ command: 'thimble:thimble', args: '' } as never)
+  await w.clock.settle()
+  expect(w.activations.length).toBe(2)
+  expect(w.activations[1]).toEqual([CLI, 'activate', '--cwd', CWD, '--session', SID, '--via', 'command', '--take', '--mod', '--json'])
+  expect(trailOf(w)).toContain('took-main')
 })
 
 test('a session where no person is at the terminal stays off', SLOW, async ($, on) => {
