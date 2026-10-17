@@ -1516,6 +1516,36 @@ audio.bcell-media {
 .bcell-values .num {
   text-align: right;
 }
+/* under the counts: what a click on a value does, and while the card's filter is on, what the scope shows, with Show all */
+.bcell-label-hint {
+  margin: -4px 0 0;
+  min-width: 0;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.bcell-label-hint.is-on {
+  color: var(--text-secondary);
+}
+.bcell-label-hint-act {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: rgba(var(--ink-rgb), 0.3);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.bcell-label-hint-act:hover:not(:disabled) {
+  color: var(--text-primary);
+  text-decoration-color: currentColor;
+}
+.bcell-label-hint-act:disabled {
+  cursor: default;
+}
 /* where a stopped run stopped, under the counts, with Run again on the board */
 .bcell-label-stopped {
   display: flex;

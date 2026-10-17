@@ -318,7 +318,9 @@ export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' |
  * A label card's body, drawn by a fixed template (a label card is deterministic, so no model checks it); the label row
  * above it names the label (LabelHead, CardFace CardLabels). The value table: value · units · share, each value a
  * button that sets the scope's filter, its tooltip saying what the click shows (ValueButton), every value's share of the same total (details labelShares); the units that
- * total is of the label row states. Under it the Rule disclosure, closed, which opens the classifier's prompt, pattern
+ * total is of the label row states. One quiet line under the table says what a click on a value does, on the board and
+ * in focus mode, and while the card's own filter is on, what the scope shows now, with Show all (labelValueLine; bug
+ * hunt round 9, J7: a click changed what Files shows, and nothing on the card said so). Under it the Rule disclosure, closed, which opens the classifier's prompt, pattern
  * or code, and Definition and records, which opens the label's definition and its records under each value in the
  * card's details (DetailPanel LabelDetails); it shows only on the board and in focus mode, where those details open,
  * not in a report's figure or the card harness's picture. The card shows no record of the corpus itself (Matt
@@ -360,6 +362,9 @@ function LabelBody({ cellId, conceptId, concept, error, reload }: { cellId: stri
       setPending(null)
     }
   }
+  // the value the card's own filter keeps, while it is on
+  const onValue = scope ? values.find((v) => filterIs(ctx.filters, scope, conceptId, v)) : undefined
+  const valueLine = scope && values.length > 0 && (onValue != null || ctx.openDetail) ? labelValueLine(scope, known.unit, onValue == null ? null : { value: onValue, n: noCounts ? null : (counts[onValue] ?? 0) }) : ''
   const spec = (known.spec || known.description || '').trim()
   const files = isFilesLabel(known)
   const classes = files ? new Map(classesOf(known).map((c) => [c.name, c])) : null
@@ -418,6 +423,19 @@ function LabelBody({ cellId, conceptId, concept, error, reload }: { cellId: stri
           </tbody>
         </table>
       )}
+      {valueLine && (
+        <p className={`bcell-label-hint${onValue != null ? ' is-on' : ''}`} role="status">
+          {valueLine}
+          {onValue != null && (
+            <>
+              {' · '}
+              <button type="button" className="bcell-label-hint-act" disabled={pending != null} onMouseDown={(e) => e.stopPropagation()} onClick={() => void toggle(onValue)}>
+                Show all
+              </button>
+            </>
+          )}
+        </p>
+      )}
       {stopped && (
         <div className="bcell-label-stopped">
           <span>{sentenceOf(stoppedText(stopped, known.unit))}</span>
@@ -474,6 +492,17 @@ export function labelValueCue(scope: FilterScope, unit: string | undefined, n: n
   if (scope === 'files') return on ? `Show all ${all} in Files` : `Show ${these} in Files`
   if (scope === 'canvas') return on ? `Show all ${all}` : `Show only ${these}`
   return on ? `Show all ${all} in the report` : `Show only ${these} in the report`
+}
+
+/** The quiet line under a label card's values (LabelBody): what a click on a value does, as where the scope shows its
+ * units, and while the card's filter keeps `on.value`, what that place shows now (`on.n` of its units, null while a run
+ * has counted none), which the card follows with Show all. Pure. */
+export function labelValueLine(scope: FilterScope, unit: string | undefined, on: { value: string; n: number | null } | null): string {
+  const all = unitWord(unit, 2)
+  if (!on) return `Click a value to show only its ${all} ${scope === 'files' ? 'in Files' : scope === 'canvas' ? 'on the canvas' : 'in the report'}`
+  const place = scope === 'files' ? 'Files' : scope === 'canvas' ? 'The canvas' : 'The report'
+  const these = on.n == null ? `the ${all}` : `the ${on.n.toLocaleString()} ${unitWord(unit, on.n)}`
+  return `${place} shows only ${these} with ${on.value}`
 }
 
 /** A value of a label card's table: a button that sets the scope's filter to it, its tooltip saying what the click does
