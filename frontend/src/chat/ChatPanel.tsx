@@ -47,9 +47,9 @@ import { Divider, Note, ThreadChip, ThreadsContext } from './Notes'
 import { RefText } from './markdown'
 import { CallFocusContext, MAIN_RETRY_NOTE, Rows, THREAD_RETRY_NOTE, type CallFocus, type ErrorRetry } from './Rows'
 import { countMessages, isUnread, markSeen, readSeen, type SeenMap } from './seen'
-import { AgentCard, stopSession, useAgentRows } from './AgentCard'
+import { AgentCard, stopAnswer, stopSession, useAgentRows, type StopAnswer } from './AgentCard'
 import { OrientStart, startedChat, useOrientRun } from './OrientStart'
-import { CONTINUE_HERE_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, continueOf, continueText, lastSession } from './subagent'
+import { CONTINUE_HERE_LINE, MAIN_ESC_LINE, PAUSED_LINE, STOPPED_CONTINUE_LINE, TERMINAL_STOP_LINE, continueOf, continueText, lastSession } from './subagent'
 import { ViewChip } from './ViewChip'
 import { replayHeld } from './pending'
 import { ThreadRows } from './ThreadRows'
@@ -121,26 +121,47 @@ export function composerStopOf(
   return null
 }
 
-/** The composer's Stop sent: a session's through stopSession, a ticket's through dev.stop_ticket, whose record then
- * goes to `onTicket`, a view's build or review through its own route; a failure is a toast, `Could not stop …: <why>`
- * for each. Resolves true when the request went through (the run is ending), false when it failed. */
-export function stopRun(ws: string, what: ComposerStop, onTicket: (t: Ticket) => void): Promise<boolean> {
-  if (what.kind === 'session') return stopSession(ws, what.chat, what.role)
+/** The composer's Stop sent: a session's through stopAnswer, a ticket's through dev.stop_ticket, whose record then goes
+ * to `onTicket`, a view's build or review through its own route. Resolves `ok` when the request went through (the run is
+ * ending), with a line for a toast when there is one; else why it did not stop and what to do, which the Stop itself
+ * then says (stopNote). */
+export function stopRun(ws: string, what: ComposerStop, onTicket: (t: Ticket) => void): Promise<StopAnswer> {
+  if (what.kind === 'session') return stopAnswer(ws, what.chat, what.role)
   if (what.kind === 'view') {
     const noun = what.review ? 'the review' : 'the build'
     return (what.review ? api.viewReviewStop(ws, what.slug) : api.stopViewBuild(ws, what.slug))
-      .then(() => (void refreshProposals(ws), true))
-      .catch((e: Error) => (bus.emit('toast', { text: `Could not stop ${noun}: ${e.message}`, kind: 'error' }), false))
+      .then((): StopAnswer => (void refreshProposals(ws), { ok: true }))
+      .catch((e: Error): StopAnswer => ({ ok: false, text: `Could not stop ${noun}: ${e.message}`, kind: 'error' }))
   }
   return api
     .stopTicket(what.ticket)
     .then(() => api.ticket(what.ticket))
-    .then((t) => (onTicket(t), true))
-    .catch((e: Error) => (bus.emit('toast', { text: `Could not stop the ticket: ${e.message}`, kind: 'error' }), false))
+    .then((t): StopAnswer => (onTicket(t), { ok: true }))
+    .catch((e: Error): StopAnswer => ({ ok: false, text: `Could not stop the ticket: ${e.message}`, kind: 'error' }))
 }
 
 /** How long the stop square stays busy after a Stop went through, at most, should the run not report its end. */
 export const STOP_HOLD_MS = 30_000
+/** How long a Stop of main, a side thread or one of thimble's agents waits for the run to end before the Stop says it
+ * did not (stopStillLine): Claude Code ends a turn or an agent within a few seconds of thimble's request. */
+export const STOP_CHECK_MS = 12_000
+
+/** What the Stop says when what it stops still runs STOP_CHECK_MS after thimble passed the Stop on: that it still runs,
+ * and how to stop it in the terminal; null for a ticket, a view's build or a review, which thimble's server stops
+ * itself. Pure. */
+export function stopStillLine(what: ComposerStop): string | null {
+  if (what.kind !== 'session') return null
+  return what.chat === 'main' ? `Main is still running. ${MAIN_ESC_LINE}` : `It is still running. ${TERMINAL_STOP_LINE}`
+}
+
+/** What the Stop of main, a side thread or one of thimble's agents says before it is pressed when thimble's module does
+ * not run in main's session (main's meta `module` false), through which alone thimble stops them: why, from main's
+ * `module_why`, and how to stop it in the terminal; null otherwise. Pure. */
+export function stopBlockedLine(what: ComposerStop | null, main: Pick<ChatMeta, 'module' | 'module_why'> | null | undefined): string | null {
+  if (what?.kind !== 'session' || main?.module !== false) return null
+  const why = (main.module_why || "Claude Code did not load thimble's hooks module").replace(/[.\s]+$/, '')
+  return what.chat === 'main' ? `thimble cannot stop main from here: ${why}. ${MAIN_ESC_LINE}` : `thimble cannot stop it from here: ${why}. ${TERMINAL_STOP_LINE}`
+}
 
 /** A thread's anchors: the meta's `anchor` split at ',' (a ⌘-drag joins several), empty for main. */
 export function threadAnchors(meta: Pick<ChatMeta, 'anchor'> | null | undefined): string[] {
@@ -580,22 +601,43 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const stopWhat = composerStopOf(kind, curMeta, ticket, stepParent, threadView)
   const stopKey = stopWhat ? (stopWhat.kind === 'ticket' ? `ticket:${stopWhat.ticket}` : stopWhat.kind === 'view' ? `view:${stopWhat.slug}:${stopWhat.review}` : `chat:${stopWhat.chat}`) : null
   // the Stop that is under way, by stopKey, so another thread's composer is not left busy: from the request until the
-  // run ends (its Stop goes, stopKey changes) or STOP_HOLD_MS pass; a failed request clears it at once
+  // run ends (its Stop goes, stopKey changes) or STOP_HOLD_MS pass (STOP_CHECK_MS for what Claude Code stops, after which
+  // the Stop says the run goes on, stopStillLine); a failed request clears it at once
   const [stopping, setStopping] = useState<string | null>(null)
+  // why the Stop did not stop the run and what to do, by stopKey: shown on the Stop and in the strip until the run ends
+  const [stopNote, setStopNote] = useState<{ key: string; text: string } | null>(null)
   useEffect(() => {
     if (stopping && stopping !== stopKey) setStopping(null)
   }, [stopping, stopKey])
   useEffect(() => {
+    if (stopNote && stopNote.key !== stopKey) setStopNote(null)
+  }, [stopNote, stopKey])
+  const still = stopWhat ? stopStillLine(stopWhat) : null
+  useEffect(() => {
     if (!stopping) return
-    const t = window.setTimeout(() => setStopping((s) => (s === stopping ? null : s)), STOP_HOLD_MS)
+    const t = window.setTimeout(
+      () => {
+        setStopping((s) => (s === stopping ? null : s))
+        if (still) setStopNote({ key: stopping, text: still })
+      },
+      still ? STOP_CHECK_MS : STOP_HOLD_MS,
+    )
     return () => window.clearTimeout(t)
-  }, [stopping])
+  }, [stopping, still])
   const stopNow = () => {
     if (!stopWhat || !stopKey || stopping === stopKey) return
     const key = stopKey
     setStopping(key)
-    void stopRun(ws, stopWhat, (t) => setTicket(t as TicketWithShots)).then((ok) => ok || setStopping((s) => (s === key ? null : s)))
+    setStopNote(null)
+    void stopRun(ws, stopWhat, (t) => setTicket(t as TicketWithShots)).then((a) => {
+      if (a.ok) return void (a.note && bus.emit('toast', { text: a.note }))
+      setStopping((s) => (s === key ? null : s))
+      setStopNote({ key, text: a.text })
+    })
   }
+  // what the Stop says, to a screen reader and in a line above the composer (the strip's, else its tooltip): why it did
+  // not stop the run and what to do, or why it cannot before it is pressed; null while there is nothing to say
+  const stopSays = (stopNote?.key === stopKey ? stopNote.text : null) ?? stopBlockedLine(stopWhat, main.meta)
   // the orientation and the tickets that run: their steps at their rows' edge, and in main the orientation's strip
   const runningAgents = useMemo(() => chats.filter((m) => (threadKind(m) === 'orient' || threadKind(m) === 'writer' || threadKind(m) === 'dev') && m.status === 'running').sort((a, b) => (a.created_at < b.created_at ? 1 : -1)), [chats])
   // the orientations' logs are read as well: main leaves out its relay of the summary one handed back
@@ -903,7 +945,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!touring && !demo && <ProposalCard ws={ws} />}
             <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
           </div>
-          {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} since={strip.since} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
+          {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} since={strip.since} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} note={stopSays} />}
           <DemoNote />
           {orientClosedText ? (
             <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
@@ -923,7 +965,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               placeholder={replyIn(target.to === 'main' ? 'main' : target.to === 'orient' ? labels.get(target.chat) ?? 'orient' : curPath)}
               disabled={demo || chat.loading || !!chat.error}
               tip={demo ? DEMO_NOTE : undefined}
-              stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
+              stop={stopWhat ? { label: stopSays ?? stopWhat.label, tip: strip && stopSays ? stopWhat.label : undefined, onStop: stopNow, busy: stopping === stopKey } : undefined}
               thread={current}
               fill={draft}
             />
@@ -1321,7 +1363,7 @@ function Elapsed({ since }: { since: number }) {
  * opens on the steps. A pending permission prompt shows a still dot in place of the spinner (and one Claude Code asks
  * in the terminal makes the title TERMINAL_WAIT, set by the caller); a session waiting to retry
  * after an API capacity error shows a countdown row with Retry now. */
-function TaskStrip({ title, steps, count, since = null, open, onToggle, waiting = false, retry = null, onRetry }: { title: string; steps: ToolStep[]; count: string; since?: number | null; open: boolean; onToggle: () => void; waiting?: boolean; retry?: SessionAlert | null; onRetry?: () => Promise<unknown> }) {
+function TaskStrip({ title, steps, count, since = null, open, onToggle, waiting = false, retry = null, onRetry, note = null }: { title: string; steps: ToolStep[]; count: string; since?: number | null; open: boolean; onToggle: () => void; waiting?: boolean; retry?: SessionAlert | null; onRetry?: () => Promise<unknown>; note?: string | null }) {
   const retryLine = useRetryText(retry)
   const [retrying, setRetrying] = useState(false)
   const retryNow = () => {
@@ -1350,6 +1392,11 @@ function TaskStrip({ title, steps, count, since = null, open, onToggle, waiting 
           {steps.length > 0 && <Icon name="chevron-down" size={12} className="chat-strip-caret" />}
         </button>
       </div>
+      {note && (
+        <div className="chat-strip-note" role="status">
+          {note}
+        </div>
+      )}
       {retry && (
         <div className="chat-strip-retry-row">
           <span className="chat-strip-retry-text" role="status">
