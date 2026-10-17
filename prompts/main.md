@@ -73,7 +73,7 @@ An event with no text of its own carries one line saying what the analyst did in
 - `label_done` says a label you ran finished after your turn moved on, or that a trial the analyst ran on all its units finished, with its counts as the text. When cards read it, the text ends with the command that runs them again: run it with Bash first, and it prints each of them whose takeaway the new output left behind, or that failed, with that output. Write each of those takeaways again with `edit_card` from its output, fix each card that failed, and write the label card's takeaway again from the final counts, in the same turn before any other call. Say something in the chat only when the final counts change your answer.
 {{/later}}
 {{later:event-rerun}}
-- `rerun` says cards read a label that changed, with the command that runs them again as the text: run it with Bash first, and it prints each card whose takeaway the new output left behind, or that failed, with that output. Write each of those takeaways again with `edit_card` from its output and fix each card that failed, in the same turn before any other call. Say something in the chat only when a new output changes your answer.
+- `rerun` says cards read a label that changed, with who changed it as `by` and the command that runs them again as the text: run it with Bash first, and it prints each card whose takeaway the new output left behind, or that failed, with that output. Write each of those takeaways again with `edit_card` from its output and fix each card that failed, in the same turn before any other call. Say something in the chat only when a new output changes your answer, and then name who changed the label as `by` does.
 {{/later}}
 {{end}}
 

@@ -337,3 +337,60 @@ async def test_a_failure_main_read_in_claude_code_s_own_line_waits_for_no_prompt
     session.tail_once(lv)
     assert subagents.agent(CORPUS, AGENT)["status"] == "failed"
     assert events.held(CORPUS) == [], "no old news for the analyst's next question"
+
+
+async def test_a_writer_whose_turn_ends_while_its_background_tasks_run_is_still_writing(bridge, project, monkeypatch):
+    """Bug hunt G9: a writer started a background command and a Monitor that waited for the orientation, then ended
+    its turn. thimble took that turn's end for the run's end and showed the document as not written, with Retry, though
+    Claude Code woke the writer when its tasks ended and it wrote the document. While a background task of its own runs,
+    a turn's end leaves the run waiting: the write stays pending, Write is refused, and its saves name its chat. The
+    task notifications wake it, and its hand-back ends the run."""
+    from types import SimpleNamespace
+
+    from app import report_types, write_session
+
+    writer = "a0c1d2e3f4a5b6c7d"
+    emitted: list[dict] = []
+    real_emit = report_types._emit
+    monkeypatch.setattr(report_types, "_emit", lambda c, e: (emitted.append(e), real_emit(c, e)))
+    monkeypatch.setattr(subagents, "HANDBACK_WAIT_S", 0.01)
+    monkeypatch.setattr(subagents, "AUTO_HANDBACK_WAIT_S", 0.01)
+    lv = _attach(project)
+    bridge.answers.append({"agentId": writer})
+    assert (await write_session.start(CORPUS, "report", route=subagents.CLICK)).agent_id == writer
+    chat = str(subagents.agent(CORPUS, writer)["chat"])
+    path = _agent_file(project, writer, agentType="thimble:writer", toolUseId="toolu_plugin_5e1f0a",
+                       description="writer: report")
+    waiting = "The orientation is still running. I'll write the report when it finishes."
+    _write(path, {"type": "user", "message": {"role": "user", "content": "the task"}},
+           _assistant(_use("toolu_w1", "Bash", {"command": "until test -f done; do sleep 15; done",
+                                                "run_in_background": True})),
+           _result("toolu_w1", "Command running in background with ID: bq7h2k9. Output is being written to: /t/bq7h2k9"),
+           _assistant(_use("toolu_w2", "Monitor", {"command": "tail -f run.json", "description": "orientation ends"})),
+           _result("toolu_w2", "Monitor started (task bm4x8r1, expires in 20m unless the source ends first)."),
+           _assistant({"type": "text", "text": waiting}))
+
+    assert subagents.ended(CORPUS, writer, waiting, "answer") is False, "the module's turn end is no end of the run"
+    subagents.stopped(CORPUS, writer)  # the SubagentStop of the same turn
+    import asyncio
+
+    await asyncio.sleep(0.05)
+    assert subagents.agent(CORPUS, writer)["status"] == "waiting"
+    assert agents.read_meta(CORPUS, chat)["status"] == "running"
+    assert not [e for e in emitted if e.get("status") in ("failed", "generated", "stopped")], emitted
+    assert report_types.write_pending(CORPUS, "report") is not None and write_session.running(CORPUS, "report")
+    ctx = SimpleNamespace(c=CORPUS, session=write_session.session_key("report"))
+    assert report_types._writer_chat(ctx) == chat, "its saves' chips name its chat, so the chat shows one row"
+
+    # the notifications wake it, it saves the document and hands back
+    _write(path, _notice("bq7h2k9", "completed", 'Background command "wait" completed (exit code 0)') | {"isMeta": True},
+           {"type": "attachment", "attachment": {"type": "queued_command", "prompt": (
+               "<task-notification>\n<task-id>bm4x8r1</task-id>\n<status>completed</status>\n"
+               "<summary>Monitor \"orientation ends\" stream ended</summary>\n</task-notification>")}})
+    session.tail_once(lv)
+    assert subagents.agent(CORPUS, writer)["status"] == "running" and session.agent_tasks(CORPUS, writer) == []
+    report_types._write_saved(CORPUS, "report", whole=False)
+    _write(path, _assistant(_use("toolu_hb", "SubagentHandback", {"message": "Wrote report:report."})))
+    session.tail_once(lv)
+    assert subagents.agent(CORPUS, writer)["status"] == "done"
+    assert [e["status"] for e in emitted if e.get("status") in ("failed", "generated")] == ["generated"]

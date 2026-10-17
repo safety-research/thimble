@@ -165,6 +165,9 @@ PLAN_MODE_ATTACHMENTS = ("plan_mode", "plan_mode_reentry")
 PLAN_EXIT_ATTACHMENT = "plan_mode_exit"
 # a Bash call's result when it runs in the background: its shell's task id, which TaskStop takes (live check L33)
 BG_SHELL_RE = re.compile(r"\A\s*Command running in background with ID:\s*([A-Za-z0-9_-]+)")
+# a Bash call's result when its timeout moved it to the background: its shell's task id
+BG_MOVED_RE = re.compile(r"moved to the background \(ID:\s*([A-Za-z0-9_-]+)\)")
+STOP_TOOLS = ("TaskStop", "KillShell")  # the tools that end a background task by its id (`task_id`, `shell_id`)
 HANDBACK_RE = re.compile(r"\A\[Subagent hand-back\].*?follows:\n", re.S)  # the harness's lead of a hand-back
 START_TOOLS = ("start_orientation", "start_writing", "message_orientation", "propose_view", "run_check")  # R3, the Bash true
 # R2: what an error result of main's call for one of thimble's agents says, by the kind of refusal it is
@@ -295,6 +298,9 @@ class Sub:
         self.skip_prompt = False
         self.root: str | None = None  # the agent id of the thimble agent a descendant's chat is a step of
         self.last_text: str | None = None  # the last text it wrote, a turn's answer (agent_answer)
+        # the background tasks it started that have not ended (a shell, a Monitor, a background agent): Claude Code
+        # wakes it when each ends (agent_tasks)
+        self.tasks: set[str] = set()
         # a thread's fork's words in its last `↳ thread <name>: …` line written after its last tool call, which only the
         # terminal shows: its answer when it ends with no reply in the thread (_note_reply)
         self.note: str | None = None
@@ -1958,6 +1964,52 @@ def _child_finished(lv: Live, text: str) -> None:
         _finish_sub(lv, sub, _task_status(fields.get("status")), str(fields.get("result") or "").strip() or None)
 
 
+def _task_started(sub: Sub, name: str, text: str, is_error: bool) -> None:
+    """A call of a subagent's whose result says it started a background task: a Bash command in the background (or
+    moved there by its timeout), a Monitor, a background agent. Its id is kept until the task ends (_own_tasks)."""
+    if is_error:
+        return
+    m = None
+    if name == "Bash":
+        m = BG_SHELL_RE.search(text) or BG_MOVED_RE.search(text)
+    elif name == MONITOR_TOOL:
+        m = MONITOR_TASK_RE.search(text)
+    elif name in AGENT_TOOLS and ASYNC_RESULT_RE.match(text):
+        m = AGENT_ID_RE.search(text)
+    if m:
+        sub.tasks.add(m.group(1))
+
+
+def _own_tasks(lv: Live, sub: Sub, text: str) -> None:
+    """Task notifications in a subagent's own transcript, each of which wakes it: a task of its own whose notification
+    has a status has ended (a Monitor's event has none), and one of thimble's agents that waited on its background work
+    runs again (subagents.resumed)."""
+    for fields in task_notices(text):
+        if fields.get("status"):
+            sub.tasks.discard(str(fields.get("task-id") or ""))
+    if sub.thimble and sub.agent_id:
+        from . import subagents  # noqa: PLC0415
+
+        subagents.resumed(lv.c, str(sub.agent_id))
+
+
+def agent_tasks(c: str, agent_id: str) -> list[str]:
+    """The background tasks one of thimble's agents started that have not ended (_task_started, _own_tasks). Claude Code
+    wakes the agent when each ends, so a turn that ends while one runs does not end its run (subagents.ended). [] when
+    the mirror does not follow the agent."""
+    lv = _live.get(c)
+    if lv is None:
+        return []
+    sub = _sub_by(lv, agent_id=agent_id)
+    if sub is None or sub.path is None:  # its transcript not found yet: look for it now, as agent_error does
+        _scan_subs(lv)
+        sub = _sub_by(lv, agent_id=agent_id)
+    if sub is None:
+        return []
+    _tail_sub(lv, sub)
+    return sorted(sub.tasks)
+
+
 def _peer(lv: Live, *, mid_turn: bool, origin: Any = None) -> None:
     """A message another session sent main (module note), a subagent's hand-back among them: no row of its own, since
     it is neither the analyst's line nor main's. The hand-back of one of thimble's agents ends its run with its report
@@ -3397,6 +3449,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
     att = rec.get("attachment") if rec.get("type") == "attachment" and isinstance(rec.get("attachment"), dict) else None
     if att is not None and "<task-notification>" in str(att.get("prompt") or ""):
         _child_finished(lv, str(att["prompt"]))  # a subagent this one started has stopped
+        _own_tasks(lv, sub, str(att["prompt"]))
         return 0
     if att is not None and att.get("type") in (*PLAN_MODE_ATTACHMENTS, PLAN_EXIT_ATTACHMENT) and sub.thimble \
             and sub.agent_id:
@@ -3420,6 +3473,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
         text = _user_text(rec) or ""
         if origin.get("kind") == "task-notification" and "<task-notification>" in text:
             _child_finished(lv, text)
+            _own_tasks(lv, sub, text)
         return 0
     # a compaction's summary (isCompactSummary) is Claude Code's, written as a user record: no message of anyone's
     if rec.get("type") == "user" and not sub.thread and not rec.get("isMeta") and not rec.get("isCompactSummary"):
@@ -3455,6 +3509,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 from . import subagents  # noqa: PLC0415
 
                 subagents.add_shell(lv.c, owner, shell.group(1))
+            _task_started(sub, sub.names.get(tid, ""), response_text(b.get("content")), bool(b.get("is_error")))
             if tid in sub.starts:
                 _sub_start_result(lv, tid, sub.starts.pop(tid), b.get("content"), bool(b.get("is_error")))
             sub.rec.tool_result(tid, data.pop("summary"), is_error=bool(data.pop("is_error", False)), by=TERMINAL,
@@ -3512,6 +3567,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             n_ = sub.calls.use(tid, name, b.get("input")) if sub.calls is not None else None
             sub.rec.tool_use(tid, name, b.get("input"), by=TERMINAL, **({"n": n_} if n_ else {}))
             inp = b.get("input") if isinstance(b.get("input"), dict) else {}
+            if name in STOP_TOOLS:  # it stopped a background task of its own, which then sends no notification
+                sub.tasks.discard(str(inp.get("task_id") or inp.get("shell_id") or ""))
             if name in AGENT_TOOLS and not sub.thimble and not sub.root:
                 from . import subagents  # noqa: PLC0415
 
