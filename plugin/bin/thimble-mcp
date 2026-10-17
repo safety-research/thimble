@@ -34,8 +34,12 @@ POST {server}/api/tools/<name> with {args, actor, cwd, session, session_token, t
 report MCP progress every PROGRESS_S, since Claude Code aborts a call that is silent for its idle timeout. The server's
 address and token are read per call from $THIMBLE_HOME/server.json; every request proves the shim holds the token, and
 an answer is believed only when it proves the server does, as the plugin's hooks do (app/hook_auth.py). After the press
-the transport stays the server's: when the server does not answer twice, STOPPED_GAP_S apart, a call answers
-PAGE_STOPPED and the shim posts the `page:stopped` notice.
+the transport stays the server's for as long as that `claude` process runs main: when the server does not answer twice,
+STOPPED_GAP_S apart, a call answers PAGE_STOPPED and the shim posts the `page:stopped` notice. A session continued in a
+new `claude` process (`claude -c` after a quit, which stopped the server with the old process) is main there on the
+local transport, as a new main starts (activate.continue_main, bug hunt H1): the shim moves launch.json to its process
+as the session watch begins, at each new session id, and before a call would answer PAGE_STOPPED, so thimble's tools
+work without the analyst doing anything, and a press moves the session to the server again.
 
 Session: a session thimble starts names itself in THIMBLE_SESSION and proves it with THIMBLE_SESSION_TOKEN, which the
 server checks (app/hook_auth.py); it lists its tools from the start and calls the server. Claude Code's background
@@ -384,6 +388,31 @@ def transport_now() -> str:
         return activate.LOCAL
 
 
+def main_transport() -> str:
+    """The transport launch.json gives main's session, whichever session that is (activate.transport with no session):
+    `server` from a press until a session continued in a new process makes it local again (continued)."""
+    c = workspace()
+    if not c:
+        return activate.LOCAL
+    try:
+        return activate.transport(c)
+    except Exception:  # noqa: BLE001 — a record that cannot be read is the local transport
+        return activate.LOCAL
+
+
+def continued() -> bool:
+    """Whether this shim's `claude` process continues main's session in a new process (`claude -c`) and launch.json now
+    names it, on the local transport (activate.continue_main, module note). Never raises."""
+    c, sid = workspace(), session_id()
+    if not c or not sid:
+        return False
+    try:
+        return activate.continue_main(c, sid)
+    except Exception:  # noqa: BLE001 — the transport stays as launch.json has it
+        log.warning("launch.json was not moved to this claude process", exc_info=True)
+        return False
+
+
 def target_of(transport: str) -> str:
     """The view build target the listing describes: the terminal page before the press, the browser page after it."""
     return prompts.HTML_PAGE if transport == activate.SERVER else prompts.TERM_PAGE
@@ -403,12 +432,16 @@ async def call_local(name: str, args: dict[str, Any], tool_use_id: str | None = 
 
 async def call_server_or_stopped(name: str, args: dict[str, Any], tool_use_id: str | None = None) -> mcp_types.CallToolResult:
     """The server transport of the analyst's session: call_server, unless the server answers neither of two looks
-    STOPPED_GAP_S apart, when the call answers PAGE_STOPPED and the `page:stopped` notice is posted (module note). The
-    transport stays the server's."""
+    STOPPED_GAP_S apart, when the call runs locally in a session continued in this new `claude` process (continued),
+    and otherwise answers PAGE_STOPPED and the `page:stopped` notice is posted (module note). The transport stays the
+    server's while the process it names runs main."""
     async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
         if not await _reachable(client):
             await anyio.sleep(STOPPED_GAP_S)
             if not await _reachable(client):
+                if (await anyio.to_thread.run_sync(continued)
+                        or await anyio.to_thread.run_sync(transport_now) != activate.SERVER):
+                    return await call_local(name, args, tool_use_id)
                 c = workspace()
                 if c:
                     try:
@@ -590,6 +623,20 @@ def tool_entries(transport: str | None = None) -> list[dict[str, Any]]:
         return tools.private_list(kind) if kind else tools.list(ROLE, session=own_session()[0])
 
 
+async def begin_local() -> None:
+    """On the local transport, once per process: the card watch from thimble's start, not its first call
+    (local.begin)."""
+    if LIVE.transport != activate.LOCAL or LIVE.begun:
+        return
+    LIVE.begun = True
+    try:
+        c = await anyio.to_thread.run_sync(local.begin, cwd())
+        if c:
+            local.watch(c)  # on this loop: the worker thread begin ran in has none
+    except Exception:  # noqa: BLE001 — the tools still serve without it
+        log.exception("the card watch did not start")
+
+
 async def go_live(wait: bool = True) -> bool:
     """List main's tools in place of load_thimble with one list_changed, and with `wait` wait at most LIST_WAIT_S for
     Claude Code's tools/list (whose answer writes listed.json). Starts the card watch (local.begin) on the local
@@ -605,14 +652,8 @@ async def go_live(wait: bool = True) -> bool:
     first = not LIVE.on
     LIVE.on = True
     LIVE.sid = session_id()
-    if first and LIVE.transport == activate.LOCAL and not LIVE.begun:
-        LIVE.begun = True
-        try:  # the card watch from thimble's start, not its first call (local.begin)
-            c = await anyio.to_thread.run_sync(local.begin, cwd())
-            if c:
-                local.watch(c)  # on this loop: the worker thread begin ran in has none
-        except Exception:  # noqa: BLE001 — the tools still serve without it
-            log.exception("the card watch did not start")
+    if first:
+        await begin_local()
     await connection.send_tool_list_changed()
     if not wait:
         return False
@@ -649,8 +690,12 @@ async def load_thimble() -> mcp_types.CallToolResult:
 async def subscription(route: str) -> None:
     """Hold the subscription for as long as the session lives on the server transport (module note). Never raises: a
     failure, a missing server.json or an answer without the server's proof waits RETRY_S and subscribes again; a new
-    session id (checked at each keep-alive) resubscribes at once."""
+    session id (checked at each keep-alive) resubscribes at once. It ends once the transport is local again (a session
+    continued in this process after a quit: continued), and the session watch starts it again at the next press."""
     while True:
+        if await anyio.to_thread.run_sync(main_transport) != activate.SERVER:
+            LIVE.subscribed = False
+            return
         sid = session_id()
         moved = False  # the session id changed under a live subscription: renew it without waiting
         query = urllib.parse.urlencode({**{k: v for k, v in (("cwd", cwd()), ("session", sid), ("pid", os.getppid()),
@@ -680,9 +725,11 @@ async def subscription(route: str) -> None:
 
 async def watch_session(tg: Any) -> None:
     """Once Claude Code finished the handshake: before thimble is on, look for the session marker every RETRY_S (an
-    activation made outside the shim) and go live when it appears; once on, every LIVE_POLL_S, write listed.json for a
-    new session id, and when the transport turns to the server's (the press), list the tools again for the browser's
-    page and subscribe (module note)."""
+    activation made outside the shim) and go live when it appears; once on, move launch.json to this process when it
+    continues main's session (continued: at the start and at each new session id), and every LIVE_POLL_S write
+    listed.json for a new session id, and when the transport turns to the server's (the press), list the tools again
+    for the browser's page and subscribe, or when it turns local (continued), list them again for the terminal's page
+    and start what the local transport runs here (begin_local) (module note)."""
     connection = LIVE.connection
     if connection is None:
         return
@@ -692,21 +739,25 @@ async def watch_session(tg: Any) -> None:
             await go_live()
             break
         await anyio.sleep(RETRY_S)
+    await anyio.to_thread.run_sync(continued)
     while True:
-        await anyio.sleep(LIVE_POLL_S)
         sid = session_id()
         if sid and sid != LIVE.sid:
             LIVE.sid = sid
             names = list(LIVE.server._tool_manager._tools) if LIVE.server is not None else []
             await anyio.to_thread.run_sync(activate.write_listed, sid, names)
+            await anyio.to_thread.run_sync(continued)
         now = await anyio.to_thread.run_sync(transport_now)
         if now != LIVE.transport:
             LIVE.transport = now
             if target_of(now) != LIVE.target:
                 await go_live(wait=False)
+        if now == activate.LOCAL:
+            await begin_local()
         if now == activate.SERVER and LIVE.route and not LIVE.subscribed:
             LIVE.subscribed = True
             tg.start_soon(subscription, LIVE.route)
+        await anyio.sleep(LIVE_POLL_S)
 
 
 # --------------------------------------------------------------------------- serving

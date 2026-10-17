@@ -2,8 +2,10 @@
 
 A session reaches thimble one of two ways (transport): locally, from the session's own processes, until the analyst's
 first press of the browser workbench (`thimble open`, `/thimble browser`, a ↗ or `o` in the terminal panel), and through
-thimble's server for the rest of that session after it. The switch is one way. Peers (a second session that turned
-thimble on beside a live main) and sessions another took main from always stay local.
+thimble's server for the rest of that session after it. The switch is one way, for as long as main's `claude` process
+runs: the session continued in a new process after a quit (`claude -c`) starts local again (activate.continue_main).
+Peers (a second session that turned thimble on beside a live main) and sessions another took main from always stay
+local.
 
 On local transport no server runs for the session. The plugin's MCP shim, one process per Claude Code session that main
 and every subagent share, runs the same `tools.call` in its own process (call); the terminal UI reads the same JSON the

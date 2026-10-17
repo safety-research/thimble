@@ -1195,6 +1195,65 @@ async def test_an_agent_s_own_shim_lists_its_private_tools_alone_and_makes_no_st
     assert local._started == {CORPUS}
 
 
+# a stand-in `claude` that continues a session: Claude Code's record of it names the session, and the shim is its child
+CONTINUED = ("import json, os, subprocess, sys; "
+             "open(os.path.join(sys.argv[2], f'{os.getpid()}.json'), 'w')"
+             ".write(json.dumps({'sessionId': sys.argv[3]})); "
+             "sys.exit(subprocess.call([sys.argv[1]]))")
+
+
+async def test_h1_a_session_continued_after_a_quit_runs_thimble_s_tools_locally_with_no_page_stopped(term, tmp_path):
+    """Bug hunt H1: `/exit` ("Exit and stop tasks") ends main's `claude`, and the server stops itself once no workspace
+    has a main session; `claude -c` continues the same session in a new process. launch.json still said `transport:
+    server` with the old process's pid, so every tool answered "thimble's page stopped" until the analyst typed
+    /thimble browser. The shim of the new process now makes it main on the local transport, as a new main starts, and
+    the call runs in the shim; a press moves the session to the server again."""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    from conftest import PLUGIN_TOKEN, _record
+
+    sid = "7e000000-0000-4000-8000-0000000000c1"
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()  # the first `claude`, which the quit ended
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        dead_port = s.getsockname()[1]
+    _record(token=PLUGIN_TOKEN, port=dead_port, api=f"http://127.0.0.1:{dead_port}")  # the stopped server's record
+    cc = tmp_path / "cc"
+    (cc / "sessions").mkdir(parents=True)
+    ws = config.workspace_dir(CORPUS)
+    (ws / "trusted" / "launch.json").write_text(json.dumps(
+        {"session": sid, "transport": "server", "mode": "browser", "via": "press", "pid": gone.pid,
+         "config_dir": str(cc), "peers": [], "moved": []}))
+    up = Path(os.environ["THIMBLE_HOME"]) / "up"
+    up.mkdir(parents=True, exist_ok=True)
+    (up / f"{sid}.active").write_text(json.dumps({"cwd": str(term), "ws": CORPUS, "path": str(ws), "mod": True}))
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.symlink_to(sys.executable)
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PID", "CLAUDE_CODE_SESSION_ID")}
+    env.update({"THIMBLE_CARD_CHECK": "off", "THIMBLE_CWD": str(term), "CLAUDE_CONFIG_DIR": str(cc),
+                "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR)})
+    params = StdioServerParameters(command=str(claude), cwd=str(term), env=env,
+                                   args=["-c", CONTINUED, str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"),
+                                         str(cc / "sessions"), sid])
+
+    async def run() -> Any:
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                return await s.call_tool("read_ref", {"ref": "board.jsonl#L1"})
+
+    res = await asyncio.wait_for(run(), 90)
+    said = "\n".join(getattr(b, "text", "") for b in res.content)
+    assert not res.is_error and "page stopped" not in said, said
+    rec = json.loads((ws / "trusted" / "launch.json").read_text())
+    [record] = list((cc / "sessions").glob("*.json"))
+    assert rec["session"] == sid and rec["transport"] == "local" and rec["pid"] == int(record.stem)
+    assert local.transport(CORPUS, sid) == local.LOCAL
+
+
 def _children() -> list[int]:
     me = os.getpid()
     out = []
