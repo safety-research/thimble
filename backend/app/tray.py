@@ -46,8 +46,8 @@ def statusline_command(own: str = "") -> str:
 
 def subagent_rows(c: str) -> list[dict[str, Any]]:
     """thimble's running agents from the registry (subagents.json), each {name, label, state, kind, chat, role}: the
-    role and what it works on, and its state, `waiting` while it waits for its child (the orientation for its critic)
-    or for a permission prompt in the terminal."""
+    role and what it works on, and its state, `waiting` while it waits for its child (the orientation for its critic),
+    its background tasks or a permission prompt in the terminal."""
     from . import events, subagents  # noqa: PLC0415
 
     rows: list[dict[str, Any]] = []
@@ -70,9 +70,11 @@ def subagent_rows(c: str) -> list[dict[str, Any]]:
             t = dev._get(what)
             what = f"#{t.get('n')} {t.get('title') or ''}".strip() if t else what
         word = ROLE_WORDS.get(role, role)
-        # waiting for a child: its critic, or the subagents it started (helpers)
+        # waiting for a child: its critic, or the subagents it started (helpers); else for its background tasks
+        # (subagents.background_work)
         kids = [k for k in every.values() if k.get("parent") == agent_id and k.get("status") in ("running", "waiting")]
-        waits = "waiting for its critique" if any(k.get("role") == "critic" for k in kids) else "waiting for its subagents"
+        waits = ("waiting for its critique" if any(k.get("role") == "critic" for k in kids)
+                 else "waiting for its subagents" if kids else "waiting for its background tasks")
         state = "waiting for a permission" if agent_id in asking else (
             waits if a.get("status") == "waiting" else "working")
         rows.append({"name": subagents.type_name(role), "label": f"{word}: {what}" if what else word, "state": state,

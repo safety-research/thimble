@@ -77,6 +77,8 @@ A card you add lands in your own group, named for the document, such as `Report 
 
 Your context file shows the cards as they were when you started, and the analyst's session may add cards while you work. So call `list_cards` before you add a card that counts something and again right before each save, and where a new card counts what one of yours counts, use its number.
 
+Do not wait for an orientation that still runs. Write from the cards that exist now, and say in your last message that the analyst can ask for the document again when the orientation is done.
+
 Save a first draft, or a revision that changes the main claim, whole with `write_document`. Answer a request about one passage with `edit_document` at that passage, since the analyst has read the rest and should not have to read it again to find what changed.
 
 A revision keeps every earlier finding the cards still support and adds to it. Copy word for word every sentence the request does not touch, since the analyst has read it. A revision you save whole ends with a section headed `What changed`, two to five lines on what changed and why.

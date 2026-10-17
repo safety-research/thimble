@@ -1528,23 +1528,60 @@ def set_paused(c: str, agent_id: str, paused: str | None) -> None:
             agents.update_agent(c, str(a["chat"]), paused=paused)
 
 
+def background_work(c: str, agent_id: str) -> list[str]:
+    """The background tasks `agent_id` started that run on (session.agent_tasks: a shell, a Monitor, a background agent).
+    Claude Code wakes the agent when each ends, so the agent is not done (bug hunt G9: a writer whose turn ended while
+    its Monitor waited for the orientation was taken as ended, and it wrote its document 13 minutes later)."""
+    from . import session  # noqa: PLC0415
+
+    try:
+        return session.agent_tasks(c, agent_id)
+    except Exception:  # noqa: BLE001 — a transcript that cannot be read says nothing of the run's end
+        log.debug("%s: the background tasks of %s were not read", c, agent_id, exc_info=True)
+        return []
+
+
+def _waits_on_work(c: str, agent_id: str) -> bool:
+    """Whether a turn's end of `agent_id` leaves its run going: a child of it runs (the orientation's critic), or a
+    background task it started runs on (background_work). Its registry entry then says `waiting` until it wakes
+    (child_ended, resumed)."""
+    if not children_running(read(c), agent_id) and not background_work(c, agent_id):
+        return False
+    with update(c) as st:
+        a = files.registry(st).get(agent_id)
+        if not isinstance(a, dict) or a.get("status") not in ("running", "waiting"):
+            return False  # its run ended meanwhile (the tail of its transcript held its hand-back)
+        a.update(status="waiting", waiting_since=a.get("waiting_since") or files.now())
+    return True
+
+
+def resumed(c: str, agent_id: str) -> None:
+    """A task notification woke `agent_id` (session._own_tasks): an agent that waited on its background work runs
+    again, unless a child of it still runs."""
+    state = read(c)
+    a = files.registry(state).get(agent_id)
+    if not isinstance(a, dict) or a.get("status") != "waiting" or children_running(state, agent_id):
+        return
+    with update(c) as st:
+        e = files.registry(st).get(agent_id)
+        if isinstance(e, dict) and e.get("status") == "waiting":
+            e.update(status="running", waiting_since=None)
+
+
 _waits: dict[tuple[str, str], asyncio.TimerHandle] = {}
 
 
 def stopped(c: str, agent_id: str, last_stop: float | None = None) -> None:
-    """A SubagentStop of a registered agent: its turn ended. With a child running it waits for it (the orientation for
-    its critic); otherwise the run ends with that turn's answer (session.agent_answer) unless a hand-back follows within
-    HANDBACK_WAIT_S (AUTO_HANDBACK_WAIT_S in auto mode)."""
+    """A SubagentStop of a registered agent: its turn ended. With a child running, or a background task of its own, it
+    waits for it (_waits_on_work: the orientation for its critic); otherwise the run ends with that turn's answer
+    (session.agent_answer) unless a hand-back follows within HANDBACK_WAIT_S (AUTO_HANDBACK_WAIT_S in auto mode)."""
     from . import session  # noqa: PLC0415
 
     state = read(c)
     a = files.registry(state).get(agent_id)
     if not isinstance(a, dict) or a.get("status") not in ("running", "waiting"):
         return
-    if children_running(state, agent_id):
-        with update(c) as st:
-            if isinstance(files.registry(st).get(agent_id), dict):
-                files.registry(st)[agent_id].update(status="waiting", waiting_since=files.now())
+    if _waits_on_work(c, agent_id):
         return
     wait = AUTO_HANDBACK_WAIT_S if session.main_mode(c) == "auto" else HANDBACK_WAIT_S
     k = int(a.get("run") or 0)
@@ -1552,7 +1589,7 @@ def stopped(c: str, agent_id: str, last_stop: float | None = None) -> None:
     def check() -> None:
         _waits.pop((c, agent_id), None)
         now_a = agent(c, agent_id) or {}
-        if now_a.get("ended_run") == k or int(now_a.get("run") or 0) != k or children_running(read(c), agent_id):
+        if now_a.get("ended_run") == k or int(now_a.get("run") or 0) != k or _waits_on_work(c, agent_id):
             return
         run_ended(c, agent_id, "done", session.agent_answer(c, agent_id), source="turn")
 
@@ -1578,8 +1615,8 @@ ERROR_TEXT_WAIT_S = 1.0
 def ended(c: str, agent_id: str, answer: str | None = None, reason: str = "") -> bool:
     """The module's `ended {agentId, answer, reason}` (its turn.complete, which reaches it for the agents it started
     although its other hooks skip them): a turn's end with its answer, which ends the run once when no child of the
-    agent runs; stopped or failed when the reason says so (`aborted`; `error`, `refusal`), a failure with the API's
-    error line as its report (run_ended)."""
+    agent runs and, for an answer, no background task of its own (_waits_on_work); stopped or failed when the reason
+    says so (`aborted`; `error`, `refusal`), a failure with the API's error line as its report (run_ended)."""
     state = read(c)
     a = files.registry(state).get(agent_id)
     if not isinstance(a, dict) or children_running(state, agent_id):
@@ -1587,6 +1624,8 @@ def ended(c: str, agent_id: str, answer: str | None = None, reason: str = "") ->
     why = str(reason or "").lower()
     status = "stopped" if any(w in why for w in STOPPED_REASONS) else "failed" if any(
         w in why for w in FAILED_REASONS) else "done"
+    if status == "done" and _waits_on_work(c, agent_id):
+        return False
     if status == "failed" and not str(answer or "").strip():
         answer = NO_ERROR_TEXT.format(reason=why)
         if api_error(c, agent_id) is None:  # not written yet: read again in a moment (run_ended reads it then)
