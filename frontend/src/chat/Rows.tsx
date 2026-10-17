@@ -279,13 +279,13 @@ export function devStarted(r: { view?: string; title?: string | null }): string 
 
 /** Where a message came from: in any chat, a prompt a plugin sent as the analyst's, as Claude Code's terminal says it
  * (thimble's terminal panel's `run again` or new label); in one of thimble's agents' threads, typed in Claude Code's
- * agent tray (`terminal` with `tray`, the record's origin `human`) or sent from thimble's browser (`browser`); none for
- * a prompt main's call sent (`terminal` alone), and none for the analyst's own messages in main. Pure. */
+ * agent tray (`terminal` with `tray`, the record's origin `human`); none for a prompt main's call sent (`terminal`
+ * alone), and none for the analyst's own messages sent here in the browser (`browser`), in main or a thread, which
+ * are theirs as they read them (bug hunt G11). Pure. */
 export function byLabel(by: string | undefined, chat: string | undefined, tray?: boolean, plugin?: string): string | null {
   if (plugin) return `Prompt from the ${plugin} plugin`
   if (!chat || chat === 'main') return null
   if (by === 'terminal') return tray ? 'typed in the agent tray' : null
-  if (by === 'browser') return 'sent from thimble'
   return null
 }
 
