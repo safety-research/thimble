@@ -115,6 +115,9 @@ export type TermVerdict = {
   kind: string
   path?: string
   line?: number
+  /** the line of its file the cited place starts on, where its file opens: its line, or a record's first line (a JSON
+   *  document's record cited by its pointer, `…json#/messages/<id>`, whose resolution has no line of its own) */
+  fileLine?: number
   lines: { n: number; text: string; hit: boolean; spans?: number[][] }[]
   card?: string
   column?: string

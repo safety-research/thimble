@@ -214,7 +214,8 @@ export type World = {
   startedAt?: number
   /** what `thimble state opens` says each file opens as (`transcript`), by path */
   opens: Record<string, string>
-  /** a whole-file JSON transcript's page of turns by its path (`thimble state turns`), over none */
+  /** a whole-file JSON transcript's page of turns by its path (`thimble state turns`), over none; a function: the page
+   *  its arguments after the path ask for */
   turns: Record<string, unknown>
   /** the file browser's reads: what `thimble state find` and `grep` answer by the words, `marks` by the file's path,
    *  `tables` by a database's path and `rows` by `<path>:<table>` (a function: the page from `--start`) */
@@ -586,6 +587,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
         if (rest[0] && w.pages[rest[0]] !== undefined) return w.pages[rest[0]] === null ? out({ error: `could not read ${rest[0]}` }, 1) : out(w.pages[rest[0]])
         return rest[0] ? out(w.states.file) : out(w.states.files)
       case 'turns':
+        // a function: the page the arguments after the path ask for (`--start n`, `--line n`)
+        if (typeof w.turns[rest[0]!] === 'function') return out((w.turns[rest[0]!] as (args: string[]) => unknown)(rest.slice(1)))
         return out(w.turns[rest[0]!] ?? { path: rest[0], total: 0, start: 0, turns: [], n_groups: 0, groups: {}, none: `${rest[0]} holds no messages to show as a transcript` })
       case 'find':
         return out(w.found[rest[0]!] ?? { q: rest[0], files: [], total: 0 })

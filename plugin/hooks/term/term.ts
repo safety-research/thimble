@@ -55,6 +55,9 @@ export const rt = {
   // draws that field (live check term-fix9, quirk 1: back from a new thread's form, the citation panel's hint still said
   // `Enter to ask · Esc to leave the field`)
   fields: new Set<string>(),
+  // the field the view shown last starts its ring on in place of the list's keys, '' for those: the labels list's entry
+  // box while the list holds no label (bug hunt C2), which giveKeys gives the ring after an open
+  startRing: '',
   // a key the panel does not bind went to the prompt (panel.tsx typeThrough): until the prompt has the keys the panel
   // draws neither its list's keys nor its hotkeys, so the next key reaches the prompt
   typeThrough: false,
@@ -601,6 +604,7 @@ export async function openPanel(cx: Ctx, p: TermPanel, opts: { replace?: boolean
  *  and has not closed by hand; below that it waits undrawn, the row above the prompt offers it and says why, and Claude
  *  Code places it once the terminal is widened to that width (the Pane's first drawing then takes the row away). */
 async function placePanel(cx: Ctx, p: TermPanel): Promise<void> {
+  opens++
   try {
     const title = paneTitle(p)
     rt.fittedFor = rt.termColumns
@@ -668,13 +672,15 @@ export async function retryPending(cx: Ctx, columns: number): Promise<void> {
  *  `ui.focus` that lets its hint row name them (live check term-fix7, quirk 2: ↓ moved the ring to `show all threads`
  *  while the hint named ↑↓). Asked again while the prompt holds them over an empty composer, Claude Code gives them;
  *  else the panel's hint row says how to give them (panel.tsx endHints). */
-function giveKeys(cx: Ctx, title: string, ringOn = RELAY_PICK): void {
+function giveKeys(cx: Ctx, title: string, ringAsked = RELAY_PICK): void {
   // `left`: how many more times the ring is asked onto the keys while the view that draws them may not be drawn yet;
   // `reopened`: the pane was opened again to take the keys from the prompt
   const ask = async (left: number, reopened: boolean) => {
     const pane = (await cx.panes()).find(p => p.id === PANEL)
     if (!pane?.isPlaced) return
     if (pane.isFocused !== false) {
+      // a view with no list whose keys a field takes in their place (the empty labels list's entry box)
+      const ringOn = ringAsked === RELAY_PICK && rt.startRing ? rt.startRing : ringAsked
       // the ring onto the list's keys (a ring there already stays, and the call says so); a view that draws none leaves
       // the ring where it is, off them. Neither raises a ui.focus (live check term-fix8, quirk 7)
       // a new thread's field likewise: an open of a pane that holds the keys already is no take, so its `autoFocus` puts
@@ -714,6 +720,27 @@ export async function takeKeys(cx: Ctx): Promise<void> {
   await cx.open({ id: PANEL, title: paneTitle(p), focus: true, columns: panelColumns() }).catch(() => undefined)
   await cx.bumpPanel()
   giveKeys(cx, paneTitle(p))
+}
+
+// the panel's opens so far (placePanel): an act that opened a view asked for the keys itself
+let opens = 0
+
+/** The keys kept by the panel after the person pressed one of its own acts (a Button such as `checked ›` or a passage's
+ *  `?`, a link, a row, a card's mark), as a click on a list keeps them (takeKeys). A click can leave the keys with the
+ *  prompt though the act changed only the panel (bug hunt B28: after `checked ›` the hint row said `click the panel for
+ *  its keys`, and the next `f` went to main's prompt). A moment after the press, once its act ran, a pane that no longer
+ *  holds the keys takes them back; nothing when the act opened a view (placePanel asked for them), while the pane holds
+ *  them, or once it closed. */
+export function keepKeys(cx: Ctx): void {
+  const at = opens
+  cx.later(KEYS_AGAIN_MS, () =>
+    void (async () => {
+      if (opens !== at) return
+      const pane = (await cx.panes()).find(x => x.id === PANEL)
+      if (!pane?.isPlaced || (pane.isFocused !== false && !rt.typeThrough)) return
+      await takeKeys(cx)
+    })().catch(() => undefined),
+  )
 }
 
 // the relay's field (panel.tsx RELAY.pick), a new thread's question field (panel.tsx drawAsk) and the ring off every
@@ -972,19 +999,32 @@ export async function saveLabel(cx: Ctx, id: string, patch: LabelPatch): Promise
 
 const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`
 
+/** What the analyst did that a code label's run follows, for main's prompt: `changed`, the press saved an edit of the
+ *  label first; `reads`, what the run reads (labels.ts runReads: `30 of its 33 files`). */
+export type LabelRunHow = { changed: boolean; reads: string }
+
 /** Run a label from its panel on a sample of `limit` records, or on every record (`limit` 0), with `thimble act
  *  label-run`, which answers once the run ends: the panel says `◌ labeling` meanwhile and the counts after. A code
- *  label's code runs only in main's Bash: main is asked to run the command the act gives. */
-export async function runLabel(cx: Ctx, id: string, name: string, limit: number): Promise<void> {
+ *  label's code runs only in main's Bash: main is asked to run the command the act gives, in words that say only what
+ *  the analyst did (`asked`); a code label whose last run covers this one runs nothing, and the panel says so, with no
+ *  turn of main's (bug hunt B31: main was told "as I changed it" of a label nobody changed, and its run kept the old
+ *  rows). */
+export async function runLabel(cx: Ctx, id: string, name: string, limit: number, asked: LabelRunHow = { changed: false, reads: '' }): Promise<void> {
   if (!rt.sc) return
   await labelSaid(cx, id, '', { limit, at: await cx.now() })
-  const got = await actLong<{ deferred?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null; stopped?: boolean } }>(cx, rt.sc, 'label-run', { label: id, ...(limit ? { limit } : {}) })
+  const got = await actLong<{ deferred?: boolean; unchanged?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null; stopped?: boolean } }>(cx, rt.sc, 'label-run', { label: id, ...(limit ? { limit } : {}) })
   if (!got.ok) {
     await labelSaid(cx, id, `× ${got.error}`, null)
     return
   }
+  if (got.value.unchanged) {
+    await labelSaid(cx, id, 'nothing changed since the last run, so thimble did not run it again', null)
+    return
+  }
   if (got.value.deferred && got.value.command) {
-    await cx.submit(`Run the code label "${name}" ${limit ? `on a sample of ${limit} records` : 'on every record'}, as I changed it in its panel. Run this with Bash: ${got.value.command}`)
+    const reads = asked.reads || (limit ? `a sample of ${limit.toLocaleString('en-US')}` : 'all of its records')
+    const what = asked.changed ? `I changed the code label "${name}" in its panel. Run it on ${reads}.` : `Run the code label "${name}" on ${reads}.`
+    await cx.submit(`${what} Use Bash to run this command: ${got.value.command}`)
     await labelSaid(cx, id, 'its code runs in main\'s Bash: main was asked to run it', null)
     return
   }

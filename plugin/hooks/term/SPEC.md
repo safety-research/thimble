@@ -303,8 +303,9 @@ and never what a script got. In the citation panel's bar, a citation still check
     element then, so no row names them. A letter the panel does not bind goes to the prompt; the panel then draws
     neither the relay nor its hotkeys until the prompt has the keys, and its row says `click the panel for its keys`.
     The row names the list's keys only once a `ui.focus` says the ring rests there. A click on a list, on a row or on
-    an empty part, hands the keys back to the pane. A list taller than its pane is cut to the rows the pane leaves it
-    around the chosen row, `↑ N more` and `↓ N more` dim above and below (a click moves a page, the wheel a row), so
+    an empty part, hands the keys back to the pane, and so does a click on any other act of the panel's own (`checked
+    ›`, a passage's `?`, a link): it never leaves the keys with the prompt (bug hunt B28). A list taller than its pane
+    is cut to the rows the pane leaves it around the chosen row, `↑ N more` and `↓ N more` dim above and below (a click moves a page, the wheel a row), so
     the chosen row and the hint row always show. A choice that moves up to the first row shown, or above it, starts the
     rows shown at the row that leads it: on home its section's heading, and the top for the first row the keys choose,
     so every row can be reached by keys. No letter is a hotkey unless the hint row names it, or, in a view, the list
@@ -1038,7 +1039,7 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
             ● unsure  ━━                               2
 
   last run on all 44 lines
-  run on a sample   run on all   rename   delete
+  run on 30 of 44 lines   run on all 44 lines   rename   delete
 
   ▸ examples  12 · 80% agreed on 10 values you set, not counting the 4 given as examples
   ▸ cards  2
@@ -1088,8 +1089,12 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
   changed the counts), its tip the count now (`the label counts 179 now, with your verdicts`).
 - The last run dim on its own row (`last run on all 44 lines`, `last run on a sample of 30 lines`), then the actions,
   3 cells apart, their words underlined in the accent, `delete` in red (Matt, v9 review: they read as text; this
-  overrides rule 24 for the label panel): `run on a sample` and `run on all`, which save what was typed first and run
-  it; `◌ labeling …  stop` while it runs, and the fields as plain text. A run's first error is a red `!` row under
+  overrides rule 24 for the label panel): `run on 30 of 44 lines` and `run on all 44 lines`, each naming what it
+  reads (`run on a sample of 30` and `run on all` where the scope's count is not known; only `run on all …` for a
+  scope of no more units than a sample), which save what was typed first and run it. A code label's run goes to main
+  as a prompt that says what it reads, and that the analyst changed the label only when the press saved an edit; a run
+  its last one covers runs nothing, and the panel says `nothing changed since the last run, so thimble did not run it
+  again` (bug hunt B31); `◌ labeling …  stop` while it runs, and the fields as plain text. A run's first error is a red `!` row under
   them. `rename` (n) gives the name's field the keyboard. `delete` (k), not offered while a run goes, asks once in
   their place: `delete label "…"? its marks and card go too · y to delete · n to keep`; y deletes the label with its
   marks, its card and any filter that uses it (`thimble act label-delete`) and opens the labels list, which offers to
@@ -1112,7 +1117,10 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
   f, e, d and l stay bound, unnamed.
 - The labels list (`home › labels`): each label as home draws it (its name row with its bar and total, its legend,
   four rows of it at most), 1-9 the first nine, then the entry box `describe a new label` (rule 27), whose words go to
-  main, which makes the label with a trial; ↓ past the last label or a click gives it the keys. `l` in a label's panel
+  main, which makes the label with a trial; ↓ past the last label or a click gives it the keys. One row shows the
+  cursor: the chosen label's `❯` while the box does not hold the keys, else the box's (its `❯` dim while it does not).
+  With no label the list has no keys of its own: the box takes them as the list opens, and the hint row names none
+  (bug hunt C2); with no label and a delete to undo, `u` keeps its key and a click gives the box the keys. `l` in a label's panel
   opens the list in place of the label's step (`home › labels`), the label it came from chosen; b then goes where the path shows, home. A document's `l` does the same for the documents list.
 - The scope's records (`14,591 records`, `run on all 14,591`): the last full run's count, else the scope's size thimble
   counts for a label whose first run never ended.

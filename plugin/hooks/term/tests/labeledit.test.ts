@@ -176,7 +176,7 @@ const KINDS_SHOWN = [
       /^ {10}● no {6}━{30} {2}25$/,
       /^ {10}● unsure {2}━{2} {31}2$/,
       /^last run on all 44 lines$/,
-      /^run on a sample {3}run on all {3}rename {3}delete$/,
+      /^run on 30 of 44 lines {3}run on all 44 lines {3}rename {3}delete$/,
       /^↑↓ to choose · Enter to press or edit/,
     ],
     chosen: [' prompt ', ' records of files ', ' on '],

@@ -1250,7 +1250,10 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     (concepts.apply_route): a label that never ran gets its card, and main hears of a version it has not heard of
     (tell_main). The run goes on in this process until it ends and its summary is the answer, so the renderer starts it
     beside the session, which it ends with. A code label's code runs only in main's sandbox: as apply_label does, the run
-    waits for `thimble-run label` (concepts.PENDING_RUN), and the answer gives its command (`deferred`)."""
+    waits for `thimble-run label` (concepts.PENDING_RUN), and the answer gives its command (`deferred`); a code label
+    whose last run already covers this one (the same version over the same files and sample, concepts.covered) runs
+    nothing and waits for nothing, and the answer says so (`unchanged`), so main is not asked to run what apply_label
+    would answer with the old rows (bug hunt B31)."""
     from . import cardrun, concepts  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -1264,6 +1267,8 @@ async def _act_label_run(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     files = found["unit"] in concepts.FILE_UNITS
     paths = concepts.glob_patterns(found["glob"]) if files else []
     if found["kind"] == "code" and cardrun.defers(c):
+        if concepts.running_apply(c, cid) is None and await asyncio.to_thread(concepts.covered, c, found, paths, limit or None):
+            return {"label": cid, "unchanged": True}
         args: dict[str, Any] = {"scope": concepts.SCOPE_OF_UNIT.get(found["unit"], "files"), "name": found["name"],
                                 "predicate": {"kind": "code", "text": found["spec"]}, "values": found["labels"],
                                 **({"paths": paths} if files else {}), **({"limit": limit} if limit else {})}

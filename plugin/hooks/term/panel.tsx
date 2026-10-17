@@ -54,7 +54,7 @@ import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, th
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
 import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
-import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
+import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, runReads, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
 import { featuresOf, openComments, openSection } from './band'
 import { openChecks } from './checksview'
 import { citeItems, citePlace, openCitations } from './citesview'
@@ -984,7 +984,7 @@ function windowFit(top: number, len: number, room: number): { up: number; down: 
  *  choosing (live check term-fix8, quirk 1). The wheel and a click on a count row move the rows shown (wheelWindow)
  *  until the choice moves again; the lines cut off above and below are counted on a dim row each, which a click moves
  *  by a page. A list that fits, or a pane whose rows are not known, is drawn whole. */
-export function windowList(key: string, lines: Line[], hits: LineHit[], at: number, room: number, bump: () => Promise<void>, lead?: number): { lines: Line[]; hits: LineHit[] } {
+export function windowList(key: string, lines: Line[], hits: LineHit[], at: number, room: number, bump: () => Promise<void>, lead?: number, count?: (top: number, end: number) => { above: number; below: number }): { lines: Line[]; hits: LineHit[] } {
   windowed = key
   const len = lines.length
   if (room < 5 || len <= room) {
@@ -1017,15 +1017,18 @@ export function windowList(key: string, lines: Line[], hits: LineHit[], at: numb
   }
   const out: Line[] = []
   const outHits: LineHit[] = []
+  // what the count rows count: the lines cut off, or with `count` the units its list counts (a transcript's turns, as
+  // its header counts them, those of the pages not read with them too: bug hunt B29)
+  const counted = count?.(top, top + f.n) ?? { above: top, below: len - top - f.n }
   if (f.up) {
-    const words = `↑ ${num(top)} more`
+    const words = `↑ ${num(counted.above)} more`
     outHits.push({ y: 0, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + width(words), row: false, run: move(top - page) })
     out.push(pointed([{ s: '  ' }, dim(words)], false))
   }
   out.push(...lines.slice(top, top + f.n))
   for (const h of hits) if (h.y >= top && h.y < top + f.n) outHits.push({ ...h, y: h.y - top + f.up })
   if (f.down) {
-    const words = `↓ ${num(len - top - f.n)} more`
+    const words = `↓ ${num(counted.below)} more`
     outHits.push({ y: out.length, x0: MARGIN_W + 2, x1: MARGIN_W + 2 + width(words), row: false, run: move(top + page) })
     out.push(pointed([{ s: '  ' }, dim(words)], false))
   }
@@ -1088,6 +1091,8 @@ const RING_HINT = 'Enter to press or edit'
 
 // the text fields the drawing being made draws, by their keys (rt.fields once it is shown)
 let fieldsDrawing = new Set<string>()
+// the field the drawing being made starts the ring on in place of a list's keys (rt.startRing once it is shown)
+let startRingDrawing = ''
 
 /** A text field's key, noted as drawn by the drawing being made: its ring's hint is named only while it is drawn. */
 function fieldKey(key: string): string {
@@ -1161,13 +1166,13 @@ export function bottomRows(cx: Ctx, e: PaneEvent, cols: number, controls: (Rende
 
 /** The bottom of a panel with an entry box (entry.tsx, rule 25): its actions 2 cells apart after a blank row, then the
  *  box, whose top rule is the panel's second rule, then the key-hint row; without a box, bottomRows. */
-export function entryBottom(cx: Ctx, e: PaneEvent, cols: number, controls: (RenderElement | null | false)[], entry: RenderElement | null, hints: string[], fields: RenderElement[] = []): RenderElement[] {
+export function entryBottom(cx: Ctx, e: PaneEvent, cols: number, controls: (RenderElement | null | false)[], entry: RenderElement | null, hints: string[], fields: RenderElement[] = [], autoFocus = ''): RenderElement[] {
   if (!entry) return bottomRows(cx, e, cols, controls, fields, hints)
   const els = cx.els(e) as El
   const { Box } = els
   const ctl = controlsEl(els, controls, 'bottom-controls')
   const above = [...(ctl ? [ctl] : []), ...fields]
-  return [...(above.length ? [<Box key="bottom-controls-row" marginTop={1} flexDirection="column">{above}</Box>] : []), entry, hintsRow(els, hints, cols)]
+  return [...(above.length ? [<Box key="bottom-controls-row" marginTop={1} flexDirection="column">{above}</Box>] : []), entry, hintsRow(els, hints, cols, autoFocus)]
 }
 
 /** An empty region (rule 28): dim words at A2. */
@@ -2026,7 +2031,10 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // the title: the value highlighted on the citation's purple (red once it failed), not underlined; no ◌ or × after
   // it, the bar says its state
   const titleSegs: Line = [bad ? { s: label, b: true, fg: COLORS.problem } : { s: label, b: true, bg: citeHighlight() }]
-  const opens = f ? () => openFile(cx, f.path, Math.max(1, (f.line ?? 1) - 5), f.line) : cardId ? () => openCard(cx, cardId) : null
+  // its file opens at the cited line, or at the record a pointer cites (`…json#/messages/<id>`), lit there (bug hunt B29:
+  // a transcript's message opened its file at the first turn, the message neither shown nor marked)
+  const at = f?.line ?? v?.fileLine
+  const opens = f ? () => openFile(cx, f.path, Math.max(1, (at ?? 1) - 5), at) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
   // the title row's current step: the value as its link, a click on it opening its place
   setHead({ line: titleSegs, key: 'cite-title', ...(opens ? { press: () => void opens() } : {}) })
@@ -2794,9 +2802,9 @@ async function pendingEdits(cx: Ctx, l: LabelFull): Promise<LabelPatch> {
   return patch
 }
 
-/** Save the label panel's edits of label `id` with `extra` over them (`thimble act label`): true when saved, or when
- *  nothing waited. A kind picked is saved only with its definition. */
-async function saveLabelEdits(cx: Ctx, id: string, extra: LabelPatch = {}): Promise<boolean> {
+/** Save the label panel's edits of label `id` with `extra` over them (`thimble act label`): `saved` when it saved an
+ *  edit, `same` when no edit waited, false when it could not save. A kind picked is saved only with its definition. */
+async function saveLabelEdits(cx: Ctx, id: string, extra: LabelPatch = {}): Promise<'saved' | 'same' | false> {
   const got = await surfaceValue(cx, `label:${id}`)
   const l = got?.ok ? (labelOf(got.value) as LabelFull | null) : null
   if (!l) return false
@@ -2809,11 +2817,11 @@ async function saveLabelEdits(cx: Ctx, id: string, extra: LabelPatch = {}): Prom
   }
   if (!Object.keys(patch).length) {
     drafts.delete(`${id}:model`)
-    return true
+    return 'same'
   }
   const err = await saveLabel(cx, id, patch)
   if (!err) for (const k of ['body', 'glob', 'model', 'name']) drafts.delete(`${id}:${k}`)
-  return !err
+  return err ? false : 'saved'
 }
 
 /** A post of field.tsx: the words typed in a field (a draft), or a save (Enter). */
@@ -2880,6 +2888,11 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   // run stopped part way)
   const scopeN = typeof last?.matched_total === 'number' ? last.matched_total : typeof last?.total === 'number' && !l.trial ? last.total : typeof l.scope_total === 'number' ? l.scope_total : null
   const sample = l.trial && last?.limit ? last.limit : 30
+  // the units a run reads from: the scope's count, or for a label over whole files the files its glob matches; a
+  // scope that holds no more units than a sample runs whole, so its sample's button gives way (bug hunt B31: `run on a
+  // sample` of a label over 33 files asked main for "30 records")
+  const unitsN = scopeN ?? (l.unit === 'agent' && typeof l.scope_files === 'number' ? l.scope_files : null)
+  const sampleWhole = unitsN !== null && unitsN <= sample
   const unit = unitWords(l.unit)
   const opened = (part: string) => ui.open.includes(`${id}:${part}`)
   const flip = (part: string) => async () => {
@@ -2890,9 +2903,12 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   }
   // the edits typed and not saved, and the kind picked: what a save or a run stores first
   const save = (extra: LabelPatch = {}) => saveLabelEdits(cx, id, extra)
+  // a run says what it reads in main's prompt (runReads), and that the analyst changed the label only when this press
+  // saved an edit (bug hunt B31)
   const run = (limit: number) => async () => {
     if (running) return
-    if (await save()) await runLabel(cx, id, name, limit)
+    const saved = await save()
+    if (saved) await runLabel(cx, id, name, limit, { changed: saved === 'saved', reads: runReads(limit, unitsN, noun).prompt })
   }
   // delete: asked once in the panel (labelDeleting), then `thimble act label-delete` and the labels list
   const askDelete = async () => {
@@ -3252,8 +3268,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     else
       rows.push(
         <Box key="lb-runs" flexDirection="row" columnGap={3} flexWrap="wrap">
-          {actionEl(els, 'lb-sample', 'run on a sample', () => void run(sample)())}
-          {actionEl(els, 'lb-all', 'run on all', () => void run(0)())}
+          {sampleWhole ? null : actionEl(els, 'lb-sample', runReads(sample, unitsN, noun).button, () => void run(sample)())}
+          {actionEl(els, 'lb-all', runReads(0, unitsN, noun).button, () => void run(0)())}
           {actionEl(els, 'lb-rename', 'rename', () => void askRename())}
           {actionEl(els, 'lb-delete', 'delete', () => void askDelete(), COLORS.problem)}
         </Box>,
@@ -3263,7 +3279,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   said.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
   const asking = labelDeleting === id && !running && !st.running
   if (asking) keys.push({ key: 'delete-yes', hotkey: 'y', onPress: () => void deleteIt() }, { key: 'delete-no', hotkey: 'n', onPress: () => void keepIt() })
-  else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
+  else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sampleWhole ? 0 : sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
   else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
   // f shows or hides the marks of a label over files in Files and the views (o opens the label in the browser, as in
   // every view)
@@ -3476,7 +3492,9 @@ const LIST_LEGEND_ROWS = 4
 const NEW_LABEL = 'make-label'
 
 /** The labels (SPEC.md, "The label panel", the labels list): each label as home draws it, its name, its bar and total
- *  and its legend, `❯` on the chosen one; under them the entry box `describe a new label`, whose words go to main. */
+ *  and its legend, `❯` on the chosen one while the entry box does not hold the keys; under them the entry box `describe
+ *  a new label`, whose words go to main. With no label the list has no keys: the box takes them (bug hunt C2: the
+ *  list's keys took a letter of the description and sent the rest to main's prompt). */
 async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const els = cx.els(e) as El
   const { Box, Button, Text } = cx.els(e)
@@ -3485,6 +3503,16 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const ls = (got?.ok ? labelsOf(got.value) : []) as LabelFull[]
   const body: RenderElement[] = [...headerEls(els, { title: 'Labels', cols, sub: subLine([plural(ls.length, 'label')]) })]
   const pick = ls.find(x => x.id === labelPick)?.id ?? ls[0]?.id ?? ''
+  // one row shows the cursor: the chosen label's `❯` while the box does not hold the keys, the box's `❯` while it does
+  const boxHeld = rt.panelFocus === NEW_LABEL && panelHasKeys()
+  // the label deleted last from its panel: `undo` puts it back with its marks, its card and its filters, as the
+  // browser's top bar's Undo (`thimble act label-undelete`); a refusal says why in red
+  const gone = labelGone && !ls.some(x => x.id === labelGone!.id) ? labelGone : null
+  const undo = gone && !gone.error ? () => void undeleteLabel(cx, gone.id, gone.name) : null
+  // a list read and empty: its entry box takes the ring as the view opens (term.ts giveKeys), but where it offers to
+  // undo a delete, whose `u` the box would take
+  const empty = Boolean(got?.ok) && !ls.length && e.surface !== 'mobile' && !undo
+  if (empty) startRingDrawing = NEW_LABEL
   // each label as home draws it (home.ts labelBlocks): its name row, its bar in the column every bar takes, its total,
   // then its legend, each value with its count, then the records it is unsure of and those no category fit; those
   // records are in its panel, a press away (SPEC-v2 J6)
@@ -3499,7 +3527,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
     if (l.id === pick) pickAt = lines.length
     for (const [k, line] of [b.name, ...b.legend].entries()) {
       hits.push({ y: lines.length, x0: MARGIN_W, x1: cols + MARGIN_W, row: true, run: () => openLabel(cx, l.id, l.name ?? l.id) })
-      lines.push(pointed(line, k === 0 && l.id === pick))
+      lines.push(pointed(line, k === 0 && l.id === pick && !boxHeld))
     }
   })
   if (!ls.length) lines.push(pointed([{ s: '  ' }, dim('none')], false))
@@ -3508,17 +3536,13 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
   const entry =
     e.surface === 'mobile'
       ? null
-      : entryEl(cx, e, { key: fieldKey(NEW_LABEL), placeholder: 'describe a new label', submit: 'make it', cols, onSubmit: v => void cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v}`) })
+      : entryEl(cx, e, { key: fieldKey(NEW_LABEL), placeholder: 'describe a new label', submit: 'make it', cols, held: boxHeld || (empty && !rt.panelFocus && panelHasKeys()), ...(empty ? { autoFocus: true } : {}), onSubmit: v => void cx.submit(`Make a label with apply_label and try it on a sample of 30: ${v}`) })
   const step = (d: number) => {
     const at = ls.findIndex(x => x.id === pick)
     if (d > 0 && at >= ls.length - 1) return entry ? ringOnto(cx, NEW_LABEL) : undefined
     labelPick = ls[Math.max(0, Math.min(ls.length - 1, at + d))]?.id ?? ''
     return cx.bumpPanel()
   }
-  // the label deleted last from its panel: `undo` puts it back with its marks, its card and its filters, as the
-  // browser's top bar's Undo (`thimble act label-undelete`); a refusal says why in red
-  const gone = labelGone && !ls.some(x => x.id === labelGone!.id) ? labelGone : null
-  const undo = gone && !gone.error ? () => void undeleteLabel(cx, gone.id, gone.name) : null
   const goneRow = gone ? (
     gone.error ? (
       <Text key="lbs-gone" color={COLORS.problem} wrap="wrap">{`× the label "${gone.name}" was not restored: ${gone.error}`}</Text>
@@ -3529,12 +3553,13 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       </Box>
     )
   ) : null
-  const listHints = ['↑↓ to choose', 'Enter to open', ...(undo ? ['u to undo'] : []), 'b to go back', 'x to close']
+  const listHints = [...(ls.length ? ['↑↓ to choose', 'Enter to open'] : []), ...(undo ? ['u to undo'] : []), 'b to go back', 'x to close']
   // the title row, the header, the entry box (else the rule under the list), the undo row and the blank row above it,
   // and the hint rows aside
   const bottom = entry ? entryHeight(NEW_LABEL, cols, true, 'make it') + (goneRow ? 2 : 0) : 1 + (goneRow ? 1 : 0)
   const win = windowList('labels-list', lines, hits, pickAt, bodyRows - 1 - bottom - hintHeight(listHints, cols) - body.length, () => cx.bumpPanel())
-  body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, k => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)))
+  const listKeys = (k: string) => (k === 'up' || k === 'k' ? step(-1) : k === 'down' || k === 'j' ? step(1) : (k === 'return' || k === 'enter') && pick ? openLabel(cx, pick, ls.find(x => x.id === pick)?.name ?? pick) : undefined)
+  body.push(linesEl(cx, e, marginKey('labels-list'), win.lines, win.hits, cols + MARGIN_W, ls.length ? listKeys : undefined))
   body.unshift(
     <Box key="label-presses" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
       {ls.map((l, i) => {
@@ -3543,7 +3568,7 @@ async function drawLabels(cx: Ctx, e: PaneEvent): Promise<RenderElement> {
       })}
     </Box>,
   )
-  body.push(...entryBottom(cx, e, cols, [], entry, listHints, goneRow ? [goneRow] : []))
+  body.push(...entryBottom(cx, e, cols, [], entry, listHints, goneRow ? [goneRow] : [], empty ? NEW_LABEL : ''))
   const hk = undo ? hiddenKeys(cx, e, [{ key: 'undo', hotkey: 'u', onPress: undo }]) : null
   return <Box flexDirection="column">{[...(hk ? [hk] : []), ...body]}</Box>
 }
@@ -4084,6 +4109,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   hotkeysDrawing = new Map()
   listExtraDrawing = { space: false, backspace: false }
   fieldsDrawing = new Set()
+  startRingDrawing = ''
   windowed = ''
   scrollDrawing = null
   panelField = null
@@ -4133,6 +4159,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   scrollShown = scrollDrawing
   viewAt = viewAtDrawing
   rt.fields = fieldsDrawing
+  rt.startRing = startRingDrawing
   return tree
 }
 
