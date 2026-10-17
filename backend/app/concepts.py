@@ -5717,6 +5717,19 @@ def _presence(ws: Path, concept_id: str) -> dict[str, dict[str, int]]:
     return out
 
 
+def marks_some(ws: Path, concept_id: str, paths: set[str] | None, values: set[str] | None) -> bool | None:
+    """Whether one concept's rows give a record of one of `paths` (of any file for None) one of `values` (any value for
+    None), covers included, as its presence says; None while its store is rebuilt and has no rows to read yet.
+    Blocking."""
+    st, building = _store(ws, concept_id)
+    if st is None:
+        return None if building else False
+    for path, got in st.presence().items():
+        if (paths is None or path in paths) and (values is None or any(v in values for v in got)):
+            return True
+    return False
+
+
 @router.get("/ws/{c}/labels/presence")
 def presence_route(c: str) -> list[dict]:
     """[{concept_id, paths: {path: {value: n}}}]: for every label over files, the values it left on each file, which

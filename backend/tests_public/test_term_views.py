@@ -17,9 +17,11 @@ import tempfile
 import threading
 from pathlib import Path
 
+import httpx
 import pytest
+from fastapi import FastAPI
 
-from app import config, kernel_wrap, srt, term_views, views
+from app import concepts, config, kernel_wrap, srt, term_views, views
 from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 NODE = srt.node()
@@ -340,6 +342,37 @@ async def test_the_host_serves_thimble_term_over_its_socket_with_its_token(board
         with contextlib.suppress(asyncio.CancelledError):
             await task
     assert view_calls.KERNEL == kernel, "the host's own kernels' name is its own while it serves"
+
+
+COLOR_PROGRAM = """
+import { colorBy, draw } from 'thimble-term'
+const color = colorBy({ fields: [{ name: 'kind', title: 'Kind', values: ['note'] }], initial: 'kind' })
+draw((d) => color.draw(d))
+"""
+
+
+@needs_node
+async def test_a_view_opens_on_its_own_field_while_the_label_on_marks_none_of_its_records(board, inproc):
+    """A label on in Files whose run marked none of the view's records (a regex that found nothing) colors no row, so
+    the view opens on its `initial` field, not on the label with no record marked; a label on that marks one takes it."""
+    app = FastAPI()
+    app.include_router(concepts.router, prefix="/api")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", timeout=180) as api:
+        async def label(name: str, pattern: str) -> None:
+            r = await api.post(f"/api/ws/{CORPUS}/concepts", json={"name": name, "kind": "regex", "spec": pattern})
+            assert r.status_code == 200, r.text
+            cid = r.json()["id"]
+            r = await api.post(f"/api/ws/{CORPUS}/concepts/{cid}/apply", json={"paths": ["board.jsonl"], "wait": True})
+            assert r.status_code == 200, r.text
+            concepts.show_concept(CORPUS, cid, True)
+
+        slug = _view(COLOR_PROGRAM)
+        await label("zebra sightings", r"zebra")
+        out = await term_views.draw_text(CORPUS, slug, cols=80, rows=4, wrap=DRAW_WRAP)
+        assert "Color by  Kind" in out and "zebra sightings" not in out, out
+        await label("second posts", r"second")
+        out = await term_views.draw_text(CORPUS, slug, cols=80, rows=4, wrap=DRAW_WRAP)
+        assert "Color by  second posts" in out, out
 
 
 # ------------------------------------------------------------------------------------------------------ Timeline

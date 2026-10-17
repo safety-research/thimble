@@ -1359,8 +1359,9 @@ function frameMenu(d, box, [a, b], title, y = d.y) {
  * the view's fields and every label over files; the chosen field's or label's values are chips with their counts, which
  * a click turns off and on; a label's definition is one step away (its name's `↗` opens the label's panel, and the menu
  * shows it under the label's row). As in the browser, the view opens Off, or as `initial` says, unless a label is on in
- * Files and marks its files: then it opens colored by that label, and a label turned on while the view is away or open
- * takes the color.
+ * Files and marks some of its records with a value it colors by (`marking`): then it opens colored by that label, and
+ * such a label turned on while the view is away or open takes the color. A label that marks none, such as one whose run
+ * found nothing, colors no row, so the view keeps its own choice.
  *
  * opts: fields [{name, title, description?, values?, meanings?, value?(record)}], initial (a field's name, or {field,
  * on: [values]}, that field with only those values colored; Off without it), onChange.
@@ -1380,8 +1381,8 @@ export function colorBy(opts = {}) {
   const startOn = startKey !== 'off' && init && typeof init === 'object' && Array.isArray(init.on) ? init.on.map(valueKey) : null
   const fieldOf = (key) => byKey.get(key)
   const labelOf = (key) => labelByKey(key) || undefined
-  // the labels on in Files (or filtering) that mark the view's files
-  const onIds = () => state.labels.filter((l) => l.on && l.here !== false).map((l) => String(l.id))
+  // the labels on in Files (or filtering) that mark some of the view's records with a value they color by
+  const onIds = () => state.labels.filter((l) => l.on && l.here !== false && l.marking !== false).map((l) => String(l.id))
   // the labels another part holds (the one Rows groups the lanes by), which take no color
   const held = () => new Set(state.holds.flatMap((f) => f() || []).map(String))
   // how the view opens: colored by a label that is on and no part holds, as the browser's view opens, else as `initial`

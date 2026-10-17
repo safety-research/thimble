@@ -156,8 +156,10 @@ the hint row names it. A view that binds `?` itself keeps it, and the kit then b
 `colorBy(opts)` is the one control for the view's color, as in the browser ([color.md](color.md)). Draw it in the top row
 with `color.draw(d, before)` (`before(r)` adds the row's other controls first) or `color.add(r)`.
 
-- The view opens colored by a label that is on in Files and marks its files (not one Rows groups by), as the browser's
-  view does, else as its `initial` says, else Off; a label turned on while the view is away or open takes the color, the one turned on last.
+- The view opens colored by a label that is on in Files and marks some records of its files with a value it colors by
+  (not one Rows groups by), as the browser's view does, else as its `initial` says, else Off; such a label turned on
+  while the view is away or open takes the color, the one turned on last. A label that marks none of them, such as one
+  whose run found nothing, colors no row, so the view keeps its own choice until the analyst picks the label.
 - The row reads `Color by  Kind` and the chosen field's values as chips: `●` in the value's hue, its name, its count
   dim. A click on a chip turns the value's hue off (`○`, dim) or on: its records stay, dim as those with no value.
   Values past the sixth share one chip, `other`, with no
