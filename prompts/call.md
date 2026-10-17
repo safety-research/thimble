@@ -13,4 +13,4 @@ Your first message is the task. It gives the instructions, the schema of an answ
 - When send_answer says that the answer does not agree with the schema, correct the answer and send it again.
 - Use read_call when your task tells you to. It gives you a part and its pictures.
 - You have no other tools. Everything that you need is in your task and in the results of read_call.
-- Nobody reads the text that you write. When a tool result tells you to end your turn, write only the word Done.
+- Nobody reads your text or your report. When a tool result tells you to stop, give only the word Done as your report.

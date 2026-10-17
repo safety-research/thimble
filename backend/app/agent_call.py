@@ -383,9 +383,12 @@ def _part_result(c: str, cid: str, n: int) -> Any:
     except OSError:
         text = ""
     pics = [x for x in p.get("pictures") or [] if isinstance(x, dict)]
-    body = tools.hint("read_call-part", part=n, text=text) or f"# Part {n}\n\n{text}"
-    if pics:
-        body += "\n\n" + (tools.hint("read_call-pictures", count=_pictures_word(len(pics)), part=n) or "")
+    if p.get("inline") and pics:  # its text is in the agent's first message already (task_text): the pictures alone
+        body = tools.hint("read_call-pictures-only", count=_pictures_word(len(pics)), part=n)
+    else:
+        body = tools.hint("read_call-part", part=n, text=text) or f"# Part {n}\n\n{text}"
+        if pics:
+            body += "\n\n" + (tools.hint("read_call-pictures", count=_pictures_word(len(pics)), part=n) or "")
     content: list[dict[str, Any]] = [{"type": "text", "text": body.strip()}]
     for pic in pics:
         try:
@@ -594,7 +597,8 @@ class _Call:
             with _locked(self.c, self.cid) as now:
                 p = (now.get("parts") or {}).get("1")
                 if p and p.get("state") == "queued":
-                    p.update(state="given", agent="", tries=int(p.get("tries") or 0) + 1, given=time.time())
+                    p.update(state="given", agent="", tries=int(p.get("tries") or 0) + 1, given=time.time(),
+                             inline=True)
         self.starts += 1
         title = _short(self.spec.title or f"thimble: {self.spec.what}", TITLE_CHARS)
         ans = await subagents.start_job(self.c, ROLE, _key(self.cid), prompt, values, subagents.FOLLOW_ON,

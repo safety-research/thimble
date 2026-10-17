@@ -1018,9 +1018,13 @@ The worktree holds no change yet, so there is nothing to check.
 
 The {count} of part {part} follow.
 
+## read_call-pictures-only
+
+The {count} of part {part} follow. Its text is in your first message.
+
 ## read_call-none
 
-No parts are left. End your turn now. Write only the word Done.
+No parts are left. Stop now. Give only the word Done as your report.
 
 ## read_call-wait
 
@@ -1028,7 +1032,7 @@ The next part is not ready yet. Call read_call again.
 
 ## read_call-share
 
-You answered your share of the parts. Another agent gets the parts that are left. End your turn now. Write only the word Done.
+You answered your share of the parts. Another agent gets the parts that are left. Stop now. Give only the word Done as your report.
 
 ## send_answer-more
 
@@ -1036,7 +1040,7 @@ thimble has your answer to part {part}. Call read_call to get the next part.
 
 ## send_answer-last
 
-thimble has your answer to part {part}. That was your last part. End your turn now. Write only the word Done.
+thimble has your answer to part {part}. That was your last part. Stop now. Give only the word Done as your report.
 
 ## send_answer-invalid
 
@@ -1056,7 +1060,7 @@ Only the agent of a thimble task can use {tool}.
 
 ## call-stopped
 
-thimble stopped this task. End your turn now. Write only the word Done.
+thimble stopped this task. Stop now. Give only the word Done as your report.
 
 ## finish-review-again
 

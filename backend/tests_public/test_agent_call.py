@@ -64,7 +64,7 @@ async def test_a_call_runs_as_main_s_subagent_and_its_answer_is_checked_against_
     wrong = await _send("send_answer", {"answer": {"curt": "very"}})
     assert wrong.is_error and "curt" in wrong.text and "agree with the schema" in wrong.text
     right = await _send("send_answer", {"answer": {"curt": True}}, 1)
-    assert not right.is_error and "Write only the word Done" in right.text
+    assert not right.is_error and "only the word Done" in right.text
     res = await asyncio.wait_for(call, 5)
     assert res.status == "ok" and res.output == {"curt": True} and res.model_requested == "claude-opus-5-5"
     late = await _send("send_answer", {"answer": {"curt": False}}, 2)
@@ -153,6 +153,7 @@ async def test_the_card_check_s_reading_gets_its_picture_from_read_call(ws, brid
     got = await _send("read_call", {})
     images = [b for b in got.content if b.get("type") == "image"]
     assert len(images) == 1 and images[0]["mimeType"] == "image/png"
+    assert "Its text is in your first message" in got.text and "How many curt replies?" not in got.text
     answer = {"assessment": [{"problem": ""}] * 5, "question": "How many curt replies?", "code": "print(2)",
               "takeaway": "Two."}
     ok = await _send("send_answer", {"answer": answer}, 1)
