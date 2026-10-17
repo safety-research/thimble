@@ -107,11 +107,11 @@ The mode hook tells the server (POST /api/events/mode) the permission mode Claud
 of its turns begins and ends, which is the mode the agents thimble starts follow by default. It sends nothing in a
 subagent. The first time main reports Manual mode in a session, the server answers with a line that says so and how to
 switch to auto mode (app/modes.py manual_line), which the hook shows as its systemMessage. As a turn ends it also shows,
-once, the dashboard link `server up` left for the session (app/cli.py leave_link): the link carries a sign-in code the
-server makes as the hook shows it, which works once, for 5 minutes, until a newer one for the workspace is made
-(app/hook_auth.py); a systemMessage reaches the analyst's terminal but not the model's context, and Claude Code also
-records it in the session's transcript. The server also leaves notes here with no link, such as the line for a new
-sign-in (app/session.py tell_terminal). Both go in one systemMessage, the link first.
+once, the notes left for the session's terminal: what `server up` found the session's environment lacks (app/cli.py
+leave_notes) and the server's lines, such as the one for a new sign-in (app/session.py tell_terminal). It never shows a
+link with a sign-in code: Claude Code records a systemMessage in the session's transcript, which a model can read, so
+the terminal gets such a link only on the clipboard (the panel's `copy link`). A first line an older build left there,
+its dashboard link, is not shown.
 
 The agents hook tells one of thimble's agents, or a descendant of one, the ref of each call it made (POST
 /api/ws/<c>/calls/ref, for the orientation and its descendants, whose calls its thread numbers) and, after a Bash call,
@@ -193,8 +193,6 @@ END_TAG = "</thimble-event>"  # closes an event as the server renders it (app/ev
 HELD_WAIT_S = 3.0
 AGENTS_WAIT_S = 3.0
 PERMISSION_WAIT_S = 2.0  # how long the permission hook's note to the server may take; Claude Code's dialog waits for it
-PAIR_WAIT_S = 3.0  # how long the Stop hook waits for the link's sign-in code (link_lines)
-NO_CODE_LINE = "thimble: to sign this browser in, run `thimble up` in a shell and open the link it prints."
 # every request goes to thimble's own server on 127.0.0.1, never through a proxy the shell names
 LOOPBACK = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -472,7 +470,7 @@ def mode(inp: dict) -> int:
         return mode_files(inp, ws)
     if server() is None or inp.get("agent_id"):
         return 0
-    said = [link_lines(str(inp.get("session_id") or ""))] if inp.get("hook_event_name") == "Stop" else []
+    said = [terminal_notes(str(inp.get("session_id") or ""))] if inp.get("hook_event_name") == "Stop" else []
     if inp.get("permission_mode"):
         body = {"cwd": folder(inp), "session": str(inp.get("session_id") or "") or None,
                 "permission_mode": str(inp["permission_mode"])}
@@ -493,16 +491,10 @@ def show(lines: list) -> None:
         print(json.dumps({"systemMessage": text}))
 
 
-def ws_name(url: str) -> str:
-    """The workspace a dashboard link names (`?ws=`), '' for the start page."""
-    return (urllib.parse.parse_qs(urllib.parse.urlsplit(url).query).get("ws") or [""])[0]
-
-
-def link_lines(session: str) -> str:
-    """The link /thimble left for `session`, with a sign-in code the server makes now (POST /api/ui/pair), and the lines
-    left after it, which the file then no longer holds (module note). The file's first line is the link, and empty when
-    the server left only notes (app/session.py tell_terminal). Without a code, the line that says how to sign a browser
-    in comes first in the notes. '' when nothing was left."""
+def terminal_notes(session: str) -> str:
+    """The notes left for `session`'s terminal (module note), which the file then no longer holds: its lines after the
+    first, which is empty (app/cli.py leave_notes, app/session.py tell_terminal) or, from an older build, a link, never
+    shown, and no sign-in code is asked for. '' when nothing was left."""
     name = "".join(ch for ch in session if ch.isalnum() or ch in "-_")
     if not name:
         return ""
@@ -512,21 +504,8 @@ def link_lines(session: str) -> str:
         path.unlink()
     except OSError:
         return ""
-    first, _, rest = text.partition("\n")
-    url = first.strip()
-    notes = [x for x in rest.splitlines() if x.strip()]
-    if url:
-        ws = ws_name(url)
-        try:
-            status, answer = request("POST", "/api/ui/pair", {"ws": ws}, timeout=PAIR_WAIT_S)
-        except (OSError, http.client.HTTPException):
-            status, answer = 0, {}
-        code = answer.get("code") if status == 200 else None
-        if isinstance(code, str) and code:
-            url += "#p=" + code
-        else:
-            notes.insert(0, NO_CODE_LINE)
-    return "\n".join(([f"thimble: {url}"] if url else []) + notes)
+    _, _, rest = text.partition("\n")
+    return "\n".join(x for x in rest.splitlines() if x.strip() and "#p=" not in x)
 
 
 # --------------------------------------------------------------------------- local transport

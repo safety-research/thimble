@@ -1076,7 +1076,7 @@ def config_files(c: str | None) -> list[Path]:
     return [global_file(), *([workspace_file(c)] if c else [])]
 
 
-LINKS_DIR = "links"  # under thimble's home: the dashboard link, with no code, and notes for main's terminal (cli.LINKS_DIR)
+LINKS_DIR = "links"  # under thimble's home: notes for main's terminal (cli.LINKS_DIR), a remote press's one-time link
 # the workspace's files and folders main and its agents may not edit, since thimble keeps its records there: the checks,
 # the chats, the extensions' state, the run record, the folder of the files the hooks trust (trusted/: subagents.json,
 # callers.jsonl, launch.json), the views' state (proposals with their attempt counts, the versions readers are served),

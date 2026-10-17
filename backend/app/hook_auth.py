@@ -32,7 +32,7 @@ may read (userconf.private_paths), and it outlives a restart, as the sessions a 
 
 Everything the analyst does in thimble (a message, a click, a change of Settings) must come from a signed-in browser
 (analyst). The page opens on a one-time code after `#p=`, which the server makes when the page is opened (mint:
-`thimble open`, app/open_cmd.py; main's Stop hook and `thimble up` for a link a person copies); the page trades it for
+`thimble open`, app/open_cmd.py, also for a link a person copies; `thimble up` in a shell); the page trades it for
 an HttpOnly, SameSite=Strict cookie and a random key of that browser's own (claim), and the code then stops working, as
 it does when its time is over (PRESS_TTL_S for a page `thimble open` opens on this computer, LINK_TTL_S for a link a
 person copies) or OVERLAP_S after a newer code for the same workspace is made, so a double press leaves both tabs
@@ -113,8 +113,8 @@ SHIM_PATHS = frozenset({"/api/events"})
 MODULE_PREFIX = "/api/module/"  # the hooks module's routes (app/module_bridge.py): every one, whatever the method
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
 SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
-# the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes the Stop hook and
-# `thimble up` / `thimble unpair` call
+# the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes `thimble open`,
+# `thimble up` and `thimble unpair` call
 CLI_PATHS = frozenset({
     "/api/corpora/register", "/api/dev/announce", "/api/dev/revert", "/api/extensions/refresh", "/api/subagents/caller",
     "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
@@ -151,7 +151,7 @@ OLD_COOKIE_PATH = "/api/"
 # signed in and when it was last used (at most TOUCH_S out of date)
 PAIRED_FILE = "paired.json"
 PRESS_TTL_S = 60  # the code of a page `thimble open` opens on this computer works this long, and once
-LINK_TTL_S = 300  # the code of a link a person copies (a remote terminal, the Stop hook, `thimble up`)
+LINK_TTL_S = 300  # the code of a link a person copies (a remote terminal, `copy link`, `thimble up` in a shell)
 PAIR_TTL_S = LINK_TTL_S  # a code's life when the pair route names none
 OVERLAP_S = 10  # an older code of the same workspace keeps working this long after a newer one is made
 PAIRED_IDLE_S = 30 * 24 * 3600  # a signed-in browser unused this long is signed out

@@ -680,9 +680,9 @@ def attached_workspaces() -> list[str]:
 
 def tell_terminal(c: str, line: str) -> bool:
     """`line` for main's terminal in workspace `c`: appended to <home>/links/<main's session>, which main's Stop hook shows
-    under main's next reply (plugin/bin/.thimble-watch link_lines), as a note after the link /thimble left there, or after
-    an empty first line in a file this makes (readable by its owner alone). False when no main is attached or the line
-    was not written."""
+    under main's next reply (plugin/bin/.thimble-watch terminal_notes), as a note after the empty first line of the file
+    /thimble left there or this makes (readable by its owner alone); never a sign-in code (the transcript keeps it).
+    False when no main is attached or the line was not written."""
     lv = _live.get(c)
     name = "".join(ch for ch in (lv.sid if lv is not None else "") if ch.isalnum() or ch in "-_")
     if not name or not line.strip():

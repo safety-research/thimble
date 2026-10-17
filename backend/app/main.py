@@ -609,7 +609,7 @@ def create_app() -> FastAPI:
             signed_in(body.get("ws"), new)
         return r
 
-    @app.post("/api/ui/pair")  # token only (hook_auth.guarded): `thimble open`, the Stop hook, `thimble up`
+    @app.post("/api/ui/pair")  # token only (hook_auth.guarded): `thimble open`, `thimble up` in a shell
     def ui_pair(body: dict = Body(default={})) -> dict:
         ttl = hook_auth.ttl_of(body.get("ttl"))
         opened = body.get("open")

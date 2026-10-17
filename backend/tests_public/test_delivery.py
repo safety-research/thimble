@@ -276,47 +276,115 @@ def test_the_server_answers_a_hook_route_only_to_a_request_that_proves_the_token
         assert client.post("/api/events/held", json=body, headers=_signed("rotated")[0]).status_code == 200
 
 
-def test_main_s_stop_hook_shows_the_link_thimble_up_left_once_and_only_as_it_ends(tmp_path):
-    """/thimble prints no link into the model's context (cli.LINK_LINE): main's Stop hook shows the link `server up` left,
-    once, as a systemMessage, which Claude Code shows the analyst and not the model, with a sign-in code the server
-    makes as the hook shows it (POST /api/ui/pair for the link's workspace), so the file never holds one."""
-    link = "http://127.0.0.1:8300/?ws=mini"
-    (tmp_path / "thome" / "links").mkdir(parents=True)
-    (tmp_path / "thome" / "links" / SID).write_text(link)
+def test_main_s_stop_hook_shows_the_notes_left_for_the_terminal_once_and_never_a_link(tmp_path):
+    """Main's Stop hook shows the notes left for the session's terminal (cli.leave_notes, session.tell_terminal) once,
+    as a systemMessage, which Claude Code shows the analyst and keeps in the transcript: never a link, and it asks the
+    server for no sign-in code (bug hunt 7, H9). A link an older build left on the first line is not shown."""
+    links = tmp_path / "thome" / "links"
+    links.mkdir(parents=True)
+    note = "thimble: WARNING - a note for the terminal"
+    (links / SID).write_text(f"\n{note}")
     stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop", "permission_mode": "default"}
     stand = _Stand([])
     try:
         assert _watch(tmp_path, stand.port, {**stop, "hook_event_name": "UserPromptSubmit"}, "--mode").stdout == ""
-        assert not [x for x in stand.seen if x[1] == "/api/ui/pair"], "no code before the link is shown"
-        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
-            "systemMessage": f"thimble: {link}#p=c0de"}
-        assert ("POST", "/api/ui/pair", {"ws": "mini"}) in stand.seen
+        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {"systemMessage": note}
         assert _watch(tmp_path, stand.port, stop, "--mode").stdout == "", "once"
-        (tmp_path / "thome" / "links" / SID).write_text(f"{link}\nthimble: WARNING - a note for the terminal")
-        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
-            "systemMessage": f"thimble: {link}#p=c0de\nthimble: WARNING - a note for the terminal"}, "the notes under it"
-        (tmp_path / "thome" / "links" / SID).write_text("http://127.0.0.1:8300/")
-        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {
-            "systemMessage": "thimble: http://127.0.0.1:8300/#p=c0de"}
-        assert stand.seen[-2:][0] == ("POST", "/api/ui/pair", {"ws": ""}), "the start page's code"
+        (links / SID).write_text(f"http://127.0.0.1:8300/?ws=mini\n{note}")
+        assert json.loads(_watch(tmp_path, stand.port, stop, "--mode").stdout) == {"systemMessage": note}
+        (links / SID).write_text("http://127.0.0.1:8300/")
+        assert _watch(tmp_path, stand.port, stop, "--mode").stdout == ""
+        assert not [x for x in stand.seen if x[1] == "/api/ui/pair"], "no sign-in code is asked for"
     finally:
         stand.close()
 
 
 def test_the_watcher_reaches_the_local_server_past_a_shell_s_proxy(tmp_path):
     """A shell's HTTP_PROXY would send urllib's requests to 127.0.0.1 through the proxy: the watcher opens its requests
-    without one (LOOPBACK), so the mode hook still reaches the server and the Stop hook gets its code."""
-    link = "http://127.0.0.1:8300/?ws=mini"
+    without one (LOOPBACK), so the mode hook still reaches the server, and the Stop hook shows its line under the
+    notes."""
     (tmp_path / "thome" / "links").mkdir(parents=True)
-    (tmp_path / "thome" / "links" / SID).write_text(link)
+    (tmp_path / "thome" / "links" / SID).write_text("\nthimble: a note")
     stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop", "permission_mode": "default"}
     stand = _Stand([], mode=(200, {"terminal": "thimble: the line"}))
     proxy = {"HTTP_PROXY": "http://127.0.0.1:9", "http_proxy": "http://127.0.0.1:9", "NO_PROXY": "", "no_proxy": ""}
     try:
         out = _watch(tmp_path, stand.port, stop, "--mode", extra=proxy).stdout
-        assert json.loads(out) == {"systemMessage": f"thimble: {link}#p=c0de\nthimble: the line"}
+        assert json.loads(out) == {"systemMessage": "thimble: a note\nthimble: the line"}
     finally:
         stand.close()
+
+
+CODE = "s1gn-1n-c0de-of-the-stand"  # what the stand-in server's sign-in route gives at every ask
+
+
+def test_no_thimble_command_shows_a_sign_in_code_where_a_model_can_read_it(home, data, monkeypatch, capsys, tmp_path):
+    """Bug hunt 7, H9: /thimble fresh and restore showed a working sign-in link under main's reply, which Claude Code
+    keeps in the transcript, where a model reads it. For each action of the /thimble skill, neither what its `up` prints
+    (the skill's text, which the model reads) nor what main's Stop hook shows after the reply (a systemMessage, which
+    the transcript keeps) holds a sign-in code, though the server gives one at every ask. A press that writes a one-time
+    link for the clipboard (`copy link`) says only where it is. What the session's environment lacks still reaches the
+    terminal."""
+    from app import cli
+
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))  # the watcher's (_watch)
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    monkeypatch.setattr(cli, "ensure_running", lambda wait: True)
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
+    monkeypatch.setattr(cli, "listening", lambda p: False)
+    monkeypatch.setattr(cli, "made_main", lambda *a, **kw: None)
+    monkeypatch.setattr(cli, "name_session", lambda *a, **kw: None)
+    note = "thimble: WARNING - a note for the terminal"
+    monkeypatch.setattr(cli, "setup_lines", lambda cwd: [note])
+    archive = "mini-2026-10-17-170404"
+    archived = str(tmp_path / "ws" / ".archive" / archive)
+
+    def request(method, url, body=None, timeout=5.0, **kw):
+        path = urllib.parse.urlsplit(url).path
+        if path == "/api/ui/pair":
+            return 200, {"code": CODE, "expires_s": 300}
+        if path == "/api/corpora/register":
+            return 201, {"name": CORPUS}
+        if path.endswith("/archive"):
+            return 200, {"archived": archived}
+        if path.endswith("/restore"):
+            return 200, {"restored": archived, "archived": f"{archived}-2"}
+        if path.endswith("/archives"):
+            return 200, {"archives": [archive]}
+        if path.endswith("/precached/context"):
+            return 200, {"text": ""}
+        return 404, {"detail": "Not Found"}
+
+    monkeypatch.setattr(cli, "_request", request)
+    # a press where no browser opens: the one-time link, with its code, in a file only the analyst's account reads
+    link_file = tmp_path / "thome" / "links" / f"{SID}.json"
+
+    def press(session, cwd, hook=False):
+        link_file.parent.mkdir(parents=True, exist_ok=True)
+        link_file.write_text(json.dumps({"url": f"http://127.0.0.1:8300/?ws={CORPUS}#p={CODE}"}))
+        return {"ok": True, "port": 8300, "url": f"http://127.0.0.1:8300/?ws={CORPUS}", "opened": False,
+                "remote": True, "tunnel": "ssh -N -L 8300:127.0.0.1:8300 <your ssh host>", "et": None,
+                "link_file": str(link_file), "claim_file": str(tmp_path / "claimed"), "proxy": False}
+
+    monkeypatch.setattr(cli, "run_open", press)
+    stop = {"session_id": SID, "cwd": "/data/mini", "hook_event_name": "Stop", "permission_mode": "default"}
+    stand = _Stand([], pair=(200, {"code": CODE, "expires_s": 300}))
+    shown: dict[str, str] = {}
+    try:
+        for words in ([], ["fresh"], ["restore"], ["restore", archive], ["resume", archive], ["status"], ["browser"]):
+            cli.write_state({"port": 8300, "url": "http://127.0.0.1:8300", "env": {}})
+            action, name = (words + ["", ""])[:2]
+            assert cli.main(["up", "--cwd", str(data / "mini"), "--session", SID, "--action", action,
+                             "--archive", name]) == 0
+            said = capsys.readouterr().out
+            hook = _watch(tmp_path, stand.port, stop, "--mode").stdout
+            for text in (said, hook):
+                assert CODE not in text and "#p=" not in text, (words, text)
+            shown[" ".join(words)] = hook
+    finally:
+        stand.close()
+    assert not [x for x in stand.seen if x[1] == "/api/ui/pair"], "no hook asks for a sign-in code"
+    assert note in shown["fresh"] and note in shown[f"restore {archive}"], "the notes still reach the terminal"
 
 
 def test_the_hooks_do_nothing_without_server_json_or_with_a_server_that_cannot_prove_the_token(tmp_path):
