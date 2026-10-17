@@ -233,7 +233,7 @@ of its own (one Agent SDK session per batch, up to 24 at once), same corpus, lab
    9-batch run above), and a label draft, view fit or viewer suggestion asks once (no pictures), a program's ask once
    or twice.
 7. **Fast mode.** A subagent runs at main's speed; Settings' fast switch of the classifier rows no longer reaches
-   these calls. Settings should say so, or lose the switch for moved rows. (Phase 2a: docs/config.md now says `fast`
+   these calls. Settings should say so, or lose the switch for moved rows. (Phase 3: every row lost it, §7.) (Phase 2a: docs/config.md now says `fast`
    changes only the check for a view proposal; Settings still shows the switch on the labels and suggest rows.)
 8. **Docs.** docs/agents.md and docs/config.md describe tasks as model calls of thimble's; update them as each caller
    moves. The card check's lines are updated in INSTALL.md. (Phase 2a: INSTALL.md, docs/agents.md's `ask` and
@@ -306,10 +306,128 @@ A program's model calls go through `ask` (A1f, phase 2a's). What needed a Claude
 
 ### Left for later
 
-1. Settings' dev-row fast switch ("thimble fix's fast mode") and `config.FAST_OF_TICKETS` now reach nothing; the
-   doctor's `bash sandbox` line and `sandbox.use` reach only an extension program's box.
+1. Settings' dev-row fast switch ("thimble fix's fast mode") and `config.FAST_OF_TICKETS` now reach nothing (gone in
+   phase 3, §7); the doctor's `bash sandbox` line and `sandbox.use` reach only an extension program's box.
 2. The extension schema still accepts `sdk`, so an old extension loads and says why it does not run; a later release
    can drop the key.
 3. Manual mode with a fork: its tool calls are refused before Claude Code asks, so no prompt should show; not checked
    live.
+
+## 7. Phase 3 (branch 090/noclaude-3)
+
+### The merge
+
+090/noclaude-2a, then 090/noclaude-2b, then 090/test-1 (4675e18c). 2b's merge conflicted in the docs (INSTALL.md,
+docs/agents.md, docs/config.md: both phases' callers kept), prompts/call-task.md (2a's `many-parts`, 2b's `fork`),
+NOCLAUDE.md and PROMPTS.md (both phases kept). One fix rode on it: a fork's part is always in its first message, since
+a fork has no read_call (2a had moved a part over 100,000 characters to read_call pages, which would have left a long
+view proposal's fork with no text). test-1 merged with no conflict; the files both sides changed (subagent_files.py,
+.thimble-watch, register.tsx, INSTALL.md) merged cleanly.
+
+### What was deleted
+
+- `backend/app/model.py` (the Agent SDK session per structured call, its semaphore, child reaping, retries) and
+  `backend/app/sdk.py`, with test_model.py, the SDK half of test_session_env.py and fixtures/agents/fake_sdk_claude.py.
+- `claude-agent-sdk` in backend/pyproject.toml and uv.lock (with `sniffio`). It had brought `mcp`, which the MCP shim
+  (plugin/bin/thimble-mcp) imports, and `jsonschema`, which agent_call.py and tasks.py import: both are now named.
+- retry.py keeps `transient_class` (the card check and notices use it); `with_retries`, the knobs and the schedule went.
+  capture.py loses the SDK session's sections (options, tool listing, the streamed transcript); the proposer's capture
+  remains. The release test's classifier smoke (scripts/e2e/contract_module.py), an SDK call, went.
+- Fast mode of thimble's rows: `config.ROLES_WITH_FAST`, `FAST_OF_TICKETS`, `model_speed`, `fast_mode_for`,
+  `has_fast_mode`, THIMBLE_MODEL_SPEED, THIMBLE_<ROLE>_FAST, `chosen` (no caller) and `call_settings`' `speed`. Every
+  model call and agent is a subagent of main, which has no fast mode of its own. `fast` of `labels`, `cardCheck`,
+  `suggest` and `dev` is now read and ignored (userconf.IGNORED_KEYS), so an old config loads and Settings offers to drop
+  it. Settings: the classifier rows' and the dev row's fast switches are gone (main's stays), the `suggest` row is named
+  "viewer suggestion" with a note that a view proposal runs on the session's model, and the Labels and Card check rows
+  say "Your session's" (permission mode) where they said "Asks nothing".
+- Docs: README, INSTALL (authentication, permissions, Manual mode's asks of a model call, view proposals) and
+  docs/config.md describe no server model call; docs/agents.md had phase 2's words already.
+
+Left: agent_session.py's helpers for sessions thimble started (`fence`, `permission_hooks`, `sandbox_hooks`,
+`scratch_hooks`, `settings_json`, `fence_env`, the retry helpers, about 330 lines), the `/sessions/permission` route with
+permission_hook.py, and .thimble-watch's `--scratch` and `--work-budget` have no caller since 2b, but four test files
+(test_permission_stack, test_web_permissions, test_agent_sessions, test_permission_modes) drive `ask`'s behavior through
+`hook_request`. Removing them means moving those tests onto `ask` first; a later change.
+
+### The test
+
+backend/tests_public/test_no_claude_starts.py reads backend/app, backend/agent_kit, plugin and scripts: each Python
+call of subprocess, asyncio's subprocess functions, os.exec*/spawn* or pty.spawn whose program names `claude` (read with
+ast, the program followed through a local name), each shell line that runs `claude` or `$CLAUDE…` with an argument, and
+each JavaScript spawn or exec of it. Each must be in ALLOWED by file and function (`<shell>` for a shell file) with
+its reason, and none may pass a model session's flag (`-p`, `--print`, `--resume`, `--fork-session`, `--session-id`,
+`--continue`, `--output-format`, …) but the release test's stand-in for main (contract_print.py `run`) and the
+launcher's exec of the analyst's session. A second test refuses any import of the Agent SDK and any dependency on it.
+Allowed today: `claude auth status` (config.auth_status), `claude plugin … --json` and `--version` (cli.py,
+feedback.py), `claude -v` (harness.session_route), `claude stop` (subagents._stop_background), the launcher
+(plugin/bin/thimble), install.sh, plugin.sh, update.sh (a message), and the release test (e2e_release.sh,
+contract_print.py: they play the analyst's main). A probe file with `subprocess.run([config.CLAUDE_BIN, "-p", …])` and
+a shell script with `claude --print` made it fail, naming both.
+
+### Tests
+
+- Backend, the whole suite (short TMPDIR): 636 passed.
+- Plugin, the whole suite on a copy of plugin/: 208 passed, 1 failed (report.test.ts "↑↓ choose a comment…", known).
+- Frontend: tsc (typecheck) clean; vitest 304 passed in 92 files.
+- Plugin tsc (claude-code.d.ts + plugin/hooks): no error outside test files; the test files' 63 lines are the same
+  kinds as on 090/test-1 (setTimeout and possibly-undefined in thimble.test.ts).
+
+### Live smoke (Claude Code 2.1.301, the `thimble` launcher, auto mode, toy-incident, one session)
+
+- Card: main made a table card; its first check was stopped when main edited the card (no row), the second read the
+  picture and ended ok in 15.8 s. Two more cards later: 22.4 s and 40.5 s. Each `ok`.
+- Prompt label over board.jsonl (44 records, one batch, one agent): apply_label answered in 15.6 s, 32 yes, 12 no.
+- View proposals: a fork ran after each of main's three turns (3.0, 5.8, 4.4 s). The first two answered `show: false`
+  (one question each); the third, after a question that set up a line of inquiry, proposed "Board Threads", which
+  showed above the prompt and as a card above the browser's reply box.
+- Browser: main's chat mirrors all three turns, its tool rows, cards and the proposal; the canvas's cards carry
+  `data-check="checked"`, and a card's Details say "Check · Checked at 02:41 · Check again".
+- Rows thimble added to main's chat: 9, all `● Prompt dropped by a hook: …`: 3 card checks ("thimble checked the card
+  …"), 1 prompt label ("thimble labeled records for the label …"), 5 answer and card checks ("Important details …").
+  None for the three forks. Main had no turn but the analyst's three. Screenshot:
+  /mnt/store/scratch/rel/v090/noclaude-3-runs/smoke/shots/main-final.png.
+- No session: main quit, the server stopped itself; `thimble server up` started one with no session, and a prompt label
+  run (`thimble act label-run`) ended in 2 s with "prompt labels cannot run: no Claude Code session runs thimble in this
+  folder. Run `thimble` in the corpus folder, or open Claude Code there and type /thimble". The browser showed it as a
+  notice ("Label: asks for help — The label asks for help failed: …") and on the label's row with Retry. Screenshot:
+  /mnt/store/scratch/rel/v090/noclaude-3-runs/smoke/shots/nosession-chat.png.
+
+### Experiment: why a fork leaves no row, and whether a call agent can
+
+Why. Claude Code 2.1.301 gives every background subagent that is not a fork a SubagentHandback tool, whatever its
+definition's `tools`, and a first-turn reminder: "Only a SubagentHandback call reaches your caller as your result;
+plain text you write at the end is not delivered." Each `thimble:call` and `thimble:check` agent calls it (the
+transcripts of phase 2a and of this smoke: one call each). The report enters main's queue as a prompt (origin `peer`,
+`<agent-message from="…">`), auto mode reviews it, and the terminal UI's `prompt.submit` hook drops it with the call's
+`done` line, which Claude Code prints and records as `Prompt dropped by a hook: …`. A fork gets neither the tool nor
+the reminder: its report is its final text, which the module reads from `turn.complete`, so nothing enters main's
+queue. That is the whole difference; the fork's tools and context play no part in it.
+
+Tried, each in a fresh session on the smoke's install, each change reverted after:
+
+| Way | Rows from call agents | Cost |
+|---|---|---|
+| `disallowedTools: ["SubagentHandback"]` in the call and check registrations (roles.json carried it) | all, as before | Claude Code ignores it: the tool was offered and called once per agent |
+| the terminal UI's `prompt.submit` answers the hand-back without `next` (documented as "enters nothing") | all: Claude Code prints `Prompt not submitted: a hook answered without passing the prompt on` | none, but the row stays, in worse words |
+| a PreToolUse hook (as the fork guard) refuses SubagentHandback to `thimble:call` and `thimble:check` | none; no queue entry in main at all | each agent tries again: 2 or 3 calls per call agent, 2 to 4 per check; 20 to 35 s more per agent before it ends |
+| the same hook for `thimble:call` only, and call.md says "end your turn with the one word Done. Do not call SubagentHandback" | none from the card check and the 4 agents of a 9-batch label (the 2 checks, unguarded, left their 2) | still 1 or 2 refused calls per agent (9 over 5 agents); the card check's agent ended 24 s after its answer |
+
+The answers were in thimble's hands before the refused calls in every run (send_answer records them), so a feature's
+result is not later; the agent holds its place among Claude Code's background agents longer and makes one or two more
+model requests.
+
+Recommendation. Do not build the refusal now. It removes the rows but costs every model call one or two extra
+requests, and fights Claude Code's own reminder in a way a later Claude Code may change. The clean way is in Claude Code:
+a definition field (or `disallowedTools` honored for SubagentHandback) that lets a plugin start a background subagent
+whose report, as a fork's, is its final text, read through `turn.complete` and queued for nobody. Ask for it; with it,
+`thimble:call` and the checks that run after a turn would leave no row and save the hand-back's request and auto mode's
+review of it. A check started with `run_check` must keep its hand-back, since main hears its line (check.md). Until
+then, if the rows must go sooner, the cheapest version is the last row of the table: extend the fork guard's PreToolUse
+hook (the module already lists its forks for it) to refuse SubagentHandback to the call agents it lists, with call.md's
+line, and accept one or two refused calls per agent. Making the calls forks would also leave no row, but gives them
+main's tools (guarded) and main's whole context, which the owner's rule excludes.
+
+Evidence: the transcripts under /mnt/store/scratch/rel/v090/noclaude-3-runs/smoke/cc/projects/ (the smoke d36c901b;
+then, in the table's order, dd6044db, 0850065e, 1c13bf96, d05690e0), the hook's logs /mnt/store/scratch/rel/v090/noclaude-3-runs/exp/handback_guard-D1.log
+and -D2.log, and the screenshots exp3-silent.png and exp4-guard.png in the smoke's shots folder.
 

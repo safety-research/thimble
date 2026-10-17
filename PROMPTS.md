@@ -1,7 +1,10 @@
-# Prompt text of the no-claude change, phase 1 (branch 090/noclaude)
+# Prompt text of the no-claude change (branches 090/noclaude, -2a, -2b and -3)
 
-Every text a model or the analyst reads that this phase adds or changes, old text first, then new text. "None" means
-the text is new. Placeholders are in braces: `{{x}}` in prompt files, `{x}` in tools.md hints and code.
+Every text a model or the analyst reads that the change adds or changes, old text first, then new text, gathered from
+the three phases' PROMPTS.md files (phase 1, 2a, 2b) and phase 3's own (the last part). "None" means the text is new.
+Placeholders are in braces: `{{x}}` in prompt files, `{x}` in tools.md hints and code.
+
+# Phase 1: the mechanism and the card check (branch 090/noclaude)
 
 ## 1. The role prompt of `thimble:call` (prompts/call.md)
 
@@ -417,3 +420,145 @@ Old (Permissions): "`thimble fix` asks you in the terminal before its change rea
 starts where its sandbox can't run. Nobody can answer it while it works, so it runs its commands without asking, in its
 sandbox where that can run." New: "`thimble fix` starts no Claude Code session: it says what `thimble doctor` finds, and
 you make the repair in your own Claude Code session, opened in thimble's checkout."
+
+# Phase 3 (branch 090/noclaude-3): the merge, the removal, the docs
+
+No prompt file changed in phase 3 (prompts/*.md). The texts below are Settings' words and the docs, which the analyst
+reads.
+
+## 24. The merge of call-task.md (prompts/call-task.md)
+
+Phase 2a's `## many-parts` (section 9) and phase 2b's `## fork` (section 18) are both kept, as each phase wrote them.
+
+## 25. Settings: the model calls' permission cell (frontend/src/shell/SettingsPopover.tsx CALL_CELL)
+
+The cell of the Labels and Card check rows, where an extension's dev program shows its permission mode.
+
+Old:
+
+> Asks nothing
+
+Old tooltip:
+
+> It has no permission mode. thimble runs it as one model call with no tools, and an extension's program that runs its
+> tasks has no thread to ask you in.
+
+New:
+
+> Your session's
+
+New tooltip:
+
+> It runs as a subagent of your Claude Code session, in its permission mode: Manual mode asks before it reads its task
+> and before it sends its answer.
+> An extension's program that runs its tasks has no thread to ask you in.
+
+## 26. Settings: the model table (SettingsPopover.tsx ROLE_LABEL, ROLE_NOTE, TICKET_FAST, lockedWhy)
+
+The `suggest` row's name. Old: "view proposals". New: "viewer suggestion".
+
+The `suggest` row's note. Old: none. New:
+
+> which viewer a file of an unknown type needs; a view proposal runs on your session's model
+
+The `refusal` row's note. Old: "if a classifier's model refuses: run again on this, or switch it off". New: "if a model
+call's model refuses: run again on this, or switch it off".
+
+The dev row's switch "thimble fix's fast mode" and the fast switches of the labels, card check and `suggest` rows are
+gone; only main's fast switch is left, so the reason "<model> has no fast mode" no longer shows on another row.
+
+## 27. Settings: an Agent SDK program's line (SettingsPopover.tsx runsWords, agentTip)
+
+Old: "{extension}, Agent SDK". New: "{extension}, Agent SDK, which thimble no longer starts".
+
+Old tooltip: "{extension} runs it with an Agent SDK program." New: "{extension} replaces it with an Agent SDK program,
+which thimble no longer starts: it starts no Claude Code session of its own."
+
+## 28. INSTALL.md
+
+The opening paragraph, after the merge of phases 2a and 2b. Old (2a): "thimble's agents and its single model calls (card
+checks, prompt labels, label drafts, whether an extension's view fits, viewer suggestions) run as subagents of your
+Claude Code session, under its permission mode; its view proposals and `thimble fix` run as `claude -p` jobs in folders
+of their own, so auth set only in a project's `.claude/` settings does not reach them." New:
+
+> thimble uses whichever auth path you have configured for `claude`, and starts no Claude Code session of its own: its
+> agents and its single model calls (card checks, prompt labels, label drafts, whether an extension's view fits, viewer
+> suggestions) run as subagents of your Claude Code session, under its permission mode and sign-in, and so do view
+> proposals, as a fork of your session that reads its conversation and uses no tools. With no Claude Code session
+> running thimble in the folder, these features say so and how to start one. thimble tells you when `claude` is missing
+> or not logged in.
+
+Authentication. Old: "thimble has no login of its own: every model call runs your own `claude`." New: "thimble has no
+login of its own and starts no Claude Code session of its own: every model call runs in your Claude Code session, on its
+sign-in."
+
+API key. Old: "Export `ANTHROPIC_API_KEY` in your shell before thimble's server starts. The server keeps the environment
+it started with, so if a server already runs, run `thimble server restart` from that shell." New: "Export
+`ANTHROPIC_API_KEY` in your shell before you start `claude` or `thimble`."
+
+apiKeyHelper. Old: "It reaches your session and thimble's server calls, whatever your shell exports. Auth set only in a
+project's `.claude/` settings does not reach thimble's server calls." New: "It reaches your session whatever your shell
+exports, and with it every model call of thimble's, which runs in your session."
+
+Bedrock, Vertex or Foundry. Old: "before the server starts". New: "before Claude Code starts".
+
+After a change of credentials. Old: "run `thimble server restart`. `thimble doctor --verbose` shows the auth path."
+New: "start Claude Code again, and run `thimble server restart` so that `thimble doctor --verbose`, which shows the auth
+path, reads them."
+
+Manual mode, added: "A model call of thimble's (a card check, a prompt label, a label draft, a viewer suggestion) runs as
+a subagent with two tools of its own, and Claude Code asks before it reads its task and before it sends its answer; a
+prompt label asks about once per batch of 50 records."
+
+Permissions. Old: "thimble's own jobs (an extension's program that runs the dev agent, and the sessions thimble's server
+runs) follow your session's mode, but never Bypass: Settings offers Manual and Auto for them". New: "An extension's
+program that runs the dev agent, a job of thimble's server, follows your session's mode, but never Bypass: Settings
+offers Manual and Auto for it".
+
+View proposals. Old: "Deciding whether to propose takes one model call on a copy of your session's context, made with
+the sign-in thimble's card checks and labels use." New: "Deciding whether to propose takes a fork of your session, a
+subagent that reads its conversation, uses no tools and runs on its model and sign-in."
+
+## 29. docs/config.md
+
+The Settings pane's list. Old: "the models and efforts, the fast mode of the classifiers, the permission mode …". New:
+"the models and efforts, the permission mode …".
+
+`views.propose`. Old: "Deciding whether to propose takes one model call on a copy of your session's context, on the
+`suggest` row." New: "Deciding whether to propose after a turn takes a fork of your session, which reads its
+conversation and runs on your session's model and effort; whether a file type needs a viewer is a model call on the
+`suggest` row."
+
+`refusal`. Old: "a classifier's call". New: "a model call".
+
+The launcher's variables. Old: "thimble's single model calls run without them, so that none can change what runs." New:
+"thimble's model calls are subagents of that session too."
+
+The model calls' rows. Old (after the merge): "`labels`, `cardCheck` and `suggest` are single model calls with no tools,
+so they take only `model`, `effort`, `fast` and `prompt`. A prompt label's batches, a label draft, whether an
+extension's view fits, a card check and a viewer suggestion run as subagents of your Claude Code session, at its speed,
+so `fast` changes nothing for them." New:
+
+> `labels`, `cardCheck` and `suggest` are model calls: a prompt label's batches, a label draft, whether an extension's
+> view fits, a card check and a viewer suggestion each run as a `thimble:call` subagent of your Claude Code session, with
+> two tools of its own (one reads its task, one sends its answer), so they take only `model`, `effort` and `prompt`.
+> thimble starts no Claude Code session of its own for them, and with no session running thimble in the folder each
+> says so, with how to start one.
+
+The `fast` key. Old: "Fast mode, on models that have it, for `labels`, `cardCheck` and `suggest`. `dev`'s reaches
+nothing, since `thimble fix` starts no Claude Code session. …" (default "on for `cardCheck` and `dev`"). New (no
+default):
+
+> Read and ignored: every agent and model call of thimble's runs as a subagent of your Claude Code session, which Claude
+> Code gives no fast mode of its own. Your session's own fast mode is the composer's switch, applied at its next start.
+
+## 30. README.md
+
+Added after "all authentication and billing is managed by `claude`.": "It starts no Claude Code session of its own: its
+agents and model calls run as subagents of your session, in its permission mode."
+
+## 31. The config check's words for an old `fast` (backend/app/userconf.py)
+
+Old: `agents.labels.fast` (and `cardCheck`, `suggest`, `dev`) was a setting. New: it is read and ignored, listed with the
+other ignored keys ("thimble's config holds settings this version ignores: agents.labels.fast. Saving here drops
+them."), as an agent's `fast` already was.
