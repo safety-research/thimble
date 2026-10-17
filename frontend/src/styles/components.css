@@ -1403,3 +1403,22 @@ a.card:hover {
   flex: none;
   margin-left: auto;
 }
+/* a name cut in its middle (components/MidCut): it takes the room its row leaves it, which MidCut measures; its start
+   gives way first and ends in an ellipsis, its end stays whole; both keep their spaces, so a space where the two meet
+   stays */
+.midcut {
+  display: inline-flex;
+  flex: 1 1 0%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: pre;
+}
+.midcut-start {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.midcut-end {
+  flex: none;
+}

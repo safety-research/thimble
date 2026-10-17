@@ -14,6 +14,7 @@ import { Button, Segmented } from '../components/Button'
 import { CodeArea } from '../components/Code'
 import { TextArea, TextInput } from '../components/Field'
 import { Icon } from '../components/Icon'
+import { MidCut } from '../components/MidCut'
 import { Menu, Popover } from '../components/Menu'
 import { Switch } from '../components/Switch'
 import { TipButton } from '../components/Tooltip'
@@ -429,7 +430,7 @@ function LabelFields({ ws, label, labels, draft, classes, set, counts, compact, 
                 {scope.files.map((f) => (
                   <span key={f} className="label-card-file">
                     <span className="label-card-filedot" style={covered?.[f] ? ({ '--c': isMultiClass(classes) ? MULTI_COLOUR : colourVar(classes[0]?.color) } as CSSProperties) : undefined} />
-                    {f}
+                    <MidCut text={f} />
                   </span>
                 ))}
                 {scope.total > scope.files.length && <span className="label-card-file">+{(scope.total - scope.files.length).toLocaleString()}</span>}
