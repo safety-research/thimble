@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, PRIVATE_FALLBACK, checkName, hmac, register } from './thimble'
+import { ABORT_WAIT_MS, CALL_DONE, PRIVATE_FALLBACK, callDone, checkName, hmac, register } from './thimble'
 
 type Json = Record<string, any>
 
@@ -588,6 +588,25 @@ describe('typed starts', () => {
     expect(await e.step('aT1', null)).toBeUndefined() // a model without effort takes none
   })
 
+})
+
+describe('model calls', () => {
+  it("spawns a model call's agent with no note, never offers its type, and keeps the reason its dropped hand-back gives", async () => {
+    const server = new Server()
+    server.roles = { ...structuredClone(ROLES), call: { name: 'call', description: 'Does one task for thimble.', prompt: 'You do one task for thimble.', background: true, model: OPUS, effort: 'low' } }
+    const e = await started({ server })
+    const call = await e.server.answer(e.server.push('spawn', { role: 'call', prompt: '[thimble call abc]', description: 'thimble card check: Q?', values: { model: OPUS, effort: 'low' }, note: '', drop: 'thimble checked the card "Q?"' }))
+    expect(e.$.agent.spawn).toHaveBeenCalledWith({ subagentType: 'thimble:call', prompt: '[thimble call abc]', description: 'thimble card check: Q?' })
+    expect(callDone(String(call.agentId))).toBe('thimble checked the card "Q?"')
+    expect(e.notes()).toEqual([])
+    expect(await e.offer('thimble:call')).toBe(false) // no model starts one or sends to one
+    const bare = await e.server.answer(e.server.push('spawn', { role: 'call', prompt: 'p', description: 'd', values: {}, note: '' }))
+    const writer = await e.server.answer(e.server.push('spawn', { role: 'writer', prompt: 'p', description: 'writer: report', values: {}, note: '' }))
+    expect([callDone(String(bare.agentId)), callDone(String(writer.agentId))]).toEqual([CALL_DONE, undefined])
+    await e.complete(String(call.agentId), 'Done')
+    await until(() => e.server.ended.length === 1)
+    expect(e.server.ended[0]).toMatchObject({ agentId: call.agentId, answer: 'Done' }) // its end reaches the server
+  })
 })
 
 describe('ends and sessions', () => {

@@ -207,6 +207,11 @@ TYPES: dict[str, Type] = {
                        "app.ticket_tools:TICKET_TOOLS", "app.dev:ticket_started", "app.dev:ticket_ended",
                        "app.dev:ticket_refused", when="app.dev:tickets_run_here", keeps_chat=True, gated=True,
                        own_notices=True),
+    # a model call's agent (agent_call.py): no chat, since nobody reads it; each start names its own model and effort,
+    # and its caller tells its failures
+    "call": Type("call", tools.CALL_SESSION, None, "verify", "cardCheck", "app.agent_call:definition",
+                 "app.agent_call:OWN_TOOLS", "", "app.agent_call:subagent_ended", "app.agent_call:subagent_refused",
+                 own_notices=True),
     HELPER: Type(HELPER, None, None, "subagents", "orientation", "app.subagents:helper_definition"),
 }
 
@@ -865,7 +870,8 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
         make_work(c, Path(str(r["work"])))
     inp = r.get("input") or {}
     ans = await _bridge(c, "spawn", role=r.get("role"), values=r.get("values") or {}, prompt=inp.get("prompt"),
-                        description=inp.get("description"), request=rid, what=_what(r), route=r.get("route") or CLICK)
+                        description=inp.get("description"), request=rid, what=_what(r), route=r.get("route") or CLICK,
+                        **({"drop": str(r["drop"])} if r.get("drop") else {}))
     if ans.started:
         meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (the started agent's thread)
         return Answer({**ans, "request": rid, **({"chat": meta["id"]} if meta and meta.get("id") else {})})
@@ -1199,10 +1205,13 @@ class Run:
 
 
 def _run(c: str, agent_id: str, a: dict[str, Any]) -> Run | None:
-    if not a.get("chat") or a.get("role") not in TYPES:
+    """The Run of a registered agent; None for one with no role, or with no chat yet where its type has one (a type
+    with no chat role, a model call's, runs with none: its Run's chat is '')."""
+    t = TYPES.get(str(a.get("role") or ""))
+    if t is None or (not a.get("chat") and t.chat_role is not None):
         return None
     sessions = a.get("sessions") or []
-    return Run(c, str(a.get("key") or ""), str(a["role"]), str(a["chat"]), agent_id, int(a.get("run") or 0),
+    return Run(c, str(a.get("key") or ""), str(a["role"]), str(a.get("chat") or ""), agent_id, int(a.get("run") or 0),
                str(sessions[-1]) if sessions else "", dict(a.get("values") or {}), bool(a.get("plugin_started")),
                str(a.get("route") or ""), str(a.get("request") or ""))
 

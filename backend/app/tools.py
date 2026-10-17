@@ -52,6 +52,7 @@ CHECK_SESSION = "check"  # `check:<id>:<doc>`, a run of a report check on a docu
 VIEW_SESSION = "view"  # `view:<slug>`, a build of a view (dev.py, view_tools.py)
 REVIEW_SESSION = "review"  # `review:<slug>`, a review of a built view (view_review.py, view_tools.py)
 TICKET_SESSION = "ticket"  # `ticket:<id>`, a code ticket's agent (dev.py, ticket_tools.py)
+CALL_SESSION = "call"  # `call:<id>`, a model call's agent (agent_call.py)
 MAIN_ONLY: "tuple[str | None, ...]" = (None,)  # Spec.sessions of a tool only main's shim lists (no THIMBLE_SESSION)
 ROLES = (ANALYST,)  # the dev worker is a Claude Code session with its own tools (dev.py)
 ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
@@ -261,6 +262,9 @@ REGISTRY: dict[str, Spec] = {
              drop_stops=True),
         Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,),
              drop_stops=True),
+        # a model call's agent takes the parts of its call and answers each (agent_call.py); its own tools alone
+        Spec("read_call", (ANALYST,), "app.agent_call:tool_read_call", sessions=(CALL_SESSION,)),
+        Spec("send_answer", (ANALYST,), "app.agent_call:tool_send_answer", sessions=(CALL_SESSION,)),
         # thimble turned on in this session (ENTRY_TOOL); the shim answers it itself, and lists it alone (entry_listing)
         Spec(ENTRY_TOOL, (ANALYST,), "app.activate:tool_load_handler", sessions=MAIN_ONLY),
     )

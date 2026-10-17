@@ -80,7 +80,7 @@ PLUGIN = "thimble"
 PREFIX = f"{PLUGIN}:"
 # thimble's seven roles: the agents that have a key, a chat and a run of their own. thimble:orient-helper, and an extension's
 # agent registered under the plugin's name, are none of them: any agent may start one (agent_check).
-ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "dev-ticket")
+ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "dev-ticket", "call")
 HELPER = "orient-helper"
 PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's module made ($.agent.spawn, $.tool.call)
 # the agent type of a thread's fork, which Claude Code tells not to start subagents (its fork boilerplate: "Do NOT spawn

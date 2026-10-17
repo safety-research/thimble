@@ -53,7 +53,7 @@ import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
 import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
-import { checkName } from '../thimble'
+import { callDone, checkName } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
 import { openInBrowser } from './offramp'
 import { openChecks } from './checksview'
@@ -588,9 +588,12 @@ export const register: Register = (on, options) => {
   // a prompt carries thimble's guide when it is owed (after /clear, a switch that changed it, a resumed session).
   // A check's hand-back never reaches main: thimble shows its comments as the passage's tint and flag (SPEC-v2 J7).
   // Claude Code queues a hand-back for main with no session.receive, so it is dropped here, as it enters, the reason saying
-  // what the check did (the owner, 10-17)
+  // what the check did (the owner, 10-17). So is a model call's agent's: its answer went to thimble through its tools, and
+  // the reason is the line the server gave its start (`thimble checked the card "…"`, backend/app/agent_call.py)
   on('prompt.submit', async ($, e, next) => {
     const from = e.origin.kind === 'peer' ? AGENT_MESSAGE.exec(e.text)?.[1] : undefined
+    const done = from === undefined ? undefined : callDone(from)
+    if (done !== undefined) return { drop: done }
     const check = from === undefined ? undefined : checkName(from)
     if (from !== undefined && check !== undefined) return { drop: await checkDone(cxOf($), from, check) }
     if (!isActive()) return next(e)

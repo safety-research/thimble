@@ -45,7 +45,8 @@
 //   (the analyst's Stop of main: $.turn.abort of main's running turn, by the id its turn.start carried, answered once
 //   that turn completed or ABORT_WAIT_MS passed, after a TaskStop of each command of that turn the abort moved to the
 //   background, where Esc would have ended it), note ($.session.append). It never starts, sends or stops anything the
-//   server did not ask for;
+//   server did not ask for. A spawn of the call role, a model call's agent (backend/app/agent_call.py), carries `drop`,
+//   the reason the terminal UI gives when it drops the agent's hand-back (callDone), and its type is never offered;
 // - agent.offer and tool.call: thimble's types stay out of every model's agent listing, whose line for each spelled its
 //   "All tools except …" list, until an agent of the type has started in the session. A type is offered while an Agent
 //   call that names it runs, so main's typed starts and the orientation's own starts of its critic and helpers run as
@@ -96,7 +97,11 @@ type Rules = { private: string[]; records: string[]; corpus: string | null; web_
 
 export const PLUGIN = 'thimble'
 // thimble's roles: each names its own model and effort, so a typed run's effort never goes to one of them
-export const ROLES = ['orientation', 'critic', 'writer', 'view-builder', 'view-reviewer', 'check', 'dev-ticket']
+export const ROLES = ['orientation', 'critic', 'writer', 'view-builder', 'view-reviewer', 'check', 'dev-ticket', 'call']
+// a model call's agent (backend/app/agent_call.py): never offered to a model, and its hand-back dropped (callDone)
+const CALL = 'call'
+/** A dropped hand-back's reason when the server named none (agent_call.DONE_DEFAULT). */
+export const CALL_DONE = 'thimble finished a task'
 export const RETRY_MS = 2000 // between hellos while no server accepts one, and after a failed poll
 export const SESSION_WAIT_MS = 10000 // how long /clear's new session id is waited for
 export const SESSION_TICK_MS = 25
@@ -237,6 +242,7 @@ type State = {
   requests: Record<string, { role: string; values: Values }> // typed starts waiting for main's Agent call
   started: Set<string> // agents this module spawned: their turn.complete is posted
   checks: Map<string, string> // agents of thimble's check role, this module's spawns and main's Agent calls: each one's check (checkName)
+  calls: Map<string, string> // agents of the call role this module spawned: the reason their dropped hand-back gives (callDone)
   queue: Promise<void> // the requests, one at a time
   helloing: { sid: string; said: Promise<Hello> } | null
   leaving: string // the session /clear or /resume is taking main away from, until the new one is known
@@ -251,7 +257,7 @@ function fresh(): State {
   return {
     active: false, interactive: false, user: '', home: '', homeReal: '', rules: null,
     cwd: '', session: '', version: '', gen: 0, server: null, roles: {}, registered: {}, efforts: {},
-    requests: {}, started: new Set(), checks: new Map(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
+    requests: {}, started: new Set(), checks: new Map(), calls: new Map(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
     dispatching: new Map(), used: new Set(),
     file: false, peer: false, rechecking: null, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
     out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
@@ -543,7 +549,7 @@ async function handle($: Engine, m: State, req: Request): Promise<Answer> {
         await registerAll($, m)
         return { ok: true }
       case 'spawn':
-        return await spawn($, m, text(a.role), text(a.prompt), text(a.description), values, text(a.note))
+        return await spawn($, m, text(a.role), text(a.prompt), text(a.description), values, text(a.note), text(a.drop))
       case 'send':
         return await send($, m, text(a.agent), text(a.text), text(a.role), values)
       case 'stop':
@@ -577,7 +583,7 @@ async function ensure($: Engine, m: State, role: string, values: Values | undefi
   m.registered[role] = want
 }
 
-async function spawn($: Engine, m: State, role: string, prompt: string, description: string, values: Values | undefined, line: string): Promise<Answer> {
+async function spawn($: Engine, m: State, role: string, prompt: string, description: string, values: Values | undefined, line: string, drop = ''): Promise<Answer> {
   await ensure($, m, role, values)
   // no `model`: a spawn takes only an alias; the registration carries the full id
   const r = await $.agent.spawn({ subagentType: `${PLUGIN}:${role}`, prompt, description })
@@ -585,7 +591,9 @@ async function spawn($: Engine, m: State, role: string, prompt: string, descript
   if (!r.agentId) return { error: 'Claude Code started no agent' }
   m.started.add(r.agentId)
   if (role === 'check') m.checks.set(r.agentId, checkOf(description))
-  m.used.add(`${PLUGIN}:${role}`)
+  // a model call's type stays out of every listing: no model starts one or sends to one (agent.offer)
+  if (role === CALL) m.calls.set(r.agentId, drop || CALL_DONE)
+  else m.used.add(`${PLUGIN}:${role}`)
   if (line) await note($, line.split('{agent}').join(r.agentId))
   return { agentId: r.agentId, model: r.model }
 }
@@ -1159,6 +1167,12 @@ function checkOf(description: string): string {
  *  started; the terminal UI drops its hand-back. */
 export function checkName(agentId: string): string | undefined {
   return live.m?.checks.get(agentId)
+}
+
+/** The reason Claude Code prints when the terminal UI drops the hand-back of `agentId`, when it is a model call's agent
+ *  this module spawned (the server names it: `thimble checked the card "…"`); undefined for any other agent. */
+export function callDone(agentId: string): string | undefined {
+  return live.m?.calls.get(agentId)
 }
 
 export const register: Register = on => {

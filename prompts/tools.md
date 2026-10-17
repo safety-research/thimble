@@ -627,6 +627,32 @@ Finish your ticket: thimble commits every change in the worktree to the ticket's
 }
 ```
 
+## read_call
+
+Get a part of your task: its text and its pictures. When you have a part with pictures that you did not answer, you get that part again. Else you get the next part.
+
+```json
+{
+  "type": "object",
+  "properties": {}
+}
+```
+
+## send_answer
+
+Send your answer to a part of your task. The answer must agree with the schema in your task. When it does not agree, the result gives the errors. Then correct the answer and send it again.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "part": {"type": "integer", "description": "The number of the part. Leave it out when you have only one part."},
+    "answer": {"type": "object", "description": "Your answer: a JSON object that agrees with the schema in your task."}
+  },
+  "required": ["answer"]
+}
+```
+
 ## load_thimble
 
 Turn on thimble in this session. thimble adds cards (tables, charts and plan cards that the terminal draws), labels that a model applies to every record of a file, and checked citations. Call this once before you make a card, a plan card or a label. It returns thimble's guidance, and thimble's other tools load after it.
@@ -981,6 +1007,56 @@ The worktree holds no change, so there is nothing to check. Make the change firs
 ## ticket-checks-empty
 
 The worktree holds no change yet, so there is nothing to check.
+
+## read_call-part
+
+# Part {part}
+
+{text}
+
+## read_call-pictures
+
+The {count} of part {part} follow.
+
+## read_call-none
+
+No parts are left. End your turn now. Write only the word Done.
+
+## read_call-wait
+
+The next part is not ready yet. Call read_call again.
+
+## read_call-share
+
+You answered your share of the parts. Another agent gets the parts that are left. End your turn now. Write only the word Done.
+
+## send_answer-more
+
+thimble has your answer to part {part}. Call read_call to get the next part.
+
+## send_answer-last
+
+thimble has your answer to part {part}. That was your last part. End your turn now. Write only the word Done.
+
+## send_answer-invalid
+
+The answer does not agree with the schema: {errors}. Correct the answer and send it again.
+
+## send_answer-which
+
+You have more than one part. Give the number of the part as `part`: {parts}.
+
+## send_answer-not-held
+
+You do not have part {part}. Call read_call to get a part.
+
+## call-not-yours
+
+Only the agent of a thimble task can use {tool}.
+
+## call-stopped
+
+thimble stopped this task. End your turn now. Write only the word Done.
 
 ## finish-review-again
 
