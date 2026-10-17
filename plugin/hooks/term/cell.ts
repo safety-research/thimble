@@ -163,12 +163,16 @@ export function htmlTable(html: string): string[][] {
   const table = /<table[\s\S]*?<\/table>/i.exec(html)?.[0]
   if (!table) return []
   const rows: string[][] = []
+  const heads: boolean[] = [] // the row's cells are all <th>
   for (const tr of table.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
-    const cells = [...tr[1]!.matchAll(/<(t[dh])[^>]*>([\s\S]*?)<\/\1>/gi)].map(m => unquote(m[2]!.replace(/<[^>]+>/g, '')).trim())
-    if (cells.length) rows.push(cells)
+    const found = [...tr[1]!.matchAll(/<(t[dh])[^>]*>([\s\S]*?)<\/\1>/gi)]
+    const cells = found.map(m => unquote(m[2]!.replace(/<[^>]+>/g, '')).trim())
+    if (cells.length) (rows.push(cells), heads.push(found.every(m => m[1]!.toLowerCase() === 'th')))
   }
-  // pandas writes the index's name on a second header row of its own (`<tr><th>name</th><th></th>…`): fold it in
-  if (rows.length > 1 && rows[1]!.slice(1).every(c => c === '') && rows[0]![0] === '') rows.splice(0, 2, [rows[1]![0]!, ...rows[0]!.slice(1)])
+  // pandas writes the index's name on a second header row of its own (`<tr><th>name</th><th></th>…`), and the columns'
+  // name, when they have one (a crosstab's), in the first cell of the row above it: the index's name heads the first
+  // column, and the columns' name goes (bug hunt B23: it headed the index, over an empty row of the index's name)
+  if (rows.length > 1 && heads[1] && rows[1]![0] !== '' && rows[1]!.slice(1).every(c => c === '')) rows.splice(0, 2, [rows[1]![0]!, ...rows[0]!.slice(1)])
   return rows
 }
 
