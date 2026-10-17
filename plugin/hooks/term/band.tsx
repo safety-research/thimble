@@ -456,6 +456,8 @@ export function registerBand(on: On): void {
       ) : (
         s.s
       )
+    // one blank row between Claude Code's own rows above (its spinner, a tip) and the line (the owner, 10-17)
+    rows.push(<Text key="above-summary-gap"> </Text>)
     rows.push(
       <Box key="above-summary" flexDirection="row">
         <Text>{'  '}</Text>

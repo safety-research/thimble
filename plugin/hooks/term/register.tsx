@@ -612,6 +612,17 @@ export const register: Register = (on, options) => {
 
   // /clear and /resume end this conversation (no session.start follows): the next call of the new one rekeys thimble,
   // and after /clear its next prompt carries the guide
+  // a check's hand-back never reaches main: thimble shows its comments as the passage's tint and flag (SPEC-v2 J7), so
+  // the delivery from a thimble:check agent is taken before main reads it, and main writes no `↳` line (the owner, 10-17)
+  on('session.receive', async ($, e, next) => {
+    const from = e.agentId === undefined ? /<agent-message from="([^"]+)"/.exec(e.text)?.[1] : undefined
+    if (from) {
+      const sender = (await $.agent.list().catch(() => [])).find(a => a.id === from)
+      if (sender && /(^|:)check$/.test(sender.type)) return { consumed: "thimble shows a check's comments where they apply" }
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('session.end', { reason: /^/ }, async ($, e, next) => {
     conversationEnded(e.sessionId, e.reason)
     return next(e)

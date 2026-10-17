@@ -577,6 +577,9 @@ def _note(role: str, what: str, route: str = "click") -> str:
     {what})."""
     from . import tools  # noqa: PLC0415
 
+    # a check tells main nothing: its comments show on the answer or the document, never in main's chat (SPEC-v2 J7)
+    if role == "check":
+        return ""
     return tools.hint(NOTE_HINT, role=role, agent=AGENT, what=sf.note_what(what), how=HOW.get(route) or HOW["click"])
 
 

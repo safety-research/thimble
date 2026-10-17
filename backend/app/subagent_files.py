@@ -878,7 +878,8 @@ def started_notes(state: dict[str, Any]) -> list[str]:
             continue
         state_ = str(e.get("status") or "")
         role = role_of(e.get("type")) or (str(e.get("role") or "") if e.get("role") in ROLES else None)
-        if not role or (state_ and state_ not in RUNNING) or (not state_ and e.get("ended")):
+        # a check tells main nothing (module_bridge._note)
+        if not role or role == "check" or (state_ and state_ not in RUNNING) or (not state_ and e.get("ended")):
             continue
         parent = str(e.get("parent") or "")
         if parent and parent in agents:
