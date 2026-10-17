@@ -243,6 +243,30 @@ py_ok() {  # py_ok PYTHON: it runs and is at least pyproject's requires-python
   (cd / && "$1" -I -c "import sys; sys.exit(0 if sys.version_info >= tuple(int(x) for x in '$req_py'.split('.')) else 1)") 2>/dev/null
 }
 
+# A Mac with Apple silicon gets a native arm64 Python, with packages from wheels alone: an Intel Python (which a shell
+# under Rosetta, such as an Intel build of iTerm, finds first) gets no wheel for some of thimble's packages, so pip or uv
+# would build them from source, which needs Xcode and its license. uv fetches a native Python where none is installed.
+apple_silicon=0 rosetta=0 uv_python="" uv_nobuild=() pip_nobuild=()
+mac_arch() {  # apple_silicon=1 on a Mac with Apple silicon, rosetta=1 when this shell runs under Rosetta there; then
+  # uv_python, the Python uv makes an environment with, is a native one, and nothing is built from source
+  uv_python=">=$req_py"
+  [ "$(uname -s)" = Darwin ] || return 0
+  if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then rosetta=1; fi
+  if [ "$rosetta" = 1 ] || [ "$(uname -m)" = arm64 ]; then apple_silicon=1; fi
+  if [ "$apple_silicon" = 1 ]; then
+    uv_python="cpython-$req_py-macos-aarch64-none" uv_nobuild=(--no-build) pip_nobuild=(--only-binary=:all:)
+    say "Apple silicon$( [ "$rosetta" = 0 ] || echo ', this shell under Rosetta'): a native arm64 Python ($uv_python for uv), and packages from wheels alone"
+  fi
+}
+
+py_native() {  # py_native PYTHON: it runs as arm64 here (an Intel Python reports x86_64)
+  [ "$(cd / && "$1" -I -c 'import platform; print(platform.machine())' 2>/dev/null)" = arm64 ]
+}
+
+wheels_only() {  # the words a failed install of Python packages adds on Apple silicon, where nothing is built from source
+  [ "$apple_silicon" = 0 ] || printf '%s' ". On a Mac with Apple silicon install.sh installs prebuilt wheels alone, never a build from source, which needs Xcode"
+}
+
 sets_key() {  # sets_key REGEX FILE…: a line of one of the existing FILEs matches REGEX
   local re="$1" f; shift
   for f in "$@"; do if [ -n "$f" ] && [ -f "$f" ] && grep -qiE "$re" "$f"; then return 0; fi; done
@@ -294,32 +318,41 @@ $lacking"
 check_prerequisites() {  # uv or python >= pyproject's requires-python, or --python's environment; node >= 20 unless
   # frontend/dist is built; the claude CLI. Each sets its line of the opening screen (found_*: a mark and a text)
   req_py="$(sed -n 's/^requires-python *= *">=\([0-9][0-9.]*\)".*/\1/p' "$src/backend/pyproject.toml")"; req_py="${req_py:-3.12}"
-  have_uv=0 py="" pytool=pip
+  have_uv=0 py="" pytool=pip intel_py=""
   ! command -v uv >/dev/null 2>&1 || have_uv=1
+  mac_arch
   for cand in python3 python3.14 python3.13 python3.12; do
-    if command -v "$cand" >/dev/null 2>&1 && py_ok "$cand"; then py="$(command -v "$cand")"; break; fi
+    if command -v "$cand" >/dev/null 2>&1 && py_ok "$cand"; then
+      if [ "$apple_silicon" = 1 ] && ! py_native "$cand"; then intel_py="${intel_py:-$(command -v "$cand")}"; continue; fi
+      py="$(command -v "$cand")"; break
+    fi
   done
+  [ -z "$intel_py" ] || say "$intel_py is an Intel Python, which this Mac runs under Rosetta: not used"
   if [ "$have_uv" = 1 ] && { uv_index_set || ! pip_index_set; }; then pytool=uv; fi
-  local uv_v="" py_v=""
+  local uv_v="" py_v="" get_py="Python $req_py if this machine lacks it" intel=""
   [ "$have_uv" = 0 ] || uv_v="uv $(uv --version 2>/dev/null | sed -e 's/^uv //' -e 's/ (.*//')"
   [ -z "$py" ] || py_v="Python $("$py" -I -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])')"
+  [ "$apple_silicon" = 0 ] || get_py="a native arm64 Python $req_py if this machine lacks one"
+  [ -z "$intel_py" ] || intel="; not the Intel Python at $(tilde "$intel_py"), which would need Xcode to build packages"
   found_py=ok
   if [ -n "$byo" ]; then
     check_byo
     found_py_text="Python $byo_v: your environment $(tilde "$byo_prefix"), which holds what thimble needs; nothing is installed into it"
+  elif [ "$apple_silicon" = 1 ] && [ "$have_uv" = 0 ] && [ -z "$py" ]; then
+    die "this Mac has Apple silicon, and no native arm64 Python $req_py+ was found$( [ -z "$intel_py" ] || echo " ($(tilde "$intel_py") is an Intel build, which would need Xcode to build thimble's packages)"). Install uv (https://docs.astral.sh/uv/getting-started/installation/), which gets a native Python, then run this again"
   elif [ "$checkout" = 1 ] && [ "$have_uv" = 1 ]; then
-    found_py_text="$uv_v: installs thimble's Python packages at their tested versions, and Python $req_py if this machine lacks it"
+    found_py_text="$uv_v: installs thimble's Python packages at their tested versions, and $get_py$intel"
   elif [ "$have_uv" = 0 ] && [ -z "$py" ]; then
     die "neither uv nor Python $req_py+ was found. Install uv (https://docs.astral.sh/uv/getting-started/installation/) or Python $req_py+, then run this again"
   elif [ "$checkout" = 1 ]; then
     found_py=warn
-    found_py_text="$py_v at $(tilde "$py"), and no uv: thimble's Python packages get the lowest versions it allows, not the tested ones (uv installs those: https://docs.astral.sh/uv/getting-started/installation/)"
+    found_py_text="$py_v at $(tilde "$py"), and no uv: thimble's Python packages get the lowest versions it allows, not the tested ones (uv installs those: https://docs.astral.sh/uv/getting-started/installation/)$intel"
   elif [ "$pytool" = uv ]; then
-    found_py_text="$uv_v: installs thimble's pinned Python packages, and Python $req_py if this machine lacks it"
+    found_py_text="$uv_v: installs thimble's pinned Python packages, and $get_py$intel"
   elif [ "$have_uv" = 1 ]; then
-    found_py_text="${py_v:-Python} with pip, which is set up with a package index (uv is not): pip installs thimble's pinned Python packages from it"
+    found_py_text="${py_v:-Python} with pip, which is set up with a package index (uv is not): pip installs thimble's pinned Python packages from it$intel"
   else
-    found_py_text="$py_v at $(tilde "$py"): pip installs thimble's pinned Python packages from the package index it is set up with"
+    found_py_text="$py_v at $(tilde "$py"): pip installs thimble's pinned Python packages from the package index it is set up with$intel"
   fi
   say "python: $found_py_text"
   has_dist=0; [ -f "$src/frontend/dist/index.html" ] && has_dist=1
@@ -420,9 +453,11 @@ git_baseline() {  # a release install as a git repository whose last commit is t
 
 make_venv() {  # --python's environment linked; a linked one kept and checked; a checkout's from uv.lock (uv sync, else
   # venv + pip from pyproject); a release's from backend/requirements.txt (release_venv)
-  local venv="$dir/backend/.venv" lacking where
+  local venv="$dir/backend/.venv" lacking where pyreq=()
   where="$(tilde "$venv")"
   extra=(); if [ "$dev" = 1 ]; then extra=(--extra dev); fi
+  # uv sync makes backend/.venv with the Python it finds, unless a native one is asked for (mac_arch)
+  if [ "$apple_silicon" = 1 ] && [ ! -e "$venv" ]; then pyreq=(--python "$uv_python"); fi
   busy "Installing thimble's Python packages"
   if [ -n "$byo" ] && [ "$venv" -ef "$byo_prefix" ]; then
     say "backend/.venv is $byo_prefix already; used as it is"
@@ -442,7 +477,8 @@ make_venv() {  # --python's environment linked; a linked one kept and checked; a
     release_venv
   elif [ "$have_uv" = 1 ] && [ -f "$src/backend/uv.lock" ]; then
     run_in "$dir/backend" uv sync --frozen --no-dev --no-install-project ${extra[@]+"${extra[@]}"} \
-      || { tail_out; die "uv sync could not install the backend's packages (above)"; }
+      ${pyreq[@]+"${pyreq[@]}"} ${uv_nobuild[@]+"${uv_nobuild[@]}"} \
+      || { tail_out; die "uv sync could not install the backend's packages (above)$(wheels_only)"; }
     # uv says "Checked N packages" (older: "Audited") when it changed nothing, and lists what it installed or removed
     if grep -qE '^(Checked|Audited) [0-9]+ package' "$tmp/out" && ! grep -qE '^ [-+~] |^(Installed|Uninstalled) [0-9]' "$tmp/out"; then
       same "Python packages up to date in $where (the versions backend/uv.lock pins)"
@@ -452,15 +488,16 @@ make_venv() {  # --python's environment linked; a linked one kept and checked; a
   elif [ "$have_uv" = 1 ]; then
     [ "$require_pinned" = 0 ] || die "backend/uv.lock is missing, so nothing pins the backend's versions, and --require-pinned installs only pinned ones"
     run_in "$dir/backend" uv sync --no-dev --no-install-project ${extra[@]+"${extra[@]}"} \
-      || { tail_out; die "uv sync could not install the backend's packages (above)"; }
+      ${pyreq[@]+"${pyreq[@]}"} ${uv_nobuild[@]+"${uv_nobuild[@]}"} \
+      || { tail_out; die "uv sync could not install the backend's packages (above)$(wheels_only)"; }
     ok "Python packages installed in $where (backend/uv.lock is missing, so at the newest versions allowed, not the tested ones)"
   else
     [ "$require_pinned" = 0 ] || die "without uv the backend's pinned versions (backend/uv.lock) can't be installed, and --require-pinned installs only pinned ones; install uv (https://docs.astral.sh/uv/getting-started/installation/)"
     [ -x "$venv/bin/python" ] || run "$py" -I -m venv "$venv" || { tail_out; die "python -m venv failed (above)"; }
     say "pip from pyproject.toml (the minimum versions, not the pinned ones in uv.lock)"
     run "$venv/bin/python" -I -m pip install --quiet --upgrade pip || { tail_out; die "pip could not upgrade itself (above)"; }
-    if [ "$dev" = 1 ]; then run "$venv/bin/python" -I -m pip install --quiet -e "$dir/backend[dev]" || { tail_out; die "pip could not install the backend's packages (above)"; }
-    else run "$venv/bin/python" -I -m pip install --quiet -e "$dir/backend" || { tail_out; die "pip could not install the backend's packages (above)"; }; fi
+    if [ "$dev" = 1 ]; then run "$venv/bin/python" -I -m pip install --quiet ${pip_nobuild[@]+"${pip_nobuild[@]}"} -e "$dir/backend[dev]" || { tail_out; die "pip could not install the backend's packages (above)$(wheels_only)"; }
+    else run "$venv/bin/python" -I -m pip install --quiet ${pip_nobuild[@]+"${pip_nobuild[@]}"} -e "$dir/backend" || { tail_out; die "pip could not install the backend's packages (above)$(wheels_only)"; }; fi
     ok "Python packages installed in $where, at the lowest versions allowed (without uv, not the tested ones)"
   fi
 }
@@ -471,15 +508,19 @@ new_venv() {  # new_venv VENV: a release's backend/.venv, made by uv, else by th
   if [ "$pytool" = pip ] && [ -n "$py" ]; then
     run "$py" -I -m venv ${clear[@]+"${clear[@]}"} "$venv" || { tail_out; die "python -m venv failed (above)"; }
   else
-    run uv venv --quiet ${clear[@]+"${clear[@]}"} --python ">=$req_py" "$venv" || { tail_out; die "uv venv failed (above)"; }
+    if ! run uv venv --quiet ${clear[@]+"${clear[@]}"} --python "$uv_python" "$venv"; then
+      tail_out
+      [ "$apple_silicon" = 0 ] || die "uv could not get a native arm64 Python $req_py (above). In a shell: uv python install $uv_python, then run this again"
+      die "uv venv failed (above)"
+    fi
     [ "$pytool" = uv ] || run "$venv/bin/python" -I -m ensurepip --quiet || { tail_out; die "ensurepip failed (above)"; }
   fi
 }
 
 py_install() {  # py_install LOG ARGS…: uv pip or pip installs ARGS into backend/.venv; LOG keeps the output
   local log="$1" venv="$dir/backend/.venv"; shift
-  if [ "$pytool" = uv ]; then logged "$log" uv pip "$@" --python "$venv/bin/python"
-  else logged "$log" "$venv/bin/python" -I -m pip install --quiet --disable-pip-version-check "$@"; fi
+  if [ "$pytool" = uv ]; then logged "$log" uv pip "$@" --python "$venv/bin/python" ${uv_nobuild[@]+"${uv_nobuild[@]}"}
+  else logged "$log" "$venv/bin/python" -I -m pip install --quiet --disable-pip-version-check ${pip_nobuild[@]+"${pip_nobuild[@]}"} "$@"; fi
 }
 
 py_ranges() {  # py_ranges WHICH: pyproject's dependencies (all, or dev: the dev extra alone), at the versions it allows
@@ -490,7 +531,7 @@ dev = p.get("optional-dependencies", {}).get("dev", []) if sys.argv[3] == "1" el
 print("\n".join(dev if sys.argv[2] == "dev" else p.get("dependencies", []) + dev))' "$src/backend/pyproject.toml" "$1" "$dev" > "$req"
   say "+ the requirements of backend/pyproject.toml$( [ "$1" = dev ] && echo "'s dev extra" ) into $req"
   if [ "$pytool" = uv ]; then set -- install -r "$req"; else set -- -r "$req"; fi
-  py_install "$tmp/py.log" "$@" || { tail_out; die "the backend's packages could not be installed (above)"; }
+  py_install "$tmp/py.log" "$@" || { tail_out; die "the backend's packages could not be installed (above)$(wheels_only)"; }
 }
 
 py_differs() {  # py_differs REQ: the packages in backend/.venv at a version other than the one REQ pins
@@ -570,8 +611,8 @@ prefer_pins() {  # prefer_pins REQ (uv): backend/pyproject.toml resolved from th
   say "so install.sh keeps each pin the index has, and for the others installs the newest versions backend/pyproject.toml allows that the index has"
   run cp "$1" "$out"  # uv pip compile keeps the versions its output file already names where it can
   logged "$tmp/py.log" uv pip compile "$src/backend/pyproject.toml" ${extra[@]+"${extra[@]}"} -o "$out" --generate-hashes \
-    --quiet --python "$py" || return 1
-  logged "$tmp/py.log" uv pip sync --require-hashes "$out" --python "$py"
+    --quiet --python "$py" ${uv_nobuild[@]+"${uv_nobuild[@]}"} || return 1
+  logged "$tmp/py.log" uv pip sync --require-hashes "$out" --python "$py" ${uv_nobuild[@]+"${uv_nobuild[@]}"}
 }
 
 dist_stale() {  # dist_stale FRONTEND: the first file frontend/dist is built from that is newer than its index.html (git

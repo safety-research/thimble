@@ -334,6 +334,11 @@ workspaces in `$T/workspaces`. Keep that folder when you replace `$T`.
 thimble needs Python 3.12 or later. [uv](https://docs.astral.sh/uv/getting-started/installation/) is recommended: it
 installs the tested versions, and it gets Python if the machine has none.
 
+On a Mac with Apple silicon, use a native Python: an Intel one, which a terminal under Rosetta finds first, gets no
+wheel for some packages and builds them from source, which needs Xcode. With uv, write
+`--python cpython-3.12-macos-aarch64-none` in place of `--python '>=3.12'` below, and add `--no-build` to its install
+commands.
+
 From a release, with uv:
 
     uv venv --python '>=3.12' "$T/backend/.venv"

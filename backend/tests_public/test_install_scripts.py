@@ -47,16 +47,19 @@ def env_for(tmp_path: Path, **extra: str) -> dict[str, str]:
 
 
 # uv's stand-in: `uv venv DIR` makes DIR/bin/python the base interpreter without site-packages, so it holds no package
-# (and install.sh fetches no browser for one); `uv pip …` is written to $STUB_LOG, and `uv pip sync` of a
-# requirements.txt prints $STUB_SYNC_OUT and exits with $STUB_SYNC_RC. `uv sync` makes .venv the same way and says, as
-# uv does, that it checked the packages, or with $STUB_UV_SYNC set that it installed those
+# (and install.sh fetches no browser for one), which says it is arm64 when uv was asked for an aarch64 Python; `uv venv …`
+# and `uv pip …` are written to $STUB_LOG, and `uv pip sync` of a
+# requirements.txt prints $STUB_SYNC_OUT and exits with $STUB_SYNC_RC. `uv sync` makes .venv the same way (and is written
+# to $STUB_LOG) and says, as uv does, that it checked the packages, or with $STUB_UV_SYNC set that it installed those
 UV_STUB = f"""#!/bin/sh
 case "$1" in
   --version) echo "uv 0.0.0";;
-  venv) for a; do d="$a"; done; mkdir -p "$d/bin"
-        printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > "$d/bin/python"; chmod +x "$d/bin/python";;
-  sync) mkdir -p .venv/bin
-        printf '#!/bin/sh\\nexec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > .venv/bin/python; chmod +x .venv/bin/python
+  venv) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"; for a; do d="$a"; done; mkdir -p "$d/bin"
+        case "$*" in *aarch64*) arch='case "$*" in *platform.machine*) echo arm64; exit 0;; esac\\n';; *) arch="";; esac
+        printf "#!/bin/sh\\n$arch"'exec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > "$d/bin/python"; chmod +x "$d/bin/python";;
+  sync) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"; mkdir -p .venv/bin
+        case "$*" in *aarch64*) arch='case "$*" in *platform.machine*) echo arm64; exit 0;; esac\\n';; *) arch="";; esac
+        printf "#!/bin/sh\\n$arch"'exec %s -S "$@"\\n' {os.path.realpath(sys.executable)} > .venv/bin/python; chmod +x .venv/bin/python
         if [ -n "${{STUB_UV_SYNC:-}}" ]; then echo "Installed 1 package in 1ms"; echo "$STUB_UV_SYNC"
         else echo "Checked 3 packages in 1ms"; fi;;
   pip) echo "uv $*" >> "${{STUB_LOG:-/dev/null}}"
@@ -558,3 +561,74 @@ STARTUP_FILES = (".bash_login", ".bash_profile", ".bashrc", ".config/fish/conf.d
 def startup(home: Path) -> dict[str, str]:
     """{each startup file under HOME: its text}."""
     return {f: (home / f).read_text() for f in STARTUP_FILES if (home / f).exists()}
+
+
+# ----------------------------------------------------------------------------- a Mac with Apple silicon
+
+
+def mac_bin(tmp_path: Path, *, uv: bool = True, translated: str = "1", pythons: dict[str, str] | None = None) -> Path:
+    """Stand-ins for a Mac with Apple silicon whose shell runs under Rosetta (`uname -m` says x86_64 and sysctl's
+    proc_translated 1, or `translated` "0" and arm64 for a native shell): uname, sysctl, a node too old for the frontend
+    step (stub_bin's), uv (UV_STUB) unless
+    `uv` is False, and `pythons`, each a python by its name that reports the given machine (an Intel build reports
+    x86_64 under Rosetta). The python found first on /usr/bin reports this Linux machine's, x86_64, as an Intel one."""
+    bin_ = tmp_path / "macbin"
+    bin_.mkdir(exist_ok=True)
+    arm = translated != "1"
+    real = os.path.realpath(sys.executable)
+    files = {"uname": f'#!/bin/sh\ncase "$1" in -m) echo {"arm64" if arm else "x86_64"};; *) echo Darwin;; esac\n',
+             "sysctl": f'#!/bin/sh\n[ "$2" = sysctl.proc_translated ] && echo {translated}\n',
+             "node": '#!/bin/sh\necho v18.0.0\n'}
+    if uv:
+        files["uv"] = UV_STUB
+    for name, machine in (pythons or {}).items():
+        files[name] = f'#!/bin/sh\ncase "$*" in *platform.machine*) echo {machine}; exit 0;; esac\nexec {real} -S "$@"\n'
+    for name, body in files.items():
+        (bin_ / name).write_text(body)
+        (bin_ / name).chmod(0o755)
+    return bin_
+
+
+def mac_install(tmp_path: Path, bin_: Path, *flags: str, tree: Path | None = None, **extra: str):
+    """install.sh --deps-only --verbose of a release (with a backend/requirements.txt) into tmp_path/app, on mac_bin's
+    stand-ins first on PATH."""
+    if tree is None:
+        tree = fake_tree(tmp_path / "release")
+        (tree / "backend" / "requirements.txt").write_text("idna==3.10 --hash=sha256:00\n")
+    env = env_for(tmp_path, PATH=f"{bin_}:/usr/bin:/bin", STUB_LOG=str(tmp_path / "uv.log"), **extra)
+    return subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--dir", str(tmp_path / "app"), "--deps-only",
+                           "--verbose", *ANSWERS, *flags], capture_output=True, text=True, env=env,
+                          stdin=subprocess.DEVNULL, timeout=60)
+
+
+def test_under_rosetta_uv_makes_the_environment_with_a_native_python_and_builds_nothing_from_source(tmp_path):
+    """The feedback's Mac: iTerm under Rosetta, where the first python3 is an Intel build. uv makes backend/.venv with a
+    native arm64 Python (which it gets when the Mac lacks one), never the Intel one, and installs wheels alone, so no
+    package is built from source, which needs Xcode and its license. The opening screen says which Python it uses."""
+    r = mac_install(tmp_path, mac_bin(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    log = (tmp_path / "uv.log").read_text().splitlines()
+    assert any(c.startswith("uv venv --quiet --python cpython-3.12-macos-aarch64-none ") for c in log), log
+    [sync] = [c for c in log if c.startswith("uv pip sync")]
+    assert sync.endswith("--no-build"), sync
+    assert "installs thimble's pinned Python packages, and a native arm64 Python 3.12 if this machine lacks one; not " \
+           "the Intel Python at /usr/bin/python3, which would need Xcode to build packages" in r.stdout, r.stdout
+
+
+def test_under_rosetta_without_uv_a_native_python_is_used_and_without_one_install_sh_says_how_to_get_one(tmp_path):
+    """Without uv the first native arm64 Python is used, with pip's wheels alone; with only an Intel one, install.sh
+    stops before it changes anything, in one line that says why and how to get a native Python."""
+    bin_ = mac_bin(tmp_path, uv=False, pythons={"python3": "x86_64", "python3.12": "arm64"})
+    r = mac_install(tmp_path, bin_, "--dry-run")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert f"+ {bin_}/python3.12 -I -m venv " in r.stdout, r.stdout
+    assert "pip install --quiet --disable-pip-version-check --only-binary=:all: --require-hashes" in r.stdout, r.stdout
+
+    (bin_ / "python3.12").unlink()
+    r = mac_install(tmp_path, bin_)
+    assert r.returncode == 1 and not (tmp_path / "app").exists(), r.stdout + r.stderr
+    [line] = [ln for ln in r.stderr.splitlines() if ln.startswith("install.sh: ")]
+    assert line == (f"install.sh: this Mac has Apple silicon, and no native arm64 Python 3.12+ was found ({bin_}/python3 "
+                    "is an Intel build, which would need Xcode to build thimble's packages). Install uv "
+                    "(https://docs.astral.sh/uv/getting-started/installation/), which gets a native Python, then run "
+                    "this again"), r.stderr
