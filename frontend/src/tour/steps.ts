@@ -129,17 +129,17 @@ const filesExample = (api: Api): Example => {
 }
 
 // the Files panel's status strip as an example shows it, saying `meta`, over thimble's own, which names the analyst's
-// open file
-const statusExample = (api: Api, meta: string) => {
-  const real = () => api.q('[data-panel="files"] .pane-status')
+// open file; with `board`, the Canvas's status line saying it, over thimble's own, which counts the workspace's cards
+const statusExample = (api: Api, meta: string, board = false) => {
+  const real = () => api.q(board ? '[data-panel="canvas"] .board-status' : '[data-panel="files"] .pane-status')
   const wrap = document.createElement('div')
   wrap.className = 'tour-ex-status'
   wrap.dataset.ground = '1'
   const strip = document.createElement('div')
-  strip.className = 'pane-status'
-  for (const [cls, text] of [['pane-status-name', 'Files'], ['pane-status-meta', meta]]) {
+  strip.className = board ? 'board-status' : 'pane-status'
+  for (const [cls, text] of board ? [['', meta]] : [['pane-status-name', 'Files'], ['pane-status-meta', meta]]) {
     const span = document.createElement('span')
-    span.className = cls
+    if (cls) span.className = cls
     span.textContent = text
     strip.append(span)
   }
@@ -167,7 +167,7 @@ const viewsExample = (api: Api): Example => {
   body.className = 'tour-ex-viewbody'
   body.style.background = api.groundOf(realBody())
   const frame = document.createElement('iframe')
-  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=12`
+  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=13`
   frame.title = 'Timeline (example)'
   Object.assign(frame.style, { display: 'block', width: '100%', height: '100%', border: '0' })
   body.append(frame)
@@ -199,7 +199,8 @@ const viewsExample = (api: Api): Example => {
 }
 
 // ---------- the card steps: the example card (the top card of an orientation's deck, captured, in plain words), scaled
-// so it reads comfortably at the window's size. Where a card of width w0 and height h0 goes on the Canvas: as large as
+// so it reads comfortably at the window's size, over a status line that counts it (CARD_STATUS), not the workspace's
+// own cards, which the tour's example workspace may have none of (bug hunt F16: `0 cards · 0 groups` under it). Where a card of width w0 and height h0 goes on the Canvas: as large as
 // fits beside the popover, at most 1100px wide.
 const fitCard = (api: Api, w0: number, h0: number) => {
   const P = api.rectOf(api.q(canvasPanel))
@@ -210,6 +211,8 @@ const fitCard = (api: Api, w0: number, h0: number) => {
   const h = (w * h0) / w0
   return { w, h, x: P.x + Math.max(32, (P.width - (w + 14 + 280)) / 2), y: P.y + Math.max(40, (P.height - 28 - h) / 2) }
 }
+/** The Canvas's status line under the example card: the card, in its group. */
+export const CARD_STATUS = '1 card · 1 group'
 const cardExample = (api: Api): Example => {
   // placed in the layer thimble's own ⌘ pointer reaches, with the card's anchors and parts as thimble drew them, so a
   // ⌘-click picks a row, a click on text picks its line and a ⌘-drag picks the words, as on a real card. The ask box
@@ -242,7 +245,13 @@ const cardExample = (api: Api): Example => {
     key = size
     Object.assign(w.style, { left: `${f.x}px`, top: `${f.y}px`, height: `${h0}px`, transform: `scale(${f.w / 720})` })
   }
-  return { els: { card: art, wrap: w, real: false }, layout }
+  const status = statusExample(api, CARD_STATUS, true)
+  api.ex.append(status.wrap)
+  const place = () => {
+    status.layout()
+    return layout()
+  }
+  return { els: { card: art, wrap: w, real: false }, layout: place }
 }
 
 // ---------- Labels: one agent's transcript in the Transcript view with two labels on it, each in colours of its own:

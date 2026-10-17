@@ -2,11 +2,12 @@
 // the labels over files that are on in the order they were turned on (kept per workspace in the browser), the focused
 // one, and which values each left on each file (GET /labels/presence, re-read on `concepts` events).
 // On/off, highlights and colours are saved at once (PUT /concepts/{id}) and applied optimistically as overrides until
-// the concepts are read again.
+// the concepts are read again. On a demo page (lib/demo) only on/off is saved.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useConcepts } from '../canvas/concepts'
 import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { isDemo } from '../lib/demo'
 import { track } from '../lib/telemetry'
 import type { Concept, ConceptPatch, LabelClass } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
@@ -131,6 +132,11 @@ export function useFilesLabels(ws: string): FilesLabels {
           const o = cur.get(id)
           return o ? new Map(cur).set(id, { ...o, settled: true }) : cur
         })
+      // a demo page saves a label's switch alone (backend demo_guard): a highlight or a colour holds on this page
+      if (isDemo() && Object.keys(body).some((k) => k !== 'shown')) {
+        settle()
+        return Promise.resolve(patch as Concept)
+      }
       return labelApi.update(ws, id, body).then(
         (k) => {
           settle()

@@ -548,11 +548,6 @@
        "value": "37,649",
        "ref": "card:84aa5fe1@out0#L1",
        "tier": 2
-      },
-      {
-       "value": "2026",
-       "ref": "card:84aa5fe1@out0#L2",
-       "tier": 2
       }
      ],
      "unresolved": [
@@ -560,12 +555,20 @@
      ],
      "broken": [],
      "quiet": [],
+     "typed": [
+      {
+       "value": "2026",
+       "ref": "card:84aa5fe1@out0#L2",
+       "line": 5,
+       "why": "typed in the code, line 5, not computed"
+      }
+     ],
      "checked": true,
      "healed": {
       "version": "f82cbcfec125",
       "relinks": 0,
       "changes": [],
-      "ms": 16
+      "ms": 83
      }
     },
     "attempts": 0,
@@ -808,30 +811,33 @@
    "verification": {
     "exec_count": 3,
     "links": {
-     "status": "partial",
-     "resolved": [
-      {
-       "value": "82",
-       "ref": "card:a7856af1@out0#L3",
-       "tier": 2
-      },
-      {
-       "value": "37,649",
-       "ref": "card:a7856af1@out0#L5",
-       "tier": 2
-      }
-     ],
+     "status": "unresolved",
+     "resolved": [],
      "unresolved": [
       "2025"
      ],
      "broken": [],
      "quiet": [],
+     "typed": [
+      {
+       "value": "82",
+       "ref": "card:a7856af1@out0#L3",
+       "line": 4,
+       "why": "typed in the code, line 4, not computed"
+      },
+      {
+       "value": "37,649",
+       "ref": "card:a7856af1@out0#L5",
+       "line": 7,
+       "why": "typed in the code, line 7, not computed"
+      }
+     ],
      "checked": true,
      "healed": {
       "version": "c9a7ce78f2c7",
       "relinks": 0,
       "changes": [],
-      "ms": 15
+      "ms": 12
      }
     },
     "attempts": 0,
@@ -1968,6 +1974,21 @@
      "status": "partial",
      "resolved": [
       {
+       "value": "source requests",
+       "ref": "call:7e554e8e/371",
+       "tier": 0
+      },
+      {
+       "value": "custom programs",
+       "ref": "all-reports.csv#row=745",
+       "tier": 0
+      },
+      {
+       "value": "Base64 answer tables",
+       "ref": "all-reports.csv#row=773",
+       "tier": 0
+      },
+      {
        "value": "URLQuery account attempts",
        "ref": "all-reports.csv#row=29144",
        "tier": 0
@@ -1977,64 +1998,15 @@
       "6",
       "2026"
      ],
-     "broken": [
-      {
-       "value": "source requests",
-       "ref": "call:7e554e8e/371",
-       "tier": 0,
-       "why": "the cited place shows 10, 9, 38078",
-       "source": "10, 9, 38078"
-      },
-      {
-       "value": "custom programs",
-       "ref": "all-reports.csv#row=745",
-       "tier": 0,
-       "why": "the cited place shows 2026",
-       "source": "2026"
-      },
-      {
-       "value": "Base64 answer tables",
-       "ref": "all-reports.csv#row=773",
-       "tier": 0,
-       "why": "the cited place shows 2026",
-       "source": "2026"
-      }
-     ],
+     "broken": [],
      "quiet": [],
+     "typed": [],
      "checked": true,
      "healed": {
       "version": "9f9bd1d7a643",
       "relinks": 0,
-      "changes": [
-       {
-        "value": "source requests",
-        "ref": "call:7e554e8e/371",
-        "state": "contradicted",
-        "how": "contradicted",
-        "to": "call:7e554e8e/371",
-        "source": "10, 9, 38078",
-        "why": "the cited place shows 10, 9, 38078"
-       },
-       {
-        "value": "custom programs",
-        "ref": "all-reports.csv#row=745",
-        "state": "contradicted",
-        "how": "contradicted",
-        "to": "all-reports.csv#row=745",
-        "source": "2026",
-        "why": "the cited place shows 2026"
-       },
-       {
-        "value": "Base64 answer tables",
-        "ref": "all-reports.csv#row=773",
-        "state": "contradicted",
-        "how": "contradicted",
-        "to": "all-reports.csv#row=773",
-        "source": "2026",
-        "why": "the cited place shows 2026"
-       }
-      ],
-      "ms": 66
+      "changes": [],
+      "ms": 6
      }
     },
     "attempts": 0,

@@ -134,7 +134,8 @@ sandbox. `thimble doctor` says whether the sandbox is on.
 thimble's browser page opens on a press: `/thimble browser` in Claude Code, `o` or `↗` in thimble's terminal panel, `↗` on a
 card, or the `thimble` command. The press starts thimble's server if none runs, makes this session the one the page
 follows, and opens the page on what you pressed, signed in. The terminal keeps working, and closing the tab changes
-nothing.
+nothing. A browser still signed in from an earlier session needs no press: when it opens the page or sends a message
+while thimble's server runs, the page follows this session, and shows its permission requests.
 
 How the press signs the browser in. It asks the server for a one-time code, which works once, for 60 seconds. It writes
 the page's address with the code into a file in `~/.thimble/open/`, and gives your browser opener (`$BROWSER`, `open`,
@@ -168,7 +169,8 @@ type `/thimble browser` in your Claude Code terminal, or press `o` in thimble's 
 When the Claude Code session ends, the page stops: it shows that it stopped and how to open it again, and it sends
 nothing more. A tab whose server went away first asks the address it reconnects to to prove, without any credential,
 that it is the same thimble server; another program that later uses the port can't, and the page stops without sending
-it the cookie. After 6 failed reconnects the page stops too.
+it the cookie. After 6 failed reconnects the page stops too. A demo (`thimble demo`) needs no session: while its page
+is open, the server stays up when the last session ends, and a demo page that stops says to run `thimble demo` again.
 
 Each new sign-in shows a notice with **Sign it out**, in the browser and above the prompt in your terminal (only in the
 Claude Code session it happened in: a later session's terminal does not show it again); a terminal without thimble's

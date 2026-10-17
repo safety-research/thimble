@@ -397,6 +397,8 @@ class Live:
         self.continued: tuple[str, str] | None = None  # (session, time) of the continued-in record read (_continue)
         self.came_from: dict | None = None  # {session, transcript, at} of the session this one continues (FROM_KEY)
         self.copied: tuple[set[str], float] | None = None  # what that session's records are known by (_copied)
+        # time.monotonic() when a signed-in browser made this server follow it from local transport (follow_browser)
+        self.handed_at: float | None = None
         self.moved_at: float | None = None  # time.monotonic() when main followed it here from that session (_continue)
         self.reading = False  # tail_once runs for it now, so _read_now leaves it to that read
         self.task: asyncio.Task | None = None
@@ -841,6 +843,38 @@ def _turned_on(c: str, sid: str) -> str:
         return datetime.fromtimestamp(float(at), timezone.utc).isoformat(timespec="milliseconds")
     except (OverflowError, OSError, ValueError):
         return ""
+
+
+def follow_browser(c: str) -> Live | None:
+    """A signed-in browser opened workspace `c`'s page, or wrote to main there, while main runs on local transport: the
+    browser stayed signed in from an earlier session, so this session had no press. A permission request on local
+    transport reaches no server, so such a browser never showed main's waiting request (bug hunt F4). The server
+    follows main from now on, as after a press (open_cmd.press): launch.json's transport made the server's first, then
+    the attach, which reads on from the last pass's cursor (H4). The session's shim, hooks and waker read the transport
+    as they go and move to the server. Nothing when main runs on the server already, when launch.json names no main, or
+    when main's `claude` has ended. The Live it attached, else None."""
+    from . import activate  # noqa: PLC0415
+
+    ws = _local_ws(c)
+    lv = current(c) if ws is not None else None
+    if ws is None or lv is None:
+        return None
+    rec = sfiles.launch(ws)
+    if not activate.main_alive(c, rec):
+        return None
+    pid = rec.get("pid") if isinstance(rec.get("pid"), int) and not isinstance(rec.get("pid"), bool) else None
+    config_dir = rec.get("config_dir") if isinstance(rec.get("config_dir"), str) else None
+    try:
+        activate.write_launch(c, lv.sid, role=activate.MAIN, transport=activate.SERVER, via="press", pid=pid,
+                              config_dir=config_dir or "")
+    except (OSError, ValueError) as e:
+        log.warning("%s: main's session %s stays on local transport: %s", c, lv.sid, e)
+        return None
+    log.info("%s: a signed-in browser opened the page; this server follows main's session %s from now on", c, lv.sid)
+    got = attach(c, lv.sid, lv.cwd, lv.transcript_path, pid, config_dir)
+    if got is not None:
+        got.handed_at = time.monotonic()
+    return got
 
 
 def _handing_over(c: str) -> bool:
@@ -1312,14 +1346,21 @@ STOP_AFTER_S = 3.0  # after main's end, how long the server waits before it stop
 async def _stop_server() -> None:
     """No workspace has a main session: what still runs in any workspace stops as main's end stops it, the kernels end,
     and the server stops itself (cli.stop_self), STOP_AFTER_S later, so a page that is open reads main's end and shows
-    the session-gone card before its stream closes (live check L10), and a session that attaches meanwhile keeps it."""
-    from . import cli, notebook  # noqa: PLC0415
+    the session-gone card before its stream closes (live check L10), and a session that attaches meanwhile keeps it. A
+    page that shows a demo workspace (demo_guard.is_demo), which needs no session, keeps it up, as `thimble demo`'s
+    own server stays up (bug hunt F7)."""
+    from . import cli, demo_guard, investigation, notebook  # noqa: PLC0415
 
     for c in sorted(agents.at_work()):
         with contextlib.suppress(Exception):
             await agents.stop_all(c)
     await asyncio.sleep(STOP_AFTER_S)
     if _live or _shutting_down():
+        return
+    demos = sorted(c for c in investigation.watched() if demo_guard.is_demo(c))
+    if demos:
+        log.info("no workspace has a main session, but a page shows the demo %s, which needs none: the server stays up",
+                 ", ".join(demos))
         return
     with contextlib.suppress(Exception):
         await notebook.shutdown_all()
@@ -3860,6 +3901,40 @@ def _size(path: Path) -> int:
         return 0
 
 
+EARLIER_RUN_BYTES = 512 * 1024  # of a transcript's history before the tail's first place, read for main's model
+
+
+def _note_earlier_run(lv: Live, p: Path) -> None:
+    """Main's model and effort as the last record before the tail's first place names them (_note_model,
+    _note_request), for the history the tail does not replay: a session resumed with `claude -c` has answered already,
+    and the composer and Settings showed its model as not known until its next reply (bug hunt F17). Reads at most
+    EARLIER_RUN_BYTES back; a record it cannot read is skipped."""
+    if lv.model is not None or lv.offset <= 0:
+        return
+    try:
+        with p.open("rb") as f:
+            start = max(0, lv.offset - EARLIER_RUN_BYTES)
+            f.seek(start)
+            lines = f.read(lv.offset - start).split(b"\n")
+    except OSError:
+        return
+    for line in reversed(lines[1:] if start else lines):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(rec, dict) or rec.get("isSidechain"):
+            continue
+        msg = rec.get("message") if isinstance(rec.get("message"), dict) else {}
+        att = rec.get("attachment") if isinstance(rec.get("attachment"), dict) else {}
+        if rec.get("type") == "assistant" and isinstance(msg.get("model"), str) and not msg["model"].startswith("<"):
+            _note_model(lv, rec)
+        elif (rec.get("type") == "attachment" and att.get("type") == "model") or rec.get("type") == "api-request":
+            _note_request(lv, rec)
+        if lv.model is not None:
+            return
+
+
 def _tail_main(lv: Live) -> None:
     if lv.degraded or not lv.transcript_path:
         return
@@ -3870,12 +3945,16 @@ def _tail_main(lv: Live) -> None:
         if lv.offset < 0:
             lv.offset = 0  # not written yet: everything it will hold is this session's
         return
+    first = lv.offset < 0
     if lv.offset < 0 and lv.read_from:
         lv.offset = _offset_since(str(p), lv.read_from)  # a session no mirror read yet: since thimble turned on (attach)
     if lv.offset < 0:
         lv.offset = size  # already there when the session attached: its history is not replayed
         _save_cursor(lv)  # a cursor an earlier attach of this session left would replay that history after a restart
+        _note_earlier_run(lv, p)
         return
+    if first:
+        _note_earlier_run(lv, p)
     if size < lv.offset:  # truncated or rewritten
         lv.offset, lv.buf = 0, b""
     if size == lv.offset:

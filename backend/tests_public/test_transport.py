@@ -235,3 +235,38 @@ async def test_after_the_press_the_terminal_s_accept_reaches_the_server_with_the
     assert out["queued"] is False and out["reason"] == refusal["reason"], "a refusal comes back with its reason"
     r = client.post(f"/api/ws/{CORPUS}/views/proposals/board/accept", headers=hook_auth.headers(hook_auth.token(), 80))
     assert r.status_code == 403, "the browser's route takes only the browser's cookie"
+
+
+# ----------------------------------------------------------------------------- a browser signed in before this session
+
+
+def test_f4_a_signed_in_browser_moves_main_to_the_server_so_main_s_permission_requests_show(ws, monkeypatch,
+                                                                                          plugin_headers):
+    """Bug hunt F4: a browser still signed in from an earlier session reached main on local transport through the
+    queue file, but a permission request on local transport reaches no server, so its question hung with no card. A
+    signed-in browser's message (or its page's stream) now makes the server follow main, as a press does: the
+    PermissionRequest hook then tells the server, and main's card shows the request. A post with no browser's
+    sign-in moves nothing."""
+    from conftest import UI_COOKIE_VALUE, UI_KEY_VALUE, _record_paired
+    from fastapi.testclient import TestClient
+
+    from app import activate, agents, hook_auth
+    from app.main import app
+
+    monkeypatch.setattr(activate, "main_alive", lambda c, rec=None: True)  # the test process stands in for `claude`
+    _record_paired(UI_COOKIE_VALUE)
+    signed = {"cookie": f"{hook_auth.ui_cookie()}={UI_COOKIE_VALUE}"}
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        r = client.post(f"/api/ws/{CORPUS}/events", json={"kind": "main", "payload": {"text": "from a script"}})
+        assert r.status_code == 200 and sf.transport(ws) == sf.LOCAL, "no browser's sign-in: main stays local"
+        r = client.post(f"/b/{UI_KEY_VALUE}/api/ws/{CORPUS}/events", headers=signed,
+                        json={"kind": "main", "payload": {"text": "which pages changed?"}})
+        assert r.status_code == 200, r.text
+        assert sf.transport(ws) == sf.SERVER and sf.main_session(ws) == MAIN, "the server follows main now"
+        assert session._live[CORPUS].sid == MAIN
+        asked = client.post("/api/events/permission", headers=plugin_headers("http://127.0.0.1"),
+                            json={"cwd": str(config.corpus_dir(CORPUS)), "session": MAIN, "tool_name": "Bash",
+                                  "tool_input": {"command": "ls", "description": "Run the new card"}})
+        assert asked.status_code == 200, asked.text
+        held = agents.meta_or_none(CORPUS, agents.MAIN_ID)["permissions"]
+        assert [(p["what"], p.get("terminal")) for p in held] == [("Run the new card", True)]

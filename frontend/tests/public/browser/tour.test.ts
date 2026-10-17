@@ -318,6 +318,25 @@ test('the tour runs in the demo workspace’s frame under its banner, never over
     assert.ok(await frame.evaluate(() => document.querySelector('.tour-ex-reader .reader-tab-name')?.textContent?.includes('agent-05.jsonl')), 'the example transcript shows in the frame')
     const demoFiles = await frame.evaluate(() => document.querySelector<HTMLElement>('.shell [data-panel="files"]')?.innerText ?? '')
     assert.ok(demoFiles.includes('example-timeline') && !demoFiles.includes('pilot'), 'over the demo’s own folder')
+    // bug hunt F16: the Views step's example shows no data error, and the Canvas step's status line counts the example
+    // card rather than the demo workspace's own cards, of which the example workspace has none
+    await frame.click('.tour-pop [data-tour="next"]')
+    assert.equal((await stepIn(frame, 5)).title, 'Views')
+    const head = await frame.waitForFunction(() => {
+      const f = document.querySelector<HTMLIFrameElement>('.tour-ex-viewbody iframe')
+      const text = f?.contentDocument?.querySelector('.view-pane-head')?.textContent ?? ''
+      return text.includes('25 files') ? text : null
+    }, null, { timeout: 15000 })
+    assert.ok(!(await head.jsonValue())!.includes('unreadable'), 'the example view reads every line of its files')
+    await frame.click('.tour-pop [data-tour="next"]')
+    assert.equal((await stepIn(frame, 6)).title, 'Cards on the Canvas')
+    await frame.waitForSelector('.tour-ex-status .board-status', { timeout: 10000 })
+    const status = await frame.evaluate(() => {
+      const shown = document.querySelector<HTMLElement>('.tour-ex-status')!.getBoundingClientRect()
+      const own = document.querySelector<HTMLElement>('[data-panel="canvas"] .board-status')!.getBoundingClientRect()
+      return { text: document.querySelector('.tour-ex-status .board-status')?.textContent, over: Math.abs(shown.top - own.top) < 1 && Math.abs(shown.left - own.left) < 1 }
+    })
+    assert.deepEqual(status, { text: '1 card · 1 group', over: true })
     const during = await pageState(page)
     assert.equal(during.examples, 0, 'no example on the analyst’s page')
     assert.equal(during.files, before.files, 'the analyst’s files as they were')

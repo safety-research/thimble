@@ -7,13 +7,15 @@
 // on hover that changes its colours (LabelPalette). Beside a view, a label's row (and each value's) has a funnel on
 // hover that sets the Files label filter, which the view keeps its records by; the funnel of the filter set stays
 // pressed, and a click on it clears the filter. A row's ⋯ menu edits the label or deletes it, once confirmed
-// (DeleteLabelConfirm).
+// (DeleteLabelConfirm); a demo page's rows have none, and its New label is off.
 import { useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Button } from '../components/Button'
+import { DemoOff } from '../components/DemoOff'
 import { Icon } from '../components/Icon'
 import { Menu } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
 import { TipButton } from '../components/Tooltip'
+import { useDemo } from '../lib/demo'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
 import type { Concept, ConceptRun } from '../lib/types'
@@ -63,7 +65,9 @@ export function LabelsPane({ labels, open, onToggleOpen, editing, onEdit, runs, 
           <Icon name="chevron-right" size={14} className="files-caret" />
           Labels
         </button>
-        <Button variant="icon" size="sm" icon="plus" title="New label" aria-label="New label" active={editing === 'new'} onClick={() => onEdit(editing === 'new' ? null : 'new')} />
+        <DemoOff>
+          <Button variant="icon" size="sm" icon="plus" title="New label" aria-label="New label" active={editing === 'new'} onClick={() => onEdit(editing === 'new' ? null : 'new')} />
+        </DemoOff>
         {onHide && <Button variant="icon" size="sm" icon="sidebar" title="Hide labels" aria-label="Hide labels" onClick={onHide} />}
       </div>
       {open && note}
@@ -121,6 +125,8 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
   const paletteAt = useRef<HTMLButtonElement>(null)
   const moreAt = useRef<HTMLButtonElement>(null)
   const [picking, setPicking] = useState(false)
+  // a demo page's labels are read (bug hunt F5): no edit or delete
+  const demo = useDemo()
   const turn = () => {
     if (!on) labels.setFocus(k.id)
     labels.toggle(k.id)
@@ -160,16 +166,18 @@ function LabelRow({ label: k, on, focused, marked, editing, status, labels, onEd
         {onFilter && (classes.length <= 2 || !on) && (
           <FilterButton pressed={filter != null} label={`Show only the records ${k.name} marks`} onClick={() => onFilter(k.id, filter != null ? null : ((classes.find((c) => c.highlight) ?? classes[0])?.name ?? 'yes'))} />
         )}
-        <Menu
-          label={k.name}
-          align="end"
-          className="files-label-menu"
-          items={[
-            { id: 'edit', label: 'Edit label', icon: 'edit', onSelect: () => onEdit(k.id) },
-            { id: 'delete', label: 'Delete label', icon: 'trash', danger: true, onSelect: () => moreAt.current && onDelete(moreAt.current) },
-          ]}
-          trigger={<Button ref={moreAt} variant="icon" size="sm" icon="more-horizontal" title="Edit or delete" aria-label={`Edit or delete ${k.name}`} className="files-label-edit" active={editing} />}
-        />
+        {!demo && (
+          <Menu
+            label={k.name}
+            align="end"
+            className="files-label-menu"
+            items={[
+              { id: 'edit', label: 'Edit label', icon: 'edit', onSelect: () => onEdit(k.id) },
+              { id: 'delete', label: 'Delete label', icon: 'trash', danger: true, onSelect: () => moreAt.current && onDelete(moreAt.current) },
+            ]}
+            trigger={<Button ref={moreAt} variant="icon" size="sm" icon="more-horizontal" title="Edit or delete" aria-label={`Edit or delete ${k.name}`} className="files-label-edit" active={editing} />}
+          />
+        )}
       </div>
       {files && <LabelPalette label={k} anchor={paletteAt} open={picking} onClose={() => setPicking(false)} onPick={(value, n) => labels.setColour(k.id, value, n)} />}
       {status && <LabelStatusLine status={status} name={k.name} marked={byHand} onRetry={() => onRetry(k.id)} />}

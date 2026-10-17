@@ -2,7 +2,7 @@
 // The stopped page (src/shell/ServerDown.tsx StoppedPage, src/shell/SignIn.tsx): once the page stopped (lib/stale: the
 // server's `stopping`, the workspace's session ended, failed reconnects or a failed challenge), the line takes the app's
 // place for good, so the app unmounts and nothing polls; a sign-out heard after it changes nothing. The server-down line
-// names /thimble browser as the way back.
+// names /thimble browser as the way back, and a demo page's lines name thimble demo.
 import { act, createElement } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -34,6 +34,22 @@ test("the stopped line takes the app's place for good", async () => {
   expect(el.querySelector('.stopped-line code')?.textContent).toBe('/thimble browser')
   await act(async () => bus.emit('signedOut', {}))
   expect(el.querySelector('.stopped-line')?.textContent).toBe(STOPPED_LINE)
+})
+
+test('a demo page that stops says to run thimble demo, which needs no session (bug hunt F7)', async () => {
+  const { SignInGate } = await import('../../src/shell/SignIn.tsx')
+  const { DEMO_STOPPED_LINE } = await import('../../src/shell/ServerDown.tsx')
+  const { stopPage } = await import('../../src/lib/stale.ts')
+  const { setDemo } = await import('../../src/lib/demo.ts')
+  const el = await mount(createElement(SignInGate, null, createElement('div', { className: 'stand-in-app' }, 'the demo')))
+  await settle()
+  await settle()
+  setDemo(true)
+  await act(async () => stopPage('stopping'))
+  expect(el.querySelector('.stopped-line')?.textContent).toBe(DEMO_STOPPED_LINE)
+  expect(DEMO_STOPPED_LINE).not.toContain('/thimble browser')
+  expect(el.querySelector('.stopped-line code')?.textContent).toBe('thimble demo')
+  setDemo(false)
 })
 
 test('the server-down line names /thimble browser', async () => {

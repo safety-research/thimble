@@ -1,9 +1,10 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
 // workspaces as the start page lists them (WorkspaceList), this one marked, and on a demo page the Demo tag (DemoTag);
 // the surfaces' tabs over the main area (a click shows the surface, a drag takes it to a pane); at the right Undo and
-// Redo (shell/undo.ts), Report a problem, the links toggle, the theme popover and the settings gear.
+// Redo (shell/undo.ts; off on a demo page), Report a problem, the links toggle, the theme popover and the settings gear.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
+import { DemoOff } from '../components/DemoOff'
 import { Icon } from '../components/Icon'
 import { Popover } from '../components/Menu'
 import { Spinner } from '../components/Spinner'
@@ -98,8 +99,12 @@ export function TopBar({ ws, tabs, onTab, onTabDrag }: TopBarProps) {
       </nav>
       <span className="shell-spacer" />
       <span ref={setTools} className="shell-tools">
-        <Button variant="icon" icon="undo" title={undoTip(history.labels)} aria-label="Undo" disabled={!history.labels.undo && !history.labels.held} onClick={history.undo} data-tel="undo" />
-        <Button variant="icon" icon="redo" title={history.labels.redo ? `Redo: ${history.labels.redo}` : 'Redo'} aria-label="Redo" disabled={!history.labels.redo} onClick={history.redo} data-tel="redo" />
+        <DemoOff>
+          <Button variant="icon" icon="undo" title={undoTip(history.labels)} aria-label="Undo" disabled={!history.labels.undo && !history.labels.held} onClick={history.undo} data-tel="undo" />
+        </DemoOff>
+        <DemoOff>
+          <Button variant="icon" icon="redo" title={history.labels.redo ? `Redo: ${history.labels.redo}` : 'Redo'} aria-label="Redo" disabled={!history.labels.redo} onClick={history.redo} data-tel="redo" />
+        </DemoOff>
         <Button variant="icon" icon="bug" title="Report a problem" aria-label="Report a problem" aria-haspopup="dialog" aria-expanded={problemOpen} onClick={() => {
             setThemeOpen(false)
             setSettingsOpen(false)
