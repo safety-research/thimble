@@ -623,6 +623,26 @@ async def test_a_long_answer_reaches_the_checks_page_as_the_reader_made_it(ws, i
     assert state["answers"][0][0] == {"ref": "board.jsonl#L1", "n": 1, "text": TRICKY}, "the answer is kept as read"
 
 
+def test_a_reader_answer_goes_to_the_checks_page_as_the_kernel_wrote_it():
+    """Bug hunt D15: the server no longer reads each 3 MB answer and writes it again for the checks' page."""
+    raw = views.RawJSON('{"rows":[{"ref":"board.jsonl#L2","x":null}],"note":"\u2603"}')
+    line = views._shot_line({"id": "f1", "data": raw})
+    assert json.loads(line) == {"id": "f1", "data": {"rows": [{"ref": "board.jsonl#L2", "x": None}], "note": "\u2603"}}
+    assert '"data":' + raw.text in line
+    assert views._shot_line({"id": "m2", "marks": {}}) == json.dumps({"id": "m2", "marks": {}})
+
+
+def test_the_refs_an_answer_hands_the_page_are_those_among_its_first_values(monkeypatch):
+    answer = {"rows": [{"ref": "a.jsonl#L1", "n": 1, "ok": True}, {"ref": "a.jsonl#L2", "n": None}],
+              "more": ["b.jsonl#L7", 2.5, "not a ref"]}
+    strings: list[str] = []
+    views._strings(answer, strings)
+    assert views._answer_refs(views.RawJSON(json.dumps(answer))) == ({s for s in strings if views.is_record(s)}, answer)
+    assert views._answer_refs(answer)[0] == {"a.jsonl#L1", "a.jsonl#L2", "b.jsonl#L7"}
+    monkeypatch.setattr(views, "FETCHED_SCAN_MAX", 4)  # a ref, 1, True, a ref: the third ref is past the scan
+    assert views._answer_refs(answer)[0] == {"a.jsonl#L1", "a.jsonl#L2"}
+
+
 # what Playwright's own error says to run, which never reaches a model
 INSTALL_WORDS = re.compile(r"playwright install|npx|download new browsers|Executable doesn't exist|install\.sh", re.I)
 

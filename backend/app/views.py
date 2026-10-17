@@ -3685,18 +3685,19 @@ async def shoot_states(c: str, slug: str, states: list[dict[str, Any]], *, width
         if kind == "fetch":
             if isinstance(msg.get("query"), dict) and KIT_QUERY in msg["query"]:  # the kit's own fetch, off the loop
                 return {"data": (await asyncio.to_thread(kit_answer, c, msg["query"]))[1]}
+            # the kernel's JSON text goes to the page as it is, as the records route sends it to the browser
             try:
                 if prepared is not None:
-                    data = await _call(c, {**prepared, "labels": _wire(ctxs[i])}, "records", msg.get("query"))
+                    data = await _call(c, {**prepared, "labels": _wire(ctxs[i])}, "records", msg.get("query"), raw=True)
                 else:
-                    data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i])
+                    data = await reader_call(c, slug, "records", msg.get("query"), labels=ctxs[i], raw=True)
             except ReaderError as e:
                 return {"error": e.message}
-            strings: list[str] = []
-            _strings(data, strings)
-            fetched[i].update(s for s in strings[:FETCHED_SCAN_MAX] if is_record(s))
-            if len(kept[i]) < answers:
-                kept[i].append(data)
+            keep = len(kept[i]) < answers
+            got, value = await asyncio.to_thread(_answer_refs, data)
+            fetched[i].update(got)
+            if keep:
+                kept[i].append(value)
             return {"data": data}
         if kind == "marks":
             refs_in = [str(r) for r in msg.get("refs") or []][:5000]
@@ -3783,7 +3784,7 @@ async def _shoot_in(work: Path, doc: str, states: list[dict[str, Any]], answer: 
 
     async def reply(obj: dict[str, Any]) -> None:
         assert proc.stdin is not None
-        proc.stdin.write((json.dumps(obj, ensure_ascii=False, default=str) + "\n").encode("utf-8"))
+        proc.stdin.write((_shot_line(obj) + "\n").encode("utf-8"))
         await proc.stdin.drain()
 
     def state_of(msg: dict[str, Any]) -> int:
@@ -3878,6 +3879,38 @@ def _state_labels(ctx: dict[str, Any]) -> dict[str, Any]:
               "values": [{"name": v.get("name"), "colour": v.get("colour"), "highlight": True} for v in k.get("values") or []],
               "count": None} for k in st["labels"]]
     return {"on": st["labels"], "filter": st["filter"], "all": every, "palette": [*LABEL_COLOURS[1:], LABEL_COLOURS[0]]}
+
+
+def _shot_line(obj: dict[str, Any]) -> str:
+    """One answer to view_shot.mjs as a line of JSON, a RawJSON value (a reader's answer as the kernel wrote it) put in
+    as its text, unread."""
+    raw = {k: v for k, v in obj.items() if isinstance(v, RawJSON)}
+    if not raw:
+        return json.dumps(obj, ensure_ascii=False, default=str)
+    rest = [json.dumps({k: v}, ensure_ascii=False, default=str)[1:-1] for k, v in obj.items() if k not in raw]
+    return "{" + ",".join([*rest, *(f"{json.dumps(k)}:{v.text}" for k, v in raw.items())]) + "}"
+
+
+def _answer_refs(data: Any) -> tuple[set[str], Any]:
+    """(the record refs among the first FETCHED_SCAN_MAX values of a reader's answer, in the order _strings lists
+    them, the answer read), the answer as the kernel's JSON text (RawJSON) or read already. Blocking."""
+    value = json.loads(data.text) if isinstance(data, RawJSON) else data
+    out: set[str] = set()
+    n = 0
+    stack = [value]
+    while stack and n < FETCHED_SCAN_MAX:
+        x = stack.pop()
+        if isinstance(x, str):
+            n += 1
+            if is_record(x):
+                out.add(x)
+        elif isinstance(x, dict):
+            stack.extend(reversed(list(x.values())))
+        elif isinstance(x, list):
+            stack.extend(reversed(x))
+        elif x is not None:
+            n += 1
+    return out, value
 
 
 def _strings(v: Any, out: list[str]) -> None:
