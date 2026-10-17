@@ -2062,9 +2062,9 @@ export interface Attached {
   session: string
   cwd: string
   since: string
-  /** the model the session's replies came from, as the mirror last read it */
+  /** the model the session's requests and replies ran on, as the mirror last read it (from the first prompt on) */
   model?: string
-  /** the effort they ran at, as the mirror last read it */
+  /** the effort they ran at, as the mirror last read it; absent until the first request */
   effort?: string
   /** what the composer's chip chose for main's next launch, while this session runs */
   effort_choice?: MainEffort
