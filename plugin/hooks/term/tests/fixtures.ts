@@ -638,7 +638,8 @@ export function world(on: On, opts: { mode?: string; ws?: string | null; active?
         // no coverage summary yet (home and the summary line leave Coverage out); fixtures-panel.ts answers with rows
         return out({ summary: null, folder: '', rows: [], counting: false })
       case 'answer-comments':
-        return out({ comments: w.comments, running: w.running })
+        // with --session, only the comments on that conversation's answers (a comment's `sid`; one with none is on any)
+        return out({ comments: w.comments.filter(c => !opt('--session') || !c.sid || c.sid === opt('--session')), running: w.running })
       default:
         return out({ error: `no surface ${what}` }, 1)
     }
