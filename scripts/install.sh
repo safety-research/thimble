@@ -302,7 +302,9 @@ check_byo() {  # --python, before anything changes: the environment it belongs t
   [ "$(cd / && "$byo_prefix/bin/python" -I -c 'import sys; print(sys.prefix)' 2>/dev/null)" = "$byo_prefix" ] \
     || die "--python $byo: its environment $byo_prefix has no bin/python of its own; give the python of a virtual environment (<venv>/bin/python)"
   if [ -e "$dir/backend/.venv" ] && [ ! -L "$dir/backend/.venv" ] && [ ! "$dir/backend/.venv" -ef "$byo_prefix" ]; then
-    die "$dir/backend/.venv is the environment an earlier install made; to use $byo_prefix in its place, delete it (rm -rf $dir/backend/.venv) and run this again"
+    venv_ours "$dir/backend/.venv" \
+      || die "$dir/backend/.venv is an environment install.sh did not make, so it leaves it as it is; to use $byo_prefix in its place, delete it (rm -rf $dir/backend/.venv) and run this again"
+    say "backend/.venv is the environment install.sh made: the link to $byo_prefix replaces it"
   fi
   if ! lacking="$(cd / && "$byo_prefix/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" 2>&1)"; then
     die "the environment $byo_prefix lacks what thimble's backend needs. Install these into it, then run this again:
@@ -355,6 +357,7 @@ check_prerequisites() {  # uv or python >= pyproject's requires-python, or --pyt
     found_py_text="$py_v at $(tilde "$py"): pip installs thimble's pinned Python packages from the package index it is set up with$intel"
   fi
   say "python: $found_py_text"
+  venv_plan
   has_dist=0; [ -f "$src/frontend/dist/index.html" ] && has_dist=1
   stale=""; if [ "$has_dist" = 1 ] && [ "$checkout" = 1 ] && [ "$in_place" = 1 ]; then stale="$(dist_stale "$src/frontend")"; fi
   node_found="$(command -v node >/dev/null 2>&1 && node -v || echo none)"
@@ -451,20 +454,77 @@ git_baseline() {  # a release install as a git repository whose last commit is t
   fi
 }
 
+# backend/.venv that install.sh made holds VENV_MADE, and VENV_PENDING while install.sh installs into it, so a run that
+# failed leaves it. A re-run makes such an environment again when it is broken (venv_problem): left unfinished, a Python
+# that does not run or is too old, or an Intel one on Apple silicon. An environment install.sh did not make (a manual
+# install's, one made by hand in a checkout) is never removed: a broken one stops the install with how to fix it.
+VENV_MADE=.thimble-made VENV_PENDING=.thimble-installing
+venv_why="" venv_redo=0 venv_fresh=0
+
+venv_ours() { [ -d "$1" ] && [ ! -L "$1" ] && [ -f "$1/$VENV_MADE" ]; }  # venv_ours VENV: install.sh made it
+
+venv_problem() {  # venv_problem VENV: why the environment there is broken, or nothing
+  local v="$1"
+  if [ -f "$v/$VENV_PENDING" ]; then echo "an earlier run did not finish installing into it"
+  elif ! { [ -x "$v/bin/python" ] && (cd / && "$v/bin/python" -I -c '') 2>/dev/null; }; then echo "its Python does not run"
+  elif ! py_ok "$v/bin/python"; then echo "its Python is older than the $req_py thimble needs"
+  elif [ "$apple_silicon" = 1 ] && ! py_native "$v/bin/python"; then echo "its Python is an Intel build, which needs Xcode to build packages"
+  fi
+}
+
+venv_plan() {  # before anything changes: venv_why, why backend/.venv is broken, when install.sh made it; one it did not
+  # make that is broken stops the install
+  local venv="$dir/backend/.venv" stop
+  venv_why=""
+  [ -z "$byo" ] && [ -d "$venv" ] && [ ! -L "$venv" ] || return 0
+  venv_why="$(venv_problem "$venv")"
+  [ -n "$venv_why" ] || return 0
+  say "backend/.venv is broken: $venv_why"
+  venv_ours "$venv" && return 0
+  stop="$(tilde "$venv") is broken ($venv_why), and install.sh did not make it, so it leaves it as it is. Move it away or delete it, then run this again"
+  venv_why=""
+  if [ "$dry" = 1 ]; then show "install.sh stops here: $stop"; else die "$stop"; fi
+}
+
+venv_again() {  # a broken environment install.sh made (venv_plan) goes, so the install step makes it again
+  [ -n "$venv_why" ] || return 0
+  run rm -rf "$dir/backend/.venv"
+  venv_redo=1
+  ok "$(tilde "$dir/backend/.venv") was broken ($venv_why), so it is made again"
+}
+
+venv_mark() {  # venv_mark made|pending|finished: backend/.venv as install.sh's (made, when this run made it), as being
+  # installed into (pending, only one install.sh made) or no longer (finished)
+  local venv="$dir/backend/.venv"
+  [ "$dry" = 0 ] && [ -d "$venv" ] && [ ! -L "$venv" ] || return 0
+  case "$1" in
+    made) if [ "$venv_fresh" = 1 ]; then : > "$venv/$VENV_MADE"; : > "$venv/$VENV_PENDING"; fi;;
+    pending) if venv_ours "$venv"; then : > "$venv/$VENV_PENDING"; fi;;
+    finished) rm -f "$venv/$VENV_PENDING";;
+  esac
+}
+
 make_venv() {  # --python's environment linked; a linked one kept and checked; a checkout's from uv.lock (uv sync, else
   # venv + pip from pyproject); a release's from backend/requirements.txt (release_venv)
   local venv="$dir/backend/.venv" lacking where pyreq=()
   where="$(tilde "$venv")"
   extra=(); if [ "$dev" = 1 ]; then extra=(--extra dev); fi
-  # uv sync makes backend/.venv with the Python it finds, unless a native one is asked for (mac_arch)
-  if [ "$apple_silicon" = 1 ] && [ ! -e "$venv" ]; then pyreq=(--python "$uv_python"); fi
   busy "Installing thimble's Python packages"
+  if [ -z "$byo" ] && [ ! -L "$venv" ]; then
+    venv_again
+    venv_fresh=0; if [ ! -e "$venv" ] || [ "$venv_redo" = 1 ]; then venv_fresh=1; fi
+    venv_mark pending
+  fi
+  # uv sync makes backend/.venv with the Python it finds, unless a native one is asked for (mac_arch)
+  if [ "$apple_silicon" = 1 ] && [ "$venv_fresh" = 1 ]; then pyreq=(--python "$uv_python"); fi
   if [ -n "$byo" ] && [ "$venv" -ef "$byo_prefix" ]; then
     say "backend/.venv is $byo_prefix already; used as it is"
     same "Python packages: your environment $(tilde "$byo_prefix"), used as it is"
   elif [ -n "$byo" ]; then
+    local was=""
+    if [ -d "$venv" ] && [ ! -L "$venv" ]; then run rm -rf "$venv"; was=", in place of the one install.sh made"; fi
     run ln -sfn "$byo_prefix" "$venv"
-    ok "Python packages: your environment $(tilde "$byo_prefix"), linked as $where; nothing installed into it"
+    ok "Python packages: your environment $(tilde "$byo_prefix"), linked as $where$was; nothing installed into it"
   elif [ -L "$venv" ]; then
     say "backend/.venv → $(readlink "$venv"): an environment of your own (install.sh --python), used as it is"
     if [ "$dry" = 0 ] && ! lacking="$(cd / && "$venv/bin/python" -I -B "$src/backend/app/env_check.py" "$src/backend/pyproject.toml" 2>&1)"; then
@@ -475,10 +535,12 @@ make_venv() {  # --python's environment linked; a linked one kept and checked; a
     fi
   elif [ "$checkout" = 0 ]; then
     release_venv
+    venv_mark finished
   elif [ "$have_uv" = 1 ] && [ -f "$src/backend/uv.lock" ]; then
     run_in "$dir/backend" uv sync --frozen --no-dev --no-install-project ${extra[@]+"${extra[@]}"} \
       ${pyreq[@]+"${pyreq[@]}"} ${uv_nobuild[@]+"${uv_nobuild[@]}"} \
-      || { tail_out; die "uv sync could not install the backend's packages (above)$(wheels_only)"; }
+      || { venv_mark made; tail_out; die "uv sync could not install the backend's packages (above)$(wheels_only)"; }
+    venv_mark made; venv_mark finished
     # uv says "Checked N packages" (older: "Audited") when it changed nothing, and lists what it installed or removed
     if grep -qE '^(Checked|Audited) [0-9]+ package' "$tmp/out" && ! grep -qE '^ [-+~] |^(Installed|Uninstalled) [0-9]' "$tmp/out"; then
       same "Python packages up to date in $where (the versions backend/uv.lock pins)"
@@ -489,32 +551,37 @@ make_venv() {  # --python's environment linked; a linked one kept and checked; a
     [ "$require_pinned" = 0 ] || die "backend/uv.lock is missing, so nothing pins the backend's versions, and --require-pinned installs only pinned ones"
     run_in "$dir/backend" uv sync --no-dev --no-install-project ${extra[@]+"${extra[@]}"} \
       ${pyreq[@]+"${pyreq[@]}"} ${uv_nobuild[@]+"${uv_nobuild[@]}"} \
-      || { tail_out; die "uv sync could not install the backend's packages (above)$(wheels_only)"; }
+      || { venv_mark made; tail_out; die "uv sync could not install the backend's packages (above)$(wheels_only)"; }
+    venv_mark made; venv_mark finished
     ok "Python packages installed in $where (backend/uv.lock is missing, so at the newest versions allowed, not the tested ones)"
   else
     [ "$require_pinned" = 0 ] || die "without uv the backend's pinned versions (backend/uv.lock) can't be installed, and --require-pinned installs only pinned ones; install uv (https://docs.astral.sh/uv/getting-started/installation/)"
-    [ -x "$venv/bin/python" ] || run "$py" -I -m venv "$venv" || { tail_out; die "python -m venv failed (above)"; }
+    if [ "$venv_fresh" = 1 ]; then run "$py" -I -m venv "$venv" || { venv_mark made; tail_out; die "python -m venv failed (above)"; }; venv_mark made; fi
     say "pip from pyproject.toml (the minimum versions, not the pinned ones in uv.lock)"
     run "$venv/bin/python" -I -m pip install --quiet --upgrade pip || { tail_out; die "pip could not upgrade itself (above)"; }
     if [ "$dev" = 1 ]; then run "$venv/bin/python" -I -m pip install --quiet ${pip_nobuild[@]+"${pip_nobuild[@]}"} -e "$dir/backend[dev]" || { tail_out; die "pip could not install the backend's packages (above)$(wheels_only)"; }
     else run "$venv/bin/python" -I -m pip install --quiet ${pip_nobuild[@]+"${pip_nobuild[@]}"} -e "$dir/backend" || { tail_out; die "pip could not install the backend's packages (above)$(wheels_only)"; }; fi
+    venv_mark finished
     ok "Python packages installed in $where, at the lowest versions allowed (without uv, not the tested ones)"
   fi
 }
 
-new_venv() {  # new_venv VENV: a release's backend/.venv, made by uv, else by the venv module, with pip in it when pip installs
-  local venv="$1" clear=()
-  [ ! -e "$venv" ] || clear=(--clear)  # a venv whose python no longer runs
+new_venv() {  # new_venv VENV: a release's backend/.venv, made by uv, else by the venv module, with pip in it when pip
+  # installs; marked as install.sh's (venv_mark), also when the command that makes it fails halfway
+  local venv="$1" made=0
   if [ "$pytool" = pip ] && [ -n "$py" ]; then
-    run "$py" -I -m venv ${clear[@]+"${clear[@]}"} "$venv" || { tail_out; die "python -m venv failed (above)"; }
+    run "$py" -I -m venv "$venv" && made=1
   else
-    if ! run uv venv --quiet ${clear[@]+"${clear[@]}"} --python "$uv_python" "$venv"; then
-      tail_out
-      [ "$apple_silicon" = 0 ] || die "uv could not get a native arm64 Python $req_py (above). In a shell: uv python install $uv_python, then run this again"
-      die "uv venv failed (above)"
-    fi
-    [ "$pytool" = uv ] || run "$venv/bin/python" -I -m ensurepip --quiet || { tail_out; die "ensurepip failed (above)"; }
+    run uv venv --quiet --python "$uv_python" "$venv" && made=1
   fi
+  venv_mark made
+  if [ "$made" = 0 ]; then
+    tail_out
+    [ "$pytool" != pip ] || [ -z "$py" ] || die "python -m venv failed (above)"
+    [ "$apple_silicon" = 0 ] || die "uv could not get a native arm64 Python $req_py (above). In a shell: uv python install $uv_python, then run this again"
+    die "uv venv failed (above)"
+  fi
+  [ "$pytool" = uv ] || [ -n "$py" ] || run "$venv/bin/python" -I -m ensurepip --quiet || { tail_out; die "ensurepip failed (above)"; }
 }
 
 py_install() {  # py_install LOG ARGS…: uv pip or pip installs ARGS into backend/.venv; LOG keeps the output
@@ -562,12 +629,12 @@ release_venv() {  # the pinned packages of backend/requirements.txt (uv.lock's, 
   # pyproject.toml allows that it has (py_ranges), and the list of those that differ from the pins
   local venv="$dir/backend/.venv" req="$src/backend/requirements.txt" stamp="$dir/backend/.venv/.thimble-requirements.txt" args
   local where; where="$(tilde "$venv")"
-  if [ "$dev" = 0 ] && [ -f "$req" ] && cmp -s "$req" "$stamp" && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; then
+  if [ "$venv_redo" = 0 ] && [ "$dev" = 0 ] && [ -f "$req" ] && cmp -s "$req" "$stamp" && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; then
     say "backend/.venv holds the packages backend/requirements.txt pins, installed by an earlier run"
     same "Python packages up to date in $where"
     return 0
   fi
-  if ! { [ -x "$venv/bin/python" ] && (cd / && "$venv/bin/python" -I -c '') 2>/dev/null; }; then new_venv "$venv"
+  if [ "$venv_fresh" = 1 ]; then new_venv "$venv"
   elif [ "$pytool" = pip ] && ! (cd / && "$venv/bin/python" -I -c 'import pip') 2>/dev/null; then
     run "$venv/bin/python" -I -m ensurepip --quiet || { tail_out; die "ensurepip failed (above)"; }  # a venv an earlier install made with uv, which holds no pip
   fi
@@ -1279,6 +1346,7 @@ nothing_planned() {  # a re-run with nothing to do, as far as the plan can tell:
     if "${q}_pending" || { declare -F "${q}_unchanged" >/dev/null && ! "${q}_unchanged"; }; then return 1; fi
   done
   [ "$in_place" = 1 ] || { [ -f "$src/RELEASE.json" ] && cmp -s "$src/RELEASE.json" "$dir/RELEASE.json" && [ -d "$dir/.git" ]; } || return 1
+  [ -z "$venv_why" ] || return 1
   if [ -n "$byo" ]; then [ "$venv" -ef "$byo_prefix" ] || return 1
   elif [ -L "$venv" ]; then :
   elif [ "$checkout" = 0 ]; then
@@ -1311,6 +1379,7 @@ opening() {  # the one screen before the questions: what install.sh found, what 
   if [ "$in_place" = 1 ]; then row "thimble $version" "$(tilde "$dir")" "runs from here; nothing is copied"
   else row "thimble $version" "$(tilde "$dir")" "$(size_of "$src")"; fi
   if [ -n "$byo" ]; then row "Python packages" "your environment $(tilde "$byo_prefix")" "nothing installed into it"
+  elif [ -n "$venv_why" ]; then row "Python packages" "$(tilde "$venv")" "made again: $venv_why"
   elif [ -e "$venv" ]; then row "Python packages" "$(tilde "$venv")" "there already; updated if needed"
   else row "Python packages" "$(tilde "$venv")" "$PY_SIZE"; fi
   if [ "$node_ok" = 1 ]; then

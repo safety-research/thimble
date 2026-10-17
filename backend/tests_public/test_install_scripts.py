@@ -632,3 +632,65 @@ def test_under_rosetta_without_uv_a_native_python_is_used_and_without_one_instal
                     "is an Intel build, which would need Xcode to build thimble's packages). Install uv "
                     "(https://docs.astral.sh/uv/getting-started/installation/), which gets a native Python, then run "
                     "this again"), r.stderr
+
+
+# ----------------------------------------------------------------------------- a re-run after a failed install
+
+
+def test_a_re_run_makes_again_the_environment_a_failed_run_left(tmp_path):
+    """The feedback's re-run: the first run made backend/.venv and failed while it installed into it (a build that
+    failed). The next run finds the environment install.sh made unfinished, removes it and makes it again, and says so
+    on its opening screen and in one line; the environment it ends with holds no mark of an unfinished run."""
+    tree = fake_tree(tmp_path / "release")
+    (tree / "backend" / "requirements.txt").write_text("cryptography==50.0.1 --hash=sha256:00\n")
+    venv = tmp_path / "app" / "backend" / ".venv"
+    r = install(tree, tmp_path / "app", tmp_path, "--require-pinned", STUB_SYNC_RC="1",
+                STUB_SYNC_OUT="  × Failed to build `cryptography==50.0.1`", STUB_LOG=str(tmp_path / "uv.log"))
+    assert r.returncode == 1 and "Failed to build" in r.stdout, r.stdout + r.stderr
+    assert (venv / ".thimble-made").is_file() and (venv / ".thimble-installing").is_file(), "marked as unfinished"
+
+    r = install(tree, tmp_path / "app", tmp_path, STUB_LOG=str(tmp_path / "uv.log"))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "(made again: an earlier run did not finish installing into it)" in r.stdout, r.stdout
+    assert f"✓ {venv} was broken (an earlier run did not finish installing into it), so it is made again" in r.stdout
+    assert [c.split(" --python")[0] for c in (tmp_path / "uv.log").read_text().splitlines()
+            if c.startswith("uv venv")] == ["uv venv --quiet"] * 2, "made twice"
+    assert (venv / ".thimble-made").is_file() and not (venv / ".thimble-installing").exists()
+    r = install(tree, tmp_path / "app", tmp_path, STUB_LOG=str(tmp_path / "uv.log"))
+    assert r.returncode == 0 and "made again" not in r.stdout, "a finished environment stays"
+
+
+def test_on_apple_silicon_an_intel_environment_install_sh_made_is_made_again_with_a_native_python(tmp_path):
+    """An environment install.sh made earlier with an Intel Python (as under Rosetta before) is made again with a native
+    one, since packages without an Intel wheel would need Xcode to build."""
+    venv = tmp_path / "app" / "backend" / ".venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").write_text(f"#!/bin/sh\nexec {os.path.realpath(sys.executable)} -S \"$@\"\n")
+    (venv / "bin" / "python").chmod(0o755)
+    (venv / ".thimble-made").write_text("")
+    (tmp_path / "app" / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (tmp_path / "app" / "plugin" / ".claude-plugin" / "plugin.json").write_text("{}")
+    r = mac_install(tmp_path, mac_bin(tmp_path))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (f"✓ {venv} was broken (its Python is an Intel build, which needs Xcode to build packages), so it is made "
+            "again") in r.stdout, r.stdout
+    assert "uv venv --quiet --python cpython-3.12-macos-aarch64-none" in (tmp_path / "uv.log").read_text()
+
+
+def test_a_broken_environment_install_sh_did_not_make_is_never_removed(tmp_path):
+    """A checkout's backend/.venv made by hand whose Python no longer runs: install.sh stops before it changes
+    anything, says why and what to do, and leaves every file of it as it was."""
+    tree = fake_tree(tmp_path / "thimble", checkout=True)
+    (tree / "backend" / "uv.lock").write_text("version = 1\n")
+    venv = tree / "backend" / ".venv"
+    (venv / "bin").mkdir(parents=True)
+    (venv / "bin" / "python").write_text("#!/bin/sh\nexit 1\n")
+    (venv / "bin" / "python").chmod(0o755)
+    (venv / "mine.txt").write_text("keep\n")
+    env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", STUB_NODE="v22.13.0")
+    r = subprocess.run(["bash", str(tree / "scripts" / "install.sh"), "--deps-only", *ANSWERS], capture_output=True,
+                       text=True, env=env, stdin=subprocess.DEVNULL, timeout=60)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert (f"install.sh: {venv} is broken (its Python does not run), and install.sh did not make it, so it leaves it "
+            "as it is. Move it away or delete it, then run this again") in r.stderr, r.stderr
+    assert (venv / "mine.txt").read_text() == "keep\n" and (venv / "bin" / "python").read_text() == "#!/bin/sh\nexit 1\n"
