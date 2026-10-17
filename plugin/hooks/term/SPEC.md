@@ -575,6 +575,13 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   Feb 1`). An axis that names its own values (Vega-Lite's `axis.values`, as thimble.chart's weekly and monthly lines
   do) ticks at those, as the browser's does, every second or third where they do not all fit. Categories stand at the
   ends and the middle. A legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
+- A dots chart (thimble.chart("dots"), or dots along rows: x numbers or times, y the rows' names): a row per row of the
+  chart in the order its axis sorts them, its name at the content's edge as a bar's label, then its dots on one x axis
+  for all rows, a cell's glyph saying how many dots it holds (`●` the most or near it, `•` past a third, `·` fewer), in
+  the first hue or its group's, with the group key under the chart. The words a text layer on the same x and y writes
+  (the agent it names) stand a cell after their dot, else after the row's last dot. Under the rows the x axis as a line
+  chart's, its labels dim under `┬`. A cell's dots are one mark; the readout names its row, its x and how many
+  (`opus-emergent  16 PRs opened · 2 dots`). The first 30 rows, then `… N more`.
 - A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
   right-aligned in the card's column formats, as the browser's table writes them (`1,446`). Markdown tables in a reply take the same header.
 - A timeline: the axis across the content with its `●` marks in hue on a rule-gray line, its two end times dim under
@@ -593,7 +600,7 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - A diagram: boxes and edges in the rule gray, node text in the text color, edge labels dim; a note's number in a dim
   column and its text dim.
 - A note, a custom card, a code card and a card type's card: their words. A chart that is not a simple bar or line
-  chart (a bar chart with its values written on its bars is one): a table of its rows, in the order its axes put them
+  chart (a bar chart with its values written on its bars is one) or a dots chart: a table of its rows, in the order its axes put them
   where the chart sorts an axis (a heatmap's days in the order of its `sort`), else in its data's order.
 - A card that cannot be read: one red line named by its place (`× card 2 cannot be drawn: …`).
 - The card pane: the question is the panel's title and the subtitle reads the card's id (`card:<name>`), its kind, who

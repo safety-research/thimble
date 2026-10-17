@@ -87,7 +87,7 @@ Claude Code's panel chrome, no right-click menu.
   notice that it finished the thread by its first question, and so does the fork's prompt in ctrl+o; a tool's words draw
   their straight quotation marks curly, which Claude Code does not escape; thimble's tool results keep their card ids, which main
   cites. A bar card keeps the order its chart's label axis sorts, and a bar chart with its values written on its bars is a bar card too; a bar chart with a color field has one row per label, its series stacked in their hues and its key below, and timestamps as labels read as the browser's axis writes them (`May 24`). A table, a timeline, a diagram, an example and a label draw
-  directly; a simple bar or line chart draws as text; any other chart as a table of its rows; a note, a custom card, a
+  directly; a simple bar or line chart draws as text, a dots chart as its rows of dots with a text layer's words beside them; any other chart as a table of its rows; a note, a custom card, a
   code card and a card type's card as their words.
 - **Rows under main's replies.** `↳ thread · "<the turn's question>" · answered` when a side thread's turn ends while the
   panel shows something else (`failed` in red, `new` in green until it is read; a stop, the analyst's or the end of the

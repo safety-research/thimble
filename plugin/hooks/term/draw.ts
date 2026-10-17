@@ -14,6 +14,9 @@ export type Seg = { s: string; fg?: string; bg?: string; b?: boolean; d?: boolea
 export type Line = Seg[]
 
 export type BarRow = { label: string; value: number; group: string }
+/** A row of a dots card (cell.ts dotsCard): its name, its dots (each its x, a number or a time as written, and the
+ *  value of the chart's color field it is colored by, '' for none), and the words a text layer writes beside them. */
+export type DotRow = { name: string; dots: { x: string | number; group: string }[]; notes: { x: string | number; text: string }[] }
 export type Cell = string | number | boolean | null
 export type CardParam = { name: string; value: string | number; default: string | number; choices: (string | number)[] }
 export type DiagramNode = { id: string; label: string; ref?: string; detail?: string }
@@ -42,6 +45,8 @@ export type CardData = {
   total?: number
   columns?: string[]
   series?: { name: string; points: [string | number, number][] }[]
+  /** a dots card's rows, in the order its rows' axis sorts them */
+  strips?: DotRow[]
   /** a line card's x axis's own ticks, as its x values are written (Vega-Lite's `axis.values`: thimble.chart's at each
    *  time of weekly or monthly data), which the axis names in place of round ones */
   xTicks?: (string | number)[]
@@ -710,6 +715,146 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10):
   lines.push([{ s: ' '.repeat(yW + 1) + xl, fg: COLORS.dim }])
   if (series.length > 1) lines.push(...flow(series.map((s, si) => [{ s: '● ', fg: seriesColour(si) }, { s: s.name }]), cols))
   return { lines, items, hit: (x, y) => nearest(x, y) }
+}
+
+/** How many dots one cell holds, as its glyph: `●` where it holds the most any cell of the card holds or near it (more
+ *  than two thirds of it), `•` past a third, `·` for fewer; every dot `●` where no cell holds two. */
+export function dotGlyph(n: number, most: number): string {
+  if (most <= 1 || n * 3 > most * 2) return '●'
+  return n * 3 > most ? '•' : '·'
+}
+
+/**
+ * A dots card (cell.ts dotsCard): a row per row of the chart, its name at the content's edge as a bar's is, then its
+ * dots on one x axis for all rows, a cell's glyph saying how many dots it holds (dotGlyph), in the first hue or its
+ * group's; the words a text layer writes stand a cell after their dot, or after the row's last dot where something
+ * stands there. Under the rows, the x axis's ticks, as a line chart names them, and the groups' legend. The first
+ * MAX_BARS rows, then `… N more`. A cell's dots are one mark: the readout names its row, its x and how many.
+ */
+function dotsLayout(card: CardData, cols: number, hover: number): Layout {
+  const all = (card.strips ?? []).filter(r => r.dots.length || r.notes.length)
+  const strips = all.slice(0, MAX_BARS)
+  const xs = strips.flatMap(r => [...r.dots.map(d => d.x), ...r.notes.map(n => n.x)])
+  const kind: 'num' | 'time' = xs.every(x => typeof x === 'number' || (x.trim() !== '' && !Number.isNaN(Number(x)))) ? 'num' : 'time'
+  const xOf = (x: string | number) => (kind === 'num' ? Number(x) : wallClock(String(x)))
+  const vals = xs.map(xOf).filter(Number.isFinite)
+  if (!vals.length) return { lines: [[{ s: 'no dots to draw', fg: COLORS.dim }]], items: [], hit: () => -1 }
+  const x0 = Math.min(...vals)
+  const x1 = Math.max(...vals)
+  // an x as the readout names it: a time as a bar's label reads (barNames), a number as the mod writes one
+  const xName = (x: string | number) => (kind === 'time' ? (barNames([String(x)])[0] ?? String(x)) : amount(Number(x)))
+  const names = barNames(strips.map(r => r.name))
+  const notes = strips.map(r => r.notes.map(n => n.text))
+  // the room the words beside the dots may take past the axis's last cell, and the names' column, as a bar card's
+  const noteW = Math.min(Math.max(0, ...notes.flat().map(t => width(t))), Math.floor(cols * 0.3))
+  const after = noteW ? noteW + 1 : 0
+  const labelW = Math.min(Math.max(4, ...names.map(n => width(n))), Math.max(8, Math.floor((cols - after) * 0.35)))
+  const pw = Math.max(10, cols - labelW - 2 - after)
+  const area = pw + after
+  const cellOf = (v: number) => (x1 === x0 ? Math.floor(pw / 2) : Math.round(((v - x0) / (x1 - x0)) * (pw - 1)))
+  const groups = [...new Set(strips.flatMap(r => r.dots.map(d => d.group)).filter(Boolean))]
+  const hue = (g: string) => classColour(card, g) ?? (groups.length ? COLORS.series[Math.max(0, groups.indexOf(g)) % COLORS.series.length]! : one())
+  // each row's cells that hold dots, left to right, with their dots: the marks the pointer picks, row by row
+  type Mark = { row: number; cell: number; dots: { x: string | number; group: string }[] }
+  const marks: Mark[] = []
+  strips.forEach((r, row) => {
+    const by = new Map<number, Mark['dots']>()
+    for (const d of r.dots) {
+      const v = xOf(d.x)
+      if (!Number.isFinite(v)) continue
+      const c = cellOf(v)
+      by.set(c, [...(by.get(c) ?? []), d])
+    }
+    for (const cell of [...by.keys()].sort((a, b) => a - b)) marks.push({ row, cell, dots: by.get(cell)! })
+  })
+  const most = Math.max(1, ...marks.map(m => m.dots.length))
+  const items: Item[] = marks.map(m => {
+    const v = m.dots.map(d => xOf(d.x))
+    const lo = m.dots[v.indexOf(Math.min(...v))]!.x
+    const hi = m.dots[v.indexOf(Math.max(...v))]!.x
+    const at = xName(lo) === xName(hi) ? xName(lo) : `${xName(lo)} to ${xName(hi)}`
+    const open = `card:${card.id}#${card.x}/${strips[m.row]!.name}`
+    return { label: names[m.row]!, value: `${at} ${card.x}${m.dots.length > 1 ? ` · ${count(m.dots.length)} dots` : ''}`, cite: cite(at, open), open, kind: 'mark', text: at }
+  })
+  const hot = hover >= 0 ? marks[hover] : undefined
+  const lines: Line[] = []
+  const owner: number[] = []
+  strips.forEach((r, row) => {
+    // the row's cells past its name: a dot's glyph, or a cell of the words beside them (null where nothing stands)
+    const cells: (Seg | null)[] = new Array<Seg | null>(area).fill(null)
+    const used = new Array<boolean>(area).fill(false)
+    for (const m of marks) {
+      if (m.row !== row) continue
+      const tally = new Map<string, number>()
+      for (const d of m.dots) tally.set(d.group, (tally.get(d.group) ?? 0) + 1)
+      const group = [...tally].sort((a, b) => b[1] - a[1])[0]![0]
+      cells[m.cell] = { s: dotGlyph(m.dots.length, most), fg: hot === m ? COLORS.text : hue(group), ...(hot === m ? { inv: true } : {}) }
+      used[m.cell] = true
+    }
+    // the words beside their dot, a blank cell between; else after the row's last word or dot
+    r.notes.forEach(n => {
+      const v = xOf(n.x)
+      const free = (p: number, w: number) => p + w <= area && used.slice(Math.max(0, p - 1), p + w).every(u => !u)
+      const text = cut(n.text, Math.max(1, Math.min(width(n.text), noteW)))
+      const w = width(text)
+      let p = Number.isFinite(v) ? cellOf(v) + 2 : area
+      while (p + w <= area && !free(p, w)) p++
+      if (p + w > area) {
+        const end = used.lastIndexOf(true) + 2
+        if (end >= area) return
+        p = end
+      }
+      const shown = cut(text, area - p)
+      cells[p] = { s: shown }
+      for (let k = p; k < Math.min(area, p + width(shown)); k++) used[k] = true
+    })
+    const segs: Seg[] = []
+    for (let k = 0; k < area; k++) {
+      const c = cells[k]
+      if (c) {
+        segs.push(c)
+        k += width(c.s) - 1
+      } else if (segs.length && segs.at(-1)!.fg === undefined && !segs.at(-1)!.inv && /^ +$/.test(segs.at(-1)!.s)) segs.at(-1)!.s += ' '
+      else segs.push({ s: ' ' })
+    }
+    while (segs.length && /^ +$/.test(segs.at(-1)!.s) && segs.at(-1)!.fg === undefined) segs.pop()
+    const [first, second] = fold(names[row]!, labelW)
+    const on = hot?.row === row
+    lines.push([{ s: first!, inv: on }, { s: ' '.repeat(Math.max(0, labelW - width(first!)) + 2) }, ...segs])
+    owner.push(row)
+    if (second) {
+      lines.push([{ s: second, inv: on }])
+      owner.push(row)
+    }
+  })
+  if (all.length > strips.length) lines.push([{ s: `… ${all.length - strips.length} more`, fg: COLORS.dim }])
+  // the x axis under the dots, its labels dim, each under a ┬, as a line chart's
+  const ticks = x1 > x0 ? axisTicks(kind, x0, x1, pw, cellOf, kind === 'num' && vals.every(v => Number.isInteger(v))) : { at: [], labels: [], cells: [], x: [] }
+  const single = x1 === x0 ? placeLabels([cellOf(x0)], [xName(xs[0]!)], pw) : null
+  const rule = new Array<string>(pw).fill('─')
+  for (const c of ticks.cells) rule[c] = '┬'
+  if (single) rule[cellOf(x0)] = '┬'
+  const pad0 = ' '.repeat(labelW + 2)
+  lines.push([{ s: pad0 }, { s: rule.join(''), fg: COLORS.rule }])
+  let xl = ''
+  ticks.labels.forEach((l, i) => (xl += ' '.repeat(Math.max(0, ticks.x[i]! - width(xl))) + l))
+  if (single) xl = ' '.repeat(single[0]!) + xName(xs[0]!)
+  lines.push([{ s: pad0 + xl, fg: COLORS.dim }])
+  // the legend on its own row under the chart; none when a label it read names the groups on its label row
+  const named = new Set(cardLabels(card).flatMap(l => l.values))
+  if (groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map(g => [{ s: '● ', fg: hue(g) }, { s: g }]), cols))
+  // a row's dots: the mark nearest the pointer's cell on its row
+  const hit = (x: number, y: number): number => {
+    const row = owner[y]
+    if (row === undefined) return -1
+    const cx = x - labelW - 2
+    let best = -1
+    marks.forEach((m, i) => {
+      if (m.row === row && (best < 0 || Math.abs(m.cell - cx) < Math.abs(marks[best]!.cell - cx))) best = i
+    })
+    return best
+  }
+  return { lines, items, hit }
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -2184,6 +2329,8 @@ export function cardLayout(card: CardData, cols: number, hover: number, plotRows
       return barLayout(card, cols, hover)
     case 'line':
       return lineLayout(card, cols, hover, plotRows)
+    case 'dots':
+      return dotsLayout(card, cols, hover)
     case 'timeline':
       return timelineLayout(card, cols, hover)
     case 'table':
