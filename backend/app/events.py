@@ -19,8 +19,9 @@ decision (0.9.0, S11). Its entry is `terminal`, which the browser shows as waiti
 ends with its call's result (calls_done), its agent's end (agent_moved), or once Claude Code's record of main's session
 says no dialog is open after it was seen open (terminal_dialogs).
 
-Main's terminal shows each event as one line (terminal_line): the analyst's words after SAID, with the thread or button
-they belong to, else a short line saying what happened. Claude Code shows a woken turn only as the hook's fixed summary,
+Each event has a line for main's terminal (terminal_line): the analyst's words after SAID, with the thread or button
+they belong to, else a short line saying what happened; the terminal prints only the analyst's words to main
+(event_files.said), as the chat's own rows say the rest. Claude Code shows a woken turn only as the hook's fixed summary,
 so the watcher's acknowledgment keeps the event's line (_lines) for the UserPromptSubmit hook, which Claude Code runs
 as the event's turn begins, to print (held_route); the line of something the analyst did that sends main no event, such
 as a follow-up to the orientation, waits there too (show). With every hook off (the Monitor route) nothing can print
@@ -441,6 +442,7 @@ def _drain_files(c: str) -> int:
     main = _main_sid(c) or files.main_session(ws)
     for rec in got:
         note = {"rendered": str(rec.get("text") or ""), "terminal": str(rec.get("said") or rec.get("line") or ""),
+                "said": str(rec.get("said") or ""),
                 "meta": {"kind": str(rec.get("kind") or ""), "event": str(rec.get("id") or "")},
                 **{k: rec[k] for k in ("riders", "told_parts", "analyst") if rec.get(k)}}
         _pending.setdefault((c, main or ""), deque()).append(note)
@@ -633,8 +635,10 @@ def _publish(c: str, note: dict[str, Any]) -> int:
         return 0
     if not mine or any(sub.delivery == cc_plugin.HOOK for sub in mine):
         _notice(c, to, note)
-    if held(c):
-        riders = pop_held(c)
+    riders = pop_held(c) if held(c) else []
+    # the line main's terminal prints for it: the analyst's own words alone (event_files.said)
+    note = {**note, "said": event_files.said([note, *riders])}
+    if riders:
         note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}",
                 "terminal": _joined([note, *riders]), "riders": riders}
     _pending.setdefault((c, to), deque()).append(note)
@@ -1009,8 +1013,9 @@ async def ack_route(body: AckBody) -> dict[str, Any]:
     if taken is None:
         raise HTTPException(404, "no such event is in flight")
     key = (taken[0], body.session or "")
-    if body.terminal and taken[2].get("terminal"):
-        _lines.setdefault(key, []).append((body.id, str(taken[2]["terminal"])))
+    said = str(taken[2]["said"]) if "said" in taken[2] else event_files.said([taken[2], *(taken[2].get("riders") or [])])
+    if body.terminal and said:
+        _lines.setdefault(key, []).append((body.id, said))
     elif key in _notices:  # the Monitor route: no held hook prints its line, so the statusline lets it go now
         _notices[key] = [n for n in _notices[key] if n[0] != body.id]
     return {"acknowledged": body.id}
@@ -1038,7 +1043,7 @@ async def held_route(body: HeldBody) -> dict[str, Any]:
     shown = {event_id for event_id, _ in written if event_id}
     if shown and key in _notices:
         _notices[key] = [n for n in _notices[key] if n[0] not in shown]
-    lines = [*(line for _, line in written), _joined(riders)]
+    lines = [*(line for _, line in written), event_files.said(riders)]
     return {"text": meanwhile(riders), "terminal": "\n".join(dict.fromkeys(x for x in lines if x))}
 
 

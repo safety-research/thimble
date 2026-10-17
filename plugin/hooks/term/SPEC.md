@@ -535,12 +535,10 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   several reports, a line each in their order, only that report's line), so `↳ The view builder finished; …` shows
   once, as the browser shows neither.
 - Claude Code draws a hook's `systemMessage` as its own row under the hook's name (`⎿ UserPromptSubmit says: …`), which
-  no render hook reaches. thimble's held hook prints there the lines of the events that reached main, so in terminal
-  mode it shortens or leaves out those the chat's own rows already say: a thread's question (its fork's row and its `↳`
-  row) is one short line, `new thread: "Make a small table…"`, since its wake opens a `● thimble` row (the hook's
-  rewakeSummary) that no hook removes and that would otherwise stand empty; a writer's end (its hand-back's row) none.
-  The other events' lines (a label run finished, a view built, the orientation's coverage line) still show in that
-  row.
+  no render hook reaches. thimble's held hook prints there only the analyst's own words from the browser (`› which
+  pages were deleted?`), which nothing else in the chat says. It prints no line for thimble's own events (bug hunt 9,
+  friction 5): a thread's question is in its fork's row and its `↳` row, and a writer's, a view build's, a label run's
+  or the orientation's end in main's reply or `↳` line and the thimble line.
 - After `claude` exits, the launcher (not thimble-term) prints `Resume with thimble --continue instead; it loads thimble's
   plugin.` under Claude Code's own `Resume this session with: claude --resume …`, which would resume the session without
   thimble; and
