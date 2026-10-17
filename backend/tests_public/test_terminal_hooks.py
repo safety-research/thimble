@@ -186,7 +186,7 @@ def test_with_plain_claude_a_side_thread_asked_after_the_press_wakes_idle_main_t
     assert ("POST", "/api/events/ack") in [(m, p) for m, p, _ in stand.seen]
 
 
-def _start_waker(env: dict) -> subprocess.Popen:
+def _start_waker(env: dict, source: str = "startup") -> subprocess.Popen:
     """SessionStart's waker as Claude Code runs it: hooks.json's asyncRewake command for the event, in a shell, with the
     hook's input on its stdin."""
     hooks = json.loads((BIN.parent / "hooks" / "hooks.json").read_text())["hooks"]["SessionStart"]
@@ -194,9 +194,58 @@ def _start_waker(env: dict) -> subprocess.Popen:
     proc = subprocess.Popen(["/bin/sh", "-c", command], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, env={**env, "CLAUDE_PLUGIN_ROOT": str(BIN.parent)},
                             cwd=str(config.corpus_dir(CORPUS)))
-    proc.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "SessionStart", "source": "startup"}))
+    proc.stdin.write(json.dumps({"session_id": MAIN, "hook_event_name": "SessionStart", "source": source}))
     proc.stdin.close()
     return proc
+
+
+def _wait(proc: subprocess.Popen, timeout: float) -> int | None:
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
+
+
+def test_h2_after_claude_c_the_waker_waits_for_the_server_a_press_starts_so_a_browser_question_wakes_idle_main(
+        tmp_path, ws):
+    """Bug hunt H2: after a quit stopped the server, `claude -c` continued the session. The wakers that SessionStart and
+    the first turn started found `transport: server` with no server up and left at once, and `/thimble browser`, a
+    local command, starts no hook's waker once its press started the server, so a question from the browser waited for
+    the analyst's next prompt. A waker of a session on the server's transport now waits for the server (the stopped
+    server's record, then none, then the one the press starts) and pulls from it; and once the session is local again
+    (activate.continue_main) it takes the session's events from the queue file."""
+    write_launch(ws, session=MAIN, transport="server")
+    env = env_for(tmp_path, ws, CLAUDE_CODE_ENTRYPOINT="cli")  # server.json names port 9, where nothing listens
+    record = Path(env["THIMBLE_HOME"], "server.json")
+    stand = _Stand([(200, {"id": "e1", "text": EVENT_TEXT})])
+    waker = _start_waker(env, source="resume")
+    try:
+        time.sleep(2.5)
+        assert waker.poll() is None, "it waits for a server that is not up yet"
+        record.unlink()
+        time.sleep(2.5)
+        assert waker.poll() is None, "and with no server.json"
+        record.write_text(json.dumps({"api": f"http://127.0.0.1:{stand.port}", "token": TOKEN}))  # the press
+        code = _wait(waker, 15)
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+        stand.close()
+    assert code == 2 and waker.stderr.read().strip() == EVENT_TEXT
+    assert [(m, p) for m, p, _ in stand.seen] == [("GET", "/api/events/pull"), ("POST", "/api/events/ack")]
+    record.unlink()
+    waker = _start_waker(env, source="resume")
+    try:
+        time.sleep(1.5)
+        assert waker.poll() is None
+        write_launch(ws, session=MAIN, transport="local")  # the session continued in this process (continue_main)
+        out = events.post(CORPUS, "main", {"text": "Did the label finish?"})
+        code = _wait(waker, 15)
+    finally:
+        if waker.poll() is None:
+            waker.kill()
+    err = waker.stderr.read()
+    assert code == 2 and f'event="{out["id"]}"' in err and "Did the label finish?" in err
 
 
 def test_session_start_s_waker_waits_for_the_marker_activation_writes_so_the_first_browser_question_wakes_idle_main(
