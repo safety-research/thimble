@@ -302,6 +302,8 @@ and never what a script got. In the citation panel's bar, a citation still check
     Backspace shortens it (`Backspace for the files` in a file's view). ←, →, the page keys, Home and End reach no
     element then, so no row names them. A letter the panel does not bind goes to the prompt; the panel then draws
     neither the relay nor its hotkeys until the prompt has the keys, and its row says `click the panel for its keys`.
+    Every key after it goes to the prompt too, however fast it comes, until the analyst gives the panel its keys back
+    (a click on it); a paste, several letters at once, goes to the prompt whole and is never a hotkey (bug hunt D8).
     The row names the list's keys only once a `ui.focus` says the ring rests there. A click on a list, on a row or on
     an empty part, hands the keys back to the pane, and so does a click on any other act of the panel's own (`checked
     ›`, a passage's `?`, a link): it never leaves the keys with the prompt (bug hunt B28). A list taller than its pane
