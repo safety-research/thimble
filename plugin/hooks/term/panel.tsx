@@ -54,7 +54,7 @@ import { NAV_EMPTY, backTarget, crumbSteps, fitPath, pathWidth, threadBehind, th
 import { COLORS, citeHighlight, paintLines } from './paint'
 import { PANEL_MARGIN, cardBlock, cardName, claimCard, claimSentence, drawReply, linkCheck, placeName, plainWhy, scrubIds } from './reply'
 import { PANEL, citePage, closePanel, deleteLabel, filterLabel, inPanelNow, loadCards, navBack, navGo, openHome, openList, openPanel, panelOfStep, queueCitations, readDoc, readFilePage, readSurface, rt, runLabel, saveLabel, showLabel, startThread, stepOf, stopLabel, subjectFile, surfaceValue, threadMessage, undeleteLabel } from './term'
-import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
+import { COLOR_NAMES, LABEL_WHEEL, MORE_ROWS, UNSURE_PAGE, agreementLine, classColors, hueOf, labelArgs, labelGone, labelRows, oneOf, regexNote, runReads, setLabelGone, unsureArgs, unsureKey, unsureOf, unsureShown, unsureWords } from './labels'
 import { featuresOf, openComments, openSection } from './band'
 import { openChecks } from './checksview'
 import { citeItems, citePlace, openCitations } from './citesview'
@@ -2794,9 +2794,9 @@ async function pendingEdits(cx: Ctx, l: LabelFull): Promise<LabelPatch> {
   return patch
 }
 
-/** Save the label panel's edits of label `id` with `extra` over them (`thimble act label`): true when saved, or when
- *  nothing waited. A kind picked is saved only with its definition. */
-async function saveLabelEdits(cx: Ctx, id: string, extra: LabelPatch = {}): Promise<boolean> {
+/** Save the label panel's edits of label `id` with `extra` over them (`thimble act label`): `saved` when it saved an
+ *  edit, `same` when no edit waited, false when it could not save. A kind picked is saved only with its definition. */
+async function saveLabelEdits(cx: Ctx, id: string, extra: LabelPatch = {}): Promise<'saved' | 'same' | false> {
   const got = await surfaceValue(cx, `label:${id}`)
   const l = got?.ok ? (labelOf(got.value) as LabelFull | null) : null
   if (!l) return false
@@ -2809,11 +2809,11 @@ async function saveLabelEdits(cx: Ctx, id: string, extra: LabelPatch = {}): Prom
   }
   if (!Object.keys(patch).length) {
     drafts.delete(`${id}:model`)
-    return true
+    return 'same'
   }
   const err = await saveLabel(cx, id, patch)
   if (!err) for (const k of ['body', 'glob', 'model', 'name']) drafts.delete(`${id}:${k}`)
-  return !err
+  return err ? false : 'saved'
 }
 
 /** A post of field.tsx: the words typed in a field (a draft), or a save (Enter). */
@@ -2880,6 +2880,11 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   // run stopped part way)
   const scopeN = typeof last?.matched_total === 'number' ? last.matched_total : typeof last?.total === 'number' && !l.trial ? last.total : typeof l.scope_total === 'number' ? l.scope_total : null
   const sample = l.trial && last?.limit ? last.limit : 30
+  // the units a run reads from: the scope's count, or for a label over whole files the files its glob matches; a
+  // scope that holds no more units than a sample runs whole, so its sample's button gives way (bug hunt B31: `run on a
+  // sample` of a label over 33 files asked main for "30 records")
+  const unitsN = scopeN ?? (l.unit === 'agent' && typeof l.scope_files === 'number' ? l.scope_files : null)
+  const sampleWhole = unitsN !== null && unitsN <= sample
   const unit = unitWords(l.unit)
   const opened = (part: string) => ui.open.includes(`${id}:${part}`)
   const flip = (part: string) => async () => {
@@ -2890,9 +2895,12 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   }
   // the edits typed and not saved, and the kind picked: what a save or a run stores first
   const save = (extra: LabelPatch = {}) => saveLabelEdits(cx, id, extra)
+  // a run says what it reads in main's prompt (runReads), and that the analyst changed the label only when this press
+  // saved an edit (bug hunt B31)
   const run = (limit: number) => async () => {
     if (running) return
-    if (await save()) await runLabel(cx, id, name, limit)
+    const saved = await save()
+    if (saved) await runLabel(cx, id, name, limit, { changed: saved === 'saved', reads: runReads(limit, unitsN, noun).prompt })
   }
   // delete: asked once in the panel (labelDeleting), then `thimble act label-delete` and the labels list
   const askDelete = async () => {
@@ -3252,8 +3260,8 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
     else
       rows.push(
         <Box key="lb-runs" flexDirection="row" columnGap={3} flexWrap="wrap">
-          {actionEl(els, 'lb-sample', 'run on a sample', () => void run(sample)())}
-          {actionEl(els, 'lb-all', 'run on all', () => void run(0)())}
+          {sampleWhole ? null : actionEl(els, 'lb-sample', runReads(sample, unitsN, noun).button, () => void run(sample)())}
+          {actionEl(els, 'lb-all', runReads(0, unitsN, noun).button, () => void run(0)())}
           {actionEl(els, 'lb-rename', 'rename', () => void askRename())}
           {actionEl(els, 'lb-delete', 'delete', () => void askDelete(), COLORS.problem)}
         </Box>,
@@ -3263,7 +3271,7 @@ async function drawLabel(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderEle
   said.split('\n').filter(Boolean).forEach((line, i) => rows.push(<Text key={`lb-said-${i}`} wrap="wrap" {...(/^[×!]/.test(line) ? { color: COLORS.problem } : { dimColor: true })}>{line}</Text>))
   const asking = labelDeleting === id && !running && !st.running
   if (asking) keys.push({ key: 'delete-yes', hotkey: 'y', onPress: () => void deleteIt() }, { key: 'delete-no', hotkey: 'n', onPress: () => void keepIt() })
-  else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
+  else if (!running && !st.running) keys.push({ key: 'sample', hotkey: 'r', onPress: () => void run(sampleWhole ? 0 : sample)() }, { key: 'rename', hotkey: 'n', onPress: () => void askRename() }, { key: 'delete', hotkey: 'k', onPress: () => void askDelete() })
   else if (running || follower) keys.push({ key: 'stop', hotkey: 's', onPress: stop })
   // f shows or hides the marks of a label over files in Files and the views (o opens the label in the browser, as in
   // every view)

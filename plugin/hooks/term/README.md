@@ -157,8 +157,8 @@ Claude Code's panel chrome, no right-click menu.
   gives); then `values:`, each value's `●`, its bar and its count bold, a click on a value showing its `color` (the
   eighteen label colors around the color wheel by the names show_label takes), `filter` and the values to edit
   (`thimble act label-show`, `label-filter`, `label`); the last run, then its actions underlined in the accent,
-  `delete` in red: `run on a sample` and `run on all`, which save what was typed first and run it (`thimble act
-  label-run`), and `stop` (s) while it runs (`thimble act label-stop`), `rename` (n, the name's field) and `delete`
+  `delete` in red: `run on 30 of 33 files` and `run on all 33 files` (what each reads), which save what was typed
+  first and run it (`thimble act label-run`; a code label's run its last one covers is `unchanged` and runs nothing), and `stop` (s) while it runs (`thimble act label-stop`), `rename` (n, the name's field) and `delete`
   (k), whose undo the labels list then offers (u, `thimble act label-undelete`); then `▸ examples` (the held-out
   agreement; each record under its value, `agree` or another value, `thimble act verdict`; `… N more` per value,
   `thimble state label --rows`; a JSON record's other fields on one dim row cut at whole pairs) and `▸ cards` (the

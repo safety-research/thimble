@@ -173,6 +173,35 @@ async def test_a_code_label_runs_through_thimble_run(term):
     assert concepts.PENDING_RUN not in concepts.read_concept(config.workspace_dir(CORPUS), lid)
 
 
+async def test_a_label_panel_run_of_an_unchanged_code_label_waits_for_no_run(term):
+    """Bug hunt B31: the label panel's `run on a sample` of a code label nobody changed asked main to run it, and
+    `thimble-run label` answered with the old rows. `label-run` now answers `unchanged` when the label's last run covers
+    the run asked for (the same code over the same files, all of them or the same sample), and no run waits for main; a
+    run its last run does not cover (a wider one, or new code) still waits for `thimble-run label`."""
+    from app import concepts
+
+    rule = "def label(u):\n    return 'long' if len(str(u)) > 300 else 'short'"
+    res = await call(term, "apply_label", scope="files", name="long", predicate={"kind": "code", "text": rule},
+                     paths=["agents/*.jsonl"], values=["long", "short"], limit=3)
+    lid = re.search(r"concept:([A-Za-z0-9_-]+)", text(res)).group(1)
+    assert run(term, "label", lid).returncode == 0
+    ws = config.workspace_dir(CORPUS)
+    # the same sample, then every file: the sample is covered, every file is not
+    same = await local.act(CORPUS, "label-run", {"label": lid, "limit": 3})
+    assert same == {"ok": True, "label": lid, "unchanged": True}
+    assert concepts.PENDING_RUN not in concepts.read_concept(ws, lid)
+    wider = await local.act(CORPUS, "label-run", {"label": lid})
+    assert wider["deferred"] is True and concepts.read_concept(ws, lid)[concepts.PENDING_RUN]["args"].get("limit") is None
+    assert run(term, "label", lid).returncode == 0
+    # once every file ran, a sample of them is covered too
+    assert (await local.act(CORPUS, "label-run", {"label": lid, "limit": 3}))["unchanged"] is True
+    assert (await local.act(CORPUS, "label-run", {"label": lid}))["unchanged"] is True
+    # new code is not
+    await local.act(CORPUS, "label", {"label": lid, "body": rule.replace("300", "200")})
+    changed = await local.act(CORPUS, "label-run", {"label": lid, "limit": 3})
+    assert changed["deferred"] is True and "unchanged" not in changed
+
+
 async def test_the_shims_watch_starts_the_check_of_a_card_run_with_a_takeaway(term, monkeypatch):
     from app import card_check
 

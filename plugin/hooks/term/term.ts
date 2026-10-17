@@ -994,19 +994,32 @@ export async function saveLabel(cx: Ctx, id: string, patch: LabelPatch): Promise
 
 const plural = (n: number, w: string) => `${n.toLocaleString('en-US')} ${w}${n === 1 ? '' : 's'}`
 
+/** What the analyst did that a code label's run follows, for main's prompt: `changed`, the press saved an edit of the
+ *  label first; `reads`, what the run reads (labels.ts runReads: `30 of its 33 files`). */
+export type LabelRunHow = { changed: boolean; reads: string }
+
 /** Run a label from its panel on a sample of `limit` records, or on every record (`limit` 0), with `thimble act
  *  label-run`, which answers once the run ends: the panel says `◌ labeling` meanwhile and the counts after. A code
- *  label's code runs only in main's Bash: main is asked to run the command the act gives. */
-export async function runLabel(cx: Ctx, id: string, name: string, limit: number): Promise<void> {
+ *  label's code runs only in main's Bash: main is asked to run the command the act gives, in words that say only what
+ *  the analyst did (`asked`); a code label whose last run covers this one runs nothing, and the panel says so, with no
+ *  turn of main's (bug hunt B31: main was told "as I changed it" of a label nobody changed, and its run kept the old
+ *  rows). */
+export async function runLabel(cx: Ctx, id: string, name: string, limit: number, asked: LabelRunHow = { changed: false, reads: '' }): Promise<void> {
   if (!rt.sc) return
   await labelSaid(cx, id, '', { limit, at: await cx.now() })
-  const got = await actLong<{ deferred?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null; stopped?: boolean } }>(cx, rt.sc, 'label-run', { label: id, ...(limit ? { limit } : {}) })
+  const got = await actLong<{ deferred?: boolean; unchanged?: boolean; command?: string; summary?: { counts?: Record<string, number>; labeled?: number; failed?: number; message?: string | null; stopped?: boolean } }>(cx, rt.sc, 'label-run', { label: id, ...(limit ? { limit } : {}) })
   if (!got.ok) {
     await labelSaid(cx, id, `× ${got.error}`, null)
     return
   }
+  if (got.value.unchanged) {
+    await labelSaid(cx, id, 'nothing changed since the last run, so thimble did not run it again', null)
+    return
+  }
   if (got.value.deferred && got.value.command) {
-    await cx.submit(`Run the code label "${name}" ${limit ? `on a sample of ${limit} records` : 'on every record'}, as I changed it in its panel. Run this with Bash: ${got.value.command}`)
+    const reads = asked.reads || (limit ? `a sample of ${limit.toLocaleString('en-US')}` : 'all of its records')
+    const what = asked.changed ? `I changed the code label "${name}" in its panel. Run it on ${reads}.` : `Run the code label "${name}" on ${reads}.`
+    await cx.submit(`${what} Use Bash to run this command: ${got.value.command}`)
     await labelSaid(cx, id, 'its code runs in main\'s Bash: main was asked to run it', null)
     return
   }

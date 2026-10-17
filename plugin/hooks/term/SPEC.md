@@ -1039,7 +1039,7 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
             ● unsure  ━━                               2
 
   last run on all 44 lines
-  run on a sample   run on all   rename   delete
+  run on 30 of 44 lines   run on all 44 lines   rename   delete
 
   ▸ examples  12 · 80% agreed on 10 values you set, not counting the 4 given as examples
   ▸ cards  2
@@ -1089,8 +1089,12 @@ browser's label editor (`frontend/src/files/LabelCard.tsx`):
   changed the counts), its tip the count now (`the label counts 179 now, with your verdicts`).
 - The last run dim on its own row (`last run on all 44 lines`, `last run on a sample of 30 lines`), then the actions,
   3 cells apart, their words underlined in the accent, `delete` in red (Matt, v9 review: they read as text; this
-  overrides rule 24 for the label panel): `run on a sample` and `run on all`, which save what was typed first and run
-  it; `◌ labeling …  stop` while it runs, and the fields as plain text. A run's first error is a red `!` row under
+  overrides rule 24 for the label panel): `run on 30 of 44 lines` and `run on all 44 lines`, each naming what it
+  reads (`run on a sample of 30` and `run on all` where the scope's count is not known; only `run on all …` for a
+  scope of no more units than a sample), which save what was typed first and run it. A code label's run goes to main
+  as a prompt that says what it reads, and that the analyst changed the label only when the press saved an edit; a run
+  its last one covers runs nothing, and the panel says `nothing changed since the last run, so thimble did not run it
+  again` (bug hunt B31); `◌ labeling …  stop` while it runs, and the fields as plain text. A run's first error is a red `!` row under
   them. `rename` (n) gives the name's field the keyboard. `delete` (k), not offered while a run goes, asks once in
   their place: `delete label "…"? its marks and card go too · y to delete · n to keep`; y deletes the label with its
   marks, its card and any filter that uses it (`thimble act label-delete`) and opens the labels list, which offers to

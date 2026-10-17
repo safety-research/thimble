@@ -28,6 +28,19 @@ export function oneOf(noun: string): string {
   return ONE[noun] ?? noun
 }
 
+/** What a label's run reads, in the words of its button in the label panel (`run on 30 of 33 files`, `run on all 33
+ *  files`) and of main's prompt for a code label's run (`30 of its 33 files`, `all 33 of its files`): a sample of
+ *  `limit` units (0: every unit) of the `units` its scope holds, where that count is known; a sample as large as the
+ *  scope reads all of it (bug hunt B31: `run on a sample` of a label over 33 files asked main for "30 records"). */
+export function runReads(limit: number, units: number | null, noun: string): { button: string; prompt: string } {
+  const n = (x: number) => x.toLocaleString('en-US')
+  if (units === 1) return { button: `run on its one ${oneOf(noun)}`, prompt: `its one ${oneOf(noun)}` }
+  if (limit && units !== null && limit < units) return { button: `run on ${n(limit)} of ${n(units)} ${noun}`, prompt: `${n(limit)} of its ${n(units)} ${noun}` }
+  if (limit && units === null) return { button: `run on a sample of ${n(limit)}`, prompt: `a sample of ${n(limit)} of its ${noun}` }
+  if (units !== null) return { button: `run on all ${n(units)} ${noun}`, prompt: `all ${n(units)} of its ${noun}` }
+  return { button: 'run on all', prompt: `all of its ${noun}` }
+}
+
 /** What a pattern gives, under it in the label panel: a match the first value, the rest the second; case-sensitive
  *  unless the pattern turns that off (`(?i)`), as Python's re reads it (backend concepts._compiled). */
 export function regexNote(values: readonly string[], pattern: string): string {

@@ -8,7 +8,7 @@ import type { Engine, Mounted } from 'claude-code/testing'
 import { COLOR_NAMES, LABEL_WHEEL, colorName } from '../labels'
 import { LABEL_HUES, PICKED_HUES } from '../paint'
 import { RELAY } from '../panel'
-import { CWD, LABEL, shown, takesKeys, world } from './fixtures'
+import { CWD, LABEL, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
 type M = Mounted<'terminal'>
@@ -82,7 +82,7 @@ test('`delete` (k) asks once in the panel; n keeps the label, y deletes it (`thi
   pane = (await $.ui.mount(PANE)) as unknown as M
   text = shown(await pane.drawn())
   expect(text).not.toContain('its marks and card go too')
-  expect(text).toContain('run on a sample')
+  expect(text).toContain('run on 30 of 14,591 records')
   expect(w.acts.some(a => a.kind === 'label-delete')).toBe(false)
   // k asks again, and y deletes
   await pane.press({ key: 'hk-delete' })
@@ -123,14 +123,14 @@ test("the label's counts apply the analyst's verdicts, as thimble.labels() reads
 test("a label whose first run stopped part way counts its scope in its panel: the files its glob matches and the records they hold", async ($, on) => {
   // live check term-fix10, low quirk: no number, though `thimble state` gave the scope's 4,579 records (scope_total);
   // 0.9.0 (Matt, 19:05): the scope row says what its count is, `<glob> · 1 file matches`; mockup labelpanel2: then the
-  // records, by the word their files give them (`· 4,579 lines`), and `run on all` alone
+  // records, by the word their files give them (`· 4,579 lines`), and `run on all` with that count (bug hunt B31)
   const w = world(on)
   w.states.labels = [{ ...LABEL, glob: 'pages.jsonl', last_run: null, applications: [], label_stats: { n_labeled: 1900, counts: { none: 1800, 'proxy-link': 100 } }, scope_total: 4579, scope_files: 1, scope_unit: 'lines', run_model: 'Haiku 4.5' }] as never
   const pane = await labelPanel($, w)
   const text = shown(await pane.drawn())
   expect(text).toContain('stopped at 1,900 of 4,579')
   expect(text).toMatch(/scope:\s*· 1 file matches · 4,579 lines/)
-  expect(await pane.find({ type: 'Button', key: 'lb-all' })).toMatchObject({ text: 'run on all' })
+  expect(await pane.find({ type: 'Button', key: 'lb-all' })).toMatchObject({ text: 'run on all 4,579 lines' })
   // a regex label has no model row
   expect(text).not.toContain('model:')
   await pane.unmount()
@@ -206,8 +206,9 @@ test("a label over cards has neither the marks row nor a glob field: its scope i
   await pane.unmount()
 })
 
-test("the label panel's actions read as buttons: `run on a sample`, `run on all`, `rename` underlined in the accent, `delete` in red", async ($, on) => {
-  // Matt (v9 review, item m): they read as text; mockup labelpanel2: underlined accent words, delete in red
+test("the label panel's actions read as buttons: `run on 30 of …`, `run on all …`, `rename` underlined in the accent, `delete` in red", async ($, on) => {
+  // Matt (v9 review, item m): they read as text; mockup labelpanel2: underlined accent words, delete in red; bug hunt
+  // B31: the run buttons say what they read
   const w = world(on)
   let pane = await labelPanel($, w)
   // an action: a Button whose words are one underlined Text in the accent, or red
@@ -216,7 +217,7 @@ test("the label panel's actions read as buttons: `run on a sample`, `run on all`
     const t = b?.children[0] as { type?: string; props?: { color?: string; underline?: boolean }; text?: string } | undefined
     return { words: b?.text, tag: t?.type, color: t?.props?.color, underline: t?.props?.underline }
   }
-  for (const [key, words, color] of [['lb-sample', 'run on a sample', 'suggestion'], ['lb-all', 'run on all', 'suggestion'], ['lb-rename', 'rename', 'suggestion'], ['lb-delete', 'delete', 'error']] as const) expect(await action(key)).toEqual({ words, tag: 'Text', color, underline: true })
+  for (const [key, words, color] of [['lb-sample', 'run on 30 of 14,591 records', 'suggestion'], ['lb-all', 'run on all 14,591 records', 'suggestion'], ['lb-rename', 'rename', 'suggestion'], ['lb-delete', 'delete', 'error']] as const) expect(await action(key)).toEqual({ words, tag: 'Text', color, underline: true })
   // three cells apart, the last run dim on its own row above them, its records by name
   expect((await pane.find({ type: 'Box', key: 'lb-runs' }))?.props).toMatchObject({ columnGap: 3 })
   expect(JSON.stringify(await pane.drawn())).toContain('{"type":"Text","props":{"dimColor":true,"wrap":"wrap"},"children":["last run on all 14,591 records"]}')
@@ -226,6 +227,44 @@ test("the label panel's actions read as buttons: `run on a sample`, `run on all`
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
   for (const [key, words, color] of [['lb-delete-yes', 'y to delete', 'error'], ['lb-delete-no', 'n to keep', 'suggestion']] as const) expect(await action(key)).toEqual({ words, tag: 'Text', color, underline: true })
+  await pane.unmount()
+})
+
+test("a code label's run from its panel (bug hunt B31): its buttons say what they read, main's prompt says only what the analyst did, and a run nothing changed asks main nothing", { timeoutMs: 30_000 }, async ($, on) => {
+  // bug hunt B31: `run on a sample` of a code label over 33 files, nothing edited, sent main "Run the code label … on a
+  // sample of 30 records, as I changed it in its panel"; thimble-run kept the old rows, and main asked what changed
+  const w = world(on)
+  const code = "def label(u):\n    return 'own', 1.0"
+  Object.assign(label(w), { name: 'which build ships at the end', kind: 'code', spec: code, unit: 'agent', glob: 'runs/*/log.json', scope_files: 33, scope_unit: 'files', last_run: { total: 30, matched_total: 33, labeled: 30, status: 'done', paths: ['runs/*/log.json'], limit: 30 } })
+  let pane = await labelPanel($, w)
+  expect(await pane.find({ type: 'Button', key: 'lb-sample' })).toMatchObject({ text: 'run on 30 of 33 files' })
+  expect(await pane.find({ type: 'Button', key: 'lb-all' })).toMatchObject({ text: 'run on all 33 files' })
+  // nothing changed since its last run: thimble runs nothing, main gets no prompt, and the panel says so
+  w.labelRun = { ok: true, label: LABEL.id, unchanged: true }
+  pane = await press($, w, pane, 'lb-sample')
+  expect(w.acts).toContainEqual({ kind: 'label-run', payload: { label: LABEL.id, limit: 30 } })
+  expect(w.submitted).toEqual([])
+  expect(shown(await pane.drawn())).toContain('nothing changed since the last run, so thimble did not run it again')
+  // a run its last one does not cover goes to main with what it reads, and no word of a change
+  w.labelRun = { ok: true, label: LABEL.id, deferred: true, command: 'thimble-run label d9b51617' }
+  pane = await press($, w, pane, 'lb-all')
+  expect(w.submitted).toEqual(['Run the code label "which build ships at the end" on all 33 of its files. Use Bash to run this command: thimble-run label d9b51617'])
+  // an edit of its code, saved by the press: the prompt says the analyst changed it
+  await pane.post({ type: 'field', name: `label-body:${LABEL.id}`, text: code.replace('own', 'rival'), save: false, origin: 'f', gestures: [] }, { in: `lb-def-${LABEL.id}-code` })
+  await w.clock.settle()
+  pane = await press($, w, pane, 'lb-sample')
+  expect(w.acts).toContainEqual({ kind: 'label', payload: { label: LABEL.id, body: code.replace('own', 'rival') } })
+  expect(w.submitted.at(-1)).toBe('I changed the code label "which build ships at the end" in its panel. Run it on 30 of its 33 files. Use Bash to run this command: thimble-run label d9b51617')
+  await pane.unmount()
+  // a scope of no more files than a sample runs whole: one button, and `r` runs every file
+  Object.assign(label(w), { scope_files: 12, last_run: { total: 12, matched_total: 12, labeled: 12, status: 'done', paths: ['runs/*/log.json'], limit: null } })
+  w.stamps.set(`${WS}/concepts`, 9)
+  await w.clock.advance(1100)
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(await pane.find({ type: 'Button', key: 'lb-sample' })).toBeUndefined()
+  expect(await pane.find({ type: 'Button', key: 'lb-all' })).toMatchObject({ text: 'run on all 12 files' })
+  pane = await press($, w, pane, 'hk-sample')
+  expect(w.acts.filter(a => a.kind === 'label-run').at(-1)).toEqual({ kind: 'label-run', payload: { label: LABEL.id } })
   await pane.unmount()
 })
 
