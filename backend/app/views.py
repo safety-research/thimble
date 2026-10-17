@@ -2732,6 +2732,33 @@ def answer_offer(c: str, slug: str, answer: str = "rejected") -> dict[str, Any]:
     return prop
 
 
+def hide_offer(c: str, slug: str) -> dict[str, Any]:
+    """The terminal's dismiss of the waiting view proposal: hidden for main's session (`dismissed_in` names it), in the
+    row above the prompt and in the browser's card (offer_hidden), and not answered, so it still waits (open_offer) and
+    shows again in a later session. `view {slug, status: suggested}` goes out, so the browser reads the list again. 404
+    for no such row, 409 for a row that waits for no answer."""
+    from . import module_bridge  # noqa: PLC0415
+
+    with _proposals_lock:
+        prop = read_proposal(c, slug)
+        if prop is None:
+            raise HTTPException(404, f"no such proposal: {slug}")
+        if prop.get("status") != "suggested" or not _is_offer(prop):
+            raise HTTPException(409, _answered(prop))
+        prop = update_proposal(c, slug, dismissed_in=module_bridge.main_session(c)) or prop
+    _emit(c, slug, "suggested")
+    return prop
+
+
+def offer_hidden(c: str, p: dict[str, Any]) -> bool:
+    """Whether the view proposal `p` was dismissed in main's session (hide_offer), followed through its /clear and
+    /resume (module_bridge.moved_to)."""
+    from . import module_bridge  # noqa: PLC0415
+
+    sid = p.get("dismissed_in")
+    return isinstance(sid, str) and module_bridge.moved_to(c, sid) == module_bridge.main_session(c)
+
+
 def install_viewer(c: str, slug: str, d: Path, claims: Any, *, description: str, proposed_by: str, orientation: bool,
                    extension: str | None = None, libs: Any = None) -> None:
     """The viewer in folder `d` as the workspace's view `slug` claiming `claims`, under a built proposal (stored with
@@ -5520,12 +5547,14 @@ def _recover(c: str) -> None:
 async def list_proposals_route(c: str) -> list[dict[str, Any]]:
     """The proposals. A held one, the proposal of an orientation from before 0.8.0 whose view has not passed its checks
     yet, is listed with `held` for the orientation's card, and the views bar leaves it out, as it leaves out one listed
-    with `off`, whose view is switched off in Settings (views_off)."""
+    with `off`, whose view is switched off in Settings (views_off). A view proposal dismissed in the terminal in main's
+    session is listed with `hidden`, and its card does not show (offer_hidden)."""
     config.workspace_dir(c)
     _bind_loop()
     _recover(c)
     off = views_off(c)
-    return [{**p, "off": True} if p["slug"] in off else p for p in list_proposals(c)]
+    return [{**p, **({"off": True} if p["slug"] in off else {}), **({"hidden": True} if offer_hidden(c, p) else {})}
+            for p in list_proposals(c)]
 
 
 @router.get("/ws/{c}/views/suggestions")

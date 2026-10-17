@@ -493,14 +493,14 @@ def _offer(c: str) -> dict[str, Any] | None:
     """The view proposal waiting for the analyst's answer (views.open_offer), as the rows above the prompt show it: its
     slug, name, description, the analyst's task (empty for a viewer of a file type) and the files it claims, and
     `refused`, why accept could not start its build and how to fix that (views.click_refused), while that stands. None
-    while none waits, and while view proposals are off (views.propose_enabled). It is not among the `views` until it is
-    accepted."""
+    while none waits, while view proposals are off (views.propose_enabled), and while it is dismissed in main's session
+    (views.offer_hidden). It is not among the `views` until it is accepted."""
     from . import views  # noqa: PLC0415
 
     if not views.propose_enabled(c):
         return None
     row = views.open_offer(c)
-    if not row:
+    if not row or views.offer_hidden(c, row):
         return None
     refused = row.get("refused") if isinstance(row.get("refused"), dict) else {}
     return {"slug": str(row["slug"]), "name": str(row.get("name") or row["slug"]),
@@ -1103,7 +1103,7 @@ _SURFACES = {"home": _home, "cards": _cards, "card": _card, "labels": _labels, "
 ACT_USAGE = ("thimble act <kind> --cwd <dir> ('<json>' | --stdin) [--session <id>]; kinds: thread {anchor | anchor_text, message}, thread-message {thread, message}, "
              "verdict {label, ref, value}, label {label, name?, kind?, body?, glob?, values?}, label-run {label, limit?, again?}, label-stop {label}, "
              "label-delete {label}, label-undelete {label}, label-show {label, on?, values?, colors?}, label-filter {label, value?}, seen {thread}, "
-             "stop {agent}, view-accept {slug}, view-reject {slug}, view-proposals-off {}, "
+             "stop {agent}, view-accept {slug}, view-reject {slug}, view-dismiss {slug}, view-proposals-off {}, "
              "view-propose-now {notice?}, view-retry {slug, notice?}, view-term-page {slug}, notice-dismiss {id}, sign-out {slug}")
 
 
@@ -1120,6 +1120,8 @@ SERVER_ACTS = {
     "view-accept": "/api/ws/{c}/views/proposals/{slug}/accept",
     "view-reject": "/api/ws/{c}/views/proposals/{slug}/reject",
     "view-retry": "/api/ws/{c}/views/proposals/{slug}/retry",
+    # the browser has no dismiss: its card follows the terminal's (views.hide_offer); the path names the field it needs
+    "view-dismiss": "/api/ws/{c}/views/proposals/{slug}",
     "view-term-page": "/api/ws/{c}/views/{slug}/frame",  # the browser's first open of a view builds its page there
     "view-propose-now": "/api/ws/{c}/views/propose-now",
     "notice-dismiss": "/api/ws/{c}/notices/{id}/dismiss",
@@ -1494,9 +1496,10 @@ def _queued(kind: str, c: str, body: dict[str, Any] | None = None) -> dict[str, 
 
 
 def _offer_answer(c: str, payload: dict[str, Any], kind: str) -> dict[str, Any]:
-    """The analyst's accept or reject of the view proposal that waits (views.open_offer), handed to the holder
-    (local_hooks `view-accept`: views.accept, its build queued; `view-reject`): this process reads and writes nothing
-    more. {queued: true} at once, or {queued: false, reason} when the proposal is gone or no longer waits."""
+    """The analyst's accept, reject or dismiss of the view proposal that waits (views.open_offer), handed to the holder
+    (local_hooks `view-accept`: views.accept, its build queued; `view-reject`; `view-dismiss`): this process reads and
+    writes nothing more. {queued: true} at once, or {queued: false, reason} when the proposal is gone or no longer
+    waits."""
     from . import views  # noqa: PLC0415
 
     slug = _text(payload, "slug")
@@ -1517,6 +1520,12 @@ async def _act_view_accept(c: str, payload: dict[str, Any]) -> dict[str, Any]:
 async def _act_view_reject(c: str, payload: dict[str, Any]) -> dict[str, Any]:
     """Reject the view proposal, as the browser's Reject does (POST …/proposals/{slug}/reject)."""
     return _offer_answer(c, payload, "view-reject")
+
+
+async def _act_view_dismiss(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Dismiss the view proposal from the row above the prompt: hidden for main's session, there and in the browser's
+    card, and not answered (views.hide_offer)."""
+    return _offer_answer(c, payload, "view-dismiss")
 
 
 async def _act_view_proposals_off(c: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1611,7 +1620,8 @@ _ACTS = {"thread": _act_thread, "thread-message": _act_thread_message, "verdict"
          "label-run": _act_label_run, "label-stop": _act_label_stop, "label-delete": _act_label_delete,
          "label-undelete": _act_label_undelete, "label-show": _act_label_show, "label-filter": _act_label_filter,
          "seen": _act_seen, "stop": _act_stop, "view-accept": _act_view_accept,
-         "view-reject": _act_view_reject, "view-proposals-off": _act_view_proposals_off,
+         "view-reject": _act_view_reject, "view-dismiss": _act_view_dismiss,
+         "view-proposals-off": _act_view_proposals_off,
          "view-propose-now": _act_view_propose_now, "view-retry": _act_view_retry,
          "view-term-page": _act_view_term_page, "notice-dismiss": _act_notice_dismiss, "sign-out": _act_sign_out}
 
