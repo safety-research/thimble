@@ -36,8 +36,8 @@ TASK = os.environ.get("THIMBLE_TASK", "")  # '' for a role
 AGENT_DIR = Path(os.environ.get("THIMBLE_AGENT_DIR") or ".")  # the folder of the program's agent.json
 SLOT_RE = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 # harness.NO_SESSION: thimble starts no Claude Code session for a program
-NO_SESSION = ("thimble starts no Claude Code session for a program: each model call runs as a subagent of the analyst's "
-              "Claude Code session. Ask a model with `ask` instead.")
+NO_SESSION = ("thimble starts no Claude Code session for a program: each model call runs through the analyst's Claude "
+              "Code session. Ask a model with `ask` instead.")
 
 
 class ThimbleError(RuntimeError):

@@ -13,7 +13,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from app import concepts, config, refs
+from app import concepts, config, model_call, refs
 from app import call_result as model_mod
 
 CORPUS = "mini"
@@ -90,7 +90,7 @@ class FakeClassify:
 
 @pytest.fixture()
 def fake_classify(monkeypatch):
-    """The scripted classifier (batches of BATCH_ITEMS, CONCURRENCY in flight)."""
+    """The scripted classifier (batches of BATCH_ITEMS, model_call.parallel() in flight)."""
     FakeClassify.calls = []
     FakeClassify.plan = []
     monkeypatch.setattr(concepts, "classify_structured", FakeClassify.call)
@@ -201,7 +201,7 @@ async def test_a_prompt_apply_slows_down_when_the_api_pushes_back_and_asks_again
     """A 429 or 529 on one call halves the calls in flight; a failed call's items and an item a call left out are asked
     once more, so every unit gets a row."""
     monkeypatch.setattr(concepts, "BATCH_ITEMS", 1)
-    monkeypatch.setattr(concepts, "CONCURRENCY", 4)
+    monkeypatch.setattr(model_call, "parallel", lambda: 4)
     running, seen, asked = 0, [], []
 
     async def call(c, concept, items, comment=True, on_retry=None):

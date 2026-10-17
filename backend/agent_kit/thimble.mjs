@@ -95,7 +95,7 @@ export function ask(prompt, { schema, model, images } = {}) {
 }
 
 // harness.NO_SESSION: thimble starts no Claude Code session for a program
-export const NO_SESSION = "thimble starts no Claude Code session for a program: each model call runs as a subagent of the analyst's Claude Code session. Ask a model with `ask` instead."
+export const NO_SESSION = "thimble starts no Claude Code session for a program: each model call runs through the analyst's Claude Code session. Ask a model with `ask` instead."
 
 /** Refused: thimble starts no Claude Code session for a program (NO_SESSION); ask() makes a model call. */
 export async function session() {

@@ -5116,13 +5116,9 @@ ORDINARY_SUFFIXES = frozenset(
 _TYPE_GLOB = re.compile(r"^(?:\*\*/)?\*(\.[A-Za-z0-9_+-]{1,16})$")
 SUGGEST_HEAD_LINES, SUGGEST_LINE_CHARS = 40, 300  # of a text file's start the proposal is written from
 SUGGEST_HEX_BYTES, SUGGEST_SCAN_BYTES, SUGGEST_RUN_MIN = 512, 65536, 6  # of a binary file's start
-# the file-viewer call's wait, a refused call's rerun on the refusal row's model included: its agent, a subagent of the
-# analyst's Claude Code session (agent_call.structured), is stopped past it
+# the file-viewer call's wait, a refused call's rerun on the refusal row's model included: the model call through the
+# analyst's Claude Code session (model_call.structured) is cancelled past it
 SUGGEST_TIMEOUT_S = 90.0
-# the call's agent in Claude Code: its line in the task list, and the reason in main's terminal when the terminal UI
-# drops its hand-back
-SUGGEST_TITLE = "thimble viewer suggestion: {files}"
-SUGGEST_DONE = "thimble checked whether {files} need a viewer"
 SUGGEST_PROMPT = "file-viewer"
 # A file type's check for a view proposal that failed (suggest) is a notice in the foreground under SUGGEST_NOTICE_KEY
 # (notices.post), whose Try again (POST /views/propose-now) checks that file type again (_suggest_failed); a check that
@@ -5254,17 +5250,15 @@ def _fmt_size(n: int) -> str:
 
 
 async def _suggest_call(c: str, system: str, user: str, tool: Any, model: str | None = None, suffix: str = "") -> Any:
-    """The proposal's one model call, as a subagent of the analyst's Claude Code session (agent_call.structured):
-    `model`, else the viewer suggestion's model (Settings' `suggest` row), at that row's effort, and on the refusal
-    row's after a refusal (config.call_settings); `suffix` the file type's, for the agent's task line. Tests replace
-    it."""
-    from . import agent_call  # noqa: PLC0415
+    """The proposal's one model call through the analyst's Claude Code session (model_call.structured): `model`, else
+    the viewer suggestion's model (Settings' `suggest` row), at that row's effort, and on the refusal row's after a
+    refusal (config.call_settings); `suffix` the file type's, for the logs. Tests replace it."""
+    from . import model_call  # noqa: PLC0415
 
     role = config.call_settings(c, "suggest")
     files = f"{suffix} files" if suffix else "files without a suffix"
-    return await agent_call.structured(c, user, tool=tool, model=model or role["model"], effort=role["effort"],
-                                       refusal=role["refusal"], system=system, what="viewer suggestion",
-                                       title=SUGGEST_TITLE.format(files=files), done=SUGGEST_DONE.format(files=files))
+    return await model_call.structured(c, user, tool=tool, model=model or role["model"], effort=role["effort"],
+                                       refusal=role["refusal"], system=system, what=f"viewer suggestion: {files}")
 
 
 def _suggest_sections(c: str) -> tuple[dict[str, str], Any]:

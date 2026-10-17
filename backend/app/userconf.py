@@ -29,9 +29,10 @@ mode, since Claude Code obeys an explicit ask rule there (live check: the checks
 mode). The keys earlier builds read for this,
 `installs`, each agent's own `fast` (no agent has a fast mode of its own: each runs as a subagent of main), and
 `permissionMode` and `web` other than "off" but the dev agent's (IGNORED_KEYS), are read and ignored, so an earlier
-config stays valid; `ignored` lists those a file holds, and a save from the Settings pane drops them. `labels`,
-`cardCheck` and `suggest` (the viewer suggestion) are model calls, each a `thimble:call` subagent of main, and
-`refusal` is the model and effort a refused call's agent runs on again, which `off` turns off.
+config stays valid; `ignored` lists those a file holds, and a save from the Settings pane drops them. `labels` and
+`suggest` (the viewer suggestion) are model calls through main's own API client (model_call.py), `cardCheck` is the
+card check's `thimble:call` subagent of main, which reads the card's picture, and `refusal` is the model and effort a
+refused call runs on again, which `off` turns off.
 
 Extensions' programs. An extension's program that runs an agent or one of its tasks (harness.py) is no subagent of main:
 it runs in a box of its own and keeps its power. So it takes its agent's own `env`, `sandbox`, `network` and `data`
