@@ -9,8 +9,9 @@ too (below). `agents/<role>/agent.json` or `tasks/<task>/task.json` names one of
 | prompt | `"prompt": "prompt.md"` | thimble's own agent with your prompt added, or in place of thimble's with `"replace": true` |
 | command | `"command": ["node", "orient.mjs"]` | any program, started from the role's folder, speaking the JSON lines below |
 
-thimble starts no Claude Code session of its own: every model call runs as a subagent of your Claude Code session. So a
-program gets no Claude Code session from thimble, and an Agent SDK program (`"sdk": "orient.py"`, a way of earlier
+thimble starts no Claude Code session of its own: every model call runs in your Claude Code session, through its own
+API client and sign-in, and thimble's agents are subagents of that session. So a program gets no Claude Code session
+from thimble, and an Agent SDK program (`"sdk": "orient.py"`, a way of earlier
 versions) does not start: the role or task says why, and Settings names the extension, which you turn off there to get
 thimble's own agent back. A program asks a model with `ask` (below).
 
@@ -82,7 +83,7 @@ Each line the program writes on stdout is one JSON object. thimble answers each 
 | program writes | thimble does |
 |---|---|
 | `{"id": 1, "tool": {"name": "add_card", "args": {...}}}` | calls one of the role's thimble tools as the role, answers `{"id": 1, "result": {"content", "is_error"}}` |
-| `{"id": 2, "ask": {"prompt": "...", "schema": {...}, "images": [...]}}` | one model call as a subagent of your Claude Code session (it fails when no session runs thimble in the folder), at the model and effort Settings shows for the role or the task's agent (a `model` the request names replaces the model): the object `schema` describes, or text. `images` are paths of PNG, JPEG, GIF or WebP files the model sees, such as a card-check task's `picture` |
+| `{"id": 2, "ask": {"prompt": "...", "schema": {...}, "images": [...]}}` | one model call through your Claude Code session's own client, with no tools (it fails when no session runs thimble in the folder), at the model and effort Settings shows for the role or the task's agent (a `model` the request names replaces the model): the object `schema` describes, or text. `images` are paths of PNG, JPEG, GIF or WebP files the model sees, such as a card-check task's `picture`; an ask with `images` runs as a subagent of your session that reads them, as the card check does, since a model call carries text alone |
 | `{"id": 3, "session": {...}}` | refused with an error: thimble starts no Claude Code session for a program |
 | `{"id": 4, "default": {"input": {...}, "model": "..."}}` | a task only: runs thimble's own implementation of the task on `input` and answers with its output |
 | `{"log": "text"}` | adds a line to the agent's thread, or to thimble's log for a task's program, which has no thread |
