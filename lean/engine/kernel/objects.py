@@ -149,7 +149,7 @@ def _bind(st: Store, ref: str, at: str, ctx: dict[str, Any]) -> Any:
             return None
         if frag and len(idx) == 1:
             if rows and idx[0] < len(rows):
-                b["rows"] = rows[idx[0]]
+                b["rows"] = Q.value_rows(q, idx[0], col)
             ctx["bindings"].append(b)
             return table[idx[0]][col]
         val = [table[i][col] for i in idx]
@@ -216,7 +216,7 @@ def _cite(st: Store, ref: str, where: str, ctx: dict[str, Any], quote: str | Non
                 if label is not None and not number_matches(label, row[col]):
                     raise R.RefError(f"the citation shows {label!r} but {ref} holds {row[col]!r}")
                 if q.get("rows") and idx[0] < len(q["rows"]):
-                    c["rows"] = q["rows"][idx[0]]
+                    c["rows"] = Q.value_rows(q, idx[0], col)
             elif frag and q.get("rows"):
                 c["rows"] = _merge_rows([q["rows"][i] for i in idx if i < len(q["rows"])])
         elif p["kind"] == "object":

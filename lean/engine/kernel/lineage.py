@@ -379,6 +379,7 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
     idx = Q.find_rows(q, frag) if frag else []
     if frag and not idx:
         raise R.RefError(f"{q['id']} has no output row {_frag_text(p)}")
+    vcol = None
     if frag:
         rows_tbl = q.get("table") or []
         step["rows"] = [{"i": i + 1, **rows_tbl[i]} for i in idx[:20]]
@@ -388,6 +389,7 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
                 if col is None:
                     raise R.RefError(f"{q['id']}'s output has no column {p['col']!r}; it has {', '.join(rows_tbl[idx[0]])}")
                 step["value"] = rows_tbl[idx[0]][col]
+                vcol = col
     if not q.get("rows"):
         notes.append(f"{q['id']} keeps no rows per output row (lineage: query), so each of its values rests on every "
                      "row it read; tally() or a `_refs` column keeps them")
@@ -401,14 +403,20 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
         step["why"] = why
     pick = idx if frag else range(len(q["rows"]))
     rowsets: list[str] = []
+    own = False
     for i in pick:
         if i < len(q["rows"]):
-            rowsets.extend(q["rows"][i])
+            got = Q.value_rows(q, i, vcol) or []
+            own = own or got is not q["rows"][i]
+            rowsets.extend(got)
     rowsets = _merge(rowsets)
     mode = q.get("lineage")
     n = R.count(rowsets)
     v = step.get("value")
-    if mode == "superset":
+    if mode == "loop" and not own:
+        notes.append(f"these {n:,} rows are what {q['id']}'s loop held when it made this output row (the frames it loaded "
+                     "and filtered for it); which of them this value used is not kept")
+    elif mode == "superset":
         notes.append(f"these {n:,} rows share the output row's key, but a count column of {q['id']} disagrees: they hold "
                      "more rows than the value counts")
     elif mode == "key":
