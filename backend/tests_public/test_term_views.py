@@ -587,3 +587,48 @@ async def test_each_worked_example_draws_every_choice_of_its_controls(example, p
         first = next(ch for q, ch in tried if q == p)
         assert first == ("Off" if p == "Color by" else "None") and (p, f"{first} (after the others)") in tried, tried
     assert not [x for x in d["choices"] if x["errors"]], d["choices"]
+
+
+KEYED_READER = """
+def build_index(paths):
+    rows = []
+    for p in paths:
+        with open(p) as fh:
+            rows += [line.rstrip("\\n") for line in fh]
+    return rows
+
+
+def records(index, query):
+    return {"rows": index}
+
+
+def resolve(index, locator):
+    if locator.get("key") == "r03":
+        return {"excerpt": "r03 · 3 posts", "label": "r03", "refs": ["board.jsonl#L1"], "key": "r03"}
+    return None
+"""
+
+
+async def test_bug_hunt_k7_the_terminal_s_check_resolves_a_view_s_key_no_process_kept_and_one_the_view_lacks_fails(
+        board, inproc):
+    """Bug hunt round 10, K7 (D3 again): main cited `view:<slug>/r03` as the view's first page passed. `thimble state
+    resolve`, the terminal's check, answers a key only from key-refs.json, which a views kernel writes as it resolves
+    the key; no process did until the analyst opened the view 16 minutes later, so the terminal's checks were spent and
+    the citation stayed a red × though the view resolves it. The check now resolves a built view's key itself, and
+    keeps the answer; a key the view does not have is missing for good, with no `retry`."""
+    from app import local
+
+    views.write_view(CORPUS, "lanes", name="Run Lanes", description="the runs", scope=["board.jsonl"],
+                     reader=KEYED_READER, html=HTML, units=[{"form": "<run>", "means": "one run"}])
+    assert not views.key_refs(CORPUS), "no process kept an answer yet"
+    found, lacking = await local.state(CORPUS, "resolve", [json.dumps(["view:lanes/r03", "view:lanes/r99"])])
+    assert "error" not in found and found["state"] == "ok", found
+    assert (found["label"], found["excerpt"], found["refs"]) == ("r03", "r03 · 3 posts", ["board.jsonl#L1"])
+    assert lacking["error"] == "the view 'Run Lanes' has no 'r99'" and "retry" not in lacking, lacking
+    assert lacking["state"] == "missing"
+    assert views.key_refs(CORPUS)["view:lanes/r03"]["excerpt"] == "r03 · 3 posts", "kept for the next check"
+    # a view still being built may resolve its key later: no reader runs, and the check says so
+    views._save_proposals(CORPUS, [{"slug": "drafts", "name": "Drafts", "description": "d", "claims": ["board.jsonl"],
+                                    "status": "building"}])
+    [building] = await local.state(CORPUS, "resolve", [json.dumps(["view:drafts/r03"])])
+    assert building["retry"] is True and building["error"] == "the view 'Drafts' is still being built", building

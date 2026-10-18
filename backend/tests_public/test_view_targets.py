@@ -191,3 +191,88 @@ async def test_a_view_built_in_the_terminal_gets_its_browser_page_in_the_same_bu
     assert len(queued) == 1 and reviewed == [("board", views.TERM_PAGE)]
     assert views.read_proposal(c, "board").get("first_page") is None
     assert views._public(views.read_built(c, "board"))["browser_page"] is True
+
+
+async def test_bug_hunt_k6_build_it_pressed_in_the_terminal_builds_the_terminal_page_first_and_main_hears_where(
+        workspaces_tmp, tmp_path, monkeypatch, queued):
+    """Bug hunt round 10, K6: `build it` pressed in the terminal after the browser had opened once was taken for a
+    browser click: main heard that the analyst started the builder "in the browser", and the build made the browser's
+    page first, so the analyst who pressed in the terminal waited 22 minutes for their page. A press is recorded where
+    it was made: the terminal's builds the terminal page first (then the browser's, in the same build), the browser's
+    the browser page, and main's note at the builder's start names the place."""
+    from app import local_hooks, subagents, term_acts
+    from app import subagent_files as sf
+
+    c = _corpus(tmp_path, monkeypatch, "board", "server")  # the browser opened once: the server's transport
+    assert views.default_target(c) == views.HTML_PAGE
+    offered = {"name": "Board", "description": "The posts.", "task": "Read the board.", "claims": ["board.jsonl"],
+               "status": "suggested", "route": "click", "offered": {"at": 1.0, "after": "main", "why": "posts"}}
+    views._save_proposals(c, [{"slug": "board", **offered}, {"slug": "threads", **offered, "name": "Threads"},
+                              {"slug": "posts", **offered, "name": "Posts"}])
+    monkeypatch.setattr(subagents, "refusal_before", lambda c, click=False: None)
+    got = await term_acts.act_route(c, term_acts.ActBody(kind="view-accept", payload={"slug": "board"}))
+    assert got == {"queued": True} and queued == [(c, "board")]
+    prop = views.read_proposal(c, "board")
+    assert (prop["place"], prop["target"], views.target_of(c, "board")) == ("terminal", views.TERM_PAGE,
+                                                                             views.TERM_PAGE)
+    # the builder's task and registration are the terminal page's
+    task = dev.build_task(c, prop)
+    assert "install the packages the page loads there" not in task
+    # the browser's press builds the browser's page; one in the terminal before the press, the terminal's
+    views.accept(c, "threads", place=views.BROWSER)
+    assert (views.read_proposal(c, "threads")["place"], views.target_of(c, "threads")) == ("browser", views.HTML_PAGE)
+    local_hooks.ANSWERS["view-accept"](c, {"slug": "posts"})
+    assert (views.read_proposal(c, "posts")["place"], views.target_of(c, "posts")) == ("terminal", views.TERM_PAGE)
+    # main's note at the start says where the analyst pressed; a click that names no place is the browser's
+    assert sf.how("click", "terminal") == "in the terminal" and sf.how("click", "browser") == "in the browser"
+    assert sf.how("click") == "in the browser" and sf.how("follow-on", "terminal") == sf.HOW["follow-on"]
+    from subagent_fakes import real_bridge
+
+    note = real_bridge._note("view-builder", "board", "click", "terminal")
+    assert "view-builder for board in the terminal," in note and "browser" not in note, note
+    wire = real_bridge._args("spawn", {"role": "view-builder", "prompt": "p", "what": "board", "route": "click",
+                                       "place": "terminal"})
+    assert "in the terminal" in wire["note"]
+    # after /clear a new main hears of the running builder with the same words
+    state = {"agents": {"abuilder01": {"type": "thimble:view-builder", "key": "view:board", "status": "running",
+                                       "route": "click", "place": "terminal", "plugin_started": True}}}
+    assert any("in the terminal" in line for line in sf.started_notes(state))
+
+
+def test_bug_hunt_k11_the_build_of_a_view_s_other_page_is_told_it_is_thimble_s_step_with_that_page_s_instructions(
+        workspaces_tmp, tmp_path, monkeypatch, queued):
+    """Bug hunt round 10, K11 (I12 again): the builder that built a view's browser page was resumed for its terminal
+    page with "The analyst asked for a change to the view", though the analyst asked for nothing, and with only its
+    first page's instructions; it grepped and read thimble's own source and docs, an ask each in Manual mode, and
+    called no `view_reference`. The build of the page a view lacks now says it is thimble's next step and carries the
+    instructions a build of that page starts with, `view_reference` and reading only the corpus's files and its own
+    among them; an analyst's change still reads as theirs."""
+    from app import view_tools
+
+    c = _corpus(tmp_path, monkeypatch, "board", "server")
+    _built(c, "board", term=False, html=True)
+    assert views.ensure_page(c, "board", views.TERM_PAGE) is True
+    prop = views.read_proposal(c, "board")
+    text = dev.change_text(c, prop)
+    assert text.startswith("## The view's page for the terminal panel\n"), text[:200]
+    assert "The analyst asked" not in text and "the analyst asked for no change" in text
+    assert f"Write view.term.js in {views.views_dir(c) / 'board'}." in text
+    assert "`view_reference` gives thimble's doc `terminal-views`" in text, "the terminal page's view kit"
+    assert "read only the corpus's files and your own" in text
+    assert "thimble.colorBy" not in text and "npm install" not in text, "not the browser page's"
+    # the instructions are those a build of the terminal page is registered with
+    with views.spawning(c, views.TERM_PAGE):
+        registered = view_tools.builder_definition(c)["prompt"]
+    assert view_tools.builder_instructions(c, views.TERM_PAGE) in registered
+    # a new builder, where none can be reached, gets the same step in its task
+    task = dev.build_task(c, prop)
+    assert "has no page for the terminal panel" in task and "The analyst asked" not in task
+    # the browser's page of a view built in the terminal: the browser's instructions
+    _built(c, "lanes", term=True, html=False)
+    assert views.ensure_page(c, "lanes", views.HTML_PAGE) is True
+    text = dev.change_text(c, views.read_proposal(c, "lanes"))
+    assert text.startswith("## The view's page for the browser workbench\n") and "thimble.colorBy" in text
+    # a change the analyst asked for still reads as theirs
+    views.revise(c, "board", "Add a legend.")
+    text = dev.change_text(c, views.read_proposal(c, "board"))
+    assert "The analyst asked for a change to the view Board" in text and "Add a legend." in text

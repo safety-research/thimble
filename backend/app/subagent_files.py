@@ -676,6 +676,7 @@ def _take(state: dict[str, Any], agent_id: str, rid: str, req: dict[str, Any], s
     entry = {"key": req.get("key"), "type": agent_type, "role": role_of(agent_type), "request": rid,
              "parent": req.get("caller"), "chat": req.get("chat"), "run": 0,
              "values": req.get("values") or {}, "route": req.get("route"),
+             **({"place": req["place"]} if req.get("place") else {}),
              "plugin_started": str(req.get("claimed_by") or "").startswith(PLUGIN_CALL),
              "sessions": [session] if session else [], "started": t, "last_start": t, "starts": 1,
              "status": "running", "work": req.get("work"), "handed_back": False}
@@ -923,6 +924,19 @@ def rekey(state: dict[str, Any], old: str, new: str, main: bool = True) -> list[
 # for (a view build's review or repair, a check after a writer), or main's own Agent call for a typed request
 HOW = {"click": "in the browser", "follow-on": "as the next step of a run they asked for in thimble",
        "typed": "through your own Agent call"}
+# a click's {how} by where the analyst pressed it, as its start's request names it (`place`: a view's Build or Retry,
+# views.PLACES); a click that names no place was the browser's (bug hunt round 10, K6: `build it` pressed in the
+# terminal reached main as started "in the browser")
+HOW_PLACE = {"terminal": "in the terminal", "browser": "in the browser"}
+
+
+def how(route: Any, place: Any = None) -> str:
+    """module-started-note's {how} for a start of `route`, pressed in `place` when a click names where (HOW_PLACE)."""
+    if route == "click" and place in HOW_PLACE:
+        return HOW_PLACE[str(place)]
+    return HOW.get(str(route or "")) or HOW["click"]
+
+
 NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}, {how}
 WHAT_CHARS = 120
 WHAT_ORIENTATION = "this corpus"  # module-started-note's {what} for an agent whose key has no name (the orientation)
@@ -961,7 +975,7 @@ def started_notes(state: dict[str, Any]) -> list[str]:
             continue
         route = str(e.get("route") or ("click" if e.get("plugin_started") else "typed"))
         line = hint(NOTE_HINT, role=role, agent=aid, what=note_what(key_what(e.get("key"))),
-                    how=HOW.get(route) or HOW["click"])
+                    how=how(route, e.get("place")))
         if line:
             out.append(line)
     return out

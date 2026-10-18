@@ -503,3 +503,19 @@ async def test_bug_hunt_e4_a_page_for_the_other_place_waits_for_the_review_and_a
     await _until(lambda: _prop(other)["review"]["state"] == "stopped", "the review's stop was never settled")
     [notice] = [n for n in notices.open_notices(CORPUS) if n["key"] == notices.agent_key(key)]
     assert notice["text"].startswith("The review of the view Thread Board stopped because the view changed")
+
+
+async def test_bug_hunt_k6_a_build_pressed_in_the_terminal_tells_the_module_where_it_was_pressed(board, bridge, gates):
+    """Bug hunt round 10, K6: the module's note to main at a builder's start said every click was the browser's. The
+    start of a build the analyst pressed in the terminal carries the place to the module and to the agent's entry,
+    from which a new main hears of it after /clear; a follow-on start names none."""
+    slug = _propose(asked=True)
+    views.update_proposal(CORPUS, slug, place=views.TERMINAL)
+    agent = await _started(slug)
+    [spawn] = bridge.ops("spawn")
+    assert (spawn["route"], spawn["place"]) == ("click", "terminal")
+    assert subagents.agent(CORPUS, agent)["place"] == "terminal"
+    other = _propose("Threads", asked=True)
+    views.update_proposal(CORPUS, other, place=views.TERMINAL)
+    await _started(other, route=subagents.FOLLOW_ON)
+    assert "place" not in bridge.ops("spawn")[-1], "only a click is pressed somewhere"

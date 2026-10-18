@@ -57,6 +57,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import functools
 import json
 import logging
 import os
@@ -287,11 +288,12 @@ def _answered(what: str, c: str, slug: str, fn: Any, *args: Any) -> None:
 
 
 def _accept(c: str, body: dict[str, Any]) -> None:
-    """The view proposal accepted: its build queued (views.accept), which this process follows (_busy); a refusal
-    (no session, no hooks module) is written on the proposal, which the row above the prompt shows."""
+    """The view proposal accepted in the terminal: its build queued (views.accept, which makes the terminal's page
+    first), which this process follows (_busy); a refusal (no session, no hooks module) is written on the proposal,
+    which the row above the prompt shows."""
     from . import views  # noqa: PLC0415
 
-    _answered("accepted", c, str(body.get("slug") or ""), views.accept)
+    _answered("accepted", c, str(body.get("slug") or ""), functools.partial(views.accept, place=views.TERMINAL))
 
 
 def _reject(c: str, body: dict[str, Any]) -> None:
@@ -311,7 +313,7 @@ def _retry(c: str, body: dict[str, Any]) -> None:
     from . import views  # noqa: PLC0415
 
     _fixing(c, body)
-    _answered("built again", c, str(body.get("slug") or ""), views.retry)
+    _answered("built again", c, str(body.get("slug") or ""), functools.partial(views.retry, place=views.TERMINAL))
 
 
 def _propose_now(c: str, body: dict[str, Any]) -> None:

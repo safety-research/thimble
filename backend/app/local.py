@@ -1110,7 +1110,20 @@ async def _resolve(c: str, args: list[str], pos: list[str]) -> Any:
             return {**got, "state": "differs", "why": verify.WHY_VALUE}
         return {**got, "state": "ok"}
 
-    return await asyncio.to_thread(lambda: [one(x) for x in wanted])
+    out = await asyncio.to_thread(lambda: [one(x) for x in wanted])
+    # a view's key no process has kept an answer for: resolved here by the view's reader, then answered again (bug hunt
+    # round 10, K7); one the view does not have is missing for good
+    later = [i for i, got in enumerate(out) if got.get("retry") and str(got.get("ref") or "").startswith("view:")]
+    if later:
+        from . import views  # noqa: PLC0415
+
+        gone = await views.resolve_keys_here(c, [out[i]["ref"] for i in later])
+        again = await asyncio.to_thread(lambda: [one(wanted[i]) for i in later])
+        for i, got in zip(later, again):
+            why = gone.get(str(got.get("ref") or ""))
+            out[i] = {**{k: v for k, v in got.items() if k != "retry"}, "error": why, "state": "missing", "why": why} \
+                if why and got.get("error") else got
+    return out
 
 
 async def _ui(c: str, args: list[str], pos: list[str]) -> Any:

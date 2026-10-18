@@ -14,6 +14,7 @@ and an agent's token, whose grant names its own routes, never reaches this one.
 """
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Any
 
@@ -82,8 +83,9 @@ async def _view(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     views._bind_loop()
     slug = _field(payload, "slug")
+    # a press here is the terminal's: main hears so, and the build makes the terminal's page first (views.accept)
     if kind == "view-accept":
-        return _view_answer(views.accept, c, slug)
+        return _view_answer(functools.partial(views.accept, place=views.TERMINAL), c, slug)
     if kind == "view-reject":
         return _view_answer(views.answer_offer, c, slug, "rejected")
     if kind == "view-dismiss":  # hidden, not answered: a refusal an earlier Accept left on it is no answer to this
@@ -93,7 +95,7 @@ async def _view(c: str, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
             return {"queued": False, "reason": str(e.detail)}
         return {"queued": True}
     _notice_first(c, payload)
-    return _view_answer(views.retry, c, slug)
+    return _view_answer(functools.partial(views.retry, place=views.TERMINAL), c, slug)
 
 
 async def _term_page(c: str, payload: dict[str, Any]) -> dict[str, Any]:

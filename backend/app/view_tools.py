@@ -82,10 +82,25 @@ def builder_definition(c: str) -> dict[str, Any]:
     from . import dev, prompts, userconf, views  # noqa: PLC0415 — dev imports the view modules, which import this one
 
     with prompts.custom(userconf.prompt_files(c, "dev")), prompts.rendering(views.target_flags(c, views.spawn_target(c))):
-        prompt = prompts.render_dev("dev-view", {"corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
-                                                 "docs": str(config.REPO_ROOT / "docs"),
-                                                 "attempts": str(dev.MAX_ATTEMPTS)})
+        prompt = prompts.render_dev("dev-view", _builder_values(c))
     return {"description": BUILDER_DESCRIPTION, "prompt": prompt, "disallowedTools": tools.not_own(BUILDER_TOOLS)}
+
+
+def _builder_values(c: str) -> dict[str, str]:
+    from . import dev, views  # noqa: PLC0415
+
+    return {"corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
+            "docs": str(config.REPO_ROOT / "docs"), "attempts": str(dev.MAX_ATTEMPTS)}
+
+
+def builder_instructions(c: str, target: str) -> str:
+    """prompts/dev-view.md as the builder's registration renders it for a build of `target` (builder_definition),
+    without the dev preamble: what a builder that started for the view's other page gets with the build of this one
+    (dev.change_text), so it builds it as a build of this page starts."""
+    from . import prompts, userconf, views  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "dev")), prompts.rendering(views.target_flags(c, target)):
+        return prompts.render("dev-view", _builder_values(c)).strip()
 
 
 def reviewer_definition(c: str) -> dict[str, Any]:

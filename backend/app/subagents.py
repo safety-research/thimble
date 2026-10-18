@@ -913,6 +913,7 @@ async def _spawn(c: str, rid: str, r: dict[str, Any]) -> Answer:
     inp = r.get("input") or {}
     ans = await _bridge(c, "spawn", role=r.get("role"), values=r.get("values") or {}, prompt=inp.get("prompt"),
                         description=inp.get("description"), request=rid, what=_what(r), route=r.get("route") or CLICK,
+                        **({"place": str(r["place"])} if r.get("place") else {}),
                         **({"drop": str(r["drop"])} if r.get("drop") else {}))
     if ans.started:
         meta = bind(c, str(ans.agent_id), rid)  # its chat, which the browser opens after a click (the started agent's thread)
@@ -951,6 +952,7 @@ def bind(c: str, agent_id: str, rid: str) -> dict[str, Any] | None:
             reg[agent_id] = {"key": r.get("key"), "type": (r.get("input") or {}).get("subagent_type"),
                              "role": r.get("role"), "request": rid, "parent": r.get("caller"), "run": 0,
                              "values": r.get("values") or {}, "route": r.get("route"), "plugin_started": plugin,
+                             **({"place": r["place"]} if r.get("place") else {}),
                              "sessions": [sid] if sid else [], "started": files.now(),
                              "last_start": files.now(), "starts": 1,
                              "status": "running", "work": r.get("work"), "handed_back": False}
