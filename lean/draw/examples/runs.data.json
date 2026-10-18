@@ -1,0 +1,176 @@
+{
+ "task": "fix flaky test_checkout_total",
+ "source": "runs/*/summary.json",
+ "runs": 40,
+ "theories": [
+  {
+   "id": "fixture",
+   "label": "shared fixture",
+   "runs": 11
+  },
+  {
+   "id": "timezone",
+   "label": "timezone",
+   "runs": 14
+  },
+  {
+   "id": "none",
+   "label": "no theory",
+   "runs": 6
+  },
+  {
+   "id": "flaky",
+   "label": "\"just flaky\"",
+   "runs": 9
+  }
+ ],
+ "endings": [
+  {
+   "id": "fixed",
+   "label": "✓ fixed",
+   "runs": 15,
+   "tone": "good"
+  },
+  {
+   "id": "timeout",
+   "label": "timed out",
+   "runs": 6,
+   "tone": "warn"
+  },
+  {
+   "id": "gaveup",
+   "label": "gave up",
+   "runs": 7,
+   "tone": "dim"
+  },
+  {
+   "id": "masked",
+   "label": "masked",
+   "runs": 12,
+   "tone": "bad"
+  }
+ ],
+ "flows": [
+  {
+   "from": "fixture",
+   "to": "fixed",
+   "runs": 11
+  },
+  {
+   "from": "timezone",
+   "to": "fixed",
+   "runs": 4
+  },
+  {
+   "from": "timezone",
+   "to": "timeout",
+   "runs": 6
+  },
+  {
+   "from": "timezone",
+   "to": "gaveup",
+   "runs": 4
+  },
+  {
+   "from": "none",
+   "to": "gaveup",
+   "runs": 3
+  },
+  {
+   "from": "none",
+   "to": "masked",
+   "runs": 3
+  },
+  {
+   "from": "flaky",
+   "to": "masked",
+   "runs": 9
+  }
+ ],
+ "sample": [
+  {
+   "run": "r09",
+   "theory": "fixture",
+   "ending": "fixed",
+   "steps": 2378
+  },
+  {
+   "run": "r05",
+   "theory": "fixture",
+   "ending": "fixed",
+   "steps": 596
+  },
+  {
+   "run": "r12",
+   "theory": "timezone",
+   "ending": "fixed",
+   "steps": 652
+  },
+  {
+   "run": "r13",
+   "theory": "timezone",
+   "ending": "fixed",
+   "steps": 2076
+  },
+  {
+   "run": "r18",
+   "theory": "timezone",
+   "ending": "timeout",
+   "steps": 2038
+  },
+  {
+   "run": "r17",
+   "theory": "timezone",
+   "ending": "timeout",
+   "steps": 671
+  },
+  {
+   "run": "r22",
+   "theory": "timezone",
+   "ending": "gaveup",
+   "steps": 553
+  },
+  {
+   "run": "r25",
+   "theory": "timezone",
+   "ending": "gaveup",
+   "steps": 1205
+  },
+  {
+   "run": "r27",
+   "theory": "none",
+   "ending": "gaveup",
+   "steps": 845
+  },
+  {
+   "run": "r26",
+   "theory": "none",
+   "ending": "gaveup",
+   "steps": 490
+  },
+  {
+   "run": "r29",
+   "theory": "none",
+   "ending": "masked",
+   "steps": 2016
+  },
+  {
+   "run": "r31",
+   "theory": "none",
+   "ending": "masked",
+   "steps": 782
+  },
+  {
+   "run": "r37",
+   "theory": "flaky",
+   "ending": "masked",
+   "steps": 699
+  },
+  {
+   "run": "r38",
+   "theory": "flaky",
+   "ending": "masked",
+   "steps": 557
+  }
+ ]
+}
