@@ -636,12 +636,35 @@ export function entryParts(e: ExampleEntry, got: (ref: string) => ResolvedRef | 
   const about: ClaimAbout = { quotes: [...e.quotes.filter(Boolean), ...(claim.said ?? [])], words: claim.words ?? '' }
   if (e.refs.length === 1) {
     const parts = quoteParts(first, about)
-    return first.kind === 'span' || !e.quotes[0] ? parts : markQuotes(parts, [e.quotes[0]])
+    return first.kind === 'span' || !e.quotes[0] ? parts : withPassages(first, markQuotes(parts, [e.quotes[0]]), [e.quotes[0]])
   }
   const said = e.refs.flatMap((_r, i) => {
     if (e.quotes[i]) return [e.quotes[i]]
     const r = res[i]
     return r && r.kind === 'span' ? quoteParts(r).flatMap((p) => (p.kind === 'span' ? [p.text] : [])) : []
   })
-  return markQuotes(quoteParts(wholeRecord(first), about), said)
+  const whole = wholeRecord(first)
+  return withPassages(whole, markQuotes(quoteParts(whole, about), said), said)
+}
+
+/** Whether a part shows `quote` where markQuotes marks it. */
+const shows = (p: QuotePart, quote: string): boolean => (p.kind === 'text' || p.kind === 'code' || p.kind === 'field' || p.kind === 'tool') && findQuote(p.text, quote) !== null
+
+/**
+ * A record's parts with each quoted passage that no part shows put first (bug hunt round 10, K3: a JSON record's quote
+ * sat inside a list its fields line cut after a line, so the card never showed it): the string value of the record's
+ * JSON that holds it, decoded, with the words around it, under its key (jsonSpanParts), as a span of that JSON reads.
+ * A passage that no value holds is left out. Pure.
+ */
+export function withPassages(r: ResolvedRef, parts: readonly QuotePart[], quotes: readonly string[]): QuotePart[] {
+  const json = (r.blocks ?? []).find((b) => b.kind === 'raw' || b.kind === 'event')?.text ?? ''
+  if (!json) return [...parts]
+  const lead: QuotePart[] = []
+  for (const q of quotes) {
+    if (!q || parts.some((p) => shows(p, q))) continue
+    const at = findQuote(json, q)
+    const span = at ? jsonSpanParts(json, 0, at[0], at[1]) : null
+    if (span) lead.push(...span.map(tidyPart))
+  }
+  return [...lead, ...parts]
 }

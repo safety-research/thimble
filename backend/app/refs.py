@@ -451,8 +451,14 @@ def fields_text(out: dict[str, Any]) -> str:
 def checked_text(out: dict[str, Any]) -> str:
     """The text a check of a value or a quote reads at a resolved ref: its excerpt, after the fields of its records that
     the excerpt leaves out (fields_text), such as a wiki save's edit summary. A block's or a span's excerpt is that
-    passage alone."""
+    passage alone. A JSON document's value is read whole, past its excerpt's cut (EXCERPT_MAX): a message as its words
+    (_message_blocks) and then its JSON, so a quote deep in a tool's output is at its place (bug hunt round 10, K3)."""
     excerpt = str(out.get("excerpt") or "")
+    if out.get("kind") == "pointer":
+        words = _join_blocks(out.get("blocks") or [])
+        if not words or excerpt.startswith(words):
+            return excerpt
+        return words if words.startswith(excerpt) else f"{words}\n{excerpt}"
     if out.get("kind") not in ("record", "range"):
         return excerpt
     return "\n".join(t for t in (fields_text(out), excerpt) if t)
@@ -987,10 +993,40 @@ def _resolve_page(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
             "blocks": [{"kind": "text", "text": text or excerpt}], "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}
 
 
+MESSAGE_KINDS = ("text", "tool_use", "tool_result", "thinking")  # the blocks a message of a JSON document reads as
+
+
+def _message_blocks(value: Any) -> list[dict[str, str]] | None:
+    """A JSON document's value that is one message of a transcript (transcripts.message_keys: a store of messages by id,
+    a chat export) whose words are content blocks, as the Transcript mode reads it: its words, its tool calls and their
+    results, its reasoning (transcripts.turn_blocks), each {kind, text}; a message of text blocks only, its words as
+    one block. None for any other value, and for a message whose words are one string, which reads as its fields. So an
+    example card quotes a tool call's command or its output, not the message's JSON cut after a line (bug hunt round 10,
+    K3)."""
+    from . import transcripts  # noqa: PLC0415 — transcripts imports this module lazily
+
+    if not isinstance(value, dict):
+        return None
+    try:
+        keys = transcripts.message_keys(value)
+        if keys is None:
+            return None
+        got = [{"kind": str(b["kind"]), "text": str(b.get("text") or "")} for b in transcripts.turn_blocks(value, keys)
+               if b.get("kind") in MESSAGE_KINDS]
+        if not got and isinstance(transcripts._get(value, keys["text"]), list):
+            words = str((transcripts.message_of(value) or {}).get("text") or "")
+            got = [{"kind": "text", "text": words}] if words.strip() else []
+    except Exception:  # noqa: BLE001 — a value the transcript reader cannot read reads as its JSON
+        return None
+    return got or None
+
+
 def _resolve_record(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
     """A JSON document's value or a CSV's row (records.read): {ref, kind, path, record, blocks, excerpt, meta}. meta
     holds the record's place `n` and the lines it spans (`line`..`end_line`), where the File browser opens it. A row
-    reads as its fields, so it has no blocks."""
+    reads as its fields, so it has no blocks; a value that is one message of a transcript has the message's blocks
+    (_message_blocks), and a string value is one text block of its words; its excerpt stays the value's text, as a
+    label reads it."""
     from . import records  # lazy (import cycle)
 
     path, rel = _locate(corpus_dir, p["path"])
@@ -1007,6 +1043,11 @@ def _resolve_record(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, 
         raise RefError(f"{rel} has no record #{fragment}", 404)
     kind = p["kind"]
     blocks: list[dict[str, str]] = [] if kind == "csvrow" else record_blocks(rec["record"])
+    if isinstance(rec["record"], str) and kind == "pointer":
+        # a string inside a document (a tool call's command, a message's words) reads as its words, not as JSON writes it
+        blocks = [{"kind": "text", "text": rec["record"]}]
+    elif any(b.get("kind") == "raw" for b in blocks):
+        blocks = _message_blocks(rec["record"]) or blocks
     meta: dict[str, Any] = {k: rec[k] for k in ("n", "line", "end_line") if rec.get(k) is not None}
     excerpt = rec["text"] or _dumps(rec["record"])
     return {"ref": ref, "kind": kind, "path": rel, "record": rec["record"], "blocks": blocks, "excerpt": excerpt[:EXCERPT_MAX],

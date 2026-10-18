@@ -31,7 +31,7 @@ import pandas as pd
 import playwright.async_api
 import pytest
 
-from app import card_check, cardrun, config, context, filters, headless, notebook, refs, render, tools, userconf
+from app import card_check, cardrun, config, context, filters, headless, notebook, records, refs, render, tools, userconf
 
 CORPUS = "mini"
 
@@ -354,3 +354,58 @@ async def test_a_quote_of_a_wiki_save_s_edit_summary_is_kept_shown_and_read_by_t
     lines = card_check._citations_text(c, cell).splitlines()
     line = next(x for x in lines if x.startswith("- revisions.jsonl#L2:"))
     assert line.startswith("- revisions.jsonl#L2: change_summary: undo the seed shop advert"), line
+
+
+async def test_an_example_of_a_json_store_s_message_shows_and_checks_the_words_it_quotes_from_a_tool_call(tmp_path):
+    """Bug hunt round 10, K3: a message of a JSON store of messages by id resolved as its JSON, so an example card showed
+    its id, its role and its content cut after one line, never the vote it quoted from a tool call's command or a tool's
+    output, and the card check, reading the start of the record, said the card never showed a vote. The message resolves
+    as the Transcript mode reads it (its tool call, its tool's output), so the card draws the words it quotes; a check
+    reads the whole message, past its excerpt's cut; a label still reads the record's JSON."""
+    root = tmp_path / "picnic-agents"
+    (root / "rowan").mkdir(parents=True)
+    note = "\n".join(f"line {i}: the tables, the blankets and the lemonade are packed." for i in range(80))
+    command = "cat >> PLAN.md <<'EOF'\n## Saturday\n\n`CHOICE: north gate` — Rowan\nEOF"
+    store = {"agent": "rowan", "messages": {
+        "m1": {"id": "m1", "role": "assistant", "content": [
+            {"type": "tool_use", "id": "toolu_a1", "name": "Bash", "input": {"command": command, "description": "Add my choice"}}],
+            "first_seen_ts": 1782799367.5},
+        "m2": {"id": "m2", "role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_a1", "content": f"{note}\n+`CHOICE: north gate` — Maya\n"}],
+            "first_seen_ts": 1782799370.5}},
+        "conversations": {"c1": {"id": "c1", "messages": ["m1", "m2"]}}}
+    (root / "rowan" / "chat.json").write_text(json.dumps(store, indent=2, ensure_ascii=False))
+    c = config.register_corpus(root, exact=True)["name"]
+    corpus = config.corpus_dir(c)
+    group = notebook.create_notebook(config.workspace_dir(c), "Your work", role="analyst")["id"]
+    deep = "`CHOICE: north gate` — Maya"
+    res = await tools.call(c, "add_card", {
+        "kind": "example", "question": "How did Rowan and Maya cast their choices?",
+        "refs": [{"ref": "rowan/chat.json#/messages/m1", "quote": "`CHOICE: north gate` — Rowan"},
+                 {"ref": "rowan/chat.json#/messages/m2", "quote": deep}],
+        "takeaway": f'Rowan cast his in a Bash call, and Maya\'s [["{deep}" shows in its output|rowan/chat.json#/messages/m2]].'},
+        actor="analyst", notebook=group, terminal=False)
+    assert not res.is_error, res.text
+    cid = res.text.split("card:", 1)[1].split()[0]
+    cell = notebook.get_cell(c, cid)
+    assert cell["payload"]["quotes"] == ["`CHOICE: north gate` — Rowan", deep], "each quote kept beside its message"
+
+    call = refs.resolve(corpus, "rowan/chat.json#/messages/m1")
+    assert [b["kind"] for b in call["blocks"]] == ["tool_use"] and "`CHOICE: north gate` — Rowan" in call["blocks"][0]["text"]
+    assert call["blocks"][0]["text"].startswith("Bash\n"), "the tool call under its tool's name, as the Transcript mode reads it"
+    output = refs.resolve(corpus, "rowan/chat.json#/messages/m2")
+    assert [b["kind"] for b in output["blocks"]] == ["tool_result"] and deep in output["blocks"][0]["text"]
+    assert deep not in output["excerpt"], "the quote sits past the excerpt's cut"
+    assert '"role": "user"' in records.read(corpus / "rowan" / "chat.json", "rowan/chat.json", "/messages/m2")["text"], \
+        "a label still reads the message's JSON"
+    value = refs.resolve(corpus, "rowan/chat.json#/messages/m1/content/0/input/command")
+    assert value["blocks"] == [{"kind": "text", "text": command}], "a string inside the message reads as its words, not as JSON"
+    from app import verify  # noqa: PLC0415
+
+    assert await verify._ref_check(corpus, "rowan/chat.json#/messages/m2", f'"{deep}"') is None, \
+        "a citation of words deep in the tool's output finds them at its place"
+    assert await verify._ref_check(corpus, "rowan/chat.json#/messages/m1/content/0/input/command",
+                                   '"`CHOICE: north gate` — Rowan"') is None
+    lines = card_check._citations_text(c, cell).splitlines()
+    line = next(x for x in lines if x.startswith("- rowan/chat.json#/messages/m2:"))
+    assert deep in line and len(line) < 600, line

@@ -39,7 +39,7 @@ import { bareCard, cardTag, cardWords, chipPlace, cid, claimFields, questionOf, 
 import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, FLAG, labelHex, paintLines, passageTint } from './paint'
-import { labelLinkStale, labelsOf, turnWords } from './model'
+import { examplePassages, labelLinkStale, labelsOf, turnWords } from './model'
 import { loadCards, queueCitations, rt } from './term'
 import type { AnswerComment } from './contracts'
 import { openInBrowser } from './offramp'
@@ -615,19 +615,43 @@ async function captionFocus(cx: Ctx, id: string, caption: string): Promise<Focus
 
 // ------------------------------------------------------------------------------------------------ a card
 
-/** A card's drawing data with what the check of its records found: an example's words, read from its places, with a
- *  line's fields its words leave out (`head`: a wiki save's edit summary); a database row's fields (lib.ts claimFields),
- *  those the card quotes or its takeaway cites from the row first, then those its question and takeaway name. */
+/** The record a ref names: a span's or a block's line (`<path>#L<n>`), else the ref itself (frontend canvas/quotes.ts
+ *  recordOf). */
+const recordRef = (ref: string): string => ref.replace(/(#L\d+)\.b\d+(?::c\d+-\d+)?$/, '$1')
+
+/** A card's drawing data with what the check of its records found: an example's words, read from its places, at the
+ *  passages it quotes (examplePassages; the refs of one record one example, every passage marked), with a line's fields
+ *  its words leave out (`head`: a wiki save's edit summary); a database row's fields, or a record kept as its JSON (lib.ts
+ *  claimFields), those the card quotes or its takeaway cites from the row first, then those its question and takeaway
+ *  name. */
 async function withQuotes(cx: Ctx, data: CardData, takeaway = ''): Promise<CardData> {
   if (data.kind !== 'example' || !data.examples?.length) return data
   const examples: CardExample[] = []
   const cited = citations(takeaway)
   const words = `${data.question} ${plainCites(takeaway)}`
-  for (const x of data.examples) {
-    const v = await cx.verdict(cid(`[[${x.ref}]]`))
+  const all = data.examples
+  const verdicts = await Promise.all(all.map(x => cx.verdict(cid(`[[${x.ref}]]`))))
+  // what each example quotes in its record: the quote add_card kept beside the ref, or a span's own words
+  const wants = all.map((x, n) => x.kept || (verdicts[n]?.kind === 'span' ? (verdicts[n]?.passage ?? '') : ''))
+  const done = new Set<number>()
+  for (const [n, x] of all.entries()) {
+    if (done.has(n)) continue
+    const v = verdicts[n]
     const row = v?.record
     // a line's fields its words leave out, such as a wiki save's edit summary, drawn before its words (bug hunt J6)
     const head = v?.fields?.length ? { head: v.fields } : {}
+    // the passages the card quotes, where the record's words hold them: a JSON document's message, a record kept as its
+    // JSON, a long line; marked, with the words around them under their part's key (a tool call's tool, a record's
+    // field), never the start of the record; the refs of one record (two spans of one line) one example, as the browser
+    // draws them (bug hunt round 10, K3). A database row has no words, and is drawn by its fields below.
+    const same = all.flatMap((y, j) => (j >= n && !done.has(j) && !y.quote && recordRef(y.ref) === recordRef(x.ref) ? [j] : []))
+    const got = v && !v.turn && !x.quote && wants[n] ? examplePassages(v, same.map(j => wants[j]!)) : null
+    if (got) {
+      const merged = got.found.map(i => same[i]!)
+      for (const j of merged) done.add(j)
+      examples.push({ ...x, ...(merged.length > 1 ? { ref: recordRef(x.ref) } : {}), quote: got.text, marks: got.marks, ...(got.key ? { key: got.key } : {}), ...head })
+      continue
+    }
     if (row) {
       const said = cited.filter(c => c.ref === x.ref && c.display !== null).map(c => c.display!)
       examples.push({ ...x, fields: claimFields(row, { quotes: [x.kept ?? '', x.quote, ...said].filter(Boolean), words }) })

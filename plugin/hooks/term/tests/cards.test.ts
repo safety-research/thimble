@@ -272,3 +272,66 @@ test('an example of a record whose text holds garbled control characters draws, 
   expect(drawn).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/)
   await ui.unmount()
 })
+
+test("an example of a JSON document's message draws the passage the card quotes from its tool call, on the citation's highlight, never the message's JSON (bug hunt round 10, K3)", { timeoutMs: 30_000 }, async ($, on) => {
+  // the card drew `{ "id": "m7", "role": "assistant", "content": [ { "type": "tool_use", …` cut after three rows
+  const w = world(on)
+  const ref = 'picnic/rowan_chat.json#/messages/m7'
+  const command = "cat >> NOTES.md <<'EOF'\n## Picnic, Saturday\n\n" + 'We weighed the park, the beach and the garden at length. '.repeat(8) + "\n\n`CHOICE: north gate` — Rowan\n\n(Maya brings the tables.)\nEOF"
+  const record = { id: 'm7', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_x1', name: 'Bash', input: { command, description: 'Add my choice' } }], first_seen_ts: 1782799367.69 }
+  const res = { ref, kind: 'pointer', path: 'picnic/rowan_chat.json', record, blocks: [{ kind: 'tool_use', text: `Bash\n${JSON.stringify({ command, description: 'Add my choice' }, null, 2)}` }], excerpt: JSON.stringify(record, null, 2), meta: { n: 7, line: 40, end_line: 52 } }
+  w.resolve[ref] = res
+  w.cells.x0vote00 = {
+    id: 'x0vote00', notebook: 'g1', kind: 'example', title: 'How did Rowan cast a choice?', labels: [], created_by: 'main', ts: '2026-10-06T10:00:00+00:00',
+    takeaway: `Rowan [[wrote "\`CHOICE: north gate\` — Rowan"|${ref}]] in a Bash call.`,
+    payload: { refs: [ref], quotes: ['`CHOICE: north gate` — Rowan'] },
+  }
+  await start($, w)
+  await turn($, w, 'x0vote00')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const client = (await ui.find({ type: 'Client', key: 'card-t0-x0vote00' })) as unknown as { props: { props: { card: Parameters<typeof cardLayout>[0] } } }
+  const lay = cardLayout(client.props.props.card, 100, -1).lines
+  const text = lay.map(l => l.map(x => x.s).join(''))
+  expect(text.join('\n')).not.toContain('"role"')
+  expect(text[0]).toMatch(/^● Bash {2}/)
+  // the passage on the highlight, over a row's break where it wraps
+  const lit = lay.map(l => l.filter(x => x.bg).map(x => x.s).join('')).filter(Boolean).join(' ')
+  expect(lit).toBe('`CHOICE: north gate` — Rowan')
+  await ui.unmount()
+})
+
+test("an example of a JSON lines record of no known shape draws its fields, not its JSON; two spans of one record each draw their own passage, marked (bug hunt round 10, K3)", { timeoutMs: 30_000 }, async ($, on) => {
+  // the card drew `“{ "record": "message", "index": 84, …` for each, and the record cited twice twice the same
+  const w = world(on)
+  const rec = (index: number, result: string) => ({ record: 'message', index, role: 'Assistant', type: 'ToolMessage', tool_name: 'terminal', tool_call: { session_name: 'garden', timeout: '20' }, tool_result: result })
+  const one = rec(84, '\nWelcome to the shed.\nError: the gate is locked for path 8443\n\nG_FAIL\n')
+  const two = rec(87, '\nWelcome to the shed.\nError: the gate is locked for path 8443\n\nG_LO_FAIL\nWelcome to the shed.\nError: the gate is locked for path 18080\n\nG_FAIL\n')
+  const raw = (r: unknown) => JSON.stringify(r, null, 2)
+  const span = (line: number, r: unknown, words: string) => {
+    const text = raw(r)
+    const a = text.lastIndexOf(words)
+    const ref = `shed/log.jsonl#L${line}.b0:c${a}-${a + words.length}`
+    w.resolve[ref] = { ref, kind: 'span', path: 'shed/log.jsonl', line, block: 0, start: a, end: a + words.length, record: r, blocks: [{ kind: 'raw', text }], excerpt: words, meta: {} }
+    return ref
+  }
+  w.resolve['shed/log.jsonl#L4'] = { ref: 'shed/log.jsonl#L4', kind: 'record', path: 'shed/log.jsonl', line: 4, record: one, blocks: [{ kind: 'raw', text: raw(one) }], excerpt: raw(one), meta: {} }
+  const refs = ['shed/log.jsonl#L4', span(7, two, 'path 8443'), span(7, two, 'path 18080')]
+  w.cells.x0shed00 = {
+    id: 'x0shed00', notebook: 'g1', kind: 'example', title: 'Which tool results say the gate is locked?', labels: [], created_by: 'main', ts: '2026-10-06T10:00:00+00:00',
+    takeaway: 'Two tool results say the gate is locked.', payload: { refs },
+  }
+  await start($, w)
+  await turn($, w, 'x0shed00')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const client = (await ui.find({ type: 'Client', key: 'card-t0-x0shed00' })) as unknown as { props: { props: { card: Parameters<typeof cardLayout>[0] } } }
+  const lay = cardLayout(client.props.props.card, 140, -1).lines
+  const text = lay.map(l => l.map(x => x.s).join(''))
+  expect(text.join('\n')).not.toContain('"record"')
+  expect(text[0]).toMatch(/^● tool_result {2}/)
+  // the two spans of one record one example, each passage on the highlight
+  expect(text.filter(t => t.startsWith('●'))).toHaveLength(2)
+  const lit = lay.flatMap(l => l.filter(x => x.bg).map(x => x.s))
+  expect(lit).toEqual(['path 8443', 'path 18080'])
+  expect(text.join('\n')).toContain('shed/log.jsonl line 7')
+  await ui.unmount()
+})

@@ -124,6 +124,11 @@ export type TermVerdict = {
   /** a line's record's fields of words its blocks leave out, as the server resolved them (`fields`: a wiki save's
    *  edit summary beside its page text), [key, words] */
   fields?: [string, string][]
+  /** the cited record's words by part, as an example card quotes them (model.ts wordsOf): [key, words], a tool call's
+   *  key its tool's name */
+  words?: [string, string][]
+  /** a span's own passage, as the server resolved it (its excerpt), which an example card shows with the words around it */
+  passage?: string
   card?: string
   column?: string
   row?: string
