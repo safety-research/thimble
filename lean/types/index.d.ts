@@ -70,8 +70,8 @@ export type Squeeze = {
 
 /** The chips' line of one message as the person works it: the picked chip, whether they type a stretch (and what
  *  they typed), a call running (and the frame of its turning glyph), a call that failed, and the new text writing
- *  itself in (`reveal.n` of its characters shown). */
-export type SqzUi = { focus: string; adding: boolean; running: { since: number } | null; error: string | null; tick: number; typing?: string; reveal?: { n: number; total: number } | null }
+ *  itself in (`reveal.n` of its characters shown), and the levels a change on its way goes to (`want`). */
+export type SqzUi = { focus: string; adding: boolean; running: { since: number } | null; error: string | null; tick: number; typing?: string; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null }
 
 /** The thimble line's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
  *  changed (it brightens for a moment). */

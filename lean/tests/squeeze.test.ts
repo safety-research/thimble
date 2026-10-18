@@ -295,3 +295,22 @@ test('a rewrite that cites a ref the original never cited shows it as plain word
   await writtenIn(clock)
   expect(textOf(await $.ui.render(view(TEXT)))).not.toContain('not in the original')
 })
+
+test('keys pressed while a rewrite is on its way add up: the chip shows where it goes at once, and only the last level waiting is written', async ($, on) => {
+  const w = world(on, ['<text>\nMedium: [6,543 saves](q1#day=2026-06-18@n) on June 18.\n</text>', '<text>\nJune 18: [6,543 saves](q1#day=2026-06-18@n).\n</text>'])
+  const clock = mock.clock(on)
+  await answered($, on, clock)
+  await ($ as Any).prompt.edit(edit('s'))
+  // three presses before the first call comes back: medium, short, one line
+  await ($ as Any).prompt.edit(edit('<'))
+  await ($ as Any).prompt.edit(edit('<'))
+  await ($ as Any).prompt.edit(edit('<'))
+  expect(textOf(await $.ui.render(view(TEXT)))).toContain('Length ●○○○ one line')
+  await clock.settle()
+  await clock.settle()
+  // the first call (medium) was on its way; short was passed over; one line came last
+  expect(w.calls.length).toBe(2)
+  expect(w.calls[1].prompt).toContain('- Length: one line')
+  expect(record(w).squeeze.at).toEqual({ length: 0 })
+  expect(record(w).shown).toBe('June 18: [6,543 saves](q1#day=2026-06-18@n).')
+})

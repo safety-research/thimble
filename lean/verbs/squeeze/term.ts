@@ -122,7 +122,7 @@ export type ChipsOpts = {
 export function chipsEl(els: Any, o: ChipsOpts): Any {
   const { Box, Button, Text } = els
   const c = colors(o.theme)
-  const chips = chipsOf(o.rec)
+  const chips = chipsOf(o.ui.want ? { ...o.rec, squeeze: { ...((o.rec as Any).squeeze || {}), at: o.ui.want } } : o.rec)
   const kids: Any[] = []
   chips.forEach((chip: Any, i: number) => {
     const picked = o.ui.focus === chip.id && !o.ui.adding
@@ -187,7 +187,8 @@ export async function squeezeKey($: Engine, row: string, k: string): Promise<'co
   }
   if (k === '<' || k === ',' || k === '>' || k === '.') {
     const chip = chips.find((x: Any) => x.id === ui.focus) || chips[0]
-    const at = stepAt(rec, chip.id, k === '<' || k === ',' ? -1 : 1)
+    // keys pressed while a change is on its way step from where it goes, so three presses are three levels
+    const at = stepAt(ui.want ? { ...rec, squeeze: { ...((rec as Any).squeeze || {}), at: ui.want } } : rec, chip.id, k === '<' || k === ',' ? -1 : 1)
     if (at) {
       await setUi($, row, { focus: chip.id, error: null })
       void setLevels($, row, at)
@@ -282,6 +283,8 @@ export async function fromBrowser($: Engine, q: { row: string; chip?: string; le
 /** Set the chips of a row to `at` and show that version: from the record when it was written before, else one call.
  *  Changes made while a call runs wait, and only the latest of them runs next. */
 export async function setLevels($: Engine, row: string, at: At): Promise<void> {
+  // the chips show where they go at once; the text follows
+  await setUi($, row, { want: at })
   const job = inflight.get(row)
   if (job) {
     job.want = { at }
@@ -298,7 +301,7 @@ export async function setLevels($: Engine, row: string, at: At): Promise<void> {
     }
   } finally {
     inflight.delete(row)
-    await setUi($, row, { running: null })
+    await setUi($, row, { running: null, want: null })
   }
 }
 
