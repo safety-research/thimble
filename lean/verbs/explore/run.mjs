@@ -27,6 +27,7 @@
 //     draw,     { run(object, { w, h, state }) -> drawing (sandboxed) }
 //     skill,    the path of this verb's SKILL.md, for the note to Claude
 //     open,     true: open any object that has a program as it is, even one that is not an explore view
+//     check,    a command that draws a saved view as text (cli.mjs), for Claude to check what it made
 //   }
 //   run(ctx) -> { object?, view?, text?, note? }
 //     object  the object to show (an explore object Claude wrote earlier counts)
@@ -106,8 +107,9 @@ export function request(ctx, existing) {
     `The person pressed x (Explore) on ${what}. Make it a view they can explore: read ${skill} first.`,
     `Reuse the queries you already ran; run a new \`lean q\` only where a mark needs rows you have not kept.`,
     `Save it with \`lean save ${name} --from FILE\`, with "verb": "explore"${obj ? ` and "of": "${obj.id}"` : ''} in the JSON.`,
+    ctx.check ? `Check that it draws, as the person will see it, with \`${ctx.check} ${name}\`.` : '',
     `Then say in one line what the person can turn or open. Do not repeat the answer.`,
-  ].join(' ')
+  ].filter(Boolean).join(' ')
 }
 const firstLine = s => { const t = String(s).trim().split('\n')[0].replace(/\s+/g, ' '); return t.length > 80 ? t.slice(0, 79) + '…' : t }
 
@@ -123,16 +125,7 @@ export async function press(view, key, ctx) {
   const w = ctx.w || 100
   if (k === 'left' || k === 'right' || k === 'shift+left' || k === 'shift+right') {
     const c = view.region && knobOf(view.drawing, view.region) ? view.region : null
-    const step = (k.endsWith('left') ? -1 : 1) * (k.startsWith('shift') ? 10 : 1)
-    const state = turn(view.drawing, view.state, c, step)
-    if (JSON.stringify(state) === JSON.stringify(view.state)) return view
-    const before = view.region ? rectOf(view.drawing, view.region, w) : null
-    const drawing = await ctx.draw.run(view.object, { w, h: ctx.h || 24, state })
-    const next = Object.assign({}, view, { drawing, state: drawing.state || state })
-    // the selection stays on its id; a part that is gone hands it to the part now in its place
-    if (next.region && !regionOf(drawing, next.region, w)) next.region = before ? regionAtRect(drawing, before, w) : null
-    if (view.rows) next.rows = next.region ? await rowsFor(drawing, next.region, ctx.kernel) : null
-    return next
+    return turnKnob(view, c, (k.endsWith('left') ? -1 : 1) * (k.startsWith('shift') ? 10 : 1), ctx)
   }
   if (k === 'tab' || k === 'down' || k === 'shift+tab' || k === 'up') {
     const grid = renderTerm(view.drawing, { w })
@@ -154,9 +147,27 @@ export async function press(view, key, ctx) {
   return view
 }
 
+/**
+ * Turn the knob `id` (the first when null) `step` places and draw again. The selection stays where it was, so a
+ * click on a knob's arrows does not take it from the part whose rows are open; a part that is gone hands the
+ * selection to the part now in its place, and open rows are read again for it.
+ */
+export async function turnKnob(view, id, step, ctx) {
+  const w = ctx.w || 100
+  const state = turn(view.drawing, view.state, id, step)
+  if (JSON.stringify(state) === JSON.stringify(view.state)) return view
+  const before = view.region ? rectOf(view.drawing, view.region, w) : null
+  const drawing = await ctx.draw.run(view.object, { w, h: ctx.h || 24, state })
+  const next = Object.assign({}, view, { drawing, state: drawing.state || state })
+  if (next.region && !regionOf(drawing, next.region, w)) next.region = before ? regionAtRect(drawing, before, w) : null
+  if (view.rows) next.rows = next.region && !knobOf(drawing, next.region) ? await rowsFor(drawing, next.region, ctx.kernel) : null
+  return next
+}
+
 /** The keys this view answers, for the hint row: [[keys, what]]. Only what applies is listed. */
 export function keys(view) {
   const out = []
+  if (view.drawing.error) return out
   const knobs = view.drawing.controls || []
   if (knobs.length) {
     const sel = view.region && knobOf(view.drawing, view.region)

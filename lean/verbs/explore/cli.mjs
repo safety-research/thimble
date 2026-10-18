@@ -32,7 +32,7 @@ export function nodeCtx(root, o = {}) {
     load: async name => objects().find(x => x.id === name || x.id.replace(/^\d+-/, '') === name) || null,
   }
   const draw = { run: async (object, opts) => runProgram(object, opts) }
-  return { kernel, draw, w: o.w || 100, h: o.h || 24, skill: join(HERE, 'SKILL.md') }
+  return { kernel, draw, w: o.w || 100, h: o.h || 24, skill: join(HERE, 'SKILL.md'), check: `node ${join(HERE, 'cli.mjs')} --text` }
 }
 
 /** Lines of segments as text with 24-bit color, or plain. */

@@ -11,7 +11,7 @@ import { renderSvg } from '../../../draw/svg.js'
 import { gridText, renderTerm } from '../../../draw/term.js'
 import { nodeCtx, toAnsi } from '../cli.mjs'
 import { applies } from '../hint.mjs'
-import { countRows, explorable, explorationOf, press, request, rowsFor, run } from '../run.mjs'
+import { countRows, explorable, explorationOf, keys, press, request, rowsFor, run, turnKnob } from '../run.mjs'
 import { viewLines } from '../view.mjs'
 
 const HERE = fileURLToPath(new URL('..', import.meta.url))
@@ -53,6 +53,8 @@ test('x on something with no explore view asks Claude to write one, in a note th
   assert.match(r.note, /read \/x\/lean\/verbs\/explore\/SKILL\.md/)
   assert.match(r.note, /lean save explore-saves-per-day --from FILE/)
   assert.match(r.note, /"of": "02-saves-per-day"/)
+  assert.doesNotMatch(r.note, /Check that it draws/)
+  assert.match((await run(ctxOf(plain, fakeKernel([plain]), { check: 'node cli.mjs --text' }))).note, /Check that it draws, as the person will see it, with `node cli\.mjs --text explore-saves-per-day`/)
   const reply = await run(ctxOf(null, fakeKernel(), { reply: { text: 'Jun 18 had the most saves: 6,543 of 14,591.\nMore.' } }))
   assert.match(reply.note, /your reply that begins "Jun 18 had the most saves: 6,543 of 14,591\."/)
   // once Claude wrote one, x on the same object opens it at once
@@ -114,6 +116,10 @@ test('scrubbing a run keeps the selection on the cursor, and its rows are that s
   assert.equal(view.state.step, 61)
   view = await press(view, 'shift+right', ctx)
   assert.equal(view.state.step, 64, 'scrubbing stops at the last step')
+  // turning a knob by its id (a click on its ◂) leaves the selection, and the rows, on the cursor
+  view = await turnKnob(view, 'step', -1, ctx)
+  assert.equal(view.region, 'cursor')
+  assert.deepEqual(view.rows.refs, DATA[1].steps[62]._rows)
 })
 
 test('rows: refs come from the part\'s meta or its cite; row sets count without the kernel', async () => {
@@ -132,6 +138,11 @@ test('rows: refs come from the part\'s meta or its cite; row sets count without 
   const c = await rowsFor(d, 'c2', kernel)
   assert.equal(c.note, 'this part names no rows')
   assert.ok(explorable(d))
+  // a program that throws offers no keys, and its error goes back to Claude as a note
+  const bad = { id: '09-explore-bad', version: 1, verb: 'explore', program: 'return data.nope.x', data: {} }
+  const r = await run(ctxOf(bad, fakeKernel()))
+  assert.deepEqual(keys(r.view), [])
+  assert.match(r.note, /09-explore-bad failed to draw: TypeError: .*Fix its program and save it again under the same name/)
 })
 
 test('the hint says what x would do for this object, or nothing', () => {

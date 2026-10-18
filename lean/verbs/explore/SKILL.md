@@ -56,7 +56,9 @@ it again under the same name and keep the region ids, so the selection survives.
    `{"title": "...", "verb": "explore", "of": "<the object's id, if there is one>", "data": {"days": "q1"}}`.
 3. `lean save explore-<name> --from spec.json --program view.js`. Fix each problem that its output lists, then save
    again.
-4. Tell the person in one line what they can turn or open. Do not repeat the answer.
+4. Look at it as the person will: `node lean/verbs/explore/cli.mjs explore-<name> --text` prints the view, and
+   `--keys "right enter"` presses keys. A program that throws draws only its error.
+5. Tell the person in one line what they can turn or open. Do not repeat the answer.
 
 The view shows under your reply. The person turns knobs with ◂ ▸, moves between parts with tab, and reads rows with
 ↵. You see none of this unless they ask you something.
