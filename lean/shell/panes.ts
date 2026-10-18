@@ -39,12 +39,15 @@ export type Inst = {
   size: Size | null
   got: Record<string, unknown>
   asked: Map<string, number>
+  tries: Map<string, number>
   gen: Record<string, number>
   ask: Any | null
   data: { key: string; value: Any } | null
 }
 const VER = { plugin: 'thimble-lean', key: 'panever' } as const
 const insts = new Map<string, Inst>()
+/** A want with no answer after this long is asked again. */
+const WANT_AGAIN_MS = 5000
 let theme: () => 'dark' | 'light' = () => 'dark'
 
 const kit = (): Any => (globalThis as Any).DrawKit
@@ -66,7 +69,7 @@ export function instance(name: string, args: Record<string, unknown> = {}): Inst
   const id = keyOf(name, args)
   let i = insts.get(id)
   if (!i) {
-    i = { id, name, args: { ...args }, state: {}, loaded: false, drawing: null, size: null, got: {}, asked: new Map(), gen: {}, ask: null, data: null }
+    i = { id, name, args: { ...args }, state: {}, loaded: false, drawing: null, size: null, got: {}, asked: new Map(), tries: new Map(), gen: {}, ask: null, data: null }
     insts.set(id, i)
   } else i.args = { ...i.args, ...args }
   return i
@@ -135,16 +138,32 @@ export async function paneRun($: Engine, name: string, args: Record<string, unkn
   const drawing = kit().run(pane.program, inst.data.value, { w: size.w, h: size.h, state: inst.state, event, mode: 'pane', surface: 'terminal', got: inst.got, title: pane.title, id: name })
   if (!drawing?.error) inst.drawing = drawing
   // what the program wants that is not in hand: read once, outside the drawing, and drawn again with it
-  for (const w of wantsOpen(drawing, inst.got)) {
-    // asked once; asked again only when no answer came for a while (a read that died with a reload of the module)
+  const open = wantsOpen(drawing, inst.got)
+  const now = open.length ? await $.clock.now() : 0
+  for (const w of open) {
+    // asked once; asked again when no answer came for a while (a read lost with an abandoned drawing or a reload of
+    // the module), and after three asks with no answer the program gets the failure, which it says in one line
     const at = inst.asked.get(w.key)
-    if (at != null && Date.now() - at < 15000) continue
-    inst.asked.set(w.key, Date.now())
+    if (at != null && now - at < WANT_AGAIN_MS) continue
+    const tries = (inst.tries.get(w.key) ?? 0) + 1
+    inst.tries.set(w.key, tries)
+    inst.asked.set(w.key, now)
+    if (tries > 3) {
+      inst.got = { ...inst.got, [w.key]: { error: 'no answer came after three tries; close this and open it again', problem: 'no answer came after three tries; close this and open it again' } }
+      $.clock.after(0, () => { void redraw($, inst) })
+      continue
+    }
     $.clock.after(0, () => {
       void (async () => {
-        try { inst.got = { ...inst.got, [w.key]: await paneWant($, inst.name, inst.args, w.request) } } catch (err) { inst.got = { ...inst.got, [w.key]: { error: String((err as Error)?.message || err).slice(0, 200) } } }
+        let v: unknown
+        try { v = await paneWant($, inst.name, inst.args, w.request) } catch (err) { v = { error: String((err as Error)?.message || err).slice(0, 200) } }
+        inst.got = { ...inst.got, [w.key]: v === undefined ? { error: 'the host gave no answer' } : v }
         await redraw($, inst)
       })()
+    })
+    // a drawing again a while later if no answer came, so the want is asked again even when nothing else redraws
+    $.clock.after(WANT_AGAIN_MS + 200, () => {
+      if (!Object.prototype.hasOwnProperty.call(inst.got, w.key)) void redraw($, inst)
     })
   }
   return drawing
