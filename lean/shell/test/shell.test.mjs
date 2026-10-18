@@ -59,10 +59,10 @@ test('the hint row picks the verbs the object names, then those whose hint.mjs h
   assert.deepEqual(none.verbs.filter(v => v.picked), [])
 })
 
-test('the plugin\'s verbs are map, squeeze, explore and trace, on m, s, x and t, in that order', async () => {
+test('the plugin\'s verbs are map, squeeze, atlas, explore and trace, on m, s, a, x and t, in that order', async () => {
   const { verbs, problems } = listVerbs()
   assert.deepEqual(problems, [])
-  assert.deepEqual(verbs.map(v => [v.key, v.name]), [['m', 'map'], ['s', 'squeeze'], ['x', 'explore'], ['t', 'trace']])
+  assert.deepEqual(verbs.map(v => [v.key, v.name]), [['m', 'map'], ['s', 'squeeze'], ['a', 'atlas'], ['x', 'explore'], ['t', 'trace']])
   // a chart of numbers whose rows keep their source rows: explore and trace say what they would do for it
   const object = { id: '01-x', title: 'Saves', data: { days: [{ day: '2026-06-18', n: 3, _rows: ['r.jsonl#L1-3'] }] }, lineage: { bindings: [{ at: '/days', ref: 'q1' }] } }
   const picked = (await verbsFor(object)).verbs.filter(v => v.picked)
