@@ -38,6 +38,15 @@ part is, such as `day-06-18`, `run-sgd-b32-lr5.7` or `flow-timezone-fixed`, not 
 link to the browser and a question about the part all carry this id. Keep the ids when you change the program, so
 a selection still finds its part.
 
+**Rows of the data keep their lineage.** Each row the kernel bound into `data` knows its source rows. A bar item, a
+table row or a region meta made from such a row (the row, `{ ...row }`, or `{ row: d }`) is a part that opens those
+rows, with real examples spread across them. A part with none is matched to the rows whose words it shows.
+
+**Answer what the person does.** `k.on(name, fn, label)` takes a key (`'j'`, `'space'`), a press on a part
+(`'press:<id>'`, or `onPress` in a region's meta) or a drag in the browser (`'brush'`, from `k.plot(…, { brush:
+'id' })` or `c.brush`). `fn(event)` returns the new state; the program runs again and reads it in `k.state`. The
+terminal and the browser keep the same state. A knob is the same thing with ◂ ▸ built in.
+
 **Cite what you state.** A number the person reads should say where it came from:
 `k.cite(id, { text, source, query, rows, more, note })`. Give the query you ran and a few of the real rows. When
 the person would want to see real records, attach them: `k.examples(id, { label, records, total, fmt })`. A region
@@ -88,6 +97,14 @@ Values:
 - Conveniences: `k.bars(items, { max, labelW })` for rows of label, bar, value and note; `k.legend(items)`;
   `k.dots(n, total)`.
 
+Interaction:
+
+- `k.on(name, fn, label)`, `k.state`, and `k.event` (what this run answers, or null).
+- In a handler: `k.set(key, value)`, and `k.ask({ label, rows, region, text })`, which sends the person's next
+  question (or `text`, at once) to the card's thread about that selection.
+- `k.rows(x)`: the refs of rows of the data, for an ask or a cite. `k.title`, `k.id`, `k.surface` (`'terminal'` or
+  `'browser'`).
+
 Knobs:
 
 - `k.knob(id, { values, at, label, fmt })` returns the value the person set, else `at` (else the first value).
@@ -122,7 +139,8 @@ The canvas, `const c = k.canvas(w, h)`, in cells (x across, y down):
 - `c.box(x, y, w, h, { title, tone })`.
 - `c.px(x, y, tone)` and `c.line(x0, y0, x1, y1, tone)` work in half cells down (y from 0 to 2h−1).
 - `c.bar(x, y, w, value, max, tone)` and `c.spark(x, y, values, { w, min, max, tone })`.
-- `c.region(id, x, y, w, h, meta)`.
+- `c.region(id, x, y, w, h, meta)`, and `c.brush(id, x, y, w, h, { min, max })`: an area a browser drag reads as a
+  range from min to max.
 
 Other: `k.w` and `k.h` (the room in columns and rows), `k.fmt(n, { dp, pct, sign, compact })` for numbers people
 read, `k.len(s)` for a string's width in columns.
@@ -178,6 +196,7 @@ return k.frame(c, { title: 'map', right: `${data.runs} runs` })
 
 ## When something goes wrong
 
-A program that throws draws a red frame with the error and its line, in place of the object. Warnings, such as a
-region with no id or a link to an id nothing defines, come back with the drawing. The draw tool shows you the cells
+A program that throws, runs past its time or draws too much shows one line under the card's title: the error, its
+line, and what to fix. Warnings, such as a region with no id or a link to an id nothing defines, come back with the
+drawing. The draw tool shows you the cells
 the person sees, the region ids, the warnings, and anything cut to fit, so you can check what you made.
