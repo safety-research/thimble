@@ -22,6 +22,9 @@
 //   ctx.model      {complete(request), fork(request)}: one quiet call to the session's own model, as $.model.complete
 //                  (no history) and $.model.fork (over the conversation) answer it: {isAnswered, text, usage, reason}
 //   ctx.w          the columns the person's terminal has for it
+//   ctx.message    for a verb of the message row (v, s, a): the message's record (CONTRACT 1: its text, marks, glosses
+//                  and the verbs the observer lit); ctx.object is then the message as an object ({id, text, row}).
+//   ctx.row, ctx.session   the message's row key and the session's id
 //
 // run(ctx) returns any of:
 //   object  an object to show: a spec this runner saves with `lean save` ({name?, title, program, data, ...}; a
@@ -125,6 +128,10 @@ export async function runVerb(word, input, { dir, lean } = {}) {
     draw: { runProgram, renderTerm, renderSvg, gridText },
     model: modelFor(input.answers, need),
     w: Number(input.w) || 96,
+    // a verb of the message row: the message's record (CONTRACT 1), its row key and the session
+    message: input.message || null,
+    row: input.row || null,
+    session: input.session || null,
   }
   let out
   try {

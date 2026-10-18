@@ -22,11 +22,16 @@
 // object's program runs only in the drawing contract's sandbox.
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ObjRef, Ran, Said, Sel } from '../types'
+import type { MsgRecord, ObjRef, Ran, Said, Sel, Tray, TrayFrame } from '../types'
 import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, regionOfKey, selectable } from './cells'
+import { cardKind, explainerCard, sourceCard } from './cards.js'
+import { newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { chainWords, isRef, objectRefs, rankRow, recordRefs, regionMeta, regionRefs } from './object.js'
+import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
+import { messageEl, trayEl, verbLineEl, verbRowEl } from './view'
+import type { RowVerb } from './view'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,8 +52,17 @@ const SAID = { plugin: 'thimble-lean', key: 'said' } as const
 const NOTES = { plugin: 'thimble-lean', key: 'notes' } as const
 const WHERE = { plugin: 'thimble-lean', key: 'where' } as const
 const RANKED = { plugin: 'thimble-lean', key: 'ranked' } as const
+const MSG = { plugin: 'thimble-lean', key: 'msg' } as const
+const MSGROWS = { plugin: 'thimble-lean', key: 'msgrows' } as const
+const TRAY = { plugin: 'thimble-lean', key: 'tray' } as const
+const PICK = { plugin: 'thimble-lean', key: 'pick' } as const
+const SELROW = { plugin: 'thimble-lean', key: 'selrow' } as const
+const ANSWER = { plugin: 'thimble-lean', key: 'answer' } as const
+const CARDREADY = { plugin: 'thimble-lean', key: 'cardready' } as const
+const RUNNING = { plugin: 'thimble-lean', key: 'running' } as const
+const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
 
-const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
+const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
 const SAVED = /^saved (\S+) v(\d+): \S+/gm
 const rowKey = (id: string) => String(id).slice(0, 24)
@@ -65,10 +79,16 @@ const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
 let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[] } | null = null
 let theme: 'dark' | 'light' = 'dark'
-let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string } } | null = null
+let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string }; scope?: Record<string, unknown> } | null = null
 let server: { base: string; root: string } | null = null
 let serverStarting: Promise<{ base: string } | { problem: string }> | null = null
 let shown: { file: string; under: Record<string, Placed[]> } | null = null
+// the message layer's memory: the records' folder and index, the tray's drawn cards, the verb key that opened a line
+let msgFiles: { session: string; dir: string | null; index: Any[]; pending: Set<string>; loaded: boolean } | null = null
+const cards = new Map<string, CardDrawn>()
+const cardPending = new Map<string, Promise<CardDrawn>>()
+let keyOpened: { key: string; at: number } | null = null
+type CardDrawn = { title: string; right: string; kind: 'cite' | 'gloss' | 'spark'; grids: Any[] | null; links: { id: string; ref: string; label: string }[]; problem?: string | null }
 
 // ------------------------------------------------------------------------------------------------ objects
 
@@ -204,6 +224,14 @@ async function setUnder($: Engine, at: string, list: Placed[]): Promise<void> {
   await $.state.set({ ...UNDER, id: at }, list)
   for (const r of list) await $.state.set({ ...WHERE, id: r.id }, at)
   try {
+    // the message's record names the objects drawn under it
+    const rec = (await $.state.get({ ...MSG, id: at })).value as MsgRecord | null | undefined
+    const ids = list.map(r => r.id)
+    if (rec && JSON.stringify(rec.objects) !== JSON.stringify(ids)) await saveRecord($, { ...rec, objects: ids })
+  } catch {
+    // the drawing holds; the record catches up at its next write
+  }
+  try {
     const s = await shownNow($)
     s.under[at] = list
     await $.fs.write(s.file, JSON.stringify({ under: s.under }))
@@ -324,15 +352,6 @@ async function openCite($: Engine, ref: string | null, label: string): Promise<v
   citeLabels.set(ref, label)
   await $.ui.open({ id: PANE, title: 'citation', focus: true })
   await resolveRefs($, root, [ref])
-}
-
-/** The values a reply cites, listed in the detail view: each a press from its rows. */
-async function openCites($: Engine, cites: { ref: string; label: string }[]): Promise<void> {
-  const root = await rootHere($)
-  if (!root) { $.ui.toast('no thimble/ folder here to resolve these citations'); return }
-  const last = (await $.state.get(LAST)).value
-  await $.state.set(SEL, { id: last?.id ?? '', v: last?.v ?? null, root, region: null, ex: 0, all: false, cites: cites.slice(0, 200) })
-  await $.ui.open({ id: PANE, title: 'cited values', focus: true })
 }
 
 /** One call a verb made to the model, made here: the verb's Node child has no $. */
@@ -512,6 +531,460 @@ async function openBrowser($: Engine, sel: Sel): Promise<string> {
   return `No browser opened here. The page: ${url}`
 }
 
+// ------------------------------------------------------------------------------------------------ the message layer
+//
+// Every row the shell draws has a line in thimble/messages/<session>/index.jsonl, and each of Claude's messages a
+// record, <row>.json (CONTRACT 1): its words, the marks in them, the verbs the observer lit and the objects drawn under
+// it. The records live in the folder under analysis, so the browser's page server reads the same; a session whose
+// folder has no thimble/ yet keeps them in memory and writes them once lean has made one.
+
+/** The records' folder of this session: <root>/thimble/messages/<session>, or null while there is no root. */
+async function messagesDir($: Engine): Promise<{ session: string; dir: string | null }> {
+  const session = String(await $.session.id())
+  const root = await rootHere($)
+  return { session, dir: root ? `${root.replace(/\/+$/, '')}/thimble/messages/${safe(session)}` : null }
+}
+
+/** The index and folder of this session, read once per load of the module (a resumed session finds its own). */
+async function msgFilesNow($: Engine): Promise<NonNullable<typeof msgFiles>> {
+  const { session, dir } = await messagesDir($)
+  if (msgFiles && msgFiles.session === session) {
+    if (!msgFiles.dir && dir) {
+      // a root appeared (lean made thimble/): everything kept in memory is written now
+      msgFiles.dir = dir
+      msgFiles.pending.add('index')
+      for (const row of ((await $.state.get(MSGROWS)).value ?? []) as string[]) msgFiles.pending.add(row)
+    }
+    return msgFiles
+  }
+  msgFiles = { session, dir, index: [], pending: new Set(), loaded: false }
+  if (dir) {
+    try {
+      if (await $.fs.exists(`${dir}/index.jsonl`)) {
+        msgFiles.index = String(await $.fs.read(`${dir}/index.jsonl`)).split('\n').filter(Boolean).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+        const rows = msgFiles.index.filter(x => x.kind === 'assistant').map(x => String(x.row))
+        const held = ((await $.state.get(MSGROWS)).value ?? []) as string[]
+        if (rows.length) await $.state.set(MSGROWS, [...new Set([...rows, ...held])])
+      }
+    } catch {
+      // an index it cannot read: this session's rows start a new one
+    }
+  }
+  msgFiles.loaded = true
+  return msgFiles
+}
+
+/** Writes what waits: the index and each record that changed. A failure leaves them waiting for the next write. */
+async function flushMessages($: Engine): Promise<void> {
+  const f = await msgFilesNow($)
+  if (!f.dir || !f.pending.size) return
+  const todo = [...f.pending]
+  f.pending.clear()
+  for (const what of todo) {
+    try {
+      if (what === 'index') await $.fs.write(`${f.dir}/index.jsonl`, f.index.map(x => JSON.stringify(x)).join('\n') + '\n')
+      else {
+        const rec = (await $.state.get({ ...MSG, id: what })).value
+        if (rec) await $.fs.write(`${f.dir}/${safe(what)}.json`, JSON.stringify(rec, null, 1))
+      }
+    } catch {
+      f.pending.add(what)
+    }
+  }
+}
+
+/** One row of the transcript in the index, once. */
+async function indexRow($: Engine, line: Record<string, unknown>): Promise<void> {
+  const f = await msgFilesNow($)
+  if (f.index.some(x => x.row === line.row)) return
+  f.index.push(line)
+  f.pending.add('index')
+}
+
+/** A record kept: in $.state for the drawing, and on disk for the browser and a resumed session. */
+export async function saveRecord($: Engine, rec: MsgRecord): Promise<void> {
+  await $.state.set({ ...MSG, id: rec.row }, rec)
+  const f = await msgFilesNow($)
+  f.pending.add(rec.row)
+  await flushMessages($)
+}
+
+/** A record: this session's, else the one a resumed session left on disk. */
+async function recordNow($: Engine, row: string): Promise<MsgRecord | null> {
+  const held = (await $.state.get({ ...MSG, id: row })).value as MsgRecord | null | undefined
+  if (held) return held
+  const f = await msgFilesNow($)
+  if (!f.dir) return null
+  try {
+    const file = `${f.dir}/${safe(row)}.json`
+    if (await $.fs.exists(file)) return JSON.parse(String(await $.fs.read(file))) as MsgRecord
+  } catch {
+    // a record it cannot read: the message is drawn from its words
+  }
+  return null
+}
+
+/** The values of each sparkline: the column of the query's output, read from its record, in its row order. */
+async function withSparkValues($: Engine, rec: MsgRecord): Promise<MsgRecord> {
+  if (!rec.marks.some(m => m.kind === 'spark' && !Array.isArray(m.values))) return rec
+  const root = await rootHere($)
+  if (!root) return rec
+  const marks = []
+  for (const m of rec.marks) {
+    if (m.kind !== 'spark' || Array.isArray(m.values)) { marks.push(m); continue }
+    const s = seriesRef(m.ref)
+    let values: number[] | null = null
+    let problem: string | undefined
+    try {
+      const q = JSON.parse(String(await $.fs.read(`${root}/thimble/queries/${s!.query}.json`)))
+      const table = Array.isArray(q.table) ? q.table : []
+      if (!table.length || !(s!.col in table[0])) problem = `${s!.query}'s output has no column ${s!.col}`
+      else values = table.map((r: Any) => (typeof r[s!.col] === 'number' ? r[s!.col] : Number(r[s!.col]))).map((x: number) => (Number.isFinite(x) ? x : 0))
+    } catch (err) {
+      problem = `no query ${s?.query} to draw: ${String((err as Error)?.message || err).slice(0, 120)}`
+    }
+    marks.push({ ...m, values, ...(problem ? { problem } : {}) })
+  }
+  return { ...rec, marks }
+}
+
+/** The message's record at this row, as a drawing reads it: kept, else made from its words (no write here). */
+async function drawnRecord($: Engine, at: string, text: string): Promise<MsgRecord> {
+  const kept = await recordNow($, at)
+  return recordFor(kept, { row: at, session: String(await $.session.id()), text }) as MsgRecord
+}
+
+/** The verbs of the row, as the registry lists them: those whose verb.json says `"row": true`, in their `order`. */
+async function rowVerbs($: Engine): Promise<RowVerb[]> {
+  const held = (await $.state.get(ROWVERBS)).value as RowVerb[] | null | undefined
+  if (held) return held
+  return [{ key: 'v', name: 'visualize' }, { key: 's', name: 'squeeze' }]
+}
+
+async function loadRowVerbs($: Engine): Promise<void> {
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'list'], { timeoutMs: 30000 })
+  const list = JSON.parse(r.stdout).verbs as Any[]
+  const row = list.filter(v => v.row === true && v.key).sort((a, b) => (Number(a.order ?? 1e6) - Number(b.order ?? 1e6))).map(v => ({ key: String(v.key), name: String(v.name), ...(v.color ? { color: v.color } : {}) }))
+  await $.state.set(ROWVERBS, row)
+}
+
+/** The rows that draw a verb row, oldest first, and the message the keys act on: the one picked, else the latest. */
+async function actingRow($: Engine): Promise<string | null> {
+  const sel = (await $.state.get(SELROW)).value as string | null | undefined
+  if (sel) return sel
+  return ((await $.state.get(ANSWER)).value as string | null | undefined) ?? null
+}
+
+/** Every mark position of this session's messages, in reading order. */
+async function allMarks($: Engine): Promise<{ row: string; i: number }[]> {
+  const rows = ((await $.state.get(MSGROWS)).value ?? []) as string[]
+  const msgs: { row: string; marks: unknown[] }[] = []
+  for (const row of rows) {
+    const rec = await recordNow($, row)
+    if (rec?.marks?.length) msgs.push({ row, marks: rec.marks })
+  }
+  return markOrder(msgs)
+}
+
+/** Open the tray on a mark of a message (a press on it, or ] and [): its message becomes the one the keys act on. */
+async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): Promise<void> {
+  let rec = await recordNow($, row)
+  if (!rec && drawn) {
+    // a message drawn from its words alone (a resumed session with no record): its record is kept now
+    rec = drawn
+    await saveRecord($, drawn)
+    const rows = ((await $.state.get(MSGROWS)).value ?? []) as string[]
+    if (!rows.includes(row)) await $.state.set(MSGROWS, [...rows, row])
+  }
+  const m = rec?.marks?.[i]
+  if (!m) return
+  await $.state.set(PICK, null)
+  await $.state.set(TRAY, trayOpen({ row, i }) as Tray)
+  const answer = (await $.state.get(ANSWER)).value
+  await $.state.set(SELROW, row === answer ? null : row)
+  // a gloss opened: the observer's backoff for glosses starts over
+  if (m.kind === 'gloss') await $.store.set('observer.glossUnopened', 0)
+}
+
+async function stepMark($: Engine, dir: number): Promise<void> {
+  const list = await allMarks($)
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  const next = trayStep(list, trayBase(tray), dir)
+  if (next) await openMark($, next.row, next.i)
+  else $.ui.toast('No marks yet: citations and glosses in Claude\'s replies open here.')
+}
+
+async function closeTray($: Engine): Promise<void> {
+  await $.state.set(TRAY, null)
+}
+
+/** A mark inside the card shown (a nested citation): its card over this one. */
+async function openLink($: Engine, id: string): Promise<boolean> {
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  const frame = trayTop(tray) as TrayFrame | null
+  if (!frame) return false
+  const ck = await cardKey($, frame)
+  const drawn = [...cards.entries()].find(([c]) => c.startsWith(`${ck}|`))?.[1]
+  const link = drawn?.links.find(l => l.id === id)
+  if (!link) return false
+  await $.state.set(TRAY, trayPush(tray, { ref: link.ref, label: link.label, kind: 'cite' }) as Tray)
+  return true
+}
+
+/** The cache key of a frame's card. */
+async function cardKey($: Engine, frame: TrayFrame): Promise<string> {
+  if (frame.row == null) return `ref|${frame.ref}`
+  const rec = await recordNow($, frame.row)
+  const m = rec?.marks?.[frame.i!]
+  if (!m) return `none|${frame.row}|${frame.i}`
+  if (m.kind === 'gloss') return `gloss|${JSON.stringify(rec!.glosses?.[m.gloss!] ?? {})}`
+  return `ref|${m.ref}`
+}
+
+/** A frame's card as the tray draws it: ready, or null with the work started outside the drawing. */
+async function cardNow($: Engine, frame: TrayFrame, w: number): Promise<CardDrawn | null> {
+  const key = `${await cardKey($, frame)}|${w}`
+  const hit = cards.get(key)
+  if (hit) return hit
+  await $.state.get({ ...CARDREADY, id: key })
+  if (!cardPending.has(key)) {
+    let done: (c: CardDrawn) => void = () => undefined
+    cardPending.set(key, new Promise<CardDrawn>(r => { done = r }))
+    // outside the drawing: a render's dispatch may be abandoned, which would stop the child
+    $.clock.after(0, () => {
+      void buildCard($, frame, w)
+        .catch((err): CardDrawn => ({ title: '', right: '', kind: 'cite', grids: null, links: [], problem: `the card could not be drawn: ${String((err as Error)?.message || err).slice(0, 160)}` }))
+        .then(async c => {
+          cards.set(key, c)
+          cardPending.delete(key)
+          done(c)
+          await $.state.set({ ...CARDREADY, id: key }, Date.now())
+        })
+    })
+  }
+  return null
+}
+
+/** `lean resolve <ref> --json`, as the person's own read (never counted as Claude's coverage). */
+async function resolveJson($: Engine, root: string, ref: string, n = 6): Promise<Any> {
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', String(n), '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+  try { return JSON.parse(r.stdout) } catch { return { ref, error: (r.stdout + r.stderr).trim().slice(0, 300) || 'lean resolve gave nothing' } }
+}
+
+/** One part of a card drawn: its program in the drawing contract's sandbox, then as terminal cells. */
+async function drawPart($: Engine, part: { program: string; data: unknown }, w: number, h: number): Promise<Any> {
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object: { id: 'card', program: part.program, data: part.data }, w, h, mode: 'inline', noVerbs: true }), timeoutMs: 30000 })
+  if (r.exitCode !== 0) throw new Error((r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 200) || `exit ${r.exitCode}`)
+  const out = JSON.parse(r.stdout)
+  return { drawing: out.drawing, grid: renderTerm(out.drawing, { w }) }
+}
+
+/** A frame's card: the mark's ref read through the kernel (or the gloss as the observer wrote it), drawn. */
+async function buildCard($: Engine, frame: TrayFrame, w: number): Promise<CardDrawn> {
+  const inner = w - 4
+  const BODY = 9
+  let spec: Any
+  let kind: CardDrawn['kind'] = 'cite'
+  if (frame.row != null) {
+    const rec = await recordNow($, frame.row)
+    const m = rec?.marks?.[frame.i!]
+    if (!rec || !m) return { title: '', right: '', kind, grids: null, links: [], problem: 'this mark is no longer in the message' }
+    if (m.kind === 'gloss') {
+      kind = 'gloss'
+      spec = explainerCard({ gloss: rec.glosses?.[m.gloss!] })
+    } else {
+      kind = m.kind === 'spark' ? 'spark' : 'cite'
+      spec = await sourceSpec($, m.ref!, m.kind === 'spark' ? 'sparkline' : m.label || m.ref!, BODY)
+    }
+  } else spec = await sourceSpec($, frame.ref!, frame.label || frame.ref!, BODY)
+  if (spec.problem) return { title: spec.title, right: spec.right || 'cite', kind, grids: null, links: [], problem: spec.problem }
+  const grids: Any[] = []
+  for (const part of spec.parts) {
+    try {
+      const d = await drawPart($, part, inner, BODY)
+      if (d.drawing?.error && part.pic) continue // a gloss's drawing that fails: its words stand alone
+      grids.push(d.grid)
+    } catch (err) {
+      if (!part.pic) throw err
+    }
+  }
+  return { title: spec.title, right: spec.right, kind, grids, links: spec.links || [] }
+}
+
+/** A citation's card spec: the ref resolved, the query's record or the code file's lines read. */
+async function sourceSpec($: Engine, ref: string, label: string, room: number): Promise<Any> {
+  const root = await rootHere($)
+  if (!root) return { title: label, right: 'cite', problem: `no thimble/ folder here to read ${ref} from; run lean in the data folder first` }
+  const series = seriesRef(ref)
+  const resolved = await resolveJson($, root, series ? series.query : ref)
+  let query: Any = null
+  const q = /^(q\d+)(?:[#@]|$)/.exec(ref)
+  if (q) {
+    try { query = JSON.parse(String(await $.fs.read(`${root}/thimble/queries/${q[1]}.json`))) } catch { query = null }
+  }
+  let lines: { n: number; text: string }[] | undefined
+  const path = ref.split('#')[0]!
+  if (cardKind(ref) === 'code') {
+    const m = /#L(\d+)(?:-L?(\d+))?$/.exec(ref)
+    const a = Number(m?.[1] || 1)
+    const b = Number(m?.[2] || a)
+    try {
+      const all = String(await $.fs.read(path.startsWith('/') ? path : `${root}/${path}`)).split('\n')
+      const from = Math.max(1, a - 2)
+      const to = Math.min(all.length, Math.max(b + 2, from + room - 2))
+      lines = []
+      for (let n = from; n <= to; n++) lines.push({ n, text: all[n - 1] ?? '' })
+    } catch {
+      lines = undefined
+    }
+  }
+  return sourceCard({ ref, label, resolved, query, lines, path, room })
+}
+
+/** The message as an object a verb reads: its words as shown, its row and its session. */
+function messageObject(rec: MsgRecord): Any {
+  const text = shownOf(rec)
+  const first = text.replace(/\s+/g, ' ').trim()
+  return { id: `msg-${rec.row.slice(0, 8)}`, version: 1, kind: 'message', row: rec.row, session: rec.session, title: first.length > 60 ? first.slice(0, 59) + '…' : first, text }
+}
+
+/** The options a verb's line offers for a message: v's proposals, squeeze's one press with its chips, atlas's offer. */
+function lineOptions(key: string, rec: MsgRecord | null): { options: { label: string; note?: string }[]; note?: string } {
+  const lit = (rec?.verbs || {})[key] as Any
+  if (key === 'v') {
+    const props = lit?.lit && Array.isArray(lit.proposals) && lit.proposals.length ? lit.proposals : ['a card of this message']
+    return { options: props.map((p: string) => ({ label: p })) }
+  }
+  if (key === 's') {
+    const chips = lit?.lit && Array.isArray(lit.chips) ? lit.chips : []
+    return { options: [{ label: 'squeeze it' }], note: chips.map((c: Any) => `${c.name}: ${c.levels?.[c.level] ?? ''}`).join(' · ') }
+  }
+  if (key === 'a') {
+    const o = lit?.offer || {}
+    const cost = [o.minutes ? `about ${o.minutes} min` : '', o.tokens ? `${Math.round(o.tokens / 1000)}k tokens` : ''].filter(Boolean).join(' · ')
+    return { options: [{ label: o.what || 'map the claims of this work', ...(cost ? { note: cost } : {}) }] }
+  }
+  return { options: [{ label: `run ${key}` }] }
+}
+
+/** A verb key under a message: its line opens (a press on the open one closes it). */
+async function pressRowVerb($: Engine, row: string, key: string): Promise<void> {
+  const cur = (await $.state.get(PICK)).value as Any
+  if (cur && cur.row === row && cur.verb === key) { await $.state.set(PICK, null); return }
+  await $.state.set(TRAY, null)
+  await $.state.set(PICK, { row, verb: key })
+  const answer = (await $.state.get(ANSWER)).value
+  await $.state.set(SELROW, row === answer ? null : row)
+}
+
+/** An option of the open line picked: the verb runs on the message, outside the press. */
+async function pickOption($: Engine, i: number): Promise<boolean> {
+  const cur = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+  if (!cur) return false
+  const rec = await recordNow($, cur.row)
+  const { options } = lineOptions(cur.verb, rec)
+  const opt = options[i]
+  if (!opt || !rec) return false
+  await $.state.set(PICK, null)
+  const verb = (await rowVerbs($)).find(v => v.key === cur.verb)
+  if (!verb) return false
+  $.clock.after(0, () => { void runOnMessage($, verb.name, cur.verb, rec, opt.label) })
+  return true
+}
+
+/** Run a verb of the row on a message: its run.mjs in a Node child, with the message record in its ctx. What it made is
+ *  drawn under the message, what it asks of Claude goes as a turn, what it says shows as a toast. */
+async function runOnMessage($: Engine, word: string, key: string, rec: MsgRecord, choice: string): Promise<void> {
+  const at = { ...RUNNING, id: rec.row }
+  if ((await $.state.get(at)).value) return
+  await $.state.set(at, key)
+  try {
+    const root = (await rootHere($)) || String(await $.session.cwd())
+    const dir = $.plugin.root.replace(/\/+$/, '')
+    const input = {
+      object: messageObject(rec), message: rec, row: rec.row, session: rec.session, root, region: null, regionMeta: null,
+      refs: rec.marks.filter(m => m.ref).map(m => m.ref), drawing: null, state: {}, args: key === 'v' ? choice : '', w: 96,
+    }
+    const answers: Record<string, unknown> = {}
+    let out: Any = null
+    for (let round = 0; round < 8; round++) {
+      const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'run', word], { stdin: JSON.stringify({ ...input, answers }), cwd: root, env: await leanEnv($, root), timeoutMs: 600000 })
+      try { out = JSON.parse(r.stdout) } catch { out = { verb: word, error: (r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400) || `exit ${r.exitCode}` } }
+      if (!out.need) break
+      answers[String(out.need.key)] = await modelCall($, out.need)
+    }
+    if (out?.need) out = { verb: word, error: 'it asked the model more than eight times' }
+    const on = `the message ${messageObject(rec).title ? `"${messageObject(rec).title}"` : rec.row}`
+    if (out.saved) {
+      const saved = { id: String(out.saved.id), v: out.saved.v ?? null, root }
+      await place($, rec.row, saved)
+      await $.state.set(LAST, { id: saved.id, v: saved.v, root: saved.root })
+      const cur = (await recordNow($, rec.row)) || rec
+      if (!cur.objects.includes(saved.id)) await saveRecord($, { ...cur, objects: [...cur.objects, saved.id] })
+    }
+    if (out.error) $.ui.toast(`${word}: ${cut(String(out.error), 200)}`)
+    else if (out.ask) void ask($, String(out.ask), word, choice || on)
+    else if (out.text && !out.saved) $.ui.toast(cut(String(out.text).split('\n')[0] || '', 200))
+    if (!out.ask && !out.error) await noteForClaude($, `The person ran the verb ${word} on ${on}.${out.saved ? ` It shows them ${out.saved.id}.` : ''}${out.text ? ` It said: ${cut(String(out.text), 600)}` : ''}${out.note ? ' ' + out.note : ''}`)
+    else if (out.note) await noteForClaude($, String(out.note))
+  } catch (err) {
+    $.ui.toast(`${word}: ${cut(String((err as Error)?.message || err), 200)}`)
+  } finally {
+    await $.state.set(at, null)
+  }
+}
+
+/** What the observer gave for the turn's answer: its lit verbs and glosses, in the answer's record. */
+export async function applyObserver($: Engine, row: string, out: { verbs: Record<string, unknown>; glosses: Record<string, unknown> }): Promise<MsgRecord | null> {
+  const rec = await recordNow($, row)
+  if (!rec) return null
+  const next = withObserver(rec, out) as MsgRecord
+  await saveRecord($, next)
+  return next
+}
+
+/** A message's record, for the observer. */
+export async function messageRecord($: Engine, row: string): Promise<MsgRecord | null> {
+  return recordNow($, row)
+}
+
+/** The row of the latest turn's answer: the message its verb row is drawn under. */
+export async function answerRow($: Engine): Promise<string | null> {
+  return ((await $.state.get(ANSWER)).value as string | null | undefined) ?? null
+}
+
+/** A question asked with the tray open: what it carries for Claude, and the row's few words for the person. */
+async function trayScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown> } | null> {
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  const frame = trayTop(tray) as TrayFrame | null
+  if (!frame) return null
+  if (frame.row == null) {
+    return {
+      label: frame.label || frame.ref!, scope: { mark: { kind: 'cite', ref: frame.ref, label: frame.label } },
+      context: `The person asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`lean resolve ${frame.ref}\` shows its rows.`,
+    }
+  }
+  const rec = await recordNow($, frame.row)
+  const m = rec?.marks?.[frame.i!]
+  if (!rec || !m) return null
+  const begins = shownOf(rec).replace(/\s+/g, ' ').trim().slice(0, 80)
+  if (m.kind === 'gloss') {
+    const g = rec.glosses?.[m.gloss!] ?? { term: '' }
+    return {
+      label: g.term, scope: { row: rec.row, mark: { kind: 'gloss', term: g.term } },
+      context: `The person asked this with a gloss of your reply open in the tray: the term "${g.term}" in your reply that begins "${begins}". The gloss said: ${g.body || g.title || ''}${g.here ? ' ' + g.here : ''} "This" or "it" may mean that term.`,
+    }
+  }
+  const label = m.kind === 'spark' ? `the sparkline of ${m.ref}` : String(m.label)
+  return {
+    label, scope: { row: rec.row, mark: { kind: m.kind, ref: m.ref, label } },
+    context: `The person asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`lean resolve ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ drawing
 
 // a verb as a chip: its key and name. Where the key works (a focused pane) the Button carries it as its hotkey, and the
@@ -526,48 +999,15 @@ function verbChip(els: Any, key: string, v: Verb, onPress: () => unknown, o: { h
 
 const sep = (els: Any) => els.Text({ dimColor: true, children: ' · ' })
 
-/** Which picked verbs read as the observer's few words, best first, while the row fits in `room` columns (the rest
- *  read as their names), and the columns the row then takes: its verbs, `? all`, and `open` at its right. */
-function hintWords(ref: ObjRef, verbs: Verb[], o: { fullscreen: boolean; more: number }, room: number): { words: string[]; width: number } {
-  const tail = o.fullscreen ? (o.more ? `${o.more} more rows · open ›` : 'open ›') : `/obj ${refText(ref)} opens it`
-  const picked = verbs.filter(v => v.picked).slice(0, 3)
-  const len = (s: string) => 2 + [...s].length + 3
-  let width = picked.reduce((n, v) => n + len(v.name), 6) + tail.length + 2
-  const words: string[] = []
-  for (const v of picked) {
-    if (!v.hint) continue
-    const more = len(v.hint) - len(v.name)
-    if (width + more > room) break
-    width += more
-    words.push(v.name)
-  }
-  return { words, width }
-}
-
-/** The one quiet row under an object: the picked verbs, `? all`, and `open` (with how many rows wait there). With
- *  `words`, a verb the observer ranked reads as its few words for this object (`t trace 2,327 to its rows`). */
-function hintRow($: Engine, els: Any, ref: ObjRef, verbs: Verb[], key: string, o: { fullscreen: boolean; at: string; more: number; said: Said | null; words: string[] }) {
+/** The one quiet row under an object: what a verb on it runs now, and `open` (with how many rows wait there) at its
+ *  right. The verbs live in the message's verb row (v, s, a); m, x and t are card forms now, still run by /verb. */
+function hintRow($: Engine, els: Any, ref: ObjRef, key: string, o: { fullscreen: boolean; more: number; said: Said | null }) {
   const { Box, Button, Text } = els
-  const picked = verbs.filter(v => v.picked).slice(0, 3)
-  const running = o.said?.running ? o.said.verb : null
-  const kids: Any[] = []
-  picked.forEach((v, i) => {
-    if (i) kids.push(sep(els))
-    kids.push(verbChip(els, `${key}:v:${v.name}`, v.hint && o.words.includes(v.name) ? { ...v, name: v.hint } : v, () => pressVerb($, v.name, ref, null, o.at, false), { running: running === v.name }))
-  })
-  if (running && !picked.some(v => v.name === running)) kids.push(...(picked.length ? [sep(els)] : []), Text({ dimColor: true, children: `${running}…` }))
-  if (kids.length) kids.push(sep(els))
-  kids.push(Button({ key: `${key}:all`, plain: true, label: 'all verbs', children: [Text({ color: 'suggestion', children: '?' }), Text({ dimColor: true, children: ' all' })], onPress: () => openAll($, ref) }))
+  const left: Any[] = o.said?.running ? [Text({ dimColor: true, children: `${o.said.verb}…` })] : []
   const right: Any[] = o.fullscreen
     ? [Button({ key: `${key}:open`, plain: true, label: 'open', children: [Text({ dimColor: true, children: o.more ? `${o.more} more rows · open ` : 'open ' }), Text({ color: 'suggestion', children: '›' })], onPress: () => openDetail($, ref) })]
     : [Text({ dimColor: true, children: `/obj ${refText(ref)} opens it` })]
-  return Box({ flexDirection: 'row', justifyContent: 'space-between', children: [Box({ flexDirection: 'row', children: kids }), Box({ flexDirection: 'row', children: right })] })
-}
-
-async function openAll($: Engine, ref: ObjRef): Promise<void> {
-  await openDetail($, ref)
-  const cur = (await $.state.get(SEL)).value
-  if (cur) await $.state.set(SEL, { ...cur, all: true })
+  return Box({ flexDirection: 'row', justifyContent: 'space-between', children: [Box({ flexDirection: 'row', children: left }), Box({ flexDirection: 'row', children: right })] })
 }
 
 /** One object inline: its cells and its hint row, or one red line saying why it cannot be drawn. */
@@ -586,14 +1026,11 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string)
   const more = p.grid.h - rows
   // a click on a part opens the detail view on it; on a knob's ◂ ▸, opens it and turns the knob there
   const onPress = fullscreen ? (id: string, dir?: number) => (dir ? openTurned($, ref, id, dir) : openDetail($, ref, knobOf(p.drawing, id) ? null : id)) : undefined
-  // the row's few words as far as they fit the screen, which may widen it past the drawing; else the verbs' names
-  const verbs = await rankedVerbs($, ref, p.verbs)
-  const { words, width } = hintWords(ref, verbs, { fullscreen, more }, Math.max(40, (e.viewport?.columns ?? 100) - 4))
   return Box({
-    flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40, words.length ? width : 0),
+    flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40),
     children: [
       paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress }),
-      hintRow($, els, ref, verbs, `${key}-${ref.id}`, { fullscreen, at, more, said, words }),
+      hintRow($, els, ref, `${key}-${ref.id}`, { fullscreen, more, said }),
     ],
   })
 }
@@ -715,7 +1152,9 @@ async function detailEl($: Engine, e: Any): Promise<Any> {
   }
   // every verb works on its key here; those picked for the object read brighter
   const running = said?.running ? said.verb : null
-  for (const v of verbs) if (v.key) row.push(verbChip(els, `k:${v.name}`, v, () => pressVerb($, v.name, sel, sel.region, null, true), { hotkey: true, running: running === v.name, dim: !v.picked }), sep(els))
+  // the verbs of the message row work on their keys here too; m, x and t are card forms now (/verb and `all verbs` still run them)
+  const onRow = new Set((await rowVerbs($)).map(v => v.name))
+  for (const v of verbs) if (v.key && onRow.has(v.name)) row.push(verbChip(els, `k:${v.name}`, v, () => pressVerb($, v.name, sel, sel.region, null, true), { hotkey: true, running: running === v.name, dim: !v.picked }), sep(els))
   row.push(Button({ key: 'k:all', plain: true, hotkey: 'h', label: 'all verbs', children: [Text({ dimColor: true, children: sel.all ? 'fewer verbs' : 'all verbs' })], onPress: () => toggleAll($) }))
   row.push(sep(els))
   row.push(Button({ key: 'k:web', plain: true, hotkey: 'o', label: 'open in browser', children: [Text({ dimColor: true, children: 'browser' })], onPress: async () => $.ui.toast(await openBrowser($, (await $.state.get(SEL)).value ?? sel)) }))
@@ -800,28 +1239,6 @@ async function stepExample($: Engine, d: number): Promise<void> {
 async function toggleAll($: Engine): Promise<void> {
   const cur = (await $.state.get(SEL)).value
   if (cur) await $.state.set(SEL, { ...cur, all: !cur.all })
-}
-
-// a citation's target may hold spaces (a query's key, as in q9#kind=SEC via proxy@n); a link that is no kernel ref
-// is left as Claude wrote it
-const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
-
-/** Claude's citations in a reply: each kernel ref it links, once, with the words that link it. */
-function citesIn(md: string): { ref: string; label: string }[] {
-  const out: { ref: string; label: string }[] = []
-  for (const m of String(md).matchAll(LINK)) {
-    const ref = String(m[2])
-    if (/^(https?|file):/i.test(ref) || !isRef(ref) || out.some(c => c.ref === ref)) continue
-    // a citation whose words are only a mark (`[↗](rows.jsonl#L12)`) is named by its place
-    const label = /[\p{L}\p{N}]/u.test(String(m[1])) ? String(m[1]) : ref.replace(/#L(\d+)/, ':$1').replace(/^obj:/, '')
-    out.push({ ref, label })
-  }
-  return out
-}
-
-/** The reply as drawn: a citation reads as its words. */
-function withoutTargets(md: string): string {
-  return String(md).replace(LINK, (m, label: string, ref: string) => (/^(https?|file):/i.test(ref) || !isRef(ref) ? m : label))
 }
 
 /** What the person sees of an object Claude just saved, in a few lines for Claude: how big it is, how many parts they
@@ -911,12 +1328,28 @@ export const registerShell: Register = on => {
     } catch {
       // a session that cannot read its placements draws its new objects only
     }
+    try {
+      // the verbs of the message row (verbs/*/verb.json with "row": true), and a resumed session's message index
+      await loadRowVerbs($)
+      await msgFilesNow($)
+    } catch (err) {
+      $.ui.toast(`thimble: the verb row could not read the verbs (${cut(String((err as Error)?.message || err), 120)}); v and s still work`)
+    }
     return r
   })
 
   // a turn of main's: the objects it saved, and its last text row, under which they are drawn
   on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) turn = { unplaced: [], lastRow: '', calls: [], placed: [] }
+    if (e.agentId === undefined) {
+      turn = { unplaced: [], lastRow: '', calls: [], placed: [] }
+      // a new turn: the keys act on its answer again, and a verb's open line closes
+      try {
+        await $.state.set(SELROW, null)
+        await $.state.set(PICK, null)
+      } catch {
+        // the turn starts whatever the shell makes of it
+      }
+    }
     return next(e)
   })
 
@@ -970,10 +1403,29 @@ export const registerShell: Register = on => {
     const stored = await next(e)
     try {
       if (e.agentId === undefined && stored.uuid) {
-        const msg = e.message as { type?: string; content?: unknown }
+        const msg = e.message as { type?: string; content?: unknown; isMeta?: boolean }
+        const blocks = Array.isArray(msg.content) ? (msg.content as { type?: string; text?: string }[]) : []
+        const text = blocks.filter(b => b.type === 'text').map(b => String(b.text || '')).join('\n')
+        const row = rowKey(stored.uuid)
+        const at = new Date(await $.clock.now()).toISOString()
+        let scope: Record<string, unknown> | undefined
         if (pendingAsk && e.door === 'prompt' && msg.type === 'user') {
-          await $.state.set({ ...ASKED, id: rowKey(stored.uuid) }, pendingAsk.about)
+          await $.state.set({ ...ASKED, id: row }, pendingAsk.about)
+          scope = pendingAsk.scope
           pendingAsk = null
+        }
+        if (e.door === 'prompt' && msg.type === 'user' && !msg.isMeta && text.trim()) {
+          await indexRow($, { row, kind: 'user', at, text, ...(scope ? { scope } : {}) })
+          await flushMessages($)
+        } else if (e.door === 'response' && msg.type === 'assistant' && text.trim()) {
+          // one of Claude's messages: its record, with the marks in its words and each sparkline's values
+          const made = newRecord({ row, session: String(await $.session.id()), text, at }) as MsgRecord
+          made.objects = (((await $.state.get({ ...UNDER, id: row })).value ?? []) as Placed[]).map(x => x.id)
+          const rec = await withSparkValues($, made)
+          const rows = ((await $.state.get(MSGROWS)).value ?? []) as string[]
+          if (!rows.includes(row)) await $.state.set(MSGROWS, [...rows, row])
+          await indexRow($, { row, kind: 'assistant', at })
+          await saveRecord($, rec)
         }
       }
     } catch {
@@ -993,38 +1445,152 @@ export const registerShell: Register = on => {
     } catch {
       // nothing drawn is better than a turn that does not end
     }
+    try {
+      // the turn's answer: its last words, under which the verb row is drawn
+      if (e.agentId === undefined && turn?.lastRow) {
+        const row = rowKey(turn.lastRow)
+        const rec = await recordNow($, row)
+        if (rec && !rec.final) await saveRecord($, { ...rec, final: true })
+        await $.state.set(ANSWER, row)
+      }
+    } catch {
+      // a turn with no verb row is better than one that does not end
+    }
     if (e.agentId === undefined) turn = null
     return done
   })
 
-  // the reply with its citations as their words (Claude Code draws a link that is no URL as its words and its target),
-  // then one quiet row naming the cited values, each a press away from its rows; then the objects its turn saved
+  // one of Claude's messages drawn from its record: its marks inline (a citation underlined, a gloss on a teal fill, a
+  // sparkline in place, each a press that opens the tray), the verb row under a turn's answer, the line a verb opened,
+  // then the objects its turn saved. A message with none of these is Claude Code's own drawing.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const at = rowKey(e.requestId)
     const list = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as ObjRef[]
-    const cites = e.props.isSummary ? [] : citesIn(e.props.text)
-    if (!list.length && !cites.length) return next(e)
     const els = $.ui.resolve(e) as Any
-    const { Box, Text, Button } = els
-    let own = await next(cites.length ? { ...e, props: { ...e.props, text: withoutTargets(e.props.text) } } : e)
-    if (cites.length) {
-      // a few citations by their words, each a press from its rows; more than fit calmly, one press to their list
-      const room = Math.min(72, Math.max(20, (e.viewport?.columns ?? 100) - 12))
-      const label = (c: { label: string }) => cut(c.label.replace(/`/g, ''), 32)
-      const words = cites.reduce((n, c) => n + [...label(c)].length + 3, 6)
-      const fits = cites.length <= 4 && words <= room
-      const chips: Any[] = fits
-        ? [Text({ dimColor: true, children: 'cites ' }), ...cites.flatMap((c, i) => [
-            ...(i ? [Text({ dimColor: true, children: ' · ' })] : []),
-            Button({ key: `cite-${at}-${i}`, plain: true, label: c.label, children: [Text({ color: 'suggestion', children: label(c) })], onPress: () => openCite($, c.ref, c.label) }),
-          ])]
-        : [Button({ key: `cites-${at}`, plain: true, label: 'cited values', children: [Text({ dimColor: true, children: `${cites.length} cited values ` }), Text({ color: 'suggestion', children: '›' })], onPress: () => openCites($, cites) })]
-      own = Box({ flexDirection: 'column', children: [own, Box({ flexDirection: 'row', marginLeft: 2, children: chips })] })
+    const { Box } = els
+    if (e.props.isSummary) {
+      if (!list.length) return next(e)
+      const own = await next(e)
+      const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at)))
+      return Box({ flexDirection: 'column', children: [own, ...drawn] })
     }
-    if (!list.length) return own
-    const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at)))
-    return Box({ flexDirection: 'column', children: [own, ...drawn] })
+    const rec = await drawnRecord($, at, e.props.text)
+    const answer = (await $.state.get(ANSWER)).value
+    const final = !!rec.final || answer === at
+    if (!rec.marks.length && !final && !list.length) return next(e)
+    const tray = (await $.state.get(TRAY)).value as Tray | null
+    const base = trayBase(tray) as TrayFrame | null
+    const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
+    const parts: Any[] = []
+    parts.push(rec.marks.length
+      ? messageEl(els, { rec, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec) })
+      : await next(e))
+    if (final) {
+      const verbs = await rowVerbs($)
+      const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+      const sel = (await $.state.get(SELROW)).value
+      const running = ((await $.state.get({ ...RUNNING, id: at })).value ?? null) as string | null
+      parts.push(verbRowEl(els, { key: `vr-${at}`, verbs, lit: rec.verbs || {}, open: pick && pick.row === at ? pick.verb : null, running, selected: sel === at, theme, onPress: (k: string) => pressRowVerb($, at, k) }))
+      if (pick && pick.row === at) {
+        const verb = verbs.find(v => v.key === pick.verb)
+        if (verb) {
+          const { options, note } = lineOptions(pick.verb, rec)
+          parts.push(verbLineEl(els, { key: `vl-${at}`, verb, options, ...(note ? { note } : {}), theme, onPick: (i: number) => pickOption($, i), onClose: () => $.state.set(PICK, null) }))
+        }
+      }
+    }
+    if (list.length) parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at)))))
+    return parts.length === 1 ? parts[0] : Box({ flexDirection: 'column', children: parts })
   })
+
+  // the tray: one small panel above the prompt, a fixed number of rows, so the transcript scrolls above it. It shows the
+  // card on top of its stack: a citation's source card or a gloss's explainer card.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const tray = (await $.state.get(TRAY)).value as Tray | null
+    const frame = trayTop(tray) as TrayFrame | null
+    if (!frame || e.props.hasSurvey) return next(e)
+    const els = $.ui.resolve(e) as Any
+    const w = Math.max(40, Math.min(104, (e.props.bodyColumns ?? 100) - 3))
+    let kind: 'cite' | 'gloss' | 'spark' = 'cite'
+    let title = frame.label || frame.ref || ''
+    if (frame.row != null) {
+      const rec = await recordNow($, frame.row)
+      const m = rec?.marks?.[frame.i!]
+      if (!rec || !m) return next(e)
+      kind = m.kind
+      title = m.kind === 'gloss' ? rec.glosses?.[m.gloss!]?.term ?? '' : m.kind === 'spark' ? `sparkline · ${m.ref}` : String(m.label)
+    }
+    const card = await cardNow($, frame, w)
+    const depth = tray?.stack.length ?? 1
+    const links = card?.links ?? []
+    const keys = ['type + ↵ ask', '] next mark', depth > 1 ? '⌫ back' : '⌫ close', ...(links.length ? [`${links.length > 1 ? `1–${links.length}` : '1'} open`] : [])].join(' · ')
+    return trayEl(els, {
+      key: 'tray', w, body: 9, theme, kind, title: card?.title && frame.row == null ? card.title : title, right: card?.right || (kind === 'gloss' ? 'gloss' : 'cite'),
+      grids: card?.grids ?? null, problem: card?.problem ?? null, links, depth, keys,
+      onLink: (id: string) => { void openLink($, id) },
+    })
+  })
+
+  // keys while the prompt is empty: v, s and a open their line under the message the keys act on; ] and [ move through
+  // the marks, opening the tray; a digit picks in the open line or opens a mark inside the card; ⌫ closes the line or
+  // goes back one card. Claude Code hands a plugin only the keys that edit the prompt, so tab, ↵ and esc stay its own.
+  // A verb key that began a word being typed (`visualize …`, `so …`) gives its letter back to the prompt.
+  on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
+    try {
+      const key = e.key
+      if (!key || key.ctrl || key.meta || e.text !== '') { keyOpened = null; return next(e) }
+      const k = key.key
+      const now = await $.clock.now()
+      const tray = (await $.state.get(TRAY)).value as Tray | null
+      const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+      const verbs = await rowVerbs($)
+      const consume = { text: e.text, cursor: e.cursor }
+      if (k === ']' || k === '[') {
+        keyOpened = null
+        await $.state.set(PICK, null)
+        await stepMark($, k === ']' ? 1 : -1)
+        return consume
+      }
+      if (k === 'backspace') {
+        keyOpened = null
+        if (pick) { await $.state.set(PICK, null); return consume }
+        if (tray) { await $.state.set(TRAY, trayBack(tray) as Tray | null); return consume }
+        return next(e)
+      }
+      if (/^[1-9]$/.test(k)) {
+        keyOpened = null
+        if (pick) return (await pickOption($, Number(k) - 1)) ? consume : next(e)
+        if (tray) {
+          const frame = trayTop(tray) as TrayFrame | null
+          const ck = frame ? await cardKey($, frame) : ''
+          const drawn = frame ? [...cards.entries()].find(([c]) => c.startsWith(`${ck}|`))?.[1] : null
+          const link = drawn?.links?.[Number(k) - 1]
+          if (link && (await openLink($, link.id))) return consume
+        }
+        return next(e)
+      }
+      // with the tray open the prompt is the tray's question: letters are typed
+      if (!tray && k.length === 1 && verbs.some(v => v.key === k)) {
+        const row = await actingRow($)
+        if (row) {
+          await pressRowVerb($, row, k)
+          keyOpened = { key: k, at: now }
+          return consume
+        }
+      }
+      if (pick && k.length === 1) {
+        await $.state.set(PICK, null)
+        const opened = keyOpened
+        keyOpened = null
+        // typed straight after the verb key: the letter was the start of a word
+        if (opened && now - opened.at < 700) return { text: `${opened.key}${e.inputText}`, cursor: opened.key.length + e.inputText.length }
+      }
+      keyOpened = null
+    } catch {
+      // a key the shell cannot read goes to the prompt
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // a turn whose last word was a tool call: its objects under that call's row
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -1057,8 +1623,15 @@ export const registerShell: Register = on => {
         await $.state.set(NOTES, [])
       }
       const sel = (await $.state.get(SEL)).value
-      const open = !e.isMeta && (await $.ui.panes()).some(x => x.id === PANE && x.isPlaced)
-      if (sel && open && sel.cite) {
+      // a question asked with the tray open is about its card's mark (CONTRACT 6: a prompt to main carrying the scope)
+      const scoped = !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin' ? await trayScope($) : null
+      await $.state.set(PICK, null)
+      const open = !scoped && !e.isMeta && (await $.ui.panes()).some(x => x.id === PANE && x.isPlaced)
+      if (scoped) {
+        context.push(scoped.context)
+        pendingAsk = { text: e.text, about: { id: scoped.label, v: null, region: null, label: scoped.label }, scope: scoped.scope }
+        await closeTray($)
+      } else if (sel && open && sel.cite) {
         pendingAsk = { text: e.text, about: { id: sel.cite, v: null, region: null, label: citeLabels.get(sel.cite) || sel.cite } }
         context.push(`The person asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`lean resolve ${sel.cite}\` shows its rows.`)
       } else if (sel && open && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin') {

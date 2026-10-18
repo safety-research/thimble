@@ -1,9 +1,10 @@
 // The shell's hooks (shell/shell.tsx): an object Claude saves is placed under the turn's next words, a prompt asked
 // while the detail view is open carries the object and its selected part, /verb lists the verbs for an object, a verb
-// pressed under an object draws what it made under the same reply, a verb's call to the model is made by the module,
+// of the message row draws what it made under the same message, a verb's call to the model is made by the module,
 // what a verb says for Claude goes with the next prompt, a verb's request to Claude reads as one line, and a resumed
-// session draws its objects again. `claude plugin test lean`. The Node children (the drawing, a verb's run, `lean
-// resolve`) are answered here, at process.run.
+// session draws its objects again. The message layer: each message's record on disk, its marks drawn inline, the verb
+// row under the answer, the keys of an empty prompt, the tray and a question asked from it. `claude plugin test lean`.
+// The Node children (the drawing, a verb's run, `lean resolve`) are answered here, at process.run.
 import { expect, mock, test } from 'claude-code/testing'
 
 const ROOT = '/data'
@@ -64,6 +65,8 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
     toasts.push(String(e.text ?? ''))
     return { value: undefined }
   })
+  // the prompt box, as its editor applies an edit
+  on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   return { runs, inputs, files, submitted, toasts }
 }
 
@@ -77,10 +80,29 @@ function textOf(n: any): string {
 }
 
 const ROW = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+const AT = ROW.slice(0, 24)
+const MOUNT = { plugin: 'thimble-lean', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
+const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never
+const verbKey = (k: string) => `vr-${AT}-verb-${k}`
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Node = any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Any = any
+// every Button and every Markdown in a drawn tree
+function walk(n: Node, f: (x: Node) => void): void {
+  if (n == null || typeof n !== 'object') return
+  if (Array.isArray(n)) { n.forEach(x => walk(x, f)); return }
+  f(n)
+  walk(n.props?.children, f)
+  walk(n.children, f)
+}
+const buttons = (t: Node) => { const out: Node[] = []; walk(t, x => { if (x.type === 'Button') out.push(x) }); return out }
+const markdowns = (t: Node) => { const out: string[] = []; walk(t, x => { if (x.type === 'Markdown') out.push(x.props.text) }); return out }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const reply = ($: any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
 
-test('an object Claude saves is drawn under the next words of the turn, with its verbs', async ($, on) => {
+test('an object Claude saves is drawn under the next words of the turn; the verb row is under the answer, and open under the object', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
@@ -92,18 +114,18 @@ test('an object Claude saves is drawn under the next words of the turn, with its
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
   const first = textOf(await reply($))
   expect(first).toContain('the reply')
+  await $.turn.complete({ turnId: 't1', answer: 'June 18 had the most saves.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.settle()
   const drawn = textOf(await reply($))
   expect(drawn).toContain('the reply')
   expect(drawn).toContain('Jun 18')
   expect(drawn).toContain('6,543')
-  // one hint row: the verbs picked for it, `? all`, and open
-  expect(drawn).toContain('x explore')
-  expect(drawn).toContain('t trace')
-  expect(drawn).not.toContain('s squeeze')
-  expect(drawn).toContain('? all')
+  // the message's verb row, dim, then the object with one quiet row: open
+  expect(drawn).toContain('v visualize · s squeeze')
   expect(drawn).toContain('open ›')
-  expect(drawn).not.toContain('browser')
+  expect(drawn).not.toContain('x explore')
+  expect(drawn).not.toContain('? all')
+  expect(drawn.indexOf('v visualize')).toBeLessThan(drawn.indexOf('Jun 18'))
 })
 
 test('a reply after no save draws as Claude Code draws it', async ($, on) => {
@@ -145,25 +167,35 @@ test('/verb ? lists every verb for the object, the picked ones marked', async ($
   expect(String(r.text)).toContain('  s  squeeze')
 })
 
-test('a reply draws its citations as their words, and names them in one row a press opens', async ($, on) => {
-  world(on)
-  let drawnText = ''
-  on('ui.render', (_$: unknown, e: { props: { text?: string } }) => {
-    drawnText = String(e.props.text ?? '')
-    return { type: 'Text', props: {}, children: ['the reply'] } as never
-  })
-  const text = 'June 18 had [6,543 saves](q1#day=2026-06-18@n); [4,219](q9#kind=SEC via proxy@n) went through a proxy, as [this one](revisions.jsonl#L28) and [a page](https://example.org/x).'
-  const tree = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
-  expect(drawnText).toBe('June 18 had 6,543 saves; 4,219 went through a proxy, as this one and [a page](https://example.org/x).')
+test('a reply draws its citations inline, each underlined and a press that opens its source card in the tray', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  const text = 'June 18 had [6,543 saves](q1#day=2026-06-18@n); [4,219](q9#kind=SEC via proxy@n) went through a proxy, as [this one](revisions.jsonl#L28) and [a page](https://example.org/x).\n\nA plain closing line.'
+  const ui = await $.ui.mount({ ...(MOUNT as object), props: { text, isFirstOfReply: true } } as never)
+  const tree = await ui.drawn()
   const shown = textOf(tree)
-  expect(shown).toContain('cites 6,543 saves · 4,219 · this one')
+  // the citations read as their words, in place; the plain paragraph is Claude Code's own Markdown
+  expect(shown).toContain('June 18 had 6,543 saves; 4,219 went through a proxy, as this one and a page')
+  expect(shown).not.toContain('q1#day')
+  const cite = buttons(tree).find(b => b.props.label === 'cite 6,543 saves')!
+  expect(cite).toBeDefined()
+  expect(JSON.stringify(cite)).toContain('"underline":true')
+  expect(buttons(tree).map(b => b.props.label)).toEqual(['cite 6,543 saves', 'cite 4,219', 'cite this one'])
+  expect(markdowns(tree)).toEqual(['A plain closing line.'])
+  // a press opens the tray on it: its source card, read through the kernel
+  await ui.press({ key: cite.props.key })
+  expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
+  await clock.settle()
+  const card = textOf(await $.ui.render(BAND))
+  expect(card).toContain('Jun 18')
+  expect(card).toContain('] next mark')
+  expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
+  await ui.unmount()
 })
 
 // ------------------------------------------------------------------------------------------------ verbs, pressed
 
-const AT = ROW.slice(0, 24)
-const MOUNT = { plugin: 'thimble-lean', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
-const chip = (verb: string) => `row-${AT}-0-01-saves:v:${verb}`
 
 /** A turn that saves 01-saves and ends with words: the object is drawn under them. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -177,31 +209,36 @@ async function savedTurn($: any, on: any, clock: { settle: () => Promise<void> }
   await clock.settle()
 }
 
-test('a verb pressed under an object runs in the module, and what it made is drawn under the same reply; Claude reads what it did with the next prompt', async ($, on) => {
-  const w = world(on, () => ({ verb: 'trace', saved: { id: '02-trace', v: 1 }, note: 'It traced q1.' }))
+test('a verb of the message row: s opens its line, a pick runs it on the message, and what it made is drawn under the same message; Claude reads what it did with the next prompt', async ($, on) => {
+  const w = world(on, () => ({ verb: 'squeeze', saved: { id: '02-trace', v: 1 }, note: 'It squeezed the message to 2 lines.' }))
   const clock = mock.clock(on)
   await savedTurn($, on, clock)
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(1)
-  await ui.press({ key: chip('trace') })
+  await ui.press({ key: verbKey('s') })
+  expect(textOf(await ui.drawn())).toContain('▸ 1 squeeze it')
+  await ui.press({ key: `vl-${AT}-opt-0` })
   await clock.settle()
-  // the verb ran with the object, as the kernel keeps it, and the drawing the person sees
-  const input = w.inputs[0] as { object: { id: string }; drawing: unknown; refs: string[] }
-  expect(input.object.id).toBe('01-saves')
-  expect(input.drawing).toEqual(DRAWING)
-  // what it made is drawn under the same reply, after the object it came from
+  // the verb ran with the message: its record, as an object with its words, and no words of its own
+  const input = w.inputs[0] as { object: { kind: string; text: string; row: string }; message: { row: string; final: boolean }; args: string }
+  expect(input.object.kind).toBe('message')
+  expect(input.object.text).toBe('June 18 had the most saves.')
+  expect(input.message.row).toBe(AT)
+  expect(input.message.final).toBe(true)
+  expect(input.args).toBe('')
+  // what it made is drawn under the same message, after the object there
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(2)
   expect(JSON.parse(w.files[SHOWN]!).under[AT].map((x: { id: string }) => x.id)).toEqual(['01-saves', '02-trace'])
-  // no prompt was sent; Claude reads it beside the next one
+  expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${AT}.json`]!).objects).toEqual(['01-saves', '02-trace'])
+  // no prompt was sent; Claude reads it beside the next one, once
   expect(w.submitted.length).toBe(0)
   await $.prompt.submit({ text: 'and this?' } as never)
   const context = w.submitted.at(-1)!.context.join('\n')
-  expect(context).toContain('The person ran the verb trace on 01-saves@1. It shows them 02-trace@1')
-  expect(context).toContain('It traced q1.')
-  // said once
+  expect(context).toContain('The person ran the verb squeeze on the message "June 18 had the most saves."')
+  expect(context).toContain('It squeezed the message to 2 lines.')
   await $.prompt.submit({ text: 'more?' } as never)
-  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('ran the verb trace')
+  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('ran the verb squeeze')
   await ui.unmount()
 })
 
@@ -222,25 +259,28 @@ test('a verb that needs the model: the module makes the call, and the verb runs 
   expect(String(r.text)).toContain('squeezed to: two lines')
 })
 
-test("a verb's request to Claude goes as the person's few words, the request beside them for Claude alone", async ($, on) => {
-  const ask = 'The person pressed x (Explore) on the object 01-saves. Make it a view they can explore.'
-  const w = world(on, () => ({ verb: 'explore', text: 'Claude is writing a view of this you can explore.', ask }))
+test("v asks Claude for a card of the message: the row reads as the person's pick, the request beside it for Claude alone", async ($, on) => {
+  const ask = 'The person pressed v (visualize) on your reply that begins "June 18 had the most saves.". Make a card of it.'
+  const w = world(on, () => ({ verb: 'visualize', text: 'Claude is making a card of this message.', ask }))
   const session = mock.session(on)
   const clock = mock.clock(on)
   await savedTurn($, on, clock)
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
-  await ui.press({ key: chip('explore') })
+  await ui.press({ key: verbKey('v') })
+  expect(textOf(await ui.drawn())).toContain('▸ 1 a card of this message')
+  await ui.press({ key: `vl-${AT}-opt-0` })
   await clock.settle()
+  expect((w.inputs[0] as { args: string }).args).toBe('a card of this message')
   // the row reads as the press; Claude reads the request in a row before it that the person does not see
-  expect(w.submitted.map(x => x.text)).toEqual(['explore 01-saves@1'])
+  expect(w.submitted.map(x => x.text)).toEqual(['visualize a card of this message'])
   const rows = session.appended() as unknown as { door: string; message: { type: string; content: { text?: string }[] } }[]
   const hidden = rows.filter(r => r.door === 'note' && r.message.type === 'user' && r.message.content.some(b => String(b.text).includes(ask)))
   expect(hidden.length).toBe(1)
   await ui.unmount()
 })
 
-test('a view that fails to draw: no prompt and no row; Claude reads why, at once after its save and with the next prompt after x', async ($, on) => {
+test('a view that fails to draw: no prompt and no row; Claude reads why, at once after its save and with /verb explore', async ($, on) => {
   const failed = { ...DRAWING, error: { name: 'TypeError', message: 'data.days is undefined', line: 3 } }
   const w = world(on, () => ({ verb: 'explore', saved: { id: '01-saves', v: 1 }, text: 'The view\'s program failed (TypeError).', note: 'The explore view 01-saves failed to draw: TypeError. Fix its program and save it again under the same name.' }), failed)
   on('ui.open', () => ({ value: { isPlaced: true } }))
@@ -252,14 +292,10 @@ test('a view that fails to draw: no prompt and no row; Claude reads why, at once
   expect(String((saved as { context?: string[] }).context)).toContain('Fix the program and save it again under the same name now')
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Here.' }] } } as never)
   await clock.settle()
-  const ui = await $.ui.mount(MOUNT)
-  await clock.settle()
-  await ui.press({ key: chip('explore') })
-  await clock.settle()
+  // explore is a card form now, still run by /verb: Claude reads why, with the command's row
+  const r = await $.command.run({ command: 'verb', args: 'explore saves' } as never)
   expect(w.submitted.length).toBe(0)
-  await $.prompt.submit({ text: 'ok' } as never)
-  expect(w.submitted.at(-1)!.context.join('\n')).toContain('Fix its program and save it again under the same name')
-  await ui.unmount()
+  expect(String((r as { context?: string[] }).context)).toContain('Fix its program and save it again under the same name')
 })
 
 test('an object whose file cannot be read is not drawn in silence: Claude reads why with the save', async ($, on) => {
@@ -287,5 +323,84 @@ test('a resumed session draws its objects under the same replies again', async (
   await clock.settle()
   const drawn = textOf(await reply($))
   expect(drawn).toContain('Jun 18')
-  expect(drawn).toContain('x explore')
+  expect(drawn).toContain('open ›')
+})
+
+// ------------------------------------------------------------------------------------------------ the message layer
+
+const MARKED = 'Mostly [6,543 saves](q1#day=2026-06-18@n) on June 18, from [this one](revisions.jsonl#L28) on. The `fixture scope` mattered.'
+const edit = (key: string, text = '') => ({ origin: { kind: 'composer' }, key: { key }, text, cursor: text.length, start: text.length, end: text.length, inputText: key.length === 1 ? key : '' }) as never
+
+/** A turn that answers with marked words and ends: its record is written and its verb row drawn. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function markedTurn($: any, on: any, clock: { settle: () => Promise<void> }, text = MARKED) {
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  on('tool.call', () => ({ result: 'ok' }))
+  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
+  await $.session.append({ door: 'prompt', uuid: 'pppppppp-0000-0000-0000-000000000000', origin: { kind: 'composer' }, message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'when?' }] } } as never)
+  await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] } } as never)
+  await $.turn.complete({ turnId: 't1', answer: text, durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+}
+
+test("each row is written to the messages folder: an index line per row, and a record of Claude's message with its marks", async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, on, clock)
+  const dir = `${ROOT}/thimble/messages/s-1`
+  const index = w.files[`${dir}/index.jsonl`]!.trim().split('\n').map(l => JSON.parse(l))
+  expect(index.map((x: { kind: string }) => x.kind)).toEqual(['user', 'assistant'])
+  expect(index[0].text).toBe('when?')
+  expect(index[1].row).toBe(AT)
+  const rec = JSON.parse(w.files[`${dir}/${AT}.json`]!)
+  expect(rec.v).toBe(1)
+  expect(rec.session).toBe('s-1')
+  expect(rec.text).toBe(MARKED)
+  expect(rec.shown).toBe(null)
+  expect(rec.final).toBe(true)
+  expect(rec.marks.map((m: { kind: string; label?: string }) => `${m.kind} ${m.label}`)).toEqual(['cite 6,543 saves', 'cite this one'])
+  expect(MARKED.slice(rec.marks[0].start, rec.marks[0].end)).toBe('[6,543 saves](q1#day=2026-06-18@n)')
+})
+
+test('keys of an empty prompt: ] opens the tray on the next mark and ⌫ goes back; v opens its line, and a letter typed straight after gives v back to the prompt', async ($, on) => {
+  world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, on, clock)
+  // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
+  expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
+  expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
+  await ($ as Any).prompt.edit(edit(']'))
+  expect(textOf(await $.ui.render(BAND))).toContain('this one')
+  await ($ as Any).prompt.edit(edit('['))
+  expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
+  // with the tray open the prompt is its question: letters are typed
+  expect(await ($ as Any).prompt.edit(edit('w'))).toEqual({ text: 'w', cursor: 1 })
+  // ⌫ on an empty prompt closes the tray
+  expect(await ($ as Any).prompt.edit(edit('backspace'))).toEqual({ text: '', cursor: 0 })
+  expect(textOf(await $.ui.render(BAND))).toBe('the reply')
+  // v opens its line under the answer; i typed straight after was the start of a word
+  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
+  expect(textOf(await $.ui.render(MOUNT))).toContain('▸ 1 a card of this message')
+  expect(await ($ as Any).prompt.edit(edit('i'))).toEqual({ text: 'vi', cursor: 2 })
+  expect(textOf(await $.ui.render(MOUNT))).not.toContain('▸ 1 a card')
+  // a key in a prompt with words in it is typed
+  expect(await ($ as Any).prompt.edit(edit('s', 'so'))).toEqual({ text: 'sos', cursor: 3 })
+})
+
+test('a question asked with the tray open carries the mark to Claude, and its row says what it was about', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, on, clock)
+  await ($ as Any).prompt.edit(edit(']'))
+  await $.prompt.submit({ text: 'why so high?', origin: { kind: 'composer' } } as never)
+  const context = w.submitted.at(-1)!.context.join('\n')
+  expect(context).toContain('citation of your reply open in the tray: 6,543 saves (q1#day=2026-06-18@n)')
+  expect(context).toContain('lean resolve q1#day=2026-06-18@n')
+  // the tray closes; the question's row names its mark, and the index keeps the scope
+  expect(textOf(await $.ui.render(BAND))).toBe('the reply')
+  await $.session.append({ door: 'prompt', uuid: 'qqqqqqqq-0000-0000-0000-000000000000', origin: { kind: 'composer' }, message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'why so high?' }] } } as never)
+  const row = await $.ui.render({ component: 'UserMessage', surface: 'terminal', requestId: 'qqqqqqqq-0000-0000-0000-000000000000', props: { text: 'why so high?', origin: { kind: 'composer' } }, viewport: { columns: 100, rows: 40 } } as never)
+  expect(textOf(row)).toContain('▸ about 6,543 saves')
+  const index = w.files[`${ROOT}/thimble/messages/s-1/index.jsonl`]!.trim().split('\n').map(l => JSON.parse(l))
+  expect(index.at(-1).scope).toEqual({ row: AT, mark: { kind: 'cite', ref: 'q1#day=2026-06-18@n', label: '6,543 saves' } })
 })

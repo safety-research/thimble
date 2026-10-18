@@ -29,6 +29,34 @@ export type ObserverLine = {
   prompts: number
 }
 
+/** One mark in a message (CONTRACT 1): a citation, a gloss or a sparkline, as offsets into the shown markdown. */
+export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string }
+
+/** A gloss the observer wrote for a message: the term as it stands in the text, what it is, where it mattered here. */
+export type Gloss = { term: string; title?: string; body?: string; here?: string; program?: string; refs?: string[] }
+
+/** The record of one of Claude's messages (CONTRACT 1), kept in thimble/messages/<session>/<row>.json. */
+export type MsgRecord = {
+  v: 1
+  row: string
+  session: string
+  at?: string | null
+  text: string
+  shown: string | null
+  marks: Mark[]
+  glosses: Record<string, Gloss>
+  verbs: Record<string, { lit?: boolean; note?: string; proposals?: string[]; chips?: unknown[]; offer?: unknown }>
+  objects: string[]
+  /** the turn's answer: the row its verb row is drawn under */
+  final?: boolean
+}
+
+/** One card of the tray: a mark of a message, or a citation inside a card. */
+export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' }
+
+/** The tray: the stack of cards it shows, the top one drawn. */
+export type Tray = { stack: TrayFrame[] }
+
 /** The browser page's server: its base URL (token included), or why there is none. */
 export type Web = { base?: string; root?: string; problem?: string; opened?: string }
 
@@ -58,6 +86,24 @@ declare module 'claude-code' {
       ranked: StateFamily<Ranking | null>
       /** the observer's line above the prompt, or none */
       line: ObserverLine | null
+      /** each message's record, by its row key */
+      msg: StateFamily<MsgRecord | null>
+      /** the rows of Claude's messages in this session, oldest first */
+      msgrows: string[]
+      /** the tray above the prompt, or none */
+      tray: Tray | null
+      /** the line a verb opened under a message's verb row, or none */
+      pick: { row: string; verb: string } | null
+      /** the message the keys act on, when the person picked one other than the latest */
+      selrow: string | null
+      /** the row of the latest turn's answer */
+      answer: string | null
+      /** when a tray card was drawn, by its key: the tray redraws */
+      cardready: StateFamily<number>
+      /** a verb of the row running on a message, by its row */
+      running: StateFamily<string | null>
+      /** the verbs of the row, as the registry lists them */
+      rowverbs: { key: string; name: string; color?: unknown }[] | null
     }
   }
 }

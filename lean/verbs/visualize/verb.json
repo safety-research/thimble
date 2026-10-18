@@ -1,0 +1,10 @@
+{
+  "key": "v",
+  "name": "visualize",
+  "line": "make a card of this message: a picture of what its words say",
+  "order": 0,
+  "row": true,
+  "color": { "light": "#4f46e5", "dark": "#9a93ff" },
+  "writer": "Claude, in the main conversation: the run asks Claude for the card, with the observer's proposals",
+  "run": "run.mjs"
+}
