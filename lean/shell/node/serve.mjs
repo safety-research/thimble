@@ -243,8 +243,9 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
     const [, head, ...rest] = parts
     try {
       if (!head) return send(302, 'text/plain', '', { location: `${base}/mirror/` })
-      // the Atlas page's files, objects as JSON, and an atlas object's link to its page (shell/browser/atlas/route.mjs)
-      if (atlasRoute(req, url, parts, { root, token, objectFile, send })) return
+      // objects as JSON, and an atlas object's link to its page (shell/browser/atlas/route.mjs); the Atlas page itself
+      // is a page folder like any other, served below
+      if (head === 'o' && atlasRoute(req, url, parts, { root, token, objectFile, send })) return
       // the old handoff link: an object's page is now its card detail
       if (head === 'o' && rest.length === 1 && req.method === 'GET') {
         if (!objectFile(root, rest[0], url.searchParams.get('v'))) return send(404, 'text/plain', `no object ${rest[0]}`)
