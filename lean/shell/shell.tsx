@@ -56,11 +56,6 @@ const refText = (r: { id: string; v: number | null }) => (r.v != null ? `${r.id}
 const cut = (s: string, n: number) => ([...s].length <= n ? s : [...s].slice(0, Math.max(0, n - 1)).join('') + '…')
 const fmtN = (x: unknown) => (typeof x === 'number' ? x.toLocaleString('en-US') : String(x))
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
-const hash = (s: string) => {
-  let h = 0x811c9dc5
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0
-  return `${h.toString(36)}-${s.length}`
-}
 const stateKey = (state?: Record<string, unknown> | null) => (state && Object.keys(state).length ? JSON.stringify(state) : '')
 
 // the module's own memory: lost on a reload, rebuilt from $.state and the object files
@@ -68,7 +63,7 @@ const objects = new Map<string, Any>()
 const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
-let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[] } | null = null
+let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[] } | null = null
 let theme: 'dark' | 'light' = 'dark'
 let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string } } | null = null
 let server: { base: string; root: string } | null = null
@@ -205,6 +200,23 @@ async function place($: Engine, at: string, ref: Placed): Promise<void> {
   await setUnder($, at, next)
 }
 
+/** The objects this turn saved, under row `at`: an object saved again in the same turn is drawn once, under the
+ *  latest words, so a fix within a turn leaves no second copy above. */
+async function placeTurn($: Engine, at: string): Promise<void> {
+  if (!turn) return
+  const moved = turn.unplaced
+  for (const before of turn.placed) {
+    if (before === at) continue
+    const cur = ((await $.state.get({ ...UNDER, id: before })).value ?? []) as Placed[]
+    const kept = cur.filter(x => !moved.some(y => y.id === x.id && y.root === x.root))
+    if (kept.length !== cur.length) await setUnder($, before, kept)
+  }
+  const cur = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as Placed[]
+  await setUnder($, at, [...cur.filter(x => !moved.some(y => y.id === x.id)), ...moved])
+  if (!turn.placed.includes(at)) turn.placed.push(at)
+  turn.unplaced = []
+}
+
 /** A resumed session: its placements back in $.state, so the rows draw their objects again. */
 async function restoreShown($: Engine): Promise<void> {
   const s = await shownNow($)
@@ -287,6 +299,15 @@ async function openCite($: Engine, ref: string | null, label: string): Promise<v
   await resolveRefs($, root, [ref])
 }
 
+/** The values a reply cites, listed in the detail view: each a press from its rows. */
+async function openCites($: Engine, cites: { ref: string; label: string }[]): Promise<void> {
+  const root = await rootHere($)
+  if (!root) { $.ui.toast('no thimble/ folder here to resolve these citations'); return }
+  const last = (await $.state.get(LAST)).value
+  await $.state.set(SEL, { id: last?.id ?? '', v: last?.v ?? null, root, region: null, ex: 0, all: false, cites: cites.slice(0, 200) })
+  await $.ui.open({ id: PANE, title: 'cited values', focus: true })
+}
+
 /** One call a verb made to the model, made here: the verb's Node child has no $. */
 async function modelCall($: Engine, need: { kind: string; request: Any }): Promise<unknown> {
   const req = need.request && typeof need.request === 'object' ? need.request : {}
@@ -352,11 +373,18 @@ async function settle($: Engine, ran: Ran, ref: ObjRef, at: string | null, inPan
     if (inPane || !where || unchanged) await openDetail($, ran.saved)
   }
   if (ran.ask) {
-    await $.state.set({ ...ASKS, id: hash(ran.ask.trim()) }, { verb: ran.verb, on: ran.on || refText(ref) })
+    await keepAsk($, ran.ask, ran.verb, ran.on || refText(ref))
     void $.prompt.submit({ text: ran.ask })
   }
   if (ran.error) $.ui.toast(`${ran.verb}: ${cut(ran.error, 200)}`)
   else if (!ran.saved && !ran.ask && ran.text && !inPane) $.ui.toast(cut(ran.text.split('\n')[0] || '', 200))
+}
+
+/** A verb's request to Claude, kept so its prompt row reads as one line (the row holds the words within the engine's
+ *  framing, so it is found by their head). */
+async function keepAsk($: Engine, ask: string, verb: string, on: string): Promise<void> {
+  const cur = ((await $.state.get(ASKS)).value ?? []) as { head: string; verb: string; on: string }[]
+  await $.state.set(ASKS, [...cur, { head: ask.trim().slice(0, 160), verb, on }].slice(-20))
 }
 
 /** A verb the person pressed (a click under an object, a key in the detail view). It runs here, outside the press, and
@@ -417,7 +445,8 @@ async function startServer($: Engine, root: string): Promise<{ base: string } | 
       server = null
       serverStarting = null
       if (!ready) resolve({ problem: 'the page server stopped before it was ready' })
-      await $.state.set(WEB, { problem: 'the page server stopped; open in browser starts it again' })
+      // a server that stopped (the module reloaded, say) starts again on the next `o`: nothing to say
+      await $.state.set(WEB, {})
     })()
   })
   const r = await serverStarting
@@ -546,6 +575,18 @@ async function detailEl($: Engine, e: Any): Promise<Any> {
   const sel = (await $.state.get(SEL)).value as Sel | null
   if (!sel) return Text({ dimColor: true, children: 'No object is open. An object Claude saves shows under its reply; open it from there.' })
   const cols = Math.max(30, (e.props.bodyColumns ?? 80) - 1)
+  if (sel.cites && !sel.cite) {
+    const shown = sel.cites.slice(0, Math.max(5, (e.props.scroll?.bodyRows ?? 40) - 4))
+    return Box({ flexDirection: 'column', children: [
+      Text({ bold: true, children: `${sel.cites.length} values cited in the reply` }),
+      Box({ flexDirection: 'column', marginTop: 1, children: shown.map((c, i) => Button({
+        key: `cl-${i}`, plain: true, label: c.label, onPress: () => openCite($, c.ref, c.label),
+        children: [Text({ children: cut(c.label, Math.max(10, Math.floor(cols / 2))) }), Text({ dimColor: true, children: `  ${cut(c.ref, Math.max(10, cols - Math.min([...c.label].length, Math.floor(cols / 2)) - 3))}` })],
+      })) }),
+      sel.cites.length > shown.length ? Text({ dimColor: true, children: `+ ${sel.cites.length - shown.length} more` }) : null,
+      Box({ marginTop: 1, children: [Text({ dimColor: true, children: 'tab and enter open one, with the rows behind it' })] }),
+    ].filter(Boolean) })
+  }
   if (sel.cite) {
     const label = citeLabels.get(sel.cite) || sel.cite
     return Box({ flexDirection: 'column', children: [
@@ -619,7 +660,8 @@ async function detailEl($: Engine, e: Any): Promise<Any> {
     const k = knobs.find(c => c.id === sel.knob) || knobs[0]
     row.push(Button({ key: 'knob-down', plain: true, hotkey: 'j', label: `turn ${k.label} down`, children: [Text({ dimColor: true, children: '◂' })], onPress: () => turnSel($, k.id, -1) }))
     row.push(Text({ children: ' ' }))
-    row.push(Button({ key: 'knob-up', plain: true, hotkey: 'k', label: `turn ${k.label} up`, children: [Text({ dimColor: true, children: `▸ ${k.label}` })], onPress: () => turnSel($, k.id, 1) }), sep(els))
+    row.push(Button({ key: 'knob-up', plain: true, hotkey: 'k', label: `turn ${k.label} up`, children: [Text({ dimColor: true, children: '▸' })], onPress: () => turnSel($, k.id, 1) }))
+    row.push(Text({ dimColor: true, children: ` turn ${k.label}` }), sep(els))
   }
   // every verb works on its key here; those picked for the object read brighter
   const running = said?.running ? said.verb : null
@@ -628,10 +670,11 @@ async function detailEl($: Engine, e: Any): Promise<Any> {
   row.push(sep(els))
   row.push(Button({ key: 'k:web', plain: true, hotkey: 'o', label: 'open in browser', children: [Text({ dimColor: true, children: 'browser' })], onPress: async () => $.ui.toast(await openBrowser($, (await $.state.get(SEL)).value ?? sel)) }))
   const keys = Box({ flexDirection: 'row', flexWrap: 'wrap', children: row })
+  // the page's link only when no browser opened it (o opens it again otherwise)
   const web = (await $.state.get(WEB)).value
-  const page = web?.opened && web.root === sel.root
-    ? Text({ dimColor: true, wrap: 'truncate-end', children: ['page ', Link({ href: web.opened, children: 'open it again ↗' }), web.problem ? ` · ${web.problem}` : ''] })
-    : web?.problem ? Text({ color: 'error', wrap: 'wrap', children: web.problem }) : null
+  const page = web?.problem
+    ? Text({ dimColor: true, wrap: 'truncate-end', children: [web.opened && web.root === sel.root ? Link({ href: web.opened, children: 'the page ↗' }) : '', ` ${web.problem}`] })
+    : null
 
   // the drawing's window: all of it when it fits, else the rows around the selection
   const head = 1 + (o.question ? 1 : 0)
@@ -823,7 +866,7 @@ export const registerShell: Register = on => {
 
   // a turn of main's: the objects it saved, and its last text row, under which they are drawn
   on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) turn = { unplaced: [], lastRow: '', calls: [] }
+    if (e.agentId === undefined) turn = { unplaced: [], lastRow: '', calls: [], placed: [] }
     return next(e)
   })
 
@@ -869,10 +912,7 @@ export const registerShell: Register = on => {
       const blocks = Array.isArray(msg.content) ? (msg.content as { type?: string; text?: string }[]) : []
       if (e.agentId === undefined && turn && e.door === 'response' && e.uuid && blocks.some(b => b.type === 'text' && String(b.text || '').trim())) {
         turn.lastRow = e.uuid
-        if (turn.unplaced.length) {
-          await setUnder($, rowKey(e.uuid), turn.unplaced)
-          turn.unplaced = []
-        }
+        if (turn.unplaced.length) await placeTurn($, rowKey(e.uuid))
       }
     } catch {
       // the row is stored whatever the shell makes of it
@@ -898,10 +938,7 @@ export const registerShell: Register = on => {
       // objects saved after the turn's last words: under those words (or the save's own row, with none)
       if (e.agentId === undefined && turn && turn.unplaced.length) {
         const at = turn.lastRow ? rowKey(turn.lastRow) : turn.calls.at(-1)
-        if (at) {
-          const cur = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as Placed[]
-          await setUnder($, at, [...cur.filter(x => !turn!.unplaced.some(y => y.id === x.id)), ...turn.unplaced])
-        }
+        if (at) await placeTurn($, at)
       }
     } catch {
       // nothing drawn is better than a turn that does not end
@@ -921,19 +958,16 @@ export const registerShell: Register = on => {
     const { Box, Text, Button } = els
     let own = await next(cites.length ? { ...e, props: { ...e.props, text: withoutTargets(e.props.text) } } : e)
     if (cites.length) {
-      const room = Math.max(20, (e.viewport?.columns ?? 100) - 12)
-      const chips: Any[] = [Text({ dimColor: true, children: 'cites ' })]
-      let used = 6
-      let shown = 0
-      for (const c of cites) {
-        const w = [...c.label].length + 3
-        if (used + w > room) break
-        if (shown) chips.push(Text({ dimColor: true, children: ' · ' }))
-        chips.push(Button({ key: `cite-${at}-${shown}`, plain: true, label: c.label, children: [Text({ color: 'suggestion', children: cut(c.label, 30) })], onPress: () => openCite($, c.ref, c.label) }))
-        used += w
-        shown++
-      }
-      if (shown < cites.length) chips.push(Text({ dimColor: true, children: ` +${cites.length - shown}` }))
+      // a few citations by their words, each a press from its rows; more than fit calmly, one press to their list
+      const room = Math.min(72, Math.max(20, (e.viewport?.columns ?? 100) - 12))
+      const words = cites.reduce((n, c) => n + [...c.label].length + 3, 6)
+      const fits = cites.length <= 4 && words <= room && cites.every(c => [...c.label].length <= 30)
+      const chips: Any[] = fits
+        ? [Text({ dimColor: true, children: 'cites ' }), ...cites.flatMap((c, i) => [
+            ...(i ? [Text({ dimColor: true, children: ' · ' })] : []),
+            Button({ key: `cite-${at}-${i}`, plain: true, label: c.label, children: [Text({ color: 'suggestion', children: c.label })], onPress: () => openCite($, c.ref, c.label) }),
+          ])]
+        : [Button({ key: `cites-${at}`, plain: true, label: 'cited values', children: [Text({ dimColor: true, children: `${cites.length} cited values ` }), Text({ color: 'suggestion', children: '›' })], onPress: () => openCites($, cites) })]
       own = Box({ flexDirection: 'column', children: [own, Box({ flexDirection: 'row', marginLeft: 2, children: chips })] })
     }
     if (!list.length) return own
@@ -965,7 +999,8 @@ export const registerShell: Register = on => {
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'plugin' } } }, async ($, e, next) => {
     const origin = e.props.origin as { kind: string; name?: string }
     if (e.props.isExpanded || origin.name !== 'thimble-lean') return next(e)
-    const asked = (await $.state.get({ ...ASKS, id: hash(String(e.props.text).trim()) })).value
+    const text = String(e.props.text)
+    const asked = (((await $.state.get(ASKS)).value ?? []) as { head: string; verb: string; on: string }[]).find(a => text.includes(a.head))
     if (!asked) return next(e)
     const { Text } = $.ui.resolve(e) as Any
     return Text({ wrap: 'truncate-end', children: [Text({ color: 'suggestion', children: '› ' }), Text({ children: `${asked.verb} ` }), Text({ dimColor: true, children: `on ${asked.on} · asked Claude` })] })
@@ -1038,7 +1073,7 @@ export const registerShell: Register = on => {
     if (ran.saved) await setUnder($, at, [ran.saved])
     if (ran.ask) {
       const ask = ran.ask
-      await $.state.set({ ...ASKS, id: hash(ask.trim()) }, { verb: ran.verb, on: ran.on || refText(t.ref) })
+      await keepAsk($, ask, ran.verb, ran.on || refText(t.ref))
       // the request is a turn of its own, which can start only once this command is done
       $.clock.after(50, () => { void $.prompt.submit({ text: ask }) })
     }

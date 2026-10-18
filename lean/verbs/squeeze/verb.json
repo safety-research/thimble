@@ -6,7 +6,7 @@
   "absorbs": ["Telescope", "squeeze chips", "session headlines"],
   "auto": { "lines": 16, "chars": 1600, "why": "long text arrives squeezed; the original is one key away" },
   "keys": { "s": "shorter", "S": "fuller", "o": "the original beside it" },
-  "model": "sonnet",
+  "model": "opus",
   "effort": "low",
   "maxTokens": 8000
 }

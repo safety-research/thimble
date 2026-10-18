@@ -231,7 +231,9 @@ export function traceId(t) {
   const key = `${t.ref || ''}|${t.text || ''}`
   let h = 0x811c9dc5
   for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x01000193) >>> 0
-  const tail = slug(String(t.ref || t.text || 'target').split('/').slice(-1)[0]).slice(-32)
+  // the words it is known by (its label, else the readable end of its ref), cut at a word
+  const words = slug(t.label || String(t.ref || t.text || 'target').split('/').slice(-1)[0])
+  const tail = words.length <= 32 ? words : words.slice(0, 33).replace(/-[^-]*$/, '') || words.slice(0, 32)
   return `trace-${tail}-${h.toString(36).slice(0, 5)}`
 }
 
