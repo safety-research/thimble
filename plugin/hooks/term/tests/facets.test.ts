@@ -93,9 +93,9 @@ test('a heatmap draws as its grid of shaded cells, in its axes order, with a rea
   expect(lines).toHaveLength(3 + 3 + 1)
   expect(lines[0]).toMatch(/^alpha\.example +▓+ +· +· +█+$/)
   expect(lines[2]).toMatch(/^gamma\.example +· +· +█+ +·/)
-  // the days' names under their columns, wrapped; the key from the least share to the most
+  // the days' names under their columns, wrapped; the key: the dot of a 0, then each shade with the least share it holds
   expect(lines[3]).toMatch(/Day 1 +Day 2 +Day 3 +Day 4/)
-  expect(lines.at(-1)).toBe('0 ·░▒▓█ 0.8  share')
+  expect(lines.at(-1)).toBe('· 0  ░ >0  ▒ ≥0.2  ▓ ≥0.4  █ ≥0.6   share')
   expect(lay.items.find(i => i.label === 'gamma.example · Day 3 (300 saves)')).toMatchObject({ value: '0.7 share' })
 })
 

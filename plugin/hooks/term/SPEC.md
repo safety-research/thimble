@@ -626,8 +626,12 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - A stacked area chart: its bands, each cell's two halves in the hue of the band that holds their middle (`█`, `▀`,
   `▄`), stacked by the chart's `order` field, else by the series' names, the first lowest; the key in the legend's order.
 - A heatmap: a row per y value, its name at the content's edge, then a cell per x value as wide as the room allows,
-  shaded from the least number to the most (`·░▒▓█`, the least a dim dot, in the first hue), the x values' names under
-  their columns, and the key `0 ·░▒▓█ 0.31  share`. A cell's readout names its row, its column and its number.
+  shaded on the chart's color scale (log, symlog, sqrt or linear) from the least number to the most (`░▒▓█` in the
+  first hue); a dim `·` for a cell that holds 0 and only for such a cell, so a cell with a number never reads as 0. Where
+  the chart writes its numbers on its cells (a text layer) and they fit, each cell is its number on its shade's tint, a
+  0 dim on none, as the browser draws them. The x values' names under their columns, and the key: the dot of a 0, each
+  shade with the least number it holds, and the numbers' name with the scale (`· 0  ░ ≥1  ▒ ≥8  ▓ ≥72  █ ≥615   Calls,
+  log scale`; bug hunt K1). A cell's readout names its row, its column and its number.
 - A faceted chart (`.facet(column=…)`, a `row` or `column` channel, thimble.chart's `panels`): each panel's title in
   bold over its picture as its kind draws, side by side as many to a row as are 40 cells wide, else one under another;
   the panels share their scales but those the chart keeps to each panel, every panel of bars lists every label, a value

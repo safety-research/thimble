@@ -5,7 +5,7 @@
 import { axisTicks, numberTicks, ownTicks, placeLabels, wallClock } from './axis'
 import { cut, cw, fmt, formatted, itemsRow, middleCut, prefix, quoted, viewRef, visibleControls, width } from './lib'
 import type { Run, TableRuns } from './lib'
-import { COLORS, seriesHue } from './paint'
+import { COLORS, cellTint, seriesHue } from './paint'
 import { hueOf } from './labels'
 
 export { COLORS }
@@ -68,7 +68,8 @@ export type CardData = {
    *  groups: a stacked area's legend, or a panel's, whose values are those of every panel (cell.ts facetCard) */
   hues?: string[]
   /** a heat card's cells (cell.ts heatCard): its x values across and its y values down, as written, each cell's number
-   *  (`v[y][x]`, null for none) and the place of the row it shows in the chart's rows (`at`), and the number's name */
+   *  (`v[y][x]`, null for none) and the place of the row it shows in the chart's rows (`at`), the number's name, its
+   *  color scale where it is not linear, its color's title, and the words a text layer writes on each cell */
   grid?: Heat
   /** a faceted chart's panels (cell.ts facetCard), each a card of one kind under its values' title; `own` the scales
    *  each panel keeps to itself (Vega-Lite's `resolve`), the others shared; `total` how many panels there are when
@@ -79,7 +80,10 @@ export type CardData = {
   browser?: boolean
 }
 
-export type Heat = { xs: string[]; ys: string[]; v: (number | null)[][]; at: (number | null)[][]; name: string }
+/** A heat card's color scale where it is not linear (Vega-Lite's scale `type`, with symlog's `constant` and pow's
+ *  `exponent`). */
+export type HeatScale = { type: 'log' | 'symlog' | 'sqrt' | 'pow'; exponent?: number; constant?: number }
+export type Heat = { xs: string[]; ys: string[]; v: (number | null)[][]; at: (number | null)[][]; name: string; scale?: HeatScale; title?: string; words?: (string | null)[][] }
 export type Panel = { title: string; card: CardData }
 
 /** What the panels of a faceted chart share (panelsLayout): the ranges of their x and y scales, in the numbers the
@@ -2600,12 +2604,78 @@ function textLayout(card: CardData, cols: number): Layout {
   return { lines, items: [], hit: () => -1 }
 }
 
-// the shades of a heat card's cells, from its least number to its most: the least a dim dot
+// the shades of a heat card's cells: a dim dot for a cell whose number is 0, and only for it; then from its least number
+// to its most
 const SHADES = ['·', '░', '▒', '▓', '█']
+// the share of the hue a cell with its words on it takes over the terminal's background, by its shade
+const TINTS = [0, 0.22, 0.42, 0.66, 0.9]
+// what a heat card's key calls its color scale, where it is not linear, and the words that say it in a title
+const SCALE_WORDS: Record<HeatScale['type'], string> = { log: 'log scale', symlog: 'log scale', sqrt: 'square root scale', pow: 'power scale' }
+const SCALE_SAID: Record<HeatScale['type'], RegExp> = { log: /\blog/i, symlog: /\blog/i, sqrt: /sqrt|square root/i, pow: /\bpow/i }
 
-/** A heat card's key: its least number, the shades, its most, and the numbers' name, dim but the shades. */
-function heatKey(lo: number, hi: number, name: string): Line {
-  return [{ s: `${amount(lo)} `, fg: COLORS.dim }, { s: SHADES[0]!, fg: COLORS.dim }, { s: SHADES.slice(1).join(''), fg: one() }, { s: ` ${amount(hi)}  ${name}`, fg: COLORS.dim }]
+/** A number as a heat card's color scale places it (Vega-Lite's log, symlog, sqrt and pow; linear for none); NaN for a
+ *  number a log scale has no place for. */
+function scaled(n: number, s?: HeatScale): number {
+  if (!s) return n
+  const a = Math.abs(n)
+  if (s.type === 'log') return n > 0 ? Math.log10(n) : NaN
+  if (s.type === 'symlog') return Math.sign(n) * Math.log1p(a / (s.constant ?? 1))
+  if (s.type === 'sqrt') return Math.sign(n) * Math.sqrt(a)
+  return Math.sign(n) * a ** (s.exponent ?? 1)
+}
+
+/** The number at place `t` of a heat card's color scale (scaled's inverse). */
+function unscaled(t: number, s?: HeatScale): number {
+  if (!s) return t
+  const a = Math.abs(t)
+  if (s.type === 'log') return 10 ** t
+  if (s.type === 'symlog') return Math.sign(t) * Math.expm1(a) * (s.constant ?? 1)
+  if (s.type === 'sqrt') return Math.sign(t) * a * a
+  return Math.sign(t) * a ** (1 / (s.exponent ?? 1))
+}
+
+type Shading = { shade: (n: number) => number; from: string[]; zero: boolean; name: string }
+
+/** How a heat card shades its cells: the range of its numbers on its color scale, its own or the panels' (`range`); a
+ *  cell's shade, 0 (the dim dot) for a number that is 0 and only for it, else 1 to 4 by where the number stands on the
+ *  scale from the least to the most; the least number each shade 1 to 4 holds, as the key writes it; whether a cell
+ *  holds 0; and the name the key gives the numbers (the color's title, else its field, with its scale where the name
+ *  does not say it). A log scale's range starts at its least number above 0. */
+function heatShading(nums: readonly number[], g: Heat, range?: [number, number]): Shading {
+  const s = g.scale
+  const placed = s?.type === 'log' ? nums.filter(n => n > 0) : nums
+  let [lo, hi] = range ?? [Math.min(...placed), Math.max(...placed)]
+  if (s?.type === 'log' && lo <= 0) lo = Math.min(...placed)
+  const [a, b] = [scaled(lo, s), scaled(hi, s)]
+  const shade = (n: number): number => {
+    if (n === 0) return 0
+    const t = scaled(n, s)
+    if (!Number.isFinite(t)) return 1
+    if (!(b > a)) return SHADES.length - 1
+    return Math.max(1, Math.min(SHADES.length - 1, 1 + Math.floor(((t - a) / (b - a)) * (SHADES.length - 1))))
+  }
+  // the least number of each shade: the first above 0 where the least is 0 (1 for whole numbers), else the least; then
+  // where each other shade starts on the scale, the least whole number there for whole numbers
+  const whole = nums.every(n => Number.isInteger(n))
+  const starts = [1, 2, 3].map(k => unscaled(a + ((b - a) * k) / (SHADES.length - 1), s))
+  const from = [lo === 0 ? (whole ? '≥1' : '>0') : `≥${amount(lo)}`, ...starts.map(e => `≥${amount(whole ? Math.ceil(e - 1e-9) : Number(e.toPrecision(3)))}`)]
+  const name = g.title ?? g.name
+  return { shade, from, zero: nums.includes(0), name: s && !SCALE_SAID[s.type].test(name) ? `${name}, ${SCALE_WORDS[s.type]}` : name }
+}
+
+/** A heat card's key, dim but its marks: `· 0` where a cell holds 0, then each shade with the least number it holds,
+ *  then the numbers' name. With `words` (the cells write their numbers on a tint) each shade is its tint with the
+ *  number on it. */
+function heatKey(sh: Shading, words: boolean): Line {
+  const key: Line = []
+  if (sh.zero) key.push(words ? { s: '0', fg: COLORS.dim } : { s: `${SHADES[0]} 0`, fg: COLORS.dim }, { s: '  ' })
+  sh.from.forEach((f, i) => {
+    const tint = words ? cellTint(one(), TINTS[i + 1]!) : null
+    if (tint) key.push({ s: ` ${f} `, bg: tint.bg, fg: tint.fg })
+    else key.push({ s: SHADES[i + 1]!, fg: one() }, { s: ` ${f}${i < sh.from.length - 1 ? '  ' : ''}`, fg: COLORS.dim })
+  })
+  key.push({ s: `   ${sh.name}`, fg: COLORS.dim })
+  return key
 }
 
 /** A heat card's numbers, over the rows and columns it draws. */
@@ -2614,30 +2684,42 @@ function heatNumbers(card: CardData): number[] {
   return g ? g.v.slice(0, MAX_BARS).flat().filter((n): n is number => n !== null) : []
 }
 
-/**
- * A heat card (cell.ts heatCard), as the browser's heatmap reads: a row per y value, its name at the content's edge as
- * a bar's is, then a cell per x value, as wide as the room allows (one to eight cells, a blank cell between two from
- * three on), shaded by its number from the card's least to its most (SHADES, in the first hue, the least a dim `·`; a
- * cell with no number blank). Under the rows each x value's name: under its column, wrapped in it on up to three rows,
- * where the columns are wide enough, else from its column every so many columns; then the key (heatKey). The first
- * MAX_BARS rows, then `… N more`; columns past the room, `… N more columns`. A cell is a mark: its readout names its
- * row, its column and its number (bug hunt J10: a heatmap drew as 110 rows of a table).
- */
-function heatLayout(card: CardData, cols: number, hover: number, shared: Shared = {}): Layout {
-  const g = card.grid
-  if (!g || !g.xs.length || !g.ys.length) return { lines: [[{ s: 'no cells to draw', fg: COLORS.dim }]], items: [], hit: () => -1 }
+/** A heat card's room: its rows drawn and their names, its columns' names, the width of the rows' names, how many
+ *  columns fit, each column's cells with its gap (`step`) and those its cell fills (`fill`), and whether its cells
+ *  write their words: the card has words (a text layer's), every one fits in its cell with a cell to spare, and the
+ *  theme is known, so their tints can be drawn. */
+function heatRoom(g: Heat, cols: number) {
   const ys = g.ys.slice(0, MAX_BARS)
   const yNames = barNames(ys)
   const xNames = barNames(g.xs)
   const labelW = Math.min(Math.max(4, ...yNames.map(n => width(n))), Math.max(8, Math.floor(cols * 0.35)))
   const room = Math.max(1, cols - labelW - 2)
   const fit = Math.min(g.xs.length, room)
-  // each column's cells, its gap included, and those its shade fills
   const step = Math.max(1, Math.min(8, Math.floor(room / fit)))
   const fill = step >= 3 ? step - 1 : step
+  const said = g.words ? ys.flatMap((_, yi) => (g.words![yi] ?? []).slice(0, fit)).filter((w): w is string => w !== null) : []
+  const words = said.length > 0 && said.every(w => width(w) < fill) && cellTint(one(), 1) !== null
+  return { ys, yNames, xNames, labelW, fit, step, fill, words }
+}
+
+/**
+ * A heat card (cell.ts heatCard), as the browser's heatmap reads: a row per y value, its name at the content's edge as
+ * a bar's is, then a cell per x value, as wide as the room allows (one to eight cells, a blank cell between two from
+ * three on), shaded on the chart's color scale (heatShading: log, symlog, sqrt or linear) from the card's least number
+ * to its most, in the first hue; a cell whose number is 0, and only such a cell, a dim `·`, so a cell that holds a
+ * number never reads as 0 (bug hunt K1: on a log heatmap drawn linearly, 70 of 77 cells read as 0); a cell with no
+ * number blank. Where the chart writes its numbers on its cells (a text layer) and they fit, each cell is its number on
+ * its shade's tint, 0 dim on none, as the browser draws them. Under the rows each x value's name: under its column,
+ * wrapped in it on up to three rows, where the columns are wide enough, else from its column every so many columns;
+ * then the key (heatKey). The first MAX_BARS rows, then `… N more`; columns past the room, `… N more columns`. A cell is
+ * a mark: its readout names its row, its column and its number (bug hunt J10: a heatmap drew as 110 rows of a table).
+ */
+function heatLayout(card: CardData, cols: number, hover: number, shared: Shared = {}): Layout {
+  const g = card.grid
+  if (!g || !g.xs.length || !g.ys.length) return { lines: [[{ s: 'no cells to draw', fg: COLORS.dim }]], items: [], hit: () => -1 }
+  const { ys, yNames, xNames, labelW, fit, step, fill, words } = heatRoom(g, cols)
   const nums = heatNumbers(card)
-  const [lo, hi] = shared.y ?? [Math.min(...nums), Math.max(...nums)]
-  const shadeOf = (n: number) => (hi > lo ? Math.max(0, Math.min(SHADES.length - 1, Math.floor(((n - lo) / (hi - lo)) * SHADES.length))) : SHADES.length - 1)
+  const sh = heatShading(nums, g, shared.y)
   const items: Item[] = []
   const marks: { yi: number; xi: number }[] = []
   const index = new Map<string, number>()
@@ -2652,6 +2734,8 @@ function heatLayout(card: CardData, cols: number, hover: number, shared: Shared 
     }),
   )
   const hot = hover >= 0 ? marks[hover] : undefined
+  // a mark in the middle of its cell
+  const mid = (s: string) => ' '.repeat((fill - width(s)) >> 1) + s + ' '.repeat(fill - width(s) - ((fill - width(s)) >> 1))
   const lines: Line[] = []
   const owner: number[] = []
   ys.forEach((_, yi) => {
@@ -2661,10 +2745,12 @@ function heatLayout(card: CardData, cols: number, hover: number, shared: Shared 
       const on = hot?.yi === yi && hot.xi === xi ? { inv: true } : {}
       if (n === null || n === undefined) segs.push({ s: ' '.repeat(fill) })
       else {
-        const k = shadeOf(n)
-        // the least a dot in the middle of its cell
-        const glyph = k === 0 ? ' '.repeat((fill - 1) >> 1) + SHADES[0]! + ' '.repeat(fill - 1 - ((fill - 1) >> 1)) : SHADES[k]!.repeat(fill)
-        segs.push({ s: glyph, fg: k === 0 ? COLORS.dim : one(), ...on })
+        const k = sh.shade(n)
+        const tint = words && k ? cellTint(one(), TINTS[k]!) : null
+        const said = words ? g.words![yi]?.[xi] ?? '' : ''
+        if (tint) segs.push({ s: mid(said), bg: tint.bg, fg: tint.fg, ...on })
+        else if (words) segs.push({ s: mid(said), fg: COLORS.dim, ...on })
+        else segs.push({ s: k === 0 ? mid(SHADES[0]!) : SHADES[k]!.repeat(fill), fg: k === 0 ? COLORS.dim : one(), ...on })
       }
       if (step > fill && xi < fit - 1) segs.push({ s: ' '.repeat(step - fill) })
     }
@@ -2698,7 +2784,7 @@ function heatLayout(card: CardData, cols: number, hover: number, shared: Shared 
     lines.push([{ s: pad0 + xl, fg: COLORS.dim }])
   }
   if (g.xs.length > fit) lines.push([{ s: `… ${g.xs.length - fit} more columns`, fg: COLORS.dim }])
-  if (shared.key !== false && nums.length) lines.push(heatKey(lo, hi, g.name))
+  if (shared.key !== false && nums.length) lines.push(heatKey(sh, words))
   const hit = (x: number, y: number): number => {
     const yi = owner[y]
     const xi = Math.floor((x - labelW - 2) / step)
@@ -2746,7 +2832,8 @@ function panelsLayout(card: CardData, cols: number, hover: number, plotRows?: nu
     const scales = panels.map(p => dotsScale(p.card)).filter(s => s.vals.length)
     if (scales.every(s => s.kind === scales[0]!.kind)) shared.x = span(scales.map(s => [s.x0, s.x1]))
   } else if (kind === 'heat' && !own.size) {
-    const nums = panels.flatMap(p => heatNumbers(p.card))
+    // a log scale's range from its least number above 0 (heatShading)
+    const nums = panels.flatMap(p => heatNumbers(p.card)).filter(n => panels[0]!.card.grid?.scale?.type !== 'log' || n > 0)
     if (nums.length) shared.y = [Math.min(...nums), Math.max(...nums)]
   }
   // each panel's layout, the one under the pointer with its mark lit; its items after those of the panels before it
@@ -2778,7 +2865,8 @@ function panelsLayout(card: CardData, cols: number, hover: number, plotRows?: nu
   const hues = card.hues ?? []
   const named = new Set([...cardLabels(card).flatMap(l => l.values), ...panels.map(p => p.title)])
   if (hues.length > 1 && !hues.every(h => named.has(h))) lines.push(...flow(hues.map(h => [{ s: '● ', fg: groupHue(card, h, hues) }, { s: h }]), cols))
-  if (kind === 'heat' && shared.y) lines.push(heatKey(shared.y[0], shared.y[1], panels[0]!.card.grid?.name ?? ''))
+  const grid = panels[0]!.card.grid
+  if (kind === 'heat' && shared.y && grid) lines.push(heatKey(heatShading(panels.flatMap(p => heatNumbers(p.card)), grid, shared.y), panels.every(p => !p.card.grid || heatRoom(p.card.grid, w).words)))
   const items = lays.flatMap((l, k) => l.items.map(it => ({ ...it, label: `${panels[k]!.title} · ${it.label}` })))
   const hit = (x: number, y: number): number => {
     const b = boxes.find(b => y >= b.y0 && y < b.y0 + b.h && x >= b.x0 && x < b.x0 + w)

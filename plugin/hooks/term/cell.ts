@@ -3,13 +3,14 @@
 //
 // The map of card kinds (the two-modes study): a table, a timeline, a diagram, an example and a label draw directly; a
 // simple bar or line chart (one Altair layer, x and y fields) draws as text, a stacked area chart as its bands, a dots
-// chart as its rows of dots with the words a text layer writes beside them, a heatmap as its grid of shaded cells, and
+// chart as its rows of dots with the words a text layer writes beside them, a heatmap as its grid of cells shaded on its
+// color scale with the numbers a text layer writes on them, and
 // a faceted chart as one of these per panel; any other chart draws as a table of its rows when they are few, else as a
 // short note that the browser draws it; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text; a custom
 // HTML card draws as its text. A label card's counts and records come from the label (`thimble state label`).
 import type { TermLinks } from './types'
-import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, DotRow, Panel, PlanStep } from './draw'
-import { MAX_TABLE_ROWS } from './draw'
+import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, DotRow, HeatScale, Panel, PlanStep } from './draw'
+import { MAX_TABLE_ROWS, amount } from './draw'
 import { labelState, labelStateWords } from './lib'
 import { classColors } from './labels'
 import type { LabelClass } from './labels'
@@ -112,7 +113,7 @@ export const CARD_TYPE = 'application/vnd.thimble.card+json'
 const READS = 'application/vnd.thimble.reads+json'
 
 type Frame = { columns?: string[]; index?: string | null; label?: string; rows?: Cell[][]; total?: number; view?: { columns?: string[]; formats?: Record<string, string> } }
-type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown; axis?: { values?: unknown } | null; stack?: unknown }
+type Enc = { field?: string; type?: string; aggregate?: string; sort?: unknown; axis?: { values?: unknown } | null; stack?: unknown; scale?: { type?: unknown; exponent?: unknown; constant?: unknown } | null; title?: unknown; format?: unknown }
 type VegaLite = {
   mark?: string | { type?: string; opacity?: unknown }
   encoding?: Record<string, Enc | undefined>
@@ -486,11 +487,37 @@ export function dotsCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
 // the marks a heatmap draws its cells with
 const CELL_MARKS = new Set(['rect', 'square'])
 
+/** The scale a chart's color takes its numbers by, when it is not linear: Vega-Lite's `log`, `symlog` (with its
+ *  `constant`, 1 by default), `sqrt` and `pow` (with its `exponent`); undefined for a linear scale or any other. */
+function colorScale(enc: Enc): HeatScale | undefined {
+  const sc = enc.scale && typeof enc.scale === 'object' ? enc.scale : null
+  const type = sc?.type
+  const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : d)
+  if (type === 'log' || type === 'sqrt') return { type }
+  if (type === 'symlog') return { type, constant: num(sc?.constant, 1) }
+  if (type === 'pow') return { type, exponent: num(sc?.exponent, 1) }
+  return undefined
+}
+
+/** A text layer's value as the chart writes it on its mark: a number as the mod writes a count (amount), or in percent
+ *  where its format says so (`.0%`); words as they are. */
+function textWord(v: unknown, format: unknown): string | null {
+  if (v === null || v === undefined) return null
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    const pct = typeof format === 'string' ? /\.(\d+)%$|%$/.exec(format) : null
+    return pct ? `${(v * 100).toFixed(pct[1] ? Number(pct[1]) : 0)}%` : amount(v)
+  }
+  const s = String(v).trim()
+  return s || null
+}
+
 /** A heatmap (thimble.chart("heatmap"), or any chart of rect marks on two discrete axes colored by a number) as a heat
- *  card: its x values across, its y values down, each in the order its axis sorts them, and each cell's number; a text
- *  layer that writes the numbers on the cells may stand beside it. Null for any other chart, and for one whose cells
- *  have no number (bug hunt J10: a heatmap of 110 cells drew as 110 rows of a table). `index` is each row's place in
- *  the chart's own rows, when these are a panel's part of them, so a mark cites the row it shows. */
+ *  card: its x values across, its y values down, each in the order its axis sorts them, and each cell's number; the
+ *  scale its color takes the numbers by (log, symlog, sqrt, pow), its color's title, and the words a text layer on the
+ *  same x and y writes on each cell (bug hunt K1: a log heatmap drew on a linear scale, its numbers left out). Null for
+ *  any other chart, and for one whose cells have no number (bug hunt J10: a heatmap of 110 cells drew as 110 rows of a
+ *  table). `index` is each row's place in the chart's own rows, when these are a panel's part of them, so a mark cites
+ *  the row it shows. */
 export function heatCard(cell: ThimbleCell, spec: VegaLite, index?: Map<Record<string, unknown>, number>): CardData | null {
   if (spec.facet || spec.hconcat || spec.vconcat || spec.concat || spec.spec) return null
   const layers = (spec.layer ?? [spec]).map(l => ({ ...l, encoding: { ...(spec.layer ? spec.encoding : {}), ...l.encoding }, data: l.data ?? spec.data }))
@@ -522,7 +549,22 @@ export function heatCard(cell: ThimbleCell, spec: VegaLite, index?: Map<Record<s
     at[yi]![xi] = index?.get(r) ?? i
   })
   if (v.every(row => row.every(n => n === null))) return null
-  return { ...blank(cell, 'heat'), x: xf, y: yf, grid: { xs, ys, v, at, name: vf } }
+  // the words a text layer on the cells' x and y writes on each cell, where it writes some
+  const said = layers.find(l => markOf(l) === 'text' && l.encoding.text?.field && l.encoding.x?.field === xf && l.encoding.y?.field === yf)
+  let words: (string | null)[][] | undefined
+  if (said) {
+    const tf = said.encoding.text!.field!
+    const w: (string | null)[][] = ys.map(() => xs.map(() => null))
+    for (const r of vegaRows(said, spec)) {
+      const yi = ys.indexOf(String(r[yf] ?? ''))
+      const xi = xs.indexOf(String(r[xf] ?? ''))
+      if (yi >= 0 && xi >= 0) w[yi]![xi] = textWord(r[tf], said.encoding.text!.format)
+    }
+    if (w.some(row => row.some(x => x !== null))) words = w
+  }
+  const scale = colorScale(color)
+  const title = typeof color.title === 'string' && color.title.trim() ? color.title.trim() : undefined
+  return { ...blank(cell, 'heat'), x: xf, y: yf, grid: { xs, ys, v, at, name: vf, ...(scale ? { scale } : {}), ...(title ? { title } : {}), ...(words ? { words } : {}) } }
 }
 
 /** The fields a faceted chart's panels split its rows by, and the chart each panel draws: Vega-Lite's facet operator
@@ -604,7 +646,7 @@ export function facetCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
       const g = card.grid
       const all = whole.grid
       const pick = <T,>(m: (T | null)[][]): (T | null)[][] => all.ys.map(y => all.xs.map(x => (g.ys.includes(y) && g.xs.includes(x) ? m[g.ys.indexOf(y)]![g.xs.indexOf(x)]! : null)))
-      card = { ...card, grid: { ...g, xs: all.xs, ys: all.ys, v: pick(g.v), at: pick(g.at) } }
+      card = { ...card, grid: { ...g, xs: all.xs, ys: all.ys, v: pick(g.v), at: pick(g.at), ...(g.words ? { words: pick(g.words) } : {}) } }
     }
     panels.push({ title: combo.join(' · '), card: { ...card, ...(hues.length ? { hues } : {}) } })
   }
