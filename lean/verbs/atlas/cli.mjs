@@ -66,7 +66,8 @@ export function cmdCheck(file, out = console.log) {
   const t0 = Date.now()
   const c = shape.counts.claims ? citations(spec, root) : { cites: 0, hold: 0, problems: [], other: [] }
   if (c.error) { out(`the citation check failed: ${c.error}`); return 1 }
-  for (const p of c.problems) out(`citation: ${p}`)
+  const named = p => p.replace(/^\/claims\/(\d+)\/(\S*?):/, (m, i, rest) => `claim "${spec.data.claims[Number(i)]?.id ?? i}" (${rest || 'evidence'}):`)
+  for (const p of c.problems) out(`citation: ${named(p)}`)
   for (const p of c.other || []) out(`problem: ${p}`)
   const name = file.split('/').pop()
   const n = shape.problems.length + c.problems.length + (c.other || []).length

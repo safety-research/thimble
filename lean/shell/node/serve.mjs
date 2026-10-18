@@ -19,6 +19,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { atlasRoute } from '../browser/atlas/route.mjs'
 
 const LEAN_DIR = fileURLToPath(new URL('../../', import.meta.url))
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
@@ -72,6 +73,8 @@ export function startServer({ root, lean = join(LEAN_DIR, 'bin/lean'), port = 0,
     const parts = url.pathname.split('/').filter(Boolean)
     if (parts[0] !== token) return send(404, 'text/plain', 'not found')
     try {
+      // the Atlas page, its files and objects as JSON (shell/browser/atlas/route.mjs)
+      if (atlasRoute(req, url, parts, { root, token, objectFile, send: (code, type, body, extra) => { res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', ...extra }); res.end(body) } })) return
       if (req.method === 'GET' && parts[1] === 'o' && parts[2] && parts.length === 3) {
         const file = objectFile(root, decodeURIComponent(parts[2]), url.searchParams.get('v'))
         if (!file) return send(404, 'text/plain', `no object ${parts[2]} in ${root}`)

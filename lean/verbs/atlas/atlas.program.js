@@ -93,7 +93,7 @@ if (k.mode === 'detail') {
 }
 
 // ------------------------------------------------------------------ under a reply: the cluster list
-const nameW = Math.min(24, Math.max(10, ...shown.map(g => k.len(g.name) + 2)))
+const nameW = Math.min(k.w >= 110 ? 30 : 24, Math.max(10, ...shown.map(g => k.len(g.name) + 2)))
 const most = Math.max(1, ...shown.map(g => g.claims.length))
 const dotsW = Math.max(8, Math.min(26, most * 2 - 1, k.w - nameW - 46))
 const spaced = most * 2 - 1 <= dotsW
