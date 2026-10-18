@@ -1,8 +1,8 @@
-// Fit on a board of many groups (canvas/layout.ts gridOf), drawn by the real Canvas with thimble's stylesheets in a real
-// browser: 25 cards in 18 groups, most of them groups nested in the analyst's frame, as main's questions and labels
-// leave them. The nested groups wrap into rows in their order, so Fit shows the board at a zoom where the cards are
-// told apart, no card covers another, and the groups keep their order (bug hunt E5: every group stood in one column and
-// Fit zoomed to 8%). THIMBLE_CANVAS_FIT_SHOT=<file.png> saves a picture of the board after Fit.
+// Fit on a board of many groups (canvas/layout.ts columnsOf), drawn by the real Canvas with thimble's stylesheets in a
+// real browser: 25 cards in 18 groups, most of them groups nested in the analyst's frame, as main's questions and
+// labels leave them. The nested groups flow down side-by-side columns in their order, so Fit shows the board at a zoom
+// where the cards are told apart, no card covers another, and the groups keep their order (bug hunt E5: every group
+// stood in one column and Fit zoomed to 8%). THIMBLE_CANVAS_FIT_SHOT=<file.png> saves a picture of the board after Fit.
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -65,7 +65,7 @@ afterAll(async () => {
   cleanup()
 })
 
-test('Fit shows 25 cards in 18 groups readably, the nested groups in rows in their order, no card over another', async () => {
+test('Fit shows 25 cards in 18 groups readably, the nested groups in columns in their order, no card over another', async () => {
   await page.click('.bctl-fit')
   await page.waitForTimeout(200)
   const zoom = Number((await page.textContent('.bctl-pct'))?.replace('%', ''))
@@ -89,14 +89,14 @@ test('Fit shows 25 cards in 18 groups readably, the nested groups in rows in the
       const [a, b] = [cards[i], cards[j]]
       assert.ok(a.x + a.w <= b.x + 0.5 || b.x + b.w <= a.x + 0.5 || a.y + a.h <= b.y + 0.5 || b.y + b.h <= a.y + 0.5, `${CELLS[i].id} and ${CELLS[j].id} overlap`)
     }
-  // the nested groups read in their order, left to right and then down, and stand side by side
+  // the nested groups read in their order, down each column and then across, and stand side by side
   const frames = boxes.frames.map((b, i) => {
     assert.ok(b, `group ${nested[i].id} is drawn`)
     return b
   })
   for (let i = 1; i < frames.length; i++) {
     const [a, b] = [frames[i - 1], frames[i]]
-    assert.ok(b.y > a.y + 0.5 || (Math.abs(b.y - a.y) <= 0.5 && b.x > a.x), `${nested[i].id} comes after ${nested[i - 1].id}`)
+    assert.ok(b.x > a.x + 0.5 || (Math.abs(b.x - a.x) <= 0.5 && b.y > a.y), `${nested[i].id} comes after ${nested[i - 1].id}`)
   }
   assert.ok(new Set(frames.map((f) => Math.round(f.x))).size > 1, 'the nested groups stand side by side')
 })

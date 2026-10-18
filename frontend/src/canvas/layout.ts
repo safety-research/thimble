@@ -2,10 +2,14 @@
 //
 // The board is an infinite plane of frames (groups) and cards (cells). A frame's children are laid out by its flow (a
 // column, or a row for a split group) in order: the group's cards, with a nested group after `order` of them; nested
-// groups that follow each other in a column wrap into rows (gridOf), so Fit shows a frame of many groups readably. A child
-// with a `pos` is placed free inside the frame. A thread's frame that no one has placed stands right of the card it is
-// about. A collapsed frame shows its nested groups and its first card, with the edges of the others stacked under it. Root frames sit at their `pos`, or below the root before them; loose cards sit
-// at their own `pos`. Empty thread groups and an empty orientation deck are not drawn. `View` is the plane's pan and zoom.
+// groups that follow each other in a column flow down side-by-side columns (columnsOf), beside the frame's cards when
+// they end its flow, so Fit shows a frame of many groups readably. A child with a `pos` is placed free inside the
+// frame. A thread's frame that no one has placed stands right of the card it is about. A collapsed frame shows its
+// nested groups and its first card, with the edges of the others stacked under it. The root frames and loose cards no
+// one placed flow down columns from the top left the same way, in order, so the board takes the shape of the room Fit
+// shows it in rather than one tall column (a session of 30 cards fit at 6%); those placed by hand sit at their `pos`,
+// and a column moves down past them. A column with cards that have comments beside them keeps room for the comments at
+// its right. Empty thread groups and an empty orientation deck are not drawn. `View` is the plane's pan and zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
@@ -24,7 +28,7 @@ export const MIN_FRAME_W = 260
 export const MIN_FRAME_H = HEAD + 40
 /** the room under a collapsed frame's card for the stacked edges */
 export const DECK = 14
-/** where the first root frame sits, and the gap under a root before the next one */
+/** where the first root frame sits, and the gap between two roots, under one or beside its column */
 export const ROOT_X = 40
 export const ROOT_Y = 60
 export const ROOT_GAP = 80
@@ -179,48 +183,81 @@ export interface Layout {
   decks: Set<string>
   /** each frame's depth, 0 at the root */
   depth: Map<string, number>
+  /** for a root frame or a loose card no one placed, where the comments beside its cards stand (commentPlaces):
+   * COMMENT_GAP_X right of its column */
+  side: Map<string, number>
 }
 
-/** About the shape (width over height) of the room Fit fills on the canvas beside the chat, which a run of nested frames
- * is wrapped to fill. */
+/** About the shape (width over height) of the room Fit fills on the canvas beside the chat, toward which a run of
+ * frames flows into columns. */
 export const GRID_ASPECT = 1.2
 
-/** A run of boxes wrapped into rows: each box's place (its top left, from the run's top left) and the run's size. */
-export interface Grid {
+/** A run of boxes flowed into columns: each box's place (its top left, from the run's top left) and column, each
+ * column's left and the width of its widest box, and the run's size. */
+export interface Columns {
   cols: number
   x: number[]
   y: number[]
+  col: number[]
+  left: number[]
+  width: number[]
   w: number
   h: number
 }
 
 /**
- * Boxes in order, wrapped row by row into the number of columns at which a viewport of GRID_ASPECT shows them whole at
- * the largest zoom (the fewer columns on a tie), GAP apart, so a few short boxes stay a column. A column is as wide as
- * its widest box, a row as tall as its tallest. Pure.
+ * Boxes in order, flowed down columns `gap` apart: a box starts the next column when it would make its column taller
+ * than the limit at which a viewport of GRID_ASPECT shows the run whole at the largest zoom (the fewer columns on a
+ * tie), so a few short boxes stay one column. A column is as wide as its widest box, and as much wider as the most
+ * `room` a box in it keeps at its right. Pure.
  */
-export function gridOf(boxes: readonly { w: number; h: number }[]): Grid {
-  const at = (cols: number): Grid => {
-    const colW = Array.from({ length: cols }, (_, j) => Math.max(0, ...boxes.filter((_, i) => i % cols === j).map((b) => b.w)))
-    const rows = Math.ceil(boxes.length / cols)
-    const rowH = Array.from({ length: rows }, (_, r) => Math.max(0, ...boxes.slice(r * cols, (r + 1) * cols).map((b) => b.h)))
-    const left = colW.map((_, j) => colW.slice(0, j).reduce((a, b) => a + b + GAP, 0))
-    const top = rowH.map((_, r) => rowH.slice(0, r).reduce((a, b) => a + b + GAP, 0))
-    return {
-      cols,
-      x: boxes.map((_, i) => left[i % cols]),
-      y: boxes.map((_, i) => top[Math.floor(i / cols)]),
-      w: colW.reduce((a, b) => a + b, 0) + GAP * (cols - 1),
-      h: rowH.reduce((a, b) => a + b, 0) + GAP * Math.max(0, rows - 1),
+export function columnsOf(boxes: readonly { w: number; h: number; room?: number }[], gap = GAP): Columns {
+  const flow = (limit: number): Columns => {
+    const col: number[] = []
+    const y: number[] = []
+    const width: number[] = []
+    const room: number[] = []
+    let next = 0
+    let h = 0
+    for (const b of boxes) {
+      if (!width.length || (next > 0 && next + b.h > limit)) {
+        width.push(0)
+        room.push(0)
+        next = 0
+      }
+      const c = width.length - 1
+      col.push(c)
+      y.push(next)
+      width[c] = Math.max(width[c], b.w)
+      room[c] = Math.max(room[c], b.room ?? 0)
+      h = Math.max(h, next + b.h)
+      next += b.h + gap
+    }
+    const left: number[] = []
+    let x = 0
+    for (let c = 0; c < width.length; c++) {
+      left.push(x)
+      x += width[c] + room[c] + gap
+    }
+    return { cols: width.length, x: col.map((c) => left[c]), y, col, left, width, w: Math.max(0, x - gap), h }
+  }
+  // the limits worth trying: the height of each run of boxes that follow each other, from the tallest box up
+  const tall = Math.max(0, ...boxes.map((b) => b.h))
+  const limits = new Set([tall])
+  for (let i = 0; i < boxes.length; i++) {
+    let s = -gap
+    for (let j = i; j < boxes.length; j++) {
+      s += boxes[j].h + gap
+      if (s > tall) limits.add(s)
     }
   }
-  let best = at(1)
-  const need = (gr: Grid) => Math.max(gr.w / GRID_ASPECT, gr.h)
-  for (let cols = 2; cols <= boxes.length; cols++) {
-    const next = at(cols)
-    if (need(next) < need(best)) best = next
+  const need = (r: Columns) => Math.max(r.w / GRID_ASPECT, r.h)
+  let best: Columns | null = null
+  for (const limit of [...limits].sort((a, b) => b - a)) {
+    const r = flow(limit)
+    if (!best || need(r) < need(best)) best = r
   }
-  return best
+  return best ?? flow(tall)
 }
 
 /** A card's height: its own, else the measured content, else a guess until it is measured. */
@@ -229,11 +266,14 @@ export const cellHeight = (c: BoardCell, heights: Readonly<Record<string, number
 /** Which frames are expanded: a set of them, or the canvas's own test (every frame but those the analyst collapsed). */
 export type Opened = Pick<ReadonlySet<string>, 'has'>
 
+const NO_NOTES: ReadonlySet<string> = new Set()
+
 /**
  * Where every frame and card sits. `open` tells the expanded frames; `heights` the measured height of each card with
- * no height of its own. Pure, so a drag and a reload agree.
+ * no height of its own; `notes` the cards with comments beside them, whose column keeps room for them. Pure, so a drag
+ * and a reload agree.
  */
-export function layoutBoard(board: Board, open: Opened, heights: Readonly<Record<string, number>>): Layout {
+export function layoutBoard(board: Board, open: Opened, heights: Readonly<Record<string, number>>, notes: ReadonlySet<string> = NO_NOTES): Layout {
   const rel = new Map<string, Pos>()
   const size = new Map<string, { w: number; h: number }>()
   const decks = new Set<string>()
@@ -254,7 +294,6 @@ export function layoutBoard(board: Board, open: Opened, heights: Readonly<Record
     let maxH = 0
     // what stands in the frame, a frame with its title's room above it, which a frame beside a card does not cover
     const taken: Rect[] = []
-    const besides: { k: Kid & { t: 'g' }; at: Pos | null; card: BoardCell | null }[] = []
     const put = (k: Kid, p: Pos, s: { w: number; h: number }, title: number) => {
       rel.set(k.it.id, p)
       taken.push({ x: p.x, y: p.y - title, w: s.w, h: s.h + title })
@@ -262,25 +301,69 @@ export function layoutBoard(board: Board, open: Opened, heights: Readonly<Record
       maxH = Math.max(maxH, p.y + s.h)
     }
     const inFlow = (k: Kid | undefined): k is Kid & { t: 'g' } => !!k && k.t === 'g' && !k.it.pos && !k.it.beside
+    const done = new Set<string>()
+    // a child placed free, at its `pos`
+    const putFree = (k: Kid) => {
+      done.add(k.it.id)
+      put(k, k.it.pos!, k.t === 'g' ? measure(k.it) : { w: k.it.w, h: cellHeight(k.it, heights) }, k.t === 'g' ? TITLE : 0)
+    }
+    // a thread's frame beside the card it is about: right of the card, its title level with the card's top, and moved
+    // down past what it would cover, so two such frames stack downward; in the order of their cards
+    const standBesides = () => {
+      const besides: { k: Kid & { t: 'g' }; at: Pos | null; card: BoardCell | null }[] = []
+      for (const k of ks) {
+        if (k.t !== 'g' || !k.it.beside || done.has(k.it.id)) continue
+        const card = board.cellById.get(k.it.beside)
+        const at = rel.get(k.it.beside)
+        besides.push(card && at ? { k, at, card } : { k, at: null, card: null })
+      }
+      besides.sort((a, b) => (a.at?.y ?? Infinity) - (b.at?.y ?? Infinity))
+      for (const { k, at, card } of besides) {
+        done.add(k.it.id)
+        const s = measure(k.it)
+        // (one whose card is not laid out goes below what stands in the frame)
+        const box = at && card ? { x: at.x + card.w + GAP, y: at.y, w: s.w, h: s.h + TITLE } : { x: PAD, y: HEAD, w: s.w, h: s.h + TITLE }
+        box.y = clearBelow(box, taken)
+        const p = { x: box.x, y: box.y + TITLE }
+        rel.set(k.it.id, p)
+        taken.push(box)
+        maxW = Math.max(maxW, p.x + s.w)
+        maxH = Math.max(maxH, p.y + s.h)
+      }
+    }
     for (let i = 0; i < ks.length; i++) {
       const k = ks[i]
-      if (k.t === 'g' && k.it.beside) continue
-      // nested frames that follow each other in a column wrap into rows, so a frame of many groups is not one tall column
+      if (done.has(k.it.id) || (k.t === 'g' && k.it.beside)) continue
+      // nested frames that follow each other in a column flow down side-by-side columns, so a frame of many groups is
+      // not one tall column
       if (g.flow === 'col' && inFlow(k)) {
         const run: (Kid & { t: 'g' })[] = []
         while (inFlow(ks[i])) run.push(ks[i++] as Kid & { t: 'g' })
         i--
         const sizes = run.map((r) => measure(r.it))
-        const grid = gridOf(sizes.map((s) => ({ w: s.w, h: s.h + TITLE })))
-        run.forEach((r, n) => put(r, { x: PAD + grid.x[n], y: y + grid.y[n] + TITLE }, sizes[n], TITLE))
-        y += grid.h + GAP
+        const boxes = sizes.map((s) => ({ w: s.w, h: s.h + TITLE }))
+        // the run that ends the flow, after cards, stands beside them: what stands in the frame by then (the cards, the
+        // children placed free and the threads' frames beside the cards) is the first of its columns
+        if (y > HEAD && !ks.slice(i + 1).some((x) => !x.it.pos && !(x.t === 'g' && x.it.beside))) {
+          for (const f of ks) if (f.it.pos && !done.has(f.it.id)) putFree(f)
+          standBesides()
+          const cols = columnsOf([{ w: maxW - PAD, h: maxH - HEAD }, ...boxes])
+          run.forEach((r, n) => put(r, { x: PAD + cols.x[n + 1], y: HEAD + cols.y[n + 1] + TITLE }, sizes[n], TITLE))
+          continue
+        }
+        const cols = columnsOf(boxes)
+        run.forEach((r, n) => put(r, { x: PAD + cols.x[n], y: y + cols.y[n] + TITLE }, sizes[n], TITLE))
+        y += cols.h + GAP
+        continue
+      }
+      if (k.it.pos) {
+        putFree(k)
         continue
       }
       const s = k.t === 'g' ? measure(k.it) : { w: k.it.w, h: cellHeight(k.it, heights) }
       const title = k.t === 'g' ? TITLE : 0
       let p: Pos
-      if (k.it.pos) p = k.it.pos
-      else if (g.flow === 'row') {
+      if (g.flow === 'row') {
         p = { x, y: HEAD + title }
         x += s.w + GAP
       } else {
@@ -289,26 +372,7 @@ export function layoutBoard(board: Board, open: Opened, heights: Readonly<Record
       }
       put(k, p, s, title)
     }
-    for (const k of ks) {
-      if (k.t !== 'g' || !k.it.beside) continue
-      const card = board.cellById.get(k.it.beside)
-      const at = rel.get(k.it.beside)
-      besides.push(card && at ? { k, at, card } : { k, at: null, card: null })
-    }
-    // a thread's frame beside the card it is about: right of the card, its title level with the card's top, and moved
-    // down past what it would cover, so two such frames stack downward; in the order of their cards
-    besides.sort((a, b) => (a.at?.y ?? Infinity) - (b.at?.y ?? Infinity))
-    for (const { k, at, card } of besides) {
-      const s = measure(k.it)
-      // (one whose card is not laid out goes below what stands in the frame)
-      const box = at && card ? { x: at.x + card.w + GAP, y: at.y, w: s.w, h: s.h + TITLE } : { x: PAD, y: HEAD, w: s.w, h: s.h + TITLE }
-      box.y = clearBelow(box, taken)
-      const p = { x: box.x, y: box.y + TITLE }
-      rel.set(k.it.id, p)
-      taken.push(box)
-      maxW = Math.max(maxW, p.x + s.w)
-      maxH = Math.max(maxH, p.y + s.h)
-    }
+    standBesides()
     const cards = board.cells.filter((c) => c.parent === g.id).length
     const deck = !open.has(g.id) && cards > 1
     if (deck) {
@@ -333,20 +397,43 @@ export function layoutBoard(board: Board, open: Opened, heights: Readonly<Record
       else rects.set(k.it.id, { x: x + p.x, y: y + p.y, w: k.it.w, h: cellHeight(k.it, heights) })
     }
   }
-  let topY = ROOT_Y
+  // the root frames and loose cards placed by hand stand at their `pos`
+  const placed: Rect[] = []
   for (const g of roots) {
-    const p = g.pos ?? { x: ROOT_X, y: topY }
-    place(g, p.x, p.y, 0)
-    topY = Math.max(topY, p.y + size.get(g.id)!.h + ROOT_GAP)
+    if (!g.pos) continue
+    place(g, g.pos.x, g.pos.y, 0)
+    const sz = size.get(g.id)!
+    placed.push({ x: g.pos.x, y: g.pos.y - TITLE, w: sz.w, h: sz.h + TITLE })
   }
-  for (const c of board.cells) {
-    if (c.parent) continue
-    const p = c.pos ?? { x: ROOT_X, y: topY }
-    const h = cellHeight(c, heights)
-    rects.set(c.id, { x: p.x, y: p.y, w: c.w, h })
-    if (!c.pos) topY += h + GAP
+  const loose = board.cells.filter((c) => !c.parent)
+  for (const c of loose) {
+    if (!c.pos) continue
+    const r = { x: c.pos.x, y: c.pos.y, w: c.w, h: cellHeight(c, heights) }
+    rects.set(c.id, r)
+    placed.push(r)
   }
-  return { rects, decks, depth }
+  // the others, the frames and then the loose cards, flow down columns from the top left (columnsOf), ROOT_GAP apart; a
+  // column with cards that have comments beside them keeps room for the comments at its right, and a column moves down
+  // past what was placed by hand
+  const noted = new Set([...notes].map((id) => rootFrameOf(board, id) ?? id))
+  const free = [
+    ...roots.filter((g) => !g.pos).map((g) => ({ id: g.id, g, title: TITLE, ...size.get(g.id)! })),
+    ...loose.filter((c) => !c.pos).map((c) => ({ id: c.id, g: null, title: 0, w: c.w, h: cellHeight(c, heights) })),
+  ]
+  const run = columnsOf(free.map((f) => ({ w: f.w, h: f.h, room: noted.has(f.id) ? COMMENT_ROOM : 0 })), ROOT_GAP)
+  const down = run.left.map(() => 0)
+  const side = new Map<string, number>()
+  free.forEach((f, i) => {
+    const c = run.col[i]
+    const x = ROOT_X + run.x[i]
+    const want = ROOT_Y + run.y[i] + down[c]
+    const y = clearBelow({ x, y: want - f.title, w: f.w, h: f.h + f.title }, placed) + f.title
+    down[c] += y - want
+    if (f.g) place(f.g, x, y, 0)
+    else rects.set(f.id, { x, y, w: f.w, h: f.h })
+    side.set(f.id, ROOT_X + run.left[c] + run.width[c] + COMMENT_GAP_X)
+  })
+  return { rects, decks, depth, side }
 }
 
 /** Whether frame `id` is `of` or nested anywhere under it. */
@@ -533,17 +620,17 @@ const sameRect = (a: Rect | undefined, b: Rect | undefined): boolean => !!a && !
  * Where the card `id`, placed free in `data`, stands so that it covers nothing: at its own `pos`, or straight below it
  * at the first place where it overlaps no other drawn card and no frame it is not in. Null when it has no `pos`. Pure.
  */
-export function clearPos(data: CanvasResponse, id: string, open: Opened, heights: Readonly<Record<string, number>>): Pos | null {
+export function clearPos(data: CanvasResponse, id: string, open: Opened, heights: Readonly<Record<string, number>>, notes?: ReadonlySet<string>): Pos | null {
   const start = boardOf(data).cellById.get(id)?.pos ?? null
   if (!start) return start
   const placed = (y: number) => patchCellLocal(data, id, { pos: { x: start.x, y } })
   // what stands after the card's frames moves down as they grow, so the card never covers it: only what stays where it
   // is with the card far down counts
-  const far = layoutBoard(boardOf(placed(start.y + FAR)), open, heights).rects
+  const far = layoutBoard(boardOf(placed(start.y + FAR)), open, heights, notes).rects
   let y = start.y
   for (let i = 0; i < 4; i++) {
     const board = boardOf(placed(y))
-    const lay = layoutBoard(board, open, heights)
+    const lay = layoutBoard(board, open, heights, notes)
     const r = lay.rects.get(id)
     if (!r) break
     const to = clearBelow(r, coverable(board, lay, id, (k, o) => sameRect(o, far.get(k))))
@@ -555,8 +642,8 @@ export function clearPos(data: CanvasResponse, id: string, open: Opened, heights
 
 /** Where a card dropped free at `pos` in `group` (null: loose, on the board) stands: there, or moved down clear of what
  * it would cover (clearPos). Pure. */
-export function placeFree(data: CanvasResponse, id: string, group: string | null, pos: Pos, open: Opened, heights: Readonly<Record<string, number>>): Pos {
-  return clearPos(moveLocal(data, [id], group, undefined, pos), id, open, heights) ?? pos
+export function placeFree(data: CanvasResponse, id: string, group: string | null, pos: Pos, open: Opened, heights: Readonly<Record<string, number>>, notes?: ReadonlySet<string>): Pos {
+  return clearPos(moveLocal(data, [id], group, undefined, pos), id, open, heights, notes) ?? pos
 }
 
 /** A card dropped beside a sibling: free at `pos`; or, on the sibling's left, in the flow `after` that card (null:
@@ -573,9 +660,9 @@ export interface Beside {
  * the flow and the sibling is placed free to its right, level with it, so the cards after them in the flow stay below
  * them. A card placed free moves down clear of what it would cover (clearPos). Pure.
  */
-export function placeBeside(data: CanvasResponse, id: string, group: string, ref: string, side: 'L' | 'R', open: Opened, heights: Readonly<Record<string, number>>): Beside {
+export function placeBeside(data: CanvasResponse, id: string, group: string, ref: string, side: 'L' | 'R', open: Opened, heights: Readonly<Record<string, number>>, notes?: ReadonlySet<string>): Beside {
   const relTo = (d: CanvasResponse, of: string, dx: number): Pos | null => {
-    const lay = layoutBoard(boardOf(d), open, heights)
+    const lay = layoutBoard(boardOf(d), open, heights, notes)
     const r = lay.rects.get(of)
     const f = lay.rects.get(group)
     return r && f ? { x: Math.round(r.x + r.w + dx - f.x), y: Math.round(r.y - f.y) } : null
@@ -583,14 +670,14 @@ export function placeBeside(data: CanvasResponse, id: string, group: string, ref
   if (side === 'R') {
     const moved = moveLocal(data, [id], group, undefined, { x: 0, y: 0 })
     const pos = relTo(moved, ref, GAP) ?? { x: 0, y: 0 }
-    return { pos: clearPos(patchCellLocal(moved, id, { pos }), id, open, heights) ?? pos }
+    return { pos: clearPos(patchCellLocal(moved, id, { pos }), id, open, heights, notes) ?? pos }
   }
   const rest = data.cells.filter((c) => c.notebook === group && c.id !== id)
   const at = rest.findIndex((c) => c.id === ref)
   const after = at > 0 ? rest[at - 1].id : null
   const moved = patchCellLocal(moveLocal(data, [id], group, after, null), ref, { pos: { x: 0, y: 0 } })
   const pos = relTo(moved, id, GAP) ?? { x: 0, y: 0 }
-  return { pos: null, after, ref: clearPos(patchCellLocal(moved, ref, { pos }), ref, open, heights) ?? pos }
+  return { pos: null, after, ref: clearPos(patchCellLocal(moved, ref, { pos }), ref, open, heights, notes) ?? pos }
 }
 
 /** The analyst's own group, where a new card goes: role analyst, a root, no thread; with several, the one with the most cards. */
@@ -941,6 +1028,8 @@ export const isRunnable = (c: Cell): boolean => {
  * comments, and how far below its card's top a comment on the card sits */
 export const COMMENT_W = 300
 export const COMMENT_GAP_X = 18
+/** the room a column of the board keeps at its right for the comments beside its cards (layoutBoard) */
+export const COMMENT_ROOM = COMMENT_GAP_X + COMMENT_W
 export const COMMENT_GAP_Y = 8
 export const COMMENT_LIFT = 14
 /** how far above its step's row a comment on a step sits */
@@ -978,13 +1067,13 @@ export function rootFrameOf(board: Board, card: string): string | null {
 }
 
 /**
- * Where each comment sits beside the canvas: COMMENT_GAP_X right of its card's outermost frame (a loose card's own
- * right edge), at its card's top plus its `dy`; the comments are stacked in the order of their wanted tops, each pushed
- * by COMMENT_GAP_Y below every comment placed before it that it would share columns with (two frames whose right edges
- * differ by less than COMMENT_W), so none overlap. The `anchor` comment (the open one, or the one the keyboard is on)
- * stands at its wanted top, level with its step, and the comments above it that it would meet move up instead, as
- * the Report's margin stands its active comment at its passage (report/checkComments stackCards). A comment whose card
- * is not drawn gets no place. Pure.
+ * Where each comment sits beside the canvas: COMMENT_GAP_X right of the column its card's outermost frame stands in
+ * (lay.side; for a frame or a loose card placed by hand, its own right edge), at its card's top plus its `dy`; the
+ * comments are stacked in the order of their wanted tops, each pushed by COMMENT_GAP_Y below every comment placed
+ * before it that it would share columns with (two frames whose right edges differ by less than COMMENT_W), so none
+ * overlap. The `anchor` comment (the open one, or the one the keyboard is on) stands at its wanted top, level with its
+ * step, and the comments above it that it would meet move up instead, as the Report's margin stands its active comment
+ * at its passage (report/checkComments stackCards). A comment whose card is not drawn gets no place. Pure.
  */
 export function commentPlaces(board: Board, lay: Layout, spots: readonly CommentSpot[], anchor: string | null = null): Map<string, CommentPlace> {
   const list: { id: string; want: number; h: number; x: number; ax: number }[] = []
@@ -993,7 +1082,7 @@ export function commentPlaces(board: Board, lay: Layout, spots: readonly Comment
     if (!r) continue
     const root = rootFrameOf(board, s.card)
     const outer = (root && lay.rects.get(root)) || r
-    list.push({ id: s.id, want: r.y + s.dy, h: s.h, x: outer.x + outer.w + COMMENT_GAP_X, ax: r.x + r.w })
+    list.push({ id: s.id, want: r.y + s.dy, h: s.h, x: lay.side.get(root ?? s.card) ?? outer.x + outer.w + COMMENT_GAP_X, ax: r.x + r.w })
   }
   list.sort((a, b) => a.want - b.want)
   const meet = (a: { x: number }, b: { x: number }) => Math.abs(a.x - b.x) < COMMENT_W
