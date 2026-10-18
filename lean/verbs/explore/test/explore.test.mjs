@@ -11,7 +11,7 @@ import { renderSvg } from '../../../draw/svg.js'
 import { gridText, renderTerm } from '../../../draw/term.js'
 import { nodeCtx, toAnsi } from '../cli.mjs'
 import { applies } from '../hint.mjs'
-import { countRows, explorable, explorationOf, keys, press, request, rowsFor, run, turnKnob } from '../run.mjs'
+import { countRows, explorable, explorationOf, hint, keys, press, request, rowsFor, run, turnKnob } from '../run.mjs'
 import { viewLines } from '../view.mjs'
 
 const HERE = fileURLToPath(new URL('..', import.meta.url))
@@ -65,7 +65,8 @@ test('x on something with no explore view asks Claude to write one (ask), which 
   assert.deepEqual(again.object, { id: ex.id, version: 1 })
   assert.equal(again.note, undefined)
   assert.equal(again.ask, undefined)
-  assert.match(again.text, /◂ ▸ split · tab parts · ↵ rows/)
+  assert.match(again.text, /^Opened 03-explore-saves: turn split; select a part to read its rows\.$/)
+  assert.match(hint(again.view), /◂ ▸ split · tab parts · ↵ rows/)
 })
 
 test('a knob turns, the sentence follows, and rows open under the selected part', async () => {

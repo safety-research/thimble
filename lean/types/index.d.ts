@@ -34,8 +34,6 @@ declare module 'claude-code' {
       notes: string[]
       /** the row an object is drawn under, by the object's id: a verb's object is drawn under the same row */
       where: StateFamily<string>
-      /** the verbs' latest requests to Claude (the head of each one's words): their rows read as one line */
-      asks: { head: string; verb: string; on: string }[]
       /** `lean resolve --json` of a ref, by root and ref */
       rows: StateFamily<unknown>
       web: Web

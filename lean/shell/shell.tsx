@@ -45,7 +45,6 @@ const WEB = { plugin: 'thimble-lean', key: 'web' } as const
 const READY = { plugin: 'thimble-lean', key: 'ready' } as const
 const SAID = { plugin: 'thimble-lean', key: 'said' } as const
 const NOTES = { plugin: 'thimble-lean', key: 'notes' } as const
-const ASKS = { plugin: 'thimble-lean', key: 'asks' } as const
 const WHERE = { plugin: 'thimble-lean', key: 'where' } as const
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
@@ -105,12 +104,14 @@ async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   return o
 }
 
-const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}`
+const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline') => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}`
 
 /** The object drawn at `w` columns (with the knobs at `state`), with its verbs: the program runs in a Node child, in the
- *  contract's sandbox. Kept per object version, width and state; a failed one stays failed until the module reloads. */
-function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null): Promise<Prepared> {
-  const key = prepKey(ref, w, state)
+ *  contract's sandbox. `mode` is where it is drawn (k.mode): 'inline' under a reply, 'detail' in the detail view, where
+ *  a program may show more. Kept per object version, width, state and mode; a failed one stays failed until the module
+ *  reloads. */
+function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline'): Promise<Prepared> {
+  const key = prepKey(ref, w, state, mode)
   const hit = preps.get(key)
   if (hit) return Promise.resolve(hit)
   const running = pending.get(key)
@@ -119,7 +120,7 @@ function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unkn
     const object = await loadObject($, ref)
     if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h: 24, state: state || undefined }), timeoutMs: 30000 })
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h: 24, state: state || undefined, mode }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, verbs: [], problems: [], error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     return { object, drawing: out.drawing, grid: renderTerm(out.drawing, { w }), verbs: out.verbs || [], problems: out.problems || [] }
@@ -131,12 +132,12 @@ function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unkn
 
 /** For a drawing hook: the object if it is ready; else null, with the work started outside the drawing (a render's
  *  dispatch may be abandoned, which would stop the child) and the drawing subscribed to its end. */
-async function preparedNow($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null): Promise<Prepared | null> {
-  const key = prepKey(ref, w, state)
+async function preparedNow($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline'): Promise<Prepared | null> {
+  const key = prepKey(ref, w, state, mode)
   const hit = preps.get(key)
   if (hit) return hit
   await $.state.get({ ...READY, id: key })
-  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state).then(() => $.state.set({ ...READY, id: key }, Date.now())) })
+  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state, mode).then(() => $.state.set({ ...READY, id: key }, Date.now())) })
   return null
 }
 
@@ -348,7 +349,7 @@ async function execVerb($: Engine, word: string, ref: ObjRef, region: string | n
 /** What Claude reads of a verb the person ran, with their next prompt. */
 function ranNote(r: Ran): string {
   const said = r.error ? ` It failed: ${r.error}` : r.text ? ` It said: ${cut(r.text, 1200)}` : ''
-  return `The person ran the verb ${r.verb} on ${r.on}.${r.saved ? ` It saved ${refText(r.saved)}, which the person sees.` : ''}${said}${r.note ? ' ' + r.note : ''}`
+  return `The person ran the verb ${r.verb} on ${r.on}.${r.saved ? ` It shows them ${refText(r.saved)}.` : ''}${said}${r.note ? ' ' + r.note : ''}`
 }
 
 /** Words for Claude alone, given with the next prompt (prompt.submit's context): no row of the transcript. */
@@ -372,19 +373,19 @@ async function settle($: Engine, ran: Ran, ref: ObjRef, at: string | null, inPan
     if (where && !unchanged) await place($, where, same ? ran.saved : { ...ran.saved, from: ref.id })
     if (inPane || !where || unchanged) await openDetail($, ran.saved)
   }
-  if (ran.ask) {
-    await keepAsk($, ran.ask, ran.verb, ran.on || refText(ref))
-    void $.prompt.submit({ text: ran.ask })
-  }
+  if (ran.ask) void ask($, ran.ask, ran.verb, ran.on || refText(ref))
   if (ran.error) $.ui.toast(`${ran.verb}: ${cut(ran.error, 200)}`)
   else if (!ran.saved && !ran.ask && ran.text && !inPane) $.ui.toast(cut(ran.text.split('\n')[0] || '', 200))
 }
 
-/** A verb's request to Claude, kept so its prompt row reads as one line (the row holds the words within the engine's
- *  framing, so it is found by their head). */
-async function keepAsk($: Engine, ask: string, verb: string, on: string): Promise<void> {
-  const cur = ((await $.state.get(ASKS)).value ?? []) as { head: string; verb: string; on: string }[]
-  await $.state.set(ASKS, [...cur, { head: ask.trim().slice(0, 160), verb, on }].slice(-20))
+/** A verb's request to Claude, as a turn the person started: its row is the person's press in a few words (`explore
+ *  01-saves`), as they would type it; the request itself (with what verbs said since Claude's last reply) goes just
+ *  before it as a row the person does not see, for Claude alone. */
+async function ask($: Engine, request: string, verb: string, on: string): Promise<void> {
+  const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
+  await $.state.set(NOTES, [])
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, request].join('\n\n') }] } })
+  await $.prompt.submit({ text: `${verb} ${on}`, asUser: true })
 }
 
 /** A verb the person pressed (a click under an object, a key in the detail view). It runs here, outside the press, and
@@ -595,7 +596,7 @@ async function detailEl($: Engine, e: Any): Promise<Any> {
       Box({ flexDirection: 'column', marginTop: 1, children: [Text({ dimColor: true, wrap: 'truncate-end', children: `ask  the next prompt carries this citation · esc to type it` })] }),
     ] })
   }
-  const p = await preparedNow($, sel, Math.min(cols, 140), sel.state)
+  const p = await preparedNow($, sel, Math.min(cols, 140), sel.state, 'detail')
   if (!p) return Text({ dimColor: true, children: `drawing ${refText(sel)}…` })
   if (p.error || !p.grid) return Text({ color: 'error', children: `× ${refText(sel)} cannot be drawn: ${p.error || 'no drawing'}` })
   const o = p.object
@@ -796,7 +797,7 @@ function drawnNote(p: Prepared, ref: ObjRef): string {
 function ranText(r: Ran): string {
   if (r.error) return `${r.verb}: ${r.error}`
   const lines = [r.text || `${r.verb} ran${r.on ? ' on ' + r.on : ''}.`]
-  if (r.saved) lines.push(`It saved ${refText(r.saved)}.`)
+  if (r.saved) lines.push(`It shows ${refText(r.saved)}.`)
   if (r.ask) lines.push('It asked Claude to do the rest.')
   return lines.join('\n')
 }
@@ -960,12 +961,13 @@ export const registerShell: Register = on => {
     if (cites.length) {
       // a few citations by their words, each a press from its rows; more than fit calmly, one press to their list
       const room = Math.min(72, Math.max(20, (e.viewport?.columns ?? 100) - 12))
-      const words = cites.reduce((n, c) => n + [...c.label].length + 3, 6)
-      const fits = cites.length <= 4 && words <= room && cites.every(c => [...c.label].length <= 30)
+      const label = (c: { label: string }) => cut(c.label.replace(/`/g, ''), 32)
+      const words = cites.reduce((n, c) => n + [...label(c)].length + 3, 6)
+      const fits = cites.length <= 4 && words <= room
       const chips: Any[] = fits
         ? [Text({ dimColor: true, children: 'cites ' }), ...cites.flatMap((c, i) => [
             ...(i ? [Text({ dimColor: true, children: ' · ' })] : []),
-            Button({ key: `cite-${at}-${i}`, plain: true, label: c.label, children: [Text({ color: 'suggestion', children: c.label })], onPress: () => openCite($, c.ref, c.label) }),
+            Button({ key: `cite-${at}-${i}`, plain: true, label: c.label, children: [Text({ color: 'suggestion', children: label(c) })], onPress: () => openCite($, c.ref, c.label) }),
           ])]
         : [Button({ key: `cites-${at}`, plain: true, label: 'cited values', children: [Text({ dimColor: true, children: `${cites.length} cited values ` }), Text({ color: 'suggestion', children: '›' })], onPress: () => openCites($, cites) })]
       own = Box({ flexDirection: 'column', children: [own, Box({ flexDirection: 'row', marginLeft: 2, children: chips })] })
@@ -993,17 +995,6 @@ export const registerShell: Register = on => {
     const { Box, Text } = $.ui.resolve(e) as Any
     const own = await next(e)
     return Box({ flexDirection: 'column', children: [own, Text({ dimColor: true, wrap: 'truncate-end', children: `  ▸ about ${about.id}${about.v != null ? '@' + about.v : ''}${about.region ? ' ▸ ' + about.label : ''}` })] })
-  })
-
-  // a verb's request to Claude, sent as a prompt: one line naming the verb and the object (ctrl+o shows the words)
-  on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'plugin' } } }, async ($, e, next) => {
-    const origin = e.props.origin as { kind: string; name?: string }
-    if (e.props.isExpanded || origin.name !== 'thimble-lean') return next(e)
-    const text = String(e.props.text)
-    const asked = (((await $.state.get(ASKS)).value ?? []) as { head: string; verb: string; on: string }[]).find(a => text.includes(a.head))
-    if (!asked) return next(e)
-    const { Text } = $.ui.resolve(e) as Any
-    return Text({ wrap: 'truncate-end', children: [Text({ color: 'suggestion', children: '› ' }), Text({ children: `${asked.verb} ` }), Text({ dimColor: true, children: `on ${asked.on} · asked Claude` })] })
   })
 
   // the prompt carries what verbs said for Claude since its last reply, and the open object with its selected part
@@ -1072,10 +1063,10 @@ export const registerShell: Register = on => {
     const at = `cmd|${e.args.trim().slice(0, 300)}`
     if (ran.saved) await setUnder($, at, [ran.saved])
     if (ran.ask) {
-      const ask = ran.ask
-      await keepAsk($, ask, ran.verb, ran.on || refText(t.ref))
+      const request = ran.ask
+      const what = ran.on || refText(t.ref)
       // the request is a turn of its own, which can start only once this command is done
-      $.clock.after(50, () => { void $.prompt.submit({ text: ask }) })
+      $.clock.after(50, () => { void ask($, request, ran.verb, what) })
     }
     return { text: ranText(ran), context: [ranNote(ran)] }
   })

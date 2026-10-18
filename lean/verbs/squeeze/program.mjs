@@ -2,10 +2,11 @@
 //
 // It draws the version at data.at: one region per squeezed line (`line-1`, `line-2`, ...), each with a cite that holds
 // the original spans it came from, then one dim line with the dimensions Claude chose and where this version sits on
-// each, and, when the version left something out, one dim line naming it. Wide (k.w >= 110), or with data.show set to
-// 'original', the original is drawn beside it (or under it): the spans this version uses are links to the line they
-// feed, so selecting a line lights its sources too, and the spans it left out are dim. With data.focus set to a line's
-// id, it draws that line alone and, under it, each paragraph of the original it draws on, its own spans underlined.
+// each, and, when the version left something out, one dim line naming it. In the detail view (k.mode 'detail'), or with
+// data.show set to 'original', the original is drawn beside it (or under it, when narrow): the spans this version uses
+// are links to the line they feed, so selecting a line lights its sources too, and the spans it left out are dim. With
+// data.focus set to a line's id, it draws that line alone and, under it, each paragraph of the original it draws on,
+// its own spans underlined.
 //
 // The program is the real function below; PROGRAM is its text as an object keeps it, the body of (k, data) => node.
 
@@ -120,8 +121,9 @@ export function squeezeProgram(k, data) {
       { gap: 1 })
   }
 
+  // under a reply the version alone, short as it is meant to be; the original waits in the detail view
   const wide = k.w >= 110
-  if (data.show !== 'original' && !wide) return version
+  if (data.show !== 'original' && k.mode !== 'detail') return version
 
   const blocks = data.blocks || []
   const orig = k.stack(blocks.map(b => {

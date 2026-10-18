@@ -197,7 +197,7 @@ test('a verb pressed under an object runs in the module, and what it made is dra
   expect(w.submitted.length).toBe(0)
   await $.prompt.submit({ text: 'and this?' } as never)
   const context = w.submitted.at(-1)!.context.join('\n')
-  expect(context).toContain('The person ran the verb trace on 01-saves@1. It saved 02-trace@1')
+  expect(context).toContain('The person ran the verb trace on 01-saves@1. It shows them 02-trace@1')
   expect(context).toContain('It traced q1.')
   // said once
   await $.prompt.submit({ text: 'more?' } as never)
@@ -222,21 +222,21 @@ test('a verb that needs the model: the module makes the call, and the verb runs 
   expect(String(r.text)).toContain('squeezed to: two lines')
 })
 
-test("a verb's request to Claude goes as a prompt, and its row reads as one line", async ($, on) => {
+test("a verb's request to Claude goes as the person's few words, the request beside them for Claude alone", async ($, on) => {
   const ask = 'The person pressed x (Explore) on the object 01-saves. Make it a view they can explore.'
   const w = world(on, () => ({ verb: 'explore', text: 'Claude is writing a view of this you can explore.', ask }))
+  const session = mock.session(on)
   const clock = mock.clock(on)
   await savedTurn($, on, clock)
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
   await ui.press({ key: chip('explore') })
   await clock.settle()
-  expect(w.submitted.map(x => x.text)).toEqual([ask])
-  const row = await $.ui.render({ component: 'UserMessage', surface: 'terminal', requestId: 'u9', props: { text: ask, origin: { kind: 'plugin', name: 'thimble-lean' }, isExpanded: false }, viewport: { columns: 100, rows: 40 } } as never)
-  expect(textOf(row)).toBe('› explore on 01-saves@1 · asked Claude')
-  // ctrl+o shows the words
-  const full = await $.ui.render({ component: 'UserMessage', surface: 'terminal', requestId: 'u9', props: { text: ask, origin: { kind: 'plugin', name: 'thimble-lean' }, isExpanded: true }, viewport: { columns: 100, rows: 40 } } as never)
-  expect(textOf(full)).toBe('the reply')
+  // the row reads as the press; Claude reads the request in a row before it that the person does not see
+  expect(w.submitted.map(x => x.text)).toEqual(['explore 01-saves@1'])
+  const rows = session.appended() as unknown as { door: string; message: { type: string; content: { text?: string }[] } }[]
+  const hidden = rows.filter(r => r.door === 'note' && r.message.type === 'user' && r.message.content.some(b => String(b.text).includes(ask)))
+  expect(hidden.length).toBe(1)
   await ui.unmount()
 })
 

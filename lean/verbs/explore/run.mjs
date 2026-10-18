@@ -87,7 +87,13 @@ export async function run(ctx) {
   if (!explorable(view.drawing)) {
     return { object: shown, view, text: 'Nothing in this view leads to rows yet; Claude is adding them.', ask: request(ctx, target) }
   }
-  return { object: shown, view, text: hint(view) }
+  return { object: shown, view, text: opened(target, view) }
+}
+
+/** What the person can do with a view that opened, in the shell's words. */
+function opened(target, view) {
+  const knobs = (view.drawing.controls || []).map(c => c.label || c.id)
+  return `Opened ${target.id}${knobs.length ? `: turn ${knobs.join(', ')}` : ''}; select a part to read its rows.`
 }
 
 /** An object drawn with the shell's sandbox: draw.runProgram (or a host's own draw.run). */
