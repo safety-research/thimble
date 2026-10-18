@@ -1458,7 +1458,8 @@ async function claimsPaneNow($: Engine, e: Any): Promise<Any> {
     onSearchDone: (value: string) => {
       const m = matchesOf(view.flat, value)
       const first = m && m.size ? (view.flat as Any[]).find(c => m.has(c.id))?.id ?? null : null
-      void set({ search: value.trim() ? value : null, searching: false, ...(first ? { focus: first } : {}) }).then(() => { if (first) void quietly($.ui.focus({ requestId: CPANE, key: claimKey(first) })) })
+      // the field gave the keys back when it was done: the pane takes them again, the ring on the first match
+      void set({ search: value.trim() ? value : null, searching: false, ...(first ? { focus: first } : {}) }).then(() => openClaimsPane($, first ?? st.focus))
     },
   })
 }
