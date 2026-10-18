@@ -313,6 +313,13 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any]) -> dict[s
         return out
     df = result
     keys: list[str] = []
+    # rows of a frame the query made, sorted, filtered or cut to a few columns: lineage by row, before any key guess
+    aligned = None
+    if "_refs" not in df.columns and "_ref" not in df.columns and len(df) <= 200000:
+        try:
+            aligned = _by_index(df, ns, frames)
+        except Exception:  # noqa: BLE001
+            aligned = None
     if not isinstance(df.index, pd.RangeIndex):
         # an unnamed whole-number index is where the rows sat before a sort or a filter, not what they stand for: it
         # stays a column, and the keys are the output's words, as for a plain table
@@ -333,6 +340,8 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any]) -> dict[s
         keys = [c for c in df.columns if not c.startswith("_") and c != "index"
                 and (not pd.api.types.is_numeric_dtype(df[c]) or pd.api.types.is_bool_dtype(df[c]))]
     out["keys"] = keys
+    if row_refs is None and aligned is not None:
+        row_refs, out["mode"], out["frame"] = aligned
     if row_refs is None and keys and len(df) <= 200000:
         found = _by_key(df, keys, ns, frames)
         if not found and len(keys) > 1:
@@ -358,13 +367,16 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any]) -> dict[s
     return out
 
 
-def _named_frames(ns: dict[str, Any], frames: list[Any], pred) -> list[tuple[str, Any]]:
+def _named_frames(ns: dict[str, Any], frames: list[Any], pred, lists: bool = False) -> list[tuple[str, Any]]:
+    """The frames of the query's namespace (and the ones it loaded) that hold source rows: `_ref` per row, or with
+    `lists`, also `_refs` (a list per row: a tally, a used query's output)."""
     import pandas as pd
 
+    has = (lambda v: "_ref" in v.columns or "_refs" in v.columns) if lists else (lambda v: "_ref" in v.columns)
     seen: set[int] = set()
     hits = []
     for name, v in list(ns.items()):
-        if isinstance(v, pd.DataFrame) and "_ref" in v.columns and id(v) not in seen:
+        if isinstance(v, pd.DataFrame) and has(v) and id(v) not in seen:
             seen.add(id(v))
             try:
                 if pred(v):
@@ -372,7 +384,7 @@ def _named_frames(ns: dict[str, Any], frames: list[Any], pred) -> list[tuple[str
             except Exception:  # noqa: BLE001
                 pass
     for i, v in enumerate(frames):
-        if id(v) not in seen:
+        if id(v) not in seen and has(v):
             seen.add(id(v))
             try:
                 if pred(v):
@@ -382,20 +394,61 @@ def _named_frames(ns: dict[str, Any], frames: list[Any], pred) -> list[tuple[str
     return hits
 
 
+def _by_index(res: Any, ns: dict[str, Any], frames: list[Any]):
+    """Row lineage found by row: the output is rows of a frame the query made (a sort, a filter, a few columns, head),
+    so its index labels are that frame's and its shared columns hold the same values there. (row sets, mode, frame)"""
+    import pandas as pd
+
+    idx = res.index
+    if not len(idx) or not idx.is_unique or isinstance(idx, pd.MultiIndex):
+        return None
+    cols = [c for c in res.columns if isinstance(c, str) and not c.startswith("_")]
+    if not cols:
+        return None
+
+    def fits(f: Any) -> bool:
+        return f.index.is_unique and bool(idx.isin(f.index).all()) and any(c in f.columns for c in cols)
+
+    best = None
+    for name, f in _named_frames(ns, frames, fits, lists=True):
+        shared = [c for c in cols if c in f.columns]
+        probe = idx[:50]
+        try:
+            a = res.loc[probe, shared].astype(object)
+            b = f.loc[probe, shared].astype(object)
+            same = ((a == b) | (a.isna() & b.isna())).all().all()
+        except Exception:  # noqa: BLE001 — columns that do not compare
+            continue
+        if not same:
+            continue
+        col = "_ref" if "_ref" in f.columns else "_refs"
+        vals = f.loc[idx, col].tolist()
+        got = [[str(v)] if col == "_ref" else [str(y) for y in (v if isinstance(v, (list, tuple)) else [])] for v in vals]
+        score = (len(shared), -len(f))
+        if best is None or score > best[0]:
+            best = (score, got, name)
+    if best is None:
+        return None
+    return best[1], "exact", best[2]
+
+
 def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
     """Row lineage found by key: each frame the query made that has `_ref` and every key column groups its rows by the
     keys; the frame whose groups hold every output row wins, one whose group sizes equal a count column first, then the
     smallest."""
-    cands = _named_frames(ns, frames, lambda f: all(k in f.columns for k in keys))
+    cands = _named_frames(ns, frames, lambda f: all(k in f.columns for k in keys), lists=True)
     best = None
     count_cols = [c for c in df.columns if c not in keys and not c.startswith("_") and _is_count_col(df[c])]
     for name, f in cands:
+        # a frame of source rows (`_ref`), or of groups that each keep theirs (`_refs`): a group's rows are the union
+        col = "_ref" if "_ref" in f.columns else "_refs"
         try:
-            g = f.groupby(keys if len(keys) > 1 else keys[0], dropna=False, sort=False)["_ref"].agg(list)
+            g = f.groupby(keys if len(keys) > 1 else keys[0], dropna=False, sort=False)[col].agg(list)
         except Exception:  # noqa: BLE001 — unhashable keys and the like
             continue
         lookup = g.to_dict()
         got = []
+        sizes = []
         ok = True
         for _, r in df[keys].iterrows():
             k = tuple(r[c] for c in keys) if len(keys) > 1 else r[keys[0]]
@@ -404,10 +457,10 @@ def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
                 # NaN keys never compare equal: match them by position of their group
                 ok = False
                 break
-            got.append([str(x) for x in refs])
+            sizes.append(len(refs))
+            got.append([str(x) for x in refs] if col == "_ref" else [str(y) for x in refs for y in (x if isinstance(x, (list, tuple)) else [])])
         if not ok:
             continue
-        sizes = [len(x) for x in got]
         agree = [c for c in count_cols if all(int(v) == s for v, s in zip(df[c].tolist(), sizes) if v == v)]
         mode = "matched" if agree else ("superset" if count_cols else "key")
         score = (2 if agree else 1 if not count_cols else 0, -len(f))
@@ -635,17 +688,25 @@ def row_refs(q: dict[str, Any]) -> list[str]:
     if not table:
         return []
     keys = [k for k in q.get("keys") or [] if not str(k).startswith("_")]
-    if keys:
-        tup = [tuple(R.value_slug(r.get(k)) for k in keys) if all(k in r for k in keys) else None for r in table]
-        seen = Counter(t for t in tup if t is not None)
+    # the shortest run of the key columns, from the first, that tells a row from every other: refs stay short
+    tups, seen = [], []
+    for j in range(1, len(keys) + 1):
+        t = [tuple(R.value_slug(r.get(k)) for k in keys[:j]) if all(k in r for k in keys[:j]) else None for r in table]
+        tups.append(t)
+        seen.append(Counter(x for x in t if x is not None))
     out = []
     for i, r in enumerate(table):
-        if keys and tup[i] is not None and seen[tup[i]] == 1 and all(tup[i]):
-            frag = "&".join(f"{R.ref_value(k)}={R.ref_value(r[k])}" for k in keys)
-            if len(frag) <= 160:
-                out.append(f"{qid}#{frag}")
-                continue
-        out.append(f"{qid}#row={i + 1}")
+        done = False
+        for j in range(len(keys)):
+            t = tups[j][i]
+            if t is not None and seen[j][t] == 1 and all(t):
+                frag = "&".join(f"{R.ref_value(k)}={R.ref_value(r[k])}" for k in keys[:j + 1])
+                if len(frag) <= 160:
+                    out.append(f"{qid}#{frag}")
+                    done = True
+                break
+        if not done:
+            out.append(f"{qid}#row={i + 1}")
     return out
 
 

@@ -174,3 +174,26 @@ def test_a_sorted_wide_table_keeps_its_rows_by_its_words_not_its_old_positions(r
     top = q["table"][0]
     assert top["outcome"] == "failed/adversarial" and "index" in top, "the old position stays a column"
     assert LIN.resolve(st, f"{q['id']}#outcome=failed-adversarial@n")["count"] == 4
+
+
+def test_rows_picked_from_a_frame_keep_their_lineage_by_row(root: Path) -> None:
+    st = Store(root)
+    # a tally merged with more columns, then sorted and cut to a few columns: each output row is a row of `per`
+    q = Q.run(st, "top outcomes", 'df = load("runs.jsonl")\nper = tally(df, "outcome", calls=("calls", "sum"))\n'
+                                 'per["share"] = per.n / per.n.sum()\nper.sort_values("n", ascending=False)[["outcome", "n", "share"]].head(2)')
+    assert q["lineage"] == "exact", q["lineage"]
+    assert [R.count(x) for x in q["rows"]] == [4, 3]
+    # source rows picked by a filter and a column choice are their own rows
+    f = Q.run(st, "slow runs", 'df = load("runs.jsonl")\ndf[df.calls > 170][["run", "calls"]]')
+    assert f["lineage"] == "exact" and f["rows"][0] == ["runs.jsonl#L9"]
+
+
+def test_a_table_built_from_a_used_query_finds_its_rows_through_that_querys_groups(root: Path) -> None:
+    st = Store(root)
+    t = Q.run(st, "per run", 'tally(load("runs.jsonl"), ["outcome", "run"])')
+    q = Q.run(st, "per outcome", f'per = use("{t["id"]}")\n'
+                                 'g = pd.DataFrame({"outcome": sorted(per.outcome.unique())})\n'
+                                 'g["runs"] = g.outcome.map(per.groupby("outcome").size())\ng')
+    assert q["lineage"] == "matched", q["lineage"]
+    won = next(i for i, r in enumerate(q["table"]) if r["outcome"] == "won (clean ep)")
+    assert q["rows"][won] == ["runs.jsonl#L1-3"]
