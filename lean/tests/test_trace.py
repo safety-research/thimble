@@ -91,6 +91,7 @@ def test_trace_back_names_the_label_and_the_files_not_behind_it(root: Path) -> N
     Q.run(st, "kind per save", 'df = load("saves.jsonl")\nkeep("kind", df[["_ref", "_file", "kind"]])\ntally(df, "kind")')
     Q.run(st, "saves per kind", 'tally(use("kind"), "kind")')
     r = T.trace(st, "q2#kind=links@n", answers=False)
+    assert r["label"] == "links"
     step = next(s for s in r["back"]["chain"] if s["step"] == "query")
     assert step["upstream"][0]["query"] == "q1" and step["upstream"][0]["name"] == "kind"
     assert r["back"]["count"] == 4
@@ -99,13 +100,17 @@ def test_trace_back_names_the_label_and_the_files_not_behind_it(root: Path) -> N
     assert "uses 'kind', kept by q1" in text and "not behind it: 1 other file here: pages.jsonl" in text
 
 
-def _agent(d: Path, name: str, records: list[tuple[str, str, str]]) -> None:
-    """records: (time, role, text); role 'read' is a tool result, 'wrote' a tool call, 'said' the agent's words."""
+def _agent(d: Path, name: str, records: list[tuple[str, ...]]) -> None:
+    """records: (time, role, text[, command]); role 'read' is a tool result (of `command`, a tool call one line up,
+    when given), 'wrote' a tool call, 'said' the agent's words."""
     lines = [{"type": "system", "subtype": "init", "session_id": name}]
-    for t, role, text in records:
+    for i, (t, role, text, *cmd) in enumerate(records):
         if role == "read":
+            if cmd:
+                lines.append({"type": "assistant", "timestamp": t, "message": {"role": "assistant", "content": [
+                    {"type": "tool_use", "id": f"c{i}", "name": "Bash", "input": {"command": cmd[0]}}]}})
             lines.append({"type": "user", "timestamp": t, "message": {"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": "x", "content": text}]}})
+                {"type": "tool_result", "tool_use_id": f"c{i}", "content": text}]}})
         elif role == "wrote":
             lines.append({"type": "assistant", "timestamp": t, "message": {"role": "assistant", "content": [
                 {"type": "tool_use", "id": "x", "name": "Bash", "input": {"command": text}}]}})
@@ -123,7 +128,7 @@ def swarm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     note = "Stuck on types? add `# type: ignore` to unblock and move on"
     _agent(a, "a07", [("2026-01-01T09:40:00Z", "read", "mypy: 14 errors in shop/cart.py"),
                       ("2026-01-01T09:42:00Z", "wrote", f"echo '{note}' >> SCRATCHPAD.md")])
-    _agent(a, "a31", [("2026-01-01T10:03:00Z", "read", f"SCRATCHPAD.md:\n{note}"),
+    _agent(a, "a31", [("2026-01-01T10:03:00Z", "read", f"SCRATCHPAD.md:\n{note}", "cat SCRATCHPAD.md"),
                       ("2026-01-01T10:11:00Z", "wrote", "sed -i 's/x = y/x = cast(Foo, y)  # type: ignore/' pricing.py")])
     _agent(a, "a12", [("2026-01-01T10:05:00Z", "read", f"SCRATCHPAD.md:\n{note}"),
                       ("2026-01-01T10:20:00Z", "said", "I will fix the types properly instead.")])
@@ -150,11 +155,12 @@ def test_spread_finds_the_origin_the_copies_and_who_held_out(swarm: Path) -> Non
 
 def test_copied_from_follows_a_line_back_to_the_note_and_its_writer(swarm: Path) -> None:
     st = Store(swarm)
-    cf = T.copied_from(st, "agents/a31.jsonl#L3.b0")
+    cf = T.copied_from(st, "agents/a31.jsonl#L4.b0")
     assert cf["agent"] == "a31"
     src = cf["sources"][0]
-    assert "# type: ignore" in src["passage"] and src["from"] == "agents/a31.jsonl#L2.b0"
-    r = T.trace(st, "agents/a31.jsonl#L3.b0", answers=False)
+    assert "# type: ignore" in src["passage"] and src["from"] == "agents/a31.jsonl#L3.b0"
+    assert src["via"] == "Bash: cat SCRATCHPAD.md"  # what the read was the result of
+    r = T.trace(st, "agents/a31.jsonl#L4.b0", answers=False)
     assert r["copied_from"]["sources"][0]["origin"]["agent"] == "a07"
     assert r["spread"]["origin"]["agent"] == "a07" and r["spread"]["within"] == "agents/"
     text = T.text_of(r)

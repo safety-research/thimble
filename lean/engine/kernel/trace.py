@@ -625,16 +625,31 @@ def copied_from(st: Store, ref: str, min_chars: int = 12, top: int = 8) -> dict[
     words = ftext.split()
     sh = _shingles(ftext)
     cands: list[tuple[int, int, int, str, str, str | None]] = []  # (shared shingles, line, block, text, kind, t)
+    calls: dict[str, str] = {}  # tool call id -> the call, so a result can say what it answers
+    answers: dict[tuple[int, int], str] = {}  # (line, block) of a tool result -> its call's id
     with open(st.root / rel, errors="replace") as fh:
         for n, raw in enumerate(fh, 1):
             if n >= line:
                 break
+            if '"tool_use"' in raw and '"assistant"' in raw:
+                try:
+                    for b in (json.loads(raw).get("message") or {}).get("content") or []:
+                        if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id"):
+                            first = next(iter(_strings(b.get("input"))), "")  # a command, a path, a pattern
+                            calls[b["id"]] = " ".join(f"{b.get('name')}: {first}".split())[:120]
+                except (ValueError, AttributeError):
+                    pass
+                continue
             if '"user"' not in raw:
                 continue
             try:
                 v = json.loads(raw)
             except ValueError:
                 continue
+            c = (v.get("message") or {}).get("content") if isinstance(v, dict) else None
+            for bi, b in enumerate(c if isinstance(c, list) else []):
+                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id"):
+                    answers[(n, bi)] = b["tool_use_id"]
             for bi, way, kind, btext in blocks(v):
                 if way != "received" or not btext:
                     continue
@@ -665,9 +680,13 @@ def copied_from(st: Store, ref: str, min_chars: int = 12, top: int = 8) -> dict[
         at = sp["per_file"][0]["first_read"] if sp["per_file"] else None
         if at and int(re.search(r"#L(\d+)", at["ref"])[1]) < line:
             f.update({"from": at["ref"], "t": at.get("t"), "kind": at.get("kind")})
+            m = re.search(r"#L(\d+)\.b(\d+)$", at["ref"])
+            via = calls.get(answers.get((int(m[1]), int(m[2])), "")) if m else None
+            if via:
+                f["via"] = via
     found = [f for f in found if f.get("from")]
     return {"ref": ref, "agent": _agent(rel), "t": _when(rec), "text": _line_with(text, words[0] if words else ""),
-            "sources": found}
+            "block": text[:4000], "sources": found}
 
 
 def _whole_words(s: str, a: int, b: int) -> tuple[int, int]:
@@ -686,6 +705,29 @@ def _whole_words(s: str, a: int, b: int) -> tuple[int, int]:
 
 
 # ------------------------------------------------------------------ one target, both directions
+
+
+def _label(st: Store, p: dict[str, Any]) -> str | None:
+    """What a value is, in the words its row holds: the key columns of a query's output row (purpose: message to
+    agents), or the words beside it in an object's data."""
+    row: Any = None
+    if p["kind"] == "query":
+        q = Q.get(st, p["query"])
+        frag = {k: p[k] for k in ("row", "keys") if k in p}
+        idx = Q.find_rows(q, frag) if q and frag else []
+        if len(idx) == 1:
+            row = {k: v for k, v in (q.get("table") or [])[idx[0]].items() if k in (q.get("keys") or [])}
+    elif p["kind"] == "object" and p.get("pointer"):
+        obj = O.load(st, p["object"])
+        parent = p["pointer"].rsplit("/", 1)[0]
+        try:
+            row, _, _ = O.walk((obj or {}).get("data"), parent) if parent else ((obj or {}).get("data"), None, None)
+        except R.RefError:
+            row = None
+    if not isinstance(row, dict):
+        return None
+    words = [str(v) for k, v in row.items() if not k.startswith("_") and isinstance(v, str) and v.strip()]
+    return ", ".join(words)[:80] or None
 
 
 def _upstream(st: Store, q: dict[str, Any], seen: set[str] | None = None) -> list[dict[str, Any]]:
@@ -713,6 +755,7 @@ def trace(st: Store, ref: str | None = None, text: str | None = None, within: st
         kind = p["kind"]
         is_transcript = kind in ("block", "lines") and S.kind_of_file(st.root, p["path"]) == "transcript"
         out["back"] = LIN.resolve(st, ref, n=n) if not is_transcript else None
+        out["label"] = _label(st, p) if kind in ("query", "object") else None
         for step in (out["back"] or {}).get("chain") or []:
             if step.get("step") == "query":
                 q = Q.get(st, step["id"])
