@@ -170,6 +170,22 @@ test('the bar is always one line: it drops the counts first (coverage last), the
   assert.ok(!barLine(narrow).includes('\n'))
 })
 
+test('a status in the bar is cut at its end, never to its first word, and the keys keep their words longest', async () => {
+  const { barLine, fitBar } = await import('../host.js')
+  const status = '! "55" is not in the original, so it shows as plain words'
+  const bar = { label: 'thimble', left: [{ key: '', words: status, tone: 'warning', status: true }, { key: '< >', words: 'change' }, { key: ']', words: 'next chip' }, { key: '+', words: 'new stretch' }, { key: '0', words: 'original' }, { key: 's', words: 'done' }], counts: [{ id: 'cites', text: '22 cites' }, { id: 'claims', text: '19 claims' }] }
+  const at = w => barLine(fitBar(bar, w))
+  assert.equal(at(200), `thimble  ${status} · < > change · ] next chip · + new stretch · 0 original · s done   22 cites · 19 claims`)
+  // short of room: the counts go, then the status is cut at its end and every key keeps its words
+  const mid = at(110)
+  assert.ok(mid.length <= 110, mid)
+  assert.ok(mid.startsWith('thimble  ! "55" is not in'), mid)
+  assert.ok(mid.includes('…'), mid)
+  assert.ok(mid.endsWith('< > change · ] next chip · + new stretch · 0 original · s done'), mid)
+  assert.ok(!/! "55 ·/.test(mid) && !/! "55$/.test(mid), mid)
+  for (const w of [200, 140, 110, 90, 80]) assert.ok(at(w).length <= w, `${w}: ${at(w)}`)
+})
+
 test('keys in a row of digits read as a range; the keys a host keeps where a card is drawn say why', async () => {
   const { hostKeys } = await import('../host.js')
   assert.deepEqual(keysOf({ on: [{ name: '2', label: 'open' }, { name: '3', label: 'open' }, { name: '4', label: 'open' }] }), [{ key: '2–4', words: 'open' }])

@@ -34,7 +34,7 @@ import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { citeCard, explainerCard } from './cards.js'
-import { cardStore, detailAction, detailIsOpen, detailKeys, detailPane, followDetail, markOpen, openDetailPane, registerDetail } from './detail'
+import { cardStore, detailAction, detailIsOpen, detailKeys, detailPane, followDetail, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadList, threadOf } from './thread'
@@ -1040,8 +1040,8 @@ async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): P
   if (!m) return
   // a resumed session's side threads, read back once (outside any drawing), so the panel knows a mark's thread
   await restoreThreads($, (await rootHere($)) || undefined).catch(() => undefined)
-  await $.state.set(PICK, null)
-  await $.state.set(CARDFOCUS, null)
+  await setPick($, null)
+  await setCardFocus($, null)
   await setTray($, trayOpen(trayFrameOf(rec, i)) as Tray)
   const answer = (await $.state.get(ANSWER)).value
   await $.state.set(SELROW, row === answer ? null : row)
@@ -1092,8 +1092,8 @@ async function stepMark($: Engine, dir: number): Promise<void> {
  *  them; 0 gives the keys back. */
 async function focusCard($: Engine, row: string, card: ObjRef): Promise<void> {
   await setTray($, null)
-  await $.state.set(PICK, null)
-  await $.state.set(CARDFOCUS, { id: card.id, v: card.v, root: card.root, row })
+  await setPick($, null)
+  await setCardFocus($, { id: card.id, v: card.v, root: card.root, row })
   const answer = (await $.state.get(ANSWER)).value
   await $.state.set(SELROW, row === answer ? null : row)
   await quietly($.ui.scroll({ to: { key: `row-${row}-card-${card.id}` }, block: 'nearest' }))
@@ -1108,6 +1108,8 @@ async function closeTray($: Engine): Promise<void> {
 async function setTray($: Engine, tray: Tray | null): Promise<void> {
   const next = tray && tray.stack && tray.stack.length ? tray : null
   await $.state.set(TRAY, next)
+  if (next) await pushFocus($, 'tray')
+  else await popFocus($, 'tray')
   await patchPaneState($, 'tray', {}, { stack: next?.stack ?? [], asking: !!next?.asking })
 }
 
@@ -1118,7 +1120,7 @@ export async function paneStateChanged($: Engine, name: string, _args: Record<st
   const now = (await $.state.get(TRAY)).value as Tray | null
   const next = stack.length ? { stack, asking: !!state.asking } : null
   if (JSON.stringify(now ?? null) !== JSON.stringify(next)) await $.state.set(TRAY, next)
-  if (next) await $.state.set(CARDFOCUS, null)
+  if (next) { await setCardFocus($, null); await pushFocus($, 'tray') } else await popFocus($, 'tray')
 }
 
 /** The card a tray frame shows, as the tray program wants it (panes/tray.js): its parts drawn in the sandbox at `w`. */
@@ -1177,15 +1179,15 @@ function messageObject(rec: MsgRecord): Any {
 /** A verb key under a message: its line opens (a press on the open one closes it). */
 async function pressRowVerb($: Engine, row: string, key: string): Promise<void> {
   const cur = (await $.state.get(PICK)).value as Any
-  if (cur && cur.row === row && cur.verb === key) { await $.state.set(PICK, null); return }
+  if (cur && cur.row === row && cur.verb === key) { await setPick($, null); return }
   // c: the Claims pane, read again (the orientation may have added claims), opened or closed
   // what the person pressed, with whether the post-turn pass had lit it (lean stats: how often a lit verb is used)
   const lit = !!((await recordNow($, row))?.verbs as Record<string, Any> | undefined)?.[key]?.lit
   void recordEvent($, { kind: 'press', verb: key, row, lit })
   if (key === 'c') { await toggleClaims($, row); return }
   await setTray($, null)
-  await $.state.set(CARDFOCUS, null)
-  await $.state.set(PICK, { row, verb: key })
+  await setCardFocus($, null)
+  await setPick($, { row, verb: key })
   const answer = (await $.state.get(ANSWER)).value
   await $.state.set(SELROW, row === answer ? null : row)
   // the line in view, when a key opened it under a message above the screen
@@ -1197,7 +1199,7 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
 async function pickOption($: Engine, row: string, verbKey: string, choice: string): Promise<boolean> {
   const rec = await recordNow($, row)
   if (!rec) return false
-  await $.state.set(PICK, null)
+  await setPick($, null)
   const verb = (await rowVerbs($)).find(v => v.key === verbKey)
   if (!verb) return false
   $.clock.after(0, () => { void runOnMessage($, verb.name, verbKey, rec, choice) })
@@ -1402,6 +1404,7 @@ async function toggleClaims($: Engine, row: string): Promise<void> {
   if ((await $.state.get(CLAIMPANE)).value) { await closeClaims($); return }
   await reloadClaims($)
   await $.state.set(CLAIMPANE, { row } as ClaimPane)
+  await pushFocus($, 'claims')
   // after the key that asked for it is done, so the pane takes the keyboard from the prompt
   $.clock.after(0, () => { void openClaimsPane($) })
 }
@@ -1414,6 +1417,7 @@ async function openClaimsPane($: Engine): Promise<void> {
 
 async function closeClaims($: Engine): Promise<void> {
   await $.state.set(CLAIMPANE, null)
+  await popFocus($, 'claims')
   paneClosed('claims')
   await quietly($.ui.close({ id: CPANE }))
 }
@@ -1566,41 +1570,102 @@ async function threadInFront($: Engine): Promise<string | null> {
   return null
 }
 
-/** The keys of what has focus now, as words (`1–4 chip · < > change · …`), or null at rest. */
-async function focusKeys($: Engine): Promise<string | null> {
-  const d = await detailKeys($)
-  if (d) return d
-  // the Claims pane's own keys, as its program names them (panes/claims.js)
-  if ((await $.state.get(CLAIMPANE)).value) return [barText([await paneNow($, 'claims')]) || 'esc close', ...(browserFlag ? ['o browser'] : [])].join(' · ')
+// ------------------------------------------------------------------------------------------------ the focus stack
+
+/** What takes the keys, newest last: each surface pushes itself as it opens and leaves as it closes (the detail, the
+ *  Claims pane, the squeeze chips, v's proposals, the tray, a card under a reply). The thimble line says the keys of
+ *  the top one alone, read from this one state, so it redraws whenever the stack changes. */
+type FocusKind = 'detail' | 'claims' | 'chips' | 'proposals' | 'tray' | 'card'
+const FSTACK = { plugin: 'thimble-lean', key: 'focus' } as const
+const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'claims', 'detail']
+
+export async function pushFocus($: Engine, kind: FocusKind): Promise<void> {
+  const now = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]
+  const next = [...now.filter(k => k !== kind), kind]
+  if (next.join() !== now.join()) await $.state.set(FSTACK, next)
+}
+
+export async function popFocus($: Engine, ...kinds: FocusKind[]): Promise<void> {
+  const now = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]
+  const next = now.filter(k => !kinds.includes(k))
+  if (next.join() !== now.join()) await $.state.set(FSTACK, next)
+}
+
+/** v's line or the chips, the PICK state, with the stack kept beside it. */
+async function setPick($: Engine, pick: { row: string; verb: string } | null): Promise<void> {
+  await $.state.set(PICK, pick)
+  if (!pick) await popFocus($, 'chips', 'proposals')
+  else { await popFocus($, pick.verb === 's' ? 'proposals' : 'chips'); await pushFocus($, pick.verb === 's' ? 'chips' : 'proposals') }
+}
+
+/** A card under a reply with the keys (] reached it), or none. */
+async function setCardFocus($: Engine, cf: (ObjRef & { row: string }) | null): Promise<void> {
+  await $.state.set(CARDFOCUS, cf)
+  if (cf) await pushFocus($, 'card')
+  else await popFocus($, 'card')
+}
+
+type FocusWords = { status?: { text: string; tone: 'error' | 'warning' } | null; keys: string }
+
+/** What the surface on top of the focus stack says now: what it shows (a status) and its keys, as words. Undefined
+ *  when that surface has gone (its state cleared), so the next one down speaks. */
+async function focusWords($: Engine, kind: FocusKind): Promise<FocusWords | undefined> {
+  const status = (d: Any) => (d?.status?.text ? { text: String(d.status.text), tone: (String(d.status.text).startsWith('×') ? 'error' : 'warning') as 'error' | 'warning' } : null)
+  if (kind === 'detail') {
+    const d = await detailKeys($)
+    return d ? { keys: d } : undefined
+  }
+  if (kind === 'claims') {
+    // the Claims pane's own keys, as its program names them (panes/claims.js)
+    if (!(await $.state.get(CLAIMPANE)).value) return undefined
+    return { keys: [barText([await paneNow($, 'claims')]) || 'esc close', ...(browserFlag ? ['o browser'] : [])].join(' · ') }
+  }
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-  if (pick?.verb === 's') {
+  if (kind === 'chips') {
+    if (pick?.verb !== 's') return undefined
     // the chips' own keys, as their program names them (panes/chips.js), after what it says of the message now
     const ui = ((await $.state.get({ ...SQZ, id: pick.row })).value ?? null) as SqzUi | null
     if (ui?.adding) {
       const ends = endsOf(String(ui.typing || '+'))
-      if (!ends) return 'type two ends, such as engineer and manager · ↵ makes the stretch · ⌫ cancels'
-      return ends.from === 'as written' ? 'then and, and the other end · ↵ makes the stretch' : `↵ makes ${ends.from} ↔ ${ends.to} · ⌫ the + cancels`
+      if (!ends) return { keys: 'type two ends, such as engineer and manager · ↵ makes the stretch · ⌫ cancels' }
+      return { keys: ends.from === 'as written' ? 'then and, and the other end · ↵ makes the stretch' : `↵ makes ${ends.from} ↔ ${ends.to} · ⌫ the + cancels` }
     }
     const d = await paneNow($, 'chips', { row: pick.row })
-    return [d?.status?.text, barText([d])].filter(Boolean).join(' · ') || null
+    return { status: status(d), keys: barText([d]) }
   }
-  const tray = (await $.state.get(TRAY)).value as Tray | null
-  if (tray) {
+  if (kind === 'tray') {
+    const tray = (await $.state.get(TRAY)).value as Tray | null
+    if (!tray) return undefined
     // the tray program's keys (panes/tray.js), after what it says while the person asks its thread
     const d = paneDrawing('tray') ?? (await paneNow($, 'tray'))
-    return [d?.status?.text, barText([d])].filter(Boolean).join(' · ') || '0 close'
+    return { status: status(d), keys: barText([d]) || '0 close' }
   }
-  if (pick) {
+  if (kind === 'proposals') {
+    if (!pick || pick.verb === 's') return undefined
     const d = paneDrawing('proposals', { row: pick.row, verb: pick.verb }) ?? (await paneNow($, 'proposals', { row: pick.row, verb: pick.verb }))
-    return barText([d]) || '0 close'
+    return { keys: barText([d]) || '0 close' }
   }
   // a card under a reply with the focus (] reached it): its own keys, those that reach it here, then the host's
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
-  if (cf) {
-    const d = await inlineDrawing($, cf)
-    const taken = new Set(Object.keys(hostKeys('inline', 'terminal')))
-    const own = keysOf(d).filter(g => !g.key.split(' ').some(x => taken.has(x === '↵' ? 'return' : x === '↑' ? 'up' : x === '↓' ? 'down' : x)))
-    return [...own.map(g => `${g.key} ${g.words}`), '1 open detail', '] next', '0 back'].join(' · ')
+  if (!cf) return undefined
+  const d = await inlineDrawing($, cf)
+  const taken = new Set(Object.keys(hostKeys('inline', 'terminal')))
+  const own = keysOf(d).filter(g => !g.key.split(' ').some(x => taken.has(x === '↵' ? 'return' : x === '↑' ? 'up' : x === '↓' ? 'down' : x)))
+  return { keys: [...own.map(g => `${g.key} ${g.words}`), '1 open detail', '] next', '0 back'].join(' · ') }
+}
+
+/** The keys of what has focus now: the top of the focus stack that is still there; a surface whose state is set but
+ *  that never pushed itself (a reload while it was open) comes after, in the shell's own order. Null at rest. */
+async function focusKeys($: Engine): Promise<FocusWords | null> {
+  const stack = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]
+  for (const kind of [...stack].reverse()) {
+    const w = await focusWords($, kind)
+    if (w) return w
+  }
+  for (const kind of [...FOCUS_ORDER].reverse()) {
+    if (stack.includes(kind)) continue
+    const w = await focusWords($, kind)
+    if (w) return w
   }
   return null
 }
@@ -1621,7 +1686,7 @@ function keySegments(keys: string): { key: string; words: string; color?: string
 }
 
 /** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
-type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; tone?: 'error' | 'warning'; label?: string; onPress?: () => unknown }
+type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown }
 
 /** The thimble line: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
  *  It is always one line: with less room it drops the counts (coverage last), then says each key's words by their
@@ -1630,10 +1695,13 @@ type BarSeg = { key: string; words: string; short?: string; color?: string; word
 async function barEl($: Engine, els: Any, w: number, working = false): Promise<Any | null> {
   const { Box, Button, Text } = els
   const left: BarSeg[] = []
-  const keys = await focusKeys($)
-  if (keys) {
-    if (keys.startsWith('×') || keys.startsWith('!')) left.push({ key: '', words: keys, tone: keys.startsWith('×') ? 'error' : 'warning' })
-    else for (const g of keySegments(keys)) left.push({ key: g.key, words: g.words, ...(g.color ? { color: g.color, wordsColor: g.color } : {}), ...(g.short ? { short: g.short } : {}), ...(g.onPress ? { onPress: g.onPress } : {}) })
+  const focus = await focusKeys($)
+  if (focus) {
+    // what the focused surface says now, cut at its end when the line is short (never to its first word), then its keys
+    if (focus.status) left.push({ key: '', words: focus.status.text, tone: focus.status.tone, status: true })
+    for (const g of keySegments(focus.keys)) {
+      if (g.key || g.words) left.push({ key: g.key, words: g.words, ...(g.color ? { color: g.color, wordsColor: g.color } : {}), ...(g.short ? { short: g.short } : {}), ...(g.onPress ? { onPress: g.onPress } : {}) })
+    }
   } else if (!working) {
     // (while Claude works the verbs wait: they act on its answer, which is not there yet)
     const row = await actingRow($)
@@ -1771,8 +1839,8 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
   if (cf && !pick) {
     keyOpened = null
-    if (k === '0' || k === 'backspace') { await $.state.set(CARDFOCUS, null); return consume }
-    if (k === '1') { await $.state.set(CARDFOCUS, null); await openDetail($, cf); return consume }
+    if (k === '0' || k === 'backspace') { await setCardFocus($, null); return consume }
+    if (k === '1') { await setCardFocus($, null); await openDetail($, cf); return consume }
     if (k === ']' || k === '[') { await stepMark($, k === ']' ? 1 : -1); return consume }
     const d = await inlineDrawing($, cf)
     const own = d ? cardTakesKey(d, k) : null
@@ -1782,18 +1850,18 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
       cardKeyed = { key: k, at: now, ref: cf, undo: before }
       return consume
     }
-    await $.state.set(CARDFOCUS, null)
+    await setCardFocus($, null)
     return null
   }
   if (k === ']' || k === '[') {
     keyOpened = null
-    await $.state.set(PICK, null)
+    await setPick($, null)
     await stepMark($, k === ']' ? 1 : -1)
     return consume
   }
   if (k === '0' || k === 'backspace') {
     keyOpened = null
-    if (pick) { await $.state.set(PICK, null); return consume }
+    if (pick) { await setPick($, null); return consume }
     return null
   }
   if (/^[1-9]$/.test(k)) {
@@ -1817,7 +1885,7 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   // o: this session in the browser, at the message the keys act on (browser mode only; `o browser` on the verb row)
   if (k === 'o' && browserFlag && !(pick && keyOpened && now - keyOpened.at < 700)) {
     keyOpened = null
-    if (pick) await $.state.set(PICK, null)
+    if (pick) await setPick($, null)
     const row = await actingRow($)
     // from the Claims pane: the graph in the browser, on the claim the ring is on here
     const claims = (await $.state.get(CLAIMPANE)).value ? { view: 'claims', claim: String((await paneState($, 'claims')).hover || '') || null } : {}
@@ -1825,7 +1893,7 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
     return consume
   }
   if (pick && k.length === 1) {
-    await $.state.set(PICK, null)
+    await setPick($, null)
     const opened = keyOpened
     keyOpened = null
     // typed straight after the verb key: the letter was the start of a word
@@ -2088,7 +2156,7 @@ async function chipsAction($: Engine, row: string, a: Record<string, unknown>): 
   }
   if (name === 'close') {
     await sqStopStretch($, row)
-    await $.state.set(PICK, null)
+    await setPick($, null)
     return
   }
   if (name === 'say') return typeof a.text === 'string' ? a.text : undefined
@@ -2112,7 +2180,7 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
     if (name === 'input') return
   }
   if (pane === 'proposals') {
-    if (name === 'close') { await $.state.set(PICK, null); return }
+    if (name === 'close') { await setPick($, null); return }
     if (name === 'pick' && typeof a.choice === 'string') {
       const row = String(_args.row || a.row || '')
       const verb = String(_args.verb || a.verb || 'v')
@@ -2194,8 +2262,8 @@ export const registerShell: Register = (on, options) => {
       // a new turn: the keys act on its answer again, and a verb's open line closes
       try {
         await $.state.set(SELROW, null)
-        await $.state.set(PICK, null)
-        await $.state.set(CARDFOCUS, null)
+        await setPick($, null)
+        await setCardFocus($, null)
       } catch {
         // the turn starts whatever the shell makes of it
       }
@@ -2414,6 +2482,7 @@ export const registerShell: Register = (on, options) => {
       if (e.props.hasSurvey) return next(e)
       const els = $.ui.resolve(e) as Any
       const { Box, Text } = els
+      noteViewport(e.viewport)
       const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
       const line = await barEl($, els, bw, !!e.props.isWorking)
       const tray = (await $.state.get(TRAY)).value as Tray | null
@@ -2519,7 +2588,7 @@ export const registerShell: Register = (on, options) => {
       // a source card in the tray first, then the claim the Claims pane has the ring on
       const mine = !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin'
       const scoped = mine ? (await trayScope($)) ?? (await claimScope($)) : null
-      await $.state.set(PICK, null)
+      await setPick($, null)
       const open = !scoped && !e.isMeta && (await $.ui.panes()).some(x => x.id === PANE && x.isPlaced)
       if (scoped) {
         context.push(scoped.context)
@@ -2639,6 +2708,7 @@ export const registerShell: Register = (on, options) => {
   on('ui.close', { id: CPANE }, async ($, e, next) => {
     try {
       await $.state.set(CLAIMPANE, null)
+      await popFocus($, 'claims')
       paneClosed('claims')
     } catch {
       // the pane closes whatever the shell makes of it

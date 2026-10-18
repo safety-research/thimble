@@ -6,14 +6,18 @@
 // (the part selected, what the bar shows) is kept in thimble/panes/<session>/detail-<id>.json, so the browser opens the
 // card where the terminal left it, and the other way round. This file is the terminal's host for it:
 //
-//   chat       the card's own thread, the pane's left column: the question that made the card, then each question asked
-//              here with its part and the thread's answer (thread.ts). A prompt typed while the detail is open asks it,
-//              and main never sees it. The pane asks for the whole width it can have, as the B4 design's two columns
+//   width      the pane docks beside the transcript and leaves the chat about two fifths of the terminal (48 to 80
+//              columns), so the conversation stays readable beside the card and the bar above the prompt stays one line
+//   ask        the pane's last row is the card's ask line (an Input): a letter that is no key starts a question there,
+//              and ↵ asks the card's own thread (thread.ts). It never passes through the prompt, so main's transcript
+//              gets no row for it. The thread's latest exchange shows above the ask line, under the card
 //   keys       the card's own keys (its program's k.on) first, then the detail's (the program's), only while the composer
-//              is empty, so a question that starts with p or h types normally; a key that began a word gives its letter
-//              back. While the composer is empty the pane holds the keys, so ↑↓ walk the parts (the ring's moves are
-//              the program's focus events); a letter that is no key goes to the composer. `0` and `esc` empty the bar
-//              and close the program, then `esc` closes the detail. Claude Code keeps ← and →, so knobs turn on , and .
+//              is empty; a key that began a word gives its letter back to the ask line. While the composer is empty the
+//              pane holds the keys, so ↑↓ walk the parts. One selection, one highlight: the ring stands in the gutter on
+//              the selected part's first row (a ▸), and the part is shaded; a move of the ring is the program's focus
+//              event, and after each drawing the ring is put back on the selected part, so the two never drift apart
+//              when the card scrolls. `0` and `esc` empty the bar and close the program, then `esc` closes the detail.
+//              Claude Code keeps ← and →, so knobs turn on , and .
 //   card       the card's drawing, run in its own sandbox with its state (thimble/objects/.state/<id>.json), which the
 //              detail's program embeds; a knob turned, a zoom or a filter is a change of the card's state
 // A card under a reply shows `1 open detail`; 1 on an empty prompt opens the latest card's detail.
@@ -23,9 +27,9 @@ import type { Sel } from '../types'
 import { renderTerm } from '../draw/term.js'
 import { barText } from '../panes/host.js'
 import { paintRegions } from './cells'
-import { beganWord, linkRuns, partsOf, versionsOf } from './carddetail.js'
+import { beganWord, examplesView, linkRuns, partsOf, versionsOf } from './carddetail.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
-import { browserOn, citeLabels, currentTheme, loadObject, openBrowser, prepared, preparedNow, select } from './shell'
+import { browserOn, citeLabels, currentTheme, loadObject, openBrowser, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
 import { cardEvent, cardKey, ownState, pressTaken, readCardState, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
@@ -39,7 +43,6 @@ type Any = any
 type Detail = Sel & { prog?: boolean; bar?: 'details' | 'examples' | null; ask?: CardAsk | null }
 
 export const PANE = 'object'
-export const COLUMNS = 400
 const SEL = { plugin: 'thimble-lean', key: 'sel' } as const
 const ROWS = { plugin: 'thimble-lean', key: 'rows' } as const
 const WHERE = { plugin: 'thimble-lean', key: 'where' } as const
@@ -50,7 +53,7 @@ const cut = (s: string, k: number) => ([...s].length <= k ? s : [...s].slice(0, 
 // the module's memory of the detail: whether it is open, what it drew last (for the ring and the keys), the key that
 // acted last (for a word it began), the agent in the main view, and the latest version seen of each card
 let isOpen = false
-let drawn: { id: string; parts: Any[]; from: number; rows: number; pixel: Set<number>; w: number; h: number; on?: Any[]; card: Any } | null = null
+let drawn: { id: string; parts: Any[]; from: number; rows: number; pixel: Set<number>; w: number; h: number; on?: Any[]; card: Any; gutter: Map<number, string[]>; selected: string | null } | null = null
 // the card's last drawing, shown while it draws again
 let lastCard: { key: string; p: Any } | null = null
 // the room the card is drawn in: the page's width and rows, as the pane last had them
@@ -58,20 +61,54 @@ let room = { w: 98, h: 32 }
 // the card states this open detail has kept (by card), and the cards it has opened where the other surface left them
 const kept = new Map<string, string>()
 const seeded = new Set<string>()
+const askedRegion = new Map<string, string>()
 let lastKey: { key: string; at: number; undo: Record<string, unknown> | null } | null = null
 let viewing: string | null = null
-let ringY = -1
 const latestSeen = new Map<string, number>()
 let keyChain: Promise<unknown> = Promise.resolve()
+// the terminal's columns, as the last drawing measured them: the detail leaves the chat its share of them
+let viewCols = 0
+// the ring: the element it stands on (as the last move or focus left it), its gutter row, and the question being typed
+// in the ask line (kept here, so a redraw never wipes what the person typed)
+let ringAt: string | null = null
+let ringY = -1
+let draft = ''
+let refocus = false
+let drawnSig = ''
+
+/** The terminal's width, from the band's viewport (shell.tsx) while no detail is docked: then the conversation has
+ *  every column. While the detail is open its own drawing measures it (the conversation's columns, the dock's and the
+ *  border between them). */
+export function noteViewport(v: { columns?: number } | undefined): void {
+  if (!isOpen && v && typeof v.columns === 'number' && v.columns > 0) viewCols = v.columns
+}
+
+/** The chat's columns beside the docked detail: about two fifths of the terminal, 48 to 80, so its lines read. */
+export function chatColumns(cols: number): number {
+  return Math.max(48, Math.min(80, Math.round(cols * 0.4)))
+}
+
+/** The columns the detail asks for: the terminal less the chat's share (a card needs 60 at least). */
+export function detailColumns(cols: number): number {
+  return cols > 0 ? Math.max(60, cols - chatColumns(cols)) : 96
+}
+
+const GUTTER = (y: number) => `g|pane|${y}`
+// the ask line's key: a new one each time text is put in it from outside (a letter typed before it had the keys), so
+// the field is drawn afresh holding that text, and the ring waits for that drawing
+let askGen = 0
+const askKey = () => `ask-${askGen}`
+const isAsk = (k: string | null) => !!k && k.startsWith('ask-')
 
 // ------------------------------------------------------------------------------------------------ opening
 
-/** Open the detail: the pane docked beside the transcript as wide as it can be, holding the keys while the composer is
- *  empty. */
+/** Open the detail: the pane docked beside the transcript, leaving the chat its share, holding the keys while the
+ *  composer is empty. */
 export async function openDetailPane($: Engine, title: string): Promise<void> {
   isOpen = true
   setThreadWindow(true)
-  await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: COLUMNS })
+  await pushFocus($, 'detail')
+  await $.ui.open({ id: PANE, title, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) })
   // asked from a key, the open lands while the key is still in the prompt: ask for the keys again once it is gone
   regrab($)
 }
@@ -79,8 +116,13 @@ export async function openDetailPane($: Engine, title: string): Promise<void> {
 async function closed($: Engine): Promise<void> {
   isOpen = false
   seeded.clear()
+  askedRegion.clear()
   setThreadWindow(false)
   drawn = null
+  ringAt = null
+  ringY = -1
+  draft = ''
+  await popFocus($, 'detail')
   if (viewing) { viewing = null; await $.ui.view({}).catch(() => undefined) }
 }
 
@@ -89,20 +131,43 @@ function regrab($: Engine): void {
   $.clock.after(0, () => {
     void (async () => {
       if (!isOpen) return
-      await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: COLUMNS }).catch(() => undefined)
+      await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch(() => undefined)
+      // taking the keyboard again starts the ring afresh: put it on the selected part, wherever it was
+      ringAt = null
       await focusPart($)
     })()
   })
 }
 
-/** The ring onto the selected part's first cell, when it is drawn there as a Button. */
+/** The ring onto the selected part: the gutter cell of the part's first row (its ▸), when that row is drawn. */
 async function focusPart($: Engine): Promise<void> {
-  const sel = (await $.state.get(SEL)).value as Sel | null
-  const part = drawn?.parts.find((x: Any) => x.id === sel?.region)
-  const top = bodyTop(part)
-  if (!top || !drawn || top.y < drawn.from || top.y >= drawn.from + drawn.rows || drawn.pixel.has(top.y)) return
-  ringY = top.y
-  await $.ui.focus({ requestId: PANE, key: `r|pane|${top.y}|${part.id}` }).catch(() => undefined)
+  const key = selectedGutter()
+  if (!key || ringAt === key) return
+  const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'failed' }))
+  if (!(r as Any)?.deny) { ringAt = key; ringY = Number(key.split('|')[2]) }
+}
+
+/** The gutter key of the selected part's first row in the last drawing, or null when it is not drawn. */
+function selectedGutter(): string | null {
+  if (!drawn) return null
+  for (const [y, ids] of drawn.gutter) if (ids.includes(drawn.selected ?? '')) return GUTTER(y)
+  return null
+}
+
+/** The ask line takes the keys, holding what the person has typed so far. */
+function toAsk($: Engine, text: string): void {
+  draft = text
+  askGen++
+  $.ui.invalidate('ui.render')
+  $.clock.after(0, () => {
+    void (async () => {
+      if (!isOpen) return
+      await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch(() => undefined)
+      const key = askKey()
+      const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'failed' }))
+      if (!(r as Any)?.deny) ringAt = key
+    })()
+  })
 }
 
 // ------------------------------------------------------------------------------------------------ the card and its program
@@ -245,6 +310,7 @@ function syncCardState($: Engine, sel: Detail): void {
   if (!seeded.has(id)) {
     seeded.add(id)
     kept.set(id, now)
+    if (sel.region) askedRegion.set(id, sel.region)
     $.clock.after(0, () => {
       void (async () => {
         // the detail's own state: where either surface left it, unless this open names a part
@@ -259,6 +325,12 @@ function syncCardState($: Engine, sel: Detail): void {
     })
     return
   }
+  // a part named from outside (an open on a part, a click in the browser's chat) is the program's selection too
+  const named = sel.region ?? null
+  if (named && askedRegion.get(id) !== named) {
+    askedRegion.set(id, named)
+    $.clock.after(0, () => { void (async () => { const st = await paneState($, 'detail', { id: sel.id }); if (st.region !== named) await patchPaneState($, 'detail', { id: sel.id }, { region: named, ex: 0 }) })().catch(() => undefined) })
+  }
   if (kept.get(id) === now) return
   kept.set(id, now)
   $.clock.after(0, () => { void writeCardState($, sel.root, sel.id, { state: sel.state, region: sel.region }, 'terminal').catch(() => undefined) })
@@ -272,22 +344,20 @@ async function selectSoon($: Engine, sel: Sel): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ drawing
 
-/** The detail pane. */
+/** The detail pane: the page (the detail's program on the card) at the pane's width, the card's thread under it once
+ *  the person has asked, and the ask line at the bottom. */
 export async function detailPane($: Engine, e: Any): Promise<Any> {
   const els = $.ui.resolve(e) as Any
-  const { Box, Text } = els
+  const { Box, Text, Button } = els
+  // the terminal's width: the conversation's columns beside the dock, the dock's, and its border
+  if (e.viewport?.columns && e.props.placement === 'dock') viewCols = e.viewport.columns + (e.props.bodyColumns ?? 0) + 1
   viewing = e.props?.view?.agentId ?? null
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel) return Text({ dimColor: true, children: 'No card is open. A card Claude saves shows under its reply; open it from there.' })
-  const CC = Math.max(40, (e.props.bodyColumns ?? 100) - 1)
-  const R = Math.max(20, e.props.scroll?.bodyRows ?? 40)
-  if (sel.cites && !sel.cite) return citesList(els, sel, CC, R)
-  if (sel.cite) return citeView($, els, sel, CC)
-  // two columns once there is room: the card's thread at the left, the card's page at the right
-  const TW = CC >= 110 ? Math.min(44, Math.max(32, Math.floor(CC * 0.3))) : 0
-  const C = TW ? CC - TW - 2 : CC
-  const W = C - 2
-  room = { w: W, h: Math.max(12, R - 8) }
+  const C = Math.max(40, (e.props.bodyColumns ?? 100) - 1)
+  const R = Math.max(12, e.props.scroll?.bodyRows ?? 40)
+  if (sel.cites && !sel.cite) return citesList(els, sel, C, R)
+  if (sel.cite) return citeView($, els, sel, C)
   syncCardState($, sel)
   const theme = currentTheme()
   const ind = IND[theme]
@@ -302,17 +372,22 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const thread = threadFor({ object: sel.id })
   if (thread) await $.state.get({ ...THREAD, id: thread.key })
 
-  // the page: the detail's program (panes/detail.js) on the card, in the room it has
-  const threadRow = thread && !TW ? 1 : 0
-  // the page beside its one-cell gutter (the mark of the part selected)
-  const d = await paneRun($, 'detail', { id: sel.id }, { w: C - 1, h: R - threadRow })
+  // the rows: the ask line at the bottom (a blank row above it), the thread's latest exchange above that (at most two
+  // fifths of the pane), the page in the rest
+  const tlines = thread ? threadSection(els, thread, C, ind) : []
+  const T = Math.min(tlines.length, Math.max(4, Math.floor(R * 0.4)))
+  const pageRows = Math.max(6, R - 2 - (T ? T + 1 : 0))
+  room = { w: C - 3, h: Math.max(10, pageRows - 8) }
+
+  // the page beside its one-cell gutter, where the ring stands on the selected part's first row
+  const d = await paneRun($, 'detail', { id: sel.id }, { w: C - 1, h: pageRows })
   const grid = renderTerm(d, { w: C - 1 })
   const card = (await preparedNow($, sel, room.w, sel.state, 'detail', room.h)) ?? (lastCard && lastCard.key === `${sel.root}|${sel.id}|${sel.v ?? ''}` ? lastCard.p : null)
   const parts = partsOf({ ...grid, regions: grid.regions.filter((r: Any) => !/^ver-\d+$/.test(r.id)) })
   const region = typeof d.selected === 'string' ? d.selected : null
   const part = parts.find((x: Any) => x.id === region) ?? null
-  // a page taller than the pane: the rows around the selected part, the header kept
-  let rows = Math.min(grid.h, R - threadRow)
+  // a page taller than its rows: the rows around the selected part
+  let rows = Math.min(grid.h, pageRows)
   let from = 0
   if (grid.h > rows) {
     const top = bodyTop(part)
@@ -321,60 +396,99 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   rows = Math.min(rows, grid.h - from)
   const pixel = new Set<number>()
   for (let y = 0; y < grid.h; y++) if (grid.rows[y].some((c: Any) => c.px) && !grid.rows[y].some((c: Any) => c.b || c.ref || c.w2)) pixel.add(y)
-  drawn = { id: sel.id, parts, from, rows, pixel, w: room.w, h: room.h, on: card?.drawing?.on || [], card: card?.drawing ?? null }
-  const top = bodyTop(part)
-  const gutter = Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: Array.from({ length: rows }, (_, i) => Text({ color: ind, bold: true, children: top && top.y === from + i ? '▸' : ' ' })) })
+  // each part's first row in the window holds a gutter cell the ring can stand on (one per row, in reading order)
+  const gutter = new Map<number, string[]>()
+  for (const x of parts) {
+    const top = bodyTop(x)
+    if (!top || top.y < from || top.y >= from + rows) continue
+    gutter.set(top.y, [...(gutter.get(top.y) ?? []), x.id])
+  }
+  drawn = { id: sel.id, parts, from, rows, pixel, w: room.w, h: room.h, on: card?.drawing?.on || [], card: card?.drawing ?? null, gutter, selected: region }
   // a press on a part the card's program answers is the card's (k.on('press:<id>')); any other is the detail's: it
   // selects the part, and on the selected part fills the bar with its details; a knob's ◂ ▸ turns it
   const onPress = (id: string, dir?: number) => {
     if (!dir && card?.drawing && pressTaken(card.drawing, id)) return cardAct($, { type: 'press', region: id })
     return detailFire($, { type: 'press', region: id, ...(dir ? { dir } : {}) })
   }
-  const kids: Any[] = [Box({ flexDirection: 'row', children: [gutter, paintRegions(grid, els, { theme, selected: region, key: 'pane', from, rows, onPress })] })]
-  if (threadRow) kids.push(threadLine(els, thread, ind))
-  const pageBox = Box({ flexDirection: 'column', width: C, children: kids })
-  if (!TW) return pageBox
-  const o = card?.object ?? latest
-  return Box({ flexDirection: 'row', children: [
-    Box({ flexDirection: 'column', width: TW, flexShrink: 0, children: threadColumn(els, o, thread, part, TW, R, ind) }),
-    Box({ flexDirection: 'column', width: 2, flexShrink: 0, children: Array.from({ length: R }, () => Text({ dimColor: true, children: '│ ' })) }),
-    pageBox,
-  ] })
+  const top = bodyTop(part)
+  const gcells = Array.from({ length: rows }, (_, i) => {
+    const y = from + i
+    const ids = gutter.get(y)
+    const mark = top && top.y === y ? '▸' : ' '
+    if (!ids) return Text({ key: `gt${y}`, color: ind, bold: true, children: mark })
+    const at = ids.includes(region ?? '') ? region! : ids[0]!
+    const label = String(parts.find((x: Any) => x.id === at)?.label || at)
+    // the selected part's cell takes the ring whenever the pane takes the keyboard (an open, a key that gave it back)
+    return Button({ key: GUTTER(y), plain: true, label, onPress: () => onPress(at), children: mark, ...(ids.includes(region ?? '') ? { autoFocus: true } : {}) })
+  })
+  const kids: Any[] = [Box({ flexDirection: 'row', children: [
+    Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: gcells }),
+    paintRegions(grid, els, { theme, selected: region, key: 'pane', from, rows, onPress }),
+  ] })]
+  if (T) kids.push(Text({ children: ' ' }), ...tlines.slice(tlines.length - T))
+  kids.push(Text({ children: ' ' }), askLine($, els, sel, part, ind))
+  // the ring follows the selection: after a drawing that moved the part (a scroll, a zoom, a key), it is put back on
+  // the selected part's gutter cell, unless the person is typing in the ask line
+  const want = selectedGutter()
+  const sig = `${parts.map((x: Any) => x.id).join(',')}|${from}`
+  if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null }
+  if (want && e.props.isFocused && !isAsk(ringAt) && ringAt !== want && !refocus) {
+    refocus = true
+    $.clock.after(0, () => { void focusPart($).finally(() => { refocus = false }) })
+  }
+  return Box({ flexDirection: 'column', width: C, children: kids })
 }
 
-/** The card's thread, the left column: the card's question, then each question asked here with its part and the
- *  thread's answers with their citations, the newest at the bottom; before the first, `❯ ask this card…`. */
-function threadColumn(els: Any, o: Any, thread: Any, part: Any, TW: number, R: number, ind: string): Any[] {
+/** The ask line: an Input the letters of a question go to; ↵ asks the card's thread about the selected part. */
+function askLine($: Engine, els: Any, sel: Detail, part: Any, ind: string): Any {
+  const { Input } = els
+  const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : ''
+  return Input({
+    key: askKey(), placeholder: about ? `ask about ${cut(about, 40)}…` : 'ask this card…', value: draft, submitLabel: 'ask',
+    onInput: (v: string) => { draft = v },
+    onSubmit: (v: string) => { void askHere($, v) },
+  })
+}
+
+/** A question typed in the ask line: the card's thread is asked about the selected part (or the selection the card's
+ *  program named), and the ring goes back to the card. */
+async function askHere($: Engine, text: string): Promise<void> {
+  if (!String(text || '').trim()) return
+  const problem = await askCard($, text)
+  if (problem) { $.ui.toast(`× ${problem}`); return }
+  draft = ''
+  ringAt = null
+  $.ui.invalidate('ui.render')
+  regrab($)
+}
+
+/** The card's thread, under the card: its latest exchange (the question with its part, the steps, the answer with its
+ *  citations), cut from the top to the rows it has. */
+function threadSection(els: Any, thread: Any, C: number, ind: string): Any[] {
   const { Text } = els
-  const w = TW - 1
+  const w = C - 1
   const lines: Any[] = []
   const say = (runs: Any[], first: Any, rest = '  ') => wrapRuns(runs, w - 2).forEach((l, i) => lines.push(Text({ wrap: 'truncate-end', children: [i ? Text({ children: rest }) : first, ...l.map(styled)] })))
   const styled = (r: Any) => (r.link ? Text({ color: ind, underline: true, children: r.s }) : Text({ bold: r.bold || undefined, dimColor: r.dim || undefined, children: r.s }))
-  const person = (text: string, about?: string) => {
-    say([{ s: text, bold: true }], Text({ color: ind, children: '❯ ' }))
-    if (about) lines.push(Text({ wrap: 'truncate-end', children: [Text({ dimColor: true, children: '  about ' }), Text({ color: ind, children: cut(about, w - 9) })] }))
-    lines.push(Text({ children: ' ' }))
-  }
-  // the card's question at the top, and until the person asks, a placeholder that says where a question goes
-  if (o.question) {
-    say([{ s: String(o.question), dim: true }], Text({ children: '' }), '')
-    lines.push(Text({ children: ' ' }))
-  }
-  if (!thread?.turns?.length) lines.push(Text({ dimColor: true, children: '❯ ask this card…' }))
-  for (const t of thread?.turns || []) {
-    if (t.role === 'person') { person(String(t.text), t.about); continue }
+  const turns: Any[] = thread?.turns || []
+  const last = turns.map((t: Any) => t.role).lastIndexOf('person')
+  const asked = thread?.asks?.length || 0
+  if (asked > 1) lines.push(Text({ dimColor: true, children: `thread · ${asked} questions` }))
+  for (const t of last >= 0 ? turns.slice(last) : []) {
+    if (t.role === 'person') {
+      lines.push(Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: '❯ ' }), Text({ bold: true, children: cut(String(t.text), w - 4) }), ...(t.about ? [Text({ dimColor: true, children: `  about ${cut(String(t.about), 40)}` })] : [])] }))
+      continue
+    }
     const calls: string[] = t.calls || []
-    if (calls.length > 2) lines.push(Text({ dimColor: true, children: `  ${calls.length - 2} earlier step${calls.length - 2 === 1 ? '' : 's'}` }))
-    for (const c of calls.slice(-2)) lines.push(Text({ dimColor: true, wrap: 'truncate-end', children: `⏺ ${cut(c, w - 2)}` }))
+    if (calls.length > 1) lines.push(Text({ dimColor: true, children: `  ${calls.length - 1} earlier step${calls.length - 1 === 1 ? '' : 's'}` }))
+    for (const c of calls.slice(-1)) lines.push(Text({ dimColor: true, wrap: 'truncate-end', children: `⏺ ${cut(c, w - 2)}` }))
     // the answer keeps its lines (a list stays a list); code marks are dropped, citations read as their words
     String(t.text || '').replace(/`/g, '').split(/\n+/).map(x => x.trim()).filter(Boolean).forEach((para, i) =>
       say(linkRuns(para), Text({ children: i ? '  ' : '⏺ ' })))
-    lines.push(Text({ children: ' ' }))
   }
   if (thread?.status === 'running') lines.push(Text({ color: 'warning', children: '✻ answering…' }))
-  if (thread?.status === 'failed') lines.push(Text({ color: 'error', wrap: 'wrap', children: `× ${cut(String(thread.error || 'the thread stopped'), w * 2)}` }))
-  const room = R - 1
-  return lines.length > room ? lines.slice(lines.length - room) : lines
+  if (thread?.status === 'failed') lines.push(Text({ color: 'error', wrap: 'truncate-end', children: `× ${cut(String(thread.error || 'the thread stopped'), w - 2)}` }))
+  return lines
 }
 
 /** Runs wrapped at word boundaries into lines of at most `w` characters. */
@@ -395,13 +509,6 @@ function wrapRuns(runs: Any[], w: number): Any[][] {
   return out.filter((l, i) => l.length || i === 0)
 }
 
-function threadLine(els: Any, thread: Any, ind: string): Any {
-  const { Text } = els
-  const qs = thread.asks?.length || 0
-  const state = thread.status === 'running' ? 'answering…' : thread.status === 'failed' ? `failed: ${cut(String(thread.error || ''), 60)}` : 'answered'
-  return Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: 'thread' }), Text({ dimColor: true, children: ` · ${qs} question${qs === 1 ? '' : 's'} · ${state}` })] })
-}
-
 /** Where a part's body starts: its biggest rect (a citation of it in the takeaway is a rect of it too, a small one). */
 function bodyTop(part: Any): { x: number; y: number } | null {
   if (!part || !part.rects?.length) return null
@@ -414,6 +521,8 @@ export async function detailKeys($: Engine): Promise<string | null> {
   if (!isOpen) return null
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return 'esc back'
+  // typing a question in the ask line: its own keys
+  if (isAsk(ringAt) || draft) return `↵ ask${sel.ask ? ` about ${cut(String(sel.ask.label), 40)}` : ''} · esc back to the card`
   // the program run now (it follows the card's drawing and the detail's state as they change)
   const d = await paneNow($, 'detail', { id: sel.id })
   const keys = barText([{ on: drawn?.on || [] }, d])
@@ -462,8 +571,9 @@ async function citeView($: Engine, els: Any, sel: Sel, C: number): Promise<Any> 
 
 export function registerDetail(on: Parameters<Register>[0]): void {
   // keys while the composer is empty: the card's own keys (its program's k.on) first, then the detail's program's. A
-  // letter typed straight after a key that acted gives the key's letter back (it began a word). When the composer
-  // empties again, the keys go back to the card. With the detail closed the message layer's keys act (shell.tsx).
+  // letter that is no key starts a question in the ask line (it never types into the prompt), and a letter typed
+  // straight after a key that acted gives the key's letter back there (it began a word). Letters that arrive before
+  // the ask line has the keys join the question. With the detail closed the message layer's keys act (shell.tsx).
   on('prompt.edit', async ($, e, next) => {
     if (!e.key || e.key.ctrl || e.key.meta) return next(e)
     if (!isOpen) return next(e)
@@ -471,12 +581,17 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       if (e.text !== '') return null
       const k = e.key!.key
       const now = Date.now()
+      const typed = String(e.inputText || '')
       const sel = (await $.state.get(SEL)).value as Detail | null
-      if (lastKey && beganWord(lastKey.key, now - lastKey.at, e.inputText)) {
+      if (!sel || sel.cite || sel.cites) return null
+      // a question already begun: the letter joins it
+      if (isAsk(ringAt) || (draft && typed)) { toAsk($, draft + typed); return { text: '', cursor: 0 } }
+      if (lastKey && beganWord(lastKey.key, now - lastKey.at, typed)) {
         const back = lastKey
         lastKey = null
-        if (back.undo && sel) { await setPaneState($, 'detail', { id: sel.id }, back.undo, 'terminal'); await mirror($) }
-        return { text: `${back.key}${e.inputText}`, cursor: back.key.length + e.inputText.length }
+        if (back.undo) { await setPaneState($, 'detail', { id: sel.id }, back.undo, 'terminal'); await mirror($) }
+        toAsk($, `${back.key}${typed}`)
+        return { text: '', cursor: 0 }
       }
       // the card's own keys (its program's k.on) come before the detail's
       const cur = await current($)
@@ -487,10 +602,14 @@ export function registerDetail(on: Parameters<Register>[0]): void {
         regrab($)
         return { text: '', cursor: 0 }
       }
-      if (!sel || sel.cite || sel.cites) return null
       const before = { ...(await paneState($, 'detail', { id: sel.id })) }
       // esc, ↑ and the like never reach here: Claude Code keeps them (the pane's close and ring do them)
-      if (!(await detailFire($, { type: 'key', key: k === 'enter' ? 'return' : k }))) { lastKey = null; return null }
+      if (!(await detailFire($, { type: 'key', key: k === 'enter' ? 'return' : k }))) {
+        lastKey = null
+        // a letter (or a paste) that is no key begins a question in the ask line
+        if (typed.trim()) { toAsk($, typed); return { text: '', cursor: 0 } }
+        return null
+      }
       lastKey = { key: k, at: now, undo: /^[a-z]$/.test(k) ? before : null }
       regrab($)
       return { text: '', cursor: 0 }
@@ -503,38 +622,75 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     return out
   }).catch(($, e, next) => next(e))
 
-  // ↑↓ walk the parts: the ring moves between the parts' cells, and a move inside the part that holds the ring goes on
-  // to the next part, so each part is one stop; where the ring stands is the program's focus event
+  // ↑↓ walk the parts. The ring stands in the gutter on the selected part's first row; the person's move (an arrow,
+  // Tab, a click on a part) is turned into the program's focus event on the part before or after (or the part
+  // clicked), and the ring is put on that part's gutter cell, now when it is drawn, else after the drawing that
+  // scrolls it into view. So the ring and the selection are always the same part.
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
     try {
       const el = String(e.element || '')
-      // a part's cells (r|…), or a dial's ◂ ▸ (t|…|down, t|…|up): the dial is its knob's part
+      const person = (e.origin as { kind?: string }).kind === 'person'
+      if (!person || !drawn) {
+        const r = await next(e)
+        if (!r.deny) { ringAt = el || null; if (el.startsWith('g|')) ringY = Number(el.split('|')[2]) }
+        return r
+      }
+      const g = /^g\|pane\|(\d+)$/.exec(el)
       const m = /^[rt]\|pane\|(\d+)\|([^|]+)(?:\|(?:down|at|up))?$/.exec(el)
-      if (!m || !drawn || (e.origin as { kind?: string }).kind !== 'person') return next(e)
       const sel = (await $.state.get(SEL)).value as Detail | null
       if (!sel) return next(e)
-      const y = Number(m[1])
-      let id = m[2]!
       const ids = drawn.parts.map((x: Any) => x.id)
-      if (id === sel.region && ids.length) {
-        const i = ids.indexOf(id)
-        id = ids[(i + (y < ringY ? -1 : 1) + ids.length) % ids.length] ?? id
-      }
+      const part = m ? (ids.includes(m[2]!) ? m[2]! : null) : null
+      const onRing = !!ringAt && ringAt.startsWith('g|')
+      // the gutter cells come first in the pane's order, so a move past the last one (or before the first) lands
+      // outside them: from the ring that is a step around the parts (the program wraps), never a jump to the header
+      const rows = [...drawn.gutter.keys()].sort((a, b) => a - b)
+      const wrap = onRing && !g && !part ? (ringY === rows[rows.length - 1] ? 1 : ringY === rows[0] ? -1 : 0) : 0
+      // the ask line, a version or the close mark, reached any other way: the ring goes there and the selection stays
+      if (!g && !part && !wrap) { const r = await next(e); if (!r.deny) ringAt = el || null; return r }
+      const y = g || m ? Number((g ?? m)![1]) : ringY
+      const cur = drawn.selected ?? sel.region ?? null
+      const dir = wrap || (ringY < 0 ? 1 : y < ringY ? -1 : 1)
+      const step = () => { const i = cur ? ids.indexOf(cur) : -1; return ids.length ? ids[i < 0 ? 0 : (i + dir + ids.length) % ids.length]! : null }
+      let id: string | null
+      // back from the ask line: the selected part
+      if (isAsk(ringAt)) id = cur ?? step()
+      else if (wrap) id = step()
+      // a move from the ring: along its own row it is a click on a part there (or stays); up or down it steps one part
+      // from the selection, or takes the part the engine moved to when that is another part
+      else if (onRing) id = y === ringY ? (part ?? cur) : part && part !== cur ? part : step()
+      // the ring was elsewhere (the header, nothing): the part it lands on
+      else id = part ?? drawn.gutter.get(y)?.[0] ?? cur ?? step()
+      if (!id) return next(e)
+      if (id !== cur) await detailFire($, { type: 'focus', region: id })
       const top = bodyTop(drawn.parts.find((x: Any) => x.id === id))
-      const target = top && top.y >= drawn.from && top.y < drawn.from + drawn.rows && !drawn.pixel.has(top.y) ? `r|pane|${top.y}|${id}` : el
-      ringY = top ? top.y : y
-      await detailFire($, { type: 'focus', region: id })
-      return next({ ...e, element: target })
+      if (top && drawn.gutter.has(top.y)) {
+        ringAt = GUTTER(top.y)
+        ringY = top.y
+        return next({ ...e, element: ringAt })
+      }
+      // not drawn yet: the ring stays, and the drawing that brings the part puts it there
+      ringAt = null
+      $.ui.invalidate('ui.render')
+      return {}
     } catch {
       return next(e)
     }
   }).catch(($, e, next) => next(e))
 
-  // esc empties the bar and closes the program first (the program's esc), then the detail; closing gives the main view
-  // back
+  // esc in the ask line empties it and gives the keys back to the card; then esc empties the bar and closes the program
+  // (the program's esc), then the detail; closing gives the main view back
   on('ui.close', { id: PANE }, async ($, e, next) => {
+    const person = (e.origin as { kind?: string }).kind === 'person'
+    if (person && isOpen && (isAsk(ringAt) || draft)) {
+      draft = ''
+      ringAt = null
+      $.ui.invalidate('ui.render')
+      regrab($)
+      return { value: undefined } as Any
+    }
     const sel = (await $.state.get(SEL)).value as Detail | null
-    if (sel && !sel.cite && !sel.cites && (sel.prog || sel.bar) && (e.origin as { kind?: string }).kind === 'person') {
+    if (sel && !sel.cite && !sel.cites && (sel.prog || sel.bar) && person) {
       await detailFire($, { type: 'key', key: 'esc' })
       // a refused close gives the keys back to the prompt: the pane takes them again, so the next esc reaches it
       regrab($)
@@ -544,8 +700,8 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     return next(e)
   })
 
-  // a prompt typed while the detail is open (the main view in front) asks the card's thread. It never reaches main:
-  // Claude Code shows it as dropped, with where it went, and the thread's column shows the question and its answer.
+  // a prompt typed in the composer while the detail is open (rare: letters normally go to the ask line) asks the card's
+  // thread too. It never reaches main: Claude Code shows it as dropped, with where it went.
   on('prompt.submit', { origin: { kind: 'composer' } }, async ($, e, next) => {
     if (!isOpen || e.command || e.isMeta || !String(e.text || '').trim()) return next(e)
     // the pane may have gone without its close reaching this module (a re-render marked it open again): a prompt goes
@@ -553,24 +709,39 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     if (!(await paneShown($))) { await closed($); return next(e) }
     const sel = (await $.state.get(SEL)).value as Sel | null
     if (!sel || sel.cite || sel.cites) return next(e)
-    const p = await prepared($, sel, drawn?.w ?? COLUMNS - 2, sel.state, 'detail', drawn?.h ?? 24)
-    if (!p.object) return next(e)
-    const o = p.object
-    const meta = sel.region ? regionMeta(p.drawing, sel.region) : null
-    const label = String(meta?.label || drawn?.parts.find((x: Any) => x.id === sel.region)?.label || sel.region || '')
-    const row = ((await $.state.get({ ...WHERE, id: sel.id })).value as string | undefined) ?? undefined
-    // a selection the card's program asked about (k.ask: a brushed range, several runs) comes before the part
-    const ask = (sel as Detail).ask || null
-    const scope: Scope = ask
-      ? { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label, ...(row ? { row } : {}) }
-      : { object: sel.id, v: o.version ?? sel.v, ...(sel.region ? { region: sel.region, label } : {}), ...(row ? { row } : {}) }
-    const refs = ask?.refs?.length ? ask.refs : ask?.region ? regionRefs(o, p.drawing, ask.region).refs : sel.region ? regionRefs(o, p.drawing, sel.region).refs : objectRefs(o).map((c: Any) => c.ref)
-    if (ask) await $.state.set(SEL, { ...sel, ask: null } as Detail)
-    const r = await askThread($, { text: e.text, scope, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
-    if (r.problem) return { drop: `${r.problem}. Your words are back in the prompt; esc closes the card, and the prompt then goes to Claude here.` }
+    const asked = await askCard($, e.text)
+    if (asked === NO_CARD) return next(e)
+    if (asked) return { drop: `${asked}. Your words are back in the prompt; esc closes the card, and the prompt then goes to Claude here.` }
     $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-    return { drop: `asked the card's thread about ${cut(aboutOf(scope), 40)}` }
+    return { drop: `asked the card's thread about ${cut(lastAbout, 40)}` }
   }).catch(($, e, next) => next(e))
+}
+
+const NO_CARD = 'no card'
+let lastAbout = ''
+
+/** Ask the open card's thread: about the selection the card's program named (k.ask: a brushed range, several runs),
+ *  else the selected part, else the whole card. Null when asked, else the problem in a few words. */
+async function askCard($: Engine, text: string): Promise<string | null> {
+  const sel = (await $.state.get(SEL)).value as Detail | null
+  if (!sel || sel.cite || sel.cites) return NO_CARD
+  const p = await prepared($, sel, drawn?.w ?? room.w, sel.state, 'detail', drawn?.h ?? room.h)
+  if (!p.object) return NO_CARD
+  const o = p.object
+  // the part selected: the one the page shows selected (the program's), else the shell's record of it
+  const region = drawn && drawn.id === sel.id && drawn.selected ? drawn.selected : sel.region
+  const meta = region ? regionMeta(p.drawing, region) : null
+  const label = String(meta?.label || drawn?.parts.find((x: Any) => x.id === region)?.label || region || '')
+  const row = ((await $.state.get({ ...WHERE, id: sel.id })).value as string | undefined) ?? undefined
+  const ask = sel.ask || null
+  const scope: Scope = ask
+    ? { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label, ...(row ? { row } : {}) }
+    : { object: sel.id, v: o.version ?? sel.v, ...(region ? { region, label } : {}), ...(row ? { row } : {}) }
+  const refs = ask?.refs?.length ? ask.refs : ask?.region ? regionRefs(o, p.drawing, ask.region).refs : region ? regionRefs(o, p.drawing, region).refs : objectRefs(o).map((c: Any) => c.ref)
+  if (ask) await $.state.set(SEL, { ...sel, ask: null } as Detail)
+  const r = await askThread($, { text, scope, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
+  lastAbout = aboutOf(scope)
+  return r.problem ?? null
 }
 
 /** Whether Claude Code shows the detail's pane now (a failed check counts as shown: the module's own state stands). */
@@ -601,6 +772,10 @@ export function resetDetail(): void {
   lastKey = null
   viewing = null
   ringY = -1
+  ringAt = null
+  draft = ''
+  refocus = false
+  viewCols = 0
   latestSeen.clear()
   lastCard = null
   keyChain = Promise.resolve()

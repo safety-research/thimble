@@ -181,6 +181,8 @@ export function barLadder(bar) {
   // each key's words to their first word, from the last key back (the first keys keep their words longest)
   const left = b.left.slice()
   for (let i = left.length - 1; i >= 0; i--) {
+    // a status (what the focused surface says now) is cut at its end by fitBar, never to its first word
+    if (left[i].status) continue
     const short = firstWord(left[i])
     if (short === left[i].words) continue
     left[i] = { ...left[i], words: short, shortened: true }
@@ -192,9 +194,19 @@ export function barLadder(bar) {
   return steps
 }
 
-/** The bar as it fits `width`: the fullest step that fits, else the last, cut at the end with an ellipsis (`cut`). */
+/** The bar as it fits `width`: the fullest step that fits, else the last, cut at the end with an ellipsis (`cut`). Once
+ *  the counts are gone, a status that does not fit is cut at its end (`! "55" is not in the …`) before the keys lose
+ *  their words, so it always reads as the start of its sentence. */
 export function fitBar(bar, width, measure = s => Array.from(String(s)).length) {
   const steps = barLadder(bar)
-  for (const s of steps) if (measure(barLine(s)) <= width) return { ...s, cut: false }
+  for (const s of steps) {
+    if (measure(barLine(s)) <= width) return { ...s, cut: false }
+    const at = s.left.findIndex(x => x.status)
+    if (at < 0 || s.counts.length) continue
+    const room = width - measure(barLine({ ...s, left: s.left.map((x, i) => (i === at ? { ...x, words: '' } : x)) }))
+    if (room >= 12) return { ...s, left: s.left.map((x, i) => (i === at ? { ...x, words: cutEnd(x.words, room) } : x)), cut: false }
+  }
   return { ...steps[steps.length - 1], cut: true }
 }
+
+const cutEnd = (s, n) => (Array.from(String(s)).length <= n ? String(s) : Array.from(String(s)).slice(0, Math.max(1, n - 1)).join('') + '…')
