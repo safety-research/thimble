@@ -65,8 +65,8 @@ def _new_id(used: set[str]) -> str:
 
 
 _MARKUP_RE = re.compile(r"\[\[([^\[\]|]*)\|[^\[\]]*\]\]|\[\[[^\[\]]*\]\]")
-# only before punctuation that ends a word: "their .yardopts file", ".gov.uk" and "port :8000" keep their space
-_BEFORE_PUNCT_RE = re.compile(r"\s+([,;:!?).])(?!\w)")
+# only before punctuation that ends a word: "their .yardopts file", ".gov.uk", "port :8000" and "./x" keep their space
+_BEFORE_PUNCT_RE = re.compile(r"\s+([,;:!?).])(?![\w./\\])")
 
 
 def plain_text(text: str) -> str:

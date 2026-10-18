@@ -2028,7 +2028,7 @@ def _attach_takeaway(c: str, cid: str, raw: Any, cell: dict | None, *, author: s
             parts.append(f"{l.token} is not at {l.ref.split(cid, 1)[-1]}, the row the takeaway names"
                          + (f", which shows {at[0]}" if at else "") + "; kept there, so it shows as wrong until you correct it")
         note = (" (" + "; ".join(p for p in parts if p) + ")") if parts else ""
-    text = re.sub(r"\s+([,;:).])(?!\w)", r"\1", text).strip()  # only before punctuation that ends a word (".5", ":8000" keep it)
+    text = re.sub(r"\s+([,;:).])(?![\w./\\])", r"\1", text).strip()  # only before punctuation that ends a word (".5", ":8000", "./x" keep it)
     if not text:
         return False, "takeaway: `text` is empty"
     if not notebook.append_takeaway(c, cid, text, overwrite=True, author=author):

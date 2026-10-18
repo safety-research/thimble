@@ -101,6 +101,17 @@ async def test_a_takeaway_keeps_the_space_before_a_word_that_starts_with_punctua
     assert notebook.get_cell(CORPUS, cid)["takeaway"] == "Both relays bind one port, :9100, and the cache dir .quill stays; it lives on :9100."
 
 
+async def test_a_takeaway_keeps_the_space_before_a_relative_path(group):
+    """A period followed by a slash or another period starts a path, so "loads ./warble.rb" keeps its space, inside a
+    citation too, and the same in a report's plain text."""
+    from app import report
+
+    cid = _cid(await call("add_card", group, kind="note", question="What does it load?", text="One file."))
+    await call("edit_card", group, cell=cid, takeaway="Plinth [[loads ./warble.rb|data.jsonl#L3]] and then ../up/x.rb .")
+    assert notebook.get_cell(CORPUS, cid)["takeaway"] == "Plinth [[loads ./warble.rb|data.jsonl#L3]] and then ../up/x.rb."
+    assert report.plain_text("it loads ./warble.rb , then .\\win.rb .") == "it loads ./warble.rb, then .\\win.rb."
+
+
 async def test_an_agent_s_card_code_may_not_install(group, tmp_path, monkeypatch):
     """Card code runs in the kernel, where neither a prompt nor Claude Code's permission mode reaches it, so an agent's
     card that installs or downloads is refused, also where an earlier config set `installs` to "allow" (read and
