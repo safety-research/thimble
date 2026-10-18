@@ -56,6 +56,7 @@ CUT = 12000  # characters of a query's printed output Claude reads
 SHOW = 3000  # characters of the result (the last expression) shown when it is a long table; the query keeps it all
 TABLE_MAX = 5000  # rows of an output table kept
 RESULT_BYTES = 50_000_000  # a result table up to this size in memory is kept whole for use("q3")
+SUMMARY_MAX = 40  # a dict of up to this many values reads as a summary: each value rests on the rows the query read
 
 
 def slug(name: str) -> str:
@@ -405,7 +406,18 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any]) -> dict[s
     if isinstance(result, dict) and all(not isinstance(x, (dict, list)) for x in result.values()):
         out["table"] = [{"key": str(k), "value": jsonable(x)} for k, x in result.items()]
         out["keys"] = ["key"]
-        if out["table"]:
+        if not out["table"]:
+            return out
+        # a dict built from a column (a Counter of users, a share per day): its keys are values of that column
+        found = None
+        if len(out["table"]) > 1:
+            try:
+                found = _by_values(pd.DataFrame(out["table"]), "key", ns, frames)
+            except Exception:  # noqa: BLE001
+                found = None
+        if found:
+            out["rows"], out["mode"], out["frame"] = [R.compress(x) for x in found[0]], found[1], found[2]
+        elif len(out["table"]) <= SUMMARY_MAX:
             _summary(out, [r["value"] for r in out["table"]], ns, frames)
         return out
     if isinstance(result, (list, tuple)) and result and all(isinstance(x, dict) for x in result):
@@ -462,6 +474,17 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any]) -> dict[s
                     break
         if found:
             row_refs, out["mode"], out["frame"] = found
+    if row_refs is None and len(df) > 1 and len(df) <= 200000:
+        # a key under another name: its values are a column (or the index) of a frame the query made
+        for k in [c for c in out["keys"] if c in df.columns][:3]:
+            try:
+                found = _by_values(df, k, ns, frames)
+            except Exception:  # noqa: BLE001
+                found = None
+            if found:
+                row_refs, out["mode"], out["frame"] = found
+                out["keys"] = [k]
+                break
     table = df.drop(columns=ref_columns(df)[1])
     out["table"] = [{k: jsonable(v) for k, v in r.items()} for r in table.head(TABLE_MAX).to_dict(orient="records")]
     out["truncated"] = len(df) > TABLE_MAX
@@ -572,6 +595,51 @@ def _by_index(res: Any, ns: dict[str, Any], frames: list[Any]):
     if best is None:
         return None
     return best[1], "exact", best[2]
+
+
+def _by_values(df: Any, key: str, ns: dict[str, Any], frames: list[Any]):
+    """Row lineage found by a key's values: the output's key column holds the values of a column (or the index) of a
+    frame the query made, under another name (a dict built from a column, a renamed key), so each output row rests on
+    the frame's rows that hold its value. A count column that equals the group sizes makes it matched, as in _by_key."""
+    import pandas as pd
+
+    want = df[key]
+    if not len(want) or want.isna().any() or not want.is_unique:
+        return None
+    wanted = pd.Index(want.astype(str))
+    count_cols = [c for c in df.columns if c != key and not str(c).startswith("_") and _is_count_col(df[c])]
+    best = None
+    for name, f in _named_frames(ns, frames, lambda f: True, lists=True):
+        cands: list[tuple[str, Any]] = [(str(c), f[c]) for c in f.columns if isinstance(c, str) and not c.startswith("_")
+                                        and (pd.api.types.is_object_dtype(f[c]) or pd.api.types.is_string_dtype(f[c]))]
+        if not isinstance(f.index, pd.RangeIndex):
+            cands.append(("index", f.index.to_series(index=f.index)))
+        for cname, col in cands:
+            try:
+                vals = col.astype(str)
+                if not bool(wanted.isin(vals.unique()).all()):
+                    continue
+            except Exception:  # noqa: BLE001 — values that do not compare
+                continue
+            hit = vals.reset_index(drop=True)
+            refs = row_ref_lists(f)
+            groups: dict[str, list[str]] = {}
+            sizes: dict[str, int] = {}
+            wset = set(wanted)
+            for v, r in zip(hit.tolist(), refs):
+                if v in wset:
+                    groups.setdefault(v, []).extend(r)
+                    sizes[v] = sizes.get(v, 0) + 1
+            got = [list(dict.fromkeys(groups.get(str(v), []))) for v in want.tolist()]
+            n = [sizes.get(str(v), 0) for v in want.tolist()]
+            agree = [c for c in count_cols if all(int(x) == s for x, s in zip(df[c].tolist(), n) if x == x)]
+            mode = "matched" if agree else ("superset" if count_cols else "key")
+            score = (2 if agree else 1 if not count_cols else 0, -len(f))
+            if best is None or score > best[0]:
+                best = (score, got, mode, f"{name}.{cname}")
+    if best is None:
+        return None
+    return best[1], best[2], best[3]
 
 
 def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
@@ -717,7 +785,10 @@ def keep_result(st: Store, qid: str, last: Any, lin: dict[str, Any]) -> None:
         df = df.reset_index()
     if "_refs" not in df.columns and lin.get("rows") is not None and len(lin["rows"]) == len(df):
         df = df.copy()
-        df["_refs"] = [R.expand(x) for x in lin["rows"]]
+        # a summary's row rests on every row the query read: a later query keeps no rows of it (the record still opens
+        # them), so millions of refs are not copied into each row
+        marks = lin.get("why_rows") or []
+        df["_refs"] = [[] if i < len(marks) and marks[i] else R.expand(x) for i, x in enumerate(lin["rows"])]
     try:
         df.to_pickle(st.sub("results") / f"{qid}.pkl")
     except Exception:  # noqa: BLE001 — a result that does not pickle is still in the query's record
@@ -813,6 +884,10 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
         marks = q.get("why_rows") or []
         mark = marks[i] if i is not None and i < len(marks) else (marks[0] if marks and all(marks) else None)
         if mark != "summary":
+            empty = i is not None and i < len(rows) and not rows[i]
+            sums = [u.get("query") for u in q.get("uses") or [] if (get(st, u.get("query") or "") or {}).get("lineage") == "summary"]
+            if empty and sums:
+                return f"{qid} builds on {', '.join(sums)}, a summary whose values keep no rows of their own"
             return None
         mine = rows[i] if i is not None and i < len(rows) else rows[0]
         return (f"{qid} computed this value over all {_count(mine):,} rows it read ({_files_text(mine)}), "

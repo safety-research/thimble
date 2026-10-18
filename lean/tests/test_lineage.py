@@ -160,3 +160,24 @@ def test_a_card_value_bound_to_a_summary_says_its_rows_are_all_the_query_read(ro
     obj = O.save(st, "share", {"title": "Ana's share", "data": {"s": f"{q['id']}#key=ana_share"}})
     r = LIN.resolve(st, f"obj:{obj['id']}#/s/value")
     assert r["count"] == 12 and r["why"].startswith(f"{q['id']} computed this value over all 12 rows it read")
+
+
+def test_a_dict_built_from_a_column_and_a_renamed_key_find_their_rows_by_value(root: Path) -> None:
+    st = Store(root)
+    q = Q.run(st, "edits per editor", 'df = load("edits.jsonl")\ndict(Counter(df.user))')
+    assert q["lineage"] == "matched" and len(q["table"]) == 4
+    assert LIN.resolve(st, f"{q['id']}#key=bo@value")["rows"] == ["edits.jsonl#L3,6,9"]
+    r = Q.run(st, "renamed", 'df = load("edits.jsonl")\ng = df.groupby("page").size()\n'
+              'pd.DataFrame({"which_page": g.index, "saves": g.values})')
+    assert r["lineage"] == "matched" and r["keys"] == ["which_page"]
+    assert LIN.resolve(st, f"{r['id']}#which_page=p4@saves")["rows"] == ["edits.jsonl#L8,10"]
+
+
+def test_a_later_query_on_a_summary_copies_no_rows_into_it(root: Path) -> None:
+    st = Store(root)
+    s = Q.run(st, "totals", 'df = load("edits.jsonl")\npd.DataFrame([{"mean_bytes": df.bytes.mean()}])')
+    t = Q.run(st, "on it", f'use("{s["id"]}")')
+    assert t["lineage"] == "exact" and t["rows"] == [[]]
+    assert LIN.resolve(st, f"{t['id']}#row=1@mean_bytes")["why"] == f"{t['id']} builds on {s['id']}, a summary whose values keep no rows of their own"
+    # the summary itself still opens every row it read
+    assert LIN.resolve(st, f"{s['id']}@mean_bytes")["count"] == 12
