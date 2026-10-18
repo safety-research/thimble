@@ -359,6 +359,18 @@
             p = isObj(p) ? p : { value: p }
             const q = { value: Math.max(0, num(p.value) || 0), tone: T(p.tone || CATS[pi % 6]) }
             if (p.label != null) q.label = clean(p.label)
+            // a part made from a row of the card's data (the row, a spread of it, or {row}) is a part by itself, as a
+            // bar item is: selected, it opens its own rows, with no ref written
+            const from = lineageOf(ctx, p)
+            if (from || p.id != null || p.cite || p.examples || p.meta) {
+              const meta = metaOf(Object.assign({}, p.meta || {}, { label: p.regionLabel || `${p.label == null ? '' : p.label} ${fmt(q.value)}`.trim(), cite: p.cite, examples: p.examples }), 'bar part')
+              if (from && meta.ref == null && meta.refs == null) meta.ref = from
+              let rid = p.id != null ? String(p.id) : (refSlug(from) || slug(p.label) || 'part')
+              // an id the runtime made is kept apart from one already drawn, with no warning: the program named none
+              if (p.id == null && ctx.ids[rid]) { let i = 2; while (ctx.ids[rid + '~' + i]) i++; rid = rid + '~' + i }
+              q.meta = meta
+              q.region = regionId(ctx, rid, 'bar part', meta)
+            }
             return q
           })
           n.value = n.parts.reduce((s, p) => s + p.value, 0)
@@ -809,7 +821,7 @@
       const walk = x => {
         if (!x || out.length > 60) return
         if (x.t === 'text') out.push(plain(x.runs))
-        else if (x.t === 'bar') { if (isFinite(x.value)) vals.push(x.value) }
+        else if (x.t === 'bar') { if (isFinite(x.value)) vals.push(x.value); if (x.parts) x.parts.forEach(p => { if (isFinite(p.value)) vals.push(p.value) }) }
         else if (x.t === 'table') x.rows.forEach(r => out.push(r.cells.map(plain).join(' ')))
         else if (x.t === 'canvas') x.ops.forEach(op => { if (op[0] === 'text') out.push(plain(op[3])); if (op[0] === 'bar') vals.push(op[4]) })
         ;(x.kids || []).forEach(walk)
@@ -848,8 +860,19 @@
         if (!(word(text, t) || (t.length >= 3 && idSlug.indexOf(slug(t)) >= 0 && slug(t).length >= 3))) continue
         for (const [i, key] of list) { score.set(i, (score.get(i) || 0) + 2); if (!field.has(i)) field.set(i, [key, t]) }
       }
-      if (!score.size) continue
       const shown = got.vals.concat((text.match(/-?\d[\d,]*(?:\.\d+)?/g) || []).map(x => +x.replace(/,/g, '')).filter(isFinite))
+      if (!score.size) {
+        // no words in common: a part that shows three or more of one row's numbers, and no other row's as many, is a copy
+        // the program made of that row's values (a bar item built from a row's fields): that row
+        const distinct = shown.filter((v, i) => Math.abs(v) >= 2 && shown.indexOf(v) === i)
+        if (distinct.length < 3) continue
+        const hits = new Map()
+        for (const v of distinct) for (const i of new Set(nums.get(v) || [])) hits.set(i, (hits.get(i) || 0) + 1)
+        let top = -1, best = 0, tie = false
+        hits.forEach((v, i) => { if (v > best) { best = v; top = i; tie = false } else if (v === best) tie = true })
+        if (best >= 3 && !tie) { m.ref = rows[top].ref; m.lineage = 'matched' }
+        continue
+      }
       for (const v of shown) for (const i of (nums.get(v) || [])) if (score.has(i)) score.set(i, score.get(i) + 1)
       let best = 0
       score.forEach(v => { if (v > best) best = v })
@@ -2107,6 +2130,7 @@
       if (n.t === 'region') out.push({ id: n.id, meta: n.meta })
       if (n.t === 'table') n.rows.forEach(r => { if (r.region) out.push({ id: r.region, meta: r.meta }) })
       if (n.t === 'plot') n.series.forEach(s => { if (s.region) out.push({ id: s.region, meta: s.meta }) })
+      if (n.t === 'bar' && n.parts) n.parts.forEach(p => { if (p.region) out.push({ id: p.region, meta: p.meta }) })
       if (n.t === 'canvas') n.ops.forEach(op => { if (op[0] === 'region') out.push({ id: op[1], meta: op[6] }); if (op[0] === 'dot' && op[4].region) out.push({ id: op[4].region, meta: op[4].meta }) })
       if (n.kids) n.kids.forEach(walk)
       if (n.kid) walk(n.kid)

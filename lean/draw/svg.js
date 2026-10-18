@@ -374,6 +374,20 @@ export function renderSvg(drawing, opts = {}) {
       case 'bar': {
         if (!dry) drawBar(x, y, w, n.value, n.max, n.tone, n.parts, n.track)
         mark({ k: 'bar', v: n.value, max: n.max, parts: n.parts ? n.parts.map(p => p.value) : undefined })
+        // a part with a region of its own (drawn from a row): the span it covers, at least a few pixels
+        if (n.parts && n.parts.some(p => p.region)) {
+          const m = n.max > 0 ? n.max : 1
+          let cum = 0
+          for (const p of n.parts) {
+            const a = clamp(cum / m, 0, 1) * w
+            cum += p.value
+            const b = clamp(cum / m, 0, 1) * w
+            if (p.region) {
+              mark({ k: 'region', id: p.region })
+              if (!dry) addRect(p.region, p.meta, { x: x + Math.min(a, Math.max(0, w - 4)), y, w: Math.max(4, b - a), h: lh })
+            }
+          }
+        }
         return lh
       }
       case 'spark': {

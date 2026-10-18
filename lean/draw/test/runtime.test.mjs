@@ -41,6 +41,31 @@ test('a part drawn from a row of the data opens that row, with no ref written by
   assert.doesNotMatch(gridText(renderTerm(d, { w: 80 })), /_ref|_rows|runs\.jsonl/)
 })
 
+test('a stacked bar\'s part drawn from a row is a part by itself: it opens that row and has its cells and its span', () => {
+  // one bar per language, split into the runs it holds: each run's part keeps the run's row
+  const program = `
+    const langs = ['Rust', 'Go']
+    return k.stack(langs.map(l => k.beside(k.text(l, { w: 6 }), k.bar(data.runs.filter(r => r.lang === l).map(r => ({ value: r.calls, label: r.run, row: r })), { max: 400 }))))`
+  const d = run(program)
+  assert.equal(d.error, undefined, d.error && d.error.message)
+  assert.deepEqual(d.regions.map(r => r.id), ['run-ep01', 'run-ep03', 'run-ep02'])
+  assert.equal(meta(d, 'run-ep03').ref, 'q12#run=ep03')
+  assert.equal(meta(d, 'run-ep03').label, 'ep03 201')
+  assert.deepEqual(d.warnings, [], 'ids the runtime made need no warning')
+  // the terminal: each part covers its own cells of the bar, side by side
+  const g = renderTerm(d, { w: 60 })
+  const rect = id => g.regions.find(r => r.id === id).rects[0]
+  assert.equal(rect('run-ep01').y, rect('run-ep03').y)
+  assert.equal(rect('run-ep01').x + rect('run-ep01').w, rect('run-ep03').x)
+  assert.ok(rect('run-ep03').w > rect('run-ep01').w, 'the longer part has more cells')
+  // the browser: the same parts, as spans of the bar
+  const s = renderSvg(d, { w: 60 })
+  assert.deepEqual(s.regions.filter(r => r.rects.length).map(r => r.id).sort(), ['run-ep01', 'run-ep02', 'run-ep03'])
+  // a part with no row stays a part of the bar only
+  const plain = run(`return k.bar([{ value: 3, label: 'a' }, { value: 4, label: 'b' }], { max: 10 })`)
+  assert.deepEqual(plain.regions, [])
+})
+
 test('a part the program drew from values alone is matched to the rows whose words it shows', () => {
   const d = run(`
     const rust = data.runs.filter(r => r.lang === 'Rust')
@@ -52,6 +77,17 @@ test('a part the program drew from values alone is matched to the rows whose wor
   assert.equal(meta(d, 'ep02').lineage, 'matched')
   assert.equal(meta(d, 'lang-rust').ref, 'q12#lang=Rust', 'rows of one query that share the words are one group')
   assert.equal(meta(d, 'total').ref, undefined, 'no words in common: no guess')
+  // no words, but the numbers of one row: a bar item the program built from a row's fields (no spread, no row)
+  const tenths = { tenths: [
+    { tenth: 0, n: 132, read: 74, write: 28, _ref: 'q3#row=1', _rows: ['t.jsonl#L1-132'] },
+    { tenth: 1, n: 133, read: 85, write: 26, _ref: 'q3#row=2', _rows: ['t.jsonl#L133-265'] },
+    { tenth: 2, n: 140, read: 74, write: 30, _ref: 'q3#row=3', _rows: ['t.jsonl#L266-405'] },
+  ] }
+  const t = runProgram({ id: '08-tenths', program: `return k.bars(data.tenths.map((d, i) => ({ id: 't' + i, label: (i * 10) + '–' + (i * 10 + 10) + '%', parts: [{ value: d.read }, { value: d.write }], text: k.fmt(d.n) })))`, data: tenths }, { w: 80, h: 24 })
+  assert.equal(meta(t, 't0').ref, 'q3#row=1', 'three of its numbers are one row\'s, and no other row has as many')
+  assert.equal(meta(t, 't2').ref, 'q3#row=3', 'a number another row shares (74) does not tie: the row with the most wins')
+  const two = runProgram({ id: '08-tenths', program: `return k.region('x', { label: 'reads' }, k.text('74 reads'))`, data: tenths }, { w: 80, h: 24 })
+  assert.equal(meta(two, 'x').ref, undefined, 'one number is no match: a guess never picks between rows')
 })
 
 test('a key or a press reaches the program; its handler sets the state the next run draws with', () => {

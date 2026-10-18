@@ -39,8 +39,9 @@ link to the browser and a question about the part all carry this id. Keep the id
 a selection still finds its part.
 
 **Rows of the data keep their lineage.** Each row the kernel bound into `data` knows its source rows. A bar item, a
-table row or a region meta made from such a row (the row, `{ ...row }`, or `{ row: d }`) is a part that opens those
-rows, with real examples spread across them. A part with none is matched to the rows whose words it shows.
+part of a stacked bar, a table row or a region meta made from such a row (the row, `{ ...row }`, or `{ row: d }`) is a
+part that opens those rows, with real examples spread across them. A part with none is matched to the rows whose words
+it shows.
 
 **Answer what the person does.** `k.on(name, fn, label)` takes a key (`'j'`, `'space'`), a press on a part
 (`'press:<id>'`, or `onPress` in a region's meta) or a drag in the browser (`'brush'`, from `k.plot(…, { brush:

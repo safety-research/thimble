@@ -346,6 +346,20 @@ function paint(n, g, x, y, w, cx) {
     case 'bar': {
       drawBar(g, x, y, w, n.value, n.max, n.tone, n.parts, n.track)
       mark({ k: 'bar', v: n.value, max: n.max, parts: n.parts ? n.parts.map(p => p.value) : undefined })
+      // a part with a region of its own (drawn from a row): the cells it covers, at least one
+      if (n.parts && n.parts.some(p => p.region)) {
+        const m = n.max > 0 ? n.max : 1
+        let cum = 0, from = 0
+        for (const p of n.parts) {
+          cum += p.value
+          const to = Math.round(clamp(cum / m, 0, 1) * w)
+          if (p.region) {
+            mark({ k: 'region', id: p.region })
+            if (!g.dry) addRect(cx, p.region, p.meta, { x: x + Math.min(from, Math.max(0, w - 1)), y, w: Math.max(1, to - from), h: 1 })
+          }
+          from = to
+        }
+      }
       return 1
     }
     case 'spark': {
