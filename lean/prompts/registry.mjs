@@ -10,6 +10,11 @@
 /** @typedef {{about: string, default: string, reads: string, skill?: string, optional?: boolean, base?: string,
  *    versions?: Record<string, {about?: string, file?: string, mode?: string, base?: string}>}} Feature */
 
+/** The principles every variant of the card ablation shares: the lean skill's card section (the card runtime's
+ *  principles, read where it stands) and the principles of a great output. A part may keep only some of a file's ###
+ *  subsections: `only` names them by the start of their headings, `pick: n` takes n of them, chosen by the session. */
+const ABLATION = [{ file: 'skills/lean/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/parts/principles.md' }]
+
 /** @type {Record<string, Feature>} */
 export const FEATURES = {
   observer: {
@@ -48,7 +53,12 @@ export const FEATURES = {
       },
       v1: { about: 'FORMS.md as v read it: the card forms, for another view' },
       v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' },
-      principles: { about: 'the draft principles of a great output, no examples (ablation variant a)' },
+      // the card ablation: the same principles in all five, which differ only in what steers quality
+      principles: { about: "ablation a: the runtime's principles (the lean skill's card section) and the principles of a great output, no examples", parts: ABLATION },
+      few: { about: 'ablation b: a, and 3 worked examples from the pool', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', only: ['Heat strips', 'Brushable timeline', 'Trail of a run'] }] },
+      many: { about: 'ablation c: a, and the whole pool of worked examples', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md' }] },
+      rotate: { about: "ablation d: a, and 3 worked examples from the pool, a different 3 per session (the session's id picks them)", parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', pick: 3 }] },
+      sketches: { about: 'ablation e: a, and the pool as sketches (the picture, its encoding, its interaction), no programs', parts: [...ABLATION, { file: 'prompts/forms/parts/sketches.md' }] },
     },
     about: 'the card guidance: what makes a card good',
     reads: 'beside the toolkit when Claude reads it before a card, and `lean guide cards` (v asks for it)', default: 'runtime',
@@ -169,13 +179,72 @@ export function sectionOf(text, heading) {
   return lines.slice(at, end).join('\n').trim()
 }
 
-/** A version made of parts, from the texts of its files (`read(file)`): each part's section, or the whole body. */
-export function partsText(parts, read, skip = () => false) {
-  return parts.filter(p => !skip(p)).map(p => {
-    const raw = read(p.file)
-    const body = String(p.file).endsWith('SKILL.md') ? bodyOf(raw) : raw
-    return p.section ? sectionOf(body, p.section) : String(body).trim()
-  }).filter(Boolean).join('\n\n') + '\n'
+/** A text's ### subsections: what stands before the first of them (`intro`), and each one as {heading, text}. */
+export function subsectionsOf(text) {
+  const lines = String(text ?? '').split('\n')
+  const items = []
+  const intro = []
+  let cur = null
+  for (const l of lines) {
+    if (/^###\s/.test(l)) { cur = { heading: l.replace(/^###\s*/, '').trim(), lines: [l] }; items.push(cur) } else if (cur) cur.lines.push(l)
+    else intro.push(l)
+  }
+  return { intro: intro.join('\n').trim(), items: items.map(x => ({ heading: x.heading, text: x.lines.join('\n').trim() })) }
+}
+
+/** A number from 0 to 1, the same for the same seed each time (a session's id picks the same examples in the hooks
+ *  and in `lean guide`). */
+function seeded(seed) {
+  let a = 2166136261 >>> 0
+  for (const ch of String(seed)) { a ^= ch.codePointAt(0); a = Math.imul(a, 16777619) >>> 0 }
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0
+    let t = a
+    t = Math.imul(t ^ (t >>> 15), t | 1)
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+/** The subsections a part keeps, in the order of its file: `only` (by the start of their headings), `pick` n of them
+ *  chosen by `seed`, or null when it keeps the whole text. */
+export function chosenOf(part, items, seed = '') {
+  if (Array.isArray(part.only)) {
+    const want = part.only.map(h => String(h).toLowerCase())
+    return items.filter(x => want.some(w => x.heading.toLowerCase().startsWith(w)))
+  }
+  if (part.pick > 0) {
+    const r = seeded(`${seed}|${part.file}`)
+    const order = items.map((_, i) => i)
+    for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [order[i], order[j]] = [order[j], order[i]] }
+    const keep = new Set(order.slice(0, part.pick))
+    return items.filter((_, i) => keep.has(i))
+  }
+  return null
+}
+
+/** One part's text, and the headings of the subsections it chose (null when it keeps the whole text). */
+function pieceOf(p, read, seed) {
+  const raw = read(p.file)
+  const body = String(p.file).endsWith('SKILL.md') ? bodyOf(raw) : raw
+  const text = p.section ? sectionOf(body, p.section) : String(body).trim()
+  if (!Array.isArray(p.only) && !(p.pick > 0)) return { text, chosen: null }
+  const { intro, items } = subsectionsOf(text)
+  const chosen = chosenOf(p, items, seed)
+  return { text: [intro, ...chosen.map(x => x.text)].filter(Boolean).join('\n\n'), chosen: chosen.map(x => x.heading) }
+}
+
+/** A version made of parts, from the texts of its files (`read(file)`): each part's section, or the whole body, or the
+ *  subsections it keeps (`seed`: the session, for a part that picks). */
+export function partsText(parts, read, skip = () => false, seed = '') {
+  return partsChoice(parts, read, skip, seed).text
+}
+
+/** partsText, and the headings of the examples the parts chose (null when no part chooses), for the session's record. */
+export function partsChoice(parts, read, skip = () => false, seed = '') {
+  const pieces = parts.filter(p => !skip(p)).map(p => pieceOf(p, read, seed))
+  const chosen = pieces.some(x => x.chosen) ? pieces.flatMap(x => x.chosen || []) : null
+  return { text: pieces.map(x => x.text).filter(Boolean).join('\n\n') + '\n', chosen }
 }
 
 /** Fill {{NAME}} placeholders from `vals` (a function value is called); unknown ones stay as written. */

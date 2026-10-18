@@ -863,9 +863,13 @@
     return this._op(['spark', fl(x), fl(y), Math.max(1, int(o.w, vals.length)), vals, mn, mx, cT(this, o.tone, 'accent')])
   }
   Canvas.prototype.region = function (id, x, y, w, h, meta) {
+    const press = isObj(meta) && typeof meta.onPress === 'function' ? meta.onPress : null
     const m = this._metaOf(meta, 'canvas region')
     const rid = regionId(this._ctx, id, 'canvas region', m)
     if (!m.label) m.label = rid
+    // a press on this part: the same as k.on('press:<id>', fn), as for k.region
+    const hs = this._ctx.handlers
+    if (press && !hs.some(x => x.name === 'press:' + rid)) hs.push({ name: 'press:' + rid, fn: press, label: clean(String(m.label)).slice(0, 40) })
     return this._op(['region', rid, fl(x), fl(y), Math.max(1, fl(w)), Math.max(1, fl(h)), m])
   }
   // a brush area: in the browser, a drag across cells x..x+w is an event {type: 'brush', id, from, to}, the cells read
@@ -2073,14 +2077,16 @@
     let rootNode = null, error = null, asked = null, handled = null
     const t0 = ctx.t0
     try {
-      rootNode = runOnce(program, data, opts, ctx, W, H).root
+      const first = runOnce(program, data, opts, ctx, W, H)
+      rootNode = first.root
       if (event) {
         const hs = handlersFor(ctx, event)
         if (hs.length) {
           handled = hs[0].name
           ctx.phase = 'handle'
           const ret = hs[0].fn(clone(event))
-          if (isObj(ret)) Object.keys(ret).forEach(x => { ctx.patch[x] = clone(ret[x]) })
+          // a handler that ends with k.ask(...) or k.set(...) returns k itself: that is no patch of the state
+          if (isObj(ret) && ret !== first.k) Object.keys(ret).forEach(x => { ctx.patch[x] = clone(ret[x]) })
           asked = ctx.ask
           const patch = ctx.patch
           if (Object.keys(patch).length) {

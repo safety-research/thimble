@@ -18,7 +18,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { record } from '../telemetry/telemetry'
-import { FEATURES, bodyOf, choose, featureOfSkill, idOf, indexOf, partsText, specOf } from './registry.mjs'
+import { FEATURES, bodyOf, choose, featureOfSkill, idOf, indexOf, partsChoice, specOf } from './registry.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,17 +81,19 @@ export async function registry($: Engine): Promise<{ idx: Any; active: Record<st
  * The active text of a feature, as {text, version, id, off}. A version file that cannot be read falls back to the
  * default once, with one line that says so; a skill's in-place version is its body.
  */
-export async function promptText($: Engine, feature: string, o: { skip?: (part: { file: string }) => boolean } = {}): Promise<{ text: string; version: string; id: string; off: boolean }> {
+export async function promptText($: Engine, feature: string, o: { skip?: (part: { file: string }) => boolean } = {}): Promise<{ text: string; version: string; id: string; off: boolean; chosen?: string[] | null }> {
   const { idx, active } = await registry($)
   const a = active[feature]
   if (!a) throw new Error(`no prompt feature ${feature}`)
   if (a.off) return { text: '', version: a.version, id: idOf(feature, a.version), off: true }
   const key = `${feature}:${a.version}`
   if (a.parts) {
-    // a version made of parts reads them where they stand, each time (a part may be left out: `skip`)
+    // a version made of parts reads them where they stand, each time (a part may be left out: `skip`); a part that
+    // picks some of a file's examples picks them by the session, so `lean guide` in the same session reads the same
     const texts: Record<string, string> = {}
     for (const p of a.parts) if (!o.skip?.(p)) texts[p.file] = String(await $.fs.read(`${rootOf($)}/${p.file}`))
-    return { text: partsText(a.parts, (f: string) => texts[f] ?? '', o.skip), version: a.version, id: key, off: false }
+    const c = partsChoice(a.parts, (f: string) => texts[f] ?? '', o.skip, R.session)
+    return { text: c.text, version: a.version, id: key, off: false, chosen: c.chosen }
   }
   if (!R.texts.has(key)) {
     try {
@@ -157,7 +159,7 @@ export function registerPrompts(on: Any, options: Any): void {
       if (t.off || !t.text.trim()) return r
       R.cardsGiven = true
       const base = (FEATURES.forms.versions as Any)?.[t.version]?.base || FEATURES.forms.base
-      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: isSave ? 'the first lean save' : `${isRead ? 'Read' : 'Bash'} of draw/TOOLKIT.md` })
+      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: isSave ? 'the first lean save' : `${isRead ? 'Read' : 'Bash'} of draw/TOOLKIT.md`, ...(t.chosen ? { examples: t.chosen } : {}) })
       const head = isSave
         ? `The card guidance (${t.id}), which thimble adds with the first card of a session when the toolkit was not read before it. It holds for this card and the next ones.`
         : `The card guidance (${t.id}), which thimble adds when you read the toolkit before a card.`

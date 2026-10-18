@@ -146,3 +146,20 @@ test('the browser surface: a plot or a canvas area takes a brush, which reads in
   // the terminal draws the same cells and no brush: there a program binds keys to the same state
   assert.equal(JSON.stringify(renderTerm(d, { w: 80 }).marks), JSON.stringify(s.marks))
 })
+
+test('a press on a canvas region runs its onPress, as on k.region; a handler that returns k changes no state', () => {
+  const program = `
+    const sel = k.state.sel || 'none'
+    const c = k.canvas(20, 2)
+    data.runs.forEach((r, i) => { c.text(i * 6, 0, r.run); c.region('cell-' + r.run, i * 6, 0, 5, 1, { row: r, onPress: () => ({ sel: r.run }) }) })
+    k.on('a', () => k.ask({ label: 'the picked run', rows: data.runs.filter(r => r.run === sel) }))
+    return k.stack(c, k.text('picked ' + sel))`
+  const pressed = run(program, { event: { type: 'press', region: 'cell-ep02' } })
+  assert.equal(pressed.handled, 'press:cell-ep02')
+  assert.deepEqual(pressed.state, { sel: 'ep02' })
+  assert.equal(meta(pressed, 'cell-ep02').ref, 'q12#run=ep02', 'the canvas region keeps its row')
+  assert.ok(!('onPress' in meta(pressed, 'cell-ep02')))
+  const asked = run(program, { state: pressed.state, event: { type: 'key', key: 'a' } })
+  assert.deepEqual(asked.ask, { label: 'the picked run', refs: ['q12#run=ep02'] })
+  assert.deepEqual(asked.state, { sel: 'ep02' }, 'k.ask returns k, which is not a patch of the state')
+})

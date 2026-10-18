@@ -72,7 +72,9 @@ test('the first read of the toolkit in a session carries the card guidance as co
   expect(r1.context.length).toBe(1)
   expect(r1.context[0]).toContain('The card guidance (forms:principles), which thimble adds when you read the toolkit before a card.')
   expect(r1.context[0]).toContain(`Paths in it are relative to ${root}/verbs/visualize.`)
-  expect(r1.context[0]).toContain('PROMPT forms:principles')
+  expect(r1.context[0]).toContain('## What the person sees\n\nTHE CARD SECTION')
+  expect(r1.context[0]).toContain('## What makes a great output\n\nTHE PRINCIPLES')
+  expect(r1.context[0]).not.toContain('POOL')
   const r2 = await $.tool.call({ tool: 'Read', file_path: `${root}/draw/TOOLKIT.md` } as never) as Any
   expect(r2.context ?? []).toEqual([])
   const r3 = await $.tool.call({ tool: 'Read', file_path: '/data/notes/TOOLKIT.md' } as never) as Any
@@ -112,3 +114,17 @@ test('a card saved with no toolkit read before it: the guidance comes with that 
   expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['the first lean save'])
 })
 
+
+test("a version that picks examples: the session's own few, named in its record", async ($, on) => {
+  const w = world(on, { LEAN_PROMPTS: 'forms:rotate' })
+  const r = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
+  const text = String(r.context[0])
+  expect(text).toContain('THE PRINCIPLES')
+  expect(text).toContain('POOL examples')
+  const shown = ['Alpha', 'Beta', 'Gamma', 'Delta'].filter(h => text.includes(`### ${h}`))
+  expect(shown.length).toBe(3)
+  await w.clock.advance(100)
+  const line = w.events.find(e => e.kind === 'prompt') as Any
+  expect(line.prompt).toBe('forms:rotate')
+  expect(line.examples).toEqual(shown)
+})

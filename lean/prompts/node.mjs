@@ -8,7 +8,7 @@
 import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ALIASES, FEATURES, bodyOf, choose, idOf, indexOf, listing, partsText } from './registry.mjs'
+import { ALIASES, FEATURES, bodyOf, choose, idOf, indexOf, listing, partsChoice } from './registry.mjs'
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -27,14 +27,19 @@ export function activeNow(root = ROOT, env = process.env) {
   return { idx, ...choose(idx, { env: env.LEAN_PROMPTS || '' }) }
 }
 
-/** The active text of a feature: {feature, version, id, text, file, problems}. A skill's in-place version is its body. */
+/** The active text of a feature: {feature, version, id, text, file, problems, chosen?}. A skill's in-place version is its
+ *  body; `chosen` names the examples a version that picks them chose for this session (LEAN_SESSION). */
 export function textOf(feature, root = ROOT, env = process.env) {
   const name = ALIASES[feature] || feature
   const { idx, active, problems } = activeNow(root, env)
   const a = active[name]
   if (!a) throw new Error(`no prompt feature "${feature}"; the features are ${Object.keys(idx).join(', ')}`)
   if (a.off) return { feature: name, version: a.version, id: idOf(name, a.version), text: '', file: null, problems }
-  if (a.parts) return { feature: name, version: a.version, id: idOf(name, a.version), text: partsText(a.parts, f => readFileSync(join(root, f), 'utf8')), file: null, problems }
+  if (a.parts) {
+    // a part that picks some of a file's examples picks them by the session, as the hooks do
+    const c = partsChoice(a.parts, f => readFileSync(join(root, f), 'utf8'), undefined, env.LEAN_SESSION || '')
+    return { feature: name, version: a.version, id: idOf(name, a.version), text: c.text, file: null, problems, chosen: c.chosen }
+  }
   const raw = readFileSync(join(root, a.file), 'utf8')
   return { feature: name, version: a.version, id: idOf(name, a.version), text: a.file.endsWith('SKILL.md') ? bodyOf(raw) : raw, file: join(root, a.file), problems }
 }
@@ -68,7 +73,7 @@ function main(argv) {
     const base = FEATURES[t.feature]?.versions?.[t.version]?.base || FEATURES[t.feature]?.base
     const head = base ? `(${t.id} · its folder: ${join(ROOT, base)}; paths below are relative to it)\n\n` : `(${t.id})\n\n`
     process.stdout.write(head + t.text + (t.text.endsWith('\n') ? '' : '\n'))
-    emit({ kind: 'prompt', feature: t.feature, prompt: t.id, via: `lean guide ${arg}`, chars: t.text.length })
+    emit({ kind: 'prompt', feature: t.feature, prompt: t.id, via: `lean guide ${arg}`, chars: t.text.length, ...(t.chosen ? { examples: t.chosen } : {}) })
     return 0
   }
   console.error('usage: lean prompts | lean guide <feature>')
