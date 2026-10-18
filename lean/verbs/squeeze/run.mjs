@@ -4,8 +4,9 @@
 //
 //   run(ctx) -> {message?, text?, note?}
 //   ctx.message   the message's record (CONTRACT 1)
-//   ctx.args      the chips to set, as words: "length=short familiarity=new", "+for my manager" (the person's own
-//                 chip), "original"; '' squeezes it to Length short, as a long message arrives
+//   ctx.args      the chips to set, as words: "length=short familiarity=beginner", "+engineer and manager" (a stretch
+//                 of the person's, which stands at the original until a level is set), "original"; '' squeezes it to
+//                 Length short, as a long message arrives
 //   ctx.model     {complete(request)}: one call to the session's model ($.model.complete, through the shell)
 //
 // It returns the record with `shown` set to the new text and its marks placed again (`message`), the text, and a note
@@ -13,7 +14,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { remark } from '../../shell/message.js'
-import { ARRIVE, applyRewrite, checkRewrite, chipsOf, isOriginal, noteFor, ownChip, readReply, request, restore, withOwn } from './chips.mjs'
+import { ARRIVE, applyRewrite, checkRewrite, chipsOf, isOriginal, noteFor, readReply, request, restore, stretchChip, withStretch } from './chips.mjs'
 
 const PROMPT = fileURLToPath(new URL('./prompt.md', import.meta.url))
 
@@ -44,26 +45,26 @@ export async function run(ctx) {
     const back = restore(rec, remark)
     return { message: back, text: back.text, note: noteFor(back) }
   }
-  let newOwn = null
   if (want.own) {
-    newOwn = ownChip(rec, want.own)
-    if (!newOwn) return { text: 'A chip needs a few words after the +, such as "+ for my manager".' }
-    rec = { ...rec, squeeze: withOwn(rec, newOwn) }
-    want.at = { ...rec.squeeze.at }
+    const chip = stretchChip(rec, want.own)
+    if (!chip) return { text: 'A stretch needs two ends after the +, such as "+ engineer and manager".' }
+    // a new stretch stands at the original: the record keeps it, and a level set later rewrites the text
+    const next = { ...rec, squeeze: withStretch(rec, chip) }
+    return { message: next, text: next.shown ?? next.text, note: noteFor(next) }
   }
   const probe = { ...rec, squeeze: { ...(rec.squeeze || {}), at: want.at } }
-  if (!newOwn && isOriginal(chipsOf(probe))) {
+  if (isOriginal(chipsOf(probe))) {
     const back = restore(probe, remark)
     return { message: back, text: back.text, note: noteFor(back) }
   }
   if (!ctx.model || typeof ctx.model.complete !== 'function') throw new Error('no model to write the rewrite: ctx.model.complete is missing')
   const cfg = ctx.verb || {}
-  const req = request(probe, { system: readFileSync(PROMPT, 'utf8'), question: ctx.question || '', newOwn, model: cfg.model || 'sonnet', effort: cfg.effort || 'low', maxTokens: cfg.maxTokens || 4000 })
+  const req = request(probe, { system: readFileSync(PROMPT, 'utf8'), question: ctx.question || '', model: cfg.model || 'sonnet', effort: cfg.effort || 'low', maxTokens: cfg.maxTokens || 4000 })
   const t0 = Date.now()
   const r = await ctx.model.complete(req)
   if (!r || !r.isAnswered) throw new Error(`the rewrite did not come back: ${r ? r.reason : 'no result'}`)
   const reply = readReply(r.text)
   const checked = checkRewrite(rec.text, reply.text)
-  const next = applyRewrite(rec, { text: checked.text, at: want.at, newOwn, chip: reply.chip, made: { ms: Date.now() - t0, model: req.model, usage: r.usage }, problems: checked.problems }, remark)
+  const next = applyRewrite(rec, { text: checked.text, at: want.at, made: { ms: Date.now() - t0, model: req.model, usage: r.usage }, problems: checked.problems }, remark)
   return { message: next, text: next.shown ?? next.text, note: noteFor(next) }
 }

@@ -423,6 +423,14 @@ function linkRects(line, x, y, cx) {
 }
 
 // ---------------------------------------------------------------- marks drawn with cells
+/** A bar part's words in place: its label and value, else its label, when they fit with a cell on each side. */
+export function inPlace(label, value, cells) {
+  const l = String(label).trim()
+  const v = isFinite(value) ? (Math.abs(value) >= 1000 ? Math.round(value).toLocaleString('en-US') : String(Math.round(value * 100) / 100)) : ''
+  for (const s of [v ? `${l} ${v}` : l, l]) if (s && [...s].length + 2 <= cells) return s
+  return ''
+}
+
 function drawBar(g, x, y, w, value, max, tone, parts, track) {
   if (!isFinite(value) || tone === 'unseen') { g.fill(x, y, w, 1, '▒', 'unseen'); return }
   const m = max > 0 ? max : 1
@@ -431,7 +439,13 @@ function drawBar(g, x, y, w, value, max, tone, parts, track) {
     for (const p of parts) {
       cum += p.value
       const to = Math.round(clamp(cum / m, 0, 1) * w)
-      g.fill(x + from, y, to - from, 1, p.tone === 'unseen' ? '▒' : BAR, p.tone)
+      // a part with a label is labelled in place when it has room (its words on its own color), so the card needs
+      // no legend: `fixture 11`, else `fixture`, else the bar alone
+      const words = p.label != null && p.tone !== 'unseen' ? inPlace(p.label, p.value, to - from) : ''
+      if (words) {
+        g.fill(x + from, y, to - from, 1, ' ', 'paper', { bg: p.tone })
+        ;[...words].forEach((c, i) => g.put(x + from + 1 + i, y, c, 'paper', { bg: p.tone }))
+      } else g.fill(x + from, y, to - from, 1, p.tone === 'unseen' ? '▒' : BAR, p.tone)
       from = to
     }
     if (from === 0 && value > 0) g.put(x, y, '▏', parts[0] ? parts[0].tone : tone)

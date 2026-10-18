@@ -53,8 +53,9 @@ One knob is usually enough; a view with several is harder to read.
 **Draw what is not in hand.** Files you did not read, rows you could not get: draw them with `k.unseen()`, hatched,
 not as a blank or a footnote.
 
-**Keep it calm.** One title. Color only where it means something, and say what it means in the words beside it
-rather than in a legend. No decoration. Short labels. Leave out what the person does not need for this question.
+**Keep it calm.** One title. Color only where it means something, and label it in place rather than in a legend: a
+bar part's `label` is drawn inside the part when it fits, and a line or a dot can end with its own name. No
+decoration. Short labels. Leave out what the person does not need for this question.
 
 **Fit the width.** The object has `k.w` columns. Add detail only when there is room: `if (k.w >= 100) ...`. The
 terminal and the browser both lay the parts out to the width they have.

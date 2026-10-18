@@ -208,10 +208,10 @@ export function blocks(text) {
       out.push({ type: 'item', indent, marker: item[2], start: L.start, end: lines[j - 1].end, from: L.start + item[0].length, to: lines[j - 1].end, gap })
       i = j; gap = false; continue
     }
-    let j = i + 1
-    while (j < lines.length && !blank(j) && !FENCE.test(lines[j].line) && !HEAD.test(lines[j].line) && !ITEM.exec(lines[j].line) && !/^\s*>/.test(lines[j].line) && !RULE.test(lines[j].line) && !(lines[j].line.includes('|') && j + 1 < lines.length && TABLE_SEP.test(lines[j + 1].line))) j++
-    out.push({ type: 'para', start: L.start, end: lines[j - 1].end, from: L.start, to: lines[j - 1].end, gap })
-    i = j; gap = false
+    // a line of its own: a line break written inside a paragraph stays a line break (a report's rows, a commit
+    // message's lines, a manager's labelled lines), with no blank row between the lines
+    out.push({ type: 'para', start: L.start, end: L.end, from: L.start, to: L.end, gap })
+    i++; gap = false
   }
   return out
 }
@@ -224,7 +224,7 @@ export const marksIn = (marks, from, to) => (marks || []).map((m, i) => ({ ...m,
 /**
  * One block's content (text[from..to)) as runs: `{s, b?, it?, code?, link?, mark?}` where `mark` is the mark's index in
  * the record's marks. Bold, italic and inline code as Claude Code draws them; a link that is no mark reads as its words
- * then its target, as Claude Code draws one; line breaks inside a block are spaces.
+ * then its target, as Claude Code draws one. (A paragraph's lines are blocks of their own, so a line break stays one.)
  */
 export function inline(text, from, to, marks = []) {
   const s = String(text || '')

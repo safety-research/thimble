@@ -151,10 +151,12 @@ function Proposals({ row }: { row: Row }) {
  * observer says it stands (record.verbs.s.at); the levels set now are record.squeeze.at; the person's own chips are
  * record.squeeze.own. A press goes to the terminal, which rewrites the message in place; the record then shows it. */
 const FIXED = [
-  { id: 'length', name: 'Length', levels: ['one line', 'short', 'medium', 'full'], level0: 3, pos: false },
-  { id: 'interpret', name: 'Report ↔ Interpret', levels: ['report', 'both', 'interpret'], level0: 1, pos: true },
-  { id: 'familiarity', name: 'Familiarity', levels: ['new', 'familiar', 'expert'], level0: 1, pos: false },
+  { id: 'length', name: 'Length', levels: ['one line', 'short', 'medium', 'full'], level0: 3, pos: true },
+  { id: 'interpret', name: 'Report ↔ Interpret', levels: ['report', 'balanced', 'interpret'], level0: 1, pos: true },
+  { id: 'familiarity', name: 'Familiarity', levels: ['new to the field', 'beginner', 'working', 'fluent', 'expert'], level0: 2, pos: true },
 ]
+// the names an observer or an older record may give a level (squeeze's chips.mjs ALIAS)
+const ALIAS: Record<string, Record<string, number>> = { interpret: { both: 1 }, familiarity: { new: 0, familiar: 2 } }
 interface ShownChip {
   id: string
   name: string
@@ -166,18 +168,22 @@ interface ShownChip {
 }
 
 function chipsOf(rec: Row['record']): ShownChip[] {
-  const sq = ((rec as any)?.squeeze || {}) as { at?: Record<string, number>; own?: { id: string; name: string; levels?: string[] }[] }
+  const sq = ((rec as any)?.squeeze || {}) as { at?: Record<string, number>; own?: unknown[] }
   const seen = ((rec?.verbs?.s as any)?.at || {}) as Record<string, number | string>
   const out: ShownChip[] = FIXED.map((c) => {
     const o = seen[c.id]
-    const level0 = c.id === 'length' ? c.level0 : typeof o === 'number' && o >= 0 && o < c.levels.length ? o : typeof o === 'string' && c.levels.includes(o) ? c.levels.indexOf(o) : c.level0
+    const named = typeof o === 'string' ? (c.levels.includes(o) ? c.levels.indexOf(o) : ALIAS[c.id]?.[o] ?? -1) : -1
+    const level0 = c.id === 'length' ? c.level0 : typeof o === 'number' && o >= 0 && o < c.levels.length ? o : named >= 0 ? named : c.level0
     const at = sq.at?.[c.id]
     return { ...c, level0, level: Number.isInteger(at) && (at as number) >= 0 && (at as number) < c.levels.length ? (at as number) : level0 }
   })
-  for (const c of sq.own || []) {
-    if (!c || !c.id || !Array.isArray(c.levels) || !c.levels.length) continue
+  for (const c of (sq.own || []) as { id: string; name?: string; from?: string; to?: string; levels?: string[] }[]) {
+    if (!c || !c.id) continue
+    // a stretch between two ends: 0 is the original, at its first end, and 3 steps go to its second
+    const levels = c.from && c.to ? [c.from, `1 of 3 toward ${c.to}`, `2 of 3 toward ${c.to}`, c.to] : Array.isArray(c.levels) ? c.levels : []
+    if (!levels.length) continue
     const at = sq.at?.[c.id]
-    out.push({ id: c.id, name: c.name, levels: c.levels, level0: 0, level: Number.isInteger(at) ? (at as number) : 0, pos: false, own: true })
+    out.push({ id: c.id, name: c.from && c.to ? `${c.from} ↔ ${c.to}` : String(c.name || c.id), levels, level0: 0, level: Number.isInteger(at) ? (at as number) : 0, pos: true, own: !(c.from && c.to) })
   }
   return out
 }

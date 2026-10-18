@@ -26,6 +26,10 @@ A sparkline draws a series in your sentence: write `[~](q3@n)`, and the person s
 An object you save is drawn for the person under your reply, in the terminal, from its `program`. So the reply does
 not need to repeat what the object shows: say what it means and what to look at.
 
+**Make a card its title, its chart and its takeaway.** The title states the claim, and one line under the chart says
+what to see. Label marks in place (a bar part's `label`, a station's name) rather than in a legend, and leave sources
+and ids out: the detail view shows where each value comes from.
+
 **Keep it to about one screen.** Under a reply the person sees about half a screen of it; the rest waits in the
 detail view. Real records belong in `k.examples` on the part they explain: the person sees them there one at a time
 when they select the part, so the object need not list them.

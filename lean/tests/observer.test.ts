@@ -82,6 +82,8 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json) } = {})
     filled.push(e.text)
     return { isFilled: true }
   })
+  // Claude Code's hint line under the prompt, as a hook leaves it
+  on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   const at = { tools: 0 }
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
@@ -146,14 +148,14 @@ test('after a turn that saved an object: one look reads its lineage; its note re
   expect(w.forks[0]).toContain('as the person sees it under the reply:\n    Jun 18 6,543')
   expect(w.forks[0]).toContain('Not read: 1 file (9 rows): events.jsonl')
   expect(w.runs.some(a => a.includes('coverage'))).toBe(true)
-  // the verb row under the answer: v lit with its note, s dim
+  // the verbs in the thimble line above the prompt: v lit with its note in place of its name, s as its name
   await clock.settle()
   const drawn = textOf(await reply($))
   await clock.settle()
-  const row = textOf(await reply($))
-  expect(row).toContain('● 2 views ready')
-  expect(row).toContain(' squeeze')
-  expect(row).not.toContain('● squeeze')
+  const row = textOf(await $.ui.render(BAND))
+  expect(row).toContain('v ● 2 views ready')
+  expect(row).toContain('s squeeze')
+  expect(row).not.toContain('s ●')
   expect(drawn.length).toBeGreaterThan(0)
   expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`]!).verbs.v.proposals).toEqual(['saves by day', 'saves by wiki'])
   // the note: for Claude alone, with the next prompt, once
@@ -266,7 +268,7 @@ test('a look that ends while a new turn runs: no line mid-turn (its finding goes
   await clock.settle()
   textOf(await reply($))
   await clock.settle()
-  expect(textOf(await reply($))).toContain('● saves by day')
+  expect(textOf(await $.ui.render(BAND))).toContain('v ● saves by day')
   // the line's finding waits for Claude's next prompt
   await $.turn.complete({ turnId: 't2', answer: 'More.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.advance(100)
@@ -301,6 +303,7 @@ test('a reload mid-session keeps the notes not yet delivered: they reach Claude 
 const GLOSS = { term: 'fixture scope', body: 'How long pytest keeps one fixture object.', here: 'In run 7, [conftest.py:14](tests/conftest.py#L14) set it to "module".', program: "return k.text('**module** {dim:one cart per file}')" }
 const ANSWER = 'June 18 had the most saves, because the `fixture scope` was module.'
 const MSGPATH = `${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`
+const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 const BAND2 = { ...(BAND as object), props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never
 const key = (k: string, text = '') => ({ origin: { kind: 'composer' }, key: { key: k }, text, cursor: 0, start: 0, end: 0, inputText: k.length === 1 ? k : '' }) as never
 
@@ -322,14 +325,15 @@ test('a gloss is placed by its term in the answer, with a teal fill; its card sa
   await w.clock.settle()
   const card = textOf(await $.ui.render(BAND2))
   expect(card).toContain('fixture scope')
-  // the person reads the mark's kind as "explain"; 1 asks, and the cite inside the card has the next digit
-  expect(card).toContain('explain')
+  // the person reads the mark's kind by its teal frame; 1 asks, and the cite inside the card has the next digit, as
+  // the hint line under the prompt says
   expect(card).not.toContain('gloss')
-  expect(card).toContain('1 ask · 2 open · 0 close')
+  expect(JSON.stringify(await $.ui.render(BAND2))).toContain('"color":"#62d2c6"')
+  expect(textOf(await $.ui.render(HINT))).toContain('1 ask · 2 open · 0 close · ] next')
   // 2 opens the citation in it, over it; 0 comes back
   await ($ as Any).prompt.edit(key('2'))
   expect(textOf(await $.ui.render(BAND2))).toContain('conftest.py:14')
-  expect(textOf(await $.ui.render(BAND2))).toContain('0 back')
+  expect(textOf(await $.ui.render(HINT))).toContain('0 back')
   await ($ as Any).prompt.edit(key('0'))
   expect(textOf(await $.ui.render(BAND2))).toContain('fixture scope')
 })
