@@ -997,7 +997,7 @@
         const span = st.from != null ? ` · ${st.to != null && st.to !== st.from ? `${fmt(st.from)}–${fmt(st.to)}` : fmt(st.from)}` : ''
         recs.push({ ref: st.ref[0], text: `${st.thread}${span}${st.note ? ': ' + st.note : ''}` })
       })
-      if (!meta.ref && recs.length) meta.ref = recs.slice(0, 3).map(r => r.ref).filter(Boolean)
+      if (!meta.ref && recs.length) { const r = recs.slice(0, 3).map(x => x.ref).filter(Boolean); if (r.length) meta.ref = r.length === 1 ? r[0] : r }
       if (s.threads.length && s.threads.length <= 400) meta.threads = s.threads.slice()
       if (recs.length) meta.examples = registerExamples(ctx, 'ex-' + mslug(s.id, 40), { label: `${s.label}: ${s.threads.length > 1 ? 'the ' + unit + ' through it' : 'its rows'}`, records: recs.slice(0, 200), total: recs.length, fmt: '{text}' })
       const id = regionId(ctx, 'st-' + mslug(s.id, 56), 'map station', meta)
@@ -1513,7 +1513,7 @@
         recs.push({ ref, text: `${t.label}${lens ? ' · ' + valueOf(t) : ''}${st && st.from != null ? ' · reaches ' + B.label + ' at ' + fmt(st.from) : ''}` })
       })
       if (e.ref) meta.ref = e.ref.length === 1 ? e.ref[0] : e.ref
-      else if (recs.some(r => r.ref)) meta.ref = recs.filter(r => r.ref).slice(0, 3).map(r => r.ref)
+      else if (recs.some(r => r.ref)) { const r = recs.filter(x => x.ref).slice(0, 3).map(x => x.ref); meta.ref = r.length === 1 ? r[0] : r }
       if (recs.length) meta.examples = registerExamples(ctx, 'ex-ln-' + mslug(A.id, 18) + '-' + mslug(B.id, 18) + (L.v ? '-' + mslug(L.v, 12) : ''), { label: meta.label, records: recs.slice(0, 200), total: recs.length, fmt: '{text}' })
       const id = regionId(ctx, 'ln-' + mslug(A.id, 20) + '-' + mslug(B.id, 20) + (L.v && !L.mixed ? '-' + mslug(L.v, 16) : ''), 'map lane', meta)
       g.regs.set(id, { meta, rects: [] })
@@ -1548,8 +1548,9 @@
     const key = []
     const hi = Math.max(3, Math.round(nThreads / 4)), mid = Math.max(2, Math.round(nThreads / 10))
     const u = unit || 'threads'
-    key.push(`{dim:line weight = ${escapeMarkup(u)}:} ━ {dim:${hi}+}  ─ {dim:${mid}–${hi - 1}}  ┄ {dim:1–${Math.max(1, mid - 1)}}` +
-      (lens ? `     {dim:${escapeMarkup(lens.label || lens.by)}:} ` + lens.values.map(v => `{${lens.tone[v]}:■} ${escapeMarkup(v)}`).join('  ') + (merged.size ? '  {dim:· a striped lane holds several}' : '') : ''))
+    const span = (a, b) => (a >= b ? fmt(a) : `${fmt(a)}–${fmt(b)}`)
+    key.push(`{dim:line weight = ${escapeMarkup(u)}:} ━ {dim:${fmt(hi)}+}  ─ {dim:${span(mid, hi - 1)}}  ┄ {dim:${span(1, mid - 1)}}`)
+    if (lens) key.push(`{dim:${escapeMarkup(lens.label || lens.by)}:} ` + lens.values.map(v => `{${lens.tone[v]}:■} ${escapeMarkup(v)}`).join('  ') + (merged.size ? '  {dim:· a striped lane holds several, a count for each}' : ''))
     const back = backs.concat(extra).map(e => {
       const a = ST.get(e.a || e.from), b = ST.get(e.b || e.to)
       return a && b ? `${escapeMarkup(a.label)} {dim:→} ${escapeMarkup(b.label)}${e.n ? ` {dim:${fmt(e.n)}}` : ''}${e.label ? ` {dim:(${escapeMarkup(e.label)})}` : ''}` : null
