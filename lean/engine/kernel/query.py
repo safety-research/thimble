@@ -44,6 +44,7 @@ import traceback
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from . import refs as R
 from . import sources as S
@@ -512,6 +513,7 @@ def cite_example(q: dict[str, Any]) -> str | None:
     v = r[col]
     shown = f"{v:,}" if isinstance(v, int) else (f"{v:,.2f}" if isinstance(v, float) else str(v))
     if keys:
-        frag = "&".join(f"{k}={r[k]}" for k in keys)
+        # a value with a space or a bracket is percent-encoded, so the citation stays one Markdown link
+        frag = "&".join(f"{k}={quote(str(r[k]), safe='-_.:~,')}" for k in keys)
         return f"[{shown}]({q['id']}#{frag}@{col})"
     return f"[{shown}]({q['id']}#row=1@{col})"
