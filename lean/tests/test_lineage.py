@@ -181,3 +181,104 @@ def test_a_later_query_on_a_summary_copies_no_rows_into_it(root: Path) -> None:
     assert LIN.resolve(st, f"{t['id']}#row=1@mean_bytes")["why"] == f"{t['id']} builds on {s['id']}, a summary whose values keep no rows of their own"
     # the summary itself still opens every row it read
     assert LIN.resolve(st, f"{s['id']}@mean_bytes")["count"] == 12
+
+
+# ------------------------------------------------------------------ records built in a loop
+
+# made-up runs: two folders, each with its tickets (some closed) and a log of steps
+RUNS = {
+    "alpha": {"tickets": [("t1", "closed", "kim"), ("t2", "open", "lee"), ("t3", "closed", "lee"), ("t4", "closed", "kim")],
+              "steps": ["2026-05-01T10:00:00", "2026-05-01T10:40:00", "2026-05-01T11:00:00", "2026-05-01T11:30:00",
+                        "2026-05-01T12:00:00"]},
+    "beta": {"tickets": [("t5", "open", "max"), ("t6", "closed", "max")],
+             "steps": ["2026-05-02T09:00:00", "2026-05-02T09:20:00", "2026-05-02T09:45:00"]},
+}
+
+
+@pytest.fixture()
+def runs_root(root: Path) -> Path:
+    for run, d in RUNS.items():
+        f = root / "runs" / run
+        f.mkdir(parents=True)
+        with open(f / "tickets.jsonl", "w") as h:
+            for tid, state, who in d["tickets"]:
+                h.write(json.dumps({"id": tid, "state": state, "closer": who}) + "\n")
+        with open(f / "steps.jsonl", "w") as h:
+            for ts in d["steps"]:
+                h.write(json.dumps({"ts": ts}) + "\n")
+    return root
+
+
+LOOP = '''import glob
+out = []
+for f in sorted(glob.glob("runs/*/tickets.jsonl")):
+    run = f.split("/")[1]
+    t = load(f)
+    done = t[t.state == "closed"]
+    by_kim = done.closer == "kim"
+    st = load(f"runs/{run}/steps.jsonl")
+    out.append(dict(run=run, closed=len(done), not_kim=int((~by_kim).sum()),
+                    hours=round((pd.to_datetime(st.ts.max()) - pd.to_datetime(st.ts.min())).total_seconds() / 3600, 1)))
+'''
+
+
+def test_records_appended_in_a_loop_keep_each_iterations_rows(runs_root: Path) -> None:
+    st = Store(runs_root)
+    q = Q.run(st, "per run", LOOP + "pd.DataFrame(out)")
+    assert q["lineage"] == "loop" and q["frame"] == "out" and q["keys"] == ["run"]
+    # a count that equals a frame the iteration made opens that frame's rows, exactly
+    r = LIN.resolve(st, f"{q['id']}#run=alpha@closed")
+    assert r["rows"] == ["runs/alpha/tickets.jsonl#L1,3-4"] and r["count"] == 3 and "why" not in r
+    assert r["chain"][-1]["check"] == "the value equals the number of rows"
+    # a count of the rows a yes/no column marks (or leaves) opens those rows
+    assert LIN.resolve(st, f"{q['id']}#run=alpha@not_kim")["rows"] == ["runs/alpha/tickets.jsonl#L3"]
+    # any other value opens what its own iteration loaded and filtered, and says so; never another run's rows
+    h = LIN.resolve(st, f"{q['id']}#run=beta@hours")
+    assert set(h["rows"]) == {"runs/beta/tickets.jsonl#L2", "runs/beta/steps.jsonl#L1-3"}
+    assert h["why"] == (f"{q['id']} made this output row in a loop from these 4 rows (runs/beta/steps.jsonl, "
+                        "runs/beta/tickets.jsonl), the frames it loaded and filtered for it, and it does not keep which of them the value used")
+    # a card bound to the table: its values open the same rows
+    from kernel import objects as O
+
+    obj = O.save(st, "runs", {"title": "Closed per run", "data": {"runs": q["id"]}})
+    c = LIN.resolve(st, f"obj:{obj['id']}#/runs/0/closed")
+    assert c["rows"] == ["runs/alpha/tickets.jsonl#L1,3-4"] and "why" not in c
+    assert LIN.resolve(st, f"obj:{obj['id']}#/runs/1/hours")["why"].startswith(f"{q['id']} made this output row in a loop")
+    # a later query that uses the table keeps each row's rows
+    u = Q.run(st, "on it", f'use("{q["id"]}").sort_values("hours")')
+    assert u["lineage"] == "exact" and LIN.resolve(st, f"{u['id']}#run=beta@hours")["count"] == 4
+
+
+def test_a_sorted_or_filtered_table_of_records_finds_each_records_rows(runs_root: Path) -> None:
+    st = Store(runs_root)
+    q = Q.run(st, "sorted", LOOP + 'pd.DataFrame(out).sort_values("closed")')
+    assert q["lineage"] == "loop" and [r["run"] for r in q["table"]] == ["beta", "alpha"]
+    assert LIN.resolve(st, f"{q['id']}#run=beta@closed")["rows"] == ["runs/beta/tickets.jsonl#L2"]
+    f = Q.run(st, "renamed", LOOP + 'pd.DataFrame(out).reset_index(drop=True).rename(columns={"closed": "n_closed"})')
+    assert f["lineage"] == "loop" and LIN.resolve(st, f"{f['id']}#run=alpha@n_closed")["count"] == 3
+    # tuples with named columns, and the list itself as the output
+    t = Q.run(st, "tuples", LOOP.replace("out.append(dict(run=run, closed=len(done), not_kim=int((~by_kim).sum()),",
+                                         "out.append((run, len(done), int((~by_kim).sum()),").replace("hours=round(", "round(")
+              + 'pd.DataFrame(out, columns=["run", "closed", "not_kim", "hours"])')
+    assert t["lineage"] == "loop" and LIN.resolve(st, f"{t['id']}#run=beta@closed")["rows"] == ["runs/beta/tickets.jsonl#L2"]
+    w = Q.run(st, "the list", LOOP + "out")
+    assert w["lineage"] == "loop" and LIN.resolve(st, f"{w['id']}#run=alpha@closed")["count"] == 3
+    # a record made by a function: what the function loaded for it stands behind it (its filtered frames are gone)
+    fn = Q.run(st, "by a function", 'def per(run):\n    t = load(f"runs/{run}/tickets.jsonl")\n'
+               '    return {"run": run, "closed": int((t.state == "closed").sum())}\nout = []\n'
+               'for run in ["alpha", "beta"]:\n    out.append(per(run))\npd.DataFrame(out)')
+    assert fn["lineage"] == "loop" and LIN.resolve(st, f"{fn['id']}#run=beta@closed")["rows"] == ["runs/beta/tickets.jsonl#L1-2"]
+
+
+def test_a_loop_whose_records_hold_the_same_rows_keeps_none_per_row(root: Path) -> None:
+    st = Store(root)
+    # one frame held across the loop, no frame made per record: nothing is known per row, and the old reason stands
+    q = Q.run(st, "row by row", 'df = load("edits.jsonl")\nout = []\nfor i, r in df.head(3).iterrows():\n'
+              '    out.append({"who": r.user.upper(), "big": r.bytes > 110})\npd.DataFrame(out)')
+    assert q["lineage"] != "loop" and not q.get("cells")
+    # an append that fails reports the query's own line, as before
+    e = Q.run(st, "bad", 'df = load("edits.jsonl")\nx = 1\ndf.append({"a": 1})')
+    assert e["error"] and "line 3" in e["stdout"] and "__lean_append__" not in e["stdout"]
+    # appends that are not records (names, frames) are only appends
+    n = Q.run(st, "names", 'names = []\nfor u in ["a", "b"]:\n    names.append(u)\nlen(names)')
+    assert n["table"] == [{"value": 2}]

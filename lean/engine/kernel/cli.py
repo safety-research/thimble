@@ -275,6 +275,7 @@ def _lineage_line(q: dict[str, Any]) -> str:
         "matched": f"Each output row keeps its source rows (found by {', '.join(q.get('keys') or [])} in `{q.get('frame')}`; the counts agree).",
         "key": f"Each output row keeps the rows that share its {', '.join(q.get('keys') or [])} in `{q.get('frame')}` (no count to check them by).",
         "superset": f"The rows found by {', '.join(q.get('keys') or [])} in `{q.get('frame')}` hold more than the counts: tally() keeps them exactly.",
+        "loop": f"Each output row keeps the rows its loop iteration held when it appended the record to `{q.get('frame')}` (what it loaded and filtered); a count that equals one of those frames opens that frame's rows.",
         "summary": "A summary of the rows it read: each value rests on all of them, except a count that equals one frame's rows (tally() keeps the rows per value).",
         "query": "No rows per output row: each value rests on all the rows read (tally() keeps them per row).",
     }.get(mode or "query", "")
