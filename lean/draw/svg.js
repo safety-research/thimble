@@ -668,9 +668,10 @@ export function renderSvg(drawing, opts = {}) {
           break
         }
         case 'box': {
-          const [, bx, by0, bw, bh0, tone, title] = op
+          const [, bx, by0, bw, bh0, tone, title, f] = op
           if (bw < 2 || bh0 < 2) break
-          if (!dry) L.frame.push(`<rect x="${r1(X(bx) + cw / 2)}" y="${r1(Y(by0) + rh / 2)}" width="${r1((bw - 1) * cw)}" height="${r1((bh0 - 1) * rh)}" rx="5" fill="none" stroke="${C(tone)}"/>`)
+          // an opaque box covers the marks drawn before it (a callout); an open one is a frame under them
+          if (!dry) (f && f.fill ? L.mark : L.frame).push(`<rect x="${r1(X(bx) + cw / 2)}" y="${r1(Y(by0) + rh / 2)}" width="${r1((bw - 1) * cw)}" height="${r1((bh0 - 1) * rh)}" rx="5" fill="${f && f.fill ? C('paper') : 'none'}" stroke="${C(tone)}"/>`)
           if (title && bw > 6) {
             if (!dry) {
               const r = capPieces(textPieces(title), (bw - 6) * cw)
@@ -685,6 +686,33 @@ export function renderSvg(drawing, opts = {}) {
         case 'bg': if (!dry && op[3] > 0 && op[4] > 0) L.bg.push(`<rect x="${r1(X(op[1]) - 2)}" y="${r1(Y(op[2]) + 1)}" width="${r1(op[3] * cw + 4)}" height="${r1(op[4] * rh - 2)}" rx="5" fill="${C(op[5])}"/>`); draws++; break
         case 'px': if (!dry) L.mark.push(`<rect x="${r1(X(op[1]))}" y="${r1(y + op[2] * rh / 2)}" width="${r1(cw + 0.3)}" height="${r1(rh / 2 + 0.3)}" fill="${C(op[3])}"/>`); draws++; break
         case 'line': if (!dry) L.mark.push(`<line x1="${r1(X(op[1]) + cw / 2)}" y1="${r1(y + op[2] * rh / 2 + rh / 4)}" x2="${r1(X(op[3]) + cw / 2)}" y2="${r1(y + op[4] * rh / 2 + rh / 4)}" stroke="${C(op[5])}" stroke-width="2" stroke-linecap="round"/>`); draws++; break
+        case 'dot': {
+          // a circle exactly where the program put it (a fraction of a cell too); a part's hit area is the dot
+          const [, dx0, dy0, tone, f] = op
+          const pcx = X(dx0) + cw / 2, pcy = Y(dy0) + rh / 2
+          const rad = f.size >= 3 ? 8.5 : f.size >= 2 ? 6.4 : 4.4
+          if (!dry) {
+            if (f.bg) L.mark.push(`<circle cx="${r1(pcx)}" cy="${r1(pcy)}" r="${r1(rad + 4.5)}" fill="${C(f.bg)}"/>`)
+            if (f.glyph && !'●◉○'.includes(f.glyph)) glyph(Math.round(dx0), Math.round(dy0), f.glyph, tone, { b: !!f.bold })
+            else if (f.hollow) L.mark.push(`<circle cx="${r1(pcx)}" cy="${r1(pcy)}" r="${r1(rad)}" fill="${C('paper')}" stroke="${C(tone)}" stroke-width="1.4"/>`)
+            else L.mark.push(`<circle cx="${r1(pcx)}" cy="${r1(pcy)}" r="${r1(rad + (f.bold ? 0.6 : 0))}" fill="${C(tone)}"/>`)
+            if (f.label) L.text.push(`<text x="${r1(pcx + rad + 3)}" y="${r1(pcy - 1)}" font-size="${r1(fs * 0.85)}" fill="${C(f.labelTone)}">${xml(f.label)}</text>`)
+          }
+          if (f.label) mark({ k: 'text', s: f.label })
+          if (f.region) {
+            mark({ k: 'region', id: f.region })
+            const hit = Math.max(rad + 4, 7)
+            if (!dry && dx0 >= -0.5 && dy0 >= -0.5 && dx0 < n.w && dy0 < n.h) addRect(f.region, f.meta, { x: pcx - hit, y: pcy - hit, w: 2 * hit, h: 2 * hit })
+          }
+          draws++
+          break
+        }
+        case 'link': {
+          // a thin straight stroke between the two points, under the dots and marks; dashed for a weak tie
+          if (!dry) L.frame.push(`<line x1="${r1(X(op[1]) + cw / 2)}" y1="${r1(Y(op[2]) + rh / 2)}" x2="${r1(X(op[3]) + cw / 2)}" y2="${r1(Y(op[4]) + rh / 2)}" stroke="${C(op[5])}" stroke-width="1.1"${op[6].dash ? ' stroke-dasharray="4 3"' : ''} stroke-linecap="round"/>`)
+          draws++
+          break
+        }
         case 'bar': if (!dry) drawBar(X(op[1]), Y(op[2]), op[3] * cw, op[4], op[5], op[6]); mark({ k: 'bar', v: op[4], max: op[5] }); break
         case 'spark': if (!dry) drawSpark(X(op[1]), Y(op[2]), Math.max(1, op[3]) * cw, op[4], op[5], op[6], op[7]); mark({ k: 'spark', values: op[4] }); break
         case 'brush': if (!dry) brushes.push({ id: op[1], x: X(op[2]), y: Y(op[3]), w: op[4] * cw, h: op[5] * rh, min: op[6], max: op[7], log: !!op[8] }); break

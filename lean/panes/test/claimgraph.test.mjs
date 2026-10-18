@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { applyTurn, emptyStore, viewOf } from '../../verbs/claims/claims.js'
-import { cardLines, compose, layout, line, neighbours } from '../claimgraph.js'
+import { cardLines, cardSpot, compose, layout, line, namesOver, neighbours } from '../claimgraph.js'
 
 function store() {
   const s = emptyStore('s1')
@@ -114,4 +114,33 @@ test('a replay shows the claims made so far, the newest marked with their links,
   const first = compose({ claims: v.flat, clusters: groups, lay, visible: new Set(['c1']), focus: null, colorOf: () => '#000000', amber: '#e0a43a' })
   assert.ok(draw(first).includes('wiki a'))
   assert.ok(!draw(first).includes('wiki b'))
+})
+
+test('between cells (the browser): every claim inside, the clusters still islands, names clear of the claims, and the card covers neither the claim nor its links', () => {
+  const v = viewOf(store())
+  const groups = v.groups.filter(g => g.id)
+  const lay = layout(v.flat, groups, { w: 100, h: 30 })
+  const ps = v.flat.map(c => lay.fine.get(c.id))
+  for (const p of ps) assert.ok(p.x >= 0 && p.x <= 99 && p.y >= 0 && p.y <= 29.5, JSON.stringify(p))
+  // the cells' layout keeps its positions: the fine one is a surface's own
+  assert.deepEqual([...layout(v.flat, groups, { w: 100, h: 30 }).fine], [...lay.fine])
+  const centre = id => { const m = v.flat.filter(c => c.cluster === id).map(c => lay.fine.get(c.id)); return [m.reduce((s, p) => s + p.x, 0) / m.length, m.reduce((s, p) => s + p.y, 0) / m.length] }
+  const cs = Object.fromEntries(groups.map(g => [g.id, centre(g.id)]))
+  const d = (p, c) => Math.hypot(p.x - c[0], (p.y - c[1]) * 2)
+  const near = v.flat.filter(c => { const p = lay.fine.get(c.id); return groups.every(g => g.id === c.cluster || d(p, cs[c.cluster]) <= d(p, cs[g.id])) }).length
+  assert.ok(near >= v.flat.length - 1, `${near} of ${v.flat.length} nearest their own cluster`)
+  // names: one per cluster with its count, on a row no claim crosses
+  const names = namesOver(v.flat, groups, lay.fine, { w: 100, h: 30 })
+  assert.equal(names.length, 3)
+  for (const n of names) {
+    assert.equal(n.n, v.flat.filter(c => c.cluster === n.id).length)
+    assert.ok(!ps.some(p => Math.abs(p.y - (n.y + 0.5)) < 1 && p.x >= n.x - 1 && p.x <= n.x + n.w + 1), n.name)
+  }
+  // the card: never over the claim; a spot that hides a linked claim loses to one that does not
+  const p = { x: 50, y: 10 }
+  const linked = { x: 56, y: 9 }
+  const spot = cardSpot(p, { bw: 30, bh: 5 }, { w: 100, h: 30, dots: [{ ...linked, near: true }], near: [linked] })
+  const inside = (q, r) => q.x >= r.x - 0.5 && q.x <= r.x + r.w - 0.5 && q.y >= r.y - 0.5 && q.y <= r.y + r.h - 0.5
+  assert.ok(spot && !inside(p, spot) && !inside(linked, spot), JSON.stringify(spot))
+  assert.ok(spot.x >= 0 && spot.x + spot.w <= 100 && spot.y >= 0 && spot.y + spot.h <= 30)
 })

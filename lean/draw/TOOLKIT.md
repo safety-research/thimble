@@ -159,8 +159,11 @@ The canvas, `const c = k.canvas(w, h)`, in cells (x across, y down):
 - `c.text(x, y, str, { tone, bold, align, max })`, `c.put(x, y, ch, tone)`, `c.fill(x, y, w, h, ch, tone)`.
 - `c.hline(x, y, w, ch, tone)` and `c.vline(x, y, h, ch, tone)`. The browser draws `─` as a line, `━` as a heavy
   line and `╌` as a dashed one.
-- `c.box(x, y, w, h, { title, tone })`.
+- `c.box(x, y, w, h, { title, tone, fill })`. With `fill`, the box hides what was drawn under it before, as a callout.
 - `c.px(x, y, tone)` and `c.line(x0, y0, x1, y1, tone)` work in half cells down (y from 0 to 2h−1).
+- `c.dot(x, y, tone, { size, hollow, label, part, meta })` and `c.link(x0, y0, x1, y1, tone, { dash })` draw nodes
+  and links. A position can fall between cells: the browser draws a circle and a thin line exactly there, and the
+  terminal uses the nearest cells. A dot with `part` is a part of its own.
 - `c.bar(x, y, w, value, max, tone)` and `c.spark(x, y, values, { w, min, max, tone })`.
 - `c.region(id, x, y, w, h, meta)`, and `c.brush(id, x, y, w, h, { min, max })`: an area a browser drag reads as a
   range from min to max.
