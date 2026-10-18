@@ -2728,6 +2728,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                         scope=concepts.SCOPE_OF_UNIT.get(prior["unit"]), new=scope))
     orienting = session_kind(ctx.session) == ORIENT_SESSION
     group = str(args.get("group") or "").strip()
+    # the group the caller's next card with no group goes to (default_group) is not the label's own group
+    own_group = False
     if orienting:
         target = None
     elif group:
@@ -2736,11 +2738,14 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             and request_of(name) is None and threads.group_of(ctx.c, name) is None:
         # a new label's card with no group named gets a group of its own, named after the label (by its title alone,
         # never read as a path or a thread), rather than the group of the last card the caller made (live check
-        # term-fix10, quirk 9: a label card landed in "Deletes per day, 18 to 26 June")
+        # term-fix10, quirk 9: a label card landed in "Deletes per day, 18 to 26 June"). That group is the label's
+        # alone: the caller's later cards with no group go where they went before (bug hunt L18: every card after the
+        # label "asks the user a question" landed in its group)
         target = _group_id(ctx, name, [])
+        own_group = True
     else:
         target = default_group(ctx)  # the card the label has already stays where it is (concepts.label_card)
-    if target:
+    if target and not own_group:
         _note_group(ctx, target)
     question = _question(args.get("question")) or None
     within = args.get("within") or None

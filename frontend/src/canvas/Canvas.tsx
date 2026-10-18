@@ -189,6 +189,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const placed = useRef(readView(viewKey) != null)
   const [heights, setHeights] = useState<Record<string, number>>({})
   const [sel, setSel] = useState<string[]>([])
+  // the card a ref opened selected (a chip, the landing on the newest card), which is no frame the analyst worked in
+  const [refSel, setRefSel] = useState<string | null>(null)
   const [gsel, setGsel] = useState<string | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
   const [marquee, setMarquee] = useState<Rect | null>(null)
@@ -477,8 +479,13 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   }, [data != null])
 
   // the frame the analyst last selected or worked in, reported to the server as it changes: a model's card whose call
-  // names no group goes there (tools.default_group). Clearing the selection reports nothing, so the last frame stays.
-  const workFrame = useMemo(() => (board ? activeFrame(board, gsel, sel) : null), [board, gsel, sel])
+  // names no group goes there (tools.default_group). Clearing the selection reports nothing, so the last frame stays,
+  // and so does a card a ref selected until the analyst presses it (bug hunt L18: the canvas landed on a label's new
+  // card, and every later card main made with no group went into the label's group)
+  const workFrame = useMemo(() => {
+    if (!board || (refSel && !gsel && sel.length === 1 && sel[0] === refSel)) return null
+    return activeFrame(board, gsel, sel)
+  }, [board, gsel, sel, refSel])
   const reported = useRef<{ ws: string; group: string } | null>(null)
   useEffect(() => {
     if (!workFrame || (reported.current?.ws === ws && reported.current.group === workFrame)) return
@@ -705,6 +712,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const r = l?.rects.get(id)
     if (!b || !l || !bc || !r) return
     setGsel(null)
+    setRefSel(null)
     setRenaming(null)
     if (editing && editing.id !== id) setEditing(null)
     if (e.shiftKey) {
@@ -1254,7 +1262,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (settling.current) window.clearTimeout(settling.current.timer)
     const cellId = board.cellById.has(id) ? id : null
     const still = pendingStill.current
-    if (cellId && !still) setSel([cellId])
+    if (cellId && !still) {
+      setSel([cellId])
+      setRefSel(cellId)
+    }
     const el = cellId ? cardEls.current.get(cellId)?.querySelector<HTMLElement>('.canvas-card') : null
     const flash = still ? () => undefined : flashCard
     // the view centres on a part of a card it opened when that part is outside the viewport (a card taller than it)
