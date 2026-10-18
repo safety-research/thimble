@@ -408,10 +408,7 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
     mode = q.get("lineage")
     n = R.count(rowsets)
     v = step.get("value")
-    if mode == "summary" and why:
-        notes.append(f"these are all {n:,} rows {q['id']} read: its output is a summary of them, and which rows each "
-                     "value used is not kept")
-    elif mode == "superset":
+    if mode == "superset":
         notes.append(f"these {n:,} rows share the output row's key, but a count column of {q['id']} disagrees: they hold "
                      "more rows than the value counts")
     elif mode == "key":
