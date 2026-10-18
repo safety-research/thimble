@@ -376,9 +376,18 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string): Promise<An
   if (!p) return Box({ marginTop: 1, marginLeft: 2, children: [Text({ dimColor: true, children: `drawing ${refText(ref)}…` })] })
   if (p.error || !p.grid) return Text({ color: 'error', children: `× ${refText(ref)} cannot be drawn: ${p.error || 'no drawing'}` })
   const fullscreen = e.viewport?.isFullscreen !== false
+  // calm: under a reply an object takes at most about half a screen; the rest waits in the detail view
+  const most = Math.max(12, Math.min(30, Math.floor((e.viewport?.rows ?? 48) * 0.55)))
+  const rows = p.grid.h > most ? most - 1 : p.grid.h
+  const more = p.grid.h - rows
+  const { Button } = els as Any
   return Box({
     flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40),
-    children: [paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, onPress: fullscreen ? (id: string) => openDetail($, ref, id) : undefined }), hintRow($, els, ref, p.verbs, `${key}-${ref.id}`, fullscreen)],
+    children: [
+      paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress: fullscreen ? (id: string) => openDetail($, ref, id) : undefined }),
+      more ? Button({ key: `${key}-${ref.id}:more`, plain: true, label: 'more rows', children: [Text({ dimColor: true, children: `↓ ${more} more rows in the detail view ` }), Text({ color: 'suggestion', children: '›' })], onPress: () => openDetail($, ref) }) : null,
+      hintRow($, els, ref, p.verbs, `${key}-${ref.id}`, fullscreen),
+    ].filter(Boolean),
   })
 }
 

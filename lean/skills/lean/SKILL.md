@@ -24,6 +24,10 @@ The person must be able to trust what you show them and check it quickly. So eac
 An object you save is drawn for the person under your reply, in the terminal, from its `program`. So the reply does
 not need to repeat what the object shows: say what it means and what to look at.
 
+**Keep it to about one screen.** Under a reply the person sees about half a screen of it; the rest waits in the
+detail view. Real records belong in `k.examples` on the part they explain: the person sees them there one at a time
+when they select the part, so the object need not list them.
+
 **Write the program against the drawing toolkit.** It is in `draw/TOOLKIT.md` of this plugin (from this skill's base
 folder, `../../draw/TOOLKIT.md`). Read it before your first object. The same program draws in the browser.
 
