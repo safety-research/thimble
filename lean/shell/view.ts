@@ -10,7 +10,7 @@
 //                       the Claims pane, claimsview.ts)
 //   trayEl(els, o)      the tray above the prompt: one card in a frame, its title on the top border, a fixed number of
 //                       rows; its keys are in the thimble line under it, and its color says cite or explain
-import { blocks, inline, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
+import { blocks, inline, looseOf, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
 import { paintRegions } from './cells'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -180,6 +180,17 @@ export function messageEl(els: Any, given: MessageOpts): Any {
     while (j + 1 < bs.length && !marksIn(o.rec.marks, bs[j + 1].start, bs[j + 1].end).length) j++
     push([Markdown({ text: text.slice(b.start, bs[j].end), ...(o.dim ? { dimColor: true } : {}) })], b.gap && i > 0)
     i = j + 1
+  }
+  // an explain whose term the rewrite left out: its term after the text, a press as in the text
+  const loose = looseOf(o.rec.marks)
+  if (loose.length) {
+    const kids: Any[] = [els.Text({ dimColor: true, children: 'explain: ' })]
+    loose.forEach((m: Any, j: number) => {
+      if (j) kids.push(els.Text({ dimColor: true, children: ' · ' }))
+      kids.push(markEl(els, o, { s: String(o.rec.glosses?.[m.gloss]?.term || 'a term'), mark: m.i }, `${o.key}-loose-${j}`))
+    })
+    kids.push(els.Text({ dimColor: true, children: ' (in the full answer)' }))
+    push([Box({ flexDirection: 'row', flexWrap: 'wrap', children: kids })], true)
   }
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
 }

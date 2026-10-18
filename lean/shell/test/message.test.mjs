@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { explainerCard, linksIn, sourceCard } from '../cards.js'
-import { blocks, findTerm, glossesOf, inline, linkMarks, newRecord, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
+import { anchorTerm, blocks, findTerm, glossesOf, inline, linkMarks, looseOf, marksIn, newRecord, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
 import { back, base, open, order, push, step, top } from '../tray.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { gridText, renderTerm } from '../../draw/term.js'
@@ -184,4 +184,40 @@ test('a citation whose key holds spaces and brackets is one mark, and its card o
   // a key written as its slug finds its row in the card too
   const slugged = sourceCard({ ref: 'q11#outcome=won-clean-ep@median', label: '110', resolved: { count: 3, rows: [], records: [], chain: [] }, query })
   assert.deepEqual(slugged.parts[0].data.rows.filter(r => r.hot).map(r => r.label), ['won (clean ep)'])
+})
+
+test('a term is found again in a rewrite that says it in another form: its words, their forms in a row, then its longest word', () => {
+  for (const [w, stem] of [['claimed', 'claim'], ['claiming', 'claim'], ['claimer', 'claim'], ['claims', 'claim'], ['approval', 'approv'], ['approved', 'approv'], ['stopped', 'stop'], ['process', 'process'], ['analysis', 'analysis']]) assert.equal(stemOf(w), stem, w)
+  const t = 'PRs the claiming agent also approved; self-approved merges, [346](q19#n). The module-scoped fixtures leaked.'
+  const show = x => x && [t.slice(x.start, x.end), x.how]
+  assert.deepEqual(show(anchorTerm(t, 'claimed')), ['claiming', 'form'])
+  assert.deepEqual(show(anchorTerm(t, 'self-approval')), ['self-approved', 'form'])
+  assert.deepEqual(show(anchorTerm(t, 'fixture scope')), ['fixtures', 'word'])
+  assert.deepEqual(show(anchorTerm(t, 'approved')), ['approved', 'term'])
+  // never in a link, and a small word alone never carries a term
+  assert.equal(anchorTerm('see [the merges](q19#n)', 'merge'), null)
+  assert.equal(anchorTerm('of the runs', 'of vs on'), null)
+})
+
+test('an explain whose term a rewrite left out stays as a loose mark after the text; the original text never makes one', () => {
+  const text = 'All 481 merges had their approval from [the claimer](q19#n). Emergent runs self-approved most.'
+  const rec = withObserver(newRecord({ row: 'r1', session: 's1', text }), { verbs: {}, glosses: { g1: { term: 'claimer' }, g2: { term: 'Emergent vs managed' }, g3: { term: 'never said' } } })
+  // in the original a term is marked only where it stands as written, outside links: none of these does
+  assert.deepEqual(rec.marks.filter(m => m.kind === 'gloss').map(m => m.gloss), [])
+  const short = 'Every flagged merge was approved by its claimer.'
+  const next = remark({ ...rec, shown: short })
+  assert.deepEqual(next.marks.map(m => [m.gloss, m.loose ? 'loose' : short.slice(m.start, m.end)]), [['g1', 'claimer']])
+  // a term the original holds that the rewrite left out entirely: kept, loose, after the text
+  const orig = 'The runs split. **Emergent vs managed:** emergent runs self-approved most.'
+  const r2 = withObserver(newRecord({ row: 'r2', session: 's1', text: orig }), { verbs: {}, glosses: { g2: { term: 'Emergent vs managed' } } })
+  assert.equal(orig.slice(r2.marks[0].start, r2.marks[0].end), 'Emergent vs managed')
+  const s2 = 'The runs split in two.'
+  const n2 = remark({ ...r2, shown: s2 })
+  assert.deepEqual(n2.marks, [{ kind: 'gloss', start: s2.length, end: s2.length, gloss: 'g2', loose: true }])
+  assert.deepEqual(looseOf(n2.marks).map(m => m.i), [0])
+  // the drawing's blocks never hold it: it is drawn after the text
+  assert.deepEqual(marksIn(n2.marks, 0, s2.length), [])
+  // restored to the original, it stands on its words again
+  const back = remark({ ...n2, shown: null })
+  assert.equal(orig.slice(back.marks[0].start, back.marks[0].end), 'Emergent vs managed')
 })

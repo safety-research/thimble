@@ -41,8 +41,8 @@ export const FEATURES = {
     versions: { v1: { about: 'every part of each claim from the pass' }, v2: { about: "v1, terse: the quote names the claim, \"based on\" comes from the cited rows, the digest holds the claims that bear on the turn, a turn with no claims gives none" } },
   },
   squeeze: {
-    about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v4',
-    versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" }, v4: { about: 'v3, with the corrections in the original named in the request and put back when a rewrite leaves one out: a correction may be shortened, never dropped', keep: true } },
+    about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v5',
+    versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" }, v4: { about: 'v3, with the corrections in the original named in the request and put back when a rewrite leaves one out: a correction may be shortened, never dropped', keep: true }, v5: { about: 'v4, with the terms of the explain marks named in the request and kept in their words where the text keeps what they name', keep: true, terms: true } },
   },
   forms: {
     versions: {

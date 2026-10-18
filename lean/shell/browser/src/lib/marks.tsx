@@ -50,6 +50,16 @@ export function prepare(record: Pick<MessageRecord, 'text' | 'shown' | 'marks' |
     at = m.end as number
   }
   out += text.slice(at)
+  // an explain whose term the rewrite left out (a loose mark): its term after the text, as in the terminal
+  const loose = (record?.marks || []).filter((m) => m && m.loose && m.gloss && glosses[m.gloss])
+  if (loose.length) {
+    out += '\n\n_explain:_ ' + loose.map((m) => {
+      const i = marks.length
+      const g = glosses[m.gloss!]
+      marks.push({ ...m, kind: 'gloss', label: plainWords(String(g.term || '')), body: g })
+      return `[${bracketSafe(String(g.term || 'a term'))}](#m${i})`
+    }).join(' · ') + ' _(in the full answer)_'
+  }
   // links to kernel refs that no mark covers: citations too
   out = out.replace(LINK, (all, label: string, ref: string) => {
     if (ref.startsWith('#m') || !isRef(ref)) return all

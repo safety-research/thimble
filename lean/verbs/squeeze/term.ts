@@ -20,7 +20,7 @@ import { remark as remarkAny } from '../../shell/message.js'
 import { tracked } from '../../telemetry/telemetry'
 import { FEATURES } from '../../prompts/registry.mjs'
 import { claimsStore, questionBefore, recordNow, saveRecord } from '../../shell/shell'
-import { ARRIVE, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, isLong, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stretchChip, withStretch } from './chips.mjs'
+import { ARRIVE, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, isLong, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stretchChip, termsOf, withStretch } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -205,8 +205,10 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     // the rewrite left out is put back after it
     const keeps = !!(FEATURES.squeeze.versions as Any)?.[sp.version]?.keep
     const keep: string[] = keeps ? mustKeep(rec.text, { claims: await claimsStore($).catch(() => null), row }) : []
+    // a version that keeps the terms of the explain marks (squeeze:v5): the terms are named in the request
+    const terms: string[] = (FEATURES.squeeze.versions as Any)?.[sp.version]?.terms ? termsOf(rec) : []
     const req = request(probe, {
-      system: sp.text, question, keep,
+      system: sp.text, question, keep, terms,
       model: String(cfg.model || DEFAULTS.model), effort: String(cfg.effort || DEFAULTS.effort),
       maxTokens: Number(cfg.maxTokens || DEFAULTS.maxTokens), timeoutMs: Number(cfg.timeoutMs || DEFAULTS.timeoutMs),
     })
@@ -236,7 +238,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     ticker.stop()
     await setUi($, row, { running: null })
     await settled($, row, next)
-    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}) })
+    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(terms.length ? { terms: terms.length } : {}) })
   } finally {
     ticker.stop()
   }

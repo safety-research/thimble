@@ -17,6 +17,7 @@ const STUBS: Record<string, string> = {
   'lens-claims/v2': 'LENS claims\n<!-- digest -->\nCLAIMS {{NEAR}}{{LEFT_OUT}} | CLUSTERS {{CLUSTERS}} {{GROWN}}\n<!-- when quiet -->\nNO CLAIMS THIS TURN',
   'squeeze/v3': 'THE PROMPT',
   'squeeze/v4': 'THE PROMPT',
+  'squeeze/v5': 'THE PROMPT',
   'thread/v1': 'THE THREAD PROMPT',
   'forms/v2': '# Card forms\n\n## Principles\n\nOLD PRINCIPLES\n\n## Worked examples\n\nTHE WORKED FORMS',
 }

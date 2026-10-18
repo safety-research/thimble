@@ -5,12 +5,16 @@
 //   cite   {kind: 'cite', start, end, ref, label}       a link to a kernel ref, `[6,543](q1#day=2026-06-18@n)`
 //   spark  {kind: 'spark', start, end, ref, values}     a link whose words are `~`, `[~](q4@n)`: a series drawn inline
 //   gloss  {kind: 'gloss', start, end, gloss}          a term the observer explains, found by its words
+//   loose  {kind: 'gloss', start, end, gloss, loose}   an explain whose term a rewrite left out: start = end = the
+//                                                       text's length; drawn after the text, so it stays reachable
 // `start` and `end` are string offsets into the shown markdown and cover the mark as written: a cite's or a spark's whole
 // link, a gloss's words. Marks are in text order and never overlap.
 //
 //   linkMarks(text)                  -> the cites and sparks Claude wrote
 //   placeMarks(text, glosses, prev)  -> every mark of the text: its links, then each gloss's term where it first stands
 //                                       outside a link or code; a spark keeps the values `prev` resolved for its ref
+//   anchorTerm(text, term, taken)    -> where a term stands in a text that may say it in another form: its words, then
+//                                       the same words inflected ("claimed" → "claiming"), then its longest word
 //   seriesRef(ref)                   -> {query, col} for a spark's ref (q4@n, q4#n), or null
 //   sparkChars(values)               -> the sparkline's glyphs, ▁ to ▇, scaled from 0 (or the least value below 0)
 //   blocks(text)                     -> the markdown's blocks with their offsets
@@ -134,24 +138,97 @@ export function findTerm(text, term, taken = []) {
   return null
 }
 
+// words that never carry a term on their own: a term's other words are tried before these
+const STOP = new Set('a an and are as at be by for from in into is it its of on or per than that the their them then this to vs versus via was were with without'.split(' '))
+
+/** A word's stem for matching forms of one word: "claimed", "claiming", "claimer" and "claims" all give "claim";
+ *  "approval" and "approved" give "approv". Crude on purpose: it is used only to find a term again in a rewrite. */
+export function stemOf(word) {
+  let w = String(word || '').toLowerCase().replace(/['’]s$/, '')
+  if (w.length <= 3) return w
+  for (const [suf, to] of [['ational', 'ate'], ['ations', 'ate'], ['ation', 'ate'], ['ingly', ''], ['ings', ''], ['ing', ''], ['iers', 'y'], ['ies', 'y'], ['ied', 'y'], ['ier', 'y'], ['ers', ''], ['er', ''], ['ed', ''], ['es', ''], ['s', ''], ['ly', ''], ['ments', ''], ['ment', ''], ['als', ''], ['al', '']]) {
+    if (w.endsWith(suf) && w.length - suf.length >= 3) {
+      if (suf === 's' && /(ss|us|is)$/.test(w)) continue
+      w = w.slice(0, w.length - suf.length) + to
+      break
+    }
+  }
+  // stopp → stop, but keep ll, ss and zz (call, pass, buzz)
+  if (/([b-df-hj-km-np-tv-z])\1$/.test(w) && !/(ll|ss|zz)$/.test(w)) w = w.slice(0, -1)
+  if (w.length > 3 && w.endsWith('e')) w = w.slice(0, -1)
+  return w
+}
+
+const WORD = /[\p{L}\p{N}]+/gu
+
+/**
+ * Where a gloss's term stands in a text that may say it in another form (a rewrite of the message the term came from):
+ *   1. its words as written (findTerm);
+ *   2. the same words in another form, in a row: "claimed" finds "claiming", "self-approval" finds "self-approved";
+ *   3. its longest word that is not a small word, in any form: "fixture scope" finds "scope".
+ * Never inside a link, code or another mark. Returns {start, end, how} (how: 'term' | 'form' | 'word'), or null.
+ */
+export function anchorTerm(text, term, taken = []) {
+  const exact = findTerm(text, term, taken)
+  if (exact) return { ...exact, how: 'term' }
+  const t = String(term || '').trim()
+  if (!t || t.length > 120) return null
+  const s = String(text || '')
+  const blocked = [...codeRanges(s), ...taken.map(m => [m.start, m.end])]
+  for (const m of linkSpans(s)) blocked.push([m.index, m.index + m[0].length])
+  const words = [...s.matchAll(WORD)].filter(m => !inside(blocked, m.index, m.index + m[0].length)).map(m => ({ a: m.index, b: m.index + m[0].length, stem: stemOf(m[0]), gap: '' }))
+  for (let i = 1; i < words.length; i++) words[i].gap = s.slice(words[i - 1].b, words[i].a)
+  const want = (t.match(WORD) || []).map(stemOf)
+  if (!want.length) return null
+  // the term's words in a row, in any form, with only spaces or hyphens between them
+  for (let i = 0; i + want.length <= words.length; i++) {
+    let ok = true
+    for (let k = 0; k < want.length && ok; k++) ok = words[i + k].stem === want[k] && (k === 0 || /^[\s-]{1,2}$/.test(words[i + k].gap))
+    if (ok) return { start: words[i].a, end: words[i + want.length - 1].b, how: 'form' }
+  }
+  if (want.length < 2) return null
+  // the term's longest word that carries meaning alone, in any form
+  const own = [...new Set((t.match(WORD) || []).filter(w => w.length >= 4 && !STOP.has(w.toLowerCase())))].sort((x, y) => y.length - x.length)
+  for (const w of own) {
+    const hit = words.find(x => x.stem === stemOf(w))
+    if (hit) return { start: hit.a, end: hit.b, how: 'word' }
+  }
+  return null
+}
+
 /**
  * Every mark of the text: the links Claude wrote, then each gloss placed by its term. `glosses` is the record's
- * `{id: {term, ...}}`; a gloss whose term is not in the text gets no mark. `prev` (the marks before a change of the
- * text) gives each spark the values already resolved for its ref.
+ * `{id: {term, ...}}`. A rewrite (`original`: the text it was written from) may say a term in another form, so the term
+ * is found again in it (anchorTerm); one the rewrite left out entirely, which the original holds, stays as a loose mark
+ * at the end of the text, drawn after it, so the explain is never lost. With no `original`, a gloss whose term is not in
+ * the text gets no mark. `prev` (the marks before a change of the text) gives each spark the values already resolved for
+ * its ref.
  */
-export function placeMarks(text, glosses = {}, prev = []) {
+export function placeMarks(text, glosses = {}, prev = [], { original = null } = {}) {
   const marks = linkMarks(text)
   for (const m of marks) {
     if (m.kind !== 'spark') continue
     const old = (prev || []).find(p => p.kind === 'spark' && p.ref === m.ref && Array.isArray(p.values))
     if (old) m.values = old.values
   }
+  const loose = []
   for (const [id, g] of Object.entries(glosses || {})) {
-    const at = findTerm(text, g && g.term, marks)
-    if (at) marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id })
+    const term = g && g.term
+    if (original == null) {
+      const at = findTerm(text, term, marks)
+      if (at) marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id })
+      continue
+    }
+    const at = anchorTerm(text, term, marks)
+    if (at) marks.push({ kind: 'gloss', start: at.start, end: at.end, gloss: id, ...(at.how !== 'term' ? { anchor: at.how } : {}) })
+    else if (findTerm(original, term)) loose.push({ kind: 'gloss', start: String(text || '').length, end: String(text || '').length, gloss: id, loose: true })
   }
-  return marks.sort((a, b) => a.start - b.start)
+  return [...marks.sort((a, b) => a.start - b.start), ...loose]
 }
+
+/** The marks drawn in the text (a loose mark is drawn after it), and the loose ones. */
+export const inText = marks => (marks || []).filter(m => !m.loose)
+export const looseOf = marks => (marks || []).map((m, i) => ({ ...m, i })).filter(m => m.loose)
 
 // ------------------------------------------------------------------------------------------------ the sparkline
 
@@ -252,7 +329,7 @@ export function blocks(text) {
 }
 
 /** The marks that lie inside [from, to). */
-export const marksIn = (marks, from, to) => (marks || []).map((m, i) => ({ ...m, i })).filter(m => m.start >= from && m.end <= to)
+export const marksIn = (marks, from, to) => (marks || []).map((m, i) => ({ ...m, i })).filter(m => !m.loose && m.start >= from && m.end <= to)
 
 // ------------------------------------------------------------------------------------------------ inline runs
 
@@ -426,7 +503,7 @@ export function newRecord({ row, session, text, at }) {
 
 /** The record with its marks placed again on the text it shows (after a squeeze, or new glosses). */
 export function remark(rec) {
-  return { ...rec, marks: placeMarks(shownOf(rec), rec.glosses || {}, rec.marks || []) }
+  return { ...rec, marks: placeMarks(shownOf(rec), rec.glosses || {}, rec.marks || [], { original: typeof rec.shown === 'string' ? rec.text : null }) }
 }
 
 /** The record for a message whose words are `text`: the kept record when its words are the same, else a new one that
