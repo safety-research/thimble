@@ -19,8 +19,8 @@ sentences at the top are enough.
 
 **Every mark leads to its rows.** Bind the data from `lean q`: `"data": {"days": "q1"}`. Each bound row keeps
 `_rows`, its source rows. Put them in the part's meta: `k.region(id, { label, rows: d._rows, fields: ['user',
-'text'] }, part)`. `fields` names what a person needs to read one row. The person presses ↵ on the part and reads
-the rows. If you have only a total, run a query that keeps the rows (`tally`) before you draw it.
+'text'] }, part)`. `fields` names what a person needs to read one row. The person selects the part and reads the
+rows under it. If you have only a total, run a query that keeps the rows (`tally`) before you draw it.
 
 **Turn what the answer assumes into a knob.** A threshold, a scale, a split, a window of time, the step of a run:
 `k.knob(id, { values, at, label })` returns the value the person set. Draw what follows from it, words included,
@@ -96,7 +96,7 @@ return k.frame(k.stack(
 ## Example: an agent's run, step by step
 
 The answer was "It claimed the PR at step 7, set up the build until step 40, then edited and tested." The person
-scrubs a cursor along the run. Under the strip is the step at the cursor, and ↵ opens its call and its result.
+scrubs a cursor along the run. Under the strip is the step at the cursor; selecting it opens its call and its result.
 The query that made `data.steps` gave each step `_refs` of two rows: the tool call and its result.
 
 ```js
