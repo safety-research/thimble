@@ -438,6 +438,8 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
         check["covers"] = covers_of(covers)
     saved = save(c, check)
     _announce(c, cid)
+    if shown is not None or colour is not None:
+        answer_comments._emit(c)  # the chat draws its answer comments again, with or without this check's
     return saved
 
 

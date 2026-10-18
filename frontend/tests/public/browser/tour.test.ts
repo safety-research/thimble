@@ -301,7 +301,7 @@ test('the tour runs in the demo workspace’s frame under its banner, never over
     })
     assert.deepEqual(banner, { text: 'Tour | · | Example data, not your files | Exit tour', src: `?ws=${DEMO}&tour=frame`, top: 0, below: true })
     // the steps run in the frame, on the demo workspace's own page: its Demo tag, its disabled composer, its files
-    assert.deepEqual(await stepIn(frame, 1), { title: 'The chat', count: '1 of 9' })
+    assert.deepEqual(await stepIn(frame, 1), { title: 'Your Claude Code session', count: '1 of 9' })
     const inFrame = await frame.evaluate(() => ({
       demoTag: !!document.querySelector('.shell-demo'),
       demoLine: !!document.querySelector('.shell-demo-line'),
@@ -384,7 +384,7 @@ test('the frame shows the demo as a demo page even after a session there ended, 
     await page.click('button[aria-label="Settings"]')
     await page.click('.settings-tour')
     const frame = await tourFrame(page)
-    assert.equal((await stepIn(frame, 1)).title, 'The chat')
+    assert.equal((await stepIn(frame, 1)).title, 'Your Claude Code session')
     await sleep(2000)
     assert.deepEqual(await frame.evaluate(() => ({ gone: !!document.querySelector('.shell-gone'), demoTag: !!document.querySelector('.shell-demo') })), { gone: false, demoTag: true })
   } finally {
@@ -422,7 +422,7 @@ test('with no demo installed, Take the tour sets up the example workspace and ru
     const before = await pageState(page)
     await page.click('.tour-pop [data-tour="begin"]')
     const frame = await tourFrame(page)
-    assert.deepEqual(await stepIn(frame, 1), { title: 'The chat', count: '1 of 9' })
+    assert.deepEqual(await stepIn(frame, 1), { title: 'Your Claude Code session', count: '1 of 9' })
     assert.ok(server.writes.includes('POST /api/tour/workspace'), 'the workspace was set up')
     await page.click('.tour-banner-exit')
     await page.waitForFunction(() => !document.querySelector('.tour-frame'), null, { timeout: 5000 })

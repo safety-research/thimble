@@ -410,9 +410,14 @@ def state(c: str, sid: str | None = None, status: str = "open") -> dict[str, Any
     if sid:
         turns = {a["turn"] for a in answers(c) if a.get("sid") == sid}
     every = {str(x["id"]): x for x in checks.list_checks(c)}
+    # a check the analyst turned off leaves nothing in the chat: its comments and its running state stay in the store
+    # and come back when it is turned on again (the owner, 10-18)
+    off = {cid for cid, x in every.items() if not x.get("shown")}
     out = []
     for x in _read(c):
         if (status == "open" and (x.get("status") or "open") != "open") or (turns is not None and x.get("turn") not in turns):
+            continue
+        if str(x.get("check") or "") in off:
             continue
         check = every.get(str(x.get("check") or "")) or {}
         out.append({"id": str(x["id"]), "check": str(x.get("check") or ""), "check_name": str(check.get("name") or ""),
@@ -423,6 +428,8 @@ def state(c: str, sid: str | None = None, status: str = "open") -> dict[str, Any
                     "status": "open" if (x.get("status") or "open") == "open" else SETTLED, "at": str(x.get("ts") or "")})
     running = []
     for check in every.values():
+        if str(check["id"]) in off:
+            continue
         rec = (check.get("runs") or {}).get(ANSWERS)
         if not isinstance(rec, dict) or rec.get("status") != "running":
             continue

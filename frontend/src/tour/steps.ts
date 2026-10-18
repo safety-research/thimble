@@ -494,7 +494,7 @@ const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undef
  * is in a live session. */
 export function sessionTexts(): { chat: [string, string]; terminal: [string, string]; ask: string } {
   return {
-    chat: ['The chat', "This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files."],
+    chat: ['Your Claude Code session', 'This chat is your Claude Code session: ask it anything about the files.'],
     terminal: ['Your terminal', 'When you run thimble yourself, the session also runs in the terminal where you started it. It shows the same conversation, and you can type in either.'],
     ask: 'Type a question and press Enter. With Claude connected, the answer comes in a new thread in the chat.',
   }

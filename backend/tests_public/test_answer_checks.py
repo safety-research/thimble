@@ -126,3 +126,17 @@ async def test_add_comment_on_an_answer_stores_its_quote_and_offsets_and_refuses
     res = await _comment(act, "report:report#x", "Not an answer.", "toolu_a3")
     assert res.is_error
     assert _run()["comments"] == 1
+
+
+async def test_a_check_turned_off_leaves_no_tint_in_the_chat_and_its_comments_come_back_when_turned_on(board, bridge,
+                                                                                                    features):
+    act = await _answered()
+    res = await _comment(act, f"answer:{TURN}#s2", "agent-02 posted 6 of 18, not most.", "toolu_b1")
+    assert not res.is_error, res.text
+    assert [x["check"] for x in answer_comments.state(CORPUS)["comments"]] == [IMPORTANT]
+    checks.edit(CORPUS, IMPORTANT, shown=False)
+    now = answer_comments.state(CORPUS)
+    assert now["comments"] == [] and now["running"] == []
+    assert len(answer_comments.open_comments(CORPUS)) == 1, "the comment stays in the store"
+    checks.edit(CORPUS, IMPORTANT, shown=True)
+    assert [x["check"] for x in answer_comments.state(CORPUS)["comments"]] == [IMPORTANT]

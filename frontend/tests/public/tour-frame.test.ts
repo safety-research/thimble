@@ -95,7 +95,7 @@ describe('what the analyst’s page says', () => {
   test('a frame that did not open: said, with only Close', () => {
     expect(offerTexts('failed', false)).toMatchObject({ title: "The tour didn't open", begin: null, skip: 'Close' })
   })
-  test('the steps speak as a demo page does, since they run only on the demo workspace', () => {
-    expect(sessionTexts().chat[1]).toMatch(/^This is a demo and thimble isn't connected to a live Claude Code session/)
+  test('the chat step says what the chat is; the demo banner already says it is a demo', () => {
+    expect(sessionTexts().chat).toEqual(['Your Claude Code session', 'This chat is your Claude Code session: ask it anything about the files.'])
   })
 })
