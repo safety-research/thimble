@@ -56,6 +56,12 @@ export function regionRefs(object, drawing, id) {
   return { refs: [], how: '' }
 }
 
+/** The key a part's rows are kept under once resolved: its one ref, or its refs together (resolved as one set). */
+export function refsKey(refs) {
+  const list = (refs || []).filter(Boolean)
+  return list.length > 1 ? list.slice(0, 500).join(' ') : list[0] || ''
+}
+
 /** The data row (one that carries `_rows`) whose value the region's id holds; null when none or two tie. */
 export function rowByName(object, id) {
   const want = String(id).toLowerCase()

@@ -83,10 +83,12 @@ export function objectOf(id: string, v?: number | null): Promise<any> {
 }
 
 const resolved = new Map<string, Promise<any>>()
-/** `lean resolve <ref>` through the server: where a value came from, down to its rows. */
-export function resolveRef(ref: string, n = 8): Promise<any> {
-  const key = `${ref}|${n}`
-  if (!resolved.has(key)) resolved.set(key, api(`resolve?ref=${encodeURIComponent(ref)}&n=${n}`))
+/** `lean resolve <ref>` through the server: where a value came from, down to its rows. Several refs (a selection, a
+ *  group of rows) resolve as one set. */
+export function resolveRef(ref: string | string[], n = 8): Promise<any> {
+  const refs = (Array.isArray(ref) ? ref : [ref]).filter(Boolean).slice(0, 500)
+  const key = `${refs.join(' ')}|${n}`
+  if (!resolved.has(key)) resolved.set(key, api(`resolve?${refs.map((r) => `ref=${encodeURIComponent(r)}`).join('&')}&n=${n}`))
   return resolved.get(key)!
 }
 

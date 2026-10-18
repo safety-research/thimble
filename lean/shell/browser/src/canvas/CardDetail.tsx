@@ -282,9 +282,9 @@ function PartFacts({ part, drawing, object }: { part: Part; drawing: any; object
       const lib = await objectLib()
       const { refs } = lib.regionRefs(object, drawing, part.id)
       if (!refs.length) return alive && setLine(part.meta?.note ? String(part.meta.note) : 'this part names no rows')
-      const r = await resolveRef(refs[0], 1)
+      const r = await resolveRef(refs, 1)
       const files = [...new Set((r.rows || []).map((x: string) => String(x).split('#')[0]))] as string[]
-      if (alive) setLine([refs[0], files.length ? `from ${files.join(', ')}` : '', r.count != null ? `${fmt(r.count)} rows` : ''].filter(Boolean).join(' · '))
+      if (alive) setLine([refs.length > 1 ? `${refs.length} rows of the card` : refs[0], files.length ? `from ${files.join(', ')}` : '', r.count != null ? `${fmt(r.count)} rows` : ''].filter(Boolean).join(' · '))
     })()
     return () => {
       alive = false
@@ -320,7 +320,7 @@ function Examples({ part, drawing, object }: { part: Part | null; drawing: any; 
       const lib = await objectLib()
       const { refs } = lib.regionRefs(object, drawing, part.id)
       if (!refs.length) return alive && setRows({ label: part.label, total: 0, recs: [] })
-      const r = await resolveRef(refs[0], 12)
+      const r = await resolveRef(refs, 12)
       const recs = await wordsOf(r.records || [])
       if (alive) setRows({ label: part.label, total: r.count ?? recs.length, recs })
     })()

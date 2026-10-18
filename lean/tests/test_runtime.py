@@ -197,3 +197,18 @@ def test_a_table_built_from_a_used_query_finds_its_rows_through_that_querys_grou
     assert q["lineage"] == "matched", q["lineage"]
     won = next(i for i, r in enumerate(q["table"]) if r["outcome"] == "won (clean ep)")
     assert q["rows"][won] == ["runs.jsonl#L1-3"]
+
+
+def test_a_selection_of_several_rows_opens_as_one_set(root: Path) -> None:
+    st = Store(root)
+    q = by_outcome(st)
+    refs = [f"{q['id']}#outcome=won-clean-ep", f"{q['id']}#outcome=contested"]
+    r = LIN.resolve_many(st, refs, n=3)
+    assert r["count"] == 4 and r["rows"] == ["runs.jsonl#L1-3,10"]
+    assert [x["ref"] for x in r["records"]] == ["runs.jsonl#L1", "runs.jsonl#L3", "runs.jsonl#L10"]
+    assert r["about"] == f"2 rows of {q['id']}"
+    env = {"PATH": "/usr/bin:/bin", "THIMBLE_HOME": str(root.parent / "th"), "LEAN_SESSION": "s-cli", "LEAN_ROOT": str(root),
+           "LEAN_PYTHON": sys.executable}
+    lean = str(Path(__file__).resolve().parents[1] / "bin" / "lean")
+    out = subprocess.run([lean, "resolve", *refs, "--json"], capture_output=True, text=True, env=env, cwd=root)
+    assert json.loads(out.stdout)["count"] == 4

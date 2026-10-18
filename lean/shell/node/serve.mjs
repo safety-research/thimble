@@ -420,10 +420,12 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       return leanJson(lean, root, ['coverage', args[0]], personEnv).then(cov => json(fromFacts(object, cov)))
     }
     if (api === 'resolve') {
-      const ref = url.searchParams.get('ref') || ''
-      if (!ref || ref.length > 2000 || /[\n\r\0]/.test(ref)) return json({ error: 'no ref' }, 400)
+      // one ref, or several (?ref=a&ref=b): a part's rows as one set
+      const refs = url.searchParams.getAll('ref').filter(Boolean).slice(0, 500)
+      const ref = refs[0] || ''
+      if (!ref || refs.some(r => r.length > 2000 || /[\n\r\0]/.test(r))) return json({ error: 'no ref' }, 400)
       const n = Math.max(1, Math.min(20, Number(url.searchParams.get('n')) || 5))
-      return leanJson(lean, root, ['resolve', ref, '-n', String(n)], personEnv).then(r => json(r.error ? { ref, ...r } : r))
+      return leanJson(lean, root, ['resolve', ...refs, '-n', String(n)], personEnv).then(r => json(r.error ? { ref, ...r } : r))
     }
     if (api === 'verbs') {
       const { verbs } = listVerbs()

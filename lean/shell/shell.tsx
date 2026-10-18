@@ -36,7 +36,7 @@ import { paintRegions, selectable } from './cells'
 import { cardKind, explainerCard, sourceCard } from './cards.js'
 import { detailIsOpen, detailKeys, detailPane, markOpen, openDetailPane, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
-import { isRef, objectRefs, rankRow, recordRefs, regionMeta, regionRefs } from './object.js'
+import { isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadOf } from './thread'
 import type { Scope as ThreadScope } from './thread'
 import { writeCardState } from './runtime'
@@ -363,11 +363,14 @@ export async function leanEnv($: Engine, root: string): Promise<Record<string, s
 
 async function resolveRefs($: Engine, root: string, refs: string[]): Promise<void> {
   const dir = $.plugin.root.replace(/\/+$/, '')
-  for (const ref of refs.slice(0, 3)) {
+  // a part with several refs (a selection, a group of rows) is one set of rows: resolved together, kept under them all
+  const sets = refs.length > 1 ? [refs.slice(0, 500)] : refs.map(r => [r])
+  for (const set of sets) {
+    const ref = refsKey(set)
     const at = { ...ROWS, id: `${root}|${ref}` }
     if ((await $.state.get(at)).value !== undefined) continue
     // a few rows spread across the part's rows (the kernel's default), enough to flip through as its examples
-    const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', '8', '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+    const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ...set, '-n', '8', '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
     let v: unknown
     try { v = JSON.parse(r.stdout) } catch { v = { ref, error: (r.stdout + r.stderr).trim().slice(0, 400) || 'lean resolve gave nothing' } }
     await $.state.set(at, v)

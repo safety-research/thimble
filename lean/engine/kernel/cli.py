@@ -406,9 +406,13 @@ def cmd_list(a: argparse.Namespace) -> int:
 def cmd_resolve(a: argparse.Namespace) -> int:
     st = Store()
     try:
-        r = LIN.resolve(st, a.ref, n=a.n, pick="random" if a.random else "first" if a.first else "spread", label=a.label)
+        pick = "random" if a.random else "first" if a.first else "spread"
+        if len(a.ref) > 1:
+            r = LIN.resolve_many(st, a.ref, n=a.n, pick=pick)
+        else:
+            r = LIN.resolve(st, a.ref[0], n=a.n, pick=pick, label=a.label)
     except R.RefError as e:
-        print(f"{a.ref}: {e}")
+        print(f"{' '.join(a.ref)}: {e}")
         return 1
     if a.json:
         out_json(r)
@@ -434,6 +438,8 @@ def cmd_resolve(a: argparse.Namespace) -> int:
                 print(f"    value: {step['value']}")
         elif k == "source":
             print(f"source {step['ref']} ({step.get('kind')})")
+        elif k == "selection":
+            print(f"{step['refs']} refs" + (f" of {', '.join(step['queries'])}" if step.get("queries") else ""))
         if step.get("check"):
             print(f"    check: {step['check']}")
     if r.get("rows"):
@@ -540,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_list)
     p = sub.add_parser("resolve", aliases=["from"], help="where a value came from, down to its source rows")
-    p.add_argument("ref")
+    p.add_argument("ref", nargs="+", help="a ref, or several: the rows behind all of them, as one set")
     p.add_argument("-n", type=int, default=5)
     p.add_argument("--random", action="store_true")
     p.add_argument("--first", action="store_true", help="the first rows in file order, not rows spread across them")

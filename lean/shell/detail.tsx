@@ -21,7 +21,7 @@ import { knobOf, turn as turnKnob } from '../draw/handoff.js'
 import { renderTerm } from '../draw/term.js'
 import { paintRegions } from './cells'
 import { barAfter, beganWord, cycleKnob, examplesView, exampleSet, fromLine, keyOf, linkRuns, namedKnob, partOfLink, partsOf, partTop, programLines, stepPart, stepVersion, versionsOf } from './carddetail.js'
-import { chainWords, fromFacts, objectRefs, regionMeta, regionRefs } from './object.js'
+import { chainWords, fromFacts, objectRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { browserOn, citeLabels, currentTheme, leanEnv, loadObject, openBrowser, prepared, preparedNow, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
 import { cardEvent, cardKey, cardKeysHint, ownState, pressTaken, readCardState, writeCardState } from './runtime'
@@ -500,7 +500,7 @@ async function barEls($: Engine, els: Any, sel: Detail, o: Any, p: Prepared, par
   const cite = typeof meta.cite === 'string' ? p.drawing.cites?.[meta.cite] : null
   const set = exampleSet(p.drawing, meta)
   const { refs } = regionRefs(o, p.drawing, part.id)
-  const resolved = refs[0] ? (await $.state.get({ ...ROWS, id: `${sel.root}|${refs[0]}` })).value as Any : undefined
+  const resolved = refs[0] ? (await $.state.get({ ...ROWS, id: `${sel.root}|${refsKey(refs)}` })).value as Any : undefined
   const chain = resolved ? chainWords(resolved) : null
   const records = set ? set.records : chain && !chain.error ? chain.records : []
   const total = set ? (set.total ?? set.records.length) : resolved?.count ?? records.length

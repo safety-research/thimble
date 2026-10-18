@@ -303,11 +303,48 @@ def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | 
     try:
         files_only = all(R.parse(x)["kind"] in ("file", "table") for x in rowsets)
         out["count"] = None if files_only else R.count(rowsets)
-        out["records"] = records(st, rowsets, n, pick) if rowsets and not files_only else []
+        out["records"] = records(st, rowsets, n, pick) if rowsets and not files_only and n else []
     except R.RefError as e:
         out["error"] = str(e)
         out["records"] = []
     st.log({"kind": "resolve", "ref": ref, "shown": [r["ref"] for r in out.get("records") or []]})
+    return out
+
+
+def resolve_many(st: Store, refs: list[str], n: int = 5, pick: str = "spread") -> dict[str, Any]:
+    """The rows behind several refs at once (a selection a card made: a brushed range, the runs of a group), as one
+    set: their row sets merged, how many, and up to n rows read back, spread across all of them."""
+    if len(refs) == 1:
+        return resolve(st, refs[0], n=n, pick=pick)
+    rowsets: list[str] = []
+    notes: list[str] = []
+    queries: list[str] = []
+    bad = 0
+    for ref in refs[:2000]:
+        try:
+            r = resolve(st, ref, n=0, pick=pick)
+        except R.RefError as e:
+            bad += 1
+            if len(notes) < 3:
+                notes.append(f"{ref}: {e}")
+            continue
+        rowsets.extend(r.get("rows") or [])
+        for c in r.get("chain") or []:
+            if c.get("step") == "query" and c.get("id") not in queries:
+                queries.append(c["id"])
+    rowsets = _merge(rowsets)
+    if bad:
+        notes.insert(0, f"{bad} of the {len(refs)} refs name nothing")
+    out: dict[str, Any] = {"ref": " ".join(refs[:3]) + (f" … ({len(refs)} refs)" if len(refs) > 3 else ""), "refs": len(refs),
+                           "chain": [{"step": "selection", "refs": len(refs), "queries": queries}], "rows": rowsets, "notes": notes,
+                           "about": f"{len(refs)} rows of {', '.join(queries) or 'the card'}"}
+    try:
+        files_only = all(R.parse(x)["kind"] in ("file", "table") for x in rowsets)
+        out["count"] = None if files_only else R.count(rowsets)
+        out["records"] = records(st, rowsets, n, pick) if rowsets and not files_only and n else []
+    except R.RefError as e:
+        out["error"] = str(e)
+        out["records"] = []
     return out
 
 
