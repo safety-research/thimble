@@ -127,9 +127,52 @@ def _record(row: S.Row) -> dict[str, Any]:
     return out
 
 
-def records(st: Store, rowsets: list[str], n: int = 5, pick: str = "first", seed: int = 0) -> list[dict[str, Any]]:
-    """Up to n rows of the row sets, each {ref, hash, text, words?, meta?}: the first ones in file order, or a random
-    sample."""
+def spread_refs(rowsets: list[str], n: int) -> list[str]:
+    """n one-row refs spread evenly across the row sets, in their order: the first, the last and the ones between, so
+    examples stand for the whole group rather than its first rows."""
+    sizes = []
+    for rs in rowsets:
+        try:
+            p = R.parse(rs)
+        except R.RefError:
+            sizes.append((rs, None, 1))
+            continue
+        k = len(p["nums"]) if "nums" in p else len(p.get("keys") or [1])
+        sizes.append((rs, p, k))
+    total = sum(k for _, _, k in sizes)
+    if total <= 0:
+        return []
+    if total <= n:
+        picks = list(range(total))
+    else:
+        picks = sorted({int(i * (total - 1) / (n - 1) + 0.5) for i in range(n)}) if n > 1 else [0]
+    out, base, j = [], 0, 0
+    for rs, p, k in sizes:
+        while j < len(picks) and picks[j] < base + k:
+            at = picks[j] - base
+            if p is None or p["kind"] in ("file", "table", "block"):
+                out.append(rs)
+            else:
+                one = dict(p)
+                if "nums" in p:
+                    one["nums"] = [p["nums"][at]]
+                elif "keys" in p:
+                    one["keys"] = [p["keys"][at]]
+                out.append(R.single_refs(one)[0])
+            j += 1
+        base += k
+    return list(dict.fromkeys(out))
+
+
+def records(st: Store, rowsets: list[str], n: int = 5, pick: str = "spread", seed: int = 0) -> list[dict[str, Any]]:
+    """Up to n rows of the row sets, each {ref, hash, text, words?, meta?}: spread evenly across them (the default),
+    the first ones in file order, or a random sample."""
+    if pick == "spread":
+        out = []
+        for ref in spread_refs(rowsets, n):
+            for row in S.fetch(st.root, ref, limit=1):
+                out.append(_record(row))
+        return out
     singles = R.expand(rowsets) if pick == "random" else None
     out = []
     if singles is not None:
@@ -151,9 +194,76 @@ def _num(ref: str) -> int:
     return int(m[1]) if m else 0
 
 
-def resolve(st: Store, ref: str, n: int = 5, pick: str = "first") -> dict[str, Any]:
+def narrow(st: Store, ref: str, label: str | None) -> tuple[str, str] | None:
+    """(the ref of the one value a citation's words show, how it was found), when the citation names a whole query, a
+    column or several rows and its words show one value that only one cell of them holds: `[6,543](q1@n)` is
+    `q1#day=2026-06-18@n`. None when the ref already names one value, or the words fit no cell or several."""
+    from .objects import NUM_RE, number_matches
+
+    if not label:
+        return None
+    try:
+        p = R.parse(ref)
+    except R.RefError:
+        return None
+    if p["kind"] != "query":
+        return None
+    q = Q.get(st, p["query"])
+    if not q:
+        return None
+    table = q.get("table") or []
+    frag = {k: p[k] for k in ("row", "keys") if k in p}
+    idx = Q.find_rows(q, frag) if frag else list(range(len(table)))
+    if frag and len(idx) == 1 and "col" in p:
+        return None
+    words = " ".join(str(label).replace("**", "").split()).strip("\"“”'")
+    hits: list[tuple[int, str]] = []
+    has_num = bool(NUM_RE.search(words.replace(" ", "")))
+    keys = set(q.get("keys") or [])
+    for i in idx:
+        r = table[i]
+        cols = [Q.column(r, p["col"])] if "col" in p else [c for c in r if not str(c).startswith("_")]
+        for c in cols:
+            if c is None:
+                continue
+            v = r.get(c)
+            if has_num:
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and c not in keys and number_matches(words, v):
+                    hits.append((i, c))
+            elif isinstance(v, str) and v.strip() and v.strip().lower() == words.lower():
+                hits.append((i, c))
+    if len({i for i, _ in hits}) != 1:
+        return None
+    i, c = hits[0]
+    cols = {c for _, c in hits}
+    own = Q.row_refs(q)[i]
+    shown = f"{own}@{R.ref_value(c)}" if len(cols) == 1 else own
+    return shown, f"the words show {words!r}, which only row {i + 1} of {q['id']} holds"
+
+
+def about_rows(chain: list[dict[str, Any]]) -> str:
+    """What a resolve's rows are, in words: the query's question and the key of the row they stand behind."""
+    for step in chain:
+        if step.get("step") == "query":
+            bits = [str(step.get("about") or step.get("id"))]
+            rows = step.get("rows") or []
+            if len(rows) == 1:
+                keys = [k for k in rows[0] if k != "i" and isinstance(rows[0][k], str)][:2]
+                bits += [f"{k} {rows[0][k]}" for k in keys]
+            return " · ".join(bits)
+        if step.get("step") == "object" and step.get("title"):
+            return str(step["title"])
+    return ""
+
+
+def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | None = None) -> dict[str, Any]:
     """Where a ref's value came from: a chain of steps from the ref down to source rows, the rows as row sets, how many,
-    and up to n of them read back."""
+    and up to n of them read back (spread across the rows). With `label`, the words a citation shows: a citation of a
+    whole query is narrowed to the one row that holds the value it shows."""
+    wrote = None
+    got = narrow(st, ref, label) if label else None
+    if got:
+        wrote, ref = ref, got[0]
     p = R.parse(ref)
     chain: list[dict[str, Any]] = []
     notes: list[str] = []
@@ -165,7 +275,15 @@ def resolve(st: Store, ref: str, n: int = 5, pick: str = "first") -> dict[str, A
     else:
         rowsets = [R.format_source(p)] if p["kind"] not in ("file", "table") else [ref]
         chain.append({"step": "source", "ref": ref, "kind": S.kind_of_file(st.root, p["path"])})
+    if got:
+        notes.insert(0, f"{wrote} names more than one value; {got[1]}, so its rows are {ref}'s")
     out: dict[str, Any] = {"ref": ref, "chain": chain, "rows": rowsets, "notes": notes}
+    if wrote:
+        out["wrote"] = wrote
+        out["narrowed"] = ref
+    about = about_rows(chain)
+    if about:
+        out["about"] = about
     try:
         files_only = all(R.parse(x)["kind"] in ("file", "table") for x in rowsets)
         out["count"] = None if files_only else R.count(rowsets)
@@ -200,9 +318,10 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
         step["rows"] = [{"i": i + 1, **rows_tbl[i]} for i in idx[:20]]
         if "col" in p:
             if len(idx) == 1:
-                if p["col"] not in rows_tbl[idx[0]]:
+                col = Q.column(rows_tbl[idx[0]], p["col"])
+                if col is None:
                     raise R.RefError(f"{q['id']}'s output has no column {p['col']!r}; it has {', '.join(rows_tbl[idx[0]])}")
-                step["value"] = rows_tbl[idx[0]][p["col"]]
+                step["value"] = rows_tbl[idx[0]][col]
     if not q.get("rows"):
         notes.append(f"{q['id']} keeps no rows per output row (lineage: query), so each of its values rests on every "
                      "row it read; tally() or a `_refs` column keeps them")

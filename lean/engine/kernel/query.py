@@ -557,19 +557,41 @@ def all_inputs(st: Store, q: dict[str, Any], seen: set[str] | None = None) -> li
     return out
 
 
+def column(r: dict[str, Any], k: str) -> str | None:
+    """The column of an output row that a ref's key or `@col` names: as written, else the one with the same slug."""
+    if k in r:
+        return k
+    sk = R.value_slug(k)
+    if sk:
+        for c in r:
+            if R.value_slug(c) == sk:
+                return c
+    return None
+
+
 def find_rows(q: dict[str, Any], frag: dict[str, Any]) -> list[int]:
-    """Indexes of the output rows a query ref's fragment names."""
+    """Indexes of the output rows a query ref's fragment names. A key value matches as written (or as the same number);
+    when no row matches so, it matches by its slug, so `won-clean-ep` finds "won (clean ep)"."""
     table = q.get("table") or []
     if "row" in frag:
         i = frag["row"] - 1
         return [i] if 0 <= i < len(table) else []
     if "keys" in frag:
         want = frag["keys"]
-        hits = []
-        for i, r in enumerate(table):
-            if all(k in r and _same(r[k], v) for k, v in want.items()):
-                hits.append(i)
-        return hits
+        for loose in (False, True):
+            hits = []
+            for i, r in enumerate(table):
+                ok = True
+                for k, v in want.items():
+                    c = column(r, k)
+                    if c is None or not (_same(r[c], v) or (loose and _slug_same(r[c], v))):
+                        ok = False
+                        break
+                if ok:
+                    hits.append(i)
+            if hits:
+                return hits
+        return []
     return list(range(len(table)))
 
 
@@ -580,6 +602,35 @@ def _same(a: Any, b: str) -> bool:
         return float(a) == float(b.replace(",", ""))
     except (TypeError, ValueError):
         return False
+
+
+def _slug_same(a: Any, b: str) -> bool:
+    sb = R.value_slug(b)
+    if isinstance(a, bool):
+        a = "true" if a else "false"
+    return bool(sb) and R.value_slug(a) == sb
+
+
+def row_refs(q: dict[str, Any]) -> list[str]:
+    """The ref of each output row, as a citation names it: by its key columns (`q3#day=2026-06-18`, a value with
+    punctuation as its slug), or by its place (`q3#row=4`) when its keys do not tell it from another row."""
+    table = q.get("table") or []
+    qid = q.get("id") or "q0"
+    if not table:
+        return []
+    keys = [k for k in q.get("keys") or [] if not str(k).startswith("_")]
+    if keys:
+        tup = [tuple(R.value_slug(r.get(k)) for k in keys) if all(k in r for k in keys) else None for r in table]
+        seen = Counter(t for t in tup if t is not None)
+    out = []
+    for i, r in enumerate(table):
+        if keys and tup[i] is not None and seen[tup[i]] == 1 and all(tup[i]):
+            frag = "&".join(f"{R.ref_value(k)}={R.ref_value(r[k])}" for k in keys)
+            if len(frag) <= 160:
+                out.append(f"{qid}#{frag}")
+                continue
+        out.append(f"{qid}#row={i + 1}")
+    return out
 
 
 def cite_example(q: dict[str, Any]) -> str | None:
@@ -595,9 +646,5 @@ def cite_example(q: dict[str, Any]) -> str | None:
         return None
     v = r[col]
     shown = f"{v:,}" if isinstance(v, int) else (f"{v:,.2f}" if isinstance(v, float) else str(v))
-    if keys:
-        # a value with a space or a bracket is percent-encoded, so the citation stays one Markdown link
-        frag = "&".join(f"{k}={quote(str(r[k]), safe='-_.:~,')}" for k in keys)
-        if len(frag) <= 100:
-            return f"[{shown}]({q['id']}#{frag}@{col})"
-    return f"[{shown}]({q['id']}#row=1@{col})"
+    # a key value with a space or a bracket is written as its slug, so the citation stays one Markdown link
+    return f"[{shown}]({row_refs(q)[0]}@{R.ref_value(col)})"

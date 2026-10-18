@@ -9,7 +9,8 @@ session's permission mode and sandbox like any other command.
     lean save [NAME] [--rerun] <<'JSON' ... JSON   (or --from FILE)
                                             save an object (program + data + lineage) or a new version of one
     lean list [NAME]                        the objects, or one object with its lineage
-    lean resolve REF [-n 5] [--random]      where a value came from, down to its source rows
+    lean resolve REF [-n 5] [--label WORDS] where a value came from, down to its source rows (a few of them, spread
+                                            across the rows)
     lean coverage [NAME] [--all]            what was read and what was not (of this session, or of an object)
     lean trace [REF] [--text PASSAGE] [--in GLOB]
                                             where it came from and where it went: the path back to its rows, what
@@ -318,6 +319,10 @@ def cmd_save(a: argparse.Namespace) -> int:
     ok = [c for c in cites if not c.get("problem")]
     if cites:
         print(f"  {len(ok)} of {len(cites)} citations hold")
+    narrowed = [c for c in cites if c.get("wrote")]
+    if narrowed:
+        print(f"  {len(narrowed)} citation{'s' if len(narrowed) != 1 else ''} named more than one value; each opens the "
+              f"row that holds the value its words show, as {narrowed[0]['wrote']} → {narrowed[0]['ref']}")
     for p in lin["problems"]:
         print(f"  problem: {p}")
     rows = lin["rows"]
@@ -401,7 +406,7 @@ def cmd_list(a: argparse.Namespace) -> int:
 def cmd_resolve(a: argparse.Namespace) -> int:
     st = Store()
     try:
-        r = LIN.resolve(st, a.ref, n=a.n, pick="random" if a.random else "first")
+        r = LIN.resolve(st, a.ref, n=a.n, pick="random" if a.random else "first" if a.first else "spread", label=a.label)
     except R.RefError as e:
         print(f"{a.ref}: {e}")
         return 1
@@ -442,7 +447,7 @@ def cmd_resolve(a: argparse.Namespace) -> int:
         print(f"  problem: {r['error']}")
     recs = r.get("records") or []
     if recs:
-        how = "at random" if a.random else "the first in file order"
+        how = "at random" if a.random else "the first in file order" if a.first else "spread across them"
         print(f"\n{len(recs)} of them, {how}:")
         for x in recs:
             print(f"  {x['ref']}  {x['text']}")
@@ -538,6 +543,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("ref")
     p.add_argument("-n", type=int, default=5)
     p.add_argument("--random", action="store_true")
+    p.add_argument("--first", action="store_true", help="the first rows in file order, not rows spread across them")
+    p.add_argument("--label", help="the words the citation shows: a citation of a whole query opens the row that holds them")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_resolve)
     p = sub.add_parser("coverage", help="what was read and what was not")
