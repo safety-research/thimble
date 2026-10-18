@@ -89,9 +89,10 @@ test('its sources are the citations in its sentence, else the nearest in its blo
   assert.deepEqual(sourcesNear(A1, at.start, at.end), [{ ref: 'q4#user=Kestrel@share', label: '41%' }, { ref: 'q7#user=Kestrel@n', label: '212 of them' }])
   const item = findQuote(A1, 'June 18 had 6,543 saves')
   assert.deepEqual(sourcesNear(A1, item.start, item.end).map(s => s.ref), ['q1#day=2026-06-18@n'])
-  // a sentence with no citation of its own: the nearest two of its paragraph
+  // a sentence with no citation of its own borrows only a citation of its paragraph that shows a number it states
   const tilt = findQuote(A1, 'The tilt is one editor')
-  assert.deepEqual(sourcesNear(A1, tilt.start, tilt.end).map(s => s.ref), ['q4#user=Kestrel@share', 'q7#user=Kestrel@n'])
+  assert.deepEqual(sourcesNear(A1, tilt.start, tilt.end, 'The tilt is one editor'), [])
+  assert.deepEqual(sourcesNear(A1, tilt.start, tilt.end, 'The tilt is one editor with 212 reverts').map(s => s.ref), ['q7#user=Kestrel@n'])
   assert.equal(shortRef('runs/r1/agents/a.jsonl#L12-L14'), 'a.jsonl:12-14')
   assert.equal(shortRef('q4#user=Kestrel@share'), 'q4 · user=Kestrel · share')
 })

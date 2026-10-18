@@ -219,15 +219,19 @@ export function findQuote(md, quote) {
   return best ? { start: best.start, end: best.end, exact: false } : null
 }
 
-/** The citations in or near [start, end): those in its sentence, else the nearest two in its block (a paragraph, a
- *  list item, a table row), at most four. Each is {ref, label}: the ref as Claude wrote it and its words. */
-export function sourcesNear(md, start, end) {
+const numbersIn = t => new Set((String(t || '').match(/\d[\d,.]*/g) || []).map(x => x.replace(/[,.]+$/, '').replace(/,/g, '')))
+
+/** The citations in or near [start, end): those in its sentence; with none there, those of its block (a paragraph, a
+ *  list item, a table row) whose words hold a number the claim states (`text`), so a sentence with no citation of its
+ *  own borrows only one that shows the same value. At most four, each {ref, label}: the ref as written and its words. */
+export function sourcesNear(md, start, end, text = '') {
   const s = String(md || '')
   const marks = linkMarks(s)
   if (!marks.length) return []
   const sent = sentenceAt(s, start, end)
   let got = marks.filter(m => m.start >= sent.start && m.end <= Math.max(sent.end, end))
-  if (!got.length) {
+  const want = numbersIn(text)
+  if (!got.length && want.size) {
     const b = blocks(s).find(x => start >= x.start && start <= x.end)
     if (b) {
       let from = b.start
@@ -236,7 +240,7 @@ export function sourcesNear(md, start, end) {
         const row = (b.rows || []).find(r => start >= r.start && start <= r.end)
         if (row) { from = row.start; to = row.end }
       }
-      got = marks.filter(m => m.start >= from && m.end <= to).sort((x, y) => Math.abs(x.start - start) - Math.abs(y.start - start)).slice(0, 2)
+      got = marks.filter(m => m.start >= from && m.end <= to && [...numbersIn(m.label)].some(n => want.has(n))).sort((x, y) => Math.abs(x.start - start) - Math.abs(y.start - start)).slice(0, 2)
     }
   }
   const out = []
@@ -282,7 +286,7 @@ export function wordsIn(md, start, end) {
  * Claude's messages, newest first; then any). A place is {row, by, turn, text}; returns the place as the store keeps
  * it, with the sources near it, or null when the quote is in none of them.
  */
-export function locate(quote, places, by = 'claude') {
+export function locate(quote, places, by = 'claude', text = '') {
   const list = Array.isArray(places) ? places : []
   const mine = list.filter(p => (p.by || 'claude') === by).reverse()
   const rest = list.filter(p => (p.by || 'claude') !== by).reverse()
@@ -297,7 +301,7 @@ export function locate(quote, places, by = 'claude') {
         sentence: cutTo(wordsIn(p.text, sent.start, sent.end), MAX_SENTENCE),
         start: hit.start, end: hit.end,
       },
-      sources: sourcesNear(p.text, hit.start, hit.end),
+      sources: sourcesNear(p.text, hit.start, hit.end, text),
       exact: hit.exact,
     }
   }
@@ -417,7 +421,8 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
   const local = new Map()
   for (const it of items) {
     if (it.revises && /^#\d+$/.test(it.revises)) it.revises = local.get(Number(it.revises.slice(1))) || null
-    const where = locate(it.quote, places, it.by)
+    const known = it.same ? store.claims.find(c => c.id === it.same) : null
+    const where = locate(it.quote, places, it.by, it.text || known?.text || '')
     if (!where) { res.dropped.push({ claim: it.text || it.same, why: `its words "${cutTo(it.quote, 60)}" are not in this turn's messages` }); continue }
     let target = it.same && !it.revises ? store.claims.find(c => c.id === it.same) : null
     if (it.same && !it.revises && !target && !it.text) { res.dropped.push({ claim: it.same, why: `no claim ${it.same} so far` }); continue }

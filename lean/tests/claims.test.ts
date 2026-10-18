@@ -212,8 +212,11 @@ test('the ring on a claim: its whole text, its links as thin lines, a revision d
   const bar = textOf(await $.ui.render(PANE))
   expect(bar).toContain('said in turn 1')
   expect(bar).toContain('×2')
-  expect(bar).toMatch(/41%.*212 of them/)
   expect(bar).toContain('revised in turn 2 to The tilt is two editors, Kestrel and Wren, not one')
+  // a claim with sources: its cite marks, each on a digit
+  await ui.press({ key: 'cl-c2' })
+  await w.clock.settle()
+  expect(textOf(await $.ui.render(PANE))).toMatch(/41%.*212 of them/)
   expect(textOf(await $.ui.render(HINT))).toContain('↵ select · 1–2 source')
   // 1 opens its first source in the tray (the key comes through the prompt), and the pane takes the keys back
   const opened = w.opened.length
