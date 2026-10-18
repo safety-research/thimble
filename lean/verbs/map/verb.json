@@ -1,0 +1,21 @@
+{
+  "key": "m",
+  "name": "map",
+  "line": "lay the work out by its own structure, so its shape is visible",
+  "order": 0,
+  "absorbs": [
+    "Trail (a metro map of work the model builds)",
+    "Atlas (concepts the model extracts, drawn as regions)",
+    "view proposals"
+  ],
+  "writer": "Claude, in the main conversation, guided by SKILL.md: one lean q for the stations, one lean save for the map; the drawing is k.map, code, not a model",
+  "forms": {
+    "line": "one thread: a long run",
+    "metro": "many threads: runs, a sweep, a swarm",
+    "regions": "no threads: a dataset, a report, a code change"
+  },
+  "keys": {
+    "m": "on a map: the full map; on a selected station or lane: the threads through it on a map of their own; on anything else: ask Claude to map it",
+    "tab": "the next station, lane or group; its rows and its moves show below the map"
+  }
+}
