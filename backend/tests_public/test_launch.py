@@ -1,290 +1,143 @@
-"""The launch (`thimble`, cli.launch_args): before main starts it registers the folder, marks it active for the plugin's
-hooks, starts thimble's server and finds the workspace's extensions again, and writes launch.json; it unsets the
-variables that would override the agents' models and efforts, says why thimble's agents may not start, and adds no
-permission rule and no sandbox to main's session."""
+"""The `thimble` command (0.9.0): `claude` with thimble's browser workbench opened at its start. It exports exactly
+THIMBLE_OPEN, NO_PROXY, no_proxy and CLAUDE_CODE_TERMINAL_MCP_TOOLS, loads the plugin with --plugin-dir only when Claude
+Code has not installed it, gives `/thimble browser` as the first prompt only where the hooks module will not load, and
+nothing else: no --append-system-prompt, no --settings, no --name, no switches. launch_args finds those values and keeps
+them in <home>/launcher.json under the launcher's key, so a launch whose files did not change starts `claude` without
+the backend's Python; it registers no folder and starts no server. `thimble mode` and `thimble cc-mod` say there are no
+modes."""
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from app import cc_plugin, cli, config, userconf
+from app import cc_plugin, cli, config
 
-REGISTER = cli.register_here  # the real one, which conftest replaces for the other tests
-REFRESH = cli.refresh_extensions
-SERVER_FOR_LAUNCH = cli.server_for_launch
-
-# the launcher's lines (launch_args): the plugin folder, the effort, the settings, the turn tools, main's name, the
-# session id, the switches, the unset names, the notes, the mode line
-EFFORT, SETTINGS, SESSION, UNSET, NOTES = 1, 2, 5, 7, 8
+ROOT = Path(__file__).resolve().parents[2]
+LOAD, TURN_TOOLS, MODULES_OFF, NOTES = 0, 1, 2, 3  # launch_args' lines
+# launch-args as the launcher's tree of stubs runs it: prints the lines of `<file>` and keeps them under --key, as
+# cli.launch_args does, and counts its runs in `<file>.runs`
+STUB_LAUNCH_ARGS = '''import json, os, sys
+src = sys.argv[1]
+a = sys.argv[2:]
+key = a[a.index("--key") + 1] if "--key" in a else ""
+lines = (open(src).read().split("\\n") + ["", "", "", ""])[:4]
+open(src + ".runs", "a").write("run\\n")
+print("\\n".join(lines))
+home = os.environ["THIMBLE_HOME"]
+path = os.path.join(home, "launcher.json")
+try:
+    kept = json.load(open(path))
+except (OSError, ValueError):
+    kept = {}
+kept[key] = {"load": lines[0], "turn_tools": lines[1], "modules_off": lines[2],
+             "notes": [n for n in lines[3].split("\\t") if n]}
+json.dump(kept, open(path, "w"))
+'''
 
 
 @pytest.fixture()
 def corpus(tmp_path, monkeypatch) -> Path:
-    """A folder to start thimble in, with the data folder, the workspaces and thimble's home of the test's own; the
-    folder registered as `logs`."""
-    data = tmp_path / "data"
-    data.mkdir()
-    monkeypatch.setenv("THIMBLE_DATA_DIR", str(data))
-    monkeypatch.setattr(config, "DATA_DIR", data.resolve())
+    """A folder to start thimble in, with thimble's home and Claude Code's config dir of the test's own."""
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("THIMBLE_PORT", "21101")
-    monkeypatch.setenv("THIMBLE_UI_PORT", "21102")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
-    for name in (*cli.UNSET_VARS, cli.NO_MODULE_ENV, cli.SAFE_MODE_ENV, "THIMBLE_CALLER_CWD", "THIMBLE_DEV_DIR"):
+    for name in (*cli.UNSET_VARS, cli.NO_MODULE_ENV, cli.SAFE_MODE_ENV, "THIMBLE_CALLER_CWD"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {})
+    monkeypatch.setattr(cli, "claude_code_version", lambda: None)
     folder = tmp_path / "work" / "logs"
     folder.mkdir(parents=True)
-    config.register_corpus(folder, exact=True)
     return folder
 
 
-def _launch(c: str = "logs") -> dict:
-    return json.loads((config.WORKSPACES_DIR / c / cli.LAUNCH_FILE).read_text())
+def test_launch_args_name_the_plugin_folder_the_turn_tools_and_why_the_module_is_off_and_keep_them(corpus, tmp_path):
+    """Four lines; with a key, kept in <home>/launcher.json (0600, the LAUNCHER_KEPT newest keys). No folder is
+    registered and no server starts: the session turns thimble on itself (THIMBLE_OPEN)."""
+    lines = cli.launch_args(corpus, key="k1").split("\n")
+    assert len(lines) == 4
+    assert lines[LOAD] == str(cli.plugin_root()), "installed_copy None (conftest): load plugin/"
+    assert lines[MODULES_OFF] == "" and lines[NOTES] == ""
+    kept_file = tmp_path / "home" / cli.LAUNCHER_FILE
+    kept = json.loads(kept_file.read_text())
+    assert set(kept) == {"k1"} and kept["k1"]["load"] == lines[LOAD] and kept["k1"]["turn_tools"] == lines[TURN_TOOLS]
+    assert kept_file.stat().st_mode & 0o777 == 0o600
+    assert config.workspace_for_cwd(str(corpus)) is None, "no folder registered"
+    for i in range(cli.LAUNCHER_KEPT + 3):
+        cli.launch_args(corpus, key=f"k{i + 2}")
+    kept = json.loads(kept_file.read_text())
+    assert len(kept) == cli.LAUNCHER_KEPT and "k1" not in kept and f"k{cli.LAUNCHER_KEPT + 4}" in kept
 
 
-def test_launch_args_on_a_new_folder_registers_it_refreshes_its_extensions_first_and_writes_launch_json(
-        tmp_path, corpus, monkeypatch):
-    """On a folder never registered, launch-args registers it, marks it active for the plugin's hooks, finds its
-    extensions again before anything reads the roles (U4), prints no --agents line, writes launch.json with main's
-    session id, the switches and the variables it unsets, and gives main no permission rule and no sandbox."""
-    monkeypatch.setattr(cli, "register_here", REGISTER)
-    seen: list[str] = []
-    monkeypatch.setattr(cli, "refresh_extensions", lambda c: seen.append(c))
-    fresh = tmp_path / "work" / "notes"
-    fresh.mkdir()
-    assert config.workspace_for_cwd(str(fresh)) is None
-    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "haiku")
-    lines = cli.launch_args(fresh).split("\n")
-    assert config.workspace_for_cwd(str(fresh)) == "notes" and seen == ["notes"]
-    assert all((cli.home() / cli.ACTIVE_DIR / key).is_file() for key in cli.active_keys(fresh))
-    assert "--agents" not in "\n".join(lines[:10])
-    rec = _launch("notes")
-    assert rec["session"] == lines[SESSION] and cli.SESSION_ID_RE.fullmatch(rec["session"])
-    assert rec["switches"] == cli.SWITCHES and rec["unset"] == ["CLAUDE_CODE_SUBAGENT_MODEL"] and rec["at"]
-    assert "fenced" not in rec
-    settings = json.loads(lines[SETTINGS])
-    assert "sandbox" not in settings and "permissions" not in settings, "thimble adds no rule and no sandbox"
-    resumed = cli.launch_args(fresh, own_session="0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b").split("\n")
-    assert resumed[SESSION] == "" and _launch("notes")["session"] == "0b9d2f3e-1c2d-4e5f-8a9b-0c1d2e3f4a5b", \
-        "the analyst's own --resume or --session-id names it"
-    cli.launch_args(fresh, own_session="")
-    assert _launch("notes")["session"] is None
-    assert REGISTER(Path.home()) is None, "the home folder is never a workspace"
+# ----------------------------------------------------------------------------- the launcher itself
 
 
-def test_the_launch_starts_the_server_before_main_and_before_it_finds_the_extensions(corpus, monkeypatch):
-    """A server that is not up when `claude` starts lets the hooks module register thimble's agent types only later,
-    and Claude Code then prints "N agent type(s) available" instead of listing them from main's first turn. So the
-    launch starts the server and waits for it first, then finds the extensions through it, and prints what the start
-    said; a folder thimble does not open starts none."""
-    order: list[str] = []
-    monkeypatch.setattr(cli, "server_for_launch", lambda c: order.append(f"server {c}") or ["thimble: restarted"])
-    monkeypatch.setattr(cli, "refresh_extensions", lambda c: order.append(f"extensions {c}"))
-    lines = cli.launch_args(corpus).split("\n")
-    assert order == ["server logs", "extensions logs"] and "thimble: restarted" in lines[NOTES].split("\t")
-    order.clear()
-    monkeypatch.setattr(cli, "register_here", lambda cwd: None)
-    cli.launch_args(corpus)
-    assert order == []
+def _tree(tmp_path: Path, lines: list[str]) -> tuple[Path, Path, Path]:
+    """plugin/bin/thimble in a tree of stubs (STUB_LAUNCH_ARGS for launch-args), and a `claude` that writes its argv,
+    one per line, and its environment: (the launcher, the PATH folder, the file launch-args counts its runs in)."""
+    tree = tmp_path / "tree"
+    bin_ = tree / "plugin" / "bin"
+    bin_.mkdir(parents=True)
+    shutil.copy(ROOT / "plugin" / "bin" / "thimble", bin_ / "thimble")
+    (tree / "plugin" / ".claude-plugin").mkdir()
+    (tree / "plugin" / ".claude-plugin" / "plugin.json").write_text('{"name": "thimble", "version": "9.9.9"}')
+    (tree / "backend").mkdir()
+    src = tmp_path / "launch-args.txt"
+    src.write_text("\n".join(lines))
+    (tmp_path / "stub_launch_args.py").write_text(STUB_LAUNCH_ARGS)
+    stubs = {"thimble-app-dir": f'#!/bin/sh\necho "{tree}"\n',
+             "thimble-python": f'#!/bin/sh\nshift 2\nexec python3 "{tmp_path}/stub_launch_args.py" "{src}" "$@"\n'}
+    for name, body in stubs.items():
+        (bin_ / name).write_text(body)
+        (bin_ / name).chmod(0o755)
+    path = tmp_path / "path"
+    path.mkdir()
+    (path / "claude").write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done > "$ARGV_OUT"\n'
+                                 'env > "$ENV_OUT"\n')
+    (path / "claude").chmod(0o755)
+    return bin_ / "thimble", path, src.with_name("launch-args.txt.runs")
 
 
-def test_server_for_launch_starts_and_waits_for_the_server_and_never_stops_the_launch(corpus, monkeypatch):
-    """server_for_launch runs `up`'s start (ensure_running) with its wait and passes on its notices; another install's
-    server on the port, a server that does not answer in time and a start that fails each give a line or nothing, and
-    the launch goes on."""
-    monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)
-    monkeypatch.setattr(cli, "stuck_server", lambda url=None: None)
-    waits: list[float] = []
-
-    def running(wait: float) -> bool:
-        waits.append(wait)
-        cli.NOTICES.append("thimble: the server restarted")
-        return True
-
-    monkeypatch.setattr(cli, "ensure_running", running)
-    assert SERVER_FOR_LAUNCH("logs") == ["thimble: the server restarted"] and waits == [cli.WAIT_S]
-    monkeypatch.setattr(cli, "ensure_running", lambda wait: False)
-    assert SERVER_FOR_LAUNCH("logs") == [cli.LAUNCH_NO_SERVER_LINE.format(wait=cli.WAIT_S, log=cli.log_path())]
-
-    def slow(wait: float) -> bool:
-        raise TimeoutError("still starting")
-
-    monkeypatch.setattr(cli, "ensure_running", slow)
-    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
-    assert SERVER_FOR_LAUNCH("logs") == [], "it answered after all"
-
-    def broken(wait: float) -> bool:
-        raise OSError("no port")
-
-    monkeypatch.setattr(cli, "ensure_running", broken)
-    assert SERVER_FOR_LAUNCH("logs") == []
-    monkeypatch.setattr(cli, "foreign_home", lambda url=None: "/other/home")
-    assert SERVER_FOR_LAUNCH("logs") == [cli.FOREIGN_LINE.format(port=cli.port())]
+BASE_ENV = ("PATH", "HOME", "THIMBLE_HOME", "CLAUDE_CONFIG_DIR", "ARGV_OUT", "ENV_OUT", "PWD", "SHLVL", "_", "OLDPWD")
 
 
-def test_launch_json_names_the_launchers_pid_where_kernels_and_file_tools_cannot_change_it(corpus):
-    """The launcher passes its own pid (--launcher-pid $$), which launch.json records until the launcher writes main's
-    `claude` process there as it starts it. launch.json stays a file the hooks trust: written where kernels see it
-    read-only, in a folder the hooks module refuses every edit tool (userconf.module_rules' records)."""
-    from app import kernel_wrap  # noqa: PLC0415
-
-    args = cli.build_parser().parse_args(["launch-args", "--launcher-pid", "4242", "--cwd", str(corpus)])
-    assert args.launcher_pid == 4242
-    cli.launch_args(corpus, launcher_pid=args.launcher_pid)
-    path = config.workspace_dir("logs") / cli.LAUNCH_FILE
-    rec = json.loads(path.read_text())
-    assert rec["pid"] == 4242 and cli.SESSION_ID_RE.fullmatch(rec["session"])
-    cli.launch_args(corpus)
-    assert "pid" not in json.loads(path.read_text()), "a launcher that names no pid: the bridge waits for /thimble"
-    cli.launch_args(corpus, launcher_pid=1)
-    assert "pid" not in json.loads(path.read_text()), "never init"
-    assert path.parent.name == kernel_wrap.TRUSTED_DIR in kernel_wrap.READ_ONLY_DIRS
-    records = userconf.module_rules("logs")["records"]
-    assert str(path.parent) in records or str(path.parent.resolve()) in records
+def _run(launcher: Path, path: Path, tmp_path: Path, *args: str, **env: str) -> tuple[list[str], dict, str]:
+    (tmp_path / "home").mkdir(exist_ok=True)
+    base = {"PATH": f"{path}:/usr/bin:/bin", "HOME": str(tmp_path), "THIMBLE_HOME": str(tmp_path / "home"),
+            "CLAUDE_CONFIG_DIR": str(tmp_path / "cc"), "ARGV_OUT": str(tmp_path / "argv.txt"),
+            "ENV_OUT": str(tmp_path / "env.txt")}
+    done = subprocess.run(["bash", str(launcher), *args], check=True, capture_output=True, text=True,
+                          cwd=tmp_path, env={**base, **env}, timeout=60)
+    seen = dict(line.split("=", 1) for line in (tmp_path / "env.txt").read_text().splitlines() if "=" in line)
+    return (tmp_path / "argv.txt").read_text().splitlines(), seen, done.stderr
 
 
-def test_refresh_extensions_asks_a_running_server_else_finds_them_here(corpus, monkeypatch):
-    """A running server of this install refreshes the workspace's extensions (GET /ws/{c}/extensions); without one
-    launch-args finds them itself. Neither failing stops the launch."""
-    calls: list = []
-    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
-    monkeypatch.setattr(cli, "foreign_home", lambda url=None: None)
-    monkeypatch.setattr(cli, "_request", lambda method, url, body=None, timeout=5.0, **kw: calls.append((method, url))
-                        or (200, {}))
-    REFRESH("logs")
-    assert calls == [("GET", f"{cli.api_url()}/api/ws/logs/extensions")]
-    from app import extensions
-
-    found: list[str] = []
-
-    async def refresh(c, wait=0.0):
-        found.append(c)
-        return {}
-
-    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
-    monkeypatch.setattr(extensions, "refresh", refresh)
-    REFRESH("logs")
-    assert found == ["logs"]
-
-    async def broken(c, wait=0.0):
-        raise RuntimeError("no")
-
-    monkeypatch.setattr(extensions, "refresh", broken)
-    REFRESH("logs")  # never raises
+def test_the_launcher_execs_claude_with_exactly_its_four_variables_and_no_appended_prompt(tmp_path):
+    tools = "Agent,mcp__plugin_thimble_thimble__add_card"
+    launcher, path, runs = _tree(tmp_path, [str(tmp_path / "tree" / "plugin"), tools, "", "thimble: a note"])
+    argv, env, err = _run(launcher, path, tmp_path, "--model", "opus", "-c", "--new")
+    assert argv == ["--plugin-dir", str(tmp_path / "tree" / "plugin"), "--model", "opus", "-c"], \
+        "every flag as given, but 0.8.0's --new"
+    assert "--append-system-prompt" not in argv and "--settings" not in argv and "--name" not in argv
+    added = {k: v for k, v in env.items() if k not in BASE_ENV}
+    assert added == {"THIMBLE_OPEN": "1", "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
+                     "CLAUDE_CODE_TERMINAL_MCP_TOOLS": tools}, added
+    assert err.strip() == "thimble: a note"
+    assert runs.read_text().splitlines() == ["run"]
+    # the next launch reads launcher.json under the same key: no backend Python
+    argv2, env2, err2 = _run(launcher, path, tmp_path, "--model", "opus", "-c")
+    assert argv2 == argv and env2["THIMBLE_OPEN"] == "1" and err2.strip() == "thimble: a note"
+    assert runs.read_text().splitlines() == ["run"], "read from launcher.json"
 
 
-def test_the_launch_unsets_the_effort_and_subagent_model_variables_and_gives_main_its_effort(corpus, monkeypatch):
-    """CLAUDE_CODE_EFFORT_LEVEL is unset and its value passed as main's --effort, unless thimble's models.main names
-    main's effort; the two subagent-model variables are unset; a note names each."""
-    monkeypatch.setenv("CLAUDE_CODE_EFFORT_LEVEL", "high")
-    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL", "haiku")
-    monkeypatch.setenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "1")
-    lines = cli.launch_args(corpus).split("\n")
-    assert lines[EFFORT] == "high" and lines[UNSET].split() == list(cli.UNSET_VARS)
-    notes = lines[NOTES].split("\t")
-    assert cli.UNSET_EFFORT_LINE.format(effort="high") in notes
-    assert all(cli.UNSET_LINE.format(name=n) in notes for n in cli.UNSET_VARS[1:])
-    (config.WORKSPACES_DIR / "logs").mkdir(parents=True, exist_ok=True)
-    (config.WORKSPACES_DIR / "logs" / "settings.json").write_text(json.dumps({"models": {"main": {"effort": "low"}}}))
-    lines = cli.launch_args(corpus).split("\n")
-    assert lines[EFFORT] == "low" and "CLAUDE_CODE_EFFORT_LEVEL" in lines[UNSET].split()
-    monkeypatch.delenv("CLAUDE_CODE_EFFORT_LEVEL")
-    monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL")
-    monkeypatch.delenv("CLAUDE_CODE_SUBAGENT_MODEL_FORCE")
-    assert cli.launch_args(corpus).split("\n")[UNSET] == ""
-
-
-def test_main_s_settings_blank_the_variables_a_settings_file_s_env_would_set_and_main_keeps_its_effort(corpus, tmp_path):
-    """An `env` block in the analyst's Claude Code settings sets CLAUDE_CODE_EFFORT_LEVEL, which would override every
-    agent's effort (live check L30), past the launcher's unset line. Main's --settings, which rank above the analyst's
-    files, give each of the three variables '', which Claude Code reads as unset. Main runs at the level the settings
-    file named, passed as --effort, unless models.main names one; a note names each variable a settings file set."""
-    def env_of(lines: list[str]) -> dict:
-        return json.loads(lines[SETTINGS])["env"]
-
-    blank = {name: "" for name in cli.UNSET_VARS}
-    lines = cli.launch_args(corpus).split("\n")
-    assert env_of(lines) == blank
-    assert not any("is blank in this session" in n for n in lines[NOTES].split("\t"))
-    (tmp_path / "cc").mkdir(exist_ok=True)
-    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "medium",
-                                                                         "CLAUDE_CODE_SUBAGENT_MODEL": "haiku"}}))
-    lines = cli.launch_args(corpus).split("\n")
-    assert env_of(lines) == blank and lines[EFFORT] == "medium" and lines[UNSET] == ""
-    notes = lines[NOTES].split("\t")
-    assert cli.BLANKED_EFFORT_LINE.format(effort="medium") in notes
-    assert cli.BLANKED_LINE.format(name="CLAUDE_CODE_SUBAGENT_MODEL") in notes
-    assert not any("CLAUDE_CODE_SUBAGENT_MODEL_FORCE" in n for n in notes)
-    lines = cli.launch_args(corpus, settings=json.dumps({"env": {"CLAUDE_CODE_EFFORT_LEVEL": "max", "MINE": "1"}}))
-    assert env_of(lines.split("\n")) == {**blank, "MINE": "1"}, "their own --settings too"
-    (config.WORKSPACES_DIR / "logs").mkdir(parents=True, exist_ok=True)
-    (config.WORKSPACES_DIR / "logs" / "settings.json").write_text(json.dumps({"models": {"main": {"effort": "low"}}}))
-    assert cli.launch_args(corpus).split("\n")[EFFORT] == "low", "the composer's choice for main wins"
-
-
-def test_the_launch_says_plainly_when_hooks_modules_are_off_and_still_launches(corpus, tmp_path, monkeypatch):
-    """Managed settings that set disableAllHooks or allowManagedHooksOnly, the analyst's own disableAllHooks or
-    THIMBLE_NO_MODULE: the note line says thimble's agents can't start and why, and the launch goes on; THIMBLE_NO_MODULE
-    is recorded among the switches. Safe mode gets its warning."""
-    def note(**kw) -> list[str]:
-        return cli.launch_args(corpus, **kw).split("\n")[NOTES].split("\t")
-
-    assert not any("hooks modules are off" in n for n in note())
-    managed = tmp_path / "managed"
-    managed.mkdir()
-    monkeypatch.setattr(cc_plugin, "MANAGED_DIRS", {cc_plugin.sys.platform: managed})
-    for key in ("disableAllHooks", "allowManagedHooksOnly"):
-        (managed / "managed-settings.json").write_text(json.dumps({key: True}))
-        assert cli.MODULES_OFF_LINE.format(reason=f"your organization's managed settings set {key}") in note()
-    (managed / "managed-settings.json").write_text(json.dumps({"allowManagedHooksOnly": True,
-                                                               "enabledPlugins": {"thimble@thimble-local": True}}))
-    assert not any("hooks modules are off" in n for n in note()), "thimble is a managed plugin there"
-    (managed / "managed-settings.json").unlink()
-    monkeypatch.setenv(cli.NO_MODULE_ENV, "1")
-    assert cli.MODULES_OFF_LINE.format(reason=f"{cli.NO_MODULE_ENV} is set") in note()
-    assert _launch()["switches"][cli.NO_MODULE_ENV] == "1"
-    monkeypatch.delenv(cli.NO_MODULE_ENV)
-    (tmp_path / "cc").mkdir(exist_ok=True)
-    (tmp_path / "cc" / "settings.json").write_text(json.dumps({"disableAllHooks": True}))
-    assert cli.MODULES_OFF_LINE.format(reason="your Claude Code settings set disableAllHooks") in note()
-    (tmp_path / "cc" / "settings.json").write_text("{}")
-    # live check L29: what only the launch can see, its own --settings, is kept in launch.json for the browser and the
-    # doctor, which run outside that session
-    assert cli.launch_args(corpus, settings='{"disableAllHooks": true}')
-    assert _launch()["modules_off"] == "your --settings set disableAllHooks"
-    line = cli.module_line(corpus)
-    assert line.startswith("off in the last launch here") and "your --settings set disableAllHooks" in line
-    cli.launch_args(corpus)
-    assert "modules_off" not in _launch()
-    assert cli.SAFE_MODE_LINE in note(safe_mode=True)
-    monkeypatch.setenv(cli.SAFE_MODE_ENV, "1")
-    assert cli.SAFE_MODE_LINE in note()
-
-
-def test_the_launch_says_nothing_about_the_permission_mode(corpus, tmp_path):
-    """Before Claude Code starts, the launch cannot know main's mode (Claude Code starts in auto mode by its own default
-    since 2.1.283), so it prints no note about it: the Manual-mode notice shows once main reports Manual mode
-    (modes.manual_notice, test_manual_notice)."""
-    user = tmp_path / "cc" / "settings.json"
-    user.parent.mkdir(exist_ok=True)
-    for own in ({}, {"permissions": {"defaultMode": "default"}}, {"permissions": {"disableAutoMode": "disable"}}):
-        user.write_text(json.dumps(own))
-        notes = cli.launch_args(corpus).split("\n")[NOTES]
-        assert "Manual" not in notes and "shift+tab" not in notes and "auto mode" not in notes, own
-
-
-def test_the_launch_and_the_doctor_name_the_security_plugin_s_allow_managed_mods_only(corpus, monkeypatch):
-    """Where the organization's managed settings set the security plugin's allowManagedModsOnly, Claude Code loads no
-    hooks module of a plugin a person installs, so thimble's agents can't start: the launch's note line, the doctor's
-    check and its fix name the setting, as for allowManagedHooksOnly."""
-    why = "your organization's managed settings set allowManagedModsOnly"
-    monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: {
-        "pluginConfigs": {"cc-plugin-sec-default@builtin": {"options": {"allowManagedModsOnly": True}}}})
-    assert cli.modules_off(corpus) == why
-    assert cli.MODULES_OFF_LINE.format(reason=why) in cli.launch_args(corpus).split("\n")[NOTES].split("\t")
-    assert cli.module_line(corpus).startswith(f"off: Claude Code's hooks modules are off ({why})")
-    assert cli._hooks_fix(why) == ("Ask your administrator: your organization's Claude Code settings set "
-                                   "allowManagedModsOnly")
+def test_the_launcher_adds_no_plugin_dir_for_an_installed_plugin_and_opens_through_the_skill_without_the_module(tmp_path):
+    launcher, path, _ = _tree(tmp_path, ["", "", "", ""])
+    argv, env, _ = _run(launcher, path, tmp_path)
+    assert argv == [] and "CLAUDE_CODE_TERMINAL_MCP_TOOLS" not in env, "an installed copy, and a claude without the switch"
+    (tmp_path / "launch-args.txt").write_text("\n".join(["", "", "THIMBLE_NO_MODULE is set", ""]))
+    (tmp_path / "home" / "launcher.json").unlink()
+    argv, env, _ = _run(launcher, path, tmp_path, "--model", "opus")
+    assert argv == ["--model", "opus", "--", "/thimble", "browser"], "without the hooks module the skill opens it"
+    assert env["THIMBLE_OPEN"] == "1"

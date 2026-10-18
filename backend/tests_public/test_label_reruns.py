@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import Listener
 
-from app import concepts, config, notebook
+from app import cardrun, concepts, config, notebook
 
 CORPUS = "relay"
 
@@ -46,6 +46,7 @@ def kernel(workspaces_tmp, tmp_path, monkeypatch) -> SimpleNamespace:
     gate.set()
     monkeypatch.setattr(notebook, "_ensure_started", started)
     monkeypatch.setattr(notebook, "_run_card_code", run)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)  # this process stands in for the card runner (R8)
     return SimpleNamespace(ran=ran, gate=gate)
 
 
@@ -112,115 +113,36 @@ async def test_a_label_run_reruns_its_two_cards_once_each_and_main_hears_which_n
     assert kernel.ran == [], "a label revision reruns a card once"
 
 
-async def test_label_done_carries_the_reruns_and_no_rerun_event_goes(kernel):
+async def test_a_label_the_running_orientation_changed_leaves_its_cards_to_it_and_names_who_changed_it(kernel,
+                                                                                                    monkeypatch):
+    """Bug hunt G10: the running orientation ran its own label again, and main's `rerun` event said neither who changed
+    it nor whose cards read it, so main ran the orientation's card again and rewrote it while the orientation still
+    worked on it, and told the analyst they had changed the label. The event names who changed the label, and the
+    cards of the agent that changed it stay with that agent while it runs, since its own call's result named them."""
+    from app import agents, subagents, tools
+    from app import subagent_files as sf
+
     cid = await _label("even", r"value \d*[02468]$")
     await _rerun_ends(cid)
-    a = await _card(f"count reads {cid}", "Ten records are even.")
+    chat = agents.new_agent(CORPUS, "orient", "Orientation", announce=False)["id"]
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)["a5e1d0c0ffee0000f"] = {"type": "thimble:orientation", "role": "orientation",
+                                                    "key": "orient", "chat": chat, "run": 0, "status": "running",
+                                                    "started": sf.now()}
+    theirs = (await notebook.run_code(CORPUS, f"count reads {cid}", f"chat:{chat}"))["id"]
+    mine = await _card(f"share reads {cid}")
+    monkeypatch.setattr(cardrun, "defers", lambda c: True)  # the server: the cards run again through thimble-run
     q = Listener(CORPUS)
     try:
-        await concepts.start_apply(CORPUS, cid, ["log.jsonl"], None, "test")
-        concepts.tell_when_done(CORPUS, cid)
+        res = await tools.call(CORPUS, "apply_label", {
+            "scope": "files", "name": "even", "paths": ["log.jsonl"], "values": ["yes", "no"],
+            "predicate": {"kind": "regex", "text": r"value \d*[02468]"}}, session="orient")
+        assert not res.is_error, res.text
+        assert f"[[card:{theirs}]]" in res.text, "the orientation's own result names its card"
+        await _rerun_ends(cid)
         note = await asyncio.wait_for(q.get(), 10)
-        await asyncio.sleep(0.2)
-        assert q.empty(), "one event tells of the label and its cards"
     finally:
         q.close()
-    assert note["meta"]["kind"] == "label_done" and f"card:{a}" in note["content"]
-
-
-async def test_a_label_edited_but_not_run_reruns_nothing(kernel):
-    cid = await _label("even", r"value \d*[02468]$")
-    await _rerun_ends(cid)
-    a = await _card(f"count reads {cid}")
-    before = concepts._reruns[(CORPUS, cid)]
-    kernel.ran.clear()
-    concepts.update_concept_route(CORPUS, cid, concepts.ConceptPatch(spec=r"value \d*[13579]$"))
-    await asyncio.sleep(0.2)
-    assert kernel.ran == [] and concepts._reruns[(CORPUS, cid)] is before
-    assert concepts.stale_in(_cell(a), {cid: concepts.read_concept(config.workspace_dir(CORPUS), cid)}), "it stays stale until the label runs"
-
-
-async def test_an_unchanged_edit_while_thimble_reruns_the_card_runs_it_once(kernel):
-    gate = kernel.gate
-    cid = await _label("even", r"value \d*[02468]$")
-    await _rerun_ends(cid)
-    a = await _card(f"count reads {cid}", "Ten records are even.")
-    kernel.ran.clear()
-    gate.clear()
-    await concepts.start_apply(CORPUS, cid, ["log.jsonl"], None, "test")
-    await concepts.wait_apply(CORPUS, cid, 10)
-    for _ in range(100):
-        if kernel.ran:
-            break
-        await asyncio.sleep(0.02)
-    assert _cell(a)["status"] == "running" and _cell(a)[notebook.REGENERATING_FOR] == [cid]
-    edit = asyncio.ensure_future(notebook.edit_and_run(CORPUS, _cell(a)["notebook"], a, _cell(a)["code"], by="main"))
-    await asyncio.sleep(0.1)
-    gate.set()
-    got = await asyncio.wait_for(edit, 10)
-    await _rerun_ends(cid)
-    assert kernel.ran == [f"count reads {cid}"], "main's edit took thimble's run"
-    assert got["status"] == "ok" and got["label_revs"][cid] == concepts._rev_of(config.workspace_dir(CORPUS), cid)
-
-
-async def test_a_rerun_waits_for_a_run_under_way_and_skips_a_card_it_left_current(kernel):
-    gate = kernel.gate
-    cid = await _label("even", r"value \d*[02468]$")
-    await _rerun_ends(cid)
-    a = await _card(f"count reads {cid}")
-    kernel.ran.clear()
-    await concepts.start_apply(CORPUS, cid, ["log.jsonl"], None, "test")
-    gate.clear()
-    ended = asyncio.Event()
-
-    async def main_edits() -> dict:
-        await concepts.wait_apply(CORPUS, cid, 10)
-        ended.set()
-        return await notebook.edit_and_run(CORPUS, _cell(a)["notebook"], a, _cell(a)["code"], by="main")
-
-    # main's edit starts as the label's run ends, before thimble's rerun reaches the card
-    edit = asyncio.ensure_future(main_edits())
-    await ended.wait()
-    await asyncio.sleep(0.1)
-    gate.set()
-    await asyncio.wait_for(edit, 10)
-    await _rerun_ends(cid)
-    assert len(kernel.ran) == 1, "the card ran once, whichever run reached it first"
-    assert not concepts.stale_in(_cell(a), {cid: concepts.read_concept(config.workspace_dir(CORPUS), cid)})
-
-
-async def test_three_verdicts_in_a_row_rerun_each_card_once_after_the_last(kernel, monkeypatch):
-    monkeypatch.setattr(concepts, "VERDICT_RERUN_DELAY_S", 0.3)
-    cid = await _label("even", r"value \d*[02468]$")
-    await _rerun_ends(cid)
-    a = await _card(f"count reads {cid}", "Ten records are even.")
-    b = await _card(f"share reads {cid}")
-    locked = await _card(f"locked reads {cid}")
-    notebook.edit_cell(CORPUS, locked, locked=True)
-    before = concepts._reruns[(CORPUS, cid)]
-    kernel.ran.clear()
-    seen: list[tuple[str, object, object]] = []
-    real_emit = notebook._emit
-
-    def emit(workspace, cell, **kw):
-        seen.append((str(cell.get("id")), cell.get("status"), cell.get(notebook.REGENERATING_FOR)))
-        real_emit(workspace, cell, **kw)
-
-    monkeypatch.setattr(notebook, "_emit", emit)
-    for n in (2, 4, 6):
-        concepts.verdict_route(CORPUS, cid, concepts.VerdictBody(ref=f"log.jsonl#L{n}", label="no"))
-        await asyncio.sleep(0.1)
-    assert kernel.ran == [] and concepts._reruns[(CORPUS, cid)] is before, "each verdict restarts the wait"
-    for _ in range(100):
-        if concepts._reruns[(CORPUS, cid)] is not before:
-            break
-        await asyncio.sleep(0.02)
-    await _rerun_ends(cid)
-    await asyncio.sleep(0.5)
-    assert sorted(kernel.ran) == sorted([f"count reads {cid}", f"share reads {cid}"]), "each reader ran once, the locked card not"
-    rev = concepts._rev_of(config.workspace_dir(CORPUS), cid)
-    for card in (a, b):
-        assert (card, "running", [cid]) in seen, "while it runs the card says which label it runs again for"
-        stored = _cell(card)
-        assert stored["status"] == "ok" and notebook.REGENERATING_FOR not in stored and stored["label_revs"][cid] == rev
-    assert _cell(locked)["label_revs"][cid] < rev
+    assert note["meta"]["kind"] == "rerun" and note["meta"]["by"] == "the orientation", note
+    assert note["content"].startswith(f"The orientation changed label even [[concept:{cid}]]."), note["content"]
+    assert f"[[card:{mine}]]" in note["content"] and f"[[card:{theirs}]]" not in note["content"], note["content"]

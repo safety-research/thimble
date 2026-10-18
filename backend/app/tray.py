@@ -2,17 +2,17 @@
 shows every one of them, its row named by its type and description (`thimble:orientation  orientation: <focus>`). What
 thimble adds is the statusline and /thimble:agents.
 
-The statusline. The launcher passes main plugin/bin/thimble-agents as its statusline command (statusline_command),
-chained to the analyst's own; it shows the orientation's state and its cards, `thimble · orientation working · 7
-cards`, and the browser's messages main has not got yet (events.queued_line). The other agents show as their own rows in
+The statusline. plugin/bin/thimble-agents is a statusline command (statusline_command), chained to the analyst's own;
+it shows the orientation's state and its cards, `thimble · orientation working · 7 cards`, and the browser's messages
+main has not got yet (events.queued_line). The other agents show as their own rows in
 Claude Code's tray, so the statusline does not list them.
 
 /thimble:agents lists thimble's running agents from the agent registry (subagent_rows), the code ticket and view builds
-the server runs (dev.running_builds), and main's other subagents and threads' forks (session.running_agents; in terminal
-mode, where no server follows main's session, the forks from the workspace's files: thread_rows_files).
+the server runs (dev.running_builds), and main's other subagents and threads' forks (session.running_agents; on local
+transport, where no server follows main's session, the forks from the workspace's files: thread_rows_files).
 
-In terminal mode no server runs. The list_agents tool runs in the MCP shim, where the registry (subagents.json) gives
-thimble's subagents as in browser mode, and the statusline command reads the workspace's files itself
+On local transport no server runs. The list_agents tool runs in the MCP shim, where the registry (subagents.json) gives
+thimble's subagents as on the server, and the statusline command reads the workspace's files itself
 (plugin/bin/thimble-agents file_agents), as agents_route would answer.
 """
 from __future__ import annotations
@@ -46,8 +46,8 @@ def statusline_command(own: str = "") -> str:
 
 def subagent_rows(c: str) -> list[dict[str, Any]]:
     """thimble's running agents from the registry (subagents.json), each {name, label, state, kind, chat, role}: the
-    role and what it works on, and its state, `waiting` while it waits for its child (the orientation for its critic)
-    or for a permission prompt in the terminal."""
+    role and what it works on, and its state, `waiting` while it waits for its child (the orientation for its critic),
+    its background tasks or a permission prompt in the terminal."""
     from . import events, subagents  # noqa: PLC0415
 
     rows: list[dict[str, Any]] = []
@@ -70,9 +70,11 @@ def subagent_rows(c: str) -> list[dict[str, Any]]:
             t = dev._get(what)
             what = f"#{t.get('n')} {t.get('title') or ''}".strip() if t else what
         word = ROLE_WORDS.get(role, role)
-        # waiting for a child: its critic, or the subagents it started (helpers)
+        # waiting for a child: its critic, or the subagents it started (helpers); else for its background tasks
+        # (subagents.background_work)
         kids = [k for k in every.values() if k.get("parent") == agent_id and k.get("status") in ("running", "waiting")]
-        waits = "waiting for its critique" if any(k.get("role") == "critic" for k in kids) else "waiting for its subagents"
+        waits = ("waiting for its critique" if any(k.get("role") == "critic" for k in kids)
+                 else "waiting for its subagents" if kids else "waiting for its background tasks")
         state = "waiting for a permission" if agent_id in asking else (
             waits if a.get("status") == "waiting" else "working")
         rows.append({"name": subagents.type_name(role), "label": f"{word}: {what}" if what else word, "state": state,
@@ -93,7 +95,7 @@ def agent_rows(c: str) -> list[dict[str, Any]]:
         log.debug("%s: the builds were not listed", c, exc_info=True)
     known = {r.get("chat") for r in rows if r.get("chat")}
     rows.extend(r for r in session.running_agents(c) if r.get("chat") not in known)
-    if files.terminal(config.workspace_path(c)):
+    if files.transport(config.workspace_path(c)) == files.LOCAL:
         known = {r.get("chat") for r in rows if r.get("chat")}
         rows.extend(r for r in thread_rows_files(c) if r["chat"] not in known)
     return rows
@@ -113,7 +115,7 @@ def _words(text: str, n: int = THREAD_WORDS) -> str:
 
 
 def thread_rows_files(c: str) -> list[dict[str, Any]]:
-    """The side threads whose fork runs now, in terminal mode, from the workspace's files (no server follows main's
+    """The side threads whose fork runs now, on local transport, from the workspace's files (no server follows main's
     session there, so session.running_agents has none): a thread whose last question has no end yet (no `done` or
     `error` record after it) and whose fork main started (an Agent call the --agent-check hook recorded as starting,
     subagents.json `forking`, which fork_finished clears) or still runs in main's session (its meta's `fork`, not ended).

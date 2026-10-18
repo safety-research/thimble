@@ -38,8 +38,8 @@ ANALYST_SOURCE = "analyst"  # a generation the analyst made: their version befor
 _BULLET_RE = re.compile(r"^\s*(?:[-*+•]|\d{1,2}[.)])\s+")
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+\S")
 _MARK_RE = re.compile(r"\[\[([^\[\]|]*)\|[^\[\]]*\]\]|\[\[[^\[\]]*\]\]")
-# not before a period that starts a word: "their .yardopts file" and ".gov.uk" keep their space
-_BEFORE_PUNCT_RE = re.compile(r"\s+([,;:!?)]|\.(?!\w))")
+# only before punctuation that ends a word: "their .yardopts file", ".gov.uk", "port :8000" and "./x" keep their space
+_BEFORE_PUNCT_RE = re.compile(r"\s+([,;:!?).])(?![\w./\\])")
 
 
 def _now() -> str:

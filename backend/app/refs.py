@@ -49,6 +49,11 @@ grammar and resolves as the file's own, then the view's reader supplies the exce
 file's own excerpt is the whole record with every field (views.enrich_file_ref). resolve_base is the resolution without
 that step, for the check that compares a view's excerpt with the records it cites.
 
+A line's record whose blocks are one of its fields (record_blocks: a wiki save's page text) resolves with `fields`, its
+other fields of words (left_out_fields: the save's edit summary). An example card shows them beside the blocks, and a
+check of a quote or a value reads them with the excerpt (checked_text, span_of_quote), so words of the record are never
+called missing because its blocks leave them out.
+
 `chat:<id>[#<n>]` is parsed, and `#<n>` is a message anchor, not resolvable. Only an orientation's chat resolves, to its
 transcript's digest, and `chat:<id>#L<a>-L<b>` to lines of the digest.
 
@@ -113,12 +118,16 @@ _BRACKETS = re.compile(r"\[\[([^\[\]]+?)\]\]")
 
 
 class RefError(Exception):
-    """A ref that cannot be resolved. `status` is the HTTP status for the route: 400 malformed, 404 missing."""
+    """A ref that cannot be resolved. `status` is the HTTP status for the route: 400 malformed, 404 missing. `retry`
+    marks a ref that may resolve soon, such as a view's key while the view is still built or indexed, or before any
+    process has read the key from its index (views.resolve_view_ref): a caller checks it again rather than calling the
+    place missing for good."""
 
-    def __init__(self, detail: str, status: int = 404):
+    def __init__(self, detail: str, status: int = 404, *, retry: bool = False):
         super().__init__(detail)
         self.detail = detail
         self.status = status
+        self.retry = retry
 
 
 # --------------------------------------------------------------------------- grammar
@@ -260,9 +269,10 @@ def format_ref(p: dict[str, Any]) -> str:
 
 
 def extract_refs(text: str) -> list[str]:
-    """All `[[ref]]` occurrences in order, deduplicated (same as frontend refs.ts)."""
+    """All `[[ref]]` occurrences in order, deduplicated (same as frontend refs.ts); a link whose words are in double
+    brackets, `[[↗]](card:<id>)`, cites its target (cite.mixed_links), never a ref named `↗`."""
     out: list[str] = []
-    for m in _BRACKETS.finditer(text):
+    for m in _BRACKETS.finditer(cite.mixed_links(text)):
         r = m[1].strip()
         if "|" in r:  # value-ref [[<display>|<ref>]]: keep only the ref part
             r = r.split("|", 1)[1].strip()
@@ -359,6 +369,137 @@ def record_blocks(record: Any, kind: str | None = None) -> list[dict[str, str]]:
             if isinstance(content, list):
                 return [blk for blk in map(_content_block, content) if blk is not None]
     return [_raw(record)]
+
+
+# the last part of a key that names a record's words (a save's edit summary, a post's title, a tool's result): a field so
+# named is the record's words even when it holds one word (`change_summary: getsave`), and `prompt_id` is no such field
+WORD_KEY_PARTS = frozenset(("text", "content", "body", "message", "msg", "summary", "title", "subject", "comment",
+                            "description", "reason", "reasoning", "note", "notes", "output", "result", "response",
+                            "answer", "prompt", "error", "stdout", "stderr", "thinking", "caption", "explanation",
+                            "rationale", "feedback"))
+FIELD_WORDS = 3  # words a field of any other name holds to be the record's words, not an id, a path or a list of codes
+FIELDS_MAX = 8  # of a record's fields its blocks leave out (left_out_fields)
+_KEY_PARTS = re.compile(r"[^A-Za-z0-9]+|(?<=[a-z])(?=[A-Z])")
+
+
+def _word_key(key: str) -> bool:
+    parts = [p for p in _KEY_PARTS.split(key) if p]
+    return bool(parts) and parts[-1].lower() in WORD_KEY_PARTS
+
+
+def _json_text(v: str) -> bool:
+    """Whether a string is a JSON list or object kept as text (`["R_UP", "R_FAIL"]`), which is no words of a record."""
+    s = v.strip()
+    if s[:1] not in ("[", "{"):
+        return False
+    try:
+        return isinstance(json.loads(s), (list, dict))
+    except ValueError:
+        return False
+
+
+def left_out_fields(record: Any, blocks: list[dict[str, str]], skip: Any = ()) -> list[dict[str, str]]:
+    """The fields of a record whose words its blocks leave out, as [{key, text}] in the record's order, at most
+    FIELDS_MAX: each string field at its top level or one object down (`outer.inner`) that a key names as words
+    (WORD_KEY_PARTS, with a letter or a digit in it) or that holds FIELD_WORDS words or more, when no block holds its
+    words, it is no JSON kept as text, and its key is not in `skip` (the facts the record's meta gives). A wiki save's block is its page's text, so
+    its edit summary is left out; a chat message's block is its words, so its tool's result is. None for a record its
+    blocks show whole (raw JSON), and none for a Claude Code transcript's message, whose other fields are the message's
+    metadata and the structured copy of a tool's result its blocks show."""
+    if not isinstance(record, dict) or not blocks or any(b.get("kind") == "raw" for b in blocks):
+        return []
+    msg = record.get("message")
+    if record.get("type") in ("assistant", "user") and isinstance(msg, dict) and "content" in msg:
+        return []
+    shown = " ".join(" ".join(str(b.get("text") or "") for b in blocks).split()).casefold()
+    out: list[dict[str, str]] = []
+
+    def take(key: str, v: Any) -> None:
+        if not isinstance(v, str) or key in skip:
+            return
+        words = v.split()
+        if not words or not (len(words) >= FIELD_WORDS or (_word_key(key) and re.search(r"\w", v))) or _json_text(v):
+            return
+        if " ".join(words).casefold() not in shown:
+            out.append({"key": key, "text": v.strip()})
+
+    for k, v in record.items():
+        if isinstance(v, dict):
+            for k2, v2 in v.items():
+                take(f"{k}.{k2}", v2)
+        else:
+            take(str(k), v)
+    return out[:FIELDS_MAX]
+
+
+def _with_fields(rec: dict[str, Any]) -> dict[str, Any]:
+    """A loaded record ({line, record, blocks, meta}) with `fields`, the fields its blocks leave out (left_out_fields),
+    when it has any."""
+    got = left_out_fields(rec.get("record"), rec.get("blocks") or [], skip=rec.get("meta") or {})
+    return {**rec, "fields": got} if got else rec
+
+
+def fields_text(out: dict[str, Any]) -> str:
+    """A resolved ref's left-out fields (`fields`, of the record or of each record of a range) as `key: text` lines,
+    those whose words its excerpt holds (a view's reader wrote it) left out."""
+    recs = out.get("records") if out.get("kind") == "range" else None
+    fields = [f for r in recs or [out] if isinstance(r, dict) for f in r.get("fields") or []]
+    shown = " ".join(str(out.get("excerpt") or "").split()).casefold()
+    return "\n".join(f"{f['key']}: {f['text']}" for f in fields if " ".join(f["text"].split()).casefold() not in shown)
+
+
+def checked_text(out: dict[str, Any]) -> str:
+    """The text a check of a value or a quote reads at a resolved ref: its excerpt, after the fields of its records that
+    the excerpt leaves out (fields_text), such as a wiki save's edit summary; a view's unit's label and excerpt. A block's or a span's excerpt is that
+    passage alone. A JSON document's value is read whole, past its excerpt's cut (EXCERPT_MAX): a message as its words
+    (_message_blocks) and then its JSON, so a quote deep in a tool's output is at its place (bug hunt round 10, K3)."""
+    excerpt = str(out.get("excerpt") or "")
+    if out.get("kind") == "view":
+        return "\n".join(t for t in (str(out.get("label") or ""), excerpt) if t)
+    if out.get("kind") == "pointer":
+        words = _join_blocks(out.get("blocks") or [])
+        if not words or excerpt.startswith(words):
+            return excerpt
+        return words if words.startswith(excerpt) else f"{words}\n{excerpt}"
+    if out.get("kind") not in ("record", "range"):
+        return excerpt
+    return "\n".join(t for t in (fields_text(out), excerpt) if t)
+
+
+_OWN_PLACE_RE = re.compile(r"^L(\d+)(?:-L?(\d+))?(?:\.b\d+(?::c\d+-\d+)?)?$|^(?:p|page=|row=)(\d+)$")
+
+
+def place_only(out: dict[str, Any], display: str | None = None) -> bool:
+    """Whether a value cited at the resolved place `out` has only its place checked when checked_text does not hold it:
+    a view's unit, whose reader says what the unit is (its label and an excerpt, such as a run's prompt), not the values
+    the view shows for it, so a value the view shows is never failed for want of them there; and a whole number
+    `display` that is the place's own (a line of the cited lines, as in `lines [4](a.jsonl#L4) and [62](a.jsonl#L62)`,
+    a page, a row), which names the place rather than a value it shows."""
+    if out.get("kind") == "view":
+        return True
+    d = str(display or "").strip().replace(",", "")
+    m = _OWN_PLACE_RE.match(str(out.get("ref") or "").partition("#")[2])
+    if not d.isdigit() or not m:
+        return False
+    if m[3]:
+        return int(d) == int(m[3])
+    return int(m[1]) <= int(d) <= int(m[2] or m[1])
+
+
+def _strings(v: Any) -> list[str]:
+    """Every string in a JSON value, at any depth."""
+    if isinstance(v, str):
+        return [v]
+    if isinstance(v, dict):
+        return [s for x in v.values() for s in _strings(x)]
+    if isinstance(v, list):
+        return [s for x in v for s in _strings(x)]
+    return []
+
+
+def record_holds(record: Any, quote: str) -> bool:
+    """Whether a record holds `quote` in any of its fields, its blocks' or not: in one of its strings, or in its JSON."""
+    return any(_find_quote(s, quote) for s in _strings(record)) or _find_quote(_dumps(record), quote) is not None
 
 
 def utf16_slice(text: str, start: int, end: int) -> str:
@@ -517,9 +658,10 @@ QUOTE_LOOSE_MAX_BYTES = 4 * 1024 * 1024  # of a whole file searched with the loo
 
 def span_of_quote(corpus_dir: Path, ref: str, quote: str) -> str:
     """The span ref (`<path>#L<n>.b<k>:c<a>-<b>`, UTF-16 offsets) of the passage `quote` in the record or lines `ref`
-    names, so an example card can show a passage deep inside a long record. A whole file is searched line by line. A ref
-    a view reads is kept as it is when the view's excerpt holds the quote (_quote_in_view). Raises RefError: 400 for a
-    ref naming no text, 404 when the quote is not there."""
+    names, so an example card can show a passage deep inside a long record. A record that holds the quote in a field its
+    blocks leave out (a wiki save's edit summary) is `ref` itself, which the card shows with that field (left_out_fields).
+    A whole file is searched line by line. A ref a view reads is kept as it is when the view's excerpt holds the quote
+    (_quote_in_view). Raises RefError: 400 for a ref naming no text, 404 when the quote is not there."""
     try:
         p = parse_ref(ref)
     except ValueError as e:
@@ -549,6 +691,13 @@ def span_of_quote(corpus_dir: Path, ref: str, quote: str) -> str:
                 a, b = found
                 start = _utf16_len(text[:a])
                 return f"{out['path']}#L{line}.b{k}:c{start}-{start + _utf16_len(text[a:b])}"
+    # words its blocks leave out, such as a wiki save's edit summary: the record itself, which the card shows with that
+    # field (left_out_fields) and the quote kept beside it
+    if p["kind"] == "range":
+        if any(record_holds(r.get("record"), quote) for r in records):
+            return ref.strip()
+    elif record_holds(out.get("record"), quote):
+        return ref.strip() if p["kind"] == "record" else f"{out['path']}#L{p['line']}"
     raise RefError(f"the quote is not in {ref}", 404)
 
 
@@ -771,6 +920,23 @@ def _join_blocks(blocks: list[dict[str, str]]) -> str:
     return "\n\n".join(b["text"] for b in blocks)
 
 
+def _with_turns(path: Path, rel: str, recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The records of a text chat log's lines (transcripts.sniff), each line that starts a turn with that turn in
+    `meta.turn` ({speaker, at, time?}: transcripts.turn_of, as the Transcript mode reads it), so a quote of the line can
+    show its speaker apart from its words; any other file's records as they are."""
+    from . import transcripts  # noqa: PLC0415 — transcripts imports this module
+
+    try:
+        hint = transcripts.sniff(path, rel)
+        if not hint or hint.get("format") != "text":
+            return recs
+        texts = [r["record"].get("text") if isinstance(r.get("record"), dict) else None for r in recs]
+        turns = list(transcripts.text_turns(texts, hint))
+    except Exception:  # noqa: BLE001 — a line with no turn read is quoted as it is
+        return recs
+    return [{**r, "meta": {**(r.get("meta") or {}), "turn": t}} if t else r for r, t in zip(recs, turns)]
+
+
 def _resolve_lines(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
     from . import corpus  # data access lives in corpus.py; imported lazily to avoid an import cycle
 
@@ -790,7 +956,8 @@ def _resolve_lines(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, A
         raise RefError(f"range end L{end_line} is before start L{line}", 400)
     end_line = min(end_line, total)
 
-    recs = corpus.load_records(path, rel, src_kind, line, min(end_line, line + RANGE_MAX_RECORDS - 1))
+    recs = _with_turns(path, rel, corpus.load_records(path, rel, src_kind, line, min(end_line, line + RANGE_MAX_RECORDS - 1)))
+    recs = [_with_fields(r) for r in recs]
     first = recs[0]
     out: dict[str, Any] = {
         "ref": ref,
@@ -800,6 +967,9 @@ def _resolve_lines(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, A
         "record": first["record"],
         "blocks": first["blocks"],
         "meta": first["meta"],
+        # the fields of the record its blocks leave out (a wiki save's edit summary), which an example card shows and a
+        # check of a value or a quote reads (checked_text)
+        **({"fields": first["fields"]} if first.get("fields") else {}),
         "context": {
             "before": corpus.load_records(path, rel, src_kind, max(1, line - CONTEXT_RECORDS), line - 1),
             "after": corpus.load_records(path, rel, src_kind, end_line + 1, min(total, end_line + CONTEXT_RECORDS)),
@@ -845,10 +1015,40 @@ def _resolve_page(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
             "blocks": [{"kind": "text", "text": text or excerpt}], "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}
 
 
+MESSAGE_KINDS = ("text", "tool_use", "tool_result", "thinking")  # the blocks a message of a JSON document reads as
+
+
+def _message_blocks(value: Any) -> list[dict[str, str]] | None:
+    """A JSON document's value that is one message of a transcript (transcripts.message_keys: a store of messages by id,
+    a chat export) whose words are content blocks, as the Transcript mode reads it: its words, its tool calls and their
+    results, its reasoning (transcripts.turn_blocks), each {kind, text}; a message of text blocks only, its words as
+    one block. None for any other value, and for a message whose words are one string, which reads as its fields. So an
+    example card quotes a tool call's command or its output, not the message's JSON cut after a line (bug hunt round 10,
+    K3)."""
+    from . import transcripts  # noqa: PLC0415 — transcripts imports this module lazily
+
+    if not isinstance(value, dict):
+        return None
+    try:
+        keys = transcripts.message_keys(value)
+        if keys is None:
+            return None
+        got = [{"kind": str(b["kind"]), "text": str(b.get("text") or "")} for b in transcripts.turn_blocks(value, keys)
+               if b.get("kind") in MESSAGE_KINDS]
+        if not got and isinstance(transcripts._get(value, keys["text"]), list):
+            words = str((transcripts.message_of(value) or {}).get("text") or "")
+            got = [{"kind": "text", "text": words}] if words.strip() else []
+    except Exception:  # noqa: BLE001 — a value the transcript reader cannot read reads as its JSON
+        return None
+    return got or None
+
+
 def _resolve_record(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, Any]:
     """A JSON document's value or a CSV's row (records.read): {ref, kind, path, record, blocks, excerpt, meta}. meta
     holds the record's place `n` and the lines it spans (`line`..`end_line`), where the File browser opens it. A row
-    reads as its fields, so it has no blocks."""
+    reads as its fields, so it has no blocks; a value that is one message of a transcript has the message's blocks
+    (_message_blocks), and a string value is one text block of its words; its excerpt stays the value's text, as a
+    label reads it."""
     from . import records  # lazy (import cycle)
 
     path, rel = _locate(corpus_dir, p["path"])
@@ -865,6 +1065,11 @@ def _resolve_record(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, 
         raise RefError(f"{rel} has no record #{fragment}", 404)
     kind = p["kind"]
     blocks: list[dict[str, str]] = [] if kind == "csvrow" else record_blocks(rec["record"])
+    if isinstance(rec["record"], str) and kind == "pointer":
+        # a string inside a document (a tool call's command, a message's words) reads as its words, not as JSON writes it
+        blocks = [{"kind": "text", "text": rec["record"]}]
+    elif any(b.get("kind") == "raw" for b in blocks):
+        blocks = _message_blocks(rec["record"]) or blocks
     meta: dict[str, Any] = {k: rec[k] for k in ("n", "line", "end_line") if rec.get(k) is not None}
     excerpt = rec["text"] or _dumps(rec["record"])
     return {"ref": ref, "kind": kind, "path": rel, "record": rec["record"], "blocks": blocks, "excerpt": excerpt[:EXCERPT_MAX],
@@ -1031,5 +1236,6 @@ def _resolve_cell(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str, An
             meta["span"] = {"out": p["out"], "line": n, "text": "\n".join(lines[n - 1 : last])}
             if m_end is not None:
                 meta["span"]["end_line"] = last
-    return {"ref": ref, "kind": "cell", "cell_id": p["cell_id"], "notebook": nb_id, "record": cell,
+    # the card's id, also when the ref names it by its name (notebook.find_cell)
+    return {"ref": ref, "kind": "cell", "cell_id": str(cell.get("id") or p["cell_id"]), "notebook": nb_id, "record": cell,
             "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}

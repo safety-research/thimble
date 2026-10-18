@@ -1,7 +1,6 @@
 """Big files' line indexes (corpus.INDEX_BIG and up): a page is read before the file's index is ready, from its start or
 the nearest mark the background build has made, with an estimated line count that turns exact once the index is built;
-the ruler's count shares that build; and the index is kept on disk, keyed by path, size and mtime, for the next
-server."""
+and an index kept on disk is used only for the file, size and mtime it was built from."""
 import json
 import threading
 from pathlib import Path
@@ -104,81 +103,6 @@ def test_pages_anywhere_match_the_file_while_the_index_is_built(big, monkeypatch
     assert corpus.page_lines(path, 5, 4) == ([], N, False)
 
 
-def test_a_page_whose_read_reaches_the_end_before_the_index_has_the_exact_count(big, gate):
-    path, data = big
-    short = path.with_name("short.jsonl")
-    short.write_bytes(b'{"a": 1}\n' * 200)
-    assert corpus.page_lines(short, 150, 300) == ([b'{"a": 1}'] * 51, 200, False)
-    assert corpus.page_lines(short, 1, 0) == ([], 200, False)
-    assert corpus.page_lines(path, 1, 0)[1:] != (N, False)  # a big file read only at its start: an estimate
-    gate.release()
-    corpus.line_offsets(short)
-    corpus.line_offsets(path)
-
-
-def test_a_ref_to_a_big_file_shows_its_first_lines_before_its_index(big, gate):
-    path, data = big
-    before = client.get(f"{MINI}/ref", params={"ref": "big.jsonl"}).json()
-    assert before["kind"] == "path" and before["meta"]["lines_estimated"] is True and before["meta"]["lines"] > 8
-    gate.release()
-    corpus.line_offsets(path)
-    after = client.get(f"{MINI}/ref", params={"ref": "big.jsonl"}).json()
-    assert after["meta"]["lines"] == N and "lines_estimated" not in after["meta"]
-    assert before["excerpt"] == after["excerpt"] and "x" * 37 in after["excerpt"]
-
-
-def test_around_answers_a_line_past_the_end_with_the_last_lines_only_when_asked():
-    agent = "agents/agent-01.jsonl"
-    total = client.get(f"{MINI}/source", params={"path": agent}).json()["total_lines"]
-    r = client.get(f"{MINI}/source/around", params={"path": agent, "line": total + 5})
-    assert r.status_code == 404 and f"has {total} lines" in r.json()["detail"]
-    page = client.get(f"{MINI}/source/around", params={"path": agent, "line": total + 5, "before": 3, "clamp": 1}).json()
-    assert [r["line"] for r in page["records"]] == list(range(total - 3, total + 1)) and page["start"] == total - 3
-    assert client.get(f"{MINI}/source/around", params={"path": agent, "line": 0, "clamp": 1}).status_code == 404
-
-
-def test_the_ruler_counts_lines_with_the_build_the_pages_started(big, gate, monkeypatch):
-    path, data = big
-    builds = []
-    build = corpus.build_index
-    monkeypatch.setattr(corpus, "build_index", lambda p, progress=None: builds.append(p) or build(p, progress))
-    assert corpus.page_lines(path, 1, 10)[2] is True
-    counted: dict = {}
-    t = threading.Thread(target=lambda: counted.update(n=corpus.line_count(path)))
-    t.start()
-    t.join(0.3)
-    assert t.is_alive()  # waiting for the build, not counting on its own
-    gate.release()
-    t.join(20)
-    assert counted["n"] == N and builds == [path]
-
-
-def test_a_big_files_index_is_kept_on_disk_for_the_next_server(big, monkeypatch, tmp_path):
-    path, data = big
-    idx = corpus.line_offsets(path)
-    kept = list((tmp_path / "thimble-home" / corpus.INDEX_DIR).glob("*.idx"))
-    assert len(kept) == 1
-    # a restart: nothing in memory, and no pass over the file allowed
-    corpus._INDEX.pop(path)
-    corpus._COUNTS.pop(path)
-
-    def no_build(p, progress=None):
-        raise AssertionError("indexed again")
-
-    # its own patch alone is undone after: undoing all of them would undo the test's THIMBLE_HOME too
-    with monkeypatch.context() as m:
-        m.setattr(corpus, "build_index", no_build)
-        again = corpus.line_offsets(path)
-        assert (again.key, again.lines, list(again.marks_list())) == (idx.key, idx.lines, list(idx.marks_list()))
-        corpus._INDEX.pop(path)
-        assert corpus.page_lines(path, N - 9, N) == (lines_of(data)[-10:], N, False)
-    # a changed file is indexed again, its index kept in the test's thimble home
-    with open(path, "ab") as f:
-        f.write(b"\n{\"i\": \"one more\"}\n")
-    assert len(corpus.line_offsets(path)) == N + 1
-    assert len(list((tmp_path / "thimble-home" / corpus.INDEX_DIR).glob("*.idx"))) == 1
-
-
 def test_an_index_file_that_does_not_match_is_not_used(big):
     path, data = big
     idx = corpus.line_offsets(path)
@@ -192,14 +116,3 @@ def test_an_index_file_that_does_not_match_is_not_used(big):
     for bad in (b"", b"junk", good[:-3], good.replace(b'"marks": ', b'"marks": 1'), good.replace(b'"order": "', b'"order": "x')):
         f.write_bytes(bad)
         assert corpus.load_index(path, idx.key) is None
-
-
-def test_the_disk_keeps_the_most_recently_used_indexes(big, monkeypatch, tmp_path):
-    path, data = big
-    monkeypatch.setattr(corpus, "INDEX_DISK_MAX", 2)
-    paths = [path.with_name(f"big-{i}.jsonl") for i in range(3)]
-    for p in paths:
-        p.write_bytes(data)
-        corpus.line_offsets(p)
-    kept = {f.name for f in (tmp_path / "thimble-home" / corpus.INDEX_DIR).glob("*.idx")}
-    assert kept == {corpus._index_file(p).name for p in paths[1:]}

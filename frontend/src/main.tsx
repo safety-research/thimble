@@ -8,8 +8,11 @@ import { installProblemLog } from './lib/problemLog'
 import { installChunkRecovery } from './lib/chunkRecovery'
 import App from './App'
 import { claimKey, claimOnHashChange } from './lib/api'
+import { guardFetch } from './lib/stale'
 import { SignInGate } from './shell/SignIn'
 
+// before the first request: nothing under this browser's key goes to a server that has not proved itself (lib/stale)
+guardFetch()
 void claimKey()
 claimOnHashChange()
 installProblemLog()

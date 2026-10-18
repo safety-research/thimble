@@ -4,15 +4,19 @@
 // is such a line carrying its `call:` ref, so it can be cited and, open, shows its whole stored output with numbered
 // lines. Other runs of one kind of call are one card (Cards · 2 steps · 31s). Everything else is a quiet note with the
 // chips of what it points at. Label runs in a row are one Label card, a step per label. A notice (a failure with its
-// fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx).
-import { createContext, useContext, useEffect, useRef, useState, type DragEvent } from 'react'
+// fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx). In main's
+// chat a check's comments on an answer tint their passages; a click on one, or a deep link to `answer:<turn>#s<n>`,
+// opens the comment under the answer as the canvas's comment card (chat/answerComments.ts, AnswerComment.tsx). A
+// reply's citation of a card is the card's chip, its glyph and name, as a step row draws it (components/RefChip
+// CardChipCites).
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
 import { Mark } from '../components/Marks'
 import { UserMessage } from '../components/Message'
-import { RefChip, scrubIds } from '../components/RefChip'
+import { CardChipCites, CardQuestions, RefChip, scrubIds } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { ChipRun, ToolCard, type ToolState } from '../components/ToolCard'
 import { api } from '../lib/api'
@@ -21,10 +25,12 @@ import { callOutput, fetchCall, outputLines, setCallWords } from '../lib/calls'
 import { isDropped, useProposals } from '../lib/proposals'
 import { callRef, parseRef } from '../lib/refs'
 import { CITED } from '../lib/tableCell'
-import { teleport } from '../lib/teleport'
+import { revealAnchor, teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
-import { ChatMarkdown, ChipContext, RefText } from './markdown'
+import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdown'
+import { AnswerCommentCard } from './AnswerComment'
+import { commentsOfRow, marksOf, useAnswerComments, type AnswerComment, type AnswerMark } from './answerComments'
 import { API_ERROR_KIND, callLineText, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
@@ -147,8 +153,40 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
   const toolPending = lastRow?.kind === 'tool' && !lastRow.result
   const anchorOf = (index: number) => (chat ? `chat:${chat}#${index}` : undefined)
   const shown = shownRows(rows, !!calls)
+  const answers = useAnswerComments(ws, chat === 'main' && !nested)
+  const [opened, setOpened] = useState<string | null>(null)
+  const [asked, setAsked] = useState<string | null>(null)
+  // each text row's comments and marks, recomputed when the comments or the open one change
+  const rowMarks = useMemo(() => {
+    const out = new Map<number, { comments: AnswerComment[]; marks: AnswerMark[] }>()
+    if (!answers.comments.length) return out
+    for (const r of shown) {
+      if (r.kind !== 'text') continue
+      const mine = commentsOfRow(r, answers.comments)
+      if (mine.length) out.set(r.index, { comments: mine, marks: marksOf(mine, opened) })
+    }
+    return out
+  }, [shown, answers.comments, opened])
+  const marksCtx = useMemo(() => ({ open: (id: string) => setOpened((cur) => (cur === id ? null : id)) }), [])
+  // a deep link or a teleport to `answer:<turn>#s<n>`: its comment opens once it is read, and its passage comes into view
+  useEffect(() => {
+    if (chat !== 'main' || nested) return
+    return bus.on('openRef', (e) => {
+      if (e.ref.startsWith('answer:')) setAsked(e.ref)
+    })
+  }, [chat, nested])
+  useEffect(() => {
+    if (!asked) return
+    const hit = answers.comments.find((c) => c.ref === asked && c.status === 'open')
+    if (!hit) return
+    setOpened(hit.id)
+    setAsked(null)
+    window.setTimeout(() => revealAnchor(asked), 0)
+  }, [asked, answers.comments])
   return (
     <ChipContext.Provider value={{ workspace: ws, broken: EMPTY, anchor: true }}>
+      <CardQuestions.Provider value={true}>
+      <AnswerMarksContext.Provider value={marksCtx}>
       {shown.map((r, i) => {
         switch (r.kind) {
           case 'user':
@@ -156,20 +194,27 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return (
               <div key={r.index} className="chat-msg chat-user" data-event={r.event}>
                 {r.by === 'main' && <Note className="chat-origin" text="From" chips={<ThreadChip id="main" />} />}
-                {byLabel(r.by, chat, r.tray) && <Note className="chat-origin chat-by" data-by={r.by} text={byLabel(r.by, chat, r.tray)!} />}
+                {byLabel(r.by, chat, r.tray, r.plugin) && <Note className="chat-origin chat-by" data-by={r.plugin ? 'plugin' : r.by} text={byLabel(r.by, chat, r.tray, r.plugin)!} />}
                 <UserMessage className="chat-message" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined} data-by={r.by}>
                   <RefText text={stripHarness(r.text)} workspace={ws} />
                 </UserMessage>
+                {r.images?.length ? <Pictures names={r.images} ws={ws} /> : null}
               </div>
             )
-          case 'text':
+          case 'text': {
+            const own = rowMarks.get(r.index)
+            const open = own?.comments.find((c) => c.id === opened)
             return (
               <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
-                  <ChatMarkdown text={r.text} streaming={r === lastText} />
+                  <CardChipCites.Provider value={true}>
+                    <ChatMarkdown text={r.text} streaming={r === lastText} marks={own?.marks} />
+                  </CardChipCites.Provider>
                 </div>
+                {open && <AnswerCommentCard key={open.id} comment={open} ws={ws} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
               </div>
             )
+          }
           case 'tools':
             return <ToolGroupCard key={r.index} group={r} ws={ws} pending={streaming && i === shown.length - 1} />
           case 'calls':
@@ -218,11 +263,30 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
         }
       })}
       {streaming && !toolPending && <Working />}
+      </AnswerMarksContext.Provider>
+      </CardQuestions.Provider>
     </ChipContext.Provider>
   )
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
+
+/** The pictures the analyst pasted into a message (Claude Code's `[Image #1]` in its text), under it, each opening full
+ * size. */
+function Pictures({ names, ws }: { names: readonly string[]; ws: string }) {
+  return (
+    <div className="chat-pictures">
+      {names.map((name, i) => {
+        const src = api.pictureUrl(ws, name)
+        return (
+          <a key={name} className="chat-picture" href={src} target="_blank" rel="noreferrer" title={`Image #${i + 1}`}>
+            <img src={src} alt={`Image #${i + 1}, pasted with the message`} loading="lazy" />
+          </a>
+        )
+      })}
+    </div>
+  )
+}
 
 /** Main's note for a dev chat that started: a view's build (`view`, on the backend's agent row), else a code ticket.
  * Pure. */
@@ -231,13 +295,15 @@ export function devStarted(r: { view?: string; title?: string | null }): string 
   return r.view || (r.title ?? '').startsWith('view: ') ? 'View build started in' : 'Dev ticket started'
 }
 
-/** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`
- * with `tray`, the record's origin `human`) or sent from thimble's browser (`browser`); none for a prompt main's call
- * sent (`terminal` alone), and none in main, whose own messages are the analyst's. Pure. */
-export function byLabel(by: string | undefined, chat: string | undefined, tray?: boolean): string | null {
+/** Where a message came from: in any chat, a prompt a plugin sent as the analyst's, as Claude Code's terminal says it
+ * (thimble's terminal panel's `run again` or new label); in one of thimble's agents' threads, typed in Claude Code's
+ * agent tray (`terminal` with `tray`, the record's origin `human`); none for a prompt main's call sent (`terminal`
+ * alone), and none for the analyst's own messages sent here in the browser (`browser`), in main or a thread, which
+ * are theirs as they read them (bug hunt G11). Pure. */
+export function byLabel(by: string | undefined, chat: string | undefined, tray?: boolean, plugin?: string): string | null {
+  if (plugin) return `Prompt from the ${plugin} plugin`
   if (!chat || chat === 'main') return null
   if (by === 'terminal') return tray ? 'typed in the agent tray' : null
-  if (by === 'browser') return 'sent from thimble'
   return null
 }
 
@@ -377,11 +443,14 @@ export function ToolGroupCard({ group, ws, pending }: { group: ToolGroup; ws: st
   const made = madeBy(tools)
   const cells = made.cells.map((c) => c.id)
   const summary = single ? toolSummary(single.name, single.input, ws) : ''
+  // a call whose target is refs (a lookup of a document, a card) names them as chips, never as `report:<slug>`
+  const refs = single ? targetRefs(single.name, summary) : null
   const madeSome = cells.length + made.views.length + made.labels.length > 0
-  const meta = single && !madeSome && summary ? summary : toolMeta(tools)
+  const meta = single && !madeSome && summary && !refs ? summary : toolMeta(tools)
   const state = groupState(tools, pending)
   const body = open && single ? <CallBody tool={single} ws={ws} summary={summary} /> : null
   const chips = [
+    ...(refs ?? []).filter((r) => !cells.includes(r.replace(/^(?:card|cell):/, '').split(/[#@]/)[0])).map((r) => <TargetChip key={`ref:${r}`} ref_={r} ws={ws} />),
     ...cells.map((id) => (
       <span key={`card:${id}`} className="chat-tool-cell" data-anchor={`card:${id}`} onClick={(e) => e.stopPropagation()}>
         <RefChip ref={`card:${id}`} compact workspace={ws} />
@@ -509,13 +578,32 @@ const REF_TARGET_TOOLS = new Set(['read_ref', 'screenshot', 'edit_card', 'delete
 /** The refs a call's target names, when it is a thimble call whose target is refs alone; null otherwise. Pure. */
 export function targetRefs(name: string, summary: string): string[] | null {
   if (!REF_TARGET_TOOLS.has(toolDisplayName(name))) return null
-  // a card named by its id alone, as edit_card and delete_card take it, is that card's ref
+  // a card named by its id alone, as edit_card and delete_card take it, is that card's ref: a name such as
+  // `prs-merged-week`, or an older card's random id
+  const byId = ['edit_card', 'delete_card'].includes(toolDisplayName(name))
   const parts = summary
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean)
-    .map((x) => (/^[0-9a-f]{8}$/.test(x) ? `card:${x}` : x))
+    .map((x) => ((byId ? /^[A-Za-z0-9_-]+$/ : /^[0-9a-f]{8}$/).test(x) ? `card:${x}` : x))
   return parts.length && parts.every((x) => x.includes(':') && parseRef(x) != null) ? parts : null
+}
+
+/** The chip of a ref a thimble call's target names: a whole document by its name (Pilot findings), as the chat's other
+ * chips of a document are, never `report:<slug>`; any other ref as its RefChip. */
+function TargetChip({ ref_: r, ws }: { ref_: string; ws: string }) {
+  const p = parseRef(r)
+  if (p?.kind === 'report' && !p.unit)
+    return (
+      <span className="chat-tool-cell" data-anchor={r} onClick={(e) => e.stopPropagation()}>
+        <DocChip ws={ws} slug={p.slug} className="chat-chip-link" onClick={() => teleport(r)} />
+      </span>
+    )
+  return (
+    <span className="chat-tool-cell" data-anchor={r} onClick={(e) => e.stopPropagation()}>
+      <RefChip ref={r} compact workspace={ws} />
+    </span>
+  )
 }
 
 /** The chips of what a thimble call made, after its chip line: the card, the view proposed, the label applied; and the
@@ -527,11 +615,7 @@ function madeChips(tool: ToolRowT, ws: string, refs: readonly string[] = []) {
     ...refs
       .map((r) => r.replace(/^cell:/, 'card:'))
       .filter((r) => !madeIds.has(r.split(/[#@]/)[0]))
-      .map((r) => (
-        <span key={`ref:${r}`} className="chat-tool-cell" data-anchor={r} onClick={(e) => e.stopPropagation()}>
-          <RefChip ref={r} compact workspace={ws} />
-        </span>
-      )),
+      .map((r) => <TargetChip key={`ref:${r}`} ref_={r} ws={ws} />),
     ...made.cells.map((c) => (
       <span key={`card:${c.id}`} className="chat-tool-cell" data-anchor={`card:${c.id}`} onClick={(e) => e.stopPropagation()}>
         <RefChip ref={`card:${c.id}`} compact workspace={ws} />
@@ -663,19 +747,27 @@ function CallOutput({ text, callRef: ref, failed, focus }: { text: string; callR
   )
 }
 
+/** The place of a view's page by its target (backend views.MISSING_PAGE_PLACE). */
+const PAGE_PLACE: Record<string, string> = { 'term-page': 'the terminal panel', 'html-page': 'the browser workbench' }
+
 /** A dev ticket's end in main, in a few words: applied, stopped, or failed (a change to a view that failed, or that the
- * analyst's quit stopped, puts the view back as it was); the thread its chip opens has the reason. Other chips keep their
- * text. Pure. */
-export function ticketChipText(item: Pick<ChipRowT, 'status' | 'text' | 'ref'>): string {
+ * analyst's quit stopped, puts the view back as it was); the thread its chip opens has the reason. The build of the page a
+ * view lacked (`page`) is thimble's step, not a change the analyst asked for, so its words name the page. Other chips keep
+ * their text. Pure. */
+export function ticketChipText(item: Pick<ChipRowT, 'status' | 'text' | 'ref' | 'page'>): string {
+  const view = item.ref?.startsWith('view:')
+  const place = view && item.page ? PAGE_PLACE[item.page] : undefined
   switch (item.status) {
     case 'applied':
       return 'Dev ticket applied'
     case 'stopped':
-      return item.ref?.startsWith('view:') ? 'The change to the view stopped when your Claude Code session ended, so it is as it was' : 'Dev ticket stopped'
+      if (place) return `The build of the view's page for ${place} stopped when your Claude Code session ended`
+      return view ? 'The change to the view stopped when your Claude Code session ended, so it is as it was' : 'Dev ticket stopped'
     case 'failed':
     case 'needs manual merge':
     case 'rolled back':
-      return item.ref?.startsWith('view:') ? 'The change to the view failed, so it is as it was' : item.status === 'rolled back' ? 'Dev ticket rolled back' : 'Dev ticket failed'
+      if (place) return `The view's page for ${place} failed to build, so the view keeps its other page`
+      return view ? 'The change to the view failed, so it is as it was' : item.status === 'rolled back' ? 'Dev ticket rolled back' : 'Dev ticket failed'
     default:
       return item.text
   }
@@ -736,7 +828,9 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
     return (
       <div className="chat-msg chat-assistant chat-say" data-chip="say">
         <div className="chat-text">
-          <RefText text={item.text} workspace={ws} cite />
+          <CardChipCites.Provider value={true}>
+            <RefText text={item.text} workspace={ws} cite />
+          </CardChipCites.Provider>
         </div>
       </div>
     )
@@ -749,7 +843,9 @@ export function ChipRow({ item, ws }: { item: ChipRowT; ws: string }) {
     const text = ticketChipText(item)
     return <Note className="chat-chip-row" data-chip="ticket" data-status={item.status} text={text} chips={<ThreadChip id={item.chat} />} />
   }
-  if (item.chip === 'thread' && item.chat) return <Note className="chat-chip-row" data-chip="thread" text={item.text} chips={<ThreadChip id={item.chat} />} />
+  // a view builder's or reviewer's hand-back to main (backend session.HANDBACK_ROWS): `View builder finished` and its
+  // chat, with main's reply to it under it
+  if ((item.chip === 'thread' || item.chip === 'handback') && item.chat) return <Note className="chat-chip-row" data-chip={item.chip} text={item.text} chips={<ThreadChip id={item.chat} />} />
   const pending = chipPending(item.status) && settled == null
   const opens = !!item.ref && item.chip !== 'ticket'
   const status = pending ? 'pending' : settled ?? item.status

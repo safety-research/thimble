@@ -23,6 +23,7 @@ import { track } from '../lib/telemetry'
 import { hhmm } from '../lib/time'
 import type { ViewQuery, ViewReview } from '../lib/types'
 import { openLabelEditor } from './LabelEditor'
+import { viewMarking } from './labels'
 import { ViewFailed } from './Reader'
 import { useFilesFilter, type FilesLabels } from './useLabels'
 import { ResidueList, useResidueOpen, useShownLabels, useViewNotes, ViewFilter, ViewHeadLine } from './ViewChrome'
@@ -56,11 +57,13 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
   const [failure, setFailure] = useState<string | null>(null)
   const filter = useFilesFilter(ws)
   const filterLabel = filter ? labels.byId.get(filter.concept) : undefined
-  const pin = usePinnedView(ws, view.slug, view.version)
+  const pin = usePinnedView(ws, view.slug, view.version, view.browser_page === false)
   const { byId, toggle, setFocus, setColour } = labels
   // what a new label made in the editor applies to: the files the view claims
   const claims = view.claims
   const firstFile = view.first_file
+  // the labels that mark some of the view's records with a value they color by, which Color by may open on
+  const marking = useMemo(() => (claims ? viewMarking(labels.all, labels.presence, claims) : undefined), [claims, labels.all, labels.presence])
   const labelActions = useMemo<ViewLabelActions>(
     () => ({
       setOn: (id, on) => {
@@ -109,7 +112,7 @@ export function ViewPane({ ws, view, path, picked, targetRef, quote, onQuoteMiss
       {residueOpen && <ResidueList notes={notes} onPick={openFile} />}
       <div className="view-pane-body">
         {failure && <ViewFailed name={view.name} detail={failure} onRaw={path ? () => openFile(targetRef && refPath(targetRef) === path ? targetRef : path) : undefined} />}
-        <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} labelActions={labelActions} onHidden={setHidden} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
+        <ViewerFrame key={`${view.slug}:${pin.pinned ?? ''}`} ws={ws} slug={view.slug} version={pin.pinned || undefined} restore={pin.restore} handle={pin.frame} targetRef={targetRef} path={path ?? undefined} pathPicked={picked} title={view.name} labels={labels.on} filter={filter} filterFiles={filter ? labels.presence.get(filter.concept) : undefined} byId={labels.byId} first={first} marking={marking} labelActions={labelActions} onHidden={setHidden} onError={setFailure} quote={quote} onQuoteMissing={onQuoteMissing} query={query} onQuery={(p) => !p && onClearQuery?.()} className="view-pane-frame" />
       </div>
     </div>
   )

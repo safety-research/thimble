@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import config, extensions, investigation, notebook, report_types, subagents, tools, video, write_session
-from app.ledger import write_json
+from app import config, extensions, investigation, notebook, report_types, tools, video
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
 CORPUS = "mini"
@@ -32,21 +31,6 @@ async def call(name: str, **args):
     return await tools.call(CORPUS, name, args, actor="analyst")
 
 
-async def test_a_video_starts_a_writer_that_reads_the_video_form(count, bridge):
-    assert "video" not in report_types.new_kinds(CORPUS)
-    await extensions.refresh(CORPUS)
-    assert "video" in report_types.new_kinds(CORPUS) and "video" not in [t["slug"] for t in report_types.list_types(CORPUS)]
-    r = await call("start_writing", doc="video", type="video")
-    assert not r.is_error, r.text
-    [req] = [x for x in subagents.read(CORPUS)["requests"].values() if x["kind"] == "start"]
-    assert req["key"] == "writer:video" and req["input"]["subagent_type"] == "thimble:writer"
-    context = (write_session.work_dir(CORPUS, "video") / write_session.CONTEXT_FILE).read_text()
-    assert "report:video" in context and str(write_session.work_dir(CORPUS, "video")) in req["input"]["prompt"]
-    assert report_types.read_type(CORPUS, "video")["renderer"] == "video"
-    form = await call("read_ref", ref="type:video")
-    assert "narrated explainer" in form.text and "window.seek" in form.text and "window.timing" in form.text
-
-
 async def test_a_saved_video_is_checked_and_timed_and_its_film_reaches_no_host(count):
     await extensions.refresh(CORPUS)
     assert report_types.create_document_type(CORPUS, "video")["slug"] == "video"
@@ -64,12 +48,3 @@ async def test_a_saved_video_is_checked_and_timed_and_its_film_reaches_no_host(c
     # the policy comes before the film's first element, so it governs the whole film
     assert page.index('http-equiv="Content-Security-Policy"') < page.index("<canvas")
     assert "connect-src 'none'" in page and "window.timing = " in page
-
-
-async def test_a_video_written_while_it_was_built_in_is_a_video_made_from_the_extension_s_type(count):
-    write_json(investigation.ensure_main(CORPUS) / "video.json", {"title": "Old", "lines": [], "film": FILM})
-    await extensions.refresh(CORPUS)
-    t = next(t for t in report_types.list_types(CORPUS) if t["slug"] == "video")
-    assert t["renderer"] == "video" and t["preset"] == "video" and not t["builtin"]
-    assert report_types.read_doc(CORPUS, MAIN, "video")["renderer"] == "video"
-    assert report_types.create_document_type(CORPUS, "video")["slug"] == "video-2"

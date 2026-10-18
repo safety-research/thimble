@@ -1,18 +1,19 @@
 // @vitest-environment jsdom
 // The settings popover (src/shell/SettingsPopover.tsx): one model table with a row per role and exactly the model and
 // effort that runs, Claude Code's levels in every agent's effort menu and none for a model that runs with none, fast
-// mode only for the classifiers, main and `thimble fix` (on the dev row), the view proposals' and the refusal's
-// rows, the orientation subagents' row with its effort, a web switch per agent; the View proposals switch, sent only
-// when it changed; thimble's rules for main and its agents, code tickets' among them (web and data follow the session's
-// mode, and the shell runs in Claude Code's sandbox where /thimble saw one); one permission row, the dev agent's
-// program's, only where an extension runs one, where a session in Bypass counts as Manual; cardWait; no installs row;
-// the Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), sent only when it changed and taken by
-// the page at once.
+// mode only for main, beside its effort, the viewer suggestion's and the refusal's rows (the refusal's Off in its model
+// menu), the orientation subagents' row with its effort, a web switch per agent in the web column, under the popover's
+// title; the View proposals switch, sent only when it changed; thimble's rules for main and its agents, code tickets'
+// among them (web and data follow the session's mode, and the shell runs in Claude Code's sandbox where /thimble saw
+// one); one permission row, the dev agent's program's, only where an extension runs one, with Manual and Auto and no
+// Bypass (0.9.0: a session or a row in Bypass counts as Manual); cardWait; no installs row; the Ask key choice, ⌘-click
+// or ⌥-click (Ctrl-click or Alt-click off a Mac), sent only when it changed and taken by the page at once; thimble's
+// feature switches, the same rows as /config → thimble, in its order, each sent only when it changed (false off, null
+// back on).
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ASK_KEY_LABEL, BYPASS_LINE, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyNote, askKeyOptions, changedAskKey, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { MODE_OPTIONS, SettingsPopover, agentMode, changedRoles, changedWeb, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
-import { getAskKey, setAskKey } from '../../src/lib/platform.ts'
 import type { Attached, Settings } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -67,24 +68,6 @@ afterEach(() => {
 })
 
 describe('the rules', () => {
-  test("every agent's effort menu is Claude Code's levels; main's alone adds ultracode", () => {
-    expect(roleEfforts('orient')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
-    expect(roleEfforts('subagents')).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
-    expect(roleEfforts('main')).toContain('ultracode')
-  })
-
-  test('fast mode is the classifiers\' and main\'s; a model with no effort has none to pick', () => {
-    const conf = (model: string) => ({ model, effort: 'high', fast: false })
-    expect(lockedWhy('orient', 'fast', conf('claude-opus-5-5'), { attached: true })).toMatch(/no fast mode/)
-    expect(lockedWhy('labels', 'fast', conf('claude-opus-5-5'), { attached: true })).toBeNull()
-    expect(lockedWhy('dev', 'fast', conf('claude-opus-5-5'), { attached: true })).toBeNull()
-    expect(lockedWhy('dev', 'fast', conf('claude-haiku-4-5-20251001'), { attached: true })).toMatch(/fast/i)
-    expect(lockedWhy('checks', 'effort', conf('claude-haiku-4-5-20251001'), { attached: true })).toBe('Haiku 4.5 runs with no effort')
-  })
-
-  test('the roles in order, the refusal row last of thimble\'s', () => {
-    expect(rolesOf(SETTINGS)).toEqual(['main', 'orient', 'subagents', 'critic', 'writer', 'dev', 'checks', 'labels', 'verify', 'suggest', 'refusal'])
-  })
 
   test('a save sends only what changed: models, the refusal row\'s off, and the web switches', () => {
     const now = { ...SETTINGS.models, refusal: { ...SETTINGS.models.refusal, off: true }, writer: { ...SETTINGS.models.writer, effort: 'max' } }
@@ -93,187 +76,16 @@ describe('the rules', () => {
     expect(loaded).toEqual({ critic: false, writer: true, checks: true })
     expect(changedWeb(loaded, { ...loaded, critic: true, writer: false })).toEqual({ critic: null, writer: 'off' })
   })
-
-  test('View proposals: false to turn them off, null to put the default (on) back, nothing when unchanged', () => {
-    expect(changedPropose(SETTINGS, true)).toEqual({})
-    expect(changedPropose(SETTINGS, false)).toEqual({ propose_views: false })
-    expect(changedPropose({ ...SETTINGS, propose_views: false }, false)).toEqual({})
-    expect(changedPropose({ ...SETTINGS, propose_views: false }, true)).toEqual({ propose_views: null })
-  })
-
-  test('the ask key: ⌘-click or ⌥-click, Ctrl-click or Alt-click off a Mac; a save sends "alt", null for ⌘, nothing when unchanged', () => {
-    expect(askKeyOptions(true)).toEqual([
-      { value: 'meta', label: '⌘-click' },
-      { value: 'alt', label: '⌥-click' },
-    ])
-    expect(askKeyOptions(false).map((o) => o.label)).toEqual(['Ctrl-click', 'Alt-click'])
-    expect(askKeyNote(true, 'meta')).toBe('⌘-click asks about anything in thimble; ⌥-drag places a card freely on the canvas.')
-    expect(askKeyNote(true, 'alt')).toBe('⌥-click asks about anything in thimble; ⌘-drag places a card freely on the canvas.')
-    expect(askKeyNote(false, 'alt')).toBe('Alt-click asks about anything in thimble; Ctrl-drag places a card freely on the canvas.')
-    expect(changedAskKey(SETTINGS, 'meta')).toEqual({})
-    expect(changedAskKey(SETTINGS, 'alt')).toEqual({ ask_key: 'alt' })
-    expect(changedAskKey({ ...SETTINGS, ask_key: 'alt' }, 'alt')).toEqual({})
-    expect(changedAskKey({ ...SETTINGS, ask_key: 'alt' }, 'meta')).toEqual({ ask_key: null })
-  })
-
-  test("thimble's rules for main and its agents in words, and the CLAUDE.md files each agent reads", () => {
-    const main = SETTINGS.agents!.main!
-    expect(fenceLine(main)).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
-    expect(fenceLine(main, true)).toBe("web follows your mode · data edits follow your mode · shell in Claude Code's sandbox")
-    expect(fenceLine({ ...main, web: 'off', data: 'off' }, false)).toBe('no web · never edits data · shell follows your mode')
-    expect(fenceLine({ ...main, web: 'allow', data: 'allow' })).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
-    expect(memoryWords('off')).toBe('CLAUDE.md files: off')
-    expect(memoryWords(undefined)).toBe('CLAUDE.md files: on')
-  })
 })
 
 describe('the popover', () => {
-  test('one model table, the fence, cardWait, and no installs or per-agent mode rows: code tickets run in your mode', async () => {
-    const anchor = document.createElement('button')
-    document.body.appendChild(anchor)
-    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
-    await settle()
-    await settle()
-    const doc = document.body
-    const roles = [...doc.querySelectorAll('.settings-models .settings-row[data-role]')].map((r) => r.getAttribute('data-role'))
-    expect(roles).toEqual(['main', 'orient', 'subagents', 'critic', 'writer', 'dev', 'checks', 'labels', 'verify', 'suggest', 'refusal'])
-    expect(doc.querySelector('.settings-row[data-role="checks"] [aria-label="checks effort"]')?.textContent).toBe('none')
-    expect(doc.querySelector('.settings-row[data-role="subagents"] .settings-role-note')?.textContent).toMatch(/thimble:orient-helper/)
-    expect(doc.querySelectorAll('.settings-row[data-role="orient"] .fast-bolt')).toHaveLength(0)
-    expect(doc.querySelectorAll('.settings-row[data-role="labels"] .fast-bolt')).toHaveLength(1)
-    expect(doc.querySelector('.settings-row[data-role="critic"] [role="switch"]')?.getAttribute('aria-checked')).toBe('false')
-    expect(doc.querySelector('.settings-next-start')?.textContent).toMatch(/applies to its next start/)
-    expect(doc.querySelector('.settings-fence-line')?.textContent).toBe('web follows your mode · data edits follow your mode · shell follows your mode')
-    expect(doc.querySelector('.settings-fence .settings-headrow')?.textContent).toMatch(/^thimble's rules/)
-    expect(doc.querySelector('.settings-fence-note')?.textContent).toBe("Your Claude Code session and thimble's agents, its subagents.")
-    expect(doc.textContent).not.toMatch(/fence/i)
-    expect(doc.querySelectorAll('[data-mode-agent]')).toHaveLength(0)
-    expect(doc.querySelector('.settings-main-mode')?.textContent).toBe(MAIN_MODE_LINE)
-    expect(doc.querySelector('.settings-card-wait')?.textContent).toBe(cardWaitLine(10))
-    expect(doc.querySelector('[data-memory-agent="writer"]')?.textContent).toContain('CLAUDE.md files: off')
-    expect(doc.textContent).not.toMatch(/installs/i)
-    expect(doc.querySelector('.settings-ignored')?.textContent).toContain('agents.writer.fast')
-    // switching the writer's web off and saving sends it
-    await act(async () => doc.querySelector<HTMLButtonElement>('.settings-row[data-role="writer"] [role="switch"]')!.click())
-    await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
-    await settle()
-    expect(puts).toEqual([['/api/ws/mini/settings', { web: { writer: 'off' } }]])
-  })
 
-  test('the View proposals switch, on by default, and a save sends it only once it changed', async () => {
-    const anchor = document.createElement('button')
-    document.body.appendChild(anchor)
-    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
-    await settle()
-    await settle()
-    const doc = document.body
-    const row = doc.querySelector('.settings-row[data-auto="propose-views"]')!
-    expect(row.querySelector('.settings-role')?.textContent).toBe(PROPOSE_LABEL)
-    expect(row.textContent).not.toMatch(/offer/i)
-    const sw = row.querySelector<HTMLButtonElement>('[role="switch"]')!
-    expect(sw.getAttribute('aria-checked')).toBe('true')
-    await act(async () => sw.click())
-    await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
-    await settle()
-    expect(puts).toEqual([['/api/ws/mini/settings', { propose_views: false }]])
-  })
-
-  test('the Ask key choice, ⌘ by default: picking the other key and saving sends it, and the page takes it at once', async () => {
-    setAskKey('meta')
-    const anchor = document.createElement('button')
-    document.body.appendChild(anchor)
-    try {
-      await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
-      await settle()
-      await settle()
-      const doc = document.body
-      const row = doc.querySelector('.settings-row[data-auto="ask-key"]')!
-      expect(row.querySelector('.settings-role')?.textContent).toBe(ASK_KEY_LABEL)
-      expect(ASK_KEY_LABEL).toBe('Ask key')
-      const options = [...row.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
-      // jsdom reports no Mac
-      expect(options.map((o) => [o.textContent, o.getAttribute('aria-checked')])).toEqual([
-        ['Ctrl-click', 'true'],
-        ['Alt-click', 'false'],
-      ])
-      expect(row.querySelector('.settings-agent-line')?.textContent).toBe(askKeyNote(false, 'meta'))
-      await act(async () => options[1].click())
-      expect(row.querySelector('.settings-agent-line')?.textContent).toBe(askKeyNote(false, 'alt'))
-      expect(getAskKey()).toBe('meta')
-      await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
-      await settle()
-      expect(puts).toEqual([['/api/ws/mini/settings', { ask_key: 'alt' }]])
-      expect(getAskKey()).toBe('alt')
-    } finally {
-      setAskKey('meta')
-    }
-  })
-
-  test('the Ask key choice shows the key the settings hold, and a save without a change sends none', async () => {
-    settings = { ...SETTINGS, ask_key: 'alt' }
-    const anchor = document.createElement('button')
-    document.body.appendChild(anchor)
-    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
-    await settle()
-    await settle()
-    const doc = document.body
-    expect(doc.querySelector('.settings-row[data-auto="ask-key"] [role="radio"][aria-checked="true"]')?.textContent).toBe('Alt-click')
-    await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
-    await settle()
-    expect(puts).toEqual([])
-  })
-
-  test("the dev row's fast switch is thimble fix's, and a save sends it", async () => {
-    const anchor = document.createElement('button')
-    document.body.appendChild(anchor)
-    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
-    await settle()
-    await settle()
-    const doc = document.body
-    const note = doc.querySelector('.settings-row[data-role="dev"] .settings-role-note')!
-    expect(note.textContent).toBe("view builds, view reviews and code tickets · thimble fix's fast mode")
-    const bolt = note.querySelector<HTMLButtonElement>(`.fast-bolt[aria-label="${TICKET_FAST}"]`)!
-    expect(bolt.getAttribute('aria-disabled')).toBeNull()
-    await act(async () => bolt.click())
-    await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
-    await settle()
-    expect(puts).toEqual([['/api/ws/mini/settings', { models: { dev: { fast: true } } }]])
-  })
-
-  test("the dev agent's permission mode shows only where an extension runs it with a program of its own", async () => {
-    expect(modeRowShown(undefined)).toBe(false)
-    expect(modeRowShown({ way: 'thimble' })).toBe(false)
-    expect(modeRowShown({ way: 'prompt' })).toBe(false)
-    expect(modeRowShown({ way: 'sdk' })).toBe(true)
-    expect(modeRowShown({ way: 'command' })).toBe(true)
-    const anchor = document.createElement('button')
-    document.body.appendChild(anchor)
-    const dev = SETTINGS.agents!.dev!
-    SETTINGS.agents!.dev = { ...dev, way: 'sdk', extension: 'ext' }
-    try {
-      await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
-      await settle()
-      await settle()
-      expect(document.body.querySelector('[data-mode-agent="dev"] .settings-role')?.textContent).toBe("Dev agent's program")
-    } finally {
-      SETTINGS.agents!.dev = dev
-    }
-  })
-
-  test("main's row says the shell runs in Claude Code's sandbox where /thimble saw one", async () => {
-    attached = { session: 's1', cwd: '/c', since: '', sandbox: true }
-    const anchor = document.createElement('button')
-    document.body.appendChild(anchor)
-    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
-    await settle()
-    await settle()
-    expect(document.body.querySelector('.settings-fence-line')?.textContent).toBe("web follows your mode · data edits follow your mode · shell in Claude Code's sandbox")
-  })
-
-  test("a session in Bypass reaches the dev agent's program as Manual; only a row the server answers Bypass is Bypass, with Claude Code's warning", async () => {
+  test("no Bypass: the dev agent's program offers Manual and Auto, and a session or a row in Bypass shows as Manual, with no warning", async () => {
+    // 0.9.0 (SPEC D47): Settings has no Bypass rows; backend modes.choose refuses bypass
+    expect(MODE_OPTIONS.map((o) => o.label)).toEqual(['Manual', 'Auto'])
     expect(agentMode({}, 'dev', 'bypassPermissions')).toBe('manual')
     expect(agentMode({}, 'dev', 'auto')).toBe('auto')
-    expect(agentMode({ dev: 'bypass' }, 'dev', 'default')).toBe('bypass')
+    expect(agentMode({ dev: 'bypass' }, 'dev', 'default')).toBe('manual')
     expect(agentMode({}, 'dev', 'auto', ['auto'])).toBe('manual')
     const program = { ...SETTINGS, agents: { ...SETTINGS.agents, dev: { ...SETTINGS.agents!.dev!, way: 'sdk' as const, extension: 'ext' } } }
     attached = { session: 's1', cwd: '/c', since: '', permission_mode: 'bypassPermissions' }
@@ -287,15 +99,81 @@ describe('the popover', () => {
     expect(chip().textContent).toBe("Manual (your session's)")
     expect(document.body.querySelector('.settings-modes-warn')).toBeNull()
     await act(async () => chip().click())
-    expect(document.querySelector('.menu-item[data-item="session"] .menu-item-note')?.textContent).toBe(SESSION_BYPASS_NOTE)
+    expect(document.querySelector('.menu-item[data-item="session"] .menu-item-note')?.textContent).toBe('Manual')
+    expect([...document.querySelectorAll('.menu-item')].map((m) => m.textContent)).not.toContain('Bypass')
     unmountAll()
-    // a row the server answers as Bypass: the analyst chose it in Settings
+    // a row an earlier version wrote as Bypass
     settings = { ...program, permission_modes: { dev: 'bypass' } }
     invalidateSettings('mini')
     await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
     await settle()
     await settle()
-    expect(chip().textContent).toBe('Bypass')
-    expect(document.body.querySelector('.settings-modes-warn')?.textContent).toBe(BYPASS_LINE)
+    expect(chip().textContent).toBe("Manual (your session's)")
+    expect(document.body.textContent).not.toMatch(/Bypass/)
+  })
+})
+
+describe('the table, as a newcomer reads it (bug hunt F17)', () => {
+
+  test("Settings opens under its title, main's model is the one main's meta names, its fast bolt sits by its effort, the last column is web alone, and the refusal row's Off is in its model menu", async () => {
+    attached = { session: 's1', cwd: '/c', since: '', model: 'claude-opus-5-5', effort: 'medium' } as Attached
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    expect(document.body.querySelector('.settings-title')?.textContent).toBe('Settings')
+    const heads = [...document.body.querySelectorAll('.settings-models .settings-headrow .label')].map((h) => h.textContent)
+    expect(heads).toEqual(['role', 'model', 'effort', 'web'])
+    expect(document.body.querySelector('.settings-models .settings-headrow .label:last-child')?.getAttribute('title')).toMatch(/web/)
+    const main = document.body.querySelector('[data-role="main"]')!
+    expect(main.querySelector('.settings-model, .settings-locked')?.textContent).toBe('Opus 5.5')
+    expect(main.querySelector('.settings-effort-cell .settings-fast')).not.toBeNull()
+    const refusal = () => document.body.querySelector('[data-role="refusal"]')!
+    expect(refusal().querySelector('[role="switch"], input[type="checkbox"]')).toBeNull()
+    await act(async () => refusal().querySelector<HTMLButtonElement>('.settings-model')!.click())
+    const off = [...document.querySelectorAll<HTMLElement>('.menu-item')].find((m) => m.textContent === 'Off')!
+    await act(async () => off.click())
+    expect(refusal().querySelector('.settings-model')?.textContent).toBe('Off')
+    expect(refusal().classList.contains('settings-row-off')).toBe(true)
+  })
+})
+
+describe('the model calls', () => {
+
+  test("labels ask nothing, as a model call through the session's own client; the card check follows the session's mode", async () => {
+    settings = { ...SETTINGS, agents: { ...SETTINGS.agents, labels: row({ config: 'agents.labels', tasks: ['labels'] }), cardCheck: row({ config: 'agents.cardCheck', tasks: ['card-check'] }) } as Settings['agents'] }
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const cell = (agent: string) => document.body.querySelector(`[data-call-agent="${agent}"] .settings-mode`)
+    expect(cell('labels')?.textContent).toBe('Asks nothing')
+    expect(cell('labels')?.getAttribute('aria-label')).toBe('Labels: Asks nothing')
+    expect(cell('cardCheck')?.textContent).toBe("Your session's")
+  })
+})
+
+describe('the feature switches', () => {
+
+  test('the switches round trip: they show what GET /settings answers, and Save PUTs the change', async () => {
+    settings = { ...SETTINGS, features: { labels: true, checks: false, citationMarks: true, coverage: true, cardCheck: true } }
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const rows = [...document.body.querySelectorAll('.settings-features .settings-row:not(.settings-headrow)')]
+    expect(rows.map((r) => r.querySelector('.settings-role')?.textContent)).toEqual([
+      'View proposals', 'Labels', 'Checks', 'Citation marks', 'Coverage', 'Card check'])
+    const sw = (key: string) => document.body.querySelector<HTMLButtonElement>(`[data-feature="${key}"] [role="switch"]`)!
+    expect(sw('checks').getAttribute('aria-checked')).toBe('false')
+    expect(sw('labels').getAttribute('aria-checked')).toBe('true')
+    await act(async () => sw('labels').click())
+    await act(async () => sw('checks').click())
+    await act(async () => [...document.body.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
+    await settle()
+    expect(puts).toEqual([['/api/ws/mini/settings', { features: { labels: false, checks: null } }]])
   })
 })

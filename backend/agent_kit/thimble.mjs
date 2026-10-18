@@ -6,8 +6,8 @@
 //
 // It speaks the JSON lines docs/agents.md documents: the input comes first on stdin, the answers to requests after
 // it, and the program's requests, log lines and output go on stdout. console.log, info and debug go to stderr, so
-// stdout carries only these lines. An Agent SDK program passes options() to query(), so its sessions start on the
-// analyst's own claude through thimble.
+// stdout carries only these lines. thimble starts no Claude Code session for a program: a model call is ask(), and
+// session() and options() throw (NO_SESSION).
 import { readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -94,9 +94,12 @@ export function ask(prompt, { schema, model, images } = {}) {
   return request('ask', { prompt, ...(schema ? { schema } : {}), ...(model ? { model } : {}), ...(images?.length ? { images } : {}) })
 }
 
-/** A Claude Code session thimble runs as the role or task, in its sandbox and permission mode; its last reply. */
-export function session(prompt, { system, tools, agents, model } = {}) {
-  return request('session', { prompt, ...(system ? { system } : {}), ...(tools ? { tools } : {}), ...(agents ? { agents } : {}), ...(model ? { model } : {}) })
+// harness.NO_SESSION: thimble starts no Claude Code session for a program
+export const NO_SESSION = "thimble starts no Claude Code session for a program: each model call runs through the analyst's Claude Code session. Ask a model with `ask` instead."
+
+/** Refused: thimble starts no Claude Code session for a program (NO_SESSION); ask() makes a model call. */
+export async function session() {
+  throw new ThimbleError(NO_SESSION)
 }
 
 /** thimble's own implementation of the task on `input`, on `model` in place of the task's own when given: the output
@@ -115,10 +118,9 @@ export function prompt(path, slots = {}) {
   })
 }
 
-/** Options for the Agent SDK's query() with `fields`, whose sessions thimble starts on the analyst's own claude, in
- * the role's permission mode, sandbox and settings, with thimble's tools. */
-export function options(fields = {}) {
-  return { cwd: WORK, ...fields, pathToClaudeCodeExecutable: process.env.THIMBLE_CLAUDE }
+/** Refused: an Agent SDK session of thimble's no longer exists (NO_SESSION); ask() makes a model call. */
+export function options() {
+  throw new ThimbleError(NO_SESSION)
 }
 
 /** Run a program: call `run` with the input, send what it returns as the output, and exit; exit 1 with the error on

@@ -16,6 +16,8 @@ Assess the card against these criteria. The graphic is the card's content as the
 
 Judge the card by what the analyst asked for in the work that led to it, which comes with the card. A look they asked for, such as a table wider than the card, is not poor formatting, and when the question and the graphic disagree, the replacement follows their request. A question that asks two separate things, such as how many X there are and which Y did the most, is not atomic even when the analyst asked both at once, since one graphic and one takeaway answer one question clearly, so the replacement keeps the part its graphic answers.
 
+An example card shows only a part of each record that it quotes. For a link to a record of a file, its line under "What each link resolves to" gives the record itself: first the fields that its text leaves out, such as the edit summary of a save, then its text. A line that ends in … is cut short. A quote or a value is correct when the record holds it, also when the picture does not show it. Say that a record does not hold a quote only when its line is complete and does not hold the quote.
+
 Then output the card that will replace it in place, with its question, its code and its takeaway. Change what fails a criterion and give back the rest word for word, since the analyst gains nothing from a rewrite of a part that works and loses the author's words. The code is the card's whole code and runs in place of the old, with a chart's colors left to thimble's theme. A card without code, such as an example or a note, can change only its question and its takeaway, so give its code empty. In a takeaway, each number the card shows links to where the card shows it. Wrap the whole quantity and cite where you read the value, as in `[[31|card:<id>#outcome/merged]] of [[40|card:<id>#outcome/all]] runs`. A rewritten takeaway keeps every link that is right.
 
 A link marked "typed in the code" points at a number that the code writes as text. Compute that number in the replacement's code instead, as in `f"revisions.jsonl: {len(R):,} saves"` in place of `"revisions.jsonl: 14,591 saves"`.
@@ -35,7 +37,7 @@ What each link resolves to
 
 Its code
 {{code}}
-{{typed}}{{kept}}
+{{chart}}{{typed}}{{kept}}
 
 The work that led to the card, most recent last
 {{context}}
@@ -43,6 +45,12 @@ The work that led to the card, most recent last
 ## none
 
 None.
+
+## chart
+
+The code draws its chart with thimble.chart. A replacement calls it only with the kinds, columns and options that its help gives:
+
+{{help}}
 
 ## typed
 

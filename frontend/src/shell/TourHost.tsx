@@ -1,16 +1,31 @@
-// The product tour's place in the shell. The first time this install's dashboard opens (backend tour.py, in thimble's
-// own home), once the shell is drawn with its session attached, or on a demo page (lib/demo), a welcome asks whether
-// to take the tour. On a demo page it first says that the page holds example data, and the steps say it is a demo;
-// elsewhere it says that the tour uses example data. The offer is recorded as it shows, whatever the answer. Settings'
-// Take the tour (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While it runs,
-// telemetry records nothing and the chat shows no view proposal (lib/touring). When it closes, the focused pane shows
-// the surface it showed before; a session that ends while it runs closes it.
-import { useEffect } from 'react'
+// The product tour's place in the shell. The tour never lays its examples over the analyst's own files: it runs in
+// thimble's read-only demo workspace, in a frame over the whole window under a banner that says it is example data, and
+// when it ends the analyst's page is exactly as it was (lib/tourFrame, TourFrame).
+//
+// On the analyst's page: the first time this install's dashboard opens (backend tour.py, in thimble's own home), once
+// the shell is drawn with its session attached, or on a demo page (lib/demo), a welcome asks whether to take the tour.
+// On a demo page it first says that the page holds example data; elsewhere it says that the tour uses example data. The
+// offer is recorded as it shows, whatever the answer. Settings' Take the tour (the bus's `tour`) opens the frame at
+// once. The tour runs on this workspace when it is a demo page, else on an installed demo dataset or worked example
+// (tourWorkspace); with none installed, the frame first sets up the tour's example workspace from a sample every
+// install ships (POST /tour/workspace), which a second tour reuses. A frame whose tour did not start, or whose setup
+// failed, gets a card that says so. While a card or the frame shows, telemetry records nothing and the chat
+// shows no view proposal (lib/touring); a session that ends meanwhile closes them, so the shell's own card about it can
+// be used.
+//
+// In the tour's frame (`?tour=frame`), a demo page whatever its session (SessionGone): the tour from its first step once
+// the shell is drawn, which tells the page around it when it started and when it ended. The tour itself (../tour)
+// loads only when it runs.
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
-import { bus, type Tab } from '../lib/bus'
+import { bus } from '../lib/bus'
+import { isDemo } from '../lib/demo'
 import { hold } from '../lib/telemetry'
 import { refFromUrl } from '../lib/teleport'
 import { setTouring } from '../lib/touring'
+import { inTourFrame, sendTourEvent, tourWorkspace } from '../lib/tourFrame'
+import type { WorkspaceRow } from '../lib/types'
+import { onSessionGone, TourFrame } from './TourFrame'
 
 /** The chat column is open, not folded. */
 const chatOn = () => !!document.querySelector('.chat[data-panel="chat"]')
@@ -20,51 +35,70 @@ const ready = () => {
   const shell = document.querySelector<HTMLElement>('.shell')
   return !!shell && shell.dataset.session !== 'gone' && (shell.dataset.chat !== 'open' || !!document.querySelector('.chat[data-panel="chat"] .chat-foot'))
 }
-const focusedTab = (): Tab | null => {
-  const t = document.querySelector<HTMLElement>('.shell-tabs .tab.active')?.dataset.tab
-  return t === 'files' || t === 'canvas' || t === 'report' ? t : null
-}
 const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms))
 
-export function TourHost() {
+type CardState = 'offer' | 'failed'
+/** The tour's example workspace, set up on the spot when no demo is installed (backend tour.py): its name. */
+const setUp = () => api.tourWorkspace().then((r) => r.name)
+
+export function TourHost({ ws }: { ws: string }) {
+  // the tour's frame while it shows, on its demo workspace (null: none installed, so the frame sets one up)
+  const [frame, setFrame] = useState<{ ws: string | null } | null>(null)
+  // a card, or the frame, shows or is about to
+  const busy = useRef(false)
+  const showCard = useRef<(state: CardState, onBegin?: () => void) => Promise<void>>(async () => undefined)
+
+  useEffect(() => (inTourFrame() ? runFramed() : undefined), [])
+
   useEffect(() => {
+    if (inTourFrame()) return
     let alive = true
-    let running = false
+    // the engine's card on this page (../tour/run offerTour): the welcome, or why the tour can't run
+    const card = async (state: CardState, onBegin?: () => void) => {
+      const { offerTour } = await import('../tour/run')
+      if (!alive) return void (busy.current = false)
+      hold(true)
+      setTouring(true)
+      let began = false
+      let stopWatch = (): void => undefined
+      const tour = offerTour({
+        state,
+        demo: isDemo(),
+        onBegin:
+          onBegin &&
+          (() => {
+            began = true
+            onBegin()
+          }),
+        onEnd: () => {
+          stopWatch()
+          hold(false)
+          setTouring(false)
+          if (!began) busy.current = false
+        },
+      })
+      stopWatch = onSessionGone(() => tour.end())
+    }
+    showCard.current = card
     const launch = async (welcome: boolean) => {
-      if (running) return
-      running = true
+      if (busy.current) return
+      busy.current = true
       try {
         if (welcome) {
           while (alive && !ready()) await sleep(250)
           await document.fonts?.ready.catch(() => undefined)
           await sleep(900)
           while (alive && !ready()) await sleep(250)
-          if (!alive) return void (running = false)
+          if (!alive) return void (busy.current = false)
           api.tourSeen().catch(() => undefined)
         }
-        const { runTour } = await import('../tour/run')
-        if (!alive) return void (running = false)
-        const before = focusedTab()
-        // a session that ends while the tour runs closes it, so the shell's own card about it can be used
-        const shell = document.querySelector<HTMLElement>('.shell')
-        const watch = new MutationObserver(() => shell?.dataset.session === 'gone' && tour.end())
-        hold(true)
-        setTouring(true)
-        const tour = runTour({
-          welcome,
-          chat: chatOn(),
-          showTab: (tab) => bus.emit('showTab', { tab, from: null }),
-          onEnd: () => {
-            running = false
-            watch.disconnect()
-            if (before && focusedTab() !== before) bus.emit('showTab', { tab: before, from: null })
-            hold(false)
-            setTouring(false)
-          },
-        })
-        if (shell) watch.observe(shell, { attributes: true, attributeFilter: ['data-session'] })
+        const rows = await api.workspaces().catch((): WorkspaceRow[] => [])
+        if (!alive) return void (busy.current = false)
+        const target = tourWorkspace(rows, ws, isDemo())
+        if (welcome) await card('offer', () => setFrame({ ws: target }))
+        else setFrame({ ws: target })
       } catch (e) {
-        running = false
+        busy.current = false
         hold(false)
         setTouring(false)
         console.warn('tour', e)
@@ -83,6 +117,54 @@ export function TourHost() {
       alive = false
       off()
     }
-  }, [])
-  return null
+  }, [ws])
+
+  if (!frame) return null
+  return (
+    <TourFrame
+      ws={frame.ws}
+      setUp={setUp}
+      onClose={(failed) => {
+        setFrame(null)
+        if (failed) void showCard.current('failed')
+        else busy.current = false
+      }}
+    />
+  )
+}
+
+/** In the tour's frame: the tour from its first step once the shell is drawn, in a demo page's words. It tells the page
+ * around the frame when it started, and when it ended or failed. Returns the stop. */
+function runFramed(): () => void {
+  let alive = true
+  const parent = window.parent
+  void (async () => {
+    try {
+      while (alive && !ready()) await sleep(250)
+      await document.fonts?.ready.catch(() => undefined)
+      await sleep(300)
+      while (alive && !ready()) await sleep(250)
+      const { runTour } = await import('../tour/run')
+      if (!alive) return
+      hold(true)
+      setTouring(true)
+      // the page around the frame removes it once the tour ends, and puts the demo workspace's stored layout back
+      runTour({
+        chat: chatOn(),
+        showTab: (tab) => bus.emit('showTab', { tab, from: null }),
+        onEnd: () => {
+          hold(false)
+          setTouring(false)
+          sendTourEvent(parent, 'end')
+        },
+      })
+      sendTourEvent(parent, 'started')
+    } catch (e) {
+      console.warn('tour', e)
+      sendTourEvent(parent, 'fail')
+    }
+  })()
+  return () => {
+    alive = false
+  }
 }

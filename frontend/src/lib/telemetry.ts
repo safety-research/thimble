@@ -2,6 +2,8 @@
 // UI: a batch that fails is requeued, a handler that throws is swallowed. Three sources: the API requests the page
 // makes (one wrapped fetch), clicks on interactive elements, and the window's uncaught errors.
 import { apiBase, apiPath } from './browserKey'
+import { isSuspect, pageStopped } from './stale'
+import { inTourFrame } from './tourFrame'
 import { workspaceFromUrl } from './workspace'
 
 export const CLIENT_KINDS = [
@@ -425,6 +427,9 @@ let selectTimer: number | null = null
 let lastSelection = ''
 
 function send(ws: string, records: TelemetryRecord[], beacon: boolean): boolean | Promise<boolean> {
+  // nothing under the browser's key while the page has stopped or waits for its server to prove itself (lib/stale):
+  // this send uses the fetch from before lib/stale wrapped it, and a beacon no wrapper sees
+  if (pageStopped() || isSuspect()) return false
   const url = `${apiBase()}/ws/${encodeURIComponent(ws)}/telemetry`
   const body = JSON.stringify(records)
   try {
@@ -455,7 +460,8 @@ const queue = makeQueue({
 })
 
 let held = false
-/** While held (the product tour runs), nothing is recorded: what the page does then is not the analyst's work. */
+/** While held (the product tour runs), nothing is recorded: what the page does then is not the analyst's work. The
+ * tour's frame on the demo workspace (lib/tourFrame) records nothing at all, from its load to its unload. */
 export function hold(on: boolean): void {
   held = on
 }
@@ -464,7 +470,7 @@ export function hold(on: boolean): void {
 export function track(kind: TelemetryKind, opts: { target?: string | null; detail?: Detail | null; duration_ms?: number | null; ts?: string } = {}): void {
   try {
     const ws = workspaceFromUrl()
-    if (!ws || held) return
+    if (!ws || held || inTourFrame()) return
     noteWorkspace(ws)
     const record: TelemetryRecord = { kind, ts: opts.ts ?? new Date().toISOString(), session: SESSION, seq: nextSeq++ }
     if (opts.target !== undefined) record.target = opts.target

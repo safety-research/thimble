@@ -5,25 +5,38 @@
 #
 # install.sh adds thimble's plugin to Claude Code with Claude Code's own commands: it adds this install's folder as a
 # marketplace (claude plugin marketplace add) and installs thimble from it at user scope (claude plugin install --scope
-# user), so /thimble works in any claude session; a re-run updates it when its version changed. `status` says which
-# thimble plugin Claude Code has, and whether it is on. /plugin in Claude Code turns it off or on.
+# user), so thimble is on in every claude session; a re-run updates it when its version or its files changed. `status`
+# says which thimble plugin Claude Code has, and whether it is on. /plugin in Claude Code turns it off or on.
 set -euo pipefail
 # How it works (not printed by --help):
 # A thimble plugin from a marketplace added from another folder, or from GitHub, is another install's: install.sh never
 # changes it, and prints the commands that switch it. $THIMBLE_HOME/plugin.json, which 0.7 kept for its plugin question,
 # is removed once this install's plugin is in place, so that `thimble uninstall` goes by what Claude Code lists.
-# When sourced, the caller defines the output functions (say, run, ok, warn, note) and the variables dir, home, tmp, dry,
-# have_claude, mp_name and version; run as a script, plugin_main sets them up.
+# Claude Code loads this install's plugin from one of two places, which `claude plugin list --json` names: the folder
+# itself (readFromFolder, as Claude Code 2.1.299 to 2.1.302 do for a directory marketplace), whose edits a session takes
+# at its next start or /reload-plugins; or its own copy (installPath), which `claude plugin update` makes again only for
+# a new version. So while the version stays the same (a checkout between releases), install.sh compares the copy's files
+# with plugin/'s and, when they differ, uninstalls and installs the plugin again, keeping its options and its on or off.
+# When sourced, the caller defines the output functions (say, run, ok, same, warn, note) and the variables dir, home, tmp, dry,
+# have_claude, mp_name and version, and src when the plugin to install is not yet in dir (a release before its copy);
+# run as a script, plugin_main sets them up.
 
 plugin_regs() {  # the thimble plugins Claude Code lists, a line each: ours or other, the marketplace, the folder that
-  # marketplace was added from (else what its source is), on or off, and the version. Only a marketplace added from this
-  # install's folder is ours; of several rows for one plugin, the user scope's comes first. Fails when the lists can't be
-  # read
+  # marketplace was added from (else what its source is), on or off, the version, and for ours what Claude Code loads
+  # (plugin_files). Only a marketplace added from this install's folder is ours; of several rows for one plugin, the
+  # user scope's comes first. Fails when the lists can't be read
   [ "$have_claude" = 1 ] && command -v python3 >/dev/null 2>&1 || return 1
   claude plugin list --json > "$tmp/plugins.json" 2>/dev/null || return 1
   claude plugin marketplace list --json > "$tmp/markets.json" 2>/dev/null || return 1
-  python3 -I - "$tmp/plugins.json" "$tmp/markets.json" "$dir" <<'PY'
-import json, os, sys
+  python3 -I - "$tmp/plugins.json" "$tmp/markets.json" "$dir" "${src:-$dir}/plugin" <<'PY'
+import hashlib, json, os, sys
+
+# what running or browsing a plugin copy adds to it, and what Claude Code's copy leaves out: backend/app/cli.py's
+# COPY_IGNORED, COPY_LEFT_OUT and COPY_LEFT_OUT_SUFFIX (test_install_scripts.py keeps them the same)
+COPY_IGNORED = ("__pycache__", ".DS_Store")
+COPY_LEFT_OUT = ("hooks/tests", "hooks/term/tests", "hooks/term/types", "hooks/term/tsconfig.json", ".claude-plugin/types",
+                 "tsconfig.json")
+COPY_LEFT_OUT_SUFFIX = ".test.ts"
 
 
 def rows(path):
@@ -31,6 +44,35 @@ def rows(path):
     if not isinstance(data, list):
         raise SystemExit(1)
     return [r for r in data if isinstance(r, dict)]
+
+
+def files(root):
+    """Each file under root that a copy keeps: its path → the SHA-256 of its bytes, and whether it is executable."""
+    out = {}
+    for d, dirs, names in os.walk(root):
+        dirs[:] = [x for x in dirs if x not in COPY_IGNORED]
+        for n in names:
+            p = os.path.join(d, n)
+            rel = os.path.relpath(p, root).replace(os.sep, "/")
+            if (n in COPY_IGNORED or n.endswith(".pyc") or rel.endswith(COPY_LEFT_OUT_SUFFIX) or not os.path.isfile(p)
+                    or any(rel == x or rel.startswith(x + "/") for x in COPY_LEFT_OUT)):
+                continue
+            with open(p, "rb") as f:
+                out[rel] = (hashlib.sha256(f.read()).hexdigest(), os.access(p, os.X_OK))
+    return out
+
+
+def loads(p, folder, new):
+    """What Claude Code loads of plugin row p (the folder it reads in place, else its copy): inplace (this install's
+    plugin folder itself), same or differs (a copy whose files equal those of the plugin to install, or not), or '' when
+    the row names no place."""
+    at = next((v for v in (p.get("readFromFolder"), p.get("installPath")) if isinstance(v, str) and v), "")
+    if not at:
+        return ""
+    at = os.path.realpath(at)
+    if at == folder:
+        return "inplace"
+    return "same" if os.path.isdir(at) and files(at) == files(new) else "differs"
 
 
 plugins, markets = rows(sys.argv[1]), rows(sys.argv[2])
@@ -48,18 +90,21 @@ for p in sorted(plugins, key=lambda p: p.get("scope", "user") != "user"):
     if name == "thimble" and market:
         w = where.get(market, "a marketplace Claude Code does not list")
         on = "off" if p.get("enabled") is False else "on"
-        print("ours" if w == mine else "other", market, w, on, str(p.get("version") or ""), sep="\t")
+        how = loads(p, os.path.realpath(os.path.join(mine, "plugin")), sys.argv[4]) if w == mine else ""
+        print("ours" if w == mine else "other", market, w, on, str(p.get("version") or ""), how, sep="\t")
 PY
 }
 
 plugin_record() {  # the thimble plugins Claude Code has: plugin_reg, the marketplace of the one added from this install's
-  # folder, with plugin_on (on or off) and plugin_version; other_reg and other_from, one added from anywhere else, which
-  # is another install's. plugin_known=0 when Claude Code's lists can't be read
-  plugin_reg="" plugin_on="" plugin_version="" other_reg="" other_from="" plugin_known=1
-  local regs kind m w on v
+  # folder, with plugin_on (on or off), plugin_version and plugin_files (what Claude Code loads: inplace, this install's
+  # plugin/ itself; same or differs, its copy, whose files equal plugin/'s or not; '' when not known); other_reg and
+  # other_from, one added from anywhere else, which is another install's. plugin_known=0 when Claude Code's lists can't
+  # be read
+  plugin_reg="" plugin_on="" plugin_version="" plugin_files="" other_reg="" other_from="" plugin_known=1
+  local regs kind m w on v how
   if regs="$(plugin_regs)"; then
-    while IFS=$'\t' read -r kind m w on v; do
-      if [ "$kind" = ours ] && [ -z "$plugin_reg" ]; then plugin_reg="$m" plugin_on="$on" plugin_version="$v"
+    while IFS=$'\t' read -r kind m w on v how; do
+      if [ "$kind" = ours ] && [ -z "$plugin_reg" ]; then plugin_reg="$m" plugin_on="$on" plugin_version="$v" plugin_files="$how"
       elif [ "$kind" = other ] && [ -z "$other_reg" ]; then other_reg="$m" other_from="$w"; fi
     done <<< "$regs"
   else
@@ -79,10 +124,58 @@ plugin_done() {  # this install's plugin is in place: plugin_ok=1, and 0.7's rec
   [ "$dry" = 1 ] || rm -f "$home/plugin.json"
 }
 
+plugin_options() {  # the options of thimble's plugin that the user set (/config, /plugin), as the JSON object `claude
+  # plugin configure --values-stdin` reads, or nothing when none is set; fails when Claude Code can't say
+  claude plugin configure --json "thimble@$mp_name" > "$tmp/options.json" 2>/dev/null || return 1
+  python3 -I -c 'import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+inputs, configured = d["inputs"], d["configured"]
+if configured:
+    print(json.dumps({k: inputs[k] for k in configured}))' "$tmp/options.json"
+}
+
+configure_from() { claude plugin configure --values-stdin "$2" < "$1"; }  # configure_from FILE ID: ID's options from FILE
+
+plugin_reinstall() {  # this install's plugin, whose version Claude Code has but whose files differ from Claude Code's
+  # copy, uninstalled and installed again with Claude Code's commands, so that Claude Code copies plugin/ anew (claude
+  # plugin update keeps a copy of the same version as it is); the options the user set and its on or off are kept, and
+  # its data folder (--keep-data). A warn line and 1 when that fails
+  local id="thimble@$mp_name" opts="$tmp/plugin-options.json"
+  if ! plugin_options > "$opts"; then
+    warn "thimble's plugin in Claude Code ($id $version) differs from this install's, but Claude Code did not list its options, so it is not installed again"
+    note "In a shell: claude plugin uninstall --keep-data --scope user $id && claude plugin install --scope user $id, then set its options again in /config"
+    return 1
+  fi
+  if ! run claude plugin uninstall --keep-data --scope user "$id"; then
+    tail_out
+    warn "thimble's plugin in Claude Code ($id $version) differs from this install's, and could not be uninstalled to install it again (above)"
+    note "In a shell: claude plugin uninstall --keep-data --scope user $id && claude plugin install --scope user $id"
+    return 1
+  fi
+  if ! run claude plugin install --scope user "$id"; then
+    tail_out
+    warn "thimble's plugin was uninstalled from Claude Code to install it again, and could not be installed (above)"
+    note "In a shell: claude plugin install --scope user $id$( [ ! -s "$opts" ] || printf ', then set its options again in /config: %s' "$(cat "$opts")")"
+    return 1
+  fi
+  local word=""; [ ! -s "$opts" ] || { word="$(cat "$opts")"; word="'${word//\'/\'\\\'\'}'"; }  # as one shell word
+  if [ -n "$word" ] && ! _run "+ claude plugin configure --values-stdin $id <<< $word" configure_from "$opts" "$id"; then
+    tail_out
+    warn "thimble's plugin was installed again, without the options you had set (above): set them again in /config: $(cat "$opts")"
+  fi
+  if [ "$plugin_on" = off ] && ! run claude plugin disable --scope user "$id"; then
+    tail_out
+    warn "thimble's plugin was installed again and is on, though you had turned it off (above): /plugin turns it off"
+  fi
+  return 0
+}
+
 plugin_apply() {  # thimble's plugin from this install's folder in Claude Code, at user scope: added (claude plugin
-  # marketplace add, then claude plugin install), or updated when the version Claude Code has differs from this
-  # install's, left on or off as the user set it. Another install's is left as it is, with the commands that switch it.
-  # One line says what is so now (ok or warn); returns 1 when the plugin could not be added or updated
+  # marketplace add, then claude plugin install), updated when the version Claude Code has differs from this install's,
+  # or installed again when the version is the same but Claude Code loads a copy whose files differ (plugin_reinstall),
+  # left on or off as the user set it. Another install's is left as it is, with the commands that switch it. One line
+  # says what is so now (ok or warn), and whether a claude session open since before needs /reload-plugins; returns 1
+  # when the plugin could not be added or updated
   if [ "$have_claude" != 1 ]; then
     warn "Claude Code is not installed, so thimble's plugin is not added to it"
     note "Install Claude Code (https://docs.anthropic.com/en/docs/claude-code), then in a shell: bash $(tilde "$dir")/scripts/install.sh"
@@ -101,8 +194,20 @@ plugin_apply() {  # thimble's plugin from this install's folder in Claude Code, 
   local off=""
   [ "$plugin_on" != off ] || off="; it is off in Claude Code, and /plugin turns it on"
   if [ "$plugin_reg" = "$mp_name" ] && [ "$plugin_version" = "$version" ]; then
-    say "Claude Code has thimble@$mp_name $version from this install already"
-    ok "thimble's plugin in Claude Code is this install's (thimble@$mp_name $version)$off"
+    case "$plugin_files" in
+      inplace) same "thimble's plugin in Claude Code is this install's (thimble@$mp_name $version), read from $(tilde "$dir")/plugin itself: nothing to update. A claude session open since before uses any changed files after /reload-plugins$off";;
+      same) same "thimble's plugin in Claude Code is this install's, unchanged (thimble@$mp_name $version): nothing to update$off";;
+      differs)
+        plugin_reinstall || return 1
+        if [ "$dry" = 0 ] && plugin_record && [ "$plugin_files" = differs ]; then
+          warn "thimble's plugin was installed in Claude Code again (thimble@$mp_name $version), and Claude Code's copy still differs from this install's"
+          note "In a shell: claude plugin list --json shows the copy (installPath); claude plugin uninstall --keep-data --scope user thimble@$mp_name && claude plugin install --scope user thimble@$mp_name installs it again"
+          return 1
+        fi
+        ok "Installed thimble's plugin in Claude Code again (thimble@$mp_name $version), since its files had changed: a claude session uses it from its next start, or after /reload-plugins$off";;
+      *) say "Claude Code has thimble@$mp_name $version from this install already (claude plugin list --json names no folder or copy to compare)"
+         same "thimble's plugin in Claude Code is this install's (thimble@$mp_name $version)$off";;
+    esac
     plugin_done
     return 0
   fi
@@ -130,7 +235,7 @@ plugin_apply() {  # thimble's plugin from this install's folder in Claude Code, 
     note "In a shell: claude plugin install --scope user thimble@$mp_name"
     return 1
   fi
-  ok "Added thimble's plugin to Claude Code (thimble@$mp_name): /thimble works in any claude session (in one open since before, run /reload-plugins first)"
+  ok "Added thimble's plugin to Claude Code (thimble@$mp_name): thimble is on in every claude session (in one open since before, run /reload-plugins first)"
   plugin_done
 }
 
@@ -140,7 +245,11 @@ plugin_status() {  # the line `thimble plugin status` prints
   elif [ -n "$plugin_reg" ]; then
     printf 'thimble plugin: %s: thimble@%s %s, from this install (%s). /plugin in Claude Code turns it off or on.%s\n' \
       "$plugin_on" "$plugin_reg" "$plugin_version" "$(tilde "$dir")" \
-      "$( [ -z "$plugin_version" ] || [ "$plugin_version" = "$version" ] || printf ' This install is %s: claude plugin update --scope user thimble@%s updates it.' "$version" "$plugin_reg")"
+      "$( if [ -n "$plugin_version" ] && [ "$plugin_version" != "$version" ]; then
+            printf ' This install is %s: claude plugin update --scope user thimble@%s updates it.' "$version" "$plugin_reg"
+          elif [ "$plugin_files" = differs ]; then
+            printf ' Its files differ from this install'"'"'s: bash %s/scripts/install.sh installs it again.' "$(tilde "$dir")"
+          fi )"
   elif [ -n "$other_reg" ]; then
     printf 'thimble plugin: another install'"'"'s: thimble@%s, from %s. To use this install'"'"'s instead: %s\n' "$other_reg" "$(tilde "$other_from")" "$(plugin_switch_cmds)"
   else

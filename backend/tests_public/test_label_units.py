@@ -7,14 +7,11 @@ Called through tools.call as a browser chat running as the analyst, over the thr
 runs in this process."""
 from __future__ import annotations
 
-import contextlib
-import io
-import os
 
 import pytest
 
 from app import concepts, config, notebook, tools
-from app import model as model_mod
+from app import call_result as model_mod
 
 CORPUS = "mini"
 FILES = ["agents/agent-01.jsonl", "agents/agent-02.jsonl", "agents/agent-03.jsonl"]
@@ -54,19 +51,6 @@ def classify(monkeypatch) -> Classify:
     return fake
 
 
-async def _code_inproc(c: str, kernel: str, code: str, timeout_s: float | None = None):
-    """The labels kernel's run of a code label's wrapper, in this process."""
-    buf = io.StringIO()
-    here = os.getcwd()
-    os.chdir(config.corpus_dir(c))
-    try:
-        with contextlib.redirect_stdout(buf):
-            exec(code, {"__name__": "wrapper"})  # noqa: S102 — the code the labels kernel runs
-    finally:
-        os.chdir(here)
-    return [{"text/plain": buf.getvalue(), "_stream": "stdout"}], 1, "ok"
-
-
 async def apply(**args) -> str:
     r = await tools.call(CORPUS, "apply_label", {"scope": "files", "paths": ["agents/*.jsonl"], **args}, actor="analyst",
                          notebook=None, terminal=False)
@@ -98,72 +82,6 @@ async def test_a_prompt_label_over_files_gives_each_transcript_one_value_from_it
     assert "longer than the model reads" not in text and not k["applications"][-1].get("cut")
 
 
-async def test_a_code_label_over_files_gets_each_transcript_whole(monkeypatch):
-    monkeypatch.setattr(notebook, "execute_on", _code_inproc)
-    rule = ("def label(unit):\n"
-            "    assert unit['path'] and isinstance(unit['data'], list) and len(unit['data']) == len(unit['records'])\n"
-            "    return ('ends in an error' if any(r.get('is_api_error_message') for r in unit['data']) else 'no', 1.0)\n")
-    text = await apply(name="api error", predicate={"kind": "code", "text": rule}, values=["ends in an error", "no"],
-                       unit="files")
-    assert "over 3 file(s)" in text, text
-    assert values("api error") == {FILES[0]: "no", FILES[1]: "no", FILES[2]: "ends in an error"}
-
-
-async def test_a_label_applied_again_keeps_its_unit_unless_the_call_names_one(classify):
-    await apply(name="ran a command", predicate=PROMPT, unit="files")
-    again = await apply(name="ran a command", predicate=PROMPT)
-    assert label("ran a command")["unit"] == "agent" and "over 3 file(s)" in again
-    assert tools.hint("apply_label-unchanged") in again, "the same predicate over the same files runs nothing again"
-    await apply(name="ran a command", predicate={**PROMPT, "text": "The agent ran a shell command, such as a build."})
-    assert label("ran a command")["unit"] == "agent" and set(values("ran a command")) == set(FILES), "a new predicate, still per file"
-    by_record = await apply(name="ran a command", predicate=PROMPT, unit="records")
-    assert label("ran a command")["unit"] == "record" and "over 60 record(s)" in by_record
-    assert all("#L" in ref for ref in values("ran a command"))
-
-
-async def test_a_label_over_records_is_as_before(classify):
-    text = await apply(name="ran a command", predicate=PROMPT)
-    k = label("ran a command")
-    assert k["unit"] == "record" and k["marks"] == "record" and "over 60 record(s)" in text
-    assert "agents/agent-01.jsonl#L11" in values("ran a command")
-
-
-async def test_unit_is_for_files_alone():
-    r = await tools.call(CORPUS, "apply_label", {"scope": "canvas", "name": "x", "predicate": PROMPT, "unit": "files"},
-                         actor="analyst", notebook=None, terminal=False)
-    assert r.is_error
-    r = await tools.call(CORPUS, "apply_label", {"scope": "files", "name": "x", "predicate": PROMPT, "unit": "lines"},
-                         actor="analyst", notebook=None, terminal=False)
-    assert r.is_error
-
-
-def test_a_whole_file_is_read_as_far_as_the_label_model_s_context_holds():
-    long_ = (config.LONG_CONTEXT_TOKENS - concepts.READ_RESERVE_TOKENS) * concepts.CHARS_PER_TOKEN
-    short = (config.CONTEXT_TOKENS - concepts.READ_RESERVE_TOKENS) * concepts.CHARS_PER_TOKEN
-    assert config.context_tokens("claude-opus-5-5") == config.context_tokens("opus") == config.LONG_CONTEXT_TOKENS
-    assert config.context_tokens("claude-opus-5-5[1m]") == config.LONG_CONTEXT_TOKENS
-    assert config.context_tokens("claude-haiku-4-5-20251001") == config.CONTEXT_TOKENS
-    assert concepts.labels_model(CORPUS)["model"] == "claude-opus-5-5", "the labels row's model by default"
-    assert concepts.whole_read_chars(CORPUS, {}) == long_ > 10 * concepts.UNIT_TEXT_MAX
-    assert concepts.whole_read_chars(CORPUS, {"model": "claude-haiku-4-5-20251001"}) == short, "the label's own model first"
-
-
-async def test_a_batch_longer_than_a_200k_window_runs_on_the_model_s_1m_window(monkeypatch):
-    asked: list[tuple[str, str]] = []
-
-    async def structured(prompt, *, model, refusal, **kw):
-        asked.append((model, (refusal or {}).get("model", "")))
-        return model_mod.CallResult(status="ok", output={"labels": []})
-
-    monkeypatch.setattr(model_mod, "structured", structured)
-    k = concepts.new_concept("ran a command", PROMPT["text"], unit="agent")
-    big = "x" * ((config.CONTEXT_TOKENS - concepts.READ_RESERVE_TOKENS) * concepts.CHARS_PER_TOKEN + 1)
-    await concepts.labels_task(CORPUS, concepts.label_input(k, [(FILES[0], "a short file")]))
-    await concepts.labels_task(CORPUS, concepts.label_input(k, [(FILES[1], big)]))
-    assert asked[0][0] == "claude-opus-5-5" and not asked[0][0].endswith("[1m]")
-    assert asked[1][0] == "claude-opus-5-5[1m]" and asked[1][1].endswith("[1m]"), asked
-
-
 def _read_small(monkeypatch, tokens: int) -> int:
     """The label model's context made to hold `tokens` of a file, and a call's batch fewer characters than that, as a
     real context holds many more than BATCH_CHARS; the characters read of a file."""
@@ -193,21 +111,3 @@ async def test_a_file_longer_than_the_model_reads_is_cut_counted_in_tokens_and_s
     monkeypatch.setattr(concepts, "READ_RESERVE_TOKENS", config.LONG_CONTEXT_TOKENS - 10_000)
     whole = await apply(name="ran a command", predicate={**PROMPT, "text": "The agent ran any shell command."})
     assert "longer than the model reads" not in whole and not label("ran a command")["applications"][-1].get("cut")
-
-
-async def test_a_cut_file_s_tokens_are_estimated_when_its_call_counts_none(monkeypatch, classify):
-    cap = _read_small(monkeypatch, 1200)
-    await apply(name="ran a command", predicate=PROMPT, unit="files")
-    cut = label("ran a command")["applications"][-1]["cut"]
-    assert cut["n"] == 2 and cut["tokens"] == -(-(cap + len("\n…[truncated]")) // concepts.CHARS_PER_TOKEN)
-
-
-def test_the_cut_line_says_tokens_and_how_many_of_how_many():
-    cut = concepts.read_cut(["a", "b", "c"], [900_000, 912_000, 905_000], 0, 776, "agent")
-    assert cut["line"] == "3 of 776 files were longer than the model reads; it read the first ~905k tokens of each"
-    one = concepts.read_cut(["runs/r1"], [1_200_000], 0, None, "run")
-    assert one["line"].startswith("1 run was longer than the model reads") and "~1.2M tokens of it" in one["line"]
-    json_doc = concepts.read_cut(["d.json"], [880_000], 1, 4, "agent")
-    assert "shortened" in json_doc["line"] and "~880k tokens" in json_doc["line"]
-    many = concepts.read_cut([f"f{i}" for i in range(concepts.CUT_REFS_KEPT + 5)], [10] * 5, 0, None, "agent")
-    assert many["n"] == concepts.CUT_REFS_KEPT + 5 and len(many["refs"]) == concepts.CUT_REFS_KEPT

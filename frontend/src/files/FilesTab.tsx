@@ -11,6 +11,7 @@ import { createPortal } from 'react-dom'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Menu } from '../components/Menu'
+import { MidCut } from '../components/MidCut'
 import { PaneStatus } from '../components/PaneStatus'
 import { TipButton, useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
@@ -179,7 +180,8 @@ export function ReaderTabs({ tabs, current, onPick, onClose, isDir }: TabsProps)
   )
 }
 
-/** One tab: the file's or folder's glyph and name, and its ×; a name cut short shows the path in the tooltip. */
+/** One tab: the file's or folder's glyph and name, and its ×; its tooltip gives its whole path, since same-named files
+ * sit under many runs (bug hunt G2), and a name cut short at the top shows itself whole there. */
 function ReaderTab({
   path,
   active,
@@ -204,7 +206,7 @@ function ReaderTab({
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
-  const { props: tipProps, tip } = useTooltip(cut ? path : null)
+  const { props: tipProps, tip } = useTooltip(cut || path.includes('/') ? path : null)
   const name = baseName(path)
   return (
     <span className={'reader-tab' + (active ? ' active' : '')} style={style}>
@@ -218,6 +220,20 @@ function ReaderTab({
       <TipButton tip="Close" className="reader-tab-x" aria-label={`Close ${name}`} onClick={() => onClose(path)}>
         <Icon name="x" size={12} />
       </TipButton>
+    </span>
+  )
+}
+
+/** The open file in the Files pane's status strip: its path, cut in its middle where the strip is narrow, so the run
+ * it sits under shows (bug hunt G2: 16 files read `agent-07.jsonl · Transcript`), then its mode; its whole path in the
+ * tooltip. */
+export function OpenFileStatus({ path, mode }: { path: string; mode: string }) {
+  const { props, tip } = useTooltip(path, undefined, 'start')
+  return (
+    <span className="pane-status-file" {...props}>
+      <MidCut className="pane-status-path" text={path} tip={null} />
+      {mode && <span className="pane-status-mode">{` · ${mode}`}</span>}
+      {tip}
     </span>
   )
 }
@@ -767,7 +783,7 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
           {side.shown && labelCard}
         </div>
       )}
-      <PaneStatus name="Files" meta={shownView ? `view · ${shownView.name}${mode === 'Raw' ? ' · Raw' : ''}` : open && !waitingView ? [baseName(open.path), openIsDir ? '' : mode].filter(Boolean).join(' · ') : ''} totals={totals} />
+      <PaneStatus name="Files" meta={shownView ? `view · ${shownView.name}${mode === 'Raw' ? ' · Raw' : ''}` : open && !waitingView ? <OpenFileStatus path={open.path} mode={openIsDir ? '' : mode} /> : ''} totals={totals} />
     </div>
   )
 }

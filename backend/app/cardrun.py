@@ -1,26 +1,29 @@
-"""Card code run in the caller's Bash, for terminal mode: `thimble-run card <cell> | label <label> | stale`, and
-`thimble-run trial <cell>`, which the shim's card check starts itself.
+"""Card code run in the caller's Bash: `thimble-run card <cell> | label <label> | stale`, and `thimble-run trial <cell>`,
+which the shim's card check starts itself.
 
-In browser mode a card's code runs in a kernel the server owns. Terminal mode has no server, and code a model wrote never
-runs in the MCP shim: add_card and edit_card store the card with a `run` record ({state: waiting, by: bash, script}) and
-answer with one Bash command (`## card-run`); a code label answers with `## label-run`, and cards that read a changed
-label with `## cards-stale`. The caller runs the command in its Bash, as its permission mode decides and in Claude
-Code's own sandbox when the analyst turned that on, where `thimble-run` runs the code as a kernel cell would: one IPython shell (LocalKernel) set up with the kernel's own startup lines
-(notebook.startup_lines: Altair's mimetype renderer, pandas' column width, the figure formatter, the page's faces, the
-cell-reads hook and the `thimble` module with WS set), thimble's matplotlibrc and the inline backend's SVG figures,
+Code a model wrote never runs in the MCP shim or the server: add_card and edit_card store the card with a `run` record
+({state: waiting, by: bash, script}) and answer with one Bash command (`## card-run`); a code label answers with
+`## label-run`, and cards that read a changed label with `## cards-stale`. This holds before and after a press of the
+browser workbench (one card runner), and the browser's Run asks main to run the command. The caller runs the command in
+its Bash, as its permission mode decides and in Claude Code's own sandbox when the analyst turned that on, where
+`thimble-run` runs the code as a kernel cell would: one IPython shell (LocalKernel) set up with the kernel's own startup
+lines (notebook.startup_lines: Altair's mimetype renderer, pandas' column width, the figure formatter, the page's faces,
+the cell-reads hook and the `thimble` module with WS set), thimble's matplotlibrc and the inline backend's SVG figures,
 then the same storage path as a kernel run (notebook._execute_cell: output bounding, memos, reads, labels read). The
 cell runs in the process's main thread, as in a kernel, with a SIGALRM time limit standing in for a kernel's SIGINT,
 while the event loop runs in a thread of its own (serve). It writes the card's outputs into the group under the store's
-lock and prints what add_card prints in browser mode, and exits 0, or 1 when the code errored. No kernel lasts between
-runs, so each run loads its data again. A run writes only the folders write_dirs names; it writes no canvas history or
+lock and prints what add_card prints, with what the card asks and says now when the card check wrote its question or
+takeaway last (check_wrote), and exits 0, or 1 when the code errored. No kernel lasts between runs, so each run
+loads its data again. A run writes only the folders write_dirs names; it writes no canvas history or
 undo step and starts no chat.
 
-The shim's CardWatch sees a group file change and records each run that ended (canvas_history, undo), starts the card
-check of a card marked `check: "pending"` (a run that ended with add_card's `takeaway`; card_check.start skips it as
-browser mode does without Chromium or the built frontend), and marks interrupted a run whose `thimble-run` is gone (its
-run lock is free: hold_run), such as one Bash's timeout killed. The check tries the code of its revision of a card
-through `thimble-run trial`, which the shim starts in Anthropic's sandbox runtime where it runs (trial_sandbox), and
-otherwise with the user's access (trial).
+A CardWatch where main's tool calls run (the shim on local transport, the server after the press) sees a group file
+change and records each run that ended (canvas_history, undo), starts the card check of a card marked
+`check: "pending"` (a run that ended on a card with a takeaway, whether add_card gave it or an earlier call did, as a
+run again's card has; card_check.start skips it as it does without Chromium or the built frontend), and marks
+interrupted a run whose `thimble-run` is gone (its run lock is free: hold_run), such as one Bash's timeout killed. The
+shim's check tries the code of its revision of a card through `thimble-run trial`, which the shim starts in
+Anthropic's sandbox runtime where it runs (trial_sandbox), and otherwise with the user's access (trial).
 """
 from __future__ import annotations
 
@@ -30,6 +33,7 @@ import contextlib
 import logging
 import os
 import queue
+import re
 import shlex
 import signal
 import sys
@@ -47,9 +51,10 @@ RUNS_DIR = "card-runs"  # workspace-relative: each card's code as `thimble-run` 
 BIN = "thimble-run"
 BY = "bash"
 WAITING, RUNNING, DONE = "waiting", "running", "done"
-PENDING = "pending"  # a card's `check` while its card check waits for the shim (CardWatch)
+PENDING = "pending"  # a card's `check` while its card check waits for the watch (CardWatch)
 GRACE_S = 10.0  # after an interrupt, how long a run has to stop before the runner gives it up (notebook._execute's 10 s)
-WATCH_S = 1.0  # how often the shim's CardWatch looks at the groups' files
+WATCH_S = 1.0  # how often a CardWatch looks at the groups' files
+LOCAL, SERVER = "local", "server"  # main's transport, where a CardWatch acts (subagent_files.LOCAL, SERVER)
 DEAD_ENAME, DEAD_EVALUE = "Interrupted", "thimble-run stopped before the card's run ended; run the command again"
 
 
@@ -65,29 +70,60 @@ def in_runner() -> bool:
 
 
 def defers(c: str) -> bool:
-    """Whether a run of card code asked for in workspace `c` goes to `thimble-run` instead of running here: a terminal-
-    mode workspace, in a process that is no card runner (the MCP shim, the hooks, `thimble act`)."""
-    from . import local  # noqa: PLC0415
-
-    return not in_runner() and local.terminal(c)
+    """Whether a run of card code asked for in workspace `c` goes to `thimble-run` instead of running here: in every
+    process that is no card runner (the MCP shim, the server, the hooks, `thimble act`), whatever the transport, since
+    `thimble-run` in main's Bash is the one card runner (module note)."""
+    return not in_runner()
 
 
 # --------------------------------------------------------------------------- the command and its folders
 
 
 def bin_path() -> Path:
-    """`thimble-run` in the plugin copy this session loaded (local.PLUGIN_ROOT), whose path the launcher's allow rule
-    names, else in this tree's plugin/."""
+    """`thimble-run` in the plugin copy this session loaded (local.PLUGIN_ROOT), else in this tree's plugin/."""
     from . import local  # noqa: PLC0415
 
     return (local.PLUGIN_ROOT or config.REPO_ROOT / "plugin") / "bin" / BIN
 
 
+# Claude Code (2.1.301) runs main's Bash with its own PATH followed by the bin/ folder of each plugin it loaded, under the
+# plugin's path, which it gives the plugin's MCP server as CLAUDE_PLUGIN_ROOT; it leaves off a bin/ whose path holds one
+# of these characters. The MCP server, the shim, gets no bin/ on its own PATH.
+PLUGIN_ROOT_ENV = "CLAUDE_PLUGIN_ROOT"
+_PATH_UNSAFE = re.compile(r"[:\"'$`\\\n\r]")
+
+
+def bash_path() -> str:
+    """The PATH main's Bash has, as far as this process can tell: in the shim (local.PLUGIN_ROOT), this process's PATH
+    with bin/ of the plugin copy Claude Code started it from (CLAUDE_PLUGIN_ROOT) after it, as Claude Code builds the
+    Bash tool's PATH; elsewhere, or when Claude Code would leave that bin/ off, this process's PATH."""
+    from . import local  # noqa: PLC0415
+
+    path, root = os.environ.get("PATH", ""), os.environ.get(PLUGIN_ROOT_ENV)
+    if local.PLUGIN_ROOT is None or not root:
+        return path
+    plugin_bin = os.path.join(root, "bin")
+    if os.sep != "\\" and _PATH_UNSAFE.search(plugin_bin):
+        return path
+    return os.pathsep.join(p for p in (path, plugin_bin) if p)
+
+
+def on_path() -> bool:
+    """Whether `thimble-run` by its name in main's Bash (bash_path) is this plugin copy's (bin_path)."""
+    import shutil  # noqa: PLC0415
+
+    found = shutil.which(BIN, path=bash_path())
+    try:
+        return bool(found) and Path(found).resolve() == bin_path().resolve()
+    except OSError:
+        return False
+
+
 def command(kind: str, ident: str = "") -> str:
-    """The Bash command that runs `thimble-run <kind> [<ident>]`, which main's `--allowedTools` lets run without asking:
-    `thimble-run` by its name, with no install path, since the launcher puts this copy's bin/ first on the session's
-    PATH in terminal mode (cli.launch_args), so the command's row in the terminal reads `thimble-run card <id>`."""
-    return shlex.join([BIN, kind, *([ident] if ident else [])])
+    """The Bash command that runs `thimble-run <kind> [<ident>]`: `thimble-run` by its name when main's Bash finds this
+    plugin copy's by that name (on_path), so the command's row in the terminal reads `thimble-run card <id>`, else by its
+    full path in this plugin copy."""
+    return shlex.join([BIN if on_path() else str(bin_path()), kind, *([ident] if ident else [])])
 
 
 def write_dirs(c: str) -> list[Path]:
@@ -620,7 +656,7 @@ _held_runs: list[int] = []  # the fds of the run locks this process holds until 
 
 
 def hold_run(ws: Path, cid: str) -> None:
-    """Take card `cid`'s run lock for the rest of this process: the shim's CardWatch reads a run whose lock is free as
+    """Take card `cid`'s run lock for the rest of this process: a CardWatch reads a run whose lock is free as
     one whose process is gone. A lock, not the pid, since main's sandbox runs `thimble-run` in a pid namespace of its
     own."""
     import fcntl  # noqa: PLC0415
@@ -652,8 +688,7 @@ def run_alive(ws: Path, cid: str) -> bool:
 
 
 async def run_card(c: str, cid: str) -> tuple[str, int]:
-    """Run card `cid`'s code (module note): (the text add_card answers with in browser mode, 0, or 1 when the code
-    errored)."""
+    """Run card `cid`'s code (module note): (the text add_card answers with, 0, or 1 when the code errored)."""
     from . import card_check, notebook, tools  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -688,14 +723,36 @@ async def run_card(c: str, cid: str) -> tuple[str, int]:
     after = notebook.get_cell(c, cid) or full
     if not noted:
         text += tools._takeaway_missing(ctx, str(after.get("notebook") or ""), {**after, "status": full.get("status")})
+    text += check_wrote(after)
     _finish(c, cid, str(full.get("status") or ""), check=card_check.enabled() and card_check.auto(c))
     return text, 1 if full.get("status") != "ok" else 0
 
 
+def check_wrote(cell: dict[str, Any]) -> str:
+    """`## card-run-check-wrote` after a run of a card whose question or takeaway the card check wrote last (the card's
+    `edited`, newest last): what the card asks and says now, so that the run's caller compares the new output with the
+    takeaway the card shows and not with the one it wrote before the check changed it (bug hunt D6: after `run again`
+    main said the output was the same, so the takeaway it wrote still held). '' when the check wrote neither last."""
+    from . import card_check, checkstore, cite, tools  # noqa: PLC0415
+
+    last: dict[str, str] = {}
+    for entry in cell.get("edited") or []:
+        if isinstance(entry, dict):
+            for f in entry.get("fields") or []:
+                last[str(f)] = str(entry.get("by") or "")
+    fields = [f for f in ("title", "takeaway") if last.get(f) == checkstore.ACTOR]
+    if not fields:
+        return ""
+    return "\n\n" + tools.hint("card-run-check-wrote", cid=str(cell.get("id") or ""),
+                               parts=card_check.parts_words(fields), question=" ".join(str(cell.get("title") or "").split()),
+                               takeaway=" ".join(cite._prose(str(cell.get("takeaway") or "")).split()))
+
+
 def _finish(c: str, cid: str, status: str, *, check: bool) -> None:
     """The card's `run` record ended (the takeaway, kept text and outputs before an edit it carried are spent), and
-    `check: "pending"` when its card check is to start (card_check.wants_check), for the shim's CardWatch."""
-    from . import card_check, notebook  # noqa: PLC0415
+    `check: "pending"` when its card check is to start (card_check.wants_check), for the CardWatch; never over a check
+    that read the card to the end as it stands (checkstore.read_as_is), which stays."""
+    from . import card_check, checkstore, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
     with notebook.editing(ws):
@@ -707,7 +764,7 @@ def _finish(c: str, cid: str, status: str, *, check: bool) -> None:
                if k not in ("takeaway", "kept", "was", "pid")}
         run.update(state=DONE, ended=_now(), status=status)
         cell[notebook.RUN_KEY] = run
-        if check and card_check.wants_check(cell):
+        if check and card_check.wants_check(cell) and not checkstore.read_as_is(cell):
             cell["check"] = PENDING
         notebook.write_notebook(ws, nb)
     notebook._emit(c, cell)
@@ -740,8 +797,8 @@ async def run_label(c: str, ident: str) -> tuple[str, int]:
 
 async def run_stale(c: str) -> tuple[str, int]:
     """Run again every card that read a label at an older revision (concepts.stale_cards, notebook.rerun_on_labels).
-    (The cards that need their author, as rerun_readers tells main of them in browser mode: each one whose takeaway the
-    new output left behind, or that failed, with its output; 0, or 1 when one failed.)"""
+    (The cards that need their author, as rerun_readers tells main of them: each one whose takeaway the new output left
+    behind, or that failed, with its output; 0, or 1 when one failed.)"""
     from . import concepts, notebook  # noqa: PLC0415
 
     ws = config.workspace_dir(c)
@@ -766,7 +823,7 @@ async def run_stale(c: str) -> tuple[str, int]:
 # --------------------------------------------------------------------------- thimble-run trial: a card check's revision
 #
 # The card check runs in the shim, and it tries the code of its revision of a card before it keeps it
-# (notebook.trial_run). In browser mode the revision runs on the card's kernel; in terminal mode the shim starts
+# (notebook.trial_run). On the server the revision runs on the card's kernel; on local transport the shim starts
 # `thimble-run trial <card>` itself (trial), with the revision's code on its stdin, in Anthropic's sandbox runtime where
 # it runs (trial_sandbox), and otherwise with the user's access, and with the shim's environment less its keys. The runner runs the code as a
 # card run would, stores nothing, and prints the run as one JSON line (TRIAL_FIELDS), which the shim reads back. No
@@ -910,21 +967,25 @@ async def trial(c: str, cid: str, code: str, timeout_s: float | None) -> dict[st
     return {k: got.get(k) for k in TRIAL_FIELDS}
 
 
-# --------------------------------------------------------------------------- the shim's watch
+# --------------------------------------------------------------------------- the watch of the shim and of the server
 
 
 class CardWatch:
-    """A task of the shim's event loop in terminal mode: once a second it looks at the workspace's group files, and
-    when one changed it starts the card check of each card marked `check: "pending"` (card_check.start, which skips a
-    card without Chromium or the built frontend as browser mode does) and marks interrupted a card whose `thimble-run`
-    process is gone mid-run (its run lock is free: hold_run). The check runs on this loop and ends with the session, as a
-    browser-mode check ends with its server."""
+    """A task of an event loop: once a second it looks at the workspace's group files, and when one changed it records
+    each run that ended, starts the card check of each card marked `check: "pending"` (card_check.start, which skips a
+    card without Chromium or the built frontend) and marks interrupted a card whose `thimble-run` process is gone
+    mid-run (its run lock is free: hold_run). It runs where main's tool calls run, so a run's check runs beside the
+    checks add_card and edit_card start (card_check.after_tool): in the shim while main's transport is local
+    (local._start), in the server after the press (serve). A watch acts only while main's transport is its own (here),
+    so one process records each run and claims each mark (_clear_pending). The check runs on this loop and ends with
+    the session, as a server's check ends with its server."""
 
     _tasks: dict[str, asyncio.Task] = {}
 
     @classmethod
     def start(cls, c: str) -> asyncio.Task:
-        """Start the watch of workspace `c` on the running loop, once per process. RuntimeError with no running loop."""
+        """Start the shim's watch of workspace `c` on the running loop, once per process. RuntimeError with no running
+        loop."""
         task = cls._tasks.get(c)
         if task is not None and not task.done():
             return task
@@ -938,11 +999,42 @@ class CardWatch:
             task.cancel()
         cls._tasks.clear()
 
-    def __init__(self, c: str) -> None:
+    @classmethod
+    async def serve(cls) -> None:
+        """The server's watch, a task of its lifespan (notebook._lifespan): once a second a look at each workspace, which
+        acts only while main's transport there is the server's (here). A workspace made later is watched from then."""
+        watches: dict[str, CardWatch] = {}
+        while True:
+            root = config.WORKSPACES_DIR
+            try:
+                names = sorted(p.name for p in root.iterdir() if (p / "notebooks").is_dir()) if root.is_dir() else []
+            except OSError:
+                names = []
+            for name in names:
+                watch = watches.get(name) or watches.setdefault(name, cls(name, SERVER))
+                try:
+                    watch.look()  # on the loop: a check it starts is a task of this loop
+                except Exception:  # noqa: BLE001 — the watch outlives a bad file
+                    log.exception("%s: the server's card watch failed once", name)
+            await asyncio.sleep(WATCH_S)
+
+    def __init__(self, c: str, transport: str = LOCAL) -> None:
         self.c = c
+        self.transport = transport  # LOCAL for the shim's watch, SERVER for the server's (here)
         self.seen: dict[str, tuple[int, int]] = {}
         self.ended: dict[str, Any] = {}  # card -> its run's `ended` as last seen, so each run is recorded once
         self.primed = False  # the first look only notes the runs that ended before this session
+
+    def here(self) -> bool:
+        """Whether this watch acts now: main's transport in the workspace is this watch's (subagent_files.transport).
+        The shim's watch stops at the press, and the server's begins. False for a folder of no corpus thimble knows."""
+        from . import subagent_files  # noqa: PLC0415 — standard library only
+
+        try:
+            ws = config.workspace_path(self.c)
+        except (ValueError, OSError):
+            return False
+        return subagent_files.transport(ws) == self.transport
 
     async def run(self) -> None:
         while True:
@@ -971,6 +1063,8 @@ class CardWatch:
     def look(self) -> None:
         from . import canvas_history, card_check, notebook  # noqa: PLC0415
 
+        if not self.here():
+            return
         ws = config.workspace_dir(self.c)
         for p in self.changed():
             if not notebook.ID_RE.match(p.stem):
@@ -986,20 +1080,23 @@ class CardWatch:
                             notebook._emit(self.c, cell)
                 if cell.get("check") == PENDING:
                     author = card_check.author_of(run.get("session") or None)
-                    self._clear_pending(ws, str(cell["id"]))
-                    card_check.start(self.c, str(cell["id"]), author)
+                    if self._clear_pending(ws, str(cell["id"])):
+                        card_check.start(self.c, str(cell["id"]), author)
                 elif run.get("state") == RUNNING and not run_alive(ws, cid):
                     self._interrupted(ws, cid)
         self.primed = True
 
-    def _clear_pending(self, ws: Path, cid: str) -> None:
+    def _clear_pending(self, ws: Path, cid: str) -> bool:
+        """Take the mark off card `cid` under the store's lock; True when this watch took it, so its check starts once."""
         from . import notebook  # noqa: PLC0415
 
         with notebook.editing(ws):
             hit = notebook._locate(ws, cid)
-            if hit is not None and hit[1].get("check") == PENDING:
-                hit[1].pop("check", None)
-                notebook.write_notebook(ws, hit[0])
+            if hit is None or hit[1].get("check") != PENDING:
+                return False
+            hit[1].pop("check", None)
+            notebook.write_notebook(ws, hit[0])
+        return True
 
     def _interrupted(self, ws: Path, cid: str) -> None:
         from . import notebook  # noqa: PLC0415
@@ -1059,10 +1156,6 @@ def main(argv: list[str]) -> int:
     local.settle_dirs()
     try:
         c = _workspace(ident if kind in ("card", TRIAL) else None)
-        from . import local  # noqa: PLC0415
-
-        if not local.terminal(c):
-            raise RunError("thimble-run: this workspace's session runs in browser mode, where the kernel runs cards")
         install()
         stop = _on_term(c, ident if kind == "card" else "")  # a trial stores nothing to end
         try:

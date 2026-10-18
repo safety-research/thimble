@@ -30,15 +30,32 @@ HMAC-SHA256 under SESSION_KEY with the workspace and the session's key (session_
 name only with a token it signed for that workspace (session_proven). The key is a file in thimble's home that no agent
 may read (userconf.private_paths), and it outlives a restart, as the sessions a restart resumes do.
 
-Everything the analyst does in thimble (a message, a click, a permission answer, a change of Settings or of a permission
-mode) must come from a signed-in browser (analyst). The dashboard link carries a one-time code after `#p=`, which the
-server makes when the link is shown (mint: main's Stop hook, `thimble up`); the page trades it for an HttpOnly,
-SameSite=Strict cookie and a random key of that browser's own (claim), and the code then stops working, as it does
-PAIR_TTL_S after it was made or when a newer code for the same workspace is made. A browser that is signed in already
-spends a code with no change. The server keeps only the sha256 of each code, and of each browser's cookie and key
-(PAIRED_FILE, read at start and then kept in memory), so no file, transcript or link holds a credential that lasts. The
-token proves only the routes hooks, the shim, the module and the CLI use (guarded); with it a process can mint a code,
-and each new sign-in prints a line in main's terminal and posts a notice.
+Everything the analyst does in thimble (a message, a click, a change of Settings) must come from a signed-in browser
+(analyst). The page opens on a one-time code after `#p=`, which the server makes when the page is opened (mint:
+`thimble open`, app/open_cmd.py, also for a link a person copies; `thimble up` in a shell); the page trades it for
+an HttpOnly, SameSite=Strict cookie and a random key of that browser's own (claim), and the code then stops working, as
+it does when its time is over (PRESS_TTL_S for a page `thimble open` opens on this computer, LINK_TTL_S for a link a
+person copies) or OVERLAP_S after a newer code for the same workspace is made, so a double press leaves both tabs
+signed in. A browser that is signed in already spends a code with no change. The server keeps only the sha256 of each
+code, and of each browser's cookie and key (PAIRED_FILE, read at start and then kept in memory), so no file,
+transcript or link holds a credential that lasts. The token proves only the routes hooks, the shim, the module and the
+CLI use (guarded); with it a process can mint a code, and each new sign-in posts a notice in each workspace it may act
+in (main.signed_in).
+
+Same user only. A code is in two places only, the redirect file `thimble open` writes and a remote terminal's link
+file (app/opener.py), each readable by the analyst's account alone; it is in no argv, output, log or model context.
+On Linux the claim route also asks the kernel which account owns the connection the claim came on (peer_uid, from
+/proc/net/tcp and tcp6) and refuses one of another account (same_user); an SSH or VS Code forward connects as the
+analyst's own account.
+
+A cookie lasts UI_COOKIE_AGE_S and is sent again with each signed request (SlidingCookie), so a browser in daily use
+stays signed in; a signed-in browser not used for PAIRED_IDLE_S signs in again (its entry's `used`, written at most
+once in TOUCH_S). A tab whose server went away may later reach another program that holds the old port. Before such a
+tab sends its cookie or its key again, it asks HELLO_PATH on the plain path, with no credentials, for an HMAC of a
+fresh nonce under the sha256 of its key, bound to the port the server listens on (hello); a program that is not this
+server cannot answer it, and the tab stops (frontend lib/stale). A browser this server signed out gets an answer of
+its own under the same key (hello_out_mac), so its tab shows the sign-in line rather than that thimble stopped, and
+comes back once the browser signs in again (bug hunt G4).
 
 A cookie is bound to a host and a path, never to a port, so a browser sends a cookie of 127.0.0.1 to every server on
 127.0.0.1 (and one of localhost to every server on localhost) whose page asks for a path the cookie covers. A cookie
@@ -71,6 +88,7 @@ import json
 import os
 import re
 import secrets
+import sys
 import tempfile
 import threading
 import time
@@ -88,20 +106,22 @@ HOOK_PATHS = frozenset({
     "/api/events/pull", "/api/events/ack", "/api/events/held", "/api/events/mode", "/api/events/permission",
     "/api/agents", "/api/bg/agent-check",
     # thimble's agents' hooks (subagents.py), each beside the record it wrote to the workspace's files
-    "/api/subagents/started", "/api/subagents/denied", "/api/subagents/stopped", "/api/subagents/end",
-    "/api/subagents/rekey",
+    "/api/subagents/started", "/api/subagents/denied", "/api/subagents/stopped", "/api/subagents/handback",
+    "/api/subagents/end", "/api/subagents/rekey",
 })
 SHIM_PATHS = frozenset({"/api/events"})
 MODULE_PREFIX = "/api/module/"  # the hooks module's routes (app/module_bridge.py): every one, whatever the method
 TOOL_PREFIX = "/api/tools/"  # POST /api/tools/<name>; GET /api/tools/holdings is the CLI's and stays open
 SESSION_HOOK_PATHS = re.compile(r"/api/ws/[^/]+/(sessions/permission|calls/ref)")
-# the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes the Stop hook and
-# `thimble up` / `thimble unpair` call
+# the routes only thimble's CLI posts to (cli._request, which proves the token), and the pairing routes `thimble open`,
+# `thimble up` and `thimble unpair` call
 CLI_PATHS = frozenset({
     "/api/corpora/register", "/api/dev/announce", "/api/dev/revert", "/api/extensions/refresh", "/api/subagents/caller",
-    "/api/ui/pair", "/api/ui/unpair", "/api/ui/shot",
+    "/api/ui/pair", "/api/ui/press", "/api/ui/unpair", "/api/ui/shot",
 })
-CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(session|precached/context|archive|restore|rename)")  # POST
+# POST; `act` is the terminal's change after the press (`thimble act`, app/term_acts.py), which the browser's own routes
+# for the same change take only with its cookie
+CLI_WS_PATHS = re.compile(r"/api/ws/[^/]+/(session|precached/context|archive|restore|rename|act)")
 CLI_WS_DELETE = re.compile(r"/api/ws/[^/]+")  # DELETE: a workspace removed (`thimble rm`)
 NONCE_HEADER = "x-thimble-nonce"
 AGENT_HEADER = "x-thimble-agent"  # the id of an agent's token (module note)
@@ -116,7 +136,7 @@ SESSION_KEY = "session.key"  # in thimble's home: the secret session tokens are 
 SESSION_TOKEN_ENV = "THIMBLE_SESSION_TOKEN"
 _secret_lock = threading.Lock()
 UI_COOKIE = "thimble-ui"  # the cookie's name, with this server's port after it (ui_cookie)
-UI_COOKIE_AGE_S = 400 * 24 * 3600  # the longest a browser keeps a cookie
+UI_COOKIE_AGE_S = 30 * 24 * 3600  # a cookie's life, renewed on each signed request (SlidingCookie)
 # The cookie the browser holds (claim) and analyst() and LocalWriteGuard check is scoped to its browser's own path,
 # BROWSER_PREFIX + <key> + "/api/" (browser_path, module note), which covers the whole API under that path, so a browser
 # proves itself to LocalWriteGuard on every write route.
@@ -127,25 +147,32 @@ BROWSER_KEY_SCOPE = "thimble_browser_key"  # where BrowserPath keeps a request's
 BROWSER_KEY_BYTES = 24  # a browser's key: secrets.token_urlsafe of this many bytes (32 characters)
 # The path earlier builds scoped the cookie to, which every server on 127.0.0.1 received; a claim deletes one there.
 OLD_COOKIE_PATH = "/api/"
-# in thimble's home: [{hash, key, at}], the sha256 of each signed-in browser's cookie and key (claim)
+# in thimble's home: [{hash, key, at, used}], the sha256 of each signed-in browser's cookie and key (claim), when it
+# signed in and when it was last used (at most TOUCH_S out of date)
 PAIRED_FILE = "paired.json"
-PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
+PRESS_TTL_S = 60  # the code of a page `thimble open` opens on this computer works this long, and once
+LINK_TTL_S = 300  # the code of a link a person copies (a remote terminal, `copy link`, `thimble up` in a shell)
+PAIR_TTL_S = LINK_TTL_S  # a code's life when the pair route names none
+OVERLAP_S = 10  # an older code of the same workspace keeps working this long after a newer one is made
+PAIRED_IDLE_S = 30 * 24 * 3600  # a signed-in browser unused this long is signed out
+TOUCH_S = 3600  # a browser's `used` is written to PAIRED_FILE at most this often
+HELLO_PATH = "/api/hello"  # the stale-tab challenge (hello): open, answered without credentials
 # a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
 ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
-                " answer a permission request, change a permission mode): open it from the link shown under /thimble's"
-                " reply, or printed by `thimble up` in a shell, and click there")
+                " change Settings): open it with `/thimble browser` in the Claude Code terminal, and click there")
 
 # A write to the local API (any method but GET/HEAD/OPTIONS) is either a token route (guarded: the plugin, the CLI, a
 # program's grant), which needs the hook proof, or an analyst route, which needs a signed-in browser's cookie (analyst).
 # A notebook kernel can reach this server on 127.0.0.1 but holds neither.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-WRITE_REFUSED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
-                 " make changes")
-CODE_GONE = ("This sign-in link was already used or has expired. Run `thimble up` in a shell for a new one, or type"
-             " /thimble in your terminal.")
+WRITE_REFUSED = "open thimble's page with `/thimble browser` in the Claude Code terminal to make changes"
+CODE_GONE = ("This sign-in link was already used or has expired. Type `/thimble browser` in your Claude Code terminal for a"
+             " new one, or press o in thimble's panel.")
+OTHER_USER = "This sign-in belongs to another account on this computer."  # the claim route's 403 (same_user)
 # A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except
-# these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
-OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})
+# these: the supervisor's, the plugin's and the page's health check, the page's question whether it is signed in, and
+# the stale-tab challenge (hello), which needs no credential by design
+OPEN_READS = frozenset({"/api/health", "/api/ui/paired", HELLO_PATH})
 READ_METHODS = frozenset({"GET", "HEAD"})
 SIGN_IN_NEEDED = ("thimble refused this read: thimble's data needs your browser's sign-in or thimble's own token, and"
                   " this request had neither. Use thimble's tools instead.")
@@ -334,9 +361,9 @@ def _now() -> float:
     return time.monotonic()
 
 
-# a live sign-in code's sha256 -> (when it expires on _now's clock, the workspace it was made for or ""); in memory
-# only, so a restart voids every code
-_codes: dict[str, tuple[float, str]] = {}
+# a live sign-in code's sha256 -> (when it expires on _now's clock, the workspace it was made for or "", the open id of
+# the redirect file it is in or "": app/opener.py); in memory only, so a restart voids every code
+_codes: dict[str, tuple[float, str, str]] = {}
 # the signed-in browsers, [{hash, at}], as read from PAIRED_FILE in thimble's home at the first use (the home named
 # beside them) and then kept: another process's later edit of the file is not read until the next start
 _paired: list[dict[str, str]] | None = None
@@ -344,17 +371,32 @@ _paired_home = ""
 _pair_lock = threading.Lock()
 
 
-def mint(ws: str = "") -> str:
-    """A new sign-in code for the link of workspace `ws` ("" for the start page): it works once, for PAIR_TTL_S, and a
-    newer code for the same workspace voids it. Expired codes go."""
+def ttl_of(value: object) -> int:
+    """A code's life from the pair route's `ttl`: PRESS_TTL_S when it asks for that, else LINK_TTL_S."""
+    return PRESS_TTL_S if value == PRESS_TTL_S else LINK_TTL_S
+
+
+def mint(ws: str = "", ttl: int = PAIR_TTL_S, open_id: str = "") -> str:
+    """A new sign-in code for the page of workspace `ws` ("" for the start page): it works once, for `ttl` seconds
+    (PRESS_TTL_S or LINK_TTL_S), and a newer code for the same workspace leaves it OVERLAP_S more at most. `open_id`
+    names the redirect file it is in (app/opener.py), which its claim deletes. Expired codes go."""
     code = secrets.token_urlsafe(16)
     now = _now()
     with _pair_lock:
-        live = {h: v for h, v in _codes.items() if v[0] > now and v[1] != ws}
+        live = {h: ((min(v[0], now + OVERLAP_S), *v[1:]) if v[1] == ws else v) for h, v in _codes.items() if v[0] > now}
         _codes.clear()
         _codes.update(live)
-        _codes[_sha(code)] = (now + PAIR_TTL_S, ws)
+        _codes[_sha(code)] = (now + ttl_of(ttl), ws, open_id if isinstance(open_id, str) else "")
     return code
+
+
+def code_open(code: object) -> str:
+    """The open id the live code `code` was made with ('' for none, or for no live code); the code is not spent."""
+    if not isinstance(code, str) or not code:
+        return ""
+    with _pair_lock:
+        got = _codes.get(_sha(code))
+    return got[2] if got is not None and got[0] > _now() else ""
 
 
 def _spend(code: object) -> bool:
@@ -418,7 +460,7 @@ def _holders() -> list[str]:
     server.json's token."""
     now = _now()
     with _pair_lock:
-        held = [f"browser:{e['hash']}" for e in _entries()] + [f"shot:{h}" for h, until in _shots.items() if until > now]
+        held = [f"browser:{e['hash']}" for e in _live()] + [f"shot:{h}" for h, until in _shots.items() if until > now]
     tok = token()
     return [*held, f"token:{_sha(tok)}"] if tok else held
 
@@ -469,10 +511,25 @@ def _sha_hex(value: object) -> bool:
     return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
 
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _stamp(entries: list[dict[str, str]]) -> bool:
+    """Give each entry without a `used` time one of now (an entry an earlier version wrote, whose last use is not
+    known, so its PAIRED_IDLE_S count from the first time this version read it); whether any had none."""
+    now, stamped = _iso_now(), False
+    for e in entries:
+        if not e.get("used"):
+            e["used"] = now
+            stamped = True
+    return stamped
+
+
 def _entries() -> list[dict[str, str]]:
     """The signed-in browsers (module note), read from PAIRED_FILE at the first use for this home. An entry without the
     sha256 of a key (an earlier build's, whose cookie was scoped to OLD_COOKIE_PATH) signs no browser in: that browser
-    signs in again with the link."""
+    signs in again with the link. An entry without its last use gets one now, written through (_stamp)."""
     global _paired, _paired_home
     where = str(home())
     if _paired is not None and _paired_home == where:
@@ -481,17 +538,58 @@ def _entries() -> list[dict[str, str]]:
         raw = json.loads(_paired_file().read_text("utf-8"))
     except (OSError, ValueError):
         raw = []
-    got = [{"hash": str(e["hash"]), "key": str(e["key"]), "at": str(e.get("at") or "")}
+    got = [{"hash": str(e["hash"]), "key": str(e["key"]), "at": str(e.get("at") or ""), "used": str(e.get("used") or "")}
            for e in (raw if isinstance(raw, list) else [])
            if isinstance(e, dict) and _sha_hex(e.get("hash")) and _sha_hex(e.get("key"))]
     _paired, _paired_home = got, where
+    if _stamp(got):
+        with contextlib.suppress(OSError):
+            _save(got)
     return _paired
+
+
+def _seconds(iso: str) -> float | None:
+    """The Unix time of an ISO time an entry keeps, None for one that does not parse."""
+    try:
+        got = datetime.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return None
+    return (got if got.tzinfo else got.replace(tzinfo=timezone.utc)).timestamp()
+
+
+def _fresh(e: dict[str, str], now: float | None = None) -> bool:
+    """Whether the signed-in browser `e` was used in the last PAIRED_IDLE_S (its `used`, else when it signed in)."""
+    when = _seconds(e.get("used") or e.get("at") or "")
+    return when is not None and (time.time() if now is None else now) - when <= PAIRED_IDLE_S
+
+
+def _live() -> list[dict[str, str]]:
+    """The signed-in browsers that may still sign a request (_fresh). Call with _pair_lock held."""
+    now = time.time()
+    return [e for e in _entries() if _fresh(e, now)]
+
+
+def touch(digest: str) -> None:
+    """The browser whose cookie's sha256 is `digest` was used now: its `used` is written when it is older than
+    TOUCH_S. Never raises."""
+    now = time.time()
+    with _pair_lock:
+        held = _entries()
+        for e in held:
+            if _same(e["hash"], digest):
+                when = _seconds(e.get("used") or "")
+                if when is None or now - when > TOUCH_S:
+                    e["used"] = _iso_now()
+                    with contextlib.suppress(OSError):
+                        _save(held)
+                return
 
 
 def _save(entries: list[dict[str, str]]) -> None:
     """`entries` as the signed-in browsers, in memory and written through to PAIRED_FILE (whole, readable by its owner
-    alone); an empty list deletes the file."""
+    alone); an empty list deletes the file. An entry without its last use gets one now (_stamp)."""
     global _paired, _paired_home
+    _stamp(entries)
     _paired, _paired_home = list(entries), str(home())
     path = _paired_file()
     if not _paired:
@@ -530,7 +628,7 @@ def _cookie_hash(request: Request) -> str:
         return ""
     want, key_hash = _sha(value), _sha(key)
     with _pair_lock:
-        known = [(e["hash"], e["key"]) for e in _entries()]
+        known = [(e["hash"], e["key"]) for e in _live()]
     return want if any(_same(want, h) and _same(key_hash, k) for h, k in known) else ""
 
 
@@ -561,8 +659,9 @@ def _gone() -> Response:
 def claim(body: Any, request: Request) -> tuple[Response, str]:
     """(the answer to a page's POST /api/ui/key with its link's code, the id of the browser it signed in or ''): a
     signed-in browser (which posts under its own path) spends the code and gets 204 and nothing more; any other browser
-    with a live code gets 200 {key} with a new cookie scoped to that key's path (set_cookie), and the sha256 of both
-    join the signed-in browsers; anything else, an old {key} body included, 410 CODE_GONE."""
+    with a live code gets 200 {key, port} with a new cookie scoped to that key's path (set_cookie), and the sha256 of
+    both join the signed-in browsers; `port` is the one this server listens on, which the page's stale-tab challenge
+    binds its answer to (hello); anything else, an old {key} body included, 410 CODE_GONE."""
     code = body.get("code") if isinstance(body, dict) else None
     if analyst(request):
         _spend(code)
@@ -572,15 +671,32 @@ def claim(body: Any, request: Request) -> tuple[Response, str]:
     cookie = secrets.token_urlsafe(32)
     key = secrets.token_urlsafe(BROWSER_KEY_BYTES)
     digest = _sha(cookie)
-    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    at = _iso_now()
     with _pair_lock:
-        _save([*[e for e in _entries() if e["hash"] != digest], {"hash": digest, "key": _sha(key), "at": at}])
-    return set_cookie(JSONResponse({"key": key}), cookie, key), digest[:12]
+        _save([*[e for e in _entries() if e["hash"] != digest], {"hash": digest, "key": _sha(key), "at": at, "used": at}])
+    return set_cookie(JSONResponse({"key": key, "port": _own_port(request.scope)}), cookie, key), digest[:12]
+
+
+# the keys (their sha256) of the browsers this server signed out (sign_out, unpair), newest last, at most
+# SIGNED_OUT_KEPT; in memory only: a signed-out tab's challenge learns from this server that it is signed out (hello)
+_signed_out: OrderedDict[str, None] = OrderedDict()
+SIGNED_OUT_KEPT = 64
+
+
+def _note_signed_out(entries: list[dict[str, str]]) -> None:
+    """Keep the keys of `entries`, signed out now, for hello. Call with _pair_lock held."""
+    for e in entries:
+        if e.get("key"):
+            _signed_out[e["key"]] = None
+            _signed_out.move_to_end(e["key"])
+    while len(_signed_out) > SIGNED_OUT_KEPT:
+        _signed_out.popitem(last=False)
 
 
 def unpair() -> None:
     """Sign every browser out: no cookie proves anything until a browser signs in again."""
     with _pair_lock:
+        _note_signed_out(_entries())
         _save([])
 
 
@@ -593,6 +709,7 @@ def sign_out(browser: str) -> bool:
         kept = [e for e in held if not e["hash"].startswith(browser)]
         if len(kept) == len(held):
             return False
+        _note_signed_out([e for e in held if e["hash"].startswith(browser)])
         _save(kept)
     return True
 
@@ -788,7 +905,7 @@ def read_allowed(scope: dict) -> bool:
 def _signed_in(digest: str) -> bool:
     """Whether the browser whose cookie's sha256 is `digest` is still signed in."""
     with _pair_lock:
-        return any(_same(digest, e["hash"]) for e in _entries())
+        return any(_same(digest, e["hash"]) for e in _live())
 
 
 def _while(still: Callable[[], bool], receive, send):
@@ -841,3 +958,151 @@ class LocalReadGuard:
             headers.insert(0, (b"content-type", b"application/json"))
         await send({"type": "http.response.start", "status": 401, "headers": headers})
         await send({"type": "http.response.body", "body": body})
+
+
+class SlidingCookie:
+    """Each signed request (the cookie of a signed-in browser under its key's path, _cookie_hash) is answered with the
+    same cookie again for UI_COOKIE_AGE_S, so a browser in use stays signed in and one left alone signs in again after
+    a month; the browser's last use is noted (touch). A response that sets the cookie itself is left as it is. Pure
+    ASGI, inside BrowserPath."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or not path_key(scope):
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
+        digest = _cookie_hash(request)
+        if not digest:
+            await self.app(scope, receive, send)
+            return
+        touch(digest)
+        renew = Response()
+        set_cookie(renew, request.cookies.get(ui_cookie(), ""), path_key(scope))
+        cookie = next(v for k, v in renew.raw_headers if k == b"set-cookie")
+
+        async def renewing(message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                if not any(k.lower() == "set-cookie" for k in headers.keys()):
+                    headers.append("set-cookie", cookie.decode("latin-1"))
+            await send(message)
+
+        await self.app(scope, receive, renewing)
+
+
+HELLO_NONCE_MAX = 128  # characters of the challenge's nonce
+
+
+def key_id(key_hash: str) -> str:
+    """The id a page names its key by in the challenge: the first 16 hex digits of the sha256 of the key's sha256 (the
+    hex the server keeps), which tells nothing of the key or of the secret the answer is made with."""
+    return _sha(key_hash)[:16]
+
+
+def hello_mac(key_hash: str, port: int, nonce: str) -> str:
+    """The challenge's answer: HMAC-SHA256 under the key's sha256 (hex, as UTF-8) of "hello:<port>:<nonce>", `port`
+    the one this server listens on, so a program that relays the challenge to a thimble server on another port gets an
+    answer the page refuses."""
+    return hmac.new(key_hash.encode("utf-8"), f"hello:{int(port)}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def hello_out_mac(key_hash: str, port: int, nonce: str) -> str:
+    """The challenge's answer for a browser this server signed out: HMAC-SHA256 under the key's sha256 of
+    "signed-out:<port>:<nonce>", which only this server can give, so the tab learns from it alone that it is signed out."""
+    return hmac.new(key_hash.encode("utf-8"), f"signed-out:{int(port)}:{nonce}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def hello(nonce: object, kid: object, scope: dict) -> dict[str, str] | None:
+    """The answer to a stale tab's challenge (module note) for the browser whose key's id is `kid`: {"mac"} (hello_mac)
+    while it is signed in; {"out"} (hello_out_mac) once this server signed it out (sign_out, unpair, or unused past
+    PAIRED_IDLE_S), so its page shows the sign-in line; None for an id no browser here had, or a nonce that is not one."""
+    if not isinstance(nonce, str) or not nonce or len(nonce) > HELLO_NONCE_MAX or not isinstance(kid, str):
+        return None
+    port = _own_port(scope)
+    if port is None:
+        return None
+    with _pair_lock:
+        now = time.time()
+        held = _entries()
+        keys = [e["key"] for e in held if _fresh(e, now)]
+        out = [*[e["key"] for e in held if not _fresh(e, now)], *_signed_out]
+    for k in keys:
+        if _same(key_id(k), kid):
+            return {"mac": hello_mac(k, port, nonce)}
+    for k in out:
+        if _same(key_id(k), kid):
+            return {"out": hello_out_mac(k, port, nonce)}
+    return None
+
+
+PROC_NET = Path("/proc/net")  # where peer_uid reads the kernel's table of TCP sockets (Linux)
+
+
+def _proc_addr(text: str) -> tuple[Any, int] | None:
+    """An address of /proc/net/tcp or tcp6 (`0100007F:1F90`) as (ip_address, port), IPv4-mapped IPv6 as IPv4."""
+    import ipaddress  # noqa: PLC0415
+
+    ip_hex, _, port_hex = text.partition(":")
+    try:
+        raw = bytes.fromhex(ip_hex)
+        port = int(port_hex, 16)
+    except ValueError:
+        return None
+    words = [raw[i:i + 4] for i in range(0, len(raw), 4)]
+    if sys.byteorder == "little":
+        words = [w[::-1] for w in words]
+    packed = b"".join(words)
+    try:
+        ip = ipaddress.ip_address(packed)
+    except ValueError:
+        return None
+    if getattr(ip, "ipv4_mapped", None) is not None:
+        ip = ip.ipv4_mapped
+    return ip, port
+
+
+def _ip(host: object) -> Any:
+    import ipaddress  # noqa: PLC0415
+
+    try:
+        ip = ipaddress.ip_address(str(host))
+    except ValueError:
+        return None
+    return ip.ipv4_mapped if getattr(ip, "ipv4_mapped", None) is not None else ip
+
+
+def peer_uid(scope: dict) -> int | None:
+    """The account (uid) that owns the socket a request came from: the line of /proc/net/tcp or tcp6 whose local
+    address is the request's client and whose remote address is this server's. None where that cannot be read (not
+    Linux, another network namespace, no client in the scope)."""
+    client, server = scope.get("client"), scope.get("server")
+    if not client or not server or len(client) < 2 or len(server) < 2 or not sys.platform.startswith("linux"):
+        return None
+    want_local, want_remote = (_ip(client[0]), int(client[1] or 0)), (_ip(server[0]), int(server[1] or 0))
+    if want_local[0] is None or want_remote[0] is None:
+        return None
+    for name in ("tcp", "tcp6"):
+        try:
+            lines = (PROC_NET / name).read_text().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            parts = line.split()
+            if len(parts) < 8:
+                continue
+            if _proc_addr(parts[1]) == want_local and _proc_addr(parts[2]) == want_remote:
+                try:
+                    return int(parts[7])
+                except ValueError:
+                    return None
+    return None
+
+
+def same_user(scope: dict) -> bool:
+    """Whether a claim may come from the connection of `scope`: its socket is this server's own account's, or its
+    owner cannot be read (peer_uid)."""
+    uid = peer_uid(scope)
+    return uid is None or uid == os.getuid()

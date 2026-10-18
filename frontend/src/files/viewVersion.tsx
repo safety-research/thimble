@@ -1,7 +1,9 @@
 // The version of a view a pane shows (backend views.VERSIONS_SUBDIR): the one it opened with, until the analyst reloads,
-// so a newer one, from a change or the review, never reloads under them. ViewUpdated is the quiet
-// notice, in the design system's style, that a newer one is there; its × hides it until a version newer than the one it
-// was dismissed for.
+// so a newer one, from a change or the review, never reloads under them. A version that has no page for the browser
+// yet, whose frame says the page is being built, is no page the analyst is in: the version that brings it loads by
+// itself (bug hunt round 9, J13: the tab said "building the page for the browser…" until a Reload). ViewUpdated is the
+// quiet notice, in the design system's style, that a newer one is there; its × hides it until a version newer than the
+// one it was dismissed for.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import type { ViewerFrameHandle, ViewState } from './ViewerFrame'
@@ -10,8 +12,10 @@ import { holdShown, markOpened } from './viewReady'
 /** The version of a view a pane shows: the one it opened with, until the analyst reloads. `stale` when a newer one has
  * passed its checks, unless the analyst dismissed the notice for that version (`dismiss`); `reload` asks the page what
  * the analyst is looking at and loads the newer version with it; after `follow`, the next newer version loads at once
- * (the analyst's own Undo). The pane holds the view as shown meanwhile. */
-export function usePinnedView(ws: string, slug: string, version: string | undefined) {
+ * (the analyst's own Undo). The pane holds the view as shown meanwhile. `pageless`: the view's `version` has no page for
+ * the browser yet (backend views._public `browser_page` false), so while the pane shows that version, the next one
+ * loads at once. */
+export function usePinnedView(ws: string, slug: string, version: string | undefined, pageless = false) {
   // the version is kept with the view it belongs to, so the first render after a switch never pairs the new view with
   // the old view's version
   const key = `${ws}\n${slug}`
@@ -22,6 +26,18 @@ export function usePinnedView(ws: string, slug: string, version: string | undefi
   const [dismissed, setDismissed] = useState<{ key: string; version: string | undefined } | null>(null)
   const frame = useRef<ViewerFrameHandle | null>(null)
   const following = useRef(false)
+  // the version the pane shows while it had no page for the browser, with the view it belongs to
+  const lacked = useRef<string | null>(null)
+  useEffect(() => {
+    if (pageless && version && version === pinned) lacked.current = `${key}\n${version}`
+  }, [pageless, key, version, pinned])
+  useEffect(() => {
+    if (lacked.current === `${key}\n${pinned}` && version && version !== pinned) {
+      lacked.current = null
+      setRestore(null)
+      setPin({ key, version })
+    }
+  }, [key, version, pinned])
   useEffect(() => {
     setPin({ key, version })
     setRestore(null)

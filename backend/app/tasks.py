@@ -6,7 +6,7 @@ Each task is a function from its input to its output: thimble's own implementati
 call() runs unless an extension's program replaces the task here (program()). A program runs through harness.py in
 the box of the config agent its task names (Task.agent), with the same consent rules and the same deny of server.json
 as every agent, and returns the object thimble's own implementation returns. thimble's own is lent to it as
-`thimble.default(input)` (default()). call() answers with a model.CallResult either way, so the callers' handling of a
+`thimble.default(input)` (default()). call() answers with a CallResult either way, so the callers' handling of a
 failed or refused call stays one path. The checks task is a session with tools rather than one call, so checks.py
 starts its program in an agent chat of its own (harness.start).
 
@@ -38,7 +38,7 @@ log = logging.getLogger("thimble.tasks")
 @dataclass(frozen=True)
 class Task:
     """One of thimble's tasks: its own implementation, `module:function` under app/, an async function (c, input, *,
-    model=None, ...) that returns a model.CallResult whose output is the task's output; the agent of thimble's config
+    model=None, ...) that returns a CallResult whose output is the task's output; the agent of thimble's config
     whose sandbox, network, data and env settings a program of the task runs under; and the thimble tools a program
     may call."""
 
@@ -138,7 +138,7 @@ def _implementation(task: str) -> Any:
 
 async def default(c: str, task: str, input: dict[str, Any], *, model: str | None = None,  # noqa: A002
                   **kw: Any) -> Any:
-    """thimble's own implementation of `task` on `input`: a model.CallResult (never raises for a failed model call)."""
+    """thimble's own implementation of `task` on `input`: a CallResult (never raises for a failed model call)."""
     return await _implementation(task)(c, input, model=model, **kw)
 
 
@@ -177,9 +177,10 @@ def by_program(res: Any) -> bool:
 async def call(c: str, task: str, input: dict[str, Any], *, schema: dict[str, Any] | None = None,  # noqa: A002
                **kw: Any) -> Any:
     """Run `task` on `input` in workspace `c`: the program that replaces it here (program()), else thimble's own with
-    `kw`. A model.CallResult: a program's output that fits `schema` is `ok`, and a program that fails, or whose output
+    `kw`. A CallResult: a program's output that fits `schema` is `ok`, and a program that fails, or whose output
     does not fit, is `error` with why in its detail."""
-    from . import harness, model  # noqa: PLC0415 — harness imports agent_session's helpers lazily
+    from . import harness  # noqa: PLC0415 — harness imports agent_session's helpers lazily
+    from .call_result import CallResult  # noqa: PLC0415
 
     part = program(c, task)
     if part is None:
@@ -189,12 +190,12 @@ async def call(c: str, task: str, input: dict[str, Any], *, schema: dict[str, An
         out = await harness.run_task(c, task, part, input)
     except (harness.HarnessError, RuntimeError, OSError) as e:
         log.warning("%s: %s failed: %s", c, who, e)
-        return model.CallResult(status="error", detail=str(e)[:1200], model_requested=who)
+        return CallResult(status="error", detail=str(e)[:1200], model_requested=who)
     if why := output_problem(out, schema):
         log.warning("%s: %s returned an output thimble cannot use: %s", c, who, why)
-        return model.CallResult(status="error", detail=f"{who} returned an output thimble cannot use: {why}",
-                                model_requested=who)
-    return model.CallResult(status="ok", output=out, model_requested=who, model_used=who)
+        return CallResult(status="error", detail=f"{who} returned an output thimble cannot use: {why}",
+                          model_requested=who)
+    return CallResult(status="ok", output=out, model_requested=who, model_used=who)
 
 
 # --------------------------------------------------------------------------- the prompt way

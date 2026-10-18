@@ -93,7 +93,7 @@ export function Focus({ cell, list, frame, onPick, onClose, onAskNew }: FocusPro
       <div className="bfocus-stage" style={{ '--bfocus-bar-h': `${barH}px` } as CSSProperties}>
         <div className="bfocus-main">
           <div className={'bfocus-col' + (wide ? ' is-wide' : '')} ref={col}>
-            <span className="bfocus-meta">{[thread.name, hhmm(cell.created_ts ?? cell.ts)].filter(Boolean).join(' · ')}</span>
+            <span className="bfocus-meta">{[thread.maker ?? thread.name, hhmm(cell.created_ts ?? cell.ts)].filter(Boolean).join(' · ')}</span>
             <GlyphCites.Provider value={true}>
               <article className="bfocus-card" data-anchor={`card:${cell.id}`} data-anchor-text={cell.title} data-anchor-parts="" data-cite-home={cell.id}>
                 <div className="bfocus-q">{kind === 'label' && concept && !(ctx.concepts.has(concept) && asksQuestion(cell.title, conceptName(ctx.concepts, concept))) ? <LabelHead conceptId={concept} detail={label.concept} /> : cell.title}</div>

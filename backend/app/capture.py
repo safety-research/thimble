@@ -1,10 +1,10 @@
-"""Prompt capture: THIMBLE_PROMPT_CAPTURE=<dir> writes every model call, as it is sent, to one file, so the prompts of
-a run can be reviewed with their templates filled.
+"""Prompt capture: THIMBLE_PROMPT_CAPTURE=<dir> writes each model call the server sends as text of its own (the check
+for a view proposal, a fork of main's conversation), as it is sent, to one file, so its prompt can be reviewed with its
+templates filled. The card check's `thimble:call` subagent of main is in main's transcript folder instead.
 
-Off by default. Set, each call becomes `<dir>/<utc stamp>-<seq>-<caller>.md` with a header (caller, model, effort,
-speed, and path), then ## Options, ## System prompt, ## Tools, ## Messages and ## Output sections.
-Callers name themselves with `scope(name)` (a contextvar) and `caller(default)` reads it. Writes are small synchronous
-appends; the switch is a debugging aid, not for a served deployment.
+Off by default. Set, each call becomes `<dir>/<utc stamp>-<seq>-<caller>.md` with a header (caller, model, effort and
+path), then its sections (## Prompt, ## Answer, ## Status). Callers name themselves with `scope(name)` (a contextvar).
+Writes are small synchronous appends; the switch is a debugging aid, not for a served deployment.
 """
 from __future__ import annotations
 
@@ -23,9 +23,6 @@ from typing import Any, Iterator
 log = logging.getLogger("thimble.capture")
 
 ENV = "THIMBLE_PROMPT_CAPTURE"
-# environment variables whose values never reach a capture file
-REDACTED_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN")
-REDACTED = "<redacted>"
 
 _seq = 0
 _seq_lock = threading.Lock()
@@ -102,11 +99,6 @@ def current() -> str | None:
     return _caller.get()
 
 
-def caller(default: str) -> str:
-    """The name for a capture file: the scope set by the caller, else `default` (a structured call's tool name)."""
-    return _caller.get() or default
-
-
 # --------------------------------------------------------------------------- rendering helpers
 
 
@@ -150,116 +142,6 @@ def fence(body: str, lang: str = "") -> str:
     return f"{ticks}{lang}\n{body}\n{ticks}"
 
 
-def _settings(settings: Any) -> Any:
-    if not isinstance(settings, str) or not settings.strip().startswith("{"):
-        return settings
-    try:
-        return json.loads(settings)
-    except ValueError:
-        return settings
-
-
-def _redact_env(env: Any) -> Any:
-    if not isinstance(env, dict):
-        return env
-    return {k: (REDACTED if k in REDACTED_ENV else v) for k, v in env.items()}
-
-
-def _content_text(content: Any) -> str:
-    """A tool_result's content as text: a string as it is, a list of blocks by their text (an image by its type)."""
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for b in content:
-            if isinstance(b, dict):
-                if b.get("type") == "text":
-                    parts.append(str(b.get("text", "")))
-                else:
-                    parts.append(f"<{b.get('type', 'block')}>")
-            elif hasattr(b, "text"):
-                parts.append(str(getattr(b, "text", "")))
-            else:
-                parts.append(repr(b))
-        return "\n".join(parts)
-    return str(content)
-
-
-async def mcp_tool_defs(server: Any) -> list[dict[str, Any]] | None:
-    """[{name, description, input_schema}] of an in-process SDK MCP server (claude_agent_sdk.create_sdk_mcp_server's
-    config: {type: sdk, name, instance}), read from the server object's own tools/list handler — the definitions the
-    CLI serves the model. None when the shape is not one this knows (the caller says so in the file)."""
-    inst = server.get("instance") if isinstance(server, dict) else getattr(server, "instance", None)
-    if inst is None:
-        return None
-    handlers = getattr(inst, "_request_handlers", None) or getattr(inst, "request_handlers", None) or {}
-    entry = None
-    for key, val in handlers.items():
-        if key == "tools/list" or getattr(key, "__name__", "") == "ListToolsRequest":
-            entry = val
-            break
-    if entry is None:
-        return None
-    handler = getattr(entry, "handler", entry)
-    result = None
-    for args in ((None, None), (None,), ()):
-        try:
-            result = await handler(*args)
-            break
-        except TypeError:
-            continue
-        except Exception:  # noqa: BLE001 — a handler that wants a real request context: listed as unknown
-            log.debug("capture: tools/list handler failed", exc_info=True)
-            return None
-    if result is None:
-        return None
-    root = getattr(result, "root", result)
-    tools = getattr(root, "tools", None)
-    if tools is None:
-        return None
-    out = []
-    for t in tools:
-        d = _jsonable(t)
-        if isinstance(d, dict):
-            out.append({"name": d.get("name"), "description": d.get("description"),
-                        "input_schema": d.get("inputSchema", d.get("input_schema"))})
-    return out
-
-
-def options_dict(opts: Any) -> dict[str, Any]:
-    """A ClaudeAgentOptions as a JSON-able dict: servers by name and type (their tools are listed under ## Tools),
-    hooks by event and matcher, the system prompt pointed at its own section, credentials redacted, None fields
-    dropped."""
-    out: dict[str, Any] = {}
-    fields = getattr(opts, "__dataclass_fields__", None)
-    names = list(fields) if fields else [k for k in vars(opts)] if hasattr(opts, "__dict__") else []
-    for name in names:
-        v = getattr(opts, name, None)
-        if v is None or v == [] or v == {} or v == "":
-            continue
-        if name == "mcp_servers" and isinstance(v, dict):
-            out[name] = {k: {"type": (s.get("type") if isinstance(s, dict) else type(s).__name__)} for k, s in v.items()}
-        elif name == "hooks" and isinstance(v, dict):
-            out[name] = {ev: [getattr(m, "matcher", repr(m)) for m in ms] for ev, ms in v.items()}
-        elif name == "system_prompt":
-            out[name] = "<see ## System prompt>"
-        elif name == "settings":
-            out[name] = _settings(v)
-        elif name == "env":
-            out[name] = _redact_env(v)
-        elif name in ("can_use_tool", "stderr"):
-            out[name] = repr(v)
-        else:
-            out[name] = _jsonable(v)
-    return out
-
-
-def system_prompt_of(opts: Any) -> str:
-    return str(getattr(opts, "system_prompt", None) or "")
-
-
 # --------------------------------------------------------------------------- one call's file
 
 
@@ -271,7 +153,6 @@ class Call:
         self.path = path
         self.on = path is not None
         self.t0 = time.monotonic()
-        self._events = 0
 
     def _append(self, text: str) -> None:
         if not self.on or self.path is None:
@@ -301,96 +182,9 @@ class Call:
     def note(self, text: str) -> None:
         self._append(f"\n_{text}_\n")
 
-    # --- what is sent ---------------------------------------------------------------------------------------
-
-    async def sdk_options(self, opts: Any, *, out_tool: Any = None, builtin: list[str] | None = None) -> None:
-        """The Agent SDK path: the options (redacted), the system prompt verbatim, and every tool the model is
-        offered — the structured call's output tool (`out_tool`, a model.ToolSpec) first, then the in-process
-        servers' tools as their objects list them, then the built-in tools by name."""
-        if not self.on:
-            return
-        self.fenced("Options (ClaudeAgentOptions as thimble builds them; sdk.build)", options_dict(opts))
-        self.text("System prompt (sent whole; the CLI adds its own first line and environment context)",
-                  system_prompt_of(opts))
-        tools: list[dict[str, Any]] = []
-        if out_tool is not None:
-            tools.append({"server": "out", "name": getattr(out_tool, "name", None), "description": getattr(out_tool, "description", None),
-                          "input_schema": getattr(out_tool, "input_schema", None)})
-        unknown: list[str] = []
-        for sname, server in (getattr(opts, "mcp_servers", None) or {}).items():
-            if out_tool is not None and sname == "out":
-                continue
-            defs = await mcp_tool_defs(server)
-            if defs is None:
-                unknown.append(sname)
-                continue
-            for d in defs:
-                tools.append({"server": sname, **d})
-        allowed = [str(t) for t in (getattr(opts, "allowed_tools", None) or [])]
-        builtins = builtin if builtin is not None else [t for t in allowed if not t.startswith("mcp__")]
-        head = (f"The model calls an MCP tool as `mcp__<server>__<name>`; `allowed_tools` names {len(allowed)} tool(s), "
-                f"`disallowed_tools` {len(getattr(opts, 'disallowed_tools', None) or [])}. Built-in tools: "
-                f"{', '.join(builtins) or 'none'}.")
-        if unknown:
-            head += f" Servers whose tool list could not be read from the object: {', '.join(unknown)}."
-        self.section("Tools (as the CLI serves them to the model)", head + "\n\n" + fence(_json(tools), "json"))
-        self.section("Messages (as sent)")
-
-    def user(self, text: str, *, role: str = "user", label: str = "") -> None:
-        if not self.on:
-            return
-        self.text(f"{role}{' (' + label + ')' if label else ''}", text, sub=True)
-
-    # --- what comes back --------------------------------------------------------------------------------------
-
-    def output_start(self) -> None:
-        if self.on and not self._events:
-            self.section("Output (the transcript as it arrived)")
-
-    def assistant(self, blocks: list[Any]) -> None:
-        """An assistant message's blocks: text verbatim, tool_use with name, id and full input, anything else by type."""
-        if not self.on:
-            return
-        self.output_start()
-        self._events += 1
-        parts: list[str] = []
-        for b in blocks:
-            kind = getattr(b, "type", None) or (b.get("type") if isinstance(b, dict) else type(b).__name__)
-            if kind == "text" or type(b).__name__ == "TextBlock":
-                parts.append(fence(str(getattr(b, "text", b.get("text", "") if isinstance(b, dict) else "")), "text"))
-            elif kind == "tool_use" or type(b).__name__ == "ToolUseBlock":
-                name = getattr(b, "name", b.get("name") if isinstance(b, dict) else "")
-                tid = getattr(b, "id", b.get("id") if isinstance(b, dict) else "")
-                inp = getattr(b, "input", b.get("input") if isinstance(b, dict) else None)
-                parts.append(f"**tool_use** `{name}` (id {tid})\n\n" + fence(_json(inp), "json"))
-            elif kind == "thinking" or type(b).__name__ == "ThinkingBlock":
-                parts.append("_(thinking block)_")
-            else:
-                parts.append(f"_({kind} block)_")
-        self.sub("assistant", "\n\n".join(parts))
-
-    def tool_result(self, tool_use_id: str, content: Any, is_error: bool = False) -> None:
-        if not self.on:
-            return
-        self.output_start()
-        self._events += 1
-        self.sub(f"user (tool_result for {tool_use_id}{'; is_error' if is_error else ''})", fence(_content_text(content)))
-
-    def result(self, msg: Any) -> None:
-        """A ResultMessage (sdk): subtype, error flags, num_turns, cost, usage, model usage, duration."""
-        if not self.on or msg is None:
-            return
-        self.output_start()
-        self._events += 1
-        keep = ("subtype", "is_error", "num_turns", "duration_ms", "duration_api_ms", "total_cost_usd", "usage",
-                "model_usage", "stop_reason", "session_id", "api_error_status", "errors", "result")
-        d = {k: _jsonable(getattr(msg, k)) for k in keep if getattr(msg, k, None) is not None}
-        self.fenced("result", d, sub=True)
-
     def finish(self, status: str, detail: str = "", **extra: Any) -> None:
         if not self.on:
             return
-        self.output_start()
         fields = {"status": status, "detail": detail, "duration_s": round(time.monotonic() - self.t0, 2), **extra}
         body = "\n".join(f"- {k}: {v}" for k, v in fields.items() if v not in (None, ""))
         self.section("Status", body)
@@ -399,9 +193,9 @@ class Call:
 NULL = Call(None)
 
 
-def begin(name: str, *, model: str | None = None, effort: str | None = None, path: str = "", speed: str | None = None,
-          note: str = "", **fields: Any) -> Call:
-    """Open a call's file (NULL when the switch is off): the header names the caller, model, effort, speed and path,
+def begin(name: str, *, model: str | None = None, effort: str | None = None, path: str = "", note: str = "",
+          **fields: Any) -> Call:
+    """Open a call's file (NULL when the switch is off): the header names the caller, model, effort and path,
     and says what is exact about the file. `fields` are more header lines (workspace, chat id, …)."""
     d = directory()
     if d is None:
@@ -418,10 +212,6 @@ def begin(name: str, *, model: str | None = None, effort: str | None = None, pat
     p = d / f"{_stamp()}-{seq:04d}-{_slug(name)}.md"
     cap = Call(p)
     paths = {
-        "sdk": ("sdk — an Agent SDK session (ClaudeSDKClient over the `claude` CLI). The CLI sends the system prompt "
-                "below after a first line of its own, adds its environment context and manages the conversation, so "
-                "this file holds what thimble passes (options, system prompt, tool definitions, the messages it sends) "
-                "and the transcript the CLI streamed back — not the exact request bytes."),
         "message": "message — text the server hands a terminal Claude Code session (browser event, inbox or the next prompt's status block); exact.",
         "note": "note — rendered outside a live call.",
     }
@@ -430,8 +220,6 @@ def begin(name: str, *, model: str | None = None, effort: str | None = None, pat
         head.append(f"- model: {model}")
     if effort:
         head.append(f"- effort: {effort}")
-    if speed:
-        head.append(f"- speed: {speed}")
     for k, v in fields.items():
         if v not in (None, ""):
             head.append(f"- {k}: {v}")

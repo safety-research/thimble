@@ -1,6 +1,6 @@
-"""The `thimble` module of a program that runs one of thimble's roles or tasks: an Agent SDK program, whose
-`run(input)` run_sdk.py calls, or a command harness that calls `thimble.serve(run)`. docs/agents.md documents the
-contract.
+"""The `thimble` module of a program that runs one of thimble's roles or tasks: a command harness that calls
+`thimble.serve(run)`. docs/agents.md documents the contract. thimble starts no Claude Code session for a program: a model
+call is `ask`, and `session` and `options` raise ThimbleError (NO_SESSION).
 
 The program and thimble talk in JSON lines. thimble writes the input on the program's stdin, then the answer to each
 request; the program writes its requests, its log lines and its output on stdout. Once this module is set up, anything
@@ -11,8 +11,7 @@ itself.
                        {"id": 4, "result": ...}       the answer to request 4, or {"id": 4, "error": "..."}
   program -> thimble   {"id": 4, "tool": {"name", "args"}}                 one of thimble's tools, as the role
                        {"id": 5, "ask": {"prompt", "schema"?, "model"?, "images"?}}   one model call
-                       {"id": 6, "session": {"prompt", "system"?, "tools"?, "agents"?, "model"?}}   a Claude Code
-                                                                           session
+                       {"id": 6, "session": {...}}                         refused: thimble starts no session
                        {"id": 7, "default": {"input", "model"?}}           a task: thimble's own implementation
                        {"log": "text"}                                     a line in the agent's thread
                        {"output": ...}                                     last: what the role or task returns
@@ -36,6 +35,9 @@ ROLE = os.environ.get("THIMBLE_ROLE", "")  # '' for a task
 TASK = os.environ.get("THIMBLE_TASK", "")  # '' for a role
 AGENT_DIR = Path(os.environ.get("THIMBLE_AGENT_DIR") or ".")  # the folder of the program's agent.json
 SLOT_RE = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
+# harness.NO_SESSION: thimble starts no Claude Code session for a program
+NO_SESSION = ("thimble starts no Claude Code session for a program: each model call runs through the analyst's Claude "
+              "Code session. Ask a model with `ask` instead.")
 
 
 class ThimbleError(RuntimeError):
@@ -155,12 +157,8 @@ def ask(prompt: str, schema: dict[str, Any] | None = None, model: str | None = N
 
 async def session(prompt: str, system: str | None = None, tools: list[str] | None = None,
                   agents: dict[str, Any] | None = None, model: str | None = None) -> str:
-    """A Claude Code session thimble runs as the role or task, in its sandbox and permission mode; its last reply."""
-    payload: dict[str, Any] = {"prompt": prompt}
-    for k, v in (("system", system), ("tools", tools), ("agents", agents), ("model", model)):
-        if v is not None:
-            payload[k] = v
-    return await arequest("session", payload)
+    """Refused: thimble starts no Claude Code session for a program (NO_SESSION); `ask` makes a model call."""
+    raise ThimbleError(NO_SESSION)
 
 
 def default(input: Any, model: str | None = None) -> Any:  # noqa: A002 — the protocol's name
@@ -183,13 +181,8 @@ def prompt(path: str, **slots: Any) -> str:
 
 
 def options(**fields: Any) -> Any:
-    """ClaudeAgentOptions for query() with `fields`, whose sessions thimble starts on the analyst's own claude, in the
-    role's permission mode, sandbox and settings, with thimble's tools."""
-    from claude_agent_sdk import ClaudeAgentOptions
-
-    fields.setdefault("cwd", str(WORK))
-    fields["cli_path"] = os.environ["THIMBLE_CLAUDE"]
-    return ClaudeAgentOptions(**fields)
+    """Refused: an Agent SDK session of thimble's no longer exists (NO_SESSION); `ask` makes a model call."""
+    raise ThimbleError(NO_SESSION)
 
 
 def serve(run: Callable[[Any], Any]) -> None:

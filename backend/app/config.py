@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,57 +48,19 @@ NO_UI_BUILD_HINT = "no frontend build: run scripts/release.sh or npm run build, 
 
 
 EFFORTS = ("low", "medium", "high", "xhigh")
-# Fast mode is the default for every model call thimble makes: THIMBLE_MODEL_SPEED, read by model_speed(). A model
-# without fast mode (has_fast_mode) runs standard whatever the knob says.
-SPEEDS = ("standard", "fast")
-FAST_MODE_MODELS = ("opus-5", "opus-4-8")  # the CLI's own rule: the model id contains one of these
-
-
-def _speed(env: str, default: str | None, environ: Mapping[str, str] | None = None) -> str | None:
-    """A model speed (SPEEDS: standard | fast) from the environment (`environ`; default os.environ). Unset or empty is
-    the default; a typo falls back to the default with a warning."""
-    src = os.environ if environ is None else environ
-    v = str(src.get(env) or "").strip().lower()
-    if not v:
-        return default
-    if v not in SPEEDS:
-        log.warning("%s=%r is not one of %s; using %r", env, v, SPEEDS, default)
-        return default
-    return v
-
-
-def model_speed() -> str:
-    """THIMBLE_MODEL_SPEED, read at call time: the speed of every model call without an override of its own (default
-    fast; a typo is fast with a warning)."""
-    return _speed("THIMBLE_MODEL_SPEED", "fast") or "fast"
-
-
-def has_fast_mode(model: str | None) -> bool:
-    """Whether fast mode exists for `model` (FAST_MODE_MODELS, matched as the CLI matches: Opus 5 and Opus 4.8, dated
-    or [1m] variants included; nothing else)."""
-    m = (model or "").lower()
-    # `opus` alone is Claude Code's alias for the current Opus, which has fast mode
-    return any(k in m for k in FAST_MODE_MODELS) or m.split("[", 1)[0] == "opus"
-
-
 # the models Claude Code runs with no effort (spike m6, Claude Code's documented behaviour): a call on one passes none
 NO_EFFORT_MODELS = ("haiku",)
 
 
 def has_effort(model: str | None) -> bool:
-    """Whether Claude Code runs `model` at an effort (NO_EFFORT_MODELS, matched in the id as FAST_MODE_MODELS are)."""
+    """Whether Claude Code runs `model` at an effort (NO_EFFORT_MODELS, matched as a part of the id)."""
     m = (model or "").lower()
     return bool(m) and not any(k in m for k in NO_EFFORT_MODELS)
 
 
-def fast_mode_for(model: str | None, speed: str | None = None) -> bool:
-    """Whether a call on `model` runs in fast mode: `speed` (an override; None = model_speed()) is fast and the model
-    has fast mode."""
-    return (speed or model_speed()) == "fast" and has_fast_mode(model)
-
-
-# The `claude` every session and model call runs: THIMBLE_CLAUDE_BIN, else the one on PATH, else ~/.local/bin/claude.
-# There is no fallback to the Agent SDK's bundled CLI: without the user's own `claude`, a call fails with NO_CLAUDE.
+# The `claude` thimble's checks run (`claude auth status`, `--version`, `claude plugin …`; NOCLAUDE.md, it starts no
+# model session) and the launcher starts as the analyst's own session: THIMBLE_CLAUDE_BIN, else the one on PATH, else
+# ~/.local/bin/claude. Without it, a check says NO_CLAUDE.
 def _resolve_cli() -> str | None:
     override = os.environ.get("THIMBLE_CLAUDE_BIN")
     if override:
@@ -111,7 +74,7 @@ def _resolve_cli() -> str | None:
 
 CLI_PATH = _resolve_cli()
 CLAUDE_BIN = CLI_PATH or "claude"
-NO_CLAUDE_FOUND = "the `claude` CLI was not found (not on PATH, not at ~/.local/bin/claude)"  # what a model call says
+NO_CLAUDE_FOUND = "the `claude` CLI was not found (not on PATH, not at ~/.local/bin/claude)"  # what a check says
 NO_CLAUDE = f"{NO_CLAUDE_FOUND}: install Claude Code, or name its path with THIMBLE_CLAUDE_BIN"
 
 # thimble's marketplace (install.sh registers this tree under its name: thimble in a checkout, thimble-local from a
@@ -261,7 +224,8 @@ def passed_environ(environ: Mapping[str, str] | None = None) -> dict[str, str]:
 AUTH_STATUS_TIMEOUT_S = 20.0
 
 
-def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = None) -> dict[str, Any] | None:
+def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = None,
+                timeout: float = AUTH_STATUS_TIMEOUT_S) -> dict[str, Any] | None:
     """What `claude auth status --json` reports for the login a `claude` thimble starts would use (`env`, default
     launch_environ()), in the folder `cwd` (a temporary one when it is none): loggedIn, authMethod,
     apiKeySource, apiProvider and the like. None when `claude` is missing, the command fails to print an object, or
@@ -272,11 +236,36 @@ def auth_status(env: Mapping[str, str] | None = None, cwd: str | Path | None = N
         r = subprocess.run([CLI_PATH, "auth", "status", "--json"], capture_output=True, text=True,
                            env=dict(env) if env is not None else launch_environ(),
                            cwd=str(cwd) if cwd and Path(cwd).is_dir() else tempfile.gettempdir(),
-                           stdin=subprocess.DEVNULL, timeout=AUTH_STATUS_TIMEOUT_S)
+                           stdin=subprocess.DEVNULL, timeout=timeout)
         d = json.loads(r.stdout)
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
     return d if isinstance(d, dict) else None
+
+
+# How Claude Code signs in, for a notice of a failed sign-in or a credit balance too low, which names it (notices.
+# sign_in_words): `claude auth status --json`'s authMethod and apiKeySource, the same apiKeySource Claude Code's init
+# records carry (ANTHROPIC_API_KEY, apiKeyHelper, /login managed key). thimble reads only those names: never the key, the
+# variable that holds it, or the account's id or email. A process thimble runs in Claude Code's session (its hooks, its
+# MCP shim, the server /thimble starts) has the session's environment, so the answer is the session's. Kept LOGIN_TTL_S.
+LOGIN_TTL_S = 60.0
+LOGIN_TIMEOUT_S = 5.0
+_login: tuple[float, dict[str, str] | None] | None = None
+
+
+def login() -> dict[str, str] | None:
+    """{method: authMethod, source: apiKeySource, provider: apiProvider}, each where `claude auth status` reports it, as
+    the note above says; None when it reports nothing (no `claude`, THIMBLE_SKIP_KEY, a status that cannot be read)."""
+    global _login
+    now = time.monotonic()
+    if _login is not None and now - _login[0] < LOGIN_TTL_S:
+        return _login[1]
+    st = auth_status(timeout=LOGIN_TIMEOUT_S)
+    got = None if st is None else {k: v for k, f in (("method", "authMethod"), ("source", "apiKeySource"),
+                                                      ("provider", "apiProvider"))
+                                   if isinstance(v := st.get(f), str) and v}
+    _login = (now, got or None)
+    return _login[1]
 
 
 # how to give Claude Code a login, for every "not logged in" message: the login, and where the other ways are
@@ -297,10 +286,9 @@ def auth_problem(status: dict[str, Any] | None = None) -> str:
     return ""
 
 
-# The default model of the `refusal` row (models_for): the model a structured call (model.structured) runs on again, once,
-# when a safety classifier stopped its model's response (`stop_reason: refusal`). THIMBLE_FALLBACK_MODEL names another,
-# '' turns the rerun off; Settings' refusal row does the same per workspace. A session thimble still runs itself
-# (agent_session) reruns on this model.
+# The default model of the `refusal` row (models_for): the model a model call (model_call, agent_call) runs on again,
+# once, when a safety classifier stopped its model's response (`stop_reason: refusal`). THIMBLE_FALLBACK_MODEL names another,
+# '' turns the rerun off; Settings' refusal row does the same per workspace.
 FALLBACK_MODEL = os.environ.get("THIMBLE_FALLBACK_MODEL", "claude-opus-4-8").strip()
 FALLBACK_EFFORT = "high"  # the refusal row's default effort
 
@@ -370,10 +358,11 @@ def claude_env(env: dict[str, str]) -> dict[str, str]:
 # below that the session does not set is given this server's value or "", so a value meant for another session or
 # another thimble never reaches it.
 # The names thimble sets for one session: a THIMBLE_* one is "" unless the session sets it; another is the server's
-# own value, else "". THIMBLE_MODE and THIMBLE_WS name a terminal-mode session and its workspace (launch_mode), which
-# no session the server starts is.
+# own value, else "". THIMBLE_OPEN asks the terminal UI to press the browser workbench at the session's start (the
+# `thimble` command exports it), and THIMBLE_WS names a workspace to the card runner's trial, neither of which a session
+# the server starts gets.
 SESSION_VARS = ("THIMBLE_SESSION", "THIMBLE_SESSION_TOKEN", "THIMBLE_RENDERED_PROMPTS", "THIMBLE_AGENT_TOKEN",
-                "THIMBLE_API", "THIMBLE_LAUNCHED", "THIMBLE_CALLER_CWD", "THIMBLE_CWD", "THIMBLE_MODE", "THIMBLE_WS",
+                "THIMBLE_API", "THIMBLE_OPEN", "THIMBLE_CALLER_CWD", "THIMBLE_CWD", "THIMBLE_WS",
                 "XDG_CACHE_HOME", "MPLCONFIGDIR", "CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD")
 # The names that place a stack and tune its plugin and hooks, which the code a session runs reads: the server's value
 # in a session that talks to this server (session_env's `stack`), else "". Every reader takes "" as unset.
@@ -381,8 +370,9 @@ STACK_VARS = ("THIMBLE_HOME", "THIMBLE_PORT", "THIMBLE_UI_PORT", "THIMBLE_WORKSP
               "THIMBLE_DEV_DIR", "THIMBLE_APP_DIR", "THIMBLE_PLUGIN_ROOT", "THIMBLE_FRONTEND_URL",
               "THIMBLE_FRONTEND_DIST", "THIMBLE_DEV", "THIMBLE_SUPERVISED", "THIMBLE_STACK_PORT",
               "THIMBLE_STACK_UI_PORT", "THIMBLE_CLAUDE_BIN", "THIMBLE_SKIP_KEY", "THIMBLE_PROMPTS_DIR",
-              "THIMBLE_PROMPT_CAPTURE", "THIMBLE_KERNEL_WRAP", "THIMBLE_MODEL_SPEED", "THIMBLE_MCP_PROGRESS_S",
-              "THIMBLE_MCP_RETRY_S", "THIMBLE_BROWSER_PATH", "THIMBLE_INDEX_CACHE_MB", "THIMBLE_BIN_DIR")
+              "THIMBLE_PROMPT_CAPTURE", "THIMBLE_KERNEL_WRAP", "THIMBLE_MCP_PROGRESS_S",
+              "THIMBLE_MCP_RETRY_S", "THIMBLE_BROWSER_PATH", "THIMBLE_INDEX_CACHE_MB", "THIMBLE_BIN_DIR",
+              "THIMBLE_NO_MODULE")
 OWN_PREFIX = "THIMBLE_"
 
 
@@ -922,6 +912,17 @@ def workspace_dir(name: str) -> Path:
     return p
 
 
+def workspace_folders(base: Path | None = None) -> list[Path]:
+    """The workspaces' folders in `base` (WORKSPACES_DIR when None), sorted: each folder with a corpus's name. A
+    leading-dot folder is thimble's own and no workspace (ledger.ARCHIVE_DIR, where `/thimble fresh` puts a workspace
+    away), and neither is a file; a folder that cannot be listed has none."""
+    try:
+        return sorted(d for d in (base or WORKSPACES_DIR).iterdir()
+                      if d.is_dir() and _valid_name(d.name) and not d.name.startswith("."))
+    except OSError:
+        return []
+
+
 def registry_dir(name: str) -> Path:
     """The workspace's registry folder, created on demand (private_dir): the card types and extensions the server found
     there, which a wrapped kernel may only read (kernel_wrap.READ_ONLY_DIRS)."""
@@ -949,41 +950,41 @@ def safe_corpus_path(corpus: Path, rel: str) -> Path:
 # Every role that runs a model, with exactly the model and effort it runs on. main is the analyst's own session: its
 # model is the session's, and the composer chip's effort and fast mode for it are kept as settings.json `models.main` and
 # applied at its next launch (cli.launch_args), so main is not a role here. Every other role is set in thimble's config
-# (userconf: `agents.<agent>.model` and `effort`, and `fast` for a classifier; userconf.ROLES naming each agent's role),
-# applied to the next start:
+# (userconf: `agents.<agent>.model` and `effort`; userconf.ROLES naming each agent's role), applied to the next start.
+# Each runs as a subagent of main, or as a model call through main's own client (model_call), neither of which has a
+# fast mode of its own (Claude Code's agent definition has none), so no role has one:
 #   orient     the orientation, a subagent of main (thimble:orientation)
 #   subagents  the orientation's own subagents, which it starts as thimble:orient-helper; by default the orientation's model
 #              without the 1M tag, at its effort
 #   critic     the critic, a subagent of the orientation (thimble:critic)
 #   writer     a writer, a subagent of main (thimble:writer)
 #   checks     each run of a report check (thimble:check)
-#   dev        a view build or review (thimble:view-builder, thimble:view-reviewer), a code ticket's agent
-#              (thimble:dev-ticket) and `thimble fix`'s session (dev.py)
-#   verify     the card check's reading of a card's picture (card_check), a classifier
-#   labels     the labels classifier (concepts), the label draft and the view fit
-#   suggest    the view proposals after a turn (proposer.py) and for a file type (views.suggest), a classifier
-#   refusal    the model and effort a classifier's call runs on again once its model refused it (model.structured);
+#   dev        a view build or review (thimble:view-builder, thimble:view-reviewer) and a code ticket's agent
+#              (thimble:dev-ticket)
+#   verify     the card check's reading of a card's picture (card_check), a subagent of main (agent_call, thimble:call)
+#   labels     the labels classifier (concepts), the label draft and the view fit, model calls through main's own client
+#              (model_call)
+#   suggest    the viewer suggestion for a file type (views.suggest), a model call; the check for a view proposal after
+#              a turn is a fork of main's conversation (proposer.py, model_call.fork), on main's model and effort, and
+#              reads no row
+#   refusal    the model and effort a model call runs on again once its model refused it (model_call, agent_call);
 #              `off` turns the rerun off
 # Layered: the role's default (ROLE_MODELS_DEFAULT; an agent file's frontmatter where it names one, ROLE_AGENTS; for the
 # orientation the analyst's own model setting, else ORIENT_DEFAULT_MODEL, at ORIENT_DEFAULT_EFFORT), then
-# THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, then thimble's config. Every role resolves to a model id (exact_model) and an
-# effort, never '' (models_for); the orientation's model carries `[1m]` where the model has a 1M-token window
-# (long_context). A stored `ultracode` (LEGACY_EFFORTS) runs at xhigh. `fast` is kept only on a model that has fast mode,
-# and only for ROLES_WITH_FAST: the classifiers, and the dev row for `thimble fix`, the one `claude -p` job of the
-# server (dev.py). thimble's agents are subagents of main, which have no fast mode of their own (Claude Code's agent
-# definition has none), so a view build, a review and a code ticket's agent run without the dev row's (chosen leaves it
-# out).
+# THIMBLE_<ROLE>_MODEL / _EFFORT, then thimble's config. Every role resolves to a model id (exact_model) and an effort,
+# never '' (models_for); the orientation's model carries `[1m]` where the model has a 1M-token window (long_context). A
+# stored `ultracode` (LEGACY_EFFORTS) runs at xhigh.
 MODEL_ROLES = ("orient", "subagents", "critic", "writer", "checks", "verify", "labels", "dev", "suggest", "refusal")
 ROLE_MODELS_DEFAULT: dict[str, dict[str, Any]] = {
-    "subagents": {"model": "", "effort": "", "fast": False},  # '' is the orientation's model and effort (models_for)
-    "critic": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/critic.md's frontmatter
-    "writer": {"model": "claude-opus-5-5", "effort": "xhigh", "fast": False},  # under prompts/writer.md's
-    "checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False},  # under prompts/check.md's
-    "labels": {"model": "claude-opus-5-5", "effort": "low", "fast": False},
-    "dev": {"model": "claude-opus-5-5", "effort": "high", "fast": True},  # fast mode for `thimble fix` alone
-    "verify": {"model": "claude-opus-5-5", "effort": "high", "fast": True},
-    "suggest": {"model": "claude-opus-5-5", "effort": "medium", "fast": False},
-    "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "fast": False, "off": not FALLBACK_MODEL},
+    "subagents": {"model": "", "effort": ""},  # '' is the orientation's model and effort (models_for)
+    "critic": {"model": "claude-opus-5-5", "effort": "xhigh"},  # under prompts/critic.md's frontmatter
+    "writer": {"model": "claude-opus-5-5", "effort": "xhigh"},  # under prompts/writer.md's
+    "checks": {"model": "claude-opus-5-5", "effort": "high"},  # under prompts/check.md's
+    "labels": {"model": "claude-opus-5-5", "effort": "low"},
+    "dev": {"model": "claude-opus-5-5", "effort": "high"},
+    "verify": {"model": "claude-opus-5-5", "effort": "high"},
+    "suggest": {"model": "claude-opus-5-5", "effort": "medium"},
+    "refusal": {"model": FALLBACK_MODEL, "effort": FALLBACK_EFFORT, "off": not FALLBACK_MODEL},
 }
 ORIENT_DEFAULT_MODEL = "claude-opus-5-5"  # the orientation's model when the analyst's own settings name none
 # Claude Code's model aliases and the ids they stand for, as Claude Code 2.1.282 resolves them. A role whose model is an
@@ -993,11 +994,6 @@ MODEL_ALIASES = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5", "haiku"
 # (plugin/agents/<name>.md) for `plugin:<name>`.
 ROLE_AGENTS: dict[str, str] = {"critic": "critic", "writer": "writer", "checks": "check"}
 PLUGIN_AGENTS_DIR = REPO_ROOT / "plugin" / "agents"
-# the classifiers, each a call the server makes, which runs at its own speed, and the dev row's `thimble fix`, the one
-# `claude -p` job of the server, which keeps the fast mode it had (on by default)
-ROLES_WITH_FAST = ("labels", "verify", "suggest", "dev")
-# the rows whose fast mode reaches only some of their runs: the dev row's, `thimble fix`'s alone (chosen)
-FAST_OF_TICKETS = ("dev",)
 ROLE_EFFORTS = ("low", "medium", "high", "xhigh", "max")  # the levels Claude Code takes (cc_settings.EFFORTS)
 # efforts earlier builds stored, read as the level they ran at: Ultracode ran at xhigh (cc_settings.ULTRACODE_EFFORT)
 LEGACY_EFFORTS = {"ultracode": "xhigh"}
@@ -1040,7 +1036,7 @@ def base_model(model: str) -> str:
 
 def long_context(model: str) -> str:
     """`model` with Claude Code's `[1m]` tag when it has a 1M-token context window (LONG_CONTEXT_MODELS, matched in the
-    id as FAST_MODE_MODELS are), else as it is; a model that carries a tag already keeps it."""
+    id), else as it is; a model that carries a tag already keeps it."""
     m = (model or "").strip()
     if not m or "[" in m or not any(k in m.lower() for k in LONG_CONTEXT_MODELS):
         return m
@@ -1100,10 +1096,10 @@ def _analyst_default(c: str | None, key: str) -> Any:
 
 
 def role_default(role: str, c: str | None = None) -> dict[str, Any]:
-    """A role's model and effort (and fast mode, for a classifier) before the environment and the workspace's settings."""
+    """A role's model and effort before the environment and the workspace's settings."""
     if role == "orient":
         own_model = _analyst_default(c, "model")
-        return {"model": str(own_model or ORIENT_DEFAULT_MODEL), "effort": ORIENT_DEFAULT_EFFORT, "fast": False}
+        return {"model": str(own_model or ORIENT_DEFAULT_MODEL), "effort": ORIENT_DEFAULT_EFFORT}
     base = dict(ROLE_MODELS_DEFAULT[role])
     if role in ROLE_AGENTS:
         front = agent_front(ROLE_AGENTS[role])
@@ -1121,14 +1117,11 @@ def _env_role(role: str, base: dict[str, Any]) -> dict[str, Any]:
     e = os.environ.get(f"THIMBLE_{up}_EFFORT", "").strip().lower()
     if e and e in role_efforts(role):
         out["effort"] = e
-    f = os.environ.get(f"THIMBLE_{up}_FAST", "").strip().lower()
-    if f:
-        out["fast"] = f not in ("0", "false", "no", "off")
     return out
 
 
 def _configured(c: str | None) -> dict[str, dict[str, Any]]:
-    """{role: {model, effort, fast, off}} as thimble's config sets them for workspace `c`, each field it leaves unset
+    """{role: {model, effort, off}} as thimble's config sets them for workspace `c`, each field it leaves unset
     left out; thimble:orient-helper's model and effort (the orientation's subagentModel and subagentEffort) under `subagents`. A
     config with an error sets none (userconf.load_or_defaults)."""
     from . import userconf  # noqa: PLC0415 — userconf imports this module
@@ -1136,24 +1129,15 @@ def _configured(c: str | None) -> dict[str, dict[str, Any]]:
     agents = userconf.load_or_defaults(c)[0]["agents"]
     out: dict[str, dict[str, Any]] = {}
     for name, role in userconf.ROLES.items():
-        out[role] = {k: agents[name][k] for k in ("model", "effort", "fast", "off") if agents[name].get(k) is not None}
+        out[role] = {k: agents[name][k] for k in ("model", "effort", "off") if agents[name].get(k) is not None}
     orient = agents["orientation"]
     out["subagents"] = {k: orient[key] for k, key in (("model", "subagentModel"), ("effort", "subagentEffort"))
                         if orient.get(key)}
     return out
 
 
-def chosen(c: str | None, role: str) -> set[str]:
-    """The fields of a role (model, effort, fast) set for workspace `c` in thimble's config or with
-    THIMBLE_<ROLE>_MODEL / _EFFORT / _FAST, as models_for reads them. The dev row's fast mode is `thimble fix`'s alone
-    (FAST_OF_TICKETS), so it is never a field a subagent takes from it."""
-    out = set(_configured(c).get(role) or {})
-    env = {f for f in ("model", "effort", "fast") if os.environ.get(f"THIMBLE_{role.upper()}_{f.upper()}", "").strip()}
-    return (out | env) - ({"fast"} if role in FAST_OF_TICKETS else set())
-
-
 def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
-    """{role: {model, effort, fast}} for a workspace, every role of MODEL_ROLES: its default under the environment under
+    """{role: {model, effort}} for a workspace, every role of MODEL_ROLES: its default under the environment under
     thimble's config, with a full model id and an explicit effort, never '' (module note above): thimble:orient-helper's
     (`subagents`) take the orientation's where nothing sets them, with `follows: orient`, and a stored LEGACY_EFFORTS
     value its level. The `refusal` row adds `off`. The orientation's default reads the analyst's settings for the folder
@@ -1172,7 +1156,7 @@ def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
         conf["effort"] = conf["effort"] or ROLE_MODELS_DEFAULT.get(role, {}).get("effort") or ORIENT_DEFAULT_EFFORT
         if role == "orient":
             conf["model"] = long_context(conf["model"])
-        conf["fast"] = role in ROLES_WITH_FAST and bool(conf.get("fast")) and has_fast_mode(conf["model"])
+        conf.pop("fast", None)  # an earlier build's, read and ignored (userconf.IGNORED_KEYS)
         if role == "refusal":
             conf["off"] = bool(conf.get("off")) or not conf["model"]
         else:
@@ -1182,12 +1166,11 @@ def models_for(c: str | None = None) -> dict[str, dict[str, Any]]:
 
 
 def call_settings(c: str | None, role: str) -> dict[str, Any]:
-    """The model, effort and speed of a structured call (model.structured) made for `role` in workspace `c`, and the
-    `refusal` row's model and effort it runs on again when its model refuses it (None when that row is off): the values
-    models_for resolves and GET /settings reports, so a call takes none of them from the analyst's Claude Code settings.
-    Every caller passes them all, and model.structured refuses a call without a model or an effort."""
+    """The model and effort of a model call (model_call, agent_call) made for `role` in workspace `c`, and the `refusal`
+    row's model and effort it runs on again when its model refuses it (None when that row is off): the values models_for
+    resolves and GET /settings reports, so a call takes none of them from the analyst's Claude Code settings. Every
+    caller passes them all, and a call without a model or an effort is refused."""
     models = models_for(c)
     conf, again = models[role], models["refusal"]
     return {"model": str(conf["model"]), "effort": str(conf["effort"]),
-            "speed": "fast" if conf.get("fast") else "standard",
             "refusal": None if again.get("off") else {"model": str(again["model"]), "effort": str(again["effort"])}}

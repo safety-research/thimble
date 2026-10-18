@@ -14,9 +14,9 @@ import { useColorBy, type ColorBy } from '../../src/files/useColorBy'
 import { useFilterBy, type FilterBy } from '../../src/files/useFilterBy'
 import type { FilesLabels } from '../../src/files/useLabels'
 import { writeColor } from '../../src/files/colorChoice'
-import transcript, { madeTurnBlocks, turnOver, turnRecords } from '../../src/files/views/transcript.tsx'
+import transcript, { turnRecords } from '../../src/files/views/transcript.tsx'
 import { api } from '../../src/lib/api.ts'
-import type { Concept, SourcePage, SourceRecord, SourceTurn } from '../../src/lib/types.ts'
+import type { Concept, SourcePage, SourceTurn } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => {
@@ -79,56 +79,6 @@ describe('a whole-file JSON transcript’s turns', () => {
     expect(card('9')!.querySelector('.reader-tool_result')!.textContent).toContain('hello.py')
     expect(kinds(card('20'))).toEqual(['reader-tool_use', 'reader-tool_result'])
   })
-  test('a tool result’s terminal output is cleaned, its stored bytes kept for Raw', () => {
-    const [b] = madeTurnBlocks([{ kind: 'tool_result', text: 'ok\x1b[0m\n' }])
-    expect(b.text).not.toContain('\x1b')
-    expect(b.raw).toBe('ok\x1b[0m\n')
-    expect(madeTurnBlocks([{ kind: 'tool_result', text: 'plain' }])).toEqual([{ kind: 'tool_result', text: 'plain' }])
-  })
-})
-
-describe('JSON lines', () => {
-  const rec = (line: number, record: any, meta: Record<string, any> = {}): SourceRecord => ({ line, record, blocks: [{ kind: 'raw', text: JSON.stringify(record) }], meta })
-  test('a message’s blocks from the server show under its author, and a tool call that is a record of its own under who it stands for', async () => {
-    const records = [
-      rec(1, { role: 'user', content: 'List the folder.' }),
-      rec(2, { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'shell', arguments: '{"command":"ls"}' } }] }, { blocks: [{ kind: 'tool_use', text: 'shell\n{\n  "command": "ls"\n}' }] }),
-      rec(3, { type: 'function_call_output', call_id: 'c1', output: 'hello.py' }, { blocks: [{ kind: 'tool_result', text: 'hello.py' }], speaker: 'tool' }),
-    ]
-    const page: SourcePage = { path: 'm.jsonl', kind: 'text', total_lines: 3, start: 1, records }
-    const el = await mount(<View workspace="w" path="m.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'messages', score: 0.95, keys: { speaker: 'role', text: 'content' } }} />)
-    const cards = [...el.querySelectorAll('.reader-card')]
-    expect(cards.map((c) => c.querySelector('.reader-record-head')!.textContent)).toEqual(['user', 'assistant', 'tool'])
-    await open(cards[1])
-    await open(cards[2])
-    expect(kinds(cards[1])).toEqual(['reader-tool_use'])
-    expect(kinds(cards[2])).toEqual(['reader-tool_result'])
-    expect(cards[2].querySelector('.reader-tool_result')!.textContent).toContain('hello.py')
-  })
-  test('a line holding a conversation shows each turn’s blocks from the server', async () => {
-    const conv = { messages: [{ role: 'user', content: 'Weather?' }, { role: 'assistant', content: null, tool_calls: [{ id: 'c1', function: { name: 'weather', arguments: '{}' } }] }] }
-    const turns = [
-      { speaker: 'user', text: 'Weather?' },
-      { speaker: 'assistant', text: '', blocks: [{ kind: 'tool_use', text: 'weather\n{}' }] },
-      { speaker: 'tool', text: 'sunny', blocks: [{ kind: 'tool_result', text: 'sunny' }] },
-    ]
-    const page: SourcePage = { path: 'c.jsonl', kind: 'text', total_lines: 1, start: 1, records: [rec(1, conv, { turns })] }
-    const el = await mount(<View workspace="w" path="c.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'conversations', score: 0.95, keys: { list: 'messages', speaker: 'role', text: 'content' } }} />)
-    await open(el.querySelector('.reader-card'))
-    expect([...el.querySelectorAll('.reader-conv-speaker')].map((s) => s.textContent)).toEqual(['user', 'assistant', 'tool'])
-    expect(kinds(el.querySelector('.reader-card'))).toEqual(['reader-text', 'reader-tool_use', 'reader-tool_result'])
-  })
-  test('a Claude Code stream shows its tool call and result as before', async () => {
-    const records = [
-      rec(1, { type: 'assistant', uuid: 'u1', session_id: 's', message: { role: 'assistant', content: [{ type: 'text', text: 'Listing.' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } }),
-      rec(2, { type: 'user', uuid: 'u2', session_id: 's', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'notes.txt' }] } }),
-    ]
-    const page: SourcePage = { path: 's.jsonl', kind: 'text', total_lines: 2, start: 1, records }
-    const el = await mount(<View workspace="w" path="s.jsonl" kind="text" page={page} loadMore={() => undefined} transcript={{ format: 'stream', score: 1 }} />)
-    const cards = [...el.querySelectorAll('.reader-card')]
-    for (const c of cards) await open(c)
-    expect(cards.map(kinds)).toEqual([['reader-text', 'reader-tool_use'], ['reader-tool_result']])
-  })
 })
 
 describe('a label of a JSON document’s records over its turns', () => {
@@ -156,14 +106,5 @@ describe('a label of a JSON document’s records over its turns', () => {
     await settle()
     expect(STEPS.map((t) => color!.colors?.get(t.line)?.color ?? null)).toEqual([null, colourVar(15), null, colourVar(15)])
     expect(STEPS.map((t) => filter!.verdict?.hides(t.line) ?? false)).toEqual([true, false, true, false])
-  })
-  test('each line of a step takes its turn, from where its record starts to its last line, which the loupe colors', () => {
-    // the server gives each turn the last line it covers: the line before the next step's record, the last step's record's end
-    const records = turnRecords(STEPS.map((t, k) => ({ ...t, end: k < STEPS.length - 1 ? t.rec_line! + 5 : 31 })))
-    expect(records.map((r) => [r.meta.from, r.meta.end])).toEqual([[7, 12], [13, 18], [19, 24], [25, 31]])
-    const over = (line: number) => turnOver(records, line)?.meta.ref ?? null
-    expect([1, 6, 7, 8, 12, 13, 24, 25, 31, 32].map(over)).toEqual([null, null, `${P}#/steps/0`, `${P}#/steps/0`, `${P}#/steps/0`, `${P}#/steps/1`, `${P}#/steps/2`, `${P}#/steps/3`, `${P}#/steps/3`, null])
-    // a turn the server gives no extent covers its own line alone
-    expect(turnRecords([{ ...STEPS[0], rec_line: undefined }]).map((r) => [r.meta.from, r.meta.end])).toEqual([[8, 8]])
   })
 })

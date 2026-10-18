@@ -1,6 +1,41 @@
-// Chips teleport: a ref opens the surface that owns it and brings the element into view.
+// Chips teleport: a ref opens the surface that owns it and brings the element into view. The refs the terminal opens the
+// page at (`thimble open --ref`, the 0.9.0 contract C12) include some that name no element (pageRef): `home`, `checks`,
+// `files:<folder>`, `ticket:<id>` and `answer:<turn>#s<n>`.
+import { api } from './api'
 import { bus } from './bus'
 import { plainRef, surfaceOf } from './refs'
+
+/** Open one of the page's own refs (module note), and whether `ref` was one: `home` opens nothing more; `checks` the
+ * report with its Checks pane; `files:<folder>` the File browser at the folder (`files:` alone, at the corpus);
+ * `ticket:<id>` the thread that ran the code ticket; `answer:<turn>#s<n>` main's chat, where the passage comes into view
+ * with its comment open (chat/Rows). */
+export function pageRef(ref: string): boolean {
+  if (ref === 'home') return true
+  if (ref === 'checks') {
+    bus.emit('showTab', { tab: 'report' })
+    return true
+  }
+  if (ref.startsWith('files:')) {
+    const folder = ref.slice('files:'.length).replace(/^\.?\/*/, '').replace(/\/+$/, '')
+    bus.emit('showTab', { tab: 'files' })
+    if (folder) bus.emit('openRef', { ref: `${folder}/`, browser: true })
+    return true
+  }
+  if (ref.startsWith('ticket:')) {
+    const id = ref.slice('ticket:'.length)
+    void api
+      .ticket(id)
+      .then((t) => bus.emit('openChat', { chatId: t.chat || 'main' }))
+      .catch(() => bus.emit('openChat', { chatId: 'main' }))
+    return true
+  }
+  if (ref.startsWith('answer:')) {
+    bus.emit('openChat', { chatId: 'main' })
+    bus.emit('openRef', { ref })
+    return true
+  }
+  return false
+}
 
 /** Open the surface that owns `ref` at it; with `browser`, a file's ref opens in the File browser rather than in a view
  * that claims the file; with `focus`, a canvas card's or frame's ref opens focus mode on the first card of its frame
@@ -9,7 +44,7 @@ import { plainRef, surfaceOf } from './refs'
  * (FilesTab). */
 export function teleport(ref: string, opts: { browser?: boolean; focus?: boolean; still?: boolean } = {}): void {
   const r = plainRef(ref.trim())
-  if (!r) return
+  if (!r || pageRef(r)) return
   const tab = surfaceOf(r)
   if (tab && tab !== 'files') bus.emit('showTab', { tab })
   bus.emit('openRef', { ref: r, ...(opts.browser ? { browser: true } : {}), ...(opts.focus ? { focus: true } : {}), ...(opts.still ? { still: true } : {}) })

@@ -7,30 +7,20 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import re
-import subprocess
-import sys
-import threading
 import time
-import types
 from dataclasses import dataclass
-from pathlib import Path
 
 import httpx
 import pytest
 
-import app
-from app import cc_plugin, config, hook_auth, module_bridge, procs, session, tools, userconf
+from app import cc_plugin, config, hook_auth, module_bridge, session, tools
 
-_real_opened = module_bridge._opened  # the autouse fixture stands in for it
 
 CORPUS = "mini"
+REAL_OPENED = module_bridge._opened  # _fresh stands in for it in every test; the H17 test takes the real one
 MAIN = "11111111-1111-4111-8111-111111111111"
-NEW = "22222222-2222-4222-8222-222222222222"
 CHILD = "33333333-3333-4333-8333-333333333333"
 NOTE = "The analyst started {role} {agent} ({what}) in thimble; its report goes to them there."
-REAL_HINT = tools.hint
 
 
 @pytest.fixture(autouse=True)
@@ -140,60 +130,7 @@ async def test_every_module_route_answers_only_a_request_that_proves_the_token(c
     assert hook_auth.guarded("GET", "/api/module/roles"), "the roles and the rules need the hooks' proof"
 
 
-# ----------------------------------------------------------------------------------------------- main's meta
-
-
-async def test_main_s_meta_says_whether_the_module_is_live(client, plugin_headers, monkeypatch):
-    """The browser's no-module line reads main's meta: `module` and, while the module is not live, `module_why`, and
-    nothing of a fence or of how main started. Each time the module goes live or stops being live, main's chat is
-    notified, so an open page reads the meta again."""
-    from app import agents
-
-    notified: list = []
-    monkeypatch.setattr(agents, "notify", lambda c, chat: notified.append((c, chat)))
-    monkeypatch.setattr(module_bridge, "LIVE_GAP_S", 0.2)
-    _launch()
-
-    async def meta() -> dict:
-        r = await client.get(f"/api/ws/{CORPUS}/chats/main")
-        assert r.status_code == 200
-        got = r.json()["meta"]
-        assert got == {**got, **(await client.get(f"/api/ws/{CORPUS}/chats/main")).json()["meta"]}
-        assert "fenced" not in got and "launched" not in got
-        return {k: got[k] for k in ("module", "module_why")}
-
-    assert module_bridge.main_meta(CORPUS) == {"module": False, "module_why": module_bridge.NOT_LOADED}
-    assert await meta() == {"module": False, "module_why": module_bridge.NOT_LOADED}
-    mod = Module(client, plugin_headers)
-    poll = await _live(mod)
-    assert await meta() == {"module": True, "module_why": ""}
-    assert notified == [(CORPUS, agents.MAIN_ID)], "once, as it went live"
-    module_bridge._enqueue(CORPUS, "note", {"text": "x"}, MAIN, None)  # ends the poll, which the test does not renew
-    assert (await poll).status_code == 200
-    for _ in range(100):
-        if len(notified) == 2:
-            break
-        await asyncio.sleep(0.02)
-    assert notified == [(CORPUS, agents.MAIN_ID)] * 2, "and once as it stopped polling"
-    got = await meta()
-    assert not got["module"] and got["module_why"].startswith(module_bridge.NOT_ANSWERING)
-
-
 # ----------------------------------------------------------------------------------------------- the hello
-
-
-async def test_a_hello_is_accepted_from_main_s_session_and_recorded_for_doctor(client, plugin_headers):
-    _launch()
-    reg = config.workspace_dir(CORPUS) / module_bridge.REGISTRY
-    reg.write_text(json.dumps({"agents": {"a1": {"type": "thimble:writer"}}}))
-    assert not module_bridge.live(CORPUS)
-    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED
-    assert (await Module(client, plugin_headers).hello()).json() == {"ok": True}
-    data = _registry()
-    assert data["agents"] == {"a1": {"type": "thimble:writer"}}, "lane B's keys are kept"
-    assert data["module"] == {**data["module"], "session": MAIN, "version": "0.6.0"} and "idle" not in data["module"]
-    assert (await Module(client, plugin_headers).hello(problem="writer: refused")).status_code == 200
-    assert _registry()["module"]["problem"] == "writer: refused"
 
 
 async def test_a_hello_from_a_session_that_is_not_the_workspace_s_main_is_refused(client, plugin_headers):
@@ -213,175 +150,45 @@ async def test_a_hello_from_a_session_that_is_not_the_workspace_s_main_is_refuse
     assert r.status_code == 404
 
 
-async def test_a_hello_before_main_s_session_opened_thimble_is_asked_again_not_refused(client, plugin_headers,
-                                                                                         monkeypatch):
-    """At session start the module says hello before the launcher's first prompt, /thimble, attaches main, so main's
-    `claude` process is not known yet (or only the last main's is): the hello waits (409) rather than being refused,
-    which would leave the module idle for the whole session."""
-    _launch()
-    monkeypatch.setattr(module_bridge, "_opened", _real_opened)
-    monkeypatch.setattr(session, "main_pid", lambda c: None)
+async def test_a_live_main_launch_json_names_is_followed_at_its_hello_and_one_on_local_transport_waits(
+        client, plugin_headers, monkeypatch):
+    """Bug hunt 7, H17 (and H13's loop): the server answered the hello of the main launch.json names with 409 every 2 s
+    for as long as that session ran, since the server followed another session or none, so the browser never followed
+    it and its agents could not start; and a watcher of a session that had just taken main was told it was gone. The
+    live main launch.json names on the server's transport is followed at its hello, or its watcher's pull, and let in
+    at once. Main continued after a quit on the local transport (activate.continue_main) waits (LOCAL_NOW, so its
+    module goes on through the files) rather than being let in to a long poll no request reaches."""
+    from app import activate
+
+    monkeypatch.setattr(module_bridge, "_opened", REAL_OPENED)
+    attached: list[tuple[str, int | None]] = []
+
+    def attach(c, sid, cwd, transcript_path=None, pid=None, config_dir=None, **kw):
+        attached.append((sid, pid))
+        session._live[c] = session.Live(c, sid, cwd, None, pid)
+        return session._live[c]
+
+    monkeypatch.setattr(session, "attach", attach)
+    monkeypatch.setattr(activate, "main_alive", lambda c, rec=None: str((rec or {}).get("session")) == MAIN)
+    _launch(transport="server", pid=4242)
     r = await Module(client, plugin_headers).hello()
-    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN
-    # the last main is still the one the server follows, its process gone: still asked again
-    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=NEW))
-    monkeypatch.setattr(session, "main_pid", lambda c: 999)
+    assert r.status_code == 200, r.text
+    assert attached == [(MAIN, 4242)] and session.current(CORPUS).sid == MAIN
+    # the server follows another session, and main's watcher asks first: followed, not told it is gone
+    session._live[CORPUS] = session.Live(CORPUS, CHILD, _cwd(), None, 5151)
+    r = await client.get("/api/events/pull", params={"cwd": _cwd(), "session": MAIN, "wait": 0},
+                         headers=plugin_headers())
+    assert r.status_code == 204, r.text
+    assert attached == [(MAIN, 4242)] * 2 and session.current(CORPUS).sid == MAIN
+    # a session launch.json does not name is still refused, and nothing follows it
+    r = await Module(client, plugin_headers, CHILD).hello()
+    assert r.status_code == 403 and attached == [(MAIN, 4242)] * 2
+    # main continued after a quit, on the local transport: its hello waits
+    session._live.clear()
+    _launch(transport="local", pid=4242)
     r = await Module(client, plugin_headers).hello()
-    assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN
-    # /thimble attached main and its shim named its process
-    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=MAIN))
-    monkeypatch.setattr(session, "main_pid", lambda c: 4242)
-    assert (await Module(client, plugin_headers).hello()).status_code == 200
-    assert "idle" not in _registry()["module"], "the wait left no idle reason behind"
-    # /clear moved main within its process: the new id's hello is accepted once --rekey names it, before the server's
-    # follower moves to it
-    module_bridge.rekey(CORPUS, MAIN, CHILD)
-    assert (await Module(client, plugin_headers, CHILD).hello()).status_code == 200
-
-
-async def test_a_hello_from_the_session_thimble_made_main_is_accepted_with_no_fence(client, plugin_headers,
-                                                                                     monkeypatch):
-    """A plain `claude` session that typed /thimble: launch.json is /thimble's (`via: skill`, no fence, no session
-    named on main's command line), and /thimble attached main, so its module's hello is accepted."""
-    _launch(via="skill", mode="browser", pid=4242)
-    monkeypatch.setattr(module_bridge, "_opened", _real_opened)
-    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=MAIN))
-    monkeypatch.setattr(session, "main_pid", lambda c: 4242)
-    r = await Module(client, plugin_headers).hello()
-    assert r.status_code == 200 and r.json() == {"ok": True}
-    assert module_bridge._accepted(CORPUS, MAIN) and "idle" not in _registry()["module"]
-
-
-def _process(tmp_path, name: str, *args: str) -> subprocess.Popen:
-    """A process whose command line is `<tmp_path>/<name> <args>`, as `ps` and /proc show it: the Python running the
-    tests, by a link of that name, sleeping."""
-    link = tmp_path / name
-    if not link.exists():
-        link.symlink_to(sys.executable)
-    return subprocess.Popen([str(link), "-c", "import time; time.sleep(60)", *args])
-
-
-async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_is_main_s_claude(
-        client, plugin_headers, monkeypatch, tmp_path):
-    """At session start /thimble has not attached main, so the server knows no `claude` process of main's; the launcher
-    wrote main's `claude` process into launch.json as it started it. A hello from launch.json's session is accepted at once
-    when that process is a `claude` whose command line names the session, read from /proc, with or without a
-    `--settings`, so the module registers thimble's types inside session.start. Every case where that check cannot be
-    made waits (409) for /thimble as before: no pid, a process that is gone, not `claude` or for another session, and a
-    session /clear moved main to."""
-    monkeypatch.setattr(module_bridge, "_opened", _real_opened)
-    monkeypatch.setattr(session, "main_pid", lambda c: None)
-    running: list[subprocess.Popen] = []
-
-    def started(name: str, *args: str) -> int:
-        running.append(_process(tmp_path, name, *args))
-        for _ in range(200):  # until /proc shows the command line the test gave it
-            if procs.argv(running[-1].pid)[-1:] == list(args[-1:]):
-                break
-            time.sleep(0.01)
-        return running[-1].pid
-
-    async def hello(pid: int | None, sid: str = MAIN) -> httpx.Response:
-        _launch(**({"pid": pid} if pid is not None else {}))
-        return await Module(client, plugin_headers, sid).hello()
-
-    try:
-        main = started("claude", "--session-id", MAIN, "--", "/thimble")
-        t0 = time.monotonic()
-        r = await hello(main)
-        assert r.status_code == 200 and r.json() == {"ok": True}
-        assert time.monotonic() - t0 < module_bridge.HELLO_HOLD_S, "accepted at once, inside session.start"
-        assert module_bridge._accepted(CORPUS, MAIN) and "idle" not in _registry()["module"]
-        module_bridge._bridges.clear()
-        resumed = started("claude", "--resume", MAIN)
-        assert (await hello(resumed)).status_code == 200, "thimble -c passes --resume with the session"
-        module_bridge._bridges.clear()
-        settings = started("claude", "--settings", "{}", "--session-id", MAIN)
-        assert (await hello(settings)).status_code == 200, "a --settings changes nothing"
-        module_bridge._bridges.clear()
-
-        waits = {
-            "no pid in launch.json": None,
-            "not claude": started("python3", "--session-id", MAIN),
-            "another session's claude": started("claude", "--session-id", CHILD),
-            "the pid is no process": 2 ** 22 + 7,
-        }
-        for why, pid in waits.items():
-            r = await hello(pid)
-            assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, why
-            assert not module_bridge._accepted(CORPUS, MAIN), why
-        gone = started("claude", "--session-id", MAIN)
-        running[-1].kill()
-        running[-1].wait()
-        r = await hello(gone)
-        assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN, "main's process has gone"
-        # /clear moved main to a new id before /thimble attached it: launch.json names the old session, so the new
-        # id's hello waits for /thimble
-        module_bridge.rekey(CORPUS, MAIN, NEW)
-        r = await hello(main, sid=NEW)
-        assert r.status_code == 409 and r.json()["detail"] == module_bridge.NOT_OPEN
-    finally:
-        for p in running:
-            p.kill()
-            p.wait()
-
-
-def test_a_command_line_names_its_session_in_the_forms_the_launcher_passes():
-    for argv in (["claude", "--session-id", MAIN], ["claude", f"--session-id={MAIN}"], ["claude", "--resume", MAIN],
-                 ["claude", "-r", MAIN], ["claude", f"--resume={MAIN}"]):
-        assert module_bridge._names(argv, MAIN), argv
-    for argv in (["claude", MAIN], ["claude", "--session-id", NEW], ["claude", "--name", MAIN], [MAIN, MAIN]):
-        assert not module_bridge._names(argv, MAIN), argv
-    assert module_bridge._is_claude(["claude", "--x"]) and module_bridge._is_claude(["/usr/local/bin/claude"])
-    assert module_bridge._is_claude(["node", "/home/a/.npm-global/bin/claude", "--x"]), "an npm install's script"
-    assert not module_bridge._is_claude(["python3", "-c", "claude"]) and not module_bridge._is_claude([])
-
-
-async def test_without_a_session_in_launch_json_main_is_the_session_thimble_made_main(client, plugin_headers,
-                                                                                     monkeypatch):
-    _launch(session="")
-    monkeypatch.setattr(session, "current", lambda c: types.SimpleNamespace(sid=MAIN) if c == CORPUS else None)
-    assert (await Module(client, plugin_headers).hello()).status_code == 200
-    assert (await Module(client, plugin_headers, CHILD).hello()).status_code == 403
-
-
-async def test_a_stray_hello_never_unseats_main_s_module(client, plugin_headers):
-    _launch()
-    task = await _live(Module(client, plugin_headers))
-    assert (await Module(client, plugin_headers, CHILD).hello()).status_code == 403
-    assert module_bridge.live(CORPUS) and module_bridge.why_not(CORPUS) == ""
-    task.cancel()
-
-
-async def test_a_hello_after_clear_is_accepted_whether_rekey_names_the_new_id_before_or_after_it(client,
-                                                                                               plugin_headers):
-    _launch()
-    old = Module(client, plugin_headers)
-    assert (await old.hello()).status_code == 200
-    new = Module(client, plugin_headers, NEW)
-    # the hello first: held until --rekey names the new id
-    hello = asyncio.create_task(new.hello())
-    await asyncio.sleep(0.1)
-    assert not hello.done()
-    module_bridge.rekey(CORPUS, MAIN, NEW)
-    r = await hello
-    assert r.status_code == 200 and module_bridge.main_session(CORPUS) == NEW
-    assert (await old.next(wait=0)).status_code == 409, "the old id's poll is told to say hello again"
-    assert _registry()["module"]["rekeyed"] == {MAIN: NEW}
-    # --rekey first (an in-session /resume back to the first session): the hello is accepted at once
-    module_bridge.rekey(CORPUS, NEW, MAIN)
-    t0 = time.monotonic()
-    assert (await old.hello()).status_code == 200
-    assert time.monotonic() - t0 < module_bridge.HELLO_HOLD_S / 2
-    assert module_bridge.main_session(CORPUS) == MAIN
-
-
-async def test_a_restarted_server_follows_the_moves_the_last_one_recorded(client, plugin_headers):
-    _launch()
-    module_bridge.rekey(CORPUS, MAIN, NEW)
-    module_bridge._bridges.clear()  # what a restart forgets
-    assert module_bridge.main_session(CORPUS) == NEW
-    assert (await Module(client, plugin_headers, NEW).hello()).status_code == 200
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == module_bridge.LOCAL_NOW and attached == [(MAIN, 4242)] * 2
 
 
 # ----------------------------------------------------------------------------------------------- requests
@@ -409,20 +216,73 @@ async def test_the_long_poll_hands_requests_to_main_s_session_alone(client, plug
     assert (await child.next(wait=0)).status_code == 409
     await mod.result(req["id"], {"agentId": "a7", "model": "claude-opus-5-5[1m]", "junk": 1})
     assert await ask == {"agentId": "a7", "model": "claude-opus-5-5[1m]"}
+    # the card check's agent (agent_call.py): its drop line, and no note in main; no fork flag reaches the module
+    check = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="call", prompt="Check.", fork=True,
+                                                      description="thimble card check: Q?", values={}, request="r-2",
+                                                      drop='thimble checked the card "Q?"'))
+    req = (await mod.next()).json()["request"]
+    assert req["args"] == {"role": "call", "prompt": "Check.", "description": "thimble card check: Q?", "values": {},
+                           "request": "r-2", "note": "", "drop": 'thimble checked the card "Q?"'}
+    await mod.result(req["id"], {"agentId": "a8", "model": "claude-opus-5-5"})
+    assert (await check)["agentId"] == "a8"
 
 
-def test_the_note_says_how_the_agent_started_in_the_real_hint(monkeypatch):
-    """Live checks L2 and L17: the note for a writer that follows a typed orientation, and the note after /clear for a
-    typed-started agent, said the analyst started it "in the browser". The note says how it started: a click in the
-    browser, the next step of a run they asked for, or main's own Agent call."""
-    monkeypatch.setattr(tools, "hint", REAL_HINT)  # the real hint of prompts/tools.md
-    click = module_bridge._note("writer", "report")
-    assert "started thimble's writer for report in the browser, as your subagent {agent}" in click
-    follow = module_bridge._note("writer", "report", "follow-on")
-    assert "for report as the next step of a run they asked for in thimble," in follow and "browser" not in follow
-    typed = module_bridge._note("orientation", "", "typed")
-    assert "for this corpus through your own Agent call," in typed and "browser" not in typed
-    assert module_bridge._args("spawn", {"role": "writer", "what": "report", "route": "follow-on"})["note"] == follow
+# ----------------------------------------------------------------------------------------------- model calls
+
+
+ASK = {"model": "claude-opus-5-5", "effort": "low", "system": [{"text": "Judge it.", "cache": True}],
+       "prompt": [{"text": "Post 3 by marble-heron."}], "maxTokens": 16000, "timeoutMs": 30000}
+
+
+async def test_model_calls_run_together_and_answer_their_own_callers_and_a_cancel_reaches_the_module(
+        client, plugin_headers):
+    """The long poll hands model calls out as they come, each answered on its own, many at once; a spawn waits for none
+    of them; a caller cancelled sends the module `cancel` for its request, and its late answer goes nowhere."""
+    _launch()
+    mod = Module(client, plugin_headers)
+    poll = await _live(mod)
+    first = asyncio.create_task(module_bridge.model(CORPUS, "complete", ASK, timeout_s=30))
+    second = asyncio.create_task(module_bridge.model(CORPUS, "fork", {"prompt": "Propose?"}, timeout_s=30))
+    a = (await poll).json()["request"]
+    b = (await mod.next()).json()["request"]
+    assert (a["op"], a["args"]) == ("complete", ASK) and (b["op"], b["args"]) == ("fork", {"prompt": "Propose?"})
+    spawn = asyncio.create_task(module_bridge.request(CORPUS, "stop", agent="a5"))
+    s = (await mod.next()).json()["request"]
+    await mod.result(s["id"], {"agentId": "a5"})
+    assert (await spawn)["agentId"] == "a5", "a request answers while two model calls run"
+    await mod.result(b["id"], {"text": '{"show": false}', "usage": {"cache_read_input_tokens": 9}, "junk": 1})
+    assert await second == {"text": '{"show": false}', "usage": {"cache_read_input_tokens": 9}}
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    cancel = (await mod.next()).json()["request"]
+    assert cancel["op"] == "cancel" and cancel["args"] == {"request": a["id"]}
+    late = await mod.result(a["id"], {"text": "too late"})
+    assert late.json()["ok"] is False
+    assert module_bridge._answer("complete", {"failed": "api-error", "status": 529, "kind": "overloaded",
+                                              "usage": {}}) == {"failed": "api-error", "status": 529,
+                                                                "kind": "overloaded", "usage": {}}
+    assert module_bridge._answer("fork", {"agentId": "x"}) == {"error": "the module gave no answer to a model call"}
+    with pytest.raises(ValueError):
+        await module_bridge.model(CORPUS, "spawn", {}, timeout_s=1)
+
+
+async def test_a_model_call_no_module_takes_expires_and_one_whose_module_stops_ends(client, plugin_headers,
+                                                                                     monkeypatch):
+    _launch()
+    monkeypatch.setattr(module_bridge, "REQUEST_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(module_bridge, "MODEL_LIVE_S", 0.05)
+    mod = Module(client, plugin_headers)
+    assert (await mod.hello()).status_code == 200
+    assert (await mod.next(wait=0)).status_code == 204  # live for LIVE_GAP_S, and polls no more
+    got = await module_bridge.model(CORPUS, "complete", ASK, timeout_s=30)
+    assert got == {"no-module": module_bridge.NOT_ANSWERING, "expired": True}
+    poll = asyncio.create_task(mod.next())
+    call = asyncio.create_task(module_bridge.model(CORPUS, "complete", ASK, timeout_s=30))
+    assert (await poll).json()["request"]["op"] == "complete"
+    monkeypatch.setattr(module_bridge, "LIVE_GAP_S", 0.05)  # the module took it, then stopped polling
+    assert await asyncio.wait_for(call, 5) == {"error": module_bridge.NOT_LIVE}
+    assert await module_bridge.model(CORPUS, "complete", ASK, timeout_s=30) == {"no-module": module_bridge.why_not(CORPUS)}
 
 
 async def test_answers_reach_their_own_callers_in_any_order_and_take_one_shape(client, plugin_headers):
@@ -466,526 +326,3 @@ async def test_without_a_live_module_a_request_answers_no_module_with_the_reason
     assert module_bridge.live(CORPUS)
     await asyncio.sleep(0.1)
     assert not module_bridge.live(CORPUS) and "stopped polling" in module_bridge.why_not(CORPUS)
-
-
-async def test_a_request_the_module_does_not_answer_in_time_expires_and_a_late_spawn_is_stopped(client, plugin_headers,
-                                                                                               monkeypatch):
-    monkeypatch.setattr(module_bridge, "REQUEST_TIMEOUT_S", 0.4)
-    _launch()
-    mod = Module(client, plugin_headers)
-    poll = await _live(mod)
-    ask = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="check", prompt="p", description="d",
-                                                    values={}))
-    req = (await poll).json()["request"]
-    t0 = time.monotonic()
-    assert await ask == {"no-module": module_bridge.NOT_ANSWERING, "expired": True}
-    assert time.monotonic() - t0 < 1
-    # the module's spawn went through anyway: its answer comes late, and the agent it started is stopped
-    r = await mod.result(req["id"], {"agentId": "late1"})
-    assert r.json() == {"ok": False, "expired": True}
-    stop = (await mod.next()).json()["request"]
-    assert (stop["op"], stop["args"], "expires_in" in stop) == ("stop", {"agent": "late1"}, False)
-    # a request whose time ran out before the module polled is never handed to it
-    ask = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="check", prompt="p", description="d",
-                                                    values={}))
-    assert (await ask)["expired"] is True
-    assert (await mod.next(wait=0.2)).status_code == 204
-
-
-async def test_requests_made_for_the_old_session_go_nowhere_once_main_moves(client, plugin_headers, monkeypatch):
-    monkeypatch.setattr(module_bridge, "LIVE_GAP_S", 30)
-    _launch()
-    mod = Module(client, plugin_headers)
-    await mod.hello()
-    assert (await mod.next(wait=0)).status_code == 204
-    ask = asyncio.create_task(module_bridge.request(CORPUS, "stop", agent="a1"))
-    await asyncio.sleep(0.05)
-    module_bridge.rekey(CORPUS, MAIN, NEW)
-    assert (await Module(client, plugin_headers, NEW).hello()).status_code == 200
-    assert await ask == {"no-module": module_bridge.NOT_ANSWERING}
-    assert (await Module(client, plugin_headers, NEW).next(wait=0)).status_code == 204
-
-
-async def test_push_roles_asks_a_live_module_to_register_again_once_from_any_thread(client, plugin_headers):
-    _launch()
-    module_bridge.push_roles(CORPUS)  # no module: nothing
-    mod = Module(client, plugin_headers)
-    poll = await _live(mod)
-    module_bridge.push_roles(CORPUS)
-    req = (await poll).json()["request"]
-    assert (req["op"], req["args"]) == ("register", {})
-    await mod.result(req["id"], {"ok": True})
-    done = threading.Event()
-    threading.Thread(target=lambda: (module_bridge.push_roles(CORPUS), module_bridge.push_roles(CORPUS),
-                                     done.set())).start()
-    for _ in range(100):
-        if done.is_set():
-            break
-        await asyncio.sleep(0.01)
-    await asyncio.sleep(0.05)
-    assert [r.op for r in module_bridge._bridge(CORPUS).queue] == ["register"], "one, however often it is pushed"
-
-
-async def test_request_blocking_asks_from_a_worker_thread_and_refuses_on_the_loop(client, plugin_headers):
-    _launch()
-    mod = Module(client, plugin_headers)
-    poll = await _live(mod)
-    with pytest.raises(RuntimeError):
-        module_bridge.request_blocking(CORPUS, "note", text="x")
-    answer = asyncio.create_task(asyncio.to_thread(module_bridge.request_blocking, CORPUS, "note", text="hello main"))
-    req = (await poll).json()["request"]
-    assert (req["op"], req["args"]) == ("note", {"text": "hello main"})
-    await mod.result(req["id"], {"ok": True})
-    assert await answer == {"ok": True}
-
-
-# ----------------------------------------------------------------------------------------------- what the module fetches
-
-
-@dataclass
-class Role:
-    prompt: str
-    model: str
-    effort: str
-    description: str = "thimble's role"
-    background: bool = True
-    skills: tuple = ()
-    route: str = "not a spec key"
-
-
-async def test_the_roles_come_from_subagents_roles_as_agent_register_takes_them(client, plugin_headers, monkeypatch):
-    fake = types.ModuleType("app.subagents")
-    fake.roles = lambda c: {
-        "orientation": {"name": "x", "prompt": "Orient.", "model": "claude-opus-5-5[1m]", "effort": "xhigh",
-                        "description": "thimble's orientation of this corpus", "background": True,
-                        "disallowedTools": ["mcp__plugin_thimble_thimble__start_orientation"], "extra": 1},
-        "thimble:orient-helper": Role("Help.", "claude-sonnet-5", "high", skills=["thimble:shared"])}
-    monkeypatch.setitem(sys.modules, "app.subagents", fake)
-    monkeypatch.setattr(app, "subagents", fake)  # `from . import subagents` reads the package's attribute first
-    _launch()
-    mod = Module(client, plugin_headers)
-    assert (await mod.get("roles")).status_code == 409, "only after the hello"
-    await mod.hello()
-    got = (await mod.get("roles")).json()
-    assert set(got) == {"roles", "rules"}
-    roles = got["roles"]
-    assert roles == {
-        "orientation": {"name": "orientation", "prompt": "Orient.", "model": "claude-opus-5-5[1m]", "effort": "xhigh",
-                        "description": "thimble's orientation of this corpus", "background": True,
-                        "disallowedTools": ["mcp__plugin_thimble_thimble__start_orientation"]},
-        "orient-helper": {"name": "orient-helper", "prompt": "Help.", "model": "claude-sonnet-5", "effort": "high",
-                          "description": "thimble's role", "background": True, "skills": ["thimble:shared"]}}
-    rules = got["rules"]
-    assert rules == userconf.module_rules(CORPUS), "the rules the hooks module enforces on file tools"
-    assert str(userconf.global_file().parent / "server.json") in rules["private"]
-    assert set(rules["reasons"]) == {"private", "records", "data", "web"} and all(rules["reasons"].values())
-
-
-def _fake_roles(monkeypatch, prompt: dict) -> None:
-    """subagents.roles replaced by one role whose prompt is prompt["text"]."""
-    fake = types.ModuleType("app.subagents")
-    fake.roles = lambda c: {"orientation": {"prompt": prompt["text"], "model": "claude-opus-5-5[1m]", "effort": "xhigh",
-                                            "description": "thimble's orientation of this corpus", "background": True}}
-    monkeypatch.setitem(sys.modules, "app.subagents", fake)
-    monkeypatch.setattr(app, "subagents", fake)  # `from . import subagents` reads the package's attribute first
-
-
-async def _ops(mod: Module, n: int) -> list[dict]:
-    """The next `n` requests of the long poll, each answered as the module would."""
-    out = []
-    for _ in range(n):
-        out.append(await mod.serve(lambda req: {"ok": True} if req["op"] == "register" else {"agentId": "a1"}))
-    return out
-
-
-async def test_a_spawn_registers_the_roles_again_first_when_they_changed_since_the_module_fetched_them(
-        client, plugin_headers, monkeypatch):
-    """A click's agent runs on the registration in force when the module spawns it, so a spawn first has the module
-    register the roles again when they render otherwise than when it fetched them (the orientation instructions or a
-    prompt file edited by hand), and not when they render the same. A restarted server knows what the module fetched
-    from the record."""
-    prompt = {"text": "Orient."}
-    _fake_roles(monkeypatch, prompt)
-    _launch()
-    mod = Module(client, plugin_headers)
-    assert (await mod.hello()).status_code == 200
-    assert (await mod.get("roles")).json()["roles"]["orientation"]["prompt"] == "Orient."
-    spawn = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="orientation", prompt="p", what=""))
-    assert [r["op"] for r in await _ops(mod, 1)] == ["spawn"]
-    assert (await spawn) == {"agentId": "a1"}
-    prompt["text"] = "Orient, with the analyst's own instructions."
-    spawn = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="orientation", prompt="p", what=""))
-    assert [r["op"] for r in await _ops(mod, 2)] == ["register", "spawn"]
-    assert (await spawn) == {"agentId": "a1"}
-    assert (await mod.get("roles")).json()["roles"]["orientation"]["prompt"] == prompt["text"]
-    module_bridge._bridges.clear()  # what a restart forgets; the module keeps its registration and says hello again
-    assert (await mod.hello()).status_code == 200
-    spawn = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="orientation", prompt="p", what=""))
-    assert [r["op"] for r in await _ops(mod, 1)] == ["spawn"], "the record says what it fetched"
-    await spawn
-
-
-async def test_a_held_poll_has_the_roles_registered_again_once_their_files_change(client, plugin_headers, monkeypatch,
-                                                                                tmp_path):
-    """While main is idle its module holds the long poll, which looks every ROLES_CHECK_S whether the files the roles
-    are rendered from changed: the workspace's settings.json, whose orient_instructions an analyst edits by hand, and a
-    prompt file an agent's `prompt` names. A change that renders the roles otherwise has the module register them again,
-    so main's next turn, whose own Agent calls ignore a registration made during the turn, starts on them; a file saved
-    with the same text asks nothing."""
-    from app import ledger, orient_session, userconf
-
-    monkeypatch.setattr(module_bridge, "ROLES_CHECK_S", 0.05)
-    monkeypatch.setattr(module_bridge, "POLL_TICK_S", 0.05)
-    _launch()
-    mod = Module(client, plugin_headers)
-    assert (await mod.hello()).status_code == 200
-    assert "orientation" in (await mod.get("roles")).json()["roles"]
-
-    async def next_op() -> str:
-        r = await mod.next(wait=3.0)
-        if r.status_code == 204:
-            return ""
-        req = r.json()["request"]
-        await mod.result(req["id"], {"ok": True})
-        return req["op"]
-
-    settings = config.workspace_dir(CORPUS) / "settings.json"
-    settings.write_text(json.dumps({**ledger.stored_settings(CORPUS), orient_session.SETTING: "Read every log first."}))
-    assert await next_op() == "register"
-    roles = (await mod.get("roles")).json()["roles"]
-    assert "Read every log first." in roles["orientation"]["prompt"]
-    settings.write_text(settings.read_text())  # saved again, the same text
-    r = await mod.next(wait=0.5)
-    assert r.status_code == 204, r.text
-    own = tmp_path / "my-critic.md"
-    original = (config.REPO_ROOT / "prompts" / "critic.md").read_text("utf-8")
-    own.write_text(original + "\nCheck every count twice.\n")
-    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
-    userconf.global_file().write_text(json.dumps({"agents": {"critic": {"prompt": str(own)}}}))
-    assert await next_op() == "register"
-    assert "Check every count twice." in (await mod.get("roles")).json()["roles"]["critic"]["prompt"]
-    own.write_text(original + "\nCheck every count three times.\n")
-    assert await next_op() == "register"
-    assert "three times" in (await mod.get("roles")).json()["roles"]["critic"]["prompt"]
-    from app import cardtypes, views
-
-    stamped = {path for path, *_ in module_bridge.roles_stamp(CORPUS)}
-    assert str(config.registry_dir(CORPUS) / cardtypes.REGISTRY_FILE) in stamped, "the card types the prompt lists"
-    assert str(views.views_dir(CORPUS)) in stamped, "and the views, whose forms it lists"
-
-
-async def test_the_state_holds_running_agents_their_efforts_the_typed_starts_and_a_note_for_each(client,
-                                                                                               plugin_headers):
-    _launch()
-    (config.workspace_dir(CORPUS) / module_bridge.REGISTRY).write_text(json.dumps({
-        "agents": {
-            "aTyped": {"type": "thimble:orientation", "key": "orient", "values": {"model": "m", "effort": "max"}},
-            "aGp": {"type": "general-purpose", "parent": "aTyped"},
-            "aGp2": {"type": "Explore", "parent": "aGp"},
-            "aCritic": {"type": "thimble:critic", "parent": "aTyped", "values": {"effort": "low"}},
-            "aCriticKid": {"type": "general-purpose", "parent": "aCritic"},
-            "aClick": {"type": "thimble:writer", "key": "writer:report", "plugin_started": True,
-                       "values": {"effort": "high"}},
-            "aCheck": {"type": "thimble:check", "key": "check:unverified:report", "plugin_started": True},
-            # a follow-up's run: running again, with the end of its earlier run kept (live check L17, group c)
-            "aAgain": {"type": "thimble:writer", "key": "writer:story", "plugin_started": True, "status": "running",
-                       "run": 2, "ended": 1791280306.25, "ended_run": 1},
-            "aDone": {"type": "thimble:check", "key": "check:c1:report", "status": "stopped", "ended": 1791280306.25}},
-        "efforts": {"aOwn": "medium"},
-        "pending": {
-            "orient": {"id": "req0001orient", "kind": "start", "route": "typed", "role": "orientation",
-                       "values": {"model": "claude-opus-5-5[1m]", "effort": "max"}, "state": "pending"},
-            "clickid1": {"kind": "start", "route": "click", "role": "writer", "values": {}},
-            "writer:x": {"id": "req0002writer", "kind": "start", "route": "typed", "role": "thimble:writer",
-                         "values": {}, "state": "expired"}},
-    }))
-    mod = Module(client, plugin_headers)
-    await mod.hello()
-    state = (await mod.get("state")).json()
-    assert set(state["agents"]) == {"aTyped", "aGp", "aGp2", "aCritic", "aCriticKid", "aClick", "aCheck", "aAgain"}
-    assert state["agents"]["aClick"] == {"type": "thimble:writer", "role": "writer", "plugin_started": True}
-    assert state["efforts"] == {"aTyped": "max", "aGp": "max", "aGp2": "max", "aCritic": "low",
-                                "aCriticKid": "low", "aOwn": "medium"}, \
-        "a typed run's effort goes to its children of no thimble type; a click's run needs none"
-    assert state["requests"] == {"req0001orient": {"role": "orientation", "key": "",
-                                                   "values": {"model": "claude-opus-5-5[1m]", "effort": "max"}}}
-    assert sorted(state["notes"]) == sorted([
-        "The analyst started orientation aTyped (this corpus) in thimble; its report goes to them there.",
-        "The analyst started writer aClick (report) in thimble; its report goes to them there.",
-        "The analyst started check aCheck (unverified on report) in thimble; its report goes to them there.",
-        "The analyst started writer aAgain (story) in thimble; its report goes to them there."]), \
-        "worded as the note at the agent's start (subagents._what)"
-
-
-async def test_the_module_s_ended_post_reaches_every_observer(client, plugin_headers):
-    _launch()
-    seen: list[tuple] = []
-    module_bridge.on_ended(lambda *a: seen.append(a))
-    module_bridge.on_ended(lambda *a: 1 / 0)  # one that fails does not stop the others
-    r = await client.post("/api/module/ended", headers=plugin_headers(),
-                          json={"cwd": _cwd(), "session": MAIN, "agentId": "a9", "answer": "Done.", "reason": "answer"})
-    assert r.json() == {"ok": True}
-    assert seen == [(CORPUS, "a9", "Done.", "answer")]
-    # a turn the model refused with no fallback model and no text: what the API said of it is the answer, so the run's
-    # end can say why it failed; a refusal that brought text keeps it
-    refusal = {"category": "cyber", "explanation": "This request triggered cyber-related  safeguards."}
-    for answer, want in (("", "The API refused the request (cyber): This request triggered cyber-related safeguards."),
-                         ("API Error: flagged", "API Error: flagged")):
-        seen.clear()
-        await client.post("/api/module/ended", headers=plugin_headers(), json={
-            "cwd": _cwd(), "session": MAIN, "agentId": "a9", "answer": answer, "reason": "refusal", "refusal": refusal})
-        assert seen == [(CORPUS, "a9", want, "refusal")]
-    assert module_bridge.refusal_text({"category": None, "explanation": "Flagged."}) == "The API refused the request: Flagged."
-    assert module_bridge.refusal_text({}) == ""
-
-
-def test_a_stop_hands_the_module_the_agent_s_shells_and_nothing_that_is_no_task_id():
-    """Live check L33: thimble's stop names the background shells the agent started, which the module stops with it."""
-    got = module_bridge._args("stop", {"agent": "a7", "shells": ["b7xk2q9", "../x", "", "b2"]})
-    assert got == {"agent": "a7", "shells": ["b7xk2q9", "b2"]}
-    assert module_bridge._args("stop", {"agent": "a7"}) == {"agent": "a7"}
-
-
-async def test_the_module_s_plan_mode_post_reaches_main_s_mode_from_the_accepted_session_only(client, plugin_headers,
-                                                                                             monkeypatch):
-    """Live check L21: the module asks Claude Code's permission decision every few seconds and posts when main went
-    into plan mode or out of it while idle; only the accepted session's post counts (session.note_plan)."""
-    _launch()
-    heard: list[tuple] = []
-    monkeypatch.setattr(session, "note_plan", lambda c, sid, plan: heard.append((c, sid, plan)))
-    mod = Module(client, plugin_headers)
-    stray = await client.post("/api/module/mode", headers=plugin_headers(),
-                              json={"cwd": _cwd(), "session": MAIN, "plan": True})
-    assert stray.status_code == 409 and not heard, "say hello first"
-    await mod.hello()
-    r = await mod._go("POST", "/api/module/mode", json={"cwd": _cwd(), "session": MAIN, "plan": True})
-    assert r.json() == {"ok": True} and heard == [(CORPUS, MAIN, True)]
-
-
-# ----------------------------------------------------------------------------------------------- terminal mode
-
-
-from terminal_fakes import FileModule, write_launch  # noqa: E402
-
-
-@pytest.fixture()
-def terminal(monkeypatch):
-    """The mini corpus's session in terminal mode, with one role to register (_fake_roles)."""
-    from app import subagents  # noqa: F401 — imported, so _fake_roles can stand in for it
-
-    _fake_roles(monkeypatch, {"text": "Orient."})
-    ws = config.workspace_dir(CORPUS)
-    write_launch(ws, session=MAIN)
-    return ws
-
-
-def test_the_transport_is_the_file_in_terminal_mode_and_http_otherwise(terminal):
-    assert module_bridge.transport(CORPUS) == module_bridge.FILE
-    write_launch(terminal, session=MAIN, mode="browser")
-    assert module_bridge.transport(CORPUS) == module_bridge.HTTP
-    _launch()  # an older launcher's launch.json, with no mode
-    assert module_bridge.transport(CORPUS) == module_bridge.HTTP
-
-
-def test_in_terminal_mode_the_module_is_live_while_main_s_module_writes_its_heartbeat(terminal, monkeypatch):
-    assert not module_bridge.live(CORPUS)
-    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED
-    mod = FileModule(terminal, session=MAIN)
-    mod.write()
-    assert module_bridge.live(CORPUS) and module_bridge.why_not(CORPUS) == ""
-    mod.out["beat"] = int((time.time() - module_bridge.FILE_LIVE_S - 1) * 1000)
-    sf_path = module_bridge.sf.module_path(terminal)
-    sf_path.write_text(json.dumps(mod.out))
-    assert not module_bridge.live(CORPUS)
-    assert "heartbeat" in module_bridge.why_not(CORPUS)
-    mod.out.update(session=NEW)
-    mod.write()
-    assert not module_bridge.live(CORPUS) and module_bridge.why_not(CORPUS) == module_bridge.NOT_MAIN
-    with module_bridge.sf.update(terminal) as state:  # --rekey recorded the move: the new session is main's
-        module_bridge.sf.rekey(state, MAIN, NEW)
-    assert module_bridge.live(CORPUS) and module_bridge.main_session(CORPUS) == NEW
-    mod.out.update(gone=True)
-    mod.write()
-    assert not module_bridge.live(CORPUS) and "session ended" in module_bridge.why_not(CORPUS)
-    mod.out.update(gone=False, beat=0, problem="Claude Code did not register thimble:critic: bad")
-    sf_path.write_text(json.dumps(mod.out))
-    assert module_bridge.why_not(CORPUS) == "Claude Code did not register thimble:critic: bad"
-
-
-async def test_a_request_in_terminal_mode_goes_through_subagents_json_and_module_json(terminal, monkeypatch):
-    import socket
-
-    def no_socket(*a, **k):
-        raise AssertionError("terminal mode opens no socket")
-
-    mod = FileModule(terminal, session=MAIN).start()
-    try:
-        monkeypatch.setattr(socket, "socket", no_socket)
-        got = await module_bridge.request(CORPUS, "spawn", role="writer", prompt="Write.", description="writer: report",
-                                          values={"model": "m", "effort": "low"}, what="report", request="req_0000000001")
-        assert got == {"agentId": "a0000000000000001"}
-        assert await module_bridge.request(CORPUS, "note", text="A line.") == {"ok": True}
-    finally:
-        mod.stop()
-    [spawn] = mod.ops("spawn")
-    assert spawn == {"role": "writer", "prompt": "Write.", "description": "writer: report",
-                     "values": {"model": "m", "effort": "low"}, "request": "req_0000000001",
-                     "note": NOTE.format(role="writer", agent="{agent}", what="report")}
-    reqs = module_bridge.sf.requests(module_bridge.sf.read(terminal))
-    entries = [r for r in reqs.values() if r.get("kind") == "module"]
-    assert [(r["op"], r["module"], r["state"], r["session"]) for r in entries] == [
-        ("spawn", "answered", "done", MAIN), ("note", "answered", "done", MAIN)]
-    assert entries[0]["of"] == "req_0000000001"
-    held = json.loads(module_bridge.sf.roles_path(terminal).read_text())
-    assert list(held["roles"]) == ["orientation"], "roles.json written before the spawn"
-
-
-async def test_a_request_the_module_does_not_answer_in_time_expires_and_a_late_spawn_is_stopped(terminal, monkeypatch):
-    monkeypatch.setattr(module_bridge, "REQUEST_TIMEOUT_S", 0.3)
-    late: list[str] = []
-    mod = FileModule(terminal, session=MAIN, answer=lambda op, args: None if op == "spawn" else {"agentId": args.get("agent")})
-    mod.start()
-    try:
-        got = await module_bridge.request(CORPUS, "spawn", role="writer", prompt="p", description="d", values={})
-        assert got == {"no-module": module_bridge.NOT_ANSWERING, "expired": True}
-        [(rid, _, _)] = mod.seen
-        r = module_bridge.sf.requests(module_bridge.sf.read(terminal))[rid]
-        assert (r["module"], r["state"]) == ("expired", "expired")
-        mod.out["answers"][rid] = {"agentId": "aLate"}  # the module's answer comes after all
-        mod.write()
-        assert module_bridge.reconcile(CORPUS) == ["aLate"]
-        assert module_bridge.reconcile(CORPUS) == [], "stopped once"
-        for _ in range(100):
-            if mod.ops("stop"):
-                break
-            await asyncio.sleep(0.02)
-        assert mod.ops("stop") == [{"agent": "aLate"}]
-    finally:
-        mod.stop()
-    assert not late
-
-
-async def test_without_a_live_module_a_request_in_terminal_mode_answers_no_module_and_writes_nothing(terminal):
-    got = await module_bridge.request(CORPUS, "spawn", role="writer", prompt="p", description="d", values={})
-    assert got == {"no-module": module_bridge.NOT_LOADED}
-    assert not [r for r in module_bridge.sf.requests(module_bridge.sf.read(terminal)).values() if r.get("kind") == "module"]
-
-
-def test_request_blocking_works_from_a_thread_in_terminal_mode(terminal):
-    mod = FileModule(terminal, session=MAIN).start()
-    out: list = []
-    try:
-        t = threading.Thread(target=lambda: out.append(module_bridge.request_blocking(CORPUS, "stop", agent="a9")))
-        t.start()
-        t.join(timeout=15)
-    finally:
-        mod.stop()
-    assert out == [{"agentId": "a9"}]
-
-
-def test_the_ends_the_module_writes_are_handed_out_once_each_by_its_load(terminal):
-    mod = FileModule(terminal, session=MAIN)
-    mod.write()
-    assert module_bridge.new_ended(CORPUS) == []
-    mod.ended("a1", "Done.")
-    mod.ended("a2", "", reason="refusal", refusal={"category": "cyber", "explanation": "flagged"})
-    assert module_bridge.new_ended(CORPUS) == [
-        {"agentId": "a1", "answer": "Done.", "reason": "answer"},
-        {"agentId": "a2", "answer": "The API refused the request (cyber): flagged", "reason": "refusal"}]
-    assert module_bridge.new_ended(CORPUS) == []
-    mod.ended("a3", "Later.")
-    assert [e["agentId"] for e in module_bridge.new_ended(CORPUS)] == ["a3"]
-    restarted = FileModule(terminal, session=MAIN)  # a new load of the module counts its ends from 1 again
-    restarted.out["load"] = "an0ther"
-    restarted.ended("a4", "After a restart.")
-    assert [e["agentId"] for e in module_bridge.new_ended(CORPUS)] == ["a4"]
-
-
-def test_push_roles_writes_roles_json_in_terminal_mode_and_sync_writes_it_only_when_the_roles_changed(terminal,
-                                                                                                       monkeypatch):
-    prompt = {"text": "Orient."}
-    _fake_roles(monkeypatch, prompt)
-    module_bridge.push_roles(CORPUS)
-    path = module_bridge.sf.roles_path(terminal)
-    first = json.loads(path.read_text())
-    assert first["roles"]["orientation"]["prompt"] == "Orient." and first["digest"]
-    assert first["rules"] == userconf.module_rules(CORPUS) and first["rules"]["corpus"] is None
-    assert path.stat().st_mode & 0o777 == 0o600
-    assert asyncio.run(module_bridge.sync_roles(CORPUS, force=True)) is False
-    prompt["text"] = "Orient, edited by hand."
-    assert asyncio.run(module_bridge.sync_roles(CORPUS, force=True)) is True
-    assert json.loads(path.read_text())["roles"]["orientation"]["prompt"] == "Orient, edited by hand."
-    # the rules count as well: corpus edits turned off by hand in thimble's config
-    userconf.global_file().parent.mkdir(parents=True, exist_ok=True)
-    userconf.global_file().write_text(json.dumps({"agents": {"orientation": {"data": "off"}}}))
-    assert asyncio.run(module_bridge.sync_roles(CORPUS, force=True)) is True
-    assert json.loads(path.read_text())["rules"]["corpus"] == os.path.realpath(config.corpus_dir(CORPUS))
-
-
-def test_roles_json_is_rendered_in_the_sessions_mode_from_any_folder(monkeypatch, tmp_path):
-    """The launcher writes roles.json before main starts, from a folder that is no corpus and with no THIMBLE_WS: the
-    agents' prompts are still rendered in the mode launch.json names (preamble.md's terminal text), and in browser
-    mode in browser mode."""
-    ws = config.workspace_dir(CORPUS)
-    monkeypatch.delenv("THIMBLE_WS", raising=False)
-    monkeypatch.delenv("THIMBLE_MODE", raising=False)
-    monkeypatch.chdir(tmp_path)
-    for mode, has, lacks in (("terminal", "the terminal, where thimble shows", "a browser interface"),
-                             ("browser", "a browser interface", "the terminal, where thimble shows")):
-        write_launch(ws, session=MAIN, mode=mode)
-        roles = json.loads(module_bridge.roles_file(CORPUS).read_text())["roles"]
-        text = json.dumps(roles, ensure_ascii=False)
-        assert roles and has in text and lacks not in text, mode
-
-
-def test_rekey_in_terminal_mode_leaves_the_record_the_hook_wrote(terminal):
-    with module_bridge.sf.update(terminal) as state:
-        module_bridge.sf.rekey(state, MAIN, NEW)
-    before = _registry()["module"]
-    module_bridge.rekey(CORPUS, MAIN, NEW)
-    assert _registry()["module"] == before and before["notes"]["session"] == NEW
-
-
-def test_the_module_s_refusal_before_the_rules_come_says_what_module_deny_private_says():
-    """Until the rules come, the hooks module refuses a token file in its own words (PRIVATE_FALLBACK in
-    plugin/hooks/thimble.ts): prompts/tools.md's module-deny-private, the words the rules carry (userconf.module_rules).
-    The module's test runs where it cannot read prompts/tools.md (claude plugin test), so this test checks it."""
-    repo = Path(config.REPO_ROOT)
-    module = (repo / "plugin" / "hooks" / "thimble.ts").read_text("utf-8")
-    [said] = re.findall(r'^export const PRIVATE_FALLBACK = ("[^"\\\n]*(?:\\.[^"\\\n]*)*")$', module, re.M)
-    section = (repo / "prompts" / "tools.md").read_text("utf-8").split("\n## module-deny-private\n")[1].split("\n## ")[0]
-    assert json.loads(said) == section.strip()
-
-
-def test_why_not_names_the_security_plugin_s_allow_managed_mods_only(monkeypatch):
-    """A start refused for want of the module gives the managed setting that keeps it out, the security plugin's
-    allowManagedModsOnly as well as disableAllHooks and allowManagedHooksOnly, not only that Claude Code did not load
-    it."""
-    _launch()
-    monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: {
-        "pluginConfigs": {"cc-plugin-sec-default@builtin": {"options": {"allowManagedModsOnly": True}}}})
-    assert module_bridge.why_not(CORPUS) == "your organization's managed settings set allowManagedModsOnly"
-    monkeypatch.setattr(cc_plugin, "managed", lambda environ=None: None)
-    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED
-
-
-def test_why_not_names_the_shell_s_proxy_when_no_hello_came():
-    """When main's /thimble found a shell proxy that NO_PROXY does not keep off 127.0.0.1 and localhost (its `setup`
-    notice `proxy`, events.session_route) and no hello of the hooks module came, a start refused for want of the module
-    names the proxy, not that Claude Code did not load the module. Once a hello came, or once /thimble no longer finds
-    the proxy, it does not."""
-    from app import events
-
-    proxy = ("your shell sets a proxy without 127.0.0.1 and localhost in NO_PROXY, so thimble's hooks module cannot "
-             "reach thimble's server")
-    _launch()
-    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED
-    events._setup(CORPUS, events.SessionBody(session=MAIN, warnings=["proxy"]))
-    assert module_bridge.why_not(CORPUS) == proxy
-    assert tools.hint("start-refused-no-module", reason=module_bridge.why_not(CORPUS)).startswith(
-        f"thimble's agents can't start in this session: {proxy}. ")
-    module_bridge._bridges[CORPUS] = module_bridge._Bridge(session=MAIN, hello_at=time.time())
-    assert module_bridge.why_not(CORPUS).startswith(module_bridge.NOT_ANSWERING), "a hello came: the proxy let it by"
-    module_bridge._bridges.clear()
-    events._setup(CORPUS, events.SessionBody(session=MAIN, warnings=[]))
-    assert module_bridge.why_not(CORPUS) == module_bridge.NOT_LOADED

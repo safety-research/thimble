@@ -209,11 +209,6 @@ export function moveSection(sections: readonly StorySection[], from: number, to:
   return out
 }
 
-/** The cards a story shows, its sections' cards and the cards among its blocks, for the sidebar's ✓. */
-export function storyCells(doc: Pick<StoryDoc, 'sections'> | null): string[] {
-  return (doc?.sections ?? []).flatMap((sec) => (sec.figures ?? []).map((f) => f.cell ?? '').filter(Boolean))
-}
-
 /** Whether an item of a figure (a table's row, a timeline's event, a diagram's node), by its text, is one a section's
  * step highlights: a term standing in the text as a word of its own, case aside. */
 export function stepMatches(text: string, terms: readonly string[]): boolean {

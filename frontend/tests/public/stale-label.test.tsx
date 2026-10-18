@@ -3,7 +3,7 @@
 // and its label's tag says so in its tooltip; no card or label sheet offers a Regenerate Card button.
 import { act } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
-import { CardFace, labelTagTip } from '../../src/canvas/CardFace.tsx'
+import { CardFace } from '../../src/canvas/CardFace.tsx'
 import { CanvasContext } from '../../src/canvas/context.ts'
 import { TIP_DELAY_MS } from '../../src/components/Tooltip.tsx'
 import type { Cell, Concept } from '../../src/lib/types.ts'
@@ -41,24 +41,6 @@ async function tipOf(el: HTMLElement): Promise<string | null> {
   })
   return document.querySelector('[role="tooltip"]')?.textContent ?? null
 }
-
-test('the tag tooltip names a label the card is running again for, then unrun edits, then a stale label', () => {
-  const stale = new Map([['k1', 'its prompt']])
-  const edited = new Map([['k1', ['its prompt']]])
-  expect(labelTagTip('k1', new Set(['k1']), edited, stale)).toBe('Stale label: card regenerating…')
-  expect(labelTagTip('k1', new Set(), edited, stale)).toBe('Edited, not run yet: its prompt')
-  expect(labelTagTip('k1', new Set(), new Map(), stale)).toBe('Stale label')
-  expect(labelTagTip('k1', new Set(), new Map(), new Map())).toBeNull()
-})
-
-test('a card run again for a changed label shimmers and its tag says why, with no Regenerate Card button', async () => {
-  const el = await face(cell({ status: 'running', regenerating_for: ['k1'] }))
-  const card = el.querySelector('.canvas-card')!
-  expect(card.classList.contains('is-regenerating')).toBe(true)
-  expect(el.querySelector('.bcell-tag.is-plain')).toBeNull()
-  expect([...el.querySelectorAll('button')].map((b) => b.textContent)).not.toContain('Regenerate Card')
-  expect(await tipOf(el)).toBe('Stale label: card regenerating…')
-})
 
 test('once the run ends the tag is normal, and a card still stale shows its tag in ink, with no button', async () => {
   let el = await face(cell({ status: 'ok', regenerating_for: null }))

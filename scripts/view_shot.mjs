@@ -577,25 +577,39 @@ async function mediaAnswer(file, type, size, rangeHeader) {
 }
 
 const answers = new Map()
+const raw = new Set() // the requests whose answer is the line's text
 let seq = 0
-createInterface({ input: process.stdin }).on('line', (line) => {
-  let msg
-  try {
-    msg = JSON.parse(line)
-  } catch {
-    return
-  }
-  const fn = answers.get(msg.id)
-  if (fn) {
-    answers.delete(msg.id)
-    fn(msg)
-  }
-})
-/** One request to the server and its answer. */
-function ask(kind, body) {
+// The server keeps this process's stdin open until it has read the `done` line. An end before that means it stopped,
+// died or gave up on the run, so the process exits rather than wait ANSWER_MS for answers that will not come, and so it
+// does on SIGTERM and SIGHUP (the launch leaves those to this file: Playwright's own handlers close the browser but
+// keep the process). Playwright's exit handler kills the browser.
+let finished = false
+createInterface({ input: process.stdin })
+  .on('line', (line) => {
+    let msg
+    try {
+      msg = JSON.parse(line)
+    } catch {
+      return
+    }
+    const fn = answers.get(msg.id)
+    if (fn) {
+      answers.delete(msg.id)
+      fn(raw.has(msg.id) ? line : msg)
+      raw.delete(msg.id)
+    }
+  })
+  .on('close', () => {
+    if (!finished) process.exit(1)
+  })
+process.on('SIGTERM', () => process.exit(143))
+process.on('SIGHUP', () => process.exit(129))
+/** One request to the server and its answer: parsed, or with `text` the line as the server wrote it. */
+function ask(kind, body, text = false) {
   const id = `${kind[0]}${++seq}`
   return new Promise((resolve) => {
     answers.set(id, resolve)
+    if (text) raw.add(id)
     say({ [kind]: id, ...body })
   })
 }
@@ -636,12 +650,14 @@ async function shootState(browser, opt, doc, state, i) {
       if (m.type() === 'error' && !isMedia(m.location()?.url || '')) errors.push(`console: ${m.text()}`.slice(0, 400))
     })
     page.on('pageerror', (e) => errors.push(`page: ${e.message}`.slice(0, 400)))
-    // a fetch or a marks request keeps the page from being shot until it is answered
+    // a fetch or a marks request keeps the page from being shot until it is answered. Its answer goes to the page as
+    // the server's JSON text, which the page parses: Playwright checks every value an exposed function returns
+    // against its protocol, which for a view whose answers were 3 MB each took a minute of each check (bug hunt D15)
     const tracked = async (kind, body) => {
       inflight++
       lastActivity = Date.now()
       try {
-        return await ask(kind, { state: i, ...body })
+        return await ask(kind, { state: i, ...body }, true)
       } finally {
         inflight--
         lastActivity = Date.now()
@@ -688,7 +704,7 @@ async function shootState(browser, opt, doc, state, i) {
         const post = (msg) => f.contentWindow.postMessage(msg, '*')
         const labels = () => post({ type: 'thimble:labels', marks, on: state.on, filter: state.filter, all: state.all, palette: state.palette })
         const ask = async (refs) => {
-          const got = await window.thimbleMarks(refs)
+          const got = JSON.parse(await window.thimbleMarks(refs))
           marks = { ...marks, ...(got.marks || {}) }
           window.__marks = marks
           state = { on: got.on || [], filter: got.filter || null, all: got.all || [], palette: got.palette || [] }
@@ -708,7 +724,7 @@ async function shootState(browser, opt, doc, state, i) {
             await ask([])
             post({ type: 'thimble:open', open: place })
           } else if (d.type === 'thimble:fetch') {
-            const msg = await window.thimbleFetch(d.query)
+            const msg = JSON.parse(await window.thimbleFetch(d.query))
             post({ type: 'thimble:result', id: d.id, data: msg.data, error: msg.error })
           } else if (d.type === 'thimble:error') {
             window.thimbleNote('error', d.message)
@@ -882,7 +898,7 @@ async function main() {
   const states = JSON.parse(readFileSync(opt.states, 'utf8') || '[]')
   // the system's Chrome, Edge or Chromium when thimble's config picks it (backend/app/userconf.py)
   const executablePath = process.env.THIMBLE_BROWSER_PATH || undefined
-  const browser = await chromium.launch({ executablePath })
+  const browser = await chromium.launch({ executablePath, handleSIGTERM: false, handleSIGHUP: false })
   const out = new Array(states.length)
   let next = 0
   const worker = async () => {
@@ -900,10 +916,12 @@ async function main() {
   } finally {
     await browser.close()
   }
+  finished = true
   say({ done: true, states: out })
 }
 
 main().catch((e) => {
+  finished = true
   say({ done: true, states: [], error: plain(e) })
   process.exit(1)
 })

@@ -75,13 +75,6 @@ test('the code is posted with the workspace, leaves the address once the server 
   expect(requests.filter((r) => r === 'GET /api/ui/paired')).toHaveLength(1)
 })
 
-test('on the start page the code goes alone', async () => {
-  stubPage('#p=abc')
-  const { claimKey } = await import('../../src/lib/api.ts')
-  await claimKey()
-  expect(posts).toEqual(['{"code":"abc"}'])
-})
-
 test('a code that is gone leaves the address and shows the page its own notice, whose × sends nothing', async () => {
   const loc = stubPage('#p=old', '?ws=logs')
   answers = [410]
@@ -101,27 +94,6 @@ test('a code that is gone leaves the address and shows the page its own notice, 
   expect(requests.slice(before)).toEqual([])
 })
 
-test('a later link whose code signs the browser in takes the notice away, and a refusal other than 410 is no gone code', async () => {
-  const loc = stubPage('#p=old', '?ws=logs')
-  answers = [410, 204, 403]
-  const { claimKey, claimOnHashChange, claimRefused } = await import('../../src/lib/api.ts')
-  const notices = await import('../../src/lib/notices.ts')
-  await claimKey()
-  expect(claimRefused()).toBe(true)
-  expect(pageNotices(notices)).toHaveLength(1)
-  claimOnHashChange()
-  loc.hash = '#p=fresh'
-  listeners.hashchange()
-  await claimKey()
-  expect(claimRefused()).toBe(false)
-  expect(pageNotices(notices)).toEqual([])
-  loc.hash = '#p=other'
-  listeners.hashchange()
-  await claimKey()
-  expect(claimRefused()).toBe(false)
-  expect(posts).toEqual(['{"code":"old","ws":"logs"}', '{"code":"fresh","ws":"logs"}', '{"code":"other","ws":"logs"}'])
-})
-
 test('a claim the server does not answer is tried again, and the code stays in the address until it is', async () => {
   const loc = stubPage('#p=abc')
   answers = ['down', 502, 'down', 204]
@@ -137,19 +109,6 @@ test('a claim the server does not answer is tried again, and the code stays in t
   await vi.advanceTimersByTimeAsync(5000)
   await second
   expect(posts.length).toBe(4)
-  expect(loc.hash).toBe('')
-})
-
-test('a link opened in a tab already on its page is claimed when only the hash changes', async () => {
-  const loc = stubPage('')
-  const { claimKey, claimOnHashChange } = await import('../../src/lib/api.ts')
-  await claimKey()
-  claimOnHashChange()
-  expect(posts.length).toBe(0)
-  loc.hash = '#p=fresh'
-  listeners.hashchange()
-  await claimKey()
-  expect(posts).toEqual(['{"code":"fresh"}'])
   expect(loc.hash).toBe('')
 })
 

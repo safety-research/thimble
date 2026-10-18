@@ -11,13 +11,18 @@
 // screen: a switch to another tab or a collapsed frame hides it, its text kept, and it comes back beside the element
 // when the element is back (onScreen); a send under way goes on. ⌘ here stands for the ask key Settings picks
 // (lib/platform pointKeyHeld): ⌘ by default, or ⌥, which then holds alone for HOLD_MS on a Mac as ⌘ does, and lets go
-// at a key pressed with it (⌥ types a letter's accent there); off a Mac, Ctrl or Alt, at once.
-import { useEffect, useRef, useState } from 'react'
+// at a key pressed with it (⌥ types a letter's accent there); off a Mac, Ctrl or Alt, at once. The first plain click on
+// something one can ask about shows, once in this browser, a small hint beside the pointer with the ask key (AskHint);
+// the click does what it does.
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { agentTinted } from '../lib/agentKey'
 import { api } from '../lib/api'
 import { demoStop } from '../lib/demo'
 import { bus } from '../lib/bus'
-import { getAskKey, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
+import { askKeyLabel, getAskKey, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
+import { isTouring } from '../lib/touring'
+import { Kbd } from '../components/Marks'
+import { Tip } from '../components/Tooltip'
 import { track } from '../lib/telemetry'
 import { token } from '../lib/vizTheme'
 import { anchorsInSelection, cellOf, chunkAt, isDrag, isShown, joinAnchors, lastLine, nearestAnchor, pressRoot, rangeContext, selectionTextWithin, textHitAt, toBox, type Anchor, type Box } from './anchors'
@@ -128,6 +133,39 @@ const UNDER: Place = { under: true }
 const BESIDE: Place = { under: false }
 
 const cmdOn = () => document.body.hasAttribute('data-cmd')
+
+/** Where this browser keeps that it showed the ask hint (AskHint), which shows once. */
+export const ASK_HINT_KEY = 'thimble.askHint'
+/** How long the ask hint shows, unless the analyst clicks, types or scrolls first. */
+export const ASK_HINT_MS = 4000
+let hintShown = false
+
+/** Whether this browser showed the ask hint already: its storage says so, or, where it keeps none, this page. */
+export function askHintShown(): boolean {
+  try {
+    if (globalThis.localStorage) return globalThis.localStorage.getItem(ASK_HINT_KEY) === '1'
+  } catch {
+    /* storage is blocked: this page's own record */
+  }
+  return hintShown
+}
+
+/** Record that the ask hint showed, for this page and the next one opened here. */
+function markAskHint(): void {
+  hintShown = true
+  try {
+    globalThis.localStorage?.setItem(ASK_HINT_KEY, '1')
+  } catch {
+    /* it holds for this page */
+  }
+}
+
+/** Whether a plain click at `target` lands on something one can ask about: an anchored element (a card, a record, a
+ * passage), not a field one types in. Pure. */
+export function askable(target: EventTarget | null): boolean {
+  if (!(target instanceof Element) || target.closest('input, textarea, select, [contenteditable="true"]')) return false
+  return nearestAnchor(target) != null
+}
 /** On a Mac, how long ⌘ is held alone before the pointer shows: a shortcut presses its key with ⌘ well within it. */
 export const HOLD_MS = 300
 
@@ -146,6 +184,9 @@ export function CmdPointer({ ws }: { ws: string }) {
   const press = useRef<{ x: number; y: number; root: ParentNode; dragged: boolean } | null>(null)
   // the click that follows a drag's release is not a ⌘-click
   const swallowClick = useRef(false)
+  // the ask hint, where the plain click that showed it was
+  const [hint, setHint] = useState<{ x: number; y: number } | null>(null)
+  const endHint = useCallback(() => setHint(null), [])
 
   useEffect(() => {
     const mac = isMacPlatform()
@@ -222,7 +263,10 @@ export function CmdPointer({ ws }: { ws: string }) {
         off()
       }
     }
+    // where the last plain press started: its click shows the ask hint unless it was a drag
+    let plain: { x: number; y: number } | null = null
     const onMouseDown = (e: MouseEvent) => {
+      plain = !held(e) && e.button === 0 ? { x: e.clientX, y: e.clientY } : null
       if (!held(e) || e.button !== 0) return
       if (inBox(e.target)) return
       // a ⌘-press points at once, before ⌘ has been held for HOLD_MS: its text selects for a ⌘-drag
@@ -288,7 +332,16 @@ export function CmdPointer({ ws }: { ws: string }) {
         e.stopPropagation()
         return
       }
-      if (!held(e)) return
+      if (!held(e)) {
+        // the first plain click on something one can ask about: the hint with the ask key, once; the click goes on
+        const p = plain
+        plain = null
+        if (p && e.button === 0 && !isDrag(p, { x: e.clientX, y: e.clientY }) && !inBox(e.target) && !isTouring() && !askHintShown() && askable(e.target)) {
+          markAskHint()
+          setHint({ x: e.clientX, y: e.clientY })
+        }
+        return
+      }
       if (inBox(e.target)) return
       const a: Anchor | null = nearestAnchor(e.target)
       if (!a) return
@@ -447,6 +500,7 @@ export function CmdPointer({ ws }: { ws: string }) {
   }
   return (
     <>
+      {hint && <AskHint at={hint} onDone={endHint} />}
       {box && !hidden && (
         <PointerBox
           ref={boxEl}
@@ -463,5 +517,37 @@ export function CmdPointer({ ws }: { ws: string }) {
         />
       )}
     </>
+  )
+}
+
+/** The ask hint: beside the pointer, the ask key Settings picks and what it does with a click (⌘-click to ask about
+ * this), for ASK_HINT_MS or until the analyst clicks, types or scrolls. */
+function AskHint({ at, onDone }: { at: { x: number; y: number }; onDone: () => void }) {
+  useEffect(() => {
+    const t = window.setTimeout(onDone, ASK_HINT_MS)
+    // the click that showed it is over: the next press, key or scroll lets it go
+    const off = () => onDone()
+    window.addEventListener('pointerdown', off, true)
+    window.addEventListener('keydown', off, true)
+    window.addEventListener('wheel', off, { capture: true, passive: true })
+    return () => {
+      window.clearTimeout(t)
+      window.removeEventListener('pointerdown', off, true)
+      window.removeEventListener('keydown', off, true)
+      window.removeEventListener('wheel', off, true)
+    }
+  }, [onDone])
+  const key = askKeyLabel()
+  const place = useCallback(
+    (w: number, h: number) => ({
+      left: Math.max(8, Math.min(at.x + 12, window.innerWidth - 8 - w)),
+      top: at.y + 18 + h <= window.innerHeight - 8 ? at.y + 18 : Math.max(8, at.y - 12 - h),
+    }),
+    [at],
+  )
+  return (
+    <Tip text={`${key}-click to ask about this`} place={place} className="ask-hint">
+      <Kbd>{key}</Kbd>-click to ask about this
+    </Tip>
   )
 }

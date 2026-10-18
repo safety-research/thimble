@@ -739,6 +739,56 @@ class Store:
                     return out
         return out
 
+    def unsure(self, values: list[str], quiet: list[str], below: float, limit: int = 0, offset: int = 0
+               ) -> tuple[int, int, list[dict]]:
+        """(records no category fit, records the classifier was unsure of, one page of both in that order) for the
+        Labels view: no fit is a classifier row whose value is none, off the label's `values`, or one of `quiet`
+        (lowercase), then the records a cover of such a value holds without a row of their own; unsure is any other
+        classifier row with a confidence under `below`, least sure first. A record the analyst judged is in neither:
+        the analyst decided it. Each row of the page is a merged row with `kind` "no-fit" or "unsure"."""
+        keep = [str(v) for v in values]
+        low = [str(q).lower() for q in quiet]
+        off = (f"label NOT IN ({','.join('?' * len(keep))})" if keep else "1")
+        loud = (f"lower(label) IN ({','.join('?' * len(low))})" if low else "0")
+        nofit = f"analyst IS NULL AND (label IS NULL OR {off} OR {loud})"
+        doubt = f"analyst IS NULL AND label IS NOT NULL AND NOT ({off} OR {loud}) AND confidence < ?"
+        args = (*keep, *low)
+        cov = (f"(c.value NOT IN ({','.join('?' * len(keep))})" if keep else "(1") + \
+              (f" OR lower(c.value) IN ({','.join('?' * len(low))}))" if low else ")")
+        conn = self.connect()
+        try:
+            own = int(conn.execute(f"SELECT COUNT(*) FROM current WHERE {nofit}", args).fetchone()[0])
+            held = int(conn.execute(f"SELECT SUM(c.last - c.first + 1 - {_ROWS_IN}) FROM covers c WHERE {cov}",
+                                    args).fetchone()[0] or 0)
+            unsure = int(conn.execute(f"SELECT COUNT(*) FROM current WHERE {doubt}", (*args, below)).fetchone()[0])
+            page: list[dict] = []
+            want, skip = max(0, int(limit)), max(0, int(offset))
+            if want and skip < own:
+                rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE {nofit} ORDER BY rowid LIMIT ? OFFSET ?",
+                                    (*args, want, skip)).fetchall()
+                page += [{**_merged(r), "kind": "no-fit"} for r in rows]
+            skip = max(0, skip - own)
+            if want > len(page) and held and skip < held:
+                for path, first, last, value in conn.execute(
+                        f"SELECT c.path, c.first, c.last, c.value FROM covers c WHERE {cov} ORDER BY c.rowid", args).fetchall():
+                    for row in self._implicit(conn, str(path), int(first), int(last), str(value)):
+                        if skip:
+                            skip -= 1
+                            continue
+                        page.append({**row, "kind": "no-fit"})
+                        if len(page) >= want:
+                            break
+                    if len(page) >= want:
+                        break
+            skip = max(0, int(offset) - own - held)
+            if want > len(page) and skip < unsure:
+                rows = conn.execute(f"SELECT {_MERGED_COLS} FROM current WHERE {doubt} ORDER BY confidence, rowid "
+                                    "LIMIT ? OFFSET ?", (*args, below, want - len(page), skip)).fetchall()
+                page += [{**_merged(r), "kind": "unsure"} for r in rows]
+            return own + held, unsure, page
+        finally:
+            conn.close()
+
     def stats(self) -> dict:
         """{n_labeled, n_reviewed, n_marked, counts}: refs with a classifier label, those the analyst also judged, every
         ref the analyst judged, and the count per label, covers' records included."""
@@ -778,6 +828,10 @@ class Store:
                 f"SELECT ref, ts FROM current WHERE label IS NOT NULL AND ts IS NOT NULL AND ref IN ({','.join('?' * len(part))})",
                 tuple(part))})
         return out
+
+    def model_refs_since(self, ts: str) -> set[str]:
+        """The refs whose classifier row was written at `ts` or after (a run that began then, concepts.resumable)."""
+        return {str(r) for (r,) in self._q("SELECT ref FROM current WHERE label IS NOT NULL AND ts >= ?", (str(ts),))}
 
     def refs(self) -> set[str]:
         """The refs of the rows (the records the covers hold without a row are not listed)."""

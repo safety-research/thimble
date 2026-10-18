@@ -1,17 +1,19 @@
 // Files' views: File browser, then every view written for this corpus, one exclusive choice (Segmented), a view whose
 // newer version builds or is reviewed with its chip shimmering; then New view, a field that asks main for one. A view
 // proposal shows here only once its view is built: until then its build is the chat's chip (chat/ViewChip) and its
-// thread. A view shows × on hover, which deletes it once confirmed. A row across the top of Files, or, while Files shows
-// in a pane beside another, in that pane's head (`compact`, portalled by FilesTab), where what does not fit goes in a ⋯
-// menu (viewsFit.ts). The views list is the shared one (lib/views.ts).
+// thread. A view shows × on hover, which deletes it once confirmed; a demo page's shows none, and its New view is off.
+// A row across the top of Files, or, while Files shows in a pane beside another, in that pane's head (`compact`,
+// portalled by FilesTab), where what does not fit goes in a ⋯ menu (viewsFit.ts). The views list is the shared one
+// (lib/views.ts).
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, Segmented } from '../components/Button'
+import { DemoOff } from '../components/DemoOff'
 import { TextInput } from '../components/Field'
 import { Icon, type IconName } from '../components/Icon'
 import { Menu, Popover } from '../components/Menu'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { demoStop } from '../lib/demo'
+import { demoStop, useDemo } from '../lib/demo'
 import { refreshProposals, useProposals } from '../lib/proposals'
 import { useViewList } from '../lib/views'
 import { startSurfaceDrag } from '../lib/surfaces'
@@ -82,6 +84,8 @@ export interface BuiltView {
   label_controls?: boolean
   /** the npm packages its page loads (view.json's `libs`), which its head names */
   libs?: string[]
+  /** false while it has no page for the browser yet (a view built in the terminal whose page is being built) */
+  browser_page?: boolean
 }
 
 /** Whether a proposal is a view the bar lists: built, or built before and being changed now. Pure. */
@@ -105,11 +109,11 @@ export function barList(list: readonly View[], all: readonly Proposal[]): { view
   const built: BuiltView[] = [
     ...listed.map((p) => {
       const v = known.get(p.slug)
-      return { slug: p.slug, name: p.name, first_file: v?.first_file, files: v?.files, n_files: v?.n_files, claims: v?.claims, built: v?.built, version: v?.version, label_controls: v?.label_controls, libs: v?.libs, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
+      return { slug: p.slug, name: p.name, first_file: v?.first_file, files: v?.files, n_files: v?.n_files, claims: v?.claims, built: v?.built, version: v?.version, label_controls: v?.label_controls, libs: v?.libs, browser_page: v?.browser_page, review: p.review, ...(p.status !== 'built' ? { updating: true } : {}) }
     }),
     ...views
       .filter((v) => !proposals.some((p) => p.slug === v.slug))
-      .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, label_controls: v.label_controls, libs: v.libs, builtin: v.origin === 'builtin' })),
+      .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, label_controls: v.label_controls, libs: v.libs, browser_page: v.browser_page, builtin: v.origin === 'builtin' })),
   ]
   // a view proposal (`suggested`) waits on the chat's card until it is accepted, and a held proposal (an orientation's
   // from before 0.8.0) appears once it is built
@@ -149,6 +153,8 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
   const askInput = useRef<HTMLInputElement>(null)
   const ready = useReadyViews(ws)
   const updated = useUpdatedViews(ws)
+  // a demo page's views stay (bug hunt F5): no ×, and New view is off
+  const demo = useDemo()
   const barRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
   // the indices of the options that fit, or null until measured: all of them
@@ -198,7 +204,7 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
         dot: ready.includes(v.slug) || updated.includes(v.slug),
         note: ready.includes(v.slug) ? 'new' : updated.includes(v.slug) ? 'updated' : undefined,
         className: v.updating || v.review?.state === 'running' ? 'is-updating is-fresh' : ready.includes(v.slug) || updated.includes(v.slug) ? 'is-fresh' : undefined,
-        ...(v.builtin ? {} : { removeLabel: `Delete ${v.name}`, onRemove: (at: HTMLElement) => setRemoving({ slug: v.slug, name: v.name, at }) }),
+        ...(v.builtin || demo ? {} : { removeLabel: `Delete ${v.name}`, onRemove: (at: HTMLElement) => setRemoving({ slug: v.slug, name: v.name, at }) }),
       })),
   ]
   const active = options.findIndex((o) => o.value === value)
@@ -256,9 +262,11 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
     return (
       <div className="files-views" aria-label="Views" onPointerDown={dragOut}>
         <Segmented label="Views" size="lg" value={value} onChange={onChange} options={options} />
-        <Button ref={setAskAt} icon="plus" className="files-views-new" active={asking} onClick={() => setAsking((o) => !o)}>
-          New view
-        </Button>
+        <DemoOff>
+          <Button ref={setAskAt} icon="plus" className="files-views-new" active={asking} onClick={() => setAsking((o) => !o)}>
+            New view
+          </Button>
+        </DemoOff>
         {newView}
         {confirm}
       </div>
@@ -291,7 +299,9 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
             {hiddenOptions.some((o) => o.dot) && <span className="dot files-views-more-dot" role="img" aria-label="New" />}
           </span>
         )}
-        <Button ref={setAskAt} variant="icon" size="sm" icon="plus" title="New view" aria-label="New view" className="files-views-new" active={asking} onClick={() => setAsking((o) => !o)} />
+        <DemoOff>
+          <Button ref={setAskAt} variant="icon" size="sm" icon="plus" title="New view" aria-label="New view" className="files-views-new" active={asking} onClick={() => setAsking((o) => !o)} />
+        </DemoOff>
         {newView}
         {confirm}
       </div>

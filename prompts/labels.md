@@ -41,10 +41,12 @@ A note on it reads {{note}}
 The analyst described a label in their own words, and thimble applies the label you define at once, over the records of files, the cards or the report's sentences. Define it with the classifier that decides the description most exactly and most cheaply.
 
 - A regex fits when a pattern in the text settles the value, such as a word, a field's value or a link. Python's re searches each record's line as the file holds it, so a JSON line is matched with its keys and quotes, and a row of a database or a CSV file as one `column: value` line per column. A unit that matches takes the first value and any other the second. Start the pattern with (?i) to ignore case.
-- Code fits when a field, a count or a comparison settles the value. Define `label(unit)` in Python returning (value, confidence), where a JSON lines record is its dict, a line of text is {"text": the line}, a row of a database or a CSV file is a dict of its columns, a record of a JSON document is its value, a page of a PDF is {"page", "text"}, and a card is a dict with its text, kind, question, takeaway, group and groups. When the label marks files, the unit is the whole file: {"path", "data", "records"}, where data is the parsed JSON document, the JSON lines' records, the CSV file's or database's rows, the PDF's pages, or the file's text, and records are its records as above.
+- Code fits when a field, a count or a comparison settles the value. Define `label(unit)` in Python returning (value, confidence), or None for a unit that gets no value, where a JSON lines record is its dict, a line of text is {"text": the line}, a row of a database or a CSV file is a dict of its columns, a record of a JSON document is its value, a page of a PDF is {"page", "text"}, and a card is a dict with its text, kind, question, takeaway, group and groups. When the label marks files, the unit is the whole file: {"path", "data", "records"}, where data is the parsed JSON document, the JSON lines' records, the CSV file's or database's rows, the PDF's pages, or the file's text, and records are its records as above.
 - A prompt fits only when the value takes reading for meaning. A model then reads every unit against your definition, which is slow, so write the definition as one or two sentences that two careful readers would apply the same way.
 
 Give two or a few short values, the positive first and the negative last, such as "match" and "no match". Name the label in a few words taken from the description. Label the records of files unless the description is about cards or report sentences. For records, mark span when the value rests on some words of the record, record when it rests on the whole record, and file when it rests on the whole file.
+
+The records thimble reads from a file by default may not be the records that the description names. For example, a chat transcript can keep its messages under one key of the file. When the files show other places of records below and the description names the records at one of them, give `records`: a glob of the files, then `#` and that place, such as `*.json#/messages`. Do not give `records` when the default records are the records that the description names.
 
 The analyst asked for: {{description}}
 
@@ -55,3 +57,11 @@ The analyst asked for: {{description}}
 The label would apply to {{paths}}. The first records of {{path}}, each cut at {{cut}} characters:
 
 {{lines}}
+
+{{places}}
+
+## places
+
+Some of these files are JSON documents. By default, thimble reads {{default}} as the records of each of them. They also hold these places of records:
+
+{{list}}

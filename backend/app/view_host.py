@@ -469,7 +469,8 @@ def answer(req: dict) -> dict:
     records call runs with `labels`, the labels context, as thimble's _view_ctx, which thimble.marked and thimble.kept
     read, and `view_paths`, else the claimed paths but those shown whole (shown_whole), as its _view_paths; its answer's
     `left_out_n` counts the refs thimble.kept and kept_unit refused for the filter, and `left_out` lists them when there
-    are at most LEFT_OUT_MAX. With `root` the call runs in that folder, a copy of the corpus the paths are relative to.
+    are at most LEFT_OUT_MAX; its `fields`, the values of the fields of the records thimble.color_value was handed
+    (thimble._fields_seen), which the page's Color by lists. With `root` the call runs in that folder, a copy of the corpus the paths are relative to.
     A request's `raw` is call's (_result_json).
     The answer's `held` lists the indexes in memory afterwards (_held), `dropped` those it let go, and `unpickled` is
     true while one of them has no pickle."""
@@ -479,6 +480,7 @@ def answer(req: dict) -> dict:
     progress = _Progress(req.get("progress"))
     dropped: list[str] = []
     left_out: set[str] = set()
+    fields_seen: dict[str, dict[str, int]] = {}
     here = os.getcwd() if req.get("root") else None
     try:
         if here is not None:
@@ -503,6 +505,7 @@ def answer(req: dict) -> dict:
                 th._view_ctx = req.get("labels")  # type: ignore[attr-defined]
                 th._view_paths = req["view_paths"] if "view_paths" in req else _parsed(paths or [])  # type: ignore[attr-defined]
                 th._left_out = left_out  # type: ignore[attr-defined]
+                th._fields_seen = fields_seen  # type: ignore[attr-defined]
             result = mod.records(idx, req.get("arg"))  # type: ignore[attr-defined]
         elif op == "resolve":
             result = mod.resolve(idx, req.get("arg"))  # type: ignore[attr-defined]
@@ -523,7 +526,7 @@ def answer(req: dict) -> dict:
             raise ValueError(f"unknown operation {op!r}")
         return {"ok": True, "result": result, "built": built, "ms": round((time.monotonic() - t0) * 1000),
                 "held": _held(), **({"dropped": dropped} if dropped else {}), **({"unpickled": True} if _unpickled else {}),
-                **_left_answer(left_out)}
+                **_left_answer(left_out), **({"fields": fields_seen} if fields_seen else {})}
     except NeedPaths:
         return {"ok": False, "need_paths": True, "ms": round((time.monotonic() - t0) * 1000)}
     except Exception as e:  # noqa: BLE001 — a reader's failure is the answer
@@ -534,6 +537,7 @@ def answer(req: dict) -> dict:
             th._view_ctx = None  # type: ignore[attr-defined]
             th._view_paths = []  # type: ignore[attr-defined]
             th._left_out = None  # type: ignore[attr-defined]
+            th._fields_seen = None  # type: ignore[attr-defined]
             th._progress = None  # type: ignore[attr-defined]
         if here is not None:
             os.chdir(here)

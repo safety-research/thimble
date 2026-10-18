@@ -1,6 +1,6 @@
-"""thimble's backend without its server (app/local.py): in a terminal-mode workspace every tool runs in the calling
-process and opens no socket; a folder of no workspace and a browser-mode workspace are refused; `thimble state` gives
-the JSON the server's GET routes give and `thimble act` makes the changes its POST routes make; a process that lost its
+"""thimble's backend without its server (app/local.py): on local transport every tool runs in the calling process and
+opens no socket; a folder of no workspace and a session another took main from are refused; `thimble state` gives the
+JSON the server's GET routes give and `thimble act` makes the changes its POST routes make; a process that lost its
 environment does nothing; and the MCP shim in terminal mode keeps fd 1 for its stream and subscribes to nothing."""
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -102,21 +103,25 @@ def _args(c: str, corpus: Path) -> dict[str, dict]:
         "file_dev_ticket": {"title": "t", "body": "b"},
         "view_check": {},
         "finish_view": {},
+        "view_reference": {},
         "view_pictures": {},
         "finish_review": {},
         "ticket_checks": {},
         "finish_ticket": {},
+        "read_call": {},
+        "send_answer": {"answer": {}},
     }
 
 
 async def test_every_tool_runs_in_process_and_opens_no_socket(term, no_sockets, monkeypatch):
     assert not (Path(os.environ["THIMBLE_HOME"]) / "server.json").exists()
     args = _args(CORPUS, term)
-    assert sorted(args) == sorted(tools.REGISTRY), "every tool of the registry is called"
+    # 0.9.0 (SPEC-v2 C5): load_thimble is answered by the shim itself, never through local.call
+    assert sorted(args) == sorted(n for n in tools.REGISTRY if n != tools.ENTRY_TOOL), "every tool of the registry is called"
     for name, given in args.items():
         res = await call(term, name, **given)
         assert isinstance(res.get("content"), list) and res["content"], name
-        assert text(res).startswith(f"$ {name}") or res["is_error"], (name, text(res))
+        assert not text(res).startswith("$ "), ("a result does not echo the call", name, text(res))
         assert "server" not in text(res).lower() or name in ("file_dev_ticket",), (name, text(res))
     assert no_sockets == []
     # what the calls made is in the workspace's files, as a server would have written it
@@ -163,13 +168,23 @@ async def test_list_agents_counts_a_side_threads_running_fork_in_terminal_mode(t
     assert tray.thread_rows_files(CORPUS) == [], "a fork of another session does not run in this one"
 
 
-async def test_the_tools_refuse_a_folder_of_no_workspace_and_a_browser_mode_workspace(term, tmp_path):
+async def test_the_tools_refuse_a_folder_of_no_workspace_and_a_session_another_took_main_from(term, tmp_path):
+    """No mode refuses a call any more (0.9.0): the shim picks the transport per call. A session in launch.json's
+    `moved` (another session took main, activate.take_main) is refused with TAKEOVER_LINE."""
     res = await local.call("list_cards", {"group": "all"}, cwd=str(tmp_path))
     assert res["is_error"] and "not inside a corpus thimble knows" in text(res)
     assert not (config.WORKSPACES_DIR / tmp_path.name).exists(), "no tool call registers a folder"
     _mode("browser")
     res = await call(term, "list_cards", group="all")
-    assert res["is_error"] and "browser mode" in text(res)
+    assert not res["is_error"], "a 0.8.0 browser-mode record no longer refuses a local call"
+    ws = config.workspace_dir(CORPUS)
+    (ws / "trusted" / "launch.json").write_text(json.dumps({"session": "s-main", "transport": "local",
+                                                            "moved": ["s-old"], "peers": ["s-peer"]}))
+    res = await local.call("list_cards", {"group": "all"}, cwd=str(term), caller="s-old")
+    assert res["is_error"] and text(res) == local.TAKEOVER_LINE.format(name="list_cards")
+    for caller in ("s-main", "s-peer", None):
+        res = await local.call("list_cards", {"group": "all"}, cwd=str(term), caller=caller)
+        assert not res["is_error"], caller
 
 
 async def test_the_shims_end_ends_the_label_scan_pools_workers(term):
@@ -199,9 +214,9 @@ async def test_the_shims_end_ends_the_label_scan_pools_workers(term):
 
 async def test_a_code_ticket_is_refused_and_a_card_screenshot_needs_the_harness(term):
     res = await call(term, "file_dev_ticket", title="t", body="b")
-    assert res["is_error"] and (tools.hint("ticket-terminal") or "browser mode") in text(res)
-    cid = re.search(r"card:([A-Za-z0-9_-]+)", text(await call(term, "add_card", question="q", kind="note", text="x"))
-                    .split("\n", 1)[1]).group(1)
+    # 0.9.0 (SPEC-v2 3.16): code tickets are filed in every transport, so the terminal-mode refusal is gone
+    assert "browser mode" not in text(res) and not tools.hint("ticket-terminal")
+    cid = re.search(r"card:([A-Za-z0-9_-]+)", text(await call(term, "add_card", question="q", kind="note", text="x"))).group(1)
     res = await call(term, "screenshot", ref=f"card:{cid}")
     assert res["is_error"], "THIMBLE_RENDER is off in the suite: the harness cannot draw"
 
@@ -218,6 +233,22 @@ async def test_the_ui_tools_leave_records_for_the_renderer(term):
     assert len(local.ui_records(CORPUS)) == 2, "browser mode's page hears the stream instead"
 
 
+async def test_home_names_which_folder_the_workspace_is(term):
+    """Bug hunt 7, H11: the terminal UI tells that another run took the workspace's place by home's `instance`: the same
+    after the folder moves away and back (/thimble fresh, then /thimble restore), another for the new folder."""
+    await call(term, "add_card", question="Posts?", kind="note", text="Eight.", group="G")
+    first = (await local.state(CORPUS, "home"))["instance"]
+    ws = config.workspace_path(CORPUS)
+    away = ws.with_name("archived-run")
+    ws.rename(away)
+    ws.mkdir()
+    fresh = (await local.state(CORPUS, "home"))["instance"]
+    shutil.rmtree(ws)
+    away.rename(ws)
+    assert first and fresh and fresh != first
+    assert (await local.state(CORPUS, "home"))["instance"] == first
+
+
 async def test_state_gives_what_the_routes_give(term):
     from app import agents, concepts
 
@@ -225,7 +256,7 @@ async def test_state_gives_what_the_routes_give(term):
     await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
                paths=["agents/*.jsonl"])
     home = await local.state(CORPUS, "home")
-    assert home["cards"] == 2 and home["labels"] == 1 and home["mode"] == "terminal" and home["unread"] == []
+    assert home["cards"] == 2 and home["labels"] == 1 and home["transport"] == "local" and home["unread"] == []
     assert home["views"] == [], "the views built for this corpus, as a list the home panel draws; no built-in viewer"
     assert home["coverage"] is None, "no orientation ran: no coverage line"
     # a view proposed and not built yet is listed with its state, when it was proposed and the files it claims; a
@@ -314,6 +345,35 @@ async def test_state_gives_what_the_routes_give(term):
     assert concepts.find_concept(config.workspace_dir(CORPUS), "bash")
 
 
+async def test_state_resolve_says_a_view_s_key_may_resolve_soon_while_its_view_is_built_or_indexed(term, monkeypatch):
+    """A `view:<slug>/<key>` citation that no process has read from the view's index yet, or whose view is still built,
+    answers `retry`, so the terminal checks it again rather than marking it failed for good; one that no view or
+    proposal knows does not (bug hunt D3)."""
+    from app import views
+
+    ref = "view:editor-graph/agent-a"
+
+    async def resolve(refs_: list[str]) -> list[dict]:
+        return await local.state(CORPUS, "resolve", [json.dumps(refs_)])
+
+    monkeypatch.setattr(views, "read_built", lambda c, slug: None)
+    monkeypatch.setattr(views, "read_proposal", lambda c, slug: {"slug": slug, "name": "Editor Graph", "status": "building"})
+    [building] = await resolve([ref])
+    assert building["retry"] is True and building["state"] == "missing", building
+    monkeypatch.setattr(views, "read_built", lambda c, slug: {"slug": slug, "name": "Editor Graph", "ok": True})
+    monkeypatch.setattr(views, "resolve_sync", lambda c, slug, locator: ("unknown", None))
+    [indexing] = await resolve([ref])
+    assert indexing["retry"] is True, indexing
+    monkeypatch.setattr(views, "key_refs", lambda c: {ref: {"label": "agent-a", "excerpt": "agent-a: 3 pages",
+                                                            "refs": ["pages.jsonl#L2"], "name": "Editor Graph"}})
+    [found] = await resolve([ref])
+    assert "error" not in found and found["excerpt"] == "agent-a: 3 pages", found
+    monkeypatch.setattr(views, "read_built", lambda c, slug: None)
+    monkeypatch.setattr(views, "read_proposal", lambda c, slug: None)
+    [gone] = await resolve(["view:no-such-view/agent-a"])
+    assert gone["error"] and "retry" not in gone, gone
+
+
 async def test_state_label_gives_the_scope_s_size_for_a_label_whose_run_never_ended(term):
     """Live check term-fix9, quirk 4: a label whose first run Claude Code's quit stopped part way read `not run yet`
     beside its counts, and its run's size was nowhere. `state label` and `state labels` give its scope's size
@@ -333,6 +393,53 @@ async def test_state_label_gives_the_scope_s_size_for_a_label_whose_run_never_en
     assert stopped["n_labeled"] > 0 and stopped["scope_total"] == total
     [listed] = await local.state(CORPUS, "labels")
     assert listed["scope_total"] == total
+
+
+async def test_state_label_gives_the_files_its_glob_matches_and_a_prompt_label_s_model(term):
+    """The label panel's header: `scope: <glob> · N files match`, and a `model:` row for a prompt label (the model its
+    calls run on, as the analyst reads its name). A regex label has no model."""
+    from app import concepts
+    from app.session import model_label
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    label = await local.state(CORPUS, "label", ["bash"])
+    agents_dir = config.corpus_dir(CORPUS) / "agents"
+    assert label["scope_files"] == len(list(agents_dir.glob("*.jsonl"))) > 0
+    assert "run_model" not in label
+    ws = config.workspace_dir(CORPUS)
+    concept = concepts.load_concept(CORPUS, label["id"])[1]
+    concepts.write_concept(ws, {**concept, "kind": "prompt", "glob": "agents/agent-01.jsonl"})
+    prompt = await local.state(CORPUS, "label", ["bash"])
+    assert prompt["scope_files"] == 1
+    assert prompt["run_model"] == model_label(concepts.label_model(CORPUS, prompt)) != ""
+
+
+async def test_state_label_names_its_records_and_the_models_its_panel_offers(term):
+    """The label panel's scope row says what the records are (`· 840 lines`), and its `model:` choice offers the models
+    by their ids: the one the label runs on first, the labels role's among them. `act label` with `model` sets the
+    label's own; '' gives it the role's again."""
+    from app import concepts, config as cfg
+
+    await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
+               paths=["agents/*.jsonl"])
+    label = await local.state(CORPUS, "label", ["bash"])
+    assert label["scope_unit"] == "lines"
+    role = cfg.base_model(concepts.labels_model(CORPUS)["model"])
+    assert label["model_id"] == label["model_role"] == role
+    assert label["model_choices"][0] == role and len(set(label["model_choices"])) == len(label["model_choices"])
+    other = next(m for m in label["model_choices"] if m != role)
+    await local.act(CORPUS, "label", {"label": "bash", "model": other})
+    ws = cfg.workspace_dir(CORPUS)
+    assert concepts.find_concept(ws, "bash")["model"] == other
+    own = await local.state(CORPUS, "label", ["bash"])
+    assert own["model_id"] == other and own["model_role"] == role and own["model_choices"][0] == other
+    await local.act(CORPUS, "label", {"label": "bash", "model": ""})
+    assert concepts.find_concept(ws, "bash")["model"] == ""
+    # the word for a file's records by its type; files of two types are records
+    assert [local._record_noun("record", ps) for ps in (["a.jsonl"], ["forge.db"], ["t.csv"], ["d.pdf"], ["r.json"], ["a.jsonl", "b.csv"], [])] == [
+        "lines", "rows", "rows", "pages", "entries", "records", "records"]
+    assert (local._record_noun("agent", ["a.jsonl"]), local._record_noun("run", [])) == ("files", "run folders")
 
 
 async def test_state_label_keeps_a_record_the_analyst_set_under_the_value_they_gave(term):
@@ -552,7 +659,7 @@ async def test_act_edits_and_runs_a_label_as_the_label_editor_does(term, monkeyp
         stop_seen.append(concepts._cancel_event(c, cid).is_set())
         return await real_wait(c, cid, timeout, enough)
 
-    monkeypatch.setattr(local, "LABEL_STOP_POLL_S", 0.02)
+    monkeypatch.setattr(concepts, "STOP_POLL_S", 0.02)
     monkeypatch.setattr(concepts, "wait_apply", wait_apply)
     stopped = await local.act(CORPUS, "label-run", {"label": "bash"})
     monkeypatch.setattr(concepts, "wait_apply", real_wait)
@@ -728,8 +835,8 @@ async def test_act_label_renames_and_state_label_pages_its_records(term):
 
 
 async def test_a_label_run_stops_when_another_process_deletes_its_label(term, monkeypatch):
-    """`label-run` watches the label's file as it watches its stop file: a `label-delete` in another process removes the
-    file, and the run stops after its current unit."""
+    """A run watches the label's file as it watches its stop file (concepts._watch_runs): a `label-delete` in another
+    process removes the file, and the run stops after its current unit."""
     from app import concepts
 
     await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
@@ -738,6 +845,14 @@ async def test_a_label_run_stops_when_another_process_deletes_its_label(term, mo
     cid = concepts.find_concept(ws, "bash")["id"]
     seen: list[bool] = []
     real_wait = concepts.wait_apply
+    real_index = concepts._index_sources
+
+    async def slow_index(c, k, corpus_dir, sources, unit, cancel):  # a run long enough to be stopped part way
+        for _ in range(200):
+            if cancel.is_set():
+                break
+            await asyncio.sleep(0.01)
+        return await real_index(c, k, corpus_dir, sources, unit, cancel)
 
     async def wait_apply(c, k, timeout=None, enough=None):
         concepts._concept_file(ws, k).unlink()  # what the other process's delete leaves
@@ -748,8 +863,9 @@ async def test_a_label_run_stops_when_another_process_deletes_its_label(term, mo
         seen.append(concepts._cancel_event(c, k).is_set())
         return await real_wait(c, k, timeout, enough)
 
-    monkeypatch.setattr(local, "LABEL_STOP_POLL_S", 0.02)
+    monkeypatch.setattr(concepts, "STOP_POLL_S", 0.02)
     monkeypatch.setattr(concepts, "wait_apply", wait_apply)
+    monkeypatch.setattr(concepts, "_index_sources", slow_index)
     await local.act(CORPUS, "label-run", {"label": cid})
     assert seen == [True]
 
@@ -996,7 +1112,7 @@ def test_the_command_line_prints_json_and_an_error(term):
     assert out.returncode == 1 and "not JSON" in json.loads(out.stdout)["error"]
     _mode("browser")
     out = _cli("act", "seen", '{"thread": "x"}', "--cwd", str(term))
-    assert out.returncode == 1 and "browser mode" in json.loads(out.stdout)["error"]
+    assert out.returncode == 1 and json.loads(out.stdout) == {"error": "no such chat: x"}, "no mode refuses an act"
 
 
 def test_a_process_that_lost_its_environment_does_nothing(term, tmp_path):
@@ -1045,7 +1161,12 @@ async def test_the_shim_in_terminal_mode_runs_calls_itself_keeps_fd_1_and_subscr
     _record(token=PLUGIN_TOKEN, port=httpd.server_address[1])
     # THIMBLE_MODE as the launcher sets it for a session it starts in terminal mode (launch_mode.ENV)
     env = {**os.environ, "THIMBLE_CARD_CHECK": "off", "THIMBLE_CWD": str(term),
-           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "THIMBLE_MODE": "terminal"}
+           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "THIMBLE_MODE": "terminal",
+           "CLAUDE_CODE_SESSION_ID": "s-term"}
+    # 0.9.0 (SPEC-v2 3.5): the shim lists thimble's tools once the session marker says thimble is on in the session
+    up = Path(os.environ["THIMBLE_HOME"]) / "up"
+    up.mkdir(parents=True, exist_ok=True)
+    (up / "s-term.active").write_text(json.dumps({"cwd": str(term), "ws": CORPUS, "mod": False}))
     params = StdioServerParameters(command=str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"), args=[], env=env,
                                    cwd=str(term))
     fds: dict[str, str] = {}
@@ -1070,6 +1191,94 @@ async def test_the_shim_in_terminal_mode_runs_calls_itself_keeps_fd_1_and_subscr
     assert cardrun.command("card", cid) in out, "the card waits for thimble-run: the shim ran no code"
     assert notebook.get_cell(CORPUS, cid)["run"]["state"] == "waiting"
     assert fds["1"] == fds["2"], "fd 1 points at stderr, the stream kept a copy of its own"
+
+
+async def test_an_agent_s_own_shim_lists_its_private_tools_alone_and_makes_no_start_of_main_s(term):
+    """An agent's own shim (thimble-mcp --private <kind>, which its registration declares): only that kind's private
+    tools, loaded, no instructions, no load_thimble, whatever the session's marker says; and its calls run as a second
+    process, which never makes the shim's start (local._start), whose marks of what an earlier session left running
+    would mark main's shim's running work."""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    env = {**os.environ, "THIMBLE_CARD_CHECK": "off", "THIMBLE_CWD": str(term),
+           "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR), "CLAUDE_CODE_SESSION_ID": "s-private"}
+    params = StdioServerParameters(command=str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"),
+                                   args=["--private", tools.REVIEW_SESSION], env=env, cwd=str(term))
+
+    async def run() -> tuple[list[Any], Any]:
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                init = await s.initialize()
+                return (await s.list_tools()).tools, init.instructions
+
+    listed, instructions = await asyncio.wait_for(run(), 60)
+    assert [t.name for t in listed] == ["view_check", "view_pictures", "finish_review"] and not instructions
+    assert all((t.meta or {}).get(tools.META_ALWAYS_LOAD) is True for t in listed)
+    assert not (Path(os.environ["THIMBLE_HOME"]) / "up" / "s-private").exists(), "it records no listing of main's"
+    res = await local.call("read_ref", {"ref": "board.jsonl#L1"}, cwd=str(term), secondary=True)
+    assert not res["is_error"] and local._started == set()
+    await call(term, "read_ref", ref="board.jsonl#L1")
+    assert local._started == {CORPUS}
+
+
+# a stand-in `claude` that continues a session: Claude Code's record of it names the session, and the shim is its child
+CONTINUED = ("import json, os, subprocess, sys; "
+             "open(os.path.join(sys.argv[2], f'{os.getpid()}.json'), 'w')"
+             ".write(json.dumps({'sessionId': sys.argv[3]})); "
+             "sys.exit(subprocess.call([sys.argv[1]]))")
+
+
+async def test_h1_a_session_continued_after_a_quit_runs_thimble_s_tools_locally_with_no_page_stopped(term, tmp_path):
+    """Bug hunt H1: `/exit` ("Exit and stop tasks") ends main's `claude`, and the server stops itself once no workspace
+    has a main session; `claude -c` continues the same session in a new process. launch.json still said `transport:
+    server` with the old process's pid, so every tool answered "thimble's page stopped" until the analyst typed
+    /thimble browser. The shim of the new process now makes it main on the local transport, as a new main starts, and
+    the call runs in the shim; a press moves the session to the server again."""
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    from conftest import PLUGIN_TOKEN, _record
+
+    sid = "7e000000-0000-4000-8000-0000000000c1"
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()  # the first `claude`, which the quit ended
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        dead_port = s.getsockname()[1]
+    _record(token=PLUGIN_TOKEN, port=dead_port, api=f"http://127.0.0.1:{dead_port}")  # the stopped server's record
+    cc = tmp_path / "cc"
+    (cc / "sessions").mkdir(parents=True)
+    ws = config.workspace_dir(CORPUS)
+    (ws / "trusted" / "launch.json").write_text(json.dumps(
+        {"session": sid, "transport": "server", "mode": "browser", "via": "press", "pid": gone.pid,
+         "config_dir": str(cc), "peers": [], "moved": []}))
+    up = Path(os.environ["THIMBLE_HOME"]) / "up"
+    up.mkdir(parents=True, exist_ok=True)
+    (up / f"{sid}.active").write_text(json.dumps({"cwd": str(term), "ws": CORPUS, "path": str(ws), "mod": True}))
+    claude = tmp_path / "bin" / "claude"
+    claude.parent.mkdir()
+    claude.symlink_to(sys.executable)
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_PID", "CLAUDE_CODE_SESSION_ID")}
+    env.update({"THIMBLE_CARD_CHECK": "off", "THIMBLE_CWD": str(term), "CLAUDE_CONFIG_DIR": str(cc),
+                "THIMBLE_WORKSPACES_DIR": str(config.WORKSPACES_DIR)})
+    params = StdioServerParameters(command=str(claude), cwd=str(term), env=env,
+                                   args=["-c", CONTINUED, str(config.REPO_ROOT / "plugin" / "bin" / "thimble-mcp"),
+                                         str(cc / "sessions"), sid])
+
+    async def run() -> Any:
+        async with stdio_client(params) as (r, w):
+            async with ClientSession(r, w) as s:
+                await s.initialize()
+                return await s.call_tool("read_ref", {"ref": "board.jsonl#L1"})
+
+    res = await asyncio.wait_for(run(), 90)
+    said = "\n".join(getattr(b, "text", "") for b in res.content)
+    assert not res.is_error and "page stopped" not in said, said
+    rec = json.loads((ws / "trusted" / "launch.json").read_text())
+    [record] = list((cc / "sessions").glob("*.json"))
+    assert rec["session"] == sid and rec["transport"] == "local" and rec["pid"] == int(record.stem)
+    assert local.transport(CORPUS, sid) == local.LOCAL
 
 
 def _children() -> list[int]:
@@ -1116,7 +1325,7 @@ async def test_a_new_label_s_card_with_no_group_named_gets_a_group_named_after_t
     await call(term, "add_card", question="Posts?", kind="note", text="Eight.", group="Deletes per day")
     res = text(await call(term, "apply_label", scope="files", name="bash", predicate={"kind": "regex", "text": "Bash"},
                           paths=["agents/*.jsonl"]))
-    cid = re.search(r"The label's card is \[\[card:([0-9a-f]+)\]\]", res)[1]
+    cid = re.search(r"The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]", res)[1]
 
     def group_of(card: str) -> str:
         nb_id, _ = notebook.find_cell(ws, card)
@@ -1132,4 +1341,4 @@ async def test_a_new_label_s_card_with_no_group_named_gets_a_group_named_after_t
     assert titles.count("bash") == 1
     res = text(await call(term, "apply_label", scope="files", name="read", predicate={"kind": "regex", "text": "Read"},
                           paths=["agents/*.jsonl"], group="Deletes per day"))
-    assert group_of(re.search(r"The label's card is \[\[card:([0-9a-f]+)\]\]", res)[1]) == "Deletes per day"
+    assert group_of(re.search(r"The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]", res)[1]) == "Deletes per day"

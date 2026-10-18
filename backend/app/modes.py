@@ -1,27 +1,26 @@
 """The permission mode of the agents thimble starts. Every agent of thimble's, code tickets' agents among them, is a
 subagent of main, the analyst's Claude Code session, and runs in main's mode, as Claude Code runs its own subagents. An
 extension's program that runs the dev agent stays a job of the server, with one row in thimble's config (AGENTS): the
-dev agent's, in Manual, Auto or Bypass (MODES), `agents.dev.permissionMode` (userconf.MODE_ROWS). The rows of earlier
-builds (IGNORED_ROWS) are read and ignored, so an earlier config or tab stays valid.
+dev agent's, in Manual or Auto, `agents.dev.permissionMode` (userconf.MODE_ROWS). The rows of earlier builds
+(IGNORED_ROWS) are read and ignored, so an earlier config or tab stays valid.
 
 A row the analyst has not set follows main: the mode Claude Code reports to main's hooks (session.note_mode), which
 thimble keeps until main reports again, over a restart of the server under the same session too, Manual before the first
-report, and Manual while main runs in Bypass. A row set to Bypass takes effect only once the analyst chose Bypass for it
-in Settings (chosen: a record only the analyst's browser can make, hook_auth.analyst, and file tools may not edit);
-"bypass" written into the config alone counts as Manual. A mode the analyst's or the org's Claude Code settings turn off
-(disabled) is never used. Main's own mode is Claude Code's alone, and code tickets' agents and view builders, which are
-main's subagents, run in it.
+report, and Manual while main runs in Bypass. thimble makes no allow decision anywhere (0.9.0, S11): Bypass is no longer
+offered (choose and refused say so), and a Bypass row an earlier build recorded, in the config or in Settings' record
+(chosen), counts as Manual. A mode the analyst's or the org's Claude Code settings turn off (disabled) is never used.
+Main's own mode is Claude Code's alone, and code tickets' agents and view builders, which are main's subagents, run in
+it.
 
-Manual and Bypass both run Claude Code's manual mode (FLAGS): in Bypass thimble grants every request itself
-(agent_session.ask), so a card switches between them without restarting the session. Auto runs Claude Code's auto mode.
+Manual runs Claude Code's manual mode and Auto its auto mode (FLAGS); an earlier Bypass row runs as Manual.
 
 While main reports Claude Code's Manual mode (subagent_files.MANUAL_MODES), Claude Code asks before most commands of
 main's and of thimble's agents, and asks thimble's agents' prompts in the terminal alone, where each agent waits until
 the analyst answers. thimble then shows the notice `manual-mode` (manual_notice) in red, which says both: in the browser
-above the chat's composer, in terminal mode above Claude Code's prompt, until main reports another mode or the analyst
+above the chat's composer, in the terminal above Claude Code's prompt, until main reports another mode or the analyst
 dismisses it, which holds for the workspace (notices.py). While one of those prompts is open the browser shows the agent
-as waiting for the analyst's answer in the terminal (events.py, the terminal's prompts). In browser mode, main's
-terminal also says once per session that Claude Code is in Manual mode (manual_line, session.note_mode).
+as waiting for the analyst's answer in the terminal (events.py, the terminal's prompts). Once main runs on the server,
+main's terminal also says once per session that Claude Code is in Manual mode (manual_line, session.note_mode).
 """
 from __future__ import annotations
 
@@ -104,8 +103,8 @@ def manual_line(claude_mode: str | None) -> str:
     return MANUAL_LINES[hint] if hint else ""
 
 
-# the words of the `manual-mode` notice (notices.py), by manual_hint, in the browser above the composer and in terminal
-# mode's band above Claude Code's prompt
+# the words of the `manual-mode` notice (notices.py), by manual_hint, in the browser above the composer and in the
+# terminal's band above Claude Code's prompt
 MANUAL_NOTICE = ("Manual mode: Claude Code asks before most commands, and thimble's agents wait in your terminal until you "
                  "answer there.")
 MANUAL_NOTICES = {
@@ -122,10 +121,16 @@ def manual_notice(claude_mode: str | None) -> str:
     return MANUAL_NOTICES[hint] if hint else ""
 
 
+BYPASS_REFUSED = ("Bypass is not offered: thimble makes no allow decision, so its agents run in Manual or Auto and Claude "
+                  "Code asks in the terminal")
+
+
 def refused(mode: Any) -> str | None:
-    """Why `mode` cannot be chosen, or None when it can."""
+    """Why `mode` cannot be chosen, or None when it can: Bypass never can (module note)."""
+    if mode == "bypass":
+        return BYPASS_REFUSED
     if mode not in MODES:
-        return f"no permission mode {mode!r}; one of {', '.join(MODES)}"
+        return f"no permission mode {mode!r}; one of {', '.join(m for m in MODES if m != 'bypass')}"
     if mode in disabled():
         return f"{NAMES[mode]} is turned off by your Claude Code settings"
     return None
@@ -139,34 +144,20 @@ def session_mode(c: str) -> str:
 
 
 def chosen() -> set[str]:
-    """The rows the analyst chose Bypass for in Settings: userconf.bypass_file, which only `choose` writes (from the
-    settings PUT, a write only the analyst's browser may make) and which file tools may not edit (module_rules)."""
-    from . import userconf  # noqa: PLC0415 — userconf reads config, which the session modules import
-
-    try:
-        got = json.loads(userconf.bypass_file().read_text("utf-8"))
-    except (OSError, ValueError):
-        return set()
-    rows = got.get("rows") if isinstance(got, dict) else None
-    return {str(r) for r in rows if r in AGENTS} if isinstance(rows, list) else set()
+    """The rows whose Bypass takes effect: none (module note). Settings' record of an earlier build
+    (userconf.bypass_file) is read by no one."""
+    return set()
 
 
 def choose(patch: dict[str, Any]) -> None:
-    """Record a Settings PUT's `permission_modes`: a row set to Bypass joins `chosen`, any other value or None leaves
-    it. Written atomically, mode 600."""
+    """Record a Settings PUT's `permission_modes` in Settings' record of Bypass rows, which refuses every Bypass row: the
+    record is written empty, so no row, earlier or new, runs in Bypass (the PUT itself refuses one first: patch_error).
+    Written atomically, mode 600."""
     from . import config, userconf  # noqa: PLC0415
 
     if not isinstance(patch, dict):
         return
-    now = chosen()
-    for agent, mode in patch.items():
-        row = EARLIER.get(agent, agent)
-        if row not in AGENTS:
-            continue
-        if mode == "bypass":
-            now.add(row)
-        else:
-            now.discard(row)
+    now: set[str] = set()
     path = userconf.bypass_file()
     config.private_dir(path.parent)
     rec = {"rows": sorted(now), "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}

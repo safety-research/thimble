@@ -1,5 +1,11 @@
 """FastAPI app: the thimble server. A module in ROUTER_MODULES that has routes exposes `router`, and one that owns
-subprocesses or tasks (kernels, the job queue, the shims' event streams) exposes `shutdown()`, which the lifespan calls."""
+subprocesses or tasks (kernels, the job queue, the shims' event streams) exposes `shutdown()`, which the lifespan calls.
+
+The sign-in routes are here (/api/ui/*, /api/hello; hook_auth has the rules): the pair route mints a code for
+`thimble open` (app/open_cmd.py) or a link, the claim route trades it for a browser's cookie on the analyst's own account
+only (hook_auth.same_user) and marks the open claimed (app/opener.py), and each new sign-in posts a notice (signed_in).
+A page stops when the server stops for good, through the `stopping` event that ends each event stream (CompleteStreams),
+and when main's session of its workspace ends, through `session-ended` (session_ended); it does not stop for a restart."""
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +21,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import Body, FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException
@@ -24,7 +31,8 @@ from starlette.staticfiles import StaticFiles
 from . import config
 from .errors import ErrorLog
 from . import hook_auth
-from .hook_auth import BrowserPath, HookAuth, LocalReadGuard, LocalWriteGuard
+from .demo_guard import DemoReadOnly
+from .hook_auth import BrowserPath, HookAuth, LocalReadGuard, LocalWriteGuard, SlidingCookie
 from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 
 # every line of thimble's own loggers carries a wall-clock stamp, so the server log can be read against the other logs
@@ -157,6 +165,8 @@ ROUTER_MODULES = [
     # programs and a code ticket's own questions (shut down with the server), and the orientation's calls, stored whole
     # and citable
     "subagents", "agent_session", "calls", "orient_session", "write_session",
+    # the terminal's changes after the press whose state this server holds (`thimble act`, a token route)
+    "term_acts",
     # the programs an extension runs a role with (an Agent SDK program or a command), and their sessions
     "harness",
     # the orientation's, its critic's and the writers' tray entries in the analyst's terminal
@@ -237,10 +247,27 @@ class OldEventRoutes:
         await self.app(scope, receive, send)
 
 
+STOPPING_EVENT = b"event: stopping\ndata: {}\n\n"  # an event stream's last message when the server stops for good
+
+
+def restarting() -> bool:
+    """Whether this server stops to be started again (cli.restart and a source change leave the kernel hand-off naming
+    it, cli.hand_over_kernels), not for good."""
+    try:
+        from . import cli  # noqa: PLC0415
+
+        pid = cli.kernel_handoff()
+    except Exception:  # noqa: BLE001 — a stop it cannot read is taken for one for good
+        return False
+    return pid is not None and pid in (os.getpid(), os.getppid(), os.getsid(0))
+
+
 class CompleteStreams:
     """Pure ASGI middleware. When the server stops, sse_starlette cancels each event stream without the response's last
-    message, which uvicorn reports as an error; such a response gets its last, empty message here. An unfinished
-    response at any other time is left for uvicorn to report."""
+    message, which uvicorn reports as an error; such a response gets its last message here: for an event stream, when
+    the server stops for good (not restarting), the `stopping` event (STOPPING_EVENT), which tells an open page to stop
+    and send nothing more (frontend lib/stale); else an empty one. An unfinished response at any other time is left for
+    uvicorn to report."""
 
     def __init__(self, app) -> None:
         self.app = app
@@ -249,11 +276,13 @@ class CompleteStreams:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        state = {"started": False, "done": False}
+        state = {"started": False, "done": False, "stream": False}
 
         async def track(message) -> None:
             if message["type"] == "http.response.start":
                 state["started"] = True
+                kind = dict(message.get("headers") or []).get(b"content-type", b"")
+                state["stream"] = kind.startswith(b"text/event-stream")
             elif message["type"] == "http.response.body" and not message.get("more_body", False):
                 state["done"] = True
             await send(message)
@@ -261,8 +290,9 @@ class CompleteStreams:
         await self.app(scope, receive, track)
         session = sys.modules.get("app.session")
         if state["started"] and not state["done"] and session is not None and session._shutting_down():
+            last = STOPPING_EVENT if state["stream"] and not restarting() else b""
             with contextlib.suppress(Exception):  # the client may be gone already
-                await send({"type": "http.response.body", "body": b"", "more_body": False})
+                await send({"type": "http.response.body", "body": last, "more_body": False})
 
 
 def dev_mode() -> bool:
@@ -310,6 +340,9 @@ class BuiltUI(StaticFiles):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    from . import heap
+
+    heap.start()  # first, so malloc's arena cap holds before the worker threads start (heap.py)
     if raised := raise_open_files():
         log.info("%s", raised)
     quiet_accept_errors(asyncio.get_running_loop())
@@ -369,11 +402,19 @@ async def _lifespan(app: FastAPI):
         views.migrate_workspaces()
     except Exception:
         log.exception("moving the workspaces' views into their local extensions failed")
+    # what earlier opens left in <home>/open (redirect files, claim marks): app/opener.py
+    try:
+        from . import opener
+
+        opener.sweep()
+    except Exception:
+        log.exception("sweeping the redirect files of earlier opens failed")
     await _startup()
     from . import loop_watch
 
     loop_watch.start(asyncio.get_running_loop())
     yield
+    heap.stop()
     loop_watch.stop()
     # shutdown: modules that own subprocesses expose `shutdown()`, so a restart never leaves an orphan running
     for name in ROUTER_MODULES:
@@ -424,17 +465,43 @@ async def _startup() -> None:
 
 
 # what a new sign-in of a browser shows (signed_in), in each workspace whose main may act for it, at {at} (HH:MM)
-SIGNED_IN_NOTICE = ("A browser signed in to thimble at {at}. If it was not you, click Sign it out, or run `thimble unpair`"
-                    " in a shell to sign out every browser.")
-SIGNED_IN_LINE = "thimble: a browser signed in to thimble at {at}. If it was not you, run `thimble unpair` in a shell."
+SIGNED_IN_NOTICE = "A browser signed in to thimble's page at {at}."
+SIGNED_IN_LINE = "thimble: a browser signed in to thimble's page at {at}. If it was not you, run `thimble unpair` in a shell."
+SIGNIN_KEY = "signin:new"  # the notice's key, with the browser's id after a colon (one notice per browser)
+
+
+def signin_key(browser: str) -> str:
+    """The key of the notice of `browser`'s sign-in (signed_in), which its Sign it out clears."""
+    return f"{SIGNIN_KEY}:{browser}"
+
+
+def signin_cleared(browser: str, ws: object = None) -> None:
+    """The notice of `browser`'s sign-in gone wherever it was posted (the workspace `ws` names, each this server
+    follows), once that browser is signed out, also when it was signed out already."""
+    from . import notices, session  # noqa: PLC0415
+
+    for c in dict.fromkeys([*([str(ws)] if ws else []), *session.attached_workspaces()]):
+        with contextlib.suppress(ValueError):
+            config.corpus_dir(c)
+            notices.clear(c, signin_key(browser))
+
+
+def _panel_shows_notices(c: str) -> bool:
+    """Whether main's session of workspace `c` runs thimble's terminal UI (its session marker's `mod`), whose rows above
+    the prompt show every open notice, a sign-in's with its Sign it out."""
+    from . import activate, session  # noqa: PLC0415
+
+    lv = session.current(c)
+    return bool(lv is not None and lv.sid and activate.read_marker(lv.sid).get("mod") is True)
 
 
 def signed_in(ws: object, browser: str) -> None:
-    """A browser signed in with a link's code (hook_auth.claim): each workspace it may act in hears of it twice, as a
-    notice with Sign it out (sign-in:<browser>) and as a line under main's next reply in its terminal
-    (session.tell_terminal), which the browser cannot hide. The workspaces are the one the link named, when it is
-    registered, and each whose main this server follows. The browser that signed in shows no notice of its own sign-in
-    (its id, GET /api/ui/paired)."""
+    """A browser signed in with a code (hook_auth.claim): each workspace it may act in hears of it as the notice
+    `signin:new:<browser>` with Sign it out (and the notice's own dismiss) in the browser and in the terminal panel's
+    rows above the prompt, which the browser that signed in cannot dismiss (notices.dismiss_route). A terminal without
+    thimble's panel shows a line under main's next reply instead (session.tell_terminal), which no browser can hide. The
+    workspaces are the one the page named, when it is registered, and each whose main this server follows. The browser
+    that signed in shows no notice of its own sign-in (its id, GET /api/ui/paired)."""
     from . import notices, session  # noqa: PLC0415
 
     name = ws if isinstance(ws, str) else ""
@@ -448,10 +515,30 @@ def signed_in(ws: object, browser: str) -> None:
     places += [c for c in session.attached_workspaces() if c not in places]
     at = datetime.now().strftime("%H:%M")
     for c in places:
-        notices.post(c, kind="sign-in", key=f"sign-in:{browser}", text=SIGNED_IN_NOTICE.format(at=at),
+        notices.post(c, kind="sign-in", key=signin_key(browser), text=SIGNED_IN_NOTICE.format(at=at),
                      action={"label": "Sign it out", "do": "sign-out", "slug": browser})
-        session.tell_terminal(c, SIGNED_IN_LINE.format(at=at))
+        if not _panel_shows_notices(c):  # one notice in the terminal, with its Sign it out (bug hunt B3)
+            session.tell_terminal(c, SIGNED_IN_LINE.format(at=at))
     log.warning("a browser signed in to thimble (%s)", name or "the start page")
+
+
+SESSION_ENDED = "session-ended"  # the workspace stream's event when main's session of the workspace ends
+
+
+def session_ended(c: str, sid: str = "") -> None:
+    """Main's Claude Code session of workspace `c` ended and no session took it over: the workspace's open pages get
+    `session-ended` on its stream, stop, and send nothing more (frontend lib/stale). Called on the event loop. Never
+    raises."""
+    from . import investigation  # noqa: PLC0415
+
+    try:
+        investigation.page_ended(c)  # its tabs stop, not close: the next press waits for them (investigation.press)
+        investigation.emit(c, investigation.MAIN, {"type": SESSION_ENDED, "session": sid})
+    except Exception:  # noqa: BLE001 — a page that misses it stops at the server's own stop
+        log.exception("%s: the session-ended event was not sent", c)
+
+
+OPEN_CLAIM_REFUSED = 403  # a claim from another account's connection (hook_auth.same_user)
 
 
 def create_app() -> FastAPI:
@@ -464,6 +551,7 @@ def create_app() -> FastAPI:
     vite = dev_origins(dev_mode())
     if vite:
         app.add_middleware(CORSMiddleware, allow_origins=vite, allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(DemoReadOnly)  # inside the sign-in checks: a demo workspace refuses a browser page's writes
     app.add_middleware(HookAuth)  # inside the write guard: a hook proves the token here too
     app.add_middleware(LocalWriteGuard)  # inside OriginCheck, outside HookAuth: a forged-Origin write still needs the cookie or the token
     app.add_middleware(LocalReadGuard)  # beside the write guard: a read needs the cookie, the CLI's proof or a shot's token
@@ -473,6 +561,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestTiming)  # times the whole stack
     app.add_middleware(CompleteStreams)  # sees every response's last message
     app.add_middleware(OldEventRoutes)  # the checks see the new path
+    app.add_middleware(SlidingCookie)  # inside BrowserPath, which leaves it the request's key: a signed request renews the cookie
     app.add_middleware(BrowserPath)  # added last = outermost: /b/<key>/api/... goes on as /api/... (hook_auth)
 
     for name in ROUTER_MODULES:
@@ -508,18 +597,53 @@ def create_app() -> FastAPI:
 
     @app.post("/api/ui/key")
     def ui_claim(request: Request, body: dict = Body(...)):  # a link's one-time code, traded for the browser's cookie
+        from . import opener  # noqa: PLC0415
+
+        if not hook_auth.same_user(request.scope):
+            log.warning("a sign-in from another account's connection was refused")
+            return JSONResponse({"detail": hook_auth.OTHER_USER}, status_code=OPEN_CLAIM_REFUSED)
+        opened = hook_auth.code_open(body.get("code") if isinstance(body, dict) else None)
         r, new = hook_auth.claim(body, request)
+        if r.status_code in (200, 204) and opened:
+            opener.claimed(opened)
         if new:
             signed_in(body.get("ws"), new)
         return r
 
-    @app.post("/api/ui/pair")  # token only (hook_auth.guarded): Stop hook, `thimble up`
+    @app.post("/api/ui/pair")  # token only (hook_auth.guarded): `thimble open`, `thimble up` in a shell
     def ui_pair(body: dict = Body(default={})) -> dict:
-        return {"code": hook_auth.mint(str(body.get("ws") or "")), "expires_s": hook_auth.PAIR_TTL_S}
+        ttl = hook_auth.ttl_of(body.get("ttl"))
+        opened = body.get("open")
+        code = hook_auth.mint(str(body.get("ws") or ""), ttl, opened if isinstance(opened, str) else "")
+        return {"code": code, "expires_s": ttl}
 
-    @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble unpair`
-    def ui_unpair() -> None:
-        hook_auth.unpair()
+    @app.post("/api/ui/press")  # token only (hook_auth.guarded): `thimble open`, before it opens another tab
+    async def ui_press(body: dict = Body(default={})) -> dict:
+        from . import investigation, opener  # noqa: PLC0415
+
+        ws, ref = str(body.get("ws") or ""), str(body.get("ref") or "")
+        opened = body.get("open")
+        if not ws or not opener.valid_id(opened) or opener.check_ref(ref):
+            return {"reused": False}
+        # a tab of thimble's page on the workspace that is signed in and live takes the press (bug hunt round 9, J8)
+        if not await investigation.press(ws, ref, str(opened)):
+            return {"reused": False}
+        opener.claimed(opened)  # the terminal's watch of the press ends as for a tab that claimed its sign-in
+        return {"reused": True}
+
+    @app.post("/api/ui/unpair", status_code=204)  # token only: `thimble unpair`, a sign-in notice's act in the terminal
+    def ui_unpair(body: dict = Body(default={})) -> None:
+        browser = str(body.get("browser") or "") if isinstance(body, dict) else ""
+        if browser:
+            hook_auth.sign_out(browser)
+            signin_cleared(browser)
+        else:
+            hook_auth.unpair()
+
+    @app.get(hook_auth.HELLO_PATH)  # open: a stale tab's challenge before it sends its cookie again (hook_auth.hello)
+    def hello(request: Request, n: str = "", k: str = "") -> JSONResponse:
+        answer = hook_auth.hello(n, k, request.scope)  # {mac} signed in, {out} signed out here, None unknown
+        return JSONResponse(answer or {"mac": None}, status_code=200 if answer else 404, headers={"cache-control": "no-store"})
 
     @app.post("/api/ui/shot")  # token only: a dev ticket's shot of this server's page (dev._take_shot)
     def ui_shot() -> dict:
@@ -527,16 +651,10 @@ def create_app() -> FastAPI:
 
     @app.post("/api/ui/signout")  # cookie: a sign-in notice's "Sign it out"
     def ui_signout(body: dict = Body(...)) -> dict:
-        from . import notices, session  # noqa: PLC0415
-
         browser = str(body.get("id") or "")
         done = hook_auth.sign_out(browser)
         if browser:  # its notice goes wherever it was posted, also when the browser was signed out already
-            ws = body.get("ws")
-            for c in dict.fromkeys([*([str(ws)] if ws else []), *session.attached_workspaces()]):
-                with contextlib.suppress(ValueError):
-                    config.corpus_dir(c)
-                    notices.clear(c, f"sign-in:{browser}")
+            signin_cleared(browser, body.get("ws"))
         return {"signed_out": done}
 
     @app.get("/api/ui/paired")

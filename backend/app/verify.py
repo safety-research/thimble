@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -140,6 +141,11 @@ def _link_now(c: str, cell: dict, v: dict, *, rerun: bool = False) -> None:
         return
     v["links"] = links
     if _runnable(cell) or _value_refs(typed.text) or _bare_refs(typed.text):
+        # each pass is a job of its own (`pass` in its version): a run that keeps the card's exec_count (a card check's
+        # fix, notebook.land_run; a kernel started again counts from 1) or a takeaway stored as it was would queue the key
+        # of a job done already, which the queue answers with no job, and the links stayed pending for good (◌ on the
+        # thimble line, bug hunt 10-17)
+        v["pass"] = uuid.uuid4().hex[:8]
         _enqueue_links(c, cell, _links_version(cell))
     else:  # an errored or silent cell with numbers in its takeaway: nothing here can vouch for them
         links["status"] = _links_status(resolved, unresolved, [], True, typed=typed_links)
@@ -173,12 +179,13 @@ def _apply_typed(typed: cite.Typed, resolved: list[dict]) -> tuple[list[dict], l
 
 
 def _links_version(cell: dict) -> str:
-    """The links job's version: the run, the takeaway's text, and the relink count (`_relink`), so a relink is a new
-    job."""
+    """The links job's version: the run, the takeaway's text, the relink count (`_relink`), so a relink is a new job,
+    and the pass that queued it (`_link_now`)."""
     h = hashlib.sha1(str(cell.get("takeaway") or "").encode("utf-8", "surrogatepass")).hexdigest()[:10]
     v = cell.get("verification") if isinstance(cell.get("verification"), dict) else {}
     n = v.get("relinks") if isinstance(v.get("relinks"), int) and not isinstance(v.get("relinks"), bool) else 0
-    return f"{cell.get('exec_count')}:{h}" + (f":r{n}" if n > 0 else "")
+    p = v.get("pass") if isinstance(v.get("pass"), str) else ""
+    return f"{cell.get('exec_count')}:{h}" + (f":r{n}" if n > 0 else "") + (f":p{p}" if p else "")
 
 
 def _enqueue_links(c: str, cell: dict, version: str) -> bool:
@@ -296,7 +303,8 @@ async def _ref_check(corpus: Path, ref: str, display: str | None, *, decrease: b
         return f"could not be checked: {type(e).__name__}: {e}"
     if (out.get("meta") or {}).get("span_missing"):
         return WHY_SPAN_MISSING
-    if display is not None and not _value_matches(display, str(out.get("excerpt") or ""), decrease=decrease):
+    if display is not None and not _value_matches(display, refs.checked_text(out), decrease=decrease) \
+            and not refs.place_only(out, display):
         return WHY_VALUE
     return None
 
@@ -515,11 +523,10 @@ def _heals_at_start(links: dict) -> bool:
 
 
 def rescan(c: str | None = None) -> int:
-    """Derive the pending cell jobs from state: a code cell that ran clean whose `verification.exec_count` differs gets
-    a
-    fresh record, a pending record is re-enqueued, and a hybrid-form record (_heals_at_start) is re-run once. Returns
-    the
-    number of cells touched. Nothing under the tests' switch (CHECK_JOBS)."""
+    """Derive the pending cell jobs from state: a card with code (notebook.RUNNABLE_KINDS) that ran clean whose
+    `verification.exec_count` differs gets a fresh record, a pending record is re-enqueued, and a hybrid-form record
+    (_heals_at_start) is re-run once. Returns the number of cells touched. Nothing under the tests' switch
+    (CHECK_JOBS)."""
     if not CHECK_JOBS:
         return 0
     if c is not None:
@@ -540,8 +547,11 @@ def rescan(c: str | None = None) -> int:
                     continue
                 changed = False
                 for cell in nb.get("cells") or []:
-                    if not isinstance(cell, dict) or cell.get("kind", "code") != "code" or not cell.get("id"):
+                    if not isinstance(cell, dict) or not cell.get("id"):
                         continue
+                    # every kind that runs code (a table, a plot, a timeline), not only `code`: a table's or a plot's
+                    # check that a stopped server or an ended `thimble-run` left pending was never run again, so its
+                    # citations stayed ◌ for good (README capture 10-17)
                     if not _runnable(cell):
                         continue
                     v = cell.get("verification")

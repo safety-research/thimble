@@ -1,15 +1,17 @@
 // One card on the board: the card's face (CardFace.tsx) with the board's chrome around it. At rest a card is its face,
 // and its lock when locked. Hovered or selected, the chrome shows in a row above the question: `thread · time` at the
-// left, the details, chat, delete, star and lock icons at the right. Any edge or corner resizes it. A locked card is one
-// no model may change or delete. Selected alone, a click on its question or takeaway edits it in place (RefEditor); a
-// double click opens focus mode. ⌘↵ in the question typed in place saves it and sends it to main as a request on the
-// card (lib/agentKey), and the card says `sent to main` until main's turn ends. The board (Canvas.tsx) owns placement,
-// selection, drag and resize. The card is its citations' home (`data-cite-home`).
+// left, the details, chat, delete, star and lock icons at the right (on a demo page only the details, history and chat:
+// lib/demo). Any edge or corner resizes it. A locked card is one no model may change or delete. Selected alone, a click
+// on its question or takeaway edits it in place (RefEditor); a double click opens focus mode. ⌘↵ in the question typed
+// in place saves it and sends it to main as a request on the card (lib/agentKey), and the card says `sent to main`
+// until main's turn ends. The board (Canvas.tsx) owns placement, selection, drag and resize. The card is its citations'
+// home (`data-cite-home`).
 import { memo, useContext, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { Button } from '../components/Button'
 import { askMain, whenMainIdle } from '../lib/agentKey'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { useDemo } from '../lib/demo'
 import { pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import type { Cell } from '../lib/types'
@@ -64,9 +66,13 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   const concept = kind === 'label' ? String(payload.concept ?? '') : ''
   const label = useConceptDetail(ctx.ws, concept || null)
   const thread = ctx.threadOf(cell)
+  // who made it, as its head names it: `you` for the analyst's own card
+  const maker = thread.maker ?? thread.name
   const time = hhmm(cell.created_ts ?? cell.ts)
   const dimmed = ctx.keep != null && !ctx.keep.has(cell.id)
   const unread = ctx.unread.has(cell.id)
+  // a demo page's card is read: no edit in place, no delete, star, lock or resize (bug hunt F5)
+  const demo = useDemo()
   const [card, setCard] = useState<HTMLElement | null>(null)
   // where the click that opened the takeaway's editor landed, for the caret
   const [editAt, setEditAt] = useState<{ x: number; y: number } | null>(null)
@@ -76,7 +82,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   const armed = useRef<CardField | null>(null)
   const textDown = (field: CardField) => (e: MouseEvent<HTMLElement>) => {
     armed.current = null
-    if (!p.alone || e.button !== 0 || pointKeyHeld(e) || (e.target as HTMLElement).closest('a, button, .chip, .refchip')) return
+    if (demo || !p.alone || e.button !== 0 || pointKeyHeld(e) || (e.target as HTMLElement).closest('a, button, .chip, .refchip')) return
     armed.current = field
     e.stopPropagation()
   }
@@ -163,7 +169,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
         onCheckAgain={() => void checkAgain(ctx, cell)}
         chrome={
           <div className="bcell-top">
-            {(thread.name || time || unread) && (
+            {(maker || time || unread) && (
               <button
                 type="button"
                 className="bcell-meta"
@@ -174,24 +180,28 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
                   ctx.openThread(cell)
                 }}
               >
-                {[thread.name, time].filter(Boolean).join(' · ')}
+                {[maker, time].filter(Boolean).join(' · ')}
                 {/* the dot at rest says this in words once the card is hovered, where the dot gives way to the chrome */}
-                {unread && <span className="bcell-meta-new">{thread.name || time ? ' · ' : ''}new reply</span>}
+                {unread && <span className="bcell-meta-new">{maker || time ? ' · ' : ''}new reply</span>}
               </button>
             )}
             <span className="bcell-acts" onMouseDown={(e) => e.stopPropagation()}>
               <Button variant="icon" size="sm" icon="code" title="Details" aria-label="Details" active={p.detailOpen} onClick={act('detail')} />
               <Button variant="icon" size="sm" icon="history" title="History" aria-label="History" className="bcell-history" onClick={act('history')} />
               <Button variant="icon" size="sm" icon="chat" title="Chat about this card" aria-label="Chat about this card" onClick={act('ask')} />
-              <Button variant="icon" size="sm" icon="trash" title="Delete" aria-label="Delete" className="bcell-delete" onClick={act('delete')} />
-              <Button variant="icon" size="sm" icon="star" title={cell.starred ? 'Starred' : 'Star'} aria-label={cell.starred ? 'Starred' : 'Star'} active={!!cell.starred} className="bcell-star" onClick={act('star')} />
-              <Button variant="icon" size="sm" icon={cell.locked ? 'lock' : 'unlock'} title={cell.locked ? 'Locked' : 'Lock'} aria-label={cell.locked ? 'Locked' : 'Lock'} active={!!cell.locked} className="bcell-lock" onClick={act('lock')} />
+              {!demo && (
+                <>
+                  <Button variant="icon" size="sm" icon="trash" title="Delete" aria-label="Delete" className="bcell-delete" onClick={act('delete')} />
+                  <Button variant="icon" size="sm" icon="star" title={cell.starred ? 'Starred' : 'Star'} aria-label={cell.starred ? 'Starred' : 'Star'} active={!!cell.starred} className="bcell-star" onClick={act('star')} />
+                  <Button variant="icon" size="sm" icon={cell.locked ? 'lock' : 'unlock'} title={cell.locked ? 'Locked' : 'Lock'} aria-label={cell.locked ? 'Locked' : 'Lock'} active={!!cell.locked} className="bcell-lock" onClick={act('lock')} />
+                </>
+              )}
             </span>
           </div>
         }
         after={
           <>
-            {!p.collapsed && (
+            {!p.collapsed && !demo && (
               <span className="bcell-grip" role="separator" aria-label="Size" onMouseDown={(e) => p.onResizeStart(e, cell.id, 'se')}>
                 <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
                   <path d="M12 6L6 12M12 10l-2 2" />
@@ -202,7 +212,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
           </>
         }
       />
-      {!p.collapsed && EDGES.map((edge) => <span key={edge} className={`bcell-edge bcell-edge-${edge}`} aria-hidden="true" onMouseDown={(e) => p.onResizeStart(e, cell.id, edge)} />)}
+      {!p.collapsed && !demo && EDGES.map((edge) => <span key={edge} className={`bcell-edge bcell-edge-${edge}`} aria-hidden="true" onMouseDown={(e) => p.onResizeStart(e, cell.id, edge)} />)}
       {p.deck && (
         <div className="bcell-deck" aria-hidden="true">
           <span />

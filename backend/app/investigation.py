@@ -7,14 +7,27 @@ the new log from its start. Every module emits through emit(c, "main", event): o
 
 emit() runs on the event-loop thread only; a module that must emit from a thread schedules it onto the loop. A torn last
 line (a crash mid-append) is healed before the next append and skipped by the reader.
+
+A signed-in browser's open stream is a tab of thimble's page on the workspace (tabs). The press (`thimble open`,
+open_cmd.py) hands its ref to such a tab rather than open another (press: the SSE event `press`, which is in no log and
+replays to no one), and the tab answers that it took it (took), within PRESS_WAIT_S; a tab that does not answer, such as
+one its browser froze, is passed over and the press opens a new tab (bug hunt round 9, J8: every press opened one more
+tab beside a live one). A tab stopped with its server or its session is no stream, but it asks now and then whether the
+server answers again, and reloads once it does (frontend shell/ServerDown StoppedPage): a press while no tab is live
+waits STOPPED_WAIT_S for such a tab to come back and hands it the press as its stream opens, when the workspace's
+tabs.json says a signed-in tab was open on it and was not closed since (note_tab, page_ended). Only when no tab answers
+does the press open one (bug hunt round 10, K12: after `claude -c` and `/thimble browser`, or `thimble -c`, a new tab
+opened beside the stopped one, which then could not close itself).
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -139,6 +152,121 @@ EVENTS_POLL_S = 3.0  # how often an idle SSE subscriber re-reads events.jsonl fo
 _seq: dict[tuple[str, str], int] = {}  # next seq per investigation; recounted from events.jsonl when unknown
 _left: dict[tuple[str, str], int] = {}  # the offset just after this process's last record in events.jsonl
 _RESET = object()  # queued to a subscriber when the workspace's log was replaced (reset_streams)
+_tabs: dict[str, set[asyncio.Queue]] = {}  # workspace -> the queues of the signed-in browsers' streams (press)
+_presses: dict[str, asyncio.Event] = {}  # an open id of a press handed to the tabs -> set once a tab took it (took)
+PRESS_WAIT_S = 3.0  # how long a press handed to the tabs waits for one to say it took it
+# how long a press with no live tab waits for a stopped one to come back: its first look 8 s after it stopped, then one
+# every 2 s (frontend shell/ServerDown BACK_FIRST_MS, BACK_EVERY_MS), its reload and its stream's start
+STOPPED_WAIT_S = 10.0
+TABS_FILE = "tabs.json"  # in the workspace: a signed-in tab is open on it, live or stopped (note_tab)
+_handed: dict[str, dict[str, "_Tell"]] = {}  # workspace -> open id -> a press waiting, which a stream opening now takes
+_ended: set[str] = set()  # workspaces whose session ended (page_ended): their streams that end are stopped tabs
+
+
+class _Tell:
+    """An SSE event for the tabs alone (press), in no log."""
+
+    def __init__(self, event: str, data: dict) -> None:
+        self.event, self.data = event, data
+
+
+def tabs(c: str) -> int:
+    """How many signed-in tabs of thimble's page hold the workspace's stream open now."""
+    return len(_tabs.get(c) or ())
+
+
+def _tabs_file(c: str) -> Path | None:
+    """The workspace's tabs.json (TABS_FILE), None for a workspace that does not exist: nothing is made for a name."""
+    try:
+        p = config.workspace_path(c)
+    except Exception:  # noqa: BLE001 — an unknown workspace has no tab
+        return None
+    return p / TABS_FILE if p.is_dir() else None
+
+
+def note_tab(c: str) -> None:
+    """A signed-in tab's stream opened on workspace `c`: tabs.json says a tab is open on it, which stays when the tab
+    stops with its server or its session, so the next press waits for it (press). Never raises."""
+    _ended.discard(c)
+    p = _tabs_file(c)
+    if p is None or p.is_file():
+        return
+    try:
+        p.write_text(json.dumps({"at": datetime.now(timezone.utc).isoformat()}), "utf-8")
+    except OSError:
+        log.debug("%s: %s was not written", c, TABS_FILE, exc_info=True)
+
+
+def forget_tabs(c: str) -> None:
+    """No tab of workspace `c` is open, live or stopped: the last one was closed, or a press waited for a stopped one in
+    vain. Never raises."""
+    p = _tabs_file(c)
+    if p is not None:
+        with contextlib.suppress(OSError):
+            p.unlink(missing_ok=True)
+
+
+def stopped_tab(c: str) -> bool:
+    """Whether a tab of workspace `c` may be open though none is live: one was, and it stopped rather than closed."""
+    p = _tabs_file(c)
+    return p is not None and p.is_file()
+
+
+def page_ended(c: str) -> None:
+    """Main's session of workspace `c` ended (main.session_ended): its tabs stop now, and the streams they close are no
+    tabs closed (_stream), so the next press waits for them."""
+    if tabs(c):
+        _ended.add(c)
+
+
+def _stream_ended(c: str) -> None:
+    """A signed-in tab's stream on workspace `c` ended: with no tab of it live, the last was closed, unless the server is
+    stopping or the session ended, which stop the tabs instead (module note)."""
+    if _tabs.get(c):
+        return
+    session = sys.modules.get("app.session")
+    if c in _ended or (session is not None and session._shutting_down()):
+        return
+    forget_tabs(c)
+
+
+async def press(c: str, ref: str, open_id: str, wait_s: float = PRESS_WAIT_S,
+                stopped_wait_s: float = STOPPED_WAIT_S) -> bool:
+    """Hand the press of `ref` to the workspace's signed-in tabs (module note): whether one took it within `wait_s`.
+    With no live tab, whether a stopped tab came back and took it within `stopped_wait_s`, when one may be open
+    (stopped_tab); False at once when none is."""
+    queues = list(_tabs.get(c) or ())
+    if not open_id or not (queues or stopped_tab(c)):
+        return False
+    got = _presses.setdefault(open_id, asyncio.Event())
+    tell = _Tell("press", {"ref": ref, "open": open_id})
+    _handed.setdefault(c, {})[open_id] = tell  # a stopped tab come back takes it as its stream opens (_stream)
+    for q in queues:
+        q.put_nowait(tell)
+    try:
+        await asyncio.wait_for(got.wait(), timeout=wait_s if queues else stopped_wait_s)
+        return True
+    except asyncio.TimeoutError:
+        if not queues and not _tabs.get(c):
+            forget_tabs(c)  # no stopped tab came back: it was closed, so the next press opens one at once
+        return False
+    finally:
+        _presses.pop(open_id, None)
+        (_handed.get(c) or {}).pop(open_id, None)
+
+
+def took(open_id: str) -> bool:
+    """A tab took the press `open_id` (press); whether that press still waited."""
+    got = _presses.get(open_id)
+    if got is None:
+        return False
+    got.set()
+    return True
+
+
+def watched() -> set[str]:
+    """The workspaces a page holds an open event stream of."""
+    return {c for (c, _), queues in _subscribers.items() if queues}
 
 
 def log_id(c: str, inv_id: str = MAIN) -> str:
@@ -237,11 +365,11 @@ def _top(events: list[dict]) -> int:
 
 
 async def _stream(c: str, inv_id: str, request: Request, after: int | None = None,
-                  log: str | None = None) -> EventSourceResponse:
+                  log: str | None = None, tab: bool = False) -> EventSourceResponse:
     """Every SSE record carries id = seq, so `Last-Event-ID` or ?after=<seq> replays from seq+1 and then streams live;
     with neither, the whole history replays first. A `live` event (carrying log_id) follows the replay, so the browser
     tells history from new records. A reopen onto another log, or a log replaced under an open stream, gets `reset`
-    first."""
+    first. A signed-in browser's stream (`tab`) also gets the presses handed to it (press)."""
     d = _existing(c, inv_id)
     if after is None:
         lei = request.headers.get("last-event-id")
@@ -253,6 +381,11 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
     key = (c, inv_id)
     q: asyncio.Queue = asyncio.Queue()
     _subscribers.setdefault(key, set()).add(q)  # subscribe BEFORE reading the file: no event can fall in the gap
+    if tab:
+        _tabs.setdefault(c, set()).add(q)
+        note_tab(c)
+        for tell in list((_handed.get(c) or {}).values()):  # a press that waits for a tab to come back (press)
+            q.put_nowait(tell)
     pos = _size(d / "events.jsonl")  # before the read: what lands between the two is read again, and skipped by seq
     stored = _read_jsonl(d / "events.jsonl")
     moved = (after is not None and after > _top(stored)) or bool(log and log != log_id(c, inv_id))
@@ -276,18 +409,16 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
             for rec in history(stored, last):
                 yield rec
             last = max(last, _top(stored))
+            stored.clear()  # sent: an open stream keeps none of the log's history, which grows with the session
             while True:
                 try:
-                    ev = await asyncio.wait_for(q.get(), timeout=EVENTS_POLL_S)
+                    got = await asyncio.wait_for(q.get(), timeout=EVENTS_POLL_S)
                 except asyncio.TimeoutError:
-                    # nothing from this process: tail the file for events another process wrote
-                    fresh, pos = _read_jsonl_after(d / "events.jsonl", pos)
-                    for ev in fresh:
-                        if isinstance(ev.get("seq"), int) and ev["seq"] > last:
-                            last = ev["seq"]
-                            yield {"data": json.dumps(ev, ensure_ascii=False), "id": str(ev["seq"])}
+                    got = None  # nothing from this process: the tail below finds what another process wrote
+                if isinstance(got, _Tell):  # for this tab alone, in no log
+                    yield {"event": got.event, "data": json.dumps(got.data, ensure_ascii=False)}
                     continue
-                if ev is _RESET:  # the log was replaced under this stream: start over on the new one
+                if got is _RESET:  # the log was replaced under this stream: start over on the new one
                     pos = _size(d / "events.jsonl")
                     fresh = _read_jsonl(d / "events.jsonl")
                     yield {"event": "reset", "data": "{}"}
@@ -295,11 +426,21 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
                         yield rec
                     last = _top(fresh)
                     continue
-                if isinstance(ev.get("seq"), int) and ev["seq"] > last:  # already replayed events are skipped
-                    last = ev["seq"]
-                    yield {"data": json.dumps(ev, ensure_ascii=False), "id": str(ev["seq"])}
+                # Tail the file before this process's event: another process (a `thimble-run label`, the shim) may have
+                # written a record with a lower seq that the tail has not read yet, and once this event raised `last`
+                # that record would be skipped as already sent (bug hunt C8: a label run's `concepts applied` was lost,
+                # so its canvas card kept 0 per value). This process's event is in the file too, and sent once.
+                fresh, pos = _read_jsonl_after(d / "events.jsonl", pos)
+                batch = [*fresh, *([got] if isinstance(got, dict) else [])]
+                for ev in sorted((e for e in batch if isinstance(e.get("seq"), int)), key=lambda e: e["seq"]):
+                    if ev["seq"] > last:  # already replayed or sent events are skipped
+                        last = ev["seq"]
+                        yield {"data": json.dumps(ev, ensure_ascii=False), "id": str(ev["seq"])}
         finally:
             _subscribers.get(key, set()).discard(q)
+            if tab:
+                _tabs.get(c, set()).discard(q)
+                _stream_ended(c)
 
     return EventSourceResponse(gen(), ping=15, ping_message_factory=lambda: ServerSentEvent(data="{}", event="ping"))
 
@@ -307,5 +448,18 @@ async def _stream(c: str, inv_id: str, request: Request, after: int | None = Non
 @router.get("/ws/{c}/events")
 async def workspace_events(c: str, request: Request, after: int | None = None,
                            log: str | None = None) -> EventSourceResponse:
-    """The workspace event stream."""
-    return await _stream(c, MAIN, request, after, log)
+    """The workspace event stream. A signed-in browser's makes this server follow main when main runs on local
+    transport (session.follow_browser), so the page shows main's permission requests."""
+    from . import hook_auth, session  # noqa: PLC0415
+
+    tab = hook_auth.analyst(request)
+    if tab:
+        session.follow_browser(c)
+    return await _stream(c, MAIN, request, after, log, tab=tab)
+
+
+@router.post("/ws/{c}/press/{open_id}")
+async def took_route(c: str, open_id: str) -> dict:
+    """A tab took the press handed to it (press): a signed-in browser's write, as every route here is."""
+    _ws(c)
+    return {"ok": took(open_id)}

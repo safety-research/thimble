@@ -18,7 +18,7 @@ import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import { teleport } from '../lib/teleport'
 import type { Cell, StoryCardSide, StoryDoc, WriteupFigure, WriteupParagraph } from '../lib/types'
-import { CARD_MIME, usedCells } from './cards'
+import { CARD_MIME } from './cards'
 import type { CheckLook, DocComment, Flag } from './checkComments'
 import { SAVE_DEBOUNCE_MS, whenShown, type DocFilter } from './Editor'
 import { EvidencePop, useEvidence } from './Evidence'
@@ -41,7 +41,6 @@ import {
   splitSection,
   stepBlock,
   storyBody,
-  storyCells,
   TEXT_TYPES,
   updateBlock,
   type StoryBlock,
@@ -1115,8 +1114,7 @@ function TextField({ className, label, value, onChange, onBlur, onKeyDown, field
 
 /** The story's sidebar: the canvas's cards to drag into a section or double-click into the last section worked in,
  * then the Checks pane. */
-export function StorySidebar({ ws, doc, slug, onInsert, onHide, over, checks, comments }: Omit<SidebarProps, 'cells' | 'groups' | 'used' | 'doc'> & { doc: StoryDoc | null; slug: string }) {
+export function StorySidebar({ ws, slug, onInsert, onHide, over, checks, comments }: Omit<SidebarProps, 'cells' | 'groups' | 'doc'> & { slug: string }) {
   const { cells, groups } = useCanvas(ws)
-  const used = useMemo(() => usedCells(storyCells(doc)), [doc])
-  return <Sidebar ws={ws} cells={cells} groups={groups} used={used} onInsert={onInsert} onHide={onHide} over={over} doc={slug} checks={checks} comments={comments} />
+  return <Sidebar ws={ws} cells={cells} groups={groups} onInsert={onInsert} onHide={onHide} over={over} doc={slug} checks={checks} comments={comments} />
 }

@@ -27,10 +27,13 @@ import {
 import { Plugin, TextSelection } from 'prosemirror-state'
 import { createContext, useCallback, useContext, useEffect, useImperativeHandle, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type Ref } from 'react'
 import { Button } from '../components/Button'
+import { CiteChecksContext } from '../components/RefChip'
 import { Icon, type IconName } from '../components/Icon'
 import { Menu } from '../components/Menu'
 import { api, reportApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { useDemo } from '../lib/demo'
+import { healChecks, mergeChecks } from '../lib/citeChecks'
 import { pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import { useTheme } from '../lib/theme'
@@ -123,8 +126,6 @@ export interface ReportEditorProps {
   client: string
   /** the stored document after a save landed */
   onSaved: (doc: Writeup) => void
-  /** the cells the blocks show as figures, after every change */
-  onFigures?: (cells: string[]) => void
   /** the toolbar's Comment on a selection inside a stored sentence (or section heading) */
   onComment?: (sid: string) => void
   /** the caption a card dropped from the sidebar starts with: its takeaway, else its question */
@@ -215,19 +216,6 @@ function slashItems(editor: AnyEditor, ws: string, slug: string, chat: (blockId:
       onItemClick: () => askAbout(editor, chat),
     },
   ]
-}
-
-/** The figure blocks' cells, in document order. */
-function figureCells(blocks: readonly EditorBlockLike[]): string[] {
-  const out: string[] = []
-  const walk = (list: readonly EditorBlockLike[]) => {
-    for (const b of list) {
-      if (b.type === 'figure' && b.props?.cell) out.push(String(b.props.cell))
-      if (b.children?.length) walk(b.children)
-    }
-  }
-  walk(blocks)
-  return out
 }
 
 /** The stored sentence (or section heading) a selection comments on, from the decorations' `data-sid`: the one under
@@ -425,8 +413,10 @@ const pointerPressExtension = () =>
     prosemirrorPlugins: [new Plugin({ props: { handleDOMEvents: { mousedown: (_view, e) => e.button === 0 && pointKeyHeld(e) } } })],
   })
 
-export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, onFigures, onComment, captionOf, ref }: ReportEditorProps) {
+export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, onComment, captionOf, ref }: ReportEditorProps) {
   const { resolved } = useTheme()
+  // a demo page's document is read, not typed in (bug hunt F5)
+  const demo = useDemo()
   const docRef = useRef<Writeup | null>(doc)
   const ctx = useRef<MarksCtx>({ slug, doc, flags, filter: filter?.sets ?? null, locked: lockedBlocks(doc), agent: null })
   const initial = useMemo(() => editorBlocksFromWire(blocksFromDoc(doc)) as ReportPartialBlock[], []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -550,6 +540,8 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
     [editor, ws],
   )
   const reportCtx = useMemo<ReportCtx>(() => ({ ws, slug, docRef, submitPrompt, submitCard }), [ws, slug, submitPrompt, submitCard])
+  // how the healing pass left each sentence's citations (lib/citeChecks), for the citations the editor draws
+  const citeChecks = useMemo(() => mergeChecks(doc.sections.flatMap((sec) => (sec.paragraphs ?? []).flatMap((p) => (p.sentences ?? []).map((x) => healChecks(x.healed))))), [doc])
 
   // a block turned into another kind from its type menu or the slash menu: the block keeps its id and its text, so the
   // save carries its lock and the comments on it into the new kind (report_types.apply_blocks)
@@ -689,18 +681,12 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
   // an empty report is one empty block after the title, drawn as an empty cell (report.css `.wu-zone-empty`) until
   // something is written
   const [empty, setEmpty] = useState(() => isEmptyDoc(initial as EditorBlockLike[]))
-  const figuresCb = useRef(onFigures)
-  figuresCb.current = onFigures
   useEditorChange(() => {
     setEmpty(isEmptyDoc(editor.document as EditorBlockLike[]))
-    figuresCb.current?.(figureCells(editor.document as EditorBlockLike[]))
     if (muted.current) return
     dirty.current = true
     schedule()
   }, editor)
-  useEffect(() => {
-    figuresCb.current?.(figureCells(editor.document as EditorBlockLike[]))
-  }, [editor])
 
   // an empty report opens with the caret in its one block, ready to type in (in a hidden tab, once the tab is shown)
   useEffect(() => {
@@ -949,43 +935,46 @@ export function ReportEditor({ ws, slug, doc, flags, filter, client, onSaved, on
 
   return (
     <ReportContext.Provider value={reportCtx}>
-      <div
-        className={['wu-zone', empty ? 'wu-zone-empty' : ''].filter(Boolean).join(' ')}
-        ref={zone}
-        onDragOverCapture={onDragOver}
-        onDragLeaveCapture={onDragLeave}
-        onDropCapture={onDrop}
-      >
-        {line && <div className="wu-dropline" style={{ top: line.top }} />}
-        <BlockNoteView
-          editor={editor}
-          theme={resolved}
-          className="wu-editor"
-          slashMenu={false}
-          formattingToolbar={false}
-          sideMenu={false}
-          filePanel={false}
-          tableHandles={false}
-          emojiPicker={false}
-          onBlur={() => void flush()}
+      <CiteChecksContext.Provider value={citeChecks}>
+        <div
+          className={['wu-zone', empty ? 'wu-zone-empty' : ''].filter(Boolean).join(' ')}
+          ref={zone}
+          onDragOverCapture={onDragOver}
+          onDragLeaveCapture={onDragLeave}
+          onDropCapture={onDrop}
         >
-          <SuggestionMenuController triggerCharacter="/" getItems={items} />
-          <FormattingToolbarController
-            formattingToolbar={() => (
-              <FormattingToolbar>
-                <BasicTextStyleButton basicTextStyle="bold" key="bold" />
-                <BasicTextStyleButton basicTextStyle="italic" key="italic" />
-                <BasicTextStyleButton basicTextStyle="code" key="code" />
-                <CreateLinkButton key="link" />
-                {onComment && <CommentButton key="comment" onComment={onComment} />}
-              </FormattingToolbar>
-            )}
-          />
-          <ActsContext.Provider value={actsCtx}>
-            <SideMenuController floatingUIOptions={ACTS_FLOATING} sideMenu={BlockActions} />
-          </ActsContext.Provider>
-        </BlockNoteView>
-      </div>
+          {line && <div className="wu-dropline" style={{ top: line.top }} />}
+          <BlockNoteView
+            editor={editor}
+            theme={resolved}
+            className="wu-editor"
+            editable={!demo}
+            slashMenu={false}
+            formattingToolbar={false}
+            sideMenu={false}
+            filePanel={false}
+            tableHandles={false}
+            emojiPicker={false}
+            onBlur={() => void flush()}
+          >
+            <SuggestionMenuController triggerCharacter="/" getItems={items} />
+            <FormattingToolbarController
+              formattingToolbar={() => (
+                <FormattingToolbar>
+                  <BasicTextStyleButton basicTextStyle="bold" key="bold" />
+                  <BasicTextStyleButton basicTextStyle="italic" key="italic" />
+                  <BasicTextStyleButton basicTextStyle="code" key="code" />
+                  <CreateLinkButton key="link" />
+                  {onComment && <CommentButton key="comment" onComment={onComment} />}
+                </FormattingToolbar>
+              )}
+            />
+            <ActsContext.Provider value={actsCtx}>
+              <SideMenuController floatingUIOptions={ACTS_FLOATING} sideMenu={BlockActions} />
+            </ActsContext.Provider>
+          </BlockNoteView>
+        </div>
+      </CiteChecksContext.Provider>
     </ReportContext.Provider>
   )
 }

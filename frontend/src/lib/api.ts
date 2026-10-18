@@ -57,7 +57,8 @@ import type {
 import { bus } from './bus'
 import { heavy } from './limit'
 import { clearCodeGone, setBrowserId, showCodeGone } from './notices'
-import { apiBase, setBrowserKey } from './browserKey'
+import { apiBase, setBrowserKey, setServerPort } from './browserKey'
+import type { AnswerComments } from '../chat/answerComments'
 
 // Every path below starts with apiBase(): `/b/<key>/api` once this browser holds its key, which the server scopes the
 // browser's cookie to (lib/browserKey), else `/api`. It is read at each request, so a key a later sign-in gives (in
@@ -99,7 +100,7 @@ function setHash(params: URLSearchParams): void {
  * hook_auth.mint), which the server trades for the cookie that every read of the server's data and every analyst
  * action needs (backend hook_auth), and take the code out of the address once the server has answered. 200 {key}:
  * signed in, with the key of the path the cookie is scoped to, which the page keeps (lib/browserKey) and sends every
- * later request under. 204: signed in already (the claim went under this browser's path with its cookie), so the key
+ * later request under, and the port the server listens on, which the page's stale-tab challenge needs (lib/stale). 204: signed in already (the claim went under this browser's path with its cookie), so the key
  * it holds stands. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which
  * shell/SignIn's line and a notice this page makes say (claimRefused, lib/notices showCodeGone; a later sign-in takes
  * the notice away). The key an earlier version's link carried (`k` in the hash)
@@ -133,7 +134,8 @@ async function claim(code: string): Promise<boolean> {
       if (signed || (res.status >= 400 && res.status < 500)) {
         if (res.status === 200) {
           try {
-            setBrowserKey(((await res.json()) as { key?: unknown } | null)?.key)
+            const got = (await res.json()) as { key?: unknown; port?: unknown } | null
+            if (setBrowserKey(got?.key)) setServerPort(got?.port)
           } catch {
             /* no key in the answer: the page goes on without one, and shows the sign-in line */
           }
@@ -293,6 +295,8 @@ export const api = {
   // ---- the product tour's first-launch state, one for the install (backend tour.py) ----
   tour: () => j<{ seen: boolean }>(`${apiBase()}/tour`),
   tourSeen: () => j<{ seen: boolean }>(`${apiBase()}/tour/seen`, { method: 'POST' }),
+  /** the tour's example workspace, set up on the spot from a sample every install ships when no demo is installed */
+  tourWorkspace: () => j<{ name: string }>(`${apiBase()}/tour/workspace`, { method: 'POST' }),
   // ---- corpora and files ----
   corpora: () => j<CorpusInfo[]>(`${apiBase()}/corpora`),
   /** `GET /workspaces`: every workspace this server knows, as the start page lists them (backend start_page.py). */
@@ -305,9 +309,10 @@ export const api = {
   /** `GET /corpora/{c}/source/lines`: a file's line count, an estimate while a big file's line index is being built. */
   sourceLines: (c: string, path: string) => j<SourceLines>(`${apiBase()}/corpora/${enc(c)}/source/lines${q({ path })}`),
   /** `GET /corpora/{c}/source/turns`: `count` turns of a JSON transcript from turn `start`, or around `line`; with
-   * `span`, a span of that line (block and UTF-16 offsets), around the turn holding the words it quotes. */
-  sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number, span?: { block: number; start: number; end: number }) =>
-    j<SourceTurns>(`${apiBase()}/corpora/${enc(c)}/source/turns${q({ path, start, count, line, block: span?.block, char_start: span?.start, char_end: span?.end })}`),
+   * `span`, a span of that line (block and UTF-16 offsets), around the turn holding the words it quotes; with `ref`, a
+   * citation of a record by its pointer, around the turn that is that record (`target`). */
+  sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number, span?: { block: number; start: number; end: number }, ref?: string) =>
+    j<SourceTurns>(`${apiBase()}/corpora/${enc(c)}/source/turns${q({ path, start, count, line, block: span?.block, char_start: span?.start, char_end: span?.end, ref })}`),
   /** `GET /corpora/{c}/source/speakers`: the names the corpus gives speaker ids (`ids`, joined by commas) that a file
    * keeps under `key` (an agents.jsonl beside it, whose records carry an id and a name). */
   speakerNames: (c: string, path: string, key: string, ids: string) => j<{ names: Record<string, string> }>(`${apiBase()}/corpora/${enc(c)}/source/speakers${q({ path, key, ids })}`),
@@ -444,6 +449,8 @@ export const api = {
     const q = [after != null && after !== '' ? `after=${enc(String(after))}` : '', log ? `log=${enc(log)}` : ''].filter(Boolean)
     return `${ws(c)}/events${q.length ? `?${q.join('&')}` : ''}`
   },
+  /** This tab took the terminal's press `open` handed to it on the stream (backend investigation.took_route). */
+  pressTaken: (c: string, open: string) => j<{ ok: boolean }>(`${ws(c)}/press/${enc(open)}`, { method: 'POST' }),
 
   // ---- canvas ----
   canvas: (c: string) => j<CanvasResponse>(`${ws(c)}/canvas`),
@@ -554,11 +561,12 @@ export const api = {
   /** reader.records(index, query), for the page's thimble.fetch, with no time limit, through the gate of slow calls
    * (lib/limit.ts heavy): `call` names it for viewCall and viewCancel, and `signal` drops the request; with a label
    * filter on, `hidden` is how many records the reader left out for it in what the frame shows (the page's fetch `key`,
-   * the `frame` and its `turn`), null when that cannot be counted exactly */
+   * the `frame` and its `turn`), null when that cannot be counted exactly; `fields`, the values of the fields of the
+   * records the reader handed thimble.color_value, each with how many take it, which the page's Color by lists */
   viewRecords: (c: string, slug: string, query: unknown, version?: string, opts?: { call?: string; signal?: AbortSignal; key?: string; frame?: string; turn?: number }) =>
     heavy(
       () =>
-        j<{ data: unknown; hidden?: number | null }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, {
+        j<{ data: unknown; hidden?: number | null; fields?: Record<string, Record<string, number>> }>(`${ws(c)}/views/${enc(slug)}/records${q({ v: version })}`, {
           method: 'POST',
           body: JSON.stringify({ query, call: opts?.call, key: opts?.key, frame: opts?.frame, turn: opts?.turn }),
           signal: opts?.signal,
@@ -608,6 +616,9 @@ export const api = {
   // ---- orientation ----
   /** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): {} before any was asked for. */
   orientation: (c: string) => j<OrientRun>(`${ws(c)}/orientation`),
+  /** A failed orientation's Run again (`POST /ws/{c}/orientation/again`, its notice's act): a click start with the
+   * focus given, else the request its last run had. */
+  orientAgain: (c: string, text = '') => j<StartAnswer>(`${ws(c)}/orientation/again`, { method: 'POST', body: JSON.stringify({ text }) }).then(startAnswer),
 
   // ---- documents ----
   frame: (c: string, slug: DocumentType) => j<Writeup>(`${inv(c, slug)}/frame`),
@@ -632,16 +643,22 @@ export const api = {
       body: JSON.stringify({ kind: 'card', payload: { text: body.text, group: `request:${body.request}`, ...(body.doc ? { doc: body.doc } : {}), ...(body.after ? { after: body.after } : {}), ...(body.card ? { card: body.card } : {}) } }),
     }),
 
+  // ---- the checks' comments on Claude's answers (backend answer_comments.py; chat/answerComments.ts) ----
+  answerComments: (c: string) => j<AnswerComments>(`${ws(c)}/answer-comments`),
+  dismissAnswerComment: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/answer-comments/${enc(id)}/dismiss`, { method: 'POST' }),
+  reopenAnswerComment: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/answer-comments/${enc(id)}/reopen`, { method: 'POST' }),
   // ---- tickets ----
   tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),
   ticket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}`),
+  /** the address of a picture the analyst pasted into a message (`GET /ws/{c}/pictures/{name}`), for an <img> */
+  pictureUrl: (c: string, name: string) => `${ws(c)}/pictures/${enc(name)}`,
   /** the address of a ticket's before or after shot (`GET /dev/tickets/{id}/shots/{name}`), for an <img> */
   ticketShotUrl: (id: string, name: string) => `${apiBase()}/dev/tickets/${enc(id)}/shots/${enc(name)}`,
   fileTicket: (body: NewTicketBody) => j<Ticket>(`${apiBase()}/dev/tickets`, { method: 'POST', body: JSON.stringify(body) }),
   retryTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/retry`, { method: 'POST' }),
   /** Start on main's ticket that waited while another ran: it starts through the plugin module once nothing else runs */
   startTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/start`, { method: 'POST' }),
-  /** whether code tickets run here (`tickets` is '' in a development install), for Report a problem's File a code ticket */
+  /** whether code tickets run here (`tickets` is '' in a development install), for Report a problem's Ask Claude to fix it */
   devStatus: () => j<DevStatus>(`${apiBase()}/dev/status`),
   dismissTicket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}/dismiss`, { method: 'POST' }),
   /** stop a running ticket: nothing is applied and it ends `stopped`, which Retry runs again */
@@ -720,8 +737,10 @@ export const labelApi = {
   detail: (c: string, id: string) => j<ConceptDetail>(`${ws(c)}/concepts/${enc(id)}`),
   /** `PUT /concepts/{id}`: a partial update (the description edited in place; the Files pane's edit card, its toggles). */
   update: (c: string, id: string, patch: ConceptPatch) => j<ConceptDetail>(`${ws(c)}/concepts/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
-  /** `POST /concepts`: a new label from the Files pane's edit card, over files, cards (`cell`) or sentences (`span`). */
-  create: (c: string, body: ConceptPatch & { name: string; unit?: ConceptUnit }) => j<ConceptDetail>(`${ws(c)}/concepts`, { method: 'POST', body: JSON.stringify(body) }),
+  /** `POST /concepts`: a new label from the Files pane's edit card, over files, cards (`cell`) or sentences (`span`). With
+   * `run`, it runs at once and the server keeps it only once its run starts (a run that cannot start leaves no label and
+   * says what to change); its run record comes back as `run`. */
+  create: (c: string, body: ConceptPatch & { name: string; unit?: ConceptUnit; run?: boolean }) => j<ConceptDetail>(`${ws(c)}/concepts`, { method: 'POST', body: JSON.stringify(body) }),
   /** `DELETE /concepts/{id}`: the label with its marks, its card and any filter that uses it; the top bar's Undo restores it. */
   remove: (c: string, id: string) => j<{ ok: boolean }>(`${ws(c)}/concepts/${enc(id)}`, { method: 'DELETE' }),
   /** `GET /labels/presence`: per label over files, the values it left on each file (the tree's dots). */
@@ -732,8 +751,13 @@ export const labelApi = {
   /** `POST /concepts/draft`: the labels model defines a label from the analyst's description, reading the first records
    * of the files it would apply to; nothing is stored. */
   draft: (c: string, text: string, paths: string[]) => j<LabelDraft>(`${ws(c)}/concepts/draft`, { method: 'POST', body: JSON.stringify({ text, paths }) }),
-  /** `GET /labels/glob?pattern=`: the files a glob applies to. */
-  glob: (c: string, pattern: string) => j<{ files: string[]; total: number }>(`${ws(c)}/labels/glob${q({ pattern })}`),
+  /** `GET /labels/glob?pattern=&unit=`: the files a glob applies to; with a file `unit`, how many units a run over them
+   * reads (`units`, and `units_more` past the most the server counts). */
+  glob: (c: string, pattern: string, unit?: ConceptUnit) =>
+    j<{ files: string[]; total: number; units?: number; units_more?: boolean }>(`${ws(c)}/labels/glob${q({ pattern, unit })}`),
+  /** `POST /concepts/{id}/apply/cancel`: stop the label's run after the batch it is on; the rows written so far stay.
+   * `cancelling` is false when no run was going on. */
+  cancel: (c: string, id: string) => j<{ ok: boolean; cancelling: boolean }>(`${ws(c)}/concepts/${enc(id)}/apply/cancel`, { method: 'POST' }),
   /** `GET /concepts/{id}/rows?text=1`: one page of rows with the effective value, each with the unit's own text. */
   rows: (c: string, id: string, opts: { value?: string; limit?: number; offset?: number }) =>
     j<{ rows: LabelRowText[]; total: number }>(`${ws(c)}/concepts/${enc(id)}/rows${q({ ...opts, text: 1 })}`),
@@ -745,6 +769,9 @@ export const labelApi = {
     j<VerdictResult>(`${ws(c)}/concepts/${enc(id)}/labels`, { method: 'POST', body: JSON.stringify({ ref, label, note }) }),
   /** `POST /concepts/{id}/apply`: start a run (202 with the run record); a prompt label's carries the analyst's values as examples. */
   apply: (c: string, id: string, body: ApplyBody) => j<ConceptRun>(`${ws(c)}/concepts/${enc(id)}/apply`, { method: 'POST', body: JSON.stringify(body) }),
+  /** `POST /concepts/{id}/apply/again`: a prompt label run again on the units its last run could not label (its notice's
+   * act); 409 when none is left. */
+  applyAgain: (c: string, id: string) => j<ConceptRun>(`${ws(c)}/concepts/${enc(id)}/apply/again`, { method: 'POST' }),
 }
 
 // --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---

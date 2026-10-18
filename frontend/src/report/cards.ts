@@ -1,5 +1,5 @@
 // The report's card sidebar, pure: the canvas's cards grouped into Starred, Orientation, Figures and Your work,
-// filtered by the search, plus the cards a document already uses.
+// filtered by the search.
 import type { Cell, Group } from '../lib/types'
 import { storageKey } from '../lib/workspace'
 
@@ -69,16 +69,6 @@ export function cardSections(cells: readonly Cell[], groups: readonly Group[], q
   }
   const keys: CardSectionKey[] = ['starred', 'orientation', 'figures', 'yours']
   return keys.map((key) => ({ key, name: SECTION_NAMES[key], cards: lists[key] })).filter((s) => !query.trim() || s.cards.length > 0)
-}
-
-/** The cards a document shows as figures, by card id, from `card:<id>` (or `cell:<id>`) refs. */
-export function usedCells(figureRefs: Iterable<string>): Set<string> {
-  const out = new Set<string>()
-  for (const ref of figureRefs) {
-    const m = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(String(ref ?? '').trim())
-    if (m) out.add(m[1])
-  }
-  return out
 }
 
 /** The drag's data type: a card dragged from the sidebar carries its id under it. */

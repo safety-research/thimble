@@ -8,23 +8,20 @@ The browser posts `POST /api/ws/{c}/events {kind, payload}`; server code calls p
 `## Events from the browser`, and other kinds are refused. A post with no subscriber is refused with 409. An event of
 QUIET_KINDS asks main for nothing, so it wakes no turn: it waits in the workspace's HELD_FILE and rides along, under
 MEANWHILE, with the next event or the analyst's next prompt in the terminal (the plugin's UserPromptSubmit hook takes it
-with held_route).
+with held_route). One that tells of a failure main has read since in Claude Code's own line no longer waits (drop_held).
 
 Each event is queued per workspace and session (_pending), and the plugin's watcher takes it with a long poll
 (pull_route) as the text the model reads (render); unacknowledged events return to the queue after ACK_S. The watcher
 runs as the plugin's asyncRewake hooks, which wake the session with the event (the HOOK route), or, where the plugin's
-hooks are off, as main's Monitor (the MONITOR route, cc_plugin.route). Permission prompts come from the
-PermissionRequest hook; since Claude Code does not signal that hook when the analyst answers in the terminal, the server
-ends the wait itself (clear_permissions, release_asks, agent_moved). A prompt of one of thimble's agents is asked in the
-terminal alone (`terminal` on its entry, which the browser shows as that agent waiting for the analyst's answer there);
-it ends with its call's result (calls_done), its agent's end (agent_moved), or once Claude Code's record of main's
-session says no dialog is open after it was seen open (terminal_dialogs). A prompt's card offers "Always allow" where
-Claude Code's own dialog offers "don't ask again", in that dialog's words (permission_updates.main_words): the request's
-permission_suggestions that dialog applies for the tool, each kept where Claude Code gave it
-(permission_updates.main_offer), none when the org's managed tier sets allowManagedPermissionRulesOnly (_main_offer).
+hooks are off, as main's Monitor (the MONITOR route, cc_plugin.route). The PermissionRequest hook only tells the server
+that a prompt waits: every prompt, main's and its agents', is asked in the terminal alone, and thimble makes no allow
+decision (0.9.0, S11). Its entry is `terminal`, which the browser shows as waiting for the analyst's answer there; it
+ends with its call's result (calls_done), its agent's end (agent_moved), or once Claude Code's record of main's session
+says no dialog is open after it was seen open (terminal_dialogs).
 
-Main's terminal shows each event as one line (terminal_line): the analyst's words after SAID, with the thread or button
-they belong to, else a short line saying what happened. Claude Code shows a woken turn only as the hook's fixed summary,
+Each event has a line for main's terminal (terminal_line): the analyst's words after SAID, with the thread or button
+they belong to, else a short line saying what happened; the terminal prints only the analyst's words to main
+(event_files.said), as the chat's own rows say the rest. Claude Code shows a woken turn only as the hook's fixed summary,
 so the watcher's acknowledgment keeps the event's line (_lines) for the UserPromptSubmit hook, which Claude Code runs
 as the event's turn begins, to print (held_route); the line of something the analyst did that sends main no event, such
 as a follow-up to the orientation, waits there too (show). With every hook off (the Monitor route) nothing can print
@@ -32,10 +29,16 @@ them. A message the analyst sends while main's turn runs reaches the session onl
 the turn ends, so main's statusline shows its words at once, after QUEUED, until the held hook prints its line
 (queued_line, which tray.agents_route adds to the statusline).
 
-Terminal mode (the session launch.json names runs in terminal mode, subagent_files.session_mode) has no server, so no
-subscription, watcher poll or in-memory queue: post() writes the event to the workspace's events/queue.jsonl, a quiet
-one to held-events.json (event_files.py), and main's watcher takes it from the file. An event reaches main while main's
-`claude` process runs (launch.json's pid); none is refused for want of a subscription.
+On local transport (subagent_files.transport: before the analyst's first press of the browser workbench, and always for
+a peer) no server holds the session's events, so there is no subscription, watcher poll or in-memory queue: post()
+writes the event to the workspace's events/queue.jsonl, a quiet one to held-events.json (event_files.py), and the
+session's watcher takes it from the file. An event reaches main while main's `claude` process runs (launch.json's pid);
+none is refused for want of a subscription. An event names the session it is for (post's `session`): a process of a
+session posts for its own session (local.session_here) unless the caller names one, so a peer's label run tells the peer
+alone; an event for main names none. Only this server's own process (SERVING, set by its lifespan) queues events in
+memory, and only for main once main's transport is the server; every other process writes the file, and this server takes
+main's waiting events and held notes from it into its queue at each pull of main's watcher (_drain_files), so an event
+that a process started before the press posts after it still reaches main, once and in order.
 
 A session started before an update to 0.6.0 runs 0.5.0's MCP shim, and perhaps the hooks of 0.5.0's cached plugin copy,
 until Claude Code restarts. Those call the routes 0.5.0 named for Claude Code channels, which answer as their new routes
@@ -59,16 +62,21 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from sse_starlette import EventSourceResponse
 
-from . import cc_plugin, config, event_files, ledger, permission_updates, procs, prompts
+from . import cc_plugin, config, event_files, permission_updates, procs, prompts
 from . import subagent_files as files
 
 log = logging.getLogger("thimble.events")
+
+
+SERVING = False  # True in thimble's server process, whose lifespan sets it (module note)
 
 
 @asynccontextmanager
 async def _lifespan(app: Any):
     from . import session  # noqa: PLC0415
 
+    global SERVING
+    SERVING = True
     session.start_sweep()  # detaches a session recorded as main whose shim does not come back after a restart
     yield
 
@@ -99,7 +107,7 @@ DORMANT = "dormant"  # _pull_state: another session is main now, and this one is
 HOOK_ASK_PREFIX = "h"  # the ids of the permission requests the PermissionRequest hook relays
 SAID = "› "  # opens the analyst's own words in main's terminal (terminal_line)
 QUEUED = "queued from the browser: "  # opens the statusline's line of a message main has not got yet (queued_line)
-QUEUED_TERMINAL = "queued: "  # the same in terminal mode, where the analyst's words come from the terminal's panes
+QUEUED_TERMINAL = "queued: "  # the same on local transport, where the analyst's words come from the terminal's panes
 LINE_CHARS = 160  # of an event's line in main's terminal: about two lines
 NOTICES_KEPT = 50  # a session's queued messages kept for its statusline; the oldest go first
 # 0.5.0's routes (module note) -> the route each answers as. A 0.5.0 shim's own relay of a channel's permission prompt
@@ -207,14 +215,15 @@ def connected_workspaces() -> list[str]:
     return sorted(c for c, subs in _subs.items() if subs)
 
 
-def reachable(c: str) -> bool:
-    """Whether an event posted now reaches a session: a subscription of the session that is main, or a session main just
-    continued in whose shim has not subscribed yet (_awaits_shim). Another `claude` in the folder subscribes too, and
-    never gets main's events, nor does a parked session (_publish). In terminal mode, which has no subscription, main's
-    `claude` process runs (launch.json's pid), whose watcher takes the event from the queue file."""
-    ws = _terminal_ws(c)
+def reachable(c: str, session: str | None = None) -> bool:
+    """Whether an event posted now reaches its session (main's when `session` is None): a subscription of the session
+    that is main, or a session main just continued in whose shim has not subscribed yet (_awaits_shim). Another `claude`
+    in the folder subscribes too, and never gets main's events, nor does a parked session (_publish). Through the queue
+    file (_queue_ws), which has no subscription, main's `claude` process runs (launch.json's pid), whose watcher, or this
+    server, takes the event from the file; an event for a peer is taken by the peer's own watcher."""
+    ws = _queue_ws(c, session)
     if ws is not None:
-        return files.main_pid(ws) is not None
+        return bool(session) or files.main_pid(ws) is not None
     _read_main(c)
     main = _main_sid(c)
     return _awaits_shim(c) or bool(main and any(sub.session == main for sub in _live_subs(c, main)))
@@ -251,10 +260,9 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
 
 # the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
 # MEANWHILE (prompts/main.md)
-QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types"})
+QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types", "card_fixed", "cite_failed"})
 MEANWHILE = "meanwhile:"
-HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notes, across restarts
-_held: dict[str, list[dict[str, Any]]] = {}  # workspace -> HELD_FILE's notes, once read
+HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notes, across restarts (event_files.HELD)
 
 
 def describe(kind: str, payload: dict[str, Any]) -> str:
@@ -308,20 +316,26 @@ def _cut(line: str, n: int) -> str:
 
 
 def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind: bool = True,
-         mirror: bool = True, line: str | None = None, event_id: str | None = None) -> dict[str, Any]:
-    """Send one event to the workspace's session: {id, kind, delivered, thread?}. A `main` event shows in main's chat
-    as the analyst's line unless `mirror` is False, for a request server code writes to main, which passes the `line`
-    main's terminal shows instead of terminal_line's. `event_id` is the event's id when the caller recorded it first
-    (a START_AGENT event's request keeps it). 409 when no session listens, 400 for a kind main.md names no bullet for
-    (when `check_kind`), or for a message with no text."""
-    from . import agents, session, threads  # noqa: PLC0415
+         mirror: bool = True, line: str | None = None, event_id: str | None = None,
+         session: str | None = None, about: str | None = None) -> dict[str, Any]:
+    """Send one event to a session of the workspace: {id, kind, delivered, thread?}. `session` names the session it is
+    for; with none, a process of a session posts for its own (local.session_here) and this server for main, and an event
+    for main's session is main's (module note). A `main` event shows in main's chat as the analyst's line unless
+    `mirror` is False, for a request server code writes to main, which passes the `line` main's terminal shows instead
+    of terminal_line's. `event_id` is the event's id when the caller recorded it first (a START_AGENT event's request
+    keeps it). `about` names the run of one of thimble's agents whose failure a quiet event tells (subagents.run_about),
+    which its held note keeps, so that it goes once main reads that failure in Claude Code's own line (drop_held). 409
+    when no session listens, 400 for a kind main.md names no bullet for (when `check_kind`), or for a message with no
+    text."""
+    from . import agents, session as session_mod, threads  # noqa: PLC0415
 
     kind = str(kind or "").strip()
     payload = dict(payload or {})
     if check_kind and kind not in kinds():
         raise HTTPException(400, f"unknown event kind {kind!r}; the kinds are {', '.join(kinds())} (prompts/{PROMPT}.md)")
-    ws = _terminal_ws(c)
-    if not reachable(c):
+    to = _addressee(c, session)
+    ws = _queue_ws(c, to)
+    if not reachable(c, to):
         raise HTTPException(409, NOT_LISTENING.format(cwd=config.corpus_dir(c)))
     event_id = event_id or secrets.token_hex(4)
     out: dict[str, Any] = {"id": event_id, "kind": kind}
@@ -333,6 +347,8 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         if mirror:
             agents.mirror(c, "user", by=agents.BROWSER, text=words, event=event_id)
         note = build_note(kind, event_id, words, {**payload, **_ultracode(c), **_filters(c)})
+        if mirror:  # the analyst's own message, which their Stop of main takes back while it waits (cancel_waiting)
+            note["analyst"] = True
     elif kind == THREAD:
         words = str(payload.get("text") or "")
         built = threads.event(c, payload, event_id)
@@ -348,22 +364,30 @@ def post(c: str, kind: str, payload: dict[str, Any] | None = None, *, check_kind
         note = build_note(kind, event_id, words or describe(kind, payload), payload,
                           cap=None if kind == START_AGENT else BODY_CHARS)
     note["terminal"] = terminal_line(kind, words, payload) if line is None else line
+    if to is None:  # the later parts of main's guidance that its first event of this kind uses (disclose.py)
+        from . import disclose  # noqa: PLC0415
+
+        note = disclose.with_event(c, kind, note, kind in QUIET_KINDS)
+    if to:
+        out["session"] = to
     if kind in QUIET_KINDS:
+        if about:
+            note["about"] = about
         if ws is None:
             _keep_held(c, [*held(c), note])
         else:
-            event_files.hold(ws, note)
+            event_files.hold(ws, note, to)
         out.update(delivered=0, held=True)
         log.info("%s: event %s kind=%s held for the next event", c, event_id, kind)
         _observe(c, kind, seen, out)
         return out
-    session.expect(c, event_id, thread=out.get("thread"))
+    session_mod.expect(c, event_id, thread=out.get("thread"))
     if ws is None:
         out["delivered"] = _publish(c, note)
     else:
-        event_files.append(ws, note, render)
+        event_files.append(ws, note, render, to)
         out["delivered"] = 1
-        log.info("%s: event %s kind=%s queued for main's watcher", c, event_id, kind)
+        log.info("%s: event %s kind=%s queued for %s's watcher", c, event_id, kind, to or "main")
     _observe(c, kind, seen, out)
     return out
 
@@ -374,55 +398,106 @@ def held_line(note: dict[str, Any]) -> str:
     return f"[{attrs}] {' '.join(str(note.get('content') or '').split())}"
 
 
-def _terminal_ws(c: str) -> Path | None:
-    """The workspace folder of `c` when its session runs in terminal mode (module note), else None."""
+def _addressee(c: str, session: str | None) -> str | None:
+    """The session an event is for, or None for main's (module note): `session` when given, else in a process of a
+    session that session (local.session_here), never in this server; None when that is main's session."""
+    if session is None and not SERVING:
+        from . import local  # noqa: PLC0415
+
+        session = local.session_here()
+    if not session:
+        return None
+    try:
+        main = files.main_session(config.workspace_path(c))
+    except (ValueError, OSError):
+        main = ""
+    return None if not main or session == main else session
+
+
+def _queue_ws(c: str, session: str | None = None) -> Path | None:
+    """The workspace folder of `c` whose event files take an event for `session` (main's when None), or None when this
+    server's own queue takes it: in this server, for main, once main's transport is the server (module note)."""
     try:
         ws = config.workspace_path(c)
     except ValueError:
         return None
-    return ws if files.terminal(ws) else None
+    if SERVING and not session and files.transport(ws) == files.SERVER:
+        return None
+    return ws
+
+
+def _drain_files(c: str) -> int:
+    """In this server, once main's transport is the server: main's events that a process of the session wrote to the
+    event queue file after the press (or before it, not taken yet), queued for main's watcher in the order they were
+    posted, and main's held notes there joined to this server's (module note). How many events it queued."""
+    if not SERVING:
+        return 0
+    try:
+        ws = config.workspace_path(c)
+    except ValueError:
+        return 0
+    if files.transport(ws) != files.SERVER:
+        return 0
+    got = event_files.drain(ws)
+    main = _main_sid(c) or files.main_session(ws)
+    for rec in got:
+        note = {"rendered": str(rec.get("text") or ""), "terminal": str(rec.get("said") or rec.get("line") or ""),
+                "said": str(rec.get("said") or ""),
+                "meta": {"kind": str(rec.get("kind") or ""), "event": str(rec.get("id") or "")},
+                **{k: rec[k] for k in ("riders", "told_parts", "analyst") if rec.get(k)}}
+        _pending.setdefault((c, main or ""), deque()).append(note)
+    if got:
+        log.info("%s: %d event(s) from the queue file queued for main's watcher", c, len(got))
+        _wake(c)
+    return len(got)
 
 
 def held(c: str) -> list[dict[str, Any]]:
-    """The quiet events waiting for the workspace's next event, as notes (in terminal mode, event_files')."""
-    ws = _terminal_ws(c)
-    if ws is not None:
-        return event_files.held(ws)
-    if c not in _held:
-        try:
-            notes = json.loads((config.workspace_dir(c) / HELD_FILE).read_text("utf-8"))
-        except (OSError, ValueError):
-            notes = []
-        _held[c] = [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
-    return list(_held[c])
+    """The quiet events waiting for main's next event, as notes (event_files: the workspace's held-events.json, which
+    this server and the session's processes share)."""
+    try:
+        return event_files.held(config.workspace_path(c))
+    except ValueError:
+        return []
 
 
 def _keep_held(c: str, notes: list[dict[str, Any]]) -> None:
-    _held[c] = list(notes)
     path = config.workspace_dir(c) / HELD_FILE
     try:
-        if notes:
-            ledger.atomic_write_text(path, json.dumps(notes, ensure_ascii=False))
-        else:
-            path.unlink(missing_ok=True)
+        event_files.keep_held(config.workspace_dir(c), notes)
     except OSError:
         log.warning("%s: the held events were not saved to %s", c, path, exc_info=True)
 
 
+def drop_held(c: str, about: str) -> int:
+    """Main's held events that tell of the run `about` (post's `about`) no longer wait, since main read of it in Claude
+    Code's own line (subagents.failure_seen), and the later parts of main's guidance they carried go with the next
+    event of their kind (disclose.untold). How many went."""
+    from . import disclose  # noqa: PLC0415
+
+    try:
+        ws = config.workspace_path(c)
+        gone = event_files.drop_held(ws, about)
+    except (ValueError, OSError):
+        return 0
+    disclose.untold(ws, gone)
+    return len(gone)
+
+
 def pop_held(c: str) -> list[dict[str, Any]]:
-    """The quiet events waiting, as notes, and no longer waiting."""
-    ws = _terminal_ws(c)
-    if ws is not None:
-        return event_files.pop_held(ws)
-    notes = held(c)
-    if notes:
-        _keep_held(c, [])
-    return notes
+    """Main's quiet events waiting, as notes, and no longer waiting."""
+    try:
+        return event_files.pop_held(config.workspace_dir(c))
+    except (ValueError, OSError):
+        return []
 
 
 def meanwhile(notes: list[dict[str, Any]]) -> str:
-    """Held events as MEANWHILE and one line each; '' for none."""
-    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) if notes else ""
+    """Held events as MEANWHILE and one line each, then the later parts of main's guidance they carry
+    (disclose.told); '' for none."""
+    from . import disclose  # noqa: PLC0415
+
+    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) + disclose.told(notes) if notes else ""
 
 
 def _joined(notes: list[dict[str, Any]]) -> str:
@@ -442,12 +517,13 @@ def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | 
          line: str = "") -> dict[str, Any]:
     """Send an event whose body server code built (threads.flush and ask_again), with its `line` in main's terminal:
     {id, kind, delivered}. The caller has logged whatever the chats show, and checked that a session listens."""
-    from . import session  # noqa: PLC0415
+    from . import disclose, session  # noqa: PLC0415
 
     event_id = secrets.token_hex(4)
     session.expect(c, event_id, thread=thread)
-    note = {**build_note(kind, event_id, text, fields), "terminal": line}
-    ws = _terminal_ws(c)
+    note = disclose.with_event(c, kind, {**build_note(kind, event_id, text, fields), "terminal": line},
+                               kind in QUIET_KINDS)
+    ws = _queue_ws(c)
     if ws is not None:
         event_files.append(ws, note, render)
         return {"id": event_id, "kind": kind, "delivered": 1}
@@ -457,8 +533,8 @@ def send(c: str, kind: str, text: str, fields: dict[str, Any], *, thread: str | 
 def show(c: str, line: str) -> None:
     """A line for main's terminal about something the analyst did in the browser that sends main no event (a follow-up
     to the orientation), printed as main's next turn begins (held_route); kept only on the hook route, whose held hook
-    runs on every turn. In terminal mode it waits in the event queue for the held hook (event_files.show)."""
-    ws = _terminal_ws(c)
+    runs on every turn. On local transport it waits in the event queue for the held hook (event_files.show)."""
+    ws = _queue_ws(c)
     if ws is not None:
         event_files.show(ws, line)
         return
@@ -531,13 +607,16 @@ def _live_subs(c: str, main: str | None) -> list[Sub]:
 
 
 def _awaits_shim(c: str) -> bool:
-    """Whether main is a session it continued in less than session.GRACE_S ago (session._continue) whose shim has not
+    """Whether main is a session it continued in (session._continue), or one a signed-in browser's visit moved from
+    local transport to this server (session.follow_browser), less than session.GRACE_S ago, whose shim has not
     subscribed yet: its events wait in its queue (_pending) for its watcher's pull."""
     from . import session  # noqa: PLC0415
 
     lv = session.current(c)
-    return (lv is not None and lv.came_from is not None and lv.moved_at is not None
-            and time.monotonic() - lv.moved_at < session.GRACE_S
+    if lv is None:
+        return False
+    since = lv.moved_at if lv.came_from is not None else lv.handed_at
+    return (since is not None and time.monotonic() - since < session.GRACE_S
             and not any(sub.session == lv.sid for sub in _subs.get(c, ())))
 
 
@@ -556,10 +635,12 @@ def _publish(c: str, note: dict[str, Any]) -> int:
         return 0
     if not mine or any(sub.delivery == cc_plugin.HOOK for sub in mine):
         _notice(c, to, note)
-    if held(c):
-        riders = pop_held(c)
+    riders = pop_held(c) if held(c) else []
+    # the line main's terminal prints for it: the analyst's own words alone (event_files.said)
+    note = {**note, "said": event_files.said([note, *riders])}
+    if riders:
         note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}",
-                "terminal": _joined([note, *riders])}
+                "terminal": _joined([note, *riders]), "riders": riders}
     _pending.setdefault((c, to), deque()).append(note)
     _wake(c)
     if mine:
@@ -593,7 +674,9 @@ def _wake(c: str) -> None:
 
 def render(note: dict[str, Any]) -> str:
     """An event as the model reads it: `<thimble-event kind="…" event="…" …>`, the body on its own lines, then
-    `</thimble-event>` (escaped inside the body)."""
+    `</thimble-event>` (escaped inside the body); an event taken from the queue file comes rendered (_drain_files)."""
+    if note.get("rendered"):
+        return str(note["rendered"])
     meta = {str(k): str(v) for k, v in (note.get("meta") or {}).items()}
     attrs = " ".join(f'{k}="{html.escape(v, quote=True)}"' for k, v in meta.items())
     body = str(note.get("content") or "").replace(f"</{TAG}>", f"&lt;/{TAG}&gt;")
@@ -651,7 +734,7 @@ def queued_line(c: str, sid: str | None, chars: int = 110) -> str:
     main."""
     if not sid or sid != _main_sid(c):
         return ""
-    ws = _terminal_ws(c)
+    ws = _queue_ws(c)
     waiting = event_files.queued_words(ws) if ws is not None else [words for _, words in _notices.get((c, sid), [])]
     if not waiting:
         return ""
@@ -659,6 +742,39 @@ def queued_line(c: str, sid: str | None, chars: int = 110) -> str:
     line = f"thimble · {QUEUED if ws is None else QUEUED_TERMINAL}{waiting[0]}"
     room = chars - len(more)
     return (line if len(line) <= room else line[: room - 1].rstrip() + "…") + more
+
+
+def cancel_waiting(c: str) -> list[str]:
+    """The analyst's Stop of main (agents.interrupt_route): the messages they sent main (`analyst`, post) that no
+    watcher has taken yet are taken back, from this server's queue and from the queue file (event_files.cancel), so
+    that main never gets them, while a question that already reached main's turn is the turn's to stop. A request
+    server code wrote to main, such as one to stop the analyst's own subagent, stays. The held events that rode along
+    with them wait again for main's next event, and the later parts of main's guidance they carried go with the next
+    event that uses them (disclose.untold). Their ids, oldest first."""
+    from . import disclose  # noqa: PLC0415
+
+    gone: list[dict[str, Any]] = []
+    for key in [k for k in _pending if k[0] == c]:
+        mine = [n for n in _pending[key] if n.get("analyst")]
+        if mine:
+            _pending[key] = deque(n for n in _pending[key] if not any(n is m for m in mine))
+            gone += mine
+    try:
+        ws = config.workspace_path(c)
+    except ValueError:
+        ws = None
+    if ws is not None:
+        gone += event_files.cancel(ws)
+        disclose.untold(ws, gone)
+    riders = [r for n in gone for r in n.get("riders") or [] if isinstance(r, dict)]
+    if riders:
+        _keep_held(c, [*riders, *held(c)])
+    ids = [str((n.get("meta") or {}).get("event") or n.get("id") or "") for n in gone]
+    for key in [k for k in _notices if k[0] == c]:
+        _notices[key] = [x for x in _notices[key] if x[0] not in ids]
+    if ids:
+        log.info("%s: the analyst's Stop took back %d message(s) main had not got: %s", c, len(ids), " ".join(ids))
+    return [i for i in ids if i]
 
 
 def pending(c: str) -> int:
@@ -678,16 +794,23 @@ BROWSER_KINDS = ("main", "thread", "card")  # the kinds the browser posts (event
 
 
 @router.post("/ws/{c}/events")
-async def events_route(c: str, body: EventBody) -> dict[str, Any]:
+async def events_route(c: str, body: EventBody, request: Request) -> dict[str, Any]:
     """The browser's one way to reach the session: a message to main or a thread, or a card's event (BROWSER_KINDS);
-    400 for any other kind, which only the server's own code posts (post)."""
+    400 for any other kind, which only the server's own code posts (post). After a signed-in browser's post, this server
+    follows main when main ran on local transport (session.follow_browser): the event went to the queue file first,
+    which the server takes events from once it follows main (_drain_files)."""
+    from . import hook_auth, session  # noqa: PLC0415
+
     if body.kind not in BROWSER_KINDS:
         raise HTTPException(400, "the browser sends only main, thread and card events")
     try:
         config.workspace_dir(c)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
-    return post(c, body.kind, body.payload)
+    out = post(c, body.kind, body.payload)
+    if hook_auth.analyst(request):
+        session.follow_browser(c)
+    return out
 
 
 class SessionBody(BaseModel):
@@ -794,7 +917,7 @@ async def subscribe(request: Request, cwd: str, session: str | None = None, pid:
 
     c = config.workspace_for_cwd(cwd)
     if not c:
-        raise HTTPException(404, f"{cwd} is not a thimble workspace yet; /thimble opens it")
+        raise HTTPException(404, f"{cwd} is not a thimble workspace yet; /thimble browsers it")
     sub = Sub(session or None, delivery if delivery in cc_plugin.ROUTES else cc_plugin.HOOK)
     _subs.setdefault(c, set()).add(sub)
     session_mod.connected(c, session, cwd, pid, config_dir)
@@ -845,15 +968,23 @@ def _stopping() -> bool:
 async def pull_route(request: Request, cwd: str, session: str | None = None, wait: float = PULL_WAIT_S,
                      pid: int | None = None) -> Any:
     """The watcher's long poll: `{id, text}` for the next event of the session, 204 when none came within `wait` seconds, 404
-    when the folder is no workspace, 410 when another session is main (see _pull_state). The event stays in flight until
-    the watcher acknowledges it (ack_route)."""
+    when the folder is no workspace, 410 when another session is main (see _pull_state). The live main launch.json names
+    is followed first (module_bridge.follow_launch). The event stays in flight until the watcher acknowledges it
+    (ack_route)."""
     c = config.workspace_for_cwd(cwd)
     if not c:
         raise HTTPException(404, f"{cwd} is not a thimble workspace")
     sid = session or ""
+    if sid and _main_sid(c) not in (None, sid):
+        # the session launch.json names main now, whose watcher came before its module's hello: the server follows it
+        # rather than telling the watcher it is gone (bug hunt 7, H13: the new main never heard the browser)
+        from . import module_bridge  # noqa: PLC0415
+
+        module_bridge.follow_launch(c, sid, cwd)
     deadline = time.monotonic() + min(max(wait, 0.0), PULL_WAIT_MAX_S)
     while True:
         _requeue(c)
+        _drain_files(c)
         state = _pull_state(c, sid, pid)
         if state == GONE:
             raise HTTPException(410, "another session is main in this workspace now")
@@ -882,8 +1013,9 @@ async def ack_route(body: AckBody) -> dict[str, Any]:
     if taken is None:
         raise HTTPException(404, "no such event is in flight")
     key = (taken[0], body.session or "")
-    if body.terminal and taken[2].get("terminal"):
-        _lines.setdefault(key, []).append((body.id, str(taken[2]["terminal"])))
+    said = str(taken[2]["said"]) if "said" in taken[2] else event_files.said([taken[2], *(taken[2].get("riders") or [])])
+    if body.terminal and said:
+        _lines.setdefault(key, []).append((body.id, said))
     elif key in _notices:  # the Monitor route: no held hook prints its line, so the statusline lets it go now
         _notices[key] = [n for n in _notices[key] if n[0] != body.id]
     return {"acknowledged": body.id}
@@ -911,7 +1043,7 @@ async def held_route(body: HeldBody) -> dict[str, Any]:
     shown = {event_id for event_id, _ in written if event_id}
     if shown and key in _notices:
         _notices[key] = [n for n in _notices[key] if n[0] not in shown]
-    lines = [*(line for _, line in written), _joined(riders)]
+    lines = [*(line for _, line in written), event_files.said(riders)]
     return {"text": meanwhile(riders), "terminal": "\n".join(dict.fromkeys(x for x in lines if x))}
 
 
@@ -1043,6 +1175,8 @@ def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: st
 
 
 GONE_ANSWER = "none: answered in the terminal, or the session moved on"  # the permission log's word for a dropped request
+# the browser answer route's refusal (permission_route)
+ANSWER_IN_TERMINAL = "Answer this in your Claude Code terminal: thimble does not answer permission requests."
 
 
 def _drop(c: str, ids: set[str] | None = None, keep: set[str] | frozenset[str] = frozenset(),
@@ -1086,13 +1220,11 @@ class Ask(NamedTuple):
 
 @router.post("/events/permission")
 async def hook_permission_route(request: Request, body: HookPermission) -> dict[str, Any]:
-    """The PermissionRequest hook relays a prompt of main's session: it waits on main's meta until the analyst answers,
-    `{id, behavior: allow | deny}`, with `updatedPermissions`, what the card's "Always allow" named, when the analyst
-    chose it (_main_offer), or the prompt or hook goes away, `{id, behavior: null}`. A prompt of one of
-    thimble's agents (or a descendant) is answered `null` at once, since Claude Code shows no dialog while a hook holds
-    a background subagent's request (U6b): it shows on the card without buttons (`terminal`), and the terminal answers
-    it; the card goes with the call's result or the agent's end. 404 when the folder is no workspace, 409 when the
-    session is not main."""
+    """The PermissionRequest hook tells the server that a prompt of main's session, or of one of its subagents, waits in
+    the terminal, where the analyst answers it in Claude Code's own dialog: thimble makes no allow decision (0.9.0, S11).
+    The prompt shows on main's card without buttons (`terminal`) until the call's result, the agent's end or the dialog's
+    close ends it (calls_done, agent_moved, terminal_dialogs), and the answer is `{id, behavior: null}` at once, which
+    the hook ignores. 404 when the folder is no workspace, 409 when the session is not main."""
     c = config.workspace_for_cwd(body.cwd)
     if not c:
         raise HTTPException(404, f"{body.cwd} is not a thimble workspace")
@@ -1105,32 +1237,11 @@ async def hook_permission_route(request: Request, body: HookPermission) -> dict[
     preview = json.dumps(body.tool_input, ensure_ascii=False) if body.tool_input is not None else ""
     request_id = HOOK_ASK_PREFIX + secrets.token_hex(4)
     loop = asyncio.get_running_loop()
-    if _thimble_agent(c, body.agent_id):
-        _terminal[request_id] = Ask(c, loop, loop.create_future(), time.monotonic(), time.time(), body.agent_id,
-                                    call_key(body.tool_name, body.tool_input))
-        _hold(c, request_id, body.tool_name, what, preview, body.agent_id, body.tool_input, terminal=True)
-        return {"id": request_id, "behavior": None}
-    fut: asyncio.Future = loop.create_future()
-    _asks[request_id] = Ask(c, loop, fut, time.monotonic(), time.time(), body.agent_id or None,
-                            call_key(body.tool_name, body.tool_input))
-    offer = _main_offer(body.suggestions, preview, body.tool_name)
-    if offer:
-        _offers[request_id] = offer
-    _hold(c, request_id, body.tool_name, what, preview, body.agent_id or None, body.tool_input, offer=offer,
-          cwd=body.cwd)
-    try:
-        while not fut.done():
-            try:
-                await asyncio.wait_for(asyncio.shield(fut), PULL_TICK_S)
-            except asyncio.TimeoutError:
-                if await request.is_disconnected() or _stopping():  # Claude Code's own prompt stays open
-                    break
-    finally:
-        _asks.pop(request_id, None)
-        _offers.pop(request_id, None)
-        if not fut.done():
-            _drop(c, {request_id})  # the hook went away: Claude Code decided without it
-    return {"id": request_id, **(fut.result() if fut.done() else {"behavior": None})}
+    agent = body.agent_id or None
+    _terminal[request_id] = Ask(c, loop, loop.create_future(), time.monotonic(), time.time(), agent,
+                                call_key(body.tool_name, body.tool_input))
+    _hold(c, request_id, body.tool_name, what, preview, agent, body.tool_input, terminal=True)
+    return {"id": request_id, "behavior": None}
 
 
 def _answer_ask(request_id: str, behavior: str | None, updates: list[dict[str, Any]] | None = None) -> bool:
@@ -1156,25 +1267,14 @@ class PermissionAnswer(BaseModel):
 
 @router.post("/ws/{c}/permission")
 async def permission_route(c: str, body: PermissionAnswer, request: Request) -> dict[str, Any]:
-    """The analyst's answer to a relayed permission prompt of main's: it goes to the waiting hook, and the request leaves
-    the card. With `always`, an allow also adds what the card's "Always allow" named, exactly (_offers); a request
-    that offers none is allowed once. 403 for a request that is not the analyst's browser's (hook_auth.analyst), 404
-    when no such request waits."""
-    from . import agents, hook_auth  # noqa: PLC0415
+    """An answer to a relayed permission prompt from the browser: refused, 409, since thimble makes no allow decision
+    (0.9.0, S11) and Claude Code asks every prompt in the terminal; the card stays until the call's result or the
+    agent's end takes it away. 403 for a request that is not the analyst's browser's (hook_auth.analyst)."""
+    from . import hook_auth  # noqa: PLC0415
 
     if not hook_auth.analyst(request):
         raise HTTPException(403, hook_auth.ANALYST_ONLY)
-
-    meta = agents.ensure_main(c)
-    pending = [p for p in meta.get("permissions") or [] if isinstance(p, dict)]
-    if not any(p.get("id") == body.id for p in pending):
-        raise HTTPException(404, "no such permission request is waiting")
-    behavior = "allow" if body.allow else "deny"
-    chosen = _offers.get(body.id) if body.allow and body.always else None
-    said = f"allow, don't ask again: {permission_updates.offer_text(chosen)}" if chosen else behavior
-    _drop(c, {body.id}, answer=said)
-    _answer_ask(body.id, behavior, chosen)
-    return {"answered": body.id, "allow": body.allow}
+    raise HTTPException(409, ANSWER_IN_TERMINAL)
 
 
 def clear_permissions(c: str) -> None:
@@ -1293,9 +1393,8 @@ def calls_done(c: str, agent: str | None, done: "list[tuple[tuple[str, str], flo
         _answer_ask(request_id, None)
     if gone:
         _drop(c, gone)
-    if agent is not None:  # a call of one of thimble's agents ran: the terminal answered its prompt
-        keys = {key for key, _ in done}
-        _end_terminal(c, {i for i, a in _terminal.items() if a.c == c and a.agent == agent and a.call in keys})
+    keys = {key for key, _ in done}  # a call ran: the terminal answered its prompt
+    _end_terminal(c, {i for i, a in _terminal.items() if a.c == c and a.agent == agent and a.call in keys})
 
 
 def _now() -> str:

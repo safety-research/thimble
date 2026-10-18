@@ -6,7 +6,7 @@
 // checkProblem). The rest of the check, the fix's Undo among it, is in the card's details (CheckDetails).
 // The body shimmers the same way while the card's code runs, as when an edit_card call is changing it, and the card
 // shimmers as in a check while thimble runs it again because a label it read changed.
-import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ChatMarkdown } from '../chat/markdown'
 import { Button } from '../components/Button'
@@ -15,7 +15,7 @@ import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Mark } from '../components/Marks'
 import { Popover } from '../components/Menu'
-import { GlyphCites } from '../components/RefChip'
+import { CiteChecksContext, GlyphCites } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
 import { placeTip, useTooltip } from '../components/Tooltip'
 import { LabelSheet } from '../files/LabelCard'
@@ -23,6 +23,7 @@ import { classesOf, isFilesLabel, isMultiClass, mainColour } from '../files/labe
 import { addAgentZone, tintElement } from '../lib/agentKey'
 import { bus } from '../lib/bus'
 import { checkOf, checkProblem } from '../lib/cardCheck'
+import { cardChecks } from '../lib/citeChecks'
 import { conceptLabel, ensureConceptName, hasConceptName, onCellNames } from '../lib/cellName'
 import { teleport } from '../lib/teleport'
 import type { Cell, Concept } from '../lib/types'
@@ -34,6 +35,10 @@ import { kindOf } from './layout'
 import { RefEditor } from './RefEditor'
 
 export type CardField = 'title' | 'takeaway'
+
+/** What a card says in its takeaway's place when the side thread that made it was stopped before it wrote one (backend
+ * notebook.UNFINISHED; bug hunt round 9, J5: the half-made chart showed no word of it, and main said no card was made). */
+export const UNFINISHED_LINE = 'Unfinished: its side thread was stopped before it wrote a takeaway.'
 
 export interface CardFaceProps {
   cell: Cell
@@ -82,6 +87,8 @@ function Face(p: CardFaceProps) {
   const problem = p.onCheckAgain ? checkProblem(check) : ''
   // a plan has no takeaway (bodies.tsx PlanBody): its steps say where the work stands
   const takeaway = kind === 'plan' ? '' : cell.takeaway
+  // how each citation of the takeaway stands in the card's links check (lib/citeChecks)
+  const citeChecks = useMemo(() => cardChecks(cell.verification), [cell.verification])
   const swapped = useSwap(check?.fix?.id ?? null)
   const cls = ['canvas-card']
   if (check?.state === 'running') cls.push('is-checking')
@@ -143,7 +150,9 @@ function Face(p: CardFaceProps) {
       ) : takeaway ? (
         <div className="bcell-take" data-anchor={`card:${cell.id}`} data-anchor-text={takeaway} onMouseDown={p.onTextDown?.('takeaway')} onClick={p.onTextClick?.('takeaway')}>
           <div className={'chat-text bcell-take-text' + (cell.takeaway_stale ? ' is-stale' : '')} title={cell.takeaway_stale ? 'Written before the card ran again' : undefined}>
-            <ChatMarkdown text={takeaway} />
+            <CiteChecksContext.Provider value={citeChecks}>
+              <ChatMarkdown text={takeaway} />
+            </CiteChecksContext.Provider>
           </div>
           {problem && <ProblemMark text={problem} onAgain={p.onCheckAgain} />}
         </div>
@@ -151,6 +160,10 @@ function Face(p: CardFaceProps) {
         <div className="bcell-take bcell-take-none">
           <div className="chat-text bcell-take-text" />
           <ProblemMark text={problem} onAgain={p.onCheckAgain} />
+        </div>
+      ) : cell.unfinished && kind !== 'plan' ? (
+        <div className="bcell-take bcell-take-unfinished" role="note">
+          <p className="bcell-take-text">{UNFINISHED_LINE}</p>
         </div>
       ) : null}
       {p.after}

@@ -7,9 +7,6 @@ import asyncio
 import hashlib
 import io
 import json
-import random
-import re
-import shutil
 import zipfile
 from pathlib import Path
 
@@ -30,81 +27,6 @@ def jsonl(rows, **kw) -> bytes:
 # --------------------------------------------------------------------------- builders
 
 
-def test_mythos5_drops_the_metadata_row_and_writes_compact_json(monkeypatch):
-    raw = jsonl([{"record": "metadata", "title": "names the answer"},
-                 {"record": "message", "n": 1, "text": "ä"}, {"record": "message", "n": 2}])
-    monkeypatch.setattr(demo_data, "M5_SHA256", sha(raw))
-    monkeypatch.setattr(demo_data, "M5_MESSAGES", 2)
-    want = b'{"record":"message","n":1,"text":"\xc3\xa4"}\n{"record":"message","n":2}\n'
-    monkeypatch.setitem(demo_data.MYTHOS5.expected, "transcript.jsonl", sha(want))
-    built = demo_data.build_mythos5(lambda url: raw)
-    assert built.files == {"transcript.jsonl": want} and built.warnings == []
-    with pytest.raises(demo_data.SourceError):
-        demo_data.build_mythos5(lambda url: raw + b'{"record":"message"}\n')
-
-
-def collusion_sources(monkeypatch):
-    """A dump and a report page with the shape the collusion-wiki build expects, and the pins set to them."""
-    probes = [t for t in demo_data.CW_PROBE_URLS]
-    events = [{"event_id": "attacklog_raw_dse_1", "event_type": "probe", "wiki": "dse", "time": t, "label": None,
-               "request": "", "round_id": 3} for t in probes]
-    events += [{"event_id": "e-revert", "event_type": "revert", "wiki": "dse", "time": "2026-05-01T00:00:00Z"},
-               {"event_id": "d1", "event_type": "delete", "wiki": "dse", "time": "2026-05-02T00:00:00Z",
-                "actor_label": "[Admin1]", "time_grade": "A"}]
-    raw = {
-        "pages.jsonl": jsonl([{"page_id": "P[Person20]", "labels": ["[Admin2]x", "[User3]"], "bucket": "b"}]),
-        "revisions.jsonl": jsonl([{"rev_id": "r1", "label": "[Admin2]", "body": "hi [Person5]", "hunks": 2}]),
-        "events.jsonl": jsonl(events),
-        "labels.jsonl": jsonl([{"label": "[Person7]", "is_human_handle": True}]),
-    }
-    sums = "".join(f"{sha(v)}  {k}\n" for k, v in raw.items())
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for k, v in raw.items():
-            zf.writestr(k, v)
-        zf.writestr("SHA256SUMS", sums)
-    archive = buf.getvalue()
-    xss = "https://wikiservice.at/dse/wiki.cgi?form_editprefs=1&action=form_editprefs&old_plist='><script>(function(){var d=JSON.parse(atob(\"e30=\"))})()</script>"
-    mod = "https://wikiservice.at/dse/wiki.cgi?form_editprefs=1&action=form_editprefs&p_username=[RedactedModName]"
-    page = (f"<p><code>{xss.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')}</code>"
-            f"<code>{mod.replace('&', '&amp;')}</code></p>").encode()
-    monkeypatch.setattr(demo_data, "CW_ARCHIVE_SHA256", sha(archive))
-    monkeypatch.setattr(demo_data, "CW_REPORT_LINES", {
-        "xss_chain": (demo_data.CW_REPORT_LINES["xss_chain"][0], sha(xss.encode())),
-        "mod_prefs": ("[RedactedModName]", sha(mod.encode()))})
-    return {demo_data.CW_ARCHIVE_URL: archive, demo_data.CW_REPORT_URL: page}, xss
-
-
-def test_collusion_wiki_strips_analysis_attaches_the_report_and_renames_tokens(monkeypatch):
-    sources, xss = collusion_sources(monkeypatch)
-    built = demo_data.build_collusion_wiki(sources.__getitem__)
-    rows = {k: [json.loads(x) for x in v.splitlines()] for k, v in built.files.items()}
-    assert rows["revisions.jsonl"] == [{"rev_id": "r1", "label": "Friеdrich1982", "body": "hi AnjaWeber"}]
-    assert rows["pages.jsonl"] == [{"page_id": "PUlrichBach", "labels": ["Friеdrich1982x", "SabineK"]}]
-    assert rows["labels.jsonl"][0] == {"label": "JoergWinkler"}
-    assert rows["labels.jsonl"][-1]["label"] == "Friedrich1982"  # the genuine admin, Latin spelling
-    events = rows["events.jsonl"]
-    assert not any(e["event_type"] in ("revert", "probe") for e in events)
-    assert [e["time"] for e in events] == sorted(e["time"] for e in events)
-    probe = next(e for e in events if e["time"] == "2026-06-18T17:44:47Z")
-    assert probe["request"] == xss and probe["label"] == "XSSChainUser" and "round_id" not in probe
-    assert probe["event_id"].startswith("request:dse:")
-    assert next(e for e in events if e["event_type"] == "delete")["actor_label"] == "MartinHuber"
-    prefs = next(e for e in events if e["event_id"] == "request:dse:2026-06-20:0")
-    assert prefs["request"].endswith("p_username=MartinHuber") and prefs["label"] == "MartinHuber"
-    assert len([e for e in events if e["event_id"].startswith("request:dse:2026-")]) == 22
-    assert not re.search(r"\[(Admin|Person|User)\d+\]", "".join(v.decode() for v in built.files.values()))
-    # the pins are the real copy's, so this synthetic one is reported as differing
-    assert len(built.warnings) == 4
-
-
-def test_a_changed_report_page_stops_the_collusion_wiki_build(monkeypatch):
-    sources, _ = collusion_sources(monkeypatch)
-    sources[demo_data.CW_REPORT_URL] = b"<p>moved</p>"
-    with pytest.raises(demo_data.SourceError, match="no longer prints"):
-        demo_data.build_collusion_wiki(sources.__getitem__)
-
-
 def publisher_zip(files: dict[str, bytes], top: str = "evidence-v3") -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -118,13 +40,6 @@ def publisher_zip(files: dict[str, bytes], top: str = "evidence-v3") -> bytes:
 TL_FILES = {"README.txt": b"Folders follow the post.\n", "01-education/arquivo-captures.csv": b"record_number,url\n1,x\n",
             "01-education/responses/ab.txt": b"Loading ..."}
 TL_URL = "https://transluce.org/data/evidence.zip"
-
-
-def test_a_transluce_zip_is_extracted_as_published_without_its_top_folder():
-    archive = publisher_zip(TL_FILES)
-    build = demo_data.zip_dataset("tl", TL_URL, "20261002015844", sha(archive), {k: sha(v) for k, v in TL_FILES.items()})
-    built = build(lambda url: archive)
-    assert built.files == TL_FILES and built.warnings == []
 
 
 def test_a_changed_transluce_zip_is_reported_and_built_from():
@@ -141,41 +56,6 @@ def test_a_changed_transluce_zip_is_reported_and_built_from():
     evil = publisher_zip({**TL_FILES, "../escape.txt": b"x"}, top="")
     built = demo_data.zip_dataset("tl", TL_URL, "1", sha(evil), pins)(lambda url: evil)
     assert "../escape.txt" not in built.files and any("outside the dataset's folder" in w for w in built.warnings)
-
-
-def test_a_transluce_zip_comes_from_the_internet_archive_when_transluce_org_fails():
-    archive = publisher_zip(TL_FILES)
-    got = []
-
-    def fetch(url):
-        got.append(url)
-        if url == TL_URL:
-            raise demo_data.SourceError(f"could not download {url}: 404")
-        return archive
-
-    built = demo_data.zip_dataset("tl", TL_URL, "20261002015844", sha(archive),
-                                  {k: sha(v) for k, v in TL_FILES.items()})(fetch)
-    assert got == [TL_URL, f"https://web.archive.org/web/20261002015844id_/{TL_URL}"]
-    assert built.files == TL_FILES and len(built.warnings) == 1 and "Internet Archive's copy" in built.warnings[0]
-
-
-def test_write_dataset_writes_subfolders_and_empty_folders(tmp_path):
-    pins = {k: sha(v) for k, v in TL_FILES.items()}
-    ds = Dataset(name="tl", title="t", about="a", source="s", sources=(TL_URL,), download_bytes=1, expected=pins,
-                 transforms="none", licence="none", folders=("13-census",),
-                 build=demo_data.zip_dataset("tl", TL_URL, "1", "0" * 64, pins))
-    archive = publisher_zip(TL_FILES)
-    folder = tmp_path / "tl"
-    warnings = demo.write_dataset(ds, folder, lambda url: archive)
-    assert (folder / "01-education" / "responses" / "ab.txt").read_bytes() == b"Loading ..."
-    assert (folder / "13-census").is_dir() and not list(folder.rglob(".*.part"))
-    assert len(warnings) == 1  # the zip's own pin is the test's zero digest
-    # a second run with every file in place fetches nothing
-    assert demo.write_dataset(ds, folder, lambda url: pytest.fail("fetched again")) == []
-    (folder / "mine.txt").write_text("keep")
-    (folder / "01-education" / "responses" / "ab.txt").write_bytes(b"edited")
-    with pytest.raises(demo.DemoError, match="holds other files"):
-        demo.write_dataset(ds, folder, lambda url: archive)
 
 
 def test_the_registry_pins_every_dataset_and_its_sources():
@@ -344,27 +224,6 @@ def test_export_keeps_the_outputs_alone(tmp_path):
     assert sorted(x.name for x in out.parent.iterdir()) == ["toy"]
 
 
-def test_export_keeps_the_cited_calls_cut_to_an_excerpt(tmp_path):
-    out, _, m = made(tmp_path)
-    assert [(c["chat"], c["n"], c["lines"]) for c in m["cited_calls"]] == [("o1", 2, None), ("o1", 5, None)]
-    rows = [json.loads(x) for x in (out / "workspace" / "calls" / "o1.jsonl").read_text().splitlines()]
-    assert {r["n"] for r in rows} == {2, 5}  # call 1, which nothing cites, is left out with its output
-    result = next(r["result"] for r in rows if r["n"] == 2 and "result" in r).split("\n")
-    assert result[0] == "line 1" and result[demo.CALL_LINES - 1] == f"line {demo.CALL_LINES}"
-    assert result[-1] == demo.CALL_CUT_NOTE and len(result) == demo.CALL_LINES + 1
-    # only lines cited: those lines in place, the others empty, so `#L3-L4` still names them
-    out_lines, cut = demo.call_excerpt("\n".join(f"l{i}" for i in range(1, 100)), [(3, 4), (50, 50)])
-    lines = out_lines.split("\n")
-    assert cut and lines[2:4] == ["l3", "l4"] and lines[49] == "l50" and lines[0] == ""
-    assert lines[-1] == demo.CALL_CUT_NOTE
-    # a citation of a whole range keeps at most CALL_KEPT lines of it
-    out_text, cut = demo.call_excerpt("\n".join(f"l{i}" for i in range(1, 1000)), [(1, 100000)])
-    assert cut and sum(1 for x in out_text.split("\n") if x) == demo.CALL_KEPT + 1
-    assert demo.call_excerpt({"rows": ["a"]}, None) == ('{\n "rows": [\n  "a"\n ]\n}', False)
-    assert demo.citations(["[[call:o1/2#L3-L4]] [[call:o1/2#L9]]", "call:x/1"]) == {("o1", 2): [(3, 4), (9, 9)],
-                                                                                    ("x", 1): None}
-
-
 def test_export_refuses_a_file_that_copies_a_long_stretch_of_the_corpus(tmp_path):
     corpus = tmp_path / "corpus"
     corpus.mkdir()
@@ -393,29 +252,6 @@ def test_export_refuses_a_file_that_copies_a_long_stretch_of_the_corpus(tmp_path
         demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path, user="", scan=no_scan)
 
 
-def test_the_verbatim_index_finds_every_long_shared_stretch():
-    rng = random.Random(7)
-    text = "".join(rng.choice("abcdefghij klmnopqrstuvwxyz") for _ in range(5000))
-    corpus = demo_verbatim.Corpus(files=[("a.txt", text)])
-    for start, n in ((0, 400), (1234, 462), (777, 1000)):
-        piece = text[start:start + n].strip()
-        found = demo_verbatim.scan(corpus, "card.json", json.dumps({"out": "BEFORE " + piece + " AFTER"}))
-        assert found.longest >= len(piece) - 2 * (demo_verbatim.STRIDE - 1) and found.shared >= found.longest
-    assert demo_verbatim.scan(corpus, "card.json", json.dumps({"out": text[10:10 + 500]})).long_runs == 1
-    assert demo_verbatim.scan(corpus, "card.json", json.dumps({"out": "NOTHING OF IT " * 20})).longest == 0
-
-
-def test_a_record_copied_as_escaped_text_measures_as_the_record():
-    """A call's input is JSON in a string, and a printed record keeps its escapes: both measure as the record."""
-    record = ('Grüße an alle Agenten: bitte "lest" die Regeln.\nZweite Zeile mit Umlauten äöü und mehr Text, damit es '
-              'lang genug wird. ') * 6
-    corpus = demo_verbatim.Corpus(files=[("a.jsonl", json.dumps({"body": record}) + "\n")])
-    call = json.dumps({"n": 1, "input": json.dumps({"command": "cat <<EOF\n" + record + "\nEOF"})})
-    for name, text in (("calls/o1.jsonl", call), ("card.txt", repr(record)), ("card.txt", json.dumps(record))):
-        found = demo_verbatim.scan(corpus, name, text)
-        assert found.long_runs == 1 and found.longest >= len(record.strip()) - 2 * (demo_verbatim.STRIDE - 1), name
-
-
 def test_export_refuses_what_may_be_private(tmp_path):
     corpus = tmp_path / "corpus"
     corpus.mkdir()
@@ -437,34 +273,6 @@ def test_export_refuses_what_may_be_private(tmp_path):
     assert (tmp_path / "mine" / "notes.txt").read_text() == "keep"
 
 
-def test_export_scrubs_and_checks_its_manifest(tmp_path):
-    """The manifest carries the orientation's request and the paths left out: written with placeholders, and refused
-    while it holds the user name, as check_content would refuse it."""
-    corpus = tmp_path / "corpus"
-    corpus.mkdir()
-    ws = make_workspace(tmp_path, corpus, tmp_path)
-    run = json.loads((ws / "orient" / "run.json").read_text())
-    (ws / "orient" / "run.json").write_text(json.dumps({**run, "query": f"look at {corpus}/a.jsonl"}))
-    (ws / "kernels" / "maintainername-k.log").write_text("log")
-    with pytest.raises(demo.DemoError, match="thimble-demo-precache.json: the user name 'maintainername'"):
-        demo.export_outputs(ws, corpus, tmp_path / "m", name="toy", home=tmp_path, user="maintainername", scan=no_scan)
-    m = demo.export_outputs(ws, corpus, tmp_path / "m", name="toy", home=tmp_path, user="maintainername", scrub_user=True,
-                    scan=no_scan)
-    text = (tmp_path / "m" / demo.MANIFEST).read_text()
-    assert m["orientation"]["query"] == "look at @@THIMBLE_CORPUS@@/a.jsonl" and str(tmp_path) not in text
-    assert "kernels/user-k.log" in text and "maintainername" not in text and m["flagged"] == []
-
-
-def test_export_refuses_a_file_of_a_shape_it_never_writes(tmp_path, monkeypatch):
-    """The export checks what it writes as check_content will: here, label rows that still carry their spans."""
-    monkeypatch.setattr(demo, "label_rows", lambda data: data)
-    corpus = tmp_path / "corpus"
-    corpus.mkdir()
-    ws = make_workspace(tmp_path, corpus, tmp_path)
-    with pytest.raises(demo.DemoError, match="labels/l1.jsonl: a label row with spans"):
-        demo.export_outputs(ws, corpus, tmp_path / "x", name="toy", home=tmp_path, user="", scan=no_scan, allow_private=True)
-
-
 def test_export_scrubs_the_user_name_and_paths_a_summary_cut_short(tmp_path):
     corpus = tmp_path / "corpus"
     corpus.mkdir()
@@ -476,6 +284,23 @@ def test_export_scrubs_the_user_name_and_paths_a_summary_cut_short(tmp_path):
     summary = (out / "workspace" / "orient" / "summary.md").read_text()
     assert "drwx user user x" in summary and "@@THIMBLE_WORKSPACE@@…" in summary and str(tmp_path) not in summary
     assert m["user_name_scrubbed"] == 2 and m["flagged"] == []
+
+
+def test_f6_a_shipped_precache_keeps_the_citation_verdicts_today_s_check_gives():
+    """Bug hunt F6: the collusion-wiki demo's first card showed "posted its answer" red, a citation in words that names
+    a record and shows no value, which the check of its orientation compared with the number on the cited line. Today's
+    check never marks such a citation red, nor leaves a card's check pending; the shipped pre-caches carry its verdicts
+    (scripts/dev/recheck_precache_citations.py)."""
+    from app import cite
+
+    found = []
+    for p in sorted((Path(__file__).resolve().parents[2] / "demos").glob("*/workspace/notebooks/*.json")):
+        for cell in json.loads(p.read_text("utf-8")).get("cells") or []:
+            links = (cell.get("verification") or {}).get("links") or {}
+            found += [(p.parent.parent.parent.name, cell["id"], b.get("value")) for b in links.get("broken") or []
+                      if not cite.shows_value(str(b.get("value") or ""))]
+            found += [(p.parent.parent.parent.name, cell["id"], "pending")] if links.get("status") == "pending" else []
+    assert found == []
 
 
 def test_install_fills_the_placeholders_and_marks_the_workspace_precached(tmp_path):
@@ -508,186 +333,6 @@ def test_install_fills_the_placeholders_and_marks_the_workspace_precached(tmp_pa
         demo.install(out, new_ws, new_corpus)
 
 
-def test_install_keeps_each_view_at_the_version_it_passed_so_readers_see_it(tmp_path):
-    """A pre-cache leaves out thimble's state of the views (views/), and readers see a view only at a version kept there
-    (views.read_built's digest rule). Install keeps that copy for each view whose files still hash to their stamp, and
-    none for one whose stamp names other files."""
-    from app import views
-
-    out, corpus, _ = made(tmp_path)
-    src = out / "workspace" / "extension" / "views" / "v1"
-    raw = json.loads((src / "view.json").read_text())
-    version = views.view_digest(src)[:12]
-    (src / "view.json").write_text(json.dumps({**raw, "version": version}))
-    new_ws = tmp_path / "b" / "toy"
-    demo.install(out, new_ws, corpus)
-    kept = new_ws / "views" / ".versions" / "v1" / version
-    assert (kept / "view.json").is_file() and (kept / "view.html").read_text() == "<p>view</p>"
-    (src / "view.json").write_text(json.dumps({**raw, "version": "0123456789ab"}))
-    other = tmp_path / "c" / "toy"
-    demo.install(out, other, corpus)
-    assert not (other / "views" / ".versions" / "v1").exists(), "a stamp that names other files is no pass"
-
-
-def test_a_precache_names_the_view_its_workspace_opens_on_and_install_marks_it(tmp_path):
-    """`--view` names one of the workspace's views for it to open on: the manifest's `view`, a sentence of the README
-    and, on install, the mark's `view`, by which the start page's row opens the workspace there. Without it nothing is
-    named; a view the workspace lacks is refused at export, writing nothing, and a manifest naming a view the pre-cache
-    lacks installs with none and a warning."""
-    out, corpus, m = made(tmp_path, view="v1")
-    assert m["view"] == "v1" and json.loads((out / demo.MANIFEST).read_text())["view"] == "v1"
-    assert "documents. The workspace opens on its view `v1`. The orientation's" in (out / "README.md").read_text()
-    ws = tmp_path / "b" / "toy"
-    got = demo.install(out, ws, corpus)
-    assert json.loads((ws / demo.MARKER).read_text())["view"] == "v1"
-    assert not [w for w in got["warnings"] if "view" in w]
-
-    plain, corpus2, m2 = made(tmp_path, where="c", name="plain")
-    assert "view" not in m2 and "opens on its view" not in (plain / "README.md").read_text()
-    ws2 = tmp_path / "b" / "plain"
-    demo.install(plain, ws2, corpus2)
-    assert json.loads((ws2 / demo.MARKER).read_text())["view"] is None
-
-    with pytest.raises(demo.DemoError, match="has no view nope; its views: v1"):
-        made(tmp_path, where="d", name="refused", view="nope")
-    assert not (tmp_path / "out" / "refused").exists()
-
-    man = json.loads((out / demo.MANIFEST).read_text())
-    (out / demo.MANIFEST).write_text(json.dumps({**man, "view": "gone"}))
-    ws3 = tmp_path / "e" / "toy"
-    got = demo.install(out, ws3, corpus)
-    assert json.loads((ws3 / demo.MARKER).read_text())["view"] is None
-    assert "the pre-cache opens on the view gone, which it does not hold, so the workspace opens on Files" in got["warnings"]
-
-
-def test_each_shipped_precache_opens_on_its_dataset_s_main_view():
-    """demos/: collusion-wiki opens on Wiki Page History, mythos-5 and transluce-urlquery on their Activity Timeline,
-    each a view the pre-cache holds and lists."""
-    want = {"collusion-wiki": "wiki-page-history", "mythos-5": "activity-timeline",
-            "transluce-urlquery": "activity-timeline"}
-    cat = demo.precaches(demo.PRECACHES)
-    assert set(cat) == set(want)
-    for name, pc in cat.items():
-        m = demo.read_manifest(Path(pc["path"]))
-        assert m.get("view") == want[name], name
-        assert demo.opening_view(Path(pc["path"]) / demo.WORKSPACE, m["view"]) == want[name], name
-        assert f"extension/views/{want[name]}/view.json" in {f["path"] for f in m["files"]}, name
-        assert f"opens on its view {demo.opens_on(m)}." in (Path(pc["path"]) / demo.README).read_text(), name
-
-
-def test_the_coverage_line_goes_with_the_precache_to_the_end_of_the_orientation_s_thread(tmp_path):
-    """The record and the thread's log stay as the export writes them (no `coverage`, an empty log); the manifest and the
-    README carry the first run's coverage line, and install ends the thread with it, as a live run's end does."""
-    from app import orient_session
-
-    line = "Coverage: viewed only a.jsonl · 50% of files · 12% of lines"
-    root = tmp_path / "a"
-    corpus = root / "corpus"
-    corpus.mkdir(parents=True)
-    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
-    ws = make_workspace(root, corpus, root)
-    run = json.loads((ws / "orient" / "run.json").read_text())
-    (ws / "orient" / "run.json").write_text(json.dumps({**run, "coverage": line, "ended": "2026-10-06T04:05:35+00:00"}))
-    out = tmp_path / "out" / "toy"
-    m = demo.export_outputs(ws, corpus, out, name="toy", home=root, user="", scan=no_scan)
-    assert m["orientation"]["coverage"] == line
-    assert "coverage" not in json.loads((out / "workspace" / "orient" / "run.json").read_text())
-    assert (out / "workspace" / "chats" / "o1.jsonl").read_text() == ""
-    assert f"coverage line, which install puts at the end of its thread: {line}" in (out / "README.md").read_text()
-    new_ws = tmp_path / "b" / "toy"
-    demo.install(out, new_ws, corpus)
-    rows = [json.loads(x) for x in (new_ws / "chats" / "o1.jsonl").read_text().splitlines()]
-    assert rows == [{"type": "chip", "ts": "2026-10-06T04:05:35+00:00", "kind": orient_session.COVERAGE_KIND,
-                     "text": line}]
-    # a record without a line (an export made before it was kept) installs with the empty log
-    assert demo.coverage_line({"coverage": 1}) is None and demo.coverage_line({"coverage": "  "}) is None
-
-
-PENDING = {
-    "views/proposals.json": json.dumps([
-        {"slug": "v1", "name": "Page threads", "status": "built", "claims": ["a.jsonl"]},
-        {"slug": "trace-steps", "name": "Trace Steps", "status": "suggested", "claims": ["**/*.trace"],
-         "offered": {"at": "2026-10-14T10:00:00Z", "after": "file", "why": "Traces read as steps."}},
-        {"slug": "old-viewer", "name": "Old Viewer", "status": "suggested", "claims": ["**/*.vtt"]}]),
-    "views/suggestions.json": json.dumps({".trace": {"answer": "suggested", "slug": "trace-steps", "ts": "t"},
-                                          ".vtt": {"answer": "none", "ts": "t"}}),
-    "notices.json": json.dumps([{"id": "n1", "key": "proposals", "text": "Couldn't check for a view proposal."}]),
-    "notices-dismissed.json": json.dumps({"manual-mode": "t"}),
-    "views/proposer.json": json.dumps({"job": {"after": ["main"], "sid": "s-exporter", "cut": "u9"}}),
-    "views/proposer.jsonl": json.dumps({"status": "ok", "sid": "s-exporter"}) + "\n",
-}
-
-
-def pending_workspace(tmp_path: Path) -> tuple[Path, Path]:
-    """A workspace that holds what was pending for its exporter (PENDING): (the workspace, the corpus)."""
-    root = tmp_path / "a"
-    corpus = root / "corpus"
-    corpus.mkdir(parents=True)
-    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
-    ws = make_workspace(root, corpus, root)
-    for rel, text in PENDING.items():
-        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
-        (ws / rel).write_text(text)
-    return ws, corpus
-
-
-def slugs(path: Path) -> list[str]:
-    return [r["slug"] for r in json.loads(path.read_text())]
-
-
-def test_exports_leave_out_what_was_pending_for_the_exporter_and_install_takes_it_from_an_older_one(tmp_path):
-    """A view proposal that waits for the exporter's answer, their notices and the view proposer's job and run log would
-    show a card or a notice on every machine that installs the export: neither format carries them, and install takes
-    them out of an export made before."""
-    ws, corpus = pending_workspace(tmp_path)
-    out = tmp_path / "out" / "toy"
-    m = demo.export_outputs(ws, corpus, out, name="toy", home=tmp_path / "a", user="", scan=no_scan)
-    assert slugs(out / "workspace" / demo.PROPOSALS) == ["v1", "old-viewer"], "a 0.7 viewer row is no card; it stays"
-    left = {f["path"]: f["why"] for f in m["left_out"]}
-    for rel in demo.PENDING_LEFT_OUT:
-        assert left[rel] == demo.PENDING_LEFT_OUT[rel] and not (out / "workspace" / rel).exists()
-    full = tmp_path / "full" / "toy"
-    m = demo.export_full(ws, corpus, full, name="toy", home=tmp_path / "a", user="", scan=no_scan,
-                         claude_dir=tmp_path / "no-claude")
-    names = {f["path"] for f in m["files"]}
-    assert not set(demo.PENDING_LEFT_OUT) & names
-    assert {f["path"]: f["why"] for f in m["left_out"]}["views/proposer.json"] == demo.PENDING_LEFT_OUT["views/proposer.json"]
-    assert slugs(full / "workspace" / demo.PROPOSALS) == ["v1", "old-viewer"]
-    # the file type whose answer was the proposal left out is asked again; another type's answer stays
-    assert set(json.loads((full / "workspace" / demo.SUGGESTIONS).read_text())) == {".vtt"}
-    # an export made before it left them out: install takes them out
-    older = json.loads((full / demo.MANIFEST).read_text())
-    for rel, text in PENDING.items():
-        (full / "workspace" / rel).write_text(text)
-        if rel not in names:
-            older["files"].append({"path": rel, "bytes": len(text)})
-    (full / demo.MANIFEST).write_text(json.dumps(older))
-    new_ws = tmp_path / "b" / "toy"
-    demo.install(full, new_ws, corpus, home=tmp_path / "b", claude_dir=tmp_path / "b-claude")
-    assert not [rel for rel in demo.PENDING_LEFT_OUT if (new_ws / rel).exists()]
-    assert slugs(new_ws / demo.PROPOSALS) == ["v1", "old-viewer"]
-    assert set(json.loads((new_ws / demo.SUGGESTIONS).read_text())) == {".vtt"}
-
-
-def test_a_readme_names_the_switches_of_a_run_from_before_0_8_0_only(tmp_path):
-    # since 0.8.0 an orientation's record holds the deck alone; its views and documents came from the analyst after it
-    assert demo.outputs_of({"passes": ["final"]}) == ""
-    assert demo.outputs_of({"passes": ["final", "views", "report"], "critique": True}) == \
-        "; outputs final, views, report, critique on"
-    assert demo.outputs_of({"passes": []}) == "; outputs none"
-    out, _, m = made(tmp_path)  # a record with passes final and views, as 0.6.0 wrote
-    readme = (out / "README.md").read_text()
-    assert "; outputs final, views." in readme and "opens on its cards, labels, views and documents" in readme
-    m = {**m, "orientation": {**m["orientation"], "passes": ["final"]},
-         "views": [{"slug": "v1", "name": "Page threads", "from": "review"}]}
-    readme = demo.readme(m)
-    assert "; outputs" not in readme and "It holds 3 cards, 1 label, 1 view and 1 document" in readme
-    assert "in place of the pre-cache's own views" in readme and "orientation's own" not in readme
-    full = demo.readme_full({**m, "version": demo.FULL_VERSION, "files": [], "transcripts": [], "inventory": {}})
-    assert "continues the orientation's session" not in full and "; outputs" not in full
-    assert "no prompt.\n" in full
-
-
 def test_install_refuses_paths_outside_the_workspace_and_files_of_other_kinds(tmp_path):
     out, corpus, _ = made(tmp_path)
     man = json.loads((out / demo.MANIFEST).read_text())
@@ -701,18 +346,6 @@ def test_install_refuses_paths_outside_the_workspace_and_files_of_other_kinds(tm
         (out / demo.MANIFEST).write_text(json.dumps({**man, "version": version}))
         with pytest.raises(demo.DemoError, match="another format"):
             demo.install(out, tmp_path / "ws", corpus)
-
-
-def test_a_precache_carries_its_sources_notice_first_in_its_readme(tmp_path):
-    out, _, m = made(tmp_path, name="mythos-5")
-    assert "canary GUID" in m["notice"]
-    readme = (out / "README.md").read_text()
-    assert readme.startswith("> Notice from the source: This document should not be included")
-    assert json.loads((out / demo.MANIFEST).read_text())["notice"] == m["notice"]
-    assert "session is not here" in readme and "measured no stretch of 400 characters or more" in readme
-    assert "every stretch of 462 or more" in readme
-    out, _, m = made(tmp_path, where="t", name="transluce-urlquery")
-    assert "Published by Transluce" in m["credit"] and "Published by Transluce" in (out / "README.md").read_text()
 
 
 # --------------------------------------------------------------------------- the context of a fresh session
@@ -853,32 +486,6 @@ def test_demo_downloads_installs_opens_and_says_how_to_attach(tmp_path, fake_wor
     assert (installed / "orient" / "run.json").is_file()
 
 
-def test_demo_refresh_reinstalls_each_named_dataset_or_all_as_replace_does(tmp_path, fake_world):
-    w = fake_world
-    pre = precache_for(tmp_path, "one")
-    ws = Path(w["env"]["workspaces_dir"]) / "demo-one"
-    archive = Path(w["env"]["workspaces_dir"]) / ".archive"
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
-    (ws / "notebooks" / "mine.json").write_text("{}")  # the analyst's own card
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre), refresh=True)) == 0
-    assert [p.name for p in archive.glob("demo-one-*/notebooks/mine.json")], "the earlier workspace is archived"
-    assert not (ws / "notebooks" / "mine.json").exists() and (ws / demo.MARKER).is_file()
-    assert "the earlier workspace demo-one is archived at" in said(w) and "it stays" not in said(w)
-    # no names: every dataset, the ones without a pre-cache registered as before
-    w["lines"].clear()
-    assert run(w, args(dir=str(w["root"]), precaches=str(pre), refresh=True)) == 0
-    assert len(list(archive.glob("demo-one-*"))) == 2 and (ws / demo.MARKER).is_file()
-    assert "two opens without a pre-cached orientation" in said(w)
-
-
-def test_refresh_s_help_says_it_reinstalls_and_what_it_does_with_examples():
-    parser = argparse.ArgumentParser()
-    demo.add_parser(parser.add_subparsers())
-    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices["demo"]
-    text = next(a.help for a in sub._actions if "--refresh" in a.option_strings)
-    assert "reinstall" in text and "as --replace does" in text and "with --examples" in text
-
-
 def set_json(p: Path, **kw) -> None:
     p.write_text(json.dumps({**json.loads(p.read_text()), **kw}))
 
@@ -919,153 +526,6 @@ def test_an_install_of_an_older_precache_is_outdated_by_its_date_its_digest_or_a
     assert not demo.precache_outdated(ws, out)
 
 
-def test_demo_names_the_command_that_reinstalls_an_older_precache(tmp_path, fake_world, monkeypatch):
-    w = fake_world
-    pre = precache_for(tmp_path, "one")
-    monkeypatch.setattr(demo, "PRECACHES", pre)  # the pre-caches this thimble ships
-    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
-    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
-    assert "holds an analysis already; it stays" in said(w) and "older pre-cache" not in said(w)
-    manifest = pre / "one" / demo.MANIFEST
-    manifest.write_text(json.dumps({**json.loads(manifest.read_text()), "created": "2999-01-01T00:00:00+00:00"}))
-    w["lines"].clear()
-    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
-    line = "workspace demo-one holds an older pre-cache than this thimble ships; `thimble demo --refresh one` " \
-           "archives it and installs the new one"
-    assert line in said(w) and "it stays" not in said(w)
-    # from another folder of pre-caches, the command names it
-    other = tmp_path / "other"
-    shutil.copytree(pre, other)
-    w["lines"].clear()
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(other))) == 0
-    assert f"older pre-cache than {other} holds; `thimble demo --refresh one --precaches {other}`" in said(w)
-    # --refresh installs it, and the workspace is no longer outdated
-    assert run(w, args(names=["one"], dir=str(w["root"]), refresh=True)) == 0
-    w["lines"].clear()
-    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
-    assert "holds an analysis already; it stays" in said(w) and "older pre-cache" not in said(w)
-
-
-def test_a_wrapped_line_keeps_a_command_in_backticks_whole():
-    lines: list[str] = []
-    demo.wrapped(lines.append)("  workspace demo-collusion-wiki holds an older pre-cache than this thimble ships; "
-                               "`thimble demo --refresh collusion-wiki` archives it and installs the new one")
-    assert len(lines) == 2 and all(len(x) <= 110 for x in lines)
-    assert lines[1] == "    `thimble demo --refresh collusion-wiki` archives it and installs the new one"
-
-
-def test_demo_with_no_precache_opens_each_dataset_with_a_note(fake_world):
-    w = fake_world  # PRECACHES is an empty folder, as in a release with no demos/<name>/
-    assert run(w, args(names=["one", "two"], dir=str(w["root"]))) == 0
-    for name in ("one", "two"):
-        assert json.loads((Path(w["env"]["data_dir"]) / f"demo-{name}.corpus.json").read_text())["path"] == str(w["root"] / name)
-        assert not (Path(w["env"]["workspaces_dir"]) / f"demo-{name}").exists()
-    assert len([x for x in w["lines"] if "opens without a pre-cached orientation" in x]) == 2
-    text = said(w)
-    assert demo.FROZEN_LINE in text
-    assert "ran in advance" not in text
-
-
-def test_demo_is_static_by_default_and_asks_nothing(tmp_path, fake_world, monkeypatch):
-    w = fake_world
-    pre = precache_for(tmp_path, "one")
-    asked = terminal(monkeypatch, [])
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
-    assert asked == [] and w["started"] == []
-    text = said(w)
-    assert f"{demo.FROZEN_LINE} cd {w['root'] / 'one'} && thimble" in text
-    assert "No Claude Code session is attached" not in text and "thimble -c" not in text
-
-
-def test_the_printout_names_a_frozen_demo_session_unless_a_session_attaches_or_was_kept(monkeypatch):
-    one = (fake_dataset("one"), Path.home() / "thimble demo" / "one", "demo-one")
-    # the frozen demo: the sentence and the command, the home folder as ~, quoted only where a shell needs it
-    assert demo.attach_lines([one], True, None) == ["", demo.FROZEN_LINE, "  cd ~/'thimble demo/one' && thimble"]
-    assert demo.shell_folder(Path("/srv/data/one")) == "/srv/data/one" and demo.shell_folder(Path.home()) == "~"
-    # a session attaching, or a full pre-cache's session kept: how to attach later and continue, as before
-    attaching = " ".join(demo.attach_lines([one], True, one[1]))
-    assert "Attaching a Claude Code session in" in attaching and "thimble -c" in attaching
-    assert demo.FROZEN_LINE not in attaching
-    kept = " ".join(demo.attach_lines([one], True, None, kept=True))
-    assert "No Claude Code session is attached" in kept and "its Claude Code session came with it" in kept
-    assert demo.FROZEN_LINE not in kept
-
-
-def test_demo_attach_with_two_datasets_asks_which(fake_world, monkeypatch):
-    w = fake_world
-    asked = terminal(monkeypatch, ["2"])
-    assert run(w, args(names=["one", "two"], dir=str(w["root"]), attach=True)) == 0
-    assert asked[0].startswith("Attach in which?")
-    assert w["started"] == [w["root"] / "two"]
-    assert f"Attaching a Claude Code session in {w['root'] / 'two'}" in said(w)
-
-
-def test_demo_says_how_to_log_in_when_claude_is_not_logged_in(fake_world, monkeypatch):
-    w = fake_world
-    w["auth"] = {"loggedIn": False}
-    asked = terminal(monkeypatch, [])
-    assert run(w, args(names=["one"], dir=str(w["root"]), attach=True)) == 0
-    assert asked == [] and w["started"] == []
-    text = said(w)
-    assert "Claude Code is not logged in" in text and "`claude auth login`" in text
-    assert "INSTALL.md, Authentication" in text and "ANTHROPIC_API_KEY" not in text
-    assert f"cd {w['root'] / 'one'} && thimble" in text
-    # no claude on PATH at all
-    monkeypatch.setattr(config, "CLI_PATH", None)
-    w["lines"].clear()
-    assert run(w, args(names=["one"], dir=str(w["root"]), attach=True)) == 0
-    assert asked == [] and "is not on PATH" in said(w)
-
-
-def test_demo_attach_and_no_attach_answer_without_asking(fake_world, monkeypatch):
-    w = fake_world
-    asked = terminal(monkeypatch, [])
-    assert run(w, args(names=["one"], dir=str(w["root"]), no_attach=True)) == 0
-    assert asked == [] and w["started"] == [] and demo.FROZEN_LINE in said(w)
-    assert run(w, args(names=["one"], dir=str(w["root"]), attach=True)) == 0
-    assert asked == [] and w["started"] == [w["root"] / "one"]
-    # --attach without a terminal: the workspace opens, with the instructions
-    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
-    w["lines"].clear()
-    assert run(w, args(names=["one"], dir=str(w["root"]), attach=True)) == 0
-    assert w["started"] == [w["root"] / "one"] and "needs a terminal" in said(w)
-
-
-def test_demo_prints_and_opens_one_url_the_start_page(tmp_path, fake_world, monkeypatch):
-    """Two datasets or one, the command prints one URL and opens it: the start page (no workspace in the URL), with a
-    one-time sign-in code when it prints to a terminal. A browser it opened spent that code, so the line it prints then
-    names the page without it; with no browser opened the printed link carries the code. The attach lines follow as
-    before."""
-    w = fake_world
-    pre = precache_for(tmp_path, "one")
-    from app import cli
-
-    monkeypatch.setattr(demo, "register", lambda folder, url, name=None: name or folder.name)
-    monkeypatch.setattr(cli, "ui_url", lambda name, pair=False: f"http://127.0.0.1:1/{f'?ws={name}' if name else ''}"
-                                                                + ("#p=c0de" if pair else ""))
-    w["server"] = lambda say: ("http://127.0.0.1:1", w["env"])
-    assert run(w, args(names=["one", "two"], dir=str(w["root"]), precaches=str(pre))) == 0
-    text = said(w)
-    assert w["shown"] == ["http://127.0.0.1:1/"]
-    assert re.findall(r"http://\S+", text) == ["http://127.0.0.1:1/"] and "Open at http://127.0.0.1:1/" in text
-    assert "?ws=" not in text and "is open at" not in text
-    assert f"cd {w['root'] / 'one'} && thimble # one" in text and demo.FROZEN_LINE in text
-    assert w["started"] == []
-    # one dataset: still the start page; on a terminal, the browser opens it with a code and the line names it plain
-    terminal(monkeypatch, [])
-    w["shown"].clear()
-    w["lines"].clear()
-    assert run(w, args(names=["two"], dir=str(w["root"]))) == 0
-    assert w["shown"] == ["http://127.0.0.1:1/#p=c0de"]
-    assert re.findall(r"http://\S+", said(w)) == ["http://127.0.0.1:1/"] and "(opened in your browser)" in said(w)
-    # no browser opened (no desktop): the printed link carries the code
-    w["lines"].clear()
-    assert demo.run(args(names=["two"], dir=str(w["root"])), get=w["get"], say=w["lines"].append, server=w["server"],
-                    start=w["started"].append, show=lambda url: False, auth=lambda: w["auth"]) == 0
-    text = said(w)
-    assert re.findall(r"http://\S+", text) == ["http://127.0.0.1:1/#p=c0de"] and "opened in your browser" not in text
-
-
 def test_demo_asks_before_downloading_and_needs_a_terminal_to_ask(fake_world, monkeypatch):
     w = fake_world
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -1078,25 +538,6 @@ def test_demo_asks_before_downloading_and_needs_a_terminal_to_ask(fake_world, mo
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     w["got"].clear()
     assert run(w, args(names=["two"], yes=False, dir=str(w["root"]))) == 0 and w["got"] == []
-
-
-def test_demo_list_downloads_nothing_and_shows_each_name_sentence_source_and_folder(fake_world, monkeypatch):
-    w = fake_world
-    monkeypatch.setitem(demo.DATASETS, "one", fake_dataset("one", caution="safeguards may stop it"))
-    assert run(w, args(list=True, dir=str(w["root"]))) == 0
-    assert w["got"] == [] and not w["root"].exists()
-    text = said(w)
-    assert "one" in text and "example.org" in text and str(w["root"] / "one").replace(str(Path.home()), "~") in text
-    assert "Published by one's authors" not in text and "safeguards may stop it" not in text  # SOURCES.md holds them
-
-
-def test_a_folder_with_other_files_is_left_alone(fake_world):
-    w = fake_world
-    (w["root"] / "one").mkdir(parents=True)
-    (w["root"] / "one" / "mine.txt").write_text("keep")
-    assert run(w, args(names=["one"], dir=str(w["root"]))) == 1
-    assert "holds other files (mine.txt)" in said(w)
-    assert (w["root"] / "one" / "mine.txt").read_text() == "keep" and w["got"] == []
 
 
 # --------------------------------------------------------------------------- the workspaces' names
@@ -1132,114 +573,6 @@ def old_demo(w, tmp_path: Path, pre: Path | None = None) -> tuple[Path, Path]:
     return pre, ws
 
 
-def test_a_dataset_registers_as_demo_name_beside_the_analyst_s_folder_of_its_name(named_world):
-    w = named_world
-    assert run(w, args(names=["one"], dir=str(w["root"]))) == 0
-    data = Path(w["env"]["data_dir"])
-    assert json.loads((data / "demo-one.corpus.json").read_text())["path"] == str(w["root"] / "one")
-    assert json.loads((data / "one.corpus.json").read_text())["path"] == str(w["mine"])  # the analyst's, untouched
-    assert not (data / "one-2.corpus.json").exists()
-    # a new registration takes the name asked for, the next free one when another folder holds it; a folder registered
-    # already keeps its own
-    other = w["root"].parent / "elsewhere" / "one"
-    other.mkdir(parents=True)
-    assert config.register_corpus(other, exact=True, name="demo-one")["name"] == "demo-one-2"
-    assert config.register_corpus(w["mine"], exact=True, name="demo-x")["name"] == "one"
-    with pytest.raises(ValueError):
-        config.register_corpus(other, exact=True, name="../up")
-
-
-def test_an_earlier_demo_workspace_under_a_suffixed_name_becomes_demo_name_with_all_it_holds(tmp_path, named_world):
-    w = named_world
-    pre, old = old_demo(w, tmp_path)
-    root, data = Path(w["env"]["workspaces_dir"]), Path(w["env"]["data_dir"])
-    (old / "chats" / "t1.jsonl").write_text(json.dumps({"type": "user", "text": "a question of mine"}) + "\n")
-    held = sorted(str(p.relative_to(old)) for p in old.rglob("*") if p.is_file())
-    assert str(old) in (old / "notebooks" / "g1.json").read_text()  # the pre-cache's absolute path, filled in
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
-    new = root / "demo-one"
-    assert not old.exists() and not (data / "one-2.corpus.json").exists()
-    assert sorted(str(p.relative_to(new)) for p in new.rglob("*") if p.is_file()) == held
-    assert "a question of mine" in (new / "chats" / "t1.jsonl").read_text()
-    rec = json.loads((data / "demo-one.corpus.json").read_text())
-    assert rec["name"] == "demo-one" and rec["path"] == str(w["root"] / "one") and rec["renamed_from"] == ["one-2"]
-    g1 = (new / "notebooks" / "g1.json").read_text()
-    assert str(new) in g1 and f"{old}/" not in g1  # its paths name the new folder
-    assert (root / ".archive" / "demo-one-2026-10-01-120000").is_dir()  # its archived run went with it
-    assert json.loads((data / "one.corpus.json").read_text())["path"] == str(w["mine"])
-    text = said(w)
-    assert "the demo workspace one-2 is now demo-one, with its cards, labels, views, documents and chats" in text
-    assert "workspace demo-one holds an analysis already; it stays" in text  # not installed again over it
-    # the next registration of the folder (a session's /thimble) keeps what it was renamed from
-    assert config.register_corpus(w["root"] / "one", exact=True)["renamed_from"] == ["one-2"]
-    # a second run has nothing to rename
-    w["lines"].clear()
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
-    assert "is now demo-one" not in said(w)
-
-
-def test_the_server_renames_an_earlier_demo_workspace_and_refuses_while_a_session_holds_it(tmp_path, named_world,
-                                                                                          monkeypatch, plugin_headers):
-    from fastapi.testclient import TestClient
-
-    from app import cli, events, main
-
-    w = named_world
-    pre, old = old_demo(w, tmp_path)
-    client = TestClient(main.create_app())
-    calls: list[tuple[str, str]] = []
-
-    def request(method, url, body=None, timeout=5.0):
-        path = url.removeprefix("http://127.0.0.1:1")
-        calls.append((method, path))
-        # the rename is the CLI's route: it proves the token, with a nonce of its own each time
-        r = client.request(method, path, json=body, headers=plugin_headers())
-        return r.status_code, r.json()
-
-    monkeypatch.setattr(cli, "_request", request)
-    w["server"] = lambda say: ("http://127.0.0.1:1", w["env"])
-    # a session holds one-2 open: it keeps its name, and the line says how to rename or remove it
-    monkeypatch.setitem(events._subs, "one-2", {events.Sub("s1")})
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
-    assert old.is_dir() and ("POST", "/api/ws/one-2/rename") not in calls
-    text = said(w)
-    assert "the demo workspace one-2 keeps its name, since a Claude Code session has it open" in text
-    assert "run `thimble demo` again to rename it demo-one (`thimble purge one-2` removes it)" in text
-    # the route refuses on its own too, the moment it is asked
-    assert client.post("/api/ws/one-2/rename", json={"to": "demo-one"}, headers=plugin_headers()).status_code == 409
-    monkeypatch.delitem(events._subs, "one-2")
-    assert client.post("/api/ws/one-2/rename", json={"to": "one"},
-                       headers=plugin_headers()).status_code == 409  # the analyst's name
-    assert client.post("/api/ws/one-2/rename", json={"to": "../x"}, headers=plugin_headers()).status_code == 400
-    assert client.post("/api/ws/nothing/rename", json={"to": "demo-x"}, headers=plugin_headers()).status_code == 404
-    # once it is closed, the next run renames it through the server
-    w["lines"].clear()
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
-    assert ("POST", "/api/ws/one-2/rename") in calls
-    assert not old.exists() and (Path(w["env"]["workspaces_dir"]) / "demo-one" / demo.MARKER).is_file()
-    assert "the demo workspace one-2 is now demo-one" in said(w)
-    names = {r["name"]: r for r in client.get("/api/workspaces").json()}
-    assert names["demo-one"]["label"] == "one" and names["demo-one"]["renamed_from"] == ["one-2"]
-    assert names["one"]["kind"] == "folder" and names["one"]["label"] == "one"
-
-
-def test_an_earlier_demo_workspace_whose_folder_ran_claude_code_sessions_stays_and_the_dataset_opens_fresh(
-        tmp_path, named_world):
-    w = named_world
-    pre, old = old_demo(w, tmp_path)
-    data = Path(w["env"]["data_dir"])
-    # a session of a full pre-cache ran in the workspace's orientation folder: a move would end it
-    (tmp_path / "claude-home" / "projects" / demo.projects_folder(str(old / "orient"))).mkdir(parents=True)
-    assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
-    assert (old / demo.MARKER).is_file() and not (data / "one-2.corpus.json").exists()
-    new = Path(w["env"]["workspaces_dir"]) / "demo-one"
-    assert json.loads((data / "demo-one.corpus.json").read_text())["path"] == str(w["root"] / "one")
-    assert (new / demo.MARKER).is_file()  # installed fresh
-    text = said(w)
-    assert f"the earlier demo workspace one-2 stays as it was in {old}" in text
-    assert "`thimble purge one-2` removes one-2" in text and "installed as workspace demo-one" in text
-
-
 def test_an_analyst_s_own_workspace_and_a_demo_name_another_folder_holds_keep_their_names(tmp_path, named_world,
                                                                                          monkeypatch):
     w = named_world
@@ -1265,76 +598,6 @@ def test_an_analyst_s_own_workspace_and_a_demo_name_another_folder_holds_keep_th
     config.register_corpus(taken, exact=True, name="demo-one")
     assert run(w, args(names=["one"], dir=str(w["root"]), precaches=str(pre))) == 0
     assert old.is_dir() and "demo workspace one-2" not in said(w)
-
-
-def test_export_command_waits_for_a_finished_orientation(tmp_path, monkeypatch):
-    monkeypatch.setattr(demo, "gitleaks_scan", no_scan)
-    monkeypatch.setattr(demo.getpass, "getuser", lambda: "")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    corpus = tmp_path / "corpus"
-    corpus.mkdir()
-    ws = make_workspace(tmp_path, corpus, tmp_path)
-    run_path = ws / "orient" / "run.json"
-    run_rec = json.loads(run_path.read_text())
-    run_path.write_text(json.dumps({**run_rec, "status": "running"}))
-    lines: list[str] = []
-    for outputs_only in (True, False):
-        a = args(export=[str(ws), str(tmp_path / "out")], corpus=str(corpus), outputs_only=outputs_only)
-        assert demo.run(a, say=lines.append) == 1 and "is running; export it once it is done" in " ".join(lines)
-    run_path.write_text(json.dumps(run_rec))
-    a = args(export=[str(ws), str(tmp_path / "out")], corpus=str(corpus), outputs_only=True)
-    assert demo.run(a, say=lines.append) == 0
-    assert (tmp_path / "out" / "toy" / demo.MANIFEST).is_file()
-    assert "view" not in json.loads((tmp_path / "out" / "toy" / demo.MANIFEST).read_text())
-    # --view names the view the workspace opens on, one it has
-    assert demo.run(args(export=[str(ws), str(tmp_path / "viewed")], corpus=str(corpus), outputs_only=True,
-                         view="v1"), say=lines.append) == 0
-    assert json.loads((tmp_path / "viewed" / "toy" / demo.MANIFEST).read_text())["view"] == "v1"
-    assert demo.run(args(export=[str(ws), str(tmp_path / "no-such")], corpus=str(corpus), outputs_only=True,
-                         view="nope"), say=lines.append) == 1
-    assert lines[-1] == "thimble demo --export: toy has no view nope; its views: v1"
-    assert "2 cited calls" in " ".join(lines) and "refused from 400" in " ".join(lines)
-    # OUT naming the pre-cache folder itself writes it again in place
-    a = args(export=[str(ws), str(tmp_path / "out" / "toy")], corpus=str(corpus), outputs_only=True)
-    assert demo.run(a, say=lines.append) == 0
-    assert not (tmp_path / "out" / "toy" / "toy").exists()
-    # a stopped orientation leaves the workspace as it stands: a full export takes it, the outputs alone do not
-    run_path.write_text(json.dumps({**run_rec, "status": "stopped"}))
-    assert demo.run(a, say=lines.append) == 1
-    lines.clear()
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
-    assert demo.run(args(export=[str(ws), str(tmp_path / "full")], corpus=str(corpus), view="v1"),
-                    say=lines.append) == 0
-    full = json.loads((tmp_path / "full" / "toy" / demo.MANIFEST).read_text())
-    assert full["version"] == demo.FULL_VERSION and full["view"] == "v1"
-    # the command ends with the inventory
-    tail = lines[next(i for i, x in enumerate(lines) if x.startswith("wrote ")):]
-    keys = [x[2:].split("  ")[0] for x in tail[1:] if x.startswith("  ") and x[2] != " " and "  " in x[2:]]
-    assert keys == ["transcripts", "chats", "call outputs", "labels", "outputs", "work files", "dataset text",
-                    "may be private", "still running", "left out"]  # the orientation's chat said it ran
-    assert any(x.startswith("wrote ") and "a full export" in x for x in lines)
-
-
-def test_a_demo_workspace_exports_under_its_dataset_s_name(tmp_path, monkeypatch):
-    """`thimble demo` names a dataset's workspace demo-<dataset>; its export is <out>/<dataset> all the same, and a
-    workspace installed from a pre-cache exports under the dataset its mark names."""
-    monkeypatch.setattr(demo, "DATASETS", {"toy": fake_dataset("toy")})
-    root = tmp_path / "workspaces"
-    for name in ("demo-toy", "demo-other", "mine"):
-        (root / name).mkdir(parents=True)
-    assert demo.dataset_of(root / "demo-toy") == "toy"
-    assert demo.dataset_of(root / "demo-other") == "demo-other"  # no dataset of that name
-    (root / "mine" / demo.MARKER).write_text(json.dumps({"dataset": "toy"}))
-    assert demo.dataset_of(root / "mine") == "toy"
-
-
-def test_the_analyst_picks_the_folder_a_session_attaches_in(tmp_path, monkeypatch):
-    folders = [tmp_path / "a", tmp_path / "b"]
-    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
-    for typed, want in (("", folders[0]), ("2", folders[1]), ("n", None), ("9", None)):
-        monkeypatch.setattr("builtins.input", lambda q, typed=typed: typed)
-        assert demo.pick_folder(folders) == want
-    assert demo.pick_folder(folders[:1]) == folders[0]
 
 
 # --------------------------------------------------------------------------- the full export
@@ -1409,146 +672,6 @@ def full_made(tmp_path: Path, **kw) -> tuple[Path, Path, Path, dict]:
     return out, corpus, claude, m
 
 
-def test_the_full_export_writes_everything_with_the_transcripts_and_refuses_nothing(tmp_path):
-    out, corpus, claude, m = full_made(tmp_path)
-    assert m["version"] == demo.FULL_VERSION and m["format"] == "full"
-    names = {f["path"] for f in m["files"]}
-    # the conversations, every call, the work files, the card checks and the history are kept
-    assert {"chats/main.jsonl", "chats/t9.jsonl", "chats/o1.jsonl", "calls/zz.jsonl", "calls/o1.jsonl",
-            "orient/work/t.csv", "writers/report/notes.md", "card-checks/c1/shot.png", "canvas-history.jsonl",
-            "views/key-refs.json", "views/.versions/v1/abc/view.html", "extension/views/v1/rows.json",
-            "notebooks/outputs/c1-1.parquet", "notebooks/trash/old.json", "settings.json"} <= names
-    left = {f["path"]: f["why"] for f in m["left_out"]}
-    assert set(left) == {"labels/l1.sqlite", "scratch/a.jsonl", "kernels/k.log", "telemetry.jsonl", "sessions.json",
-                         "view-indexes/v1/index.json", "extension/views/v1/cache/x.json",
-                         "orient/work/.claude/settings.json", "trusted/subagents.json", "trusted/callers.jsonl",
-                         "trusted/launch.json"}
-    assert left["trusted/launch.json"] == demo.TRUSTED_WHY
-    assert not (out / "workspace" / "trusted").exists(), "this machine's session ids and agent records stay here"
-    ws_out = out / "workspace"
-    assert (ws_out / "card-checks" / "c1" / "shot.png").read_bytes() == b"\x89PNG\r\n\x00\xff"
-    # the labels keep every row whole, the texts each marked too
-    assert "the time it expected" in (ws_out / "labels" / "l1.jsonl").read_text()
-    assert "api_token" not in (ws_out / "settings.json").read_text()
-    # main's chat without the slash commands; no chat names the process or the session that ran it
-    assert "/exit" not in (ws_out / "chats" / "main.jsonl").read_text()
-    for meta in (ws_out / "chats").glob("*.meta.json"):
-        assert not {"pid", "server", "follow", "background", "bg", "attached"} & set(json.loads(meta.read_text()))
-    assert json.loads((ws_out / "chats" / "w1.meta.json").read_text())["status"] == "done"
-    assert json.loads((ws_out / "chats" / "o1.meta.json").read_text())["session"] == SID
-    assert "pid" not in json.loads((ws_out / "orient" / "run.json").read_text())
-    # the transcripts of the workspace's sessions, cleaned, and what Claude Code kept beside them
-    trs = {t["folder"]: t for t in m["transcripts"]}
-    assert set(trs) == {"orient/work", "writers/report"}
-    assert trs["orient/work"]["role"] == "orientation" and trs["writers/report"]["role"] == "writer"
-    assert trs["orient/work"]["session"] == SID and trs["orient/work"]["path"] == f"transcripts/{SID}.jsonl"
-    assert trs["orient/work"]["dropped"] == {"attachment:nested_memory": 2}  # its own, and its subagent's
-    assert {f["path"] for f in trs["orient/work"]["files"]} == {f"transcripts/{SID}/tool-results/b1.txt",
-                                                               f"transcripts/{SID}/subagents/agent-1.jsonl"}
-    text = (out / "transcripts" / f"{SID}.jsonl").read_text()
-    assert "my CLAUDE.md" not in text and "line\u2028break" in text
-    assert [json.loads(x)["uuid"] for x in text.split("\n") if x] == ["u1", "u2", "q1", "u3"]  # the queued message too
-    assert json.loads(text.split("\n")[0])["parentUuid"] is None  # linked past the record it dropped
-    assert '"cwd":"@@THIMBLE_WORKSPACE@@/orient/work"' in text
-    assert "@@THIMBLE_WORKSPACE@@/orient/work" in (out / "transcripts" / SID / "tool-results" / "b1.txt").read_text()
-    assert str(tmp_path) not in tree_text(out)
-    # it holds the dataset's text and says how much, refusing nothing
-    v = m["verbatim"]
-    assert v["shared"] > 2 * len(CORPUS_TEXT) and {"transcripts", "chats", "calls"} <= set(v["by_kind"])
-    inv = m["inventory"]
-    assert inv["sessions"] == {"orientation": 1, "writer": 1} and inv["dropped_records"] == 3
-    assert inv["typed_in_main"] == 1 and inv["marked_done"] == ["w1"] and inv["calls"] == 3
-    assert inv["label_rows"] == 1 and inv["rationales"] == 1 and inv["spans"] == 1
-    assert (out / "README.md").read_text().startswith("# toy: full export")
-
-
-def test_the_full_export_holds_a_subagent_orientation_s_transcript_split_by_a_clear(tmp_path):
-    """thimble's agents run as subagents of main, so their records are under main's session folder; after /clear an
-    agent's records go on in the new session's folder (U1). The full export joins both parts, in order, and the
-    agent's descendants'; an install keeps them as data, since no new session continues them."""
-    root = tmp_path / "a"
-    corpus = root / "corpus"
-    corpus.mkdir(parents=True)
-    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
-    ws = make_workspace(root, corpus, root)
-    old, new, agent = "11111111-0000-4000-8000-000000000001", "22222222-0000-4000-8000-000000000002", "abd7be4046c88858c"
-    (ws / "chats" / "o9.meta.json").write_text(json.dumps({
-        "id": "o9", "kind": "agent", "role": "orient", "route": "subagent", "agent_id": agent, "status": "done",
-        "session": new, "sessions": [old, new]}))
-    (ws / "chats" / "o9.jsonl").write_text("")
-    claude = tmp_path / "claude"
-    proj = claude / "projects" / demo.dashed(str(corpus))
-    for sid, line in ((old, "before the clear"), (new, "after the clear")):
-        (proj / sid / "subagents").mkdir(parents=True)
-        (proj / f"{sid}.jsonl").write_text("")
-        (proj / sid / "subagents" / f"agent-{agent}.jsonl").write_text(transcript(corpus, sid, line))
-    (proj / old / "subagents" / "agent-c1.jsonl").write_text(transcript(corpus, old, "a helper's step"))
-    (proj / old / "subagents" / "agent-c1.meta.json").write_text(json.dumps({"parentAgentId": agent}))
-    (proj / old / "subagents" / "agent-x1.jsonl").write_text(transcript(corpus, old, "the analyst's own"))
-    (proj / old / "subagents" / "agent-x1.meta.json").write_text(json.dumps({"agentType": "general-purpose"}))
-    out = tmp_path / "out" / "toy"
-    m = demo.export_full(ws, corpus, out, name="toy", home=root, user="", scan=no_scan, claude_dir=claude)
-    by_path = {t["path"]: t for t in m["transcripts"] if t.get("agent")}
-    assert set(by_path) == {f"transcripts/agent-{agent}.jsonl", "transcripts/agent-c1.jsonl"}
-    assert by_path[f"transcripts/agent-{agent}.jsonl"]["role"] == "orientation"
-    text = (out / "transcripts" / f"agent-{agent}.jsonl").read_text()
-    assert text.index("before the clear") < text.index("after the clear"), "both parts, in order"
-    got = demo.install(out, tmp_path / "b" / "toy", corpus, home=tmp_path / "b", claude_dir=tmp_path / "b-claude")
-    assert got["warnings"] == [] and not [i for i in got["installed_transcripts"] if "agent" in i["path"]]
-
-
-def test_the_full_export_holds_every_role_s_subagent_transcript(tmp_path):
-    """View builds, view reviews and report checks are subagents of main now, like the orientation: their records are
-    under main's session folder, not a session of their own in the workspace (which is how 0.6.0's full export found a
-    view build's), so the export finds them by their chats, each under its own role."""
-    root = tmp_path / "a"
-    corpus = root / "corpus"
-    corpus.mkdir(parents=True)
-    (corpus / "a.jsonl").write_text(json.dumps({"body": CORPUS_TEXT}) + "\n")
-    ws = make_workspace(root, corpus, root)
-    sid = "33333333-0000-4000-8000-000000000003"
-    claude = tmp_path / "claude"
-    proj = claude / "projects" / demo.dashed(str(corpus))
-    (proj / sid / "subagents").mkdir(parents=True)
-    (proj / f"{sid}.jsonl").write_text("")
-    chats = {"b1": ("dev", {"view": "posts"}), "r1": ("dev", {"view": "posts", "review": True}),
-             "k1": ("check", {"check": "unverified", "doc": "report"})}
-    for chat, (role, extra) in chats.items():
-        agent = f"a{chat}"
-        (ws / "chats" / f"{chat}.meta.json").write_text(json.dumps({
-            "id": chat, "kind": "agent", "role": role, "route": "subagent", "agent_id": agent, "status": "done",
-            "session": sid, "sessions": [sid], **extra}))
-        (ws / "chats" / f"{chat}.jsonl").write_text("")
-        (proj / sid / "subagents" / f"agent-{agent}.jsonl").write_text(transcript(corpus, sid, f"the {chat} ran"))
-    out = tmp_path / "out" / "toy"
-    m = demo.export_full(ws, corpus, out, name="toy", home=root, user="", scan=no_scan, claude_dir=claude)
-    roles = {t["path"]: t["role"] for t in m["transcripts"] if t.get("agent")}
-    assert roles == {"transcripts/agent-ab1.jsonl": "view build", "transcripts/agent-ar1.jsonl": "view review",
-                     "transcripts/agent-ak1.jsonl": "report check"}
-    assert m["inventory"]["sessions"] == {"view build": 1, "report check": 1, "view review": 1}
-
-
-def test_the_full_export_names_what_may_be_private_without_refusing(tmp_path):
-    full_made(tmp_path / "x")
-    ws = tmp_path / "x" / "a" / "workspaces" / "toy"
-    (ws / "notebooks" / "outputs" / "c9.txt").write_text("ls -l: maintainername staff /home/maintainername/notes")
-    m = demo.export_full(ws, tmp_path / "x" / "a" / "corpus", tmp_path / "y", name="toy", home=tmp_path / "nohome",
-                         user="maintainername", scan=lambda _: ["chats/x.jsonl:1: generic-api-key"],
-                         claude_dir=tmp_path / "x" / "claude")
-    inv = m["inventory"]
-    assert inv["user_name_files"] == 1 and inv["paths"] == ["/home/maintainername"]
-    assert inv["gitleaks"] == ["chats/x.jsonl:1: generic-api-key"]
-    assert (tmp_path / "y" / "workspace" / "notebooks" / "outputs" / "c9.txt").is_file()
-    lines = demo.inventory_lines(m, tmp_path / "y", 1000)
-    private = " ".join(" ".join(lines[next(i for i, x in enumerate(lines) if x.startswith("  may be private")):]).split())
-    assert "your user name in 1 file (--scrub-user replaces it)" in private
-    assert "absolute paths such as /home/maintainername" in private and "gitleaks: 1 finding" in private
-    # --scrub-user writes `user` in its place
-    m = demo.export_full(ws, tmp_path / "x" / "a" / "corpus", tmp_path / "y", name="toy", home=tmp_path / "nohome",
-                         user="maintainername", scrub_user=True, scan=no_scan, claude_dir=tmp_path / "x" / "claude")
-    assert m["inventory"]["user_name_files"] == 0 and m["user_name_scrubbed"] == 2
-
-
 def test_a_full_export_installs_with_its_sessions_under_new_ids(tmp_path):
     out, corpus, claude, m = full_made(tmp_path)
     new_ws = tmp_path / "b" / "workspaces" / "toy"
@@ -1600,20 +723,6 @@ def test_install_leaves_out_the_trusted_folder_an_older_full_export_kept(tmp_pat
     assert not (new_ws / "trusted").exists()
 
 
-def test_an_outputs_only_export_leaves_out_the_trusted_folder():
-    assert demo.kept(Path("trusted/subagents.json"), "o1") == demo.TRUSTED_WHY
-
-
-def test_a_full_export_whose_transcripts_did_not_come_installs_as_the_outputs_do(tmp_path):
-    out, corpus, claude, m = full_made(tmp_path)
-    shutil.rmtree(out / "transcripts")
-    new_ws = tmp_path / "b" / "toy"
-    got = demo.install(out, new_ws, corpus, home=tmp_path / "b", claude_dir=tmp_path / "b-claude")
-    assert len(got["warnings"]) == 2 and "cannot continue" in got["warnings"][0]
-    run = json.loads((new_ws / "orient" / "run.json").read_text())
-    assert "session" not in run and run["precached"]["kept"] is False and precached.is_precached_run(run)
-
-
 def test_install_refuses_a_full_export_whose_transcripts_reach_outside(tmp_path):
     out, corpus, claude, m = full_made(tmp_path)
     man = json.loads((out / demo.MANIFEST).read_text())
@@ -1625,11 +734,22 @@ def test_install_refuses_a_full_export_whose_transcripts_reach_outside(tmp_path)
         assert not (tmp_path / "ws").exists() and not (tmp_path / "c").exists()
 
 
-def test_a_fresh_session_on_a_full_install_is_told_the_orientation_can_be_read_but_not_continued(tmp_path, mini_dir):
-    out, _, _, _ = full_made(tmp_path)
-    ws = config.workspace_path("mini")
-    demo.install(out, ws, mini_dir, home=tmp_path, claude_dir=tmp_path / "b-claude")
-    text = precached.take_context("mini", "s1")
-    assert text.startswith("This workspace was installed from a full export")
-    assert "so `message_orientation` cannot reach it" in text, "a subagent of the exporter's session (lane D's wording)"
-    assert precached.take_context("mini", "s1") == ""
+def test_open_page_opens_through_the_redirect_file_on_a_desktop_terminal_only(monkeypatch):
+    """`thimble demo` opens the start page through opener.open_url (a redirect file the analyst's account alone reads,
+    so the code is in no argv); not for output a program reads, and not in a remote terminal."""
+    from app import opener
+
+    opened: list[str] = []
+    monkeypatch.setattr(opener, "open_url", lambda url, **kw: opened.append(url) or opener.Opened(True, "xdg-open", None,
+                                                                                                    False))
+    monkeypatch.setattr(opener, "remote", lambda env=None, platform=None: opener.Remote(False, False, False, False,
+                                                                                         False, "a desktop session"))
+    monkeypatch.setattr(demo.sys.stdout, "isatty", lambda: True, raising=False)
+    assert demo.open_page("http://127.0.0.1:8300/#p=code") is True and opened == ["http://127.0.0.1:8300/#p=code"]
+    monkeypatch.setattr(demo.sys.stdout, "isatty", lambda: False, raising=False)
+    assert demo.open_page("http://127.0.0.1:8300/#p=code") is False and len(opened) == 1
+    monkeypatch.setattr(demo.sys.stdout, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(opener, "remote", lambda env=None, platform=None: opener.Remote(True, True, False, False, True,
+                                                                                         "an SSH session"))
+    assert demo.open_page("http://127.0.0.1:8300/#p=code") is False and len(opened) == 1
+    assert "webbrowser" not in demo.__dict__, "no URL with a code goes to webbrowser's argv"

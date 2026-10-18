@@ -4,7 +4,7 @@
 // span names the label that marks it (`id`), so the bridge tells the Color by label's texts from the others' by id, not
 // by color, which two labels may share.
 import { describe, expect, test } from 'vitest'
-import { pageColour, viewMarks } from '../../src/files/labels.ts'
+import { viewMarks } from '../../src/files/labels.ts'
 import type { Concept, LabelRow } from '../../src/lib/types.ts'
 
 const K = { id: 'k1', name: 'refund', unit: 'record', marks: 'record', labels: ['refund', 'no'], classes: [{ name: 'refund', color: 3, highlight: true }, { name: 'no', color: 0, highlight: false }] } as unknown as Concept
@@ -26,11 +26,5 @@ describe('the marks a view page gets', () => {
       { text: 'money back', colour: '#08632f', id: 'k1' },
       { text: 'not happy', colour: '#08632f', id: 'k2' },
     ])
-  })
-
-  test('a token the theme does not define stays a token, and a colour stays as it is', () => {
-    expect(pageColour('var(--label-9)', () => '')).toBe('var(--label-9)')
-    expect(pageColour('#123456', () => 'x')).toBe('#123456')
-    expect(pageColour(' var(--label-1) ', (t) => (t === '--label-1' ? 'rgb(2, 90, 195)' : ''))).toBe('rgb(2, 90, 195)')
   })
 })

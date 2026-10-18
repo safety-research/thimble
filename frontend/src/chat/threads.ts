@@ -6,9 +6,10 @@
 // start (a report check's run) is listed only while it is relevant (running, waiting, or shown); every dev ticket, the
 // orientation's view builds among them, is always listed.
 //
-// Names: `main/<title>` for a thread, `orient` (and `orient-1`, `orient-2`, ...), `write-<document>` (`-2`, `-3` for
-// later runs), `check/<title>`, `dev/<view>` for a view's build and `dev/<first words of its title>` for another ticket, and a step `orient/<phase>: <agent key>`. A chat's
-// own `name` replaces the last part.
+// Names: `main/<title>` for a thread, `orient` (and `orient-1`, `orient-2`, ...), a writer by its document's name
+// (`Pilot findings`, `(2)`, `(3)` for later runs), `check/<title>`, `dev/<view's name>` for a view's build (`dev/<view's
+// name> review` for its review) and `dev/<first words of its title>` for another ticket, and a step `orient/<phase>:
+// <agent key>`. A chat's own `name` replaces the last part.
 import type { ThreadNode } from '../components/ThreadTree'
 import { hhmm } from '../lib/time'
 import type { ChatMeta } from '../lib/types'
@@ -55,6 +56,9 @@ export interface PickOptions {
   waiting?: ReadonlySet<string>
   /** the chats whose agent waits on a permission prompt in the terminal (chat/waiting.ts terminalWaits) */
   terminal?: ReadonlySet<string>
+  /** a document's name by its slug, which names its writers (Report, or a document's own name such as Pilot findings);
+   * the built-in types' names and the slug otherwise */
+  docName?: (slug: string) => string
 }
 
 const byCreation = (a: ChatMeta, b: ChatMeta) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0)
@@ -149,6 +153,16 @@ export function checkLabel(title: string): string {
   return `check/${t || 'run'}`
 }
 
+/** The built-in documents' names (report/model BUILTIN_LABEL, which this pure module does not import, since the report's
+ * model imports the chat's markdown), for a writer's thread when no names are given. */
+const BUILTIN_DOC_NAMES: Readonly<Record<string, string>> = { report: 'Report', slides: 'Slides', story: 'Story' }
+
+/** A view's name from its build's or review's chat title (`view: Agent Network`, `review: Agent Network`), else its
+ * slug. Pure. */
+export function viewName(m: Pick<ChatMeta, 'title'> & { view?: string | null }): string {
+  return (m.title || '').replace(/^(?:view|review):\s*/i, '').trim() || m.view || 'view'
+}
+
 /** A ticket's title as a thread name: `ticket #2: ` dropped, the first four words, lower case, joined by '-'. Pure. */
 export function ticketSlug(title: string): string {
   const words = title.replace(/^ticket #\d+:\s*/i, '').match(/[\p{L}\p{N}]+/gu) ?? []
@@ -180,23 +194,31 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
   orients.forEach((m, i) => labels.set(m.id, i === orients.length - 1 ? 'orient' : `orient-${i + 1}`))
   const writes = new Map<string, ChatMeta[]>()
   for (const m of listedChats) if (threadKind(m) === 'writer') writes.set(writerDoc(m), [...(writes.get(writerDoc(m)) ?? []), m])
-  // a document's first writer is `write-<doc>` and each later one takes the next number, so a name never moves to
-  // another run and a chip in main's history keeps pointing at the run it named
-  for (const [doc, ms] of writes) ms.forEach((m, i) => labels.set(m.id, i === 0 ? `write-${doc}` : `write-${doc}-${i + 1}`))
+  // a writer is named by its document's name, never its slug (bug hunt G11); a document's first writer takes the name
+  // and each later one the next number, so a name never moves to another run and a chip in main's history keeps
+  // pointing at the run it named
+  const docName = opts.docName ?? ((slug: string) => BUILTIN_DOC_NAMES[slug] ?? slug)
+  for (const [doc, ms] of writes) {
+    const name = docName(doc).trim() || doc
+    ms.forEach((m, i) => labels.set(m.id, i === 0 ? name : `${name} (${i + 1})`))
+  }
   // a view's builds and reviews each take a name of their own (live check L25: four threads were all called
-  // dev/wiki-page-history): the first build `dev/<view>`, its first review `dev/<view>-review`, and each later one the
-  // next number, as a document's writers do (backend threads.tree_names gives the same names)
+  // dev/wiki-page-history), by the view's name, never its slug (bug hunt G11): the first build `dev/<view>`, its first
+  // review `dev/<view> review`, and each later one the next number, as a document's writers do (backend
+  // threads.view_names finds them by these names)
   const devs = new Map<string, ChatMeta[]>()
   for (const m of listedChats) {
     if (threadKind(m) !== 'dev') continue
     const base = m.view ? `${m.view}${m.review ? '-review' : ''}` : ticketSlug(m.title || m.id)
     devs.set(base, [...(devs.get(base) ?? []), m])
   }
-  for (const [base, ms] of devs) ms.forEach((m, i) => labels.set(m.id, `dev/${base}${m.view && i > 0 ? `-${i + 1}` : ''}`))
+  for (const ms of devs.values())
+    ms.forEach((m, i) => labels.set(m.id, m.view ? `dev/${viewName(m)}${m.review ? ' review' : ''}${i > 0 ? ` (${i + 1})` : ''}` : `dev/${ticketSlug(m.title || m.id)}`))
   for (const m of listedChats) if (threadKind(m) === 'check') labels.set(m.id, checkLabel(m.title || m.id))
   for (const m of listedChats) {
     const known = labels.get(m.id)
-    if (m.name && known) labels.set(m.id, known.includes('/') ? `${known.slice(0, known.indexOf('/'))}/${m.name}` : m.name)
+    // a writer's name is its document's, which may hold a slash of its own
+    if (m.name && known) labels.set(m.id, known.includes('/') && threadKind(m) !== 'writer' ? `${known.slice(0, known.indexOf('/'))}/${m.name}` : m.name)
   }
   const labelOf = (m: ChatMeta, seen: Set<string> = new Set()): string => {
     const known = labels.get(m.id)
@@ -314,6 +336,10 @@ export function threadNodes(items: readonly PickItem[]): ThreadNode[] {
   nodes.splice(at < 0 ? nodes.length : at, 0, group)
   return nodes
 }
+
+/** The composer's placeholder for a chat named `name`: `Reply in main/why-the-spike…`, with one ellipsis when the
+ * name was cut to one already. Pure. */
+export const replyIn = (name: string): string => `Reply in ${name.replace(/\s*…$/, '')}…`
 
 /** The label of every listed chat by id, for the chips that point at a thread (main/why-the-spike, orient). Pure. */
 export function threadLabels(items: readonly PickItem[]): Map<string, string> {

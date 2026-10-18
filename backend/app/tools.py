@@ -3,11 +3,14 @@
 prompts/tools.md holds each tool's description and JSON input schema (one `## <tool>` section each, read fresh on
 every listing); REGISTRY holds the roles that get a tool and its handler as an import path resolved at call time. This
 module imports only config, prompts, cite and frames, so the stdio shim (plugin/bin/thimble-mcp) builds its tool list
-without loading the notebook or a kernel. The shim lists the tools (`list("analyst")`) and posts each call to
-`POST /api/tools/{name}`; its THIMBLE_SESSION (Ctx.session) says which session called: none for main, `orient`,
+without loading the notebook or a kernel. Before thimble is on in a session the shim lists ENTRY_TOOL alone
+(entry_listing); once it is on, the tools (`list("analyst")`, ENTRY_TOOL left out), and it runs each call in its own
+process (local transport) or posts it to `POST /api/tools/{name}` after the press (server transport). A tool whose
+feature the analyst turned off (FEATURE_TOOLS) stays listed and refuses with one line (call). Its THIMBLE_SESSION
+(Ctx.session) says which session called: none for main, `orient`,
 `writer:<doc>`, `critique:orient` or `check:<id>:<doc>`. Tools whose machinery lives elsewhere run `tool_<name>(ctx,
-args)` in that module. Every result starts with the call as run (call_line); a card's result shows the first lines of
-each output, a chart as the rows it draws, and hint lines from prompts/tools.md. The card tools also answer to the
+args)` in that module. A result does not echo the call, which the model and the terminal have already; a card's
+result shows the first lines of each output, a chart as the rows it draws, and hint lines from prompts/tools.md. The card tools also answer to the
 alias names of the cell tools and `cell:` refs (Spec.aliases, ARG_ALIASES, cite.CARD_PREFIXES)."""
 from __future__ import annotations
 
@@ -49,6 +52,7 @@ CHECK_SESSION = "check"  # `check:<id>:<doc>`, a run of a report check on a docu
 VIEW_SESSION = "view"  # `view:<slug>`, a build of a view (dev.py, view_tools.py)
 REVIEW_SESSION = "review"  # `review:<slug>`, a review of a built view (view_review.py, view_tools.py)
 TICKET_SESSION = "ticket"  # `ticket:<id>`, a code ticket's agent (dev.py, ticket_tools.py)
+CALL_SESSION = "call"  # `call:<id>`, the card check's agent, which reads a picture (agent_call.py)
 MAIN_ONLY: "tuple[str | None, ...]" = (None,)  # Spec.sessions of a tool only main's shim lists (no THIMBLE_SESSION)
 ROLES = (ANALYST,)  # the dev worker is a Claude Code session with its own tools (dev.py)
 ANALYSIS_ROLES = (ANALYST,)  # who reads cards and records
@@ -78,13 +82,13 @@ RESULT_LINES_KEY = "run_cell_result_lines"  # settings.json; a persisted key, no
 CELL_READ_LIMIT = 40_000
 WARM_REFS_MAX = 20  # an example's quoted refs a view reads, resolved off the loop before add_card or edit_card reads them
 LINE_LIMIT = 160  # chars of a takeaway / md text on a `cells` line
-CALL_ARG_CHARS = 80  # chars of one argument on a result's `$` line (call_line)
+CALL_ARG_CHARS = 80  # chars of a value _cut keeps
 # of one read_ref result, in UTF-16 code units (read_parts.units), so that it stays whole in the session that reads it:
 # Claude Code (2.1.300) saves a tool result of more than 50,000 characters to a file and shows the model a 2KB preview
 # of it, and an MCP result its estimate (4 characters a token) puts past 12,500 tokens is counted, and past 25,000
 # tokens (MAX_MCP_OUTPUT_TOKENS) saved to a file in its place. read_parts.READ_UNITS is under the first and never
-# counted, whatever the text; this leaves room in it for the call line (call_line, `$ read_ref ref="…"`) that comes
-# first.
+# counted, whatever the text; this keeps the room 0.8.0 left for the call line results no longer start with, so a
+# result is cut where it was.
 READ_REF_UNITS = read_parts.READ_UNITS - 2 * CALL_ARG_CHARS - 40
 TAKEAWAY_AUTHOR = "model"  # cell.takeaway_author for a takeaway written with edit_card (the analyst's is `analyst`)
 TAKEAWAY_WORDS = 40  # the words a takeaway may run to, which the `## takeaway-long` line of prompts/tools.md states
@@ -104,7 +108,29 @@ CELL_KINDS = ("plot", "table", "code", "example", "note", "diagram", "timeline",
 ADD_CELL_KINDS = ("example", "table", "code", "diagram", "plot", "timeline", "note", "custom", "plan")
 EDIT_CELL_KINDS = ADD_CELL_KINDS
 RUN_KINDS = ("plot", "table", "code", "timeline", "diagram")  # notebook.RUNNABLE_KINDS: the kinds that run `code`
-INSTRUCTIONS_HINT = "instructions"  # prompts/tools.md `## instructions`: the shim's MCP server instructions (instructions)
+# The tool the shim lists alone before thimble is on in a session (contract C5): its call turns thimble on (activate.py)
+# and answers with the guide. Claude Code defers it, and ToolSearch finds it by SEARCH_HINT.
+ENTRY_TOOL = "load_thimble"
+SEARCH_HINT = "card plan chart table label classify records thimble"
+META_ALWAYS_LOAD = "anthropic/alwaysLoad"  # a listed tool's `_meta` key: loaded (true) or deferred (false or absent)
+META_SEARCH_HINT = "anthropic/searchHint"  # a listed tool's `_meta` key: the words ToolSearch matches
+# The tools main's shim lists loaded, with their schemas in every request: those an analysis answer uses (cards, reads,
+# labels) and a thread's reply. Main's shim lists every other tool deferred (alwaysLoad false), so Claude Code shows main
+# its name and loads it through ToolSearch when main first wants it; main.md's `thimble's other tools` says when.
+ALWAYS_LOADED = ("read_ref", "list_cards", "add_card", "edit_card", "apply_label", "reply_in_thread")
+
+
+def deferred_in_main(name: str | None) -> bool:
+    """Whether the analyst's session lists the tool `name` deferred (ALWAYS_LOADED): a tool main may call that is not
+    one of ALWAYS_LOADED. A tool only thimble's agents call stays loaded wherever a shim lists it, since its agent
+    calls it at once."""
+    spec = REGISTRY.get(str(name or ""))
+    return spec is not None and (not spec.sessions or None in spec.sessions) and spec.name not in ALWAYS_LOADED
+
+
+# the tools a feature switch turns off (features.py), by the switch: they stay listed, since thimble's agents share
+# main's listing, and a call refuses with the tool's `## <tool>-off` hint (call)
+FEATURE_TOOLS = {"apply_label": "labels", "run_check": "checks"}
 SCREENSHOT_HOSTS = ("127.0.0.1", "localhost", "::1")  # a page screenshot is of thimble's own interface on this machine
 # a figure's own page (_shot_page_file): no network, inline script and style only, images from data: URLs; the figure
 # runs in a frame sandboxed to scripts alone, which reports its size to the page
@@ -226,6 +252,9 @@ REGISTRY: dict[str, Spec] = {
         Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION),
              drop_stops=True),
         Spec("finish_view", (ANALYST,), "app.view_tools:tool_finish_view", sessions=(VIEW_SESSION,), drop_stops=True),
+        # thimble's docs of the view kit and the worked examples a builder names, whole, in one result, so it reads none
+        # of thimble's files (each Read outside the analyst's folder is a permission ask in Manual mode)
+        Spec("view_reference", (ANALYST,), "app.view_tools:tool_view_reference", sessions=(VIEW_SESSION,)),
         Spec("view_pictures", (ANALYST,), "app.view_tools:tool_view_pictures", sessions=(REVIEW_SESSION,),
              drop_stops=True),
         Spec("finish_review", (ANALYST,), "app.view_tools:tool_finish_review", sessions=(REVIEW_SESSION,),
@@ -236,6 +265,12 @@ REGISTRY: dict[str, Spec] = {
              drop_stops=True),
         Spec("finish_ticket", (ANALYST,), "app.ticket_tools:tool_finish_ticket", sessions=(TICKET_SESSION,),
              drop_stops=True),
+        # the card check's agent takes the part of its call with its picture and answers it (agent_call.py); its own
+        # tools alone
+        Spec("read_call", (ANALYST,), "app.agent_call:tool_read_call", sessions=(CALL_SESSION,)),
+        Spec("send_answer", (ANALYST,), "app.agent_call:tool_send_answer", sessions=(CALL_SESSION,)),
+        # thimble turned on in this session (ENTRY_TOOL); the shim answers it itself, and lists it alone (entry_listing)
+        Spec(ENTRY_TOOL, (ANALYST,), "app.activate:tool_load_handler", sessions=MAIN_ONLY),
     )
 }
 
@@ -364,16 +399,59 @@ def session_kind(session: str | None) -> str | None:
     return str(session).split(":", 1)[0] or None if session else None
 
 
+def private(spec: Spec) -> bool:
+    """Whether only thimble's agents call the tool: `sessions` of its own that leave main out (critique, view_check …)."""
+    return bool(spec.sessions) and None not in spec.sessions
+
+
 def list(role: str = ANALYST, session: str | None = None) -> "builtins.list[dict[str, Any]]":  # noqa: A001 — the contract names it `tools.list`
     """[{name, description, input_schema}] for the tools the role may use in the session `session` (a THIMBLE_SESSION),
-    in registry order. A tool with `sessions` of its own is listed in those alone, but main's shim (no session) lists
-    them all, since thimble's agents are main's subagents and call through it: each agent's registration takes away
-    the tools that are not its own, and a call is refused when its caller may not make it (call_route)."""
+    in registry order, ENTRY_TOOL left out (entry_listing). A tool with `sessions` of its own is listed in those alone.
+    Main's shim (no session) lists every tool but the private ones (private), since thimble's agents are main's
+    subagents and call through it: each agent's registration takes away the tools that are not its own, and a call is
+    refused when its caller may not make it (call_route). An agent's private tools come from a shim of its own that its
+    registration declares (private_list, subagents.private_server)."""
     role_of(role)
     kind = session_kind(session)
-    names = [s.name for s in REGISTRY.values() if role in s.roles and (kind is None or not s.sessions or kind in s.sessions)]
+    names = [s.name for s in REGISTRY.values() if role in s.roles and s.name != ENTRY_TOOL
+             and (not private(s) if kind is None else (not s.sessions or kind in s.sessions))]
     secs = tool_sections(names)
     return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
+
+
+def private_names(kind: str | None) -> "builtins.list[str]":
+    """The private tools (private) of the agents of session kind `kind`, in registry order."""
+    return [s.name for s in REGISTRY.values() if kind and private(s) and kind in s.sessions]
+
+
+def private_list(kind: str | None) -> "builtins.list[dict[str, Any]]":
+    """list's entries for the private tools of session kind `kind`: what the shim an agent's registration declares
+    lists (plugin/bin/thimble-mcp --private <kind>)."""
+    names = private_names(kind)
+    secs = tool_sections(names)
+    return [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in names]
+
+
+def entry_listing() -> "builtins.list[dict[str, Any]]":
+    """[{name, description, input_schema}] of ENTRY_TOOL alone, as the shim lists it before thimble is on."""
+    desc, schema = tool_sections((ENTRY_TOOL,))[ENTRY_TOOL]
+    return [{"name": ENTRY_TOOL, "description": desc, "input_schema": schema}]
+
+
+def feature_refusal(c: str | None, name: str) -> str | None:
+    """The line a call of `name` refuses with because the analyst turned its feature off (FEATURE_TOOLS); None when the
+    tool has no switch or its switch is on."""
+    key = FEATURE_TOOLS.get(canonical(name))
+    if key is None:
+        return None
+    from . import features  # noqa: PLC0415
+
+    try:
+        if features.on(c, key):
+            return None
+    except Exception:  # noqa: BLE001 — a switch that cannot be read is on, as a fresh config has it
+        return None
+    return hint(f"{canonical(name)}-off") or f"{canonical(name)}: {key} are off in thimble's Settings"
 
 
 PLUGIN_NAME = "thimble"  # the plugin's name (orientation.PLUGIN), the scope of its MCP server's tools
@@ -645,6 +723,8 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
 
     name = canonical(name)
     spec = REGISTRY[name]
+    if (off := feature_refusal(c, name)) is not None:  # a feature the analyst turned off (FEATURE_TOOLS)
+        return err(off)
     # a follow-up of the orientation is one change the analyst asked for, so its steps are one undo (undo.batching)
     batch = None
     if session_kind(session) == ORIENT_SESSION:
@@ -655,12 +735,16 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     with undo.batching(batch), undo.acting_session(session):
         with canvas_history.acting(Ctx(c, actor, notebook, terminal, anchor, chat, session).cell_author):  # who changed a card
             res = await _run(spec, c, name, args, actor, notebook, terminal, anchor, chat, session, tool_use_id)
+        # the later parts of main's guidance that this call's feature uses, on its first use (disclose.py)
+        from . import disclose  # noqa: PLC0415
+
+        res = disclose.after_call(c, name, args, res, session, tool_use_id)
         # the card check (card_check.py): a card add_card or edit_card wrote is drawn and read once it has its
         # takeaway; nothing of the check joins this result
         from . import card_check  # noqa: PLC0415 — card_check imports the harness
 
         res = await card_check.after_tool(c, name, args, res, session=session, anchor=anchor)
-    return with_call_line(name, args, res)
+    return res
 
 
 async def _run(spec: Spec, c: str, name: str, args: dict[str, Any] | None, actor: str, notebook: str | None, terminal: bool,
@@ -688,39 +772,8 @@ async def _run(spec: Spec, c: str, name: str, args: dict[str, Any] | None, actor
         return err(f"{name} failed: {type(e).__name__}: {e}")
 
 
-def call_line(name: str, args: dict[str, Any] | None) -> str:
-    """The first line of every result, the call as run, the way a shell echoes a command: `$ add_card kind=plot
-    question="..."`, strings quoted and cut to CALL_ARG_CHARS, other values as compact JSON."""
-    parts = [f"$ {name}"]
-    for k, v in (args or {}).items():
-        if v is None or not isinstance(k, str):
-            continue
-        if isinstance(v, str):
-            body = json.dumps(v, ensure_ascii=False)[1:-1]
-            parts.append(f'{k}="{_cut(body)}"')
-        elif isinstance(v, bool) or isinstance(v, (int, float)):
-            parts.append(f"{k}={json.dumps(v)}")
-        else:
-            try:
-                parts.append(f"{k}={_cut(json.dumps(v, ensure_ascii=False, separators=(',', ':'), default=str))}")
-            except (TypeError, ValueError):
-                parts.append(f"{k}={_cut(str(v))}")
-    return " ".join(parts)
-
-
 def _cut(s: str, n: int = CALL_ARG_CHARS) -> str:
     return s if len(s) <= n else s[: n - 1].rstrip() + "…"
-
-
-def with_call_line(name: str, args: dict[str, Any] | None, res: ToolResult) -> ToolResult:
-    """`res` with call_line(name, args) as its first line, ahead of the first text block (or as a new one)."""
-    line = call_line(name, args)
-    for b in res.content:
-        if b.get("type") == "text":
-            b["text"] = f"{line}\n{b.get('text', '')}" if str(b.get("text", "")) else line
-            return res
-    res.content.insert(0, {"type": "text", "text": line})
-    return res
 
 
 # --------------------------------------------------------------------------- shared helpers
@@ -1262,12 +1315,20 @@ def _example_ref(c: str | None, item: Any) -> tuple[str, str]:
 
 def _kept_quote(item: Any, ref: str) -> str:
     """The quote of a {ref, quote} item whose ref stays as given (a JSON value, a row, a page or a view's unit, which
-    span_of_quote keeps), which the card highlights in that record; '' when the ref itself is the quoted passage (a span)
-    or the item quotes nothing."""
+    span_of_quote keeps) or names a record (a line whose field its blocks leave out holds the quote, such as a wiki
+    save's edit summary), which the card highlights in that record; '' when span_of_quote made the ref the quoted
+    passage (a span) or the item quotes nothing."""
+    from . import refs as refs_mod
+
     if not isinstance(item, dict):
         return ""
     quote = str(item.get("quote") or "").strip()
-    return quote if quote and str(item.get("ref") or "").strip().strip("[]") == ref else ""
+    if not quote or str(item.get("ref") or "").strip().strip("[]") == ref:
+        return quote
+    try:
+        return "" if refs_mod.parse_ref(ref)["kind"] == "span" else quote
+    except ValueError:
+        return ""
 
 
 async def _warm_view_refs(c: str | None, args: dict[str, Any]) -> None:
@@ -1475,9 +1536,9 @@ async def _h_add_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             # otherwise nothing reminds the caller when no add_card follows
             line = hint("takeaway-missing-shown", cid=new)
         return ok(warn + res.text + (f"\n\n{line}" if line else ""))
-    if cardrun.defers(ctx.c):  # terminal mode: the code runs through `thimble-run` in the caller's Bash
+    if cardrun.defers(ctx.c):  # the card runner: the code runs through `thimble-run` in the caller's Bash
         await cardrun.ready_types(ctx.c, code)
-        cell = notebook.new_cell(kind, ctx.cell_author, title, nb_id, code=code)
+        cell = notebook.new_cell(kind, ctx.cell_author, title, nb_id, code=code, workspace=ctx.c)
         cell[notebook.RUN_KEY] = cardrun.run_record(str(cell["id"]), takeaway=takeaway,
                                                     default_timeout_s=_default_timeout(ctx), session=ctx.session)
         cell = notebook.insert_cell(ctx.c, nb_id, cell)
@@ -1521,7 +1582,8 @@ def _add_data_cell(ctx: Ctx, nb_id: str, kind: str, title: str, payload: dict,
     """A new card with a payload and no code: stored and announced."""
     from . import notebook
 
-    cell = notebook.insert_cell(ctx.c, nb_id, notebook.new_cell(kind, ctx.cell_author, title, nb_id, payload=payload))
+    cell = notebook.insert_cell(ctx.c, nb_id, notebook.new_cell(kind, ctx.cell_author, title, nb_id, payload=payload,
+                                                                       workspace=ctx.c))
     cid = str(cell["id"])
     _remember_cell(ctx, nb_id, cid)
     return ok(f"card:{cid}" + "".join(f"\n\n{line}" for line in lines))
@@ -1781,7 +1843,7 @@ async def _h_edit_card(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     only_code = (notebook.runnable(cell) and code != cell.get("code") and (kind or old_kind) == old_kind != "code"
                  and title in (None, cell.get("title")) and takeaway is None)
     was = notebook.outputs_key(ctx.ws, cell.get("outputs")) if only_code else ""
-    if cardrun.defers(ctx.c):  # terminal mode: the code runs through `thimble-run` in the caller's Bash
+    if cardrun.defers(ctx.c):  # the card runner: the code runs through `thimble-run` in the caller's Bash
         await cardrun.ready_types(ctx.c, code)
         run = cardrun.run_record(cid, takeaway=takeaway, default_timeout_s=_default_timeout(ctx), session=ctx.session)
         if was:
@@ -1966,7 +2028,7 @@ def _attach_takeaway(c: str, cid: str, raw: Any, cell: dict | None, *, author: s
             parts.append(f"{l.token} is not at {l.ref.split(cid, 1)[-1]}, the row the takeaway names"
                          + (f", which shows {at[0]}" if at else "") + "; kept there, so it shows as wrong until you correct it")
         note = (" (" + "; ".join(p for p in parts if p) + ")") if parts else ""
-    text = re.sub(r"\s+([,;:)]|\.(?!\w))", r"\1", text).strip()  # not before a period that starts a word (".yardopts", ".5")
+    text = re.sub(r"\s+([,;:).])(?![\w./\\])", r"\1", text).strip()  # only before punctuation that ends a word (".5", ":8000", "./x" keep it)
     if not text:
         return False, "takeaway: `text` is empty"
     if not notebook.append_takeaway(c, cid, text, overwrite=True, author=author):
@@ -1978,7 +2040,46 @@ def _attach_takeaway(c: str, cid: str, raw: Any, cell: dict | None, *, author: s
     if author == TAKEAWAY_AUTHOR and (first := _uncited_example_ref(cell, text)):
         # an example's takeaway rests on its records, and the rule to cite them is read here as it applies, like the limit
         note += "\n" + hint("takeaway-uncited-example", ref=first)
+    if author == TAKEAWAY_AUTHOR and (missing := [(w, r) for w, r, at in _takeaway_quotes(c, text) if at is None]):
+        # a quote its record does not hold is told as the takeaway is stored, before the answer that rests on it
+        note += "\n" + hint("takeaway-quote-missing", quotes="; ".join(f'"{_cut(" ".join(w.split()), 80)}" at {r}' for w, r in missing))
     return True, f"takeaway noted on card:{cid}{note}"
+
+
+# the kinds of ref a takeaway's quote is looked up in as the takeaway is stored: a file's record or lines, never a whole
+# file (a scan), a view's unit (read off the loop) or a card
+QUOTED_KINDS = ("record", "range", "block", "pointer", "row", "csvrow", "page")
+TAKEAWAY_QUOTES_MAX = 8  # the quotes of one takeaway looked up
+
+
+def _takeaway_quotes(c: str, text: str) -> builtins.list[tuple[str, str, str | None]]:
+    """Each citation of a takeaway whose shown value is a quote of a file's record (`[["…"|<path>#L62]]`, QUOTED_KINDS),
+    at most TAKEAWAY_QUOTES_MAX: (the words, the ref, the span of those words in the record by refs.span_of_quote, or
+    None when the record does not hold them or does not exist)."""
+    from . import cite, refs as refs_mod
+
+    out: builtins.list[tuple[str, str, str | None]] = []
+    for m in cite._SPAN_RE.finditer(text):
+        display, bar, ref = m.group(1).rpartition("|")
+        display, ref = display.strip(), ref.strip()
+        if not bar or len(display) <= 2 or display[0] not in cite.QUOTE_MARKS or display[-1] not in cite.QUOTE_MARKS:
+            continue
+        try:
+            if refs_mod.parse_ref(ref)["kind"] not in QUOTED_KINDS:
+                continue
+        except ValueError:
+            continue
+        words = display[1:-1].strip()
+        try:
+            at: str | None = refs_mod.span_of_quote(config.corpus_dir(c), ref, words)
+        except refs_mod.RefError as e:
+            if e.status != 404 or e.retry:
+                continue
+            at = None
+        out.append((words, ref, at))
+        if len(out) >= TAKEAWAY_QUOTES_MAX:
+            break
+    return out
 
 
 def _uncited_example_ref(cell: dict | None, text: str) -> str:
@@ -2059,7 +2160,7 @@ async def _h_read_ref(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 def _outputs_lines(cell: dict, body: str) -> builtins.list[str]:
     """read_ref's lines of a card's outputs (`body`, their text), headed by a line that says plainly whether the code it
-    shows made them: a card whose edit waits for `thimble-run` (terminal mode), or whose run goes on, still shows what
+    shows made them: a card whose edit waits for `thimble-run` (the card runner), or whose run goes on, still shows what
     it showed before, and a card that never ran shows nothing. Live QA 2: main read a card the card check had changed
     and run, whose outputs came out as before, and told the analyst that the card had not run since the edit."""
     from . import notebook  # noqa: PLC0415
@@ -2147,7 +2248,8 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
 
 async def _read_excerpt(ctx: Ctx, ref: str) -> ToolResult:
     """The excerpt refs.resolve gives a reader of `ref`: a file, a line or a range, a record's block, a database row, a
-    label, a passage of a document."""
+    label, a passage of a document; a line's record with the fields its excerpt leaves out first (refs.checked_text: a
+    wiki save's edit summary)."""
     from . import refs
 
     try:
@@ -2158,7 +2260,7 @@ async def _read_excerpt(ctx: Ctx, ref: str) -> ToolResult:
     lines = [f"{ref} ({res.get('kind', 'record')})"]
     if meta.get("span_missing"):
         lines.append("(the cited span is not in the card's current output; the whole card follows)")
-    lines.append(str(res.get("excerpt") or "").strip() or "(empty)")
+    lines.append(refs.checked_text(res).strip() or "(empty)")
     return ok("\n".join(lines))
 
 
@@ -2247,7 +2349,7 @@ def holdings(c: str) -> dict[str, Any]:
 
     ws = config.workspace_path(c)  # a read: validated, never created (report_types is asked only for a dir that exists)
     cards = sum(int(r.get("n_cells") or 0) for r in notebook.list_notebooks(ws, figures=False))
-    labels = len(concepts.list_concepts(ws, trials=False))
+    labels = len(concepts.list_concepts(ws))  # a trial too, as every Labels list holds it (concepts.py, Trials)
     docs = [t["slug"] for t in (report_types.list_types(c) if ws.is_dir() else [])
             if report_types.doc_file(c, investigation.MAIN, t["slug"]).is_file()]
     return {"workspace": c, "cards": cards, "labels": labels, "documents": docs, "chats": agents.held_chats(ws),
@@ -2266,12 +2368,6 @@ def _docs_phrase(docs: "builtins.list[str]") -> str:
     if len(docs) == 1:
         return f"document {docs[0]}"
     return "documents " + ", ".join(docs[:-1]) + f" and {docs[-1]}"
-
-
-def instructions() -> str:
-    """The MCP server instructions the shim carries: the `## instructions` section of prompts/tools.md, a short pointer
-    (Claude Code cuts server instructions at 2 KB)."""
-    return hint(INSTRUCTIONS_HINT).strip()
 
 
 # --------------------------------------------------------------------------- handlers: labels
@@ -2307,6 +2403,14 @@ async def _delegate(path: str, ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     return _as_result(await _maybe_await(_resolve(path)(ctx, args)))
 
 
+def _paged(c: str) -> bool:
+    """Whether workspace `c`'s session has the browser workbench (server transport, after the press), so screenshot can
+    open a page of it; before the press a card is drawn offscreen alone (activate.transport)."""
+    from . import activate  # noqa: PLC0415
+
+    return activate.transport(c) == activate.SERVER
+
+
 def _image(data: str, mime: str, caption: str) -> ToolResult:
     return ToolResult([{"type": "text", "text": caption}, {"type": "image", "data": data, "mimeType": mime}])
 
@@ -2317,10 +2421,12 @@ async def _h_screenshot(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     if not ref:
         return err("screenshot: `ref` is empty")
-    from . import local  # noqa: PLC0415
+    from . import threads  # noqa: PLC0415
 
-    if local.terminal(ctx.c) and not cite.is_card_ref(ref):  # terminal mode has no page to shoot: a card alone
-        return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} in terminal mode")
+    if ref.startswith(threads.PICTURE_REF):  # a picture the analyst pasted, which needs no page
+        return await _delegate("app.threads:tool_screenshot", ctx, {**args, "ref": ref})
+    if not _paged(ctx.c) and not cite.is_card_ref(ref):  # no page to shoot before the press: a card alone
+        return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} before the browser opens")
     if urlsplit(ref).scheme in ("http", "https"):
         return await _shot_page(ref, str(args.get("selector") or "").strip() or None)
     if cite.is_card_ref(ref):
@@ -2399,9 +2505,7 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
     cell = notebook.get_cell(ctx.c, cid, full_outputs=True) if cid else None
     if cell is None:
         return err(f"screenshot: there is no card {cid or ref}")
-    from . import local  # noqa: PLC0415 — imported above too: _shot_card is also reached on its own
-
-    if local.terminal(ctx.c):  # no page to open in terminal mode: the card harness draws the card offscreen
+    if not _paged(ctx.c):  # no page to open before the press: the card harness draws the card offscreen
         return await _shot_card_offscreen(ctx, cid, cell)
     if any(CARD_MIME in b for _, b in cite.iter_outputs(cell.get("outputs"))):
         return await _shot_type_card(ctx, cid, cell)
@@ -2444,13 +2548,13 @@ async def _shot_card(ctx: Ctx, ref: str) -> ToolResult:
 
 async def _shot_card_offscreen(ctx: Ctx, cid: str, cell: dict) -> ToolResult:
     """A card drawn by the card harness (render.py, the card check's drawing) in headless Chromium with the built page,
-    as terminal mode's screenshot; the `## screenshot-terminal` line when the harness cannot draw here."""
+    as the screenshot before the press; the `## screenshot-terminal` line when the harness cannot draw here."""
     from . import render  # noqa: PLC0415
 
     try:
         shot = await render.render_card(ctx.c, cell)
     except render.Unavailable as e:
-        log.info("screenshot: card:%s not drawn in terminal mode: %s", cid, e)
+        log.info("screenshot: card:%s not drawn offscreen: %s", cid, e)
         return err(hint("screenshot-terminal") or f"screenshot: {headless.NO_SCREENSHOTS} ({e})")
     if not shot.ok or shot.png is None:
         return err(hint("screenshot-terminal") or f"screenshot: card:{cid} was not drawn ({shot.error or 'no picture'})")
@@ -2663,6 +2767,8 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                         scope=concepts.SCOPE_OF_UNIT.get(prior["unit"]), new=scope))
     orienting = session_kind(ctx.session) == ORIENT_SESSION
     group = str(args.get("group") or "").strip()
+    # the group the caller's next card with no group goes to (default_group) is not the label's own group
+    own_group = False
     if orienting:
         target = None
     elif group:
@@ -2671,22 +2777,30 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
             and request_of(name) is None and threads.group_of(ctx.c, name) is None:
         # a new label's card with no group named gets a group of its own, named after the label (by its title alone,
         # never read as a path or a thread), rather than the group of the last card the caller made (live check
-        # term-fix10, quirk 9: a label card landed in "Deletes per day, 18 to 26 June")
+        # term-fix10, quirk 9: a label card landed in "Deletes per day, 18 to 26 June"). That group is the label's
+        # alone: the caller's later cards with no group go where they went before (bug hunt L18: every card after the
+        # label "asks the user a question" landed in its group)
         target = _group_id(ctx, name, [])
+        own_group = True
     else:
         target = default_group(ctx)  # the card the label has already stays where it is (concepts.label_card)
-    if target:
+    if target and not own_group:
         _note_group(ctx, target)
     question = _question(args.get("question")) or None
     within = args.get("within") or None
     if isinstance(within, str):
         within = {"label": within}
-    defer = kind == "code" and cardrun.defers(ctx.c)  # terminal mode: the code runs through `thimble-run label`
+    defer = kind == "code" and cardrun.defers(ctx.c)  # the card runner: the code runs through `thimble-run label`
+    # a side thread's fork: its run is the thread's, which the thread's Stop stops too (bug hunt round 10, K4)
+    thread = await _fork_thread_id(ctx)
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
                                     card=not orienting, within=within, show=bool(args.get("show")), defer=defer,
-                                    unit=LABEL_UNITS.get(unit_arg))
+                                    unit=LABEL_UNITS.get(unit_arg), thread=thread,
+                                    # who changed the label, which main's `rerun` event names: an agent by its key
+                                    by=ctx.session or (concepts.BY_ANALYST if ctx.created_by == BROWSER_AUTHOR
+                                                       else concepts.BY_MAIN))
     if s.get("deferred"):
         # the run makes the call again where the code runs; the filter and Files' switch are set already, here
         again = {k: v for k, v in args.items() if k not in ("filter", "show")}
@@ -2710,15 +2824,29 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                       if s.get("concept") and given else (given, 0))
     counts = ", ".join(f"{k} {v}" for k, v in sorted(applied.items()))
     unit = UNIT_WORDS.get(str(s.get("unit") or ""), s.get("unit") or "unit")
+    # a run that goes on is told by its rows so far, an earlier run's among them, and by its own failures so far, so its
+    # numbers need not add up to its size yet (bug hunt E8: 68 + 599 + 1 of 669, where the run ended 667 + 2)
+    sofar = " so far" if s.get("partial") else ""
     line = (f"applied label {s.get('name', name)} [[concept:{s.get('concept')}]] over {s.get('total', 0)} {unit}(s)"
             f"{' in ' + ', '.join(paths) if scope == 'files' else ''}{' within ' + within['label'] if within else ''}: "
-            f"{counts or 'no values yet'}.")
+            f"{counts + sofar if counts else ('no values' if s.get('none') else 'no values yet')}.")
     if moved:
         before = ", ".join(f"{k} {v}" for k, v in sorted(given.items()))
         line += (f" These counts apply the analyst's verdicts, as thimble.labels() does: {moved} {unit}(s) the analyst set"
                  f" to another value count under that value (the label itself gave {before}).")
+    if s.get("none"):  # files that keep no unit to label (concepts.none_why)
+        line += f" {s['none']}" + (" Its counts from earlier runs are cleared." if s.get("dropped") else "")
     if s.get("failed"):
-        line += f" {s['failed']} {unit}(s) failed: {s.get('message') or 'no reason given'}."
+        line += f" {s['failed']} {unit}(s) failed{sofar}: {s.get('message') or 'no reason given'}."
+    if s.get("skipped"):
+        # units that got no value, which no count holds, so the counts add up to the units that got one, as every place
+        # counts them (bug hunt I10: "blank" read as empty records, and main's card counted 8,496 where the browser
+        # said 71,298): a code label's that its code returned None for, a prompt label's that held no words
+        n = int(s["skipped"])
+        valued = sum(int(v) for v in applied.values()) if applied else 0
+        why = "its code returned None for them" if kind == "code" else "they hold no words to read"
+        line += (f" {n:,} {unit}(s) got no value, as {why}; the counts leave them out"
+                 f"{f', and are of the {valued:,} {unit}(s) that got one' if valued else ''}.")
     if (s.get("cut") or {}).get("line"):
         line += f" {s['cut']['line']}."
     values = (concepts.find_concept(ctx.ws, s["concept"]) or {}).get("labels") or [None]
@@ -2739,7 +2867,7 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
                  " The run goes on in the background; the counts are final when its card stops spinning.")
     if s.get("cell"):
         line += f" The label's card is [[card:{s['cell']}]]."
-    if s.get("stale") and cardrun.defers(ctx.c):  # terminal mode: those cards run again through `thimble-run stale`
+    if s.get("stale") and cardrun.defers(ctx.c):  # the card runner: those cards run again through `thimble-run stale`
         line += " " + concepts.stale_note(ctx.c, [{"id": x} for x in s["stale"]])
     elif s.get("stale"):
         line += " " + hint("apply_label-stale", cards=", ".join(f"[[card:{x}]]" for x in s["stale"]))
@@ -2902,6 +3030,17 @@ async def _fork_of(ctx: Ctx) -> dict[str, Any] | None:
     return await subagents.fork_thread(ctx.c, ctx.tool_use_id) or {}
 
 
+async def _fork_thread_id(ctx: Ctx) -> str | None:
+    """The side thread whose fork made this call (_fork_of), whose Stop stops the work the call starts; None for any
+    other caller's call, or a fork whose thread is not known. Never raises."""
+    try:
+        meta = await _fork_of(ctx)
+    except Exception:  # noqa: BLE001 — the work runs either way, as main's
+        log.debug("the thread of call %s was not found", ctx.tool_use_id, exc_info=True)
+        return None
+    return str(meta["id"]) if meta and meta.get("id") else None
+
+
 # what a thread's anchor names (agents.new_thread), as the lines a ticket from the thread adds (_with_anchor)
 ANCHOR_LINES = (("anchor", "ref"), ("anchor_surface", "surface"), ("anchor_element", "element"),
                 ("anchor_selector", "selector"), ("anchor_text", "text"), ("anchor_image", "picture"))
@@ -2999,12 +3138,8 @@ def ask_main_again(c: str, rid: str, call: str) -> bool:
 
 
 async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    from . import local  # noqa: PLC0415
-
-    # a code ticket's Allow card is in the browser, which terminal mode does not open; a change to a view is a view
-    # build, which runs in both modes
-    if local.terminal(ctx.c) and not " ".join(str(args.get("view") or "").split()):
-        return err(hint("ticket-terminal") or "file_dev_ticket: code tickets are filed in browser mode")
+    # a code ticket is filed in any transport: the analyst allows it on its card in the browser workbench, which a
+    # notice in the terminal opens (dev tickets in every install)
     title = " ".join(str(args.get("title") or "").split())
     body = str(args.get("body") or "").strip()
     if not title:

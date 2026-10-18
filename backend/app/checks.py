@@ -19,11 +19,16 @@ extension's report checks, checks/<slug>/check.json (its name and colour)
 and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, read from the extension until
 first changed as the built-ins are, and off. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
-work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, holds the context engine's part
-(context.render) and then the document, the check's prompt and the passages it covers; a task too large for one Read
-call is written as task.md, task-2.md… (read_parts), each small enough that Read returns it whole. Its prompt names that
-file or those files in order (`## check-task-file`, `## check-task-files`). It comments with add_comment and hands back
-one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
+work folder of its own, check-work/<id>-<doc>/. Its task holds the context engine's part (context.render) and then the
+document, the check's prompt and the passages it covers. A run thimble's module starts (a click or a follow-on start)
+gets its task whole in its prompt (`## check-task-inline`), so it makes no Read call for it: in Manual mode each Read
+outside the analyst's folder is a permission ask (bug hunt F2: 42 of 87 asks were checks reading their task files).
+A typed start (main's run_check) gets a prompt main types out whole, so main's Agent call names the task's file there,
+task.md, written as task.md, task-2.md… when too large for one Read call (read_parts), each small enough that Read
+returns it whole, in order (`## check-task-file`, `## check-task-files`); thimble's module gives its agent the task
+whole in place of that prompt (`## check-task-inline`, subagents.start_job's `inline`), so it reads no file either (bug
+hunt I12: Manual mode asked before each task file's Read), and only where the module cannot does the agent read the
+files. Every run writes the task file, its record. A check comments with add_comment and hands back one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
 analyst's Stop ends it (through thimble's plugin module, subagents.stop). A check made or changed (its name, prompt,
 colour, shown or covers) emits `checks` on the stream, so every Comments pane, the Report's and the canvas's in any tab,
 reads the checks again.
@@ -38,8 +43,11 @@ The cache: a passage (paragraph, heading, slide, beat or free sentence) is finge
 words. A run covers only passages whose fingerprint its check has not seen on that document; a run that ends `done`
 supersedes the check's earlier open comments on those passages and records their fingerprints in `seen`. Main hears
 `checked {check, doc, status, comments}` when a run run_check started ends with no agent of main's, such as an
-extension's program; a run that ran as main's subagent says nothing more, since its hand-back already tells main, which
-answers it in one line.
+extension's program; a run that ran as main's subagent says nothing more: the hand-back of a run thimble's module
+started is taken by thimble's hand-back hook and never reaches main (plugin/bin/.thimble-watch --handback), and that of
+a run main's own Agent call started tells main, which answers it in one line. The terminal UI lets that hand-back in
+and draws no row for it, and the notice Claude Code adds that the report reached main is kept empty
+(plugin/hooks/term/register.tsx, plugin/hooks/thimble.ts ownPointer), so main's line is the run's one row (bug hunt I7).
 
 The cards. A check `covers` the documents, the cards or both (COVERS; the built-ins say so in their frontmatter, a new
 check covers the documents unless made for the cards). The cards are one more run target beside the documents' slugs,
@@ -48,6 +56,17 @@ each step of a plan card. Its comments are canvas_comments' store, and Done reso
 shown check that covers the cards, a follow-on start (main_turn_ended), on the cards that changed since its last run
 there and that it has not seen; Run on its row in the canvas's Comments pane and main's run_check with `on: cards` start
 one too.
+
+Claude's answers. A check also covers Claude's answers in the chat (`answers` in COVERS; the built-ins say so), a third
+run target, ANSWERS (`@answers`), whose passages are the sentences of the answers answer_comments.py keeps. At main's
+turn end the mirror calls answer_ended with the turn's text rows and tool calls: after a data turn
+(answer_comments.is_data_turn) it keeps the answer and starts each shown check that covers answers, a follow-on start,
+on the passages of the answers since that check's last run there that it has not seen. Its comments are
+answer_comments' store, which the terminal tints in the check's color. A run over answers never wakes main: neither its
+start nor its end sends main an event, a hand-back or a delivery; its end changes only answer-comments.json.
+
+Feature switches. With the `checks` feature off (features.auto) no run starts by itself: not after a writer's end, not
+at main's turn end over the cards, not after an answer.
 
 Notices. A run that ends failed (its agent's API error, a start that did not happen, a program's error) is told in the
 foreground with Open on its chat, since the analyst may be in another chat (notices.post, under the run's key); its
@@ -69,7 +88,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from . import canvas_comments, config, investigation, prompts, read_parts, tools, userconf, work_files
+from . import answer_comments, canvas_comments, config, investigation, prompts, read_parts, tools, userconf, work_files
 from .kernel_thimble import LABEL_ORDER
 from .ledger import read_json, write_json
 
@@ -82,7 +101,9 @@ WRITER_ROLE = "writer"  # the chat role of a writer, whose end starts the shown 
 AUTHOR = "check"  # a check's comment's author (report.CHECK_AUTHOR)
 DIR = "checks"  # workspaces/<c>/checks/<id>.json
 WORK_DIR = "check-work"  # workspaces/<c>/check-work/<id>-<doc>/, a run's own folder, where its Bash may write
-TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first, with task-2.md… when one file is too large
+TASK_FILE = "task.md"  # in a run's own folder: its task's record, which a typed start's agent reads first, with
+# task-2.md… when one file is too large
+PROMPT_ROW_CHARS = 2_000  # a check's prompt longer than this holds its task, and its chat keeps only its lead (prompt_row)
 OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
 BUILTINS = ("judgment", "unverified", "important-details")  # prompts/checks/<id>.md, listed first in this order
 RETIRED = ("verified",)  # a former built-in: listed only where the workspace stored it, and no new check takes its id
@@ -94,6 +115,9 @@ FORMER_IDS = {"you-should-know": "important-details"}
 # (_as_now)
 FORMER_NAMES = {"unverified": ("Unverified",), "important-details": ("You should know",)}
 FORMER_COVERS = {"judgment": (["documents"],), "unverified": (["documents"],)}
+# what the built-ins covered before they covered Claude's answers: a stored copy that holds it reads as covering what
+# its built-in covers now (_as_now); unlike FORMER_COVERS it says nothing of when the copy was stored
+COVERS_BEFORE_ANSWERS = (["documents", "cards"],)
 FORMER_PROMPTS = {
     "judgment": ("20b914af87f96860649651e3c44b4a1217752e90",),
     "unverified": ("fd652c0e32dafbfda58932a0e2cc1e5acb7898e6",),
@@ -101,14 +125,19 @@ FORMER_PROMPTS = {
 }
 CANVAS = canvas_comments.CANVAS  # the run target of a check over the cards, among `runs` beside the documents' slugs
 CANVAS_NAME = "cards"  # how a line, a chat and main's `checked` event name that target
-COVERS = ("documents", "cards")  # what a check comments on
+ANSWERS = answer_comments.ANSWERS  # the run target of a check over Claude's answers
+ANSWERS_NAME = "answers"  # how a line and a chat name that target
+COVERS = ("documents", "cards", "answers")  # what a check comments on
+RUN_ON = ("documents", "cards")  # what run_check's `on` names: a run over answers starts only after an answer
 DEFAULT_COVERS = ("documents",)
 MAX_CARDS = 40  # the cards a run over the canvas covers at most, the ones that changed last
+MAX_ANSWERS = 3  # the answers a run over answers covers at most, the last ones
 COLOURS = tuple(range(1, 9))  # the label palette's places a check's color may take (kernel_thimble.LABEL_COLOURS)
 NEW_COLOURS = tuple(m for m in LABEL_ORDER if m in COLOURS)  # the order new checks take them, as new label values do
 CONTEXT_CHARS = 400_000  # of the context engine's part of a run's first message
 WAITING_QUEUED = "queued"  # a run's `waiting` while it waits for a place (MAX_SESSIONS)
 WAITING_PLAN = "plan"  # a run's `waiting` while main is in plan mode, where a writer's end holds the runs it starts
+WAITING_OFF = "off"  # a run's `waiting` while thimble is off in main's session (/plugin), which holds the runs it starts
 MAX_SESSIONS = 3  # runs whose agents run at once
 LIMIT_RETRY_S = 30.0  # a start Claude Code refused at its subagent limit is tried again after this long, or at an end
 TYPED = "typed"  # subagents.TYPED: main's run_check makes the Agent call
@@ -152,7 +181,7 @@ def covers_of(raw: Any) -> list[str]:
 
 
 def covers(check: dict[str, Any] | None, what: str) -> bool:
-    """Whether `check` comments on `what`, `documents` or `cards`."""
+    """Whether `check` comments on `what`, `documents`, `cards` or `answers`."""
     return bool(check) and what in covers_of(check.get("covers"))  # type: ignore[union-attr]
 
 
@@ -168,9 +197,11 @@ def builtin(cid: str) -> dict[str, Any] | None:
     front = yaml.safe_load(head) if sep else {}
     front = front if isinstance(front, dict) else {}
     colour = front.get("color", front.get("colour"))  # `colour`, the British spelling, is its alias
+    # `about`, one line on what the check looks for, is for the terminal's Checks view alone, never sent to a model
     return {"id": cid, "name": _collapse(front.get("name") or cid), "prompt": body.strip(),
             "colour": colour if colour in COLOURS else COLOURS[0], "shown": front.get("shown") is True, "builtin": True,
-            "covers": covers_of(front.get("covers")), "created_by": "thimble", "ts": "", "version": 1, "runs": {}}
+            "covers": covers_of(front.get("covers")), "about": _collapse(front.get("about")), "created_by": "thimble",
+            "ts": "", "version": 1, "runs": {}}
 
 
 def from_extensions(c: str) -> dict[str, dict[str, Any]]:
@@ -196,8 +227,8 @@ def from_extensions(c: str) -> dict[str, dict[str, Any]]:
                 continue
             out[cid] = {"id": cid, "name": _collapse(raw.get("name") or slug)[:NAME_CHARS], "prompt": prompt,
                         "colour": colour if colour in COLOURS else NEW_COLOURS[len(out) % len(NEW_COLOURS)], "shown": False,
-                        "builtin": True, "covers": covers_of(raw.get("covers")), "created_by": str(e["name"]), "ts": "",
-                        "version": 1, "runs": {}}
+                        "builtin": True, "covers": covers_of(raw.get("covers")), "about": _collapse(raw.get("about")),
+                        "created_by": str(e["name"]), "ts": "", "version": 1, "runs": {}}
     return out
 
 
@@ -227,8 +258,9 @@ def _as_now(stored: dict[str, Any], *, before_cards: bool = False) -> dict[str, 
         stored["name"] = now["name"]
     if _words_key(stored.get("prompt")) in FORMER_PROMPTS.get(cid, ()):
         stored["prompt"] = now["prompt"]
-    if stored.get("covers") in FORMER_COVERS.get(cid, ()):
+    if stored.get("covers") in FORMER_COVERS.get(cid, ()) or stored.get("covers") in COVERS_BEFORE_ANSWERS:
         stored["covers"] = now["covers"]
+    stored.setdefault("about", now.get("about") or "")
     return stored
 
 
@@ -406,6 +438,8 @@ def edit(c: str, cid: str, *, name: str | None = None, prompt: str | None = None
         check["covers"] = covers_of(covers)
     saved = save(c, check)
     _announce(c, cid)
+    if shown is not None or colour is not None:
+        answer_comments._emit(c)  # the chat draws its answer comments again, with or without this check's
     return saved
 
 
@@ -499,9 +533,12 @@ def to_cover(check: dict[str, Any], slug: str, doc: dict[str, Any] | None, wante
 
 
 def passages_of(c: str, doc: str) -> list[dict[str, Any]]:
-    """The passages of a run target: a written document's (passages), or the cards' (canvas_comments.passages)."""
+    """The passages of a run target: a written document's (passages), the cards' (canvas_comments.passages), or the
+    sentences of the answers kept (answer_comments.all_passages)."""
     if doc == CANVAS:
         return canvas_comments.passages(c)
+    if doc == ANSWERS:
+        return answer_comments.all_passages(c)
     return passages(doc, _doc(c, doc))
 
 
@@ -521,8 +558,27 @@ def canvas_cover(c: str, check: dict[str, Any], wanted: list[str] | None = None,
     return [p for p in out if p["card"] in keep]
 
 
+def answer_cover(c: str, check: dict[str, Any], wanted: list[str] | None = None, force: bool = False,
+                 since: float | None = None) -> list[dict[str, Any]]:
+    """The sentences of Claude's answers a run of `check` covers: the ones `wanted` names, else every one of the last
+    MAX_ANSWERS answers when `force`, else those it has not seen of the last MAX_ANSWERS answers kept at or after
+    `since` (a time) when it is given."""
+    kept = answer_comments.answers(c)
+    if wanted:
+        ps = answer_comments.all_passages(c)
+        refs = {p["ref"] for w in wanted if (p := answer_comments.passage_of(c, w, ps)) is not None}
+        return [p for p in ps if p["ref"] in refs]
+    if since is not None and not force:
+        kept = [a for a in kept if float(a.get("at") or 0) >= since]
+    turns = [a["turn"] for a in kept[-MAX_ANSWERS:]]
+    seen = set(((check.get("runs") or {}).get(ANSWERS) or {}).get("seen") or [])
+    return [p for p in answer_comments.all_passages(c, turns) if force or p["fp"] not in seen]
+
+
 def target_name(doc: str) -> str:
-    """How a line names a run target: `report:<slug>`, or the cards."""
+    """How a line names a run target: `report:<slug>`, the cards, or Claude's answers."""
+    if doc == ANSWERS:
+        return "Claude's answers"
     return f"the {CANVAS_NAME}" if doc == CANVAS else f"report:{doc}"
 
 
@@ -575,20 +631,29 @@ def running(c: str, cid: str, doc: str) -> bool:
 
 
 def _terminal(c: str) -> bool:
-    from . import subagent_files  # noqa: PLC0415
+    """Whether workspace `c`'s session runs on local transport (no server holds the runs): local.transport (C11)."""
+    from . import local  # noqa: PLC0415
 
     try:
-        return subagent_files.terminal(config.workspace_dir(c))
+        return local.transport(c) == "local"
     except (OSError, ValueError):
         return False
 
 
+def _auto(c: str) -> bool:
+    """Whether the `checks` feature is on in workspace `c` (features.auto, C6): off, no run starts by itself."""
+    from . import features  # noqa: PLC0415
+
+    return bool(features.auto(c, "checks"))
+
+
 def _current(c: str, cid: str, doc: str) -> _Active | None:
-    """The run of check `cid` on `doc` that goes. In browser mode the server holds every run (_active). In terminal mode
-    the process that starts a run (the shim for main's run_check, a hook's process for a writer's follow-on) is not the
-    one that hears its agent start and end (a hook's process) or takes its comments (the shim), so the check's file
-    decides: a run it records `running` that this process does not hold is taken up from the record, as recover takes
-    up a previous server's, and a run this process holds that the file records ended, or replaced, is let go."""
+    """The run of check `cid` on `doc` that goes. After the press the server holds every run (_active). On the local
+    transport the process that starts a run (the shim for main's run_check, a hook's process for a writer's follow-on)
+    is not the one that hears its agent start and end (a hook's process) or takes its comments (the shim), so the
+    check's file decides: a run it records `running` that this process does not hold is taken up from the record, as
+    recover takes up a previous server's, and a run this process holds that the file records ended, or replaced, is let
+    go."""
     act = _active.get((c, cid, doc))
     if not _terminal(c):
         return act
@@ -611,7 +676,7 @@ def _current(c: str, cid: str, doc: str) -> _Active | None:
 
 
 def _prune(c: str | None = None) -> None:
-    """In terminal mode, let go of the runs this process holds that another process ended (_current)."""
+    """On the local transport, let go of the runs this process holds that another process ended (_current)."""
     for (cc, cid, doc) in list(_active):
         if c is None or cc == c:
             _current(cc, cid, doc)
@@ -680,11 +745,13 @@ def agent_definition() -> tuple[str, dict[str, Any]]:
 def definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:check` for workspace `c` (subagents.roles adds its model, effort and `background`):
     check.md's body and its frontmatter's description, as the config or the active extensions change it, and the
-    thimble tools that are not a check's taken away."""
+    thimble tools that are not a check's taken away, and Monitor."""
     with prompts.custom(userconf.prompt_files(c, "checks")):
         _, agent = agent_definition()
     out = {k: agent[k] for k in ("description", "prompt") if k in agent}
-    out["disallowedTools"] = tools.not_own(OWN_TOOLS)
+    # a check ends with its turn: no Monitor, and the foreground hook refuses a Bash or Agent call in the background
+    # (plugin/bin/.thimble-watch --foreground)
+    out["disallowedTools"] = [*tools.not_own(OWN_TOOLS), "Monitor"]
     return out
 
 
@@ -714,6 +781,11 @@ def _replaced_part(c: str, check: dict[str, Any], doc: str, cover: list[dict[str
         keys = {canvas_comments.key_of(p) for p in cover}
         found = [canvas_comments.line(c, cm) for cm in canvas_comments.open_comments(c)
                  if cm.get("check") == cid and canvas_comments.key_of(cm) in keys]
+    elif doc == ANSWERS:
+        refs = {p["ref"] for p in cover}
+        found = [f"comment {cm['id']} on {cm['ref']} · {_collapse(cm.get('text'))}"
+                 + (f" — {_collapse(cm.get('details'))}" if _collapse(cm.get("details")) else "")
+                 for cm in answer_comments.open_comments(c) if cm.get("check") == cid and cm.get("ref") in refs]
     else:
         ps, covered, found = passages(doc, d), {p["ref"] for p in cover}, []
         for cm in (d or {}).get("comments") or []:
@@ -734,6 +806,11 @@ def task_text(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any
         parts = [tools.hint("check-instructions", check=check["name"], prompt=str(check.get("prompt") or "").strip()),
                  tools.hint("check-canvas", cards=canvas_comments.card_lines(c, [p["ref"] for p in cover])),
                  _replaced_part(c, check, doc, cover)]
+        return "\n\n".join(p.strip() for p in parts if p.strip())
+    if doc == ANSWERS:
+        lines = "\n".join(f"- {p['ref']} {_collapse(p['text'])}" for p in cover)
+        parts = [tools.hint("check-instructions", check=check["name"], prompt=str(check.get("prompt") or "").strip()),
+                 f"{answer_comments.TASK_HEADING}\n\n{lines}", _replaced_part(c, check, doc, cover)]
         return "\n\n".join(p.strip() for p in parts if p.strip())
     t = report_types.read_type(c, doc)
     d = report_types.read_doc(c, inv.MAIN, doc) or {}
@@ -756,27 +833,32 @@ def first_message(c: str, check: dict[str, Any], doc: str, cover: list[dict[str,
     """A run's task file: the context engine's part (CONTEXT_CHARS), then the task (task_text)."""
     from . import context  # noqa: PLC0415 — context imports this module for the check names
 
-    focus = tuple(dict.fromkeys(f"card:{p['card']}" for p in cover)) if doc == CANVAS else (f"report:{doc}",)
+    focus = (tuple(dict.fromkeys(f"card:{p['card']}" for p in cover)) if doc == CANVAS else () if doc == ANSWERS
+             else (f"report:{doc}",))
     return context.render(c, task_text(c, check, doc, cover), budget=CONTEXT_CHARS, focus=focus)
 
 
 async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None = None, force: bool = False,
                     notify: bool = False, route: str = "follow-on", call: str | None = None,
-                    since: str | None = None) -> dict[str, Any] | None:
-    """Start a run of check `cid` on the written document `doc`, or on the cards (CANVAS, canvas_cover, of the cards that
-    changed since `since` when it is given), and return its record, or None when it has nothing to cover, the document
-    is not written or the check does not cover the cards. A running run of it on `doc` is stopped first. `notify` tells
-    main when it ends. Its agent starts as `route` says (subagents.start_job): a click (Run) or a follow-on start (a
-    writer's end, main's turn end) through main's module when a place is free (MAX_SESSIONS), queued otherwise; a typed
-    start (main's run_check) at once, as the exact Agent call main makes, which the record's `_answer` holds for the
-    tool."""
+                    since: str | float | None = None) -> dict[str, Any] | None:
+    """Start a run of check `cid` on the written document `doc`, on the cards (CANVAS, canvas_cover, of the cards that
+    changed since `since` when it is given), or on Claude's answers (ANSWERS, answer_cover, of the answers kept since
+    `since`, a time), and return its record, or None when it has nothing to cover, the document is not written or the
+    check does not cover the cards or the answers. A running run of it on `doc` is stopped first. `notify` tells main
+    when it ends, never for a run over answers. Its agent starts as `route` says (subagents.start_job): a click (Run) or
+    a follow-on start (a writer's end, main's turn end) through main's module when a place is free (MAX_SESSIONS),
+    queued otherwise; a typed start (main's run_check) at once, as the exact Agent call main makes, which the record's
+    `_answer` holds for the tool."""
     from . import investigation as inv, report_types  # noqa: PLC0415
 
     check = read(c, cid)
     if check is None:
         raise ValueError(f"no check {cid!r}")
     if doc == CANVAS:
-        cover = canvas_cover(c, check, passages_, force, since) if covers(check, "cards") else []
+        cover = canvas_cover(c, check, passages_, force, since) if covers(check, "cards") else []  # type: ignore[arg-type]
+    elif doc == ANSWERS:
+        cover = answer_cover(c, check, passages_, force, since) if covers(check, "answers") else []  # type: ignore[arg-type]
+        notify, route, call = False, route if route != TYPED else "follow-on", None  # a run over answers wakes no one
     else:
         d = report_types.read_doc(c, inv.MAIN, doc)
         cover = to_cover(check, doc, d, passages_, force) if d is not None else []
@@ -790,7 +872,7 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
     rec = {"run": secrets.token_hex(4), "status": "running", "chat": "", "started": _now(), "ended": None,
            "covered": [p["ref"] for p in cover], "fps": [p["fp"] for p in cover], "seen": list(prev.get("seen") or []),
            "comments": 0, "summary": "", "stale": 0, "notify": notify or None, "agent_id": None, "refused": None}
-    if doc == CANVAS:
+    if doc in (CANVAS, ANSWERS):
         rec["since"] = since  # the time its cover looked from, which the next turn's run looks from if this one fails
     act = _Active(c, cid, doc, rec["run"], notify, rec["covered"], rec["fps"], route=route, call=call)
     _active[(c, cid, doc)] = act
@@ -814,7 +896,7 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
 
 
 def _places() -> int:
-    """The runs holding a place: started, or starting; in terminal mode not one another process ended (_prune)."""
+    """The runs holding a place: started, or starting; on the local transport not one another process ended (_prune)."""
     _prune()
     return sum(1 for a in _active.values() if not a.ended and a not in _queue
                and (a.agent or a.request or (a.task is not None and not a.task.done()) or a.program))
@@ -831,6 +913,23 @@ async def _wait_out_of_plan(act: _Active) -> None:
     _set_waiting(act, WAITING_PLAN)
     try:
         await subagents.out_of_plan(act.c)
+    finally:
+        _set_waiting(act, None)
+
+
+async def _wait_module_back(act: _Active) -> None:
+    """A run a turn's end started (an answer's checks, the cards' checks) waits while thimble is off in main's session
+    (subagents.module_away: /plugin turned it off, which is no end of the session), its record `waiting` for that, and
+    starts once thimble is on again. Bug hunt round 10, K8: such a start failed with a notice that said main, its threads,
+    cards and labels still work and to try again in a few seconds, beside the page's line that thimble is off, and
+    nothing ran the check once thimble was on again."""
+    from . import subagents  # noqa: PLC0415
+
+    if not subagents.module_away(act.c):
+        return
+    _set_waiting(act, WAITING_OFF)
+    try:
+        await subagents.module_back(act.c)
     finally:
         _set_waiting(act, None)
 
@@ -899,7 +998,8 @@ async def _go(act: _Active) -> None:
 
 async def _launch(act: _Active) -> None:
     """Write the run's task file (first_message), then start its agent (subagents.start_job, `thimble:check`) on
-    Settings' checks row, as its route says; or the run as an extension's program of the checks task (_program)."""
+    Settings' checks row, as its route says, with its task in its prompt (task_prompt); or the run as an extension's
+    program of the checks task (_program)."""
     from . import subagents, tasks  # noqa: PLC0415 — tasks reads the extensions
 
     c = act.c
@@ -919,12 +1019,15 @@ async def _launch(act: _Active) -> None:
     paths = await asyncio.to_thread(_write_task, c, work / TASK_FILE, text)
     if act.route == subagents.FOLLOW_ON:
         await _wait_out_of_plan(act)
+        if not act.ended:
+            await _wait_module_back(act)
     if act.ended:
         return
     ans = await subagents.start_job(
-        c, ROLE, session_key(act.check, act.doc), read_parts.named(paths, "check-task-file", "check-task-files"),
-        subagents.values_for(c, ROLE), act.route,
-        description=f"check: {check['name']} · {CANVAS_NAME if act.doc == CANVAS else act.doc}",
+        c, ROLE, session_key(act.check, act.doc), task_prompt(act.route, work, text, paths),
+        subagents.values_for(c, ROLE), act.route, inline=task_prompt(subagents.FOLLOW_ON, work, text, paths),
+        description=f"check: {check['name']} · "
+                    f"{CANVAS_NAME if act.doc == CANVAS else ANSWERS_NAME if act.doc == ANSWERS else act.doc}",
         chat={"title": str(check["name"]), "check": act.check, "doc": act.doc, "run_id": act.run, "announce": False,
               "brief": tools.hint("check-instructions", check=check["name"],
                                   prompt=str(check.get("prompt") or "").strip())},
@@ -936,6 +1039,22 @@ async def _launch(act: _Active) -> None:
         return  # a request refused went through subagent_refused
     if not act.agent:  # a typed start's request, until its agent starts (subagent_started)
         act.request = str(ans.get("request") or "") or None
+
+
+def task_prompt(route: str, work: Path, text: str, paths: list[Path]) -> str:
+    """A run's prompt: its task `text` whole, with its work folder `work` (`## check-task-inline`), so that its agent
+    reads no file for it; for a typed start, which main types out whole, the task file or files `paths` named in order
+    (read_parts.named)."""
+    if route == TYPED:
+        return read_parts.named(paths, "check-task-file", "check-task-files")
+    return tools.hint("check-task-inline", work=str(work), task=text) or text
+
+
+def prompt_row(text: str) -> str:
+    """What a check's chat keeps of a prompt: the lines before the task that `## check-task-inline` holds whole (its
+    first paragraph), not the task, which the run's task file records; any other prompt as it is."""
+    head, sep, _ = text.partition("\n\n")
+    return head if sep and len(text) > PROMPT_ROW_CHARS else text
 
 
 def _write_task(c: str, path: Path, text: str) -> list[Path]:
@@ -995,6 +1114,15 @@ def _refused(act: _Active, kind: str, reason: str, rid: Any, expired: bool = Fal
             _queue.insert(0, act)
         _retry_later()
         return
+    if act.route == subagents.FOLLOW_ON and subagents.module_away(act.c):
+        # thimble went off in main's session (/plugin) as the run started: it starts once thimble is on again
+        # (_wait_module_back), with no failure (bug hunt round 10, K8)
+        act.request = None
+        act.task = None
+        if act not in _queue:
+            _queue.insert(0, act)
+        _pump()
+        return
     check = read(act.c, act.check)
     rec = ((check or {}).get("runs") or {}).get(act.doc)
     if check is not None and isinstance(rec, dict) and rec.get("run") == act.run:
@@ -1047,12 +1175,13 @@ def check_input(check: dict[str, Any], doc: str, cover: list[dict[str, Any]], co
 async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None, program: Any = None) -> Any:
     """thimble's own checks task (tasks.py), lent to a program that runs it: a Claude Code session as the check agent
     (prompts/check.md) on the input's `context`, run as the program's run (harness.session_call), which comments
-    with add_comment as thimble's own run does, on Settings' checks row. A model.CallResult whose output is the
+    with add_comment as thimble's own run does, on Settings' checks row. A call_result.CallResult whose output is the
     session's last reply."""
-    from . import harness, model as model_mod, subagents  # noqa: PLC0415
+    from . import harness, subagents  # noqa: PLC0415
+    from .call_result import CallResult  # noqa: PLC0415
 
     if program is None:
-        return model_mod.CallResult(status="error", detail="the checks task runs only in a program's run")
+        return CallResult(status="error", detail="the checks task runs only in a program's run")
     with prompts.custom(userconf.prompt_files(c, "checks")):
         _, agent = agent_definition()
     values = subagents.values_for(c, ROLE, {"model": model} if model else None)
@@ -1061,14 +1190,14 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None, p
     try:
         reply = await harness.session_call(program, payload)
     except harness.HarnessError as e:
-        return model_mod.CallResult(status="error", detail=str(e))
-    return model_mod.CallResult(status="ok", output=reply)
+        return CallResult(status="error", detail=str(e))
+    return CallResult(status="ok", output=reply)
 
 
 def _doc(c: str, doc: str) -> dict[str, Any] | None:
     from . import report_types  # noqa: PLC0415
 
-    if doc == CANVAS:
+    if doc in (CANVAS, ANSWERS):
         return None
     return report_types.read_doc(c, investigation.MAIN, doc)
 
@@ -1105,9 +1234,11 @@ def _finish(act: _Active, status: str, summary: str) -> None:
             return  # a newer run took its place
         doc = _doc(c, act.doc)
         canvas = act.doc == CANVAS
-        # the run's comments as the document (or the cards' store) holds them: in terminal mode the shim takes them, in
-        # another process
+        answers = act.doc == ANSWERS
+        # the run's comments as the document (or the cards' or the answers' store) holds them: on the local transport the
+        # shim takes them, in another process
         act.comments = max(act.comments, canvas_comments.count(c, act.check, act.run) if canvas else
+                           answer_comments.count(c, act.check, act.run) if answers else
                            sum(1 for cm in (doc or {}).get("comments") or []
                                if isinstance(cm, dict) and cm.get("check") == act.check and cm.get("run") == act.run))
         rec.update(status=status, ended=_now(), summary=last[:SUMMARY_CHARS], comments=act.comments)
@@ -1118,6 +1249,8 @@ def _finish(act: _Active, status: str, summary: str) -> None:
             if canvas:
                 canvas_comments.supersede(c, act.check, act.run,
                                           {canvas_comments.key_of(p) for p in ps if p["ref"] in covered})
+            elif answers:
+                answer_comments.supersede(c, act.check, act.run, covered)
             elif doc is not None:
                 gone = 0
                 for cm in doc.get("comments") or []:
@@ -1139,7 +1272,8 @@ def _finish(act: _Active, status: str, summary: str) -> None:
         save(c, check)
         _stream(c, act.check, act.doc, status, act.run, str(rec.get("chat") or ""), stale=rec["stale"])
         _notice(act, check, status, str(summary or ""), str(rec.get("chat") or ""))
-        if act.notify and not act.agent:  # main's subagent hands back itself: one line in main's chat, not two
+        # main's subagent hands back itself: one line in main's chat, not two; a run over answers tells main nothing
+        if act.notify and not act.agent and not answers:
             try:
                 events.post(c, CHECKED_KIND, {"text": rec["summary"] or status, "check": act.check,
                                                "doc": CANVAS_NAME if canvas else act.doc, "status": status,
@@ -1167,7 +1301,8 @@ def _notice(act: _Active, check: dict[str, Any] | None, status: str, summary: st
                 notices.cleared(act.c, key)
             return
         name, subject = notices.who(ROLE, str((check or {}).get("name") or act.check))
-        target = f"the {CANVAS_NAME}" if act.doc == CANVAS else f"the document {act.doc}"
+        target = (f"the {CANVAS_NAME}" if act.doc == CANVAS else "Claude's answer" if act.doc == ANSWERS
+                  else f"the document {act.doc}")
         why, fix = notices.reason(summary or "it ended with no summary")
         notices.post(act.c, kind="agent", text=FAILED_TEXT.format(subject=subject, target=target, why=why), agent=name,
                      chat=chat or None, action=fix, key=notices.agent_key(key))
@@ -1241,7 +1376,7 @@ def _spawn(c: str, coro: Any) -> None:
 def _writer_ended(c: str, meta: dict[str, Any]) -> None:
     """A writer's chat ended (agents.on_agent_finished): when it finished, each shown check runs on its document, as a
     follow-on start of the writer's own start (Q5), covering the passages it has not seen."""
-    if meta.get("role") != WRITER_ROLE or meta.get("status") != "done" or not meta.get("doc"):
+    if meta.get("role") != WRITER_ROLE or meta.get("status") != "done" or not meta.get("doc") or not _auto(c):
         return
     doc = str(meta["doc"])
     shown = [x for x in list_checks(c) if x.get("shown") and covers(x, "documents")]
@@ -1295,10 +1430,13 @@ def mark_stale(c: str, slug: str) -> None:
 def main_turn_ended(c: str, since: str | None = None) -> None:
     """Main's turn ended (session._end_turn): each shown check that covers the cards runs on them, a follow-on start,
     covering the cards it has not seen that changed since its last run there began (since the time that run looked
-    from, when it did not end done), else since the turn began (`since`). A check whose run there goes is left to it."""
+    from, when it did not end done), else since the turn began (`since`). A check whose run there goes is left to it.
+    Nothing runs with the `checks` feature off."""
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        return
+    if not _auto(c):
         return
     shown = [x for x in list_checks(c) if x.get("shown") and covers(x, "cards")]
     if shown:
@@ -1317,6 +1455,52 @@ async def _run_on_cards(c: str, ids: list[str], since: str | None) -> None:
             await start_run(c, cid, CANVAS, route="follow-on", since=str(base) if base else None)
         except Exception:  # noqa: BLE001 — one check's failure leaves the others to run
             log.exception("%s: check %s did not run on the cards after main's turn", c, cid)
+
+
+def answer_ended(c: str, turn: dict[str, Any]) -> None:
+    """Main's turn ended (the mirror, session.py, C10), `turn` = {sid, turn, rows: [{uuid, text}], tools: [{name,
+    input}], at}, each row's text raw as Claude wrote it: after a data turn (answer_comments.is_data_turn) the answer is
+    kept and each shown check that covers answers runs on it, a follow-on start, covering the sentences of the answers
+    since its last run there that it has not seen; a check whose run over answers goes is left to it. Nothing runs with
+    the `checks` feature off or after a turn that did not answer from the data. Such a run never wakes main (module
+    note)."""
+    if not _auto(c) or not isinstance(turn, dict):
+        return
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    try:
+        if not answer_comments.is_data_turn(c, turn):
+            return
+        shown = [x for x in list_checks(c) if x.get("shown") and covers(x, "answers")]
+        if not shown or answer_comments.store_answer(c, turn) is None:
+            return
+    except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
+        log.exception("%s: the answer of turn %s was not kept for the checks", c, turn.get("turn"))
+        return
+    _spawn(c, _run_on_answers(c, [str(x["id"]) for x in shown]))
+
+
+async def _run_on_answers(c: str, ids: list[str]) -> None:
+    for cid in ids:
+        if running(c, cid, ANSWERS):
+            continue
+        rec = ((read(c, cid) or {}).get("runs") or {}).get(ANSWERS)
+        since = None
+        if isinstance(rec, dict) and rec.get("run"):
+            since = rec.get("since") if rec.get("status") != "done" else _epoch(rec.get("started"))
+        try:
+            await start_run(c, cid, ANSWERS, route="follow-on", since=float(since) if since is not None else None)
+        except Exception:  # noqa: BLE001 — one check's failure leaves the others to run
+            log.exception("%s: check %s did not run on Claude's answer", c, cid)
+
+
+def _epoch(ts: Any) -> float | None:
+    try:
+        return datetime.fromisoformat(str(ts)).timestamp() if ts else None
+    except ValueError:
+        return None
 
 
 def on_report(c: str, event: dict[str, Any]) -> None:
@@ -1352,8 +1536,8 @@ async def tool_run_check(ctx: Any, args: dict[str, Any]) -> Any:
     on = _collapse(args.get("on")).lower() or None
     if not name:
         return tools.err("run_check: `name` is required")
-    if on is not None and on not in COVERS:
-        return tools.err(f"run_check: `on` is one of {', '.join(COVERS)}")
+    if on is not None and on not in RUN_ON:
+        return tools.err(f"run_check: `on` is one of {', '.join(RUN_ON)}")
     check = by_name(ctx.c, name)
     how = "rerun"
     try:
@@ -1427,6 +1611,8 @@ async def tool_add_comment(ctx: Any, args: dict[str, Any]) -> Any:
         return tools.err(tools.hint("add_comment-not-check"))
     if act.doc == CANVAS:
         return _add_card_comment(ctx, act, args)
+    if act.doc == ANSWERS:
+        return _add_answer_comment(ctx, act, args)
     ref = str(args.get("ref") or "").strip().strip("[]").strip()
     text = _collapse(args.get("text"))
     if not text:
@@ -1499,6 +1685,33 @@ def _add_card_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
         return tools.err("add_comment: `text` holds nothing but citations")
     _, new = canvas_comments.add(ctx.c, card=p["card"], step=p["step"], text=shown, details=details, author=AUTHOR,
                                  check=act.check, run=act.run, evidence=evidence, fp=p["fp"])
+    if new:
+        act.comments += 1
+        check = read(ctx.c, act.check)
+        rec = ((check or {}).get("runs") or {}).get(act.doc)
+        if check is not None and rec is not None and rec.get("run") == act.run:
+            rec["comments"] = act.comments
+            save(ctx.c, check)
+    return tools.ok(f"commented on {p['ref']}")
+
+
+def _add_answer_comment(ctx: Any, act: _Active, args: dict[str, Any]) -> Any:
+    """add_comment in a run over Claude's answers: a comment beside a sentence the run covers, `answer:<turn>#s<n>`,
+    stored with the sentence's raw text and offsets (answer_comments.add)."""
+    ref = str(args.get("ref") or "").strip().strip("[]").strip()
+    text = _collapse(args.get("text"))
+    if not text:
+        return tools.err("add_comment: `text` is empty")
+    if ref not in set(act.covered):
+        return tools.err(tools.hint("add_comment-uncovered", ref=ref or "(no ref)"))
+    p = answer_comments.passage_of(ctx.c, ref)
+    if p is None:
+        return tools.err(tools.hint("add_comment-uncovered", ref=ref))
+    shown, details, evidence = note_parts(ctx.c, text, args.get("details"))
+    if not shown:
+        return tools.err("add_comment: `text` holds nothing but citations")
+    _, new = answer_comments.add(ctx.c, passage=p, text=shown, details=details, author=AUTHOR, check=act.check,
+                                 run=act.run, evidence=evidence)
     if new:
         act.comments += 1
         check = read(ctx.c, act.check)
@@ -1637,6 +1850,30 @@ async def stop_route(c: str, cid: str, doc: str, request: Request) -> dict[str, 
             save(c, check)
             _stream(c, cid, doc, "stopped", str(rec.get("run") or ""), str(rec.get("chat") or ""))
     return read(c, cid) or check
+
+
+@router.get("/ws/{c}/answer-comments")
+async def answer_comments_route(c: str, session: str | None = None, status: str = "open") -> dict[str, Any]:
+    """The checks' comments on Claude's answers (answer_comments.state): {comments, running}, of one session's answers
+    when `session` is given; `status` open (the default) or all."""
+    _ws(c)
+    if status not in ("open", "all"):
+        raise HTTPException(400, "status is open or all")
+    return await asyncio.to_thread(answer_comments.state, c, session, status)
+
+
+@router.post("/ws/{c}/answer-comments/{cid}/dismiss")
+async def answer_comment_dismiss_route(c: str, cid: str) -> dict[str, Any]:
+    """The analyst's dismiss (Done) on a comment on an answer, which takes its tint away. The comment; 404 for none."""
+    _ws(c)
+    return await asyncio.to_thread(answer_comments.set_status, c, cid, answer_comments.SETTLED)
+
+
+@router.post("/ws/{c}/answer-comments/{cid}/reopen")
+async def answer_comment_reopen_route(c: str, cid: str) -> dict[str, Any]:
+    """A dismissed comment on an answer open again. The comment; 404 for none."""
+    _ws(c)
+    return await asyncio.to_thread(answer_comments.set_status, c, cid, "open")
 
 
 def stop_workspace(c: str) -> int:

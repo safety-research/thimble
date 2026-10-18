@@ -18,8 +18,9 @@ in rounds, through two thimble tools (view_tools.py):
    before ROUNDS rounds it is told to take the pictures again; a failure puts the view back as it was before the round
    (REVISION_FAILED_NOTE). A review with no problems calls finish_review with nothing revised. While it edits, readers
    see the view as it last passed (views.read_built's digest rule).
-In terminal mode a picture is the view's program drawn as text (term_views.draw_check), as thimble-term's panel shows
-it: the overview 120 columns wide, then TERM_STATES, given in view_pictures' result itself; no browser is needed.
+For a view whose page is its terminal program (views.target_of `term-page`) a picture is the program drawn as text
+(term_views.draw_check), as the terminal panel shows it: the overview 120 columns wide, then TERM_STATES, given in
+view_pictures' result itself; no browser is needed.
 An extension's program that replaces the view-review task (tasks.program) reads the pictures in place of the reviewer:
 each view_pictures call passes them to it (review_input, the input docs/agents.md documents), and the reviewer gets the
 problems it found to fix. A program that fails ends the review failed with why (PROGRAM_FAILED_NOTE).
@@ -31,8 +32,9 @@ The state rides on the proposal as `review {state, round, ts, revised, left, not
 and goes out with the `view` event, `shots` counting the pictures the review took. views/.reviewed/<slug>/ keeps the
 view as it was built for Undo until the next build or change passes, and <slug>.last the last version that passed,
 restored when a revision fails. A review run again keeps what the review before it revised, so Undo still reaches the
-view as it was built. A new change to the view stops its review; a view replaced or deleted stops it with no trace
-(forget)."""
+view as it was built. A new change to the view stops its review, which a notice tells (_changed_notice); a view
+replaced or deleted stops it with no trace (forget). The page of the view's other place, which its first open there
+builds, is no change: it waits for the review's end (views.ensure_page, _page_after)."""
 from __future__ import annotations
 
 import asyncio
@@ -87,7 +89,7 @@ EXTRA_STATES = {"labels": views.PANE_NARROW, "filtered": views.PANE_NARROW, "det
                 "control": views.PANE_SIZE}
 EXTRA_SHOTS = 4
 CONTROLS_CLICKED = 3  # controls one `control` state clicks in turn
-# in terminal mode, the columns of the overview's drawing and the states the reviewer may ask to see beside it, each
+# for a terminal page, the columns of the overview's drawing and the states the reviewer may ask to see beside it, each
 # with its columns: the view 200 columns wide, the first place a citation opens, the place a ref names, and the view
 # after keys pressed in turn (as `thimble view text --keys` takes them)
 TERM_COLUMNS = 120
@@ -224,7 +226,8 @@ def after_built(c: str, slug: str) -> None:
     if view is None or view.get("origin") != "workspace" or prop is None:
         return
     _drop_copies(c, slug)
-    if not enabled() or not auto(c) or (not views.terminal(c) and headless.missing(headless.PAGES)):
+    term = views.target_of(c, slug) == views.TERM_PAGE
+    if not enabled() or not auto(c) or (not term and headless.missing(headless.PAGES)):
         if prop.get("review"):
             views.update_proposal(c, slug, review=None)
         return
@@ -263,10 +266,12 @@ async def begin(c: str, slug: str, *, again: bool = False, route: str = subagent
     if route == subagents.FOLLOW_ON:
         await subagents.out_of_plan(c)
     name = str(prop.get("name") or slug)
-    ans = await subagents.start_job(c, REVIEWER, key(slug), task(c, prop), subagents.values_for(c, REVIEWER), route,
-                                    description=f"review: {name}",
-                                    chat={"title": f"review: {name}", "view": slug, "review": True, "announce": False},
-                                    work=work_dir(c, slug))
+    with views.spawning(c, views.target_of(c, slug)):  # the reviewer's registration renders for the view's page
+        ans = await subagents.start_job(c, REVIEWER, key(slug), task(c, prop), subagents.values_for(c, REVIEWER), route,
+                                        description=f"review: {name}",
+                                        chat={"title": f"review: {name}", "view": slug, "review": True,
+                                              "announce": False},
+                                        work=work_dir(c, slug))
     if ans.refused and ans.get("request") is None:
         subagent_refused(c, {"kind": "start", "key": key(slug), "reason": ans.reason, "refused_kind": ans.kind})
     return ans
@@ -364,6 +369,8 @@ async def _ended(c: str, run: subagents.Run, status: str, report: str, why: str,
             a = subagents.agent(c, run.agent_id) or {}
             quit_ = a.get("stopped_by") == subagents.STOPPED_QUIT
             _set(c, slug, state="stopped", note=note or (QUIT_NOTE if quit_ else why or STOPPED_NOTE))
+            if why == CHANGED_NOTE and not quit_:
+                _changed_notice(c, run, prop)
         elif status == "failed" and report == subagents.plan_failed_line(REVIEWER):  # main's plan mode held it
             _set(c, slug, state="failed", note=note or report)
         elif status == "failed":
@@ -378,9 +385,41 @@ async def _ended(c: str, run: subagents.Run, status: str, report: str, why: str,
     finally:
         if forget:
             _drop_copies(c, slug)
+        # the page an open in the view's other place asked for while it ran, whose pass starts the next review
+        queued = not forget and _page_after(c, slug)
         if (c, slug) in _restart:
             _restart.discard((c, slug))
-            after_built(c, slug)
+            if not queued:
+                after_built(c, slug)
+
+
+def _page_after(c: str, slug: str) -> bool:
+    """Build the page of the view's other place that an open asked for while the review ran (views.ensure_page, the
+    proposal's `page_wanted`), now that it ended; whether its build was queued."""
+    try:
+        wanted = str((views.read_proposal(c, slug) or {}).get("page_wanted") or "")
+        if wanted not in views.TARGETS:
+            return False
+        views.update_proposal(c, slug, page_wanted=None)
+        return views.ensure_page(c, slug, wanted)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the page %s waited for after its review was not built", c, slug)
+        return False
+
+
+def _changed_notice(c: str, run: subagents.Run, prop: dict[str, Any] | None) -> None:
+    """A review that thimble stopped because the view changed (CHANGED_NOTE) is told in the foreground, with Open on its
+    chat (bug hunt E4: it ended with no word); the next review's start takes the notice away. Never raises."""
+    from . import notices  # noqa: PLC0415
+
+    try:
+        name, subject = notices.who(REVIEWER, str((prop or {}).get("name") or ""))
+        then = ("A new review starts once the change passes its checks." if enabled() and auto(c) else
+                "Review again runs it on the changed view.")
+        notices.post(c, kind="agent", text=f"{subject} stopped because the view changed while it was reviewed. {then}",
+                     agent=name, chat=run.chat or None, key=notices.agent_key(run.key))
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the stop of the review %s was not told", c, run.key)
 
 
 def stop(c: str, slug: str, reason: str = STOPPED_NOTE, forget: bool = False) -> bool:
@@ -522,16 +561,17 @@ def _wanted(states: Any, left: int, term: bool = False) -> list[dict[str, Any]]:
     return more[:max(0, left)]
 
 
-async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str, str]:
+async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, str, str, list[str]]:
     """view_pictures for the reviewer `agent_id`: in a round's first call the overview, then the states asked for, up
     to EXTRA_SHOTS a round, into views-work/<slug>/review/<round>/. (The pictures' lines, each its number, path and
     what it shows, then what the checks found; the records the pages fetched; what an extension's program that replaces
-    the view-review task found in them, program_reading.) NoPictures for none, or for a program that failed."""
+    the view-review task found in them, program_reading; the pictures' paths in order, which the tool's result
+    carries, none for a terminal page's drawings.) NoPictures for none, or for a program that failed."""
     prop = views.read_proposal(c, slug)
     view = views.read_view(c, slug)
     if prop is None or view is None:
         raise NoPictures(f"view_pictures: the view {slug} is gone")
-    term = views.terminal(c)
+    term = views.target_of(c, slug) == views.TERM_PAGE  # the page its last build made
     if not term and headless.missing(headless.PAGES):
         raise NoPictures(NO_BROWSER_NOTE)
     review = review_of(prop)
@@ -554,6 +594,7 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
         raise NoPictures(why)
     extra = sum(1 for w in wanted if w["state"] != "overview")
     _set(c, slug, pictured=rnd, extra_left=left - extra, shots=done + sum(1 for s in shots if s.get("png")))
+    pngs = [str(s["png"]) for s in shots if s.get("png")]
     lines = [f"{i}: {s['png']} ({_about(s)})" for i, s in enumerate(shots, done + 1) if s.get("png")]
     if shots and shots[0].get("controls") and shots[0].get("state") == "overview":
         lines.append(f"The controls picture {done + 1} shows, by their text: "
@@ -561,11 +602,12 @@ async def pictures(c: str, slug: str, agent_id: str, states: Any) -> tuple[str, 
     checks = views.gate_notes(c, slug)
     if checks:
         lines += ["", "What the view's checks found:", *checks]
-    return "\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots)
+    return ("\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots),
+            pngs)
 
 
 async def draw(c: str, slug: str, wanted: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The pictures of a view built in terminal mode: its draft's program drawn as text (term_views.draw_check) in each
+    """The pictures of a view built for the terminal: its draft's program drawn as text (term_views.draw_check) in each
     state `wanted`, the overview TERM_COLUMNS wide or one of TERM_STATES at its columns. Each result carries its state,
     ref, controls and why."""
     from . import term_views  # noqa: PLC0415
@@ -586,8 +628,8 @@ async def draw(c: str, slug: str, wanted: list[dict[str, Any]]) -> list[dict[str
 
 
 async def _drawn(c: str, slug: str, agent_id: str, prop: dict[str, Any], view: dict[str, Any],
-                 wanted: list[dict[str, Any]], rnd: int, left: int, done: int) -> tuple[str, str, str]:
-    """pictures in terminal mode: the drawings of the states `wanted` (draw), each with what it shows and the text
+                 wanted: list[dict[str, Any]], rnd: int, left: int, done: int) -> tuple[str, str, str, list[str]]:
+    """pictures of a terminal page: the drawings of the states `wanted` (draw), each with what it shows and the text
     itself, then what the checks found; the records the programs fetched; what an extension's program found."""
     shots = await draw(c, slug, wanted)
     if bad := [s for s in shots if not s.get("text")]:
@@ -601,7 +643,7 @@ async def _drawn(c: str, slug: str, agent_id: str, prop: dict[str, Any], view: d
     checks = views.gate_notes(c, slug)
     if checks:
         lines += ["", "What the view's checks found:", *checks]
-    return "\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots)
+    return "\n".join(lines), records_text(shots) or "-", await program_reading(c, slug, agent_id, prop, view, shots), []
 
 
 def _drawn_about(s: dict[str, Any]) -> str:
@@ -675,11 +717,16 @@ def _about(s: dict[str, Any]) -> str:
 
 
 def records_text(shots: list[dict[str, Any]]) -> str:
-    """The first reader answers of each picture's page, as JSON, RECORDS_CHARS at most in all."""
-    parts = []
+    """The first reader answers of each picture's page, as JSON, RECORDS_CHARS at most in all: each answer read
+    (views.answer_value) only while the text is shorter."""
+    parts: list[str] = []
+    length = 0  # of the parts joined
     for i, s in enumerate(shots, 1):
         for a in (s.get("answers") or [])[:ANSWERS_PER_STATE]:
-            parts.append(f"picture {i}: {json.dumps(a, ensure_ascii=False, default=str)}")
+            if length > RECORDS_CHARS:  # cut where it would be cut with every answer
+                break
+            parts.append(f"picture {i}: {json.dumps(views.answer_value(a), ensure_ascii=False, default=str)}")
+            length += len(parts[-1]) + (len(parts) > 1)
     text = "\n".join(parts)
     return text if len(text) <= RECORDS_CHARS else text[: RECORDS_CHARS - 1] + "…"
 
@@ -738,10 +785,10 @@ async def review_task(c: str, inp: dict[str, Any], *, model: str | None = None, 
     lend, and the call fails. The task's prompt part,
     the `review` section of prompts/view-review.md, is the reviewer's registered prompt, which an extension's prompt
     still changes (view_tools.reviewer_definition)."""
-    from . import model as model_mod  # noqa: PLC0415
+    from .call_result import CallResult  # noqa: PLC0415
 
-    return model_mod.CallResult(status="error", detail="thimble's view review runs as a subagent, with no one-call "
-                                                       "reading to run")
+    return CallResult(status="error",
+                      detail="thimble's view review runs as a subagent, with no one-call reading to run")
 
 
 # --------------------------------------------------------------------------- routes

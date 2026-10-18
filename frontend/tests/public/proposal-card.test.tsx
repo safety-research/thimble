@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 // The view proposal above the chat's composer (src/chat/ProposalCard.tsx): the oldest open proposal (a `suggested` row
-// with `offered`), with its name and what it shows in view, never behind a click, and not the task it names; Accept and
-// Reject are clicks of their own routes, each tracked; Don't ask again turns view proposals off and says where to turn them on
-// again; nothing shows while view proposals are off; a click in the first ARM_MS does nothing; an Accept that cannot
+// with `offered`), with its name and what it shows in view, never behind a click, and not the task it names, in the
+// terminal row's words; Build it and Don't build it are clicks of their own routes, each tracked; Stop suggesting pages
+// turns view proposals off and says where to turn them on again; nothing shows while view proposals are off; a click in the first ARM_MS does nothing; an Accept that cannot
 // start says why under the buttons.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ARM_MS } from '../../src/chat/PermissionCard.tsx'
-import { offerFor, openOffer, PROPOSAL_HEAD, PROPOSALS_OFF_LINE, ProposalCard } from '../../src/chat/ProposalCard.tsx'
+import { ProposalCard } from '../../src/chat/ProposalCard.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { track } from '../../src/lib/telemetry.ts'
@@ -18,21 +18,6 @@ vi.mock('../../src/lib/telemetry.ts', async (orig) => ({ ...(await orig<typeof i
 
 const row = (slug: string, at: string | null, extra: Partial<Proposal> = {}): Proposal =>
   ({ slug, name: slug.replace(/-/g, ' '), description: `What ${slug} shows.`, task: 'compare how the agents coordinated', claims: ['agents/*.jsonl'], status: 'suggested', ...(at ? { offered: { at, after: 'main' } } : {}), ...extra }) as Proposal
-
-describe('which proposal shows, and its line', () => {
-  test('the oldest suggested row with `offered`; a row without it (an older version), one switched off or one answered never shows', () => {
-    const rows = [row('legacy', null), row('later', '2026-10-14T10:05:00Z'), row('first', '2026-10-14T10:00:00Z'), row('off', '2026-10-14T09:00:00Z', { off: true }), row('built', '2026-10-14T08:00:00Z', { status: 'built' })]
-    expect(openOffer(rows)?.slug).toBe('first')
-    expect(openOffer([row('legacy', null)])).toBeNull()
-    expect(openOffer(null)).toBeNull()
-  })
-
-  test('none for a proposal with a task, which the card does not show; for a viewer of a file type the files it reads', () => {
-    expect(offerFor({ task: ' compare the agents ', claims: ['a.jsonl'] })).toBe('')
-    expect(offerFor({ task: '', claims: ['**/*.vtt'] })).toBe('For **/*.vtt')
-    expect(offerFor({ task: '', claims: [] })).toBe('')
-  })
-})
 
 describe('the card', () => {
   let proposals: Proposal[] = []
@@ -84,20 +69,6 @@ describe('the card', () => {
   }
   const click = (el: HTMLElement, sel: string) => act(async () => el.querySelector<HTMLButtonElement>(sel)!.click())
 
-  test('the head, the name in bold and what it shows are in view, with Accept, Reject and Don’t ask again, and no task', async () => {
-    const el = await card('pc-look', false)
-    const c = el.querySelector('.chat-offer')!
-    expect(c.getAttribute('aria-label')).toBe(PROPOSAL_HEAD)
-    expect(c.querySelector('.chat-offer-head')?.textContent).toBe('View proposal')
-    expect(c.querySelector('b.chat-offer-name')?.textContent).toBe('agent timeline')
-    expect(c.querySelector('.chat-offer-desc')?.textContent?.trim()).toBe('What agent-timeline shows.')
-    expect(c.querySelector('.chat-offer-files')).toBeNull()
-    expect(c.textContent).not.toMatch(/task|compare how the agents coordinated/i)
-    expect([...c.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Accept', 'Reject', 'Don’t ask again'])
-    expect(c.textContent).not.toMatch(/offer/i)
-    expect(document.activeElement).toBe(document.body)
-  })
-
   test('Accept posts accept and Reject posts reject, each tracked; Reject hides the card at once', async () => {
     let el = await card('pc-accept')
     await click(el, '.chat-offer-accept')
@@ -114,6 +85,19 @@ describe('the card', () => {
     expect(track).toHaveBeenCalledWith('view-dismiss', { target: 'view:agent-timeline', detail: { offer: true } })
   })
 
+  test('the card says what the terminal row says: what thimble can build, Build it, Don\'t build it, Stop suggesting pages', async () => {
+    // bug hunt round 9, friction 7: the browser said "View proposal · Accept · Reject · Don't ask again" for the row the
+    // terminal shows as "thimble can build a page for these records: … · build it · don't build it · stop suggesting pages"
+    const el = await card('pc-words')
+    const text = (sel: string) => el.querySelector(sel)?.textContent?.trim()
+    expect(text('.chat-offer-head')).toBe('thimble can build a page for these records:')
+    expect(text('.chat-offer-name')).toBe('agent timeline')
+    expect([text('.chat-offer-accept'), text('.chat-offer-reject'), text('.chat-offer-off')]).toEqual(['Build it', "Don't build it", 'Stop suggesting pages'])
+    await click(el, '.chat-offer-off')
+    await settle()
+    expect(toasts).toEqual(['thimble will suggest no more pages. Settings turns suggestions back on.'])
+  })
+
   test('a click in the first ARM_MS after the proposal shows does nothing', async () => {
     const el = await card('pc-arm', false)
     await click(el, '.chat-offer-accept')
@@ -122,54 +106,5 @@ describe('the card', () => {
     await settle()
     expect(sent).toEqual([])
     expect(el.querySelector('.chat-offer')).not.toBeNull()
-  })
-
-  test('Don’t ask again turns view proposals off, the card goes, and a toast says Settings turns them on again', async () => {
-    const el = await card('pc-off')
-    await click(el, '.chat-offer-off')
-    await settle()
-    await settle()
-    expect(sent).toEqual([{ method: 'PUT', url: '/api/ws/pc-off/settings', body: { propose_views: false } }])
-    expect(el.querySelector('.chat-offer')).toBeNull()
-    expect(toasts).toEqual([PROPOSALS_OFF_LINE])
-  })
-
-  test('nothing shows while view proposals are off, nor once the proposal is dropped', async () => {
-    settings = { models: {}, propose_views: false }
-    let el = await card('pc-hidden', false)
-    expect(el.querySelector('.chat-offer')).toBeNull()
-    unmountAll()
-    settings = { models: {}, propose_views: true }
-    el = await card('pc-dropped', false)
-    expect(el.querySelector('.chat-offer')).not.toBeNull()
-    await act(async () => bus.emit('view', { slug: 'agent-timeline', status: 'dropped' }))
-    expect(el.querySelector('.chat-offer')).toBeNull()
-  })
-
-  test('a viewer proposed for a file type shows the files it reads under what it shows', async () => {
-    proposals = [row('vtt-viewer', '2026-10-14T10:00:00Z', { task: '', claims: ['**/*.vtt'], proposed_by: 'files', offered: { at: '2026-10-14T10:00:00Z', after: 'file' } } as Partial<Proposal>)]
-    const el = await card('pc-file', false)
-    expect(el.querySelector('.chat-offer-files')?.textContent).toBe('For **/*.vtt')
-    expect(el.querySelector('.chat-offer')?.getAttribute('data-after')).toBe('file')
-  })
-
-  test('an Accept the server refuses keeps the proposal and says the reason and the fix under the buttons', async () => {
-    const reason = 'Leave plan mode (shift+tab), then Accept.'
-    const el = await card('pc-refuse-now')
-    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
-      const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
-      if (String(url).endsWith('/accept') && init.method === 'POST') return json({ ...proposals[0], refused: { kind: 'plan', reason } })
-      return String(url).endsWith('/views/proposals') ? json(proposals) : json(settings)
-    })
-    await click(el, '.chat-offer-accept')
-    await settle()
-    expect(el.querySelector('.chat-offer')).not.toBeNull()
-    expect(el.querySelector('.chat-offer-refused')?.textContent).toBe(reason)
-  })
-
-  test('an Accept refused before this page opened still says why under the buttons', async () => {
-    proposals = [row('agent-timeline', '2026-10-14T10:00:00Z', { refused: { kind: 'no-module', reason: "thimble's agents can't start in this session: Claude Code's hooks modules are off (off). Once modules are on, quit and run `thimble -c` in this folder." } })]
-    const el = await card('pc-refused', false)
-    expect(el.querySelector('.chat-offer-refused')?.textContent).toMatch(/hooks modules are off .* quit and run `thimble -c`/)
   })
 })

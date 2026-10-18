@@ -1,7 +1,9 @@
 // A label card's details, as a drawer inside the card frame: DEFINITION (name and description, edited in place),
 // COMPUTED (kind, model, pattern or code), APPLIED TO (scope, units covered, globs, and the files not included),
 // CLASSES for a label over files (colour and highlight per value), and EXAMPLES (rows per value with verdict buttons,
-// under the label's agreement with the values the analyst set). Every run of a prompt label carries the analyst's
+// under the label's agreement with the values the analyst set): its first segment lists the records with no category
+// fit, then the unsure ones, lowest confidence first, as the terminal's Labels view does (details.unsureFirst), and each
+// value's rows come unsure first. Every run of a prompt label carries the analyst's
 // latest values as examples, so there is nothing to ask for here.
 import { useContext, useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react'
 import { Button, Segmented } from '../components/Button'
@@ -21,7 +23,7 @@ import { loadSettings, modelLabel } from '../lib/models'
 import { track } from '../lib/telemetry'
 import type { ConceptCoverage, ConceptDetail, LabelClass, LabelRowText } from '../lib/types'
 import { CanvasContext } from './context'
-import { agreementLine, COVERAGE_PAGE, EXAMPLES_PAGE, effectiveValue, groupCoverage, labelValues, otherValues, pickValue, scopeWord, unitTotal } from './details'
+import { agreementLine, COVERAGE_PAGE, EXAMPLES_PAGE, effectiveValue, fitOf, groupCoverage, labelValues, otherValues, pickValue, scopeWord, unitTotal, UNSURE_KEY, UNSURE_LABEL, UNSURE_PAGE, unsureFirst } from './details'
 import { cutExcerpt, excerptOf } from './excerpts'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
@@ -253,7 +255,8 @@ interface ExampleState {
 function Examples({ concept, values, reload }: { concept: ConceptDetail; values: string[]; reload: () => Promise<void> }) {
   const { ws } = useContext(CanvasContext)
   const [chosen, setChosen] = useState<string | null>(null)
-  const value = pickValue(values, concept.counts, chosen)
+  const unsure = chosen === UNSURE_KEY
+  const value = unsure ? UNSURE_KEY : pickValue(values, concept.counts, chosen)
   const [state, setState] = useState<ExampleState>({ rows: [], total: 0, loading: false })
   const [texts, setTexts] = useState<Record<string, string>>({})
   const [pending, setPending] = useState<string | null>(null)
@@ -266,9 +269,15 @@ function Examples({ concept, values, reload }: { concept: ConceptDetail; values:
     }
     let alive = true
     setState({ rows: [], total: 0, loading: true })
+    // the no-fit and unsure segment reads a page of every value's rows and keeps those, sorted (unsureFirst)
+    const ask = value === UNSURE_KEY ? { limit: UNSURE_PAGE, offset: 0 } : { value, limit: EXAMPLES_PAGE, offset: 0 }
     labelApi
-      .rows(ws, concept.id, { value, limit: EXAMPLES_PAGE, offset: 0 })
-      .then((r) => alive && setState({ rows: r.rows, total: r.total, loading: false }))
+      .rows(ws, concept.id, ask)
+      .then((r) => {
+        if (!alive) return
+        const rows = value === UNSURE_KEY ? unsureFirst(r.rows, values).filter((x) => fitOf(x, values) !== 'sure') : unsureFirst(r.rows, values)
+        setState({ rows, total: value === UNSURE_KEY ? rows.length : r.total, loading: false })
+      })
       .catch((e) => {
         if (alive) {
           setState({ rows: [], total: 0, loading: false })
@@ -299,11 +308,11 @@ function Examples({ concept, values, reload }: { concept: ConceptDetail; values:
     }
   }, [ws, state.rows])
   const more = async () => {
-    if (!value || state.loading) return
+    if (!value || value === UNSURE_KEY || state.loading) return
     setState((s) => ({ ...s, loading: true }))
     try {
       const r = await labelApi.rows(ws, concept.id, { value, limit: EXAMPLES_PAGE, offset: state.rows.length })
-      setState((s) => ({ rows: [...s.rows, ...r.rows.filter((x) => !s.rows.some((y) => y.ref === x.ref))], total: r.total, loading: false }))
+      setState((s) => ({ rows: [...s.rows, ...unsureFirst(r.rows.filter((x) => !s.rows.some((y) => y.ref === x.ref)), values)], total: r.total, loading: false }))
     } catch (e) {
       setState((s) => ({ ...s, loading: false }))
       fail(e)
@@ -328,7 +337,8 @@ function Examples({ concept, values, reload }: { concept: ConceptDetail; values:
     <section className="canvas-details-section">
       <span className="label">examples</span>
       {agreed && <span className="canvas-label-agreed">{agreed}</span>}
-      <Segmented label="Value" value={value ?? ''} onChange={(v) => setChosen(v)} options={values.map((v) => ({ value: v, label: v }))} />
+      <Segmented label="Value" value={value ?? ''} onChange={(v) => setChosen(v)} options={[{ value: UNSURE_KEY, label: UNSURE_LABEL }, ...values.map((v) => ({ value: v, label: v }))]} />
+      {unsure && !state.loading && state.rows.length === 0 && <span className="canvas-label-agreed">No record without a fit or below 60% confidence among the first {UNSURE_PAGE}.</span>}
       {state.rows.length > 0 ? (
         <div className="canvas-label-rows">
           {state.rows.map((row) => {
@@ -336,7 +346,7 @@ function Examples({ concept, values, reload }: { concept: ConceptDetail; values:
             const t = texts[row.ref]
             const busy = pending === row.ref
             return (
-              <Card key={row.ref} flat className="canvas-label-row" data-ref={row.ref}>
+              <Card key={row.ref} flat className="canvas-label-row" data-ref={row.ref} data-fit={fitOf(row, values)}>
                 <div className="canvas-label-rowhead">
                   <RefChip ref={row.ref} workspace={ws} />
                   {row.analyst ? (
