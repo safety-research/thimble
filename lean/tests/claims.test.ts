@@ -10,6 +10,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import '../draw/kit.js'
 import claimsPane from '../panes/claims.js'
+import { promptStub } from './stubs'
 
 const ROOT = '/data'
 const STORE = `${ROOT}/thimble/claims/s-1.json`
@@ -48,7 +49,7 @@ function world(on: Any, forks: Record<string, unknown>[]) {
   const files: Record<string, string> = {}
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` || e.path.endsWith('.md') }))
   on('fs.list', () => ({ value: [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('observer.md') ? 'OBSERVER {{QUESTION}} | CLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}} {{GROWN}}' : e.path.endsWith('question.md') ? 'QUESTION {{QUESTION}} {{ANSWER}}' : files[e.path] ?? '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => {
     files[e.path] = String(e.content ?? e.text ?? e.data ?? '')
     return { value: undefined }
@@ -71,11 +72,13 @@ function world(on: Any, forks: Record<string, unknown>[]) {
   on('ui.close', () => ({ value: undefined }))
   on('ui.panes', () => ({ value: [] }))
   const prompts: string[] = []
-  on('model.complete', () => ({ value: { isAnswered: true, text: JSON.stringify({ parts: [], drift: null, decision: null }), usage: USAGE } }))
-  on('model.fork', (_$: unknown, e: { prompt: string }) => {
-    prompts.push(String(e.prompt))
+  // the question step has no system prompt; the pass has the frame and its lenses as one (observer:v2)
+  const pass = (prompt: string) => {
+    prompts.push(prompt)
     return { value: { isAnswered: true, text: JSON.stringify(forks[prompts.length - 1] ?? forks.at(-1)), usage: USAGE } }
-  })
+  }
+  on('model.complete', (_$: unknown, e: { prompt: string; system?: string }) => (e.system ? pass(`${e.system}\n${e.prompt}`) : { value: { isAnswered: true, text: JSON.stringify({ parts: [], drift: null, decision: null }), usage: USAGE } }))
+  on('model.fork', (_$: unknown, e: { prompt: string }) => pass(String(e.prompt)))
   const submitted: { text: string; context: readonly string[] }[] = []
   on('prompt.submit', (_$: unknown, e: { text: string; context?: readonly string[] }) => {
     submitted.push({ text: e.text, context: e.context ?? [] })

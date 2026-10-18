@@ -8,16 +8,21 @@
 // delays one.
 //
 // One look, in order:
-// 1. The question step (prompts/question.md): one small completion, with no transcript, compares the answer with the
-//    person's literal question and says whether their message states a decision. Its result is evidence for step 3.
+// 1. The question step (registry feature `question`): one small completion, with no transcript, compares the answer
+//    with the person's literal question and says whether their message states a decision. Its result is evidence.
 // 2. The evidence (evidence.js): the objects Claude saved since the last look (and, for context, its latest ones),
-//    each with its lineage in a few lines and, for the new ones, the object as the person sees it (its drawing's text) (how many rows stand behind each cited value, how sure each query's row
-//    lineage is, the files the session never read, what Claude declared, the problems `lean save` found) and the
-//    verbs that can act on it; and `lean coverage` for the session.
-// 3. The fork (prompts/observer.md): one tool-less fork of the session (served from main's prompt cache). It gives
-//    0-2 notes for Claude, at most one line for the person, whether the open line is settled, the verbs of the
-//    answer's row it lights, 0-3 glosses, and the turn's claims: each new one with its words and a cluster, each one
-//    said again by its id, each correction with the id it revises (it reads the claims so far by id).
+//    each with its lineage in a few lines and, for the new ones, the object as the person sees it (how many rows stand
+//    behind each cited value, how sure each query's row lineage is, the files the session never read, what Claude
+//    declared, the problems `lean save` found) and the verbs that can act on it; and `lean coverage` for the session.
+// 3. The pass: one call that composes the enabled lenses (lenses/index.mjs; compose.mjs). Each lens is a folder with
+//    its output shape, its digest of the state and its merge into the store, and its prompt fragment in the registry
+//    (prompts/lens-<name>/): notes to Claude, the rare line, the lit actions, where the answer stands on squeeze's
+//    chips, explain marks, and the turn's claims with what each means. The system prompt is the frame (registry
+//    feature `observer`) with the lenses' fragments, which the prompt cache serves; the message is the new turn (the
+//    person's prompt, Claude's words and tool calls cut to fit, the answer), its objects, and each lens's digest. It
+//    never reads the session before the turn. `observer:v1` is the earlier pass: one prompt in a fork of the session.
+//    Every call is a line in the session's events (telemetry), with each lens's share of the pass.
+// A lens turned off (LEAN_PROMPTS=lens-explain:off) is neither asked nor merged.
 //
 // Where its output goes:
 // - notes: beside the person's next prompt, as context the person never sees. Deduplicated across the session.
@@ -41,9 +46,15 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, ObserverLine, Ranking } from '../types'
 import { answerRow, applyObserver, claimsStore, drawnTextOf, messageRecord, saveClaims, setVerb, turnPlaces } from '../shell/shell'
-import { glossesOf, verbsOf as litVerbs } from '../shell/message.js'
+import { glossesOf } from '../shell/message.js'
 import { applyTurn, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
+import { promptText } from '../prompts/prompts'
+import { FEATURES, fill } from '../prompts/registry.mjs'
+import { tracked } from '../telemetry/telemetry'
+import { composeSystem, composeTurn, sharesOf } from './compose.mjs'
 import { digest, isRepeat, jsonIn, parseAnswer } from './evidence.js'
+import { LENSES } from './lenses/index.mjs'
+import { stepsOf } from './turn.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,6 +84,7 @@ const TYPED_PAST_FREE = 2
 export const skipsFor = (n: number) => (n <= TYPED_PAST_FREE ? 0 : Math.min(MAX_SKIP, 2 ** (n - TYPED_PAST_FREE - 1)))
 const LONG_ANSWER = 800 // characters: a turn that ran no tool is substantial when its answer is this long
 const CONTEXT_OBJECTS = 4 // objects the fork reads: every new one, then the latest older ones up to this many
+const STEPS_BUDGET = 24000 // characters of the turn's words and tool calls the pass reads, the latest calls kept longest
 const NOTE_HEAD = 'Here is a note offered by a side agent:'
 const K = {
   seen: 'observer.seen', known: 'observer.known', typedPast: 'observer.typedPastInARow', skip: 'observer.looksToSkip', off: 'observer.off',
@@ -85,8 +97,6 @@ export const glossSkipsFor = (n: number) => (n <= GLOSS_FREE ? 0 : Math.min(8, 2
 const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
 
 const S = {
-  observerPrompt: '',
-  questionPrompt: '',
   session: '',
   file: '',
   enabled: true,
@@ -115,11 +125,9 @@ const bullets = (xs: string[]) => (xs.length ? xs.map(x => `- ${x}`).join('\n') 
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
 const cut = (s: string, n: number) => (s.length <= n ? s : s.slice(0, n - 1) + '…')
 
-/** The prompts, the session and its file, read again after a reload (which keeps the session, not this memory). */
+/** The session and its file, read again after a reload (which keeps the session, not this memory). The prompts come
+ *  from the registry (prompts/prompts.ts), at each look. */
 async function ensure($: Engine): Promise<void> {
-  const dir = $.plugin.root.replace(/\/+$/, '')
-  if (!S.observerPrompt) S.observerPrompt = String(await $.fs.read(`${dir}/observer/prompts/observer.md`))
-  if (!S.questionPrompt) S.questionPrompt = String(await $.fs.read(`${dir}/observer/prompts/question.md`))
   const id = String(await $.session.id())
   if (id !== S.session) {
     S.session = id
@@ -228,18 +236,21 @@ async function answerOf($: Engine, fallback: string): Promise<string> {
   return texts.join('\n\n')
 }
 
-async function questionStep($: Engine, question: string, answer: string): Promise<Record<string, unknown>> {
-  const prompt = S.questionPrompt
-    .replace('{{EARLIER}}', bullets(S.questions.slice(0, -1).slice(-6).map(q => cut(q, 600))))
-    .replace('{{QUESTION}}', cut(question, 4000) || '(none)')
-    .replace('{{ANSWER}}', cut(answer, 16000))
+async function questionStep($: Engine, question: string, answer: string, turn: number): Promise<Record<string, unknown>> {
+  const q = await promptText($, 'question')
+  const prompt = fill(q.text, {
+    EARLIER: () => bullets(S.questions.slice(0, -1).slice(-6).map(x => cut(x, 600))),
+    QUESTION: () => cut(question, 4000) || '(none)',
+    ANSWER: () => cut(answer, 16000),
+  })
   const t0 = await $.clock.now()
+  const model = S.model || 'opus'
   // a comparison of two texts, not an analysis: low effort, so its thinking stays short
-  const r = await $.model.complete({ model: S.model || 'opus', prompt, maxTokens: 2000, effort: 'low' })
+  const r = await tracked($, { feature: 'question', prompt: q.id, model, extra: { turn } }, () => $.model.complete({ model, prompt, maxTokens: 2000, effort: 'low' }))
   const ms = (await $.clock.now()) - t0
-  if (!r.isAnswered) return { ms, error: r.reason, usage: r.usage }
+  if (!r.isAnswered) return { ms, error: r.reason, usage: r.usage, prompt: q.id }
   const out = jsonIn(r.text)
-  return { ms, usage: r.usage, out, ...(out ? {} : { raw: cut(r.text, 2000) }) }
+  return { ms, usage: r.usage, out, prompt: q.id, ...(out ? {} : { raw: cut(r.text, 2000) }) }
 }
 
 /** The folder under analysis: where the latest object is, else LEAN_ROOT, else the nearest folder at or above the
@@ -319,7 +330,7 @@ async function look($: Engine, t: Look): Promise<void> {
     row.question = cut(t.question, 400)
 
     // 1. the question step: drift and a decision in view
-    const q = await questionStep($, t.question, answer)
+    const q = await questionStep($, t.question, answer, t.turnNo)
     row.question_step = q
     const qo = (q.out ?? null) as Any
     const drift = qo && typeof qo.drift === 'string' && qo.drift.trim() ? qo.drift.trim() : ''
@@ -343,52 +354,104 @@ async function look($: Engine, t: Look): Promise<void> {
     }
     const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through lean)'
 
-    // 3. the fork
+    // 3. the pass: the state each lens needs, the lenses enabled, one call
     const seen = strs(await $.store.get(K.seen))
     const known = strs(await $.store.get(K.known))
     const open = await openLine($)
     const skips = Math.min(MAX_SKIP, num(await $.store.get(K.skip)))
-    const lineRule = open
-      ? '\nA line is open above the prompt now. Give no new line this time: notes only, and say whether the open line is settled.\n'
-      : skips > 0
-        ? '\nThe person typed past the last lines without a look. Give no line this time: notes only.\n'
-        : ''
     const glossed = strs(await $.store.get(K.glossed))
     const glossSkip = Math.min(8, num(await $.store.get(K.glossSkip)))
-    const glossRule = glossSkip > 0 ? '\nThe person has not opened the last glosses. Give no glosses this time.\n' : ''
     const inRow = ((await $.state.get(ROWVERBS)).value ?? []) as { key: string; name: string }[]
-    // the session's claims so far, which the fork adds this turn's to (CONTRACT 7)
+    // the session's claims so far, which the claims lens adds this turn's to (CONTRACT 7)
     const store = await claimsStore($)
     const grown = grownClusters(store)
-    const sofar = promptLines(store)
+    const st = { seen, known, notesGiven: S.notesGiven, open, skips, glossed, glossSkip, store, grown }
     const qText = q.out
       ? drift
         ? `A part is missing or replaced: ${drift}`
         : 'The answer gives every part of the question.'
       : '(the step gave no result)'
-    const prompt = S.observerPrompt
-      .replace('{{QUESTION_STEP}}', qText)
-      .replace('{{QUESTION}}', cut(t.question, 4000) || '(none)')
-      .replace('{{DECISION}}', decision || 'none stated')
-      .replace('{{ANSWER}}', cut(answer, 16000))
-      .replace('{{LINES}}', String(answer.split('\n').length))
-      .replace('{{ROW}}', inRow.length ? inRow.map(v => `${v.key} ${v.name}`).join(', ') : 'v visualize, s squeeze')
-      .replace('{{GLOSSED}}', bullets(glossed.slice(-GLOSSED_KEEP)))
-      .replace('{{GLOSS_RULE}}', glossRule)
-      .replace('{{OBJECTS}}', digests.length ? digests.join('\n\n') : 'No objects yet.')
-      .replace('{{COVERAGE}}', coverage)
-      .replace('{{SEEN}}', bullets(seen.slice(-KEEP)))
-      .replace('{{KNOWN}}', bullets(known))
-      .replace('{{NOTES}}', bullets(S.notesGiven.slice(-30)))
-      .replace('{{OPEN}}', open ? `"${open.line}" (shown ${open.prompts} prompt${open.prompts === 1 ? '' : 's'} ago)` : '(none)')
-      .replace('{{LINE_RULE}}', lineRule)
-      .replace('{{CLAIMS}}', () => sofar.claims)
-      .replace('{{CLUSTERS}}', () => sofar.clusters)
-      .replace('{{GROWN}}', () => (grown.length ? `\nGrown clusters, which you can rename or split:\n${grownLines(grown)}\n` : ''))
-    const t0 = await $.clock.now()
-    const f = await $.model.fork({ prompt })
-    const fork: Record<string, unknown> = { ms: (await $.clock.now()) - t0, prompt_chars: prompt.length }
+    const frame = await promptText($, 'observer')
+    const mode = FEATURES.observer.versions?.[frame.version]?.mode === 'fork' ? 'fork' : 'lenses'
+    const parts: { lens: Any; text: string; id: string }[] = []
+    for (const lens of LENSES) {
+      const pt = await promptText($, lens.feature)
+      if (!pt.off) parts.push({ lens, text: pt.text, id: pt.id })
+    }
+    const model = S.model || 'opus'
+    const fork: Record<string, unknown> = { mode, prompt: frame.id, lenses: Object.fromEntries(parts.map(x => [x.lens.name, x.id])) }
     row.fork = fork
+    const extra: Record<string, unknown> = { turn: t.turnNo, mode, lens_prompts: fork.lenses }
+    const t0 = await $.clock.now()
+    let f: Any
+    if (mode === 'fork') {
+      // the earlier pass: one prompt, in a fork of the whole session (served from main's prompt cache)
+      const sofar = promptLines(store)
+      const lineRule = open
+        ? '\nA line is open above the prompt now. Give no new line this time: notes only, and say whether the open line is settled.\n'
+        : skips > 0
+          ? '\nThe person typed past the last lines without a look. Give no line this time: notes only.\n'
+          : ''
+      const glossRule = glossSkip > 0 ? '\nThe person has not opened the last glosses. Give no glosses this time.\n' : ''
+      const prompt = frame.text
+        .replace('{{QUESTION_STEP}}', qText)
+        .replace('{{QUESTION}}', cut(t.question, 4000) || '(none)')
+        .replace('{{DECISION}}', decision || 'none stated')
+        .replace('{{ANSWER}}', cut(answer, 16000))
+        .replace('{{LINES}}', String(answer.split('\n').length))
+        .replace('{{ROW}}', inRow.length ? inRow.map(v => `${v.key} ${v.name}`).join(', ') : 'v visualize, s squeeze')
+        .replace('{{GLOSSED}}', bullets(glossed.slice(-GLOSSED_KEEP)))
+        .replace('{{GLOSS_RULE}}', glossRule)
+        .replace('{{OBJECTS}}', digests.length ? digests.join('\n\n') : 'No objects yet.')
+        .replace('{{COVERAGE}}', coverage)
+        .replace('{{SEEN}}', bullets(seen.slice(-KEEP)))
+        .replace('{{KNOWN}}', bullets(known))
+        .replace('{{NOTES}}', bullets(S.notesGiven.slice(-30)))
+        .replace('{{OPEN}}', open ? `"${open.line}" (shown ${open.prompts} prompt${open.prompts === 1 ? '' : 's'} ago)` : '(none)')
+        .replace('{{LINE_RULE}}', lineRule)
+        .replace('{{CLAIMS}}', () => sofar.claims)
+        .replace('{{CLUSTERS}}', () => sofar.clusters)
+        .replace('{{GROWN}}', () => (grown.length ? `\nGrown clusters, which you can rename or split:\n${grownLines(grown)}\n` : ''))
+      fork.prompt_chars = prompt.length
+      f = await tracked($, { feature: 'observer', prompt: frame.id, model, extra }, async () => {
+        const r = await $.model.fork({ prompt })
+        if (r && (r as Any).isAnswered) Object.assign(extra, sharesOf({ system: { chars: {}, shared: 0 }, turn: { chars: {}, shared: prompt.length }, lenses: parts.map(x => x.lens), raw: jsonIn((r as Any).text), rawText: (r as Any).text }))
+        return r
+      })
+    } else {
+      // the pass over the new turn and a digest of the state: the frame and the lenses' fragments are the system
+      // prompt (cached), the turn is the message
+      const system = composeSystem(frame.text, parts)
+      const tmpl = await promptText($, 'observer-turn')
+      // a long answer arrives squeezed: the person reads the squeezed text, which the pass reads beside the original
+      const atRow = await answerRow($)
+      const before = atRow ? await messageRecord($, atRow) : null
+      const squeezed = before && typeof before.shown === 'string' && before.shown.trim() && before.shown !== before.text ? before.shown : ''
+      const msgs = (await $.session.messages().catch(() => [])) as Any[]
+      const turn = composeTurn(tmpl.text, {
+        QUESTION_STEP: qText,
+        QUESTION: cut(t.question, 4000) || '(none)',
+        DECISION: decision || 'none stated',
+        ROW: inRow.length ? inRow.map(v => `${v.key} ${v.name}`).join(', ') : 'v visualize, s squeeze',
+        STEPS: stepsOf(msgs, { answer, budget: STEPS_BUDGET }),
+        LINES: String(answer.split('\n').length),
+        ANSWER: cut(answer, 16000),
+        SHOWN: squeezed ? `\nThe person reads it squeezed (${squeezed.split('\n').length} lines); this is what shows:\n${cut(squeezed, 6000)}\n` : '',
+        OBJECTS: digests.length ? digests.join('\n\n') : 'No objects yet.',
+        COVERAGE: coverage,
+        EARLIER: bullets(S.questions.slice(0, -1).slice(-6).map(x => cut(x, 300))),
+      }, parts, st)
+      fork.prompt_chars = system.text.length + turn.text.length
+      fork.system_chars = system.text.length
+      fork.lens_chars = Object.fromEntries(parts.map(x => [x.lens.name, (system.chars[x.lens.name] || 0) + (turn.chars[x.lens.name] || 0)]))
+      extra.turn_prompt = tmpl.id
+      f = await tracked($, { feature: 'observer', prompt: frame.id, model, extra }, async () => {
+        const r = await $.model.complete({ model, system: [{ text: system.text, cache: true }], prompt: turn.text, maxTokens: 16000 } as Any)
+        if (r && (r as Any).isAnswered) Object.assign(extra, sharesOf({ system, turn, lenses: parts.map(x => x.lens), raw: jsonIn((r as Any).text), rawText: (r as Any).text }))
+        return r
+      })
+    }
+    fork.ms = (await $.clock.now()) - t0
     const out: Answer | null = f.isAnswered ? parseAnswer(f.text) : null
     if (f.isAnswered) {
       fork.usage = f.usage
@@ -404,58 +467,70 @@ async function look($: Engine, t: Look): Promise<void> {
     }
     const moved = S.running || S.turnId !== t.turnId // the person started another turn while it looked
 
-    // the turn's claims into the session's Claims: placed by their words, said again, revised, clustered
+    // a look that gave nothing readable: noted in Claims, so the list says which turn was not read
+    if (!out) {
+      try {
+        if (parts.some(x => x.lens.name === 'claims')) {
+          const tp = await turnPlaces($, t.turnId)
+          noteGap(store, tp.turn ?? t.turnNo, f.isAnswered ? 'the look gave no answer it could read' : `the look failed (${f.reason})`)
+          await saveClaims($, store)
+        }
+      } catch (err) {
+        row.claims_error = cut(String((err as Error)?.message || err), 300)
+      }
+      return
+    }
+
+    // 4. each lens merges its part into the store; the answer's record takes the verbs and marks of all of them
+    const fresher: Note[] = []
     let claimsLit: { row: string; note: string; claims: string[] } | null = null
-    try {
-      const tp = await turnPlaces($, t.turnId)
-      const here = await answerRow($)
-      const places = tp.places.length ? tp.places : here ? [{ row: here, by: 'claude' as const, turn: null, text: answer }] : []
-      const when = new Date(await $.clock.now()).toISOString()
-      if (out) {
-        const res = applyTurn(store, { places, out, turn: tp.turn ?? t.turnNo, at: when, grown })
-        await saveClaims($, store)
-        row.claims = { turn: tp.turn ?? t.turnNo, given: Array.isArray(out.claims) ? out.claims.length : 0, added: res.added, restated: res.restated, revised: res.revised, dropped: res.dropped, clusters: res.clusters }
-        const note = noteFor(res)
-        const target = tp.rows.at(-1) ?? here
-        if (note && target) claimsLit = { row: target, note, claims: res.added }
-      } else {
-        noteGap(store, tp.turn ?? t.turnNo, f.isAnswered ? 'the look gave no answer it could read' : `the look failed (${f.reason})`)
-        await saveClaims($, store)
-      }
-    } catch (err) {
-      row.claims_error = cut(String((err as Error)?.message || err), 300)
-    }
-
-    // the open line: closed when the session has settled it
-    if (open && out?.settled) {
-      const now = await openLine($)
-      if (now && now.line === open.line) {
-        await closeLine($)
-        row.settled = open.line
-      }
-    }
-
-    // notes, then the line
-    const fresher: Note[] = (out?.notes ?? []).slice(0, 2).map(n => ({ from: 'observer' as const, ...n }))
-    const L = out?.line ?? null
-    if (L) {
-      let why = ''
-      if (!L.decision) why = 'it names no decision'
-      else if (await openLine($)) why = 'a line is open'
-      else if (skips > 0) why = 'backoff'
-      else if (isRepeat(L.line, [...seen, ...known])) why = 'repeat'
-      else if (moved) why = 'stale: a new turn began'
-      if (why) {
-        row.line_dropped = { line: L.line, why }
-        // a finding that cannot be a line still reaches Claude; one the person saw or knows goes nowhere
-        if (why !== 'repeat') fresher.push({ from: 'line', note: `${L.line}${L.explanation ? ' ' + L.explanation.replace(/\n+/g, ' ') : ''}`, ...(L.rests_on ? { rests_on: L.rests_on } : {}) })
-      } else {
+    const ctx: Any = {
+      open, skips, seen, known, moved, glossSkip, isRepeat,
+      verbs: {} as Record<string, unknown>,
+      glosses: null as unknown[] | null,
+      note: (n: Note) => { fresher.push(n) },
+      log: (k: string, v: unknown) => { row[k] = v },
+      settle: async () => {
+        const now = await openLine($)
+        if (now && open && now.line === open.line) {
+          await closeLine($)
+          row.settled = open.line
+        }
+      },
+      lineOpenNow: async () => !!(await openLine($)),
+      showLine: async (L: NonNullable<Answer['line']>) => {
         const v: ObserverLine = { kind: 'offer', line: L.line, title: L.title, explanation: L.explanation, decision: L.decision, shownAt: await $.clock.now(), prompts: 0 }
         await $.store.set(K.seen, [...seen, L.line].slice(-KEEP))
         await $.state.set(LINE, v)
         row.line_shown = v
+      },
+      // the turn's claims into the session's Claims: placed by their words, said again, revised, clustered
+      claims: async (value: { claims: unknown[]; clusters: unknown[] }) => {
+        try {
+          const tp = await turnPlaces($, t.turnId)
+          const here = await answerRow($)
+          const places = tp.places.length ? tp.places : here ? [{ row: here, by: 'claude' as const, turn: null, text: answer }] : []
+          const when = new Date(await $.clock.now()).toISOString()
+          const res = applyTurn(store, { places, out: value, turn: tp.turn ?? t.turnNo, at: when, grown })
+          await saveClaims($, store)
+          row.claims = { turn: tp.turn ?? t.turnNo, given: value.claims.length, added: res.added, restated: res.restated, revised: res.revised, dropped: res.dropped, clusters: res.clusters }
+          const note = noteFor(res)
+          const target = tp.rows.at(-1) ?? here
+          if (note && target) claimsLit = { row: target, note, claims: res.added }
+        } catch (err) {
+          row.claims_error = cut(String((err as Error)?.message || err), 300)
+        }
+      },
+    }
+    for (const x of parts) {
+      try {
+        await x.lens.merge(x.lens.read(out), ctx)
+      } catch (err) {
+        row[`${x.lens.name}_error`] = cut(String((err as Error)?.message || err), 300)
       }
     }
+
+    // notes: those Claude already has dropped, the rest wait for the next prompt
     const added: Note[] = []
     for (const n of fresher) {
       if (isRepeat(n.note, S.notesGiven)) continue
@@ -465,19 +540,20 @@ async function look($: Engine, t: Look): Promise<void> {
     }
     row.notes_added = added
 
-    // the message row of the turn's answer: the verbs it lights and its glosses, in the answer's record
+    // the message row of the turn's answer: the verbs the lenses lit and the explain marks, in the answer's record
+    const lit = claimsLit as { row: string; note: string; claims: string[] } | null
     const at = await answerRow($)
-    if (at && out) {
+    if (at) {
       const kept = await messageRecord($, at)
       const shown = kept ? String(kept.shown ?? kept.text) : answer
-      const verbs = litVerbs(out.verbs) as Record<string, unknown>
-      // c is lit by thimble, not the fork: by the claims this turn added to this message (or as it was lit before)
-      delete verbs.c
+      const verbs = { ...(ctx.verbs as Record<string, unknown>) }
+      // c is lit by thimble, not the pass: by the claims this turn added to this message (or as it was lit before)
       const prior = (kept?.verbs as Record<string, unknown> | undefined)?.c
-      if (claimsLit && claimsLit.row === at && inRow.some(v => v.key === 'c')) verbs.c = { lit: true, note: claimsLit.note, claims: claimsLit.claims }
+      if (lit && lit.row === at && inRow.some(v => v.key === 'c')) verbs.c = { lit: true, note: lit.note, claims: lit.claims }
       else if (prior) verbs.c = prior
-      // glosses are kept by the words Claude wrote, so a term a squeeze left out is placed again when the original shows
-      const glosses = glossSkip > 0 ? {} : glossesOf(out.glosses, kept ? String(kept.text) : shown, glossed)
+      // marks are kept by the words Claude wrote, so a term a squeeze left out is placed again when the original shows
+      // (a term may stand in the original or in the squeezed text the person reads)
+      const glosses = ctx.glosses ? glossesOf(ctx.glosses, kept ? `${String(kept.text)}\n\n${typeof kept.shown === 'string' ? kept.shown : ''}` : shown, glossed) : {}
       const rec = await applyObserver($, at, { verbs, glosses })
       const placed = rec ? Object.entries(rec.glosses || {}).filter(([id]) => rec.marks.some(m => m.gloss === id)).map(([, g]) => g.term) : []
       row.verbs_lit = Object.keys(verbs)
@@ -490,7 +566,7 @@ async function look($: Engine, t: Look): Promise<void> {
       } else if (glossSkip > 0) await $.store.set(K.glossSkip, glossSkip - 1)
     }
     // a turn whose answer is another row than the one the verbs light (a new turn ended while it looked)
-    if (claimsLit && claimsLit.row !== at && inRow.some(v => v.key === 'c')) await setVerb($, claimsLit.row, 'c', { lit: true, note: claimsLit.note, claims: claimsLit.claims })
+    if (lit && lit.row !== at && inRow.some(v => v.key === 'c')) await setVerb($, lit.row, 'c', { lit: true, note: lit.note, claims: lit.claims })
     if (skips > 0) await $.store.set(K.skip, skips - 1)
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
@@ -705,7 +781,7 @@ export const registerObserver: Register = (on, options) => {
 /** For tests: the module's memory, cleared. */
 export function resetObserver(): void {
   Object.assign(S, {
-    observerPrompt: '', questionPrompt: '', session: '', file: '', enabled: true, model: '', turnId: '', turnNo: 0, steps: 0, tools: 0,
+    session: '', file: '', enabled: true, model: '', turnId: '', turnNo: 0, steps: 0, tools: 0,
     turnStart: 0, running: false, since: 0, question: '', questions: [], notesGiven: [], pending: [], looking: false, again: null,
     deferred: [], hints: {}, log: [],
   })

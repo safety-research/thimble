@@ -11,12 +11,9 @@
 //
 // It returns the record with `shown` set to the new text and its marks placed again (`message`), the text, and a note
 // for Claude.
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { textOf } from '../../prompts/node.mjs'
 import { remark } from '../../shell/message.js'
 import { ARRIVE, applyRewrite, checkRewrite, chipsOf, isOriginal, noteFor, readReply, request, restore, stretchChip, withStretch } from './chips.mjs'
-
-const PROMPT = fileURLToPath(new URL('./prompt.md', import.meta.url))
 
 /** The levels the words ask for: `name=level` for each chip named, by its id, its name or its first word. */
 export function parseWords(rec, words) {
@@ -59,12 +56,13 @@ export async function run(ctx) {
   }
   if (!ctx.model || typeof ctx.model.complete !== 'function') throw new Error('no model to write the rewrite: ctx.model.complete is missing')
   const cfg = ctx.verb || {}
-  const req = request(probe, { system: readFileSync(PROMPT, 'utf8'), question: ctx.question || '', model: cfg.model || 'sonnet', effort: cfg.effort || 'low', maxTokens: cfg.maxTokens || 4000 })
+  const sp = textOf('squeeze')
+  const req = request(probe, { system: sp.text, question: ctx.question || '', model: cfg.model || 'sonnet', effort: cfg.effort || 'low', maxTokens: cfg.maxTokens || 4000 })
   const t0 = Date.now()
-  const r = await ctx.model.complete(req)
+  const r = await ctx.model.complete({ ...req, telemetry: { feature: 'squeeze', prompt: sp.id } })
   if (!r || !r.isAnswered) throw new Error(`the rewrite did not come back: ${r ? r.reason : 'no result'}`)
   const reply = readReply(r.text)
   const checked = checkRewrite(rec.text, reply.text)
-  const next = applyRewrite(rec, { text: checked.text, at: want.at, made: { ms: Date.now() - t0, model: req.model, usage: r.usage }, problems: checked.problems }, remark)
+  const next = applyRewrite(rec, { text: checked.text, at: want.at, made: { ms: Date.now() - t0, model: req.model, usage: r.usage, prompt: sp.id }, problems: checked.problems }, remark)
   return { message: next, text: next.shown ?? next.text, note: noteFor(next) }
 }
