@@ -1536,17 +1536,23 @@
       const cnt = fmt(N[id].n)
       const toneOfLabel = S.tone ? T(S.tone) : p.end ? (MAP_GOOD.test(S.label) ? 'good' : MAP_WARN.test(S.label) ? 'warn' : MAP_BAD.test(S.label) ? 'bad' : 'ink') : 'ink'
       const short = S.short || shortName(S.label)
-      const variants = small(id) ? [] : S.origin ? [[S.label, false]] : [[S.label, true], [S.label, false], [short, true], [short, false]]
+      // an ending's words run to the right edge, so a long one is cut there rather than shortened to two words
+      const roomEnd = W - (p.x + 2) - k.len(cnt) - 1
+      const cutEnd = k.len(S.label) > roomEnd && roomEnd >= 6 ? Array.from(S.label).slice(0, roomEnd - 1).join('') + '…' : null
+      const variants = small(id) ? [] : S.origin ? [[S.label, false]] : p.end && cutEnd ? [[S.label, true], [cutEnd, true], [short, true], [short, false]] : [[S.label, true], [S.label, false], [short, true], [short, false]]
       const spots = L => p.end
         ? [[p.x + 2, p.top + Math.floor((p.h - 1) / 2)], [p.x + 2, p.top], [p.x + 2, p.top - 1], [p.x + 2, p.top + p.h]]
-        : [[p.x, p.top - 1], [p.x + 2, p.top - 1], [p.x - L + 1, p.top - 1], [p.x, p.top + p.h], [p.x - L + 1, p.top + p.h], [p.x + 2, p.top], [p.x - L - 1, p.top], [p.x, p.top - 2], [p.x, p.top + p.h + 1]]
+        : [[p.x, p.top - 1], [p.x + 2, p.top - 1], [p.x - L + 1, p.top - 1], [p.x, p.top + p.h], [p.x - L + 1, p.top + p.h], [p.x + 2, p.top], [p.x - L - 1, p.top],
+          [p.x + 2, p.top + p.h - 1], [p.x - L - 1, p.top + p.h - 1], [p.x - L - 1, p.top - 1], [p.x + 2, p.top + p.h], [p.x, p.top - 2], [p.x, p.top + p.h + 1]]
+      // a name keeps a free cell on each side, so two names never run together
+      const fits = (lx, ly, L) => g.freeSpan(lx, ly, L) && (lx === 0 || g.free(lx - 1, ly)) && (lx + L >= W || g.free(lx + L, ly))
       let placed = null
       for (const [name, withN] of variants) {
         const txt = withN ? name + ' ' + cnt : name
         const L = k.len(txt)
         for (const [lx, ly] of spots(L)) {
           if (lx < 0 || lx + L > W || ly < 0 || ly >= H) continue
-          if (g.freeSpan(lx, ly, L)) { placed = { x: lx, y: ly, name, withN }; break }
+          if (fits(lx, ly, L)) { placed = { x: lx, y: ly, name, withN }; break }
         }
         if (placed) break
       }
