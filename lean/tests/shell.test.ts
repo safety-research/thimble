@@ -106,3 +106,17 @@ test('/verb ? lists every verb for the object, the picked ones marked', async ($
   expect(String(r.text)).toContain('● e  echo')
   expect(String(r.text)).toContain('say back its 1 part')
 })
+
+test('a reply draws its citations as their words, and names them in one row a press opens', async ($, on) => {
+  world(on)
+  let drawnText = ''
+  on('ui.render', (_$: unknown, e: { props: { text?: string } }) => {
+    drawnText = String(e.props.text ?? '')
+    return { type: 'Text', props: {}, children: ['the reply'] } as never
+  })
+  const text = 'June 18 had [6,543 saves](q1#day=2026-06-18@n); [4,219](q9#kind=SEC via proxy@n) went through a proxy, as [this one](revisions.jsonl#L28) and [a page](https://example.org/x).'
+  const tree = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
+  expect(drawnText).toBe('June 18 had 6,543 saves; 4,219 went through a proxy, as this one and [a page](https://example.org/x).')
+  const shown = textOf(tree)
+  expect(shown).toContain('cites 6,543 saves · 4,219 · this one')
+})

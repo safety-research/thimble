@@ -405,7 +405,7 @@ async function detailEl($: Engine, e: Any): Promise<Any> {
     return Box({ flexDirection: 'column', children: [
       Box({ flexDirection: 'row', justifyContent: 'space-between', children: [Text({ bold: true, wrap: 'truncate-end', children: `where ${label} comes from` }), Text({ dimColor: true, children: ` ${cut(sel.cite, 40)}` })] }),
       Box({ flexDirection: 'column', marginTop: 1, children: await rowsEls($, els, sel.root, [sel.cite], '', cols) }),
-      Box({ flexDirection: 'column', marginTop: 1, children: [Text({ dimColor: true, wrap: 'truncate-end', children: `ask  your next prompt carries this citation · esc goes to the prompt` })] }),
+      Box({ flexDirection: 'column', marginTop: 1, children: [Text({ dimColor: true, wrap: 'truncate-end', children: `ask  the next prompt carries this citation · esc to type it` })] }),
     ] })
   }
   const p = await preparedNow($, sel, Math.min(cols, 140))
@@ -453,12 +453,12 @@ async function detailEl($: Engine, e: Any): Promise<Any> {
     const cites = objectRefs(o)
     if (o.text) section.push(Text({ wrap: 'wrap', children: String(o.text).replace(/\[([^\]]+)\]\([^)\s]+\)/g, '$1') }))
     if (cites.length) section.push(...(await rowsEls($, els, sel.root, cites.map((c: Any) => c.ref), '', cols)))
-    else if (!o.text) section.push(Text({ dimColor: true, children: 'Select a part to see its rows.' }))
+    else if (!o.text) section.push(Text({ dimColor: true, children: selectable(p.grid).length ? 'Select a part to see its rows.' : 'It cites no rows and has no parts to select.' }))
   }
 
   // the two quiet rows: what a prompt carries, and the keys
   const parts = selectable(p.grid)
-  const ask = Text({ dimColor: true, wrap: 'truncate-end', children: `ask  your next prompt carries ${o.id}${sel.region ? ' ▸ ' + sel.region : ''} · esc goes to the prompt` })
+  const ask = Text({ dimColor: true, wrap: 'truncate-end', children: `ask  the next prompt carries ${o.id}${sel.region ? ' ▸ ' + sel.region : ''} · esc to type it` })
   const picked = p.verbs.filter(v => v.picked).slice(0, 3)
   const row: Any[] = []
   if (parts.length) row.push(Text({ color: 'suggestion', children: 'tab' }), Text({ dimColor: true, children: ' parts' }), sep(els))
@@ -543,7 +543,9 @@ async function toggleAll($: Engine): Promise<void> {
   if (cur) await $.state.set(SEL, { ...cur, all: !cur.all })
 }
 
-const LINK = /\[([^\]\n]+)\]\(([^)\s]+)\)/g
+// a citation's target may hold spaces (a query's key, as in q9#kind=SEC via proxy@n); a link that is no kernel ref
+// is left as Claude wrote it
+const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
 
 /** Claude's citations in a reply: each kernel ref it links, once, with the words that link it. */
 function citesIn(md: string): { ref: string; label: string }[] {
