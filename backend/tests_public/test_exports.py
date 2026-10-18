@@ -44,33 +44,46 @@ def _model() -> dict:
     return exports.read_model(CORPUS, report_types.read_doc(CORPUS, MAIN, "report"), "document")
 
 
-async def test_markdown_numbers_each_citation_once_as_a_footnote(report):
+async def test_markdown_numbers_each_citation_once_as_a_footnote_cards_cite_none(report):
+    """The references are true references alone: the corpus's records keep their footnotes; a canvas card, which the
+    export's reader cannot reach, adds none."""
     await _write(report)
     md = exports.to_markdown(_model())
     assert "## What happened" in md
-    assert "account.[^1] It posted first and again later.[^2][^1]" in md
-    assert f"[^1]: card:{report} “How many deletions?”" in md
-    assert "[^2]: board.jsonl#L1" in md and "forge pr claim" in md.split("[^2]:")[1]
+    assert "account. It posted first and again later.[^1]" in md
+    assert "[^1]: board.jsonl#L1" in md and "forge pr claim" in md.split("[^1]:")[1]
+    assert "card:" not in md and "[^2]" not in md
 
 
 async def test_a_card_a_sentence_reads_as_a_noun_is_exported_as_its_title(report):
-    """...a whole card right after a word such as "in"; one that words follow, and a line of one, cite."""
+    """...a whole card right after a word such as "in"; card refs, a line of one included, add no footnote."""
     text = (f"# Deletions\n\n## Where\n\nThe count is laid out in [[card:{report}]]. "
             f"Every deletion came from one account [[card:{report}]]. "
             f"The first came on May 24, 2026 [[card:{report}@out0#L1]] and the rest by June.\n")
     r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": text}, actor="analyst")
     assert not r.is_error, r.text
     md = exports.to_markdown(_model())
-    assert "The count is laid out in “How many deletions?”.[^1] Every deletion came from one account.[^1]" in md
-    assert "The first came on May 24, 2026 and the rest by June.[^2]" in md
+    assert "The count is laid out in “How many deletions?”. Every deletion came from one account." in md
+    assert "The first came on May 24, 2026 and the rest by June." in md
+    assert "[^" not in md
 
 
 async def test_html_is_one_file_that_loads_nothing_and_links_each_citation(report):
     await _write(report)
     page = exports.to_html(_model(), {report: {"title": "How many deletions?", "text": "27"}}, faces="")
     assert "<strong>one</strong>" in page
-    assert page.count('href="#note-1"') == 2 and 'id="note-1"' in page and 'id="note-2"' in page
+    assert page.count('href="#note-1"') == 1 and 'id="note-1"' in page and 'id="note-2"' not in page
     assert "<link" not in page and 'src="http' not in page and "<script src" not in page
+
+
+async def test_a_figures_card_is_a_picture_not_a_reference(report):
+    """A figure cites its caption's records; the card it shows adds no entry to the references."""
+    doc = {"title": "R", "sections": [{"id": "0000a001", "heading": "Where",
+           "sentences": [{"id": "0000s001", "text": "See the count. [[board.jsonl#L1]]"}],
+           "figures": [{"cell": f"card:{report}", "caption": "The count [[board.jsonl#L1]]"}]}]}
+    m = exports.read_model(CORPUS, doc, "document")
+    assert m["units"][0]["figures"][0]["notes"] == [1]
+    assert [r["label"].split(" (")[0] for r in m["notes"]] == ["board.jsonl#L1"]
 
 
 async def test_slides_export_lays_each_slide_out_as_the_editor_shows_it(report):
