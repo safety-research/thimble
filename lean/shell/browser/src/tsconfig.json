@@ -1,0 +1,50 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "types": [],
+    "paths": {
+      "@09/*": [
+        "../../../../frontend/src/*"
+      ],
+      "react": [
+        "../../../../frontend/node_modules/@types/react"
+      ],
+      "react/*": [
+        "../../../../frontend/node_modules/@types/react/*"
+      ],
+      "react-dom": [
+        "../../../../frontend/node_modules/@types/react-dom"
+      ],
+      "react-dom/*": [
+        "../../../../frontend/node_modules/@types/react-dom/*"
+      ],
+      "react-markdown": [
+        "../../../../frontend/node_modules/react-markdown"
+      ],
+      "remark-gfm": [
+        "../../../../frontend/node_modules/remark-gfm"
+      ],
+      "*": [
+        "../../../../frontend/node_modules/*"
+      ]
+    }
+  },
+  "include": [
+    ".",
+    "../../../../frontend/src/vite-env.d.ts"
+  ]
+}

@@ -243,6 +243,31 @@ export async function chipFromPrompt($: Engine, row: string | null, text: string
   return `squeeze chip "${own.name}" added; the reply above is rewritten with it`
 }
 
+/**
+ * A squeeze pressed in the browser, as the page server's line names it: a chip at a level, the person's own chip in
+ * their words, or the original again. It acts as the same press in the terminal does, so the message is rewritten in
+ * place here and the page reads the record. Returns one plain line when it cannot act, else null.
+ */
+export async function fromBrowser($: Engine, q: { row: string; chip?: string; level?: number; custom?: string; reset?: boolean }): Promise<string | null> {
+  const rec = await recordNow($, q.row)
+  if (!rec) return 'Squeeze from the browser did nothing: that message is not in this session. Press s under it here instead.'
+  if (q.reset) { void setLevels($, q.row, {}); return null }
+  if (typeof q.custom === 'string') {
+    const own = ownChip(rec, q.custom) as Own | null
+    if (!own) return 'Squeeze from the browser did nothing: a chip needs a few words, such as "for my manager".'
+    const squeeze = withOwn(rec, own)
+    await saveRecord($, { ...rec, squeeze } as MsgRecord)
+    await setUi($, q.row, { focus: own.id, adding: false, error: null })
+    void setLevels($, q.row, { ...(squeeze.at || {}) }, own)
+    return null
+  }
+  const chip = chipsOf(rec).find((x: Any) => x.id === q.chip)
+  if (!chip || !Number.isInteger(q.level)) return `Squeeze from the browser did nothing: the message has no chip "${q.chip ?? ''}". Press s under it here instead.`
+  await setUi($, q.row, { focus: chip.id, error: null })
+  void setLevels($, q.row, { ...((rec as Any).squeeze?.at || {}), [chip.id]: Number(q.level) })
+  return null
+}
+
 // ------------------------------------------------------------------------------------------------ the rewrite
 
 /** Set the chips of a row to `at` and show that version: from the record when it was written before, else one call.

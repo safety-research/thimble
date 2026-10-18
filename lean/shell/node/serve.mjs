@@ -5,12 +5,18 @@
 //   node serve.mjs --root <folder> --session <id> [--lean <bin/lean>] [--idle <seconds>] [--first <seconds>]
 //
 //   prints {"ready": {"port", "token"}} once listening, then one line for each thing the person does on a page:
-//     {"ask": "<text>", "scope": {row?, object?, v?, region?, label?, mark?}}   a question, which becomes a prompt
+//     {"ask": "<text>", "scope": {row?, object?, v?, region?, label?, mark?, thread?}}
+//                                                     a question: a prompt to main, or (a card, a mark or a thread in
+//                                                     its scope) a question in that side thread
 //     {"verb": "v", "row": "<row key>", "proposal"?: "<words>"}                a verb pressed under a message
+//     {"squeeze": {row, chip?, level?, name?, label?, custom?, reset?}}       a squeeze chip pressed under a message:
+//                                                     a chip set to a level, the person's own chip, or the original
 //     {"back": {object, v, region, state?}}                                    a selection handed back (the old page)
 //   and {"stopped": "<why>"} when it ends on its own.
 //
 // What it serves, every path behind the token:
+//   /<token>/                  the app (shell/browser/app/: thimble's browser, built from shell/browser/src/)
+//   /<token>/mirror/, /card/   the old pages' links, sent to the app (?card=<id> opens a card's detail)
 //   /<token>/<page>/...        a file of shell/browser/<page>/ (index.html for the folder): every folder there is a
 //                              page, so a new page is a new folder and this file does not change
 //   /<token>/draw/...          the drawing contract's modules (draw/), which the pages import as ES modules
@@ -25,11 +31,17 @@
 //   /<token>/api/resolve?ref=  `lean resolve <ref> --json`: where a value came from, down to its rows
 //   /<token>/api/verbs         the verbs of the row under each message (verb.json `row: true`)
 //   /<token>/api/asks          what pages of this session asked (for a card's thread)
+//   /<token>/api/threads       this session's side threads (thimble/threads/<session>/<id>.json), each with its turns
+//   /<token>/api/sources       `lean sources --json`: the source files, with their kind and rows
+//   /<token>/api/coverage      `lean coverage --json` for this session: what Claude read of each file
+//   /<token>/api/rows?path=&from=&n=   a file's rows from row `from` (`lean rows <path>#L<from>-L<to>`), or with
+//                              &search=<regex> the first rows that match (`lean rows <path> --search`); ?ref=<source
+//                              ref> the rows a ref or row set names, whole
 //   /<token>/api/events        server-sent events: `change` when the messages or objects change. An open stream is
 //                              an open page: the server lives while one is open, and a while after the last closes
 //   POST /<token>/api/back     what the person did, printed on stdout as one line (above)
 //
-// It starts no `claude`, holds no credential, and reads only <folder>/thimble/. The token in every path keeps other
+// It starts no `claude`, holds no credential, and reads only <folder>/thimble/ and, through the kernel, the sources. The token in every path keeps other
 // pages and other users of this machine out; the Host check keeps a rebound DNS name out; a POST must come from its
 // own origin.
 import { execFile } from 'node:child_process'
@@ -48,12 +60,13 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
 const ROW = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/
 const SESSION = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' }
+const TYPES = { '.woff': 'font/woff', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' }
 // the row a page shows when no verb carries `row: true` yet (CONTRACT 3)
 const ROW_VERBS = [{ key: 'v', name: 'visualize', order: 0 }, { key: 's', name: 'squeeze', order: 1 }, { key: 'a', name: 'atlas', order: 2 }]
+const THREAD = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/
 // pages: the sandbox runs programs in a srcdoc iframe and a blob worker (draw/browser/sandbox.js), which this allows;
 // nothing on a page can connect anywhere but this server (and the fonts)
-const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-src 'self' blob: data:; base-uri 'none'; form-action 'none'"
+const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; worker-src blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-src 'self' blob: data:; base-uri 'none'; form-action 'none'"
 
 /** The object file for id (and version), or null. */
 export function objectFile(root, id, v) {
@@ -112,11 +125,63 @@ export function readMessages(root, session) {
   return { rows, dir }
 }
 
+/** The folder of a session's side threads: thimble/threads/<session>/, the session id made safe for a file name. */
+const threadsDir = (root, session) => join(root, 'thimble', 'threads', String(session).replace(/[^A-Za-z0-9_-]/g, '-'))
+
+/**
+ * A session's side threads, newest first: each thread file (thimble/threads/<session>/<id>.json, written by the
+ * threads module) as {id, title, card?, scope, status, at, updated, turns: [{role: user | assistant, text, at?, about?,
+ * calls?}], error?}.
+ * Loose on purpose: a field it does not know is dropped, a turn without words is dropped, a file being written is
+ * skipped until it reads.
+ */
+export function readThreads(root, session) {
+  const dir = threadsDir(root, session)
+  let names = []
+  try { names = readdirSync(dir).filter(n => n.endsWith('.json')) } catch { return [] }
+  const out = []
+  for (const n of names) {
+    const file = join(dir, n)
+    const t = readJson(file)
+    if (!t || typeof t !== 'object' || Array.isArray(t)) continue
+    let updated = null
+    try { updated = new Date(statSync(file).mtimeMs).toISOString() } catch { /* gone */ }
+    const id = [t.id, t.key, n.slice(0, -5)].find(x => typeof x === 'string' && THREAD.test(x))
+    if (!id) continue
+    // a turn's role as the threads module writes it (person, claude) or as the transcript names it (user, assistant)
+    const ROLE = { user: 'user', person: 'user', assistant: 'assistant', claude: 'assistant' }
+    const turns = (Array.isArray(t.turns) ? t.turns : [])
+      .filter(x => x && ROLE[x.role] && (typeof x.text === 'string' || Array.isArray(x.calls)))
+      .map(x => ({ role: ROLE[x.role], text: String(x.text ?? '').slice(0, 20000), ...(x.at ? { at: String(x.at) } : {}), ...(typeof x.about === 'string' ? { about: x.about.slice(0, 200) } : {}), ...(Array.isArray(x.calls) ? { calls: x.calls.slice(0, 20).map(c => String(c).slice(0, 200)) } : {}) }))
+    const scope = t.scope && typeof t.scope === 'object' ? scopeOf(t.scope) : {}
+    out.push({ id, title: typeof t.title === 'string' ? t.title.slice(0, 200) : '', ...(typeof t.card === 'string' ? { card: t.card.slice(0, 200) } : {}), scope, status: typeof t.status === 'string' ? t.status : (turns.at(-1)?.role === 'user' ? 'running' : 'done'), at: t.at || null, updated, turns, ...(t.error ? { error: String(t.error).slice(0, 400) } : {}) })
+  }
+  return out.sort((a, b) => String(b.updated || b.at || '').localeCompare(String(a.updated || a.at || '')))
+}
+
+/** A source path a page may read through the kernel: relative, inside the folder, not lean's own thimble/. */
+export function sourcePath(p) {
+  const s = String(p || '')
+  if (!s || s.length > 1000 || /[\0\n\r#]/.test(s) || s.startsWith('/') || s.split('/').some(x => x === '..' || x === '' || x.startsWith('.'))) return null
+  if (s === 'thimble' || s.startsWith('thimble/')) return null
+  return s
+}
+
+/** `lean rows` output as rows: "<path>#L<n>  <text>" (or #row=<n> for a table) per line; the summary lines dropped. */
+export function rowsOf(stdout) {
+  const out = []
+  for (const line of String(stdout || '').split('\n')) {
+    const m = /^(.+?#(?:L|row=)(\d+))  (.*)$/.exec(line)
+    if (m) out.push({ ref: m[1], line: Number(m[2]), text: m[3] })
+  }
+  return out
+}
+
 /** A cheap signature of what the pages show: the messages folder and the objects folder, by size and time. */
 function signature(root, session) {
   const parts = []
   const dirs = [join(root, 'thimble', 'objects')]
-  if (session) dirs.unshift(join(root, 'thimble', 'messages', session))
+  if (session) dirs.unshift(join(root, 'thimble', 'messages', session), threadsDir(root, session))
   for (const dir of dirs) {
     let names = []
     try { names = readdirSync(dir) } catch { parts.push('-'); continue }
@@ -138,6 +203,19 @@ export function backLine(body) {
     const text = body.ask.trim().slice(0, 4000)
     if (!text) return { error: 'an empty question' }
     return { ask: text, scope: scopeOf(body.scope) }
+  }
+  if (body.squeeze && typeof body.squeeze === 'object' && !Array.isArray(body.squeeze)) {
+    const q = body.squeeze
+    if (typeof q.row !== 'string' || !ROW.test(q.row)) return { error: 'no row' }
+    const out = { row: q.row }
+    if (q.reset === true) out.reset = true
+    else if (typeof q.custom === 'string' && q.custom.trim()) out.custom = q.custom.trim().slice(0, 300)
+    else if (typeof q.chip === 'string' && /^[\w.-]{1,64}$/.test(q.chip) && Number.isInteger(q.level) && q.level >= 0 && q.level < 12) {
+      out.chip = q.chip
+      out.level = q.level
+      for (const k of ['name', 'label']) if (typeof q[k] === 'string' && q[k].trim()) out[k] = q[k].trim().slice(0, 80)
+    } else return { error: 'a squeeze names a chip and a level, a custom chip, or reset' }
+    return { squeeze: out }
   }
   if (typeof body.verb === 'string') {
     if (!/^[a-z0-9]$/.test(body.verb)) return { error: 'a verb is one key' }
@@ -163,6 +241,7 @@ export function scopeOf(s) {
     if (typeof s.region === 'string' && REGION.test(s.region)) out.region = s.region
   }
   if (typeof s.label === 'string' && s.label.trim()) out.label = s.label.trim().slice(0, 200)
+  if (typeof s.thread === 'string' && THREAD.test(s.thread)) out.thread = s.thread
   const m = s.mark
   if (m && typeof m === 'object' && ['cite', 'gloss', 'spark'].includes(m.kind)) {
     const mark = { kind: m.kind }
@@ -227,6 +306,8 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
   let sig = signature(root, sess)
   let stopTimer = null
   let coverage = { at: '', value: null }
+  let fullCoverage = { at: '', value: null }
+  let sources = { at: 0, value: null }
   const asksFile = sess ? join(root, 'thimble', 'web', `${sess}.asks.jsonl`) : null
 
   const server = createServer((req, res) => {
@@ -242,7 +323,12 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
     const base = `/${token}`
     const [, head, ...rest] = parts
     try {
-      if (!head) return send(302, 'text/plain', '', { location: `${base}/mirror/` })
+      // the app is the page; the old pages' links open it (a card's link on its detail)
+      if (!head || ((head === 'mirror' || head === 'card') && req.method === 'GET' && rest.length === 0)) {
+        const q = new URLSearchParams()
+        if (head === 'card') for (const [k, to] of [['o', 'card'], ['v', 'v'], ['from', 'from']]) { const x = url.searchParams.get(k); if (x) q.set(to, x) }
+        return send(302, 'text/plain', '', { location: `${base}/app/${q.toString() ? '?' + q : ''}` })
+      }
       // objects as JSON, and an atlas object's link to its page (shell/browser/atlas/route.mjs); the Atlas page itself
       // is a page folder like any other, served below
       if (head === 'o' && atlasRoute(req, url, parts, { root, token, objectFile, send })) return
@@ -250,7 +336,7 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       if (head === 'o' && rest.length === 1 && req.method === 'GET') {
         if (!objectFile(root, rest[0], url.searchParams.get('v'))) return send(404, 'text/plain', `no object ${rest[0]}`)
         const v = url.searchParams.get('v')
-        return send(302, 'text/plain', '', { location: `${base}/card/?o=${encodeURIComponent(rest[0])}${v ? `&v=${Number(v)}` : ''}` })
+        return send(302, 'text/plain', '', { location: `${base}/app/?card=${encodeURIComponent(rest[0])}${v ? `&v=${Number(v)}` : ''}` })
       }
       const api = head === 'api' ? rest[0] : head === 'resolve' || head === 'back' ? head : null
       const args = head === 'api' ? rest.slice(1) : rest
@@ -320,7 +406,7 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       const list = names.map(n => readJson(join(root, 'thimble', 'objects', n))).filter(Boolean)
         // this session's: saved by Claude, or by a verb the person ran in it (the person's reads go as person-<id>)
         .filter(o => !sess || !o.session || o.session === sess || o.session === personEnv.LEAN_SESSION)
-        .map(o => ({ id: o.id, version: o.version, title: o.title || o.id, updated: o.updated || null }))
+        .map(o => ({ id: o.id, version: o.version, title: o.title || o.id, question: typeof o.question === 'string' ? o.question.slice(0, 300) : '', updated: o.updated || null, created: o.created || null, verb: o.verb || null, kind: o.kind || null, session: o.session || null }))
       return json({ objects: list })
     }
     if (api === 'from' && args.length === 1) {
@@ -339,6 +425,63 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       const { verbs } = listVerbs()
       const row = verbs.filter(v => v.row === true && v.key).map(v => ({ key: v.key, name: v.name, line: v.line || '', order: v.order ?? null }))
       return json({ verbs: row.length ? row : ROW_VERBS })
+    }
+    if (api === 'threads') {
+      return json({ threads: sess ? readThreads(root, sess) : [] })
+    }
+    if (api === 'thread' && args.length === 1) {
+      const t = sess && THREAD.test(args[0]) ? readThreads(root, sess).find(x => x.id === args[0]) : null
+      return t ? json(t) : json({ error: `no thread ${args[0]}` }, 404)
+    }
+    if (api === 'sources') {
+      if (sources.at > Date.now() - 30000 && sources.value) return json({ sources: sources.value })
+      return leanJson(lean, root, ['sources'], personEnv).then(r => {
+        if (!Array.isArray(r)) return json({ error: r.error || 'lean sources gave no list' }, 500)
+        sources = { at: Date.now(), value: r.map(x => ({ path: x.path, kind: x.kind, rows: x.rows, lines: x.lines, size: x.size })) }
+        return json({ sources: sources.value })
+      })
+    }
+    if (api === 'coverage') {
+      if (!sess) return json({ error: 'no session' }, 404)
+      if (fullCoverage.at === sig && fullCoverage.value) return json(fullCoverage.value)
+      const at = sig
+      return leanJson(lean, root, ['coverage'], { LEAN_SESSION: sess }).then(r => {
+        if (r.error) return json(r, 500)
+        fullCoverage = { at, value: r }
+        return json(r)
+      })
+    }
+    if (api === 'rows' && url.searchParams.get('ref')) {
+      // the rows a source ref names (a row set such as revisions.jsonl#L4,9,12), whole
+      const ref = String(url.searchParams.get('ref'))
+      const [p, loc] = ref.split('#')
+      if (!sourcePath(p) || !/^(L\d+(-L?\d+)?(,\d+(-\d+)?)*|row=\d+(-\d+)?(,\d+(-\d+)?)*)$/.test(loc || '')) return json({ error: 'not a source ref' }, 400)
+      const n = Math.max(1, Math.min(50, Number(url.searchParams.get('n')) || 12))
+      return run(lean, ['rows', ref, '-n', String(n), '--width', '4000'], { cwd: root, env: { LEAN_ROOT: root, ...personEnv } }).then(r => {
+        const rows = rowsOf(r.stdout)
+        if (!rows.length && r.code) return json({ error: (r.stdout + r.stderr).trim().slice(0, 400) || `lean rows ${ref} failed` }, 500)
+        return json({ ref, rows })
+      })
+    }
+    if (api === 'rows') {
+      const path = sourcePath(url.searchParams.get('path'))
+      if (!path) return json({ error: 'no source path' }, 400)
+      const n = Math.max(1, Math.min(200, Number(url.searchParams.get('n')) || 60))
+      const search = url.searchParams.get('search')
+      const table = /\.(csv|tsv)$/i.test(path)
+      let argv
+      if (search) {
+        if (search.length > 300 || /[\n\r\0]/.test(search)) return json({ error: 'a search is one short line' }, 400)
+        argv = ['rows', path, '--search', search, '-n', String(n), '--first', '--width', '2000']
+      } else {
+        const from = Math.max(1, Math.floor(Number(url.searchParams.get('from')) || 1))
+        argv = ['rows', `${path}#${table ? 'row=' : 'L'}${from}-${from + n - 1}`, '-n', String(n), '--width', '100000']
+      }
+      return run(lean, argv, { cwd: root, env: { LEAN_ROOT: root, ...personEnv } }).then(r => {
+        const rows = rowsOf(r.stdout)
+        if (!rows.length && r.code) return json({ error: (r.stdout + r.stderr).trim().slice(0, 400) || `lean rows ${path} failed` }, 500)
+        return json({ path, rows })
+      })
     }
     if (api === 'asks') {
       const asks = []

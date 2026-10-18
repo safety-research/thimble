@@ -2,7 +2,7 @@
 // (browser mode: pages behind a token, the JSON routes, the lines back to the terminal, and its life).
 //   node --test lean/shell/test/shell.test.mjs
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -189,9 +189,17 @@ function browserRoot() {
     { row: '../x', kind: 'user', text: 'a row key that is no key' },
   ].map(r => JSON.stringify(r)).join('\n') + '\nnot json\n')
   writeFileSync(join(msgs, 'a1.json'), JSON.stringify({ v: 1, row: 'a1', session: SID, text: 'June 18: [2](q1#day=2026-06-18@n).', marks: [{ kind: 'cite', start: 9, end: 34, ref: 'q1#day=2026-06-18@n', label: '2' }], verbs: { v: { lit: true, note: '1 view' } }, objects: ['01-saves'] }))
-  // a stand-in for the lean command: what `lean coverage <id>` and `lean resolve` print with --json
+  // a stand-in for the lean command: what `lean coverage [<id>]`, `lean resolve`, `lean sources` and `lean rows` print
   const lean = join(root, 'fake-lean')
-  writeFileSync(lean, `#!/bin/sh\ncase "$1" in\n coverage) echo '{"object": "01-saves", "feeding": [{"path": "r.jsonl", "rows": 5, "of": 9}], "not_feeding": ["kinds.csv", "notes.md"], "session": null, "total": {"files": 3, "rows": 9, "not_read_files": 1, "not_read_rows": 4}, "groups": []}' ;;\n resolve) echo "{\\"ref\\": \\"$2\\", \\"chain\\": [{\\"step\\": \\"query\\", \\"id\\": \\"q1\\"}], \\"count\\": 2, \\"rows\\": [\\"r.jsonl#L4-5\\"], \\"records\\": [], \\"session\\": \\"$LEAN_SESSION\\"}" ;;\nesac\n`, { mode: 0o755 })
+  writeFileSync(lean, [
+    '#!/bin/sh',
+    'case "$1" in',
+    ` coverage) if [ "$2" = "--json" ]; then echo '{"files": [{"path": "r.jsonl", "status": "computed", "rows": 9, "computed": 9}, {"path": "kinds.csv", "status": "not read", "rows": 3}], "groups": [], "total": {"files": 2, "rows": 12, "not_read_files": 1, "not_read_rows": 3}, "session": "'"$LEAN_SESSION"'"}'; else echo '{"object": "01-saves", "feeding": [{"path": "r.jsonl", "rows": 5, "of": 9}], "not_feeding": ["kinds.csv", "notes.md"], "session": null, "total": {"files": 3, "rows": 9, "not_read_files": 1, "not_read_rows": 4}, "groups": []}'; fi ;;`,
+    ' resolve) echo "{\\"ref\\": \\"$2\\", \\"chain\\": [{\\"step\\": \\"query\\", \\"id\\": \\"q1\\"}], \\"count\\": 2, \\"rows\\": [\\"r.jsonl#L4-5\\"], \\"records\\": [], \\"session\\": \\"$LEAN_SESSION\\"}" ;;',
+    ` sources) echo '[{"path": "r.jsonl", "kind": "jsonl", "rows": 9, "lines": 9, "size": 900}, {"path": "kinds.csv", "kind": "csv", "rows": 3, "lines": 4, "size": 40}]' ;;`,
+    ' rows) echo "args $*" >> "$LEAN_ROOT/rows.log"; printf \'r.jsonl#L4  {"text": "four"}\\nr.jsonl#L5  {"text": "five"}\\n\\nthe rows 4 to 5 of 9 in r.jsonl.\\n\' ;;',
+    'esac',
+  ].join('\n') + '\n', { mode: 0o755 })
   return { root, lean }
 }
 const JSON_H = { 'content-type': 'application/json' }
@@ -199,7 +207,7 @@ const JSON_H = { 'content-type': 'application/json' }
 test('pages are folders behind the token: each folder of shell/browser/ is a page, with the drawing modules beside them', async () => {
   const { root, lean } = browserRoot()
   const pages = mkdtempSync(join(tmpdir(), 'pages-'))
-  for (const d of ['mirror', 'card', 'atlas']) { mkdirSync(join(pages, d)); writeFileSync(join(pages, d, 'index.html'), `<title>${d}</title>`) }
+  for (const d of ['app', 'atlas']) { mkdirSync(join(pages, d)); writeFileSync(join(pages, d, 'index.html'), `<title>${d}</title>`) }
   writeFileSync(join(pages, 'atlas', 'graph.js'), 'export const x = 1')
   writeFileSync(join(pages, '.hidden'), 'no')
   const { server, port, token } = await startServer({ root, session: SID, lean, pages })
@@ -207,11 +215,16 @@ test('pages are folders behind the token: each folder of shell/browser/ is a pag
     assert.equal(server.address().address, '127.0.0.1')
     const top = await call(port, { path: `/${token}/` })
     assert.equal(top.status, 302)
-    assert.equal(top.headers.location, `/${token}/mirror/`)
-    assert.equal((await call(port, { path: `/${token}/mirror` })).headers.location, `/${token}/mirror/`)
-    const page = await call(port, { path: `/${token}/mirror/` })
+    assert.equal(top.headers.location, `/${token}/app/`)
+    assert.equal((await call(port, { path: `/${token}/app` })).headers.location, `/${token}/app/`)
+    const page = await call(port, { path: `/${token}/app/` })
     assert.equal(page.status, 200)
-    assert.match(page.text, /<title>mirror<\/title>/)
+    assert.match(page.text, /<title>app<\/title>/)
+    // the font faces the app serves are allowed from the page's own origin
+    assert.match(page.headers['content-security-policy'], /font-src 'self'/)
+    // the old pages' links open the app: the session's chat, or a card's detail
+    assert.equal((await call(port, { path: `/${token}/mirror/` })).headers.location, `/${token}/app/`)
+    assert.equal((await call(port, { path: `/${token}/card/?o=01-saves&v=2&from=a1` })).headers.location, `/${token}/app/?card=01-saves&v=2&from=a1`)
     assert.match(page.headers['content-security-policy'], /connect-src 'self'/)
     // a page another part adds is served as it is: no change to the server
     assert.match((await call(port, { path: `/${token}/atlas/` })).text, /atlas/)
@@ -225,14 +238,14 @@ test('pages are folders behind the token: each folder of shell/browser/ is a pag
     // nothing else of the plugin, no dot-file, no way out of a folder, and nothing without the token or the host
     assert.equal((await call(port, { path: `/${token}/lib/shell.tsx` })).status, 404)
     assert.equal((await call(port, { path: `/${token}/.hidden` })).status, 404)
-    assert.equal((await call(port, { path: `/${token}/mirror/%2e%2e/%2e%2e/package.json` })).status, 404)
+    assert.equal((await call(port, { path: `/${token}/app/%2e%2e/%2e%2e/package.json` })).status, 404)
     assert.equal((await call(port, { path: `/${token}/draw/..%2F..%2F.claude-plugin%2Fplugin.json` })).status, 404)
-    assert.equal((await call(port, { path: `/wrong/mirror/` })).status, 404)
-    assert.equal((await call(port, { path: `/${token}/mirror/`, host: 'evil.example:80' })).status, 421)
+    assert.equal((await call(port, { path: `/wrong/app/` })).status, 404)
+    assert.equal((await call(port, { path: `/${token}/app/`, host: 'evil.example:80' })).status, 421)
     // the old handoff link opens the card's page
     const old = await call(port, { path: `/${token}/o/01-saves?v=1` })
     assert.equal(old.status, 302)
-    assert.equal(old.headers.location, `/${token}/card/?o=01-saves&v=1`)
+    assert.equal(old.headers.location, `/${token}/app/?card=01-saves&v=1`)
     assert.equal((await call(port, { path: `/${token}/o/..%2Fsecret` })).status, 404)
   } finally {
     server.close()
@@ -311,6 +324,86 @@ test('what the person does on a page comes back as one line: an ask with its sco
   } finally {
     server.close()
   }
+})
+
+test('the app\'s routes: side threads with their turns, the sources, what this session read, and a file\'s rows', async () => {
+  const { root, lean } = browserRoot()
+  const dir = join(root, 'thimble', 'threads', SID)
+  mkdirSync(dir, { recursive: true })
+  // a thread file as the threads module writes it; a field it does not know is dropped, a bad turn is dropped
+  writeFileSync(join(dir, 'card-01-saves.json'), JSON.stringify({ key: 'card-01-saves', agentId: 'a7', title: 'Saves per day', card: 'Saves per day', status: 'done', scope: { object: '01-saves', v: 2, region: 'day-2026-06-18', label: 'Jun 18', secret: 'x' }, turns: [{ role: 'person', text: 'why so high?', about: 'Jun 18' }, { role: 'claude', text: 'A bot: [6,543](q1#day=2026-06-18@n).', calls: ['lean resolve q1'] }, { role: 'system', text: 'no' }], at: '2026-01-01T00:01:00Z' }))
+  // the format the detail agent names: {id, session, scope, title, at, turns}
+  writeFileSync(join(dir, 'mark-a1-q1.json'), JSON.stringify({ id: 'mark-a1-q1', session: SID, scope: { row: 'a1', mark: { kind: 'cite', ref: 'q1#day=2026-06-18@n', label: '2' } }, title: '', at: '2026-01-01T00:02:00Z', turns: [{ role: 'user', text: 'where from?', at: '2026-01-01T00:02:00Z' }] }))
+  writeFileSync(join(dir, 'broken.json'), '{"turns": [')
+  mkdirSync(join(root, 'thimble', 'threads', 'someone-else'), { recursive: true })
+  writeFileSync(join(root, 'thimble', 'threads', 'someone-else', 't.json'), JSON.stringify({ id: 't', turns: [] }))
+  const { server, port, token } = await startServer({ root, session: SID, lean })
+  const get = async path => JSON.parse((await call(port, { path: `/${token}/api/${path}` })).text)
+  try {
+    const { threads } = await get('threads')
+    assert.deepEqual(threads.map(t => t.id).sort(), ['card-01-saves', 'mark-a1-q1'])
+    const card = threads.find(t => t.id === 'card-01-saves')
+    assert.deepEqual(card.scope, { object: '01-saves', v: 2, region: 'day-2026-06-18', label: 'Jun 18' })
+    assert.deepEqual(card.turns.map(t => t.role), ['user', 'assistant'])
+    assert.deepEqual(card.turns[1].calls, ['lean resolve q1'])
+    assert.equal(card.status, 'done')
+    // a thread whose last turn is a question is still answering
+    assert.equal(threads.find(t => t.id === 'mark-a1-q1').status, 'running')
+    assert.equal((await get('thread/card-01-saves')).card, 'Saves per day')
+    assert.equal((await call(port, { path: `/${token}/api/thread/..%2Fx` })).status, 404)
+    // the sources and what Claude's session read of each (the session's own id, not the person's)
+    assert.deepEqual((await get('sources')).sources.map(x => x.path), ['r.jsonl', 'kinds.csv'])
+    const cov = await get('coverage')
+    assert.equal(cov.session, SID)
+    assert.deepEqual(cov.files.map(f => f.status), ['computed', 'not read'])
+    // a file's rows, from a row on, as the person's read; a search; the rows a ref names
+    const rows = await get('rows?path=r.jsonl&from=4&n=2')
+    assert.deepEqual(rows.rows, [{ ref: 'r.jsonl#L4', line: 4, text: '{"text": "four"}' }, { ref: 'r.jsonl#L5', line: 5, text: '{"text": "five"}' }])
+    await get('rows?path=r.jsonl&search=fi&n=5')
+    await get(`rows?ref=${encodeURIComponent('r.jsonl#L4,5')}`)
+    const log = readFileSync(join(root, 'rows.log'), 'utf8').trim().split('\n')
+    assert.deepEqual(log, ['args rows r.jsonl#L4-5 -n 2 --width 100000', 'args rows r.jsonl --search fi -n 5 --first --width 2000', 'args rows r.jsonl#L4,5 -n 12 --width 4000'])
+    // never lean's own folder, a path out of the folder, or a ref that is not a source row
+    for (const bad of ['rows?path=..%2Fsecret', 'rows?path=thimble%2Fledger.jsonl', 'rows?path=%2Fetc%2Fpasswd', 'rows?path=.env', `rows?ref=${encodeURIComponent('q1#n')}`, `rows?ref=${encodeURIComponent('../x#L1')}`]) {
+      assert.equal((await call(port, { path: `/${token}/api/${bad}` })).status, 400, bad)
+    }
+  } finally {
+    server.close()
+  }
+})
+
+test('a squeeze chip pressed in the browser comes back as one line: a chip at a level, the person\'s own chip, or the original', async () => {
+  const { root, lean } = browserRoot()
+  const lines = []
+  const { server, port, token } = await startServer({ root, session: SID, lean, onLine: l => lines.push(l) })
+  const post = body => call(port, { method: 'POST', path: `/${token}/api/back`, headers: JSON_H, body: JSON.stringify(body) })
+  try {
+    assert.equal((await post({ squeeze: { row: 'a1', chip: 'length', level: 1, name: 'Length', label: 'short', extra: 'x' } })).status, 200)
+    assert.equal((await post({ squeeze: { row: 'a1', custom: '  for my manager  ' } })).status, 200)
+    assert.equal((await post({ squeeze: { row: 'a1', reset: true } })).status, 200)
+    assert.equal((await post({ ask: 'and here?', scope: { thread: 'card-01-saves', object: '01-saves' } })).status, 200)
+    for (const bad of [{ squeeze: { row: '../a1', reset: true } }, { squeeze: { row: 'a1', chip: 'length' } }, { squeeze: { row: 'a1', chip: 'length', level: 99 } }, { squeeze: 'short' }]) {
+      assert.equal((await post(bad)).status, 400, JSON.stringify(bad))
+    }
+    assert.deepEqual(lines, [
+      { squeeze: { row: 'a1', chip: 'length', level: 1, name: 'Length', label: 'short' } },
+      { squeeze: { row: 'a1', custom: 'for my manager' } },
+      { squeeze: { row: 'a1', reset: true } },
+      { ask: 'and here?', scope: { object: '01-saves', thread: 'card-01-saves' } },
+    ])
+  } finally {
+    server.close()
+  }
+})
+
+test('browser mode is off at install, and the app is built: the plugin needs no build step where it is installed', () => {
+  const plugin = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
+  assert.equal(plugin.userConfig.browser.type, 'boolean')
+  assert.equal(plugin.userConfig.browser.default, false)
+  const app = new URL('../browser/app/', import.meta.url)
+  const html = readFileSync(new URL('index.html', app), 'utf8')
+  assert.match(html, /<script type="module" src="app.js"><\/script>/)
+  for (const f of ['app.js', 'app.css', 'fonts.css']) assert.ok(readFileSync(new URL(f, app)).length > 100, f)
 })
 
 function events(port, path) {

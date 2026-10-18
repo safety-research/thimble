@@ -203,3 +203,19 @@ test('browser mode turned off in /config ends the server and hides o again', { o
   expect(String(r.text)).toContain('Browser mode is off')
   expect(w.spawned.length).toBe(0)
 })
+
+test('a squeeze chip pressed in the browser rewrites the message here, as a press in the terminal does', { options: { browser: true } }, async ($, on) => {
+  const SHORT = 'June 18: [6,543](q1#day=2026-06-18@n).'
+  const w = world(on, [{ squeeze: { row: AT, chip: 'length', level: 2, name: 'Length', label: 'medium' } }, { squeeze: { row: 'zzzzzzzz-0000-0000-0000-', reset: true } }])
+  const calls: unknown[] = []
+  on('model.complete', (_$: unknown, e: unknown) => { calls.push(e); return { value: { isAnswered: true, text: `<text>\n${SHORT}\n</text>`, usage: {} } } })
+  const clock = mock.clock(on)
+  await $.command.run({ command: 'browser', args: '' } as never)
+  await clock.settle()
+  expect(calls.length).toBe(1)
+  const rec = JSON.parse(w.files[`${ROOT}/thimble/messages/${SESSION}/${AT}.json`]!)
+  expect(rec.shown).toBe(SHORT)
+  expect(rec.squeeze.at).toEqual({ length: 2 })
+  // a message this session does not have: one plain line, nothing runs
+  expect(w.toasts.some(t => t.includes('not in this session'))).toBe(true)
+})

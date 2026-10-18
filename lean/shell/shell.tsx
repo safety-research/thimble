@@ -36,7 +36,7 @@ import { chainWords, isRef, objectRefs, rankRow, recordRefs, regionMeta, regionR
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { messageEl, trayEl, verbLineEl, verbRowEl } from './view'
 import type { RowVerb } from './view'
-import { afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, chipFromPrompt, chipsEl, pressChip, seeView, setLevels as sqSetLevels, sLit, squeezeKey, takeNotes as sqNotes } from '../verbs/squeeze/term'
+import { afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, chipFromPrompt, chipsEl, fromBrowser as sqFromBrowser, pressChip, seeView, setLevels as sqSetLevels, sLit, squeezeKey, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { chipsOf as sqChips, isOriginal as sqIsOriginal } from '../verbs/squeeze/chips.mjs'
 
 type Engine = EngineInterface
@@ -542,6 +542,9 @@ async function startServer($: Engine, root: string): Promise<{ base: string } | 
               void askFromBrowser($, root, msg.ask, msg.scope || {})
             } else if (typeof msg.verb === 'string') {
               void verbFromBrowser($, root, String(msg.verb), String(msg.row || ''), typeof msg.proposal === 'string' ? msg.proposal : null)
+            } else if (msg.squeeze && typeof msg.squeeze === 'object') {
+              // a squeeze chip pressed under a message in the browser: the same rewrite in place as a press here
+              void sqFromBrowser($, msg.squeeze).then(said => { if (said) $.ui.toast(said) }, err => failed($, 'Squeeze from the browser did not run', err, 'Press s under the message here instead'))
             } else if (msg.back) {
               await backFromBrowser($, root, msg.back)
             } else if (msg.stopped) {
