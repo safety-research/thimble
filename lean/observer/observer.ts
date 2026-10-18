@@ -11,7 +11,7 @@
 // 1. The question step (prompts/question.md): one small completion, with no transcript, compares the answer with the
 //    person's literal question and says whether their message states a decision. Its result is evidence for step 3.
 // 2. The evidence (evidence.js): the objects Claude saved since the last look (and, for context, its latest ones),
-//    each with its lineage in a few lines (how many rows stand behind each cited value, how sure each query's row
+//    each with its lineage in a few lines and, for the new ones, the object as the person sees it (its drawing's text) (how many rows stand behind each cited value, how sure each query's row
 //    lineage is, the files the session never read, what Claude declared, the problems `lean save` found) and the
 //    verbs that can act on it; and `lean coverage` for the session.
 // 3. The fork (prompts/observer.md): one tool-less fork of the session (served from main's prompt cache). It gives
@@ -36,7 +36,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, ObserverLine, Ranking } from '../types'
-import { rankedId, verbsOf } from '../shell/shell'
+import { drawnTextOf, rankedId, verbsOf } from '../shell/shell'
 import { digest, hintsFor, isRepeat, jsonIn, parseAnswer, pickHints } from './evidence.js'
 
 type Engine = EngineInterface
@@ -323,7 +323,8 @@ async function look($: Engine, t: Look): Promise<void> {
     const digests: string[] = []
     for (const x of objs) {
       verbs[x.ref.id] = await verbsOf($, x.ref).catch(() => [])
-      digests.push(digest(x.object, { verbs: verbs[x.ref.id], isNew: x.isNew }))
+      const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(() => '') : ''
+      digests.push(digest(x.object, { verbs: verbs[x.ref.id], isNew: x.isNew, drawn }))
     }
     const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through lean)'
 

@@ -139,6 +139,7 @@ test('after a turn that saved an object: one look reads its lineage; its note re
   expect(w.forks[0]).toContain('Object 01-saves v1 "Saves per day" (saved since the last look)')
   expect(w.forks[0]).toContain('"6,543" = 6,543 (q1#day=2026-06-18@n): rests on 4 rows of revisions.jsonl')
   expect(w.forks[0]).toContain('t trace: where it came from')
+  expect(w.forks[0]).toContain('as the person sees it under the reply:\n    Jun 18 6,543')
   expect(w.forks[0]).toContain('Not read: 1 file (9 rows): events.jsonl')
   expect(w.runs.some(a => a.includes('coverage'))).toBe(true)
   // the hint row: the observer's verbs, in its order, with its words

@@ -44,7 +44,7 @@ test('numbers in the words that cite nothing are named; cited ones, years and da
 })
 
 test('the digest says how many rows stand behind each cited value, how sure the lineage is, what was not read, and the verbs', () => {
-  const d = digest(OBJECT, { verbs: VERBS, isNew: true })
+  const d = digest(OBJECT, { verbs: VERBS, isNew: true, drawn: 'Refunds by region\nWest ▆▆▆▆ 412\n\n12 regions' })
   assert.match(d, /Object 02-orders-by-region v2 "Refunds by region" \(saved since the last look\)/)
   assert.match(d, /"412 refunds" = 412 \(q3#region=West@n\): rests on 412 rows of orders.csv/)
   assert.match(d, /numbers in its words that cite nothing: 31%/)
@@ -54,6 +54,7 @@ test('the digest says how many rows stand behind each cited value, how sure the 
   assert.match(d, /t trace: where it came from · where these numbers come from/)
   assert.match(d, /its hint row now: explore, trace \(Claude named explore\)/)
   assert.match(d, /records it quotes or cites in its data: 1, each found in its row/)
+  assert.match(d, /as the person sees it under the reply:\n    Refunds by region\n    West ▆▆▆▆ 412\n    12 regions/)
 })
 
 test("the fork's answer is read leniently, and its hints keep only verbs that exist, at most three", () => {

@@ -24,7 +24,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, Ran, Said, Sel } from '../types'
 import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
-import { renderTerm } from '../draw/term.js'
+import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, regionOfKey, selectable } from './cells'
 import { chainWords, isRef, objectRefs, rankRow, recordRefs, regionMeta, regionRefs } from './object.js'
 
@@ -152,6 +152,14 @@ async function withVersion($: Engine, ref: ObjRef): Promise<ObjRef> {
 /** The verbs for an object as the registry's rule picks them, each with its hint.mjs phrase (what the observer reads). */
 export async function verbsOf($: Engine, ref: ObjRef): Promise<Verb[]> {
   return (await prepared($, ref, 96)).verbs
+}
+
+/** The object as the person sees it under a reply, as plain text at 96 columns (what the observer reads). */
+export async function drawnTextOf($: Engine, ref: ObjRef): Promise<string> {
+  const p = await prepared($, ref, 96)
+  if (p.error || !p.grid) return `(it cannot be drawn: ${p.error || 'no drawing'})`
+  const err = p.drawing?.error ? `\n(its program failed: ${p.drawing.error.name}: ${p.drawing.error.message})` : ''
+  return gridText(p.grid) + err
 }
 
 /** The state key of an object version's ranking. */

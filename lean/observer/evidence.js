@@ -8,7 +8,7 @@
 //
 //   rowCount(rowsets)          -> how many source rows a list of row sets names (null when one names a whole file)
 //   bareNumbers(text)          -> the numbers in an object's words that cite nothing
-//   digest(object, o)          -> the object's lineage in plain lines, with its verb candidates
+//   digest(object, o)          -> the object's lineage in plain lines, as the person sees it, with its verb candidates
 //   parseAnswer(text)          -> {notes, line, settled, hints} from the fork's reply, or null
 //   pickHints(list, verbs)     -> the 2-3 verbs the observer chose for one object, checked against the verbs that exist
 
@@ -88,6 +88,7 @@ function citeLine(c) {
 
 /**
  * One object's lineage in plain lines, for the observer's prompt.
+ *   o.drawn   the object as the person sees it: its drawing as plain text
  *   o.verbs   the verbs for it as the shell lists them: [{key, name, line, phrase, picked}]
  *   o.isNew   whether it was saved in the turns since the observer last looked
  */
@@ -140,6 +141,11 @@ export function digest(object, o = {}) {
   else L.push('  Claude declared nothing it read or judged by hand')
   const probs = lin.problems || []
   if (probs.length) L.push(`  problems lean save found: ${probs.slice(0, 5).map(p => cut(p, 140)).join('; ')}`)
+  if (typeof o.drawn === 'string' && o.drawn.trim()) {
+    const lines = o.drawn.split('\n').filter(l => l.trim())
+    const shown = lines.slice(0, 30).map(l => `    ${cut(l, 130)}`)
+    L.push(`  as the person sees it under the reply:\n${shown.join('\n')}${lines.length > 30 ? `\n    … ${lines.length - 30} more lines` : ''}`)
+  }
   const verbs = Array.isArray(o.verbs) ? o.verbs : []
   if (verbs.length) {
     const named = Array.isArray(object.hints) ? object.hints.map(h => (typeof h === 'string' ? h : h?.verb || h?.name)).filter(Boolean) : []
