@@ -245,7 +245,7 @@ function drawTray(fresh) {
   const keys = st.mode === 'thread'
     ? '<button data-k="back"><kbd>esc</kbd> back</button>'
     : `<button data-k="ask"><kbd>↵</kbd> ask</button><button data-k="back"><kbd>esc</kbd> ${st.tray.length > 1 ? 'back' : 'close'}</button>`
-  th.innerHTML = `<span class="kind">${kind}</span><span class="ttl">${ttl}</span>${st.tray.length > 1 ? `<span class="depth">${st.tray.length - 1} back</span>` : ''}${st.mode === 'thread' ? '<span class="thr">· ask</span>' : ''}${m.ref ? `<span class="src">${esc(m.ref)}</span>` : ''}<span class="sp"></span><span class="keys">${keys}</span>`
+  th.innerHTML = `<span class="kind">${kind}</span><span class="ttl">${ttl}</span>${st.tray.length > 1 ? `<span class="depth">${st.tray.length - 1} back</span>` : ''}${st.mode === 'thread' ? '<span class="thr">· ask</span>' : ''}${m.ref && m.ref !== m.label ? `<span class="src">${esc(m.ref)}</span>` : ''}<span class="sp"></span><span class="keys">${keys}</span>`
   tb.className = 'tb' + (fresh ? ' fresh' : '')
   if (st.mode === 'thread') tb.innerHTML = threadHtml(top, m)
   else if (m.kind === 'gloss') glossBody(m)

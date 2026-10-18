@@ -41,7 +41,8 @@ table.md td.n { text-align: right; white-space: nowrap; }
 .vb.lit.s, .vb.lit.s b { color: var(--amber); }
 .vb.lit.a, .vb.lit.a b { color: var(--teal700); }
 .vb.lit b { font-weight: 700; }
-.vb.open { background: var(--ind); color: #fff; } .vb.open b { color: #fff; }
+.vb.open, .vb.lit.open, .vb.lit.open b, .vb.open b { background: var(--ind); color: #fff; }
+.vb.lit.open b { background: none; }
 .vb .dot { font-size: 9px; }
 .verbs .said { margin-left: 16px; font-family: var(--sans); font-size: 11.5px; color: var(--good); }
 .verbs .said.err { color: var(--bad); }
