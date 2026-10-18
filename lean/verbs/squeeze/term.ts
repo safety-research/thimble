@@ -4,7 +4,7 @@
 // system resolves at call time).
 //
 //   s            opens the chips under the message the keys act on, in place of its verb row (s again closes them)
-//   1-9          picks a chip                 < >  (or , .)  the picked chip one level down, one up
+//   1-9, ] [     pick a chip (] the next)     < >  (or , .)  the picked chip one level down, one up
 //   +            starts a stretch: the person types its two ends after the + in the prompt ("engineer and manager")
 //                and presses ↵; the chip stands at the original until they step it
 //   0            the original again (with the chips at the original: closes them)
@@ -166,7 +166,8 @@ export function squeezeHint(rec: MsgRecord, ui: SqzUi | null): string {
   const problems = ((rec as Any).squeeze?.problems ?? []) as string[]
   if (problems.length && typeof rec.shown === 'string') return `! ${problems[0]} · 0 original`
   const orig = isOriginal(chips)
-  return `${chips.length > 1 ? `1–${Math.min(9, chips.length)}` : '1'} chip · < > change · + stretch · ${orig ? '0 close' : '0 original · s done'}`
+  const lit = sLit(rec, u)
+  return `${lit ? `s ● ${lit.note} · ` : ''}< > change · ] next chip · + new stretch · ${orig ? '0 close' : '0 original · s done'}`
 }
 
 // ------------------------------------------------------------------------------------------------ keys
@@ -183,6 +184,13 @@ export async function squeezeKey($: Engine, row: string, k: string): Promise<'co
   if (/^[1-9]$/.test(k)) {
     const chip = chips[Number(k) - 1]
     if (chip) await setUi($, row, { focus: chip.id, adding: false })
+    return 'consume'
+  }
+  if (k === ']' || k === '[') {
+    // the next chip (or the one before), round the row
+    const i = Math.max(0, chips.findIndex((x: Any) => x.id === ui.focus))
+    const to = chips[(i + (k === ']' ? 1 : chips.length - 1)) % chips.length]
+    if (to) await setUi($, row, { focus: to.id, adding: false })
     return 'consume'
   }
   if (k === '<' || k === ',' || k === '>' || k === '.') {

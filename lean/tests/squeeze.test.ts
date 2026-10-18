@@ -102,7 +102,7 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   expect(drawn).toContain('+')
   // nothing under the chips: their keys are in the thimble line, once
   expect(drawn).not.toContain('change')
-  expect(await hintOf($)).toContain('1–3 chip · < > change · + stretch · 0 close')
+  expect(await hintOf($)).toContain('< > change · ] next chip · + new stretch · 0 close')
   // only the picked chip has a fill
   const tree = JSON.stringify(await $.ui.render(view(TEXT)))
   expect((tree.match(/"backgroundColor":"#4a3b1d"/g) || []).length).toBe(7)
@@ -145,7 +145,7 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(drawn).not.toContain('from this one')
   expect(drawn).toContain('Length ○○●○ medium')
   expect(drawn).not.toContain('rewriting')
-  expect(await hintOf($)).toContain('1–3 chip · < > change · + stretch · 0 original · s done')
+  expect(await hintOf($)).toContain('< > change · ] next chip · + new stretch · 0 original · s done')
   await ui.unmount()
   await ($ as Any).prompt.edit(edit('0'))
   await clock.settle()
@@ -231,7 +231,7 @@ test('a stretch: + then two ends and ↵ make a chip that stands at the original
   let drawn = textOf(await $.ui.render(view(TEXT)))
   expect(drawn).toContain(' engineer ●○○○ manager ')
   expect(drawn).toContain('Length ○○●○ medium')
-  expect(await hintOf($)).toContain('1–4 chip · < > change · + stretch · 0 original · s done')
+  expect(await hintOf($)).toContain('< > change · ] next chip · + new stretch · 0 original · s done')
   // > steps it toward manager: one call, with Length still at medium
   await ($ as Any).prompt.edit(edit('>'))
   await clock.settle()

@@ -204,7 +204,7 @@ test('a reply draws its citations inline, each underlined and a press that opens
   expect(card).toContain('Jun 18')
   // the tray's keys are in the thimble line under it, not on its frame
   expect(card.split('╯')[0]).not.toContain('1 ask')
-  expect(await hintOf($)).toContain('thimble  1 ask · ] [ next · 0 close')
+  expect(await hintOf($)).toContain('thimble  1 ask · 0 close · ] next')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
   await ui.unmount()
 })
@@ -392,11 +392,11 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
-  expect(await hintOf($)).toContain('thimble  1 ask · ] [ next · 0 close')
+  expect(await hintOf($)).toContain('thimble  1 ask · 0 close · ] next')
   // 1 asks: the panel turns to the mark's side thread, and the hint line says how to ask it
   expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('ask about 6,543 saves…')
-  expect(await hintOf($)).toContain('type to ask · ↵ asks this thread · 0 back to the card')
+  expect(await hintOf($)).toContain('type to ask · ↵ asks this thread · 0 back')
   // the thimble line names the thread the prompt goes to
   expect(textOf(await $.ui.render(BAND))).toContain('thimble:main/6,543 saves')
   await ($ as Any).prompt.edit(edit(']'))
@@ -442,7 +442,7 @@ test('a question asked with the tray open goes to the side thread of its mark: m
   await clock.settle()
   const band = textOf(await $.ui.render(BAND))
   expect(band).toContain('❯ why so high?')
-  expect(await hintOf($)).toContain('0 back to the card')
+  expect(await hintOf($)).toContain('0 back')
   // the thimble line counts the thread
   expect(band).toContain('1 thread')
   // its thread file is written for the browser
@@ -504,5 +504,5 @@ test('the thimble line is the one bar: the verbs in words at its left, a lit one
   await ($ as Any).prompt.edit(edit('1'))
   const inThread = textOf(await $.ui.render(HINT))
   expect(inThread).toContain('thimble:main/6,543 saves')
-  expect(inThread).toContain('type to ask · ↵ asks this thread · 0 back to the card')
+  expect(inThread).toContain('type to ask · ↵ asks this thread · 0 back')
 })

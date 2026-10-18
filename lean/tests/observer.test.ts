@@ -329,7 +329,7 @@ test('a gloss is placed by its term in the answer, with a teal fill; its card sa
   // the hint line under the prompt says
   expect(card).not.toContain('gloss')
   expect(JSON.stringify(await $.ui.render(BAND2))).toContain('"color":"#62d2c6"')
-  expect(textOf(await $.ui.render(HINT))).toContain('1 ask · 2 open · ] [ next · 0 close')
+  expect(textOf(await $.ui.render(HINT))).toContain('1 ask · 2 open · 0 close · ] next')
   // 2 opens the citation in it, over it; 0 comes back
   await ($ as Any).prompt.edit(key('2'))
   expect(textOf(await $.ui.render(BAND2))).toContain('conftest.py:14')

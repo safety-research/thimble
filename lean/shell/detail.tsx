@@ -352,8 +352,8 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   ] })
 }
 
-/** The card's thread, the left column: each question asked here with its part, and the thread's answers with their
- *  citations, the newest at the bottom, above the prompt that asks it. Empty until the first question. */
+/** The card's thread, the left column: the card's question, then each question asked here with its part and the
+ *  thread's answers with their citations, the newest at the bottom; before the first, `❯ ask this card…`. */
 function threadColumn(els: Any, o: Any, thread: Any, part: Any, TW: number, R: number, ind: string): Any[] {
   const { Text } = els
   const w = TW - 1
@@ -365,7 +365,12 @@ function threadColumn(els: Any, o: Any, thread: Any, part: Any, TW: number, R: n
     if (about) lines.push(Text({ wrap: 'truncate-end', children: [Text({ dimColor: true, children: '  about ' }), Text({ color: ind, children: cut(about, w - 9) })] }))
     lines.push(Text({ children: ' ' }))
   }
-  // empty until the person asks: the prompt's placeholder and the hint line say where a question goes
+  // the card's question at the top, and until the person asks, a placeholder that says where a question goes
+  if (o.question) {
+    say([{ s: String(o.question), dim: true }], Text({ children: '' }), '')
+    lines.push(Text({ children: ' ' }))
+  }
+  if (!thread?.turns?.length) lines.push(Text({ dimColor: true, children: '❯ ask this card…' }))
   for (const t of thread?.turns || []) {
     if (t.role === 'person') { person(String(t.text), t.about); continue }
     const calls: string[] = t.calls || []

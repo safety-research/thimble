@@ -1677,12 +1677,12 @@ async function focusKeys($: Engine): Promise<string | null> {
   if (tray) {
     const t = await trayScope($)
     const thread = t ? threadFor(t.scope as ThreadScope) : null
-    if (tray.asking) return `${thread?.status === 'running' ? 'answering… · ' : ''}type to ask · ↵ asks this thread · 0 back to the card`
+    if (tray.asking) return `${thread?.status === 'running' ? 'answering… · ' : ''}type to ask · ↵ asks this thread · 0 back`
     const frame = trayTop(tray) as TrayFrame | null
     const ck = frame ? await cardKey($, frame) : ''
     const drawn = frame ? [...cards.entries()].find(([k]) => k.startsWith(`${ck}|`))?.[1] : null
     const links = drawn?.links ?? []
-    return [thread ? '1 thread' : '1 ask', ...(links.length ? [`${links.length > 1 ? `2–${links.length + 1}` : '2'} open`] : []), '] [ next', tray.stack.length > 1 ? '0 back' : '0 close'].join(' · ')
+    return [thread ? '1 thread' : '1 ask', ...(links.length ? [`${links.length > 1 ? `2–${links.length + 1}` : '2'} open`] : []), tray.stack.length > 1 ? '0 back' : '0 close', '] next'].join(' · ')
   }
   if (pick) {
     const rec = await recordNow($, pick.row)
@@ -1690,6 +1690,21 @@ async function focusKeys($: Engine): Promise<string | null> {
     return `${n > 1 ? `1–${n}` : '1'} pick · 0 close`
   }
   return null
+}
+
+/** Keys as the bar says them, `1 ask · 0 close · ] next`, cut into each key and its words: the key is the first
+ *  token and any symbols after it (`< >`, `] [`, `↑ ↓`); a lit verb's `s ● note` keeps its color. */
+function keySegments(keys: string): { key: string; words: string; color?: string }[] {
+  return keys.split(' · ').map(seg => {
+    const lit = /^([a-z]) ● (.*)$/.exec(seg)
+    if (lit) return { key: lit[1]!, words: `● ${lit[2]}`, color: verbColor(lit[1]!, theme) }
+    const t = seg.split(' ')
+    // a phrase with no key (`type to ask`): words alone
+    if (t[0]!.length > 3 && /^[a-z]+$/.test(t[0]!)) return { key: '', words: seg }
+    let n = 1
+    while (n < t.length && /^[^\p{L}\p{N}]+$/u.test(t[n]!)) n++
+    return { key: t.slice(0, n).join(' '), words: t.slice(n).join(' ') }
+  })
 }
 
 /** The thimble line: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
@@ -1701,8 +1716,8 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   let leftText = ''
   const keys = await focusKeys($)
   if (keys) {
-    const tone = keys.startsWith('×') ? { color: 'error' } : keys.startsWith('!') ? { color: 'warning' } : { dimColor: true }
-    left.push(Text({ key: 'keys', ...tone, wrap: 'wrap', children: keys }))
+    if (keys.startsWith('×') || keys.startsWith('!')) left.push(Text({ key: 'keys', color: keys.startsWith('×') ? 'error' : 'warning', wrap: 'wrap', children: keys }))
+    else left.push(Text({ key: 'keys', wrap: 'wrap', children: keySegments(keys).flatMap((g, i) => [...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []), ...(g.key ? [Text({ key: `kk${i}`, ...(g.color ? { color: g.color } : {}), children: g.key })] : []), ...(g.words ? [Text({ key: `kw${i}`, ...(g.color ? { color: g.color } : { dimColor: true }), children: `${g.key ? ' ' : ''}${g.words}` })] : [])]) }))
     leftText = keys
   } else if (!working) {
     // (while Claude works the verbs wait: they act on its answer, which is not there yet)
@@ -1718,7 +1733,7 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       else delete lit.s
       const item = (k: string, label: string, key: string, color: string, words: string, wordsColor: string | null, onPress: () => unknown) => {
         if (left.length) { left.push(Text({ key: `sep-${k}`, dimColor: true, children: ' · ' })); leftText += ' · ' }
-        left.push(Button({ key: `bar-${k}`, plain: true, label, onPress, children: [Text({ color, bold: true, children: key }), Text(wordsColor ? { color: wordsColor, children: ` ${words}` } : { dimColor: true, children: ` ${words}` })] }))
+        left.push(Button({ key: `bar-${k}`, plain: true, label, onPress, children: [Text(wordsColor ? { color, children: key } : { children: key }), Text(wordsColor ? { color: wordsColor, children: ` ${words}` } : { dimColor: true, children: ` ${words}` })] }))
         leftText += `${key} ${words}`
       }
       for (const v of verbs) {
@@ -1754,7 +1769,7 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   const where = await threadInFront($)
   if (!left.length && !counts.length && !where) return null
   const name = where ?? 'thimble'
-  const label = Text({ key: 'bar-label', color: FOCUS[theme], wrap: 'truncate-end', children: name })
+  const label = Text({ key: 'bar-label', color: FOCUS[theme], underline: !where, wrap: 'truncate-end', children: name })
   const right = counts.length ? Text({ key: 'bar-right', wrap: 'wrap', children: counts }) : null
   // one row where everything fits, the counts at its right
   if ([...name].length + 2 + [...leftText].length + 4 + [...countsText].length <= w) {
