@@ -122,6 +122,15 @@ BUILDING_HTML = "building the page for the browser…"
 MISSING_PAGE_REQUEST = ("Build the page this view lacks, {page}, for {place}. Keep reader.py, which passed its checks, "
                         "and view.json as they are, unless the page cannot work without a change to them.")
 MISSING_PAGE_PLACE = {TERM_PAGE: "the terminal panel", HTML_PAGE: "the browser workbench"}
+
+
+def missing_page_target(change: Any) -> str | None:
+    """The target whose page a change builds when it is the build of the page a view lacks (MISSING_PAGE_REQUEST), else
+    None: a change the analyst asked for."""
+    for t in TARGETS:
+        if str(change or "").strip() == MISSING_PAGE_REQUEST.format(page=PAGE_OF[t], place=MISSING_PAGE_PLACE[t]):
+            return t
+    return None
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is the proposal of an orientation from before 0.8.0 left out
 # when the analyst stopped the orientation before its view was built, or a view proposal the analyst rejected
@@ -3215,9 +3224,8 @@ def retry(c: str, slug: str, values: dict[str, Any] | None = None, *, place: str
         return refused
     if prop.get("status") == "built" and prop.get("failed_change") is not None:
         # a failed build of the page a view lacked (ensure_page) builds that page again, wherever Retry is pressed
-        missing = {MISSING_PAGE_REQUEST.format(page=PAGE_OF[t], place=MISSING_PAGE_PLACE[t]): t for t in TARGETS}
         return revise(c, slug, str(prop["failed_change"]), asked=True, route=CLICK, values=vals,
-                      target=missing.get(str(prop["failed_change"])), place=place)
+                      target=missing_page_target(prop["failed_change"]), place=place)
     if prop.get("status") != "failed":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not failed")
     prop = update_proposal(c, slug, status="queued", error=None, refused=None, route=CLICK, repairs=0,

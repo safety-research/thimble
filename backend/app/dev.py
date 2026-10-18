@@ -2461,10 +2461,20 @@ def _reachable(c: str, agent_id: str | None) -> bool:
 
 
 def change_text(c: str, prop: dict[str, Any]) -> str:
-    """A change to a view as its builder gets it (prompts/dev-view-change.md), the analyst's request fenced as data."""
-    from . import views  # noqa: PLC0415
+    """A change to a view as its builder gets it (prompts/dev-view-change.md), the analyst's request fenced as data.
+    The build of the page the view lacks (views.missing_page_target: the next step of a build, an open in the place that
+    has no page, its Retry) is thimble's step, not the analyst's request: prompts/dev-view-page.md, with the builder's
+    instructions for that page (view_tools.builder_instructions), as a builder that started for the other page knows
+    only that page's (bug hunt round 10, K11: told "The analyst asked for a change", the builder of a view's terminal
+    page read thimble's own source and docs, one permission ask each in Manual mode, and no `view_reference`)."""
+    from . import view_tools, views  # noqa: PLC0415
 
     request = str(prop.get("change") or "").strip()
+    if (target := views.missing_page_target(request)) is not None:
+        return prompts.render("dev-view-page", {
+            "name": str(prop.get("name") or prop["slug"]), "place": views.MISSING_PAGE_PLACE[target],
+            "page": views.PAGE_OF[target], "folder": str(views.views_dir(c) / prop["slug"]),
+            "instructions": view_tools.builder_instructions(c, target)})
     return prompts.render("dev-view-change", {
         "name": str(prop.get("name") or prop["slug"]),
         "proposal": views.proposal_lines(prop),

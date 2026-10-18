@@ -237,3 +237,42 @@ async def test_bug_hunt_k6_build_it_pressed_in_the_terminal_builds_the_terminal_
     state = {"agents": {"abuilder01": {"type": "thimble:view-builder", "key": "view:board", "status": "running",
                                        "route": "click", "place": "terminal", "plugin_started": True}}}
     assert any("in the terminal" in line for line in sf.started_notes(state))
+
+
+def test_bug_hunt_k11_the_build_of_a_view_s_other_page_is_told_it_is_thimble_s_step_with_that_page_s_instructions(
+        workspaces_tmp, tmp_path, monkeypatch, queued):
+    """Bug hunt round 10, K11 (I12 again): the builder that built a view's browser page was resumed for its terminal
+    page with "The analyst asked for a change to the view", though the analyst asked for nothing, and with only its
+    first page's instructions; it grepped and read thimble's own source and docs, an ask each in Manual mode, and
+    called no `view_reference`. The build of the page a view lacks now says it is thimble's next step and carries the
+    instructions a build of that page starts with, `view_reference` and reading only the corpus's files and its own
+    among them; an analyst's change still reads as theirs."""
+    from app import view_tools
+
+    c = _corpus(tmp_path, monkeypatch, "board", "server")
+    _built(c, "board", term=False, html=True)
+    assert views.ensure_page(c, "board", views.TERM_PAGE) is True
+    prop = views.read_proposal(c, "board")
+    text = dev.change_text(c, prop)
+    assert text.startswith("## The view's page for the terminal panel\n"), text[:200]
+    assert "The analyst asked" not in text and "the analyst asked for no change" in text
+    assert f"Write view.term.js in {views.views_dir(c) / 'board'}." in text
+    assert "`view_reference` gives thimble's doc `terminal-views`" in text, "the terminal page's view kit"
+    assert "read only the corpus's files and your own" in text
+    assert "thimble.colorBy" not in text and "npm install" not in text, "not the browser page's"
+    # the instructions are those a build of the terminal page is registered with
+    with views.spawning(c, views.TERM_PAGE):
+        registered = view_tools.builder_definition(c)["prompt"]
+    assert view_tools.builder_instructions(c, views.TERM_PAGE) in registered
+    # a new builder, where none can be reached, gets the same step in its task
+    task = dev.build_task(c, prop)
+    assert "has no page for the terminal panel" in task and "The analyst asked" not in task
+    # the browser's page of a view built in the terminal: the browser's instructions
+    _built(c, "lanes", term=True, html=False)
+    assert views.ensure_page(c, "lanes", views.HTML_PAGE) is True
+    text = dev.change_text(c, views.read_proposal(c, "lanes"))
+    assert text.startswith("## The view's page for the browser workbench\n") and "thimble.colorBy" in text
+    # a change the analyst asked for still reads as theirs
+    views.revise(c, "board", "Add a legend.")
+    text = dev.change_text(c, views.read_proposal(c, "board"))
+    assert "The analyst asked for a change to the view Board" in text and "Add a legend." in text
