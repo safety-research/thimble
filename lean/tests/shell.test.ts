@@ -55,6 +55,7 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
       inputs.push(input)
       out = verb(input)
     } else if (e.argv.includes('resolve')) out = RESOLVED
+    else if (e.argv.includes('coverage')) out = { files: [{ path: 'revisions.jsonl', rows: 300, lines: 300, status: 'computed', computed: 102 }, { path: 'events.jsonl', rows: 300, lines: 300, status: 'not read', computed: 0 }] }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const submitted: { text: string; context: readonly string[] }[] = []
@@ -475,4 +476,33 @@ test('a failure reads as plain words, never JSON; a refusal that needs nothing f
   expect(plainWhy(new Error('thimble-lean: $.model.complete: the model is busy'))).toBe('the model is busy')
   expect(plainWhy('{"error":"q9 has no column n"}')).toBe('q9 has no column n')
   expect(plainWhy('Traceback (most recent call last):\n  File "x"')).toBe('Traceback (most recent call last):')
+})
+
+test('the thimble line is the one bar: the verbs in words at its left, a lit one with its note; the non-zero counts at its right, coverage the share read; a changed count bright for a moment; a blank row above it only while Claude works', async ($, on) => {
+  world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, on, clock)
+  const bar = textOf(await $.ui.render(HINT))
+  expect(bar).toContain('thimble  v visualize · s squeeze · ] cite & explain')
+  // 102 of 600 rows read: 17%; no zero count shows
+  expect(bar).toContain('2 cites · coverage 17%')
+  expect(bar).not.toContain('card')
+  expect(bar).not.toContain('thread')
+  expect(bar).not.toContain('claims')
+  // the counts that just changed are bright, then dim
+  const lit = (t: Any) => { let on = false; walk(t, x => { if (x.type === 'Text' && x.props?.bold && textOf(x) === '2 cites') on = true }); return on }
+  expect(lit(await $.ui.render(HINT))).toBe(true)
+  for (let i = 0; i < 40; i++) await clock.advance(50)
+  expect(lit(await $.ui.render(HINT))).toBe(false)
+  // at rest no blank row stands above the bar (Claude Code's [-] stands beside its first row); while Claude works, one does
+  const rest = await $.ui.render(BAND) as Any
+  expect(textOf(rest).startsWith('thimble')).toBe(true)
+  const working = await $.ui.render({ ...(BAND as object), props: { ...(BAND as Any).props, isWorking: true } } as never) as Any
+  expect(textOf(working).startsWith(' thimble')).toBe(true)
+  // inside a thread the bar's label names it, and its left side is that thread's keys
+  await ($ as Any).prompt.edit(edit(']'))
+  await ($ as Any).prompt.edit(edit('1'))
+  const inThread = textOf(await $.ui.render(HINT))
+  expect(inThread).toContain('thimble:main/6,543 saves')
+  expect(inThread).toContain('type to ask · ↵ asks this thread · 0 back to the card')
 })
