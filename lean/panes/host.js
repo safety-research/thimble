@@ -14,7 +14,8 @@
 //   wantsOpen(drawing, got)    the wants of a drawing the host has not got yet
 
 /** How the bar shows a key name. */
-export const KEY_SHOW = { space: 'space', return: '↵', enter: '↵', up: '↑', down: '↓', left: '←', right: '→', esc: 'esc', escape: 'esc', tab: 'tab', backspace: '⌫' }
+export const KEY_SHOW = { space: 'space', return: '↵', enter: '↵', up: '↑', down: '↓', left: '←', right: '→', esc: 'esc', escape: 'esc', tab: 'tab', backspace: '⌫', '-': '−' }
+const ARROW = /^[↑↓←→]$/
 
 const SKIP = /^(press|brush|hover|focus|key|tick|input)(:|$)/
 
@@ -30,7 +31,8 @@ export function keysOf(drawing) {
     const hit = out.find(x => x.words === words)
     if (hit) { if (!hit.keys.includes(key)) hit.keys.push(key) } else out.push({ keys: [key], words })
   }
-  return out.map(x => ({ key: x.keys.join(' '), words: x.words }))
+  // arrows that share their words read as one key (↑↓), any other keys with a space between (< >)
+  return out.map(x => ({ key: x.keys.every(k => ARROW.test(k)) ? x.keys.join('') : x.keys.join(' '), words: x.words }))
 }
 
 /** The keys of a focus stack, top first, as one line of the bar; a key the top takes is not said again below it. */

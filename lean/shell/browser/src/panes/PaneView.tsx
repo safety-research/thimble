@@ -30,10 +30,20 @@ export interface PaneProps {
   onDrawn?: () => void
   /** extra data stores the host has in hand (the card detail's card drawing), merged over the pane's own reads */
   extra?: Record<string, unknown>
+  /** the columns to draw in, when the host measures its own room (the detail draws its card at the same width) */
+  columns?: number
+  /** a program under this one that takes events first (the card inside its detail): true when it took the event */
+  before?: (event: Record<string, unknown>) => boolean
+  /** its keys come before this pane's in the bar (the card's own) */
+  keysFirst?: any
+  /** actions the host does itself (k.do), by name; any other goes to the terminal */
+  actions?: Record<string, (e: Record<string, unknown>) => void>
+  /** the state the program answered with, each time it changes */
+  onState?: (state: Record<string, unknown>) => void
   className?: string
 }
 
-export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawing, onDrawn, extra, className }: PaneProps) {
+export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawing, onDrawn, extra, columns, before, keysFirst, actions, onState, className }: PaneProps) {
   const ver = useStore((s) => s.version)
   const msgs = useStore((s) => s.rows)
   const box = useRef<HTMLDivElement>(null)
@@ -91,7 +101,11 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
     void readPaneState(key).then((r) => {
       if (!alive) return
       const st = r?.state && typeof r.state === 'object' ? r.state : null
-      if (st && (!loaded || r?.by !== 'browser') && JSON.stringify(st) !== JSON.stringify(stateRef.current)) setLocal(st)
+      if (st && (!loaded || r?.by !== 'browser') && JSON.stringify(st) !== JSON.stringify(stateRef.current)) {
+        stateRef.current = st
+        setLocal(st)
+        onState?.(st)
+      }
       setLoaded(true)
     })
     return () => {
@@ -99,7 +113,7 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
     }
   }, [key, ver])
 
-  const cols = columnsIn(px.w)
+  const cols = columns ?? columnsIn(px.w)
   const lines = rows ?? Math.max(6, Math.floor(px.h / ROW_H))
   const allStores = useMemo(() => (stores ? { ...stores, ...(extra || {}) } : null), [stores, extra])
   const data = useMemo(() => {
@@ -130,7 +144,7 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
     if (!drawing) return
     let alive = true
     onDrawing?.(drawing)
-    void svgOf(drawing, { w: cols }).then((r) => {
+    void svgOf(drawing, { w: cols, selected: drawing.selected ?? null }).then((r) => {
       if (!alive) return
       setSvg(r.svg)
       if (onDrawn) requestAnimationFrame(() => onDrawn())
@@ -153,15 +167,16 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
   // its keys in the app's bar while it is on top
   const publish = () => {
     if (!focus || !drawing || !mods || topLayer() !== layerId) return
-    setState({ keybar: { from: layerId, keys: mods.host.barText([drawing]), status: drawing.status?.text || null } })
+    setState({ keybar: { from: layerId, keys: mods.host.barText(keysFirst ? [keysFirst, drawing] : [drawing]), status: drawing.status?.text || null } })
   }
   const publishRef = useRef(publish)
   publishRef.current = publish
-  useEffect(publish, [focus, drawing, mods, layerId])
+  useEffect(publish, [focus, drawing, mods, layerId, keysFirst])
 
   /** What the person did, as the program's event. True when the program took it. */
   const fire = (event: Record<string, unknown>): boolean => {
     if (!mods || !pane || !data || !drawing) return false
+    if (before && before(event)) return true
     if (!mods.host.takes(drawing, event)) return false
     const d = run(stateRef.current, event)
     if (d.error) {
@@ -172,6 +187,7 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
     if (!mods.host.same(next, stateRef.current)) {
       stateRef.current = next
       setLocal(next)
+      onState?.(next)
       void back({ panestate: { pane: name, args, state: next } } as never)
     }
     for (const a of (d.after || []) as { ms: number; event: Record<string, unknown> }[]) {
@@ -190,6 +206,7 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
   /** An action the program asked for: done here when the page can, else in the terminal. */
   const effect = (e: Record<string, unknown>) => {
     const what = String(e.do || '')
+    if (actions && actions[what]) return actions[what](e)
     if (what === 'close') return onClose?.()
     if (what === 'open' && typeof e.row === 'string') return setState({ thread: 'main', flashRow: e.row })
     if (what === 'open' && typeof e.object === 'string') return setState({ surface: 'canvas', card: { id: e.object, v: typeof e.v === 'number' ? e.v : null, region: typeof e.region === 'string' ? e.region : null } })

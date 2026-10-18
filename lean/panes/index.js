@@ -6,5 +6,6 @@
 // size) -> the program's data, program(k, data) -> node}. A new pane is a new file here and a line below.
 import chips from './chips.js'
 import claims from './claims.js'
+import detail from './detail.js'
 
-export default { chips, claims }
+export default { chips, claims, detail }

@@ -65,6 +65,10 @@ export async function readWant(request: any): Promise<unknown> {
     if (!refs.length) return { records: [], count: 0 }
     return resolveRef(refs, Math.max(1, Math.min(20, Number(request.n) || 8)))
   }
+  if (typeof request?.facts === 'string') {
+    const r = await api(`from/${encodeURIComponent(request.facts)}`)
+    return r.error ? { error: r.error } : r
+  }
   return { error: 'the page cannot read that' }
 }
 

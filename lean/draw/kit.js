@@ -254,6 +254,12 @@
         if (ctx.effects.length < 20) ctx.effects.push(Object.assign({}, isObj(args) ? clone(args) : {}, { do: a }))
         return k
       },
+      // k.select(id): the part this program has selected, which every surface marks as it marks a selection (a fill in
+      // the terminal, an outline in the browser)
+      select(id) {
+        ctx.selected = id == null ? null : String(id)
+        return k
+      },
       // k.status(text, tone): one short line the host shows in its bar while this program has the keys (what is
       // going on, a problem and its fix)
       status(text, tone) {
@@ -2077,7 +2083,7 @@
     return 'fix the program and save the card again'
   }
   function newCtx(state, event, limit, got) {
-    return { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: limit, handlers: [], patch: {}, phase: 'draw', ask: null, event: event || null, rowsOf: null, rowList: [], after: [], effects: [], status: null, wants: [], got: isObj(got) ? got : null }
+    return { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: limit, handlers: [], patch: {}, phase: 'draw', ask: null, event: event || null, rowsOf: null, rowList: [], after: [], effects: [], status: null, wants: [], selected: null, got: isObj(got) ? got : null }
   }
   // a want's key: its request as JSON with sorted keys, so the same request is the same key on every surface
   function wantKey(req) {
@@ -2187,6 +2193,7 @@
       if (after.length && !error) out.after = after
       if (ctx.status && !error) out.status = ctx.status
       if (ctx.wants.length && !error) out.wants = ctx.wants
+      if (ctx.selected && !error) out.selected = ctx.selected
       if (error) out.error = error
       return out
     }

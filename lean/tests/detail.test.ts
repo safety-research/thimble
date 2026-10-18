@@ -131,7 +131,8 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   expect(t).toContain('card:01-saves')
   expect(t).toContain('v1 · v2')
   expect(t).toContain('June 18 had 6,543 saves.')
-  expect(t).toContain('▸Jun 17')
+  // the selected part is marked beside the card (the page above it is the detail's program, panes/detail.js)
+  expect(t).toContain('▸')
   expect(t).toContain('Jun 18 ▆▆▆')
   // no details up front: no examples, no rows, no from line
   expect(t).not.toContain('Hello agents')

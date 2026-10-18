@@ -34,9 +34,9 @@ import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { cardKind, explainerCard, sourceCard } from './cards.js'
-import { detailIsOpen, detailKeys, detailPane, markOpen, openDetailPane, registerDetail } from './detail'
+import { cardStore, detailAction, detailIsOpen, detailKeys, detailPane, followDetail, markOpen, openDetailPane, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
-import { isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
+import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadOf } from './thread'
 import type { Scope as ThreadScope } from './thread'
 import { writeCardState } from './runtime'
@@ -641,6 +641,7 @@ async function paneFromBrowser($: Engine, q: { pane: string; args?: Record<strin
     return
   }
   await setPaneState($, q.pane, q.args || {}, q.state || {}, 'browser')
+  if (q.pane === 'detail' && typeof q.args?.id === 'string') await followDetail($, q.args.id)
 }
 
 /** An action a pane's program asked for in the browser (k.do), done as the terminal's run would do it. */
@@ -1998,6 +1999,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'record': return arg ? await recordNow($, arg) : null
     // the squeeze's own state of a message (a stretch being typed, a call running, a failure): the terminal's alone
     case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
+    // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
+    case 'card': return arg ? cardStore($, arg) : null
     default: return paneStoreMore($, kind, arg)
   }
 }
@@ -2016,6 +2019,18 @@ export async function paneWant($: Engine, _name: string, _args: Record<string, u
     // the rows the person flips through: read once per set, kept where the detail's own reads keep them
     await resolveRefs($, root, refs)
     return (await $.state.get({ ...ROWS, id: `${root}|${refsKey(refs.length > 1 ? refs.slice(0, 500) : refs)}` })).value ?? null
+  }
+  // where a card's values come from: its sources, rows, labels and the files read (the from line)
+  if (typeof request?.facts === 'string' && ID.test(request.facts) && root) {
+    const dir = $.plugin.root.replace(/\/+$/, '')
+    let cov: Any = null
+    try {
+      const r = await $.process.run([`${dir}/bin/lean`, 'coverage', request.facts, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+      cov = JSON.parse(r.stdout)
+    } catch {
+      cov = null
+    }
+    return fromFacts(await loadObject($, { id: request.facts, v: null, root }), cov)
   }
   return { error: 'the terminal cannot read that' }
 }
@@ -2067,6 +2082,7 @@ export async function paneAction($: Engine, pane: string, _args: Record<string, 
   const name = String(a.do || '')
   if (pane === 'claims' && name === 'close') { await closeClaims($); return }
   if (pane === 'chips') return chipsAction($, String(_args.row || a.row || ''), a)
+  if (pane === 'detail') return detailAction($, a)
   if (name === 'open') {
     // a place a program opens: a card (its detail), a message (the keys act on it now)
     if (typeof a.object === 'string' && ID.test(a.object)) {

@@ -13,7 +13,6 @@ import { FilesPane } from './files/FilesPane'
 import { ReportPane } from './report/ReportPane'
 import { getState, setState, useStore, type Surface } from './lib/store'
 import { allMarks, pressVerb, rowVerbs, stepMark } from './lib/actions'
-import { detailKey } from './canvas/CardDetail'
 
 const CHAT = { def: 308, min: 280, max: 640 }
 const TABS: { id: Surface; label: string }[] = [
@@ -152,7 +151,6 @@ function useKeys() {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || typing(e)) return
       const s = getState()
       const k = e.key
-      if (s.card && !s.tray.length && detailKey(k)) return e.preventDefault()
       if (k === ']' || k === '[') {
         e.preventDefault()
         stepMark(marks, k === ']' ? 1 : -1)
