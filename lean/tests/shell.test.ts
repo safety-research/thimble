@@ -44,8 +44,8 @@ function saving(files: Record<string, string>, id = '01-saves', v = 1, root = RO
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Verb = (input: any) => unknown
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), drawing: unknown = DRAWING) {
-  mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
+function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), drawing: unknown = DRAWING, env: Record<string, string> = {}) {
+  mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...env })
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.cwd', () => ({ value: ROOT }))
@@ -68,6 +68,13 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
     // the feed's new bytes (`tail -c +N <file>`): the test's files are ASCII, so a byte is a character
     if (e.argv[0] === 'tail') return { value: { exitCode: 0, stdout: (files[e.argv[3]!] ?? '').slice(Number(e.argv[2]!.slice(1)) - 1), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     let out: unknown = {}
+    // a save the shell makes itself (a card from a fork): the kernel writes it to the change feed and says it saved
+    if (e.argv[0]!.endsWith('/bin/lean') && e.argv[1] === 'save') {
+      const id = `03-${e.argv[2]}`
+      files[`${ROOT}/thimble/objects/${id}.json`] = JSON.stringify({ ...OBJECT, id, ...JSON.parse(files[e.argv[4]!] || '{}') })
+      files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: id, version: 1 }) + '\n'
+      return { value: { exitCode: 0, stdout: `saved ${id} v1: thimble/objects/${id}.json`, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv.some(a => a.endsWith('prep.mjs'))) out = { drawing, verbs: VERBS, problems: [], ...(JSON.parse(String(e.init?.stdin || '{}')).check ? { check: checked } : {}) }
     else if (e.argv.some(a => a.endsWith('verb.mjs'))) {
       const input = JSON.parse(String(e.init?.stdin || '{}'))
@@ -369,6 +376,32 @@ test('a verb that needs the model: the module makes the call, and the verb runs 
   expect(asked[0]!.prompt).toBe('the spans')
   expect(w.inputs.length).toBe(2)
   expect(String(r.text)).toContain('squeezed to: two lines')
+})
+
+test("with the card from a fork (card:v2), v asks main nothing: a fork writes the card, it is drawn under the same message, and Claude reads which card it is", async ($, on) => {
+  const w = world(on, () => ({ verb: 'visualize', text: 'never run', ask: 'never asked' }), DRAWING, { LEAN_PROMPTS: 'card:v2' })
+  const forks: string[] = []
+  on('model.fork', (_$: unknown, e: { prompt: string }) => {
+    forks.push(String(e.prompt))
+    return { value: { isAnswered: true, text: JSON.stringify({ card: 'by-hour', object: { title: 'Saves by hour', program: 'return k.text("x")', data: { days: 'q1' } } }), usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 9 } } }
+  })
+  const clock = mock.clock(on)
+  await savedTurn($, on, clock, w.files)
+  const ui = await $.ui.mount(MOUNT)
+  await clock.settle()
+  await ($ as Any).prompt.edit(edit('v'))
+  await ui.press({ key: 'r|p-proposals|0|opt-0' })
+  await clock.settle()
+  // the verb's child never ran, and no prompt went to main
+  expect(w.inputs.length).toBe(0)
+  expect(w.submitted.length).toBe(0)
+  expect(forks.length).toBe(1)
+  expect(forks[0]).toContain('VIEW June 18 had the most saves. | It has the card 01-saves already: make a different view, not a copy.')
+  // drawn under the same message, after the card there
+  expect(JSON.parse(w.files[SHOWN]!).under[AT].map((x: { id: string }) => x.id)).toEqual(['01-saves', '03-by-hour'])
+  await $.prompt.submit({ text: 'and this?' } as never)
+  expect(w.submitted.at(-1)!.context.join('\n')).toContain('The person pressed v under your last answer, and thimble drew the card 03-by-hour@1 under it ("Saves by hour")')
+  await ui.unmount()
 })
 
 test("v asks Claude for a card of the message: the row reads as the person's pick, the request beside it for Claude alone", async ($, on) => {

@@ -67,7 +67,7 @@ test('a lens can be turned off; a feature that is no lens cannot', () => {
 
 test('a feature that is off by default (the card after the answer) is off until a setting names a version, and the spec names it then', () => {
   const idx = indexOf({ card: ['v1.md'] })
-  assert.deepEqual(Object.keys(idx.card.versions), ['v1'])
+  assert.deepEqual(Object.keys(idx.card.versions), ['v1', 'v2'])
   const d = choose(idx, {})
   assert.equal(d.active.card.off, true)
   assert.equal(d.active.card.version, 'off')
@@ -78,7 +78,7 @@ test('a feature that is off by default (the card after the answer) is off until 
   assert.equal(on.active.card.file, 'prompts/card/v1.md')
   assert.equal(specOf(on.active, idx), 'card:v1')
   assert.equal(choose(idx, { setting: 'card:v1', env: 'card:off' }).active.card.off, true)
-  assert.ok(listing(idx, d.active).some(l => l.startsWith('card') && l.includes('v1 [off]')))
+  assert.ok(listing(idx, d.active).some(l => l.startsWith('card') && l.includes('v1 v2 [off]')))
 })
 
 test('the spec of the versions in use names only those that are not the defaults', () => {

@@ -23,6 +23,22 @@ export function requestText(raw, { question = '', answer = '', cards = [], guida
   })
 }
 
+/** v's card from the fork (a version with the section "The view the person asked for"), or '' for a version without
+ *  it, where v asks main as before. */
+export function viewText(raw, { what = '', choice = '', has = [], proposals = [], answer = '', guidance = '', toolkit = '' } = {}) {
+  const text = body(raw, 'The view the person asked for')
+  if (!text) return ''
+  return fill(text, {
+    WHAT: what,
+    CHOICE: choice ? `, as "${choice}"` : '',
+    HAS: has.length ? `It has the card${has.length > 1 ? 's' : ''} ${has.join(', ')} already: make a different view, not a copy.\n\n` : '',
+    PROPOSALS: proposals.length ? `${choice ? 'Also proposed' : 'Proposed'} for it: ${proposals.join('; ')}.\n\n` : '',
+    ANSWER: answer.trim() || '(none)',
+    GUIDANCE: guidance.trim(),
+    TOOLKIT: toolkit.trim(),
+  })
+}
+
 /** The fix round's request: the problems the save and the drawing found, and the card as the fork wrote it. */
 export function fixText(raw, { problems = [], card = '', toolkit = '' } = {}) {
   return fill(body(raw, 'The fix'), {

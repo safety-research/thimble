@@ -8,10 +8,11 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { bindQueries, fixText, jsonOf, problemsOf, queryIdOf, readReply, requestText, skillWithCards, slugOf } from '../cardfork.mjs'
+import { bindQueries, fixText, jsonOf, problemsOf, queryIdOf, readReply, requestText, skillWithCards, slugOf, viewText } from '../cardfork.mjs'
 
 const LEAN = join(fileURLToPath(import.meta.url), '..', '..', '..')
 const V1 = readFileSync(join(LEAN, 'prompts', 'card', 'v1.md'), 'utf8')
+const V2 = readFileSync(join(LEAN, 'prompts', 'card', 'v2.md'), 'utf8')
 const SKILL = readFileSync(join(LEAN, 'skills', 'lean', 'SKILL.md'), 'utf8')
 
 test('the request holds the question, the answer, the cards so far, the guidance and the toolkit, and no other section', () => {
@@ -77,4 +78,20 @@ test("the lean skill while the card comes after the answer: its saving principle
   // a skill with neither part gets both at its end
   const bare = skillWithCards('# Where each value comes from\n\nSome words.', V1)
   assert.ok(bare.includes('Some words.') && bare.includes('## What the person sees') && bare.includes('thimble draws a card for it when one'))
+})
+
+test("v's card from the fork: only a version with its section asks for it, with the pick, the cards it has and the other proposals", () => {
+  assert.equal(viewText(V1, { what: 'x' }), '')
+  const t = viewText(V2, { what: 'June 18 had the most saves', choice: 'saves by hour', has: ['01-saves'], proposals: ['who saved'], answer: 'June 18 had the most saves: 6,543.', guidance: 'THE GUIDANCE', toolkit: 'THE TOOLKIT' })
+  assert.match(t, /under your answer that begins "June 18 had the most saves"/)
+  assert.match(t, /shows what it says, as "saves by hour"\. This message is from thimble/)
+  assert.match(t, /It has the card 01-saves already: make a different view, not a copy\./)
+  assert.match(t, /Also proposed for it: who saved\./)
+  for (const x of ['June 18 had the most saves: 6,543.', 'THE GUIDANCE', 'THE TOOLKIT']) assert.ok(t.includes(x), x)
+  assert.ok(!/\{\{[A-Z_]+\}\}/.test(t))
+  const bare = viewText(V2, { what: 'x' })
+  assert.match(bare, /shows what it says\. This message/)
+  assert.ok(!bare.includes('already') && !bare.includes('proposed'))
+  // v2's skill parts say v's card comes from the fork too
+  assert.ok(skillWithCards(SKILL, V2).replace(/\s+/g, ' ').includes('When the person presses v under an answer, a fork draws that card too'))
 })

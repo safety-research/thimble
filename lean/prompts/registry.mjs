@@ -71,7 +71,10 @@ export const FEATURES = {
   card: {
     about: "the card after the answer: a fork of the session that shares main's prompt cache draws the answer's card after its text, so main neither reads the card guidance nor writes the program inside its turn",
     reads: 'shell/shell.tsx after a turn that ran lean, and the lean skill in place of its card section (prompts.ts)', default: 'off', optional: true,
-    versions: { v1: { about: 'the fork decides whether a card helps and writes it, with queries for thimble to run first; one fix round when the save or the drawing finds a problem' } },
+    versions: {
+      v1: { about: 'the fork decides whether a card helps and writes it, with queries for thimble to run first; one fix round when the save or the drawing finds a problem' },
+      v2: { about: "v1, and v's card from a fork too: a press of v asks the fork for the card, not main, so main never reads the card guidance unless the person asks for a card in words" },
+    },
   },
   thread: { about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v1' },
   lean: { about: 'the lean skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'lean', versions: { skill: { file: 'skills/lean/SKILL.md', about: 'as SKILL.md says now' } } },

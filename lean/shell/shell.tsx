@@ -45,7 +45,7 @@ import { back as trayBack, base as trayBase, open as trayOpen, order as markOrde
 import { markColors, messageEl, verbColor } from './view'
 import { markNextTurn, record as recordEvent, tracked, turnFeature } from '../telemetry/telemetry'
 import { cardAfter as cardVersion, promptText } from '../prompts/prompts'
-import { bindQueries, fixText, problemsOf, queryIdOf, readReply, requestText } from './cardfork.mjs'
+import { bindQueries, fixText, problemsOf, queryIdOf, readReply, requestText, viewText } from './cardfork.mjs'
 import type { RowVerb } from './view'
 import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { endsOf, revealCut } from '../verbs/squeeze/chips.mjs'
@@ -552,27 +552,28 @@ async function leanRun($: Engine, root: string, args: string[], stdin?: string):
 }
 
 /**
- * After a turn that ran `lean` and saved nothing, a fork of the session (it shares main's prompt cache) decides whether a
- * card would help the person see why the answer holds, and writes it. thimble runs the queries it asks for, saves it,
- * draws it once as a save does (its interactions tried), and asks the fork once more when something does not hold.
- * The card is drawn under the answer, and Claude reads which card it is with the next prompt. Every call and its
- * outcome is in the session's events (feature `card`).
+ * A card from a fork of the session (it shares main's prompt cache): after a turn that ran `lean` and saved nothing, the
+ * fork decides whether a card would help the person see why the answer holds, and writes it (`after`); when the person
+ * presses v and the version says so, it writes v's card (`v`). thimble runs the queries the card asks for, saves it
+ * under the session, draws it once as a save does (its interactions tried), and asks the fork once more when something
+ * does not hold. The card is drawn under the answer, and Claude reads which card it is with the next prompt. Every call
+ * and its outcome is in the session's events (feature `card`).
  */
-async function cardAfterTurn($: Engine, o: { row: string; question: string; version: { text: string; id: string } }): Promise<void> {
+async function forkCard($: Engine, o: { row: string; version: { text: string; id: string }; via: 'after' | 'v'; ask: (c: { answer: string; cards: string[]; guidance: string; toolkit: string }) => string }): Promise<void> {
   const t0 = Date.now()
-  const outcome: Record<string, unknown> = { kind: 'card', prompt: o.version.id }
+  const outcome: Record<string, unknown> = { kind: 'card', prompt: o.version.id, via: o.via }
   try {
     const root = await rootHere($)
     if (!root) { outcome.skip = 'no folder under analysis'; return }
     const rec = await recordNow($, o.row)
-    const answer = String(rec?.text ?? '')
+    const answer = String(rec?.shown ?? rec?.text ?? '')
     if (!answer.trim()) { outcome.skip = 'no answer'; return }
     const dir = $.plugin.root.replace(/\/+$/, '')
     const guidance = (await promptText($, 'forms')).text
     const toolkit = String(await $.fs.read(`${dir}/draw/TOOLKIT.md`).catch(() => ''))
-    const cards = [...new Set(Object.values((await shownNow($)).under).flat().map(x => x.id))]
-    const ask = async (prompt: string, round: number): Promise<Any> => tracked($, { feature: 'card', prompt: o.version.id, extra: { round } }, () => $.model.fork({ prompt }))
-    let r = await ask(requestText(o.version.text, { question: o.question, answer, cards, guidance, toolkit }), 1)
+    const cards = [...new Set([...Object.values((await shownNow($)).under).flat().map(x => x.id), ...(rec?.objects ?? [])])]
+    const ask = async (prompt: string, round: number): Promise<Any> => tracked($, { feature: 'card', prompt: o.version.id, extra: { round, via: o.via } }, () => $.model.fork({ prompt }))
+    const r = await ask(o.ask({ answer: String(rec?.text ?? answer), cards, guidance, toolkit }), 1)
     if (!r.isAnswered) { outcome.error = String(r.reason); return }
     let reply = readReply(r.text)
     outcome.rounds = 1
@@ -597,6 +598,7 @@ async function cardAfterTurn($: Engine, o: { row: string; question: string; vers
       const m = /^saved (\S+) v(\d+)/m.exec(saved.out)
       if (!m) {
         problems.push(`lean save did not save it: ${cut(saved.out.split('\n').filter(Boolean).slice(-3).join(' '), 400)}`)
+        made = { problems, reply, p: null }
       } else {
         ref = { id: m[1]!, v: Number(m[2]), root }
         forkMade.add(`${root}|${ref.id}|${ref.v}`)
@@ -604,7 +606,6 @@ async function cardAfterTurn($: Engine, o: { row: string; question: string; vers
         problems.push(...problemsOf(saved.out, drawnNote(p, ref)))
         made = { problems, reply, p }
       }
-      if (!m) made = { problems, reply, p: null }
       if (!problems.length || round === 2) break
       // once more, with what does not hold
       const again = await ask(fixText(o.version.text, { problems, card: JSON.stringify({ card: reply.name, queries: reply.queries, object: reply.object }), toolkit }), 2)
@@ -619,7 +620,7 @@ async function cardAfterTurn($: Engine, o: { row: string; question: string; vers
     if (!ref || !p || p.error || !p.grid || p.drawing?.error) {
       outcome.drawn = false
       outcome.error = made.problems[0] ?? p?.error ?? 'it did not draw'
-      failed($, 'thimble could not draw a card for this answer', outcome.error, 'Press v under the answer to ask Claude for one')
+      failed($, `thimble could not draw ${o.via === 'v' ? "v's card" : 'a card for this answer'}`, outcome.error, o.via === 'v' ? 'Press v again, or ask Claude for the card' : 'Press v under the answer to ask for one')
       return
     }
     // under the answer, as a verb's card is drawn; Claude reads which card it is with the next prompt
@@ -628,7 +629,8 @@ async function cardAfterTurn($: Engine, o: { row: string; question: string; vers
     const cur = await recordNow($, o.row)
     if (cur && !cur.objects.includes(ref.id)) await saveRecord($, { ...cur, objects: [...cur.objects, ref.id] })
     const data = Object.values((p.object?.data ?? {}) as Record<string, unknown>).filter(v => typeof v === 'string' && /^q\d+/.test(v))
-    await noteForClaude($, `After your last answer, thimble drew the card ${refText(ref)} under it ("${p.object?.title || ref.id}"), written by a fork of this conversation${data.length ? ` from ${[...new Set(data)].join(', ')}` : ''}. It is in thimble/objects/${ref.id}.json.${made.problems.length ? ` What did not hold: ${cut(made.problems.join(' '), 400)}` : ''}`)
+    const lead = o.via === 'v' ? 'The person pressed v under your last answer, and thimble drew the card' : 'After your last answer, thimble drew the card'
+    await noteForClaude($, `${lead} ${refText(ref)} under it ("${p.object?.title || ref.id}"), written by a fork of this conversation${data.length ? ` from ${[...new Set(data)].join(', ')}` : ''}. It is in thimble/objects/${ref.id}.json.${made.problems.length ? ` What did not hold: ${cut(made.problems.join(' '), 400)}` : ''}`)
     outcome.drawn = true
     outcome.object = refText(ref)
     outcome.queries = made.reply.queries.length
@@ -638,6 +640,25 @@ async function cardAfterTurn($: Engine, o: { row: string; question: string; vers
     outcome.ms = Date.now() - t0
     await recordEvent($, outcome)
   }
+}
+
+/** The card after the answer: the fork's request is the version's "The request". */
+function cardAfterTurn($: Engine, o: { row: string; question: string; version: { text: string; id: string } }): Promise<void> {
+  return forkCard($, { row: o.row, version: o.version, via: 'after', ask: c => requestText(o.version.text, { question: o.question, ...c }) })
+}
+
+/** v's card from a fork, when the card version has the section for it: true when it took the press (the card comes
+ *  from the fork), false when v asks main as before. */
+async function viewFromFork($: Engine, rec: MsgRecord, choice: string): Promise<boolean> {
+  const version = await cardVersion($)
+  if (!version || !viewText(version.text, {})) return false
+  const proposals = ((rec.verbs?.v as { proposals?: unknown[] } | undefined)?.proposals ?? []).filter((x): x is string => typeof x === 'string' && x.trim() !== '' && x !== choice)
+  const what = String(rec.shown ?? rec.text).replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim()
+  const work: Promise<void> = forkCard($, { row: rec.row, version, via: 'v', ask: c => viewText(version.text, { what: cut(what, 80), choice: choice === ANOTHER_VIEW ? '' : choice, has: c.cards.filter(id => rec.objects.includes(id)), proposals, ...c }) })
+    .finally(() => { if (cardWork === work) cardWork = null })
+  cardWork = work
+  await work
+  return true
 }
 
 // ------------------------------------------------------------------------------------------------ failures, in words
@@ -1332,6 +1353,8 @@ async function runOnMessage($: Engine, word: string, key: string, rec: MsgRecord
   if ((await $.state.get(at)).value) return
   await $.state.set(at, key)
   try {
+    // v's card from a fork of the session, when the card version draws it (main is not asked)
+    if (word === 'visualize' && (await viewFromFork($, rec, choice))) return
     const root = (await rootHere($)) || String(await $.session.cwd())
     const dir = $.plugin.root.replace(/\/+$/, '')
     const input = {
