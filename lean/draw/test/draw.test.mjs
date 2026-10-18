@@ -122,3 +122,48 @@ test('the demo plugin carries the current renderer files', () => {
     assert.equal(readFileSync(lib + f, 'utf8'), readFileSync(DRAW + f, 'utf8'), `demo-plugin/hooks/lib/${f} is out of date: run node lean/draw/demo-plugin/sync.mjs`)
   }
 })
+
+test('the toolkit doc\'s programs run', () => {
+  const md = readFileSync(DRAW + 'TOOLKIT.md', 'utf8')
+  const blocks = [...md.matchAll(/```js\n([\s\S]*?)```/g)].map(m => m[1])
+  const rows = [{ day: '06-16', messages: 3 }]
+  const DATA = [
+    { days: [{ day: '06-16', messages: 1546 }, { day: '06-17', messages: 870 }] },
+    { days: [{ day: '06-16', messages: 1546, saves: 3148, rows, samples: [{ text: 'hello', user: 'a', page: 'p' }] }] },
+    { configs: [{ name: 'SGD', runs: [{ run: 'sgd-1', acc: [10, 50, 90], final: 90, rows }, { run: 'sgd-2', acc: [10, 60, 97], final: 97, rows }] }] },
+    { runs: 9, flows: [
+      { first: true, theory: 'fixture', theoryRuns: 9, runs: 6, tone: 'good', from: 'fixture', to: 'fixed', lastOfOutcome: true, outcome: 'fixed' },
+      { first: false, theory: 'fixture', theoryRuns: 9, runs: 3, tone: 'bad', from: 'fixture', to: 'masked', lastOfOutcome: true, outcome: 'masked' }] },
+  ]
+  assert.equal(blocks.length, DATA.length)
+  blocks.forEach((program, i) => {
+    const d = runProgram({ program, data: DATA[i] }, { w: 100 })
+    assert.equal(d.error, undefined, `TOOLKIT.md block ${i + 1}: ${d.error && d.error.message}`)
+    const t = renderTerm(d, { w: 100 }), s = renderSvg(d, { w: 100 })
+    assert.equal(json(t.marks), json(s.marks), `TOOLKIT.md block ${i + 1}: the renderers disagree`)
+    if (i > 0) assert.ok(d.regions.length > 0, `TOOLKIT.md block ${i + 1} has no regions`)
+  })
+})
+
+test('paint.js draws text rows as Text and pixel rows as one Raster', async () => {
+  const { paintGrid } = await import('../paint.js')
+  const el = type => props => ({ type, props })
+  const els = { Box: el('Box'), Text: el('Text'), Raster: el('Raster') }
+  const o = examples.find(e => e.id === 'senders')
+  const g = renderTerm(runProgram(o, { w: 100 }), { w: 100 })
+  const tree = paintGrid(g, els, { theme: 'dark', selected: 'sender-april-scout', key: 't' })
+  const kids = tree.props.children
+  const rasters = kids.filter(k => k.type === 'Raster')
+  assert.equal(rasters.length, 1, 'the plot rows are one Raster band')
+  const r = rasters[0].props
+  assert.equal(r.columns, g.w)
+  assert.equal(Buffer.from(r.cells, 'base64').length, r.columns * r.rows * 12)
+  const rowsDrawn = kids.reduce((s, k) => s + (k.type === 'Raster' ? k.props.rows : 1), 0)
+  assert.equal(rowsDrawn, g.h, 'every grid row is drawn once')
+  // the selected row is tinted: in a Raster as the select color, in a Text line as the theme's selection background
+  const words = new Uint32Array(new Uint8Array(Buffer.from(r.cells, 'base64')).buffer)
+  const sel = parseInt('26384f', 16)
+  const tinted = [...words].filter((v, i) => i % 3 === 2 && v === sel).length
+  const textTinted = kids.filter(k => k.type === 'Text').some(k => k.props.children.some(c => c.props.backgroundColor === 'selectionBg'))
+  assert.ok(tinted > 0 || textTinted, 'the selected region is tinted')
+})

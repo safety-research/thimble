@@ -4,7 +4,8 @@
 //
 // The page carries kit.js as text (for the sandbox), the renderer modules joined into one module script, and the
 // example objects. It runs every program itself, in the sandbox, so what it draws is what the program says.
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadExamples } from '../examples/load.mjs'
 
@@ -60,5 +61,6 @@ ${safe(bundle)}
 </script>
 </body></html>
 `
+mkdirSync(dirname(out), { recursive: true })
 writeFileSync(out, html)
 console.log(`${out}: ${objects.length} objects, ${Math.round(html.length / 1024)} KB`)
