@@ -353,6 +353,16 @@ export function thimbleCommands(text: string): string {
  * the corpus relative to it (underCorpus). Pure. */
 export const commandLine = (command: string, ws: string): string => underCorpus(thimbleCommands(command), ws)
 
+/** A shell command without the variable settings and `cd`s it opens with (`B=/long/install/bin/thimble-run; $B card …`,
+ * `cd /long/data/folder; python3 -c "…`), which are the same in every step of a turn: what is left tells its steps
+ * apart. The terminal panel's bareCommand (plugin/hooks/term/model.ts). Pure. */
+export function bareCommand(command: string): string {
+  const lead = /^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|[^\s;&]*)\s*(?:;|&&|\n)?\s*|^cd\s+(?:'[^']*'|"[^"]*"|[^\s;&]+)\s*(?:;|&&|\n)\s*/
+  let s = command.trim()
+  for (let m = lead.exec(s); m && m[0].length && m[0].length < s.length; m = lead.exec(s)) s = s.slice(m[0].length)
+  return s
+}
+
 /** A call's chip line, as Claude Code prints a tool line: the tool and its target (`Read notes.jsonl`, `Bash grep -c
  * refund tickets/`). Pure. */
 export function callLineText(name: string, input: unknown, ws: string): string {
@@ -530,8 +540,11 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
     case 'list_cards':
       return str(inp.group)
     case 'Bash':
-      // the command on one line, as far as the chip has room: a script's first line alone (`python3 -c "`) says nothing
-      return oneLine(commandLine(str(inp.command), ws)) || oneLine(str(inp.description))
+      // what the call says it does (its description), as the terminal panel names it (bug hunt round 10, K5: every row
+      // read `Bash B=/mnt/…/thimble-run; $B card …` or `Bash cd /mnt/…; python3 -c "`, alike and cut before what each
+      // did); else the command on one line without its leading settings and cd, as far as the chip has room. An open
+      // call shows the whole command.
+      return oneLine(str(inp.description)) || oneLine(commandLine(bareCommand(str(inp.command)), ws))
     case 'Edit':
     case 'Write':
     case 'MultiEdit':
