@@ -2304,9 +2304,9 @@ export const registerShell: Register = (on, options) => {
     await $.state.get(CLAIMPANE)
     return claimsPaneNow($, e)
   })
-  on('ui.close', async ($, e, next) => {
+  on('ui.close', { id: CPANE }, async ($, e, next) => {
     try {
-      if ((e as Any).id === CPANE) {
+      {
         const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
         // esc with a search: the search clears, and the pane stays
         if (cp && cp.search != null && (e as Any).origin?.kind === 'person') {
