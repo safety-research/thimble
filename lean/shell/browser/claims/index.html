@@ -7,9 +7,9 @@
 <!--
   Claims in the browser: the claims made in this session (thimble/claims/<session>.json, CONTRACT 7), deduped and
   clustered by what the work is doing, as a graph with no lines at rest. Pointing at a claim shows a card of what it
-  means (the claim as said, Precisely, Based on, Judgment, Not stated) and draws its links; the rest fades. A click
-  opens the message where it was said. Replay (or r) grows the graph again in the order the claims were made; any key
-  stops it.
+  means (the claim as said, precisely, based on, judgment, not stated) and draws its links; the rest fades. A click
+  opens the message where it was said. Replay (or r) grows the graph again in the order the claims were made, the turn
+  it is at in the button, its newest claims marked with their links; any key stops it.
 
   A page folder like the others, served behind the session's token: it reads /api/claims (or ?src=<json url>, or
   window.CLAIMS_STORE for a static page) and polls while visible. ?embed=1 leaves out its own header, for a tab of
@@ -28,7 +28,7 @@
     <div id="gwrap">
       <canvas id="g"></canvas>
       <div id="hc" class="hc" role="tooltip"></div>
-      <button id="replay" class="replay" title="Grow the graph again in the order the claims were made"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>Replay<kbd>r</kbd></button>
+      <button id="replay" class="replay" title="Grow the graph again in the order the claims were made"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg><span>Replay</span><kbd>r</kbd></button>
       <div id="empty"></div>
     </div>
   </div>

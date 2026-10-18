@@ -6,13 +6,14 @@
 //   neighbours(view, id)               the claims a claim links to: the claim it revised or that revised it, the
 //                                      claims said just before and after it in the same message, those that share a
 //                                      source; each with its kind ('revised' or 'link')
-//   cardLines(claim, width)            what the claim means, in at most five lines: the claim as said, Precisely,
-//                                      Based on (with a sparkline when its source is one), Judgment, Not stated
+//   cardLines(claim, width)            what the claim means, in at most five lines: ● the claim as said, precisely,
+//                                      based on (a cite; a sparkline when its source is one), judgment, not stated
 //   compose(o)                         the grid of cells: dots in their cluster's color (heavier at ×N ≥ 2, ○ for a
 //                                      revised claim, a faint ? beside a claim whose denominator or window was not
 //                                      stated), the clusters' names dim at their centres, and, only around the hovered
-//                                      claim, its links as thin glyph lines and its card; every other claim fades.
-//                                      Rows of runs {s, style, node?}.
+//                                      claim, its links as thin glyph lines and its card in a thin frame; every other
+//                                      claim fades. While a replay grows the graph, its newest claims are marked and
+//                                      their links drawn. Rows of runs {s, style, node?}.
 import { sparkChars } from './message.js'
 
 const hash = s => {
@@ -171,38 +172,39 @@ const sourcesWords = c => (c.sources || []).slice(0, 3).map(x => {
 }).join(', ')
 
 /**
- * What a claim means, as the card under the pointer shows it: at most five lines, each [{s, style}]. The claim as said
- * (bold); Precisely; Based on (a cite; a sparkline when a source holds its values); Judgment and Not stated
- * only when the fork gave them. The claim and Precisely wrap to two lines while the card has room.
+ * What a claim means, as the card under the pointer shows it: at most five lines, each [{s, style}]. ● and the claim as
+ * said (bold); precisely; based on (a cite; a sparkline when a source holds its values); judgment and not stated only
+ * when the fork gave them. The claim and precisely wrap to two lines while the card has room.
  */
-export function cardLines(c, width, { cite = null, amber = null } = {}) {
+export function cardLines(c, width, { cite = null, amber = null, color = null } = {}) {
   const W = Math.max(30, width)
   const body = W - LABEL
   const based = c.based_on || sourcesWords(c)
   const values = (c.sources || []).find(x => Array.isArray(x.values) && x.values.length > 1)?.values
   const spark = values ? sparkChars(values, 16) : ''
   const parts = [
-    { key: 'claim', lines: wrap(c.text, W), style: { bold: true } },
-    c.precisely ? { key: 'precisely', label: 'Precisely', lines: wrap(c.precisely, body), style: {} } : null,
-    based || spark ? { key: 'based', label: 'Based on', lines: [cut(String(based || ''), body - (spark ? spark.length + 1 : 0))], style: cite ? { color: cite } : {}, spark } : null,
-    c.judgment ? { key: 'judgment', label: 'Judgment', lines: wrap(c.judgment, body), style: {} } : null,
-    c.unstated ? { key: 'unstated', label: 'Not stated', lines: wrap(c.unstated, body), style: {}, labelStyle: amber ? { color: amber } : { dim: true } } : null,
+    { key: 'claim', lines: wrap(c.text, W - 2), style: { bold: true } },
+    c.precisely ? { key: 'precisely', label: 'precisely', lines: wrap(c.precisely, body), style: {} } : null,
+    based || spark ? { key: 'based', label: 'based on', lines: [cut(String(based || ''), body - (spark ? spark.length + 1 : 0))], style: cite ? { color: cite, underline: true } : { underline: true }, spark } : null,
+    c.judgment ? { key: 'judgment', label: 'judgment', lines: wrap(c.judgment, body), style: {} } : null,
+    c.unstated ? { key: 'unstated', label: 'not stated', lines: wrap(c.unstated, body), style: {}, labelStyle: amber ? { color: amber } : { dim: true } } : null,
   ].filter(Boolean)
   // one line each for the parts that come after Precisely; the claim and Precisely take two while there is room
   for (const p of parts) if (!['claim', 'precisely'].includes(p.key) && p.lines.length > 1) p.lines = [cut(p.lines.join(' '), body)]
   const total = () => parts.reduce((n, p) => n + Math.min(2, p.lines.length), 0)
   for (const key of ['claim', 'precisely']) {
     const p = parts.find(x => x.key === key)
-    if (p && p.lines.length > 2) p.lines = [p.lines[0], cut(p.lines.slice(1).join(' '), p.label ? body : W)]
+    if (p && p.lines.length > 2) p.lines = [p.lines[0], cut(p.lines.slice(1).join(' '), p.label ? body : W - 2)]
   }
   for (const key of ['claim', 'precisely']) {
     const p = parts.find(x => x.key === key)
-    if (p && total() > 5 && p.lines.length > 1) p.lines = [cut(p.lines.join(' '), p.label ? body : W)]
+    if (p && total() > 5 && p.lines.length > 1) p.lines = [cut(p.lines.join(' '), p.label ? body : W - 2)]
   }
   const out = []
   for (const p of parts) {
     p.lines.forEach((t, i) => {
       const runs = []
+      if (p.key === 'claim') runs.push({ s: i ? '  ' : '● ', style: color ? { color } : {} })
       if (p.label) runs.push({ s: (i ? '' : p.label).padEnd(LABEL), style: p.labelStyle || { dim: true } })
       runs.push({ s: t, style: p.style })
       if (p.spark && i === 0) runs.push({ s: (t ? ' ' : '') + p.spark, style: cite ? { color: cite } : {} })
@@ -215,8 +217,8 @@ export function cardLines(c, width, { cite = null, amber = null } = {}) {
 /**
  * The grid: rows of runs {s, style, node?}. o = {claims (the view's flat list, each with cluster, n, revised_by, text
  * and what it means), clusters, lay (layout's result), visible (the ids shown while a replay grows the graph; null:
- * all), newest (ids the replay just added, drawn bold), focus (the claim hovered), colorOf (claim → color), amber (the
- * revision color), cite (the Based on color)}.
+ * all), newest (ids the replay just added: marked, with their links), focus (the claim hovered), colorOf (claim →
+ * color), amber (the revision color), cite (the based-on color)}.
  */
 export function compose(o) {
   const W = o.lay.w, H = o.lay.h
@@ -233,10 +235,11 @@ export function compose(o) {
     const fade = ringOn && byId.get(o.focus)?.cluster !== n.id
     for (let i = 0; i < n.name.length; i++) set(n.x + i, n.y, n.name[i], { dim: true, faint: !!fade }, { name: true })
   }
-  // the hovered claim's links, as thin lines; a revision dashed, in a faint amber
-  if (ringOn && near.size) {
-    const a = o.lay.pos.get(o.focus)
-    for (const [id, kind] of near) {
+  // links as thin lines, a revision dashed in a faint amber: the hovered claim's, or those of a replay's newest claims
+  const newest = o.newest || new Set()
+  const drawLinks = (from, links) => {
+    const a = o.lay.pos.get(from)
+    for (const [id, kind] of links) {
       if (o.visible && !o.visible.has(id)) continue
       const b = o.lay.pos.get(id)
       if (!a || !b) continue
@@ -249,40 +252,42 @@ export function compose(o) {
       })
     }
   }
+  if (ringOn && near.size) drawLinks(o.focus, near)
+  else for (const id of newest) drawLinks(id, neighbours(o.claims, id))
   // the claims; a claim whose denominator or window was not stated has a faint ? beside it
-  const newest = o.newest || new Set()
   for (const c of shown) {
     const p = o.lay.pos.get(c.id)
     if (!p) continue
     const revised = !!c.revised_by && (!o.visible || o.visible.has(c.revised_by))
-    const style = { color: o.colorOf(c), bold: c.n >= 2 || newest.has(c.id), faint: !lit(c.id) }
+    const style = { color: o.colorOf(c), bold: c.n >= 2 || newest.has(c.id), faint: !lit(c.id), ...(newest.has(c.id) ? { mark: true } : {}) }
     // a claim said twice or more is drawn heavier
     set(p.x, p.y, revised ? '○' : c.n >= 2 ? '◉' : '●', style, { node: c.id })
     if (c.unstated && (cells[p.y]?.[p.x + 1]?.ch === ' ' || cells[p.y]?.[p.x + 1]?.edge)) set(p.x + 1, p.y, '?', { color: o.colorOf(c), faint: true }, { mark: true })
   }
-  // the hovered claim's card, where it covers the fewest of its links
+  // the hovered claim's card in a thin frame, where it covers the fewest of its links
   let card = null
   if (ringOn) {
-    const lines = cardLines(byId.get(o.focus), Math.min(W - 4, 104), { cite: o.cite, amber: o.amber })
-    const h = lines.length
-    const bw = Math.max(...lines.map(l => l.reduce((n, r) => n + r.s.length, 0)))
+    const c0 = byId.get(o.focus)
+    const lines = cardLines(c0, Math.min(W - 8, 84), { cite: o.cite, amber: o.amber, color: o.colorOf(c0) })
+    const inner = Math.max(...lines.map(l => l.reduce((n, r) => n + r.s.length, 0)))
+    const bw = inner + 4, bh = lines.length + 2
     const p = o.lay.pos.get(o.focus)
-    const clampX = x => Math.max(1, Math.min(W - bw - 1, x))
-    // beside it on the right, else under or over it starting near it, else on its left (where the lines' ends stand
-    // away from the dot): each try costs what it covers, its links most
+    const clampX = x => Math.max(0, Math.min(W - bw, x))
+    // beside it on the right (its first line level with the dot), else under or over it starting near it, else on its
+    // left: each try costs what it covers, its links most
     const tries = [
-      [p.x + 2, p.y, 0, true], [p.x + 2, p.y - h + 1, 0.1, true], [p.x - 2, p.y + 1, 0.2], [p.x - 2, p.y - h, 0.4],
-      [p.x - bw + 3, p.y + 1, 0.6], [p.x - bw + 3, p.y - h, 0.8], [p.x - 1 - bw, p.y, 2.5, true], [p.x - 1 - bw, p.y - h + 1, 2.6, true],
+      [p.x + 2, p.y - 1, 0, true], [p.x + 2, p.y - bh + 2, 0.1, true], [p.x - 2, p.y + 1, 0.2], [p.x - 2, p.y - bh, 0.4],
+      [p.x - bw + 3, p.y + 1, 0.6], [p.x - bw + 3, p.y - bh, 0.8], [p.x - 1 - bw, p.y - 1, 1.5, true], [p.x - 1 - bw, p.y - bh + 2, 1.6, true],
     ]
     let best = null
     for (const [x0, y0, pen, beside] of tries) {
       const x = clampX(x0)
-      if (y0 < 0 || y0 + h > H) continue
-      if (p.x >= x - 1 && p.x <= x + bw && p.y >= y0 && p.y < y0 + h) continue
+      if (y0 < 0 || y0 + bh > H) continue
+      if (p.x >= x && p.x < x + bw && p.y >= y0 && p.y < y0 + bh) continue
       if (beside && x !== x0) continue
       let cost = pen
-      for (let y = y0; y < y0 + h; y++) {
-        for (let xx = x - 1; xx <= x + bw; xx++) {
+      for (let y = y0; y < y0 + bh; y++) {
+        for (let xx = x; xx < x + bw; xx++) {
           const cell = cells[y]?.[xx]
           if (!cell) continue
           if (cell.node) cost += near.has(cell.node) ? 20 : 0.3
@@ -294,12 +299,22 @@ export function compose(o) {
       if (cost === 0) break
     }
     if (best) {
-      for (let y = best.y; y < best.y + h; y++) for (let xx = best.x - 1; xx <= best.x + bw; xx++) set(xx, y, ' ', null, { card: true })
+      // a dot under the card keeps its press, drawn as the card's character there: the presses stay the same ones in
+      // the same order whatever the card covers, so a focus ring kept by place stays on its claim
+      const put = (x, y, ch, style) => set(x, y, ch, style, { card: true, ...(cells[y]?.[x]?.node ? { node: cells[y][x].node } : {}) })
+      const frame = { dim: true }
+      for (let y = best.y; y < best.y + bh; y++) {
+        for (let xx = best.x; xx < best.x + bw; xx++) {
+          const top = y === best.y, bottom = y === best.y + bh - 1, left = xx === best.x, right = xx === best.x + bw - 1
+          const ch = top ? (left ? '┌' : right ? '┐' : '─') : bottom ? (left ? '└' : right ? '┘' : '─') : left || right ? '│' : ' '
+          put(xx, y, ch, ch === ' ' ? null : frame)
+        }
+      }
       lines.forEach((runs, i) => {
-        let x = best.x
-        for (const r of runs) for (const ch of r.s) set(x++, best.y + i, ch, r.style, { card: true })
+        let x = best.x + 2
+        for (const r of runs) for (const ch of r.s) { put(x, best.y + 1 + i, ch, r.style); x++ }
       })
-      card = { x: best.x, y: best.y, w: bw, h }
+      card = { x: best.x, y: best.y, w: bw, h: bh }
     }
   }
   // rows of runs: a claim's cell a run of its own (a press), the rest merged by style

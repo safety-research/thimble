@@ -2239,10 +2239,13 @@ export const registerShell: Register = (on, options) => {
   on('ui.focus', async ($, e, next) => {
     const r = await next(e)
     try {
-      const claim = e.requestId === CPANE && typeof e.element === 'string' ? claimOfKey(e.element) : null
-      if (claim) {
+      if (e.requestId === CPANE && !r.deny) {
+        // off the claims (onto the pane's close mark): no card
+        const claim = typeof e.element === 'string' ? claimOfKey(e.element) : null
         const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
-        if (cp && (cp.focus !== claim || cp.replay)) await $.state.set(CLAIMPANE, { ...cp, focus: claim, replay: null })
+        if (cp && (cp.focus !== claim || cp.replay)) {
+          await $.state.set(CLAIMPANE, { ...cp, focus: claim, replay: null })
+        }
       }
     } catch {
       // the ring moves whatever the shell makes of it

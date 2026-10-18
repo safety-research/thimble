@@ -434,8 +434,9 @@ export function restates(store, text, skip = new Set()) {
 /**
  * One turn's claims into the store (changed in place, and returned). `places` are the turn's messages, each
  * {row, by, turn, text}; `out` is the fork's {claims, clusters}; `grown` the clusters the fork was offered to rename
- * or split. Returns {store, added, restated, revised, dropped, clusters}: the ids of new claims, of claims said again,
- * of claims a new one corrects, and why each dropped one was dropped.
+ * or split. Returns {store, added, restated, revised, unstated, dropped, clusters}: the ids of new claims, of claims
+ * said again, of claims a new one corrects, of new claims whose denominator or window was not stated, and why each
+ * dropped one was dropped.
  */
 export function applyTurn(store, { places = [], out = {}, turn = null, at = null, grown = [] } = {}) {
   const res = { store, added: [], restated: [], revised: [], dropped: [], clusters: [] }
@@ -482,6 +483,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     res.added.push(id)
     local.set(it.at, id)
   }
+  res.unstated = res.added.filter(id => store.claims.find(c => c.id === id)?.unstated)
   res.clusters = applyClusters(store, out?.clusters, grown, turn)
   // a cluster named this turn counts its first claims as named
   for (const c of store.clusters) if (!c.named) c.named = Math.max(1, sizeOf(store, c.id))
@@ -496,10 +498,13 @@ export function noteGap(store, turn, why) {
   return store
 }
 
-/** The note `c` lights with for one turn: "3 new claims", or '' when nothing new came. A revision is a new claim too;
- *  the graph shows the claim it replaced as a hollow dot, and nothing more says so. */
+/** The note `c` lights with for one turn: what the new claims leave open first ("2 claims need a denominator": their
+ *  denominator or window was not stated), else "3 new claims", or '' when nothing new came. A revision is a new claim
+ *  too: the graph shows the claim it replaced as a hollow dot, and nothing more says so. */
 export function noteFor(res) {
   const n = res?.added?.length || 0
+  const open = res?.unstated?.length || 0
+  if (open) return `${open} claim${open === 1 ? ' needs' : 's need'} a denominator`
   return n ? `${n} new claim${n === 1 ? '' : 's'}` : ''
 }
 

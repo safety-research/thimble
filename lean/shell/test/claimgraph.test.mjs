@@ -1,7 +1,7 @@
 // The Claims graph in cells (shell/claimgraph.js): the layout keeps each cluster an island that fills the area, no two
 // claims touch and a cluster's name touches none; at rest no line is drawn; the hovered claim shows a card of what it
-// means (at most five lines) and its links, a revision dashed and faint; a claim whose denominator was not stated has a
-// faint ? beside it; a replay shows the claims made so far, the newest bold.
+// means (at most five lines in a thin frame) and its links, a revision dashed and faint; a claim whose denominator was
+// not stated has a faint ? beside it; a replay shows the claims made so far, the newest marked with their links.
 //   node --test lean/shell/test/claimgraph.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -59,16 +59,20 @@ test('at rest no line is drawn; the hovered claim shows its card and its links, 
   assert.equal(near.get('c2'), 'revised')
   const f = compose({ ...base, focus: 'c19' })
   const ft = draw(f)
-  for (const words of ['Fact 2 is wrong; it is 3', 'Precisely   Wiki b holds 3 of the facts, not 2', 'Based on    q2 · wiki b, all pages · 3 rows', "Judgment    'wrong' is a reading", 'Not stated  All of June, or only after June 18?']) assert.ok(ft.includes(words), words)
-  assert.ok(f.card && f.card.h === 5)
+  for (const words of ['│ ● Fact 2 is wrong; it is 3', 'precisely   Wiki b holds 3 of the facts, not 2', 'based on    q2 · wiki b, all pages · 3 rows', "judgment    'wrong' is a reading", 'not stated  All of June, or only after June 18?']) assert.ok(ft.includes(words), words)
+  // five lines in a thin frame
+  assert.ok(f.card && f.card.h === 7)
+  assert.ok(ft.includes('┌─') && ft.includes('─┘'))
   assert.ok(f.flat().some(r => r.style && r.style.color === '#e0a43a' && r.style.faint && /[╌╎╱╲]/.test(r.s)))
   // the card never covers its own claim, and Based on reads as a cite
   const pf = lay.pos.get('c19')
-  assert.ok(!(pf.y >= f.card.y && pf.y < f.card.y + f.card.h && pf.x >= f.card.x - 1 && pf.x <= f.card.x + f.card.w))
-  assert.ok(f.flat().some(r => r.style && r.style.color === '#4f46e5' && r.s.includes('q2 · wiki b')))
+  assert.ok(!(pf.y >= f.card.y && pf.y < f.card.y + f.card.h && pf.x >= f.card.x && pf.x < f.card.x + f.card.w))
+  assert.ok(f.flat().some(r => r.style && r.style.color === '#4f46e5' && r.style.underline && r.s.includes('q2 · wiki b')))
+  // every claim keeps its press, also one the card covers, so a focus ring kept by place stays on its claim
   const nodes = f.flat().filter(r => r.node)
+  assert.equal(nodes.length, 19)
   assert.equal(nodes.find(r => r.node === 'c19').style.faint, false)
-  assert.ok(nodes.filter(r => r.style.faint).length >= 12)
+  assert.ok(nodes.filter(r => r.style?.faint).length >= 8)
   // lines are cells of glyphs between two claims, their ends left out
   assert.deepEqual(line({ x: 0, y: 0 }, { x: 4, y: 0 }).map(p => p.ch).join(''), '───')
   assert.deepEqual(line({ x: 0, y: 0 }, { x: 0, y: 3 }).map(p => p.ch).join(''), '││')
@@ -79,20 +83,20 @@ test('a card is at most five lines: the claim and Precisely wrap to two while th
   const long = { text: 'June 18 had the most saves of any day in the wiki, by far, and most were by agents', precisely: 'June 18 had 6,543 saves, the most of the 92 days from May 1 to July 31, counted from revisions.jsonl', based_on: 'q1 · revisions.jsonl, May–July · 6,543 rows', sources: [{ ref: 'q1@n', values: [1, 2, 9, 3] }] }
   const a = text(cardLines(long, 60))
   assert.equal(a.length, 5)
-  assert.ok(a[0].startsWith('June 18 had the most saves'))
-  assert.ok(a[2].startsWith('Precisely'))
+  assert.ok(a[0].startsWith('● June 18 had the most saves'))
+  assert.ok(a[2].startsWith('precisely'))
   assert.ok(a[3].startsWith('            '))
-  assert.match(a[4], /^Based on {4}q1 · revisions\.jsonl.*[▁▂▃▄▅▆▇]{4}$/)
+  assert.match(a[4], /^based on {4}q1 · revisions\.jsonl.*[▁▂▃▄▅▆▇]{4}$/)
   // with a judgment and what was not stated, the claim and Precisely take one line each
   const b = text(cardLines({ ...long, judgment: "'by far' is a reading: no test", unstated: 'Of all days, or of weekdays?' }, 60))
   assert.equal(b.length, 5)
-  assert.deepEqual(b.map(l => l.slice(0, 11).trim()), ['June 18 had', 'Precisely', 'Based on', 'Judgment', 'Not stated'])
+  assert.deepEqual(b.map(l => l.slice(0, 11).trim()), ['● June 18 h', 'precisely', 'based on', 'judgment', 'not stated'])
   assert.ok(b.every(l => l.length <= 60))
   // a claim with none of it (an older store): its words, and its sources as Based on
-  assert.deepEqual(text(cardLines({ text: 'Bots made 4% of edits', sources: [{ ref: 'q5#bot=yes@share', label: '4%' }] }, 60)), ['Bots made 4% of edits', 'Based on    q5 · bot=yes · share'])
+  assert.deepEqual(text(cardLines({ text: 'Bots made 4% of edits', sources: [{ ref: 'q5#bot=yes@share', label: '4%' }] }, 60)), ['● Bots made 4% of edits', 'based on    q5 · bot=yes · share'])
 })
 
-test('a replay shows the claims made so far, the newest bold, and no revision before it is made', () => {
+test('a replay shows the claims made so far, the newest marked with their links, and no revision before it is made', () => {
   const v = viewOf(store())
   const groups = v.groups.filter(g => g.id)
   const lay = layout(v.flat, groups, { w: 120, h: 34 })
@@ -102,8 +106,10 @@ test('a replay shows the claims made so far, the newest bold, and no revision be
   const t = draw(rows)
   assert.equal((t.match(/[●○◉]/g) || []).length, 18)
   assert.ok(!t.includes('○'))
-  assert.equal(rows.flat().find(r => r.node === 'c18').style.bold, true)
-  assert.equal(rows.flat().find(r => r.node === 'c17').style.bold, false)
+  assert.equal(rows.flat().find(r => r.node === 'c18').style.mark, true)
+  assert.equal(rows.flat().find(r => r.node === 'c17').style.mark, undefined)
+  // the newest claim's links are drawn (c18 was said beside c17 in the same message)
+  assert.match(t, /[─│╱╲]/)
   // a cluster's name shows once a claim of it is made
   const first = compose({ claims: v.flat, clusters: groups, lay, visible: new Set(['c1']), focus: null, colorOf: () => '#000000', amber: '#e0a43a' })
   assert.ok(draw(first).includes('wiki a'))

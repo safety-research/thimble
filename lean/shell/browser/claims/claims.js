@@ -57,7 +57,8 @@
 
   const colorOf = n => { const c = CBY[n.cluster]; return c ? c.color : T.mut }
   const radiusOf = n => Math.min(12, 5.2 + Math.sqrt(Math.max(0, n.n - 1)) * 2.8)
-  const revised = n => !!n.revised_by && !!byId[n.revised_by]
+  // revised once the claim that revises it is there (a replay grows it later)
+  const revised = (n, now) => !!n.revised_by && !!byId[n.revised_by] && !(now < byId[n.revised_by].born)
   function layoutAnchors() {
     const used = CLUSTERS.filter(c => N.some(n => n.cluster === c.key))
     const m = used.length
@@ -259,7 +260,17 @@
 
   // ------------------------------------------------------------------------------------------------ the replay
   const btn = $('#replay')
+  const btnWords = $('#replay span')
   let replayEnd = 0
+  /** Where a replay is: "turn 2 of 4" (the turn of the claim it grew last), "the corpus", or "replay". */
+  function replayWhere(now) {
+    let last = null
+    for (const n of N) if (n.born <= now && (!last || n.born > last.born)) last = n
+    if (!last) return 'replay'
+    if (last.by === 'orientation') return 'the corpus'
+    const turns = N.map(n => n.turn).filter(t => t != null)
+    return last.turn == null ? 'replay' : `turn ${last.turn} of ${Math.max(...turns)}`
+  }
   function replay() {
     S.hover = null
     hideCard()
@@ -267,6 +278,7 @@
     replayEnd = now + grow(now, 3200) + 600
     S.replaying = replayEnd
     btn.classList.add('on')
+    btnWords.textContent = 'replay'
   }
   function stopReplay() {
     if (!S.replaying) return false
@@ -274,6 +286,7 @@
     N.forEach(n => { n.born = Math.min(n.born, now - 1200) })
     S.replaying = 0
     btn.classList.remove('on')
+    btnWords.textContent = 'Replay'
     return true
   }
   btn.addEventListener('click', e => { e.currentTarget.blur(); if (!stopReplay()) replay() })
@@ -307,10 +320,10 @@
   const back = t => { if (t <= 0) return 0; if (t >= 1) return 1; const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2) }
   const font = (w, px) => `${w} ${px}px ${T.font || 'sans-serif'}`
 
-  function dot(n, sx, sy, r, alpha) {
+  function dot(n, sx, sy, r, alpha, now) {
     const col = colorOf(n)
     ctx.beginPath(); ctx.arc(sx, sy, Math.max(0.1, r), 0, 7)
-    if (revised(n)) {
+    if (revised(n, now)) {
       // revised: a hollow dot, nothing more
       ctx.fillStyle = hexA(solid(T.bg, '#fcfbf8'), alpha); ctx.fill()
       ctx.strokeStyle = hexA(col, Math.max(0.12, alpha)); ctx.lineWidth = 1.6; ctx.stroke()
@@ -333,18 +346,26 @@
       n.va += (t - n.va) * 0.18
       n.hv += ((n === focus ? 1 : 0) - n.hv) * 0.25
     })
-    // the hovered claim's links: thin lines; a revision dashed in a faint amber
-    if (focus) {
-      const [x1, y1] = toScreen(focus)
+    // links as thin lines, a revision dashed in a faint amber: the hovered claim's, or, while a replay runs, those of
+    // the claims it just grew (marked)
+    const links = (n, near, alpha) => {
+      const [x1, y1] = toScreen(n)
       for (const [m, kind] of near) {
         if (!L.includes(m)) continue
         const [x2, y2] = toScreen(m)
         ctx.save()
-        if (kind === 'revised') { ctx.setLineDash([4, 4]); ctx.strokeStyle = hexA(solid(T.warn, '#b7791f'), 0.5) } else ctx.strokeStyle = hexA(T.edge, 0.7)
+        if (kind === 'revised') { ctx.setLineDash([4, 4]); ctx.strokeStyle = hexA(solid(T.warn, '#b7791f'), 0.5 * alpha) } else ctx.strokeStyle = hexA(T.edge, 0.7 * alpha)
         ctx.lineWidth = 1.2
         ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
         ctx.restore()
       }
+    }
+    const fresh = S.replaying && !focus ? L.filter(n => now - n.born < 700) : []
+    if (focus) links(focus, near, 1)
+    for (const n of fresh) {
+      const [sx, sy] = toScreen(n)
+      ctx.beginPath(); ctx.arc(sx, sy, rScreen(n) + 7, 0, 7); ctx.fillStyle = DARK ? 'rgba(120,98,40,.55)' : 'rgba(246,227,168,.85)'; ctx.fill()
+      links(n, neighbours(n), 1 - (now - n.born) / 700)
     }
     // the claims, each growing in when it is born
     L.forEach(n => {
@@ -353,7 +374,7 @@
       const r = rScreen(n) * e * (1 + 0.22 * n.hv)
       const p = (now - n.born) / 1100
       if (p < 1) { ctx.beginPath(); ctx.arc(sx, sy, rScreen(n) + 4 + 16 * ease(p), 0, 7); ctx.strokeStyle = hexA(colorOf(n), 0.45 * (1 - p)); ctx.lineWidth = 1.5; ctx.stroke() }
-      dot(n, sx, sy, r, n.va)
+      dot(n, sx, sy, r, n.va, now)
     })
     // the clusters' names, above their claims
     CLUSTERS.forEach(c => {
@@ -394,16 +415,16 @@
       return path.split('/').pop() + (line ? ':' + line[1] : '')
     }).join(', ')
   }
-  /** What the claim means, in at most five lines: the claim as said, Precisely, Based on, Judgment, Not stated. */
+  /** What the claim means, in at most five lines: ● the claim as said, precisely, based on, judgment, not stated. */
   function cardHtml(n) {
     const based = n.based_on || sourcesWords(n)
     const vals = (n.sources.find(s => Array.isArray(s.values) && s.values.length > 1) || {}).values
     const row = (k, v, cls = '') => `<div class="r ${cls}"><span class="k">${k}</span><span>${v}</span></div>`
-    return `<div class="t">${esc(n.text)}</div>` +
-      (n.precisely ? row('Precisely', esc(n.precisely)) : '') +
-      (based || vals ? row('Based on', `<span class="cite">${esc(based)}${vals ? sparkSvg(vals) : ''}</span>`) : '') +
-      (n.judgment ? row('Judgment', esc(n.judgment)) : '') +
-      (n.unstated ? row('Not stated', esc(n.unstated), 'un') : '')
+    return `<div class="t"><i style="background:${colorOf(n)}"></i><span>${esc(n.text)}</span></div>` +
+      (n.precisely ? row('precisely', esc(n.precisely)) : '') +
+      (based || vals ? row('based on', `<span class="cite">${esc(based)}</span>${vals ? `<span class="cite">${sparkSvg(vals)}</span>` : ''}`) : '') +
+      (n.judgment ? row('judgment', esc(n.judgment)) : '') +
+      (n.unstated ? row('not stated', esc(n.unstated), 'un') : '')
   }
   /** The card beside its claim, on the side where it covers the fewest of its links. */
   function placeCard(n, near) {
@@ -433,7 +454,8 @@
   function frame(now) {
     const s = [S.hover && S.hover.id, N.length, S.replaying].join('|')
     if (s !== sig) { sig = s; changed = now }
-    if (S.replaying && now > replayEnd) { S.replaying = 0; btn.classList.remove('on') }
+    if (S.replaying && now > replayEnd) { S.replaying = 0; btn.classList.remove('on'); btnWords.textContent = 'Replay' }
+    else if (S.replaying) { const w = replayWhere(now); if (btnWords.textContent !== w) btnWords.textContent = w }
     tick()
     const mv = fitCamera(false)
     const arriving = N.some(n => now - n.born < 1200)
@@ -549,5 +571,6 @@
     nodeAt(id) { const n = byId[id]; if (!n) return null; const [x, y] = toScreen(n); const r = cv.getBoundingClientRect(); return [r.left + x, r.top + y] },
     hover(id) { S.hover = byId[id] || null; changed = performance.now() },
     card: () => (hc.classList.contains('on') ? hc.innerText : ''),
+    where: () => (S.replaying ? btnWords.textContent : ''),
   }
 })()

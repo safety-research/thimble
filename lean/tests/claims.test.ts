@@ -126,7 +126,7 @@ const reply = ($: Any, row: string, text: string) => $.ui.render({ component: 'A
 const TRAY = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 50, isFullscreen: true } } as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k.length === 1 ? k : '' }) as never
 
-test('after a turn of work its claims are in the store, each where it was said with the citations near it, and c lights with how many are new', async ($, on) => {
+test('after a turn of work its claims are in the store, each where it was said with the citations near it and what it means; c lights with what they leave open', async ($, on) => {
   const w = world(on, [FORK1])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   // the fork read the claims so far (none yet), and gave this turn's
@@ -140,13 +140,14 @@ test('after a turn of work its claims are in the store, each where it was said w
   expect(c2.said[0].quote).toBe("Kestrel made 41% of June's edits")
   expect(c2.sources.map((s: Any) => s.label)).toEqual(['41%', '212 of them'])
   expect(store.clusters.map((k: Any) => k.name)).toEqual(['testing for bias', 'finding who edited', 'the June 18 burst'])
-  // c lights under the answer, with its note
+  expect(c2.precisely).toBe("41% of the 517 edits saved in June were Kestrel's; 212 of those were reverts")
+  // c lights under the answer, with what the new claims leave open (c1 does not say what its "most" is out of)
   textOf(await reply($, R1, A1))
   await w.clock.settle()
   const row = textOf(await reply($, R1, A1))
-  expect(row).toContain('● 3 new claims')
+  expect(row).toContain('● 1 claim needs a denominator')
   const rec = JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${R1.slice(0, 24)}.json`]!)
-  expect(rec.verbs.c).toEqual({ lit: true, note: '3 new claims', claims: ['c1', 'c2', 'c3'] })
+  expect(rec.verbs.c).toEqual({ lit: true, note: '1 claim needs a denominator', claims: ['c1', 'c2', 'c3'] })
   const log = JSON.parse(w.files['/home/t/.thimble/lean/observer/s-1.json']!).log.find((r: Any) => r.kind === 'look')
   expect(log.claims.added).toEqual(['c1', 'c2', 'c3'])
 })
@@ -209,9 +210,10 @@ test('the ring on a claim: its card says what it means, its links are thin lines
   await $.ui.focus(focus('cl-c2'))
   const t = textOf(await $.ui.render(PANE))
   expect(t).toContain("Kestrel made 41% of June's edits, 212 of them reverts")
-  expect(t).toContain("Precisely   41% of the 517 edits saved in June were Kestrel's; 212 of those were reverts")
-  expect(t).toContain('Based on    q4 · revisions.jsonl, June · 517 rows')
-  expect(t).not.toContain('Judgment')
+  // precisely wraps to a second line in the card's frame
+  expect(t).toMatch(/precisely {3}41% of the 517 edits saved in June were Kestrel's; 212 of those were *│[^│]*│ +reverts/)
+  expect(t).toContain('based on    q4 · revisions.jsonl, June · 517 rows')
+  expect(t).not.toContain('judgment')
   expect(edges(t)).toBe(true)
   // a click on another claim puts the ring there: its card, with its judgment and what it does not state
   const ui = await $.ui.mount(PANE)
@@ -219,49 +221,46 @@ test('the ring on a claim: its card says what it means, its links are thin lines
   await ui.press({ key: 'cl-c1' })
   await w.clock.settle()
   const c1 = textOf(await $.ui.render(PANE))
-  expect(c1).toContain("Judgment    'tilt' is a reading: no side was measured")
-  expect(c1).toContain('Not stated  Most of all June edits, or of the reverts?')
+  expect(c1).toContain("judgment    'tilt' is a reading: no side was measured")
+  expect(c1).toContain('not stated  Most of all June edits, or of the reverts?')
   // no bar of details, no sources on digits: the card is all
   expect(c1).not.toContain('said in turn')
   expect(textOf(await $.ui.render(HINT))).toBe('r replay · esc close')
   await ui.unmount()
 })
 
-test('r replays the graph in the order the claims were made, the newest bold; any key stops it; / t n ] are not its keys', async ($, on) => {
+test('r replays the graph in the order the claims were made, "turn N of M" in the head; any key stops it; / t n are not its keys', async ($, on) => {
   const w = await twoTurns($, on)
   await $.ui.focus(focus('cl-c2'))
   await ($ as Any).prompt.edit(key('r'))
   await w.clock.settle()
   // it starts from nothing, with the ring off, so no card covers the growth
   let t = textOf(await $.ui.render(PANE))
-  expect(t).toContain('replay · 0 of 4')
-  expect(t).not.toContain('Precisely')
-  // it grows in the order made: turn 1's three claims, then turn 2's correction
+  expect(t).toContain('Claims   replay')
+  expect(t).not.toContain('precisely')
+  // it grows in the order made: turn 1's three claims, then turn 2's correction; the head says which turn
   const seen: string[] = []
+  const dots: number[] = []
   for (let i = 0; i < 60; i++) {
     await w.clock.advance(80)
     await w.clock.settle()
     t = textOf(await $.ui.render(PANE))
-    const m = /replay · (\d+) of 4/.exec(t)
-    if (m) seen.push(m[1]!)
+    const m = /Claims {3}(turn \d of 2|replay)/.exec(t)
     if (!m) break
+    if (seen.at(-1) !== m[1]) seen.push(m[1]!)
+    dots.push((t.match(/[●◉○]/g) || []).length)
+    // the correction is hollow only once it is made: in turn 1 no ○ is drawn
+    if (m[1] === 'turn 1 of 2') expect(t).not.toContain('○')
   }
-  expect(seen.length).toBeGreaterThan(2)
-  expect(seen.map(Number)).toEqual([...seen.map(Number)].sort((a, b) => a - b))
+  expect(seen).toEqual(['turn 1 of 2', 'turn 2 of 2'])
+  expect(dots).toEqual([...dots].sort((a, b) => a - b))
   expect(t).toContain('Claims   4 · 3 clusters')
-  // the correction is hollow only once it is made: at 3 of 4 no ○ is drawn
+  // again, then any key stops it: the whole graph at once
   await ($ as Any).prompt.edit(key('r'))
   await w.clock.settle()
-  let at3 = ''
-  for (let i = 0; i < 60 && !at3; i++) {
-    await w.clock.advance(80)
-    await w.clock.settle()
-    const x = textOf(await $.ui.render(PANE))
-    if (x.includes('replay · 3 of 4')) at3 = x
-  }
-  expect(at3).not.toBe('')
-  expect(at3).not.toContain('○')
-  // any key stops it: the whole graph at once
+  await w.clock.advance(80)
+  await w.clock.settle()
+  expect(textOf(await $.ui.render(PANE))).toContain('turn 1 of 2')
   await ($ as Any).prompt.edit(key('x'))
   await w.clock.settle()
   expect(textOf(await $.ui.render(PANE))).toContain('Claims   4 · 3 clusters')

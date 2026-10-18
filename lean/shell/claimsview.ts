@@ -6,7 +6,8 @@
 //                          claim the pointer or the ring is on shows a card of what it means beside it (the claim as
 //                          said, Precisely, Based on, Judgment, Not stated), keeps its links bright and draws them as
 //                          thin lines, and fades the rest. A replay (r) grows the graph again in the order the claims
-//                          were made. The keys are in the hint line under the prompt (claimsHint), never in the pane.
+//                          were made, "turn 2 of 4" in the head, its newest claims marked with their links. The keys
+//                          are in the hint line under the prompt (claimsHint), never in the pane.
 import { compose } from './claimgraph.js'
 import { markColors, verbColor } from './view'
 import type { Theme } from './view'
@@ -43,10 +44,22 @@ export type ClaimsPaneOpts = {
 /** The head's rows (its line and a blank row). */
 export const HEAD_ROWS = 2
 
-/** The claims a replay shows (null: all of them), and the ones it just added. */
-export function replayShows(r: Replay | null, step = 1): { visible: Set<string> | null; newest: Set<string> } {
+/** The claims a replay shows (null: all of them), and the ones it added last (about a fifth of a second's worth of
+ *  the replay: they are marked, with their links). */
+export function replayShows(r: Replay | null): { visible: Set<string> | null; newest: Set<string> } {
   if (!r) return { visible: null, newest: new Set() }
-  return { visible: new Set(r.order.slice(0, r.k)), newest: new Set(r.order.slice(Math.max(0, r.k - step), r.k)) }
+  const recent = Math.max(1, Math.round(r.order.length * 0.18))
+  return { visible: new Set(r.order.slice(0, r.k)), newest: new Set(r.order.slice(Math.max(0, r.k - recent), r.k)) }
+}
+
+/** Where a replay is, for the head: "turn 2 of 4" (the turn of the claim it showed last), "the corpus", or "replay"
+ *  before the first claim. */
+export function replayWhere(r: Replay, flat: Any[]): string {
+  const last = r.k ? flat.find(c => c.id === r.order[r.k - 1]) : null
+  if (!last) return 'replay'
+  if (last.by === 'orientation') return 'the corpus'
+  const turns = flat.map(c => c.turn).filter((t: unknown) => typeof t === 'number') as number[]
+  return last.turn == null ? 'replay' : `turn ${last.turn} of ${Math.max(...turns)}`
 }
 
 /** The hint line under the prompt while the pane has the keys. (Its argument is not read: every state has these keys.) */
@@ -65,7 +78,7 @@ export function claimsPaneEl(els: Any, o: ClaimsPaneOpts): Any {
   const colorOfCluster = new Map<string, string>(groups.map((g, i) => [String(g.id), clusterColor(i, o.theme)]))
   const colorOf = (c: Any) => colorOfCluster.get(String(c.cluster)) || (o.theme === 'light' ? '#85837c' : '#9c978d')
   const { visible, newest } = replayShows(o.replay)
-  const where = o.replay ? `replay · ${o.replay.k} of ${o.replay.order.length}` : `${v.total} · ${v.clusters} cluster${v.clusters === 1 ? '' : 's'}`
+  const where = o.replay ? replayWhere(o.replay, v.flat) : `${v.total} · ${v.clusters} cluster${v.clusters === 1 ? '' : 's'}`
   const head = Box({ key: 'head', flexDirection: 'row', width: w, children: [Text({ color: tone, bold: true, children: 'Claims   ' }), Text({ dimColor: true, children: where })] })
   if (!v.total) {
     return Box({ flexDirection: 'column', width: w, children: [head, Text({ children: ' ' }), Text({ dimColor: true, children: 'No claims yet.' })] })
@@ -87,6 +100,9 @@ export function claimsPaneEl(els: Any, o: ClaimsPaneOpts): Any {
     if (st.color) p.color = st.faint && /^#[0-9a-f]{6}$/i.test(st.color) ? fade(st.color) : st.color
     if (st.dim || (st.faint && !st.color)) p.dimColor = true
     if (st.bold) p.bold = true
+    if (st.underline) p.underline = true
+    // a replay's newest claims, marked as the demo marks them
+    if (st.mark) p.backgroundColor = o.theme === 'light' ? '#f6e3a8' : '#5a4a1f'
     return p
   }
   const graph = rows.map((runs: Any[], y: number) => Box({ key: `g${y}`, flexDirection: 'row', width: w, height: 1, children: runs.map((r, i) => (r.node

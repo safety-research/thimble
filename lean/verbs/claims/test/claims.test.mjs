@@ -167,9 +167,11 @@ test('a correction stays: the old claim is revised by the new one, and the new o
   assert.equal(c5.cluster, c1.cluster)
   // the person said it too: their place counts
   assert.deepEqual(c1.said.map(p => p.by), ['claude', 'person'])
-  // a revision is a new claim: the note says nothing more of it
+  // a revision is a new claim: the note says nothing more of it; what the new claims leave open comes first
   assert.equal(noteFor(res), '1 new claim')
   assert.equal(noteFor({ added: ['c7', 'c8', 'c9'], revised: ['c2'] }), '3 new claims')
+  assert.equal(noteFor({ added: ['c7', 'c8', 'c9'], unstated: ['c8', 'c9'] }), '2 claims need a denominator')
+  assert.equal(noteFor({ added: ['c7'], unstated: ['c7'] }), '1 claim needs a denominator')
   const v = viewOf(store, { fresh: res.added })
   const g = v.groups.find(x => x.id === c1.cluster)
   assert.equal(g.claims.find(c => c.id === 'c1').replacement.id, 'c5')
@@ -211,6 +213,8 @@ test('a claim keeps what it means as the fork gave it: precisely, based on, a ju
   assert.deepEqual(c1.sources[0].values, [3, 4, 9, 12])
   assert.equal(c2.judgment, "'extra' is a judgment: they did not change the estimate")
   assert.equal(c2.unstated, 'Of all reruns, or of the flaky runs only?')
+  assert.deepEqual(res.unstated, ['c2'])
+  assert.equal(noteFor(res), '1 claim needs a denominator')
   // empty or "none" parts are left out; a long part is cut
   assert.deepEqual(meaningOf({ precisely: 'x '.repeat(200), judgment: 'none', unstated: '' }), { precisely: 'x '.repeat(120).trim() })
   // a restatement fills in what the first saying left out, and never changes what it gave
