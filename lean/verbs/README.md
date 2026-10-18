@@ -34,8 +34,11 @@ the shell makes the call and runs the verb again with the answer. Call the model
   with its tools. Its row reads as one line naming the verb and the object.
 
 The hint row shows 2–3 verbs: those the object names in its `hints` field first, then those whose `hint.mjs` has a
-phrase for it, in the order of their `order` field. A verb without `hint.mjs` shows only in `?`. Every verb with a key
-works on that key in the detail view.
+phrase for it, in the order of their `order` field. Once the observer (`../observer/`) has looked at the turn that saved
+the object, its ranking takes that rule's place: it reads every verb's `line` and `hint.mjs` phrase beside the object's
+lineage, picks the 2–3 most worth doing for this object, and writes a few words for each (`t trace the 412 to its
+rows`). A verb without `hint.mjs` shows only in `?` until the observer picks it. Every verb with a key works on that key
+in the detail view.
 
 Run a verb by hand: `node shell/node/verb.mjs run <name> < input.json`, or `/verb <name> [object] [region] [words]` in
 a session.

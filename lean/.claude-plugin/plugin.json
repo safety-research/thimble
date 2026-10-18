@@ -1,7 +1,7 @@
 {
   "name": "thimble-lean",
   "version": "0.0.1",
-  "description": "thimble's lean kernel and shell: the `lean` command reads and queries any files, keeps the code, inputs and source rows behind every value, and saves objects as program + data + lineage; each object Claude saves is drawn under its reply with the verbs that fit it, opens in a detail view that keeps the chat going, and opens in the browser and back. Verbs are folders in verbs/.",
+  "description": "thimble's lean kernel and shell: the `lean` command reads and queries any files, keeps the code, inputs and source rows behind every value, and saves objects as program + data + lineage; each object Claude saves is drawn under its reply with the verbs that fit it, opens in a detail view that keeps the chat going, and opens in the browser and back. Verbs are folders in verbs/. An observer reads each answer and the objects behind it once after the turn: it leaves notes for Claude, ranks each object's hint row, and, rarely, shows one line above the prompt when a decision of the person's is in view.",
   "author": {
     "name": "Matthew Joerke"
   },
@@ -10,5 +10,13 @@
     "./skills/",
     "./verbs/"
   ],
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "observer": {
+      "type": "boolean",
+      "title": "Observer",
+      "description": "After each turn of work, a side agent reads the answer and the objects behind it: it leaves notes for Claude, picks the verbs under each object, and, rarely, shows a line above your prompt when a decision is in view.",
+      "default": true
+    }
+  }
 }
