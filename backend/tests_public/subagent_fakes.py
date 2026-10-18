@@ -126,6 +126,7 @@ def bridge(monkeypatch) -> FakeBridge:
                  "needs_restart", "no_session_text"):
         setattr(mod, name, getattr(fake, name))
     mod.NO_MODULE = "no-module"  # type: ignore[attr-defined]
+    mod.NOT_ANSWERING = real_bridge.NOT_ANSWERING  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "app.module_bridge", mod)
     # `from . import module_bridge` reads the package's attribute first, which the real bridge sets once any test has
     # imported it, so the fake replaces that too

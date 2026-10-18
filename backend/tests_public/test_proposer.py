@@ -33,7 +33,11 @@ ANSWER = {"show": True, "why": "The analyst keeps comparing who replies to whom.
 
 @pytest.fixture(autouse=True)
 def _fresh(workspaces_tmp, tmp_path, monkeypatch):
+    from app import subagents
+
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    # thimble is on in main's session: no module of an earlier test's session holds a run back (module_back)
+    monkeypatch.setattr(subagents, "module_away", lambda c: False)
     session._live.clear()
     proposer._tasks.clear()
     proposer._running.clear()
@@ -167,6 +171,28 @@ async def test_an_analyst_s_turn_end_runs_one_fork_of_main_and_shows_the_card(cw
     assert run["after"] == ["main"] and run["cut"] == "cut-1"
     assert run["input_tokens"] == 23_400 and run["cached"] == 23_000, "what the fork read, mostly from the cache"
     assert proposer.pending(CORPUS) is None
+    assert _shown_notice() is None
+
+
+async def test_k8_a_turn_end_while_thimble_is_off_waits_with_no_notice_and_runs_once_it_is_on(cwd, tmp_path, cards,
+                                                                                               forks, monkeypatch):
+    """Bug hunt round 10, K8: with thimble off in main's session (/plugin, which is no end of the session), a turn's end
+    left "Couldn't check for a view proposal: Your Claude Code session's thimble module did not answer; it stopped
+    polling" with Try again, beside the page's line that thimble is off. The run waits, tells nothing, and runs once
+    thimble is on again."""
+    from app import subagents
+
+    off = {"now": True}
+    monkeypatch.setattr(subagents, "module_away", lambda c: off["now"])
+    monkeypatch.setattr(subagents, "MODULE_BACK_POLL_S", 0.01)
+    lv, p = _attach(cwd, tmp_path)
+    _append(p, lv, _turn("Who replies to whom on the board?", "cut-1"))
+    for _ in range(50):  # as long as a run takes to fork when thimble is on
+        await asyncio.sleep(0.01)
+    assert forks == [] and _shown_notice() is None and _runs() == []
+    off["now"] = False  # /plugin on again
+    await _settle()
+    assert [f["cut"] for f in forks] == ["cut-1"] and [r["name"] for r in cards] == ["Reply Network"]
     assert _shown_notice() is None
 
 

@@ -7,6 +7,7 @@ subagents.run_ended."""
 from __future__ import annotations
 
 import asyncio
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
@@ -256,3 +257,49 @@ def test_every_check_click_route_refuses_the_server_s_token_without_the_analyst_
         r = getattr(client, method)(path, json=body)
         assert r.status_code == 403, ("neither cookie nor token, as a kernel cell posts it", path)
     assert not bridge.calls, "the module is never asked"
+
+
+async def test_k8_a_check_due_while_thimble_is_off_waits_and_starts_once_it_is_on(doc, bridge, monkeypatch):
+    """Bug hunt round 10, K8: /plugin off while an answer's checks were due failed each with a notice "… failed:
+    thimble's agents can't start in this session: … it stopped polling. Main, its threads, cards and labels still work.
+    Try again in a few seconds", shown beside the page's line that thimble is off, and nothing ran the check once thimble
+    was on again. /plugin off is no end of the session (H19): a follow-on run waits while main's module does not answer
+    in a session that runs, its record `waiting` off, tells no failure, and starts once thimble is on again."""
+    from app import module_bridge as real_bridge
+    from app import notices
+
+    monkeypatch.setattr(subagents, "MODULE_BACK_POLL_S", 0.01)
+    await _write()
+    bridge.is_live, bridge.runs = False, True
+    bridge.reason = f"{real_bridge.NOT_ANSWERING}; it stopped polling"
+    await checks.start_run(CORPUS, "unverified", "report", force=True, route=subagents.FOLLOW_ON)
+    await _until(lambda: _run("unverified").get("waiting") == checks.WAITING_OFF, "the run does not wait for thimble")
+    await asyncio.sleep(0.1)
+    assert not bridge.ops("spawn") and _run("unverified")["status"] == "running"
+    key = notices.agent_key(checks.session_key("unverified", "report"))
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("key") == key], "no failure while thimble is off"
+    bridge.is_live, bridge.reason = True, ""  # /plugin on again
+    await _until(lambda: len(bridge.ops("spawn")) == 1, "the check never started once thimble was on")
+    assert _run("unverified")["status"] == "running" and "waiting" not in _run("unverified")
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("key") == key]
+
+    # a start the module did not answer as thimble went off (its request expired) waits too, with no failure either
+    key = notices.agent_key(checks.session_key("judgment", "report"))
+    real_request = bridge.request
+
+    async def gone(c, op, **args):
+        if op != "spawn":
+            return await real_request(c, op, **args)
+        bridge.calls.append((op, args))
+        bridge.is_live, bridge.reason = False, f"{real_bridge.NOT_ANSWERING}; it stopped polling"
+        return {"no-module": bridge.reason}
+
+    fake = sys.modules["app.module_bridge"]
+    monkeypatch.setattr(fake, "request", gone)
+    await checks.start_run(CORPUS, "judgment", "report", force=True, route=subagents.FOLLOW_ON)
+    await _until(lambda: _run("judgment").get("waiting") == checks.WAITING_OFF, "the expired start does not wait")
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("key") == key] and _run("judgment")["status"] == "running"
+    monkeypatch.setattr(fake, "request", real_request)
+    bridge.is_live, bridge.reason = True, ""
+    await _until(lambda: len(bridge.ops("spawn")) == 3, "the expired check never started again")
+    assert _run("judgment")["agent_id"] and not [n for n in notices.open_notices(CORPUS) if n.get("key") == key]
