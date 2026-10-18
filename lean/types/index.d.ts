@@ -56,8 +56,8 @@ export type MsgRecord = {
 /** One card of the tray: a mark of a message, or a citation inside a card. */
 export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' }
 
-/** The tray: the stack of cards it shows, the top one drawn. */
-export type Tray = { stack: TrayFrame[] }
+/** The tray: the stack of cards it shows, the top one drawn; `asking` once 1 was pressed (its footer says how to ask). */
+export type Tray = { stack: TrayFrame[]; asking?: boolean }
 
 /** Browser mode (`on`, the `browser` setting) and its page server: its base URL (token included), the page opened
  *  last, why there is none, or why it stopped on its own (no page open). */

@@ -158,7 +158,7 @@ test("a gloss's explainer card: what it is, its drawing, where it mattered, each
   const text = card.parts.map(p => gridText(draw(p))).join('\n')
   assert.match(text, /gets the same\s+object/)
   assert.match(text, /module one cart per file {4}default a cart per test/)
-  assert.match(text, /conftest\.py:14¹ set "module"; the cart turned up at step 1,812²/)
+  assert.match(text, /conftest\.py:14² set "module"; the cart turned up at step 1,812³/)
   // the nested marks are parts of the drawing a press reaches
   const here = draw(card.parts[2])
   assert.deepEqual(here.regions.map(r => r.id).sort(), ['n1', 'n2'])

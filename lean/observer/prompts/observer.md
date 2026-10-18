@@ -23,6 +23,7 @@ The default for each is none. Most turns need no note, no line, no lit verb and 
 - An **unread file that matters** is a file the session never touched that could change the answer, for example a file of deletions when the claim is about what stayed.
 - A **number whose rows do not hold it** has rows from a different period, group or scope than its words say, rows found "by key only" or "more than it counts", or no rows at all. A number in the words that cites nothing is a weaker claim than one that does.
 - A **drawing that disagrees** with the words, the data or the answer: the person reads the drawing, so a number drawn wrong (a label computed from the wrong list, a total over the wrong rows) misleads as much as one written wrong.
+- A **sparkline that decorates**: a `[~](q3@n)` whose sentence claims no shape (a trend, a burst or a spread), a second sparkline in the same answer, or one in a short answer. It takes the person's attention and shows nothing the number does not. A note tells Claude to draw one only for a shape.
 These are places to look. They are not kinds of output, and most objects have none of them.
 
 **Errors often hide between the work and the answer.** A number is right in its output, but the answer uses it for a different period, group or scope. A share divides by the wrong total. A query gave a new number when it ran again, and the answer kept the old one. So compare each claim in the answer and in the object with the output it comes from.

@@ -11,7 +11,7 @@
 //   linksIn(markdown)                               -> the kernel refs a card's words cite, each a nested mark
 // A card is drawn part by part (`parts`, each a program and its data), a blank row between parts.
 // `links` are the nested marks a card holds, in reading order: [{id, ref, label}]. Their words carry a small digit
-// (¹ ² ³), the key that opens one from an empty prompt.
+// (² ³ ⁴), the key that opens one from an empty prompt; 1 is the tray's ask.
 import { isRef } from './object.js'
 import { seriesRef } from './message.js'
 
@@ -37,7 +37,7 @@ export function linksIn(md) {
     if (!isRef(ref) || out.some(x => x.ref === ref)) continue
     out.push({ id: `n${out.length + 1}`, ref, label: String(m[1]).replace(/[*_`]/g, '') })
   }
-  return out.slice(0, SUP.length)
+  return out.slice(0, SUP.length - 1)
 }
 
 /** Card words with each nested mark as a toolkit link to its cite (`[words¹](#n1)`), other markup escaped. */
@@ -49,7 +49,7 @@ export function linkedText(md, links) {
   for (const m of s.matchAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g)) {
     out += esc(s.slice(i, m.index)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
     const k = links.findIndex(x => x.ref === String(m[2]).trim())
-    out += k >= 0 ? `[${esc(String(m[1]).replace(/[*_`]/g, ''))}${SUP[k]}](#${links[k].id})` : esc(m[1])
+    out += k >= 0 ? `[${esc(String(m[1]).replace(/[*_`]/g, ''))}${SUP[k + 1]}](#${links[k].id})` : esc(m[1])
     i = m.index + m[0].length
   }
   return out + esc(s.slice(i)).replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
@@ -206,7 +206,7 @@ export function sourceCard({ ref, label, resolved, query, lines, path, room = 9 
   }
 }
 
-/** A gloss's explainer card: what the term is, its tiny drawing, and where it mattered in this work. Three parts,
+/** A gloss's explain card: what the term is, its tiny drawing, and where it mattered in this work. Three parts,
  *  drawn one under the other with a blank row between: a drawing that fails leaves the words as they are. */
 export function explainerCard({ gloss }) {
   const g = gloss || {}
@@ -215,5 +215,5 @@ export function explainerCard({ gloss }) {
   const parts = [words(g.body || g.title || '')]
   if (typeof g.program === 'string' && g.program.trim()) parts.push({ program: g.program, data: g.data && typeof g.data === 'object' ? g.data : {}, pic: true })
   if (g.here) parts.push(words(g.here))
-  return { title: g.term || g.title || 'gloss', right: 'gloss', parts, links }
+  return { title: g.term || g.title || 'explain', right: 'explain', parts, links }
 }

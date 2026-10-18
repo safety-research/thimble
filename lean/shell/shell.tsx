@@ -135,7 +135,7 @@ async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   return o
 }
 
-const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline') => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}`
+const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline') => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}|${browserFlag ? 'web' : ''}`
 
 /** The object drawn at `w` columns (with the knobs at `state`), with its verbs: the program runs in a Node child, in the
  *  contract's sandbox. `mode` is where it is drawn (k.mode): 'inline' under a reply, 'detail' in the detail view, where
@@ -157,7 +157,7 @@ function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unkn
     }
     if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h: 24, state: state || undefined, mode }), timeoutMs: 30000 })
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h: 24, state: { ...(state || {}), browser: browserFlag }, mode }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, verbs: [], problems: [], error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     return { object, drawing: out.drawing, grid: renderTerm(out.drawing, { w }), verbs: out.verbs || [], problems: out.problems || [] }
@@ -356,7 +356,7 @@ async function rootHere($: Engine): Promise<string | null> {
 async function openCite($: Engine, ref: string | null, label: string): Promise<void> {
   if (!ref) return
   const root = await rootHere($)
-  if (!root) { $.ui.toast(`no thimble/ folder here to resolve ${ref}`); return }
+  if (!root) { $.ui.toast(`No thimble/ folder here to resolve ${ref}. Run lean in the data folder first.`); return }
   const last = (await $.state.get(LAST)).value
   await $.state.set(SEL, { id: last?.id ?? '', v: last?.v ?? null, root, region: null, ex: 0, all: false, cite: ref })
   citeLabels.set(ref, label)
@@ -429,7 +429,7 @@ async function settle($: Engine, ran: Ran, ref: ObjRef, at: string | null, inPan
     if (inPane || !where || unchanged) await openDetail($, ran.saved)
   }
   if (ran.ask) void ask($, ran.ask, ran.verb, ran.on || refText(ref))
-  if (ran.error) $.ui.toast(`${ran.verb}: ${cut(ran.error, 200)}`)
+  if (ran.error) failed($, `${ran.verb} did not run`, ran.error, 'Run it again with /verb, or ask Claude')
   else if (!ran.saved && !ran.ask && ran.text && !inPane) $.ui.toast(cut(ran.text.split('\n')[0] || '', 200))
 }
 
@@ -461,6 +461,36 @@ function pressVerb($: Engine, verb: string, ref: ObjRef, region: string | null, 
       await settle($, ran, ref, at, inPane)
     })()
   })
+}
+
+// ------------------------------------------------------------------------------------------------ failures, in words
+
+// refusals the engine gives that need nothing from the person: a key in the prompt may not scroll the transcript, and
+// a mark far above the screen has no element drawn to scroll to. The tray shows the mark anyway.
+const QUIET = /not person-initiated|no element of its own|nothing drawn under|not scrollable|nothing around that site scrolls|not this plugin's site|does not hold the keyboard/
+
+/** Why something failed, in its own plain words: never JSON, never a stack. Null for a refusal that needs nothing from
+ *  the person. */
+export function plainWhy(err: unknown): string | null {
+  const o = err && typeof err === 'object' && !(err instanceof Error) ? (err as Any) : null
+  let s = o ? String(o.deny ?? o.error ?? o.message ?? o.reason ?? '') : String((err as Error)?.message ?? err ?? '')
+  // a refusal or an error written as JSON inside the text reads as its words
+  s = s.replace(/\{[^{}]*\}/g, j => { try { const v = JSON.parse(j); return String(v.deny ?? v.error ?? v.message ?? v.reason ?? '') } catch { return j } })
+  s = s.replace(/^[\w.-]+: \$\.[\w.]+: /, '').split('\n').map(l => l.trim()).find(Boolean) ?? ''
+  if (!s || QUIET.test(s)) return null
+  return cut(s.replace(/\s+/g, ' ').replace(/[.\s]+$/, ''), 160)
+}
+
+/** A failure the person should know of: one line with what did not happen, why, and the fix. A refusal that needs
+ *  nothing from them shows nothing. */
+function failed($: Engine, what: string, err: unknown, fix: string): void {
+  const why = plainWhy(err)
+  if (why != null) $.ui.toast(`${what}: ${why}. ${fix}`)
+}
+
+/** An engine call whose refusal needs nothing from the person (a scroll a key asked for): it is dropped quietly. */
+async function quietly(p: Promise<unknown>): Promise<void> {
+  try { await p } catch { /* a refusal: the tray shows the mark anyway */ }
 }
 
 // ------------------------------------------------------------------------------------------------ the browser
@@ -598,7 +628,7 @@ async function askFromBrowser($: Engine, root: string, text: string, scope: WebS
     await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, context].join('\n\n') }] } })
     await $.prompt.submit({ text, asUser: true })
   } catch (err) {
-    $.ui.toast(`A question from the browser did not reach Claude (${cut(String((err as Error)?.message || err), 120)}); type it here instead.`)
+    $.ui.toast(`A question from the browser did not reach Claude${plainWhy(err) ? ` (${plainWhy(err)})` : ''}. Type it here instead.`)
   }
 }
 
@@ -805,7 +835,14 @@ async function actingRow($: Engine): Promise<string | null> {
   return null
 }
 
-/** Every mark position of this session's messages, in reading order. */
+/** The card `1` opens in the detail view: the newest one drawn under the message the keys act on, or null. */
+async function focusedCard($: Engine): Promise<ObjRef | null> {
+  const row = await actingRow($)
+  if (!row) return null
+  const list = ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]
+  return list.length ? list[list.length - 1]! : null
+}
+
 /** The rows of Claude's messages in this session, oldest first: the index's (a resumed session's too) and this load's. */
 async function messageRows($: Engine): Promise<string[]> {
   const f = await msgFilesNow($)
@@ -852,15 +889,23 @@ async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): P
 /** A mark brought into view where the transcript draws it now (a row far above the screen is not drawn, and the
  *  engine moves the transcript only for a press, not for a key in the prompt, so then the tray's title names it). */
 async function revealMark($: Engine, rec: MsgRecord, i: number): Promise<void> {
-  await $.ui.scroll({ to: { key: `mk-${rec.row}-${i}` }, block: 'nearest' }).catch(() => undefined)
+  await quietly($.ui.scroll({ to: { key: `mk-${rec.row}-${i}` }, block: 'nearest' }))
 }
 
 async function stepMark($: Engine, dir: number): Promise<void> {
   const list = await allMarks($)
   const tray = (await $.state.get(TRAY)).value as Tray | null
-  const next = trayStep(list, trayBase(tray), dir)
+  const base = trayBase(tray) as TrayFrame | null
+  let next = null as { row: string; i: number } | null
+  if (!base) {
+    // a closed tray: the marks of the message the keys act on, the one whose row says `] 3 marks`
+    const row = await actingRow($)
+    const n = row ? ((await recordNow($, row))?.marks?.length ?? 0) : 0
+    if (row && n) next = { row, i: dir > 0 ? 0 : n - 1 }
+  }
+  next = next || trayStep(list, base, dir)
   if (next) await openMark($, next.row, next.i)
-  else $.ui.toast('No marks yet: citations and glosses in Claude\'s replies open here.')
+  else $.ui.toast('No marks yet: each cite and explain in Claude\'s replies opens here.')
 }
 
 async function closeTray($: Engine): Promise<void> {
@@ -1027,7 +1072,7 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
   const answer = (await $.state.get(ANSWER)).value
   await $.state.set(SELROW, row === answer ? null : row)
   // the line in view, when a key opened it under a message above the screen
-  await $.ui.scroll({ to: { key: `vl-${row}-opt-0` }, block: 'nearest' }).catch(() => undefined)
+  await quietly($.ui.scroll({ to: { key: `vl-${row}-opt-0` }, block: 'nearest' }))
 }
 
 /** An option of the open line picked: the verb runs on the message, outside the press. */
@@ -1075,13 +1120,13 @@ async function runOnMessage($: Engine, word: string, key: string, rec: MsgRecord
       const cur = (await recordNow($, rec.row)) || rec
       if (!cur.objects.includes(saved.id)) await saveRecord($, { ...cur, objects: [...cur.objects, saved.id] })
     }
-    if (out.error) $.ui.toast(`${word}: ${cut(String(out.error), 200)}`)
+    if (out.error) failed($, `${word} did not run`, out.error, `Press ${key} under the message again, or ask Claude`)
     else if (out.ask) void ask($, String(out.ask), word, choice || on)
     else if (out.text && !out.saved) $.ui.toast(cut(String(out.text).split('\n')[0] || '', 200))
     if (!out.ask && !out.error) await noteForClaude($, `The person ran the verb ${word} on ${on}.${out.saved ? ` It shows them ${out.saved.id}.` : ''}${out.text ? ` It said: ${cut(String(out.text), 600)}` : ''}${out.note ? ' ' + out.note : ''}`)
     else if (out.note) await noteForClaude($, String(out.note))
   } catch (err) {
-    $.ui.toast(`${word}: ${cut(String((err as Error)?.message || err), 200)}`)
+    failed($, `${word} did not run`, err, `Press ${key} under the message again, or ask Claude`)
   } finally {
     await $.state.set(at, null)
   }
@@ -1162,11 +1207,19 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
     keyOpened = null
     if (pick) return (await pickOption($, Number(k) - 1)) ? consume : null
     if (tray) {
+      // 1 asks about the card's mark: the footer then says how; the question is typed in the prompt
+      if (k === '1') { await $.state.set(TRAY, { ...tray, asking: true }); return consume }
       const frame = trayTop(tray) as TrayFrame | null
       const ck = frame ? await cardKey($, frame) : ''
       const drawn = frame ? [...cards.entries()].find(([c]) => c.startsWith(`${ck}|`))?.[1] : null
-      const link = drawn?.links?.[Number(k) - 1]
+      const link = drawn?.links?.[Number(k) - 2]
       if (link && (await openLink($, link.id))) return consume
+      return null
+    }
+    // 1 under a card: its detail view (the card's row says `1 open detail`)
+    if (k === '1') {
+      const ref = await focusedCard($)
+      if (ref) { await openDetail($, ref); return consume }
     }
     return null
   }
@@ -1215,18 +1268,24 @@ const sep = (els: Any) => els.Text({ dimColor: true, children: ' · ' })
 /** The one quiet row under an object: what a verb on it runs now, and `open` (with how many rows wait there) at its
  *  right, with `o browser` (its card page) while browser mode is on. The verbs live in the message's verb row (v, s,
  *  a); m, x and t are card forms now, still run by /verb. */
-function hintRow($: Engine, els: Any, ref: ObjRef, key: string, o: { fullscreen: boolean; at: string; more: number; said: Said | null }) {
+function hintRow($: Engine, els: Any, ref: ObjRef, key: string, o: { fullscreen: boolean; at: string; more: number; said: Said | null; focus?: boolean }) {
   const { Box, Button, Text } = els
-  const left: Any[] = o.said?.running ? [Text({ dimColor: true, children: `${o.said.verb}…` })] : []
-  const right: Any[] = o.fullscreen
-    ? [Button({ key: `${key}:open`, plain: true, label: 'open', children: [Text({ dimColor: true, children: o.more ? `${o.more} more rows · open ` : 'open ' }), Text({ color: 'suggestion', children: '›' })], onPress: () => openDetail($, ref) })]
-    : [Text({ dimColor: true, children: `/obj ${refText(ref)} opens it` })]
-  if (browserFlag) right.unshift(browserChip(els, `${key}:web`, async () => $.ui.toast(await openBrowser($, { id: ref.id, v: ref.v, row: o.at, root: ref.root }))), sep(els))
+  const left: Any[] = o.said?.running
+    ? [Text({ dimColor: true, children: `${o.said.verb}…` })]
+    : o.focus
+      ? [Button({ key: `${key}:detail`, plain: true, label: 'open detail', children: [Text({ color: 'suggestion', children: '1' }), Text({ dimColor: true, children: ` open detail${o.more ? ` · ${o.more} more rows` : ''}` })], onPress: () => openDetail($, ref) })]
+      : []
+  const right: Any[] = o.focus
+    ? []
+    : o.fullscreen
+      ? [Button({ key: `${key}:open`, plain: true, label: 'open', children: [Text({ dimColor: true, children: o.more ? `${o.more} more rows · open ` : 'open ' }), Text({ color: 'suggestion', children: '›' })], onPress: () => openDetail($, ref) })]
+      : [Text({ dimColor: true, children: `/obj ${refText(ref)} opens it` })]
+  if (browserFlag) right.unshift(browserChip(els, `${key}:web`, async () => $.ui.toast(await openBrowser($, { id: ref.id, v: ref.v, row: o.at, root: ref.root }))), ...(right.length ? [sep(els)] : []))
   return Box({ flexDirection: 'row', justifyContent: 'space-between', children: [Box({ flexDirection: 'row', children: left }), Box({ flexDirection: 'row', children: right })] })
 }
 
 /** One object inline: its cells and its hint row, or one red line saying why it cannot be drawn. */
-async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string): Promise<Any> {
+async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string, focus = false): Promise<Any> {
   const els = $.ui.resolve(e)
   const { Box, Text } = els as Any
   const cols = Math.max(40, Math.min(120, (e.viewport?.columns ?? 100) - 4))
@@ -1245,7 +1304,7 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string)
     flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40),
     children: [
       paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress }),
-      hintRow($, els, ref, `${key}-${ref.id}`, { fullscreen, at, more, said }),
+      hintRow($, els, ref, `${key}-${ref.id}`, { fullscreen, at, more, said, focus }),
     ],
   })
 }
@@ -1567,7 +1626,7 @@ export const registerShell: Register = (on, options) => {
       await loadRowVerbs($)
       await msgFilesNow($)
     } catch (err) {
-      $.ui.toast(`thimble: the verb row could not read the verbs (${cut(String((err as Error)?.message || err), 120)}); v and s still work`)
+      failed($, 'thimble: the verb row could not read its verbs', err, 'v and s still work; start the session again to get the rest')
     }
     return r
   })
@@ -1727,8 +1786,14 @@ export const registerShell: Register = (on, options) => {
       const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
       const sel = (await $.state.get(SELROW)).value
       const running = ((await $.state.get({ ...RUNNING, id: at })).value ?? null) as string | null
-      // browser mode on: `o browser` ends the row, the mirror opened at this message
-      const after = browserFlag ? [browserChip(els, `vr-${at}-web`, async () => $.ui.toast(await openBrowser($, { row: at })))] : []
+      // the keys that act on this message, each where it acts: `] 3 marks` opens its first mark in the tray, and with
+      // browser mode on `o browser` opens the mirror at it
+      const { Button, Text } = els
+      const n = rec.marks.length
+      const after = [
+        ...(n ? [Button({ key: `vr-${at}-marks`, plain: true, label: 'marks', children: [Text({ color: 'suggestion', children: ']' }), Text({ dimColor: true, children: ` ${n} mark${n === 1 ? '' : 's'}` })], onPress: () => openMark($, at, 0, rec) })] : []),
+        ...(browserFlag ? [browserChip(els, `vr-${at}-web`, async () => $.ui.toast(await openBrowser($, { row: at })))] : []),
+      ]
       parts.push(verbRowEl(els, { key: `vr-${at}`, verbs, lit: rec.verbs || {}, open: pick && pick.row === at ? pick.verb : null, running, selected: sel === at, theme, onPress: (k: string) => pressRowVerb($, at, k), after }))
       if (pick && pick.row === at) {
         const verb = verbs.find(v => v.key === pick.verb)
@@ -1738,7 +1803,11 @@ export const registerShell: Register = (on, options) => {
         }
       }
     }
-    if (list.length) parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at)))))
+    if (list.length) {
+      // the newest card under the message the keys act on says `1 open detail`, while no line or tray takes the 1
+      const focus = !tray && !(await $.state.get(PICK)).value && (await actingRow($)) === at
+      parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at, focus && i === list.length - 1)))))
+    }
     return parts.length === 1 ? parts[0] : Box({ flexDirection: 'column', children: parts })
   })
 
@@ -1762,9 +1831,12 @@ export const registerShell: Register = (on, options) => {
     const card = await cardNow($, frame, w)
     const depth = tray?.stack.length ?? 1
     const links = card?.links ?? []
-    const keys = ['type + ↵ ask', '] next mark', ...(links.length ? [`${links.length > 1 ? `1–${links.length}` : '1'} open`] : []), depth > 1 ? '0 back' : '0 close'].join(' · ')
+    const shut = depth > 1 ? '0 back' : '0 close'
+    const keys = tray?.asking
+      ? ['type your question · ↵ sends it with this mark', shut].join(' · ')
+      : ['1 ask', ...(links.length ? [`${links.length > 1 ? `2–${links.length + 1}` : '2'} open`] : []), shut].join(' · ')
     return trayEl(els, {
-      key: 'tray', w, body: 9, theme, kind, title: card?.title && frame.row == null ? card.title : title, right: card?.right || (kind === 'gloss' ? 'gloss' : 'cite'),
+      key: 'tray', w, body: 9, theme, kind, title: card?.title && frame.row == null ? card.title : title, right: card?.right || (kind === 'gloss' ? 'explain' : 'cite'),
       grids: card?.grids ?? null, problem: card?.problem ?? null, links, depth, keys,
       onLink: (id: string) => { void openLink($, id) },
     })

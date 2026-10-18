@@ -7,6 +7,8 @@
 // The Node children (the drawing, a verb's run, `lean resolve`) are answered here, at process.run.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { plainWhy } from '../shell/shell'
+
 const ROOT = '/data'
 const FILE = `${ROOT}/thimble/objects/01-saves.json`
 const OBJECT = {
@@ -105,6 +107,8 @@ const reply = ($: any) => $.ui.render({ component: 'AssistantMessage', surface: 
 test('an object Claude saves is drawn under the next words of the turn; the verb row is under the answer, and open under the object', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
+  const opened: string[] = []
+  on('ui.open', (_$: unknown, e: { id: string }) => { opened.push(e.id); return { value: { isPlaced: true } } })
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   on('tool.call', () => ({ result: 'saved 01-saves v1: thimble/objects/01-saves.json\n  /days ← q1 (exact)\n' }))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
@@ -120,12 +124,15 @@ test('an object Claude saves is drawn under the next words of the turn; the verb
   expect(drawn).toContain('the reply')
   expect(drawn).toContain('Jun 18')
   expect(drawn).toContain('6,543')
-  // the message's verb row, dim, then the object with one quiet row: open
+  // the message's verb row, dim, then the object with one quiet row; the keys act on this answer, so its card says
+  // what 1 does, and 1 on an empty prompt opens the card's detail view
   expect(drawn).toContain('v visualize · s squeeze')
-  expect(drawn).toContain('open ›')
+  expect(drawn).toContain('1 open detail')
   expect(drawn).not.toContain('x explore')
   expect(drawn).not.toContain('? all')
   expect(drawn.indexOf('v visualize')).toBeLessThan(drawn.indexOf('Jun 18'))
+  expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
+  expect(opened).toEqual(['object'])
 })
 
 test('a reply after no save draws as Claude Code draws it', async ($, on) => {
@@ -189,7 +196,7 @@ test('a reply draws its citations inline, each underlined and a press that opens
   await clock.settle()
   const card = textOf(await $.ui.render(BAND))
   expect(card).toContain('Jun 18')
-  expect(card).toContain('] next mark')
+  expect(card).toContain('1 ask · 0 close')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
   await ui.unmount()
 })
@@ -366,9 +373,15 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   world(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
+  // the answer's row names the key that opens its marks
+  expect(textOf(await $.ui.render({ ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never))).toContain('] 2 marks')
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
+  expect(textOf(await $.ui.render(BAND))).toContain('1 ask · 0 close')
+  // 1 asks: the footer says how, and the question is typed in the prompt
+  expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
+  expect(textOf(await $.ui.render(BAND))).toContain('type your question · ↵ sends it with this mark')
   await ($ as Any).prompt.edit(edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('this one')
   await ($ as Any).prompt.edit(edit('['))
@@ -420,4 +433,15 @@ test("a resumed session finds its messages on disk: their marks open from the ke
   await ($ as Any).prompt.edit(edit('0'))
   await ($ as Any).prompt.edit(edit('s'))
   expect(textOf(await $.ui.render(RESUMED))).toContain('▸ 1 squeeze it')
+})
+
+test('a failure reads as plain words, never JSON; a refusal that needs nothing from the person says nothing', () => {
+  // the engine refuses a scroll that a key asked for, or one to a mark not drawn now: the tray shows the mark anyway
+  expect(plainWhy({ deny: 'not person-initiated' })).toBeNull()
+  expect(plainWhy('scroll: {"deny":"no element of its own is drawn under that key"}')).toBeNull()
+  expect(plainWhy(new Error('thimble-lean: $.ui.scroll: not person-initiated'))).toBeNull()
+  // a real failure keeps its own words
+  expect(plainWhy(new Error('thimble-lean: $.model.complete: the model is busy'))).toBe('the model is busy')
+  expect(plainWhy('{"error":"q9 has no column n"}')).toBe('q9 has no column n')
+  expect(plainWhy('Traceback (most recent call last):\n  File "x"')).toBe('Traceback (most recent call last):')
 })

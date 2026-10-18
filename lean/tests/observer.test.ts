@@ -314,7 +314,7 @@ test('a gloss is placed by its term in the answer, with a teal fill; its card sa
   const mark = rec.marks.find((m: Any) => m.kind === 'gloss')
   expect(ANSWER.slice(mark.start, mark.end)).toBe('`fixture scope`')
   const drawn = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: ANSWER, isFirstOfReply: true }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never)
-  expect(JSON.stringify(drawn)).toContain('"label":"gloss fixture scope"')
+  expect(JSON.stringify(drawn)).toContain('"label":"explain fixture scope"')
   // ] opens it in the tray; its card is drawn from the gloss
   await ($ as Any).prompt.edit(key(']'))
   await w.clock.settle()
@@ -322,10 +322,12 @@ test('a gloss is placed by its term in the answer, with a teal fill; its card sa
   await w.clock.settle()
   const card = textOf(await $.ui.render(BAND2))
   expect(card).toContain('fixture scope')
-  expect(card).toContain('gloss')
-  expect(card).toContain('1 open')
-  // 1 opens the citation in it, over it; 0 comes back
-  await ($ as Any).prompt.edit(key('1'))
+  // the person reads the mark's kind as "explain"; 1 asks, and the cite inside the card has the next digit
+  expect(card).toContain('explain')
+  expect(card).not.toContain('gloss')
+  expect(card).toContain('1 ask · 2 open · 0 close')
+  // 2 opens the citation in it, over it; 0 comes back
+  await ($ as Any).prompt.edit(key('2'))
   expect(textOf(await $.ui.render(BAND2))).toContain('conftest.py:14')
   expect(textOf(await $.ui.render(BAND2))).toContain('0 back')
   await ($ as Any).prompt.edit(key('0'))

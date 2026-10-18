@@ -75,7 +75,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
     p.color = 'inactive'
     if (on) p.backgroundColor = 'selectionBg'
   }
-  const label = m.kind === 'gloss' ? `gloss ${r.s}` : m.kind === 'spark' ? `sparkline ${m.ref}` : `cite ${m.label}`
+  const label = m.kind === 'gloss' ? `explain ${r.s}` : m.kind === 'spark' ? `cite sparkline ${m.ref}` : `cite ${m.label}`
   // the first run of a mark has a key of its own, `mk-<row>-<i>`, so the keys can scroll it into view
   const seen = (o as MessageOpts & { seen?: Set<number> }).seen
   const own = seen && !seen.has(r.mark as number) ? `mk-${o.rec.row}-${r.mark}` : key
