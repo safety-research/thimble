@@ -5,7 +5,7 @@
 import labelOrder from '../../../backend/app/label_order.json'
 import labelWheel from '../../../backend/app/label_wheel.json'
 import { recordKey, recordOf } from '../lib/refs'
-import type { Concept, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow, ReadCut } from '../lib/types'
+import type { Concept, ConceptApplication, ConceptPatch, ConceptRun, ConceptUnit, LabelClass, LabelDraft, LabelMarks, LabelRow, ReadCut } from '../lib/types'
 
 const FILE_UNITS = new Set(['record', 'agent', 'run'])
 
@@ -304,10 +304,26 @@ const later = (a: string | null | undefined, b: string | null | undefined): bool
   return Number.isNaN(tb) || (!Number.isNaN(ta) && ta > tb)
 }
 
+/** When the kept run last changed: a Run again on the units it could not label (backend concepts._record_application
+ * `merge`) keeps the run's own `ts` and records its own time under `again`, as a resume that failed does under
+ * `resumed`. The latest of them. Pure. */
+function keptAt(last: ConceptApplication): string {
+  let at = last.ts
+  for (const t of [last.again?.ts, last.resumed?.ts]) if (t && later(t, at)) at = t
+  return at
+}
+
+/** Whether a run that ended is a Run again on the units the kept run could not label: its record is that run's, with
+ * what this one labeled taken in (backend concepts.run_apply's `summary`, the merged application with its `again`).
+ * Such a run never stands in for the label: its own counts are of those units alone (bug hunt round 10, K9: "1 of 326
+ * records" for good after a Run again on 326, where the card and the terminal said 249 of 1,746). Pure. */
+const ranAgain = (run: ConceptRun): boolean => !!(run.summary as { again?: unknown } | null | undefined)?.again
+
 /** A label's status from the run the pane last saw (`live`, else the concepts list's run record) and the last run kept
- * on the label. A run that ended after the kept one stands in for it until the list is read again (a failed run sends
- * no `concepts` event). The kept run's count is matchedCount over the label's counts; before counts are known, the
- * run's `matches`. `cut` is the whole files or runs that run read only in part. */
+ * on the label. A run that ended after the kept one changed last (keptAt) stands in for it until the list is read again
+ * (a failed run sends no `concepts` event), but never a Run again (ranAgain), which the kept run takes in. The kept
+ * run's count is matchedCount over the label's counts; before counts are known, the run's `matches`. `cut` is the
+ * whole files or runs that run read only in part. */
 export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'last_run' | 'run' | 'trial'> & { kind?: string }, live?: ConceptRun | null): LabelStatus | null {
   const sample = k.trial ? { sample: true } : {}
   const run = live ?? k.run ?? null
@@ -317,7 +333,7 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
     return { state: 'running', done: 0, total: null, unit: k.unit }
   }
   const last = k.last_run ?? null
-  if (run && (run.status === 'error' || run.status === 'done') && (!last || later(run.started, last.ts))) {
+  if (run && (run.status === 'error' || run.status === 'done') && (!last || (!ranAgain(run) && later(run.started, keptAt(last))))) {
     if (run.status === 'error') return { state: 'error', message: run.message || 'the run failed' }
     const matches = run.matches ?? 0
     // a run the analyst stopped states the units it read, not those it would have read, and says where it stopped
@@ -336,7 +352,9 @@ export function labelStatus(k: Pick<Concept, 'unit' | 'labels' | 'counts' | 'las
   const total = valued > 0 ? valued : last.stopped ? read : last.total ?? last.matched_total ?? last.labeled
   const matches = k.counts ? matchedCount(k.labels, k.counts, total) : last.matches ?? 0
   const none = last.skipped ? { none: { n: last.skipped, code: k.kind === 'code' } } : {}
-  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts: last.ts, unit: k.unit, cut: last.cut ?? null, ...sample, ...none, ...(last.stopped ? { stopped: true, stoppedAt: stoppedAt(read, last.total, last.stopped_by) } : {}) }
+  // the time its values last changed: a Run again's that labeled, not one that failed and changed nothing
+  const ts = last.again && last.again.status !== 'error' ? keptAt({ ...last, resumed: null }) : last.ts
+  return { state: 'done', matches, total: statedTotal(total, matches), failed: last.failed ?? 0, ts, unit: k.unit, cut: last.cut ?? null, ...sample, ...none, ...(last.stopped ? { stopped: true, stoppedAt: stoppedAt(read, last.total, last.stopped_by) } : {}) }
 }
 
 /** The units a run gave no value, as the label row says them under its outcome: "62,802 records got no value from its

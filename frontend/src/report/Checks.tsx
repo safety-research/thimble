@@ -172,6 +172,7 @@ export function checkRunLabel(name: string, run: { chat?: string | null; waiting
   if (run.chat) return `${name} is running: open its run`
   if (run.waiting === 'writer') return `${name} runs once the writer has finished`
   if (run.waiting === 'plan') return `${name} runs once your session leaves plan mode (shift+tab in your terminal)`
+  if (run.waiting === 'off') return `${name} runs once thimble is on again in your Claude Code session (/plugin in your terminal)`
   return `${name} waits for a free session`
 }
 

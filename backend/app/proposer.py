@@ -10,7 +10,8 @@ from /thimble:ask in the terminal, to that fork; and once when the first run of 
 and its cut), so a later pass of the mirror on the local transport, or a restarted server, runs it. One loop per workspace
 (_loop) waits DEBOUNCE_MAIN_S after a main turn, else DEBOUNCE_OTHER_S (longer than auto mode's hand-back wait, so an
 orientation's end merges with main's `↳` turn), and runs the job once main is idle; a main turn still open leaves it
-pending until that turn ends. A running fork is never cancelled; a trigger that comes meanwhile is the next job.
+pending until that turn ends. A running fork is never cancelled; a trigger that comes meanwhile is the next job. While
+thimble is off in main's session (/plugin), the job waits until it is on again (subagents.module_back).
 
 The gate (due): view proposals are on (the View proposals feature switch, features.auto `proposer`, which reads
 views.propose_enabled: PROPOSE_ENV, then Settings' View proposals switch),
@@ -216,12 +217,15 @@ async def _loop(c: str) -> None:
             await asyncio.sleep(DEBOUNCE_MAIN_S if MAIN in job["after"] else DEBOUNCE_OTHER_S)
             if pending(c) != job:
                 continue  # a trigger came while it waited: wait again
-            from . import session  # noqa: PLC0415 — session imports this module lazily
+            from . import session, subagents  # noqa: PLC0415 — session imports this module lazily
 
             lv = session.current(c)
             if lv is not None and lv.turn_open:
                 return  # main's turn end starts the loop again (turn_ended)
             if (job := _pop(c)) is not None:
+                # thimble off in main's session (/plugin, which is no end of the session): the run waits until it is on
+                # again, with no notice that it failed (bug hunt round 10, K8)
+                await subagents.module_back(c)
                 await run_once(c, job)
     except asyncio.CancelledError:
         raise

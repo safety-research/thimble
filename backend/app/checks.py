@@ -137,6 +137,7 @@ NEW_COLOURS = tuple(m for m in LABEL_ORDER if m in COLOURS)  # the order new che
 CONTEXT_CHARS = 400_000  # of the context engine's part of a run's first message
 WAITING_QUEUED = "queued"  # a run's `waiting` while it waits for a place (MAX_SESSIONS)
 WAITING_PLAN = "plan"  # a run's `waiting` while main is in plan mode, where a writer's end holds the runs it starts
+WAITING_OFF = "off"  # a run's `waiting` while thimble is off in main's session (/plugin), which holds the runs it starts
 MAX_SESSIONS = 3  # runs whose agents run at once
 LIMIT_RETRY_S = 30.0  # a start Claude Code refused at its subagent limit is tried again after this long, or at an end
 TYPED = "typed"  # subagents.TYPED: main's run_check makes the Agent call
@@ -914,6 +915,23 @@ async def _wait_out_of_plan(act: _Active) -> None:
         _set_waiting(act, None)
 
 
+async def _wait_module_back(act: _Active) -> None:
+    """A run a turn's end started (an answer's checks, the cards' checks) waits while thimble is off in main's session
+    (subagents.module_away: /plugin turned it off, which is no end of the session), its record `waiting` for that, and
+    starts once thimble is on again. Bug hunt round 10, K8: such a start failed with a notice that said main, its threads,
+    cards and labels still work and to try again in a few seconds, beside the page's line that thimble is off, and
+    nothing ran the check once thimble was on again."""
+    from . import subagents  # noqa: PLC0415
+
+    if not subagents.module_away(act.c):
+        return
+    _set_waiting(act, WAITING_OFF)
+    try:
+        await subagents.module_back(act.c)
+    finally:
+        _set_waiting(act, None)
+
+
 def _set_waiting(act: _Active, waiting: str | None) -> None:
     check = read(act.c, act.check)
     rec = ((check or {}).get("runs") or {}).get(act.doc)
@@ -999,6 +1017,8 @@ async def _launch(act: _Active) -> None:
     paths = await asyncio.to_thread(_write_task, c, work / TASK_FILE, text)
     if act.route == subagents.FOLLOW_ON:
         await _wait_out_of_plan(act)
+        if not act.ended:
+            await _wait_module_back(act)
     if act.ended:
         return
     ans = await subagents.start_job(
@@ -1091,6 +1111,15 @@ def _refused(act: _Active, kind: str, reason: str, rid: Any, expired: bool = Fal
         if act not in _queue:
             _queue.insert(0, act)
         _retry_later()
+        return
+    if act.route == subagents.FOLLOW_ON and subagents.module_away(act.c):
+        # thimble went off in main's session (/plugin) as the run started: it starts once thimble is on again
+        # (_wait_module_back), with no failure (bug hunt round 10, K8)
+        act.request = None
+        act.task = None
+        if act not in _queue:
+            _queue.insert(0, act)
+        _pump()
         return
     check = read(act.c, act.check)
     rec = ((check or {}).get("runs") or {}).get(act.doc)

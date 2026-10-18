@@ -104,6 +104,7 @@ AUTO_MODE, NO_CALL, LIMIT, HOOK, EARLIER, NO_MODULE, ERROR = (
 CONNECT_GRACE_S = 30.0
 # how long a follow-on start waits for that module first (module_settled), looking every CONNECT_STEP_S
 CONNECT_WAIT_S, CONNECT_STEP_S = 10.0, 0.25
+MODULE_BACK_POLL_S = 1.0  # how often a follow-on start held while main's module does not answer looks again (module_back)
 HANDBACK_WAIT_S = 5.0  # a turn's end with no running child ends the run once no hand-back follows within this
 # in auto mode Claude Code makes an agent that ended with text call SubagentHandback, a model step later
 AUTO_HANDBACK_WAIT_S = 30.0
@@ -733,6 +734,26 @@ async def module_settled(c: str, wait_s: float | None = None) -> None:
     while (not module_bridge.live(c) and connecting(c) and module_bridge.why_not(c) == module_bridge.NOT_LOADED
            and time.monotonic() < end):
         await asyncio.sleep(CONNECT_STEP_S)
+
+
+def module_away(c: str) -> bool:
+    """Whether main's session runs but its hooks module does not answer: the analyst turned thimble off in it with
+    /plugin, which is no end of the session (session._away, bug hunt H19), or Claude Code is a moment from quitting.
+    False while the module answers, and for a reason a restart of Claude Code fixes (module_bridge.needs_restart)."""
+    from . import module_bridge  # noqa: PLC0415
+
+    if module_bridge.live(c):
+        return False
+    why = str(module_bridge.why_not(c) or "")
+    return why.startswith(module_bridge.NOT_ANSWERING) and not module_bridge.needs_restart(c, why)
+
+
+async def module_back(c: str, poll_s: float | None = None) -> None:
+    """Wait while main's module does not answer in a session that runs (module_away): a follow-on start then starts once
+    thimble is on again, rather than failing with a notice that says main and its tools still work (bug hunt round 10,
+    K8). Main's quit ends the wait: its stop (agents.stop_all) ends what waits."""
+    while module_away(c):
+        await asyncio.sleep(MODULE_BACK_POLL_S if poll_s is None else poll_s)
 
 
 # --------------------------------------------------------------------------- starts

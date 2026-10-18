@@ -753,6 +753,7 @@ FULL_LEFT_OUT = {
     "held-events.json": "per session",
     "unheard.json": "per session",
     "telemetry.jsonl": "the browser's telemetry",
+    "tabs.json": "this machine's browser tabs of the page (investigation.note_tab)",
 }
 FULL_SKIPPED_PARTS = {"__pycache__": "compiled Python", "cache": "a cache, rebuilt", "tmp": "a temporary file",
                       ".claude": "Claude Code's settings for one session, written again when it starts",

@@ -532,6 +532,7 @@ def session_ended(c: str, sid: str = "") -> None:
     from . import investigation  # noqa: PLC0415
 
     try:
+        investigation.page_ended(c)  # its tabs stop, not close: the next press waits for them (investigation.press)
         investigation.emit(c, investigation.MAIN, {"type": SESSION_ENDED, "session": sid})
     except Exception:  # noqa: BLE001 — a page that misses it stops at the server's own stop
         log.exception("%s: the session-ended event was not sent", c)
