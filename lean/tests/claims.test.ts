@@ -189,9 +189,9 @@ test('c opens Claims as a graph, focused: at rest an island of dots per cluster,
   expect(rest).toContain('Claims   4 · 3 clusters')
   for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst']) expect(rest).toContain(name)
   // four claims: the revised one hollow, the one said twice heavier
-  expect((rest.match(/[●⬤○]/g) || []).length).toBe(4)
+  expect((rest.match(/[●◉○]/g) || []).length).toBe(4)
   expect(rest).toContain('○')
-  expect(rest).toContain('⬤')
+  expect(rest).toContain('◉')
   expect(edges(rest)).toBe(false)
   // no sentence teaches the pane: its keys are in the hint line under the prompt
   expect(rest).not.toContain('↑')

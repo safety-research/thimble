@@ -183,7 +183,7 @@ export function compose(o) {
     const revised = !!c.revised_by && (!o.visible || o.visible.has(c.revised_by))
     const style = { color: o.colorOf(c), bold: c.n >= 2, faint: !lit(c.id) }
     // a claim said twice or more is drawn heavier
-    set(p.x, p.y, revised ? '○' : c.n >= 2 ? '⬤' : '●', style, { node: c.id })
+    set(p.x, p.y, revised ? '○' : c.n >= 2 ? '◉' : '●', style, { node: c.id })
   }
   // labels: the focused claim's whole text; a search's matches, the words found marked
   const labels = []

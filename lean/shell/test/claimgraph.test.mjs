@@ -46,7 +46,7 @@ test('at rest no line is drawn; the ring\'s claim shows its text and its links, 
   const rest = compose({ ...base, focus: null })
   const t = draw(rest)
   assert.doesNotMatch(t, /[─│╱╲╌╎]/)
-  assert.equal((t.match(/[●○⬤]/g) || []).length, 19)
+  assert.equal((t.match(/[●○◉]/g) || []).length, 19)
   assert.equal((t.match(/○/g) || []).length, 1)
   for (const name of ['wiki a', 'wiki b', 'wiki c']) assert.ok(t.includes(name))
   assert.ok(rest.flat().filter(r => r.node).every(r => !r.style.faint))
@@ -79,6 +79,6 @@ test('a search lights its matches with their labels, the words found marked; tim
   // at turn 1 the correction is not made yet: 18 claims, none hollow
   const visible = new Set(v.flat.filter(c => c.turn === 1).map(c => c.id))
   const t1 = draw(compose({ claims: v.flat, clusters: groups, lay, visible, focus: null, selected: null, matches: null, colorOf: () => '#000000', amber: '#e0a43a' }))
-  assert.equal((t1.match(/[●○⬤]/g) || []).length, 18)
+  assert.equal((t1.match(/[●○◉]/g) || []).length, 18)
   assert.ok(!t1.includes('○'))
 })
