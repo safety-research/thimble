@@ -40,8 +40,11 @@ build target flag of the view prompts, prompts.rendering): the page of where the
 started while the session's transport is local (before the analyst opens the browser) and `html-page` after the press
 (default_target), kept on its proposal (target_of). Once that page passes, the view opens there, and the same build
 goes on to the page of the other place, as a revision that reuses the reader.py that passed (build_other_page; bug hunt round 9, J13: a view built in the
-terminal was built again when the browser first opened it, 7 minutes more, then a second review); the review, of the
-page the build began with (`first_page`), starts when the build ends. A view that still lacks a page, such as one this
+terminal was built again when the browser first opened it, 7 minutes more, then a second review). The builder gets that
+step in the result of the finish_view that passed its first page and goes on in the same run (dev.next_page_step; bug
+hunt round 11, L17: sent as a message, it reached a builder that had handed back already); a build that passed with no
+finish_view sends it to its builder as a follow-on. The review, of the page the build began with (`first_page`),
+starts when the build ends. A view that still lacks a page, such as one this
 machine could not build, builds it on its first open in that place (ensure_page): the browser shows "building the page
 for the browser…", and loads the page by itself once it is built (the views list's `browser_page`), the terminal
 "building the terminal page…". The gate of a `term-page` build runs the same reader checks, then draws the program as text at 120
@@ -3122,7 +3125,7 @@ def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: 
 def revise(c: str, slug: str, request: str, *, description: str | None = None, task: str | None = None,
            claims: Any = None, arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False,
            route: str = CLICK, values: dict[str, Any] | None = None, target: str | None = None,
-           place: str | None = None) -> dict[str, Any]:
+           place: str | None = None, queue: bool = True) -> dict[str, Any]:
     """A change to the view `slug`, as a build on its proposal (made from the view when it has none): `request` is the
     analyst's words, and given fields replace the proposal's. A `description` is the proposal made again (propose), so
     its task and arrangement replace the old ones with it, a 0.7.0 spec too. A built view's files are copied aside first
@@ -3130,8 +3133,8 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
     the start that asked for it (`route`, pressed in `place` when the press names where: retry), where a running
     builder of the view gets the change as a message, and a finished one that main's session can still reach runs
     again with it; a typed change (main's propose_view) is started by its caller. `target` names the page the change
-    builds (ensure_page); without it the build makes the page of where it starts (default_target). 404 for no such
-    view or proposal."""
+    builds (ensure_page); without it the build makes the page of where it starts (default_target). `queue` False
+    leaves the change to a builder that takes it now (dev.next_page_step). 404 for no such view or proposal."""
     request = str(request or "").strip()
     _stop_review(c, slug)
     with _proposals_lock:
@@ -3166,6 +3169,8 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
         if revision:
             _keep_built(c, slug)
         prop = update_proposal(c, slug, **fields) or prop
+    if not queue:
+        return {**prop, "revised": True}
     _emit(c, slug, str(prop.get("status") or "queued"), chat=prop.get("chat"))
     if route != TYPED:
         _queue(c, slug)
@@ -3708,13 +3713,14 @@ def other_page(target: str) -> str:
     return HTML_PAGE if target == TERM_PAGE else TERM_PAGE
 
 
-def build_other_page(c: str, slug: str) -> bool:
+def build_other_page(c: str, slug: str, *, queue: bool = True) -> bool:
     """A build of the view `slug` that just passed goes on to the page of the view's other place (module note, Pages):
     the change ensure_page asks for, queued at once as a follow-on of the same build, which a builder that main's session
     can still reach takes with its context (dev.queue_view), the page the build began with kept as `first_page`, whose
-    review waits for the build's end (end_other_page). Nothing for a view that has both pages or lacks the page its build
-    made, a view thimble ships, a page whose last build failed (Retry builds it), or a page this machine cannot build
-    and check (its first open there says why). Whether it was queued."""
+    review waits for the build's end (end_other_page). With `queue` False the change is not queued: the builder that
+    still runs takes it in the result of its finish_view (dev.next_page_step). Nothing for a view that has both pages or
+    lacks the page its build made, a view thimble ships, a page whose last build failed (Retry builds it), or a page
+    this machine cannot build and check (its first open there says why). Whether the build goes on."""
     view = read_built(c, slug)
     prop = read_proposal(c, slug)
     if view is None or view.get("origin") != "workspace" or prop is None:
@@ -3728,7 +3734,7 @@ def build_other_page(c: str, slug: str) -> bool:
         return False
     if build_problem_for(c, other) or (other == HTML_PAGE and headless.missing(headless.PAGES)):
         return False
-    revise(c, slug, request, proposed_by="thimble", route=FOLLOW_ON, target=other)
+    revise(c, slug, request, proposed_by="thimble", route=FOLLOW_ON, target=other, queue=queue)
     update_proposal(c, slug, first_page=made)
     log.info("%s: the view %s passed with its %s, and its build goes on to its %s", c, slug, PAGE_OF[made],
              PAGE_OF[other])

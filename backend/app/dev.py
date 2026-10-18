@@ -2830,6 +2830,30 @@ def _passed(c: str, slug: str) -> None:
     view_review.after_built(c, slug)
 
 
+NEXT_PAGE_HINT = "finish-view-pass-next"  # prompts/tools.md: {place}, the page that passed; the step follows it
+
+
+def next_page_step(c: str, slug: str, agent_id: str) -> str:
+    """finish_view's pass of the page a build began with, while its builder still runs: the build goes on to the page
+    of the view's other place in the same run (views.build_other_page, not queued), and the builder gets that step
+    (change_text, prompts/dev-view-page.md) in finish_view's result, after NEXT_PAGE_HINT. Its attempts count afresh,
+    and the review starts once, when the build ends (_passed). '' when the build makes no other page (bug hunt round
+    11, L17: the builder handed back its terminal page before thimble's message with the browser page reached it, and
+    the resumed run was taken as ended by that hand-back, which a /compact in main held back 14 s)."""
+    from . import subagents, tools, views  # noqa: PLC0415
+
+    made = views.target_of(c, slug)
+    if not views.build_other_page(c, slug, queue=False):
+        return ""
+    prop = views.update_proposal(c, slug, status="building", changed=None, attempt=0, finish=None,
+                                 last_report=None) or {}
+    _view_runs.setdefault((c, slug), _Build(agent=agent_id, route=str(prop.get("route") or subagents.FOLLOW_ON)))
+    views._emit(c, slug, "building", chat=prop.get("chat"))
+    log.info("%s: the builder %s of %s goes on to the view's other page in the same run", c, agent_id, slug)
+    return "\n\n".join(x for x in (tools.hint(NEXT_PAGE_HINT, place=views.MISSING_PAGE_PLACE.get(made, "")),
+                                   change_text(c, prop)) if x)
+
+
 def stop_view(c: str, slug: str, why: str) -> bool:
     """Take the build of `slug` out of the queue and stop its builder through main's module (subagents.stop), or its
     program's task, which ends it as `why` says (_settle). Never blocks; the build leaves the pool at once so a
