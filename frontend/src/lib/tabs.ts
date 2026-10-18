@@ -2,10 +2,13 @@
 // after a quit, `claude -c`, `/thimble browser`, `thimble -c` and two ↗). The press (`thimble open`, backend open_cmd)
 // hands its ref to the signed-in tabs whose stream is live (backend investigation.press, the stream's `press` event): a
 // tab opens the ref, asks its browser to bring it to the front, and says it took it (takePress), so no other tab opens.
-// A tab stopped with its server closes once another tab of its workspace on this origin runs the page: the press that
-// started the server again opened that one, in front, and it says so when it starts (answerTabs); a stopped tab that
-// missed it asks before it reloads once the server runs again (shell/ServerDown StoppedPage, liveElsewhere), and closes
-// when one answers. A tab that came back by itself (noteCameBack) just before the press's tab started stops and closes
+// A tab stopped with its server or its session comes back by itself once the server answers (shell/ServerDown
+// StoppedPage), and a press while no tab is live waits for it and hands it the ref as its stream opens (bug hunt round
+// 10, K12: a new tab opened beside it, and it could not close itself, since browsers let a script close only a tab a
+// script opened). A tab stopped with its server closes once another tab of its workspace on this origin runs the page:
+// a press no stopped tab answered in time opened that one, in front, and it says so when it starts (answerTabs); a
+// stopped tab that missed it asks before it reloads once the server runs again (shell/ServerDown StoppedPage,
+// liveElsewhere), and closes when one answers. A tab that came back by itself (noteCameBack) just before the press's tab started stops and closes
 // when that one says it started (`elsewhere`), so the press's tab, in front, is the one left.
 import { api } from './api'
 import { pageStopped, stopPage } from './stale'

@@ -231,3 +231,54 @@ async def test_the_server_hands_a_press_to_a_signed_in_tab_and_waits_for_it_to_t
         assert await investigation.press("mini", "home", "open0000ac", wait_s=0.05) is False, "a tab that does not answer"
     finally:
         investigation._tabs["mini"].discard(q)
+
+
+async def test_k12_a_press_waits_for_a_stopped_tab_to_come_back_and_hands_it_the_press():
+    """Bug hunt round 10, K12: after `claude -c` and `/thimble browser`, or `thimble -c`, a new tab opened beside the one
+    that stopped with the session, which then tried to close itself and could not (a browser lets a script close only a
+    tab a script opened). A stopped tab comes back by itself once the server answers (frontend StoppedPage): a press
+    while no tab is live waits for it and hands it the press as its stream opens, so no other tab opens. A tab that was
+    closed, not stopped, is not waited for, nor one that does not come back."""
+    import asyncio
+
+    from app import config, investigation
+
+    class Req:
+        headers: dict = {}
+
+    c = "mini"
+    config.workspace_dir(c)
+    tabs = investigation._tabs.setdefault(c, set())
+    try:
+        # a signed-in tab's stream opens, and its session ends: the tab stops, it is not closed
+        await investigation._stream(c, investigation.MAIN, Req(), tab=True)
+        [q0] = tabs
+        investigation.page_ended(c)
+        tabs.discard(q0)
+        investigation._stream_ended(c)
+        assert investigation.stopped_tab(c)
+        # the press after `claude -c`: no tab is live, so it waits for the stopped one
+        waiting = asyncio.create_task(investigation.press(c, "card:abc", "open0000ba", stopped_wait_s=5))
+        await asyncio.sleep(0.05)
+        assert not waiting.done(), "a press waits for the stopped tab"
+        # the stopped tab comes back: its stream opens, and the press is handed to it
+        await investigation._stream(c, investigation.MAIN, Req(), tab=True)
+        [q] = tabs
+        told = q.get_nowait()
+        assert (told.event, told.data) == ("press", {"ref": "card:abc", "open": "open0000ba"})
+        assert investigation.took("open0000ba") is True and await waiting is True
+        # the analyst closes it: its stream ends while the server and the session run, so no press waits for it
+        tabs.discard(q)
+        investigation._stream_ended(c)
+        assert not investigation.stopped_tab(c)
+        assert await investigation.press(c, "home", "open0000bb", stopped_wait_s=5) is False
+        # a stopped tab that does not come back in time: the press opens a tab, and the next one waits for none
+        investigation.note_tab(c)
+        assert await investigation.press(c, "home", "open0000bc", stopped_wait_s=0.05) is False
+        assert not investigation.stopped_tab(c)
+        from app import demo
+        assert demo.full_kept(Path(investigation.TABS_FILE)), "this machine's tabs are no part of a full export"
+    finally:
+        tabs.clear()
+        investigation._subscribers.pop((c, investigation.MAIN), None)
+        investigation._ended.discard(c)

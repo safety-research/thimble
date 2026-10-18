@@ -26,9 +26,10 @@ serializes presses; the record is <home>/open/<hash>.last, opener.press_record).
 
 One tab for the page. Where a signed-in tab of thimble's page on the folder's workspace holds its stream open, the press
 hands it the ref (reuse: the server's press, investigation.press), which it opens and comes to the front where the
-browser lets it, and no opener runs and no code is made: the status says `reused`. Only when no tab takes it does the
-press open one (bug hunt round 9, J8: after a quit, `claude -c` and `/thimble browser`, `thimble -c` and two ↗ the
-analyst had five tabs of one page). A press for a link (`--link`) always makes one.
+browser lets it, and no opener runs and no code is made: the status says `reused`. A tab that stopped with the server
+or the session comes back by itself once the server answers, and takes the press as it comes back (bug hunt round 10,
+K12). Only when no tab takes it does the press open one (bug hunt round 9, J8: after a quit, `claude -c` and `/thimble
+browser`, `thimble -c` and two ↗ the analyst had five tabs of one page). A press for a link (`--link`) always makes one.
 """
 from __future__ import annotations
 
@@ -49,7 +50,9 @@ from urllib.parse import urlsplit
 from . import opener
 
 DEBOUNCE_S = 5.0  # a second press of one session at one ref within this long answers the first's status
-REUSE_TIMEOUT_S = 6.0  # the server waits investigation.PRESS_WAIT_S for a tab to take a press (reuse)
+# the server waits investigation.PRESS_WAIT_S for a live tab to take a press, and STOPPED_WAIT_S for a stopped one to come
+# back and take it (reuse)
+REUSE_TIMEOUT_S = 15.0
 LOCK_NAME = "press.lock"  # under <home>/open: one press at a time
 PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy")
 NO_PROXY_VARS = ("NO_PROXY", "no_proxy")

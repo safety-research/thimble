@@ -5,10 +5,11 @@
 // sends nothing under its key. The line names the ways to start the page again (`thimble` in the folder, or the
 // session continued with `claude -c` and `/thimble browser`: bug hunts G11, H6), and the page asks quietly, with no
 // credentials, whether thimble's server answers again (lib/stale serverBack), then reloads, which is all it needs: the
-// browser's sign-in outlives the server (bug hunt H6: the tab stayed stopped beside the new one). Once another tab of
-// this origin runs the page on the same workspace (the press that started the server opened it, in front), this tab
-// closes instead, or says it may be closed where the browser keeps it open (lib/tabs; bug hunt round 9, J8: after a
-// restart there were always two tabs). A demo page (lib/demo) has no session and no terminal of its own, so both lines
+// browser's sign-in outlives the server (bug hunt H6: the tab stayed stopped beside the new one). The press that starts
+// the page again waits for such a tab to come back and hands it its object as its stream opens, so it opens no other
+// tab (backend investigation.press; bug hunt round 10, K12). Once another tab of this origin runs the page on the same
+// workspace (a press no stopped tab answered in time opened it), this tab closes instead, or says it may be closed where
+// the browser keeps it open (lib/tabs; bug hunt round 9, J8: after a restart there were always two tabs). A demo page (lib/demo) has no session and no terminal of its own, so both lines
 // name `thimble demo` there (bug hunt F7).
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
@@ -35,8 +36,8 @@ export const ELSEWHERE_LINE = "thimble's page runs again in another tab. You can
 /** How long a stopped page waits before it first asks whether thimble's server answers again: a server stops a few
  * seconds after its session ended (backend session.STOP_AFTER_S), and a page brought back into it would stop again. */
 export const BACK_FIRST_MS = 8_000
-/** How often a stopped page asks after that. */
-export const BACK_EVERY_MS = 4_000
+/** How often a stopped page asks after that: a press waits for it to come back (backend investigation.STOPPED_WAIT_S). */
+export const BACK_EVERY_MS = 2_000
 /** What brings a stopped page back once the server answers, and what closes it when another tab runs the page (a test
  * replaces them). */
 export const comeBack = { reload: (): void => window.location.reload(), close: (): void => window.close() }
