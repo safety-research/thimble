@@ -307,3 +307,29 @@ def test_an_object_bound_to_a_cut_table_says_so(root: Path, monkeypatch: pytest.
     assert q["truncated"] and len(q["table"]) == 4
     obj = O.save(st, "saves", {"title": "Saves", "data": {"rows": q["id"], "first": f"{q['id']}#row=1@user"}})
     assert len(obj["lineage"]["problems"]) == 1 and "more rows than its record keeps" in obj["lineage"]["problems"][0]
+
+
+def test_row_sets_of_many_block_refs_compress_and_expand_fast_and_the_same(root: Path) -> None:
+    """An output row may rest on a hundred thousand block refs (each tool call of a swarm): compress keeps each once in
+    first-seen order without a quadratic scan, and expand gives back what parse() reads, in a few seconds at most."""
+    import random
+    import time
+
+    rnd = random.Random(7)
+    files = [f"runs/r{i}/agents/agent-{j:02d}.jsonl" for i in range(3) for j in range(4)]
+    blocks = [f"{rnd.choice(files)}#L{rnd.randint(1, 4000)}.b{rnd.randint(0, 3)}" for _ in range(120_000)]
+    mixed = blocks + ["a.jsonl#L3", "a.jsonl#L4", "a.jsonl#L9", "t.csv#row=2", "d.db#t/5", "f.json#/x/3", blocks[0]]
+    t0 = time.time()
+    sets = R.compress(mixed)
+    back = R.expand(sets)
+    assert time.time() - t0 < 10
+    # every ref once, the numbered rows as row sets first, then the rest in first-seen order
+    want_other = list(dict.fromkeys(b for b in mixed if R._unit(b) is None))
+    assert sets[:4] == ["a.jsonl#L3-4,9", "t.csv#row=2", "d.db#t/5", "f.json#/x/3"]
+    assert sets[4:] == want_other
+    # expand reads each row set as parse() does, the block refs included (a leading zero is read as a number)
+    slow = [x for s in sets for x in R.single_refs(R.parse(s))]
+    assert back == slow
+    assert R.expand(["a b/c.jsonl#L007.b02 "]) == ["a b/c.jsonl#L7.b2"]
+    with pytest.raises(R.RefError):
+        R.expand(["q12#L3.b1"])
