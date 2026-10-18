@@ -1,9 +1,10 @@
 // Claims in a session (verbs/claims, shell/claimsview.ts, observer.ts): the observer's one look after a turn of work
-// gives the turn's claims; each is placed in the message that said it, with the citations near it, in the session's
-// store (thimble/claims/<session>.json); c lights under the answer with how many are new or revised; c from the empty
-// prompt opens the Claims pane as a graph, focused: at rest an island of dots per cluster with its name and no lines;
-// the ring on a claim shows its text and its links; ↵ fills the bar (said in turn N, ×N, its sources, what it revised);
-// n, /, t and ] [ come through the prompt; the hint line under the prompt holds the keys; a question carries the claim.
+// gives the turn's claims, each with what it means; each is placed in the message that said it, with the citations near
+// it, in the session's store (thimble/claims/<session>.json); c lights under the answer with how many are new; c from
+// the empty prompt opens the Claims pane as a graph, focused: at rest an island of dots per cluster with its name and no
+// lines; the ring on a claim (arrow keys or a click) shows its card (the claim, Precisely, Based on, Judgment, Not
+// stated) and its links; r replays the graph in the order made and any key stops it; the hint line under the prompt
+// says `r replay · esc close`; a question carries the claim the ring is on.
 // `claude plugin test lean`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -21,8 +22,8 @@ const R2 = '2b2b2b2b-aaaa-bbbb-cccc-000000000002'
 const Q1 = 'was there any bias in the edits over time? who drove it?'
 const A1 = 'Yes. The tilt is one editor. Kestrel made [41%](q4#user=Kestrel@share) of June\'s edits, and [212 of them](q7#user=Kestrel@n) were reverts. June 18 had [6,543 saves](q1#day=2026-06-18@n), the busiest day.'
 const FORK1 = { notes: [], line: null, settled: false, verbs: {}, glosses: [], claims: [
-  { claim: 'The tilt in the edits is one editor', quote: 'The tilt is one editor', kind: 'judgment', cluster: 'testing for bias' },
-  { claim: "Kestrel made 41% of June's edits, 212 of them reverts", quote: "Kestrel made 41% of June's edits", kind: 'finding', cluster: 'finding who edited' },
+  { claim: 'The tilt in the edits is one editor', quote: 'The tilt is one editor', kind: 'judgment', cluster: 'testing for bias', precisely: 'One editor made most of the edits that lean one way in June', based_on: 'q4, q7 · June edits, all users', judgment: "'tilt' is a reading: no side was measured", unstated: 'Most of all June edits, or of the reverts?' },
+  { claim: "Kestrel made 41% of June's edits, 212 of them reverts", quote: "Kestrel made 41% of June's edits", kind: 'finding', cluster: 'finding who edited', precisely: "41% of the 517 edits saved in June were Kestrel's; 212 of those were reverts", based_on: 'q4 · revisions.jsonl, June · 517 rows' },
   { claim: 'June 18 had 6,543 saves, the busiest day', quote: 'June 18 had 6,543 saves', kind: 'event', cluster: 'the June 18 burst' },
 ] }
 const Q2 = "I'm going to tell my manager the tilt is one editor. Anything to fix?"
@@ -151,7 +152,7 @@ test('after a turn of work its claims are in the store, each where it was said w
 })
 
 
-test('a later turn: a claim said again counts ×N; a correction is linked both ways, and c lights with "1 claim revised"', async ($, on) => {
+test('a later turn: a claim said again counts ×N; a correction is linked both ways, and c lights with "1 new claim"', async ($, on) => {
   const w = world(on, [FORK1, FORK2])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   await turn($, w, { id: 't2', user: U2, prompt: Q2, row: R2, answer: A2 })
@@ -167,7 +168,8 @@ test('a later turn: a claim said again counts ×N; a correction is linked both w
   expect(store.claims.find((c: Any) => c.id === 'c3').said.length).toBe(2)
   textOf(await reply($, R2, A2))
   await w.clock.settle()
-  expect(textOf(await reply($, R2, A2))).toContain('● 1 claim revised')
+  // a revision is a new claim: the note says nothing more of it
+  expect(textOf(await reply($, R2, A2))).toContain('● 1 new claim')
 })
 
 const PANE = { plugin: 'thimble-lean', component: 'Pane', surface: 'terminal', requestId: 'claims', props: { bodyColumns: 110, scroll: { bodyRows: 30 }, isFocused: true, title: 'Claims' }, viewport: { columns: 200, rows: 50, isFullscreen: true } } as never
@@ -190,73 +192,90 @@ test('c opens Claims as a graph, focused: at rest an island of dots per cluster,
   const rest = textOf(await $.ui.render(PANE))
   expect(rest).toContain('Claims   4 · 3 clusters')
   for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst']) expect(rest).toContain(name)
-  // four claims: the revised one hollow, the one said twice heavier
+  // four claims: the revised one hollow, the one said twice heavier, and a faint ? beside the one whose denominator
+  // was not stated
   expect((rest.match(/[●◉○]/g) || []).length).toBe(4)
-  expect(rest).toContain('○')
+  // (textOf reads a dot's press with its label: the ? stands right after it)
+  expect(rest).toMatch(/○claim: The tilt in the edits is one editor\?/)
   expect(rest).toContain('◉')
   expect(edges(rest)).toBe(false)
-  // no sentence teaches the pane: its keys are in the hint line under the prompt
+  // no sentence teaches the pane: its keys are in the hint line under the prompt, and they are only these
   expect(rest).not.toContain('↑')
-  expect(textOf(await $.ui.render(HINT))).toContain('↑ ↓ move · ↵ select · n cluster · / search · t time · esc close · m map the corpus ~4 min ~310k tokens')
+  expect(textOf(await $.ui.render(HINT))).toBe('r replay · esc close')
 })
 
-test('the ring on a claim: its whole text, its links as thin lines, a revision dashed; ↵ fills the bar; 1 opens a source', async ($, on) => {
+test('the ring on a claim: its card says what it means, its links are thin lines, the rest fades; a click moves the ring', async ($, on) => {
   const w = await twoTurns($, on)
-  await $.ui.focus(focus('cl-c1'))
+  await $.ui.focus(focus('cl-c2'))
   const t = textOf(await $.ui.render(PANE))
-  expect(t).toContain('The tilt in the edits is one editor')
+  expect(t).toContain("Kestrel made 41% of June's edits, 212 of them reverts")
+  expect(t).toContain("Precisely   41% of the 517 edits saved in June were Kestrel's; 212 of those were reverts")
+  expect(t).toContain('Based on    q4 · revisions.jsonl, June · 517 rows')
+  expect(t).not.toContain('Judgment')
   expect(edges(t)).toBe(true)
-  // ↵ on the claim (a press): the bar says where it was said, ×N, its sources, and what revised it
+  // a click on another claim puts the ring there: its card, with its judgment and what it does not state
   const ui = await $.ui.mount(PANE)
   await w.clock.settle()
   await ui.press({ key: 'cl-c1' })
   await w.clock.settle()
-  const bar = textOf(await $.ui.render(PANE))
-  expect(bar).toContain('said in turn 1')
-  expect(bar).toContain('×2')
-  expect(bar).toContain('revised in turn 2 to The tilt is two editors, Kestrel and Wren, not one')
-  // a claim with sources: its cite marks, each on a digit
-  await ui.press({ key: 'cl-c2' })
-  await w.clock.settle()
-  expect(textOf(await $.ui.render(PANE))).toMatch(/41%.*212 of them/)
-  expect(textOf(await $.ui.render(HINT))).toContain('↵ select · 1–2 source')
-  // 1 opens its first source in the tray (the key comes through the prompt), and the pane takes the keys back
-  const opened = w.opened.length
-  await ($ as Any).prompt.edit(key('1'))
-  await w.clock.settle()
-  const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 50, isFullscreen: true } } as never
-  textOf(await $.ui.render(BAND))
-  await w.clock.settle()
-  expect(textOf(await $.ui.render(BAND))).toContain('41%')
-  expect(w.runs.some(a => a.includes('resolve') && a.includes('q4#user=Kestrel@share'))).toBe(true)
-  expect(w.opened.length).toBeGreaterThan(opened)
+  const c1 = textOf(await $.ui.render(PANE))
+  expect(c1).toContain("Judgment    'tilt' is a reading: no side was measured")
+  expect(c1).toContain('Not stated  Most of all June edits, or of the reverts?')
+  // no bar of details, no sources on digits: the card is all
+  expect(c1).not.toContain('said in turn')
+  expect(textOf(await $.ui.render(HINT))).toBe('r replay · esc close')
   await ui.unmount()
 })
 
-test('t is time: the claims appear in the order made, a revision only once made; ] [ move; n goes cluster to cluster; / searches', async ($, on) => {
+test('r replays the graph in the order the claims were made, the newest bold; any key stops it; / t n ] are not its keys', async ($, on) => {
   const w = await twoTurns($, on)
-  await ($ as Any).prompt.edit(key('t'))
+  await $.ui.focus(focus('cl-c2'))
+  await ($ as Any).prompt.edit(key('r'))
   await w.clock.settle()
-  const t1 = textOf(await $.ui.render(PANE))
-  expect(t1).toContain('turn 1 · answer · 3 of 4')
-  expect(t1).not.toContain('○')
-  expect(textOf(await $.ui.render(HINT))).toContain('] [ turn · t now · esc close')
-  await ($ as Any).prompt.edit(key(']'))
+  // it starts from nothing, with the ring off, so no card covers the growth
+  let t = textOf(await $.ui.render(PANE))
+  expect(t).toContain('replay · 0 of 4')
+  expect(t).not.toContain('Precisely')
+  // it grows in the order made: turn 1's three claims, then turn 2's correction
+  const seen: string[] = []
+  for (let i = 0; i < 60; i++) {
+    await w.clock.advance(80)
+    await w.clock.settle()
+    t = textOf(await $.ui.render(PANE))
+    const m = /replay · (\d+) of 4/.exec(t)
+    if (m) seen.push(m[1]!)
+    if (!m) break
+  }
+  expect(seen.length).toBeGreaterThan(2)
+  expect(seen.map(Number)).toEqual([...seen.map(Number)].sort((a, b) => a - b))
+  expect(t).toContain('Claims   4 · 3 clusters')
+  // the correction is hollow only once it is made: at 3 of 4 no ○ is drawn
+  await ($ as Any).prompt.edit(key('r'))
+  await w.clock.settle()
+  let at3 = ''
+  for (let i = 0; i < 60 && !at3; i++) {
+    await w.clock.advance(80)
+    await w.clock.settle()
+    const x = textOf(await $.ui.render(PANE))
+    if (x.includes('replay · 3 of 4')) at3 = x
+  }
+  expect(at3).not.toBe('')
+  expect(at3).not.toContain('○')
+  // any key stops it: the whole graph at once
+  await ($ as Any).prompt.edit(key('x'))
   await w.clock.settle()
   expect(textOf(await $.ui.render(PANE))).toContain('Claims   4 · 3 clusters')
-  // n: the ring to the next cluster's first claim
-  await $.ui.focus(focus('cl-c1'))
-  await ($ as Any).prompt.edit(key('n'))
-  await w.clock.settle()
-  expect(textOf(await $.ui.render(PANE))).toContain("Kestrel made 41% of June's edits, 212 of them reverts")
-  // /: a search field in the head, and the hint line says what its keys do
-  await ($ as Any).prompt.edit(key('/'))
-  await w.clock.settle()
-  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"key":"search"')
-  expect(textOf(await $.ui.render(HINT))).toContain('type to search · ↵ done · esc close')
+  // / t n ] are not keys of the pane: nothing in it changes, and the hint stays
+  for (const k of ['/', 't', 'n']) {
+    const r = await ($ as Any).prompt.edit(key(k))
+    expect(r.text).toBe(k)
+  }
+  expect(textOf(await $.ui.render(PANE))).toContain('Claims   4 · 3 clusters')
+  expect(JSON.stringify(await $.ui.render(PANE))).not.toContain('"key":"search"')
+  expect(textOf(await $.ui.render(HINT))).toBe('r replay · esc close')
 })
 
-test('a question asked with a claim selected carries it; 0 closes the pane; m asks Claude for the corpus orientation', async ($, on) => {
+test('a question asked with the ring on a claim carries it; c closes the pane', async ($, on) => {
   const w = world(on, [FORK1])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   await ($ as Any).prompt.edit(key('c'))
@@ -264,27 +283,20 @@ test('a question asked with a claim selected carries it; 0 closes the pane; m as
   await $.ui.focus(focus('cl-c2'))
   await $.prompt.submit({ text: 'is 41% of all June edits or of the relay edits?', origin: { kind: 'composer' } } as never)
   const ctx = w.submitted.at(-1)!.context.join('\n')
-  expect(ctx).toContain('a claim of this session selected in the Claims pane: c2 "Kestrel made 41% of June\'s edits, 212 of them reverts"')
+  expect(ctx).toContain('the ring on a claim of this session in the Claims pane: c2 "Kestrel made 41% of June\'s edits, 212 of them reverts"')
   expect(ctx).toContain('q4#user=Kestrel@share')
-  await ($ as Any).prompt.edit(key('0'))
-  await w.clock.settle()
-  expect(textOf(await $.ui.render(HINT))).not.toContain('↵ select')
   await ($ as Any).prompt.edit(key('c'))
   await w.clock.settle()
-  await ($ as Any).prompt.edit(key('m'))
-  await w.clock.settle()
-  const ran = w.runs.find(a => a.some(x => x.endsWith('verb.mjs')) && a.includes('run'))
-  expect(ran?.includes('claims')).toBe(true)
+  expect(textOf(await $.ui.render(HINT))).not.toContain('r replay')
 })
 
 test('a graph with no layout (a drawing older than its module, after a reload) says so in one line and never throws', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const el = (t: string) => (p: any) => ({ t, ...p })
-  const els = { Box: el('Box'), Text: el('Text'), Button: el('Button'), Input: el('Input') }
+  const els = { Box: el('Box'), Text: el('Text'), Button: el('Button') }
   const claim = { id: 'c1', cluster: 'k1', text: 'June 18 was the busiest day', n: 1, said: [] }
   const view = { flat: [claim], groups: [{ id: 'k1', name: 'the June 18 burst', claims: [claim] }], total: 1, clusters: 1 }
-  const noop = () => undefined
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const drawn = claimsPaneEl(els, { w: 80, h: 20, theme: 'dark', view, lay: undefined, moments: [], cursor: null, focus: null, selected: null, search: null, searching: false, onSelect: noop, onSource: noop, onSearch: noop, onSearchDone: noop }) as any
+  const drawn = claimsPaneEl(els, { w: 80, h: 20, theme: 'dark', view, lay: undefined, focus: null, replay: null, onHover: () => undefined }) as any
   expect(JSON.stringify(drawn)).toContain('The graph could not be laid out. Press esc, then c to open it again.')
 })

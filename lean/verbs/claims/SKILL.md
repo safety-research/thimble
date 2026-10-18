@@ -1,6 +1,6 @@
 ---
 name: claims
-description: Use when the person asks for the corpus orientation (offered in the claims list, c) or for an orientation of a folder's work. You read the work and write its claims, facts, findings, judgment calls and events, each with evidence refs, their relations and named clusters, as one JSON file that `lean verb claims save` adds to the session's claims.
+description: Use when the person asks for the corpus orientation (/verb claims orient) or for an orientation of a folder's work. You read the work and write its claims, facts, findings, judgment calls and events, each with evidence refs, their relations and named clusters, as one JSON file that `lean verb claims save` adds to the session's claims.
 ---
 
 # The corpus orientation: what the work holds, claim by claim
@@ -9,13 +9,13 @@ The orientation helps a person find their way in work they did not do: many agen
 of records. It lists what the work holds as short claims. Each claim has a kind, the rows that show it, and its
 relations to other claims. Clusters group the claims by what happened. The claims join the session's own claims (the
 ones Claude and the person made in the conversation), marked as the orientation's: the person opens them with c, as a
-list of clusters in the terminal and as a graph in the browser, and a claim shows its evidence.
+graph of clusters in the terminal and in the browser, and a claim shows its evidence.
 
 ## Who does the work
 
 The main conversation gives this work to one subagent with the Agent tool. Reading the work takes many rows, and in a
 subagent those rows do not stay in the conversation. When the subagent is done, main adds the claims with
-`lean verb claims save FILE` and replies in one or two sentences. The claims list's offer writes the brief for main.
+`lean verb claims save FILE` and replies in one or two sentences. `/verb claims orient` writes the brief for main.
 
 The subagent does the work below. Its last message is the last line of the check.
 

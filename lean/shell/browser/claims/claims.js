@@ -1,18 +1,16 @@
 // claims.js: the Claims page. The session's claims (thimble/claims/<session>.json, CONTRACT 7) drawn as a force graph
-// on a canvas, with no library. A node is a claim, in the color of its cluster (or of what Color by says): Claude's a
-// circle, the person's a diamond, the corpus orientation's a small dotted ring, larger when it was said again (×N).
-// Each cluster is named above its claims; a thin line joins the claims of a cluster in the order said, and claims said
-// one after the other in a message. A revised claim is a dashed ring, its words struck through, with a dashed arrow
-// "revised in turn N" to the claim that replaced it. The time strip replays the claims in the order made. A click
-// opens the claim below: where it was said, its sources, ×N, what it replaces, and ↵ ask.
+// on a canvas, with no library. A dot is a claim, in the color of its cluster, larger when it was said again (×N), and
+// hollow when a later claim revised it; a faint ? beside it says its denominator or window was not stated. Each
+// cluster is named above its claims. No line is drawn at rest. Pointing at a claim shows the card of what it means and
+// draws its links (a revision as a faint dashed amber line); the rest fades. A click opens the message where it was
+// said. Replay (or r) grows the graph again in the order the claims were made; any key stops it.
 //
 // It reads the store from the page server (/api/claims, with its ETag) and asks again every few seconds while the page
-// is visible, so the claims a later turn adds arrive in place.
+// is visible, so the claims a later turn adds grow in place.
 (function () {
   'use strict'
   const $ = (s, r) => (r || document).querySelector(s)
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-  const fmt = n => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n))
 
   // ------------------------------------------------------------------------------------------------ where it reads
   const params = new URLSearchParams(location.search)
@@ -29,16 +27,14 @@
   // ------------------------------------------------------------------------------------------------ colors
   const PAL = ['#1f5fbf', '#d7781f', '#0f5b3a', '#1f9e8f', '#7a6a12', '#b34a7a', '#6d4fd8', '#8a5a2b']
   const PAL_DARK = ['#6aa2f0', '#f0a050', '#4fbf86', '#4fd0c0', '#c9b54a', '#ea86b2', '#a593f5', '#d09a66']
-  const TAGC = { fact: ['#3f6f8f', '#8fbcdc'], interp: ['#8a4fb5', '#c79ae9'] }
-  const BYC = { claude: ['#5b6b82', '#9fb0c9'], person: ['#b9466e', '#ec8fb3'], orientation: ['#a8875a', '#d9b98a'] }
   let DARK = false
-  const T = { bg: '#fcfbf8', ink: '#1f1e1c', ink2: '#4a4945', mut: '#85837c', halo: 'rgba(252,251,248,.92)', pill: '#ffffff', pillLine: '#e2e0da', ring: '#6d4fd8', warn: '#b7791f', edge: '#cfcac0' }
+  const T = { bg: '#fcfbf8', ink: '#1f1e1c', ink2: '#4a4945', mut: '#85837c', halo: 'rgba(252,251,248,.92)', warn: '#b7791f', edge: '#9c978d' }
   function readTheme() {
     const cs = getComputedStyle(document.documentElement)
     const v = n => cs.getPropertyValue(n).trim()
     DARK = (matchMedia('(prefers-color-scheme: dark)').matches && document.documentElement.dataset.theme !== 'light') || document.documentElement.dataset.theme === 'dark'
-    Object.assign(T, { bg: v('--view'), ink: v('--ink'), ink2: v('--ink2'), mut: v('--mut'), halo: v('--halo'), pill: v('--bg'), pillLine: v('--line2'), ring: v('--atl'), warn: v('--warn') })
-    T.edge = DARK ? '#4a4741' : '#d6d1c7'
+    Object.assign(T, { bg: v('--view'), ink: v('--ink'), ink2: v('--ink2'), mut: v('--mut'), halo: v('--halo'), warn: v('--warn') })
+    T.edge = DARK ? '#8f8c85' : '#9c978d'
     T.font = getComputedStyle(document.body).fontFamily
   }
   function hexA(hex, a) {
@@ -46,12 +42,7 @@
     const v = parseInt(hex.slice(1), 16)
     return `rgba(${(v >> 16) & 255},${(v >> 8) & 255},${v & 255},${a})`
   }
-  const tagOf = k => (['fact', 'finding', 'event'].includes(k) ? 'fact' : 'interp')
-  const kindOf = k => {
-    const s = String(k == null ? '' : k).toLowerCase().trim()
-    if (s.startsWith('judg') || s === 'decision') return 'judgment'
-    return ['fact', 'finding', 'event', 'claim'].includes(s) ? s : 'claim'
-  }
+  const solid = (c, fallback) => (String(c || '').startsWith('#') ? c : fallback)
 
   // ------------------------------------------------------------------------------------------------ the graph's state
   let STORE = null
@@ -60,27 +51,13 @@
   let EDGES = []
   const CLUSTERS = []
   let CBY = {}
-  const S = { hover: null, sel: null, solo: null, query: '', upto: null, color: 'cluster', asking: false, fresh: new Set(), loaded: false, etag: '' }
+  const S = { hover: null, loaded: false, etag: '', replaying: 0 }
   let seed = 17
   const rnd = () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296 }
 
-  /** The group a claim is in for the color mode, and that group's name and color. */
-  function groupOf(n) {
-    if (S.color === 'tag') return { key: n.tag, name: n.tag, color: TAGC[n.tag][DARK ? 1 : 0] }
-    if (S.color === 'by') { const b = n.by === 'person' ? 'person' : n.by === 'orientation' ? 'orientation' : 'claude'; return { key: b, name: b === 'person' ? 'you' : b === 'orientation' ? 'the corpus' : 'Claude', color: BYC[b][DARK ? 1 : 0] } }
-    if (S.color === 'turn') {
-      const ts = turnsOf()
-      const i = n.turn == null ? ts.length : ts.indexOf(n.turn)
-      const a = ts.length > 1 ? i / (ts.length - 1) : 1
-      const lo = DARK ? [90, 120, 170] : [176, 196, 226], hi = DARK ? [190, 160, 250] : [60, 40, 150]
-      const c = lo.map((x, k) => Math.round(x + (hi[k] - x) * Math.min(1, a)))
-      return { key: n.turn == null ? 'corpus' : 't' + n.turn, name: n.turn == null ? 'corpus' : 'turn ' + n.turn, color: '#' + c.map(x => x.toString(16).padStart(2, '0')).join('') }
-    }
-    const c = CBY[n.cluster]
-    return { key: n.cluster, name: c ? c.name : 'between clusters', color: c ? c.color : T.mut }
-  }
-  const colorOf = n => groupOf(n).color
-  const radiusOf = n => Math.min(12, (n.by === 'orientation' ? 4 : 5.2) + Math.sqrt(Math.max(0, n.n - 1)) * 2.8)
+  const colorOf = n => { const c = CBY[n.cluster]; return c ? c.color : T.mut }
+  const radiusOf = n => Math.min(12, 5.2 + Math.sqrt(Math.max(0, n.n - 1)) * 2.8)
+  const revised = n => !!n.revised_by && !!byId[n.revised_by]
   function layoutAnchors() {
     const used = CLUSTERS.filter(c => N.some(n => n.cluster === c.key))
     const m = used.length
@@ -93,7 +70,9 @@
     })
   }
 
-  /** The store's claims and clusters into the graph; claims already there keep their place. */
+  /** The store's claims and clusters into the graph; claims already there keep their place. The springs (a cluster's
+   *  claims in the order said, claims said one after the other in a message, a revision) shape the layout only: no
+   *  line is drawn for them. */
   function ingest(store) {
     const claims = (Array.isArray(store.claims) ? store.claims : []).filter(c => c && c.id != null && c.text)
     const clusters = (Array.isArray(store.clusters) ? store.clusters : []).filter(c => c && c.id != null)
@@ -102,7 +81,7 @@
       const key = c.id == null ? '' : String(c.id)
       if (CBY[key]) { CBY[key].name = String(c.name || key); continue }
       const i = CLUSTERS.filter(x => x.id != null).length
-      const k = { id: c.id == null ? null : key, key, name: String(c.name || 'between clusters'), from: c.from, i, cx: 0, cy: 0, ax: 0, ay: 0, lx: 0 }
+      const k = { id: c.id == null ? null : key, key, name: String(c.name || 'between clusters'), i, cx: 0, cy: 0, ax: 0, ay: 0, lx: 0 }
       k.color = k.id == null ? '#9c978d' : (DARK ? PAL_DARK : PAL)[i % PAL.length]
       CLUSTERS.push(k)
       CBY[key] = k
@@ -115,11 +94,14 @@
       const cluster = c.cluster != null && CBY[String(c.cluster)] ? String(c.cluster) : ''
       const said = (Array.isArray(c.said) ? c.said : []).filter(p => p && typeof p === 'object')
       const sources = (Array.isArray(c.sources) ? c.sources : []).map(s => (typeof s === 'string' ? { ref: s, label: s } : s)).filter(s => s && s.ref)
-      const kind = kindOf(c.kind)
-      const fields = { text: String(c.text), kind, tag: tagOf(kind), by: c.by || 'claude', cluster, turn: typeof c.turn === 'number' ? c.turn : null, said, sources, n: Math.max(1, said.length), revises: c.revises || null, revised_by: c.revised_by || null, order: i, row: said[0] && said[0].row }
+      const fields = {
+        text: String(c.text), by: c.by || 'claude', cluster, turn: typeof c.turn === 'number' ? c.turn : null, said, sources, n: Math.max(1, said.length),
+        revises: c.revises || null, revised_by: c.revised_by || null, order: i, row: said[0] && said[0].row, start: said[0] && typeof said[0].start === 'number' ? said[0].start : 0,
+        precisely: c.precisely || '', based_on: c.based_on || '', judgment: c.judgment || '', unstated: c.unstated || '',
+      }
       if (byId[id]) Object.assign(byId[id], fields)
       else {
-        const n = Object.assign({ id, x: 0, y: 0, vx: 0, vy: 0, live: false, born: 0, va: 1, hv: 0, fx: null, fy: null, adj: [] }, fields)
+        const n = Object.assign({ id, x: 0, y: 0, vx: 0, vy: 0, live: false, born: 0, va: 1, hv: 0, adj: [] }, fields)
         N.push(n)
         added.push(n)
       }
@@ -128,8 +110,7 @@
     N.sort((a, b) => a.order - b.order)
     N.forEach(n => { byId[n.id] = n; n.adj = []; n.r = radiusOf(n) })
     EDGES = []
-    const link = (a, b, t) => { if (!a || !b || a === b) return; const e = { a, b, t, born: 0 }; EDGES.push(e); a.adj.push({ n: b, t, e }); b.adj.push({ n: a, t, e }) }
-    // a cluster's claims in the order said; claims said one after the other in a message; a revision
+    const link = (a, b, t) => { if (!a || !b || a === b) return; const e = { a, b, t }; EDGES.push(e); a.adj.push({ n: b, t, e }); b.adj.push({ n: a, t, e }) }
     const lastIn = {}
     const lastRow = {}
     N.forEach(n => {
@@ -144,26 +125,40 @@
     return added
   }
 
-  // ------------------------------------------------------------------------------------------------ time
-  const turnsOf = () => [...new Set(N.map(n => n.turn).filter(t => t != null))].sort((a, b) => a - b)
-  /** Whether a claim was made by the cut-off of the time strip (all, with none set). */
-  const shown = n => S.upto == null || n.order < S.upto
-  const revisedNow = n => !!n.revised_by && byId[n.revised_by] && shown(byId[n.revised_by])
-  const saidNow = n => {
-    if (S.upto == null) return n.n
-    const last = N[Math.max(0, S.upto - 1)]
-    const lt = last ? last.turn : null
-    return Math.max(1, n.said.filter((p, i) => i === 0 || p.turn == null || lt == null || p.turn < lt || (p.turn === lt && p.row && N.some(m => m.row === p.row && shown(m)))).length)
+  /** The claims a claim links to, as the terminal's graph has them (shell/claimgraph.js neighbours): the revision it is
+   *  part of, the claims said just before and after it in the same message, those that share a source (six at most). */
+  function neighbours(n) {
+    const out = new Map()
+    if (n.revised_by && byId[n.revised_by]) out.set(byId[n.revised_by], 'revised')
+    if (n.revises && byId[n.revises]) out.set(byId[n.revises], 'revised')
+    if (n.row) {
+      const same = N.filter(x => x.row === n.row).sort((a, b) => a.start - b.start)
+      const k = same.indexOf(n)
+      for (const x of [same[k - 1], same[k + 1]]) if (x && !out.has(x)) out.set(x, 'link')
+    }
+    const refs = new Set(n.sources.map(s => s.ref))
+    for (const x of N) {
+      if (out.size >= 6) break
+      if (x !== n && !out.has(x) && x.sources.some(s => refs.has(s.ref))) out.set(x, 'link')
+    }
+    out.delete(n)
+    return out
+  }
+
+  /** The claims in the order they were made: by turn, the person's words before Claude's in a turn, the corpus
+   *  orientation's last, and in the order said. */
+  function madeOrder() {
+    const rank = n => [n.turn == null ? 1e9 : n.turn, n.by === 'person' ? 0 : n.by === 'orientation' ? 2 : 1, n.order]
+    return N.slice().sort((a, b) => { const x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2] })
   }
 
   // ------------------------------------------------------------------------------------------------ the simulation
   const SIM = { alpha: 0, target: 0, decay: 1 - Math.pow(0.001, 1 / 320), vdecay: 0.56 }
   const live = () => N.filter(n => n.live)
-  let drag = null
   function tick() {
     const L = live()
     const a = SIM.alpha
-    if (a < 0.002 && !drag) return
+    if (a < 0.002) return
     for (let i = 0; i < L.length; i++) {
       const p = L[i]
       for (let j = i + 1; j < L.length; j++) {
@@ -220,11 +215,7 @@
         q.ms.forEach(n => { n.vx += dx * f * wq; n.vy += dy * f * wq })
       }
     }
-    L.forEach(n => {
-      if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; return }
-      n.vx *= SIM.vdecay; n.vy *= SIM.vdecay
-      n.x += n.vx; n.y += n.vy
-    })
+    L.forEach(n => { n.vx *= SIM.vdecay; n.vy *= SIM.vdecay; n.x += n.vx; n.y += n.vy })
     for (let i = 0; i < L.length; i++) {
       for (let j = i + 1; j < L.length; j++) {
         const p = L[i], q = L[j]
@@ -234,8 +225,7 @@
         if (l2 >= min * min) continue
         const l = Math.sqrt(l2) || 0.01, m = ((min - l) / l) * 0.5 * 0.7
         dx *= m; dy *= m
-        if (p.fx == null) { p.x -= dx; p.y -= dy }
-        if (q.fx == null) { q.x += dx; q.y += dy }
+        p.x -= dx; p.y -= dy; q.x += dx; q.y += dy
       }
     }
     SIM.alpha += (SIM.target - SIM.alpha) * SIM.decay
@@ -257,10 +247,36 @@
     for (let i = 0; i < 260; i++) tick()
     SIM.target = 0
     for (let i = 0; i < 420; i++) tick()
-    const step = READY ? 0 : Math.min(60, 2000 / Math.max(1, N.length))
-    N.forEach((n, i) => { n.born = now + i * step })
-    EDGES.forEach(e => { e.born = Math.max(e.a.born, e.b.born) })
+    grow(now, READY ? 0 : 2000)
   }
+  /** Each claim born in the order made, over `ms`: the graph grows. */
+  function grow(now, ms) {
+    const order = madeOrder()
+    const step = order.length ? Math.min(140, ms / order.length) : 0
+    order.forEach((n, i) => { n.born = now + i * step })
+    return order.length * step
+  }
+
+  // ------------------------------------------------------------------------------------------------ the replay
+  const btn = $('#replay')
+  let replayEnd = 0
+  function replay() {
+    S.hover = null
+    hideCard()
+    const now = performance.now()
+    replayEnd = now + grow(now, 3200) + 600
+    S.replaying = replayEnd
+    btn.classList.add('on')
+  }
+  function stopReplay() {
+    if (!S.replaying) return false
+    const now = performance.now()
+    N.forEach(n => { n.born = Math.min(n.born, now - 1200) })
+    S.replaying = 0
+    btn.classList.remove('on')
+    return true
+  }
+  btn.addEventListener('click', e => { e.currentTarget.blur(); if (!stopReplay()) replay() })
 
   // ------------------------------------------------------------------------------------------------ the view
   const cv = $('#g'), gw = $('#gwrap'), ctx = cv.getContext('2d')
@@ -273,10 +289,9 @@
   }
   const cam = { x: 0, y: 0, k: 1.2 }
   const toScreen = n => [W / 2 + (n.x - cam.x) * cam.k, H / 2 + 8 + (n.y - cam.y) * cam.k]
-  // a claim's size follows how often it was said by the cut-off of the time strip
-  const rScreen = n => (S.upto == null ? n.r : Math.min(12, (n.by === 'orientation' ? 4 : 5.2) + Math.sqrt(Math.max(0, saidNow(n) - 1)) * 2.8)) * Math.max(0.8, Math.min(1.25, cam.k))
+  const rScreen = n => n.r * Math.max(0.8, Math.min(1.25, cam.k))
   function fitCamera(snap) {
-    const L = live().filter(shown)
+    const L = live()
     if (!L.length) return 0
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
     L.forEach(n => { x0 = Math.min(x0, n.x - n.r - 60); x1 = Math.max(x1, n.x + n.r + 60); y0 = Math.min(y0, n.y - n.r - 46); y1 = Math.max(y1, n.y + n.r + 30) })
@@ -288,447 +303,178 @@
     cam.x += (tx - cam.x) * f; cam.y += (ty - cam.y) * f; cam.k += (k - cam.k) * f
     return mv
   }
-  function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath() }
   const ease = t => (t < 0 ? 0 : t > 1 ? 1 : 1 - Math.pow(1 - t, 3))
   const back = t => { if (t <= 0) return 0; if (t >= 1) return 1; const c1 = 1.5, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2) }
-  const matches = n => (!S.solo || groupOf(n).key === S.solo) && (!S.query || (n.text + ' ' + n.said.map(p => p.quote || '').join(' ')).toLowerCase().includes(S.query.toLowerCase()))
-  const filtering = () => !!(S.solo || S.query)
   const font = (w, px) => `${w} ${px}px ${T.font || 'sans-serif'}`
-  const clip = (s, max) => (s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s)
-  const overlap = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y))
 
-  function mark(n, sx, sy, r, alpha) {
+  function dot(n, sx, sy, r, alpha) {
     const col = colorOf(n)
-    if (revisedNow(n)) {
-      ctx.save(); ctx.setLineDash([2.5, 2.5]); ctx.beginPath(); ctx.arc(sx, sy, r, 0, 7)
-      ctx.fillStyle = hexA(T.bg, alpha); ctx.fill(); ctx.strokeStyle = hexA(T.mut, alpha); ctx.lineWidth = 1.3; ctx.stroke(); ctx.restore()
-      return
+    ctx.beginPath(); ctx.arc(sx, sy, Math.max(0.1, r), 0, 7)
+    if (revised(n)) {
+      // revised: a hollow dot, nothing more
+      ctx.fillStyle = hexA(solid(T.bg, '#fcfbf8'), alpha); ctx.fill()
+      ctx.strokeStyle = hexA(col, Math.max(0.12, alpha)); ctx.lineWidth = 1.6; ctx.stroke()
+    } else {
+      ctx.fillStyle = hexA(col, Math.max(0.08, alpha)); ctx.fill()
+      ctx.lineWidth = 1.5; ctx.strokeStyle = hexA(DARK ? '#191817' : '#ffffff', 0.9 * alpha); ctx.stroke()
     }
-    ctx.beginPath()
-    if (n.by === 'person') { ctx.moveTo(sx, sy - r * 1.2); ctx.lineTo(sx + r * 1.2, sy); ctx.lineTo(sx, sy + r * 1.2); ctx.lineTo(sx - r * 1.2, sy); ctx.closePath() }
-    else ctx.arc(sx, sy, Math.max(0.1, r), 0, 7)
-    ctx.fillStyle = hexA(col, Math.max(0.08, alpha)); ctx.fill()
-    ctx.lineWidth = 1.5; ctx.strokeStyle = hexA(DARK ? '#191817' : '#ffffff', 0.9 * alpha); ctx.stroke()
-    if (n.by === 'orientation') { ctx.save(); ctx.setLineDash([2, 2.5]); ctx.beginPath(); ctx.arc(sx, sy, r + 3.5, 0, 7); ctx.strokeStyle = hexA(col, 0.7 * alpha); ctx.lineWidth = 1.1; ctx.stroke(); ctx.restore() }
-  }
-  function textAt(s, x, y, strike) {
-    ctx.fillText(s, x, y)
-    if (!strike) return
-    const w = ctx.measureText(s).width
-    const x0 = ctx.textAlign === 'center' ? x - w / 2 : ctx.textAlign === 'right' ? x - w : x
-    const mid = ctx.textBaseline === 'middle' ? y : ctx.textBaseline === 'top' ? y + 7 : y - 4
-    ctx.save(); ctx.beginPath(); ctx.moveTo(x0, mid); ctx.lineTo(x0 + w, mid); ctx.lineWidth = 1; ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); ctx.restore()
-  }
-  /** Names placed so that none overlaps another name or a node; a name with no free spot near its node is left out. */
-  function placeLabels(labs, obstacles, discs) {
-    const placed = obstacles.slice()
-    const out = []
-    for (const lab of labs) {
-      const n = lab.n
-      const [sx, sy] = toScreen(n)
-      const r = rScreen(n) * (1 + 0.22 * n.hv)
-      if (lab.big) {
-        ctx.font = font(600, 13.5)
-        const text = clip(n.text, 72)
-        const tw = ctx.measureText(text).width, bw = tw + 30, bh = 26
-        const spots = []
-        for (const d of [9, 24, 40]) spots.push([sx - bw / 2, sy - r - bh - d], [sx - bw / 2, sy + r + d], [sx + r + d, sy - bh / 2], [sx - r - d - bw, sy - bh / 2])
-        let best = null
-        for (const [x0, y0] of spots) {
-          const b = { x: Math.max(6, Math.min(W - bw - 6, x0)), y: Math.max(4, Math.min(H - bh - 6, y0)), w: bw, h: bh }
-          const cost = placed.reduce((s, p) => s + overlap(b, p), 0) + discs.reduce((s, d) => (d.n === n ? s : s + overlap(b, d)), 0)
-          if (!best || cost < best.cost) best = { ...b, cost }
-          if (!cost) break
-        }
-        placed.push(best)
-        out.push({ n, big: true, text, box: best })
-        continue
-      }
-      ctx.font = font(500, 11.5)
-      const text = clip(n.text, lab.max || 44)
-      const tw = ctx.measureText(text).width, lh = 14
-      let got = null
-      for (const d of [4, 16, 30]) {
-        const rr = r + d
-        const cands = lab.left ? [[sx - rr - 2 - tw, sy - lh / 2], [sx - tw / 2, sy + rr], [sx - tw / 2, sy - rr - lh]] : [[sx + rr + 2, sy - lh / 2], [sx - tw / 2, sy + rr], [sx - tw / 2, sy - rr - lh], [sx - rr - 2 - tw, sy - lh / 2]]
-        for (const [x, y] of cands) {
-          const b = { x: x - 2, y: y - 1, w: tw + 4, h: lh + 2 }
-          if (b.x < 4 || b.x + b.w > W - 4 || b.y < 2 || b.y + b.h > H - 4) continue
-          if (placed.some(p => overlap(b, p) > 0)) continue
-          if (discs.some(q => q.n !== n && overlap(b, q) > 0)) continue
-          got = { b, x, y, lead: d > 4 }
-          break
-        }
-        if (got) break
-      }
-      if (!got) continue
-      placed.push(got.b)
-      out.push({ n, big: false, text, x: got.x, y: got.y, lead: got.lead, sx, sy, r })
-    }
-    return out
-  }
-  function arrow(x1, y1, x2, y2, r2, color, width) {
-    const dx = x2 - x1, dy = y2 - y1, d = Math.hypot(dx, dy) || 1
-    const ex = x2 - (dx / d) * (r2 + 3), ey = y2 - (dy / d) * (r2 + 3)
-    ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = width; ctx.setLineDash([4, 3.5])
-    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([])
-    const a = Math.atan2(dy, dx), h = 7
-    ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - h * Math.cos(a - 0.42), ey - h * Math.sin(a - 0.42)); ctx.moveTo(ex, ey); ctx.lineTo(ex - h * Math.cos(a + 0.42), ey - h * Math.sin(a + 0.42))
-    ctx.stroke(); ctx.restore()
+    // its denominator or window was not stated: a faint ? beside it
+    if (n.unstated) { ctx.font = font(600, 10); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = hexA(col, 0.45 * Math.max(0.3, alpha)); ctx.fillText('?', sx + r + 2.5, sy - r * 0.55) }
   }
 
   function draw(now) {
     ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
     ctx.clearRect(0, 0, W, H)
-    const L = live().filter(n => now >= n.born && shown(n))
-    const focus = S.hover || S.sel
-    const nbr = new Set(focus ? [focus].concat(focus.adj.filter(x => x.t === 'r').map(x => x.n)) : [])
+    const L = live().filter(n => now >= n.born)
+    const focus = S.hover && L.includes(S.hover) ? S.hover : null
+    const near = focus ? neighbours(focus) : new Map()
     L.forEach(n => {
-      let t = 1
-      if (filtering()) t = matches(n) ? 1 : 0.12
-      if (focus) t = nbr.has(n) ? 1 : focus.cluster === n.cluster ? 0.55 : 0.18
-      n.va += (t - n.va) * 0.16
-      n.hv += ((n === S.hover ? 1 : 0) - n.hv) * 0.25
+      const t = !focus || n === focus || near.has(n) ? 1 : 0.16
+      n.va += (t - n.va) * 0.18
+      n.hv += ((n === focus ? 1 : 0) - n.hv) * 0.25
     })
-    // thin lines: a cluster's claims in the order said, claims said one after the other in a message
-    EDGES.forEach(e => {
-      if (e.t === 'r' || !L.includes(e.a) || !L.includes(e.b)) return
-      const hot = focus && (e.a === focus || e.b === focus)
-      const al = Math.min(e.a.va, e.b.va) * ease((now - e.born) / 700) * (e.t === 'm' ? (hot ? 0.8 : 0.3) : 1)
-      if (al < 0.02) return
-      const [x1, y1] = toScreen(e.a), [x2, y2] = toScreen(e.b)
-      ctx.strokeStyle = hexA(T.edge, al); ctx.lineWidth = 1
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
-    })
-    // revisions: a dashed arrow from the revised claim to the claim that replaced it, "revised in turn N" on it
-    const names = []
-    EDGES.forEach(e => {
-      if (e.t !== 'r' || !L.includes(e.a) || !L.includes(e.b)) return
-      const hot = focus && (e.a === focus || e.b === focus)
-      const al = (focus && !hot ? 0.35 : 1) * ease((now - e.born) / 700)
-      const [x1, y1] = toScreen(e.a), [x2, y2] = toScreen(e.b)
-      arrow(x1, y1, x2, y2, rScreen(e.b), hexA(T.ink2.startsWith('#') ? T.ink2 : '#4a4945', 0.75 * al), hot ? 1.6 : 1.2)
-      const lab = `revised in turn ${e.b.turn ?? '?'}`
-      ctx.font = font(500, 10.5); ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
-      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2 - 4
-      const tw = ctx.measureText(lab).width
-      const box = { x: mx - tw / 2 - 2, y: my - 13, w: tw + 4, h: 14 }
-      // a label that would overlap another is left out (the arrow still says it)
-      if (names.some(b => overlap(b, box) > 0)) return
-      ctx.lineWidth = 3; ctx.strokeStyle = T.halo; ctx.strokeText(lab, mx, my)
-      ctx.fillStyle = hexA(T.mut, al); ctx.fillText(lab, mx, my)
-      names.push(box)
-    })
-    // nodes
+    // the hovered claim's links: thin lines; a revision dashed in a faint amber
+    if (focus) {
+      const [x1, y1] = toScreen(focus)
+      for (const [m, kind] of near) {
+        if (!L.includes(m)) continue
+        const [x2, y2] = toScreen(m)
+        ctx.save()
+        if (kind === 'revised') { ctx.setLineDash([4, 4]); ctx.strokeStyle = hexA(solid(T.warn, '#b7791f'), 0.5) } else ctx.strokeStyle = hexA(T.edge, 0.7)
+        ctx.lineWidth = 1.2
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke()
+        ctx.restore()
+      }
+    }
+    // the claims, each growing in when it is born
     L.forEach(n => {
       const [sx, sy] = toScreen(n)
       const e = back((now - n.born) / 520)
       const r = rScreen(n) * e * (1 + 0.22 * n.hv)
       const p = (now - n.born) / 1100
       if (p < 1) { ctx.beginPath(); ctx.arc(sx, sy, rScreen(n) + 4 + 16 * ease(p), 0, 7); ctx.strokeStyle = hexA(colorOf(n), 0.45 * (1 - p)); ctx.lineWidth = 1.5; ctx.stroke() }
-      if (S.fresh.has(n.id)) { ctx.beginPath(); ctx.arc(sx, sy, r + 4.5, 0, 7); ctx.strokeStyle = hexA(T.ring, 0.65 * n.va); ctx.lineWidth = 1.4; ctx.setLineDash([2, 2]); ctx.stroke(); ctx.setLineDash([]) }
-      if (S.sel === n) { ctx.beginPath(); ctx.arc(sx, sy, r + 5.5, 0, 7); ctx.strokeStyle = hexA(T.ring, 0.95); ctx.lineWidth = 2; ctx.stroke() }
-      mark(n, sx, sy, r, n.va)
-      const k = saidNow(n)
-      if (k > 1 && n.va > 0.4) { ctx.font = font(700, 10); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = hexA(T.ink2.startsWith('#') ? T.ink2 : '#4a4945', n.va); ctx.fillText(`×${k}`, sx + r + 3, sy - r * 0.8) }
+      dot(n, sx, sy, r, n.va)
     })
-    // the clusters' names (by cluster), above their claims, with how many
-    if (S.color === 'cluster') {
-      CLUSTERS.forEach(c => {
-        const ms = L.filter(n => n.cluster === c.key)
-        if (!ms.length) return
-        let top = Infinity, cx = 0
-        ms.forEach(n => { const [x, y] = toScreen(n); top = Math.min(top, y - rScreen(n)); cx += x })
-        cx /= ms.length
-        c.lx = c.lx ? c.lx + (cx - c.lx) * 0.2 : cx
-        const lab = c.name, cnt = `${ms.length}`
-        ctx.font = font(600, 13)
-        const w1 = ctx.measureText(lab + ' ').width
-        ctx.font = font(500, 11.5)
-        const w2 = ctx.measureText(cnt).width
-        const x = Math.max(6, Math.min(W - 6 - w1 - w2, c.lx - (w1 + w2) / 2)), y = Math.max(18, top - 12)
-        const fade = focus && focus.cluster !== c.key ? 0.4 : 1
-        ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'
-        ctx.font = font(600, 13); ctx.fillStyle = hexA(T.ink.startsWith('#') ? T.ink : '#1f1e1c', fade); ctx.fillText(lab, x, y)
-        ctx.font = font(500, 11.5); ctx.fillStyle = hexA(T.mut, fade); ctx.fillText(cnt, x + w1, y)
-        names.push({ x: x - 2, y: y - 16, w: w1 + w2 + 4, h: 17 })
-      })
-    }
-    // labels: the hovered claim in a pill; the revised claims (struck, left of them) and what replaced them
-    const labs = []
-    if (S.hover) labs.push({ n: S.hover, big: true })
-    L.filter(revisedNow).forEach(n => labs.push({ n, left: true, max: 40 }))
-    L.filter(n => n.revises && byId[n.revises] && shown(byId[n.revises])).forEach(n => labs.push({ n, max: 40 }))
-    if (S.sel && S.sel !== S.hover) labs.push({ n: S.sel })
-    if (filtering()) L.filter(matches).sort((a, b) => b.r - a.r).slice(0, 16).forEach(n => labs.push({ n }))
-    const discs = L.filter(n => n.va > 0.4).map(n => { const [x, y] = toScreen(n), r = rScreen(n); return { n, x: x - r, y: y - r, w: 2 * r, h: 2 * r } })
-    const got = placeLabels(labs.filter((x, i) => labs.findIndex(y => y.n === x.n) === i), names, discs)
-    for (const g of got.filter(g => !g.big)) {
-      const al = Math.max(0.5, Math.min(1, g.n.va))
-      ctx.font = font(500, 11.5); ctx.textAlign = 'left'; ctx.textBaseline = 'top'
-      ctx.lineWidth = 3.5; ctx.strokeStyle = T.halo; ctx.lineJoin = 'round'; ctx.strokeText(g.text, g.x, g.y + 1)
-      const rev = revisedNow(g.n)
-      ctx.fillStyle = hexA(rev ? T.mut : T.ink2.startsWith('#') ? T.ink2 : '#4a4945', al)
-      textAt(g.text, g.x, g.y + 1, rev)
-    }
-    for (const g of got.filter(g => g.big)) {
-      const b = g.box
-      ctx.save(); ctx.shadowColor = 'rgba(30,28,24,.16)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 3
-      ctx.fillStyle = T.pill; roundRect(b.x, b.y, b.w, b.h, 8); ctx.fill(); ctx.restore()
-      ctx.strokeStyle = T.pillLine; ctx.lineWidth = 1; roundRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 8); ctx.stroke()
-      ctx.beginPath(); ctx.arc(b.x + 12, b.y + b.h / 2, 4, 0, 7); ctx.fillStyle = colorOf(g.n); ctx.fill()
-      ctx.font = font(600, 13.5); ctx.fillStyle = revisedNow(g.n) ? T.mut : T.ink; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'
-      textAt(g.text, b.x + 21, b.y + b.h / 2 + 0.5, revisedNow(g.n))
-    }
-    S.lastLabels = got.map(g => ({ id: g.n.id, big: g.big }))
+    // the clusters' names, above their claims
+    CLUSTERS.forEach(c => {
+      const ms = L.filter(n => n.cluster === c.key)
+      if (!ms.length) return
+      let top = Infinity, cx = 0
+      ms.forEach(n => { const [x, y] = toScreen(n); top = Math.min(top, y - rScreen(n)); cx += x })
+      cx /= ms.length
+      c.lx = c.lx ? c.lx + (cx - c.lx) * 0.2 : cx
+      ctx.font = font(600, 13)
+      const w = ctx.measureText(c.name).width
+      const x = Math.max(6, Math.min(W - 6 - w, c.lx - w / 2)), y = Math.max(18, top - 12)
+      const fade = focus && focus.cluster !== c.key ? 0.35 : 1
+      ctx.textAlign = 'left'; ctx.textBaseline = 'bottom'
+      ctx.lineWidth = 3; ctx.strokeStyle = T.halo; ctx.strokeText(c.name, x, y)
+      ctx.fillStyle = hexA(solid(T.ink2, '#4a4945'), fade); ctx.fillText(c.name, x, y)
+    })
+    if (focus) placeCard(focus, near)
   }
+
+  // ------------------------------------------------------------------------------------------------ the card
+  const hc = $('#hc')
+  let cardFor = null
+  /** A sparkline of a source's values, when the claim rests on one. */
+  function sparkSvg(values) {
+    const v = values.filter(x => typeof x === 'number' && Number.isFinite(x))
+    if (v.length < 2) return ''
+    const lo = Math.min(0, ...v), hi = Math.max(...v), w = 64, h = 14
+    const pts = v.map((x, i) => `${((i / (v.length - 1)) * w).toFixed(1)},${(h - 1 - ((x - lo) / (hi - lo || 1)) * (h - 2)).toFixed(1)}`).join(' ')
+    return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>`
+  }
+  function sourcesWords(n) {
+    return n.sources.slice(0, 3).map(s => {
+      const m = /^(q\d+)(?:#(.*))?$/.exec(s.ref)
+      if (m) { let w = m[2] || ''; try { w = decodeURIComponent(w) } catch { /* as written */ } return [m[1], w.replace(/&/g, ' ').replace('@', ' · ')].filter(Boolean).join(' · ') }
+      const [path, loc] = s.ref.split('#')
+      const line = /^L(\d+)/.exec(loc || '')
+      return path.split('/').pop() + (line ? ':' + line[1] : '')
+    }).join(', ')
+  }
+  /** What the claim means, in at most five lines: the claim as said, Precisely, Based on, Judgment, Not stated. */
+  function cardHtml(n) {
+    const based = n.based_on || sourcesWords(n)
+    const vals = (n.sources.find(s => Array.isArray(s.values) && s.values.length > 1) || {}).values
+    const row = (k, v, cls = '') => `<div class="r ${cls}"><span class="k">${k}</span><span>${v}</span></div>`
+    return `<div class="t">${esc(n.text)}</div>` +
+      (n.precisely ? row('Precisely', esc(n.precisely)) : '') +
+      (based || vals ? row('Based on', `<span class="cite">${esc(based)}${vals ? sparkSvg(vals) : ''}</span>`) : '') +
+      (n.judgment ? row('Judgment', esc(n.judgment)) : '') +
+      (n.unstated ? row('Not stated', esc(n.unstated), 'un') : '')
+  }
+  /** The card beside its claim, on the side where it covers the fewest of its links. */
+  function placeCard(n, near) {
+    if (cardFor !== n) { hc.innerHTML = cardHtml(n); hc.classList.add('on'); cardFor = n }
+    const w = hc.offsetWidth, h = hc.offsetHeight
+    const [sx, sy] = toScreen(n)
+    const r = rScreen(n) + 10
+    const tries = [[sx + r, sy - 14], [sx - r - w, sy - 14], [sx - w / 2, sy + r], [sx - w / 2, sy - r - h], [sx + r, sy - h + 14], [sx - r - w, sy - h + 14]]
+    const pts = [...near.keys()].map(toScreen)
+    let best = null
+    for (const [x0, y0] of tries) {
+      const x = Math.max(8, Math.min(W - w - 8, x0)), y = Math.max(8, Math.min(H - h - 8, y0))
+      // never over the claim itself
+      if (sx > x - 6 && sx < x + w + 6 && sy > y - 6 && sy < y + h + 6) continue
+      const cost = pts.filter(([px, py]) => px > x - 8 && px < x + w + 8 && py > y - 8 && py < y + h + 8).length
+      if (!best || cost < best.cost) best = { x, y, cost }
+      if (!cost) break
+    }
+    if (!best) best = { x: Math.max(8, Math.min(W - w - 8, sx + r)), y: Math.max(8, Math.min(H - h - 8, sy + r)) }
+    hc.style.transform = `translate(${Math.round(best.x)}px, ${Math.round(best.y)}px)`
+  }
+  function hideCard() { hc.classList.remove('on'); cardFor = null }
 
   // ------------------------------------------------------------------------------------------------ the frame loop
   let changed = 0
   let sig = ''
   function frame(now) {
-    const s = [S.hover && S.hover.id, S.sel && S.sel.id, S.solo, S.query, S.upto, S.color, N.length].join('|')
+    const s = [S.hover && S.hover.id, N.length, S.replaying].join('|')
     if (s !== sig) { sig = s; changed = now }
+    if (S.replaying && now > replayEnd) { S.replaying = 0; btn.classList.remove('on') }
     tick()
     const mv = fitCamera(false)
     const arriving = N.some(n => now - n.born < 1200)
-    if (SIM.alpha > 0.002 || drag || mv > 0.3 || arriving || now - changed < 2200) draw(now)
+    if (SIM.alpha > 0.002 || mv > 0.3 || arriving || now - changed < 1200) draw(now)
+    if (!S.hover && cardFor) hideCard()
     requestAnimationFrame(frame)
   }
 
-  // ------------------------------------------------------------------------------------------------ tools
-  const strip = $('#strip')
-  /** The time strip: a section per turn (the corpus orientation last), a tick per claim in the order made, colored
-   *  as the graph is; the handle at the cut-off. */
-  function drawStrip() {
-    const n = N.length
-    if (!n) { strip.innerHTML = ''; $('#upto').innerHTML = ''; return }
-    const at = i => (i / n) * 100
-    const secs = []
-    N.forEach((c, i) => {
-      const key = c.by === 'orientation' ? 'corpus' : c.turn == null ? '?' : 'turn ' + c.turn
-      if (!secs.length || secs[secs.length - 1].key !== key) secs.push({ key, from: i, to: i + 1 })
-      else secs[secs.length - 1].to = i + 1
-    })
-    const cut = S.upto == null ? n : S.upto
-    strip.innerHTML = secs.map(s => `<div class="sec" style="left:${at(s.from)}%;width:${at(s.to) - at(s.from)}%"><b>${esc(s.key)}</b></div>`).join('') +
-      N.map((c, i) => `<i class="tick${revisedNow(c) ? ' rev' : ''}" style="left:calc(${at(i + 0.5)}% - .75px);background:${colorOf(c)}"></i>`).join('') +
-      (cut < n ? `<div class="later" style="left:${at(cut)}%"></div>` : '') +
-      `<div class="handle" style="left:${at(cut)}%"></div>`
-    const last = N[Math.max(0, cut - 1)]
-    const turns = turnsOf()
-    $('#upto').innerHTML = cut >= n
-      ? `all ${turns.length} turn${turns.length === 1 ? '' : 's'}<small>${n} of ${n} claims</small>`
-      : `up to ${last.by === 'orientation' ? 'the corpus' : 'turn ' + (last.turn ?? '?')}<small>${cut} of ${n} claims</small>`
-  }
-  function setUpto(k) {
-    const n = N.length
-    k = Math.max(1, Math.min(n, Math.round(k)))
-    S.upto = k >= n ? null : k
-    drawStrip(); legend(); count()
-    if (S.sel && !shown(S.sel)) closeDetail(); else if (S.sel) renderDetail(S.sel)
-    reheat(0.04)
-  }
-  let striping = false
-  const fromStrip = e => { const r = strip.getBoundingClientRect(); setUpto(((e.clientX - r.left) / r.width) * N.length) }
-  strip.addEventListener('mousedown', e => { striping = true; fromStrip(e) })
-  addEventListener('mousemove', e => { if (striping) fromStrip(e) })
-  addEventListener('mouseup', () => { striping = false })
-  /** The legend: one chip per group of the color mode, with how many claims it holds by the cut-off; a chip shows its
-   *  group alone. */
-  function legend() {
-    const groups = new Map()
-    N.filter(shown).forEach(n => {
-      const g = groupOf(n)
-      if (!groups.has(g.key)) groups.set(g.key, { ...g, n: 0 })
-      groups.get(g.key).n++
-    })
-    $('#legend').innerHTML = [...groups.values()].map(g => `<button class="lg${S.solo === g.key ? ' on' : S.solo ? ' off' : ''}" data-k="${esc(g.key)}"><i style="background:${g.color}"></i>${esc(g.name)}<span class="n">${g.n}</span></button>`).join('')
-    $('#legend').querySelectorAll('.lg').forEach(b => b.addEventListener('click', () => { S.solo = S.solo === b.dataset.k ? null : b.dataset.k; legend() }))
-  }
-  function count() {
-    const L = N.filter(shown)
-    const used = new Set(L.map(n => n.cluster).filter(Boolean)).size
-    const merged = L.filter(n => saidNow(n) > 1).length
-    const revised = L.filter(revisedNow).length
-    $('#count').innerHTML = `<b>${L.length}</b> claims · <b>${used}</b> clusters · <b>${merged}</b> merged` + (revised ? ` · <b>${revised}</b> revised` : '') + (S.fresh.size ? ` · <span style="color:var(--atl)">+${S.fresh.size} new</span>` : '')
-    const o = STORE && STORE.orientation
-    $('#from').textContent = `from Claude's work and our chat${o && o.claims ? ' and the corpus' : ''} · deduped`
-    const turns = turnsOf()
-    $('#sub').textContent = turns.length ? (turns.length > 1 ? `turns ${turns[0]}–${turns[turns.length - 1]}` : `turn ${turns[0]}`) : 'this session'
-    document.title = `Claims · ${L.length}`
-  }
-  $('#colorby').addEventListener('change', e => { S.color = e.target.value; S.solo = null; legend(); drawStrip(); changed = performance.now() })
-  const q = $('#q')
-  q.addEventListener('focus', () => $('#search').classList.add('focus'))
-  q.addEventListener('blur', () => $('#search').classList.remove('focus'))
-  q.addEventListener('input', () => { S.query = q.value.trim(); $('#qn').textContent = S.query ? N.filter(n => matches(n) && shown(n)).length : '' })
-
   // ------------------------------------------------------------------------------------------------ pointer
-  let downAt = null
   const local = e => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top] }
   function pick(px, py) {
+    const now = performance.now()
     let best = null, bd = Infinity
     live().forEach(n => {
-      if (!shown(n)) return
+      if (now < n.born) return
       const [sx, sy] = toScreen(n), d = Math.hypot(sx - px, sy - py)
       if (d < rScreen(n) + 7 && d < bd) { best = n; bd = d }
     })
     return best
   }
   cv.addEventListener('mousemove', e => {
-    const [px, py] = local(e)
-    if (drag) { drag.fx = cam.x + (px - W / 2) / cam.k; drag.fy = cam.y + (py - H / 2 - 8) / cam.k; reheat(0.25); return }
-    const n = pick(px, py)
-    if (S.hover !== n) { S.hover = n; cv.classList.toggle('hand', !!n) }
+    const n = pick(...local(e))
+    if (S.hover !== n) { S.hover = n; cv.classList.toggle('hand', !!(n && n.row)) }
   })
-  cv.addEventListener('mouseleave', () => { if (!drag) S.hover = null })
-  cv.addEventListener('mousedown', e => { const [px, py] = local(e); const n = pick(px, py); downAt = [px, py]; if (n) { drag = n; n.fx = n.x; n.fy = n.y; cv.classList.add('grab') } })
-  addEventListener('mouseup', () => { if (!drag) return; const n = drag; drag = null; n.fx = n.fy = null; cv.classList.remove('grab'); reheat(0.15) })
-  cv.addEventListener('click', e => {
-    const [px, py] = local(e)
-    if (downAt && Math.hypot(px - downAt[0], py - downAt[1]) > 4) return
-    const n = pick(px, py)
-    if (n) select(n); else if (S.sel) closeDetail()
-  })
-
-  // ------------------------------------------------------------------------------------------------ the details
-  const detail = $('#detail')
-  const resolved = new Map()
-  function resolve(ref, n) {
-    const key = ref + '|' + n
-    if (!resolved.has(key)) resolved.set(key, fetch(`${BASE}/api/resolve?ref=${enc(ref)}&n=${n}`, { cache: 'no-store' }).then(r => (r.ok ? r.json() : r.text().then(t => ({ error: t.slice(0, 200) || 'HTTP ' + r.status })))).catch(e => ({ error: String(e.message || e) })))
-    return resolved.get(key)
-  }
-  function shortRef(ref) {
-    const m = /^(q\d+)(?:#(.*))?$/.exec(ref)
-    if (m) {
-      const [frag, col] = String(m[2] || '').split('@')
-      let words = frag || ''
-      try { words = decodeURIComponent(words) } catch { /* as written */ }
-      return [m[1], words.replace(/&/g, ' '), col].filter(Boolean).join(' · ')
-    }
-    const [path, loc] = ref.split('#')
-    const file = path.split('/').pop()
-    const line = /^L(\d+)/.exec(loc || '')
-    return line ? `${file}:${line[1]}` : file + (loc ? '#' + loc : '')
-  }
-  const who = p => (p.by === 'person' ? 'you' : p.by === 'orientation' ? 'corpus' : 'reply')
-  function sentenceHtml(p) {
-    const s = String(p.sentence || ''), qt = String(p.quote || '')
-    if (!s) return qt ? `“${esc(qt)}”` : ''
-    const k = qt ? s.toLowerCase().indexOf(qt.toLowerCase()) : -1
-    if (k < 0) return `“${esc(qt || s)}”`
-    return `“${esc(s.slice(0, k))}<b>${esc(s.slice(k, k + qt.length))}</b>${esc(s.slice(k + qt.length))}”`
-  }
+  cv.addEventListener('mouseleave', () => { S.hover = null })
   const post = m => { try { if (window.parent !== window) window.parent.postMessage(m, '*') } catch { /* no parent page */ } }
-  function select(n) {
-    S.sel = n
-    S.asking = false
-    renderDetail(n)
-    history.replaceState(null, '', location.pathname + location.search + '#c=' + enc(n.id))
-    post({ type: 'thimble:claim', claim: n.id })
-  }
-  function closeDetail() {
-    S.sel = null
-    S.asking = false
-    renderNone()
-    history.replaceState(null, '', location.pathname + location.search)
-  }
-  function renderNone() {
-    detail.classList.remove('on')
-    detail.innerHTML = `<div class="none"><svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2l9 5-4 1-1 4z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>Select a claim to see where it was said<span class="sp"></span><span class="lab">DETAILS</span></div>`
-  }
-  function renderDetail(n) {
-    detail.classList.add('on')
-    const c = CBY[n.cluster]
-    const k = saidNow(n)
-    const revised = revisedNow(n)
-    const rep = revised ? byId[n.revised_by] : null
-    const org = n.revises && byId[n.revises] && shown(byId[n.revises]) ? byId[n.revises] : null
-    const places = n.said.slice(0, k)
-    const first = places[0] || {}
-    const srcs = n.sources.map((s, i) => `<span class="cite" data-i="${i}" title="${esc(s.ref)}">${esc(s.label || shortRef(s.ref))}</span>`).join(' ')
-    detail.innerHTML =
-      `<div class="dh"><i style="background:${colorOf(n)}"></i><span class="t${revised ? ' struck' : ''}">${esc(n.text)}</span><span class="tag${revised ? ' rev' : ''}">${revised ? 'revised' : n.tag}</span>${k > 1 ? `<span class="xn">×${k}</span>` : ''}<span class="sp"></span><span class="cl">${esc(c ? c.name : 'between clusters')}</span><span class="x" id="x">esc</span></div>` +
-      `<div class="meta"><span>${first.by === 'orientation' ? 'from the <b>corpus orientation</b>' : `said in <b>turn ${first.turn ?? '?'}</b>${first.by === 'person' ? ' by you' : ''}`}</span>${srcs ? `<span>sources ${srcs}</span>` : '<span>no citation in or near its sentence</span>'}${k > 1 ? `<span><span class="xn">×${k}</span> said ${k} times, merged into one</span>` : ''}</div>` +
-      `<div class="places" id="places">${places.map((p, i) => `<span class="w${p.row ? ' go' : ''}" data-i="${i}">${p.by === 'orientation' ? 'corpus' : 'turn ' + (p.turn ?? '?')}</span><span class="w">${who(p)}</span><span class="q${p.row ? ' go' : ''}" data-i="${i}">${sentenceHtml(p)}${p.ref ? ` <span class="w">${esc(shortRef(p.ref))}</span>` : ''}</span>`).join('')}</div>` +
-      (rep ? `<div class="repl">revised in turn ${rep.turn ?? '?'} → <a data-id="${esc(rep.id)}">${esc(rep.text)}</a></div>` : '') +
-      (org ? `<div class="repl">replaces <s>${esc(org.text)}</s> · said in turn ${org.turn ?? '?'}, revised in turn ${n.turn ?? '?'} · <a data-id="${esc(org.id)}">open it</a></div>` : '') +
-      `<div class="dfoot" id="dfoot"><button class="ask" id="ask"><kbd>↵</kbd>ask about this claim</button><div class="askbox"><input id="askq" placeholder="Ask about this claim…" spellcheck="false" autocomplete="off"><button class="send" id="send" title="send">↑</button></div><span class="said" id="said"></span></div>`
-    detail.querySelectorAll('.repl a').forEach(a => a.addEventListener('click', () => { const m = byId[a.dataset.id]; if (m) select(m) }))
-    detail.querySelectorAll('.places .go').forEach(el => el.addEventListener('click', () => openPlace(places[Number(el.dataset.i)])))
-    detail.querySelectorAll('.meta .cite').forEach(el => el.addEventListener('click', () => toggleRows(n.sources[Number(el.dataset.i)])))
-    $('#x').addEventListener('click', closeDetail)
-    $('#ask').addEventListener('click', ask)
-    $('#send').addEventListener('click', send)
-    $('#askq').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send() } if (e.key === 'Escape') { e.preventDefault(); stopAsking() } e.stopPropagation() })
-  }
-  function openPlace(p) {
-    if (!p || !p.row) return
+  /** A click on a claim: the message where it was said, in the chat around this page, or the mirror. */
+  cv.addEventListener('click', e => {
+    const n = pick(...local(e))
+    const p = n && n.said.find(x => x.row)
+    if (!p) return
     if (window.parent !== window) { post({ type: 'thimble:row', row: p.row }); return }
     window.open(`${BASE}/mirror/#row=${enc(p.row)}`, '_blank', 'noopener')
-  }
-  function toggleRows(s) {
-    const box0 = $('#places')
-    const old = box0.querySelector('.rows')
-    if (old && old.dataset.ref === s.ref) { old.remove(); return }
-    if (old) old.remove()
-    const box = document.createElement('div')
-    box.className = 'rows'
-    box.dataset.ref = s.ref
-    box.innerHTML = '<div class="r">reading…</div>'
-    box0.appendChild(box)
-    resolve(s.ref, 5).then(r => {
-      if (!r || r.error) { box.innerHTML = `<div class="err">${esc(s.ref)} does not resolve: ${esc(r ? r.error : 'no answer')}</div>`; return }
-      const qy = (r.chain || []).find(x => x.step === 'query')
-      const lines = []
-      if (qy) lines.push(`<div><span class="r">${esc(qy.id)}</span>${esc(qy.about || '')}${qy.value != null ? ' = ' + esc(qy.value) : ''} · ${esc(r.count != null ? fmt(r.count) + ' source rows' : (r.rows || []).join(', '))}</div>`)
-      for (const x of (r.records || []).slice(0, 5)) lines.push(`<div title="${esc(x.text)}"><span class="r">${esc(shortRef(x.ref))}</span>${esc(String(x.text).replace(/\s+/g, ' ').slice(0, 400))}</div>`)
-      box.innerHTML = lines.join('') || `<div>${esc(s.ref)}</div>`
-    })
-  }
-  function ask() { if (!S.sel) return; S.asking = true; $('#dfoot').classList.add('asking'); $('#askq').focus() }
-  function stopAsking() { S.asking = false; const f = $('#dfoot'); if (f) f.classList.remove('asking'); const x = $('#askq'); if (x) x.blur() }
-  async function send() {
-    const n = S.sel
-    const box = $('#askq')
-    const text = box ? box.value.trim() : ''
-    if (!n || !text) return
-    const first = n.said.find(p => p.row)
-    const said = $('#said')
-    try {
-      const r = await fetch(`${BASE}/api/back`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ask: text, scope: { claim: n.id, label: n.text, ...(first ? { row: first.row } : {}) } }) })
-      if (!r.ok) throw new Error((await r.text()).slice(0, 120) || 'HTTP ' + r.status)
-      box.value = ''
-      said.className = 'said ok'
-      said.textContent = 'sent to the terminal: Claude answers there, about this claim'
-      stopAsking()
-    } catch (e) {
-      said.className = 'said bad'
-      said.textContent = `not sent (${e.message}). In the terminal, press c, put the ring on "${n.text}", and type the question.`
-    }
-  }
+  })
 
   // ------------------------------------------------------------------------------------------------ keys
   document.addEventListener('keydown', e => {
-    const k = e.key
-    if (document.activeElement === q) {
-      if (k === 'Escape') { q.value = ''; S.query = ''; q.blur(); e.preventDefault() }
-      if (k === 'Enter') { q.blur(); e.preventDefault() }
-      return
-    }
-    if (k === 'Escape') {
-      e.preventDefault()
-      if (S.asking) return stopAsking()
-      if (S.query) { q.value = ''; S.query = ''; return }
-      if (S.solo) { S.solo = null; return legend() }
-      if (S.sel) return closeDetail()
-      return
-    }
-    if (k === ']' || k === '[') { setUpto((S.upto == null ? N.length : S.upto) + (k === ']' ? 1 : -1)); e.preventDefault(); return }
-    if (k === '/') { q.focus(); e.preventDefault(); return }
-    if (k === 'Enter' && S.sel) { ask(); e.preventDefault() }
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    // any key stops a replay
+    if (stopReplay()) { e.preventDefault(); return }
+    if (e.key === 'r') { replay(); e.preventDefault() }
   })
 
   // ------------------------------------------------------------------------------------------------ loading
@@ -736,6 +482,7 @@
     const el = $('#empty')
     el.innerHTML = html ? `<div>${html}</div>` : ''
     el.classList.toggle('on', !!html)
+    btn.style.display = html ? 'none' : ''
   }
   async function fetchStore() {
     const embedded = window.CLAIMS_STORE || (document.getElementById('claims-store') && JSON.parse(document.getElementById('claims-store').textContent))
@@ -751,12 +498,16 @@
       return store && Array.isArray(store.claims) ? { store } : { error: 'the answer is not a claims store' }
     } catch (e) { return { error: String(e.message || e) } }
   }
+  function count() {
+    const used = new Set(N.map(n => n.cluster).filter(Boolean)).size
+    $('#sub').textContent = `${N.length} claim${N.length === 1 ? '' : 's'} · ${used} cluster${used === 1 ? '' : 's'}`
+    document.title = `Claims · ${N.length}`
+  }
   async function load(first) {
     const got = await fetchStore()
     if (got.same) return
     if (got.error) {
       if (first || !STORE) { $('#sub').textContent = 'no claims yet'; empty(`<b>No claims yet.</b><br>They are read after each turn of work in the terminal, from what Claude and you said.<br><span style="font-size:12px">(${esc(got.error)})</span>`) }
-      else $('#st').textContent = 'the page server stopped · open the claims again from the terminal'
       return
     }
     const store = got.store
@@ -765,35 +516,27 @@
     readTheme()
     if (!store.claims.length) { empty('<b>No claims yet.</b><br>They are read after each turn of work in the terminal, from what Claude and you said.'); count(); return }
     empty('')
-    const before = new Set(N.map(n => n.id))
     const added = ingest(store)
     const now = performance.now()
     if (!S.loaded) {
       settle(now)
       fitCamera(true)
       S.loaded = true
-      const want = /[#&]c=([^&]+)/.exec(HASH)
-      const hit = want ? byId[decodeURIComponent(want[1])] : null
-      if (hit) setTimeout(() => select(hit), READY ? 0 : 900)
     } else if (added.length) {
       added.forEach((n, i) => { place(n); n.born = now + i * 200 })
-      EDGES.forEach(e => { if (!before.has(e.a.id) || !before.has(e.b.id)) e.born = now })
-      S.fresh = new Set(added.filter(n => before.size && !before.has(n.id)).map(n => n.id))
       SIM.target = 0
       reheat(0.35)
     }
-    drawStrip(); legend(); count()
-    if (S.sel) { if (byId[S.sel.id]) renderDetail(byId[S.sel.id]); else closeDetail() }
-    $('#st').textContent = store.updated ? `read ${String(store.updated).slice(11, 16)}` : ''
+    if (cardFor) { const n = cardFor; cardFor = null; if (byId[n.id]) placeCard(byId[n.id], neighbours(byId[n.id])) }
+    count()
   }
 
   readTheme()
-  renderNone()
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); CLUSTERS.forEach(c => { if (c.id != null) c.color = (DARK ? PAL_DARK : PAL)[c.i % PAL.length] }); legend(); drawStrip(); changed = performance.now() })
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { readTheme(); CLUSTERS.forEach(c => { if (c.id != null) c.color = (DARK ? PAL_DARK : PAL)[c.i % PAL.length] }); changed = performance.now() })
   addEventListener('resize', () => { size(); changed = performance.now() })
-  // the details below grow and shrink: the graph's room follows
   if (window.ResizeObserver) new ResizeObserver(() => { size(); changed = performance.now() }).observe(gw)
-  addEventListener('message', e => { const m = e.data; if (m && m.type === 'thimble:open-claim' && byId[m.claim]) select(byId[m.claim]) })
+  // the page around this one can point at a claim: its card shows, as on a hover
+  addEventListener('message', e => { const m = e.data; if (m && m.type === 'thimble:open-claim' && byId[m.claim]) { S.hover = byId[m.claim]; changed = performance.now() } })
   size()
   const FIXED = !!window.CLAIMS_STORE
   load(true).then(() => {
@@ -801,7 +544,10 @@
     document.body.dataset.ready = '1'
     setInterval(() => { if (document.visibilityState === 'visible' && !FIXED) load(false) }, POLL_MS)
   })
-  window.Claims = { S, N, get byId() { return byId }, CLUSTERS, cam, select, closeDetail, setUpto, setColor: c => { $('#colorby').value = c; $('#colorby').dispatchEvent(new Event('change')) }, labels: () => S.lastLabels || [],
+  window.Claims = {
+    S, N, CLUSTERS, cam, replay, stopReplay, get byId() { return byId },
     nodeAt(id) { const n = byId[id]; if (!n) return null; const [x, y] = toScreen(n); const r = cv.getBoundingClientRect(); return [r.left + x, r.top + y] },
-    hover(id) { S.hover = byId[id] || null; changed = performance.now() } }
+    hover(id) { S.hover = byId[id] || null; changed = performance.now() },
+    card: () => (hc.classList.contains('on') ? hc.innerText : ''),
+  }
 })()
