@@ -1,5 +1,6 @@
 // The observer's pure parts: what it reads of an object's lineage, how it reads the fork's answer, and the hint row as
 // it ranks it (shell/object.js rankRow). `node --test lean/observer/test/*.test.mjs`
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 

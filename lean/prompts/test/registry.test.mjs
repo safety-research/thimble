@@ -2,6 +2,7 @@
 // and LEAN_PROMPTS pick the active one, a version that does not exist keeps the default with one line, a lens can be
 // turned off, and `lean guide cards` prints the card guidance and notes the read in the session's events.
 //   node --test lean/prompts/test
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'

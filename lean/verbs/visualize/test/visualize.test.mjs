@@ -2,6 +2,7 @@
 // card forms' worked programs, which must draw as the card guidance (the registry's forms) shows them, under a reply and
 // in the detail.
 //   node --test lean/verbs/visualize/test/visualize.test.mjs
+import '../../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'

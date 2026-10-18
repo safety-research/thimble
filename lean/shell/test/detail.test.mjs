@@ -1,6 +1,7 @@
 // The card detail's state (shell/carddetail.js) and the side threads' scoping (shell/threads.js): parts, examples, versions,
 // keys that act only while the composer is empty, the "from" line, the program behind p, and what a thread is about.
 //   node --test lean/shell/test/detail.test.mjs
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

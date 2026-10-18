@@ -1,5 +1,6 @@
 // The message layer's pure parts: the record and its marks (shell/message.js), the tray's stack (shell/tray.js) and the
 // tray's cards (shell/cards.js), drawn through the drawing contract. node --test lean/shell/test/message.test.mjs
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { explainerCard, linksIn, sourceCard } from '../cards.js'

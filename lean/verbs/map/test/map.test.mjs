@@ -2,6 +2,7 @@
 // their rows, the terminal's rules (a lane per lens value with its count, a striped lane where rows run out), the
 // browser drawing the same regions, the verb's moves (the full map, a zoom, asking Claude) and its hint.
 // node --test lean/verbs/map/test/*.test.mjs
+import '../../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'

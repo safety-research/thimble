@@ -1,5 +1,6 @@
 // The card runtime's tests: lineage carried by itself, interaction state and events, ask(selection), the sandbox's
 // budgets and its one-line fallback, and a title for every card. node --test lean/draw/test
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { runProgram } from '../sandbox-node.mjs'

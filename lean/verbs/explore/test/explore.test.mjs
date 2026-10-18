@@ -1,4 +1,5 @@
 // Explore's tests: node --test lean/verbs/explore/test
+import '../../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'

@@ -1,6 +1,7 @@
 // The Trace verb: the short path it draws from the kernel's facts, stepping on from a step, the full trace Claude
 // writes (and its retry), the hint, and the worked examples of SKILL.md, each run in the drawing sandbox.
 // node --test lean/verbs/trace/test
+import '../../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'

@@ -1,6 +1,7 @@
 // The browser canvas's Fit (shell/browser/src/canvas/fit.ts): a board that fits at a zoom where its cards read is shown
 // whole, as 0.9 does; a bigger one stops at the readable zoom from its top left, and the person pans to the rest.
 //   node --test lean/shell/test/canvasfit.test.mjs   (Node strips the file's types: 22.18 or later)
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 

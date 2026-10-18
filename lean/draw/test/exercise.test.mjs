@@ -1,6 +1,7 @@
 // A save's check (draw/exercise.mjs): every interaction a card declares tried once, as the person would, before they
 // press anything; what fails is one line for Claude, a pass says nothing, and the tries change nothing.
 //   node --test lean/draw/test
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'

@@ -22,7 +22,7 @@ export function listVerbs(dir = VERBS) {
   const verbs = []
   const problems = []
   let names = []
-  try { names = readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory() && !d.name.startsWith('.')).map(d => d.name) } catch { names = [] }
+  try { names = readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory() && !d.name.startsWith('.') && d.name !== '__pycache__').map(d => d.name) } catch { names = [] }
   for (const folder of names.sort()) {
     const at = join(dir, folder)
     let spec

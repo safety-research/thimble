@@ -1,6 +1,7 @@
 // Telemetry's lines and `lean stats` (telemetry/events.mjs, stats.mjs): a call's and a turn's line, the price weights,
 // the sums per feature and per lens of the pass, a plain Claude Code transcript per prompt, and the report beside it.
 //   node --test lean/telemetry/test
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'

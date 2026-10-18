@@ -1,6 +1,7 @@
 // Panes as programs on the card runtime (panes/*.js, panes/host.js): each pane is one program both surfaces run on the
 // same stores; the state one surface answers with draws the same on the other; keys go down a focus stack to the first
 // program that takes them, and the bar says the keys in words. node --test lean/panes/test
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import '../../draw/kit.js'

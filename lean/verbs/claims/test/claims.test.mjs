@@ -2,6 +2,7 @@
 // it, a restatement counted (×N), a correction linked both ways, clusters assigned, renamed and split, the corpus
 // orientation merged, the order a replay grows them in, the orientation's estimate, and its citation check.
 // node --test lean/verbs/claims/test/
+import '../../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'

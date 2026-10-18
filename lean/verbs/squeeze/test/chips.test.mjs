@@ -1,6 +1,7 @@
 // The squeeze chips' pure parts (verbs/squeeze/chips.mjs): chip state with its levels, a stretch of the person's
 // combined with the fixed chips in one request, the reply read and held to the original, the marks placed again after a
 // rewrite, the text cut as it writes itself in, and the original restored. node --test lean/verbs/squeeze/test
+import '../../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'

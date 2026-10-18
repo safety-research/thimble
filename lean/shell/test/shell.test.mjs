@@ -1,6 +1,7 @@
 // The shell's Node side: the verb registry, the verb runner, what both views say of an object, and the page server
 // (browser mode: pages behind a token, the JSON routes, the lines back to the terminal, and its life).
 //   node --test lean/shell/test/shell.test.mjs
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'

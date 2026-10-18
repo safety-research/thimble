@@ -2,6 +2,7 @@
 // (the frame and the enabled lenses' instructions, the reply's skeleton), the message (the turn, each lens's digest and
 // its rules this turn), each lens's share of the pass, each lens's merge into the store, and the turn cut to fit.
 //   node --test lean/observer/test
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'

@@ -3,6 +3,7 @@
 // means (at most five lines in a thin frame) and its links, a revision dashed and faint; a claim whose denominator was
 // not stated has a faint ? beside it; a replay shows the claims made so far, the newest marked with their links.
 //   node --test lean/panes/test/claimgraph.test.mjs
+import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { applyTurn, emptyStore, viewOf } from '../../verbs/claims/claims.js'
