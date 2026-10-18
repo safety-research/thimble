@@ -1,10 +1,12 @@
 // build.mjs: write the browser demo as one self-contained page (no network, no server).
 //
-//   node browser/build.mjs <out.html> [example ids...]
+//   node browser/build.mjs <out.html> [example ids...] [--objects <dir>]
 //
+// --objects adds every object file in <dir> ({id, v, title, program, data} as JSON), such as the objects Claude drew
+// in a session, so the terminal can hand them to the page too.
 // The page carries kit.js as text (for the sandbox), the renderer modules joined into one module script, and the
 // example objects. It runs every program itself, in the sandbox, so what it draws is what the program says.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadExamples } from '../examples/load.mjs'
@@ -12,8 +14,12 @@ import { loadExamples } from '../examples/load.mjs'
 const DRAW = fileURLToPath(new URL('..', import.meta.url))
 const out = process.argv[2]
 if (!out) { console.error('usage: node browser/build.mjs <out.html> [example ids...]'); process.exit(2) }
-const only = process.argv.slice(3)
-const objects = loadExamples().filter(o => !only.length || only.includes(o.id))
+const rest = process.argv.slice(3)
+const at = rest.indexOf('--objects')
+const extraDir = at >= 0 ? rest[at + 1] : null
+const only = at >= 0 ? rest.slice(0, at).concat(rest.slice(at + 2)) : rest
+const extra = extraDir && existsSync(extraDir) ? readdirSync(extraDir).filter(f => f.endsWith('.json')).map(f => JSON.parse(readFileSync(extraDir + '/' + f, 'utf8'))) : []
+const objects = loadExamples().filter(o => !only.length || only.includes(o.id)).concat(extra)
 
 // modules in dependency order; their imports are dropped and their exports become plain declarations
 const strip = src => src.replace(/^import [^\n]*\n/gm, '').replace(/^export (?=(async )?function|const|let|class)/gm, '')

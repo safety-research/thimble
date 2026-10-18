@@ -34,8 +34,10 @@ type Any = any
 
 const byArgs = new Map<string, Shown>()
 const byCall = new Map<string, Shown>()
+const byId = new Map<string, Obj>()   // the objects Claude drew with the tool, the latest version of each
 let theme: 'dark' | 'light' = 'dark'
 let page = ''
+let work = ''
 let pageProblem = ''
 
 function dirOf(root: string): string {
@@ -66,7 +68,7 @@ export const register: Register = on => {
           id: { type: 'string', description: 'a stable id for the object, such as messages-by-day' },
           title: { type: 'string' },
           program: { type: 'string', description: 'the body of a function (k, data) => node' },
-          data: { description: 'the data the program draws, any JSON' },
+          data: { type: ['object', 'array'], description: 'the data the program draws, as JSON (not a string)' },
           select: { type: 'string', description: 'a region id to show selected' },
         },
         required: ['program'],
@@ -78,9 +80,10 @@ export const register: Register = on => {
     } catch { theme = 'dark' }
     // the browser page the terminal hands off to: one self-contained file, built from the examples
     const tmp = (await $.env.get('TMPDIR')) || '/tmp'
-    const out = `${tmp.replace(/\/+$/, '')}/lean-draw/demo.html`
+    work = `${tmp.replace(/\/+$/, '')}/lean-draw`
+    const out = `${work}/demo.html`
     try {
-      const built = await $.process.run(['node', `${dir}/browser/build.mjs`, out], { timeoutMs: 30000 })
+      const built = await $.process.run(['node', `${dir}/browser/build.mjs`, out, '--objects', `${work}/objects`], { timeoutMs: 30000 })
       if (built.exitCode === 0) page = out
       else {
         const lines = (built.stderr || built.stdout || `exit ${built.exitCode}`).trim().split('\n')
@@ -101,7 +104,11 @@ export const register: Register = on => {
       const want = fromArgs(args.replace(/^open\s*/, ''))
       if (!want) return { text: 'Type /draw open <object> [region].' }
       if (!page) return { text: `There is no browser page: ${pageProblem || 'it was not built'}.` }
-      const shownBefore = [...byArgs.values()].reverse().find(x => x.object.id === want.object)
+      if (byId.has(want.object)) {
+        // the page carries the objects Claude drew: build it again so it has the latest
+        await $.process.run(['node', `${dirOf($.plugin.root)}/browser/build.mjs`, page, '--objects', `${work}/objects`], { timeoutMs: 30000 })
+      }
+      const shownBefore = [...byArgs.values(), ...byCall.values()].reverse().find(x => x.object.id === want.object)
       const url = `file://${page}${toHash({ ...want, v: want.v ?? shownBefore?.object.v, w: shownBefore?.w })}`
       const browser = await $.env.get('BROWSER')
       const tries = browser ? [[browser, url]] : [['xdg-open', url], ['open', url]]
@@ -115,12 +122,13 @@ export const register: Register = on => {
     const refs = index.map(x => `${x.id}@${x.v}`).join(' · ')
     if (!sel) return { text: `Objects: ${refs}\n\n/draw <object> draws one; /draw <object> <region> selects a part of it.` }
     const entry = index.find(x => x.id === sel.object && (sel.v == null || x.v === sel.v))
-    if (!entry) return { text: `There is no object "${sel.object}". The objects: ${refs}` }
-    const object: Obj = {
+    const drawn = byId.get(sel.object)
+    if (!entry && !drawn) return { text: `There is no object "${sel.object}". The objects: ${refs}${byId.size ? ' · ' + [...byId.keys()].join(' · ') : ''}` }
+    const object: Obj = entry ? {
       id: entry.id, v: entry.v, title: entry.title,
       program: await $.fs.read(`${dir}/examples/${entry.program}`),
       data: JSON.parse(await $.fs.read(`${dir}/examples/${entry.data}`)),
-    }
+    } : drawn!
     const w = Math.max(40, Math.min(140, e.presentation.columns - 4))
     const drawing = await sandbox($, object, w)
     const grid = renderTerm(drawing, { w })
@@ -135,14 +143,23 @@ export const register: Register = on => {
   // Claude's own objects: the program runs in the same sandbox; Claude reads back the cells the person sees
   on('tool.call', { tool: 'mcp__lean-draw-demo__draw' }, async ($, e) => {
     const input = e as unknown as { tool_use_id?: string; id?: string; title?: string; program?: string; data?: unknown; select?: string }
-    const object: Obj = { id: String(input.id || 'object'), title: input.title, program: String(input.program || ''), data: input.data ?? {} }
+    let data = input.data ?? {}
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data) } catch { return { result: 'data is a string that is not JSON; pass the data as a JSON object or array.' } }
+    }
+    const id = String(input.id || 'object').replace(/[^A-Za-z0-9_.:-]+/g, '-').slice(0, 64) || 'object'
+    const prev = byId.get(id)
+    const same = prev && prev.program === String(input.program || '') && JSON.stringify(prev.data) === JSON.stringify(data)
+    const object: Obj = { id, v: same ? prev!.v : (prev?.v ?? 0) + 1, title: input.title, program: String(input.program || ''), data }
+    byId.set(id, object)
+    if (work) await $.fs.write(`${work}/objects/${id}.json`, JSON.stringify(object)).catch(() => undefined)
     const w = 100
     const drawing = await sandbox($, object, w)
     const grid = renderTerm(drawing, { w })
     if (input.tool_use_id) byCall.set(input.tool_use_id, { object, drawing, grid, region: input.select, w })
     const lines = [gridText(grid), '']
     if (drawing.error) lines.push(`The program failed: ${drawing.error.name}: ${drawing.error.message}${drawing.error.line ? ` (line ${drawing.error.line})` : ''}`)
-    lines.push(`regions: ${grid.regions.map(r => r.id).join(', ') || 'none'}`)
+    lines.push(`object: ${id}@${object.v} · regions: ${grid.regions.map(r => r.id).join(', ') || 'none'}`)
     if (drawing.warnings.length) lines.push('warnings:', ...drawing.warnings.map(x => '- ' + x))
     if (grid.cut.length) lines.push(`cut to fit ${w} columns: ${JSON.stringify(grid.cut).slice(0, 400)}`)
     return { result: lines.join('\n') }
@@ -153,6 +170,19 @@ export const register: Register = on => {
     const shown = byArgs.get(e.props.args.trim())
     if (!shown) return next(e)
     return view($.ui.resolve(e), shown, 'cmd-' + e.props.args.trim().replace(/[^A-Za-z0-9]+/g, '-'))
+  })
+
+  // the call row: what is being drawn, not the program's text
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    if (e.props.tool !== 'mcp__lean-draw-demo__draw') return next(e)
+    const { Text } = $.ui.resolve(e)
+    const input = (e.props.input || {}) as { title?: string; id?: string; program?: string }
+    const lines = String(input.program || '').split('\n').length
+    return Text({ wrap: 'truncate-end', children: [
+      Text({ bold: true, children: '● draw ' }),
+      Text({ children: input.title || input.id || 'an object' }),
+      Text({ dimColor: true, children: e.props.isRunning ? '  · running its program…' : `  · ${input.id || 'object'} · a program of ${lines} lines` }),
+    ] })
   })
 
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {

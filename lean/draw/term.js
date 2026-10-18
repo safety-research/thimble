@@ -7,7 +7,7 @@
 //   - a spark is one cell per value (averaged when there are more values than cells), on eight levels ▁..█;
 //   - a plot is half-block pixels, two per cell down, with an axis of ┤ └ ┴ and the end values;
 //   - a table is padded columns, numbers right-aligned, the widest text column shrinking first;
-//   - unseen data is ░, never blank, so a gap reads as a gap;
+//   - unseen data is ▒ (a medium shade), never blank, so a gap reads as a gap;
 //   - a canvas is replayed as the program placed it.
 //
 // renderTerm(drawing, {w}) -> grid {w, h, rows, regions, marks, cut}
@@ -387,7 +387,7 @@ function paint(n, g, x, y, w, cx) {
     }
     case 'unseen': {
       const h = n.h || 1
-      g.fill(x, y, w, h, '░', 'unseen')
+      g.fill(x, y, w, h, '▒', 'unseen')
       if (n.label) { const l = ' ' + n.label + ' '; const lw = Math.min(len(l), w); g.str(x + Math.max(0, Math.floor((w - lw) / 2)), y + Math.floor((h - 1) / 2), l.slice(0, lw), 'dim') }
       mark({ k: 'unseen', label: n.label || '' })
       return h
@@ -423,14 +423,14 @@ function linkRects(line, x, y, cx) {
 
 // ---------------------------------------------------------------- marks drawn with cells
 function drawBar(g, x, y, w, value, max, tone, parts, track) {
-  if (!isFinite(value) || tone === 'unseen') { g.fill(x, y, w, 1, '░', 'unseen'); return }
+  if (!isFinite(value) || tone === 'unseen') { g.fill(x, y, w, 1, '▒', 'unseen'); return }
   const m = max > 0 ? max : 1
   if (parts) {
     let cum = 0, from = 0
     for (const p of parts) {
       cum += p.value
       const to = Math.round(clamp(cum / m, 0, 1) * w)
-      g.fill(x + from, y, to - from, 1, p.tone === 'unseen' ? '░' : BAR, p.tone)
+      g.fill(x + from, y, to - from, 1, p.tone === 'unseen' ? '▒' : BAR, p.tone)
       from = to
     }
     if (from === 0 && value > 0) g.put(x, y, '▏', parts[0] ? parts[0].tone : tone)
@@ -459,7 +459,7 @@ function drawSpark(g, x, y, w, values, mn, mx, tone, tones) {
   const vals = resample(values, w)
   const same = vals.length === values.length
   vals.forEach((v, i) => {
-    if (v === null || !isFinite(v)) { g.put(x + i, y, '░', 'unseen'); return }
+    if (v === null || !isFinite(v)) { g.put(x + i, y, '▒', 'unseen'); return }
     const j = clamp(Math.floor((v - mn) / ((mx - mn) || 1) * 8), 0, 7)
     g.put(x + i, y, SPARK[j], same && tones && tones[i] ? tones[i] : tone)
   })
