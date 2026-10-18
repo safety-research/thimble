@@ -178,6 +178,7 @@ function browserRoot() {
   writeFileSync(join(objs, '01-saves.json'), JSON.stringify({ ...OBJ, version: 2, session: SID, program: 'return k.text("hi")', lineage, history: [{ v: 1, at: 't1' }, { v: 2, at: 't2', change: 'named the week' }] }))
   writeFileSync(join(objs, '.versions', '01-saves', 'v1.json'), JSON.stringify({ ...OBJ, version: 1, title: 'Saves v1' }))
   writeFileSync(join(objs, '02-other.json'), JSON.stringify({ id: '02-other', version: 1, session: 'someone-else', title: 'Other' }))
+  writeFileSync(join(objs, '03-squeezed.json'), JSON.stringify({ id: '03-squeezed', version: 1, session: `person-${SID.slice(0, 8)}`, title: 'Squeezed' }))
   const msgs = join(root, 'thimble', 'messages', SID)
   mkdirSync(msgs, { recursive: true })
   writeFileSync(join(msgs, 'index.jsonl'), [
@@ -260,8 +261,8 @@ test('the JSON routes: this session\'s messages with their records, a record, an
     assert.equal(o.versions[1].change, 'named the week')
     assert.equal(JSON.parse((await call(port, { path: `/${token}/api/object/01-saves?v=1` })).text).object.title, 'Saves v1')
     assert.equal((await call(port, { path: `/${token}/api/object/nope` })).status, 404)
-    // the objects this session saved, not another's
-    assert.deepEqual(JSON.parse((await call(port, { path: `/${token}/api/objects` })).text).objects.map(x => x.id), ['01-saves'])
+    // the objects this session saved (Claude's, and a verb's the person ran), not another's
+    assert.deepEqual(JSON.parse((await call(port, { path: `/${token}/api/objects` })).text).objects.map(x => x.id), ['01-saves', '03-squeezed'])
     // the row's verbs: the CONTRACT's three while no verb carries row: true
     const v = JSON.parse((await call(port, { path: `/${token}/api/verbs` })).text).verbs
     assert.ok(v.length >= 1 && v.every(x => /^[a-z0-9]$/.test(x.key)))

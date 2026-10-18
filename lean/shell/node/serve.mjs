@@ -314,7 +314,8 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       let names = []
       try { names = readdirSync(join(root, 'thimble', 'objects')).filter(n => n.endsWith('.json')).sort() } catch { names = [] }
       const list = names.map(n => readJson(join(root, 'thimble', 'objects', n))).filter(Boolean)
-        .filter(o => !sess || !o.session || o.session === sess)
+        // this session's: saved by Claude, or by a verb the person ran in it (the person's reads go as person-<id>)
+        .filter(o => !sess || !o.session || o.session === sess || o.session === personEnv.LEAN_SESSION)
         .map(o => ({ id: o.id, version: o.version, title: o.title || o.id, updated: o.updated || null }))
       return json({ objects: list })
     }
