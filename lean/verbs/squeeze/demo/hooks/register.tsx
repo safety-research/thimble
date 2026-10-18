@@ -33,6 +33,7 @@ const replies = new Map<string, Entry>() // by the reply's text
 const drawn = new Map<string, Drawn>() // by `${id}@${v}${show}:${w}`
 const shown = new Map<string, { object: Obj; region?: string; moved?: boolean }>() // what a /squeeze row draws, by its marker
 let question = ''
+let session: Obj | null = null // the session squeezed, one line per turn
 let theme: 'dark' | 'light' = 'dark'
 let verb: Any = {}
 let skill = ''
@@ -115,12 +116,13 @@ async function squeezeReply($: Any, entry: Entry) {
 // the one line of hints under a squeeze: what the verb can do next for THIS object
 function hints(o: Obj): string {
   const d = o.data
+  const cmd = d.of?.id === 'session' ? '/squeeze session  ' : '/squeeze  '
   const focus = /^line-(\d+)$/.exec(d.focus || '')
   if (focus) {
     const v = d.versions.find((x: Any) => JSON.stringify(x.at) === JSON.stringify(d.at)) || d.versions[0]
     const n = Number(focus[1])
     const near = [n - 1, n + 1].filter(i => i >= 1 && i <= v.lines.length).map(i => `why ${i}`)
-    return '/squeeze  ' + near.concat([`open ${n}`, 'original']).join(' · ')
+    return cmd + near.concat(d.of?.id === 'session' ? [] : [`open ${n}`, 'original']).join(' · ')
   }
   const v = d.versions.find((x: Any) => JSON.stringify(x.at) === JSON.stringify(d.at)) || d.versions[0]
   const first = d.dims[0]
@@ -130,8 +132,9 @@ function hints(o: Obj): string {
   if (at < first.levels.length - 1) parts.push('fuller')
   for (const x of d.dims.slice(1)) parts.push(`${x.name} ▸ ${x.levels[((v.at[x.id] ?? 0) + 1) % x.levels.length]}`)
   if (v.lines.length > 1) parts.push('why 2')
-  parts.push(d.show === 'original' ? 'back' : 'original', 'open')
-  return '/squeeze  ' + parts.join(' · ')
+  parts.push(d.show === 'original' ? 'back' : 'original')
+  if (d.of?.id !== 'session') parts.push('open')
+  return cmd + parts.join(' · ')
 }
 
 function view(els: Any, s: { object: Obj; d: Drawn; region?: string }, key: string, bullet: boolean) {
@@ -237,10 +240,23 @@ export const register: Register = on => {
       return { text: `[squeeze ${marker}]\n${said || object.text || ''}`, ...(note ? { context: [note] } : {}) }
     }
     try {
-      if (args === 'session') {
+      const sess = /^session(?:\s+(.*))?$/.exec(args)
+      if (sess) {
+        const more = (sess[1] || '').trim()
+        if (more && session) {
+          const why = /^(?:why|from)\s+(\d+)$/.exec(more)
+          if (why) {
+            const r = await run(ctxFor($, session, '', `line-${why[1]}`))
+            return answer({ ...session, data: { ...session.data, focus: `line-${why[1]}` } }, `line-${why[1]}`, r.text, null)
+          }
+          const r = await run(ctxFor($, session, more))
+          if (r.object) session = r.object as Obj
+          return r.object ? answer(session, undefined, r.text, r.note) : { text: r.text || 'Nothing changed.' }
+        }
         const units = messagesToUnits(await $.session.messages())
         if (units.length < 3) return { text: 'The session has fewer than three turns, so there is nothing to squeeze yet.' }
-        const r = await run(ctxFor($, { id: 'session', title: 'this session', units, question: 'What happened in this session, turn by turn?' }))
+        const r = await run(ctxFor($, { id: 'session', ref: 'session', title: 'this session', unit: 'turn', units, question: 'What happened in this session, turn by turn?' }))
+        if (r.object) session = r.object as Obj
         return r.object ? answer(r.object as Obj, undefined, r.text, r.note) : { text: r.text || 'Nothing came back.' }
       }
       // the conversation's last long reply, squeezed already or not

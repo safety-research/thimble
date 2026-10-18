@@ -72,7 +72,10 @@ export function squeezeProgram(k, data) {
     return k.region('dim-' + d.id, { label: `${name}: ${(d.levels || [])[lvl] || ''}`, note: d.why, levels: d.levels, at: lvl },
       k.text(`{dim:${k.escape(name)}:} ${k.escape((d.levels || [])[lvl] || '')} ${dot(d, lvl)}`, { wrap: false }))
   })
-  const count = k.text(`{dim:${kept}${n ? ` of ${k.fmt(n)}` : ''} ${(n || kept) === 1 ? 'line' : 'lines'}}`, { wrap: false })
+  const unit = data.of && data.of.unit
+  const count = k.text(unit
+    ? `{dim:${kept} ${kept === 1 ? 'line' : 'lines'} for ${k.fmt(n || 0)} ${n === 1 ? unit : unit + 's'}}`
+    : `{dim:${kept}${n ? ` of ${k.fmt(n)}` : ''} ${(n || kept) === 1 ? 'line' : 'lines'}}`, { wrap: false })
   const dimLine = k.beside([count].concat(dimParts), { gap: 3 })
   const out = (v.out || []).filter(o => o && o.what)
   const outLine = out.length && k.region('left-out', { label: 'left out', note: out.map(o => o.what).join('; '), from: out.map(o => ids(o.from)) },

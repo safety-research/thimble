@@ -5,7 +5,8 @@
 //
 // ctx, from the shell (or the demo plugin, or cli.mjs):
 //   object   what to squeeze: anything with `text` (a reply, a report, a kernel object), or `units` [{id, text}] (a
-//            session's turns, a run's steps), or a squeeze object made earlier (then `args` moves it)
+//            session's turns, a run's steps; `unit` names one, as in 'turn'), or a squeeze object made earlier (then
+//            `args` moves it)
 //   region   the selected region id, if any (`line-2` of a squeeze: `why` tells where it came from)
 //   args     optional words: '' makes a squeeze (or squeezes more), 'shorter', 'fuller', a dimension's id (its next
 //            level), 'reader=new to it', 'original', 'why 2', or any request in plain words ("for my manager")
@@ -201,7 +202,7 @@ export function build(object, orig, norm, made) {
   const ref = o.ref || (o.id ? (String(o.id).includes(':') ? String(o.id) : `obj:${o.id}`) : `text:${hash(orig.text)}`)
   const title = o.title || plain(orig.spans[0]?.text || '').slice(0, 60) || 'text'
   const data = {
-    of: { id: ref, title, lines: orig.lines, question: o.question || undefined },
+    of: { id: ref, title, lines: orig.lines, question: o.question || undefined, unit: o.unit || undefined },
     spans: orig.spans, blocks: orig.blocks, dims: norm.dims, versions: norm.versions,
     at: versionAt({ versions: norm.versions }, norm.first) ? norm.first : norm.versions[0].at,
   }
