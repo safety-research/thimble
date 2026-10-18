@@ -119,6 +119,10 @@ test('a rewrite is held to the original: a ref it never cited loses its link, an
   assert.match(out.problems[0], /q9#x@n is not in the original/)
   assert.match(out.problems[1], /"12" is not in the original/)
   assert.deepEqual(checkRewrite(TEXT, 'It failed about [1 in 9](q2#test=checkout@fail_rate); now it [passed 200 times](q3#test=checkout@passes).').problems, [])
+  // a kept ref whose words state another number of the text: the words stay, the link goes
+  const moved = checkRewrite(TEXT, 'The fix held [200 times](tests/conftest.py#L14); it [passed 200 times](q3#test=checkout@passes).')
+  assert.equal(moved.text, 'The fix held 200 times; it [passed 200 times](q3#test=checkout@passes).')
+  assert.match(moved.problems[0], /"200 times" was linked to the source of "tests\/conftest.py:14"/)
 })
 
 test('after a rewrite the marks are placed again on the new text: citations, a sparkline with its values, the glosses whose terms stayed', () => {

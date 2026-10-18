@@ -249,12 +249,29 @@ const numbersIn = s => (norm(String(s).replace(LINK, '$1 $2')).match(/\d+(?:\.\d
  * number the original never states is named as a problem. Returns the text to show and the problems.
  */
 export function checkRewrite(original, text) {
-  const refs = new Set([...String(original).matchAll(LINK)].map(m => m[2].trim()))
+  // each ref the original cites, with the numbers its words state there
+  const cited = new Map()
+  const wordsOf = new Map()
+  for (const m of String(original).matchAll(LINK)) {
+    const ref = m[2].trim()
+    if (!cited.has(ref)) { cited.set(ref, new Set()); wordsOf.set(ref, m[1]) }
+    for (const n of numbersIn(m[1])) cited.get(ref).add(n)
+  }
   const problems = []
   const out = String(text).replace(LINK, (whole, words, ref) => {
-    if (refs.has(ref.trim()) || /^(https?|mailto):/i.test(ref)) return whole
-    problems.push(`a citation to ${ref.trim().slice(0, 60)} is not in the original, so it shows as plain words`)
-    return words
+    const r = ref.trim()
+    if (/^(https?|mailto):/i.test(r)) return whole
+    if (!cited.has(r)) {
+      problems.push(`a citation to ${r.slice(0, 60)} is not in the original, so it shows as plain words`)
+      return words
+    }
+    // a kept citation states the number the original cites there, never another number of the text
+    const said = numbersIn(words).filter(n => !cited.get(r).has(n))
+    if (said.length && cited.get(r).size) {
+      problems.push(`"${words.slice(0, 40)}" was linked to the source of "${String(wordsOf.get(r)).slice(0, 40)}", so it shows as plain words`)
+      return words
+    }
+    return whole
   })
   const have = new Set(numbersIn(original))
   const stray = [...new Set(numbersIn(out.replace(LINK, '$1')).filter(n => !have.has(n)))]

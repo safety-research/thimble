@@ -34,7 +34,7 @@ Each chip line in the request says the level to write and the level the original
 
 **Keep the hedges.** "About", "in the sample", "2 of 3 runs", "I did not read the other files": if the original says it and the sentence stays, the hedge stays. A short version that drops a limit the answer depends on claims more than was found, so keep that limit even at "short".
 
-**Keep the citations as Claude wrote them.** A citation is a markdown link to a ref, such as `[6,543 saves](q1#day=2026-06-18@n)` or `["PRECISION ALERT"](revisions.jsonl#L4410)`. When you keep a fact that has a citation, keep its link and copy its ref exactly. You can change the link's words, but keep the number or the quote they state. A sparkline is written `[~](q3@n)`: keep it whole where its sentence stays. Never write a ref that is not in the original, and never put a link on words that had none.
+**Keep the citations as Claude wrote them.** A citation is a markdown link to a ref, such as `[6,543 saves](q1#day=2026-06-18@n)` or `["PRECISION ALERT"](revisions.jsonl#L4410)`. When you keep a fact that has a citation, keep its link and copy its ref exactly. You can change the link's words, but keep the number or the quote they state: a link stays on its own value, never on another number of the text, such as a total beside it. A sparkline is written `[~](q3@n)`: keep it whole where its sentence stays. Never write a ref that is not in the original, and never put a link on words that had none.
 
 **Start with what the person asked.** The first sentence answers their question: what was found, what was fixed, or what waits on them. The path to the answer comes later, or not at all.
 
