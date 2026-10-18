@@ -574,6 +574,39 @@ async def test_bug_hunt_l17_a_failed_second_page_says_that_page_failed_never_a_c
     assert texts[-1].startswith("The change to the view Run Board failed, so the view is as it was")
 
 
+async def test_bug_hunt_l17_a_page_whose_build_failed_that_passes_later_clears_its_notice_and_main_hears(
+        board, bridge, gates, hints, monkeypatch):
+    """Bug hunt round 11, L17: the browser page passed later as "a change made to the view outside thimble's agents",
+    and the browser drew it, but its failure notice stayed through /compact and `claude -c`, and main told the analyst
+    the page did not show. A page whose build failed that passes later settles that failure: its notice goes, the
+    view's chip shows it built, and main hears the view has the page."""
+    from app import notices
+
+    told: list[tuple[str, str, dict]] = []
+    monkeypatch.setattr(session, "push_event", lambda c, kind, text, **meta: told.append((kind, text, meta)) or True)
+    slug, agent, key, d, reviewed = await _first_page_passed(monkeypatch, "Lark Grid")
+    (d / views.VIEW_HTML).write_text("<p>FAIL</p>")
+    subagents.run_ended(CORPUS, agent, "done", "The browser page still fails.", source="handback")
+    await _until(lambda: reviewed, "the review of the terminal page never started")
+    assert [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
+    # the page is written again, with no agent of the view running, and passes
+    (d / views.VIEW_HTML).write_text("<p>larks</p>")
+    await views._gate_found(CORPUS, slug, views.digest(d))
+    assert views.has_page(views.read_built(CORPUS, slug), views.HTML_PAGE)
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"], "its failure notice is gone"
+    prop = _prop(slug)
+    assert (prop["status"], prop.get("failed_change"), prop.get("error")) == ("built", None, None)
+    kind, text, meta = told[-1]
+    assert (kind, meta) == ("view", {"view": slug})
+    assert text == tools.hint("view-page-passed", view="Lark Grid", place="the browser workbench")
+    assert "now has its page for the browser workbench" in text
+    # a pass that brings no page whose build failed tells main nothing more
+    n = len(told)
+    (d / views.VIEW_HTML).write_text("<p>larks, sorted</p>")
+    await views._gate_found(CORPUS, slug, views.digest(d))
+    assert len(told) == n
+
+
 async def test_bug_hunt_l17_a_build_s_second_page_is_the_next_step_of_the_same_run_then_one_review(
         board, bridge, gates, heard, hints, monkeypatch):
     """Bug hunt round 11, L17: once the terminal page of a build pressed in the terminal passed, the builder handed back

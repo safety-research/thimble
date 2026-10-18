@@ -812,6 +812,7 @@ async def _gate_found(c: str, slug: str, seen: str) -> None:
     if rep.get("ok") and digest(d) == seen:
         log.info("%s: a change made to the view %s outside thimble's agents passed its checks", c, slug)
         mark_built(c, slug)
+        failed_page_passed(c, slug)
     else:
         log.info("%s: a change made to the view %s outside thimble's agents did not pass, so readers keep the view as "
                  "it last passed: %s", c, slug, first_failure(rep))
@@ -828,11 +829,45 @@ async def regate(c: str, slug: str) -> dict[str, Any] | None:
     rep = await gate(c, slug, _kept_locators(c, slug))
     if rep.get("ok"):
         mark_built(c, slug)
+        failed_page_passed(c, slug)
     elif not restore_version(c, slug, version):
         kept = _as_built(c, slug, v)
         if kept is not None:
             restore_version(c, slug, str(kept.get("version") or ""))
     return rep
+
+
+VIEW_PAGE_PASSED_HINT = "view-page-passed"  # prompts/tools.md: {view}, {place}; main's `view` event (failed_page_passed)
+
+
+def failed_page_passed(c: str, slug: str) -> str | None:
+    """After a pass that made the folder of `slug` the view other than a builder's finish (a change found in the folder,
+    _gate_found; an agent's end, regate): a page whose last build failed (`failed_change`, the build of the page the view
+    lacked) that the view now has passed after all, so that failure goes: from the proposal, and its notice with it
+    (dev._view_cleared), and main hears that the view has the page (VIEW_PAGE_PASSED_HINT, a `view` event), so its
+    account matches what the analyst sees (bug hunt round 11, L17: the browser page passed as "a change made outside
+    thimble's agents", and the notice that it failed, and main's word that it does not show, stayed for good). The
+    page's target, or None when no failure was settled. Never raises."""
+    from . import dev, session  # noqa: PLC0415
+
+    try:
+        prop = read_proposal(c, slug) or {}
+        target = missing_page_target(prop.get("failed_change"))
+        view = read_built(c, slug)
+        if target is None or view is None or not has_page(view, target):
+            return None
+        update_proposal(c, slug, failed_change=None, error=None)
+        dev._view_cleared(c, slug)
+        _emit(c, slug, "built")
+        name = str(prop.get("name") or view.get("name") or slug)  # as its notice named it (dev._view_notice)
+        session.push_event(c, "view", _hint(VIEW_PAGE_PASSED_HINT, view=name,
+                                            place=MISSING_PAGE_PLACE[target]), view=slug)
+        log.info("%s: the view %s has its %s now, so the failure of its build no longer holds", c, slug,
+                 PAGE_OF[target])
+        return target
+    except Exception:  # noqa: BLE001 — the view passed either way
+        log.exception("%s: the failure of a page of the view %s was not settled", c, slug)
+        return None
 
 
 def restore_version(c: str, slug: str, version: str) -> bool:
