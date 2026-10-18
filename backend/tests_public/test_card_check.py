@@ -316,6 +316,82 @@ async def test_main_learns_of_a_fix_of_its_card_in_one_line_at_its_next_turn_and
     assert event_files.held(ws) == []
 
 
+async def test_main_learns_of_problems_the_check_found_but_could_not_fix_and_the_check_reads_thimble_chart_s_help(
+        workspaces_tmp, monkeypatch):
+    """Bug hunt L8: the check found that a chart main had called side by side stacked its groups, but its replacement
+    called thimble.chart with an option it does not take (`stacked=False`), did not run, and the check ended with the
+    card as it was and nothing said. Main now gets one line held for its next turn, as for a fix: the problems the
+    check found, why its replacement was not kept, and that the card is as main made it. And the check reads
+    thimble.chart's help with the code of a card that calls it, so its replacement can call it as it is written."""
+    from terminal_fakes import write_launch
+
+    from app import event_files, events
+
+    async def started(k, workspace, kernel=None) -> None:
+        return None
+
+    async def ran(k, code, kind, timeout_s, extra_exprs=None):  # main's card; the check's revision runs in thimble-run
+        k.last_labels, k.last_label_revs = [], {}
+        return [_bars(LONG)], 1, "ok"
+
+    monkeypatch.setattr(notebook, "_ensure_started", started)
+    monkeypatch.setattr(notebook, "_run_card_code", ran)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)
+    ws = config.workspace_dir(CORPUS)
+    write_launch(ws)
+    monkeypatch.setattr(notebook, "_no_kernel_here", lambda c: None)
+    group = notebook.create_notebook(ws, "Your work", role="analyst")["id"]
+    code = ("import pandas as pd\nimport thimble\n"
+            "df = pd.DataFrame({'round': ['r1', 'r1'], 'calls': [3, 4], 'crew': ['heron crew', 'lark crew']})\n"
+            "thimble.chart('bar', df)")
+    res = await tools.call(CORPUS, "add_card", {"kind": "plot", "question": "How many calls did each crew make in each round?",
+                                                "code": code, "takeaway": "The crews' bars stand side by side."},
+                           actor="analyst", notebook=group, terminal=False)
+    assert not res.is_error, res.text
+    cid = res.text.split("card:", 1)[1].split()[0]
+    problem = "The analyst asked for the crews side by side, but the chart stacks them."
+    seen: list[dict] = []
+
+    async def draw(c, cell):
+        return render.Rendered(png=b"\x89PNG card")
+
+    async def read(c, cell, png, run, picture=None):
+        seen.append(await card_check.card_input(c, cell, run, None, card_check._sections()))
+        assessment = [{"problem": ""}] * card_check.CRITERIA
+        assessment[1] = {"problem": problem}
+        return assessment, {"question": cell["title"], "code": code.replace("df)", "df, stacked=False)"),
+                            "takeaway": cell["takeaway"]}, "test-model"
+
+    monkeypatch.setattr(render, "down", lambda: False)
+    monkeypatch.setattr(card_check, "_draw", draw)
+    monkeypatch.setattr(card_check, "_read", read)
+    run = card_check.start(CORPUS, cid, card_check.MAIN)
+    assert run is not None
+    await run.task
+    cell = notebook.get_cell(CORPUS, cid)
+    assert cell["check"]["status"] == "error" and cell["code"] == code, "the card stays as main made it"
+    assert [f["state"] for f in cell["fixes"]] == ["rejected"]
+
+    notes = event_files.held(ws)
+    assert [n["meta"]["kind"] for n in notes] == ["card_fixed"] and notes[0]["meta"]["card"] == f"card:{cid}"
+    line = events.meanwhile(notes)
+    assert f"found problems in card:{cid} that it could not fix" in line, line
+    assert "its code did not run clean: TypeError" in line and "not 'stacked'" in line, line
+    assert problem in line and "The card is as you made it." in line and "`edit_card`" in line, line
+    assert event_files.said(notes) == "", "main's terminal prints no line for it"
+    # a card another agent made tells main nothing
+    event_files.pop_held(ws)
+    assert not card_check.tell_unfixed(CORPUS, cid, "orient:o1", [problem], "it could not be applied")
+
+    # the reading got thimble.chart's help, with the option that sets bars side by side, under the card's code
+    chart = seen[0]["card"]["chart"]
+    assert "thimble.chart" in chart and "False sets bars side by side" in chart and "sort, stack, label" in chart, chart
+    user = card_check._fill(card_check._sections()["card"], {**{k: "" for k in (
+        "card", "kind", "question", "takeaway", "citations", "context", "typed", "kept")}, "code": code, "chart": chart})
+    assert user.index(code) < user.index("False sets bars side by side")
+    assert card_check._chart_text("alt.Chart(df).mark_bar()", card_check._sections()) == "", "no help for other code"
+
+
 async def test_a_quote_of_a_wiki_save_s_edit_summary_is_kept_shown_and_read_by_the_card_check(tmp_path):
     """Bug hunt J6: a wiki save's record shows its page's text and left its edit summary out, so add_card refused a true
     quote of that summary, the card drew the save without it, and the card check, reading only the text, called the
