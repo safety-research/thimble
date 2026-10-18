@@ -14,6 +14,10 @@
  *  principles, read where it stands) and the principles of a great output. A part may keep only some of a file's ###
  *  subsections: `only` names them by the start of their headings, `pick: n` takes n of them, chosen by the session. */
 const ABLATION = [{ file: 'skills/lean/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/parts/principles.md' }]
+/** The same, with the principles' second version: parts are labelled with what they stand for, each part is drawn from
+ *  its row (a stacked bar's parts too), and when interaction earns its place (a part that stands for many things; a
+ *  case the person asks to see). */
+const ABLATION_V2 = [{ file: 'skills/lean/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/parts/principles-v2.md' }]
 
 /** @type {Record<string, Feature>} */
 export const FEATURES = {
@@ -63,6 +67,9 @@ export const FEATURES = {
       many: { about: 'ablation c: a, and the whole pool of worked examples', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md' }] },
       rotate: { about: "ablation d: a, and 3 worked examples from the pool, a different 3 per session (the session's id picks them)", parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', pick: 3 }] },
       sketches: { about: 'ablation e: a, and the pool as sketches (the picture, its encoding, its interaction), no programs', parts: [...ABLATION, { file: 'prompts/forms/parts/sketches.md' }] },
+      // the interaction pass: the same two versions with the principles' second version
+      'principles-v2': { about: 'a with the principles v2: label parts with what they stand for, draw each part from its row, and when a zoom or examples earn their place', parts: ABLATION_V2 },
+      'sketches-v2': { about: 'e with the principles v2', parts: [...ABLATION_V2, { file: 'prompts/forms/parts/sketches.md' }] },
     },
     about: 'the card guidance: what makes a card good',
     reads: 'beside the toolkit when Claude reads it before a card, and `lean guide cards` (v asks for it)', default: 'runtime',

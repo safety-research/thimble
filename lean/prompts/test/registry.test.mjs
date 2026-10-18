@@ -51,7 +51,7 @@ test('the active version: the default, then the setting, then LEAN_PROMPTS; a mi
   const m = choose(idx, { setting: 'forms:v1', env: 'forms:v9,nothing:v1' })
   assert.equal(m.active.forms.version, 'v1')
   assert.equal(m.problems.length, 2)
-  assert.match(m.problems[0], /^LEAN_PROMPTS: no version forms:v9, so forms stays at v1; its versions are runtime, v1, v2, principles, few, many, rotate, sketches$/)
+  assert.match(m.problems[0], /^LEAN_PROMPTS: no version forms:v9, so forms stays at v1; its versions are runtime, v1, v2, principles, few, many, rotate, sketches, principles-v2, sketches-v2$/)
   assert.match(m.problems[1], /no prompt feature "nothing"/)
 })
 
@@ -172,6 +172,18 @@ test('the card ablation: five versions with the same principles, which differ on
   assert.ok(named.every(Boolean), 'each example few names is in the pool')
   assert.deepEqual(few.chosen, pool.map(x => x.heading).filter(h => named.includes(h)), 'in the order of the pool')
   assert.doesNotMatch(textOf('cards', ROOT, env('sketches')).text, /```js/)
+})
+
+test('the interaction pass: principles-v2 and sketches-v2 are a and e with the second principles, and nothing else changed', () => {
+  const env = v => ({ LEAN_PROMPTS: `forms:${v}`, LEAN_SESSION: 's-ab' })
+  const a2 = textOf('cards', ROOT, env('principles-v2'))
+  assert.equal(a2.id, 'forms:principles-v2')
+  assert.match(a2.text, /Interaction earns its place/)
+  assert.match(a2.text, /a part of a stacked bar/)
+  const e = textOf('cards', ROOT, env('sketches')).text
+  const e2 = textOf('cards', ROOT, env('sketches-v2')).text
+  assert.ok(e2.startsWith(a2.text.trim()), 'sketches-v2 starts with the principles of principles-v2')
+  assert.equal(e2.slice(a2.text.trim().length), e.slice(textOf('cards', ROOT, env('principles')).text.trim().length), 'the same sketches follow')
 })
 
 test('a part that picks: the same session reads the same examples, in the order of the file; only keeps them by name', () => {
