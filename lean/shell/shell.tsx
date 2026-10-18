@@ -1778,7 +1778,14 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       ...(right ? [Box({ key: 'bar-counts', flexShrink: 0, children: [right] })] : []),
     ] })
   }
-  // too narrow: the label, the keys and the counts each on rows of their own, wrapped at words
+  // the label and the keys on one row where they fit, the counts on the row under it, at its right
+  if ([...name].length + 2 + [...leftText].length <= w) {
+    return Box({ flexDirection: 'column', width: w, children: [
+      Box({ key: 'bar-left', flexDirection: 'row', children: [label, Text({ key: 'bar-gap', children: '  ' }), ...left] }),
+      ...(right ? [Box({ key: 'bar-counts', flexDirection: 'row', justifyContent: 'flex-end', width: w, children: [right] })] : []),
+    ] })
+  }
+  // too narrow (beside a docked pane): the label, the keys and the counts each on rows of their own, wrapped at words
   const rows: Any[] = [label]
   if (left.length) rows.push(keys ? left[0] : Box({ key: 'bar-left', flexDirection: 'row', flexWrap: 'wrap', children: left }))
   if (right) rows.push(right)
