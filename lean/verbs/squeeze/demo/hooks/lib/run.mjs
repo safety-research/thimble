@@ -201,7 +201,7 @@ export function build(object, orig, norm, made) {
   const ref = o.ref || (o.id ? (String(o.id).includes(':') ? String(o.id) : `obj:${o.id}`) : `text:${hash(orig.text)}`)
   const title = o.title || plain(orig.spans[0]?.text || '').slice(0, 60) || 'text'
   const data = {
-    of: { ref, title, lines: orig.lines, question: o.question || undefined },
+    of: { id: ref, title, lines: orig.lines, question: o.question || undefined },
     spans: orig.spans, blocks: orig.blocks, dims: norm.dims, versions: norm.versions,
     at: versionAt({ versions: norm.versions }, norm.first) ? norm.first : norm.versions[0].at,
   }
@@ -222,13 +222,13 @@ function lineageOf(data, made, problems) {
   data.versions.forEach((v, vi) => v.lines.forEach((l, li) => {
     const via = [...new Set(l.from.flatMap(id => byId.get(id)?.cites || []))]
     via.forEach(r => rows.add(r))
-    cites.push({ in: `/versions/${vi}/lines/${li}`, ref: data.of.ref, spans: l.from, ...(via.length ? { via } : {}), ...(l.problem ? { problem: l.problem } : {}) })
+    cites.push({ in: `/versions/${vi}/lines/${li}`, of: data.of.id, spans: l.from, ...(via.length ? { via } : {}), ...(l.problem ? { problem: l.problem } : {}) })
   }))
-  return { of: data.of.ref, cites, rows: [...rows], made, problems: problems || [] }
+  return { of: data.of.id, cites, rows: [...rows], made, problems: problems || [] }
 }
 
 function withVersion(sq, change) {
-  const next = { ...sq, v: (sq.v || 1) + 1, data: { ...sq.data } }
+  const next = { ...sq, v: (sq.v || sq.version || 1) + 1, data: { ...sq.data } }
   change(next)
   next.text = shownText(next)
   return next
@@ -283,7 +283,7 @@ async function move(ctx, sq) {
     return { text: `Line ${args.line} came from ${l.from.join(', ') || 'no span'}:\n` + l.from.map(id => `  [${id}] ${plain(byId.get(id).text)}`).join('\n') + (l.problem ? `\n  (${l.problem})` : '') }
   }
   if (args.kind === 'show') return { object: withVersion(sq, n => { n.data.show = args.show }), text: args.show ? 'The original, with what this version keeps underlined.' : sq.text }
-  if (args.kind === 'again') return run({ ...ctx, object: { ref: d.of.ref, title: d.of.title, question: d.of.question, text: originalText(d) }, args: '' })
+  if (args.kind === 'again') return run({ ...ctx, object: { ref: d.of.id, title: d.of.title, question: d.of.question, text: originalText(d) }, args: '' })
   let at = { ...cur }
   let ask = ''
   if (args.kind === 'default' || args.kind === 'step') {
@@ -338,5 +338,5 @@ function noteFor(sq, how) {
   const d = sq.data
   const v = versionAt(d, d.at) || d.versions[0]
   const where = d.dims.map(x => `${x.name} ${x.levels[v.at[x.id] ?? 0]}`).join(', ')
-  return `The person sees ${d.of.ref} ${how === 'moved' ? 'now ' : ''}squeezed to ${v.lines.length} of ${d.of.lines} lines (${where}); the original is unchanged and one key away.`
+  return `The person sees ${d.of.id} ${how === 'moved' ? 'now ' : ''}squeezed to ${v.lines.length} of ${d.of.lines} lines (${where}); the original is unchanged and one key away.`
 }

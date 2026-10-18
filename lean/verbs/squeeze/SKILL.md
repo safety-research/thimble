@@ -15,6 +15,8 @@ The original comes cut into numbered spans: `[3.2]` is the second sentence of th
 
 **Put first the dimension that makes it shorter.** "Shorter" and "fuller" move along it. The other dimensions change what the version is about, not only its size.
 
+**Keep the promise of a level's name.** If a level is called "one line", write one line. If it is called "headline", write one sentence. A short version of 6 long lines is not short. One idea goes in each line, in about 25 words or fewer.
+
 **Start with what the person needs to act on.** The first line answers the question that was asked: what happened, what was found, or what needs a decision. Keep the numbers, the names and the outcome. Leave out the path to the outcome, unless the path is the point.
 
 **Say nothing that the original does not say.** A squeezed line can merge, reorder and shorten. It cannot add. Every number, name and claim in it must be in the spans it cites. If a shorter wording would need a new claim (a total nobody computed, a "most" nobody counted), keep the longer wording.

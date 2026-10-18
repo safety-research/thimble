@@ -31,7 +31,7 @@ const tick = { plugin: 'lean-squeeze-demo', key: 'tick' } as const
 
 const replies = new Map<string, Entry>() // by the reply's text
 const drawn = new Map<string, Drawn>() // by `${id}@${v}${show}:${w}`
-const shown = new Map<string, { object: Obj; region?: string }>() // what a /squeeze row draws, by its marker
+const shown = new Map<string, { object: Obj; region?: string; moved?: boolean }>() // what a /squeeze row draws, by its marker
 let last = '' // the key of the last long reply
 let question = ''
 let theme: 'dark' | 'light' = 'dark'
@@ -54,7 +54,7 @@ const dirs = (root: string) => {
 async function bump($: Any) { await update($, tick, n => (n ?? 0) + 1) }
 
 async function drawOf($: Any, object: Obj, w: number): Promise<Drawn> {
-  const k = `${object.id}@${object.v}${object.data?.show || ''}:${w}`
+  const k = `${object.id}@${object.v}${object.data?.show || ''}${object.data?.focus || ''}:${w}`
   const have = drawn.get(k)
   if (have) return have
   const { draw } = dirs($.plugin.root)
@@ -69,11 +69,31 @@ async function drawOf($: Any, object: Obj, w: number): Promise<Drawn> {
   return d
 }
 
-async function keep($: Any, object: Obj) {
+async function keep($: Any, object: Obj, entry?: Entry) {
   try {
     await $.fs.write(`${home}/lean/squeeze/objects/${object.id}.json`, JSON.stringify(object))
+    // which reply it squeezes, so a resumed session draws the reply squeezed again
+    if (entry) await $.fs.write(`${home}/lean/squeeze/replies/${entry.key.replace(/\W/g, '-')}.json`, JSON.stringify({ key: entry.key, object: object.id, at: Date.now() }))
   } catch {
-    // keeping a copy for the browser is a convenience; the object stays in this session
+    // keeping a copy for the browser and for a resume is a convenience; the object stays in this session
+  }
+}
+
+async function reload($: Any) {
+  try {
+    const dir = `${home}/lean/squeeze/replies`
+    if (!(await $.fs.exists(dir))) return
+    let newest = 0
+    for (const f of await $.fs.list(dir)) {
+      if (!String(f.name).endsWith('.json')) continue
+      const r = JSON.parse(String(await $.fs.read(`${dir}/${f.name}`)))
+      const object = JSON.parse(String(await $.fs.read(`${home}/lean/squeeze/objects/${r.object}.json`)))
+      if (object.data) delete object.data.focus
+      replies.set(r.key, { key: r.key, text: '', object })
+      if (r.at > newest) { newest = r.at; last = r.key }
+    }
+  } catch {
+    // nothing kept, or a copy that does not read: those replies show as written
   }
 }
 
@@ -84,7 +104,7 @@ function ctxFor($: Any, object: Any, args = '', region?: string) {
 async function squeezeReply($: Any, entry: Entry) {
   try {
     const r = await run(ctxFor($, { id: `reply:${entry.turn || entry.key}`, text: entry.text, question: entry.question }))
-    if (r.object) { entry.object = r.object as Obj; await keep($, entry.object) }
+    if (r.object) { entry.object = r.object as Obj; await keep($, entry.object, entry) }
     else entry.error = r.text || 'nothing came back'
   } catch (err) {
     entry.error = String((err as Error)?.message || err).slice(0, 200)
@@ -98,6 +118,13 @@ async function squeezeReply($: Any, entry: Entry) {
 // the one line of hints under a squeeze: what the verb can do next for THIS object
 function hints(o: Obj): string {
   const d = o.data
+  const focus = /^line-(\d+)$/.exec(d.focus || '')
+  if (focus) {
+    const v = d.versions.find((x: Any) => JSON.stringify(x.at) === JSON.stringify(d.at)) || d.versions[0]
+    const n = Number(focus[1])
+    const near = [n - 1, n + 1].filter(i => i >= 1 && i <= v.lines.length).map(i => `why ${i}`)
+    return '/squeeze  ' + near.concat([`open ${n}`, 'original']).join(' · ')
+  }
   const v = d.versions.find((x: Any) => JSON.stringify(x.at) === JSON.stringify(d.at)) || d.versions[0]
   const first = d.dims[0]
   const at = v.at[first.id] ?? 0
@@ -114,7 +141,7 @@ function view(els: Any, s: { object: Obj; d: Drawn; region?: string }, key: stri
   const { Box, Text } = els
   const body = paintGrid(s.d.grid, els, { theme, selected: s.region, key })
   const rows = [body]
-  const r = s.region ? s.d.grid.regions.find((x: Any) => x.id === s.region) : undefined
+  const r = s.region && !s.object.data?.focus ? s.d.grid.regions.find((x: Any) => x.id === s.region) : undefined
   if (r) {
     const cite = r.meta.cite ? s.d.drawing.cites[r.meta.cite] : undefined
     const said = cite ? `▸ ${r.id.replace('-', ' ')} came from ${cite.source.replace(/^the original, /, '')}: ${cite.text}` : `▸ ${r.meta.label || r.id}`
@@ -157,6 +184,7 @@ export const register: Register = on => {
     try { verb = JSON.parse(String(await $.fs.read(`${verbDir}/verb.json`))) } catch { verb = {} }
     try { skill = String(await $.fs.read(`${verbDir}/SKILL.md`)) } catch { skill = '' }
     home = ((await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`).replace(/\/+$/, '')
+    await reload($)
     return next(e)
   })
 
@@ -202,11 +230,12 @@ export const register: Register = on => {
   on('command.run', { command: 'squeeze' }, async ($, e) => {
     const args = e.args.trim()
     const w = Math.max(40, Math.min(140, e.presentation.columns - 4))
-    const answer = async (object: Obj, region: string | undefined, said: string | null, note?: string | null) => {
-      await keep($, object)
-      const marker = `${object.id}@${object.v}${object.data?.show ? '~' + object.data.show : ''}${region ? ' ' + region : ''}`
-      shown.set(marker, { object, region })
-      await drawOf($, object, w)
+    // a move changes the reply's own row, so its command row is one line; a new object draws in the command row
+    const answer = async (object: Obj, region: string | undefined, said: string | null, note?: string | null, moved = false) => {
+      if (!object.data?.focus) await keep($, object) // a focused view is a way of drawing the object, not a version of it
+      const marker = `${object.id}@${object.v}${object.data?.show ? '~' + object.data.show : ''}${object.data?.focus ? '#' + object.data.focus : ''}${region ? ' ' + region : ''}`
+      shown.set(marker, { object, region, moved })
+      if (!moved) await drawOf($, object, w)
       return { text: `[squeeze ${marker}]\n${said || object.text || ''}`, ...(note ? { context: [note] } : {}) }
     }
     try {
@@ -216,7 +245,19 @@ export const register: Register = on => {
         const r = await run(ctxFor($, { id: 'session', title: 'this session', units, question: 'What happened in this session, turn by turn?' }))
         return r.object ? answer(r.object as Obj, undefined, r.text, r.note) : { text: r.text || 'Nothing came back.' }
       }
-      const entry = replies.get(last)
+      let entry = replies.get(last)
+      if (!entry) {
+        // no reply squeezed in this run of the module: the conversation's last long reply
+        const msgs = await $.session.messages()
+        for (let i = msgs.length - 1; i >= 0 && !entry; i--) {
+          const m = msgs[i]
+          if (m.role !== 'assistant' || !isLong(m.text, verb.auto || {})) continue
+          const asked = msgs.slice(0, i).reverse().find((x: Any) => x.role === 'user' && x.text && !(x.toolResults || []).length)
+          entry = { key: keyOf(m.text), text: m.text, question: asked?.text }
+          replies.set(entry.key, entry)
+          last = entry.key
+        }
+      }
       if (!entry) return { text: 'There is no long reply to squeeze yet.' }
       if (args === 'full' || args === 'back') {
         entry.full = args === 'full'
@@ -243,7 +284,7 @@ export const register: Register = on => {
       const why = /^(?:why|from)\s+(\d+)$/.exec(args)
       if (why && entry.object) {
         const r = await run(ctxFor($, entry.object, '', `line-${why[1]}`))
-        const object = { ...entry.object, data: { ...entry.object.data, show: 'original' } }
+        const object = { ...entry.object, data: { ...entry.object.data, show: null, focus: `line-${why[1]}` } }
         return answer(object, `line-${why[1]}`, r.text, null)
       }
       $.ui.status('squeezing…')
@@ -253,8 +294,9 @@ export const register: Register = on => {
       entry.object = r.object as Obj
       entry.full = false
       entry.error = undefined
+      await keep($, entry.object, entry)
       await bump($)
-      return answer(entry.object, undefined, r.text, r.note)
+      return answer(entry.object, undefined, r.text, r.note, true)
     } catch (err) {
       $.ui.status(undefined)
       return { text: `Squeeze failed: ${String((err as Error)?.message || err).slice(0, 300)}. Type /squeeze again to retry.` }
@@ -264,9 +306,16 @@ export const register: Register = on => {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     if (e.props.command !== 'squeeze' || e.props.isErrored) return next(e)
     try {
-      const m = /^\[squeeze ([^\]]+)\]/.exec(e.props.text)
+      const m = /\[squeeze ([^\]]+)\]/.exec(e.props.text)
       const s = m ? shown.get(m[1]) : undefined
       if (!s) return next(e)
+      if (s.moved) {
+        const { Text } = $.ui.resolve(e)
+        const d = s.object.data
+        const v = d.versions.find((x: Any) => JSON.stringify(x.at) === JSON.stringify(d.at)) || d.versions[0]
+        const where = d.dims.map((x: Any) => `${x.name} ${x.levels[v.at[x.id] ?? 0]}`).join(' · ')
+        return Text({ dimColor: true, wrap: 'truncate-end', children: `  ⎿  ↑ the reply above is now ${d.show === 'original' ? 'beside its original' : `${v.lines.length} of ${d.of.lines} lines`} · ${where}` })
+      }
       const w = Math.max(40, Math.min(140, (e.viewport?.columns ?? 100) - 4))
       const d = await drawOf($, s.object, w)
       return view($.ui.resolve(e), { object: s.object, d, region: s.region }, `cmd-${m![1].replace(/\W+/g, '-')}`, false)

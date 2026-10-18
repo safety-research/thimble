@@ -4,7 +4,8 @@
 // the original spans it came from, then one dim line with the dimensions Claude chose and where this version sits on
 // each, and, when the version left something out, one dim line naming it. Wide (k.w >= 110), or with data.show set to
 // 'original', the original is drawn beside it (or under it): the spans this version uses are links to the line they
-// feed, so selecting a line lights its sources too, and the spans it left out are dim.
+// feed, so selecting a line lights its sources too, and the spans it left out are dim. With data.focus set to a line's
+// id, it draws that line alone and, under it, each paragraph of the original it draws on, its own spans underlined.
 //
 // The program is the real function below; PROGRAM is its text as an object keeps it, the body of (k, data) => node.
 
@@ -25,7 +26,12 @@ export function squeezeProgram(k, data) {
     .replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
   const words = s => String(s || '').replace(/\[([^\]\n]*)\]\([^)\s]*\)/g, '$1').replace(/`|\*\*/g, '').replace(/[\[\]{}\\]/g, '').replace(/\s+/g, ' ').trim()
   const ids = from => (from || []).filter(id => byId[id])
-  const span = id => byId[id].kind === 'h' ? words(byId[id].text).toUpperCase() : words(byId[id].text)
+  const span = id => {
+    const sp = byId[id]
+    if (sp.kind === 'h') return words(sp.text).toUpperCase()
+    if (sp.kind === 'row') return words(sp.text.replace(/^\s*\||\|\s*$/g, '').split('|').map(c => c.trim()).join(' · '))
+    return words(sp.text)
+  }
   const range = list => {
     // "2.1-2.3, 4.2": runs of neighbors in one block shown as a range
     if (!list.every(id => /^\d+\.\d+$/.test(id))) return list.join(', ')
@@ -69,14 +75,11 @@ export function squeezeProgram(k, data) {
   const dimLine = k.beside([count].concat(dimParts), { gap: 3 })
   const out = (v.out || []).filter(o => o && o.what)
   const outLine = out.length && k.region('left-out', { label: 'left out', note: out.map(o => o.what).join('; '), from: out.map(o => ids(o.from)) },
-    k.text(`{dim:left out: ${out.map(o => k.escape(o.what)).join(' · ')}}`))
+    k.text(`{dim:left out: ${out.slice(0, 4).map(o => k.escape(o.what)).join(' · ')}${out.length > 4 ? ` · ${out.length - 4} more` : ''}}`))
   const version = k.stack(k.stack(lines), dimLine, outLine || false)
 
-  const wide = k.w >= 110
-  if (data.show !== 'original' && !wide) return version
-
-  // the original, its used spans linked to the line they feed (a link's words are cut into pieces the toolkit reads
-  // as one link each, under 200 characters)
+  // a span of the original as a link to the line it feeds (the words are cut into pieces the toolkit reads as one
+  // link each, under 200 characters), so selecting the line lights the span too
   const link = (t, id) => {
     const pieces = []
     let cur = ''
@@ -84,6 +87,32 @@ export function squeezeProgram(k, data) {
     if (cur) pieces.push(cur)
     return pieces.map(p => `[${p}](#${id})`).join(' ')
   }
+
+  // one line and where it came from: each paragraph it draws on, its own spans underlined, the rest dim
+  const focus = /^line-(\d+)$/.exec(data.focus || '')
+  const fl = focus && (v.lines || [])[Number(focus[1]) - 1]
+  if (fl) {
+    const i = Number(focus[1]) - 1
+    const from = ids(fl.from)
+    const mine = {}
+    from.forEach(s => { mine[s] = 1 })
+    const paras = from.map(s => byId[s].b).filter((b, j, all) => all.indexOf(b) === j)
+    const rows = paras.map(b => {
+      const blk = (data.blocks || []).find(x => x.b === b) || { spans: [] }
+      const parts = blk.spans.filter(id => byId[id]).map(id => mine[id] ? `{ink:${link(span(id), data.focus)}}` : `{dim:${k.escape(span(id))}}`)
+      return k.beside(k.text(`{dim:¶${b}}`, { w: 5, wrap: false }), k.text(parts.join(' ')), { gap: 1 })
+    })
+    return k.stack(
+      k.beside(k.text(`{dim:line ${i + 1} of ${(v.lines || []).length}}`, { w: 11, wrap: false }), lines[i], { gap: 1 }),
+      k.text(`{dim:${from.length ? `came from ${from.length} ${from.length === 1 ? 'span' : 'spans'} of the original (${range(from)}), underlined:` : 'cites no span of the original'}}`),
+      k.stack(rows),
+      fl.problem ? k.text(`{warn:? ${k.escape(fl.problem)}}`) : false,
+      { gap: 1 })
+  }
+
+  const wide = k.w >= 110
+  if (data.show !== 'original' && !wide) return version
+
   const blocks = data.blocks || []
   const orig = k.stack(blocks.map(b => {
     const parts = (b.spans || []).filter(id => byId[id]).map(id => {
