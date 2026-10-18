@@ -68,6 +68,11 @@ export const FEATURES = {
     reads: 'beside the toolkit when Claude reads it before a card, and `lean guide cards` (v asks for it)', default: 'runtime',
     base: 'verbs/visualize',
   },
+  card: {
+    about: "the card after the answer: a fork of the session that shares main's prompt cache draws the answer's card after its text, so main neither reads the card guidance nor writes the program inside its turn",
+    reads: 'shell/shell.tsx after a turn that ran lean, and the lean skill in place of its card section (prompts.ts)', default: 'off', optional: true,
+    versions: { v1: { about: 'the fork decides whether a card helps and writes it, with queries for thimble to run first; one fix round when the save or the drawing finds a problem' } },
+  },
   thread: { about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v1' },
   lean: { about: 'the lean skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'lean', versions: { skill: { file: 'skills/lean/SKILL.md', about: 'as SKILL.md says now' } } },
   claims: { about: 'the corpus orientation (a subagent reads it)', reads: 'verbs/claims/run.mjs, /verb claims orient', default: 'skill', skill: 'claims', versions: { skill: { file: 'verbs/claims/SKILL.md' } } },
@@ -110,7 +115,7 @@ export function indexOf(found = {}) {
       if (!String(file).endsWith('.md') || v.startsWith('.') || v === OFF) continue
       versions[v] = { ...(versions[v] || {}), file: `prompts/${name}/${file}` }
     }
-    if (!versions[f.default]) versions[f.default] = { file: `prompts/${name}/${f.default}.md` }
+    if (!versions[f.default] && f.default !== OFF) versions[f.default] = { file: `prompts/${name}/${f.default}.md` }
     idx[name] = { ...f, name, versions }
   }
   return idx
@@ -123,7 +128,8 @@ export function indexOf(found = {}) {
  */
 export function choose(idx, { setting = '', env = '' } = {}) {
   const active = {}
-  for (const [name, f] of Object.entries(idx)) active[name] = { version: f.default, file: f.versions[f.default]?.file ?? null, ...(f.versions[f.default]?.parts ? { parts: f.versions[f.default].parts } : {}), source: 'default' }
+  // a feature that is off by default (an optional one whose default is `off`) is off until a setting names a version
+  for (const [name, f] of Object.entries(idx)) active[name] = f.default === OFF ? { version: OFF, file: null, source: 'default', off: true } : { version: f.default, file: f.versions[f.default]?.file ?? null, ...(f.versions[f.default]?.parts ? { parts: f.versions[f.default].parts } : {}), source: 'default' }
   const problems = []
   for (const [source, spec] of [['setting', setting], ['LEAN_PROMPTS', env]]) {
     const p = parseSpec(spec)

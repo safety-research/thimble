@@ -43,7 +43,9 @@ import { cardEvent, cardKey as cardTakesKey, cardStateNow, pressTaken, readCardS
 import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { markColors, messageEl, verbColor } from './view'
-import { markNextTurn, record as recordEvent, tracked } from '../telemetry/telemetry'
+import { markNextTurn, record as recordEvent, tracked, turnFeature } from '../telemetry/telemetry'
+import { cardAfter as cardVersion, promptText } from '../prompts/prompts'
+import { bindQueries, fixText, problemsOf, queryIdOf, readReply, requestText } from './cardfork.mjs'
 import type { RowVerb } from './view'
 import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { endsOf, revealCut } from '../verbs/squeeze/chips.mjs'
@@ -108,7 +110,12 @@ const objects = new Map<string, Any>()
 export const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
-let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; rows: string[]; oriented: number } | null = null
+let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; rows: string[]; oriented: number; leaned: boolean; saved: number } | null = null
+// the person's latest question (the card after the answer reads it), and the card after the answer while it is made:
+// the observer's look waits for it, so the pass reads the card; the saves it made, which the feed never places again
+let question = ''
+let cardWork: Promise<void> | null = null
+const forkMade = new Set<string>()
 let theme: 'dark' | 'light' = 'dark'
 let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string }; scope?: Record<string, unknown> } | null = null
 let server: { base: string; root: string } | null = null
@@ -322,6 +329,8 @@ async function newSaves($: Engine): Promise<ObjRef[]> {
       const ev = JSON.parse(line)
       if (ev?.kind !== 'save' || typeof ev.object !== 'string' || !ID.test(ev.object) || typeof ev.root !== 'string' || !(Number(ev.t) >= since)) continue
       const ref = { id: ev.object, v: Number(ev.version) || null, root: String(ev.root).replace(/\/+$/, '') }
+      // a save the card after the answer made: it placed that card itself
+      if (forkMade.has(`${ref.root}|${ref.id}|${ref.v}`)) continue
       out.push(ref)
     } catch {
       // a line that does not parse is skipped; the feed's later lines still count
@@ -519,6 +528,116 @@ export async function ask($: Engine, request: string, verb: string, on: string):
   await $.state.set(NOTES, [])
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, request].join('\n\n') }] } })
   await $.prompt.submit({ text: `${verb} ${on}`, asUser: true })
+}
+
+// ------------------------------------------------------------------------------------------------ the card after the answer
+
+/** Whether `lean` ran a data command or a save (what a card after the answer could draw from). */
+const LEAN_WORK = /(^|[\s;&|(])lean\s+(q|rows|resolve|sources|save)\b/
+
+/** The card after the answer while one is being made (else null): the observer's look waits for it, so its pass reads
+ *  the card. */
+export function cardSettled(): Promise<void> | null {
+  return cardWork
+}
+
+/** One `lean` command of the card after the answer, filed under the session (it is Claude's work, in a fork). */
+async function leanRun($: Engine, root: string, args: string[], stdin?: string): Promise<{ ok: boolean; out: string }> {
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  const prompts = String((await $.env.get('LEAN_PROMPTS')) || '')
+  const py = String((await $.env.get('LEAN_PYTHON')) || '')
+  const env: Record<string, string> = { LEAN_ROOT: root, LEAN_SESSION: String(await $.session.id()), ...(prompts ? { LEAN_PROMPTS: prompts } : {}), ...(py ? { LEAN_PYTHON: py } : {}) }
+  const r = await $.process.run([`${dir}/bin/lean`, ...args], { cwd: root, env, timeoutMs: 300000, ...(stdin != null ? { stdin } : {}) })
+  return { ok: r.exitCode === 0, out: `${r.stdout || ''}${r.stderr ? `\n${r.stderr}` : ''}`.trim() }
+}
+
+/**
+ * After a turn that ran `lean` and saved nothing, a fork of the session (it shares main's prompt cache) decides whether a
+ * card would help the person see why the answer holds, and writes it. thimble runs the queries it asks for, saves it,
+ * draws it once as a save does (its interactions tried), and asks the fork once more when something does not hold.
+ * The card is drawn under the answer, and Claude reads which card it is with the next prompt. Every call and its
+ * outcome is in the session's events (feature `card`).
+ */
+async function cardAfterTurn($: Engine, o: { row: string; question: string; version: { text: string; id: string } }): Promise<void> {
+  const t0 = Date.now()
+  const outcome: Record<string, unknown> = { kind: 'card', prompt: o.version.id }
+  try {
+    const root = await rootHere($)
+    if (!root) { outcome.skip = 'no folder under analysis'; return }
+    const rec = await recordNow($, o.row)
+    const answer = String(rec?.text ?? '')
+    if (!answer.trim()) { outcome.skip = 'no answer'; return }
+    const dir = $.plugin.root.replace(/\/+$/, '')
+    const guidance = (await promptText($, 'forms')).text
+    const toolkit = String(await $.fs.read(`${dir}/draw/TOOLKIT.md`).catch(() => ''))
+    const cards = [...new Set(Object.values((await shownNow($)).under).flat().map(x => x.id))]
+    const ask = async (prompt: string, round: number): Promise<Any> => tracked($, { feature: 'card', prompt: o.version.id, extra: { round } }, () => $.model.fork({ prompt }))
+    let r = await ask(requestText(o.version.text, { question: o.question, answer, cards, guidance, toolkit }), 1)
+    if (!r.isAnswered) { outcome.error = String(r.reason); return }
+    let reply = readReply(r.text)
+    outcome.rounds = 1
+    if (reply.kind === 'none') { outcome.drawn = false; outcome.why = reply.why; return }
+    if (reply.kind !== 'card') { outcome.error = reply.why ?? 'no card in the reply'; return }
+    let ref: ObjRef | null = null
+    let made: { problems: string[]; reply: Any; p: Prepared | null } = { problems: [], reply, p: null }
+    for (let round = 1; round <= 2; round++) {
+      // its queries, run in order; each name in the card becomes the id the query got
+      const ids: Record<string, string> = {}
+      const problems: string[] = []
+      for (const q of reply.queries) {
+        const run = await leanRun($, root, ['q', q.label], q.code)
+        const id = run.ok ? queryIdOf(run.out) : null
+        if (id) ids[q.name] = id
+        else problems.push(`the query ${q.name} ("${q.label}") did not run: ${cut(run.out.split('\n').filter(Boolean).slice(-3).join(' '), 400)}`)
+      }
+      const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
+      const file = `${home.replace(/\/+$/, '')}/lean/cards/${safe(String(await $.session.id()))}/${reply.name}.json`
+      await $.fs.write(file, JSON.stringify(bindQueries(reply.object, ids), null, 1))
+      const saved = await leanRun($, root, ['save', reply.name, '--from', file])
+      const m = /^saved (\S+) v(\d+)/m.exec(saved.out)
+      if (!m) {
+        problems.push(`lean save did not save it: ${cut(saved.out.split('\n').filter(Boolean).slice(-3).join(' '), 400)}`)
+      } else {
+        ref = { id: m[1]!, v: Number(m[2]), root }
+        forkMade.add(`${root}|${ref.id}|${ref.v}`)
+        const p = await prepared($, ref, 96, null, 'inline', 24, true)
+        problems.push(...problemsOf(saved.out, drawnNote(p, ref)))
+        made = { problems, reply, p }
+      }
+      if (!m) made = { problems, reply, p: null }
+      if (!problems.length || round === 2) break
+      // once more, with what does not hold
+      const again = await ask(fixText(o.version.text, { problems, card: JSON.stringify({ card: reply.name, queries: reply.queries, object: reply.object }), toolkit }), 2)
+      outcome.rounds = 2
+      if (!again.isAnswered) break
+      const next = readReply(again.text)
+      if (next.kind !== 'card') break
+      reply = { ...next, name: reply.name }
+    }
+    outcome.problems = made.problems
+    const p = made.p
+    if (!ref || !p || p.error || !p.grid || p.drawing?.error) {
+      outcome.drawn = false
+      outcome.error = made.problems[0] ?? p?.error ?? 'it did not draw'
+      failed($, 'thimble could not draw a card for this answer', outcome.error, 'Press v under the answer to ask Claude for one')
+      return
+    }
+    // under the answer, as a verb's card is drawn; Claude reads which card it is with the next prompt
+    await place($, o.row, ref)
+    await $.state.set(LAST, ref)
+    const cur = await recordNow($, o.row)
+    if (cur && !cur.objects.includes(ref.id)) await saveRecord($, { ...cur, objects: [...cur.objects, ref.id] })
+    const data = Object.values((p.object?.data ?? {}) as Record<string, unknown>).filter(v => typeof v === 'string' && /^q\d+/.test(v))
+    await noteForClaude($, `After your last answer, thimble drew the card ${refText(ref)} under it ("${p.object?.title || ref.id}"), written by a fork of this conversation${data.length ? ` from ${[...new Set(data)].join(', ')}` : ''}. It is in thimble/objects/${ref.id}.json.${made.problems.length ? ` What did not hold: ${cut(made.problems.join(' '), 400)}` : ''}`)
+    outcome.drawn = true
+    outcome.object = refText(ref)
+    outcome.queries = made.reply.queries.length
+  } catch (err) {
+    outcome.error = cut(String((err as Error)?.message || err), 300)
+  } finally {
+    outcome.ms = Date.now() - t0
+    await recordEvent($, outcome)
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ failures, in words
@@ -2260,7 +2379,7 @@ export const registerShell: Register = (on, options) => {
   // a turn of main's: the objects it saved, and its last text row, under which they are drawn
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      turn = { unplaced: [], lastRow: '', calls: [], placed: [], rows: [], oriented: 0 }
+      turn = { unplaced: [], lastRow: '', calls: [], placed: [], rows: [], oriented: 0, leaned: false, saved: 0 }
       // a new turn: the keys act on its answer again, and a verb's open line closes
       try {
         await $.state.set(SELROW, null)
@@ -2286,10 +2405,12 @@ export const registerShell: Register = (on, options) => {
         await reloadClaims($)
       }
       if (r.deny !== undefined) return r
+      if (turn && !input.agentId && LEAN_WORK.test(String(input.command))) turn.leaned = true
       // the saves this call made, from the kernel's change feed (never from what the call printed, which a pipe cuts);
       // a subagent's saves (a side thread's) are read and left where its card is
       const saves = await newSaves($)
       if (input.agentId || !saves.length) return r
+      if (turn) turn.saved += saves.length
       notes = []
       for (const ref of saves) {
         const id = ref.id
@@ -2398,6 +2519,13 @@ export const registerShell: Register = (on, options) => {
         $.clock.after(0, () => { void recount($, { coverage: true }) })
         // claims the corpus orientation saved in this turn light c under its answer
         if (turn.oriented) await setVerb($, row, 'c', { lit: true, note: `${turn.oriented} claims from the corpus` })
+        // the card after the answer: a turn of the person's that ran lean and saved nothing (a verb's turn draws its own)
+        const card = turn.leaned && !turn.saved && !turn.unplaced.length && !turn.placed.length && turnFeature() === 'main' ? await cardVersion($) : null
+        if (card) {
+          const q = question
+          const work: Promise<void> = new Promise<void>(done => { $.clock.after(0, () => { void cardAfterTurn($, { row, question: q, version: card }).finally(() => { if (cardWork === work) cardWork = null; done() }) }) })
+          cardWork = work
+        }
       }
     } catch {
       // a turn with no verb row is better than one that does not end
@@ -2558,6 +2686,7 @@ export const registerShell: Register = (on, options) => {
   // the prompt carries what verbs said for Claude since its last reply, and the open object with its selected part
   on('prompt.submit', async ($, e, next) => {
     if (e.command) return next(e)
+    if (!e.isMeta && /^(composer|bridge)$/.test(String((e.origin as { kind?: string } | undefined)?.kind ?? ''))) question = String(e.text || '')
     try {
       const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
       if (pick?.verb === 's' && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin' && /^\s*\+/.test(String(e.text || ''))) {

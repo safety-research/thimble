@@ -47,6 +47,11 @@ export function markNextTurn(feature: string): void {
   T.next = feature
 }
 
+/** The feature of the main turn now, or of the last one once it ended: 'main', or the verb whose request it answers. */
+export function turnFeature(): string {
+  return T.feature
+}
+
 /** A subagent thimble started (a side thread): its turns are filed under `feature`. */
 export function claimAgent(agentId: string, feature: string, prompt?: string | null): void {
   if (agentId) T.agents.set(agentId, { feature, prompt: prompt ?? null })

@@ -45,7 +45,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, ObserverLine, Ranking } from '../types'
-import { answerRow, applyObserver, claimsStore, drawnTextOf, leanEnv, messageRecord, saveClaims, setVerb, turnPlaces } from '../shell/shell'
+import { answerRow, applyObserver, cardSettled, claimsStore, drawnTextOf, leanEnv, messageRecord, saveClaims, setVerb, turnPlaces } from '../shell/shell'
 import { glossesOf } from '../shell/message.js'
 import { applyTurn, basedOnFrom, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
 import { promptText, promptTextAt, shadowVersions } from '../prompts/prompts'
@@ -336,7 +336,9 @@ async function look($: Engine, t: Look): Promise<void> {
     const drift = qo && typeof qo.drift === 'string' && qo.drift.trim() ? qo.drift.trim() : ''
     const decision = qo && typeof qo.decision === 'string' && qo.decision.trim() ? qo.decision.trim() : ''
 
-    // 2. the objects and their lineage
+    // 2. the objects and their lineage (a card drawn after the answer, by a fork, is one of them once it is done)
+    const card = cardSettled()
+    if (card) await Promise.race([card, new Promise<void>(done => $.clock.after(180000, () => done()))])
     const root = await rootNow($)
     const objs = root ? await objectsNow($, root, t.since) : []
     const fresh = objs.filter(x => x.isNew)
