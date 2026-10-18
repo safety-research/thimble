@@ -235,3 +235,14 @@ test('one thread with many stations, full: down the left, a station a row with i
   assert.equal(r.rects.length, 1)
   assert.ok(r.rects[0].h >= 2, 'the station and its note are one part')
 })
+
+test("the verb: a zoom's stations show only the zoomed threads' rows", async () => {
+  const data = many(24)
+  data.stations = data.stations.map(s => ({ ...s, ref: `q1#station=${s.id}` }))
+  const object = { id: '03-runs-map', version: 1, title: '24 runs', program: PROGRAM, data }
+  const out = await run({ object, region: 'x', regionMeta: { label: 'some', threads: ['r01', 'r04'] }, kernel: {} })
+  const g = draw(out.object.data, { w: 100 })
+  const st = region(g, 'st-search')
+  assert.ok(String(st.meta.ref).startsWith('runs/r01.jsonl') || (Array.isArray(st.meta.ref) && st.meta.ref.every(r => /r0[14]/.test(r))), JSON.stringify(st.meta.ref))
+  assert.equal(st.meta.ref_all, 'q1#station=search')
+})

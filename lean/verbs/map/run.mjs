@@ -110,6 +110,13 @@ function zoom(ctx, o) {
   const label = String(meta.label || ctx.region).replace(/ · .*$/, '')
   const data = { ...filterThreads(o.data, keep), full: true }
   data.title = `${o.data?.title || o.title || 'map'} ▸ ${label}`
+  // a station's own ref names its rows in every thread; here it shows only these threads' rows, from their moves
+  for (const k of ['stations', 'nodes', 'places', 'concepts']) {
+    const v = data[k]
+    const narrow = st => (st && typeof st === 'object' && !Array.isArray(st) && (st.ref || st.refs || st._rows) ? (({ ref, refs, _rows, ...rest }) => ({ ...rest, ref_all: ref || refs || _rows }))(st) : st)
+    if (Array.isArray(v)) data[k] = v.map(narrow)
+    else if (v && typeof v === 'object') data[k] = Object.fromEntries(Object.entries(v).map(([id, st]) => [id, narrow(st)]))
+  }
   const one = keep.length === 1
   return {
     object: {
