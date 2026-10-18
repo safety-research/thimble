@@ -24,7 +24,7 @@ function world(on: any, replies: string[] = []) {
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/queries` }))
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => {
-    if (e.path.endsWith('/prompts/squeeze/v3.md')) return { value: 'THE PROMPT' }
+    if (/\/prompts\/squeeze\/v\d+\.md$/.test(e.path)) return { value: 'THE PROMPT' }
     if (e.path.endsWith('/verbs/squeeze/verb.json')) return { value: '{"model": "sonnet", "effort": "low"}' }
     return { value: files[e.path] ?? '' }
   })
@@ -316,4 +316,24 @@ test('keys pressed while a rewrite is on its way add up: the chip shows where it
   expect(w.calls[1].prompt).toContain('- Length: one line')
   expect(record(w).squeeze.at).toEqual({ length: 0 })
   expect(record(w).shown).toBe('June 18: [6,543 saves](q1#day=2026-06-18@n).')
+})
+
+test('a correction of its own earlier answer stays at every length: the request names it, and a rewrite that leaves it out gets it back', async ($, on) => {
+  const FIXED = 'June 18 had the most saves.\n\nTwo corrections to my last answer:\n- **AgentRelent:** it made 316 edits, not 317.\n- **The split:** 5,242 link edits, not 5,181.'
+  // the rewrite at one line keeps the first correction and leaves out the second
+  const w = world(on, Array(3).fill('<text>\nJune 18 had the most saves (AgentRelent: 316, not 317).\n</text>'))
+  const clock = mock.clock(on)
+  await answered($, on, clock, FIXED)
+  await ($ as Any).prompt.edit(edit('s'))
+  // three steps of Length down: one line
+  for (const k of ['<', '<', '<']) await ($ as Any).prompt.edit(edit(k))
+  await clock.settle()
+  const call = w.calls.at(-1)
+  expect(call.prompt).toContain('then each correction listed below in a few words')
+  expect(call.prompt).toContain('Corrections in the original. Each stays at every level')
+  expect(call.prompt).toContain('- **The split:** 5,242 link edits, not 5,181.')
+  const rec = record(w)
+  expect(rec.shown).toContain('316, not 317')
+  // the correction the rewrite dropped is put back after it, as the original says it
+  expect(rec.shown).toContain('**The split:** 5,242 link edits, not 5,181.')
 })

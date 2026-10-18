@@ -184,9 +184,10 @@ export function wordsOf(text) {
   return String(text || '').replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
 }
 
-/** What a level of Length means for this message, in words: the model keeps a number better than a level's name. */
-export function lengthTarget(level, words) {
-  if (level === 0) return 'one sentence, at most 35 words'
+/** What a level of Length means for this message, in words: the model keeps a number better than a level's name. A
+ *  correction the request lists does not count against it (`keep`: how many there are). */
+export function lengthTarget(level, words, keep = 0) {
+  if (level === 0) return keep ? `one sentence, at most 35 words, then each correction listed below in a few words` : 'one sentence, at most 35 words'
   // a quarter and a half of the original, but never longer than most of a short message, and short stays short
   const round = n => (n >= 40 ? Math.round(n / 5) * 5 : Math.max(1, Math.round(n)))
   if (level === 1) return `at most ${round(Math.min(120, Math.max(Math.min(30, words * 0.6), words * 0.25)))} words`
@@ -195,9 +196,9 @@ export function lengthTarget(level, words) {
 }
 
 /** One chip as the request names it. */
-function chipLine(c, words = 0) {
+function chipLine(c, words = 0, keep = 0) {
   const levels = c.levels.join(' · ')
-  if (c.id === 'length' && words) return `- ${c.name}: ${c.levels[c.level]}, ${lengthTarget(c.level, words)} (levels ${levels}; the original is at full, ${words} words)`
+  if (c.id === 'length' && words) return `- ${c.name}: ${c.levels[c.level]}, ${lengthTarget(c.level, words, keep)} (levels ${levels}; the original is at full, ${words} words)`
   if (c.kind === 'stretch') {
     const where = c.level === 0 ? `0 of ${STRETCH_STEPS}, as the original` : c.level === STRETCH_STEPS ? `${STRETCH_STEPS} of ${STRETCH_STEPS}, all the way to "${c.to}"` : `${c.level} of ${STRETCH_STEPS} steps toward "${c.to}"`
     return `- A stretch the person made, from "${c.from}" to "${c.to}": ${where} (the original stands at "${c.from}", step 0)`
@@ -212,8 +213,8 @@ function chipLine(c, words = 0) {
  * The fixed text goes first and is marked for the prompt cache: prompt.md, then the question and the original, so a
  * second change of the same message reads them from the cache.
  */
-/** @param {any} rec @param {{system?: string, question?: string, chips?: any[], model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
-export function request(rec, { system, question = '', chips = chipsOf(rec), model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
+/** @param {any} rec @param {{system?: string, question?: string, chips?: any[], keep?: string[], model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
+export function request(rec, { system, question = '', chips = chipsOf(rec), keep = [], model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
   const head = [
     question ? `The person asked: ${question.trim().slice(0, 2000)}` : 'The person\'s question is not known.',
     '',
@@ -223,8 +224,10 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), mode
     '</original>',
   ].join('\n')
   const words = wordsOf(rec?.text)
-  const lines = chips.map(c => chipLine(c, words)).filter(Boolean)
-  const tail = ['', 'The chips, each at the level to write now:', ...lines, '', 'Write the message at these levels.']
+  const lines = chips.map(c => chipLine(c, words, keep.length)).filter(Boolean)
+  // the corrections in the original stay at every level, shortened if need be (mustKeep); the length does not count them
+  const kept = keep.length ? ['', 'Corrections in the original. Each stays at every level, in as few words as it needs, next to what it corrects:', ...keep.map(k => `- ${k}`)] : []
+  const tail = ['', 'The chips, each at the level to write now:', ...lines, ...kept, '', 'Write the message at these levels.']
   return {
     model, effort, maxTokens, timeoutMs,
     system: [{ text: String(system || ''), cache: true }],
@@ -238,6 +241,75 @@ export function readReply(raw) {
   const t = /<text>\s*\n?([\s\S]*?)\n?\s*<\/text>/i.exec(s)
   const text = (t ? t[1] : s).replace(/^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i, '$1').trim()
   return { text }
+}
+
+// ------------------------------------------------------------------------------------------------ corrections kept
+
+// a lead that says the words after it correct Claude's own earlier answer: "Two corrections to my last answer:",
+// "**I also need to correct something I told you.**", "I miscounted earlier"
+const OWN = /\b(correct(ion|ions|ing)?|wrong|mistake|misstated|overstated|understated|miscounted|mislabeled)\b[^.\n]*\b(my|I|earlier|last|previous|before|told you)\b|\b(I|my)\b[^.\n]*\b(correct(ion|ions)?|wrong|mistake|misstated|overstated|understated|miscounted|mislabeled)\b/i
+// a sentence that sets an earlier statement right: "Earlier I said 5,181; it is 5,242."
+const SAID = /\b(earlier|before|previously|last time|in my (last|earlier|previous) (answer|reply|message))\b[^.\n]*\b(I|we)\s+(said|wrote|reported|stated|counted|gave|claimed|called)\b|\b(I|we)\s+(said|wrote|reported|stated|counted|gave|claimed)\b[^.\n]*\b(earlier|before|last time|in my last)\b/i
+const ITEM = /^\s*([-*+]|\d+[.)])\s+/
+// an offer of more work, which only sounds like a correction ("I can check whether the answers were wrong")
+const OFFER = /^\s*(\*\*)?(I can|I could|Want me|Do you want|If you (want|like)|Should I|Shall I)\b/i
+const plainLine = t => String(t).replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').replace(/[*_`]/g, '')
+
+/**
+ * The corrections of Claude's own earlier answer in a message, as the original writes them (markdown, links kept): a
+ * list under a lead that says it corrects ("Two corrections to my last answer:") gives each item; a paragraph that
+ * opens with such a lead is one; a sentence that sets an earlier statement right is one. `claims`: the session's claims
+ * store, when the observer has read the message: a claim said in this message that revises one of Claude's earlier
+ * claims adds the sentence that says it. At most `max`, each at most 600 characters.
+ */
+export function mustKeep(text, { claims = null, row = null, max = 4 } = {}) {
+  const out = []
+  const add = t => {
+    const x = String(t || '').trim()
+    if (!x || out.some(y => y === x || y.includes(x) || x.includes(y))) return
+    out.push(x.length > 600 ? `${x.slice(0, 599)}…` : x)
+  }
+  const paras = String(text || '').split(/\n\s*\n/)
+  for (const para of paras) {
+    const lines = para.split('\n')
+    const lead = lines.findIndex(l => !ITEM.test(l) && !OFFER.test(plainLine(l)) && OWN.test(plainLine(l).split(/(?<=[.!?])\s/)[0] || ''))
+    if (lead >= 0 && /:\s*$/.test(plainLine(lines[lead]).trim())) {
+      // a list under the lead: each item a correction
+      const items = lines.slice(lead + 1).filter(l => ITEM.test(l)).map(l => l.replace(ITEM, ''))
+      if (items.length) { items.forEach(add); continue }
+    }
+    if (lead === 0 && !ITEM.test(lines[0])) { add(para); continue }
+    for (const sent of para.split(/(?<=[.!?])\s+(?=[A-Z*"(])/)) if (SAID.test(plainLine(sent)) && !OFFER.test(plainLine(sent))) add(sent)
+  }
+  if (claims && row) {
+    const byId = new Map((claims.claims || []).map(c => [c.id, c]))
+    for (const c of claims.claims || []) {
+      if (!c.revises || c.by === 'person') continue
+      const old = byId.get(c.revises)
+      if (!old || old.by === 'person') continue
+      const here = (c.said || []).find(p => p.row === row)
+      if (here?.sentence) add(here.sentence)
+    }
+  }
+  return out.slice(0, max)
+}
+
+/**
+ * The corrections a rewrite left out, put back: one whose numbers (or, with none, most of its words) are not in the
+ * rewrite is added after it, as the original says it. A correction may be shortened, never dropped. Returns the text
+ * and the corrections put back.
+ */
+export function keepCorrections(text, keep) {
+  const have = plainLine(text).toLowerCase()
+  const nums = new Set(numbersIn(plainLine(text)))
+  const back = []
+  for (const k of keep || []) {
+    const n = numbersIn(plainLine(k)).filter(x => x.length > 1)
+    const words = plainLine(k).toLowerCase().match(/[a-z][a-z'-]{3,}/g) || []
+    const kept = n.length ? n.some(x => nums.has(x)) : words.filter(w => have.includes(w)).length >= Math.ceil(words.length * 0.5)
+    if (!kept) back.push(k)
+  }
+  return { text: back.length ? `${String(text).trimEnd()}\n\n${back.join('\n\n')}` : text, back }
 }
 
 const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g

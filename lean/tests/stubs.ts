@@ -10,10 +10,13 @@ const STUBS: Record<string, string> = {
   'lens-notes/v1': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
   'lens-line/v1': 'LENS line\n<!-- digest -->\n| {{SEEN}} | {{KNOWN}} | {{OPEN}}\n<!-- when open -->\nA line is open above the prompt now. Give no new line this time.\n<!-- when backoff -->\nGive no line this time: backoff.',
   'lens-actions/v2': 'LENS actions',
+  'lens-actions/v3': 'LENS actions',
   'lens-squeeze/v1': 'LENS squeeze',
   'lens-explain/v2': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
   'lens-claims/v1': 'LENS claims\n<!-- digest -->\nCLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}} {{GROWN}}',
+  'lens-claims/v2': 'LENS claims\n<!-- digest -->\nCLAIMS {{NEAR}}{{LEFT_OUT}} | CLUSTERS {{CLUSTERS}} {{GROWN}}\n<!-- when quiet -->\nNO CLAIMS THIS TURN',
   'squeeze/v3': 'THE PROMPT',
+  'squeeze/v4': 'THE PROMPT',
   'thread/v1': 'THE THREAD PROMPT',
   'forms/v2': '# Card forms\n\n## Principles\n\nOLD PRINCIPLES\n\n## Worked examples\n\nTHE WORKED FORMS',
 }
