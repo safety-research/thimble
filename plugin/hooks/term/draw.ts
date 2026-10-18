@@ -68,6 +68,9 @@ export type CardData = {
   formats?: Record<string, string>
   /** a line card's series stacked as areas, the first lowest: `zero` as they are, `share` each x to the whole */
   stack?: 'zero' | 'share'
+  /** a bar card's groups side by side, each its own bar from 0 (Vega-Lite's xOffset or yOffset, a value axis that does
+   *  not stack: cell.ts chartCard); else a label's groups stack on its one bar */
+  grouped?: boolean
   /** the color field's values in the order their hues go by, when that is not the order of the card's own series or
    *  groups: a stacked area's legend, or a panel's, whose values are those of every panel (cell.ts facetCard) */
   hues?: string[]
@@ -491,7 +494,64 @@ function barNames(labels: readonly string[]): string[] {
   return labels.length && labels.every(l => STAMP.test(l.trim())) ? shortTimes(labels) : [...labels]
 }
 
+/**
+ * A grouped bar card (cell.ts chartCard `grouped`): the bars the browser sets side by side in each label, here one under
+ * another, each on its own row from 0 to its value, in its group's hue, its value at the end; the label on its first
+ * bar's row, the second line of a long one on the next. Under them the groups' legend. Each bar is one mark (bug hunt
+ * L1: such a chart drew as one stacked bar per label with the label's total).
+ */
+function groupedLayout(card: CardData, cols: number, hover: number, shared: Shared = {}): Layout {
+  const { rows, more } = barRows(card)
+  const col = card.y || 'value'
+  const groups = [...new Set(rows.map(r => r.group).filter(Boolean))]
+  const labels = [...new Set(rows.map(r => r.label))]
+  const names = barNames(labels)
+  const shown = amount
+  const valueW = Math.max(...rows.map(r => shown(r.value).length), 1)
+  // 2-cell gutters after the names and before the numbers (rule 3); the bars keep two fifths of the room
+  const room = cols - valueW - 4
+  const labelW = Math.min(Math.max(4, ...names.map(n => width(n))), Math.max(8, room - Math.max(12, Math.ceil(room * 0.4))))
+  const barW = Math.max(4, room - labelW)
+  const max = shared.y?.[1] ?? Math.max(...rows.map(r => Math.abs(r.value)), 0)
+  const hueOf = (r: BarRow) => (r.group ? groupHue(card, r.group, groups) : (classColour(card, r.label) ?? one()))
+  const items: Item[] = rows.map(r => {
+    const name = names[labels.indexOf(r.label)] ?? r.label
+    const group = groups.length > 1 && r.group && r.group !== r.label ? ` · ${r.group}` : ''
+    const open = `card:${card.id}#${col}/${r.label}`
+    return { label: `${name}${group}`, value: `${shown(r.value)} ${col}`, cite: cite(fmt(r.value), open), open, kind: 'mark', text: shown(r.value) }
+  })
+  const lines: Line[] = []
+  // the row of the data each line draws
+  const owner: number[] = []
+  labels.forEach((l, j) => {
+    const ids = rows.flatMap((r, i) => (r.label === l ? [i] : []))
+    const on = ids.includes(hover)
+    const parts = fold(names[j]!, labelW)
+    ids.forEach((i, k) => {
+      const r = rows[i]!
+      const b = bar(r.value, max, barW)
+      const name = parts[k] ?? ''
+      lines.push([
+        { s: name, inv: on && Boolean(name) },
+        { s: ' '.repeat(Math.max(0, labelW - width(name)) + 2) },
+        { s: b, fg: i === hover ? COLORS.text : hueOf(r) },
+        { s: ' '.repeat(Math.max(2, barW - width(b) + 2)) },
+        { s: pad(shown(r.value), valueW, true) },
+      ])
+      owner.push(i)
+    })
+    // a label longer than its bars' rows: its second line under them
+    for (const p of parts.slice(ids.length)) (lines.push([{ s: p, inv: on }]), owner.push(ids.at(-1)!))
+  })
+  if (more > 0) lines.push([{ s: `… ${more} more`, fg: COLORS.dim }])
+  // the legend on its own row under the chart; none when a label it read names the groups on its label row
+  const named = new Set(cardLabels(card).flatMap(l => l.values))
+  if (shared.key !== false && groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map(g => [{ s: '● ', fg: groupHue(card, g, groups) }, { s: g }]), cols))
+  return { lines, items, hit: (_x, y) => owner[y] ?? -1 }
+}
+
 function barLayout(card: CardData, cols: number, hover: number, shared: Shared = {}): Layout {
+  if (card.grouped && card.kind === 'bar') return groupedLayout(card, cols, hover, shared)
   const { rows, more } = barRows(card)
   const col = card.y || 'value'
   const groups = [...new Set(rows.map(r => r.group).filter(Boolean))]
@@ -2928,7 +2988,9 @@ function panelsLayout(card: CardData, cols: number, hover: number, plotRows?: nu
     if (!own.has('x') && scales.every(s => s.kind === scales[0]!.kind && s.kind !== 'cat')) shared.x = span(scales.map(s => [s.x0, s.x1]))
     if (!own.has('y')) shared.y = span(scales.map(s => [s.y0, s.y1]))
   } else if (kind === 'bar' && !own.size) {
+    // the longest bar: a stack's total, or a grouped card's own bar
     const tops = panels.flatMap(p => {
+      if (p.card.grouped) return barRows(p.card).rows.map(r => Math.abs(r.value))
       const by = new Map<string, number>()
       for (const r of barRows(p.card).rows) by.set(r.label, (by.get(r.label) ?? 0) + r.value)
       return [...by.values()].map(Math.abs)

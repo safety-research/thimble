@@ -581,9 +581,12 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   of a whole runs on a `─` track to the whole. The total has its own row (`all  4,579`). A chart with a color field
   (two series or more) has one row per label, its series stacked on it in their hues in the data's order, the label's
   total against the right edge, and its key on a row under the bars (`● page saved  ● page deleted`); the readout names
-  the part under the pointer and its series (`May 24 · page deleted  14 events`). Labels that are timestamps read as the
-  browser's date axis writes them, all in one form: `May 24`, the time only when one is not midnight (`May 24 12:30`),
-  the year only when they span more than one, never an ISO stamp.
+  the part under the pointer and its series (`May 24 · page deleted  14 events`). A chart whose series stand side by
+  side in each label (Vega-Lite's `xOffset` or `yOffset`, thimble.chart's `stack=False`, a value axis that does not
+  stack) has a row per bar instead, each label's bars one under another in the order the browser sets them, each from
+  0 in its series' hue with its own value against the right edge, the label on its first bar's row (bug hunt L1).
+  Labels that are timestamps read as the browser's date axis writes them, all in one form: `May 24`, the time only
+  when one is not midnight (`May 24 12:30`), the year only when they span more than one, never an ISO stamp.
 - A line chart (an area and a scatter too): axes in the rule gray, with a `┤` or `┬` at each tick and its label dim
   beside or under it. Numbers tick at round steps, whole for whole data (`0 100 200 300 400`, never `209.5`), the y
   labels right-aligned in a column and the x labels as many as fit with 2 cells between (`0 1 2 … 8`, never `4.024`),

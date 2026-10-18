@@ -2,13 +2,13 @@
 // the drawing form of hooks/draw.ts (CardData), so its layouts draw it in the terminal. No `$`.
 //
 // The map of card kinds (the two-modes study): a table, a timeline, a diagram, an example and a label draw directly; a
-// simple bar or line chart (one Altair layer, x and y fields; a line per `detail` value) draws as text, at most
-// MAX_LINE_POINTS points of its lines, a stacked area chart as its bands, a dots chart as its rows of dots with the words
-// a text layer writes beside them, a heatmap as its grid of cells shaded on its color scale with the numbers a text
-// layer writes on them, and a faceted chart as one of these per panel; any other chart draws as a table of its rows when
-// they are few, else as a short note that the browser draws it; a note is prose; a code card, a card type's card and a
-// matplotlib figure draw as their printed text; a custom HTML card draws as its text. A label card's counts and records
-// come from the label (`thimble state label`).
+// simple bar or line chart (one Altair layer, x and y fields; a bar's groups stacked or side by side; a line per `detail`
+// value) draws as text, at most MAX_LINE_POINTS points of its lines, a stacked area chart as its bands, a dots chart as
+// its rows of dots with the words a text layer writes beside them, a heatmap as its grid of cells shaded on its color
+// scale with the numbers a text layer writes on them, and a faceted chart as one of these per panel; any other chart
+// draws as a table of its rows when they are few, else as a short note that the browser draws it; a note is prose; a
+// code card, a card type's card and a matplotlib figure draw as their printed text; a custom HTML card draws as its
+// text. A label card's counts and records come from the label (`thimble state label`).
 import type { TermLinks } from './types'
 import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, DotRow, HeatScale, Panel, PlanStep } from './draw'
 import { MAX_TABLE_ROWS, amount } from './draw'
@@ -341,6 +341,20 @@ export function sortedBars(rows: Record<string, unknown>[], enc: Record<string, 
   return rows.map((r, i) => ({ r, i })).sort((a, b) => rank.get(String(a.r[lab] ?? ''))! - rank.get(String(b.r[lab] ?? ''))! || a.i - b.i).map(x => x.r)
 }
 
+/** A grouped bar chart's rows (sortedBars' order, a label's rows together) with each label's bars in the order the
+ *  offset channel sets them side by side, as Vega-Lite draws them: its `sort` (else the color's, on the same field),
+ *  else A to Z. */
+function sideBySide(rows: Record<string, unknown>[], enc: Record<string, Enc | undefined>, channel: string, field: string, lab: string): Record<string, unknown>[] {
+  const own = enc[channel]?.field === field && enc[channel]?.sort !== undefined
+  const by = own || enc.color?.field !== field ? channel : 'color'
+  const groups = [...new Set(sortedBars(rows, { ...enc, [by]: { ...enc[by], field } }, by, field).map(r => String(r[field] ?? '')))]
+  const rank = new Map(groups.map((g, i) => [g, i]))
+  const labels = new Map<string, number>()
+  for (const r of rows) if (!labels.has(String(r[lab] ?? ''))) labels.set(String(r[lab] ?? ''), labels.size)
+  const key = (r: Record<string, unknown>) => [labels.get(String(r[lab] ?? ''))!, rank.get(String(r[field] ?? ''))!]
+  return rows.map((r, i) => ({ r, i, k: key(r) })).sort((a, b) => a.k[0]! - b.k[0]! || a.k[1]! - b.k[1]! || a.i - b.i).map(x => x.r)
+}
+
 /** The bar layer of a chart whose other layers write the bars' values on them (Altair's `bars + bars.mark_text()`: a
  *  text mark on the same x and y), each layer with the encoding and the data it takes from the chart; else null. */
 function labeledBars(spec: VegaLite): VegaLite | null {
@@ -432,10 +446,19 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
     // the quantitative axis is the value, the other the label
     const horizontal = x.type === 'quantitative' && y.type !== 'quantitative'
     const [lab, val] = horizontal ? [y.field, x.field] : [x.field, y.field]
+    const enc = spec.encoding ?? {}
+    // a label's bars side by side, each from 0 (bug hunt L1: Altair's `xOffset`, thimble.chart's stack=False, drew as one
+    // stacked bar per label): an offset channel across the labels' axis, or a value axis told not to stack
+    const offset = enc[horizontal ? 'yOffset' : 'xOffset']?.field ?? ''
+    const unstacked = (horizontal ? x : y).stack === null || (horizontal ? x : y).stack === false
+    const gf = color?.field ?? offset
+    const grouped = Boolean(gf) && (Boolean(offset) || unstacked)
     // in the order the label axis sorts them (its `sort`, else A to Z), as the browser draws them
-    const bars: BarRow[] = sortedBars(rows, spec.encoding ?? {}, horizontal ? 'y' : 'x', lab).map(r => ({ label: String(r[lab] ?? ''), value: Number(r[val] ?? 0), group: color?.field ? String(r[color.field] ?? '') : '' }))
+    let sorted = sortedBars(rows, enc, horizontal ? 'y' : 'x', lab)
+    if (grouped) sorted = sideBySide(sorted, enc, horizontal ? 'yOffset' : 'xOffset', offset || gf, lab)
+    const bars: BarRow[] = sorted.map(r => ({ label: String(r[lab] ?? ''), value: Number(r[val] ?? 0), group: gf ? String(r[gf] ?? '') : '' }))
     if (bars.some(b => !Number.isFinite(b.value))) return null
-    return { ...blank(cell, 'bar'), x: lab, y: val, rows: bars }
+    return { ...blank(cell, 'bar'), x: lab, y: val, rows: bars, ...(grouped ? { grouped: true } : {}) }
   }
   // a dots chart's rows are names down its y axis, which no line card draws: its rows' table instead
   if ((mark === 'line' || mark === 'point' || mark === 'area' || mark === 'circle') && y.type !== 'nominal' && y.type !== 'ordinal') {
