@@ -269,7 +269,8 @@ class _Records:
 
     def append(self, obj: Any, x: Any) -> Any:
         r = obj.append(x)
-        if type(obj) is list and not self.full:
+        # a list longer than an output table keeps (TABLE_MAX) is not noted further: its table keeps no rows per row
+        if type(obj) is list and not self.full and len(obj) <= TABLE_MAX:
             try:
                 self._note(obj, x, sys._getframe(1))
             except Exception:  # noqa: BLE001 — a record the kernel cannot note keeps no rows of its own
