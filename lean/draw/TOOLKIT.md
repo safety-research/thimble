@@ -101,6 +101,18 @@ Meaning:
 - `k.region(id, meta, part)`. `meta` is a label string or `{ label, cite, examples, note, ...anything }`.
 - `k.cite(id, {...})` and `k.examples(id, {...})` register a cite or a set of records and return the id.
 
+A map of work:
+
+- `k.map(spec, { full, form, lens, w, rows })` lays work out by its own structure. `spec` holds `threads` (runs,
+  agents, one long run), each with `stops` (the stations it passes, in order, as ids or `{ station, from, to, ref,
+  note }`), or a list of `moves` (`{ thread, station, from, to }`); `stations` (`{ id, label, ref, note, key, end,
+  group }`); `links` (`{ from, to, n, label }`); `groups` of stations; and a `lens`, the thread field that colors the
+  lanes. Every field is optional and any other field is kept on the regions' meta. One thread draws as a line of its
+  stations, many as a metro map whose bundles fork and merge, stations with no threads as regions of boxes. `full:
+  false` is the calm form for under a reply (one row for one thread; the key stations and the endings for many); it
+  defaults to `k.mode === 'detail'` or `spec.full`. Each station, lane and group is a region whose meta names its rows
+  (`ref`, or the rows a query bound) and holds the threads through it as examples.
+
 The canvas, `const c = k.canvas(w, h)`, in cells (x across, y down):
 
 - `c.text(x, y, str, { tone, bold, align, max })`, `c.put(x, y, ch, tone)`, `c.fill(x, y, w, h, ch, tone)`.

@@ -481,7 +481,10 @@
         w = clamp(int(w, W), 1, MAX_SIDE); h = clamp(int(h, 1), 1, MAX_SIDE)
         tick(w * h / 50)
         return new Canvas(w, h, ctx, tick, metaOf)
-      }
+      },
+
+      // ---------------- a map of work: threads passing stations, links, groups (makeMap below); a canvas with regions
+      map(spec, o) { return makeMap(k, ctx, T, spec, o) }
     }
     k.vstack = k.stack; k.hstack = k.beside; k.hatch = k.unseen
     return k
@@ -656,6 +659,992 @@
     if ((cp >= 0x1100 && cp <= 0x115F) || (cp >= 0x2E80 && cp <= 0xA4CF) || (cp >= 0xAC00 && cp <= 0xD7A3) ||
       (cp >= 0xF900 && cp <= 0xFAFF) || (cp >= 0xFE30 && cp <= 0xFE4F) || (cp >= 0xFF00 && cp <= 0xFF60) || (cp >= 0xFFE0 && cp <= 0xFFE6) || (cp >= 0x20000 && cp <= 0x3FFFD)) return true
     return false
+  }
+
+  // ---------------------------------------------------------------- map: work laid out by its own structure
+  // k.map(spec, o) composes a canvas from a loose spec: threads (one long run, many runs, the agents of a swarm) that
+  // pass stations (moves, places, concepts) in order, links between stations, and groups of stations. Every field is
+  // optional, several names are read for each (stations or nodes, links or edges, stops or path), and the parts' meta
+  // keep any other field given. The form follows the shape, unless o.form names one:
+  //   line     one thread: its stations along one line, numbered by step; the mini form is one row, to scale
+  //   metro    many threads: stations in columns, bundles of threads between them that fork and merge; a bundle splits
+  //            into one lane per value of the lens, its count printed on it, and where a column runs out of rows its
+  //            biggest bundle stays one striped lane with a count per value (cells cannot draw 40 thin lines)
+  //   regions  stations with no threads: groups as boxes of stations, a dot sized by each station's count
+  // o: {form, full (false: the calm mini form), lens (a thread field), rows (a row budget), unit, title}
+  // Every station, group and lane is a region whose meta names its rows (`ref`, or the source rows a query bound) and
+  // carries the moves through it as examples, so a selection leads to the real rows.
+  const MAP_GLY = {
+    3: { h: '━', v: '┃', LD: '┓', UR: '┗', LU: '┛', DR: '┏' },
+    2: { h: '─', v: '│', LD: '╮', UR: '╰', LU: '╯', DR: '╭' },
+    1: { h: '┄', v: '┆', LD: '╮', UR: '╰', LU: '╯', DR: '╭' },
+  }
+  const MAP_GOOD = /\b(fixed|merged|pass(ed|es)?|green|done|success(ful)?|solved|resolved|correct|completed?|yes|true|ok)\b|✓/i
+  const MAP_BAD = /\b(fail(ed|s|ure)?|error|broke|broken|time[ds]? ?out|crash(ed)?|wrong|rejected|false|no)\b|✗/i
+  const MAP_WARN = /\b(mask(ed|s)?|skip(ped)?|retr(y|ied)|partial|gave up|stuck|flaky|stale|abandoned)\b/i
+
+  // a short name for a label: the first word and the most telling other word (one with a digit or #, else the longest)
+  function shortName(label) {
+    const w = String(label || '').split(/\s+/).filter(Boolean)
+    if (w.length <= 2) return w.join(' ')
+    const tell = w.slice(1).find(x => /[\d#@./_]/.test(x)) || w.slice(1).slice().sort((a, b) => b.length - a.length)[0]
+    return w[0] + ' ' + tell
+  }
+  const mslug = (s, n) => (slug(s) || slug('x-' + s) || 'x').slice(0, n || 48).replace(/-+$/, '')
+  function mapList(v) {
+    if (Array.isArray(v)) return v
+    if (isObj(v)) return Object.keys(v).map(id => Object.assign({ id: id }, isObj(v[id]) ? v[id] : { label: v[id] }))
+    return []
+  }
+  function firstOf(o, names) {
+    if (!isObj(o)) return undefined
+    for (const n of names) if (o[n] != null && o[n] !== '') return o[n]
+    return undefined
+  }
+  const refList = v => (typeof v === 'string' && v ? [v] : Array.isArray(v) ? v.filter(x => typeof x === 'string' && x).slice(0, 50) : [])
+  const scalar = v => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
+
+  // the loose spec, read into {title, unit, stations, threads, links, groups, lens}
+  function mapSpec(spec, o) {
+    spec = isObj(spec) ? spec : {}
+    const from = names => { for (const n of names) if (spec[n] != null) return mapList(spec[n]); return [] }
+    const stations = new Map()
+    const station = raw => {
+      const r = isObj(raw) ? raw : { id: raw }
+      const id = firstOf(r, ['id', 'key', 'station', 'name', 'label'])
+      if (id == null || (!scalar(id))) return null
+      const sid = clean(String(id)).slice(0, 120)
+      if (!sid) return null
+      let s = stations.get(sid)
+      if (!s) { s = { id: sid, label: sid, raw: {}, threads: [], stops: [] }; stations.set(sid, s) }
+      if (isObj(raw)) {
+        Object.keys(raw).forEach(kk => { if (kk !== '_rows' && kk !== 'examples') s.raw[kk] = raw[kk] })
+        const lab = firstOf(raw, ['label', 'name', 'title'])
+        if (lab != null && scalar(lab)) s.label = clean(String(lab))
+        if (raw.short != null) s.short = clean(String(raw.short))
+        const n = num(firstOf(raw, ['n', 'count', 'size', 'value', 'total']))
+        if (isFinite(n)) s.n = n
+        const ref = refList(firstOf(raw, ['ref', 'refs', 'rows']))
+        if (ref.length) s.ref = ref
+        else if (Array.isArray(raw._rows) && raw._rows.length) s.ref = refList(raw._rows)
+        if (Array.isArray(raw.examples)) s.examples = raw.examples
+        const g = firstOf(raw, ['group', 'region', 'area', 'cluster'])
+        if (g != null && scalar(g)) s.group = String(g)
+        if (raw.mark != null) s.mark = Array.from(clean(String(raw.mark)))[0]
+        if (raw.tone != null) s.tone = raw.tone
+        const note = firstOf(raw, ['note', 'rule', 'why', 'text', 'what'])
+        if (note != null && scalar(note)) s.note = clean(String(note))
+        if (raw.end || raw.sink || raw.final || raw.ending) s.end = true
+      }
+      return s
+    }
+    from(['stations', 'nodes', 'places', 'concepts', 'moves_list']).forEach(station)
+    const threads = new Map()
+    const thread = raw => {
+      const r = isObj(raw) ? raw : { id: raw }
+      const id = firstOf(r, ['id', 'thread', 'run', 'agent', 'name', 'label'])
+      if (id == null || !scalar(id)) return null
+      const tid = clean(String(id)).slice(0, 120)
+      let t = threads.get(tid)
+      if (!t) { t = { id: tid, label: tid, fields: {}, stops: [] }; threads.set(tid, t) }
+      if (isObj(raw)) {
+        const lab = firstOf(raw, ['label', 'name', 'title'])
+        if (lab != null && scalar(lab)) t.label = clean(String(lab))
+        const steps = num(firstOf(raw, ['steps', 'length', 'len', 'total', 'records']))
+        if (isFinite(steps)) t.steps = steps
+        const ref = refList(firstOf(raw, ['ref', 'refs', 'file', 'rows']))
+        if (ref.length) t.ref = ref
+        else if (Array.isArray(raw._rows) && raw._rows.length) t.ref = refList(raw._rows)
+        if (raw.tone != null) t.tone = raw.tone
+        Object.keys(raw).forEach(kk => {
+          if (kk[0] !== '_' && scalar(raw[kk]) && ['id', 'label', 'name', 'title', 'ref', 'file', 'tone'].indexOf(kk) < 0) t.fields[kk] = raw[kk]
+        })
+        const stops = firstOf(raw, ['stops', 'path', 'stations', 'moves', 'visits', 'trail'])
+        if (Array.isArray(stops)) stops.forEach(x => addStop(t, x))
+      }
+      return t
+    }
+    const addStop = (t, x) => {
+      const r = isObj(x) ? x : { station: x }
+      const s = station(isObj(x) ? (firstOf(r, ['station', 'at', 'stop']) != null ? { id: firstOf(r, ['station', 'at', 'stop']) } : r) : x)
+      if (!s) return
+      const stop = { station: s.id, thread: t.id }
+      const a = num(firstOf(r, ['from', 'start', 'step', 'first']))
+      const b = num(firstOf(r, ['to', 'end', 'last']))
+      if (isFinite(a)) stop.from = a
+      if (isFinite(b)) stop.to = b
+      const ref = refList(firstOf(r, ['ref', 'refs', 'rows']))
+      if (ref.length) stop.ref = ref
+      else if (Array.isArray(r._rows) && r._rows.length) stop.ref = refList(r._rows)
+      const rep = num(firstOf(r, ['repeat', 'repeats', 'times', 'loop']))
+      if (isFinite(rep) && rep > 1) stop.repeat = rep
+      const note = firstOf(r, ['note', 'text', 'what', 'quote'])
+      if (note != null && scalar(note)) stop.note = clean(String(note))
+      if (r.mark != null) stop.mark = Array.from(clean(String(r.mark)))[0]
+      if (r.tone != null) stop.tone = r.tone
+      if (r.label != null && isObj(x) && firstOf(r, ['station', 'at', 'stop']) != null) stop.label = clean(String(r.label))
+      Object.keys(r).forEach(kk => { if (kk[0] !== '_' && scalar(r[kk]) && stop[kk] === undefined && ['station', 'at', 'stop', 'thread'].indexOf(kk) < 0) stop[kk] = r[kk] })
+      t.stops.push(stop)
+    }
+    from(['threads', 'runs', 'agents', 'lines', 'trails']).forEach(thread)
+    from(['moves', 'visits', 'stops', 'steps_list']).forEach(m => {
+      if (!isObj(m)) return
+      const tid = firstOf(m, ['thread', 'run', 'agent'])
+      if (tid == null || !scalar(tid)) return
+      const t = thread({ id: tid })
+      if (t) addStop(t, m)
+    })
+    for (const t of threads.values()) {
+      if (t.stops.length && t.stops.every(s => s.from != null)) t.stops.sort((a, b) => a.from - b.from)
+      t.stops.forEach((s, i) => {
+        if (s.to == null && s.from != null) { const nx = t.stops[i + 1]; s.to = nx && nx.from != null ? Math.max(s.from, nx.from - 1) : (t.steps != null ? Math.max(s.from, t.steps) : s.from) }
+        const S = stations.get(s.station)
+        if (S.threads.indexOf(t.id) < 0) S.threads.push(t.id)
+        S.stops.push(s)
+      })
+    }
+    const links = from(['links', 'edges', 'flows', 'arrows']).filter(isObj).map(l => {
+      const a = firstOf(l, ['from', 'source', 'a', 'src']), b = firstOf(l, ['to', 'target', 'b', 'dst'])
+      if (a == null || b == null || !scalar(a) || !scalar(b)) return null
+      const A = station({ id: a }), B = station({ id: b })
+      if (!A || !B) return null
+      const q = { from: A.id, to: B.id, raw: l }
+      const n = num(firstOf(l, ['n', 'count', 'weight', 'value', 'threads']))
+      if (isFinite(n)) q.n = n
+      const lab = firstOf(l, ['label', 'name', 'what', 'note'])
+      if (lab != null && scalar(lab)) q.label = clean(String(lab))
+      if (l.kind != null) q.kind = clean(String(l.kind))
+      if (l.tone != null) q.tone = l.tone
+      const ref = refList(firstOf(l, ['ref', 'refs', 'rows']))
+      if (ref.length) q.ref = ref
+      if (isObj(l.by)) q.by = l.by
+      return q
+    }).filter(Boolean)
+    const groups = new Map()
+    from(['groups', 'regions', 'areas', 'clusters']).forEach(g => {
+      const r = isObj(g) ? g : { id: g }
+      const id = firstOf(r, ['id', 'key', 'name', 'label'])
+      if (id == null || !scalar(id)) return
+      const gid = clean(String(id))
+      const G = groups.get(gid) || { id: gid, label: gid, stations: [], raw: {} }
+      if (isObj(g)) {
+        Object.keys(g).forEach(kk => { if (kk !== '_rows') G.raw[kk] = g[kk] })
+        const lab = firstOf(g, ['label', 'name', 'title']); if (lab != null && scalar(lab)) G.label = clean(String(lab))
+        if (g.tone != null) G.tone = g.tone
+        const n = num(firstOf(g, ['n', 'count', 'size', 'total'])); if (isFinite(n)) G.n = n
+        const ref = refList(firstOf(g, ['ref', 'refs', 'rows'])); if (ref.length) G.ref = ref
+        else if (Array.isArray(g._rows) && g._rows.length) G.ref = refList(g._rows)
+        const note = firstOf(g, ['note', 'why', 'text']); if (note != null && scalar(note)) G.note = clean(String(note))
+        const members = firstOf(g, ['stations', 'members', 'items', 'concepts', 'nodes'])
+        if (Array.isArray(members)) members.forEach(m => { const s = station(m); if (s) { s.group = s.group || gid; if (G.stations.indexOf(s.id) < 0) G.stations.push(s.id) } })
+      }
+      groups.set(gid, G)
+    })
+    for (const s of stations.values()) {
+      if (!s.group) continue
+      const G = groups.get(s.group) || { id: s.group, label: s.group, stations: [], raw: {} }
+      if (G.stations.indexOf(s.id) < 0) G.stations.push(s.id)
+      groups.set(s.group, G)
+    }
+    let lens = o.lens !== undefined ? o.lens : spec.lens
+    if (typeof lens === 'string') lens = { by: lens }
+    if (!isObj(lens)) lens = null
+    else lens = { by: String(firstOf(lens, ['by', 'field', 'name', 'key']) || ''), tones: isObj(lens.tones) ? lens.tones : {}, order: Array.isArray(lens.order) ? lens.order.map(String) : null, label: lens.label != null ? clean(String(lens.label)) : null }
+    if (lens && !lens.by) lens = null
+    const title = o.title != null ? String(o.title) : spec.title != null ? String(spec.title) : ''
+    return { title: clean(title), unit: clean(String(o.unit || spec.unit || '')), stations, threads: [...threads.values()], links, groups: [...groups.values()], lens }
+  }
+
+  // the cells a map draws, kept as cells until they become canvas ops (lines as hline/vline, so the browser strokes them)
+  function MapGrid(w, h) { this.w = w; this.h = h; this.c = new Array(w * h).fill(null); this.regs = new Map(); this.boxes = [] }
+  MapGrid.prototype.inb = function (x, y) { return x >= 0 && y >= 0 && x < this.w && y < this.h }
+  MapGrid.prototype.get = function (x, y) { return this.inb(x, y) ? this.c[y * this.w + x] : undefined }
+  MapGrid.prototype.set = function (x, y, cell) { if (this.inb(x, y)) this.c[y * this.w + x] = cell }
+  MapGrid.prototype.free = function (x, y) { return this.inb(x, y) && !this.c[y * this.w + x] }
+  MapGrid.prototype.freeSpan = function (x, y, n) { for (let i = 0; i < n; i++) if (!this.free(x + i, y)) return false; return true }
+  MapGrid.prototype.str = function (x, y, s, tone, o) {
+    o = o || {}
+    let dx = 0
+    for (const ch of Array.from(String(s))) { if (this.inb(x + dx, y)) this.set(x + dx, y, { ch: ch, tone: tone || 'ink', b: !!o.b, kind: o.kind || 'text' }); dx++ }
+    return dx
+  }
+  MapGrid.prototype.rect = function (id, x, y, w, h) {
+    const r = this.regs.get(id)
+    if (!r || w <= 0 || h <= 0) return
+    const x0 = Math.max(0, x), y0 = Math.max(0, y), x1 = Math.min(this.w, x + w), y1 = Math.min(this.h, y + h)
+    if (x1 > x0 && y1 > y0) r.rects.push([x0, y0, x1 - x0, y1 - y0])
+  }
+  // the rows in use, from the first to the last that holds anything
+  MapGrid.prototype.used = function () {
+    let a = this.h, b = -1
+    for (let y = 0; y < this.h; y++) for (let x = 0; x < this.w; x++) if (this.c[y * this.w + x] && this.c[y * this.w + x].ch !== ' ') { if (y < a) a = y; if (y > b) b = y; break }
+    this.boxes.forEach(q => { a = Math.min(a, q[1]); b = Math.max(b, q[1] + q[3] - 1) })
+    return b < a ? [0, 0] : [a, b]
+  }
+  const H_LINE = '─━┄╌═'
+  const V_LINE = '│┃┆╎'
+  MapGrid.prototype.toCanvas = function (tick) {
+    const [y0, y1] = this.used()
+    const H = Math.max(1, y1 - y0 + 1)
+    const ops = []
+    const done = new Uint8Array(this.w * this.h)
+    // vertical runs of one line glyph and tone
+    for (let x = 0; x < this.w; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const c = this.get(x, y)
+        if (!c || V_LINE.indexOf(c.ch) < 0 || done[y * this.w + x]) continue
+        let e = y
+        while (e + 1 <= y1) { const d = this.get(x, e + 1); if (d && d.ch === c.ch && d.tone === c.tone && !d.pat) e++; else break }
+        if (c.pat) e = y
+        for (let j = y; j <= e; j++) done[j * this.w + x] = 1
+        ops.push(e > y ? ['vline', x, y - y0, e - y + 1, c.ch, c.tone] : ['put', x, y - y0, c.ch, c.tone])
+      }
+    }
+    for (let y = y0; y <= y1; y++) {
+      let x = 0
+      while (x < this.w) {
+        const c = this.get(x, y)
+        if (!c || done[y * this.w + x] || c.ch === ' ') { x++; continue }
+        if (H_LINE.indexOf(c.ch) >= 0 && !c.pat) {
+          let e = x
+          while (e + 1 < this.w) { const d = this.get(e + 1, y); if (d && d.ch === c.ch && d.tone === c.tone && !d.pat && !done[y * this.w + e + 1]) e++; else break }
+          ops.push(e > x ? ['hline', x, y - y0, e - x + 1, c.ch, c.tone] : ['put', x, y - y0, c.ch, c.tone])
+          x = e + 1
+          continue
+        }
+        if (c.kind === 'text') {
+          const runs = []
+          let e = x
+          while (e < this.w) {
+            const d = this.get(e, y)
+            if (!d || d.kind !== 'text' || done[y * this.w + e]) break
+            const last = runs[runs.length - 1]
+            if (last && last.tone === d.tone && !!last.b === !!d.b) last.s += d.ch
+            else { const r = { s: d.ch, tone: d.tone }; if (d.b) r.b = true; runs.push(r) }
+            e++
+          }
+          // trailing spaces of a run of words are not drawn
+          const lr = runs[runs.length - 1]
+          if (lr) lr.s = lr.s.replace(/\s+$/, '')
+          if (runs.some(r => r.s.trim())) ops.push(['text', x, y - y0, runs.filter(r => r.s.length), 'left'])
+          x = e
+          continue
+        }
+        const op = ['put', x, y - y0, c.ch, c.tone]
+        if (c.b || c.bg) op.push(c.b ? 1 : 0)
+        if (c.bg) op.push(c.bg)
+        ops.push(op)
+        x++
+      }
+    }
+    this.boxes.forEach(q => ops.unshift(['box', q[0], q[1] - y0, q[2], q[3], q[4], q[5]]))
+    for (const [id, r] of this.regs) r.rects.forEach(q => { if (q[1] + q[3] > y0 && q[1] <= y1) ops.push(['region', id, q[0], Math.max(0, q[1] - y0), q[2], Math.min(q[3], y1 + 1 - q[1]), r.meta]) })
+    tick(ops.length)
+    return { t: 'canvas', w: this.w, h: H, ops: ops }
+  }
+
+  function makeMap(k, ctx, T, spec, o) {
+    o = isObj(o) ? o : {}
+    const M = mapSpec(spec, o)
+    // inside a frame by default, as k.bars is: the frame takes four columns
+    const W = clamp(int(o.w, k.w - 4), 16, MAX_SIDE)
+    const full = o.full != null ? !!o.full : isObj(spec) && spec.full != null ? !!spec.full : k.mode === 'detail'
+    const lineThreads = M.threads.filter(t => t.stops.length)
+    const flows = lineThreads.some(t => t.stops.length > 1) || M.links.length > 0
+    const asked = o.form || (isObj(spec) ? spec.form : null)
+    let form = ['line', 'metro', 'regions'].indexOf(asked) >= 0 ? asked
+      : lineThreads.length === 1 ? 'line' : flows && (lineThreads.length > 1 || M.links.length) ? 'metro' : 'regions'
+    if (form === 'metro' && !flows) form = 'regions'
+    if (form === 'line' && !lineThreads.length) form = 'regions'
+    const unit = M.unit || (form === 'line' ? 'steps' : form === 'metro' && lineThreads.length ? 'threads' : '')
+    // lens: a field of the threads; the values in their order, each with a tone
+    const lens = M.lens && form !== 'regions' ? Object.assign({}, M.lens) : null
+    if (lens) {
+      const seen = []
+      lineThreads.forEach(t => { const v = t.fields[lens.by]; if (v != null && seen.indexOf(String(v)) < 0) seen.push(String(v)) })
+      lens.values = lens.order ? lens.order.filter(v => seen.indexOf(v) >= 0).concat(seen.filter(v => lens.order.indexOf(v) < 0)) : seen
+      // Claude's tones first; else good, warn and bad by the value's words, each once, then categories
+      lens.tone = {}
+      const used = new Set()
+      lens.values.forEach(v => { if (lens.tones[v]) { lens.tone[v] = T(lens.tones[v]); used.add(lens.tone[v]) } })
+      lens.values.forEach(v => {
+        if (lens.tone[v]) return
+        const want = MAP_GOOD.test(v) ? 'good' : MAP_WARN.test(v) ? 'warn' : MAP_BAD.test(v) ? 'bad' : null
+        const t = want && !used.has(want) ? want : CATS.find(c => !used.has(c)) || 'dim'
+        lens.tone[v] = t
+        used.add(t)
+      })
+      if (!lens.values.length) warn(ctx, `k.map: no thread has the lens field "${lens.by}"`)
+    }
+    const valueOf = t => (lens ? (t.fields[lens.by] == null ? '(none)' : String(t.fields[lens.by])) : '')
+    const toneOfThread = t => (lens ? lens.tone[valueOf(t)] || 'dim' : t.tone ? T(t.tone) : 'accent')
+
+    // regions: one per station, group and lane, with the station's rows and its moves as examples
+    const regOf = new Map()
+    const unitWord = (n, u) => (u ? `${fmt(n)} ${n === 1 ? u.replace(/s$/, '') : u}` : fmt(n))
+    const stationRegion = (g, s, extra) => {
+      if (regOf.has('s:' + s.id)) return regOf.get('s:' + s.id)
+      const meta = Object.assign({}, s.raw, extra || {})
+      delete meta.id
+      meta.label = s.label + (s.n != null ? ` · ${unitWord(s.n, s.threads.length ? '' : unit)}` : s.threads.length > 1 ? ` · ${unitWord(s.threads.length, unit)}` : '')
+      meta.station = s.id
+      if (s.note) meta.note = s.note
+      if (s.ref) meta.ref = s.ref.length === 1 ? s.ref[0] : s.ref
+      const recs = []
+      if (Array.isArray(s.examples)) s.examples.forEach(x => { if (isObj(x)) recs.push({ ref: x.ref, text: clean(String(firstOf(x, ['text', 'quote', 'label']) || x.ref || '')) }); else if (scalar(x)) recs.push({ text: clean(String(x)) }) })
+      s.stops.forEach(st => {
+        if (!st.ref) return
+        const span = st.from != null ? ` · ${st.to != null && st.to !== st.from ? `${fmt(st.from)}–${fmt(st.to)}` : fmt(st.from)}` : ''
+        recs.push({ ref: st.ref[0], text: `${st.thread}${span}${st.note ? ': ' + st.note : ''}` })
+      })
+      if (!meta.ref && recs.length) meta.ref = recs.slice(0, 3).map(r => r.ref).filter(Boolean)
+      if (s.threads.length && s.threads.length <= 400) meta.threads = s.threads.slice()
+      if (recs.length) meta.examples = registerExamples(ctx, 'ex-' + mslug(s.id, 40), { label: `${s.label}: ${s.threads.length > 1 ? 'the ' + unit + ' through it' : 'its rows'}`, records: recs.slice(0, 200), total: recs.length, fmt: '{text}' })
+      const id = regionId(ctx, 'st-' + mslug(s.id, 56), 'map station', meta)
+      g.regs.set(id, { meta: meta, rects: [] })
+      regOf.set('s:' + s.id, id)
+      return id
+    }
+
+    let grid, key = []
+    if (form === 'metro' && !full && lineThreads.length > 1) {
+      // the mini form of many threads: the stations that tell the story, the rest folded into the lanes between them
+      const R = mapReduce(M, lineThreads, unit)
+      if (R) {
+        const r = mapMetro(k, R.M, R.threads, W, false, unit, o.lens ? lens : null, valueOf, stationRegion, ctx, T, o)
+        grid = r.g
+      }
+    }
+    if (grid) { /* drawn */ } else if (form === 'line') grid = mapLine(k, M, lineThreads[0], W, full, unit, stationRegion, toneOfThread, ctx, T)
+    else if (form === 'metro') {
+      const F = mapFold(M, lineThreads, o.fold != null ? num(o.fold) : Math.max(2, Math.ceil(lineThreads.length * 0.05)))
+      const r = mapMetro(k, F.M, F.threads, W, full, unit, full || o.lens ? lens : null, valueOf, stationRegion, ctx, T, o)
+      grid = r.g
+      key = r.key
+      if (F.folded.length) key.push(`{dim:folded into the lanes, under ${fmt(F.min)} ${escapeMarkup(unit || 'threads')} each:} ` + F.folded.slice(0, 8).map(x => `${escapeMarkup(x.label)} {dim:${fmt(x.threads.length)}}`).join(', ') + (F.folded.length > 8 ? ` {dim:+${F.folded.length - 8}}` : ''))
+    } else grid = mapRegions(k, M, W, full, unit, stationRegion, ctx, T)
+    const node = grid.toCanvas(n => { ctx.ops += n })
+    node.map = { form: form, full: full, threads: lineThreads.length, stations: M.stations.size, lens: lens ? lens.by : null }
+    const parts = [node]
+    if (full && key.length) key.forEach(line => parts.push(k.text(line)))
+    return parts.length === 1 ? node : k.stack(parts)
+  }
+
+  // ---- one thread: a line of its stations
+  function mapLine(k, M, t, W, full, unit, stationRegion, toneOfThread, ctx, T) {
+    const stops = t.stops
+    const n = stops.length
+    const total = t.steps || Math.max(0, ...stops.map(s => s.to || s.from || 0)) || n
+    const known = stops.every(s => s.from != null)
+    const span = s => (known ? Math.max(1, (s.to != null ? s.to : s.from) - s.from + 1) : 1)
+    const st = s => M.stations.get(s.station) || {}
+    const labelOf = s => s.label || st(s).label || s.station
+    // a short name: Claude's `short`, else the first word and the most telling other word (one with a digit or #)
+    const shortOf = s => st(s).short || shortName(labelOf(s))
+    const markOf = (s, i) => s.mark || st(s).mark || (i === n - 1 && (st(s).end || MAP_GOOD.test(labelOf(s))) ? '✓' : '')
+    const markTone = (s, m) => (s.tone ? T(s.tone) : st(s).tone ? T(st(s).tone) : m === '✓' ? 'good' : 'accent')
+    const notes = stops.map((s, i) => ({ s, i, note: s.note || st(s).note })).filter(x => x.note)
+    const ncol = W >= 100 && notes.length > 3 ? 2 : 1
+    const H = full ? 8 + Math.ceil(notes.length / ncol) : 1
+    const g = new MapGrid(W, H)
+    const reg = stops.map(s => stationRegion(g, M.stations.get(s.station)))
+
+    if (!full) {
+      // one row to scale: each stop takes width as its steps, its name at its start; where names do not fit, the
+      // stops with the fewest steps give up words first (the full name, a short name, its mark alone)
+      const token = (s, i, lvl) => {
+        const m = markOf(s, i), rep = s.repeat ? (lvl ? ' ⟳' : ` ⟳${fmt(s.repeat)}`) : ''
+        if (lvl >= 2) return m || '●'
+        return (lvl === 0 ? labelOf(s) : shortOf(s)) + (m ? ' ' + m : '') + rep
+      }
+      const lvl = stops.map(() => 0)
+      const minOf = i => k.len(token(stops[i], i, lvl[i])) + (i < n - 1 ? 3 : 0)
+      const byFew = stops.map((s, i) => i).sort((a, b) => span(stops[a]) - span(stops[b]))
+      for (let guard = 0; guard < 3 * n && stops.reduce((sum, s, i) => sum + minOf(i), 0) > W; guard++) {
+        const i = byFew.find(j => lvl[j] < 2 && (lvl[j] < 1 || byFew.every(q => lvl[q] >= 1)))
+        if (i == null) break
+        lvl[i]++
+      }
+      const mins = stops.map((s, i) => minOf(i))
+      let ws = mins.slice()
+      const room = W - ws.reduce((a, b) => a + b, 0)
+      if (room > 0) {
+        // the spare cells go to the stops by their steps, largest remainders first
+        const wts = stops.map(span)
+        const sum = wts.reduce((a, b) => a + b, 0)
+        const extra = wts.map((w, i) => Math.max(0, (W * w) / sum - mins[i]))
+        const es = extra.reduce((a, b) => a + b, 0) || 1
+        const add = extra.map(v => Math.floor((room * v) / es))
+        let left = room - add.reduce((a, b) => a + b, 0)
+        extra.map((v, i) => [((room * v) / es) % 1, i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { add[i]++; left-- } })
+        ws = ws.map((v, i) => v + add[i])
+      }
+      let x = 0
+      stops.forEach((s, i) => {
+        const m = markOf(s, i)
+        const lab = lvl[i] >= 2 ? '' : lvl[i] === 1 ? shortOf(s) : labelOf(s)
+        let dx = 0
+        if (lab) dx += g.str(x, 0, lab, 'ink')
+        if (m || !lab) { if (lab) dx++; g.set(x + dx, 0, { ch: m || '●', tone: markTone(s, m), kind: 'mark' }); dx++ }
+        if (s.repeat) { const r = lvl[i] ? ' ⟳' : ` ⟳${fmt(s.repeat)}`; g.str(x + dx, 0, r, 'c5'); dx += k.len(r) }
+        if (i < n - 1) for (let j = x + dx + 1; j < x + ws[i] - 1; j++) g.set(j, 0, { ch: '─', tone: s.tone ? T(s.tone) : 'dim', kind: 'line' })
+        g.rect(reg[i], x, 0, ws[i], 1)
+        x += ws[i]
+      })
+      return g
+    }
+
+    // the full map: the stations spaced for reading, their first step under each, a strip to scale, then the notes
+    const lastW = Math.min(18, k.len(labelOf(stops[n - 1])))
+    let xs
+    const gap = n > 1 ? Math.floor((W - 1 - lastW) / (n - 1)) : W
+    if (n > 1 && gap < 4) {
+      xs = []
+      stops.forEach((s, i) => { const want = known ? Math.round(((s.from - 1) / Math.max(1, total)) * (W - 2)) : Math.round((i / (n - 1)) * (W - 2)); xs.push(i ? Math.max(xs[i - 1] + 2, want) : 0) })
+    } else xs = stops.map((s, i) => i * gap)
+    const oneRow = stops.every((s, i) => xs[i] + k.len(labelOf(s)) < (i < n - 1 ? xs[i + 1] - 1 : W + 1))
+    const yL = oneRow ? [0, 0] : [0, 1], yLine = yL[1] + 1, yNum = yLine + 1, yScale = yNum + 1
+    stops.forEach((s, i) => {
+      const tier = oneRow ? 1 : (n - 1 - i) % 2
+      const nextX = oneRow ? (i < n - 1 ? xs[i + 1] : W) : (i + 2 < n ? xs[i + 2] : W)
+      let lab = labelOf(s)
+      let x0 = xs[i]
+      if (i === n - 1 && x0 + k.len(lab) > W) x0 = Math.max(n > 1 ? xs[n - 2] + 2 : 0, W - k.len(lab))
+      const room = Math.max(2, Math.max(nextX - x0 - 1, i === n - 1 ? W - x0 : 0))
+      if (k.len(lab) > room) lab = Array.from(lab).slice(0, room - 1).join('') + '…'
+      g.str(x0, yL[tier], lab, s.tone ? T(s.tone) : 'ink', { b: true })
+      g.rect(reg[i], x0, yL[tier], k.len(lab), 1)
+      if (tier === 0 && !oneRow) g.set(xs[i], yL[1], { ch: '╷', tone: 'dim', kind: 'tick' })
+    })
+    stops.forEach((s, i) => {
+      const x = xs[i]
+      const m = markOf(s, i) || '●'
+      g.set(x, yLine, { ch: m, tone: markTone(s, m), kind: 'mark', b: true })
+      g.rect(reg[i], x, yLine, 1, 1)
+      if (i < n - 1) {
+        const ch = s.repeat ? '↻' : '━'
+        for (let xx = x + 1; xx < xs[i + 1]; xx++) g.set(xx, yLine, { ch: ch, tone: s.repeat ? 'c5' : (s.tone ? T(s.tone) : toneOfThread(t)), kind: s.repeat ? 'mark' : 'line' })
+        if (s.repeat) { const r = ` ×${fmt(s.repeat)} `; if (xs[i + 1] - x - 1 > k.len(r) + 2) g.str(x + 2, yLine, r, 'c5') }
+      }
+    })
+    let free = 0
+    stops.forEach((s, i) => {
+      if (s.from == null) return
+      const txt = fmt(s.from)
+      if (xs[i] >= free && xs[i] + k.len(txt) <= W) { g.str(xs[i], yNum, txt, 'dim'); g.rect(reg[i], xs[i], yNum, k.len(txt), 1); free = xs[i] + k.len(txt) + 1 }
+    })
+    // where the steps went: one strip to scale, a stop's segment in alternating tones, the total at its end
+    if (known && n > 1) {
+      const tail = ` ${fmt(total)} ${unit} to scale`
+      const sw = Math.max(n, W - k.len(tail))
+      let x = 0
+      stops.forEach((s, i) => {
+        const end = i === n - 1 ? sw : Math.max(x + 1, Math.round(((s.to != null ? s.to : s.from) / Math.max(1, total)) * sw))
+        for (let xx = x; xx < Math.min(end, sw); xx++) g.set(xx, yScale, { ch: '▬', tone: i % 2 ? 'dim' : 'accent', kind: 'block' })
+        g.rect(reg[i], x, yScale, Math.max(1, Math.min(end, sw) - x), 1)
+        x = Math.min(end, sw)
+      })
+      g.str(sw, yScale, tail, 'dim')
+    }
+    // notes: the stops Claude said something about, two columns when there is room
+    const cw = Math.floor(W / ncol)
+    const per = Math.ceil(notes.length / ncol)
+    notes.forEach((x, j) => {
+      const col = Math.floor(j / per), row = j % per
+      const X = col * cw, Y = yScale + 2 + row
+      const m = markOf(x.s, x.i) || '●'
+      const head = x.s.from != null ? fmt(x.s.from) : ''
+      g.set(X, Y, { ch: m, tone: markTone(x.s, m), kind: 'mark' })
+      g.str(X + 2, Y, head, 'dim')
+      const nx = X + 2 + Math.max(6, k.len(head) + 1)
+      let words = x.note
+      const room = cw - (nx - X) - 2
+      if (k.len(words) > room) words = Array.from(words).slice(0, Math.max(1, room - 1)).join('') + '…'
+      g.str(nx, Y, words, 'ink')
+      g.rect(reg[x.i], X, Y, cw - 1, 1)
+    })
+    return g
+  }
+
+  // ---- the mini form of many threads: an origin, the stations Claude marked `key` (else the first column where the
+  // threads split widely), and where they end; each thread's other stops are folded into the lanes between them
+  function mapReduce(M, threads, unit) {
+    const ST = M.stations
+    const nT = threads.length
+    const ends = new Set(threads.map(t => t.stops[t.stops.length - 1].station))
+    let keep = [...ST.values()].filter(s => s.raw.key || s.raw.mini).map(s => s.id)
+    if (!keep.length) {
+      // columns as the longest path from a start
+      const pred = {}
+      threads.forEach(t => t.stops.forEach((s, i) => { pred[s.station] = pred[s.station] || new Set(); if (i && t.stops[i - 1].station !== s.station) pred[s.station].add(t.stops[i - 1].station) }))
+      const rank = {}, busy = {}
+      const rk = id => { if (rank[id] != null) return rank[id]; if (busy[id]) return 0; busy[id] = 1; let r = 0; for (const p of pred[id] || []) r = Math.max(r, rk(p) + 1); busy[id] = 0; return (rank[id] = r) }
+      Object.keys(pred).forEach(rk)
+      const byRank = {}
+      Object.keys(rank).forEach(id => { if (!ends.has(id)) (byRank[rank[id]] = byRank[rank[id]] || []).push(id) })
+      const big = id => ST.get(id).threads.length >= Math.max(2, Math.ceil(nT * 0.1))
+      let best = null
+      Object.keys(byRank).map(Number).sort((a, b) => a - b).forEach(r => {
+        const ids = byRank[r].filter(big)
+        const covered = new Set()
+        ids.forEach(id => ST.get(id).threads.forEach(t => covered.add(t)))
+        if (ids.length >= 2 && covered.size >= nT * 0.5 && (!best || ids.length > best.length)) best = ids
+      })
+      keep = best || Object.keys(rank).filter(id => !ends.has(id) && ST.get(id).threads.length >= nT * 0.3)
+    }
+    keep = keep.concat([...ends])
+    if (keep.length < 2) return null
+    const origin = { id: 'all', label: `${fmt(nT)} ${unit || 'threads'}`, raw: { origin: true }, origin: true, threads: threads.map(t => t.id), stops: [], n: nT }
+    const stations = new Map([['all', origin]])
+    keep.forEach(id => { const s = ST.get(id); if (s) stations.set(id, s) })
+    const out = threads.map(t => {
+      const stops = [{ station: 'all', thread: t.id }]
+      t.stops.forEach(s => { if (stations.has(s.station) && stops[stops.length - 1].station !== s.station) stops.push(s) })
+      return Object.assign({}, t, { stops })
+    })
+    return { M: Object.assign({}, M, { stations, links: [] }), threads: out }
+  }
+
+  // ---- the full form of many threads leaves out the stations few threads pass (under `min`), unless Claude marked them
+  // key or threads end there; their threads run straight through to the next station they reach
+  function mapFold(M, threads, min) {
+    const folded = [...M.stations.values()].filter(s => s.threads.length && s.threads.length < min && !s.raw.key && !s.end && !threads.some(t => t.stops[t.stops.length - 1].station === s.id))
+    if (!folded.length || min <= 1) return { M, threads, folded: [], min }
+    const gone = new Set(folded.map(s => s.id))
+    const stations = new Map([...M.stations].filter(([id]) => !gone.has(id)))
+    const out = threads.map(t => {
+      const stops = []
+      t.stops.forEach(s => { if (!gone.has(s.station) && (!stops.length || stops[stops.length - 1].station !== s.station)) stops.push(s) })
+      return Object.assign({}, t, { stops })
+    })
+    return { M: Object.assign({}, M, { stations }), threads: out, folded, min }
+  }
+
+  // ---- many threads: a metro map of bundles between stations in columns
+  function mapMetro(k, M, threads, W, full, unit, lens, valueOf, stationRegion, ctx, T, o) {
+    const ST = M.stations
+    const unitWord = (n, u) => (u ? `${fmt(n)} ${n === 1 ? u.replace(/s$/, '') : u}` : fmt(n))
+    // edges: consecutive stops of each thread; links with a count where no thread runs
+    const EW = new Map()
+    const backs = []
+    const edge = (a, b) => { const key = a + '>' + b; let e = EW.get(key); if (!e) { e = { key, a, b, tids: [], n: 0, by: null, ref: null }; EW.set(key, e) } return e }
+    threads.forEach(t => t.stops.forEach((s, i) => { if (!i) return; const a = t.stops[i - 1].station; if (a !== s.station) { const e = edge(a, s.station); e.tids.push(t.id); e.n++ } }))
+    const extra = []
+    M.links.forEach(l => {
+      if (EW.has(l.from + '>' + l.to) && !l.n) return
+      if (threads.length && l.n == null) { extra.push(l); return }
+      const e = edge(l.from, l.to)
+      if (!e.tids.length) { e.n = l.n != null ? l.n : 1; e.by = l.by; e.ref = l.ref; e.label = l.label }
+    })
+    const ids = []
+    for (const e of EW.values()) { if (ids.indexOf(e.a) < 0) ids.push(e.a); if (ids.indexOf(e.b) < 0) ids.push(e.b) }
+    // an edge that goes back (a return, a loop) is a note, not a lane: with threads, back means against the order in
+    // which the threads first reach the stations; with links alone, against a depth-first walk from the starts
+    const pos = {}
+    if (threads.length) {
+      const acc = {}
+      threads.forEach(t => {
+        const seen = new Set()
+        t.stops.forEach((s, i) => { if (seen.has(s.station)) return; seen.add(s.station); const a = acc[s.station] = acc[s.station] || [0, 0]; a[0] += i / Math.max(1, t.stops.length - 1); a[1]++ })
+      })
+      ids.forEach(id => { pos[id] = acc[id] ? acc[id][0] / acc[id][1] : 0.5 })
+    } else {
+      const out = {}
+      for (const e of EW.values()) (out[e.a] = out[e.a] || []).push(e.b)
+      const state = {}
+      let t = 0
+      const visit = id => { if (state[id]) return; state[id] = 1; (out[id] || []).forEach(visit); pos[id] = -(t++) }
+      ids.filter(id => ![...EW.values()].some(e => e.b === id)).concat(ids).forEach(visit)
+    }
+    const fwd = (a, b) => pos[a] < pos[b] || (pos[a] === pos[b] && a < b)
+    for (const [key, e] of [...EW]) if (!fwd(e.a, e.b)) { backs.push(e); EW.delete(key) }
+    const succ0 = {}, pred0 = {}
+    ids.forEach(id => { succ0[id] = {}; pred0[id] = {} })
+    for (const e of EW.values()) { succ0[e.a][e.b] = (succ0[e.a][e.b] || 0) + e.n; pred0[e.b][e.a] = (pred0[e.b][e.a] || 0) + e.n }
+    // columns: the longest path from a start; a station where threads end goes to the last column
+    const rank = {}
+    const rk = id => {
+      if (rank[id] != null) return rank[id]
+      let r = 0
+      for (const p in pred0[id]) r = Math.max(r, rk(p) + 1)
+      return (rank[id] = r)
+    }
+    ids.forEach(rk)
+    let maxR = Math.max(0, ...ids.map(id => rank[id]))
+    const ending = ids.filter(id => ST.get(id).end || !Object.keys(succ0[id]).length)
+    if (ending.length && ending.some(id => rank[id] < maxR)) ending.forEach(id => { rank[id] = maxR })
+    for (const [key, e] of [...EW]) if (rank[e.b] <= rank[e.a]) { backs.push(e); EW.delete(key) }
+    maxR = Math.max(0, ...ids.map(id => rank[id]))
+    const nThreads = threads.length || Math.max(1, ...[...EW.values()].map(e => e.n))
+    const nOf = id => { const s = ST.get(id); return s.n != null ? s.n : s.threads.length || Math.max(Object.values(pred0[id]).reduce((a, b) => a + b, 0), Object.values(succ0[id]).reduce((a, b) => a + b, 0)) }
+    // nodes, with a pass-through point in every column an edge skips
+    const N = {}
+    ids.forEach((id, i) => { N[id] = { id, rank: rank[id], n: nOf(id), ord: i } })
+    const chain = {}
+    for (const e of EW.values()) {
+      const ch = [e.a]
+      for (let r = rank[e.a] + 1; r < rank[e.b]; r++) { const did = `~${e.key}@${r}`; N[did] = { id: did, rank: r, dummy: true, edge: e.key, n: e.n, ord: 1e6 }; ch.push(did) }
+      ch.push(e.b)
+      chain[e.key] = ch
+    }
+    const succ = {}, pred = {}
+    for (const id in N) { succ[id] = {}; pred[id] = {} }
+    for (const key in chain) {
+      const ch = chain[key], w = EW.get(key).n
+      for (let i = 1; i < ch.length; i++) { succ[ch[i - 1]][ch[i]] = (succ[ch[i - 1]][ch[i]] || 0) + w; pred[ch[i]][ch[i - 1]] = (pred[ch[i]][ch[i - 1]] || 0) + w }
+    }
+    const layers = []
+    for (const id in N) (layers[N[id].rank] = layers[N[id].rank] || []).push(id)
+    for (let r = 0; r <= maxR; r++) layers[r] = (layers[r] || []).sort((a, b) => N[a].ord - N[b].ord || (a < b ? -1 : 1))
+    const yy = {}
+    const place = l => { let y = 0; l.forEach(id => { yy[id] = y + N[id].n / 2; y += N[id].n + (N[id].dummy ? 2 : 6) }); const sh = -y / 2; l.forEach(id => { yy[id] += sh }) }
+    layers.forEach(place)
+    const bary = (id, nb) => { let s = 0, w = 0; for (const q in nb[id]) { s += yy[q] * nb[id][q]; w += nb[id][q] } return w ? s / w : yy[id] }
+    for (let it = 0; it < 10; it++) {
+      for (let r = 1; r <= maxR; r++) { layers[r].sort((a, b) => bary(a, pred) - bary(b, pred)); place(layers[r]) }
+      for (let r = maxR - 1; r >= 0; r--) { layers[r].sort((a, b) => bary(a, succ) - bary(b, succ)); place(layers[r]) }
+    }
+    // lanes: every bundle split by the lens, one lane per value; a bundle in `merged` stays one striped lane
+    const cats = lens ? lens.values.concat(['(none)']) : ['']
+    const weightOf = n => (n >= Math.max(3, Math.round(nThreads / 4)) ? 3 : n >= Math.max(2, Math.round(nThreads / 10)) ? 2 : 1)
+    const lanesFor = merged => {
+      const lanes = {}, all = []
+      for (const [key, e] of EW) {
+        const gr = {}
+        if (e.tids.length) e.tids.forEach(tid => { const t = threads.find(x => x.id === tid); const v = lens && t ? valueOf(t) : ''; (gr[v] = gr[v] || []).push(tid) })
+        else if (lens && isObj(e.by)) Object.keys(e.by).forEach(v => { const c = num(e.by[v]); if (c > 0) gr[String(v)] = new Array(c).fill(null) })
+        else gr[''] = new Array(e.n).fill(null)
+        const present = Object.keys(gr).sort((a, b) => (cats.indexOf(a) < 0 ? 999 : cats.indexOf(a)) - (cats.indexOf(b) < 0 ? 999 : cats.indexOf(b)))
+        const tone = v => (lens ? lens.tone[v] || 'dim' : 'accent')
+        if ((merged.has(key) && present.length > 1) || !lens) {
+          const parts = present.map(v => ({ v, n: gr[v].length, tids: gr[v].filter(Boolean), tone: tone(v) }))
+          const pat = []
+          parts.forEach(p => { for (let i = 0; i < Math.max(1, Math.round((6 * p.n) / e.n)); i++) pat.push(p.tone) })
+          const major = parts.slice().sort((a, b) => b.n - a.n)[0] || { v: '', tone: 'accent' }
+          const L = { id: all.length, key, v: lens ? major.v : '', parts, pat: lens && parts.length > 1 ? pat : null, tids: e.tids.slice(), n: e.n, tone: major.tone, w: weightOf(e.n), mixed: !!lens && parts.length > 1 }
+          all.push(L)
+          lanes[key] = [L]
+          continue
+        }
+        lanes[key] = present.map(v => { const L = { id: all.length, key, v, tids: gr[v].filter(Boolean), n: gr[v].length, tone: tone(v), w: weightOf(gr[v].length) }; all.push(L); return L })
+      }
+      const ins = {}, outs = {}
+      for (const id in N) { ins[id] = []; outs[id] = [] }
+      for (const key in chain) { const ch = chain[key]; for (let i = 0; i < ch.length - 1; i++) { outs[ch[i]].push(...lanes[key]); ins[ch[i + 1]].push(...lanes[key]) } }
+      return { lanes, all, ins, outs }
+    }
+    const budget = clamp(int(o.rows, full ? 30 : 10), 4, 200)
+    const gapB = (a, b) => (N[b].dummy && N[a].dummy ? 1 : 2)
+    const merged = new Set()
+    let hOf, plan
+    for (let guard = 0; guard < 200; guard++) {
+      plan = lanesFor(merged)
+      hOf = {}
+      for (const id in N) hOf[id] = N[id].dummy ? plan.lanes[N[id].edge].length : Math.max(plan.ins[id].length, plan.outs[id].length, 1)
+      const colH = layers.map(l => l.reduce((a, id, i) => a + hOf[id] + (i ? gapB(l[i - 1], id) : 0), 0))
+      const worst = colH.indexOf(Math.max(...colH))
+      if (colH[worst] <= budget - 2) break
+      const keys = [...EW.keys()].filter(kk => !merged.has(kk) && plan.lanes[kk].length > 1 && chain[kk].some(id => N[id].rank === worst))
+      if (!keys.length) break
+      keys.sort((a, b) => plan.lanes[b].length - plan.lanes[a].length || EW.get(a).n - EW.get(b).n)
+      merged.add(keys[0])
+    }
+    const { lanes, all: allLanes, ins, outs } = plan
+    const colH = layers.map(l => l.reduce((a, id, i) => a + hOf[id] + (i ? gapB(l[i - 1], id) : 0), 0))
+    const H = Math.max(budget, Math.max(...colH) + 4)
+    const top0 = 1, bot0 = H - 2
+    // x: the last column leaves room for the endings' words to its right
+    const sinkW = Math.max(0, ...layers[maxR].filter(id => !N[id].dummy).map(id => k.len(ST.get(id).label) + 1 + k.len(fmt(N[id].n)) + 2))
+    const xEnd = Math.max(Math.floor(W * 0.5), W - Math.min(sinkW, Math.floor(W * 0.4)) - 1)
+    const X = []
+    for (let r = 0; r <= maxR; r++) X.push(maxR ? Math.round((r * (xEnd - 1)) / maxR) : 0)
+    // y: centers relaxed toward their weighted neighbors, order and gaps kept
+    const y = {}
+    const cen = id => y[id] + (hOf[id] - 1) / 2
+    layers.forEach(l => { let v = 0; l.forEach((id, i) => { if (i) v += gapB(l[i - 1], id); y[id] = v; v += hOf[id] }); const sh = (top0 + bot0 + 1) / 2 - v / 2; l.forEach(id => { y[id] += sh }) })
+    const resolve = (l, round) => {
+      for (let i = 0; i < l.length; i++) { const lo = i ? y[l[i - 1]] + hOf[l[i - 1]] + gapB(l[i - 1], l[i]) : top0; if (y[l[i]] < lo) y[l[i]] = lo }
+      for (let i = l.length - 1; i >= 0; i--) { const hi = i < l.length - 1 ? y[l[i + 1]] - gapB(l[i], l[i + 1]) - hOf[l[i]] : bot0 - hOf[l[i]] + 1; if (y[l[i]] > hi) y[l[i]] = hi }
+      for (let i = 0; i < l.length; i++) { const lo = i ? y[l[i - 1]] + hOf[l[i - 1]] + gapB(l[i - 1], l[i]) : top0; if (y[l[i]] < lo) y[l[i]] = lo }
+      if (round) l.forEach(id => { y[id] = Math.round(y[id]) })
+    }
+    const NB = {}
+    for (const id in N) { const q = {}; for (const z in pred[id]) q[z] = (q[z] || 0) + pred[id][z]; for (const z in succ[id]) q[z] = (q[z] || 0) + succ[id][z]; NB[id] = q }
+    for (let it = 0, al = 0.7; it < 60; it++, al *= 0.96) {
+      const rs = [...Array(maxR + 1).keys()]
+      if (it % 2) rs.reverse()
+      for (const r of rs) {
+        for (const id of layers[r]) { let s = 0, w = 0; for (const q in NB[id]) { s += cen(q) * NB[id][q]; w += NB[id][q] } if (w) y[id] += (s / w - cen(id)) * al }
+        resolve(layers[r])
+      }
+    }
+    layers.forEach(l => resolve(l, true))
+    // the rows of the lanes at every node: in by where they come from, out by where they go
+    const entry = {}, exit = {}
+    const prevOf = (id, L) => { const ch = chain[L.key]; return ch[ch.indexOf(id) - 1] }
+    const nextOf = (id, L) => { const ch = chain[L.key]; return ch[ch.indexOf(id) + 1] }
+    const ci = L => cats.indexOf(L.v)
+    const bestOffset = (rows, h, n) => { let best = 0, bs = Infinity; for (let off = 0; off <= h - n; off++) { let s = 0; rows.forEach((d, i) => { s += Math.abs(off + i - d) }); if (s < bs - 1e-9) { bs = s; best = off } } return best }
+    for (let r = 0; r <= maxR; r++) {
+      for (const id of layers[r]) {
+        entry[id] = {}; exit[id] = {}
+        const h = hOf[id], top = y[id]
+        if (N[id].dummy) {
+          const ls = lanes[N[id].edge]
+          const off = bestOffset(ls.map(L => exit[prevOf(id, L)][L.id] - top), h, ls.length)
+          ls.forEach((L, i) => { entry[id][L.id] = top + off + i; exit[id][L.id] = top + off + i })
+          continue
+        }
+        const I = ins[id].slice().sort((a, b) => exit[prevOf(id, a)][a.id] - exit[prevOf(id, b)][b.id] || ci(a) - ci(b))
+        const oi = bestOffset(I.map(L => exit[prevOf(id, L)][L.id] - top), h, I.length)
+        I.forEach((L, i) => { entry[id][L.id] = top + oi + i })
+        const tg = L => { const nn = nextOf(id, L); return N[nn].dummy ? y[nn] + (hOf[nn] - lanes[L.key].length) / 2 + lanes[L.key].indexOf(L) : y[nn] + (hOf[nn] - 1) / 2 }
+        const O = outs[id].slice().sort((a, b) => tg(a) - tg(b) || ci(a) - ci(b))
+        const oo = bestOffset(O.map(L => tg(L) - top), h, O.length)
+        O.forEach((L, i) => { exit[id][L.id] = top + oo + i })
+      }
+    }
+    // route: straight runs and one bend per gap, the bends of a gap in columns of their own
+    const g = new MapGrid(W, H)
+    const xL = id => X[N[id].rank], xR = id => X[N[id].rank]
+    const segs = []
+    for (const key in chain) {
+      const ch = chain[key]
+      for (const L of lanes[key]) {
+        for (let i = 0; i < ch.length - 1; i++) segs.push({ L, a: ch[i], b: ch[i + 1], ya: exit[ch[i]][L.id], yb: entry[ch[i + 1]][L.id], x0: xR(ch[i]) + 1, x1: xL(ch[i + 1]) - 1, r: N[ch[i]].rank })
+        for (let i = 1; i < ch.length - 1; i++) segs.push({ L, thru: true, ya: entry[ch[i]][L.id], x0: xL(ch[i]), x1: xR(ch[i]) })
+      }
+    }
+    const byGap = {}
+    segs.filter(s => !s.thru && s.ya !== s.yb).forEach(s => (byGap[s.r] = byGap[s.r] || []).push(s))
+    for (const r in byGap) {
+      const list = byGap[r]
+      const up = list.filter(s => s.yb < s.ya).sort((a, b) => b.ya - a.ya || b.yb - a.yb)
+      const dn = list.filter(s => s.yb > s.ya).sort((a, b) => a.ya - b.ya || a.yb - b.yb)
+      const occ = {}
+      const lo0 = list[0].x0 + 1, hi0 = list[0].x1 - 1
+      const fits = (c, a, b) => (occ[c] || []).every(([p, q]) => b < p - 1 || a > q + 1)
+      for (const s of up.concat(dn)) {
+        const a = Math.min(s.ya, s.yb), b = Math.max(s.ya, s.yb)
+        let c = hi0
+        while (c > lo0 && !fits(c, a, b)) c--
+        s.c = Math.max(list[0].x0, c)
+        ;(occ[s.c] = occ[s.c] || []).push([a, b])
+      }
+    }
+    const put = (x, yy0, ch, L, dir) => {
+      const cur = g.get(x, yy0)
+      if (cur === undefined) return
+      if (cur && dir === 'h' && cur.kind === 'lane' && cur.dir !== 'h') return
+      g.set(x, yy0, { ch, tone: L.pat ? L.pat[(x + yy0) % L.pat.length] : L.tone, kind: 'lane', dir, lane: L, pat: !!L.pat })
+    }
+    for (const s of segs) {
+      const G = MAP_GLY[s.L.w]
+      if (s.thru || s.ya === s.yb) { for (let x = s.x0; x <= s.x1; x++) put(x, s.ya, G.h, s.L, 'h'); continue }
+      for (let x = s.x0; x < s.c; x++) put(x, s.ya, G.h, s.L, 'h')
+      for (let x = s.c + 1; x <= s.x1; x++) put(x, s.yb, G.h, s.L, 'h')
+    }
+    for (const s of segs) {
+      if (s.thru || s.ya === s.yb) continue
+      const G = MAP_GLY[s.L.w], down = s.yb > s.ya
+      put(s.c, s.ya, down ? G.LD : G.LU, s.L, 'c')
+      put(s.c, s.yb, down ? G.UR : G.DR, s.L, 'c')
+      for (let q = Math.min(s.ya, s.yb) + 1; q < Math.max(s.ya, s.yb); q++) put(s.c, q, G.v, s.L, 'v')
+    }
+    // stations: a column of beads as tall as its lanes
+    const P = {}
+    const regs = {}
+    for (const id of ids) {
+      const S = ST.get(id), top = y[id], h = hOf[id], x = X[N[id].rank]
+      const rid = stationRegion(g, S)
+      regs[id] = rid
+      const glyph = S.mark || '●'
+      for (let row = top; row < top + h; row++) g.set(x, row, { ch: h > 1 && row > top && row < top + h - 1 ? '┃' : glyph, tone: S.tone ? T(S.tone) : 'ink', kind: 'bead' })
+      g.rect(rid, x, top, 1, h)
+      P[id] = { x, top, h, S, end: N[id].rank === maxR && maxR > 0 }
+    }
+    // words: the endings to the right of the last column; the others beside their beads where the cells are free
+    const order = ids.slice().sort((a, b) => (P[b].end - P[a].end) || P[b].x - P[a].x || N[b].n - N[a].n)
+    const small = id => !full && N[id].n < Math.max(2, nThreads * 0.12) && !P[id].end
+    for (const id of order) {
+      const p = P[id], S = p.S
+      const cnt = fmt(N[id].n)
+      const toneOfLabel = S.tone ? T(S.tone) : p.end ? (MAP_GOOD.test(S.label) ? 'good' : MAP_WARN.test(S.label) ? 'warn' : MAP_BAD.test(S.label) ? 'bad' : 'ink') : 'ink'
+      const short = S.short || shortName(S.label)
+      const variants = small(id) ? [] : S.origin ? [[S.label, false]] : [[S.label, true], [S.label, false], [short, true], [short, false]]
+      const spots = L => p.end
+        ? [[p.x + 2, p.top + Math.floor((p.h - 1) / 2)], [p.x + 2, p.top], [p.x + 2, p.top - 1], [p.x + 2, p.top + p.h]]
+        : [[p.x, p.top - 1], [p.x + 2, p.top - 1], [p.x - L + 1, p.top - 1], [p.x, p.top + p.h], [p.x - L + 1, p.top + p.h], [p.x + 2, p.top], [p.x - L - 1, p.top], [p.x, p.top - 2], [p.x, p.top + p.h + 1]]
+      let placed = null
+      for (const [name, withN] of variants) {
+        const txt = withN ? name + ' ' + cnt : name
+        const L = k.len(txt)
+        for (const [lx, ly] of spots(L)) {
+          if (lx < 0 || lx + L > W || ly < 0 || ly >= H) continue
+          if (g.freeSpan(lx, ly, L)) { placed = { x: lx, y: ly, name, withN }; break }
+        }
+        if (placed) break
+      }
+      if (!placed && !small(id)) {
+        const ly = p.end ? p.top : p.top - 1, lx = p.end ? p.x + 2 : p.x
+        let n = 0
+        while (lx + n < W && g.free(lx + n, ly) && n < 30) n++
+        if (n >= 4) placed = { x: lx, y: ly, name: Array.from(short).slice(0, n - 1).join('') + (k.len(short) > n - 1 ? '…' : ''), withN: false }
+      }
+      if (placed) {
+        const dx = g.str(placed.x, placed.y, placed.name, toneOfLabel, { b: true })
+        if (placed.withN) g.str(placed.x + dx, placed.y, ' ' + cnt, 'dim')
+        g.rect(regs[id], placed.x, placed.y, dx + (placed.withN ? 1 + k.len(cnt) : 0), 1)
+      }
+    }
+    // lane counts, once on each lane's longest straight run; a striped lane prints a count per value in its tone
+    const laneRegion = L => {
+      const e = EW.get(L.key)
+      const A = ST.get(e.a), B = ST.get(e.b)
+      const meta = { label: `${unitWord(L.n, unit)}: ${A.label} → ${B.label}${L.v && !L.mixed ? ' · ' + L.v : ''}`, from: A.id, to: B.id }
+      if (L.v && !L.mixed) meta.value = L.v
+      if (L.tids.length) meta.threads = L.tids.slice(0, 400)
+      const recs = []
+      L.tids.forEach(tid => {
+        const t = threads.find(x => x.id === tid)
+        if (!t) return
+        const st = t.stops.find(s => s.station === e.b)
+        const ref = (st && st.ref && st.ref[0]) || (t.ref && t.ref[0])
+        recs.push({ ref, text: `${t.label}${lens ? ' · ' + valueOf(t) : ''}${st && st.from != null ? ' · reaches ' + B.label + ' at ' + fmt(st.from) : ''}` })
+      })
+      if (e.ref) meta.ref = e.ref.length === 1 ? e.ref[0] : e.ref
+      else if (recs.some(r => r.ref)) meta.ref = recs.filter(r => r.ref).slice(0, 3).map(r => r.ref)
+      if (recs.length) meta.examples = registerExamples(ctx, 'ex-ln-' + mslug(A.id, 18) + '-' + mslug(B.id, 18) + (L.v ? '-' + mslug(L.v, 12) : ''), { label: meta.label, records: recs.slice(0, 200), total: recs.length, fmt: '{text}' })
+      const id = regionId(ctx, 'ln-' + mslug(A.id, 20) + '-' + mslug(B.id, 20) + (L.v && !L.mixed ? '-' + mslug(L.v, 16) : ''), 'map lane', meta)
+      g.regs.set(id, { meta, rects: [] })
+      return id
+    }
+    for (const L of allLanes) {
+      let best = null
+      for (let yy0 = 0; yy0 < H; yy0++) {
+        let x = 0
+        while (x < W) {
+          const c = g.get(x, yy0)
+          if (c && c.kind === 'lane' && c.lane === L && c.dir === 'h') {
+            let e = x
+            while (e + 1 < W && g.get(e + 1, yy0) && g.get(e + 1, yy0).lane === L && g.get(e + 1, yy0).dir === 'h') e++
+            if (!best || e - x > best.e - best.x) best = { x, e, y: yy0 }
+            x = e + 1
+          } else x++
+        }
+      }
+      const parts = L.mixed ? L.parts : [{ n: L.n, tone: L.tone }]
+      const cells = [{ ch: ' ' }]
+      parts.forEach((pt, i) => { if (i) cells.push({ ch: '·', tone: 'dim' }); Array.from(String(pt.n)).forEach(ch => cells.push({ ch, tone: pt.tone, b: true })) })
+      cells.push({ ch: ' ' })
+      const rid = laneRegion(L)
+      if (best && best.e - best.x + 1 >= cells.length + 2) {
+        const sx = Math.round((best.x + best.e) / 2 - (cells.length - 1) / 2)
+        cells.forEach((c, i) => g.set(sx + i, best.y, { ch: c.ch, tone: c.tone || L.tone, b: !!c.b, kind: 'text' }))
+        g.rect(rid, best.x, best.y, best.e - best.x + 1, 1)
+      } else if (best) g.rect(rid, best.x, best.y, best.e - best.x + 1, 1)
+    }
+    // the key: what a line's weight counts, the lens's values, and what goes back
+    const key = []
+    const hi = Math.max(3, Math.round(nThreads / 4)), mid = Math.max(2, Math.round(nThreads / 10))
+    const u = unit || 'threads'
+    key.push(`{dim:line weight = ${escapeMarkup(u)}:} ━ {dim:${hi}+}  ─ {dim:${mid}–${hi - 1}}  ┄ {dim:1–${Math.max(1, mid - 1)}}` +
+      (lens ? `     {dim:${escapeMarkup(lens.label || lens.by)}:} ` + lens.values.map(v => `{${lens.tone[v]}:■} ${escapeMarkup(v)}`).join('  ') + (merged.size ? '  {dim:· a striped lane holds several}' : '') : ''))
+    const back = backs.concat(extra).map(e => {
+      const a = ST.get(e.a || e.from), b = ST.get(e.b || e.to)
+      return a && b ? `${escapeMarkup(a.label)} {dim:→} ${escapeMarkup(b.label)}${e.n ? ` {dim:${fmt(e.n)}}` : ''}${e.label ? ` {dim:(${escapeMarkup(e.label)})}` : ''}` : null
+    }).filter(Boolean)
+    if (back.length) key.push('{dim:↺ back:} ' + back.join('{dim:,} '))
+    return { g, key }
+  }
+
+  // ---- stations with no threads: groups as boxes of stations, each dot sized by its count
+  function mapRegions(k, M, W, full, unit, stationRegion, ctx, T) {
+    let groups = M.groups.filter(G => G.stations.length)
+    const loose = [...M.stations.values()].filter(s => !groups.some(G => G.stations.indexOf(s.id) >= 0))
+    if (loose.length) groups = groups.concat([{ id: '_rest', label: groups.length ? 'other' : (M.title || 'stations'), stations: loose.map(s => s.id), raw: {}, rest: true }])
+    const nOf = s => (s.n != null ? s.n : s.threads.length || 1)
+    groups.forEach((G, i) => {
+      G.items = G.stations.map(id => M.stations.get(id)).sort((a, b) => nOf(b) - nOf(a))
+      G.total = G.n != null ? G.n : G.items.reduce((s, x) => s + nOf(x), 0)
+      G.tone = G.tone ? T(G.tone) : CATS[i % 6]
+    })
+    groups.sort((a, b) => b.total - a.total)
+    const max = Math.max(1, ...[...M.stations.values()].map(nOf))
+    const dot = n => (n >= max * 0.6 ? '◉' : n >= max * 0.3 ? '●' : n >= max * 0.1 ? '•' : '·')
+    const groupRegion = (g, G) => {
+      const meta = Object.assign({}, G.raw, { label: `${G.label} · ${unitWord(G.total)}`, group: G.id, stations: G.stations.slice(0, 200) })
+      delete meta.id
+      if (G.note) meta.note = G.note
+      if (G.ref) meta.ref = G.ref.length === 1 ? G.ref[0] : G.ref
+      else { const r = G.items.filter(s => s.ref).slice(0, 3).map(s => s.ref[0]); if (r.length) meta.ref = r }
+      const id = regionId(ctx, G.rest ? 'grp-other' : 'grp-' + mslug(G.id, 56), 'map group', meta)
+      g.regs.set(id, { meta, rects: [] })
+      return id
+    }
+    const unitWord = n => (unit ? `${fmt(n)} ${unit}` : fmt(n))
+    if (!full) {
+      // one row of groups to scale, the words under it
+      const g = new MapGrid(W, 2)
+      const sum = groups.reduce((s, G) => s + G.total, 0) || 1
+      let x = 0
+      const rids = groups.map(G => groupRegion(g, G))
+      groups.forEach((G, i) => {
+        const w = i === groups.length - 1 ? W - x : Math.max(1, Math.round((W * G.total) / sum))
+        for (let j = 0; j < w && x + j < W; j++) g.set(x + j, 0, { ch: '▆', tone: G.tone, kind: 'block' })
+        g.rect(rids[i], x, 0, Math.min(w, W - x), 1)
+        x += w
+      })
+      let lx = 0
+      groups.forEach((G, i) => {
+        const txt = `${G.label} ${fmt(G.total)}`
+        if (lx + 2 + k.len(txt) > W) return
+        g.set(lx, 1, { ch: '■', tone: G.tone, kind: 'mark' })
+        g.str(lx + 2, 1, G.label, 'ink')
+        g.str(lx + 2 + k.len(G.label) + 1, 1, fmt(G.total), 'dim')
+        g.rect(rids[i], lx, 1, 2 + k.len(txt), 1)
+        lx += 2 + k.len(txt) + 3
+      })
+      return g
+    }
+    // the full map: boxes in columns, each the shortest column so far
+    const itemW = s => 2 + k.len(s.label) + 2 + k.len(fmt(nOf(s)))
+    const boxW = G => clamp(Math.max(k.len(G.label) + k.len(fmt(G.total)) + 8, ...G.items.map(s => itemW(s) + 4)), 16, W)
+    const ncol = Math.max(1, Math.min(groups.length, Math.floor(W / Math.max(24, Math.min(40, ...groups.map(boxW))))))
+    const colW = Math.floor(W / ncol)
+    const maxItems = 12
+    const heights = new Array(ncol).fill(0)
+    const placed = groups.map(G => {
+      const shown = G.items.slice(0, maxItems)
+      const h = shown.length + 2 + (G.items.length > shown.length ? 1 : 0)
+      const c = heights.indexOf(Math.min(...heights))
+      const at = { G, shown, x: c * colW, y: heights[c], w: colW - 1, h }
+      heights[c] += h
+      return at
+    })
+    const g = new MapGrid(W, Math.max(1, ...heights))
+    placed.forEach(p => {
+      const { G } = p
+      const rid = groupRegion(g, G)
+      g.boxes.push([p.x, p.y, p.w, p.h, G.tone, [{ s: G.label, tone: 'ink', b: true }, { s: ' ' + fmt(G.total), tone: 'dim' }]])
+      for (let xx = p.x; xx < p.x + p.w; xx++) { g.set(xx, p.y, { ch: ' ', kind: 'box' }); g.set(xx, p.y + p.h - 1, { ch: ' ', kind: 'box' }) }
+      for (let yy0 = p.y; yy0 < p.y + p.h; yy0++) { g.set(p.x, yy0, { ch: ' ', kind: 'box' }); g.set(p.x + p.w - 1, yy0, { ch: ' ', kind: 'box' }) }
+      g.rect(rid, p.x, p.y, p.w, 1)
+      p.shown.forEach((s, i) => {
+        const yy0 = p.y + 1 + i
+        const sid = stationRegion(g, s)
+        const n = fmt(nOf(s))
+        const room = p.w - 4 - k.len(n) - 3
+        let lab = s.label
+        if (k.len(lab) > room) lab = Array.from(lab).slice(0, Math.max(1, room - 1)).join('') + '…'
+        g.set(p.x + 2, yy0, { ch: s.mark || dot(nOf(s)), tone: s.tone ? T(s.tone) : G.tone, kind: 'mark' })
+        g.str(p.x + 4, yy0, lab, 'ink')
+        g.str(p.x + p.w - 2 - k.len(n), yy0, n, 'dim')
+        g.rect(sid, p.x + 1, yy0, p.w - 2, 1)
+      })
+      if (G.items.length > p.shown.length) g.str(p.x + 4, p.y + p.h - 2, `+ ${G.items.length - p.shown.length} more`, 'dim')
+    })
+    return g
   }
 
   // ---------------------------------------------------------------- run
