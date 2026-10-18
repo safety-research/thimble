@@ -123,6 +123,12 @@ test('a rewrite is held to the original: a ref it never cited loses its link, an
   const moved = checkRewrite(TEXT, 'The fix held [200 times](tests/conftest.py#L14); it [passed 200 times](q3#test=checkout@passes).')
   assert.equal(moved.text, 'The fix held 200 times; it [passed 200 times](q3#test=checkout@passes).')
   assert.match(moved.problems[0], /"200 times" was linked to the source of "tests\/conftest.py:14"/)
+  // the cited value with a date or a total beside it is kept; a total alone in place of the value is not
+  const orig = 'Most saves came on [6,543](q1#day=18@n) days, [13,403 of 14,591](q10#wiki=dse@n) on one wiki.'
+  assert.deepEqual(checkRewrite(orig, 'Peak: [6,543 on Jun 18](q1#day=18@n); [13,403 saves](q10#wiki=dse@n).').problems, [])
+  const total = checkRewrite(orig, 'Of [14,591 edits](q10#wiki=dse@n), most came on one day.')
+  assert.equal(total.text, 'Of 14,591 edits, most came on one day.')
+  assert.match(total.problems[0], /"14,591 edits" was linked to the source of "13,403 of 14,591"/)
 })
 
 test('after a rewrite the marks are placed again on the new text: citations, a sparkline with its values, the glosses whose terms stayed', () => {

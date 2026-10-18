@@ -250,12 +250,14 @@ const numbersIn = s => (norm(String(s).replace(LINK, '$1 $2')).match(/\d+(?:\.\d
  */
 export function checkRewrite(original, text) {
   // each ref the original cites, with the numbers its words state there
+  // the first number each cited ref's words state in the original: the value it cites (`13,403` of `13,403 of 14,591`)
   const cited = new Map()
   const wordsOf = new Map()
   for (const m of String(original).matchAll(LINK)) {
     const ref = m[2].trim()
     if (!cited.has(ref)) { cited.set(ref, new Set()); wordsOf.set(ref, m[1]) }
-    for (const n of numbersIn(m[1])) cited.get(ref).add(n)
+    const first = numbersIn(m[1])[0]
+    if (first) cited.get(ref).add(first)
   }
   const problems = []
   const out = String(text).replace(LINK, (whole, words, ref) => {
@@ -265,9 +267,10 @@ export function checkRewrite(original, text) {
       problems.push(`a citation to ${r.slice(0, 60)} is not in the original, so it shows as plain words`)
       return words
     }
-    // a kept citation states the number the original cites there, never another number of the text
-    const said = numbersIn(words).filter(n => !cited.get(r).has(n))
-    if (said.length && cited.get(r).size) {
+    // a kept citation states the number the original cites there (it may add a date or a total beside it), never
+    // only another number of the text
+    const said = numbersIn(words)
+    if (said.length && cited.get(r).size && !said.some(n => cited.get(r).has(n))) {
       problems.push(`"${words.slice(0, 40)}" was linked to the source of "${String(wordsOf.get(r)).slice(0, 40)}", so it shows as plain words`)
       return words
     }
