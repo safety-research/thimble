@@ -1,9 +1,9 @@
 // Claims in a session (verbs/claims, shell/claimsview.ts, observer.ts): the observer's one look after a turn of work
 // gives the turn's claims; each is placed in the message that said it, with the citations near it, in the session's
 // store (thimble/claims/<session>.json); c lights under the answer with how many are new or revised; c from the empty
-// prompt opens the Claims pane, focused (clusters with their claims, fact or interp, ×N; a revised claim struck
-// through with └→ its replacement under it); the ring on a claim shows where it was said, its sources and ×N; ] [
-// replay the claims in the order made; 2–8 open a source in the tray; 0 closes; a question asked carries the claim.
+// prompt opens the Claims pane as a graph, focused: at rest an island of dots per cluster with its name and no lines;
+// the ring on a claim shows its text and its links; ↵ fills the bar (said in turn N, ×N, its sources, what it revised);
+// n, /, t and ] [ come through the prompt; the hint line under the prompt holds the keys; a question carries the claim.
 // `claude plugin test lean`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -78,7 +78,7 @@ function world(on: Any, forks: Record<string, unknown>[]) {
     return { text: e.text }
   })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.component === 'PromptHint' ? e.props.hint : 'the reply'] }) as never)
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', (_$: unknown, e: { answer?: string }) => ({ text: e.answer ?? '' }))
   on('command.register', (_$: unknown, e: { name: string }) => ({ value: { command: e.name } }))
@@ -148,8 +148,6 @@ test('after a turn of work its claims are in the store, each where it was said w
   expect(log.claims.added).toEqual(['c1', 'c2', 'c3'])
 })
 
-const PANE = { component: 'Pane', surface: 'terminal', requestId: 'claims', props: { bodyColumns: 120, scroll: { bodyRows: 46 } } } as never
-const focus = (el: string) => ({ requestId: 'claims', element: el, origin: { kind: 'person' } }) as never
 
 test('a later turn: a claim said again counts ×N; a correction is linked both ways, and c lights with "1 claim revised"', async ($, on) => {
   const w = world(on, [FORK1, FORK2])
@@ -170,91 +168,102 @@ test('a later turn: a claim said again counts ×N; a correction is linked both w
   expect(textOf(await reply($, R2, A2))).toContain('● 1 claim revised')
 })
 
-test('c opens the Claims pane, focused: clusters with their claims, fact or interp, ×N, a revised claim struck through with └→ its replacement', async ($, on) => {
+const PANE = { plugin: 'thimble-lean', component: 'Pane', surface: 'terminal', requestId: 'claims', props: { bodyColumns: 110, scroll: { bodyRows: 30 }, isFocused: true, title: 'Claims' }, viewport: { columns: 200, rows: 50, isFullscreen: true } } as never
+const HINT = { component: 'PromptHint', surface: 'terminal', requestId: 'hint', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' } } as never
+const focus = (el: string) => ({ requestId: 'claims', element: el, origin: { kind: 'person' } }) as never
+const edges = (t: string) => /[─│╱╲╌╎]/.test(t)
+
+async function twoTurns($: Any, on: Any) {
   const w = world(on, [FORK1, FORK2])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   await turn($, w, { id: 't2', user: U2, prompt: Q2, row: R2, answer: A2 })
   await ($ as Any).prompt.edit(key('c'))
   await w.clock.settle()
+  return w
+}
+
+test('c opens Claims as a graph, focused: at rest an island of dots per cluster, its name at the centre, and no lines', async ($, on) => {
+  const w = await twoTurns($, on)
   expect(w.opened.at(-1)).toMatchObject({ id: 'claims', focus: true })
-  const pane = await $.ui.render(PANE)
-  const t = textOf(pane)
-  expect(t).toContain("Claims · 4 from Claude's work and our chat · deduped · 3 clusters")
-  expect(t).toContain('↑ ↓ claim · ] [ time · ')
-  for (const name of ['● testing for bias · 2', '● finding who edited · 1', '● the June 18 burst · 1']) expect(t).toContain(name)
-  expect(t).toMatch(/The tilt in the edits is one editor +revised/)
-  expect(t).toMatch(/└→ The tilt is two editors, Kestrel and Wren, not one +fact/)
-  expect(t).toMatch(/June 18 had 6,543 saves, the busiest day +fact +×2/)
-  expect(t).toMatch(/Kestrel made 41% of June's edits, 212 of them reverts +fact/)
-  expect(struck(pane).join('|')).toContain('The tilt in the edits is one editor')
-  expect(struck(pane).join('|')).not.toContain('two editors')
-  expect(t).toContain('orient on the whole corpus · map 4 files · ~4 min · ~310k tokens')
-  // the time strip: one dot per message that said claims, the turns named
-  expect(t).toContain('turn 1')
-  expect(t).toContain('▲ turn 2 · answer · 4 of 4 claims')
-  // the ring starts on the claim the message added; the details say where it was said
-  expect(t).toContain('said in turn 2 by Claude')
-  // the ring on the revised claim: where it was said twice, its sources as cite marks, what revised it
+  const rest = textOf(await $.ui.render(PANE))
+  expect(rest).toContain('Claims   4 · 3 clusters')
+  for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst']) expect(rest).toContain(name)
+  // four claims: the revised one hollow, the one said twice heavier
+  expect((rest.match(/[●⬤○]/g) || []).length).toBe(4)
+  expect(rest).toContain('○')
+  expect(rest).toContain('⬤')
+  expect(edges(rest)).toBe(false)
+  // no sentence teaches the pane: its keys are in the hint line under the prompt
+  expect(rest).not.toContain('↑')
+  expect(textOf(await $.ui.render(HINT))).toContain('↑ ↓ move · ↵ select · n cluster · / search · t time · esc close · m map the corpus ~4 min ~310k tokens')
+})
+
+test('the ring on a claim: its whole text, its links as thin lines, a revision dashed; ↵ fills the bar; 1 opens a source', async ($, on) => {
+  const w = await twoTurns($, on)
   await $.ui.focus(focus('cl-c1'))
-  const d = textOf(await $.ui.render(PANE))
-  expect(d).toContain('revised in turn 2 → The tilt is two editors')
-  expect(d).toContain('said in turn 1 by Claude · ×2 restated, merged · interp · testing for bias')
-  expect(d).toMatch(/sources .*41%.*212 of them/)
-  expect(d).toContain('turn 1  Claude "The tilt is one editor"')
-  expect(d).toContain('turn 2  you    "the tilt is one editor"')
-  expect(d).toContain(' · 2–3 open a source · 0 close')
-  // 2 opens its first source in the tray
-  await ($ as Any).prompt.edit(key('2'))
+  const t = textOf(await $.ui.render(PANE))
+  expect(t).toContain('The tilt in the edits is one editor')
+  expect(edges(t)).toBe(true)
+  // ↵ on the claim (a press): the bar says where it was said, ×N, its sources, and what revised it
+  const ui = await $.ui.mount(PANE)
+  await w.clock.settle()
+  await ui.press({ key: 'cl-c1' })
+  await w.clock.settle()
+  const bar = textOf(await $.ui.render(PANE))
+  expect(bar).toContain('said in turn 1')
+  expect(bar).toContain('×2')
+  expect(bar).toMatch(/41%.*212 of them/)
+  expect(bar).toContain('revised in turn 2 to The tilt is two editors, Kestrel and Wren, not one')
+  expect(textOf(await $.ui.render(HINT))).toContain('↵ select · 1–2 source')
+  // 1 opens its first source in the tray (the key comes through the prompt), and the pane takes the keys back
+  const opened = w.opened.length
+  await ($ as Any).prompt.edit(key('1'))
   await w.clock.settle()
   const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 50, isFullscreen: true } } as never
   textOf(await $.ui.render(BAND))
   await w.clock.settle()
   expect(textOf(await $.ui.render(BAND))).toContain('41%')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q4#user=Kestrel@share'))).toBe(true)
-  // 0 closes the source card first
-  await ($ as Any).prompt.edit(key('0'))
-  expect(textOf(await $.ui.render(BAND))).not.toContain('41%')
+  expect(w.opened.length).toBeGreaterThan(opened)
+  await ui.unmount()
 })
 
-test('] [ replay the claims in the order made: later claims are not shown yet, and a revision only once it was made', async ($, on) => {
-  const w = world(on, [FORK1, FORK2])
-  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
-  await turn($, w, { id: 't2', user: U2, prompt: Q2, row: R2, answer: A2 })
-  await ($ as Any).prompt.edit(key('c'))
+test('t is time: the claims appear in the order made, a revision only once made; ] [ move; n goes cluster to cluster; / searches', async ($, on) => {
+  const w = await twoTurns($, on)
+  await ($ as Any).prompt.edit(key('t'))
   await w.clock.settle()
-  await ($ as Any).prompt.edit(key('['))
-  await w.clock.settle()
-  const back = await $.ui.render(PANE)
-  const t = textOf(back)
-  expect(t).toContain('▲ turn 1 · answer · 3 of 4 claims')
-  expect(t).toContain("Claims · 3 from Claude's work")
-  expect(t).not.toContain('Kestrel and Wren')
-  expect(t).toMatch(/The tilt in the edits is one editor +interp +claim:/)
-  expect(t).toMatch(/June 18 had 6,543 saves, the busiest day +fact +claim:/)
-  expect(t).toContain('the claim the ring was on is said later, in turn 2')
-  expect(struck(back).join('|')).not.toContain('The tilt in the edits')
-  // the pane takes the keys back after a key that came through the prompt
-  expect(w.opened.filter(o => o.id === 'claims').length).toBe(2)
+  const t1 = textOf(await $.ui.render(PANE))
+  expect(t1).toContain('turn 1 · answer · 3 of 4')
+  expect(t1).not.toContain('○')
+  expect(textOf(await $.ui.render(HINT))).toContain('] [ turn · t now · esc close')
   await ($ as Any).prompt.edit(key(']'))
   await w.clock.settle()
-  expect(textOf(await $.ui.render(PANE))).toContain('▲ turn 2 · answer · 4 of 4 claims')
+  expect(textOf(await $.ui.render(PANE))).toContain('Claims   4 · 3 clusters')
+  // n: the ring to the next cluster's first claim
+  await $.ui.focus(focus('cl-c1'))
+  await ($ as Any).prompt.edit(key('n'))
+  await w.clock.settle()
+  expect(textOf(await $.ui.render(PANE))).toContain("Kestrel made 41% of June's edits, 212 of them reverts")
+  // /: a search field in the head, and the hint line says what its keys do
+  await ($ as Any).prompt.edit(key('/'))
+  await w.clock.settle()
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"key":"search"')
+  expect(textOf(await $.ui.render(HINT))).toContain('type to search · ↵ done · esc clear')
 })
 
-test('a question asked with the ring on a claim carries it; 0 closes the pane; m asks Claude for the corpus orientation', async ($, on) => {
+test('a question asked with a claim selected carries it; 0 closes the pane; m asks Claude for the corpus orientation', async ($, on) => {
   const w = world(on, [FORK1])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   await ($ as Any).prompt.edit(key('c'))
   await w.clock.settle()
   await $.ui.focus(focus('cl-c2'))
-  await ($ as Any).prompt.edit(key('1'))
-  expect(textOf(await $.ui.render(PANE))).toContain('type your question below · ↵ sends it with this claim')
   await $.prompt.submit({ text: 'is 41% of all June edits or of the relay edits?', origin: { kind: 'composer' } } as never)
   const ctx = w.submitted.at(-1)!.context.join('\n')
   expect(ctx).toContain('a claim of this session selected in the Claims pane: c2 "Kestrel made 41% of June\'s edits, 212 of them reverts"')
   expect(ctx).toContain('q4#user=Kestrel@share')
-  // 0 closes the pane; c opens it again, and m asks for the orientation (the claims verb run with "orient")
   await ($ as Any).prompt.edit(key('0'))
   await w.clock.settle()
+  expect(textOf(await $.ui.render(HINT))).not.toContain('↵ select')
   await ($ as Any).prompt.edit(key('c'))
   await w.clock.settle()
   await ($ as Any).prompt.edit(key('m'))

@@ -112,8 +112,9 @@ declare module 'claude-code' {
       claims: Record<string, unknown> | null
       /** a turn's prompt row, its number and Claude's message rows, by turn id: where its claims were said */
       turns: StateFamily<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null>
-      /** the Claims pane: the message it was opened from, the claim the ring is on, the time cursor, asking */
-      claimpane: { row: string; focus: string | null; cursor: number | null; asking: boolean } | null
+      /** the Claims pane: the message it was opened from, the claim the ring is on and the one selected, the time
+       *  cursor, the search */
+      claimpane: { row: string; focus: string | null; selected: string | null; cursor: number | null; search: string | null; searching: boolean } | null
       /** what the corpus orientation would map in the folder, with its time and tokens */
       claimoffer: { root: string; offer: { what: string; minutes: number | null; tokens: number | null } | null } | null
     }
