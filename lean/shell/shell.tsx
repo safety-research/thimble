@@ -37,19 +37,22 @@ import { cardKind, explainerCard, sourceCard } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKeys, detailPane, followDetail, markOpen, openDetailPane, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
-import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadOf } from './thread'
+import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadList, threadOf } from './thread'
 import type { Scope as ThreadScope } from './thread'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
-import { markColors, messageEl, trayEl, verbColor, verbLineEl } from './view'
-import { markNextTurn, tracked } from '../telemetry/telemetry'
+import { markColors, messageEl, verbColor } from './view'
+import { markNextTurn, record as recordEvent, tracked } from '../telemetry/telemetry'
 import type { RowVerb } from './view'
 import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { endsOf, revealCut } from '../verbs/squeeze/chips.mjs'
 import { HEAD_ROWS } from '../panes/claims.js'
-import { barText, keysOf } from '../panes/host.js'
-import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneNow, paneOf, paneState, setPaneState, setTheme } from './panes'
+import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
+import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneNow, paneOf, paneState, patchPaneState, setPaneState, setTheme } from './panes'
+import { frameOf as trayFrameOf } from '../panes/tray.js'
+import { ANOTHER_VIEW } from '../panes/proposals.js'
+import { mix } from '../draw/palette.js'
 import { emptyStore, readStore } from '../verbs/claims/claims.js'
 
 type Engine = EngineInterface
@@ -77,7 +80,7 @@ const TRAY = { plugin: 'thimble-lean', key: 'tray' } as const
 const PICK = { plugin: 'thimble-lean', key: 'pick' } as const
 const SELROW = { plugin: 'thimble-lean', key: 'selrow' } as const
 const ANSWER = { plugin: 'thimble-lean', key: 'answer' } as const
-const CARDREADY = { plugin: 'thimble-lean', key: 'cardready' } as const
+const CARDFOCUS = { plugin: 'thimble-lean', key: 'cardfocus' } as const
 const RUNNING = { plugin: 'thimble-lean', key: 'running' } as const
 const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
 const SQZ = { plugin: 'thimble-lean', key: 'sqz' } as const
@@ -118,13 +121,10 @@ let browserFlag = false
 let shown: { file: string; under: Record<string, Placed[]> } | null = null
 // the message layer's memory: the records' folder and index, the tray's drawn cards, the verb key that opened a line
 let msgFiles: { session: string; dir: string | null; index: Any[]; pending: Set<string>; loaded: boolean } | null = null
-const cards = new Map<string, CardDrawn>()
-const cardPending = new Map<string, Promise<CardDrawn>>()
 let keyOpened: { key: string; at: number } | null = null
 // the card key pressed last from the empty prompt, with the card's state before it (a word it began gives it back)
 let cardKeyed: { key: string; at: number; ref: ObjRef; undo: { state: Record<string, unknown>; region: string | null } | null } | null = null
 let keyChain: Promise<unknown> = Promise.resolve()
-type CardDrawn = { title: string; right: string; kind: 'cite' | 'gloss' | 'spark'; grids: Any[] | null; links: { id: string; ref: string; label: string }[]; problem?: string | null }
 
 // ------------------------------------------------------------------------------------------------ objects
 
@@ -287,30 +287,65 @@ async function setUnder($: Engine, at: string, list: Placed[]): Promise<void> {
 async function newSaves($: Engine): Promise<ObjRef[]> {
   const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
   const file = `${home.replace(/\/+$/, '')}/lean/events/${safe(String(await $.session.id()))}.jsonl`
-  const seen = (await $.state.get(EVENTS)).value as { file: string; n: number } | undefined
-  if (!(await $.fs.exists(file))) {
-    if (!seen || seen.file !== file) await $.state.set(EVENTS, { file, n: 0 })
+  const seen = (await $.state.get(EVENTS)).value as { file: string; n: number; bytes?: number } | undefined
+  const mine = seen && seen.file === file ? seen : null
+  // the feed's size: a call that saved nothing reads no bytes at all; where a surface cannot say, the whole feed is read
+  const size = await $.fs.stat(file).then(x => (x.kind === 'file' ? x.size : -1), () => null)
+  if (size === -1 || (size === null && !(await $.fs.exists(file)))) {
+    if (!mine) await $.state.set(EVENTS, { file, n: 0, bytes: 0 })
     return []
   }
-  const lines = String(await $.fs.read(file)).split('\n').filter(Boolean)
   // with no mark yet (the first read since this module loaded), the saves made since it loaded are new: a resumed
   // session's earlier saves are drawn from its placements, never placed twice
-  const from = seen && seen.file === file ? seen.n : 0
-  const since = seen && seen.file === file ? 0 : LOADED - 2
-  await $.state.set(EVENTS, { file, n: lines.length })
+  const since = mine ? 0 : LOADED - 2
+  let lines: string[]
+  if (size !== null && mine && typeof mine.bytes === 'number') {
+    if (size === mine.bytes) return []
+    // only the bytes after the last read (a feed that shrank, a new file under the same name, from its start)
+    const from = size > mine.bytes ? mine.bytes : 0
+    const text = await feedTail($, file, from)
+    // whole lines only: a line being written is read whole by the next call
+    const whole = text.slice(0, text.lastIndexOf('\n') + 1)
+    lines = whole.split('\n').filter(Boolean)
+    await $.state.set(EVENTS, { file, n: (from ? mine.n : 0) + lines.length, bytes: from + utf8Bytes(whole) })
+  } else {
+    const text = String(await $.fs.read(file))
+    const whole = text.slice(0, text.lastIndexOf('\n') + 1)
+    const all = whole.split('\n').filter(Boolean)
+    lines = all.slice(mine ? mine.n : 0)
+    await $.state.set(EVENTS, { file, n: all.length, ...(size !== null ? { bytes: utf8Bytes(whole) } : {}) })
+  }
   const out: ObjRef[] = []
-  for (const line of lines.slice(from)) {
+  for (const line of lines) {
     try {
       const ev = JSON.parse(line)
       if (ev?.kind !== 'save' || typeof ev.object !== 'string' || !ID.test(ev.object) || typeof ev.root !== 'string' || !(Number(ev.t) >= since)) continue
       const ref = { id: ev.object, v: Number(ev.version) || null, root: String(ev.root).replace(/\/+$/, '') }
       out.push(ref)
     } catch {
-      // a line being written: the next read has it whole
+      // a line that does not parse is skipped; the feed's later lines still count
     }
   }
   // an object saved twice in one call is drawn once, at its latest version
   return out.filter((x, i) => !out.slice(i + 1).some(y => y.id === x.id && y.root === x.root))
+}
+
+/** UTF-8 bytes of a text (the feed's offsets are bytes). */
+function utf8Bytes(t: string): number {
+  let n = 0
+  for (const ch of t) {
+    const c = ch.codePointAt(0)!
+    n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4
+  }
+  return n
+}
+
+/** The feed from byte `from` on: the whole file when that is its start, else only its new bytes (`tail -c`). */
+async function feedTail($: Engine, file: string, from: number): Promise<string> {
+  if (from <= 0) return String(await $.fs.read(file))
+  const r = await $.process.run(['tail', '-c', `+${from + 1}`, file], { timeoutMs: 10000 })
+  if (r.exitCode !== 0) throw new Error(`tail could not read the feed: ${String(r.stderr || '').trim().slice(0, 120)}`)
+  return String(r.stdout)
 }
 
 /** One object under a row: a new version of one already there takes its place; a verb's object goes after the
@@ -1001,7 +1036,8 @@ async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): P
   // a resumed session's side threads, read back once (outside any drawing), so the panel knows a mark's thread
   await restoreThreads($, (await rootHere($)) || undefined).catch(() => undefined)
   await $.state.set(PICK, null)
-  await $.state.set(TRAY, trayOpen({ row, i }) as Tray)
+  await $.state.set(CARDFOCUS, null)
+  await setTray($, trayOpen(trayFrameOf(rec, i)) as Tray)
   const answer = (await $.state.get(ANSWER)).value
   await $.state.set(SELROW, row === answer ? null : row)
   // a gloss opened: the observer's backoff for glosses starts over
@@ -1016,71 +1052,88 @@ async function revealMark($: Engine, rec: MsgRecord, i: number): Promise<void> {
   await quietly($.ui.scroll({ to: { key: `mk-${rec.row}-${i}` }, block: 'nearest' }))
 }
 
+/** What ] and [ move through, in reading order: each message's marks, then the cards drawn under it. */
+async function focusOrder($: Engine): Promise<{ row: string; i?: number; card?: ObjRef }[]> {
+  const out: { row: string; i?: number; card?: ObjRef }[] = []
+  for (const row of await messageRows($)) {
+    const rec = await recordNow($, row)
+    ;(rec?.marks || []).forEach((_, i) => out.push({ row, i }))
+    for (const card of ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]) out.push({ row, card })
+  }
+  return out
+}
+
 async function stepMark($: Engine, dir: number): Promise<void> {
-  const list = await allMarks($)
+  const list = await focusOrder($)
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const base = trayBase(tray) as TrayFrame | null
-  let next = null as { row: string; i: number } | null
-  if (!base) {
-    // a closed tray: the marks of the message the keys act on, the one whose row says `] 3 marks`
+  const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
+  const at = base && base.row != null ? list.findIndex(p => p.row === base.row && p.i === base.i) : cf ? list.findIndex(p => p.row === cf.row && p.card?.id === cf.id && p.card?.root === cf.root) : -1
+  let next: { row: string; i?: number; card?: ObjRef } | null = null
+  if (at >= 0) next = list[(at + (dir > 0 ? 1 : -1) + list.length) % list.length] ?? null
+  else {
+    // from rest: what the message the keys act on holds (] its first mark, [ its last card), else the latest message's
     const row = await actingRow($)
-    const n = row ? ((await recordNow($, row))?.marks?.length ?? 0) : 0
-    if (row && n) next = { row, i: dir > 0 ? 0 : n - 1 }
+    const here = list.filter(p => p.row === row)
+    const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
+    next = (dir > 0 ? pool[0] : pool[pool.length - 1]) ?? null
   }
-  next = next || trayStep(list, base, dir)
-  if (next) await openMark($, next.row, next.i)
-  else $.ui.toast('No marks yet: each cite and explain in Claude\'s replies opens here.')
+  if (!next) { $.ui.toast('Nothing to step to yet: each cite, explain and card in Claude\'s replies opens here.'); return }
+  if (next.card) await focusCard($, next.row, next.card)
+  else await openMark($, next.row, next.i!)
+}
+
+/** A card under a message takes the keys (] reached it): its own keys win while it has the focus, and the bar names
+ *  them; 0 gives the keys back. */
+async function focusCard($: Engine, row: string, card: ObjRef): Promise<void> {
+  await setTray($, null)
+  await $.state.set(PICK, null)
+  await $.state.set(CARDFOCUS, { id: card.id, v: card.v, root: card.root, row })
+  const answer = (await $.state.get(ANSWER)).value
+  await $.state.set(SELROW, row === answer ? null : row)
+  await quietly($.ui.scroll({ to: { key: `row-${row}-card-${card.id}` }, block: 'nearest' }))
 }
 
 async function closeTray($: Engine): Promise<void> {
-  await $.state.set(TRAY, null)
+  await setTray($, null)
 }
 
-/** A mark inside the card shown (a nested citation): its card over this one. */
-async function openLink($: Engine, id: string): Promise<boolean> {
-  const tray = (await $.state.get(TRAY)).value as Tray | null
-  const frame = trayTop(tray) as TrayFrame | null
-  if (!frame) return false
-  const ck = await cardKey($, frame)
-  const drawn = [...cards.entries()].find(([c]) => c.startsWith(`${ck}|`))?.[1]
-  const link = drawn?.links.find(l => l.id === id)
-  if (!link) return false
-  await $.state.set(TRAY, trayPush(tray, { ref: link.ref, label: link.label, kind: 'cite' }) as Tray)
-  return true
+/** The tray as it stands now, on both surfaces: $.state for the terminal's own reads, and the tray program's state,
+ *  kept where the browser reads it (panes/tray.js). */
+async function setTray($: Engine, tray: Tray | null): Promise<void> {
+  const next = tray && tray.stack && tray.stack.length ? tray : null
+  await $.state.set(TRAY, next)
+  await patchPaneState($, 'tray', {}, { stack: next?.stack ?? [], asking: !!next?.asking })
 }
 
-/** The cache key of a frame's card. */
-async function cardKey($: Engine, frame: TrayFrame): Promise<string> {
-  if (frame.row == null) return `ref|${frame.ref}`
-  const rec = await recordNow($, frame.row)
-  const m = rec?.marks?.[frame.i!]
-  if (!m) return `none|${frame.row}|${frame.i}`
-  if (m.kind === 'gloss') return `gloss|${JSON.stringify(rec!.glosses?.[m.gloss!] ?? {})}`
-  return `ref|${m.ref}`
+/** A pane's shared state changed (here, or in the browser): the terminal's own copies follow it. */
+export async function paneStateChanged($: Engine, name: string, _args: Record<string, unknown>, state: Record<string, unknown>): Promise<void> {
+  if (name !== 'tray') return
+  const stack = Array.isArray(state.stack) ? (state.stack as TrayFrame[]) : []
+  const now = (await $.state.get(TRAY)).value as Tray | null
+  const next = stack.length ? { stack, asking: !!state.asking } : null
+  if (JSON.stringify(now ?? null) !== JSON.stringify(next)) await $.state.set(TRAY, next)
+  if (next) await $.state.set(CARDFOCUS, null)
 }
 
-/** A frame's card as the tray draws it: ready, or null with the work started outside the drawing. */
-async function cardNow($: Engine, frame: TrayFrame, w: number): Promise<CardDrawn | null> {
-  const key = `${await cardKey($, frame)}|${w}`
-  const hit = cards.get(key)
-  if (hit) return hit
-  await $.state.get({ ...CARDREADY, id: key })
-  if (!cardPending.has(key)) {
-    let done: (c: CardDrawn) => void = () => undefined
-    cardPending.set(key, new Promise<CardDrawn>(r => { done = r }))
-    // outside the drawing: a render's dispatch may be abandoned, which would stop the child
-    $.clock.after(0, () => {
-      void buildCard($, frame, w)
-        .catch((err): CardDrawn => ({ title: '', right: '', kind: 'cite', grids: null, links: [], problem: `the card could not be drawn: ${String((err as Error)?.message || err).slice(0, 160)}` }))
-        .then(async c => {
-          cards.set(key, c)
-          cardPending.delete(key)
-          done(c)
-          await $.state.set({ ...CARDREADY, id: key }, Date.now())
-        })
-    })
+/** The card a tray frame shows, as the tray program wants it (panes/tray.js): its parts drawn in the sandbox at `w`. */
+async function trayCard($: Engine, req: Any, w: number, h: number): Promise<Any> {
+  let spec: Any
+  if (req?.kind === 'gloss') spec = explainerCard({ gloss: req.gloss || {} })
+  else if (typeof req?.ref === 'string' && req.ref) spec = await sourceSpec($, req.ref, req.kind === 'spark' ? 'sparkline' : String(req.label || req.ref), h)
+  else return { problem: 'this mark names no ref, so there are no rows to show', drawings: [], links: [] }
+  if (spec.problem) return { title: spec.title, right: spec.right, problem: spec.problem, drawings: [], links: [] }
+  const drawings: Any[] = []
+  for (const part of spec.parts || []) {
+    try {
+      const d = await drawPart($, part, w, h)
+      if (d.drawing?.error && part.pic) continue // a gloss's drawing that fails: its words stand alone
+      drawings.push(d.drawing)
+    } catch (err) {
+      if (!part.pic) return { title: spec.title, right: spec.right, problem: `the card could not be drawn: ${String((err as Error)?.message || err).slice(0, 160)}`, drawings: [], links: [] }
+    }
   }
-  return null
+  return { title: spec.title, right: spec.right, drawings, links: spec.links || [], ...(spec.why ? { why: spec.why } : {}) }
 }
 
 /** `lean resolve <ref> --json`, as the person's own read (never counted as Claude's coverage). */
@@ -1099,38 +1152,6 @@ async function drawPart($: Engine, part: { program: string; data: unknown }, w: 
   if (r.exitCode !== 0) throw new Error((r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 200) || `exit ${r.exitCode}`)
   const out = JSON.parse(r.stdout)
   return { drawing: out.drawing, grid: renderTerm(out.drawing, { w }) }
-}
-
-/** A frame's card: the mark's ref read through the kernel (or the gloss as the observer wrote it), drawn. */
-async function buildCard($: Engine, frame: TrayFrame, w: number): Promise<CardDrawn> {
-  const inner = w - 4
-  const BODY = 9
-  let spec: Any
-  let kind: CardDrawn['kind'] = 'cite'
-  if (frame.row != null) {
-    const rec = await recordNow($, frame.row)
-    const m = rec?.marks?.[frame.i!]
-    if (!rec || !m) return { title: '', right: '', kind, grids: null, links: [], problem: 'this mark is no longer in the message' }
-    if (m.kind === 'gloss') {
-      kind = 'gloss'
-      spec = explainerCard({ gloss: rec.glosses?.[m.gloss!] })
-    } else {
-      kind = m.kind === 'spark' ? 'spark' : 'cite'
-      spec = await sourceSpec($, m.ref!, m.kind === 'spark' ? 'sparkline' : m.label || m.ref!, BODY)
-    }
-  } else spec = await sourceSpec($, frame.ref!, frame.label || frame.ref!, BODY)
-  if (spec.problem) return { title: spec.title, right: spec.right || 'cite', kind, grids: null, links: [], problem: spec.problem }
-  const grids: Any[] = []
-  for (const part of spec.parts) {
-    try {
-      const d = await drawPart($, part, inner, BODY)
-      if (d.drawing?.error && part.pic) continue // a gloss's drawing that fails: its words stand alone
-      grids.push(d.grid)
-    } catch (err) {
-      if (!part.pic) throw err
-    }
-  }
-  return { title: spec.title, right: spec.right, kind, grids, links: spec.links || [] }
 }
 
 /** A citation's card spec: the ref resolved, the query's record or the code file's lines read. */
@@ -1170,31 +1191,17 @@ function messageObject(rec: MsgRecord): Any {
   return { id: `msg-${rec.row.slice(0, 8)}`, version: 1, kind: 'message', row: rec.row, session: rec.session, title: first.length > 60 ? first.slice(0, 59) + '…' : first, text }
 }
 
-// v's one option when the observer proposed none: visualize then picks the form itself (its args are empty)
-const ANOTHER_VIEW = 'another view of this answer'
-
-/** The options a verb's line offers for a message: v's proposals, squeeze's one press with its chips. (c opens the
- *  claims list instead of a line.) */
-function lineOptions(key: string, rec: MsgRecord | null): { options: { label: string; note?: string }[]; note?: string } {
-  const lit = (rec?.verbs || {})[key] as Any
-  if (key === 'v') {
-    const props = lit?.lit && Array.isArray(lit.proposals) && lit.proposals.length ? lit.proposals : [ANOTHER_VIEW]
-    return { options: props.map((p: string) => ({ label: p })) }
-  }
-  if (key === 's') {
-    const chips = lit?.lit && Array.isArray(lit.chips) ? lit.chips : []
-    return { options: [{ label: 'squeeze it' }], note: chips.map((c: Any) => `${c.name}: ${c.levels?.[c.level] ?? ''}`).join(' · ') }
-  }
-  return { options: [{ label: `run ${key}` }] }
-}
-
 /** A verb key under a message: its line opens (a press on the open one closes it). */
 async function pressRowVerb($: Engine, row: string, key: string): Promise<void> {
   const cur = (await $.state.get(PICK)).value as Any
   if (cur && cur.row === row && cur.verb === key) { await $.state.set(PICK, null); return }
   // c: the Claims pane, read again (the orientation may have added claims), opened or closed
+  // what the person pressed, with whether the post-turn pass had lit it (lean stats: how often a lit verb is used)
+  const lit = !!((await recordNow($, row))?.verbs as Record<string, Any> | undefined)?.[key]?.lit
+  void recordEvent($, { kind: 'press', verb: key, row, lit })
   if (key === 'c') { await toggleClaims($, row); return }
-  await $.state.set(TRAY, null)
+  await setTray($, null)
+  await $.state.set(CARDFOCUS, null)
   await $.state.set(PICK, { row, verb: key })
   const answer = (await $.state.get(ANSWER)).value
   await $.state.set(SELROW, row === answer ? null : row)
@@ -1202,18 +1209,15 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
   await quietly($.ui.scroll({ to: { key: `vl-${row}-opt-0` }, block: 'nearest' }))
 }
 
-/** An option of the open line picked: the verb runs on the message, outside the press. */
-async function pickOption($: Engine, i: number): Promise<boolean> {
-  const cur = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-  if (!cur) return false
-  const rec = await recordNow($, cur.row)
-  const { options } = lineOptions(cur.verb, rec)
-  const opt = options[i]
-  if (!opt || !rec) return false
+/** An option of the open line picked (the proposals program's k.do('pick')): the verb runs on the message, outside the
+ *  press. */
+async function pickOption($: Engine, row: string, verbKey: string, choice: string): Promise<boolean> {
+  const rec = await recordNow($, row)
+  if (!rec) return false
   await $.state.set(PICK, null)
-  const verb = (await rowVerbs($)).find(v => v.key === cur.verb)
+  const verb = (await rowVerbs($)).find(v => v.key === verbKey)
   if (!verb) return false
-  $.clock.after(0, () => { void runOnMessage($, verb.name, cur.verb, rec, opt.label) })
+  $.clock.after(0, () => { void runOnMessage($, verb.name, verbKey, rec, choice) })
   return true
 }
 
@@ -1288,65 +1292,16 @@ export async function answerRow($: Engine): Promise<string | null> {
   return ((await $.state.get(ANSWER)).value as string | null | undefined) ?? null
 }
 
-/** The tray as the band draws it: the card on top of its stack in one frame, or the mark's side thread once 1 was
- *  pressed. Its keys are in the hint line. */
-async function trayBand($: Engine, e: Any, els: Any, tray: Tray): Promise<Any | null> {
-  const frame = trayTop(tray) as TrayFrame | null
-  if (!frame) return null
+/** The tray as the band draws it: the tray program (panes/tray.js) on its state, the card on top of its stack, or the
+ *  mark's side thread once 1 was pressed. Its keys are in the bar. */
+async function trayBand($: Engine, e: Any, tray: Tray): Promise<Any | null> {
+  if (!trayTop(tray)) return null
   const w = Math.max(40, Math.min(104, (e.props.bodyColumns ?? 100) - 3))
-  let kind: 'cite' | 'gloss' | 'spark' = 'cite'
-  let title = frame.label || frame.ref || ''
-  if (frame.row != null) {
-    const rec = await recordNow($, frame.row)
-    const m = rec?.marks?.[frame.i!]
-    if (!rec || !m) return null
-    kind = m.kind
-    title = m.kind === 'gloss' ? rec.glosses?.[m.gloss!]?.term ?? '' : m.kind === 'spark' ? `sparkline · ${m.ref}` : String(m.label)
-  }
-  const card = await cardNow($, frame, w)
-  if (tray.asking) {
-    // 1 (or a question sent): the mark's side thread, its questions and answers, the newest at the bottom
-    const t = await trayScope($)
-    await $.state.get({ plugin: 'thimble-lean', key: 'thread', id: t ? threadKeyOf(t.scope) : '' })
-    const thread = t ? threadFor(t.scope as ThreadScope) : null
-    const lines = threadLines(els, thread, t?.label ?? title, w - 4)
-    return trayEl(els, { key: 'tray', w, body: 9, theme, kind, title: t?.label ?? title, grids: null, lines, links: [], onLink: () => undefined })
-  }
-  return trayEl(els, {
-    key: 'tray', w, body: 9, theme, kind, title: card?.title && frame.row == null ? card.title : title,
-    grids: card?.grids ?? null, problem: card?.problem ?? null, links: card?.links ?? [],
-    onLink: (id: string) => { void openLink($, id) },
-  })
-}
-
-/** A side thread as the tray shows it: each question with a ❯, each answer's lines (citations read as their words),
- *  and while it answers, that it does. `w` is the room inside the tray's frame. */
-function threadLines(els: Any, thread: Any, label: string, w: number): Any[] {
-  const { Text } = els
-  const out: Any[] = []
-  const wrap = (s: string, lead: string, style: Record<string, unknown> = {}) => {
-    const words = s.split(/\s+/).filter(Boolean)
-    let line = ''
-    let first = true
-    const push = () => { out.push(Text({ wrap: 'truncate-end', children: [Text({ dimColor: !first || undefined, children: first ? lead : '  ' }), Text({ ...style, children: line })] })); first = false; line = '' }
-    for (const word of words) {
-      if (line && [...line].length + 1 + [...word].length > w - 2) push()
-      line = line ? `${line} ${word}` : word
-    }
-    if (line || first) push()
-  }
-  if (!thread?.turns?.length) {
-    wrap(`ask about ${label}…`, '', { dimColor: true })
-    return out
-  }
-  for (const t of thread.turns) {
-    if (t.role === 'person') { wrap(String(t.text), '❯ ', { bold: true }); continue }
-    String(t.text || '').replace(/`/g, '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').split(/\n+/).map((x: string) => x.trim()).filter(Boolean)
-      .forEach((para: string, i: number) => wrap(para, i ? '  ' : '⏺ '))
-  }
-  if (thread.status === 'running') out.push(Text({ color: 'warning', children: '✻ answering…' }))
-  if (thread.status === 'failed') wrap(`× ${thread.error || 'the thread stopped'} · ask again, or 0 and ask in main`, '', { color: 'error' })
-  return out
+  // the mark's thread, as it answers, draws again
+  const t = await trayScope($)
+  if (t) await $.state.get({ plugin: 'thimble-lean', key: 'thread', id: threadKeyOf(t.scope) })
+  const { Box } = $.ui.resolve(e) as Any
+  return Box({ marginLeft: 2, children: [await paneEl($, e, 'tray', {}, { w, h: 14 })] })
 }
 
 /** A question asked with the tray open: the side thread of its mark (thread.ts), which main does not see. The tray
@@ -1358,7 +1313,7 @@ async function askTrayThread($: Engine, text: string): Promise<string | null> {
   const r = await askThread($, { text, root, scope: t.scope as ThreadScope, refs: t.refs, card: null })
   if (r.problem) return `${r.problem}. Your words are back in the prompt; 0 closes the panel, and the prompt then goes to Claude here.`
   const tray = (await $.state.get(TRAY)).value as Tray | null
-  if (tray) await $.state.set(TRAY, { ...tray, asking: true })
+  if (tray) await setTray($, { ...tray, asking: true })
   $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
   return `asked the thread of ${cut(t.label, 40)}`
 }
@@ -1648,29 +1603,31 @@ async function focusKeys($: Engine): Promise<string | null> {
   }
   const tray = (await $.state.get(TRAY)).value as Tray | null
   if (tray) {
-    const t = await trayScope($)
-    const thread = t ? threadFor(t.scope as ThreadScope) : null
-    if (tray.asking) return `${thread?.status === 'running' ? 'answering… · ' : ''}type to ask · ↵ asks this thread · 0 back`
-    const frame = trayTop(tray) as TrayFrame | null
-    const ck = frame ? await cardKey($, frame) : ''
-    const drawn = frame ? [...cards.entries()].find(([k]) => k.startsWith(`${ck}|`))?.[1] : null
-    const links = drawn?.links ?? []
-    return [thread ? '1 thread' : '1 ask', ...(links.length ? [`${links.length > 1 ? `2–${links.length + 1}` : '2'} open`] : []), tray.stack.length > 1 ? '0 back' : '0 close', '] next'].join(' · ')
+    // the tray program's keys (panes/tray.js), after what it says while the person asks its thread
+    const d = paneDrawing('tray') ?? (await paneNow($, 'tray'))
+    return [d?.status?.text, barText([d])].filter(Boolean).join(' · ') || '0 close'
   }
   if (pick) {
-    const rec = await recordNow($, pick.row)
-    const n = Math.min(9, lineOptions(pick.verb, rec).options.length)
-    return `${n > 1 ? `1–${n}` : '1'} pick · 0 close`
+    const d = paneDrawing('proposals', { row: pick.row, verb: pick.verb }) ?? (await paneNow($, 'proposals', { row: pick.row, verb: pick.verb }))
+    return barText([d]) || '0 close'
+  }
+  // a card under a reply with the focus (] reached it): its own keys, those that reach it here, then the host's
+  const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
+  if (cf) {
+    const d = await inlineDrawing($, cf)
+    const taken = new Set(Object.keys(hostKeys('inline', 'terminal')))
+    const own = keysOf(d).filter(g => !g.key.split(' ').some(x => taken.has(x === '↵' ? 'return' : x === '↑' ? 'up' : x === '↓' ? 'down' : x)))
+    return [...own.map(g => `${g.key} ${g.words}`), '1 open detail', '] next', '0 back'].join(' · ')
   }
   return null
 }
 
 /** Keys as the bar says them, `1 ask · 0 close · ] next`, cut into each key and its words: the key is the first
  *  token and any symbols after it (`< >`, `] [`, `↑ ↓`); a lit verb's `s ● note` keeps its color. */
-function keySegments(keys: string): { key: string; words: string; color?: string }[] {
+function keySegments(keys: string): { key: string; words: string; color?: string; short?: string; onPress?: () => unknown }[] {
   return keys.split(' · ').map(seg => {
     const lit = /^([a-z]) ● (.*)$/.exec(seg)
-    if (lit) return { key: lit[1]!, words: `● ${lit[2]}`, color: verbColor(lit[1]!, theme) }
+    if (lit) return { key: lit[1]!, words: `● ${lit[2]}`, color: verbColor(lit[1]!, theme), short: `● ${lit[2]!.split(/\s+/)[0]}` }
     const t = seg.split(' ')
     // a phrase with no key (`type to ask`): words alone
     if (t[0]!.length > 3 && /^[a-z]+$/.test(t[0]!)) return { key: '', words: seg }
@@ -1680,18 +1637,20 @@ function keySegments(keys: string): { key: string; words: string; color?: string
   })
 }
 
+/** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
+type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; tone?: 'error' | 'warning'; label?: string; onPress?: () => unknown }
+
 /** The thimble line: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
- *  Where the band is too narrow for one row (beside a docked pane), the label, the keys and the counts each take
- *  their own rows, wrapped at words. */
+ *  It is always one line: with less room it drops the counts (coverage last), then says each key's words by their
+ *  first word, then drops its label, then cuts its end (panes/host.js fitBar). Beside a docked pane Claude Code gives
+ *  the band only the transcript's column, so there it is the narrow form. */
 async function barEl($: Engine, els: Any, w: number, working = false): Promise<Any | null> {
   const { Box, Button, Text } = els
-  const left: Any[] = []
-  let leftText = ''
+  const left: BarSeg[] = []
   const keys = await focusKeys($)
   if (keys) {
-    if (keys.startsWith('×') || keys.startsWith('!')) left.push(Text({ key: 'keys', color: keys.startsWith('×') ? 'error' : 'warning', wrap: 'wrap', children: keys }))
-    else left.push(Text({ key: 'keys', wrap: 'wrap', children: keySegments(keys).flatMap((g, i) => [...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []), ...(g.key ? [Text({ key: `kk${i}`, ...(g.color ? { color: g.color } : {}), children: g.key })] : []), ...(g.words ? [Text({ key: `kw${i}`, ...(g.color ? { color: g.color } : { dimColor: true }), children: `${g.key ? ' ' : ''}${g.words}` })] : [])]) }))
-    leftText = keys
+    if (keys.startsWith('×') || keys.startsWith('!')) left.push({ key: '', words: keys, tone: keys.startsWith('×') ? 'error' : 'warning' })
+    else for (const g of keySegments(keys)) left.push({ key: g.key, words: g.words, ...(g.color ? { color: g.color, wordsColor: g.color } : {}), ...(g.short ? { short: g.short } : {}), ...(g.onPress ? { onPress: g.onPress } : {}) })
   } else if (!working) {
     // (while Claude works the verbs wait: they act on its answer, which is not there yet)
     const row = await actingRow($)
@@ -1704,34 +1663,20 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       const sv = sLit(rec, sqUi)
       if (sv) lit.s = sv
       else delete lit.s
-      const item = (k: string, label: string, key: string, color: string, words: string, wordsColor: string | null, onPress: () => unknown) => {
-        if (left.length) { left.push(Text({ key: `sep-${k}`, dimColor: true, children: ' · ' })); leftText += ' · ' }
-        left.push(Button({ key: `bar-${k}`, plain: true, label, onPress, children: [Text(wordsColor ? { color, children: key } : { children: key }), Text(wordsColor ? { color: wordsColor, children: ` ${words}` } : { dimColor: true, children: ` ${words}` })] }))
-        leftText += `${key} ${words}`
-      }
       for (const v of verbs) {
         const color = verbColor(v.key, theme, v.color)
         const on = lit[v.key]
         const more = running === v.key ? '…' : ''
-        if (on?.lit && on.note) item(v.key, v.name, v.key, color, `● ${on.note}${more}`, color, () => pressRowVerb($, row, v.key))
-        else item(v.key, v.name, v.key, color, `${v.name}${more}`, null, () => pressRowVerb($, row, v.key))
+        if (on?.lit && on.note) left.push({ key: v.key, words: `● ${on.note}${more}`, short: `● ${v.name}`, color, wordsColor: color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
+        else left.push({ key: v.key, words: `${v.name}${more}`, color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
       }
-      if (rec.marks.length) item('marks', 'cite & explain', ']', markColors(theme).cite, 'cite & explain', null, () => stepMark($, 1))
+      // ] steps through what the answer holds: its marks, then its cards (a card focused takes its own keys)
+      const cardsHere = ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]
+      if (rec.marks.length) left.push({ key: ']', words: 'cite & explain', color: markColors(theme).cite, onPress: () => stepMark($, 1) })
+      else if (cardsHere.length) left.push({ key: ']', words: 'card', color: FOCUS[theme], onPress: () => stepMark($, 1) })
       const ref = await focusedCard($)
-      if (ref) {
-        // the focused card's own keys, from its first drawing (its program's k.on): each a press too
-        const d = await inlineDrawing($, ref)
-        // a card key the bar's own keys take first (a verb's letter, ] [, a digit, o) reaches the card in its detail
-        // only, so it is not said here
-        const taken = new Set([...verbs.map(v => v.key), ']', '[', 'o'])
-        for (const g of keysOf(d)) {
-          const first = g.key.split(' ')[0]!
-          if (taken.has(first) || /^[0-9]$/.test(first)) continue
-          item(`card-${g.key}`, g.words, g.key, FOCUS[theme], g.words, null, () => inlineCardAct($, ref, { type: 'key', key: first }))
-        }
-        item('detail', 'open detail', '1', FOCUS[theme], 'open detail', null, () => openDetail($, ref))
-      }
-      if (browserFlag) item('web', 'browser', 'o', FOCUS[theme], 'browser', null, async () => $.ui.toast(await openBrowser($, { row })))
+      if (ref) left.push({ key: '1', words: 'open detail', color: FOCUS[theme], onPress: () => openDetail($, ref) })
+      if (browserFlag) left.push({ key: 'o', words: 'browser', color: FOCUS[theme], onPress: async () => $.ui.toast(await openBrowser($, { row })) })
     }
   }
   const c = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
@@ -1743,38 +1688,31 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
     ['claims', c.claims, c.claims === 1 ? '1 claim' : `${fmtN(c.claims)} claims`],
     ['cov', c.cov, `coverage ${percent(c.cov)}`],
   ] : []
-  const shown = items.filter(([, n]) => n > 0)
-  const counts: Any[] = []
-  for (const [k, , label] of shown) {
-    if (counts.length) counts.push(Text({ key: `csep-${k}`, dimColor: true, children: ' · ' }))
-    const bright = now - (c!.changed[k] ?? 0) < BRIGHT_MS
-    counts.push(Text({ key: `count-${k}`, ...(bright ? { bold: true } : { dimColor: true }), children: label }))
-  }
-  const countsText = shown.map(([, , l]) => l).join(' · ')
+  const counts = items.filter(([, n]) => n > 0).map(([id, , text]) => ({ id, text, bright: now - (c!.changed[id] ?? 0) < BRIGHT_MS }))
   const where = await threadInFront($)
   if (!left.length && !counts.length && !where) return null
-  const name = where ?? 'thimble'
-  const label = Text({ key: 'bar-label', color: FOCUS[theme], underline: !where, wrap: 'truncate-end', children: name })
-  const right = counts.length ? Text({ key: 'bar-right', wrap: 'wrap', children: counts }) : null
-  // one row where everything fits, the counts at its right
-  if ([...name].length + 2 + [...leftText].length + 4 + [...countsText].length <= w) {
-    return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [
-      Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, Text({ key: 'bar-gap', children: '  ' }), ...left] }),
-      ...(right ? [Box({ key: 'bar-counts', flexShrink: 0, children: [right] })] : []),
-    ] })
+  const fit = fitBar({ label: where ?? 'thimble', left, counts }, w) as { label: string; left: BarSeg[]; counts: { id: string; text: string; bright: boolean }[]; cut: boolean }
+  const label = fit.label ? [Text({ key: 'bar-label', color: FOCUS[theme], underline: !where, children: fit.label }), Text({ key: 'bar-gap', children: '  ' })] : []
+  const segText = (g: BarSeg, i: number) => [
+    ...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []),
+    ...(g.tone ? [Text({ key: `kt${i}`, color: g.tone, children: g.words })] : [
+      ...(g.key ? [Text({ key: `kk${i}`, ...(g.color && g.wordsColor ? { color: g.color } : {}), children: g.key })] : []),
+      ...(g.words ? [Text({ key: `kw${i}`, ...(g.wordsColor ? { color: g.wordsColor } : { dimColor: true }), children: `${g.key ? ' ' : ''}${g.words}` })] : []),
+    ]),
+  ]
+  const countEls = fit.counts.flatMap((x, i) => [...(i ? [Text({ key: `csep-${x.id}`, dimColor: true, children: ' · ' })] : []), Text({ key: `count-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: x.text })])
+  if (fit.cut) {
+    // narrower than the shortest form: one line, cut at its end (no presses: the keys still work)
+    return Box({ width: w, children: [Text({ key: 'bar-cut', wrap: 'truncate-end', children: [...label, ...fit.left.flatMap(segText), ...(countEls.length ? [Text({ children: '   ' }), ...countEls] : [])] })] })
   }
-  // the label and the keys on one row where they fit, the counts on the row under it, at its right
-  if ([...name].length + 2 + [...leftText].length <= w) {
-    return Box({ flexDirection: 'column', width: w, children: [
-      Box({ key: 'bar-left', flexDirection: 'row', children: [label, Text({ key: 'bar-gap', children: '  ' }), ...left] }),
-      ...(right ? [Box({ key: 'bar-counts', flexDirection: 'row', justifyContent: 'flex-end', width: w, children: [right] })] : []),
-    ] })
-  }
-  // too narrow (beside a docked pane): the label, the keys and the counts each on rows of their own, wrapped at words
-  const rows: Any[] = [label]
-  if (left.length) rows.push(keys ? left[0] : Box({ key: 'bar-left', flexDirection: 'row', flexWrap: 'wrap', children: left }))
-  if (right) rows.push(right)
-  return Box({ flexDirection: 'column', width: w, children: rows })
+  // one row: each key a press, the counts at its right
+  const leftEls = fit.left.flatMap((g, i) => g.onPress
+    ? [...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []), Button({ key: `bar-${g.key || i}-${i}`, plain: true, label: g.label || g.words, onPress: g.onPress, children: segText(g, 0) })]
+    : segText(g, i))
+  return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [
+    Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [...label, ...leftEls] }),
+    ...(countEls.length ? [Box({ key: 'bar-counts', flexShrink: 0, children: [Text({ key: 'bar-right', wrap: 'truncate-end', children: countEls })] })] : []),
+  ] })
 }
 
 /** A key pressed while the prompt is empty: the box as it should stand when the shell took the key, or null to let
@@ -1829,6 +1767,41 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
     typedKey = null
     if (taken) { keyOpened = null; return typed ? null : consume }
   }
+  // the tray open: its program's keys (panes/tray.js: 1 ask, 2–9 open a citation in it, 0 back, ] [ step); a letter
+  // types the question for the mark's thread
+  if (tray) {
+    keyOpened = null
+    if (k === 'backspace' && !tray.asking) return (await paneFire($, 'tray', {}, keyEvent('0'))) ? consume : null
+    if (k.length === 1 && (await paneFire($, 'tray', {}, keyEvent(k)))) return consume
+    return null
+  }
+  // v's line open under a message: the proposals program's keys (1–9 pick, 0 close)
+  if (pick && pick.verb !== 's') {
+    if (k === 'backspace' || /^[0-9]$/.test(k)) {
+      keyOpened = null
+      if (await paneFire($, 'proposals', { row: pick.row, verb: pick.verb }, keyEvent(k === 'backspace' ? '0' : k))) return consume
+      if (/^[0-9]$/.test(k)) return null
+    }
+  }
+  // a card with the focus: its own keys win over the verbs (the bar names them); 1 opens its detail, ] [ step on, 0 and
+  // ⌫ give the keys back; a key it does not take gives the keys back and types
+  const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
+  if (cf && !pick) {
+    keyOpened = null
+    if (k === '0' || k === 'backspace') { await $.state.set(CARDFOCUS, null); return consume }
+    if (k === '1') { await $.state.set(CARDFOCUS, null); await openDetail($, cf); return consume }
+    if (k === ']' || k === '[') { await stepMark($, k === ']' ? 1 : -1); return consume }
+    const d = await inlineDrawing($, cf)
+    const own = d ? cardTakesKey(d, k) : null
+    if (own && !(own in hostKeys('inline', 'terminal'))) {
+      const before = await readCardState($, cf.root, cf.id)
+      await inlineCardAct($, cf, { type: 'key', key: own })
+      cardKeyed = { key: k, at: now, ref: cf, undo: before }
+      return consume
+    }
+    await $.state.set(CARDFOCUS, null)
+    return null
+  }
   if (k === ']' || k === '[') {
     keyOpened = null
     await $.state.set(PICK, null)
@@ -1838,31 +1811,19 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   if (k === '0' || k === 'backspace') {
     keyOpened = null
     if (pick) { await $.state.set(PICK, null); return consume }
-    if (tray) { await $.state.set(TRAY, tray.asking ? { ...tray, asking: false } : (trayBack(tray) as Tray | null)); return consume }
     return null
   }
   if (/^[1-9]$/.test(k)) {
     keyOpened = null
-    if (pick && !tray) return (await pickOption($, Number(k) - 1)) ? consume : null
-    if (tray) {
-      // 1 asks about the card's mark: the footer then says how; the question is typed in the prompt
-      if (k === '1') { await $.state.set(TRAY, { ...tray, asking: true }); return consume }
-      const frame = trayTop(tray) as TrayFrame | null
-      const ck = frame ? await cardKey($, frame) : ''
-      const drawn = frame ? [...cards.entries()].find(([c]) => c.startsWith(`${ck}|`))?.[1] : null
-      const link = drawn?.links?.[Number(k) - 2]
-      if (link && (await openLink($, link.id))) return consume
-      return null
-    }
-    // 1 under a card: its detail view (the card's row says `1 open detail`)
+    // 1 under a card: its detail view (the bar says `1 open detail`)
     if (k === '1') {
       const ref = await focusedCard($)
       if (ref) { await openDetail($, ref); return consume }
     }
     return null
   }
-  // with the tray open the prompt is the tray's question: letters are typed
-  if (!tray && k.length === 1 && verbs.some(v => v.key === k)) {
+  // at rest the verbs win: a card's own keys reach it once it has the focus (] or its detail)
+  if (k.length === 1 && verbs.some(v => v.key === k)) {
     const row = await actingRow($)
     if (row) {
       await pressRowVerb($, row, k)
@@ -1870,20 +1831,8 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
       return consume
     }
   }
-  // the focused card's own keys (its program's k.on), after the verbs: a letter typed straight after one gives it back
-  if (!tray && !pick && k.length === 1 && !/^[0-9\]\[]$/.test(k)) {
-    const ref = await focusedCard($)
-    const d = ref ? await inlineDrawing($, ref) : null
-    const own = d ? cardTakesKey(d, k) : null
-    if (ref && own) {
-      const before = await readCardState($, ref.root, ref.id)
-      await inlineCardAct($, ref, { type: 'key', key: own })
-      cardKeyed = { key: k, at: now, ref, undo: before }
-      return consume
-    }
-  }
   // o: this session in the browser, at the message the keys act on (browser mode only; `o browser` on the verb row)
-  if (k === 'o' && browserFlag && !tray && !(pick && keyOpened && now - keyOpened.at < 700)) {
+  if (k === 'o' && browserFlag && !(pick && keyOpened && now - keyOpened.at < 700)) {
     keyOpened = null
     if (pick) await $.state.set(PICK, null)
     const row = await actingRow($)
@@ -1911,7 +1860,7 @@ function runningRow(els: Any, said: Said | null) {
 
 /** One object inline: its cells, or one red line saying why it cannot be drawn. The card the keys act on (`1` opens
  *  it) has its frame in the keys' color. */
-async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string, focus = false): Promise<Any> {
+async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string, focus: 'focus' | 'rest' | boolean | null = null): Promise<Any> {
   const els = $.ui.resolve(e)
   const { Box, Text } = els as Any
   const cols = Math.max(40, Math.min(120, (e.viewport?.columns ?? 100) - 4))
@@ -1932,7 +1881,7 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const selected = kept?.region && (p.drawing?.regions || []).some((r: Any) => r.id === kept.region) ? kept.region : null
   return Box({
     flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40),
-    children: [paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, selected, frame: focus ? FOCUS[theme] : null }), ...(run ? [run] : [])],
+    children: [paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, selected, frame: focus === 'rest' ? mix(FOCUS[theme], theme === 'light' ? '#ffffff' : '#1e1e1e', 0.45) : focus ? FOCUS[theme] : null }), ...(run ? [run] : [])],
   })
 }
 
@@ -2080,6 +2029,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
     // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
     case 'card': return arg ? cardStore($, arg) : null
+    // the session's side threads: the tray shows a mark's
+    case 'threads': return threadList()
     default: return paneStoreMore($, kind, arg)
   }
 }
@@ -2091,6 +2042,8 @@ async function paneStoreMore(_$: Engine, _kind: string, _arg: string): Promise<u
 
 /** What a program wants that its data does not hold (k.want): {rows: [refs]} read through the kernel. */
 export async function paneWant($: Engine, _name: string, _args: Record<string, unknown>, request: Any): Promise<unknown> {
+  // a card a program shows inside itself (the tray's): its parts drawn in the sandbox at the room it gives
+  if (request?.card && typeof request.card === 'object') return trayCard($, request.card, Math.max(20, Number(request.w) || 80), Math.max(3, Number(request.h) || 9))
   const root = await rootHere($)
   if (Array.isArray(request?.rows) && root) {
     const refs = request.rows.filter((r: unknown) => typeof r === 'string' && isRef(r)).slice(0, 200) as string[]
@@ -2160,6 +2113,26 @@ async function chipsAction($: Engine, row: string, a: Record<string, unknown>): 
 export async function paneAction($: Engine, pane: string, _args: Record<string, unknown>, a: Record<string, unknown>): Promise<string | boolean | void> {
   const name = String(a.do || '')
   if (pane === 'claims' && name === 'close') { await closeClaims($); return }
+  if (pane === 'tray') {
+    if (name === 'close') { await setTray($, null); return }
+    if (name === 'step') { await stepMark($, Number(a.dir) < 0 ? -1 : 1); return }
+    if (name === 'ask' && typeof a.text === 'string') {
+      // a question typed in the browser's tray: the mark's side thread, as one typed here would be
+      const t = await trayScope($)
+      if (!t) return '× The tray has no mark open to ask about.'
+      const r = await askThread($, { text: a.text, root: (await rootHere($)) || String(await $.session.cwd()), scope: t.scope as ThreadScope, refs: t.refs, card: null })
+      return r.problem ? `× ${r.problem}` : undefined
+    }
+    if (name === 'input') return
+  }
+  if (pane === 'proposals') {
+    if (name === 'close') { await $.state.set(PICK, null); return }
+    if (name === 'pick' && typeof a.choice === 'string') {
+      const row = String(_args.row || a.row || '')
+      const verb = String(_args.verb || a.verb || 'v')
+      return (await pickOption($, row, verb, a.choice)) ? undefined : '× That message is not in this session, so nothing ran. Press v under a message here.'
+    }
+  }
   if (pane === 'chips') return chipsAction($, String(_args.row || a.row || ''), a)
   if (pane === 'detail') return detailAction($, a)
   if (name === 'open') {
@@ -2236,6 +2209,7 @@ export const registerShell: Register = (on, options) => {
       try {
         await $.state.set(SELROW, null)
         await $.state.set(PICK, null)
+        await $.state.set(CARDFOCUS, null)
       } catch {
         // the turn starts whatever the shell makes of it
       }
@@ -2412,6 +2386,7 @@ export const registerShell: Register = (on, options) => {
       const open = pick && pick.row === at ? pick.verb : null
       if (!rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null) return next(e)
       const tray = (await $.state.get(TRAY)).value as Tray | null
+      await $.state.get(CARDFOCUS)
       const base = trayBase(tray) as TrayFrame | null
       const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
       const parts: Any[] = []
@@ -2423,16 +2398,15 @@ export const registerShell: Register = (on, options) => {
         // thimble line
         parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'chips', { row: at }, { w: Math.max(30, cols - 2), h: 3 })] }))
       } else if (open) {
-        const verb = (await rowVerbs($)).find(v => v.key === open)
-        if (verb) {
-          const { options, note } = lineOptions(open, rec)
-          parts.push(verbLineEl(els, { key: `vl-${at}`, verb, options, ...(note ? { note } : {}), theme, onPick: (i: number) => pickOption($, i), onClose: () => $.state.set(PICK, null) }))
-        }
+        // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the thimble line
+        parts.push(Box({ key: `vl-${at}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row: at, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
       }
       if (list.length) {
-        // the newest card under the message the keys act on is the one 1 opens: its frame says so, in the keys' color
-        const focus = !tray && !pick && (await actingRow($)) === at
-        parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at, focus && i === list.length - 1)))))
+        // the card with the focus (] reached it) has its frame in the keys' color; at rest the newest card under the
+        // message the keys act on (the one 1 opens) has it faint
+        const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
+        const rest = !tray && !pick && !cf && (await actingRow($)) === at
+        parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at, cf && cf.row === at && cf.id === ref.id && cf.root === ref.root ? 'focus' : rest && i === list.length - 1 ? 'rest' : null)))))
       }
       return parts.length === 1 ? parts[0] : Box({ flexDirection: 'column', children: parts })
     } catch {
@@ -2454,7 +2428,7 @@ export const registerShell: Register = (on, options) => {
       const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
       const line = await barEl($, els, bw, !!e.props.isWorking)
       const tray = (await $.state.get(TRAY)).value as Tray | null
-      const above = trayTop(tray) ? await trayBand($, e, els, tray!) : null
+      const above = trayTop(tray) ? await trayBand($, e, tray!) : null
       // the observer's line (observer.ts, inside this hook): drawn by its own hook when it has one open
       const own = above ?? ((await $.state.get(LINE)).value ? await next(e) : null)
       if (!line) return own ?? next(e)
@@ -2712,8 +2686,6 @@ export function resetShell(): void {
   serverStream = null
   shown = null
   msgFiles = null
-  cards.clear()
-  cardPending.clear()
   keyOpened = null
   keyChain = Promise.resolve()
   graphLayout = null

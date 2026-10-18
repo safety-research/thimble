@@ -77,8 +77,9 @@ export type SqzUi = { focus: string; adding: boolean; running: { since: number }
  *  changed (it brightens for a moment). */
 export type LineCounts = { cards: number; threads: number; cites: number; claims: number; cov: number; at: number; changed: Record<string, number> }
 
-/** One card of the tray: a mark of a message, or a citation inside a card. */
-export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' }
+/** One card of the tray: a mark of a message (with what it shows: its ref and words, or its gloss), or a citation
+ *  inside a card (panes/tray.js frameOf). */
+export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' | 'spark' | 'gloss'; gloss?: Record<string, unknown> }
 
 /** The tray: the stack of cards it shows, the top one drawn; `asking` once 1 was pressed (its footer says how to ask). */
 export type Tray = { stack: TrayFrame[]; asking?: boolean }
@@ -126,8 +127,8 @@ declare module 'claude-code' {
       selrow: string | null
       /** the row of the latest turn's answer */
       answer: string | null
-      /** when a tray card was drawn, by its key: the tray redraws */
-      cardready: StateFamily<number>
+      /** the card under a reply that has the keys (] reached it): its own keys win over the verbs until 0 */
+      cardfocus: (ObjRef & { row: string }) | null
       /** a verb of the row running on a message, by its row */
       running: StateFamily<string | null>
       /** the verbs of the row, as the registry lists them */
@@ -150,7 +151,7 @@ declare module 'claude-code' {
        *  while one grows the graph (how many of the claims, in the order made, are shown) */
       claimpane: { row: string; focus: string | null; replay: { gen: number; k: number; order: string[] } | null } | null
       /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
-      events: { file: string; n: number }
+      events: { file: string; n: number; bytes?: number }
     }
   }
 }

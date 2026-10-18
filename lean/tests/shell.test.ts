@@ -50,7 +50,8 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
   const files: Record<string, string> = { [FILE]: JSON.stringify(OBJECT), [`${ROOT}/thimble/objects/02-trace.json`]: JSON.stringify(TRACE) }
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` }))
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: e.path === `${ROOT}/thimble/objects` ? [{ name: '01-saves.json', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] : [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
+  const reads: string[] = []
+  on('fs.read', (_$: unknown, e: { path: string }) => { reads.push(e.path); return { value: files[e.path] ?? promptStub(e.path) ?? '' } })
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => {
     files[e.path] = String(e.content ?? e.text ?? e.data ?? '')
     return { value: undefined }
@@ -59,6 +60,8 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
   const inputs: unknown[] = []
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     runs.push([...e.argv])
+    // the feed's new bytes (`tail -c +N <file>`): the test's files are ASCII, so a byte is a character
+    if (e.argv[0] === 'tail') return { value: { exitCode: 0, stdout: (files[e.argv[3]!] ?? '').slice(Number(e.argv[2]!.slice(1)) - 1), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     let out: unknown = {}
     if (e.argv.some(a => a.endsWith('prep.mjs'))) out = { drawing, verbs: VERBS, problems: [] }
     else if (e.argv.some(a => a.endsWith('verb.mjs'))) {
@@ -83,7 +86,7 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   // Claude Code's hint line under the prompt, as a hook leaves it
   on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
-  return { runs, inputs, files, submitted, toasts }
+  return { runs, inputs, files, submitted, toasts, reads }
 }
 
 // every string a drawn tree holds, in order
@@ -145,7 +148,7 @@ test('an object Claude saves is drawn under the next words of the turn; its verb
   // prompt names its verbs and what 1 does, and 1 on an empty prompt opens the card's detail view
   expect(drawn).not.toContain('visualize')
   expect(drawn).not.toContain('1 open detail')
-  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · 1 open detail')
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · ] card · 1 open detail')
   expect(drawn).not.toContain('x explore')
   expect(drawn).not.toContain('? all')
   expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
@@ -170,6 +173,33 @@ test('a save is seen from the kernel\'s change feed, not from what the call prin
   // a call that saved nothing adds nothing, however its output reads
   const echo = await $.tool.call({ tool: 'Bash', command: 'echo "saved 09-other v1: thimble/objects/09-other.json"' } as never)
   expect((echo as { context?: string[] }).context ?? []).toEqual([])
+})
+
+test('the change feed is read from where the last read stopped: a call that saved nothing reads none of it, a later save only the new bytes', async ($, on) => {
+  const w = world(on)
+  mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  // the feed's size, as the file system says it
+  on('fs.stat', (_$: unknown, e: { path: string }) => (e.path in w.files ? { value: { kind: 'file', size: w.files[e.path]!.length, mtimeMs: 0, isLink: false } } : { error: 'ENOENT' }) as never)
+  let call = 0
+  on('tool.call', () => (++call === 1 || call === 3 ? saving(w.files, call === 1 ? '01-saves' : '02-trace')() : { result: 'ok' }))
+  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
+  // the first read since the module loaded: the whole feed, once
+  const first = await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  expect(String((first as { context?: string[] }).context)).toContain('01-saves@1 is drawn')
+  expect(w.reads.filter(p => p === EVENTS).length).toBe(1)
+  // a call that saved nothing: the feed's size is the same, so nothing of it is read
+  const quiet = await $.tool.call({ tool: 'Bash', command: 'ls' } as never)
+  expect((quiet as { context?: string[] }).context ?? []).toEqual([])
+  expect(w.reads.filter(p => p === EVENTS).length).toBe(1)
+  expect(w.runs.filter(r => r[0] === 'tail').length).toBe(0)
+  // a later save: only the bytes after the last read, through tail
+  const later = await $.tool.call({ tool: 'Bash', command: 'lean save trace' } as never)
+  expect(String((later as { context?: string[] }).context)).toContain('02-trace@1 is drawn')
+  expect(String((later as { context?: string[] }).context)).not.toContain('01-saves@1')
+  expect(w.reads.filter(p => p === EVENTS).length).toBe(1)
+  const tail = w.runs.find(r => r[0] === 'tail')!
+  expect(Number(tail[2]!.slice(1)) - 1).toBe(w.files[EVENTS]!.split('\n')[0]!.length + 1)
 })
 
 test('a reply after no save draws as Claude Code draws it', async ($, on) => {
@@ -265,7 +295,7 @@ test('a verb of the message row: v opens its line, a pick runs it on the message
   // v on an empty prompt, as the thimble line names it
   await ($ as Any).prompt.edit(edit('v'))
   expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
-  await ui.press({ key: `vl-${AT}-opt-0` })
+  await ui.press({ key: 'r|p-proposals|0|opt-0' })
   await clock.settle()
   // the verb ran with the message: its record, as an object with its words, and the pick as its words
   const input = w.inputs[0] as { object: { kind: string; text: string; row: string }; message: { row: string; final: boolean }; args: string }
@@ -317,7 +347,7 @@ test("v asks Claude for a card of the message: the row reads as the person's pic
   // v on an empty prompt, as the thimble line names it
   await ($ as Any).prompt.edit(edit('v'))
   expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
-  await ui.press({ key: `vl-${AT}-opt-0` })
+  await ui.press({ key: 'r|p-proposals|0|opt-0' })
   await clock.settle()
   expect((w.inputs[0] as { args: string }).args).toBe('')
   // the row reads as the press; Claude reads the request in a row before it that the person does not see

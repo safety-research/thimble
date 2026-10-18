@@ -31,8 +31,10 @@ export function keysOf(drawing) {
     const hit = out.find(x => x.words === words)
     if (hit) { if (!hit.keys.includes(key)) hit.keys.push(key) } else out.push({ keys: [key], words })
   }
-  // arrows that share their words read as one key (↑↓), any other keys with a space between (< >)
-  return out.map(x => ({ key: x.keys.every(k => ARROW.test(k)) ? x.keys.join('') : x.keys.join(' '), words: x.words }))
+  // arrows that share their words read as one key (↑↓), digits in a row as a range (2–4), any other keys with a space
+  // between (< >)
+  const digits = ks => ks.length > 2 && ks.every(k => /^[0-9]$/.test(k)) && ks.every((k, i) => !i || Number(k) === Number(ks[i - 1]) + 1)
+  return out.map(x => ({ key: x.keys.every(k => ARROW.test(k)) ? x.keys.join('') : digits(x.keys) ? `${x.keys[0]}–${x.keys[x.keys.length - 1]}` : x.keys.join(' '), words: x.words }))
 }
 
 /** The keys of a focus stack, top first, as one line of the bar; a key the top takes is not said again below it. */
@@ -90,4 +92,109 @@ export function nextState(was, drawing) {
 /** The wants of a drawing that are not in `got`. */
 export function wantsOpen(drawing, got) {
   return (Array.isArray(drawing?.wants) ? drawing.wants : []).filter(w => !got || !Object.prototype.hasOwnProperty.call(got, w.key))
+}
+
+// ---------------------------------------------------------------- what stays on one surface
+// A program's state is shared by every surface (a filter, a zoom, a flip, the cards open), except the keys it names
+// with k.local (or a pane module's `local`): a hover, a replay's frame. Each surface keeps those for itself, so a
+// pointer on one surface never moves a mark on the other.
+
+/** The state keys that stay on the surface they were set on: the pane module's `local` and the drawing's (k.local). */
+export function localKeys(drawing, pane) {
+  const a = Array.isArray(pane?.local) ? pane.local : []
+  const b = Array.isArray(drawing?.local) ? drawing.local : []
+  return [...new Set([...a, ...b].map(String))]
+}
+
+/** The part of a state every surface shares: the state without its local keys. */
+export function shared(state, keys) {
+  const out = {}
+  for (const [k, v] of Object.entries(state || {})) if (!(keys || []).includes(k)) out[k] = v
+  return out
+}
+
+/** A state another surface answered with, joined with this surface's own local keys. */
+export function joinShared(mine, theirs, keys) {
+  const out = shared(theirs, keys)
+  for (const k of keys || []) if (mine && Object.prototype.hasOwnProperty.call(mine, k)) out[k] = mine[k]
+  return out
+}
+
+// ---------------------------------------------------------------- the keys a host keeps
+// Where a card is drawn, a few keys are the host's: moving between things, going back, and the keys Claude Code keeps
+// for its own prompt. A card's program learns them as k.keys (draw/kit.js); a key it takes there never reaches it, and
+// the bar names only the keys that do.
+
+const CC_OWN = { esc: 'Claude Code keeps it', return: 'Claude Code keeps it', tab: 'Claude Code keeps it', 'shift+tab': 'Claude Code keeps it', up: 'Claude Code keeps it for the prompt history', down: 'Claude Code keeps it for the prompt history', backspace: 'Claude Code keeps it' }
+
+/** The keys the host keeps where a card is drawn ('inline': under a reply, focused with ]; 'detail': its detail), on a
+ *  surface ('terminal' | 'browser'), each with why: {key: why}. */
+export function hostKeys(mode, surface = 'terminal') {
+  if (mode === 'detail') {
+    return { esc: 'goes back', up: 'moves between parts', down: 'moves between parts', tab: 'moves between parts', 'shift+tab': 'moves between parts', return: 'opens the part', '0': 'clears' }
+  }
+  const moving = { 0: 'goes back', 1: 'opens the detail', ']': 'moves to the next thing', '[': 'moves to the one before' }
+  return surface === 'terminal' ? { ...CC_OWN, ...moving } : { ...moving, esc: 'goes back' }
+}
+
+// ---------------------------------------------------------------- the one bar, in the room it has
+// The bar is one line: `thimble  v visualize · s squeeze · c claims · ] cite & explain      2 cards · coverage 34%`. With
+// less room it gives up, in this order: the counts (coverage last), then each key's words beyond their first word
+// (`visualize`, `squeeze`, `claims`, `cite`), then the label, then the end of the line (an ellipsis). It never wraps.
+//
+//   bar: {label, left: [{key, words, short?, ...}], counts: [{id, text, ...}]}
+//   barLadder(bar) -> the bar at each step, fullest first
+//   fitBar(bar, width, measure) -> the first step whose line fits `width` (measure: text -> width, default columns)
+
+const COUNT_ORDER = ['cards', 'threads', 'cites', 'claims', 'cov']
+const GAP = 3 // between the keys and the counts
+
+/** The line a bar draws, as text (for measuring). */
+export function barLine(b) {
+  const keys = (b.left || []).map(s => [s.key, s.words].filter(Boolean).join(' ')).join(' · ')
+  const head = [b.label || '', keys].filter(Boolean).join('  ')
+  const counts = (b.counts || []).map(c => c.text).join(' · ')
+  return counts ? `${head}${' '.repeat(GAP)}${counts}` : head
+}
+
+/** The first word of a key's words, as the narrowest bar says it (`cite & explain` → `cite`; a lit `● 2 views` keeps
+ *  its verb's name when it gives one as `short`). */
+export function firstWord(seg) {
+  if (seg.short) return seg.short
+  const w = String(seg.words || '').trim()
+  if (!w) return w
+  const parts = w.split(/\s+/)
+  // a dot or an arrow alone is no word: keep the word after it
+  return /^[^\p{L}\p{N}]+$/u.test(parts[0]) && parts[1] ? `${parts[0]} ${parts[1]}` : parts[0]
+}
+
+export function barLadder(bar) {
+  const steps = []
+  let b = { label: bar.label || '', left: (bar.left || []).slice(), counts: (bar.counts || []).slice() }
+  steps.push(b)
+  // the counts, one at a time, coverage last
+  const order = [...b.counts].sort((x, y) => (COUNT_ORDER.indexOf(x.id) + 1 || 99) - (COUNT_ORDER.indexOf(y.id) + 1 || 99) || 0)
+  for (const c of order) {
+    b = { ...b, counts: b.counts.filter(x => x !== c) }
+    steps.push(b)
+  }
+  // each key's words to their first word, from the last key back (the first keys keep their words longest)
+  const left = b.left.slice()
+  for (let i = left.length - 1; i >= 0; i--) {
+    const short = firstWord(left[i])
+    if (short === left[i].words) continue
+    left[i] = { ...left[i], words: short, shortened: true }
+    b = { ...b, left: left.slice() }
+    steps.push(b)
+  }
+  // the label last
+  if (b.label) steps.push({ ...b, label: '' })
+  return steps
+}
+
+/** The bar as it fits `width`: the fullest step that fits, else the last, cut at the end with an ellipsis (`cut`). */
+export function fitBar(bar, width, measure = s => Array.from(String(s)).length) {
+  const steps = barLadder(bar)
+  for (const s of steps) if (measure(barLine(s)) <= width) return { ...s, cut: false }
+  return { ...steps[steps.length - 1], cut: true }
 }

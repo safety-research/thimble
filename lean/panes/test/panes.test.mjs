@@ -13,8 +13,8 @@ import { barText, keyEvent, keysOf, nextState, route, takes } from '../host.js'
 const DK = globalThis.DrawKit
 const run = (pane, data, o = {}) => DK.run(pane.program, data, { w: 100, h: 30, mode: 'pane', ...o })
 /** One surface's turn: the event answered, the new state kept. */
-const act = (pane, data, state, event, surface) => {
-  const d = run(pane, data, { state, event, surface })
+const act = (pane, data, state, event, surface, o = {}) => {
+  const d = run(pane, data, { state, event, surface, ...o })
   return { d, state: nextState(state, d) }
 }
 
@@ -150,4 +150,82 @@ test('the focus stack: a key goes to the top program that takes it, then down; t
   assert.match(barText([card.drawing, pane.drawing]), /^j next run · ↑↓ part · ↵ details/)
   // keys that share their words are one entry; a key with no words is an alias, not shown
   assert.deepEqual(keysOf({ on: [{ name: '<', label: 'change' }, { name: '>', label: 'change' }, { name: ',', label: '' }, { name: 'up', label: 'part' }, { name: 'down', label: 'part' }, { name: 'press', label: 'x' }] }), [{ key: '< >', words: 'change' }, { key: '↑↓', words: 'part' }])
+})
+
+// ---------------------------------------------------------------- the bar in the room it has
+test('the bar is always one line: it drops the counts first (coverage last), then says each key by its first word, then its label, then cuts', async () => {
+  const { barLine, fitBar } = await import('../host.js')
+  const bar = { label: 'thimble', left: [{ key: 'v', words: 'visualize' }, { key: 's', words: '● 6 of 24 lines', short: '● squeeze' }, { key: 'c', words: 'claims' }, { key: ']', words: 'cite & explain' }, { key: '1', words: 'open detail' }], counts: [{ id: 'cov', text: 'coverage 34%' }, { id: 'cards', text: '2 cards' }, { id: 'claims', text: '22 claims' }] }
+  const at = w => barLine(fitBar(bar, w))
+  assert.equal(at(200), 'thimble  v visualize · s ● 6 of 24 lines · c claims · ] cite & explain · 1 open detail   coverage 34% · 2 cards · 22 claims')
+  // the counts go first, coverage last
+  assert.ok(at(110).endsWith('coverage 34%') && !at(110).includes('cards'))
+  assert.ok(!at(90).includes('coverage'))
+  // then the words: each key keeps its first word (a lit verb its dot and name)
+  assert.equal(at(60), 'v visualize · s ● squeeze · c claims · ] cite · 1 open')
+  for (const w of [200, 140, 110, 90, 75, 60]) assert.ok(at(w).length <= w, `${w}: ${at(w)}`)
+  // narrower than the shortest form: the last form, marked to be cut at its end (never a second line)
+  const narrow = fitBar(bar, 30)
+  assert.equal(narrow.cut, true)
+  assert.ok(!barLine(narrow).includes('\n'))
+})
+
+test('keys in a row of digits read as a range; the keys a host keeps where a card is drawn say why', async () => {
+  const { hostKeys } = await import('../host.js')
+  assert.deepEqual(keysOf({ on: [{ name: '2', label: 'open' }, { name: '3', label: 'open' }, { name: '4', label: 'open' }] }), [{ key: '2–4', words: 'open' }])
+  const inline = hostKeys('inline', 'terminal')
+  for (const k of ['0', '1', ']', '[', 'esc', 'return', 'up']) assert.ok(inline[k], k)
+  assert.ok(!inline.c && !inline.v && !inline.left, 'letters and ← → reach a focused card')
+  const detail = hostKeys('detail', 'terminal')
+  assert.ok(detail.esc && detail.up && detail['0'] && !detail[']'])
+})
+
+test('local state: a hover and a replay stay on the surface they were set on; the rest is shared', async () => {
+  const { joinShared, localKeys, shared } = await import('../host.js')
+  const d = run(PANES.claims, { claims: [], total: 0, clusters: 0, order: [], groups: [], pos: {}, names: [] })
+  assert.deepEqual(localKeys(d, PANES.claims).sort(), ['hover', 'replay'])
+  assert.deepEqual(shared({ hover: 'c1', replay: { k: 2 }, zoom: 3 }, ['hover', 'replay']), { zoom: 3 })
+  // the other surface's state, with this surface's own hover kept
+  assert.deepEqual(joinShared({ hover: 'c4', zoom: 1 }, { hover: 'c9', zoom: 3 }, ['hover', 'replay']), { zoom: 3, hover: 'c4' })
+})
+
+// ---------------------------------------------------------------- the tray and v's proposals
+test('tray: a mark is a frame that carries what it shows; the card comes from the host (k.want), keys open, go back and step', async () => {
+  const { frameOf, scopeOf } = await import('../tray.js')
+  const rec = { row: 'r1', marks: [{ kind: 'cite', start: 0, end: 5, ref: 'q3#day=2026-06-18@n', label: '6,543' }, { kind: 'gloss', start: 9, end: 12, gloss: 'g1', label: 'SEC' }], glosses: { g1: { term: 'SEC', body: 'a county file', here: 'it named the county' } } }
+  const f0 = frameOf(rec, 0)
+  assert.deepEqual(f0, { row: 'r1', i: 0, kind: 'cite', ref: 'q3#day=2026-06-18@n', label: '6,543' })
+  assert.equal(frameOf(rec, 1).gloss.body, 'a county file')
+  assert.deepEqual(scopeOf(frameOf(rec, 1)), { row: 'r1', mark: { kind: 'gloss', term: 'SEC' } })
+  const data = PANES.tray.data({ threads: [] })
+  const d = run(PANES.tray, data, { state: { stack: [f0] }, w: 70 })
+  assert.equal(d.wants[0].request.card.ref, 'q3#day=2026-06-18@n')
+  assert.match(gridText(renderTerm(d, { w: 70 })), /6,543.*cite[\s\S]*reading it through the kernel/)
+  const inner = globalThis.DrawKit.run('return k.text("Jun 18 **6,543**")', {}, { w: 60 })
+  const got = { [d.wants[0].key]: { drawings: [inner], links: [{ id: 'n1', ref: 'q1#user=A@n', label: 'A' }, { id: 'n2', ref: 'q2', label: 'B' }] } }
+  const full = run(PANES.tray, data, { state: { stack: [f0] }, w: 70, got })
+  assert.match(gridText(renderTerm(full, { w: 70 })), /Jun 18 6,543/)
+  assert.equal(barText([full]), '1 ask · 2 3 open · 0 close · ] next')
+  // 2 opens the first citation inside the card over it; 0 goes back to the card under it
+  const opened = act(PANES.tray, data, { stack: [f0] }, keyEvent('2'), 'terminal', { got, w: 70 })
+  assert.deepEqual(opened.state.stack.at(-1), { kind: 'cite', ref: 'q1#user=A@n', label: 'A' })
+  assert.equal(act(PANES.tray, data, opened.state, keyEvent('0'), 'terminal').state.stack.length, 1)
+  // back from the first card closes the tray; ] asks the host for the next mark or card
+  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent('0'), 'terminal').d.effects, [{ do: 'close' }])
+  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, keyEvent(']'), 'terminal').d.effects, [{ dir: 1, do: 'step' }])
+  // 1 asks: in the browser the question is typed in the tray (an input), in the terminal in the prompt
+  assert.equal(act(PANES.tray, data, { stack: [f0] }, keyEvent('1'), 'browser').d.effects[0].do, 'input')
+  const asking = run(PANES.tray, data, { state: { stack: [f0], asking: true }, w: 70, got })
+  assert.equal([asking.status?.text, barText([asking])].filter(Boolean).join(' · '), 'type to ask · ↵ asks this thread · 0 back')
+})
+
+test('proposals: v\'s line is a program on the message\'s record: 1–9 pick (the host runs the verb), 0 closes', async () => {
+  const data = PANES.proposals.data({ 'record:r1': { verbs: { v: { lit: true, proposals: ['saves per day around June 18', 'who edited most'] } } } }, { row: 'r1', verb: 'v' })
+  const d = run(PANES.proposals, data, { w: 90 })
+  assert.match(gridText(renderTerm(d, { w: 90 })), /▸ 1 saves per day around June 18 {3}▸ 2 who edited most/)
+  assert.equal(barText([d]), '1 2 pick · 0 close')
+  assert.deepEqual(act(PANES.proposals, data, {}, keyEvent('2'), 'terminal').d.effects, [{ row: 'r1', verb: 'v', choice: 'who edited most', i: 1, do: 'pick' }, { do: 'close' }])
+  assert.deepEqual(act(PANES.proposals, data, {}, { type: 'press', region: 'opt-0' }, 'browser').d.effects[0].choice, 'saves per day around June 18')
+  // none proposed: one option, another view of this answer
+  assert.deepEqual(PANES.proposals.data({ 'record:r1': { verbs: {} } }, { row: 'r1', verb: 'v' }).options, ['another view of this answer'])
 })

@@ -17,7 +17,7 @@
   'use strict'
 
   const KIT = 1
-  const TONES = ['ink', 'dim', 'accent', 'good', 'bad', 'warn', 'unseen', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6']
+  const TONES = ['ink', 'dim', 'accent', 'good', 'bad', 'warn', 'unseen', 'c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'cite', 'explain']
   const CATS = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6']
   const ALIAS = {
     default: 'ink', normal: 'ink', text: 'ink', black: 'ink', fg: 'ink',
@@ -200,6 +200,7 @@
       return n
     }
     const metaOf = (m, where) => normMeta(m, ctx, where)
+    const keys = keysAt(opts.keys)
 
     const k = {
       w: W, h: H, mode: opts.mode || 'inline', state: clone(ctx.state) || {},
@@ -218,6 +219,8 @@
       on(name, fn, label) {
         const n = String(name == null ? '' : name).trim()
         if (!n || typeof fn !== 'function') { warn(ctx, 'k.on needs (name, fn): a key, "press", "brush" or "press:<id>", and a function'); return k }
+        const why = keys.why(n)
+        if (why) warn(ctx, `the key "${n}" does not reach this card where it is drawn now (${why}); the person cannot use it here. k.keys.free(key) says which keys do`)
         if (!ctx.handlers.some(h => h.name === n)) ctx.handlers.push({ name: n, fn: fn, label: label != null ? clean(String(label)).slice(0, 40) : '' })
         return k
       },
@@ -254,6 +257,19 @@
         if (ctx.effects.length < 20) ctx.effects.push(Object.assign({}, isObj(args) ? clone(args) : {}, { do: a }))
         return k
       },
+      // k.local(...keys): state keys that belong to the surface they were set on, such as a hover or a replay's frame.
+      // Each surface keeps its own; the rest of the state (a filter, a zoom, a flip) is shared by every surface.
+      local() {
+        Array.prototype.slice.call(arguments).flat().forEach(x => {
+          const s = String(x == null ? '' : x).trim()
+          if (s && ctx.local.indexOf(s) < 0 && ctx.local.length < 20) ctx.local.push(s)
+        })
+        return k
+      },
+      // k.keys: the keys that reach this program where it is drawn now. k.keys.free(key) is true for a key it can
+      // take; the host keeps the others (moving between things, going back), and k.keys.taken lists them. The bar
+      // names the program's keys while it has the focus, so a program never prints its own key hints.
+      keys: { taken: keys.taken.slice(), free: kk => !keys.why(String(kk == null ? '' : kk)) },
       // k.select(id): the part this program has selected, which every surface marks as it marks a selection (a fill in
       // the terminal, an outline in the browser)
       select(id) {
@@ -2083,7 +2099,17 @@
     return 'fix the program and save the card again'
   }
   function newCtx(state, event, limit, got) {
-    return { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: limit, handlers: [], patch: {}, phase: 'draw', ask: null, event: event || null, rowsOf: null, rowList: [], after: [], effects: [], status: null, wants: [], selected: null, got: isObj(got) ? got : null }
+    return { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: limit, handlers: [], patch: {}, phase: 'draw', ask: null, event: event || null, rowsOf: null, rowList: [], after: [], effects: [], status: null, wants: [], selected: null, local: [], got: isObj(got) ? got : null }
+  }
+  // the keys a host keeps where a program is drawn: opts.keys = {taken: {key: why}} (or a list of keys). A key's name
+  // as handlers name it ('space', 'return', 'esc', 'up', '0')
+  function keysAt(o) {
+    const raw = isObj(o) && o.taken != null ? o.taken : Array.isArray(o) ? o : null
+    const why = {}
+    if (Array.isArray(raw)) raw.forEach(x => { if (x != null) why[String(x)] = 'the host keeps it' })
+    else if (isObj(raw)) Object.keys(raw).forEach(x => { why[x] = String(raw[x] || 'the host keeps it').slice(0, 80) })
+    const name = x => (x === ' ' ? 'space' : x === 'enter' ? 'return' : x === 'escape' ? 'esc' : x)
+    return { taken: Object.keys(why), why: x => why[name(x)] || null }
   }
   // a want's key: its request as JSON with sorted keys, so the same request is the same key on every surface
   function wantKey(req) {
@@ -2194,6 +2220,8 @@
       if (ctx.status && !error) out.status = ctx.status
       if (ctx.wants.length && !error) out.wants = ctx.wants
       if (ctx.selected && !error) out.selected = ctx.selected
+      // the state keys each surface keeps for itself (k.local)
+      if (ctx.local.length && !error) out.local = ctx.local.slice()
       if (error) out.error = error
       return out
     }

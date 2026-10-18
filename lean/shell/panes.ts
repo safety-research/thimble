@@ -21,9 +21,9 @@ import type { EngineInterface } from 'claude-code'
 import '../draw/kit.js'
 import { renderTerm } from '../draw/term.js'
 import PANES from '../panes/index.js'
-import { nextState, same, takes, wantsOpen } from '../panes/host.js'
+import { joinShared, localKeys, nextState, same, shared, takes, wantsOpen } from '../panes/host.js'
 import { paintRegions, regionOfKey } from './cells'
-import { paneAction, paneStore, paneWant, paneWhere } from './shell'
+import { paneAction, paneStateChanged, paneStore, paneWant, paneWhere } from './shell'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -86,18 +86,22 @@ async function load($: Engine, inst: Inst): Promise<void> {
     const f = await stateFile($, inst)
     if (f && (await $.fs.exists(f))) {
       const v = JSON.parse(String(await $.fs.read(f)))
-      if (v && typeof v.state === 'object' && v.state) inst.state = v.state
+      if (v && typeof v.state === 'object' && v.state) inst.state = shared(v.state, localOf(inst))
     }
   } catch {
     // no state kept yet: the pane opens at rest
   }
 }
 
+/** The state keys this pane keeps on this surface alone (a hover, a replay's frame): its module's and its program's. */
+const localOf = (inst: Inst): string[] => localKeys(inst.drawing, paneOf(inst.name))
+
 async function keep($: Engine, inst: Inst, by: string): Promise<void> {
   const f = await stateFile($, inst)
   if (!f) return
   try {
-    await $.fs.write(f, JSON.stringify({ pane: inst.name, args: inst.args, state: inst.state, at: new Date().toISOString(), by }, null, 1))
+    // only what every surface shares: a hover or a replay stays where it was made
+    await $.fs.write(f, JSON.stringify({ pane: inst.name, args: inst.args, state: shared(inst.state, localOf(inst)), at: new Date().toISOString(), by }, null, 1))
   } catch {
     // the other surface opens the pane where it was; this one keeps its own
   }
@@ -175,13 +179,19 @@ export async function paneFire($: Engine, name: string, args: Record<string, unk
 /** What a program answered with: its state kept, its actions run, its later events set, its ask kept. */
 async function answered($: Engine, inst: Inst, d: Any, by: string): Promise<void> {
   const next = nextState(inst.state, d)
+  const keys = localKeys(d, paneOf(inst.name))
   const changed = !same(next, inst.state)
+  // a change of what every surface shares is kept for the other surface; a change of this surface's own keys is not
+  const sharedChanged = !same(shared(next, keys), shared(inst.state, keys))
   inst.state = next
   if (d.ask) inst.ask = d.ask
   for (const a of (d.after || []) as { ms: number; event: Record<string, unknown> }[]) later($, inst, a.ms, a.event)
   if (changed) {
     await redraw($, inst)
-    $.clock.after(0, () => { void keep($, inst, by) })
+    if (sharedChanged) {
+      $.clock.after(0, () => { void keep($, inst, by) })
+      await paneStateChanged($, inst.name, inst.args, inst.state)
+    }
   }
   for (const eff of (d.effects || []) as Record<string, unknown>[]) await act($, inst, eff)
 }
@@ -212,10 +222,14 @@ export async function act($: Engine, inst: Inst, eff: Record<string, unknown>): 
 export async function setPaneState($: Engine, name: string, args: Record<string, unknown>, state: Record<string, unknown>, by = 'browser'): Promise<void> {
   const inst = instance(name, args)
   await load($, inst)
-  if (same(state, inst.state)) return
-  inst.state = state
+  // what the other surface shares, with this surface's own hover and replay kept
+  const keys = localOf(inst)
+  const next = joinShared(inst.state, state, keys)
+  if (same(next, inst.state)) return
+  inst.state = next
   await redraw($, inst)
   await keep($, inst, by)
+  await paneStateChanged($, name, args, inst.state)
 }
 
 /** A state set by the host itself (opening a pane on a part): kept and drawn. */

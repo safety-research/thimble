@@ -7,5 +7,7 @@
 import chips from './chips.js'
 import claims from './claims.js'
 import detail from './detail.js'
+import proposals from './proposals.js'
+import tray from './tray.js'
 
-export default { chips, claims, detail }
+export default { chips, claims, detail, proposals, tray }
