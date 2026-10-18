@@ -205,7 +205,7 @@ async def test_h3_a_run_the_quit_stopped_part_way_is_kept_as_stopped_told_and_re
     assert last["stopped"] is True and last["stopped_by"] == "quit" and last["status"] == "done"
     assert (last["labeled"], last["total"]) == (3, 8)
     told = [n for n in notices.open_notices(CORPUS) if n["key"] == f"label:{k['id']}"]
-    assert len(told) == 1 and "stopped the label claims a PR at 3 of 8 records" in told[0]["text"]
+    assert len(told) == 1 and "stopped the label \"claims a PR\" at 3 of 8 records" in told[0]["text"]
     assert told[0]["action"] == {"label": "See the label", "do": "label-open", "slug": k["id"]}
     read = refs.resolve(MINI, f"concept:{k['id']}")["excerpt"]
     assert "its last run stopped when Claude Code quit at 3 of 8 records" in read, read

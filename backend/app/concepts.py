@@ -2703,16 +2703,18 @@ NO_LABELS = "the classifier gave no label for them"  # why units failed when no 
 _BLANK: dict = {}  # a prompt label's answer for a unit with no words, which it skips
 _STATUS_HEAD = re.compile(r"[a-z_]+")
 FALLBACK_MESSAGE = "Downgrading {model} to {fallback}"
-# the notices of a label's runs (module note): {name} the label's, {why} the failure in plain words
-LABEL_FAILED_TEXT = "The label {name} failed: {why}."
-LABEL_UNITS_FAILED_TEXT = "The label {name} couldn't label {failed} of {total}: {why}."
-LABEL_NONE_TEXT = "The label {name} found nothing to label. {why}"  # a run over files that keep no record (none_why)
+# the notices of a label's runs (module note): {name} the label's, {why} the failure in plain words. Every one sets the
+# name off in quotation marks, never runs it into the sentence (bug hunt J3 for the safeguards' switch; round 10, K10:
+# "The label failed couldn't label 326 of 2,064 records" read as a label that failed)
+LABEL_FAILED_TEXT = 'The label "{name}" failed: {why}.'
+LABEL_UNITS_FAILED_TEXT = 'The label "{name}" couldn\'t label {failed} of {total}: {why}.'
+LABEL_NONE_TEXT = 'The label "{name}" found nothing to label. {why}'  # a run over files that keep no record (none_why)
 # the label's name in quotation marks, never run into the sentence (bug hunt J3: "switched 15 of the label purpose of
 # the save's calls"), and what it means for the label: the values those calls gave are its own
 LABEL_FALLBACK_TEXT = ('Claude\'s safeguards answered {n} {calls} of the label "{name}" with {fallback} instead of {model}. '
                        "The label keeps the values {those} gave.")
 # a run main's quit stopped part way (_keep_quit_stop): {read} of {total} as `8,447 of 14,591 records`
-LABEL_QUIT_TEXT = ("Claude Code quit and stopped the label {name} at {read} of {total}. Its counts are of those {noun} "
+LABEL_QUIT_TEXT = ('Claude Code quit and stopped the label "{name}" at {read} of {total}. Its counts are of those {noun} '
                    "only. Run the label again to label all of them.")
 STOPPED_BY_QUIT = "quit"  # a stopped run's `stopped_by` when main's quit stopped it, not the analyst's Stop
 # a label notice's acts (notices.ACTIONS): the link to the label, and a run again on the units its last run could not
@@ -3784,7 +3786,7 @@ def none_why(ws: Path, corpus_dir: Path, sources: list[dict], patterns: list[str
     files = f"{n:,} file{'' if n == 1 else 's'}"
     if within:
         parent = read_concept(ws, within["label"]) or {"name": within["label"]}
-        return f"The label {parent['name']} gave the value {within['value']!r} to no record of the {files} that {paths} " \
+        return f"The label \"{parent['name']}\" gave the value {within['value']!r} to no record of the {files} that {paths} " \
                f"{'matches' if one else 'match'}."
     src = sources[0]
     try:

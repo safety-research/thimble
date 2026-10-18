@@ -203,3 +203,24 @@ def test_j3_a_label_s_safeguards_notice_sets_its_name_off_and_says_its_values_ar
     [one] = _open("safeguards:label:k-one")
     assert one["text"].startswith('Claude\'s safeguards answered 1 call of the label "kind of page" with Opus 4.8')
     assert one["text"].endswith("The label keeps the values that call gave.")
+
+
+def test_k10_every_label_notice_sets_the_label_s_name_off_in_quotation_marks():
+    """Bug hunt round 10, K10: beside J3's safeguards notice, the other notices of a label's run still ran its name
+    into the sentence: "The label failed couldn't label 326 of 2,064 records" read as a label that failed, and "The
+    label proposes a rule to decide couldn't label 71 of 29,555 records" as a label that proposes. Each sets it off."""
+    from app import concepts
+
+    refused = "Claude's safeguards refused the request (stop_reason refusal)"
+    concepts._label_notice(CORPUS, {"id": "k-failed", "name": "failed"}, failed=326, total=2064,
+                           failures=[[refused, 326]])
+    [units] = _open("label:k-failed")
+    assert units["text"].startswith('The label "failed" couldn\'t label 326 of 2,064 records: '), units["text"]
+    concepts._label_notice(CORPUS, {"id": "k-rule", "name": "proposes a rule to decide"}, error="the run broke")
+    [error] = _open("label:k-rule")
+    assert error["text"] == 'The label "proposes a rule to decide" failed: the run broke.', error["text"]
+    concepts._label_notice(CORPUS, {"id": "k-none", "name": "kind of tea"}, none="teas/*.md matches no file.")
+    [none] = _open("label:k-none")
+    assert none["text"] == 'The label "kind of tea" found nothing to label. teas/*.md matches no file.', none["text"]
+    quit_ = concepts.LABEL_QUIT_TEXT.format(name="brews late", read="3", total="8 records", noun="records")
+    assert quit_.startswith('Claude Code quit and stopped the label "brews late" at 3 of 8 records.'), quit_

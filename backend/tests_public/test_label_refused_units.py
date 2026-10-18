@@ -93,7 +93,7 @@ async def test_refused_units_are_told_to_main_and_run_again_alone_from_the_notic
     # the notice: why in plain words, a link to the label and a run again on the 2, never "rephrase the request"
     n = notice(cid)
     assert n is not None
-    assert n["text"] == "The label confused couldn't label 2 of 4 records: Claude's safeguards refused them.", n["text"]
+    assert n["text"] == "The label \"confused\" couldn't label 2 of 4 records: Claude's safeguards refused them.", n["text"]
     acts = n["action"] if isinstance(n["action"], list) else [n["action"]]
     assert {"label": "Run again on these 2", "do": "label-again", "slug": cid} in acts, acts
     assert {"label": "See the label", "do": "label-open", "slug": cid} in acts, acts

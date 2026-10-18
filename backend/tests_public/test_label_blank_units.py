@@ -98,7 +98,7 @@ async def test_failures_say_each_reason_once_with_counts_that_add_up(data_tmp, c
     said = notice("confused")
     assert said is not None
     words = said["text"]
-    assert words.startswith("The label confused couldn't label 5 of 8 records: "), words
+    assert words.startswith("The label \"confused\" couldn't label 5 of 8 records: "), words
     assert "3 because " in words and "2 because " in words, words
     assert words.lower().count("overloaded") == 1 and words.count("no usable labels") == 1, words
     assert "no readable text" not in words and "req_" not in words, words
