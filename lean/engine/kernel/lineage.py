@@ -466,7 +466,7 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
                     notes.append(f"{', '.join(stale)} changed since {q['id']} ran")
                 if q.get("lineage") in ("superset", "key"):
                     notes.append(f"{q['id']}'s rows were found by key ({q['lineage']}), not kept exactly")
-                if q.get("lineage") == "loop" and isinstance(holder.get("_ref"), str):
+                if (q.get("lineage") == "loop" or q.get("cells")) and isinstance(holder.get("_ref"), str):
                     # a value of a row a loop made: its own rows when the query kept them (a count of one frame), else
                     # the row's, which says why
                     col = ptr.rsplit("/", 1)[-1].replace("~1", "/").replace("~0", "~")
