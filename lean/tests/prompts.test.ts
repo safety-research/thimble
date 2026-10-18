@@ -128,3 +128,15 @@ test("a version that picks examples: the session's own few, named in its record"
   expect(line.prompt).toBe('forms:rotate')
   expect(line.examples).toEqual(shown)
 })
+
+test('after `lean guide cards` printed the guidance, no toolkit read or save brings it a second time', async ($, on) => {
+  const w = world(on)
+  const g = await $.tool.call({ tool: 'Bash', command: 'lean guide cards' } as never) as Any
+  expect(g.context ?? []).toEqual([])
+  const save = await $.tool.call({ tool: 'Bash', command: 'lean save x --from x.json' } as never) as Any
+  expect(save.context ?? []).toEqual([])
+  const read = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
+  expect(read.context ?? []).toEqual([])
+  await w.clock.advance(100)
+  expect(w.events.filter(e => e.kind === 'prompt')).toEqual([])
+})

@@ -148,6 +148,13 @@ export function registerPrompts(on: Any, options: Any): void {
       const file = String(e.file_path || '')
       const isRead = e.tool === 'Read' && /(^|\/)draw\/TOOLKIT\.md$/.test(file) && file.startsWith(rootOf($))
       const command = String(e.command || '')
+      // `lean guide cards` (v asks for it) printed the guidance itself: it is in the conversation, so no read or save
+      // after it brings it a second time
+      if (e.tool === 'Bash' && /(^|[\s;&|(])lean\s+guide\s+(cards|forms|card-forms)\b/.test(command)) {
+        await registry($)
+        R.cardsGiven = true
+        return r
+      }
       const isShell = e.tool === 'Bash' && /\bdraw\/TOOLKIT\.md\b/.test(command) && !/\blean\s/.test(command)
       // a card saved with no toolkit read before it: the guidance comes with the save, for this card and the next
       const isSave = e.tool === 'Bash' && !isShell && /(^|[\s;&|(])lean\s+save\b/.test(command) && /\bsaved\b/.test(String(r.text ?? ''))
