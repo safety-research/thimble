@@ -167,7 +167,9 @@ test('the card ablation: five versions with the same principles, which differ on
   }
   // few keeps the subsections it names; sketches has no programs
   const few = textOf('cards', ROOT, env('few'))
-  assert.deepEqual(few.chosen, FEATURES.forms.versions.few.parts.at(-1).only.map(h => pool.find(x => x.heading.toLowerCase().startsWith(h.toLowerCase()))?.heading).filter(Boolean))
+  const named = FEATURES.forms.versions.few.parts.at(-1).only.map(h => pool.find(x => x.heading.toLowerCase().startsWith(h.toLowerCase()))?.heading)
+  assert.ok(named.every(Boolean), 'each example few names is in the pool')
+  assert.deepEqual(few.chosen, pool.map(x => x.heading).filter(h => named.includes(h)), 'in the order of the pool')
   assert.doesNotMatch(textOf('cards', ROOT, env('sketches')).text, /```js/)
 })
 

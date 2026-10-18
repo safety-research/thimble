@@ -55,7 +55,7 @@ export const FEATURES = {
       v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' },
       // the card ablation: the same principles in all five, which differ only in what steers quality
       principles: { about: "ablation a: the runtime's principles (the lean skill's card section) and the principles of a great output, no examples", parts: ABLATION },
-      few: { about: 'ablation b: a, and 3 worked examples from the pool', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', only: ['Heat strips', 'Brushable timeline', 'Trail of a run'] }] },
+      few: { about: 'ablation b: a, and 3 worked examples from the pool', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', only: ['Heat strips', 'Brushable timeline', 'Curves with a knob'] }] },
       many: { about: 'ablation c: a, and the whole pool of worked examples', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md' }] },
       rotate: { about: "ablation d: a, and 3 worked examples from the pool, a different 3 per session (the session's id picks them)", parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', pick: 3 }] },
       sketches: { about: 'ablation e: a, and the pool as sketches (the picture, its encoding, its interaction), no programs', parts: [...ABLATION, { file: 'prompts/forms/parts/sketches.md' }] },

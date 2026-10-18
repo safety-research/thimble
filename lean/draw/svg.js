@@ -645,7 +645,9 @@ export function renderSvg(drawing, opts = {}) {
         case 'fill': {
           const [, fx, fy, fw, fh, ch, tone] = op
           if (!dry && fw > 0 && fh > 0) {
-            if ('▆█▇▅■'.includes(ch)) for (let j = 0; j < fh; j++) L.mark.push(`<rect x="${r1(X(fx))}" y="${r1(Y(fy + j) + (ch === '█' ? 0 : by))}" width="${r1(fw * cw)}" height="${ch === '█' ? rh : bh}" fill="${C(tone)}"/>`)
+            if ('█■'.includes(ch)) for (let j = 0; j < fh; j++) L.mark.push(`<rect x="${r1(X(fx))}" y="${r1(Y(fy + j) + (ch === '█' ? 0 : by))}" width="${r1(fw * cw)}" height="${ch === '█' ? rh : bh}" fill="${C(tone)}"/>`)
+            // a lower block is as tall as the terminal draws it, as c.put draws it: a height is a value
+            else if (LEVEL.includes(ch)) for (let j = 0; j < fh; j++) { const hh = (LEVEL.indexOf(ch) + 1) / 8 * rh; L.mark.push(`<rect x="${r1(X(fx))}" y="${r1(Y(fy + j) + rh - hh)}" width="${r1(fw * cw + 0.3)}" height="${r1(hh)}" fill="${C(tone)}"/>`) }
             else if (SHADE[ch]) L.mark.push(`<rect x="${r1(X(fx))}" y="${r1(Y(fy) + (fh === 1 ? by : 0))}" width="${r1(fw * cw)}" height="${fh === 1 ? bh : fh * rh}" fill="url(#${id}-hatch)"/>`)
             else if (ch === ' ') L.mark.push(`<rect x="${r1(X(fx))}" y="${r1(Y(fy))}" width="${r1(fw * cw)}" height="${fh * rh}" fill="${C('paper')}"/>`)
             else if ('─━╌┄┈═·'.includes(ch)) for (let j = 0; j < fh; j++) L.mark.push(hl(X(fx), X(fx + fw), Y(fy + j) + rh / 2, tone, ch))
