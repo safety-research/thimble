@@ -3,34 +3,50 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Atlas</title>
+<title>Claims</title>
 <!--
-  Atlas in the browser: the claims of one atlas object as a force graph. Nodes are colored by kind, clusters are soft
-  regions, a hover names a claim and its neighbors, a click opens the claim below the graph with its evidence (each
-  citation opens its rows through `lean resolve`), its related claims and ↵ ask. 1-5 filter by kind, / searches.
-  It reads the object through the page server: ?o=<object id> (the newest atlas when left out), or ?src=<json url>.
-  #ready opens on the settled graph with no arrival.
+  Claims in the browser: the claims made in this session (thimble/claims/<session>.json, CONTRACT 7), deduped and
+  clustered by what the work is doing. The time strip replays them in the order made (drag or click it, or ] [);
+  Color by: cluster, fact or interp, turn, or who said it; a chip of the legend shows one group alone. A revised
+  claim is struck through, with a dashed arrow to the claim that replaced it. A click opens the claim below the
+  graph: where it was said (each place opens its message), its sources (each opens its rows), ×N, what it replaces.
+
+  A page folder like the others, served behind the session's token: it reads /api/claims (or ?src=<json url>, or
+  window.CLAIMS_STORE for a static page) and polls while visible. ?embed=1 leaves out its own header, for a tab of
+  another page: a press on a place where a claim was said then posts {type: 'thimble:row', row} to the parent page,
+  and the parent can post {type: 'thimble:open-claim', claim} to open one. #ready opens on the settled graph with no
+  arrival; #c=<id> opens a claim.
 -->
-<link rel="stylesheet" href="atlas.css">
+<link rel="stylesheet" href="claims.css">
 </head>
 <body>
 <div id="app">
   <header class="ah">
-    <span class="icon"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><g stroke="#fff" stroke-width="1.2" opacity=".75"><line x1="4" y1="5" x2="11" y2="4"/><line x1="4" y1="5" x2="6" y2="12"/><line x1="11" y1="4" x2="6" y2="12"/><line x1="11" y1="4" x2="13" y2="10"/></g><g fill="#fff"><circle cx="4" cy="5" r="2"/><circle cx="11" cy="4" r="1.6"/><circle cx="6" cy="12" r="2.2"/><circle cx="13" cy="10" r="1.3"/></g></svg></span>
-    <div class="tt"><b>Atlas</b><small id="sub">loading</small></div>
+    <span class="icon"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><g stroke="#fff" stroke-width="1.2" opacity=".75"><line x1="4" y1="5" x2="11" y2="4"/><line x1="4" y1="5" x2="6" y2="12"/><line x1="11" y1="4" x2="13" y2="10"/></g><g fill="#fff"><circle cx="4" cy="5" r="2"/><circle cx="11" cy="4" r="1.6"/><circle cx="6" cy="12" r="2.2"/><circle cx="13" cy="10" r="1.3"/></g></svg></span>
+    <div class="tt"><b>Claims</b><small id="sub">loading</small></div>
     <span class="sp"></span>
     <span class="st" id="st"></span>
   </header>
-  <div class="atool" id="atool"></div>
-  <div id="gwrap">
-    <canvas id="g"></canvas>
-    <div id="gstat"></div>
-    <div id="glegend"></div>
-    <div id="ghint">hover a claim · click to open · drag to move</div>
-    <div id="empty"></div>
-    <div id="detail"></div>
+  <div class="card">
+    <div class="tool">
+      <div class="row1">
+        <label class="search" id="search"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".55"/><path d="M10.5 10.5l3.4 3.4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".55"/></svg><input id="q" placeholder="Search claims" spellcheck="false" autocomplete="off"><span class="n" id="qn"></span></label>
+        <div class="upto" id="upto"></div>
+        <div class="strip" id="strip" title="drag or click to replay the claims in the order made · ] [ step"></div>
+      </div>
+      <div class="row2">
+        <label class="colorby"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".6"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11z" fill="currentColor" opacity=".6"/></svg>Color by: <select id="colorby"><option value="cluster">cluster</option><option value="tag">fact or interp</option><option value="turn">turn</option><option value="by">who said it</option></select></label>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
+    <div class="count"><span id="count"></span><span class="from" id="from">from Claude's work and our chat · deduped</span></div>
+    <div id="gwrap">
+      <canvas id="g"></canvas>
+      <div id="empty"></div>
+    </div>
   </div>
+  <div class="detail" id="detail"></div>
 </div>
-<script src="atlas.js"></script>
+<script src="claims.js"></script>
 </body>
 </html>
