@@ -36,8 +36,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, ObserverLine, Ranking } from '../types'
-import { drawnTextOf, rankedId, verbsOf } from '../shell/shell'
-import { digest, hintsFor, isRepeat, jsonIn, parseAnswer, pickHints } from './evidence.js'
+import { answerRow, applyObserver, drawnTextOf, messageRecord } from '../shell/shell'
+import { glossesOf, verbsOf as litVerbs } from '../shell/message.js'
+import { digest, isRepeat, jsonIn, parseAnswer } from './evidence.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,12 +49,15 @@ type Answer = {
   line: { line: string; decision: string; title: string; explanation: string; rests_on: string } | null
   settled: boolean
   hints: Record<string, unknown>
+  verbs: Record<string, unknown>
+  glosses: unknown[]
 }
 type Look = { turnId: string; turnNo: number; steps: number; tools: number; answer: string; question: string; since: number }
 
 const LINE = { plugin: 'thimble-lean', key: 'line' } as const
 const RANKED = { plugin: 'thimble-lean', key: 'ranked' } as const
 const LAST = { plugin: 'thimble-lean', key: 'last' } as const
+const TRAY = { plugin: 'thimble-lean', key: 'tray' } as const
 
 const KEEP = 50 // lines shown and known, remembered, as YSK
 const CLEAR_AFTER_PROMPTS = 2 // an unanswered line clears at the second next prompt, as YSK
@@ -63,7 +67,15 @@ export const skipsFor = (n: number) => (n <= TYPED_PAST_FREE ? 0 : Math.min(MAX_
 const LONG_ANSWER = 800 // characters: a turn that ran no tool is substantial when its answer is this long
 const CONTEXT_OBJECTS = 4 // objects the fork reads: every new one, then the latest older ones up to this many
 const NOTE_HEAD = 'Here is a note offered by a side agent:'
-const K = { seen: 'observer.seen', known: 'observer.known', typedPast: 'observer.typedPastInARow', skip: 'observer.looksToSkip', off: 'observer.off' }
+const K = {
+  seen: 'observer.seen', known: 'observer.known', typedPast: 'observer.typedPastInARow', skip: 'observer.looksToSkip', off: 'observer.off',
+  // glosses: the terms the person saw explained (never glossed again), looks whose glosses nobody opened, looks to skip
+  glossed: 'observer.glossed', glossUnopened: 'observer.glossUnopened', glossSkip: 'observer.glossSkip',
+}
+const GLOSSED_KEEP = 100
+const GLOSS_FREE = 2 // looks whose glosses nobody opened before glosses back off
+export const glossSkipsFor = (n: number) => (n <= GLOSS_FREE ? 0 : Math.min(8, 2 ** (n - GLOSS_FREE - 1)))
+const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
 
 const S = {
   observerPrompt: '',
@@ -317,12 +329,10 @@ async function look($: Engine, t: Look): Promise<void> {
       return
     }
     row.why = [substantial ? 'work' : '', decision ? 'decision' : '', drift ? 'drift' : ''].filter(Boolean).join(', ')
-    const verbs: Record<string, Any[]> = {}
     const digests: string[] = []
     for (const x of objs) {
-      verbs[x.ref.id] = await verbsOf($, x.ref).catch(() => [])
       const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(err => `(the person cannot see it: it does not draw: ${cut(String((err as Error)?.message || err), 160)})`) : ''
-      digests.push(digest(x.object, { verbs: verbs[x.ref.id], isNew: x.isNew, drawn }))
+      digests.push(digest(x.object, { isNew: x.isNew, drawn }))
     }
     const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through lean)'
 
@@ -336,6 +346,10 @@ async function look($: Engine, t: Look): Promise<void> {
       : skips > 0
         ? '\nThe person typed past the last lines without a look. Give no line this time: notes only.\n'
         : ''
+    const glossed = strs(await $.store.get(K.glossed))
+    const glossSkip = Math.min(8, num(await $.store.get(K.glossSkip)))
+    const glossRule = glossSkip > 0 ? '\nThe person has not opened the last glosses. Give no glosses this time.\n' : ''
+    const inRow = ((await $.state.get(ROWVERBS)).value ?? []) as { key: string; name: string }[]
     const qText = q.out
       ? drift
         ? `A part is missing or replaced: ${drift}`
@@ -346,6 +360,10 @@ async function look($: Engine, t: Look): Promise<void> {
       .replace('{{QUESTION}}', cut(t.question, 4000) || '(none)')
       .replace('{{DECISION}}', decision || 'none stated')
       .replace('{{ANSWER}}', cut(answer, 16000))
+      .replace('{{LINES}}', String(answer.split('\n').length))
+      .replace('{{ROW}}', inRow.length ? inRow.map(v => `${v.key} ${v.name}`).join(', ') : 'v visualize, s squeeze')
+      .replace('{{GLOSSED}}', bullets(glossed.slice(-GLOSSED_KEEP)))
+      .replace('{{GLOSS_RULE}}', glossRule)
       .replace('{{OBJECTS}}', digests.length ? digests.join('\n\n') : 'No objects yet.')
       .replace('{{COVERAGE}}', coverage)
       .replace('{{SEEN}}', bullets(seen.slice(-KEEP)))
@@ -411,19 +429,25 @@ async function look($: Engine, t: Look): Promise<void> {
     }
     row.notes_added = added
 
-    // the hint rows of the new objects
-    const ranked: Record<string, unknown> = {}
-    for (const x of fresh) {
-      const list = pickHints(hintsFor(out?.hints, x.ref.id), verbs[x.ref.id] || [])
-      if (!list.length) continue
-      const ranking: Ranking = { verbs: list, at: await $.clock.now(), by: 'observer' }
-      const id = rankedId(x.ref)
-      ranked[`${x.ref.id}@${x.ref.v}`] = list
-      if (moved) S.deferred.push({ id, ranking })
-      else await applyRanking($, id, ranking)
+    // the message row of the turn's answer: the verbs it lights and its glosses, in the answer's record
+    const at = await answerRow($)
+    if (at && out) {
+      const kept = await messageRecord($, at)
+      const shown = kept ? String(kept.shown ?? kept.text) : answer
+      const verbs = litVerbs(out.verbs)
+      if (!inRow.some(v => v.key === 'a')) delete (verbs as Record<string, unknown>).a
+      const glosses = glossSkip > 0 ? {} : glossesOf(out.glosses, shown, glossed)
+      const rec = await applyObserver($, at, { verbs, glosses })
+      const placed = rec ? Object.entries(rec.glosses || {}).filter(([id]) => rec.marks.some(m => m.gloss === id)).map(([, g]) => g.term) : []
+      row.verbs_lit = Object.keys(verbs)
+      row.glosses = placed
+      if (placed.length) {
+        await $.store.set(K.glossed, [...glossed, ...placed].slice(-GLOSSED_KEEP))
+        const n = num(await $.store.get(K.glossUnopened)) + 1
+        await $.store.set(K.glossUnopened, n)
+        await $.store.set(K.glossSkip, glossSkipsFor(n))
+      } else if (glossSkip > 0) await $.store.set(K.glossSkip, glossSkip - 1)
     }
-    row.hints = ranked
-    if (moved && Object.keys(ranked).length) row.hints_wait = 'for the running turn to end'
     if (skips > 0) await $.store.set(K.skip, skips - 1)
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
@@ -622,6 +646,8 @@ export const registerObserver: Register = (on, options) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const v = await openLine($)
+    // the tray, which the person opened, has the band while it is open
+    if ((await $.state.get(TRAY)).value) return next(e)
     if (e.props.hasSurvey || !v || !(await isOn($))) return next(e)
     return band($, e, v)
   })

@@ -1,6 +1,6 @@
 // Browser mode (shell/shell.tsx): off by default, so nothing of it shows and no server starts; on, `o browser` shows
 // under replies and cards, /browser opens the session's page, and what the person does on a page comes back as one
-// line: an ask becomes a prompt that carries its scope, a verb press runs that verb on the message's card.
+// line: an ask becomes a prompt that carries its scope, a verb press runs that verb on the message.
 // `claude plugin test lean`. The page server is answered here, at process.spawn, the drawing and verbs at process.run.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -130,8 +130,10 @@ test('browser mode on: o browser under replies and cards, and /browser starts th
   const drawn = textOf(await reply($))
   expect(drawn).toContain('o browser')
   expect(drawn.match(/o browser/g)!.length).toBe(2)
-  // a plain reply carries it too: the mirror opened at that reply
-  expect(textOf(await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: 'bbbbbbbb-0000', props: { text: 'Done.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never))).toContain('o browser')
+  // the chips stand in the message layer's rows: the answer's verb row and the card's row. A text between tool calls
+  // (not the turn's answer) has no row, so it draws as Claude Code draws it
+  expect(drawn).not.toContain('· · ')
+  expect(textOf(await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: 'bbbbbbbb-0000', props: { text: 'Done.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never))).toBe('the reply')
   const r = await $.command.run({ command: 'browser', args: '' } as never)
   expect(String(r.text)).toContain('Opened this session in the browser')
   // one server, on this session's folder and id, and the page opened at the mirror
@@ -164,7 +166,7 @@ test('an ask from the browser goes to Claude as a prompt, its scope beside it fo
   expect(context).toContain('q1#day=2026-06-18@n')
 })
 
-test('an ask about a citation or a gloss names it; a verb pressed in the browser runs on the message\'s card', { options: { browser: true } }, async ($, on) => {
+test('an ask about a citation or a gloss names it; a verb pressed in the browser runs on the message', { options: { browser: true } }, async ($, on) => {
   const w = world(on, [
     { ask: 'where is this from?', scope: { row: AT, mark: { kind: 'cite', ref: 'q1#day=2026-06-18@n', label: '6,543' } } },
     { verb: 's', row: AT },
@@ -178,13 +180,13 @@ test('an ask about a citation or a gloss names it; a verb pressed in the browser
   const context = hidden(session)
   expect(context).toContain('your citation "6,543" (q1#day=2026-06-18@n)')
   expect(context).toContain('June 18 had 6,543')
-  // s is squeeze's key: it ran on the card under that message, with the message's record
-  const input = w.inputs[0] as { object: { id: string }; record: { row: string }; row: string }
-  expect(input.object.id).toBe('01-saves')
+  // s is squeeze's key: it ran on the message, as the terminal's verb row runs it, with the message's record
+  const input = w.inputs[0] as { object: { id: string; kind: string }; message: { row: string }; row: string }
+  expect(input.object.kind).toBe('message')
   expect(input.row).toBe(AT)
-  expect(input.record.row).toBe(AT)
-  // a key no verb has: one line that says so
-  expect(w.toasts.some(t => t.includes('no verb is on that key'))).toBe(true)
+  expect(input.message.row).toBe(AT)
+  // a key no verb of the row has: one line that says so
+  expect(w.toasts.some(t => t.includes('no verb of the row is on that key'))).toBe(true)
 })
 
 test('browser mode turned off in /config ends the server and hides o again', { options: { browser: true } }, async ($, on) => {
