@@ -249,3 +249,21 @@ def test_a_query_prints_little_beyond_what_claude_asked_for(root: Path) -> None:
     bad = Q.run(st, "bad", 'df = load("saves.jsonl")\ndef f(x):\n    return x.nope\ndf.id.map(f)')
     assert "line 3, in f: return x.nope" in bad["stdout"] and "AttributeError" in bad["stdout"]
     assert "query.py" not in bad["stdout"]
+
+
+def test_a_later_query_uses_an_earlier_querys_output_without_running_it_again(root: Path) -> None:
+    st = Store(root)
+    by_day = Q.run(st, "saves per day", 'df = load("saves.jsonl")\ndf["day"] = df.time.str[:10]\ntally(df, "day")')
+    busy = Q.run(st, "busy days", 'd = use("%s")\nd[d.n >= 3]' % by_day["id"])
+    assert busy["error"] is None and busy["lineage"] == "exact"
+    assert [r["day"] for r in busy["table"]] == ["2026-06-01", "2026-06-02"]
+    assert busy["rows"][1] == ["saves.jsonl#L4-8"]
+    assert busy["uses"] == [{"name": by_day["id"], "query": by_day["id"]}]
+    assert [x["path"] for x in Q.all_inputs(st, busy)] == ["saves.jsonl"]
+    # a grouped count (no _refs of its own) is used with the rows its lineage found, and tally() builds on them
+    users = Q.run(st, "per user", 'df = load("saves.jsonl")\ndf.groupby("user").size().rename("n")')
+    both = Q.run(st, "all users", 'tally(use("%s"))' % users["id"])
+    assert both["table"][0]["n"] == 2 and R.count(both["rows"][0]) == 10
+    printed = Q.run(st, "printed", 'print(1)')
+    bad = Q.run(st, "use it", 'use("%s")' % printed["id"])
+    assert bad["error"] and "only printed" in bad["error"]

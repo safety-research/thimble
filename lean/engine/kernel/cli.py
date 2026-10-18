@@ -244,7 +244,7 @@ def cmd_q(a: argparse.Namespace) -> int:
     if read:
         tail.append("read " + ", ".join(read[:6]) + (f" and {len(read) - 6} more files" if len(read) > 6 else ""))
     if q.get("uses"):
-        tail.append("uses " + ", ".join(f"{u['name']} (kept by {u['query']})" for u in q["uses"]))
+        tail.append("uses " + ", ".join(u["name"] if u["name"] == u["query"] else f"{u['name']} (kept by {u['query']})" for u in q["uses"]))
     if q.get("kept"):
         tail.append("kept " + ", ".join(q["kept"]))
     if q["external"]:
