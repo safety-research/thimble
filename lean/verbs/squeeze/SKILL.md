@@ -13,7 +13,7 @@ The original comes cut into numbered spans: `[3.2]` is the second sentence of th
 
 **Choose the dimensions for this text.** Length is often one of them, but ask what a reader of THIS text would want to turn up or down. Some examples: the story of how the work went, the background a newcomer needs, which agents or runs, how much of the numbers, the decisions that wait on the person. Choose one to three. Name each one in the reader's words, give its levels from most squeezed to fullest, and say in one line why it matters here. Do not add a dimension that the text has nothing behind.
 
-**Put first the dimension that makes it shorter.** "Shorter" and "fuller" move along it. The other dimensions change what the version is about, not only its size.
+**Put first the dimension that makes it shorter.** "Shorter" and "fuller" move along it. The other dimensions change what a version is about, not its size: two versions at the same level of the first dimension are about as long.
 
 **Keep the promise of a level's name.** If a level is called "one line", write one line. If it is called "headline", write one sentence. A short version of 6 long lines is not short. One idea goes in each line, in about 25 words or fewer.
 

@@ -24,7 +24,8 @@ export function squeezeProgram(k, data) {
     .replace(/\\\[([^\]\n]*?)\\\]\([^)\s]*\)/g, '$1')
     .replace(/`([^`]*)`/g, (m, c) => '{c2:' + c + '}')
     .replace(/\\\*\\\*([^*]+?)\\\*\\\*/g, '**$1**')
-  const words = s => String(s || '').replace(/\[([^\]\n]*)\]\([^)\s]*\)/g, '$1').replace(/`|\*\*/g, '').replace(/[\[\]{}\\]/g, '').replace(/\s+/g, ' ').trim()
+  const words = s => String(s || '').replace(/\[([^\]\n]*)\]\([^)\s]*\)/g, '$1').replace(/`|\*\*/g, '')
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, '$1$2').replace(/[\[\]{}\\]/g, '').replace(/\s+/g, ' ').trim()
   const ids = from => (from || []).filter(id => byId[id])
   const span = id => {
     const sp = byId[id]

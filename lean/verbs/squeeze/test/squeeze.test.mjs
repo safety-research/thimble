@@ -134,7 +134,7 @@ test('moving along a dimension uses a version already written, and writes a miss
   const made = (await run({ object: { text: REPORT }, model, skill: SKILL })).object
   const shorter = await run({ object: made, args: 'shorter', model, skill: SKILL })
   assert.equal(model.calls.length, 2, 'the shorter version was not written yet')
-  assert.match(model.calls[1].prompt, /Write the version at \{"length":0,"story":0\} only/)
+  assert.match(model.calls[1].prompt, /Write the version at \{"length":0,"story":0\} only. A version at the same level of "length"/)
   assert.equal(shorter.object.v, 2)
   const again = await run({ object: shorter.object, args: 'shorter', model, skill: SKILL })
   assert.match(again.text, /shortest version on length/)

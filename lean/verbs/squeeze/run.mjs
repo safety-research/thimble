@@ -283,7 +283,16 @@ async function move(ctx, sq) {
     return { text: `Line ${args.line} came from ${l.from.join(', ') || 'no span'}:\n` + l.from.map(id => `  [${id}] ${plain(byId.get(id).text)}`).join('\n') + (l.problem ? `\n  (${l.problem})` : '') }
   }
   if (args.kind === 'show') return { object: withVersion(sq, n => { n.data.show = args.show }), text: args.show ? 'The original, with what this version keeps underlined.' : sq.text }
-  if (args.kind === 'again') return run({ ...ctx, object: { ref: d.of.id, title: d.of.title, question: d.of.question, text: originalText(d) }, args: '' })
+  if (args.kind === 'again') {
+    // made afresh, as a new version of the same object, so a selection or a handoff to it still finds it
+    const r = await run({ ...ctx, object: { ref: d.of.id, title: d.of.title, question: d.of.question, text: originalText(d) }, args: '' })
+    if (r.object) {
+      Object.assign(r.object, { id: sq.id, v: (sq.v || sq.version || 1) + 1 })
+      r.object.data.of = d.of
+      r.object.text = shownText(r.object)
+    }
+    return r
+  }
   let at = { ...cur }
   let ask = ''
   if (args.kind === 'default' || args.kind === 'step') {
@@ -313,7 +322,7 @@ async function move(ctx, sq) {
   const written = d.versions.map(v => ({ at: v.at, lines: v.lines.map(l => ({ text: l.text, from: l.from })) }))
   const extra = `The dimensions so far: ${JSON.stringify(d.dims)}\nThe versions written so far: ${JSON.stringify(written)}\n\n` + (ask
     ? `The person asked: "${ask}". Write one version for it. Keep the dimensions, or replace the last one with a dimension that names what they asked for; answer with "dims" (all of them), "first" (where the new version sits) and "versions" (the new one only).`
-    : `Write the version at ${JSON.stringify(at)} only. Answer with {"versions": [ ... ]}.`)
+    : `Write the version at ${JSON.stringify(at)} only. A version at the same level of "${d.dims[0].id}" as one already written is about as long as it. Answer with {"versions": [ ... ]}.`)
   const { answer, usage, model } = await complete(ctx, request(orig, { title: d.of.title, question: d.of.question }, extra))
   const norm = normalize(answer, d.spans, d.dims)
   if (!norm.versions.length) throw new Error(`the model wrote no usable version${norm.problems.length ? ': ' + norm.problems[0] : ''}`)

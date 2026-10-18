@@ -146,7 +146,7 @@ function view(els: Any, s: { object: Obj; d: Drawn; region?: string }, key: stri
   }
   rows.push(Text({ dimColor: true, wrap: 'truncate-end', children: hints(s.object) }))
   const col = Box({ flexDirection: 'column', children: rows })
-  return bullet ? Box({ flexDirection: 'row', children: [Text({ children: '⏺ ' }), col] }) : col
+  return bullet ? Box({ flexDirection: 'row', marginTop: 1, children: [Text({ children: '● ' }), col] }) : col
 }
 
 function messagesToUnits(msgs: Any[]): { id: string; text: string }[] {
