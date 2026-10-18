@@ -29,7 +29,7 @@ import { browserOn, citeLabels, currentTheme, loadObject, openBrowser, prepared,
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
 import { cardEvent, cardKey, ownState, pressTaken, readCardState, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
-import { paneDrawing, paneFire, paneNow, paneRun, paneState, patchPaneState, setPaneState } from './panes'
+import { paneFire, paneNow, paneRun, paneState, patchPaneState, setPaneState } from './panes'
 import type { Scope } from './thread'
 import { aboutOf } from './threads.js'
 
@@ -304,8 +304,9 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
 
   // the page: the detail's program (panes/detail.js) on the card, in the room it has
   const threadRow = thread && !TW ? 1 : 0
-  const d = await paneRun($, 'detail', { id: sel.id }, { w: C, h: R - threadRow })
-  const grid = renderTerm(d, { w: C })
+  // the page beside its one-cell gutter (the mark of the part selected)
+  const d = await paneRun($, 'detail', { id: sel.id }, { w: C - 1, h: R - threadRow })
+  const grid = renderTerm(d, { w: C - 1 })
   const card = (await preparedNow($, sel, room.w, sel.state, 'detail', room.h)) ?? (lastCard && lastCard.key === `${sel.root}|${sel.id}|${sel.v ?? ''}` ? lastCard.p : null)
   const parts = partsOf({ ...grid, regions: grid.regions.filter((r: Any) => !/^ver-\d+$/.test(r.id)) })
   const region = typeof d.selected === 'string' ? d.selected : null
@@ -413,7 +414,8 @@ export async function detailKeys($: Engine): Promise<string | null> {
   if (!isOpen) return null
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return 'esc back'
-  const d = paneDrawing('detail', { id: sel.id }) ?? (await paneNow($, 'detail', { id: sel.id }))
+  // the program run now (it follows the card's drawing and the detail's state as they change)
+  const d = await paneNow($, 'detail', { id: sel.id })
   const keys = barText([{ on: drawn?.on || [] }, d])
   const ask = sel.ask ? `type to ask about ${cut(String(sel.ask.label), 40)}` : 'type to ask this card'
   const parts = keys.split(' · ').filter(Boolean)

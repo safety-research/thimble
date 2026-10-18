@@ -1633,7 +1633,7 @@ async function focusKeys($: Engine): Promise<string | null> {
   const d = await detailKeys($)
   if (d) return d
   // the Claims pane's own keys, as its program names them (panes/claims.js)
-  if ((await $.state.get(CLAIMPANE)).value) return barText([paneDrawing('claims') ?? (await paneNow($, 'claims'))]) || 'esc close'
+  if ((await $.state.get(CLAIMPANE)).value) return barText([await paneNow($, 'claims')]) || 'esc close'
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (pick?.verb === 's') {
     // the chips' own keys, as their program names them (panes/chips.js), after what it says of the message now
@@ -1721,7 +1721,14 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       if (ref) {
         // the focused card's own keys, from its first drawing (its program's k.on): each a press too
         const d = await inlineDrawing($, ref)
-        for (const g of keysOf(d)) item(`card-${g.key}`, g.words, g.key, FOCUS[theme], g.words, null, () => inlineCardAct($, ref, { type: 'key', key: g.key.split(' ')[0] === 'space' ? 'space' : g.key.split(' ')[0] }))
+        // a card key the bar's own keys take first (a verb's letter, ] [, a digit, o) reaches the card in its detail
+        // only, so it is not said here
+        const taken = new Set([...verbs.map(v => v.key), ']', '[', 'o'])
+        for (const g of keysOf(d)) {
+          const first = g.key.split(' ')[0]!
+          if (taken.has(first) || /^[0-9]$/.test(first)) continue
+          item(`card-${g.key}`, g.words, g.key, FOCUS[theme], g.words, null, () => inlineCardAct($, ref, { type: 'key', key: first }))
+        }
         item('detail', 'open detail', '1', FOCUS[theme], 'open detail', null, () => openDetail($, ref))
       }
       if (browserFlag) item('web', 'browser', 'o', FOCUS[theme], 'browser', null, async () => $.ui.toast(await openBrowser($, { row })))

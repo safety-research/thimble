@@ -1517,5 +1517,5 @@ button.lean-keybar-key:hover span {
 }
 .lean-keybar-counts {
   margin-left: auto;
-  white-space: nowrap;
+  min-width: 0;
 }

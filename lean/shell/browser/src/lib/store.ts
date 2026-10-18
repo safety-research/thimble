@@ -56,6 +56,9 @@ export interface ObjectInfo {
   verb?: string | null
   kind?: string | null
   session?: string | null
+  /** where the person left the card, on either surface (thimble/objects/.state/<id>.json) */
+  state?: Record<string, unknown>
+  region?: string | null
 }
 export interface ThreadTurn {
   role: 'user' | 'assistant'
@@ -88,7 +91,7 @@ export interface SessionInfo {
   title: string
   started: string | null
   rows: number
-  coverage: { total: { files: number; rows: number; not_read_files: number; not_read_rows: number }; groups: { group: string; files: number; rows: number; byStatus: Record<string, number> }[] } | null
+  coverage: { total: { files: number; rows: number; not_read_files: number; not_read_rows: number }; share?: number; groups: { group: string; files: number; rows: number; byStatus: Record<string, number> }[] } | null
 }
 export interface Ask {
   at: string
@@ -209,6 +212,12 @@ async function refresh(): Promise<void> {
     if (!same(m.rows, state.rows)) patch.rows = m.rows || []
   }
   if (!o.error && !same(o.objects, state.objects)) patch.objects = o.objects || []
+  // every card's state as either surface left it (the terminal keeps them): the board draws each card so
+  if (!o.error) {
+    const kept: Record<string, Record<string, unknown>> = {}
+    for (const x of (o.objects || []) as ObjectInfo[]) if (x.state && !same(x.state, state.cardStates[x.id])) kept[x.id] = x.state
+    if (Object.keys(kept).length) patch.cardStates = { ...state.cardStates, ...(patch.cardStates || {}), ...kept }
+  }
   if (!t.error && !same(t.threads, state.threads)) patch.threads = t.threads || []
   if (!a.error && !same(a.asks, state.asks)) patch.asks = a.asks || []
   // the open card's interaction state, as the terminal may have changed it (thimble/objects/.state/<id>.json)

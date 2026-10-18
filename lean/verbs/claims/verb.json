@@ -8,8 +8,8 @@
   "writer": "the observer's one fork after each turn of work gives the turn's claims, each with what it means (precisely, based_on, judgment, unstated), and claims.js applyTurn places, dedupes, links and clusters them; the corpus orientation (a subagent of main, guided by SKILL.md) adds the corpus's claims with `lean verb claims save`",
   "offer": "estimate.mjs: the time and tokens of the corpus orientation, which /verb claims orient asks Claude to start",
   "forms": {
-    "terminal": "c: the claims as a graph, an island of dots per cluster; the claim the ring is on shows a card of what it means and its links; r replays the graph in the order the claims were made",
-    "browser": "shell/browser/claims/: the same graph; pointing at a claim shows its card and its links; a click opens the message where it was said; Replay or r grows the graph again"
+    "terminal": "c: the claims pane (panes/claims.js), an island of dots per cluster; the claim the ring is on shows a card of what it means and its links; r replays the graph in the order the claims were made",
+    "browser": "Files › Claims: the same program on the same store and state; pointing at a claim shows its card and its links; a click on the claim shown opens the message where it was said; r replays the graph"
   },
   "keys": {
     "c": "open or close the claims graph",

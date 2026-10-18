@@ -38,7 +38,7 @@ export type Inst = {
   drawing: Any | null
   size: Size | null
   got: Record<string, unknown>
-  asked: Set<string>
+  asked: Map<string, number>
   gen: Record<string, number>
   ask: Any | null
   data: { key: string; value: Any } | null
@@ -66,7 +66,7 @@ export function instance(name: string, args: Record<string, unknown> = {}): Inst
   const id = keyOf(name, args)
   let i = insts.get(id)
   if (!i) {
-    i = { id, name, args: { ...args }, state: {}, loaded: false, drawing: null, size: null, got: {}, asked: new Set(), gen: {}, ask: null, data: null }
+    i = { id, name, args: { ...args }, state: {}, loaded: false, drawing: null, size: null, got: {}, asked: new Map(), gen: {}, ask: null, data: null }
     insts.set(id, i)
   } else i.args = { ...i.args, ...args }
   return i
@@ -132,8 +132,10 @@ export async function paneRun($: Engine, name: string, args: Record<string, unkn
   if (!drawing?.error) inst.drawing = drawing
   // what the program wants that is not in hand: read once, outside the drawing, and drawn again with it
   for (const w of wantsOpen(drawing, inst.got)) {
-    if (inst.asked.has(w.key)) continue
-    inst.asked.add(w.key)
+    // asked once; asked again only when no answer came for a while (a read that died with a reload of the module)
+    const at = inst.asked.get(w.key)
+    if (at != null && Date.now() - at < 15000) continue
+    inst.asked.set(w.key, Date.now())
     $.clock.after(0, () => {
       void (async () => {
         try { inst.got = { ...inst.got, [w.key]: await paneWant($, inst.name, inst.args, w.request) } } catch (err) { inst.got = { ...inst.got, [w.key]: { error: String((err as Error)?.message || err).slice(0, 200) } } }

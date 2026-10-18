@@ -122,6 +122,15 @@ export function codeFile(parts) {
   return ok ? fileUnder(LEAN_DIR, p.join('/')) : null
 }
 
+/** The share of the folder's rows Claude read, as the terminal's thimble line counts it: per file, the rows computed
+ *  over, else the lines read, else the rows shown, of its rows; a file searched or named counts as not read. */
+export function readShare(files) {
+  const list = Array.isArray(files) ? files : []
+  const one = f => (!f || !f.rows ? 0 : f.computed ? Math.min(1, f.computed / f.rows) : f.read_lines ? Math.min(1, f.read_lines / Math.max(1, f.lines || f.rows)) : f.shown ? Math.min(1, f.shown / f.rows) : 0)
+  const rows = list.reduce((n, f) => n + (Number(f?.rows) || 0), 0)
+  return rows > 0 ? list.reduce((n, f) => n + one(f) * (Number(f.rows) || 0), 0) / rows : 0
+}
+
 /** A pane's state file: thimble/panes/<session>/<key>.json (CONTRACT 8), or null. */
 export function paneFile(root, session, key) {
   if (!SESSION.test(String(session || '')) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(String(key || ''))) return null
@@ -457,7 +466,11 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       const list = names.map(n => readJson(join(root, 'thimble', 'objects', n))).filter(Boolean)
         // this session's: saved by Claude, or by a verb the person ran in it (the person's reads go as person-<id>)
         .filter(o => !sess || !o.session || o.session === sess || o.session === personEnv.LEAN_SESSION)
-        .map(o => ({ id: o.id, version: o.version, title: o.title || o.id, question: typeof o.question === 'string' ? o.question.slice(0, 300) : '', updated: o.updated || null, created: o.created || null, verb: o.verb || null, kind: o.kind || null, session: o.session || null }))
+        .map(o => {
+          // where the person left the card (either surface): its board face draws with it
+          const kept = ID.test(String(o.id)) ? readJson(join(root, 'thimble', 'objects', '.state', `${o.id}.json`)) : null
+          return { id: o.id, version: o.version, title: o.title || o.id, question: typeof o.question === 'string' ? o.question.slice(0, 300) : '', updated: o.updated || null, created: o.created || null, verb: o.verb || null, kind: o.kind || null, session: o.session || null, ...(kept && kept.state ? { state: kept.state, region: kept.region || null } : {}) }
+        })
       return json({ objects: list })
     }
     if (api === 'from' && args.length === 1) {
@@ -552,7 +565,7 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
     // what Claude's session read, as `lean coverage` counts it, once per change of the folder
     if (coverage.at !== sig) {
       const c = sess ? await leanJson(lean, root, ['coverage'], { LEAN_SESSION: sess }) : { error: 'no session' }
-      coverage = { at: sig, value: c.error ? null : { total: c.total, groups: (c.groups || []).slice(0, 4).map(g => ({ group: g.group, files: g.files, rows: g.rows, byStatus: g.by_status })) } }
+      coverage = { at: sig, value: c.error ? null : { total: c.total, share: readShare(c.files), groups: (c.groups || []).slice(0, 4).map(g => ({ group: g.group, files: g.files, rows: g.rows, byStatus: g.by_status })) } }
     }
     return { session: sess, root, folder: basename(root), title: firstPrompt ? firstPrompt.text : '', started: rows[0]?.at || null, rows: rows.length, coverage: coverage.value }
   }

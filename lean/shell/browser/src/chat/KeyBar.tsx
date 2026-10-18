@@ -73,7 +73,8 @@ export function KeyBar() {
     if (selected) left.push({ key: '1', words: 'open detail', act: () => setState({ card: { id: selected, v: null, region: null } }) })
   }
   const cites = useMemo(() => rows.reduce((n, r) => n + (r.record ? prepare(r.record).marks.filter((m) => m.kind === 'cite').length : 0), 0), [rows])
-  const cov = info?.coverage?.total?.rows ? 1 - (info.coverage.total.not_read_rows || 0) / info.coverage.total.rows : 0
+  // the share of the folder's rows Claude read, as the terminal's line counts it
+  const cov = typeof info?.coverage?.share === 'number' ? info.coverage.share : 0
   const counts = [
     [objects.length, objects.length === 1 ? '1 card' : `${objects.length} cards`],
     [threads.length, threads.length === 1 ? '1 thread' : `${threads.length} threads`],

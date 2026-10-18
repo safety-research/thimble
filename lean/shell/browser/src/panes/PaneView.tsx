@@ -244,7 +244,10 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
         }}
         onMouseMove={(e) => {
           const r = regionAt(e.target)
-          if (!r || r === hovered.current) return
+          // off every part the hover stays where it is (the card of a claim stays to be read); back on a part it is
+          // that part's again
+          if (!r) { hovered.current = null; return }
+          if (r === hovered.current) return
           hovered.current = r
           fire({ type: 'hover', region: r })
         }}
