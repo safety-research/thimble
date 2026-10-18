@@ -41,8 +41,15 @@ def excerpt(row: S.Row, width: int = 240) -> str:
     elif isinstance(v, dict) and "text" in v and len(v) <= 6 and isinstance(v["text"], str):
         s = " ".join(v["text"].split())
     elif isinstance(v, dict):
-        s = json.dumps({k: (x if not isinstance(x, str) or len(x) < 120 else x[:120] + "…") for k, x in v.items()},
-                       ensure_ascii=False, default=str)
+        def short(x: Any) -> Any:
+            if isinstance(x, str):
+                x = " ".join(x.split())
+                return x if len(x) <= 60 else x[:59] + "…"
+            if isinstance(x, (dict, list)):
+                t = json.dumps(x, ensure_ascii=False, default=str)
+                return t if len(t) <= 60 else t[:59] + "…"
+            return x
+        s = ", ".join(f"{k}: {short(x)}" for k, x in v.items() if x not in (None, "", [], {}))
     else:
         s = " ".join(str(v).split())
     return s if len(s) <= width else s[: width - 1] + "…"
@@ -373,10 +380,16 @@ def coverage_text(cov: dict[str, Any], max_lines: int = 40) -> str:
         for o in sorted(cov["files"], key=lambda o: (["computed", "read", "searched", "named", "not read"].index(o["status"]), o["path"])):
             lines.append(f"  {o['status']:<9} {o['path']}  {file_line(o)}")
     else:
-        for g in cov["groups"][:max_lines]:
+        order = ["computed", "read", "searched", "named", "not read"]
+        shown = [g for g in cov["groups"] if g["files"] > 1 or set(g["by_status"]) != {"not read"}][:12]
+        for g in shown:
             st = g["by_status"]
-            parts = [f"{n} {k}" for k, n in sorted(st.items(), key=lambda kv: ["computed", "read", "searched", "named", "not read"].index(kv[0]))]
+            parts = [f"{n} {k}" for k, n in sorted(st.items(), key=lambda kv: order.index(kv[0]))]
             lines.append(f"  {g['group']}  {g['files']:,} file{'s' if g['files'] != 1 else ''}, {g['rows']:,} rows: {', '.join(parts)}")
+        others = [g for g in cov["groups"] if g not in shown]
+        if others:
+            lines.append(f"  {sum(g['files'] for g in others):,} other files ({sum(g['rows'] for g in others):,} rows): "
+                         + ", ".join(f"{sum(g['by_status'].get(k, 0) for g in others)} {k}" for k in order if any(g['by_status'].get(k) for g in others)))
         touched = [o for o in cov["files"] if o["status"] != "not read"]
         if touched:
             lines.append("  touched:")

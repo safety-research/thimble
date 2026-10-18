@@ -6,7 +6,7 @@ session's permission mode and sandbox like any other command.
                                             rows with their refs: one ref, or a random sample of a file or glob
     lean q "what it answers" <<'PY' ... PY  run Python over the sources; keeps the code, inputs, output and the rows
                                             behind each output row (lean q --rerun q3 runs a query again)
-    lean save [NAME] [--rerun] <<'JSON' ... JSON
+    lean save [NAME] [--rerun] <<'JSON' ... JSON   (or --from FILE)
                                             save an object (program + data + lineage) or a new version of one
     lean list [NAME]                        the objects, or one object with its lineage
     lean resolve REF [-n 5] [--random]      where a value came from, down to its source rows
@@ -72,11 +72,21 @@ def cmd_sources(a: argparse.Namespace) -> int:
         groups: dict[str, list[str]] = {}
         for f, g in S.group_of(files).items():
             groups.setdefault(g, []).append(f)
-        for g, fs in sorted(groups.items(), key=lambda kv: -sum(cnt.get(f, {}).get("rows", 0) for f in kv[1])):
+        ranked = sorted(groups.items(), key=lambda kv: -sum(cnt.get(f, {}).get("rows", 0) for f in kv[1]))
+        top, rest = ranked[:12], ranked[12:]
+        for g, fs in top:
             kinds = sorted({str(cnt.get(f, {}).get("kind")) for f in fs})
             rows = sum(cnt.get(f, {}).get("rows", 0) for f in fs)
             size = sum(cnt.get(f, {}).get("size", 0) for f in fs)
             print(f"{g}  {len(fs)} file{'s' if len(fs) != 1 else ''}  {'/'.join(kinds)}  {fmt(rows)} rows  {size / 1e6:.1f} MB")
+        by_top: dict[str, list[str]] = {}
+        for _, fs in rest:
+            for f in fs:
+                by_top.setdefault(f.split("/")[0] + ("/" if "/" in f else ""), []).append(f)
+        for t, fs in sorted(by_top.items(), key=lambda kv: -len(kv[1])):
+            kinds = sorted({str(cnt.get(f, {}).get("kind")) for f in fs})
+            rows = sum(cnt.get(f, {}).get("rows", 0) for f in fs)
+            print(f"{t}…  {len(fs)} more files  {'/'.join(kinds)}  {fmt(rows)} rows  (lean sources '{t}**' lists them)")
     total = sum(c.get("rows", 0) for c in cnt.values())
     print(f"\n{len(files):,} source files, {total:,} rows under {st.root}. A row's ref is its stable id: cite it as [↗](<ref>).")
     return 0
@@ -169,11 +179,15 @@ def cmd_rows(a: argparse.Namespace) -> int:
     for row in kept:
         print(f"{row.ref}  {shorten(row.value, width, fields)}")
     how = "the first in file order" if a.first else f"chosen at random (seed {a.seed})"
-    scope = f"{fmt(total)} in {files[0]}" if len(files) == 1 else f"{fmt(total)} in {len(files)} files"
-    if a.first and not (rx or where) and total == len(kept):
-        scope = f"read up to row {len(kept)} of {files[0] if len(files) == 1 else str(len(files)) + ' files'}"
     cond = " matching" if (rx or where) else ""
-    print(f"\n{len(kept)} of {fmt(matched)}{cond} rows (of {scope}), {how}. Cite one as [↗](<ref>).")
+    if a.first and not (rx or where):
+        cnt = S.counts(st.root, files, st.dir / "cache" / "counts.json")
+        all_rows = sum(c.get("rows", 0) for c in cnt.values())
+        where_ = files[0] if len(files) == 1 else f"{len(files)} files"
+        print(f"\nthe first {len(kept)} of {fmt(all_rows)} rows in {where_}. Cite one as [↗](<ref>).")
+    else:
+        scope = f"{fmt(total)} in {files[0]}" if len(files) == 1 else f"{fmt(total)} in {len(files)} files"
+        print(f"\n{len(kept)} of {fmt(matched)}{cond} rows (of {scope}), {how}. Cite one as [↗](<ref>).")
     scanned = files if (rx or where or not a.first) else []
     st.log({"kind": "rows", "how": "first" if a.first else "random", "target": a.target, "search": a.search,
             "where": a.where, "matched": matched, "total": total, "scanned": scanned, "shown": [k.ref for k in kept]})
@@ -258,7 +272,7 @@ def _lineage_line(q: dict[str, Any]) -> str:
 
 def cmd_save(a: argparse.Namespace) -> int:
     st = Store()
-    raw = stdin_text()
+    raw = Path(a.spec_file).read_text() if a.spec_file else stdin_text()
     spec: dict[str, Any] = {}
     if raw.strip():
         try:
@@ -474,6 +488,7 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(fn=cmd_q)
     p = sub.add_parser("save", help="save an object, or a new version of one")
     p.add_argument("name", nargs="?")
+    p.add_argument("--from", dest="spec_file", metavar="FILE", help="read the object's JSON from this file, not stdin")
     p.add_argument("--program", help="read the program from this file")
     p.add_argument("--rerun", action="store_true", help="run its queries again and bind the new results")
     p.add_argument("--merge", action="store_true", help="merge the JSON into the object's spec, not replace it")
