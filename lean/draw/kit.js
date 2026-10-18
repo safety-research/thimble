@@ -679,9 +679,9 @@
     2: { h: '─', v: '│', LD: '╮', UR: '╰', LU: '╯', DR: '╭' },
     1: { h: '┄', v: '┆', LD: '╮', UR: '╰', LU: '╯', DR: '╭' },
   }
-  const MAP_GOOD = /\b(fixed|merged|pass(ed|es)?|green|done|success(ful)?|solved|resolved|correct|completed?|yes|true|ok)\b|✓/i
+  const MAP_GOOD = /\b(fix(ed|es)?|merge[sd]?|pass(ed|es)?|green|done|success(ful)?|solved|resolved|correct|complete[sd]?|approved|yes|true|ok)\b|✓/i
   const MAP_BAD = /\b(fail(ed|s|ure)?|error|broke|broken|time[ds]? ?out|crash(ed)?|wrong|rejected|false|no)\b|✗/i
-  const MAP_WARN = /\b(mask(ed|s)?|skip(ped)?|retr(y|ied)|partial|gave up|stuck|flaky|stale|abandoned)\b/i
+  const MAP_WARN = /\b(mask(ed|s)?|skip(ped)?|retr(y|ied)|partial|gave up|stuck|flaky|stale|abandoned|cut off|unfinished|incomplete|stopped)\b/i
 
   // a short name for a label: the first word and the most telling other word (one with a digit or #, else the longest)
   function shortName(label) {
@@ -865,7 +865,10 @@
   MapGrid.prototype.str = function (x, y, s, tone, o) {
     o = o || {}
     let dx = 0
-    for (const ch of Array.from(String(s))) { if (this.inb(x + dx, y)) this.set(x + dx, y, { ch: ch, tone: tone || 'ink', b: !!o.b, kind: o.kind || 'text' }); dx++ }
+    let chars = Array.from(String(s))
+    // o.max: cut to that many cells, the last one an ellipsis
+    if (o.max != null && chars.length > o.max) chars = chars.slice(0, Math.max(0, o.max - 1)).concat(['…'])
+    for (const ch of chars) { if (this.inb(x + dx, y)) this.set(x + dx, y, { ch: ch, tone: tone || 'ink', b: !!o.b, kind: o.kind || 'text' }); dx++ }
     return dx
   }
   MapGrid.prototype.rect = function (id, x, y, w, h) {
@@ -1041,8 +1044,10 @@
     const labelOf = s => s.label || st(s).label || s.station
     // a short name: Claude's `short`, else the first word and the most telling other word (one with a digit or #)
     const shortOf = s => st(s).short || shortName(labelOf(s))
-    const markOf = (s, i) => s.mark || st(s).mark || (i === n - 1 && (st(s).end || MAP_GOOD.test(labelOf(s))) ? '✓' : '')
-    const markTone = (s, m) => (s.tone ? T(s.tone) : st(s).tone ? T(st(s).tone) : m === '✓' ? 'good' : 'accent')
+    // the last stop of a finished thread says how it ended: ✓ by words of success, ✗ of failure, ■ otherwise
+    const endMark = s => (MAP_GOOD.test(labelOf(s)) ? '✓' : MAP_BAD.test(labelOf(s)) ? '✗' : '■')
+    const markOf = (s, i) => s.mark || st(s).mark || (i === n - 1 && st(s).end ? endMark(s) : '')
+    const markTone = (s, m) => (s.tone ? T(s.tone) : st(s).tone ? T(st(s).tone) : m === '✓' ? 'good' : m === '✗' ? 'bad' : m === '■' ? (MAP_WARN.test(labelOf(s)) ? 'warn' : 'ink') : 'accent')
     const notes = stops.map((s, i) => ({ s, i, note: s.note || st(s).note })).filter(x => x.note)
     const ncol = W >= 100 && notes.length > 3 ? 2 : 1
     const H = full ? 8 + Math.ceil(notes.length / ncol) : 1
@@ -1059,7 +1064,8 @@
       }
       const lvl = stops.map(() => 0)
       const minOf = i => k.len(token(stops[i], i, lvl[i])) + (i < n - 1 ? 3 : 0)
-      const byFew = stops.map((s, i) => i).sort((a, b) => span(stops[a]) - span(stops[b]))
+      const keyed = i => (st(stops[i]).raw && st(stops[i]).raw.key ? 1 : 0)
+      const byFew = stops.map((s, i) => i).sort((a, b) => keyed(a) - keyed(b) || span(stops[a]) - span(stops[b]))
       for (let guard = 0; guard < 3 * n && stops.reduce((sum, s, i) => sum + minOf(i), 0) > W; guard++) {
         const i = byFew.find(j => lvl[j] < 2 && (lvl[j] < 1 || byFew.every(q => lvl[q] >= 1)))
         if (i == null) break
@@ -1094,44 +1100,38 @@
       return g
     }
 
-    // the full map: the stations spaced for reading, their first step under each, a strip to scale, then the notes
+    // the full map. Across when the names fit in one row (stations spaced for reading, their first step under each, a
+    // strip to scale, the notes below); else down, one station a row: its first step, its name, its share to scale,
+    // its note under it. Cells are too coarse for names that take turns above and below a line.
     const lastW = Math.min(18, k.len(labelOf(stops[n - 1])))
-    let xs
     const gap = n > 1 ? Math.floor((W - 1 - lastW) / (n - 1)) : W
-    if (n > 1 && gap < 4) {
-      xs = []
-      stops.forEach((s, i) => { const want = known ? Math.round(((s.from - 1) / Math.max(1, total)) * (W - 2)) : Math.round((i / (n - 1)) * (W - 2)); xs.push(i ? Math.max(xs[i - 1] + 2, want) : 0) })
-    } else xs = stops.map((s, i) => i * gap)
-    const oneRow = stops.every((s, i) => xs[i] + k.len(labelOf(s)) < (i < n - 1 ? xs[i + 1] - 1 : W + 1))
-    const yL = oneRow ? [0, 0] : [0, 1], yLine = yL[1] + 1, yNum = yLine + 1, yScale = yNum + 1
+    const xs = stops.map((s, i) => i * gap)
+    const across = n <= 8 && gap >= 4 && stops.every((s, i) => xs[i] + k.len(labelOf(s)) < (i < n - 1 ? xs[i + 1] - 1 : W + 1))
+    if (!across) return mapDown(k, M, t, W, unit, stops, reg, g.regs, { span, labelOf, markOf, markTone, known, total, T })
+    const G = g
+    const yLine = 1, yNum = 2, yScale = 3
     stops.forEach((s, i) => {
-      const tier = oneRow ? 1 : (n - 1 - i) % 2
-      const nextX = oneRow ? (i < n - 1 ? xs[i + 1] : W) : (i + 2 < n ? xs[i + 2] : W)
       let lab = labelOf(s)
-      let x0 = xs[i]
-      if (i === n - 1 && x0 + k.len(lab) > W) x0 = Math.max(n > 1 ? xs[n - 2] + 2 : 0, W - k.len(lab))
-      const room = Math.max(2, Math.max(nextX - x0 - 1, i === n - 1 ? W - x0 : 0))
-      if (k.len(lab) > room) lab = Array.from(lab).slice(0, room - 1).join('') + '…'
-      g.str(x0, yL[tier], lab, s.tone ? T(s.tone) : 'ink', { b: true })
-      g.rect(reg[i], x0, yL[tier], k.len(lab), 1)
-      if (tier === 0 && !oneRow) g.set(xs[i], yL[1], { ch: '╷', tone: 'dim', kind: 'tick' })
+      const x0 = i === n - 1 && xs[i] + k.len(lab) > W ? Math.max(n > 1 ? xs[n - 2] + 2 : 0, W - k.len(lab)) : xs[i]
+      G.str(x0, 0, lab, s.tone ? T(s.tone) : 'ink', { b: true })
+      G.rect(reg[i], x0, 0, k.len(lab), 1)
     })
     stops.forEach((s, i) => {
       const x = xs[i]
       const m = markOf(s, i) || '●'
-      g.set(x, yLine, { ch: m, tone: markTone(s, m), kind: 'mark', b: true })
-      g.rect(reg[i], x, yLine, 1, 1)
+      G.set(x, yLine, { ch: m, tone: markTone(s, m), kind: 'mark', b: true })
+      G.rect(reg[i], x, yLine, 1, 1)
       if (i < n - 1) {
         const ch = s.repeat ? '↻' : '━'
-        for (let xx = x + 1; xx < xs[i + 1]; xx++) g.set(xx, yLine, { ch: ch, tone: s.repeat ? 'c5' : (s.tone ? T(s.tone) : toneOfThread(t)), kind: s.repeat ? 'mark' : 'line' })
-        if (s.repeat) { const r = ` ×${fmt(s.repeat)} `; if (xs[i + 1] - x - 1 > k.len(r) + 2) g.str(x + 2, yLine, r, 'c5') }
+        for (let xx = x + 1; xx < xs[i + 1]; xx++) G.set(xx, yLine, { ch: ch, tone: s.repeat ? 'c5' : (s.tone ? T(s.tone) : toneOfThread(t)), kind: s.repeat ? 'mark' : 'line' })
+        if (s.repeat) { const r = ` ×${fmt(s.repeat)} `; if (xs[i + 1] - x - 1 > k.len(r) + 2) G.str(x + 2, yLine, r, 'c5') }
       }
     })
     let free = 0
     stops.forEach((s, i) => {
       if (s.from == null) return
       const txt = fmt(s.from)
-      if (xs[i] >= free && xs[i] + k.len(txt) <= W) { g.str(xs[i], yNum, txt, 'dim'); g.rect(reg[i], xs[i], yNum, k.len(txt), 1); free = xs[i] + k.len(txt) + 1 }
+      if (xs[i] >= free && xs[i] + k.len(txt) <= W) { G.str(xs[i], yNum, txt, 'dim'); G.rect(reg[i], xs[i], yNum, k.len(txt), 1); free = xs[i] + k.len(txt) + 1 }
     })
     // where the steps went: one strip to scale, a stop's segment in alternating tones, the total at its end
     if (known && n > 1) {
@@ -1140,13 +1140,12 @@
       let x = 0
       stops.forEach((s, i) => {
         const end = i === n - 1 ? sw : Math.max(x + 1, Math.round(((s.to != null ? s.to : s.from) / Math.max(1, total)) * sw))
-        for (let xx = x; xx < Math.min(end, sw); xx++) g.set(xx, yScale, { ch: '▬', tone: i % 2 ? 'dim' : 'accent', kind: 'block' })
-        g.rect(reg[i], x, yScale, Math.max(1, Math.min(end, sw) - x), 1)
+        for (let xx = x; xx < Math.min(end, sw); xx++) G.set(xx, yScale, { ch: '▬', tone: i % 2 ? 'dim' : 'accent', kind: 'block' })
+        G.rect(reg[i], x, yScale, Math.max(1, Math.min(end, sw) - x), 1)
         x = Math.min(end, sw)
       })
-      g.str(sw, yScale, tail, 'dim')
+      G.str(sw, yScale, tail, 'dim')
     }
-    // notes: the stops Claude said something about, two columns when there is room
     const cw = Math.floor(W / ncol)
     const per = Math.ceil(notes.length / ncol)
     notes.forEach((x, j) => {
@@ -1154,15 +1153,72 @@
       const X = col * cw, Y = yScale + 2 + row
       const m = markOf(x.s, x.i) || '●'
       const head = x.s.from != null ? fmt(x.s.from) : ''
-      g.set(X, Y, { ch: m, tone: markTone(x.s, m), kind: 'mark' })
-      g.str(X + 2, Y, head, 'dim')
+      G.set(X, Y, { ch: m, tone: markTone(x.s, m), kind: 'mark' })
+      G.str(X + 2, Y, head, 'dim')
       const nx = X + 2 + Math.max(6, k.len(head) + 1)
       let words = x.note
       const room = cw - (nx - X) - 2
       if (k.len(words) > room) words = Array.from(words).slice(0, Math.max(1, room - 1)).join('') + '…'
-      g.str(nx, Y, words, 'ink')
-      g.rect(reg[x.i], X, Y, cw - 1, 1)
+      G.str(nx, Y, words, 'ink')
+      G.rect(reg[x.i], X, Y, cw - 1, 1)
     })
+    return G
+  }
+
+  // ---- one thread, down: a station a row, the line running down the left, its share of the steps to scale
+  function mapDown(k, M, t, W, unit, stops, reg, regs, f) {
+    const n = stops.length
+    const st = s => M.stations.get(s.station) || {}
+    const notes = stops.map(s => s.note || st(s).note || '')
+    const wrapNote = (txt, w) => {
+      const out = []
+      let line = ''
+      for (const word of String(txt).split(/\s+/).filter(Boolean)) {
+        if (line && k.len(line) + 1 + k.len(word) > w) { out.push(line); line = word } else line = line ? line + ' ' + word : word
+        if (out.length >= 2) break
+      }
+      if (line && out.length < 2) out.push(line)
+      if (out.length === 2 && k.len(out.join(' ')) < k.len(txt)) out[1] = Array.from(out[1]).slice(0, Math.max(1, w - 1)).join('') + '…'
+      return out
+    }
+    const numW = Math.max(1, ...stops.map(s => (s.from != null ? k.len(fmt(s.from)) : 0)))
+    const barW = f.known ? Math.max(6, Math.min(24, Math.floor(W / 5))) : 0
+    const maxSpan = Math.max(1, ...stops.map(f.span))
+    const nameX = 2 + numW + 2
+    const nameW = Math.max(8, W - nameX - (barW ? barW + 2 + k.len(fmt(maxSpan)) + 1 : 0))
+    const rows = stops.map((s, i) => 1 + wrapNote(notes[i], nameW).length)
+    const back = (M.links || []).filter(l => stops.some(s => s.station === l.from))
+    const H = rows.reduce((a, b) => a + b, 0) + (f.known ? 1 : 0) + back.length
+    const g = new MapGrid(W, Math.max(1, H))
+    g.regs = regs
+    let y = 0
+    stops.forEach((s, i) => {
+      const m = f.markOf(s, i) || '●'
+      const h = rows[i]
+      g.set(0, y, { ch: m, tone: f.markTone(s, m), kind: 'mark', b: true })
+      if (i < n - 1) for (let yy = y + 1; yy < y + h; yy++) g.set(0, yy, { ch: s.repeat ? '↻' : '┃', tone: s.repeat ? 'c5' : 'accent', kind: s.repeat ? 'mark' : 'line' })
+      if (s.from != null) g.str(2 + numW - k.len(fmt(s.from)), y, fmt(s.from), 'dim')
+      let lab = f.labelOf(s) + (s.repeat ? ` ⟳${fmt(s.repeat)}` : '')
+      if (k.len(lab) > nameW) lab = Array.from(lab).slice(0, nameW - 1).join('') + '…'
+      g.str(nameX, y, lab, s.tone ? f.T(s.tone) : 'ink', { b: true })
+      if (barW) {
+        const v = f.span(s)
+        const len = Math.max(1, Math.round((v / maxSpan) * barW))
+        const bx = W - barW - 1 - k.len(fmt(maxSpan))
+        for (let j = 0; j < len; j++) g.set(bx + j, y, { ch: '▬', tone: 'accent', kind: 'block' })
+        g.str(bx + barW + 1 + k.len(fmt(maxSpan)) - k.len(fmt(v)), y, fmt(v), 'dim')
+      }
+      wrapNote(notes[i], nameW).forEach((line, j) => g.str(nameX, y + 1 + j, line, 'dim'))
+      g.rect(reg[i], 0, y, W, h)
+      y += h
+    })
+    back.forEach(l => {
+      const a = M.stations.get(l.from), b = M.stations.get(l.to)
+      g.str(0, y, '↺', 'c5')
+      g.str(nameX, y, `back: ${a ? a.label : l.from} → ${b ? b.label : l.to}${l.label ? ' (' + l.label + ')' : ''}`, 'dim', { max: W - nameX })
+      y++
+    })
+    if (f.known) g.str(nameX, y, `${fmt(f.total)}${unit ? ' ' + unit : ''} in all; a bar is a station's share`, 'dim', { max: W - nameX })
     return g
   }
 
