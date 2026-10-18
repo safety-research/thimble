@@ -200,3 +200,7 @@ A program that throws, runs past its time or draws too much shows one line under
 line, and what to fix. Warnings, such as a region with no id or a link to an id nothing defines, come back with the
 drawing. The draw tool shows you the cells
 the person sees, the region ids, the warnings, and anything cut to fit, so you can check what you made.
+
+To check an interaction before the person tries it, run the saved card with an event: `node cli.mjs
+thimble/objects/<id>.json --text --event '{"type":"key","key":"f"}'` (`cli.mjs` is beside this file). It prints the
+cells the card then draws and the state its handler set.

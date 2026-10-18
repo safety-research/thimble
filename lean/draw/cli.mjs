@@ -1,6 +1,10 @@
 // cli.mjs: draw an example (or an object file) in this terminal, the way the mod's renderer lays it out.
 //
 //   node cli.mjs <example id | object.json> [--w 100] [--h 24] [--select <region id>] [--light] [--text] [--json]
+//                [--state '{"view":"model"}'] [--event '{"type":"key","key":"f"}']
+//
+// --state and --event run the card as the person would leave it and act on it: the cells it then draws, and the state
+// and ask its handlers answered with.
 //
 // --text prints plain cells, --json the drawing. Colors are the palette's, in 24-bit escapes.
 import { readFileSync } from 'node:fs'
@@ -12,16 +16,19 @@ import { gridText, renderTerm } from './term.js'
 const args = process.argv.slice(2)
 const flag = (name, d) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : d }
 const has = name => args.includes(name)
-const what = args.find((a, i) => !a.startsWith('--') && !(i > 0 && ['--w', '--h', '--select'].includes(args[i - 1])))
+const what = args.find((a, i) => !a.startsWith('--') && !(i > 0 && ['--w', '--h', '--select', '--state', '--event'].includes(args[i - 1])))
 if (!what) { console.error('usage: node cli.mjs <example id | object.json> [--w 100] [--select id] [--light] [--text] [--json]'); process.exit(2) }
 const object = what.endsWith('.json') ? JSON.parse(readFileSync(what, 'utf8')) : loadExample(what)
 const w = Number(flag('--w', 100)), h = Number(flag('--h', 24))
-const drawing = runProgram(object, { w, h })
+const parse = s => { try { return s ? JSON.parse(s) : undefined } catch (e) { console.error(`not JSON: ${s}`); process.exit(2) } }
+const drawing = runProgram(object, { w, h, state: parse(flag('--state')), event: parse(flag('--event')) })
 if (has('--json')) { console.log(JSON.stringify(drawing, null, 1)); process.exit(0) }
 const grid = renderTerm(drawing, { w })
 if (has('--text')) { console.log(gridText(grid)); process.exit(0) }
 console.log(toAnsi(grid, { theme: has('--light') ? 'light' : 'dark', select: flag('--select') }))
 for (const x of drawing.warnings || []) console.log('\x1b[33mwarning\x1b[0m ' + x)
+if (drawing.on) console.log('\x1b[2mtakes: ' + drawing.on.map(o => o.name + (o.label ? ` (${o.label})` : '')).join(' · ') + '\x1b[0m')
+if (drawing.handled) console.log('\x1b[2m' + drawing.handled + ' → state ' + JSON.stringify(drawing.state) + (drawing.ask ? ' · ask ' + JSON.stringify(drawing.ask).slice(0, 200) : '') + '\x1b[0m')
 if (grid.cut.length) console.log('\x1b[2mcut: ' + JSON.stringify(grid.cut) + '\x1b[0m')
 console.log(`\x1b[2m${grid.w}×${grid.h} cells · ${grid.regions.length} regions · program ${drawing.ms} ms\x1b[0m`)
 
