@@ -10,7 +10,8 @@
 // `runtime`, is the lean skill's card section (the card runtime's principles) and the worked forms: when the lean
 // skill is loaded, its section is in the conversation already, so only the worked forms come. v's request asks for
 // the guidance with `lean guide cards` when it was not read yet. The session's events name the version given, the
-// command it came with and the turn.
+// command it came with and when (a hook on turn.start would also see the observer's forks, so the step is read from
+// the time).
 //
 // Skills: Claude Code finds a skill's SKILL.md where it is, and that text is the version `skill`. When another version
 // of a skill's feature is active, the skill.prompt hook serves it in place of the file's text. The same hook makes sure
@@ -35,8 +36,6 @@ const R = {
   texts: new Map<string, string>(),
   leanLoaded: false,
   cardsGiven: false,
-  turns: 0,
-  turnId: '' as unknown,
   resolving: null as Promise<void> | null,
 }
 
@@ -77,8 +76,6 @@ export async function registry($: Engine): Promise<{ idx: Any; active: Record<st
     R.session = id
     R.leanLoaded = false
     R.cardsGiven = false
-    R.turns = 0
-    R.turnId = ''
     R.resolving = resolve($)
   }
   if (R.resolving) await R.resolving
@@ -147,16 +144,6 @@ export function registerPrompts(on: Any, options: Any): void {
     return r
   }).catch(($: Engine, e: Any, next: Any) => next(e))
 
-  // the turn the session is in, for the record of when the card guidance came
-  on('turn.start', { turnId: /./ }, async ($: Engine, e: Any, next: Any) => {
-    const r = await next(e)
-    try {
-      await registry($)
-      if (e?.turnId !== R.turnId) { R.turns++; R.turnId = e?.turnId }
-    } catch { /* a gap in the record, never in the turn */ }
-    return r
-  }).catch(($: Engine, e: Any, next: Any) => next(e))
-
   // the first data command (or a toolkit read before it): the card guidance comes beside its result, once per session
   on('tool.call', { tool: /^(Read|Bash)$/ }, async ($: Engine, e: Any, next: Any) => {
     const r = await next(e)
@@ -182,7 +169,7 @@ export function registerPrompts(on: Any, options: Any): void {
       if (t.off || !t.text.trim()) return r
       R.cardsGiven = true
       const base = (FEATURES.forms.versions as Any)?.[t.version]?.base || FEATURES.forms.base
-      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: data ? `lean ${data[2]}` : `${isRead ? 'Read' : 'Bash'} of draw/TOOLKIT.md`, turn: R.turns, ...(t.chosen ? { examples: t.chosen } : {}) })
+      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: data ? `lean ${data[2]}` : `${isRead ? 'Read' : 'Bash'} of draw/TOOLKIT.md`, ...(t.chosen ? { examples: t.chosen } : {}) })
       const head = data
         ? `The card guidance (${t.id}), which thimble adds once per session with your first data command, so you have it before you draw a card.`
         : `The card guidance (${t.id}), which thimble adds when you read the toolkit before a card.`
