@@ -61,7 +61,8 @@ function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
   })
   const opened: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
-  on('ui.focus', () => ({}))
+  const focused: string[] = []
+  on('ui.focus', (_$: unknown, e: Any) => { focused.push(String(e.element ?? e.key)); return { value: {} } })
   on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble-lean' }] : [] }))
   const views: Any[] = []
   on('ui.view', (_$: unknown, e: Any) => { views.push(e); return { value: {} } })
@@ -93,7 +94,7 @@ function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
   // Claude Code's hint line under the prompt, as a hook leaves it
   on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
   on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }) as never)
-  return { files, opened, views, fills, submitted, spawns, sent, toasts, status, preps }
+  return { files, opened, views, fills, submitted, spawns, sent, toasts, status, preps, focused }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -108,6 +109,9 @@ const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'termi
 const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 140, rows: 40, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hintOf = async ($: any) => textOf(await $.ui.render(HINT))
+// the ask line's key in the pane as drawn now
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const askKeyOf = async ($: any) => /"key":"(ask-\d+)"/.exec(JSON.stringify(await $.ui.render(PANE)))?.[1] ?? 'ask-0'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function pane($: any, clock: { settle: () => Promise<void> }): Promise<string> {
@@ -180,14 +184,28 @@ test('keys act only while the composer is empty; a key that began a word gives i
   expect(await pane($, clock)).toContain('· 1 of 6,543')
   expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(await pane($, clock)).toContain('· 2 of 6,543')
-  // p lays the program over the card; a letter straight after it was the start of a word
+  // p lays the program over the card; a letter straight after it was the start of a word: both go to the ask line,
+  // never into the prompt
   expect(await ($ as Any).prompt.edit(edit('p'))).toEqual({ text: '', cursor: 0 })
   expect(await pane($, clock)).toContain('how Claude drew this')
-  expect(await ($ as Any).prompt.edit(edit('l'))).toEqual({ text: 'pl', cursor: 2 })
+  expect(await ($ as Any).prompt.edit(edit('l'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
   expect(await pane($, clock)).not.toContain('how Claude drew this')
-  // once a question has begun, every key types
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"pl"')
+  expect(await hintOf($)).toContain('↵ ask · esc back to the card')
+  // a letter that arrives before the ask line has the keys joins the question, and so does a paste (no key)
+  expect(await ($ as Any).prompt.edit(edit('a'))).toEqual({ text: '', cursor: 0 })
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"pla"')
+  expect(await ($ as Any).prompt.edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'nts here?' } as never)).toEqual({ text: '', cursor: 0 })
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"plants here?"')
+  // with words in the composer (typed there before the detail opened), every key types there
   expect(await ($ as Any).prompt.edit(edit('p', 'what about '))).toEqual({ text: 'what about p', cursor: 12 })
   expect(await ($ as Any).prompt.edit(edit(']', 'x'))).toEqual({ text: 'x]', cursor: 2 })
+  // ↵ in the ask line asks the card's thread, and the keys go back to the card
+  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
+  await ui.input({ key: await askKeyOf($), text: 'plants?' })
+  await clock.settle()
+  expect(JSON.stringify(await $.ui.render(PANE))).not.toContain('"value":"plants here?"')
   // h steps back to v1 (the history lives in the header)
   await clock.advance(1000)
   expect(await ($ as Any).prompt.edit(edit('h'))).toEqual({ text: '', cursor: 0 })
@@ -200,12 +218,11 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   const session = mock.session(on)
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
-  const r = await $.prompt.submit({ text: 'why so many links?', origin: { kind: 'composer' } } as never)
+  // the question is typed in the pane's ask line: it never passes through the prompt, so main's transcript gets no row
+  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
+  await ui.input({ key: await askKeyOf($), text: 'why so many links?' })
   await clock.advance(100)
-  // dropped from main, with where it went; the prompt box is cleared; the main view stays (the pane draws the thread)
-  expect(String((r as Any).drop)).toContain("asked the card's thread about Jun 18")
   expect(w.submitted).not.toContain('why so many links?')
-  expect(w.fills).toContain('')
   expect(w.views.length).toBe(0)
   // its agent: the question, the part and the card, and the folder of the data
   expect(w.spawns.length).toBe(1)
@@ -241,25 +258,22 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(w.status.length).toBe(0)
   expect(file.turns[1].calls).toEqual(['lean resolve "q1#day=2026-06-18@n"'])
   expect(file.turns[1].text).toContain('Links peaked that day')
-  expect(await pane($, clock)).toContain('1 question · answered')
-  // a wide pane: the card's thread is its left column, the question with its part, then the answer
-  const WIDE = { ...(PANE as Any), props: { ...(PANE as Any).props, bodyColumns: 140 } } as never
-  await $.ui.render(WIDE)
-  await clock.settle()
-  const wide = textOf(await $.ui.render(WIDE))
-  expect(wide).not.toContain('Thread ·')
-  expect(wide).not.toContain("card's own thread")
-
-  expect(wide).toContain('❯ why so many links?')
-  expect(wide).toContain('about Jun 18')
-  expect(wide).toContain('lean resolve "q1#day=2026-06-18@n"')
-  expect(wide).toContain('Links peaked that day: 2,994 of the')
+  // under the card, the thread's latest exchange: the question with its part, its last step, then the answer
+  const t = await pane($, clock)
+  expect(t).not.toContain("card's own thread")
+  expect(t).toContain('❯ why so many links?')
+  expect(t).toContain('about Jun 18')
+  expect(t).toContain('lean resolve "q1#day=2026-06-18@n"')
+  expect(t).toContain('Links peaked that day: 2,994 of the')
   // another part: the next question resumes the same agent and names the new part
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-17' } as never)
   await pane($, clock)
   // the thread's agent can read the part selected now (a message typed in its own view names none)
   expect(w.spawns[0].prompt).toContain(`${ROOT}/thimble/threads/${SESSION}/sel/card-01-saves.json`)
-  await $.prompt.submit({ text: 'and here?', origin: { kind: 'composer' } } as never)
+  // a question typed in the composer instead (its words were there before) goes to the thread too, dropped from main
+  const r = await $.prompt.submit({ text: 'and here?', origin: { kind: 'composer' } } as never)
+  expect(String((r as Any).drop)).toContain("asked the card's thread about Jun 17")
+  expect(w.submitted).not.toContain('and here?')
   expect(w.spawns.length).toBe(1)
   expect(w.sent.at(-1).text).toContain('and here?')
   expect(w.sent.at(-1).text).toContain('About the part "Jun 17" (day-2026-06-17) now.')
@@ -327,4 +341,80 @@ test('a prompt after the pane has gone goes to Claude, even when the module stil
   await $.prompt.submit({ text: 'and across all the runs?', origin: { kind: 'composer' } } as never)
   expect(w.submitted).toContain('and across all the runs?')
   expect(w.spawns.length).toBe(0)
+})
+
+test('the detail leaves the chat about two fifths of the terminal, so its lines read beside the card', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  // a 144-column terminal, as the band above the prompt measured it
+  await $.ui.render({ ...(BAND as Any), viewport: { columns: 144, rows: 36, isFullscreen: true } } as never)
+  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await clock.settle()
+  expect(w.opened.at(-1)).toMatchObject({ id: 'object', columns: 144 - 58 })
+  // the terminal widened to 240 while the detail is docked: the pane measures it (the conversation's 140 columns, its
+  // own 99 and the border), and the next open keeps the chat at 80, its most
+  await $.ui.render({ ...(PANE as Any), props: { ...(PANE as Any).props, bodyColumns: 99 }, viewport: { columns: 140, rows: 60, isFullscreen: true } } as never)
+  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-17' } as never)
+  await clock.settle()
+  expect(w.opened.at(-1)).toMatchObject({ columns: 160 })
+  // no thread column in the pane: the chat beside it is the conversation
+  expect(await pane($, clock)).not.toContain('ask this card…  ')
+})
+
+test('one selection, one highlight: the ring stands on the selected part, and stays with it while the card scrolls', async ($, on) => {
+  // a tall card: 30 steps, one row each, in a pane of 14 rows
+  const steps = Array.from({ length: 30 }, (_, i) => region(`step-${i}`, `Step ${i}`, i))
+  const TALL = { ...DRAWING, root: { t: 'stack', kids: steps }, regions: steps.map(x => ({ id: x.id, meta: x.meta })) }
+  const w = world(on, () => TALL)
+  const clock = mock.clock(on)
+  const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 14, offset: 0 } } } as never
+  await $.command.run({ command: 'obj', args: '01-saves step-0' } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(SMALL as Any) } as never)
+  const draw = async () => { for (let i = 0; i < 3; i++) { await ui.redraw(); await clock.settle() } }
+  // the gutter cells the ring can stand on, in document order, and the one marked ▸ (the selected part's)
+  const gutters = async () => ((await ui.findAll({ type: 'Button' })) as Any[]).filter(b => String(b.key).startsWith('g|'))
+  const marked = async () => (await gutters()).find(b => String(b.text).includes('▸'))?.key as string | undefined
+  const selected = async () => { const b = (await gutters()).find(x => String(x.text).includes('▸')); const m = /Step (\d+)/.exec(String(b?.props?.label ?? '')); return m ? Number(m[1]) : -1 }
+  await draw()
+  expect(await selected()).toBe(0)
+  let ring = (await marked())!
+  expect(ring).toMatch(/^g\|pane\|\d+$/)
+  let landed = 0
+  // ↓ twenty times: the engine proposes the gutter cell after the ring's; each lands on the next part, past the
+  // window's edge too, and the ring is put on that part's own cell (never another part's)
+  for (let i = 1; i <= 20; i++) {
+    const keys = (await gutters()).map(b => String(b.key))
+    const at = keys.indexOf(ring)
+    const proposed = keys[at + 1] ?? keys[keys.length - 1]!
+    const before = w.focused.length
+    await $.ui.focus({ requestId: 'object', element: proposed, origin: { kind: 'person' } } as never)
+    await draw()
+    expect(await selected()).toBe(i)
+    const now = (await marked())!
+    // where the move landed when the part was drawn: on its gutter cell
+    if (w.focused.length > before) { landed++; expect(w.focused.at(-1)).toBe(now) }
+    ring = now
+  }
+  // most moves land at once; the rest wait for the drawing that scrolls the part into view
+  expect(landed).toBeGreaterThan(10)
+  // the window followed: the twentieth step is drawn, the first is not
+  expect(textOf(await ui.drawn())).toContain('Step 20')
+  expect(textOf(await ui.drawn())).not.toContain('Step 0 ')
+})
+
+test('the thimble line says the keys of what is on top of the focus stack: the detail gone, they are gone', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  // the Claims pane first, then the detail on top of it: the detail's keys
+  await ($ as Any).prompt.edit(edit('c'))
+  await clock.settle()
+  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await pane($, clock)
+  expect(await hintOf($)).toContain('↑↓ part')
+  // the pane goes (the module learns it as a prompt comes): the detail leaves the stack, and the bar says no key of it
+  w.opened.length = 0
+  await $.prompt.submit({ text: 'and across all the runs?', origin: { kind: 'composer' } } as never)
+  await clock.settle()
+  expect(await hintOf($)).not.toContain('↑↓ part')
+  expect(await hintOf($)).not.toContain('type to ask')
 })

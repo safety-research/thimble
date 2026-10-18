@@ -1,12 +1,14 @@
 // CanvasPane.tsx: 0.9's canvas on lean's objects: the dotted board, a frame per question the person asked holding the
 // cards its turn saved, each card drawn by lean's SVG renderer (the same program the terminal draws), laid out by 0.9's
 // own board math (canvas/layout.ts). A click selects a card ("1 open detail"), a double click or 1 opens its detail;
-// the wheel pans, ⌘/ctrl and the wheel zoom, a drag on the board pans; − + Fit and the minimap as in 0.9.
+// the wheel pans, ⌘/ctrl and the wheel zoom, a drag on the board pans; − + Fit and the minimap as in 0.9, except that
+// Fit stops at a zoom where a card's words still read (fit.ts) and the person pans to the rest.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Icon } from '@09/components/Icon'
 import { Spinner } from '@09/components/Spinner'
 import { CARD_W, boardOf, cardCount, centerOn, extentOf, fitView, layoutBoard, MINIMAP, minimapOf, stepZoom, toPlane, wheelView, zoomLabel, zoomTo, type View } from '@09/canvas/layout'
 import { CardFace } from './CardFace'
+import { readableFit } from './fit'
 import { cardGroups, setState, useStore, type CardGroup } from '../lib/store'
 
 const OPEN = { has: () => true }
@@ -57,7 +59,7 @@ export function CanvasPane() {
     }
     if (moved.current || fitted.current === `${cardsSig}|${sizeSig}|${size.w}x${size.h}`) return
     fitted.current = `${cardsSig}|${sizeSig}|${size.w}x${size.h}`
-    setView(fitView(content, size.w, size.h, 48, 200))
+    setView(readableFit(fitView(content, size.w, size.h, 48, 200), content, size.w, size.h, 48, 200))
   }, [cardsSig, sizeSig, size.w, size.h])
 
   // a card picked elsewhere (a chip in the chat): into view, once
@@ -117,7 +119,7 @@ export function CanvasPane() {
   }
   const fit = () => {
     moved.current = false
-    setView(fitView(content, size.w, size.h, 48, 200))
+    setView(readableFit(fitView(content, size.w, size.h, 48, 200), content, size.w, size.h, 48, 200))
   }
   const map = minimapOf(content, view, size.w, size.h)
   const onMinimap = (e: React.MouseEvent) => {

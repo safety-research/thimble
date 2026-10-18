@@ -100,7 +100,104 @@ export function layout(claims, clusters, { w, h }) {
     }
     if (best) names.push(best)
   }
-  return { pos, names, w: W, h: H }
+  return { pos, names, fine: relax(claims, P, anchor, { W, H, cx, cy }), w: W, h: H }
+}
+
+/** The claims between cells (x in cells, y in rows), for a surface that draws there (the browser): the same islands,
+ *  relaxed from the cells' layout with each claim's links inside its cluster as springs, so related claims sit
+ *  together and a cluster reads as a group rather than a lattice. Deterministic. */
+function relax(claims, P, anchor, { W, H, cx, cy }) {
+  const Q = P.map(p => ({ id: p.id, cluster: p.cluster, x: p.x, y: p.y, vx: 0, vy: 0 }))
+  const at = new Map(Q.map((q, i) => [q.id, i]))
+  const springs = []
+  for (const c of claims) {
+    const i = at.get(c.id)
+    for (const [id] of neighbours(claims, c.id)) {
+      const j = at.get(id)
+      if (j != null && i < j && Q[i].cluster === Q[j].cluster) springs.push([i, j])
+    }
+  }
+  for (let it = 0; it < 240; it++) {
+    const a = 1 - it / 260
+    for (let i = 0; i < Q.length; i++) {
+      const p = Q[i]
+      for (let j = i + 1; j < Q.length; j++) {
+        const q = Q[j]
+        let dx = q.x - p.x, dy = q.y - p.y
+        let d2 = dx * dx + dy * dy
+        const reach = p.cluster === q.cluster ? 42 : 160
+        if (d2 > reach) continue
+        if (d2 < 0.01) { dx = 0.1; dy = 0.1; d2 = 0.02 }
+        const f = ((p.cluster === q.cluster ? 3.2 : 12) * a) / d2
+        p.vx -= dx * f; p.vy -= dy * f; q.vx += dx * f; q.vy += dy * f
+      }
+      const [ax, ay] = anchor.get(p.cluster) || [cx, cy]
+      p.vx += (ax - p.x) * 0.03 * a
+      p.vy += (ay - p.y) * 0.03 * a
+    }
+    for (const [i, j] of springs) {
+      const p = Q[i], q = Q[j]
+      const dx = q.x - p.x, dy = q.y - p.y
+      const d = Math.max(0.1, Math.hypot(dx, dy))
+      const f = ((d - 6) * 0.06 * a) / d
+      p.vx += dx * f; p.vy += dy * f; q.vx -= dx * f; q.vy -= dy * f
+    }
+    for (const p of Q) {
+      p.vx *= 0.6; p.vy *= 0.6
+      p.x = Math.max(2, Math.min(W - 3, p.x + Math.max(-2, Math.min(2, p.vx))))
+      p.y = Math.max(2, Math.min(2 * H - 3, p.y + Math.max(-2, Math.min(2, p.vy))))
+    }
+  }
+  return new Map(Q.map(p => [p.id, { x: Math.round(p.x * 100) / 100, y: Math.round((p.y / 2) * 100) / 100 }]))
+}
+
+/** Each cluster's name over its claims at their fine positions: centred on them, on the first row above (else below)
+ *  where the words cross no claim and no other name. `len` is a name's width in cells. [{id, name, n, x, y, w}], x the
+ *  left cell. */
+export function namesOver(claims, clusters, fine, { w, h, len = s => s.length }) {
+  const out = []
+  const dots = claims.map(c => fine.get(c.id)).filter(Boolean)
+  for (const cl of clusters) {
+    const mine = claims.filter(c => c.cluster === cl.id).map(c => fine.get(c.id)).filter(Boolean)
+    if (!mine.length) continue
+    const name = String(cl.name)
+    const words = `${name} ${mine.length}`
+    const nw = Math.ceil(len(words))
+    const mx = mine.reduce((a, p) => a + p.x, 0) / mine.length
+    const top = Math.min(...mine.map(p => p.y)), bottom = Math.max(...mine.map(p => p.y))
+    const x = Math.max(0, Math.min(w - nw, Math.round(mx - nw / 2)))
+    const rows = [Math.floor(top - 1.3), Math.floor(top - 2.3), Math.ceil(bottom + 1.3), Math.ceil(bottom + 2.3), Math.floor(top - 3.3)]
+    const clear = y => y >= 0 && y <= h - 1 && !dots.some(p => Math.abs(p.y - (y + 0.5)) < 1 && p.x >= x - 1 && p.x <= x + nw + 1) &&
+      !out.some(o => o.y === y && x < o.x + o.w + 2 && o.x < x + nw + 2)
+    const y = rows.find(clear)
+    if (y != null) out.push({ id: cl.id, name, n: mine.length, x, y, w: nw })
+  }
+  return out
+}
+
+/** Where the card of the claim at `p` goes (cells, for a surface that draws between them): of the places around the
+ *  claim (beside it, over it, under it), the one that covers least, the claim's linked claims and links most, then the
+ *  nearest. `dots` [{x, y, near}], `near` the linked claims' points, `names` [{x, y, w}]. {x, y, w, h} or null. */
+export function cardSpot(p, { bw, bh }, { w, h, dots = [], near = [], names = [] }) {
+  const xs = [p.x + 2, p.x - bw / 2, p.x - 3, p.x - bw + 3, p.x - 1 - bw, w - bw, 0]
+  const ys = [p.y - 1, p.y + 1.5, p.y + 2.5, p.y + 3.5, p.y - bh - 0.5, p.y - bh - 1.5, p.y - bh / 2, p.y - bh + 2]
+  const inside = (q, r) => q.x >= r.x - 0.5 && q.x <= r.x + r.w - 0.5 && q.y >= r.y - 0.5 && q.y <= r.y + r.h - 0.5
+  let best = null
+  for (const x0 of xs) {
+    for (const y0 of ys) {
+      const x = Math.max(0, Math.min(w - bw, Math.round(x0))), y = Math.round(y0)
+      if (y < 0 || y + bh > h) continue
+      const r = { x, y, w: bw, h: bh }
+      if (inside(p, r)) continue
+      let cost = 0.04 * Math.hypot(x + bw / 2 - p.x, (y + bh / 2 - p.y) * 2.4)
+      for (const d of dots) if (inside(d, r)) cost += d.near ? 20 : 0.6
+      for (const n of names) if (n.y >= y && n.y < y + bh && n.x < x + bw && x < n.x + n.w) cost += 0.5
+      // a link covered costs by how much of it the card hides
+      for (const q of near) for (let t = 0.15; t < 0.9; t += 0.15) if (inside({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }, r)) cost += 3
+      if (!best || cost < best.cost) best = { ...r, cost }
+    }
+  }
+  return best ? { x: best.x, y: best.y, w: best.w, h: best.h } : null
 }
 
 /** The claims a claim links to, each once: the revision it is part of, the claims said just before and after it in

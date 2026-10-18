@@ -40,7 +40,7 @@ async function frameAt(at: { row: string; i: number }): Promise<TrayEntry | null
   if (!rec) return null
   const p = prepare(rec).marks[at.i]
   if (!p) return null
-  const k = (rec.marks || []).findIndex((m: any) => m && m.start === p.start && m.end === p.end)
+  const k = (rec.marks || []).findIndex((m: any) => m && m.start === p.start && m.end === p.end && (m.gloss ?? null) === (p.gloss ?? null))
   if (k >= 0) return (await trayModule()).frameOf(rec, k)
   return { kind: p.kind === 'spark' ? 'spark' : 'cite', ref: p.ref, label: p.label }
 }
@@ -51,7 +51,7 @@ export function markOfFrame(rows: Row[], f: TrayEntry | undefined): { row: strin
   const rec = rows.find((r) => r.row === f.row)?.record
   const m = rec?.marks?.[f.i]
   if (!rec || !m) return null
-  const i = prepare(rec).marks.findIndex((x) => x.start === m.start && x.end === m.end)
+  const i = prepare(rec).marks.findIndex((x) => x.start === m.start && x.end === m.end && (x.gloss ?? null) === (m.gloss ?? null))
   return i >= 0 ? { row: f.row, i } : null
 }
 

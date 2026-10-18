@@ -141,3 +141,16 @@ test('lean stats counts the looks: how often v lit and how often the person pres
   assert.match(text, /\nlooks\s+v lit on 1 of 2 looks \(1 skipped\) · v pressed 1 of 1 times lit, 1 while dim/)
   assert.match(text, /\nlooks \(shadow\)\s+v lit on 2 of 2 · observer:v2/)
 })
+
+test("a save's check is a line of its own: lean stats counts the saves checked, the tries, the failures, the milliseconds and the characters Claude read", () => {
+  const events = [
+    { kind: 'check', id: '01-a', v: 1, tried: 0, total: 0, failed: 0, cut: 0, ms: 3, chars: 0 },
+    { kind: 'check', id: '02-b', v: 1, tried: 10, total: 10, failed: 10, cut: 0, ms: 21, chars: 260 },
+    { kind: 'check', id: '02-b', v: 2, tried: 10, total: 10, failed: 0, cut: 0, ms: 38, chars: 0 },
+  ]
+  assert.deepEqual(summarize(events).checks, { saves: 3, tried: 20, failed: 1, cut: 0, median_ms: 21, max_ms: 38, chars: 260 })
+  assert.equal(summarize([]).checks, null)
+  const { lines, out } = report(events)
+  assert.ok(lines.some(l => /^saves checked +3 saves · 20 interactions tried · 1 with a failure · 21 ms median, 38 ms most · 260 characters to Claude$/.test(l)), lines.join('\n'))
+  assert.equal(out.checks.saves, 3)
+})

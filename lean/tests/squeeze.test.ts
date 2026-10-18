@@ -337,3 +337,42 @@ test('a correction of its own earlier answer stays at every length: the request 
   // the correction the rewrite dropped is put back after it, as the original says it
   expect(rec.shown).toContain('**The split:** 5,242 link edits, not 5,181.')
 })
+
+test('an explain mark stays on a squeezed text: the request names its term, a term said in another form keeps its mark, and a term left out shows after the text', async ($, on) => {
+  const FORM = 'Mostly [6,543 saves](q1#day=2026-06-18@n) on June 18; the fixture scoped them.'
+  const GONE = 'Mostly [6,543 saves](q1#day=2026-06-18@n) on June 18.'
+  const w = world(on, [`<text>\n${FORM}\n</text>`, `<text>\n${GONE}\n</text>`])
+  const clock = mock.clock(on)
+  // the answer's record as the observer left it: a citation, and an explain mark on `fixture scope`
+  const dir = `${ROOT}/thimble/messages/s-1`
+  const marks = [{ kind: 'cite', start: 7, end: 41, ref: 'q1#day=2026-06-18@n', label: '6,543 saves' }, { kind: 'gloss', start: 99, end: 114, gloss: 'g1' }]
+  expect(TEXT.slice(99, 114)).toBe('`fixture scope`')
+  w.files[`${dir}/index.jsonl`] = `${JSON.stringify({ row: 'pppppppp-0000-0000-0000-', kind: 'user', text: 'when did the agents edit most?' })}\n${JSON.stringify({ row: AT, kind: 'assistant' })}\n`
+  w.files[`${dir}/${AT}.json`] = JSON.stringify({ v: 1, row: AT, session: 's-1', text: TEXT, shown: null, marks, glosses: { g1: { term: 'fixture scope', title: 'fixture scope', body: 'How widely one fixture is shared.' } }, verbs: {}, objects: [], final: true })
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  await ($ as Any).prompt.edit(edit('s'))
+  await ($ as Any).prompt.edit(edit('<'))
+  await clock.settle()
+  expect(w.calls[0].prompt).toContain('Terms the person can open an explanation of. Where your text keeps what a term names, use the term in these words:\n- fixture scope')
+  let rec = record(w)
+  const g = rec.marks.find((m: Any) => m.kind === 'gloss')
+  expect(FORM.slice(g.start, g.end)).toBe('fixture scoped')
+  // the rewrite one level shorter leaves the term out: its explain stays, drawn after the text
+  await ($ as Any).prompt.edit(edit('<'))
+  await clock.settle()
+  await writtenIn(clock)
+  rec = record(w)
+  expect(rec.shown).toBe(GONE)
+  expect(rec.marks.filter((m: Any) => m.kind === 'gloss').map((m: Any) => [m.loose, m.start, m.gloss])).toEqual([[true, GONE.length, 'g1']])
+  const ui = await $.ui.mount(view(TEXT))
+  expect(textOf(await ui.drawn())).toContain('explain: fixture scope (in the full answer)')
+  await ui.unmount()
+  // with the chips closed, ] reaches it after the citation and opens its explain card
+  await ($ as Any).prompt.edit(edit('s'))
+  await ($ as Any).prompt.edit(edit(']'))
+  await ($ as Any).prompt.edit(edit(']'))
+  await clock.settle()
+  const band = await hintOf($)
+  expect(band).toContain('─ fixture scope ─')
+  expect(band).toContain('─ explain ─')
+})

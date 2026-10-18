@@ -379,6 +379,7 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
     idx = Q.find_rows(q, frag) if frag else []
     if frag and not idx:
         raise R.RefError(f"{q['id']} has no output row {_frag_text(p)}")
+    vcol = None
     if frag:
         rows_tbl = q.get("table") or []
         step["rows"] = [{"i": i + 1, **rows_tbl[i]} for i in idx[:20]]
@@ -388,6 +389,7 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
                 if col is None:
                     raise R.RefError(f"{q['id']}'s output has no column {p['col']!r}; it has {', '.join(rows_tbl[idx[0]])}")
                 step["value"] = rows_tbl[idx[0]][col]
+                vcol = col
     if not q.get("rows"):
         notes.append(f"{q['id']} keeps no rows per output row (lineage: query), so each of its values rests on every "
                      "row it read; tally() or a `_refs` column keeps them")
@@ -396,14 +398,14 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
         if not frag and q.get("read"):
             return list(q["read"])
         return [x["path"] for x in Q.all_inputs(st, q)]
-    why = Q.why_of(st, q, i=idx[0] if frag and len(idx) == 1 else None)
+    why = Q.why_of(st, q, i=idx[0] if frag and len(idx) == 1 else None, col=vcol)
     if why:
         step["why"] = why
     pick = idx if frag else range(len(q["rows"]))
     rowsets: list[str] = []
     for i in pick:
         if i < len(q["rows"]):
-            rowsets.extend(q["rows"][i])
+            rowsets.extend(Q.value_rows(q, i, vcol) or [])
     rowsets = _merge(rowsets)
     mode = q.get("lineage")
     n = R.count(rowsets)
@@ -464,6 +466,18 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
                     notes.append(f"{', '.join(stale)} changed since {q['id']} ran")
                 if q.get("lineage") in ("superset", "key"):
                     notes.append(f"{q['id']}'s rows were found by key ({q['lineage']}), not kept exactly")
+                if (q.get("lineage") == "loop" or q.get("cells")) and isinstance(holder.get("_ref"), str):
+                    # a value of a row a loop made: its own rows when the query kept them (a count of one frame), else
+                    # the row's, which says why
+                    col = ptr.rsplit("/", 1)[-1].replace("~1", "/").replace("~0", "~")
+                    rp = R.parse(holder["_ref"]) if holder["_ref"].startswith(q["id"] + "#") else {}
+                    frag = {k: rp[k] for k in ("row", "keys") if k in rp}
+                    idx = Q.find_rows(q, frag) if frag else []
+                    if len(idx) == 1 and col in holder:
+                        rowsets = list(Q.value_rows(q, idx[0], col) or rowsets)
+                        why = Q.why_of(st, q, i=idx[0], col=col)
+                        if why:
+                            chain[-1]["why"] = why
                 if q.get("why_rows"):
                     # a value of a summary: the card's value rests on all the rows the query read
                     bp = R.parse(b["ref"])

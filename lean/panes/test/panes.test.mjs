@@ -44,6 +44,27 @@ test('claims: the ring in the terminal and the pointer in the browser are one ho
   assert.equal(barText([run(PANES.claims, data)]), 'r replay · esc close')
 })
 
+test('claims in the browser: the same program draws dots and links between cells and the card as an opaque box; the terminal keeps its cells', () => {
+  const data = claimsData()
+  const opsOf = d => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; if (n.t === 'canvas') out.push(...n.ops); (n.kids || []).forEach(walk); if (n.kid) walk(n.kid) }; walk(d.root); return out }
+  const rest = opsOf(run(PANES.claims, data, { surface: 'browser' }))
+  assert.equal(rest.filter(o => o[0] === 'dot').length, 3, 'a dot per claim')
+  assert.ok(rest.filter(o => o[0] === 'dot').every(o => /^cl-/.test(o[4].region)), 'each dot is its claim\'s part')
+  assert.equal(rest.filter(o => o[0] === 'link').length, 0, 'no line at rest')
+  assert.ok(!rest.some(o => o[0] === 'put' && /[●◉○]/.test(o[3])), 'no dot as a glyph')
+  const hov = run(PANES.claims, data, { surface: 'browser', state: { hover: 'c2' } })
+  const ops = opsOf(hov)
+  assert.ok(ops.some(o => o[0] === 'link'), 'the hovered claim\'s links')
+  assert.ok(ops.some(o => o[0] === 'box' && o[7] && o[7].fill), 'its card is an opaque box')
+  const s = renderSvg(hov, { w: 90 })
+  assert.ok(s.marks.some(m => m.k === 'text' && /Kestrel made 41% of June edits/.test(m.s)), 'the card says the claim')
+  assert.ok(s.regions.some(r => r.id === 'cl-c1'))
+  // the terminal draws the same program in cells, as before
+  const t = run(PANES.claims, data, { surface: 'terminal', state: { hover: 'c2' } })
+  assert.ok(!opsOf(t).some(o => o[0] === 'dot' || o[0] === 'link'))
+  assert.match(gridText(renderTerm(t, { w: 90 })), /┌─+┐/)
+})
+
 test('claims: r replays the graph by later events (k.after) in the order made; any key stops it', () => {
   const data = claimsData()
   let { d, state } = act(PANES.claims, data, { hover: 'c1' }, keyEvent('r'), 'terminal')
@@ -168,6 +189,22 @@ test('the bar is always one line: it drops the counts first (coverage last), the
   const narrow = fitBar(bar, 30)
   assert.equal(narrow.cut, true)
   assert.ok(!barLine(narrow).includes('\n'))
+})
+
+test('a status in the bar is cut at its end, never to its first word, and the keys keep their words longest', async () => {
+  const { barLine, fitBar } = await import('../host.js')
+  const status = '! "55" is not in the original, so it shows as plain words'
+  const bar = { label: 'thimble', left: [{ key: '', words: status, tone: 'warning', status: true }, { key: '< >', words: 'change' }, { key: ']', words: 'next chip' }, { key: '+', words: 'new stretch' }, { key: '0', words: 'original' }, { key: 's', words: 'done' }], counts: [{ id: 'cites', text: '22 cites' }, { id: 'claims', text: '19 claims' }] }
+  const at = w => barLine(fitBar(bar, w))
+  assert.equal(at(200), `thimble  ${status} · < > change · ] next chip · + new stretch · 0 original · s done   22 cites · 19 claims`)
+  // short of room: the counts go, then the status is cut at its end and every key keeps its words
+  const mid = at(110)
+  assert.ok(mid.length <= 110, mid)
+  assert.ok(mid.startsWith('thimble  ! "55" is not in'), mid)
+  assert.ok(mid.includes('…'), mid)
+  assert.ok(mid.endsWith('< > change · ] next chip · + new stretch · 0 original · s done'), mid)
+  assert.ok(!/! "55 ·/.test(mid) && !/! "55$/.test(mid), mid)
+  for (const w of [200, 140, 110, 90, 80]) assert.ok(at(w).length <= w, `${w}: ${at(w)}`)
 })
 
 test('keys in a row of digits read as a range; the keys a host keeps where a card is drawn say why', async () => {

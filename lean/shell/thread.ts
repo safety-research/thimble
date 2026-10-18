@@ -269,7 +269,8 @@ export const registerThreads: Register = on => {
   // the type is offered only while a thread is asked or the detail is open (a resume checks the offer again)
   on('agent.offer', { agent: TYPE }, async () => ({ isOffered: inFlight > 0 || windowOpen }))
 
-  // a thread's hand-back (auto mode) and its task notifications never enter main's conversation
+  // a thread's hand-back (auto mode) and its task notifications never enter main's conversation. Claude Code queues
+  // them as prompts of its own, and dropping one is the only way to keep it out, which Claude Code shows as one row
   // (each hook has a matcher: a plugin takes one bare hook per event, and the shell has the bare ones)
   on('prompt.submit', { origin: { kind: /^(peer|task-notification)$/ } }, async ($, e, next) => {
     await restoreThreads($)

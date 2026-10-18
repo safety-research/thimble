@@ -31,7 +31,7 @@ export type ObserverLine = {
 }
 
 /** One mark in a message (CONTRACT 1): a citation, a gloss or a sparkline, as offsets into the shown markdown. */
-export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string }
+export type Mark = { kind: 'cite' | 'gloss' | 'spark'; start: number; end: number; ref?: string; label?: string; gloss?: string; values?: number[] | null; problem?: string; loose?: boolean; anchor?: 'form' | 'word' }
 
 /** A gloss the observer wrote for a message: the term as it stands in the text, what it is, where it mattered here. */
 export type Gloss = { term: string; title?: string; body?: string; here?: string; program?: string; refs?: string[] }

@@ -13,7 +13,8 @@
 // for Claude.
 import { textOf } from '../../prompts/node.mjs'
 import { remark } from '../../shell/message.js'
-import { ARRIVE, applyRewrite, checkRewrite, chipsOf, isOriginal, noteFor, readReply, request, restore, stretchChip, withStretch } from './chips.mjs'
+import { FEATURES } from '../../prompts/registry.mjs'
+import { ARRIVE, applyRewrite, checkRewrite, chipsOf, isOriginal, noteFor, readReply, request, restore, stretchChip, termsOf, withStretch } from './chips.mjs'
 
 /** The levels the words ask for: `name=level` for each chip named, by its id, its name or its first word. */
 export function parseWords(rec, words) {
@@ -57,7 +58,8 @@ export async function run(ctx) {
   if (!ctx.model || typeof ctx.model.complete !== 'function') throw new Error('no model to write the rewrite: ctx.model.complete is missing')
   const cfg = ctx.verb || {}
   const sp = textOf('squeeze')
-  const req = request(probe, { system: sp.text, question: ctx.question || '', model: cfg.model || 'sonnet', effort: cfg.effort || 'low', maxTokens: cfg.maxTokens || 4000 })
+  const terms = FEATURES.squeeze.versions?.[sp.version]?.terms ? termsOf(rec) : []
+  const req = request(probe, { system: sp.text, question: ctx.question || '', terms, model: cfg.model || 'sonnet', effort: cfg.effort || 'low', maxTokens: cfg.maxTokens || 4000 })
   const t0 = Date.now()
   const r = await ctx.model.complete({ ...req, telemetry: { feature: 'squeeze', prompt: sp.id } })
   if (!r || !r.isAnswered) throw new Error(`the rewrite did not come back: ${r ? r.reason : 'no result'}`)

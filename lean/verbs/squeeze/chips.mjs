@@ -213,8 +213,8 @@ function chipLine(c, words = 0, keep = 0) {
  * The fixed text goes first and is marked for the prompt cache: prompt.md, then the question and the original, so a
  * second change of the same message reads them from the cache.
  */
-/** @param {any} rec @param {{system?: string, question?: string, chips?: any[], keep?: string[], model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
-export function request(rec, { system, question = '', chips = chipsOf(rec), keep = [], model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
+/** @param {any} rec @param {{system?: string, question?: string, chips?: any[], keep?: string[], terms?: string[], model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
+export function request(rec, { system, question = '', chips = chipsOf(rec), keep = [], terms = [], model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
   const head = [
     question ? `The person asked: ${question.trim().slice(0, 2000)}` : 'The person\'s question is not known.',
     '',
@@ -227,7 +227,9 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), keep
   const lines = chips.map(c => chipLine(c, words, keep.length)).filter(Boolean)
   // the corrections in the original stay at every level, shortened if need be (mustKeep); the length does not count them
   const kept = keep.length ? ['', 'Corrections in the original. Each stays at every level, in as few words as it needs, next to what it corrects:', ...keep.map(k => `- ${k}`)] : []
-  const tail = ['', 'The chips, each at the level to write now:', ...lines, ...kept, '', 'Write the message at these levels.']
+  // the terms the person can open an explanation of (explain marks): kept in their own words where the text keeps them
+  const named = terms.length ? ['', 'Terms the person can open an explanation of. Where your text keeps what a term names, use the term in these words:', ...terms.map(t => `- ${t}`)] : []
+  const tail = ['', 'The chips, each at the level to write now:', ...lines, ...kept, ...named, '', 'Write the message at these levels.']
   return {
     model, effort, maxTokens, timeoutMs,
     system: [{ text: String(system || ''), cache: true }],
@@ -241,6 +243,16 @@ export function readReply(raw) {
   const t = /<text>\s*\n?([\s\S]*?)\n?\s*<\/text>/i.exec(s)
   const text = (t ? t[1] : s).replace(/^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i, '$1').trim()
   return { text }
+}
+
+/** The terms of a record's explain marks (its glosses), for the rewrite to keep in their words: at most `max`. */
+export function termsOf(rec, max = 8) {
+  const out = []
+  for (const g of Object.values((rec && rec.glosses) || {})) {
+    const t = g && typeof g.term === 'string' ? g.term.replace(/\s+/g, ' ').trim() : ''
+    if (t && t.length <= 80 && !out.includes(t)) out.push(t)
+  }
+  return out.slice(0, max)
 }
 
 // ------------------------------------------------------------------------------------------------ corrections kept

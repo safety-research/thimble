@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { newRecord, remark, verbsOf, withObserver } from '../../../shell/message.js'
-import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, glyph, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, withStretch } from '../chips.mjs'
+import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, glyph, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, termsOf, withStretch } from '../chips.mjs'
 import { parseWords, run } from '../run.mjs'
 
 // a made-up report, as a long reply takes it
@@ -131,7 +131,7 @@ test('a rewrite is held to the original: a ref it never cited loses its link, an
   assert.match(total.problems[0], /"14,591 edits" was linked to the source of "13,403 of 14,591"/)
 })
 
-test('after a rewrite the marks are placed again on the new text: citations, a sparkline with its values, the glosses whose terms stayed', () => {
+test('after a rewrite the marks are placed again on the new text: citations, a sparkline with its values, each gloss on its term or a word of it', () => {
   const rec = record()
   const short = '**Fixed:** a shared `cart` fixture leaked a coupon, about [1 run in 9](q2#test=checkout@fail_rate) [~](q5@n); now it [passed 200 times](q3#test=checkout@passes).'
   const next = applyRewrite(rec, { text: short, at: { length: 0 }, made: { ms: 900, model: 'sonnet' } }, remark)
@@ -139,7 +139,8 @@ test('after a rewrite the marks are placed again on the new text: citations, a s
   const at = m => short.slice(m.start, m.end)
   assert.deepEqual(next.marks.filter(m => m.kind !== 'gloss').map(at), ['[1 run in 9](q2#test=checkout@fail_rate)', '[~](q5@n)', '[passed 200 times](q3#test=checkout@passes)'])
   assert.deepEqual(next.marks.find(m => m.kind === 'spark').values, [3, 1, 4, 1, 5])
-  assert.deepEqual(next.marks.filter(m => m.kind === 'gloss').map(m => m.gloss), ['g1'])
+  // `fixture` stayed as it was; of `coupon test` only "coupon" stayed, and the explain stands on it
+  assert.deepEqual(next.marks.filter(m => m.kind === 'gloss').map(m => [m.gloss, at(m), m.anchor ?? 'term']), [['g1', 'fixture', 'term'], ['g2', 'coupon', 'word']])
   assert.equal(next.squeeze.versions['length=0'], short)
   assert.equal(next.squeeze.made[0].ms, 900)
   // the original's marks are kept, so a later version that brings the sparkline back still has its values
@@ -214,6 +215,8 @@ test('run.mjs: the same rewrite from words, through ctx.model, for /verb and too
   const model = { complete: async req => { asked.push(req); return { isAnswered: true, text: '<text>Fixed: [1 run in 9](q2#test=checkout@fail_rate).</text>', usage: { input_tokens: 10, output_tokens: 5 } } } }
   const r = await run({ message: rec, args: 'length=one line', model, verb: { model: 'sonnet' } })
   assert.equal(asked.length, 1)
+  // the terms of its explain marks are named, to keep in their words
+  assert.match(asked[0].prompt[1].text, /Terms the person can open an explanation of\. Where your text keeps what a term names, use the term in these words:\n- fixture\n- coupon test/)
   assert.equal(r.message.shown, 'Fixed: [1 run in 9](q2#test=checkout@fail_rate).')
   assert.equal(r.message.marks[0].ref, 'q2#test=checkout@fail_rate')
   const back = await run({ message: r.message, args: 'original', model })
@@ -259,4 +262,19 @@ test('the request names the corrections and does not count them in a level\'s le
   assert.match(tail, /one line, one sentence, at most 35 words, then each correction listed below in a few words/)
   assert.match(tail, /Corrections in the original\. Each stays at every level, in as few words as it needs, next to what it corrects:\n- Earlier I said 3; it is 4\./)
   assert.doesNotMatch(request({ text: 'A.', squeeze: { at: { length: 0 } } }, { system: 'S' }).prompt[1].text, /Corrections in the original/)
+})
+
+test('the request names the terms of the explain marks, to keep in their words; none when the message has no explain marks', () => {
+  assert.deepEqual(termsOf(record()), ['fixture', 'coupon test'])
+  assert.deepEqual(termsOf({ glosses: { a: { term: '  rebase\n loop ' }, b: { term: 'rebase loop' }, c: {} } }), ['rebase loop'])
+  const q = request(record(), { system: 'S', terms: termsOf(record()) })
+  assert.match(q.prompt[1].text, /Terms the person can open an explanation of\. Where your text keeps what a term names, use the term in these words:\n- fixture\n- coupon test\n/)
+  assert.doesNotMatch(request(record(), { system: 'S' }).prompt[1].text, /Terms the person can open/)
+})
+
+test('squeeze:v5 is v4 with the principle of keeping the explain terms, and it is the default', () => {
+  const v4 = readFileSync(fileURLToPath(new URL('../../../prompts/squeeze/v4.md', import.meta.url)), 'utf8')
+  const v5 = readFileSync(fileURLToPath(new URL('../../../prompts/squeeze/v5.md', import.meta.url)), 'utf8')
+  assert.match(v5, /\*\*Keep the terms the person can open\.\*\*/)
+  assert.equal(v5.replace(/\*\*Keep the terms the person can open\.\*\*[^\n]*\n\n/, ''), v4)
 })
