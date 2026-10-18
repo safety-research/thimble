@@ -80,11 +80,11 @@ test('skills, bodies and placeholders', () => {
 })
 
 test("today's texts are the v1 of their features, byte for byte", () => {
-  // the hashes of observer.md, question.md, squeeze's prompt.md, FORMS.md, the lean skill's body and the thread
-  // prompt as they stood before the registry
+  // the hashes of observer.md, question.md, squeeze's prompt.md and FORMS.md as they stood before the registry, and
+  // the thread prompt's opening
   const want = {
     'observer/v1.md': '51490982d80d0f94', 'question/v1.md': '84409e8c32d8fc4a', 'squeeze/v1.md': '0fad5d2275653f10',
-    'forms/v1.md': 'fe514350976bbb45', 'lean/v1.md': '1a7cb35ae0987538',
+    'forms/v1.md': 'fe514350976bbb45',
   }
   for (const [f, h] of Object.entries(want)) assert.equal(sha(readFileSync(join(ROOT, 'prompts', f), 'utf8')), h, f)
   assert.match(readFileSync(join(ROOT, 'prompts/thread/v1.md'), 'utf8'), /^You answer one person's questions about one part of a card/)
@@ -111,7 +111,7 @@ test('textOf reads the active text; a skill in place is its body', () => {
   const lean = textOf('lean', ROOT, {})
   assert.equal(lean.id, 'lean:skill')
   assert.doesNotMatch(lean.text, /^---/)
-  assert.match(lean.text, /lean guide cards/)
+  assert.match(lean.text, /^\n# Where each value comes from/)
 })
 
 test('`lean guide cards` prints the card guidance with its folder, and notes the read in the session events', () => {

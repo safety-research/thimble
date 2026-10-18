@@ -5,7 +5,7 @@ const STUBS: Record<string, string> = {
   'observer/v1': 'OBSERVER {{QUESTION}} | {{DECISION}} | {{OBJECTS}} | {{COVERAGE}} | {{NOTES}} | {{OPEN}} {{LINE_RULE}} | {{GLOSSED}} | CLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}} {{GROWN}}',
   'observer/v2': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
   'observer/attention-v1': 'FRAME ATTENTION\n{{LENSES}}\nREPLY {{SKELETON}}',
-  'observer-turn/v1': 'TURN {{QUESTION_STEP}} | {{QUESTION}} | {{DECISION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
+  'observer-turn/v1': 'TURN {{QUESTION_STEP}} | {{QUESTION}} | {{DECISION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
   'question/v1': 'QUESTION {{QUESTION}} {{ANSWER}}',
   'lens-notes/v1': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
   'lens-line/v1': 'LENS line\n<!-- digest -->\n| {{SEEN}} | {{KNOWN}} | {{OPEN}}\n<!-- when open -->\nA line is open above the prompt now. Give no new line this time.\n<!-- when backoff -->\nGive no line this time: backoff.',

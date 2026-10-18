@@ -3,6 +3,11 @@
 // session's commands to the same choice (so `lean guide` and a verb's child read the same versions), names the versions
 // in use in the session's events, and says in one line when a named version does not exist (it keeps the default).
 //
+// The card guidance (feature `forms`): Claude reads the drawing toolkit (draw/TOOLKIT.md) before it writes a card's
+// program, as the lean skill says; the first such read in a session carries the guidance's active version as context
+// beside the file (the person never sees it, and it is never in the conversation at rest). v's request asks for it
+// with `lean guide cards` when it was not read yet.
+//
 // Skills: Claude Code finds a skill's SKILL.md where it is, and that text is the version `skill`. When another version
 // of a skill's feature is active, the skill.prompt hook serves it in place of the file's text. The same hook makes sure
 // a verb's skill never replaces the lean skill: when Claude loads one of thimble's other skills (map, explore, trace,
@@ -25,6 +30,7 @@ const R = {
   problems: [] as string[],
   texts: new Map<string, string>(),
   leanLoaded: false,
+  cardsGiven: false,
   resolving: null as Promise<void> | null,
 }
 
@@ -61,6 +67,7 @@ export async function registry($: Engine): Promise<{ idx: Any; active: Record<st
   if (id !== R.session || !R.idx) {
     R.session = id
     R.leanLoaded = false
+    R.cardsGiven = false
     R.resolving = resolve($)
   }
   if (R.resolving) await R.resolving
@@ -117,7 +124,29 @@ export function registerPrompts(on: Any, options: Any): void {
   on('session.compact', async ($: Engine, e: Any, next: Any) => {
     const r = await next(e)
     R.leanLoaded = false
+    R.cardsGiven = false
     return r
+  }).catch(($: Engine, e: Any, next: Any) => next(e))
+
+  // the toolkit read before a card: the card guidance comes beside it, once per session
+  on('tool.call', { tool: 'Read' }, async ($: Engine, e: Any, next: Any) => {
+    const r = await next(e)
+    try {
+      if (!r || r.deny !== undefined || r.isError || e.agentId !== undefined) return r
+      const file = String(e.file_path || '')
+      if (!/(^|\/)draw\/TOOLKIT\.md$/.test(file) || !file.startsWith(rootOf($))) return r
+      await registry($)
+      if (R.cardsGiven) return r
+      const t = await promptText($, 'forms')
+      if (t.off || !t.text.trim()) return r
+      R.cardsGiven = true
+      const base = (FEATURES.forms.versions as Any)?.[t.version]?.base || FEATURES.forms.base
+      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: 'read of draw/TOOLKIT.md' })
+      const note = `The card guidance (${t.id}), which thimble adds when you read the toolkit before a card. Paths in it are relative to ${rootOf($)}/${base}.\n\n${t.text}`
+      return { ...r, context: [...(r.context ?? []), note] }
+    } catch {
+      return r
+    }
   }).catch(($: Engine, e: Any, next: Any) => next(e))
 
   on('skill.prompt', async ($: Engine, e: Any, next: Any) => {
@@ -155,5 +184,5 @@ export function registerPrompts(on: Any, options: Any): void {
 
 /** For tests: the module's memory, cleared. */
 export function resetPrompts(): void {
-  Object.assign(R, { setting: '', session: '', idx: null, active: {}, problems: [], texts: new Map(), leanLoaded: false, resolving: null })
+  Object.assign(R, { setting: '', session: '', idx: null, active: {}, problems: [], texts: new Map(), leanLoaded: false, cardsGiven: false, resolving: null })
 }

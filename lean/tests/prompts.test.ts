@@ -15,11 +15,13 @@ function world(on: Any, env: Record<string, string> = {}) {
   const clock = mock.clock(on, { now: 0 })
   on('session.id', () => ({ value: 's-1' }))
   on('session.cwd', () => ({ value: '/data' }))
-  on('fs.list', () => ({ value: [] }))
+  on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: String(e.path).endsWith('/prompts/lean') ? [{ name: 'v1.md', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] : [] }))
   on('fs.exists', () => ({ value: false }))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/skills/lean/SKILL.md') ? '---\nname: lean\ndescription: x\n---\n\nLEAN BODY: cite what you show.\n' : promptStub(e.path) ?? '' }))
   // the engine's own expansion: the text as the skill computed it
   on('skill.prompt', (_$: unknown, e: { text: string }) => ({ text: e.text }))
+  // a Read answered as core does: the file's text, as the model reads it
+  on('tool.call', (_$: unknown, e: { tool: string; file_path?: string }) => ({ result: { type: 'text' }, text: `the file ${e.file_path}` }))
   const events: Json[] = []
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     if (e.argv.some(a => a.endsWith('telemetry/append.mjs'))) for (const l of String(e.init?.stdin ?? '').split('\n').filter(Boolean)) events.push(JSON.parse(l))
@@ -60,3 +62,22 @@ test("another version of a skill's feature is served in place of its file's text
   const lean = String((await load($, 'lean', 'LEAN BODY as the file says')).text)
   expect(lean).toBe('Base directory for this skill: /p/lean\n\nPROMPT lean:v1')
 })
+
+test('the first read of the toolkit in a session carries the card guidance as context, once; another file reads as it is', async ($, on) => {
+  const w = world(on, { LEAN_PROMPTS: 'forms:principles' })
+  // the plugin's folder: the one above this test's
+  const root = new URL('..', import.meta.url).pathname.replace(/\/+$/, '')
+  const r1 = await $.tool.call({ tool: 'Read', file_path: `${root}/draw/TOOLKIT.md` } as never) as Any
+  expect(r1.text).toBe(`the file ${root}/draw/TOOLKIT.md`)
+  expect(r1.context.length).toBe(1)
+  expect(r1.context[0]).toContain('The card guidance (forms:principles), which thimble adds when you read the toolkit before a card.')
+  expect(r1.context[0]).toContain(`Paths in it are relative to ${root}/verbs/visualize.`)
+  expect(r1.context[0]).toContain('PROMPT forms:principles')
+  const r2 = await $.tool.call({ tool: 'Read', file_path: `${root}/draw/TOOLKIT.md` } as never) as Any
+  expect(r2.context ?? []).toEqual([])
+  const r3 = await $.tool.call({ tool: 'Read', file_path: '/data/notes/TOOLKIT.md' } as never) as Any
+  expect(r3.context ?? []).toEqual([])
+  await w.clock.advance(100)
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:principles', 'read of draw/TOOLKIT.md']])
+})
+

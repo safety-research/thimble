@@ -423,6 +423,10 @@ async function look($: Engine, t: Look): Promise<void> {
       // prompt (cached), the turn is the message
       const system = composeSystem(frame.text, parts)
       const tmpl = await promptText($, 'observer-turn')
+      // a long answer arrives squeezed: the person reads the squeezed text, which the pass reads beside the original
+      const atRow = await answerRow($)
+      const before = atRow ? await messageRecord($, atRow) : null
+      const squeezed = before && typeof before.shown === 'string' && before.shown.trim() && before.shown !== before.text ? before.shown : ''
       const msgs = (await $.session.messages().catch(() => [])) as Any[]
       const turn = composeTurn(tmpl.text, {
         QUESTION_STEP: qText,
@@ -432,6 +436,7 @@ async function look($: Engine, t: Look): Promise<void> {
         STEPS: stepsOf(msgs, { answer, budget: STEPS_BUDGET }),
         LINES: String(answer.split('\n').length),
         ANSWER: cut(answer, 16000),
+        SHOWN: squeezed ? `\nThe person reads it squeezed (${squeezed.split('\n').length} lines); this is what shows:\n${cut(squeezed, 6000)}\n` : '',
         OBJECTS: digests.length ? digests.join('\n\n') : 'No objects yet.',
         COVERAGE: coverage,
         EARLIER: bullets(S.questions.slice(0, -1).slice(-6).map(x => cut(x, 300))),
@@ -547,7 +552,8 @@ async function look($: Engine, t: Look): Promise<void> {
       if (lit && lit.row === at && inRow.some(v => v.key === 'c')) verbs.c = { lit: true, note: lit.note, claims: lit.claims }
       else if (prior) verbs.c = prior
       // marks are kept by the words Claude wrote, so a term a squeeze left out is placed again when the original shows
-      const glosses = ctx.glosses ? glossesOf(ctx.glosses, kept ? String(kept.text) : shown, glossed) : {}
+      // (a term may stand in the original or in the squeezed text the person reads)
+      const glosses = ctx.glosses ? glossesOf(ctx.glosses, kept ? `${String(kept.text)}\n\n${typeof kept.shown === 'string' ? kept.shown : ''}` : shown, glossed) : {}
       const rec = await applyObserver($, at, { verbs, glosses })
       const placed = rec ? Object.entries(rec.glosses || {}).filter(([id]) => rec.marks.some(m => m.gloss === id)).map(([, g]) => g.term) : []
       row.verbs_lit = Object.keys(verbs)
