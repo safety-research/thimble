@@ -128,20 +128,23 @@ export function registerPrompts(on: Any, options: Any): void {
     return r
   }).catch(($: Engine, e: Any, next: Any) => next(e))
 
-  // the toolkit read before a card: the card guidance comes beside it, once per session
-  on('tool.call', { tool: 'Read' }, async ($: Engine, e: Any, next: Any) => {
+  // the toolkit read before a card (with Read, or with cat, sed or head in Bash): the card guidance comes beside it,
+  // once per session
+  on('tool.call', { tool: /^(Read|Bash)$/ }, async ($: Engine, e: Any, next: Any) => {
     const r = await next(e)
     try {
       if (!r || r.deny !== undefined || r.isError || e.agentId !== undefined) return r
       const file = String(e.file_path || '')
-      if (!/(^|\/)draw\/TOOLKIT\.md$/.test(file) || !file.startsWith(rootOf($))) return r
+      const isRead = e.tool === 'Read' && /(^|\/)draw\/TOOLKIT\.md$/.test(file) && file.startsWith(rootOf($))
+      const isShell = e.tool === 'Bash' && /\bdraw\/TOOLKIT\.md\b/.test(String(e.command || '')) && !/\blean\s/.test(String(e.command || ''))
+      if (!isRead && !isShell) return r
       await registry($)
       if (R.cardsGiven) return r
       const t = await promptText($, 'forms')
       if (t.off || !t.text.trim()) return r
       R.cardsGiven = true
       const base = (FEATURES.forms.versions as Any)?.[t.version]?.base || FEATURES.forms.base
-      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: 'read of draw/TOOLKIT.md' })
+      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: `${isRead ? 'Read' : 'Bash'} of draw/TOOLKIT.md` })
       const note = `The card guidance (${t.id}), which thimble adds when you read the toolkit before a card. Paths in it are relative to ${rootOf($)}/${base}.\n\n${t.text}`
       return { ...r, context: [...(r.context ?? []), note] }
     } catch {

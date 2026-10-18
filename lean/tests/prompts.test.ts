@@ -78,6 +78,16 @@ test('the first read of the toolkit in a session carries the card guidance as co
   const r3 = await $.tool.call({ tool: 'Read', file_path: '/data/notes/TOOLKIT.md' } as never) as Any
   expect(r3.context ?? []).toEqual([])
   await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:principles', 'read of draw/TOOLKIT.md']])
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:principles', 'Read of draw/TOOLKIT.md']])
+})
+
+test('a toolkit read with sed in Bash carries the card guidance too', async ($, on) => {
+  world(on)
+  const r = await $.tool.call({ tool: 'Bash', command: 'sed -n 1,80p /x/../plugin/draw/TOOLKIT.md' } as never) as Any
+  expect(r.context.length).toBe(1)
+  expect(r.context[0]).toContain('The card guidance (forms:v2)')
+  expect(r.context[0]).toContain('THE CARD GUIDANCE')
+  const again = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
+  expect(again.context ?? []).toEqual([])
 })
 

@@ -37,8 +37,8 @@ export const FEATURES = {
   },
   'lens-claims': { about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v1', optional: true },
   squeeze: {
-    about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v2',
-    versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' } },
+    about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v3',
+    versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" } },
   },
   forms: {
     versions: { v1: { about: 'FORMS.md as v read it: the card forms, for another view' }, v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' }, principles: { about: 'the draft principles of a great output, no examples (ablation variant a)' } },
