@@ -597,42 +597,53 @@ def _by_index(res: Any, ns: dict[str, Any], frames: list[Any]):
     return best[1], "exact", best[2]
 
 
-def _by_values(df: Any, key: str, ns: dict[str, Any], frames: list[Any]):
+def _by_values(df: Any, key: str, ns: dict[str, Any], frames: list[Any], budget: float = 3.0):
     """Row lineage found by a key's values: the output's key column holds the values of a column (or the index) of a
     frame the query made, under another name (a dict built from a column, a renamed key), so each output row rests on
-    the frame's rows that hold its value. A count column that equals the group sizes makes it matched, as in _by_key."""
+    the frame's rows that hold its value. A count column that equals the group sizes makes it matched, as in _by_key.
+    Looked for only when nothing else found the rows, for at most `budget` seconds."""
     import pandas as pd
 
     want = df[key]
     if not len(want) or want.isna().any() or not want.is_unique:
         return None
-    wanted = pd.Index(want.astype(str))
+    wvals = want.tolist()
+    wstr = [str(v) for v in wvals]
+    wset = set(wstr)
     count_cols = [c for c in df.columns if c != key and not str(c).startswith("_") and _is_count_col(df[c])]
+    deadline = time.time() + budget
     best = None
     for name, f in _named_frames(ns, frames, lambda f: True, lists=True):
         cands: list[tuple[str, Any]] = [(str(c), f[c]) for c in f.columns if isinstance(c, str) and not c.startswith("_")
                                         and (pd.api.types.is_object_dtype(f[c]) or pd.api.types.is_string_dtype(f[c]))]
         if not isinstance(f.index, pd.RangeIndex):
-            cands.append(("index", f.index.to_series(index=f.index)))
+            cands.append(("index", pd.Series(f.index, index=f.index)))
         for cname, col in cands:
+            if time.time() > deadline:
+                return None if best is None else (best[1], best[2], best[3])
             try:
-                vals = col.astype(str)
-                if not bool(wanted.isin(vals.unique()).all()):
+                hit = col.isin(wvals)
+                if not bool(hit.any()):
+                    continue
+                vals = col[hit].astype(str)
+                if not wset <= set(vals.unique().tolist()):
                     continue
             except Exception:  # noqa: BLE001 — values that do not compare
                 continue
-            hit = vals.reset_index(drop=True)
-            refs = row_ref_lists(f)
-            groups: dict[str, list[str]] = {}
-            sizes: dict[str, int] = {}
-            wset = set(wanted)
-            for v, r in zip(hit.tolist(), refs):
-                if v in wset:
+            mask = hit.to_numpy()
+            if ref_columns(f) == (["_ref"], []):
+                g = pd.DataFrame({"v": vals.to_numpy(), "r": f["_ref"].to_numpy()[mask]}).groupby("v", sort=False)["r"].agg(list)
+                got = [[str(x) for x in g.get(v, [])] for v in wstr]
+                n = [len(x) for x in got]
+            else:
+                groups: dict[str, list[str]] = {}
+                sizes: dict[str, int] = {}
+                for v, r in zip(vals.tolist(), row_ref_lists(f[mask])):
                     groups.setdefault(v, []).extend(r)
                     sizes[v] = sizes.get(v, 0) + 1
-            got = [list(dict.fromkeys(groups.get(str(v), []))) for v in want.tolist()]
-            n = [sizes.get(str(v), 0) for v in want.tolist()]
-            agree = [c for c in count_cols if all(int(x) == s for x, s in zip(df[c].tolist(), n) if x == x)]
+                got = [list(dict.fromkeys(groups.get(v, []))) for v in wstr]
+                n = [sizes.get(v, 0) for v in wstr]
+            agree = [c for c in count_cols if all(int(x) == k for x, k in zip(df[c].tolist(), n) if x == x)]
             mode = "matched" if agree else ("superset" if count_cols else "key")
             score = (2 if agree else 1 if not count_cols else 0, -len(f))
             if best is None or score > best[0]:
