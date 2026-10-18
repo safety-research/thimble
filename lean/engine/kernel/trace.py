@@ -717,6 +717,8 @@ def trace(st: Store, ref: str | None = None, text: str | None = None, within: st
             if step.get("step") == "query":
                 q = Q.get(st, step["id"])
                 step["upstream"] = _upstream(st, q) if q else []
+                if q and not step.get("inputs"):
+                    step["inputs"] = [{"path": x["path"], "rows_read": x.get("rows_read")} for x in q.get("inputs") or []]
         if is_transcript:
             cf = copied_from(st, ref)
             out["copied_from"] = cf
