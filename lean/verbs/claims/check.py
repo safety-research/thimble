@@ -1,6 +1,6 @@
-"""check.py SPEC.json (or - for stdin): the kernel's own citation check of an atlas, without saving it. cli.mjs runs it for
-`lean verb atlas check`, so the subagent that writes the atlas sees each evidence ref or quote that does not hold before
-main saves it. It builds the object as `lean save` would (objects.build) and prints, as JSON, how many citations hold
+"""check.py SPEC.json (or - for stdin): the kernel's own citation check of the corpus orientation's claims, without saving
+anything. cli.mjs runs it for `lean verb claims check`, so the subagent that writes the claims sees each evidence ref or
+quote that does not hold before main saves them. It builds the object as `lean save` would (objects.build) and prints, as JSON, how many citations hold
 and the problems. It writes nothing."""
 from __future__ import annotations
 

@@ -15,8 +15,9 @@
 //    lineage is, the files the session never read, what Claude declared, the problems `lean save` found) and the
 //    verbs that can act on it; and `lean coverage` for the session.
 // 3. The fork (prompts/observer.md): one tool-less fork of the session (served from main's prompt cache). It gives
-//    0-2 notes for Claude, at most one line for the person, whether the open line is settled, and for each new object
-//    the 2-3 verbs most worth doing with a few words each.
+//    0-2 notes for Claude, at most one line for the person, whether the open line is settled, the verbs of the
+//    answer's row it lights, 0-3 glosses, and the turn's claims: each new one with its words and a cluster, each one
+//    said again by its id, each correction with the id it revises (it reads the claims so far by id).
 //
 // Where its output goes:
 // - notes: beside the person's next prompt, as context the person never sees. Deduplicated across the session.
@@ -28,6 +29,9 @@
 //   closes at the next look.
 // - hints: the shell's hint row under each object (shell/object.js rankRow), in place of its own rule, once the
 //   look is done; a ranking that comes while a turn runs waits for that turn's end.
+// - claims: into the session's Claims (thimble/claims/<session>.json, CONTRACT 7) by verbs/claims/claims.js: placed
+//   by their words in the turn's messages, with the citations near them; c lights under the answer with how many are
+//   new. A look that fails is noted there, so the list says which turn was not read.
 // Memory and backoff, as YSK's: the last 50 lines shown and every known line are kept in the plugin's store and go
 // to the fork; code drops a repeat. After more than two lines typed past in a row, the next 2^(n-3) looks (at most
 // 16) give notes but no line.
@@ -36,8 +40,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, ObserverLine, Ranking } from '../types'
-import { answerRow, applyObserver, drawnTextOf, messageRecord } from '../shell/shell'
+import { answerRow, applyObserver, claimsStore, drawnTextOf, messageRecord, saveClaims, setVerb, turnPlaces } from '../shell/shell'
 import { glossesOf, verbsOf as litVerbs } from '../shell/message.js'
+import { applyTurn, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
 import { digest, isRepeat, jsonIn, parseAnswer } from './evidence.js'
 
 type Engine = EngineInterface
@@ -51,6 +56,8 @@ type Answer = {
   hints: Record<string, unknown>
   verbs: Record<string, unknown>
   glosses: unknown[]
+  claims: unknown[]
+  clusters: unknown[]
 }
 type Look = { turnId: string; turnNo: number; steps: number; tools: number; answer: string; question: string; since: number }
 
@@ -350,6 +357,10 @@ async function look($: Engine, t: Look): Promise<void> {
     const glossSkip = Math.min(8, num(await $.store.get(K.glossSkip)))
     const glossRule = glossSkip > 0 ? '\nThe person has not opened the last glosses. Give no glosses this time.\n' : ''
     const inRow = ((await $.state.get(ROWVERBS)).value ?? []) as { key: string; name: string }[]
+    // the session's claims so far, which the fork adds this turn's to (CONTRACT 7)
+    const store = await claimsStore($)
+    const grown = grownClusters(store)
+    const sofar = promptLines(store)
     const qText = q.out
       ? drift
         ? `A part is missing or replaced: ${drift}`
@@ -371,6 +382,9 @@ async function look($: Engine, t: Look): Promise<void> {
       .replace('{{NOTES}}', bullets(S.notesGiven.slice(-30)))
       .replace('{{OPEN}}', open ? `"${open.line}" (shown ${open.prompts} prompt${open.prompts === 1 ? '' : 's'} ago)` : '(none)')
       .replace('{{LINE_RULE}}', lineRule)
+      .replace('{{CLAIMS}}', () => sofar.claims)
+      .replace('{{CLUSTERS}}', () => sofar.clusters)
+      .replace('{{GROWN}}', () => (grown.length ? `\nGrown clusters, which you can rename or split:\n${grownLines(grown)}\n` : ''))
     const t0 = await $.clock.now()
     const f = await $.model.fork({ prompt })
     const fork: Record<string, unknown> = { ms: (await $.clock.now()) - t0, prompt_chars: prompt.length }
@@ -389,6 +403,28 @@ async function look($: Engine, t: Look): Promise<void> {
       return
     }
     const moved = S.running || S.turnId !== t.turnId // the person started another turn while it looked
+
+    // the turn's claims into the session's Claims: placed by their words, said again, revised, clustered
+    let claimsLit: { row: string; note: string; claims: string[] } | null = null
+    try {
+      const tp = await turnPlaces($, t.turnId)
+      const here = await answerRow($)
+      const places = tp.places.length ? tp.places : here ? [{ row: here, by: 'claude' as const, turn: null, text: answer }] : []
+      const when = new Date(await $.clock.now()).toISOString()
+      if (out) {
+        const res = applyTurn(store, { places, out, turn: tp.turn ?? t.turnNo, at: when, grown })
+        await saveClaims($, store)
+        row.claims = { turn: tp.turn ?? t.turnNo, given: Array.isArray(out.claims) ? out.claims.length : 0, added: res.added, restated: res.restated, revised: res.revised, dropped: res.dropped, clusters: res.clusters }
+        const note = noteFor(res)
+        const target = tp.rows.at(-1) ?? here
+        if (note && target) claimsLit = { row: target, note, claims: res.added }
+      } else {
+        noteGap(store, tp.turn ?? t.turnNo, f.isAnswered ? 'the look gave no answer it could read' : `the look failed (${f.reason})`)
+        await saveClaims($, store)
+      }
+    } catch (err) {
+      row.claims_error = cut(String((err as Error)?.message || err), 300)
+    }
 
     // the open line: closed when the session has settled it
     if (open && out?.settled) {
@@ -434,8 +470,12 @@ async function look($: Engine, t: Look): Promise<void> {
     if (at && out) {
       const kept = await messageRecord($, at)
       const shown = kept ? String(kept.shown ?? kept.text) : answer
-      const verbs = litVerbs(out.verbs)
-      if (!inRow.some(v => v.key === 'a')) delete (verbs as Record<string, unknown>).a
+      const verbs = litVerbs(out.verbs) as Record<string, unknown>
+      // c is lit by thimble, not the fork: by the claims this turn added to this message (or as it was lit before)
+      delete verbs.c
+      const prior = (kept?.verbs as Record<string, unknown> | undefined)?.c
+      if (claimsLit && claimsLit.row === at && inRow.some(v => v.key === 'c')) verbs.c = { lit: true, note: claimsLit.note, claims: claimsLit.claims }
+      else if (prior) verbs.c = prior
       const glosses = glossSkip > 0 ? {} : glossesOf(out.glosses, shown, glossed)
       const rec = await applyObserver($, at, { verbs, glosses })
       const placed = rec ? Object.entries(rec.glosses || {}).filter(([id]) => rec.marks.some(m => m.gloss === id)).map(([, g]) => g.term) : []
@@ -448,6 +488,8 @@ async function look($: Engine, t: Look): Promise<void> {
         await $.store.set(K.glossSkip, glossSkipsFor(n))
       } else if (glossSkip > 0) await $.store.set(K.glossSkip, glossSkip - 1)
     }
+    // a turn whose answer is another row than the one the verbs light (a new turn ended while it looked)
+    if (claimsLit && claimsLit.row !== at && inRow.some(v => v.key === 'c')) await setVerb($, claimsLit.row, 'c', { lit: true, note: claimsLit.note, claims: claimsLit.claims })
     if (skips > 0) await $.store.set(K.skip, skips - 1)
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
@@ -626,7 +668,7 @@ export const registerObserver: Register = (on, options) => {
       }
       await logRow($, { kind: 'switch', on: arg === 'on' })
       if (arg === 'on' && !S.enabled) return { text: 'The Observer row in /config is off. Turn it on there.' }
-      return { text: arg === 'on' ? 'The observer is on.' : 'The observer is off: no lines above the prompt, no notes to Claude, and the hint rows keep the shell\'s own rule. /observe on starts it again.' }
+      return { text: arg === 'on' ? 'The observer is on.' : 'The observer is off: no lines above the prompt, no notes to Claude, no new claims under c, and the hint rows keep the shell\'s own rule. /observe on starts it again.' }
     }
     if (arg === 'demo') {
       // a made-up line, so a person can see the band and its keys before a real one comes
@@ -641,7 +683,8 @@ export const registerObserver: Register = (on, options) => {
     const looks = S.log.filter(x => x.kind === 'look' && !x.skip)
     const lines = looks.filter(x => x.line_shown).length
     const ranked = Object.keys(S.hints).length
-    return { text: `The observer is ${(await isOn($)) ? 'on' : 'off'}. This session: ${looks.length} look${looks.length === 1 ? '' : 's'}, ${S.notesGiven.length} note${S.notesGiven.length === 1 ? '' : 's'} to Claude, ${lines} line${lines === 1 ? '' : 's'} shown, ${ranked} hint row${ranked === 1 ? '' : 's'} ranked. /observe off or /observe on.` }
+    const claims = (await claimsStore($)).claims.length
+    return { text: `The observer is ${(await isOn($)) ? 'on' : 'off'}. This session: ${looks.length} look${looks.length === 1 ? '' : 's'}, ${S.notesGiven.length} note${S.notesGiven.length === 1 ? '' : 's'} to Claude, ${lines} line${lines === 1 ? '' : 's'} shown, ${ranked} hint row${ranked === 1 ? '' : 's'} ranked, ${claims} claim${claims === 1 ? '' : 's'} read. /observe off or /observe on.` }
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

@@ -63,10 +63,10 @@ test('after the text changes (a squeeze), every mark is placed again on the new 
 })
 
 test("the observer's verbs and glosses, as the record keeps them: lit only when given, glosses only for terms in the text", () => {
-  const verbs = verbsOf({ v: { note: '2 views ready', proposals: ['steps per run', 'the common path', 'a third'] }, s: { lit: false }, a: { note: 'map 16 runs', minutes: 3, tokens: 60000 }, x: { note: 'not a row verb' } })
-  assert.deepEqual(Object.keys(verbs), ['v', 'a'])
+  const verbs = verbsOf({ v: { note: '2 views ready', proposals: ['steps per run', 'the common path', 'a third'] }, s: { lit: false }, c: { note: '3 new claims', claims: ['c4', 'c5', 'c6', 7] }, a: { note: 'not a row verb now' }, x: { note: 'not a row verb' } })
+  assert.deepEqual(Object.keys(verbs), ['v', 'c'])
   assert.deepEqual(verbs.v.proposals, ['steps per run', 'the common path'])
-  assert.deepEqual(verbs.a.offer, { what: 'map 16 runs', minutes: 3, tokens: 60000 })
+  assert.deepEqual(verbs.c, { lit: true, note: '3 new claims', claims: ['c4', 'c5', 'c6'] })
   const chips = verbsOf({ s: { note: '41 lines', chips: [{ name: 'Length', levels: ['one line', 'short', 'full'], level: 2 }, { name: 'bad', levels: ['one'] }] } })
   assert.deepEqual(chips.s.chips, [{ id: 'length', name: 'Length', levels: ['one line', 'short', 'full'], level: 2 }])
   const g = glossesOf([{ term: 'rebase loop', body: 'An agent rebases again and again.', here: 'Run 7 did it [41 times](q4#run=7@n).', refs: ['q4#run=7@n', 'not a ref'] }, { term: 'absent term' }, { term: 'fixture scope' }], TEXT, ['Fixture  Scope'])

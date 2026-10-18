@@ -1,5 +1,5 @@
-// shape.mjs: what an atlas holds, checked only as far as drawing needs. No Node and no imports, so the verb, the CLI,
-// the tests and the browser page can all use it.
+// shape.mjs: what the corpus orientation's claims file holds, checked only as far as the Claims store needs. No Node
+// and no imports, so the verb, the CLI and the tests can all use it.
 //
 //   data = {
 //     title, scope: {unit, n, what},                    what was read ("40 runs"), shown in the heading
@@ -9,8 +9,8 @@
 //     added?: {claims: [ids], row?, at?}                the claims one message added (that version only)
 //   }
 //
-// Any other field is kept. Nothing here judges whether a claim is true: the kernel checks each evidence ref and quote
-// when the atlas is saved (`lean save` lists a citation that does not hold).
+// Any other field is kept. Nothing here judges whether a claim is true: `lean verb claims check` runs the kernel's own
+// check of each evidence ref and quote (check.py).
 
 export const KINDS = [
   { id: 'fact', name: 'fact', tone: 'c4', color: '#5b6b82' },
@@ -43,30 +43,30 @@ export function refsOf(claim) {
   return (Array.isArray(claim?.evidence) ? claim.evidence : []).map(e => (typeof e === 'string' ? e : e && e.ref)).filter(x => typeof x === 'string' && x.trim())
 }
 
-/** The atlas's data from an object or from data itself. */
+/** The claims file's data from its object or from data itself. */
 export function dataOf(o) {
   if (o && typeof o === 'object' && o.data && typeof o.data === 'object' && Array.isArray(o.data.claims)) return o.data
   return o && typeof o === 'object' ? o : {}
 }
 
 /**
- * Check an atlas (its object or its data) for what drawing needs: claims with ids, names and known kinds, clusters
+ * Check a claims file (its object or its data) for what the store needs: claims with ids, names and known kinds, clusters
  * they name, relations between claims that exist, evidence on each claim.
  * @returns {{problems: string[], warnings: string[], counts: {claims, clusters, relations, refs, loose}}}
  */
-export function check(atlas) {
-  const d = dataOf(atlas)
+export function check(file) {
+  const d = dataOf(file)
   const problems = []
   const warnings = []
   const claims = Array.isArray(d.claims) ? d.claims : null
   const clusters = Array.isArray(d.clusters) ? d.clusters : []
-  if (!claims) problems.push('data.claims is not a list: the atlas has nothing to draw')
+  if (!claims) problems.push('data.claims is not a list: there is nothing to add')
   if (d.clusters != null && !Array.isArray(d.clusters)) problems.push('data.clusters is not a list')
   const cids = new Set()
   clusters.forEach((c, i) => {
     if (!c || c.id == null || String(c.id).trim() === '') { problems.push(`cluster ${i + 1} has no id`); return }
     if (cids.has(String(c.id))) problems.push(`cluster id "${c.id}" is used twice`)
-    if (/^q\d+(#.*)?$/.test(String(c.id))) problems.push(`cluster id "${c.id}" reads as a query ref when the atlas is saved; name it in words`)
+    if (/^q\d+(#.*)?$/.test(String(c.id))) problems.push(`cluster id "${c.id}" reads as a query ref when it is checked; name it in words`)
     cids.add(String(c.id))
     if (!c.name) warnings.push(`cluster "${c.id}" has no name; its id is shown`)
   })
@@ -80,7 +80,7 @@ export function check(atlas) {
     if (c.id == null || String(c.id).trim() === '') problems.push(`${at} has no id`)
     else if (ids.has(String(c.id))) problems.push(`${at}: the id is used twice`)
     else ids.add(String(c.id))
-    if (/^q\d+(#.*)?$/.test(String(c.id ?? ''))) problems.push(`${at}: an id of the form q<n> reads as a query ref when the atlas is saved; name it in words`)
+    if (/^q\d+(#.*)?$/.test(String(c.id ?? ''))) problems.push(`${at}: an id of the form q<n> reads as a query ref when it is checked; name it in words`)
     if (!c.name || typeof c.name !== 'string') problems.push(`${at} has no name`)
     else if (c.name.length > 120) warnings.push(`${at}: its name is ${c.name.length} characters; a name of under 80 reads in one row (put the rest in note)`)
     if (!kindOf(c.kind)) problems.push(`${at}: kind "${c.kind}" is not one of fact, finding, judgment call, event, claim`)
@@ -110,21 +110,16 @@ export function check(atlas) {
   return { problems, warnings, counts: { claims: (claims || []).length, clusters: used.size, relations: rels.length, refs, loose } }
 }
 
-/** One line on what the atlas holds: "53 claims in 6 clusters · 88 relations · 141 evidence refs". */
-export function summary(atlas) {
-  const { counts: c } = check(atlas)
+/** One line on what the file holds: "53 claims in 6 clusters · 88 relations · 141 evidence refs". */
+export function summary(file) {
+  const { counts: c } = check(file)
   return `${c.claims} claim${c.claims === 1 ? '' : 's'} in ${c.clusters} cluster${c.clusters === 1 ? '' : 's'} · ${c.relations} relation${c.relations === 1 ? '' : 's'} · ${c.refs} evidence ref${c.refs === 1 ? '' : 's'}`
 }
 
-/** Whether a kernel object is an atlas: made by this verb, or saved as "atlas". */
-export function isAtlas(o) {
-  return !!o && typeof o === 'object' && (o.verb === 'atlas' || /(^|-)atlas$/.test(String(o.id || ''))) && Array.isArray(o.data?.claims)
-}
-
 /**
- * The spec `lean save` gets for an atlas written as JSON: the file's object (or its bare data wrapped), with each
- * evidence ref as {ref} (a bare string that reads as a query ref would be replaced by its value), the verb's name and
- * the program. `added` is dropped unless `keepAdded`: a full build shows the cluster list, not one message's claims.
+ * The spec the kernel's citation check reads for a claims file: the file's object (or its bare data wrapped), with each
+ * evidence ref as {ref} (a bare string that reads as a query ref would be replaced by its value). `added` is dropped
+ * unless `keepAdded`.
  */
 export function specFor(json, program, { keepAdded = false } = {}) {
   const wrapped = json && typeof json === 'object' && json.data && typeof json.data === 'object' && !Array.isArray(json.data)
@@ -137,9 +132,9 @@ export function specFor(json, program, { keepAdded = false } = {}) {
       : c))
   }
   spec.data = data
-  spec.title = spec.title || data.title || 'atlas'
-  if (!data.title && spec.title !== 'atlas') data.title = spec.title
-  spec.verb = 'atlas'
+  spec.title = spec.title || data.title || 'claims'
+  if (!data.title && spec.title !== 'claims') data.title = spec.title
+  spec.verb = 'claims'
   if (program) spec.program = program
   return spec
 }

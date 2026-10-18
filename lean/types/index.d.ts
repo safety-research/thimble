@@ -53,8 +53,8 @@ export type MsgRecord = {
   final?: boolean
 }
 
-/** One card of the tray: a mark of a message, or a citation inside a card. */
-export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' }
+/** One card of the tray: a mark of a message, a citation inside a card, or a claim of the session's Claims. */
+export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite'; claim?: string }
 
 /** The tray: the stack of cards it shows, the top one drawn; `asking` once 1 was pressed (its footer says how to ask). */
 export type Tray = { stack: TrayFrame[]; asking?: boolean }
@@ -96,7 +96,8 @@ declare module 'claude-code' {
       /** the tray above the prompt, or none */
       tray: Tray | null
       /** the line a verb opened under a message's verb row, or none */
-      pick: { row: string; verb: string } | null
+      /** the line a verb opened under a message's verb row (for c, the claims list, with the cluster opened), or none */
+      pick: { row: string; verb: string; open?: string | null } | null
       /** the message the keys act on, when the person picked one other than the latest */
       selrow: string | null
       /** the row of the latest turn's answer */
@@ -107,6 +108,12 @@ declare module 'claude-code' {
       running: StateFamily<string | null>
       /** the verbs of the row, as the registry lists them */
       rowverbs: { key: string; name: string; color?: unknown }[] | null
+      /** this session's claims (CONTRACT 7), as held for the drawing; thimble/claims/<session>.json on disk */
+      claims: Record<string, unknown> | null
+      /** a turn's prompt row, its number and Claude's message rows, by turn id: where its claims were said */
+      turns: StateFamily<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null>
+      /** what the corpus orientation would map in the folder, with its time and tokens */
+      claimoffer: { root: string; offer: { what: string; minutes: number | null; tokens: number | null } | null } | null
     }
   }
 }

@@ -17,6 +17,9 @@
 //              (shell/node/serve.mjs), alive while a page is open and ended with the session. What the person does
 //              on a page comes back as one line: an `ask` goes to Claude as a prompt that carries its scope, a `verb`
 //              presses that verb on the message's card.
+//   claims     the session's claims (thimble/claims/<session>.json), which the observer's look adds each turn's to:
+//              c under a message opens the clusters with their claims there (shell/claimsview.ts), a claim opens in
+//              the tray with where it was said and its sources, and ] [ step through them.
 //   resume     where each object is drawn is kept per session in $THIMBLE_HOME/lean/shown/<session>.json, so
 //              `claude -c` and `--resume` draw the objects under the same replies again.
 //
@@ -36,6 +39,8 @@ import { chainWords, isRef, objectRefs, rankRow, recordRefs, regionMeta, regionR
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { messageEl, trayEl, verbLineEl, verbRowEl } from './view'
 import type { RowVerb } from './view'
+import { claimCardEl, claimsListEl, listDigits } from './claimsview'
+import { emptyStore, readStore, viewOf } from '../verbs/claims/claims.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -65,6 +70,9 @@ const ANSWER = { plugin: 'thimble-lean', key: 'answer' } as const
 const CARDREADY = { plugin: 'thimble-lean', key: 'cardready' } as const
 const RUNNING = { plugin: 'thimble-lean', key: 'running' } as const
 const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
+const CLAIMS = { plugin: 'thimble-lean', key: 'claims' } as const
+const TURNS = { plugin: 'thimble-lean', key: 'turns' } as const
+const CLAIMOFFER = { plugin: 'thimble-lean', key: 'claimoffer' } as const
 
 const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
@@ -81,7 +89,7 @@ const objects = new Map<string, Any>()
 const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
-let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[] } | null = null
+let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; rows: string[]; oriented: number } | null = null
 let theme: 'dark' | 'light' = 'dark'
 let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string }; scope?: Record<string, unknown> } | null = null
 let server: { base: string; root: string } | null = null
@@ -588,7 +596,7 @@ async function recordOf($: Engine, root: string, row: string): Promise<Any | nul
   try { return (await $.fs.exists(file)) ? JSON.parse(String(await $.fs.read(file))) : null } catch { return null }
 }
 
-type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
+type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; claim?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
 
 /** What Claude reads beside a question asked in the browser: what it was asked about, and where its rows are. */
 export async function webContext($: Engine, root: string, scope: WebScope): Promise<string> {
@@ -602,6 +610,15 @@ export async function webContext($: Engine, root: string, scope: WebScope): Prom
     lines.push(`They asked it on the page of ${ref.id}@${o?.version ?? ref.v} "${o?.title || ''}" (${root}/thimble/objects/${ref.id}.json)${region ? `, with its part ${region} ("${label}") selected. "This" may mean that part.` : '.'}`)
     const refs = o && region ? regionRefs(o, p.drawing, region).refs : o ? objectRefs(o).map((c: Any) => c.ref) : []
     if (refs.length) lines.push(`${region ? 'That part rests' : 'Its words rest'} on ${refs.slice(0, 3).join(', ')}; \`lean resolve <ref>\` opens the rows, \`lean list ${ref.id}\` the object's lineage.`)
+  }
+  if (scope.claim && /^c\d{1,6}$/.test(scope.claim)) {
+    const store = await claimsStore($)
+    const c = store.claims.find((x: Any) => x.id === scope.claim)
+    if (c) {
+      const first = (c.said || [])[0]
+      const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
+      lines.push(`They asked it about the claim ${c.id} "${c.text}" on the page of this session's claims${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}${first?.quote ? `, first said as "${first.quote}"` : ''}.${refs.length ? ` It rests on ${refs.join(', ')}.` : ''} "This" may mean that claim.`)
+    }
   }
   const m = scope.mark
   if (m && m.kind === 'gloss') {
@@ -634,6 +651,11 @@ async function askFromBrowser($: Engine, root: string, text: string, scope: WebS
 
 /** A verb pressed under a message in the browser: run here as the terminal's verb row runs it, on the message. */
 async function verbFromBrowser($: Engine, root: string, key: string, row: string, proposal: string | null): Promise<void> {
+  if (key === 'c') {
+    // the claims are the browser's own tab; pressed on a message there, the list opens under it here too
+    if (await recordNow($, row)) await pressRowVerb($, row, 'c')
+    return
+  }
   const verb = (await rowVerbs($)).find(v => v.key === key)
   if (!verb) { $.ui.toast(`The browser pressed ${key}, but no verb of the row is on that key, so nothing ran.`); return }
   const rec = (await recordNow($, row)) ?? ((await recordOf($, root, row)) as MsgRecord | null)
@@ -1044,7 +1066,8 @@ function messageObject(rec: MsgRecord): Any {
   return { id: `msg-${rec.row.slice(0, 8)}`, version: 1, kind: 'message', row: rec.row, session: rec.session, title: first.length > 60 ? first.slice(0, 59) + '…' : first, text }
 }
 
-/** The options a verb's line offers for a message: v's proposals, squeeze's one press with its chips, atlas's offer. */
+/** The options a verb's line offers for a message: v's proposals, squeeze's one press with its chips. (c opens the
+ *  claims list instead of a line.) */
 function lineOptions(key: string, rec: MsgRecord | null): { options: { label: string; note?: string }[]; note?: string } {
   const lit = (rec?.verbs || {})[key] as Any
   if (key === 'v') {
@@ -1055,19 +1078,19 @@ function lineOptions(key: string, rec: MsgRecord | null): { options: { label: st
     const chips = lit?.lit && Array.isArray(lit.chips) ? lit.chips : []
     return { options: [{ label: 'squeeze it' }], note: chips.map((c: Any) => `${c.name}: ${c.levels?.[c.level] ?? ''}`).join(' · ') }
   }
-  if (key === 'a') {
-    const o = lit?.offer || {}
-    const cost = [o.minutes ? `about ${o.minutes} min` : '', o.tokens ? `${Math.round(o.tokens / 1000)}k tokens` : ''].filter(Boolean).join(' · ')
-    return { options: [{ label: o.what || 'map the claims of this work', ...(cost ? { note: cost } : {}) }] }
-  }
   return { options: [{ label: `run ${key}` }] }
 }
 
 /** A verb key under a message: its line opens (a press on the open one closes it). */
 async function pressRowVerb($: Engine, row: string, key: string): Promise<void> {
   const cur = (await $.state.get(PICK)).value as Any
-  if (cur && cur.row === row && cur.verb === key) { await $.state.set(PICK, null); return }
+  if (cur && cur.row === row && cur.verb === key) { await $.state.set(PICK, null); if (key === 'c') await $.state.set(TRAY, null); return }
   await $.state.set(TRAY, null)
+  if (key === 'c') {
+    // the claims list: read again (the orientation may have added some), with the orientation's offer beside it
+    await reloadClaims($)
+    await claimOffer($)
+  }
   await $.state.set(PICK, { row, verb: key })
   const answer = (await $.state.get(ANSWER)).value
   await $.state.set(SELROW, row === answer ? null : row)
@@ -1151,11 +1174,237 @@ export async function answerRow($: Engine): Promise<string | null> {
   return ((await $.state.get(ANSWER)).value as string | null | undefined) ?? null
 }
 
+// ------------------------------------------------------------------------------------------------ claims
+//
+// The session's claims (CONTRACT 7) are kept in <root>/thimble/claims/<session>.json, beside its messages, so the
+// browser's page server reads the same. The observer's one look adds each turn's claims (observer.ts); `lean verb
+// claims save` adds the corpus orientation's. c under a message opens the list there; a claim opens in the tray.
+
+type ClaimsStore = ReturnType<typeof emptyStore> & Record<string, Any>
+type Place = { row: string; by: 'person' | 'claude'; turn: number | null; text: string }
+
+/** The claims file of this session, or null while there is no folder under analysis. */
+async function claimsFile($: Engine): Promise<string | null> {
+  const root = await rootHere($)
+  return root ? `${root.replace(/\/+$/, '')}/thimble/claims/${safe(String(await $.session.id()))}.json` : null
+}
+
+/** This session's claims: as held, else as on disk, else none yet. A copy: the caller may change it. */
+export async function claimsStore($: Engine): Promise<ClaimsStore> {
+  const session = String(await $.session.id())
+  const held = (await $.state.get(CLAIMS)).value as ClaimsStore | null | undefined
+  if (held && held.session === session) return JSON.parse(JSON.stringify(held))
+  return reloadClaims($)
+}
+
+/** The claims read again from disk (the orientation's CLI wrote them, or a resumed session), and held. */
+async function reloadClaims($: Engine): Promise<ClaimsStore> {
+  const session = String(await $.session.id())
+  const file = await claimsFile($)
+  let store = emptyStore(session) as ClaimsStore
+  try {
+    if (file && (await $.fs.exists(file))) store = readStore(String(await $.fs.read(file)), session) as ClaimsStore
+    else {
+      const held = (await $.state.get(CLAIMS)).value as ClaimsStore | null | undefined
+      if (held && held.session === session) store = held
+    }
+  } catch {
+    // a file it cannot read: the claims start again, and the next save writes a whole one
+  }
+  await $.state.set(CLAIMS, store)
+  return JSON.parse(JSON.stringify(store))
+}
+
+/** The claims kept: held for the drawing, and written for the browser and a resumed session. With no folder yet they
+ *  are held only, and the next save writes them. */
+export async function saveClaims($: Engine, store: ClaimsStore): Promise<void> {
+  await $.state.set(CLAIMS, store)
+  const file = await claimsFile($)
+  if (file) await $.fs.write(file, JSON.stringify(store, null, 1))
+}
+
+/** A turn's prompt row, its turn number (the person's prompts so far) and Claude's message rows. */
+async function turnOf($: Engine, rows: string[]): Promise<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null }> {
+  const idx = (await msgFilesNow($)).index
+  const first = rows.length ? idx.findIndex(x => x.row === rows[0]) : -1
+  let p = -1
+  for (let i = (first < 0 ? idx.length : first) - 1; i >= 0; i--) if (idx[i].kind === 'user') { p = i; break }
+  const prompt = p >= 0 ? { row: String(idx[p].row), text: String(idx[p].text || '') } : null
+  return { prompt, rows: [...rows], turn: p >= 0 ? idx.slice(0, p + 1).filter(x => x.kind === 'user').length : null }
+}
+
+/** Where a turn's claims can have been said: the person's prompt, then each of Claude's messages in the turn. */
+export async function turnPlaces($: Engine, turnId: string): Promise<{ turn: number | null; rows: string[]; places: Place[] }> {
+  const t = (await $.state.get({ ...TURNS, id: turnId })).value as { prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null | undefined
+  if (!t) return { turn: null, rows: [], places: [] }
+  const places: Place[] = []
+  if (t.prompt?.text) places.push({ row: t.prompt.row, by: 'person', turn: t.turn, text: t.prompt.text })
+  for (const row of t.rows) {
+    const rec = await recordNow($, row)
+    if (rec?.text) places.push({ row, by: 'claude', turn: t.turn, text: rec.text })
+  }
+  return { turn: t.turn, rows: t.rows, places }
+}
+
+/** One verb of a message's row lit (or dimmed, with null), its other verbs kept. */
+export async function setVerb($: Engine, row: string, key: string, v: Record<string, unknown> | null): Promise<void> {
+  const rec = await recordNow($, row)
+  if (!rec) return
+  const verbs = { ...(rec.verbs || {}) } as Record<string, Any>
+  if (v) verbs[key] = v
+  else delete verbs[key]
+  await saveRecord($, { ...rec, verbs })
+}
+
+/** What the corpus orientation would map here, with its time and tokens (verbs/claims/estimate.mjs), once per folder. */
+async function claimOffer($: Engine): Promise<Any | null> {
+  const root = await rootHere($)
+  if (!root) return null
+  const held = (await $.state.get(CLAIMOFFER)).value as Any
+  if (held && held.root === root) return held.offer
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  try {
+    const r = await $.process.run(['node', `${dir}/verbs/claims/estimate.mjs`, root], { timeoutMs: 30000 })
+    const e = r.exitCode === 0 ? JSON.parse(r.stdout) : null
+    const offer = e?.offer ? { what: String(e.offer.what), minutes: e.offer.minutes ?? null, tokens: e.offer.tokens ?? null } : null
+    await $.state.set(CLAIMOFFER, { root, offer })
+    return offer
+  } catch {
+    await $.state.set(CLAIMOFFER, { root, offer: null })
+    return null
+  }
+}
+
+/** The claims the list marks as new under a message: those the observer counted for it. */
+function freshOf(rec: MsgRecord | null): string[] {
+  const c = (rec?.verbs as Any)?.c
+  return Array.isArray(c?.claims) ? c.claims.map(String) : []
+}
+
+/** The claim the tray shows, if its card started from a claim. */
+function claimInTray(tray: Tray | null): string | null {
+  const f = tray?.stack?.[0] as (TrayFrame & { claim?: string }) | undefined
+  return f?.claim ? String(f.claim) : null
+}
+
+/** A claim opened in the tray; the list (when open) opens its cluster and lights it. */
+async function openClaim($: Engine, id: string): Promise<void> {
+  const store = await claimsStore($)
+  const c = store.claims.find((x: Any) => x.id === id)
+  if (!c) return
+  await $.state.set(TRAY, { stack: [{ claim: id } as TrayFrame] } as Tray)
+  const pick = (await $.state.get(PICK)).value as Any
+  if (pick && pick.verb === 'c') await $.state.set(PICK, { ...pick, open: c.cluster ?? null })
+}
+
+/** A cluster of the list opened: all its claims show, and its first opens in the tray. */
+async function openCluster($: Engine, id: string | null): Promise<void> {
+  const store = await claimsStore($)
+  const g = viewOf(store).groups.find((x: Any) => (x.id ?? null) === id)
+  const pick = (await $.state.get(PICK)).value as Any
+  if (pick && pick.verb === 'c') await $.state.set(PICK, { ...pick, open: id })
+  if (g?.claims?.length) await openClaim($, g.claims[0].id)
+}
+
+/** ] and [ through the claims, in the list's order: from none, the message's first new claim (or the first). */
+async function stepClaim($: Engine, dir: number): Promise<void> {
+  const store = await claimsStore($)
+  const pick = (await $.state.get(PICK)).value as Any
+  const rec = pick?.row ? await recordNow($, pick.row) : null
+  const flat = viewOf(store, { fresh: freshOf(rec) }).flat as Any[]
+  if (!flat.length) { $.ui.toast('No claims yet: they are read after each turn of work.'); return }
+  const cur = claimInTray((await $.state.get(TRAY)).value as Tray | null)
+  const k = cur ? flat.findIndex(c => c.id === cur) : -1
+  const next = k < 0 ? (dir > 0 ? flat.find(c => c.fresh) || flat[0] : flat[flat.length - 1]) : flat[(k + dir + flat.length) % flat.length]
+  await openClaim($, next.id)
+}
+
+/** The corpus orientation asked for: the claims verb asks Claude to start it (a subagent reads the corpus). */
+async function orient($: Engine, row: string): Promise<void> {
+  const rec = await recordNow($, row)
+  if (!rec) { $.ui.toast('The orientation needs a message to start from. Press c under one of Claude\'s replies.'); return }
+  await $.state.set(PICK, null)
+  await $.state.set(TRAY, null)
+  $.clock.after(0, () => { void runOnMessage($, 'claims', 'c', rec, 'orient') })
+}
+
+/** The list under a message, as a drawing reads it. */
+async function claimsListNow($: Engine, els: Any, at: string, rec: MsgRecord, pick: Any, cols: number): Promise<Any> {
+  const store = ((await $.state.get(CLAIMS)).value as ClaimsStore | null) ?? (emptyStore(String(await $.session.id())) as ClaimsStore)
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  const offer = ((await $.state.get(CLAIMOFFER)).value as Any)?.offer ?? null
+  const view = viewOf(store, { fresh: freshOf(rec) })
+  const o = store.orientation as Any
+  return claimsListEl(els, {
+    key: `vl-${at}`, w: Math.max(50, Math.min(112, cols - 2)), theme, view, selected: claimInTray(tray), open: pick.open ?? null,
+    offer, oriented: o && o.claims ? { claims: Number(o.claims), clusters: Number(o.clusters) || 0 } : null, cardOpen: !!claimInTray(tray),
+    onClaim: (id: string) => openClaim($, id), onCluster: (id: string | null) => openCluster($, id), onOffer: () => orient($, at), onClose: () => $.state.set(PICK, null),
+  })
+}
+
+/** A digit with the list open: a cluster, or the orientation's offer. */
+async function claimsDigit($: Engine, n: number): Promise<boolean> {
+  const pick = (await $.state.get(PICK)).value as Any
+  if (!pick || pick.verb !== 'c') return false
+  const store = await claimsStore($)
+  const view = viewOf(store)
+  const offer = ((await $.state.get(CLAIMOFFER)).value as Any)?.offer ?? null
+  const d = listDigits(view, store.orientation ? null : offer)
+  if (d.offer === n) { await orient($, pick.row); return true }
+  const g = view.groups.find((x: Any) => d.clusters.get(String(x.id)) === n)
+  if (!g) return false
+  await openCluster($, g.id ?? null)
+  return true
+}
+
+/** The claim card in the tray, as a drawing reads it. */
+async function claimCardNow($: Engine, els: Any, id: string, tray: Tray, w: number): Promise<Any | null> {
+  const store = ((await $.state.get(CLAIMS)).value as ClaimsStore | null) ?? null
+  if (!store) return null
+  const v = viewOf(store)
+  const c = (v.flat as Any[]).find(x => x.id === id)
+  if (!c) return null
+  const g = (v.groups as Any[]).find(x => x.claims.some((y: Any) => y.id === id))
+  const n = Math.min(8, (c.sources || []).length)
+  const keys = tray.asking
+    ? 'type your question · ↵ sends it with this claim · 0 back'
+    : ['1 ask', n ? `${n > 1 ? `2–${n + 1}` : '2'} open a source` : '', '] [ next claim', '0 back'].filter(Boolean).join(' · ')
+  return claimCardEl(els, {
+    key: 'claim-card', w, body: 7, theme, claim: c, cluster: g?.name || 'between clusters', keys,
+    onSource: (i: number) => openClaimSource($, id, i),
+    onClaim: (other: string) => openClaim($, other),
+    onPlace: (row: string) => quietly($.ui.scroll({ to: { key: `msg-${row}-b0` }, block: 'center' })),
+  })
+}
+
+/** A source of the claim in the tray: its source card over the claim's, through the kernel like any citation. */
+async function openClaimSource($: Engine, id: string, i: number): Promise<boolean> {
+  const store = await claimsStore($)
+  const c = store.claims.find((x: Any) => x.id === id)
+  const s = c?.sources?.[i]
+  if (!s) return false
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  await $.state.set(TRAY, trayPush(tray, { ref: s.ref, label: s.label || s.ref, kind: 'cite' }) as Tray)
+  return true
+}
+
 /** A question asked with the tray open: what it carries for Claude, and the row's few words for the person. */
 async function trayScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown> } | null> {
   const tray = (await $.state.get(TRAY)).value as Tray | null
-  const frame = trayTop(tray) as TrayFrame | null
+  const frame = trayTop(tray) as (TrayFrame & { claim?: string }) | null
   if (!frame) return null
+  if (frame.claim) {
+    const store = await claimsStore($)
+    const c = store.claims.find((x: Any) => x.id === frame.claim)
+    if (!c) return null
+    const first = (c.said || [])[0]
+    const where = first ? (first.by === 'orientation' ? 'from the corpus orientation' : `said in turn ${first.turn ?? '?'} by ${first.by === 'person' ? 'the person' : 'you'}: "${first.quote}"`) : ''
+    const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
+    return {
+      label: `claim: ${c.text}`, scope: { claim: c.id, ...(first?.row ? { row: first.row } : {}) },
+      context: `The person asked this with a claim of this session open in the tray: ${c.id} "${c.text}"${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}, ${where}.${refs.length ? ` It rests on ${refs.join(', ')}; \`lean resolve <ref>\` shows the rows.` : ''} "This" or "it" may mean that claim.`,
+    }
+  }
   if (frame.row == null) {
     return {
       label: frame.label || frame.ref!, scope: { mark: { kind: 'cite', ref: frame.ref, label: frame.label } },
@@ -1191,21 +1440,33 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   const verbs = await rowVerbs($)
   const consume = { text: e.text, cursor: e.cursor }
+  const claims = pick?.verb === 'c' || !!claimInTray(tray)
   if (k === ']' || k === '[') {
     keyOpened = null
+    // with the claims list or a claim open, ] and [ step through the claims
+    if (claims) { await stepClaim($, k === ']' ? 1 : -1); return consume }
     await $.state.set(PICK, null)
     await stepMark($, k === ']' ? 1 : -1)
     return consume
   }
   if (k === '0' || k === 'backspace') {
     keyOpened = null
+    // a claim's card closes before the list under it
+    if (tray && claims) { await $.state.set(TRAY, trayBack(tray) as Tray | null); return consume }
     if (pick) { await $.state.set(PICK, null); return consume }
     if (tray) { await $.state.set(TRAY, trayBack(tray) as Tray | null); return consume }
     return null
   }
   if (/^[1-9]$/.test(k)) {
     keyOpened = null
-    if (pick) return (await pickOption($, Number(k) - 1)) ? consume : null
+    const top = trayTop(tray) as (TrayFrame & { claim?: string }) | null
+    if (top?.claim) {
+      // the claim's card: 1 asks, 2–9 open its sources
+      if (k === '1') { await $.state.set(TRAY, { ...tray!, asking: true }); return consume }
+      return (await openClaimSource($, top.claim, Number(k) - 2)) ? consume : null
+    }
+    if (pick?.verb === 'c' && !tray) return (await claimsDigit($, Number(k))) ? consume : null
+    if (pick && !tray) return (await pickOption($, Number(k) - 1)) ? consume : null
     if (tray) {
       // 1 asks about the card's mark: the footer then says how; the question is typed in the prompt
       if (k === '1') { await $.state.set(TRAY, { ...tray, asking: true }); return consume }
@@ -1634,7 +1895,7 @@ export const registerShell: Register = (on, options) => {
   // a turn of main's: the objects it saved, and its last text row, under which they are drawn
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      turn = { unplaced: [], lastRow: '', calls: [], placed: [] }
+      turn = { unplaced: [], lastRow: '', calls: [], placed: [], rows: [], oriented: 0 }
       // a new turn: the keys act on its answer again, and a verb's open line closes
       try {
         await $.state.set(SELROW, null)
@@ -1652,6 +1913,12 @@ export const registerShell: Register = (on, options) => {
     try {
       const input = e as unknown as { command?: string; agentId?: string; tool_use_id?: string }
       const text = typeof r.text === 'string' ? r.text : typeof r.result === 'string' ? r.result : ''
+      // the corpus orientation's claims went into the store: the list reads it again, and c lights under the answer
+      if (r.deny === undefined && !r.isError && !input.agentId && /\blean\s+verb\s+claims\s+save\b/.test(String(input.command))) {
+        const m = /(\d+) new claims? from the corpus/.exec(text)
+        if (m && turn) turn.oriented += Number(m[1])
+        await reloadClaims($)
+      }
       if (r.deny !== undefined || r.isError || input.agentId || !/\blean\b/.test(String(input.command)) || !text.includes('saved ')) return r
       const cdTo = /^\s*cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*&&/.exec(String(input.command))
       notes = []
@@ -1720,6 +1987,8 @@ export const registerShell: Register = (on, options) => {
           if (!rows.includes(row)) await $.state.set(MSGROWS, [...rows, row])
           await indexRow($, { row, kind: 'assistant', at })
           await saveRecord($, rec)
+          // the turn's messages, where its claims are found
+          if (turn && !turn.rows.includes(row)) turn.rows.push(row)
         }
       }
     } catch {
@@ -1746,9 +2015,17 @@ export const registerShell: Register = (on, options) => {
         const rec = await recordNow($, row)
         if (rec && !rec.final) await saveRecord($, { ...rec, final: true })
         await $.state.set(ANSWER, row)
+        // claims the corpus orientation saved in this turn light c under its answer
+        if (turn.oriented) await setVerb($, row, 'c', { lit: true, note: `${turn.oriented} claims from the corpus` })
       }
     } catch {
       // a turn with no verb row is better than one that does not end
+    }
+    try {
+      // the turn's prompt and messages, for the observer's claims
+      if (e.agentId === undefined && turn) await $.state.set({ ...TURNS, id: e.turnId }, await turnOf($, turn.rows))
+    } catch {
+      // the claims of this turn are then read from its answer alone
     }
     if (e.agentId === undefined) turn = null
     return done
@@ -1795,7 +2072,10 @@ export const registerShell: Register = (on, options) => {
         ...(browserFlag ? [browserChip(els, `vr-${at}-web`, async () => $.ui.toast(await openBrowser($, { row: at })))] : []),
       ]
       parts.push(verbRowEl(els, { key: `vr-${at}`, verbs, lit: rec.verbs || {}, open: pick && pick.row === at ? pick.verb : null, running, selected: sel === at, theme, onPress: (k: string) => pressRowVerb($, at, k), after }))
-      if (pick && pick.row === at) {
+      if (pick && pick.row === at && pick.verb === 'c') {
+        await $.state.get(CLAIMS)
+        parts.push(await claimsListNow($, els, at, rec, pick, cols))
+      } else if (pick && pick.row === at) {
         const verb = verbs.find(v => v.key === pick.verb)
         if (verb) {
           const { options, note } = lineOptions(pick.verb, rec)
@@ -1815,10 +2095,14 @@ export const registerShell: Register = (on, options) => {
   // card on top of its stack: a citation's source card or a gloss's explainer card.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const tray = (await $.state.get(TRAY)).value as Tray | null
-    const frame = trayTop(tray) as TrayFrame | null
+    const frame = trayTop(tray) as (TrayFrame & { claim?: string }) | null
     if (!frame || e.props.hasSurvey) return next(e)
     const els = $.ui.resolve(e) as Any
     const w = Math.max(40, Math.min(104, (e.props.bodyColumns ?? 100) - 3))
+    if (frame.claim) {
+      await $.state.get(CLAIMS)
+      return (await claimCardNow($, els, frame.claim, tray!, w)) ?? next(e)
+    }
     let kind: 'cite' | 'gloss' | 'spark' = 'cite'
     let title = frame.label || frame.ref || ''
     if (frame.row != null) {
@@ -1842,9 +2126,10 @@ export const registerShell: Register = (on, options) => {
     })
   })
 
-  // keys while the prompt is empty: v, s and a open their line under the message the keys act on; ] and [ move through
-  // the marks, opening the tray; a digit picks in the open line or opens a mark inside the card; 0 closes the line or
-  // goes back one card. Claude Code hands a plugin only the keys that edit the prompt (tab, ↵, esc and a ⌫ with nothing
+  // keys while the prompt is empty: v and s open their line under the message the keys act on, and c the claims list;
+  // ] and [ move through the marks, opening the tray (through the claims while the list or a claim is open); a digit
+  // picks in the open line, opens a cluster of the list, or opens a mark or a source inside the card; 0 closes the
+  // card, then the line or list. Claude Code hands a plugin only the keys that edit the prompt (tab, ↵, esc and a ⌫ with nothing
   // to delete stay its own), so these are the keys. A verb key that began a word being typed (`visualize …`, `so …`)
   // gives its letter back to the prompt. Keys are read one at a time, in the order pressed.
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {

@@ -1,7 +1,7 @@
 // base.js: what every page of the session's browser mode shares: the server's base path (the token is the first part
 // of every path), its JSON routes, its change events, and the line a page sends back to the terminal.
 //
-// A page is a folder of shell/browser/ (mirror/, card/, atlas/ ...). It imports this file as ../common/base.js, the
+// A page is a folder of shell/browser/ (mirror/, card/, claims/ ...). It imports this file as ../common/base.js, the
 // drawing modules as ../draw/<file>, and shell/object.js as ../lib/object.js. serve.mjs serves them all behind the
 // token, so a new page needs no change to the server.
 
