@@ -290,7 +290,7 @@
   }
   const cam = { x: 0, y: 0, k: 1.2 }
   const panelH = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--panel')) || 282
-  const vpTop = 44
+  const vpTop = 58
   const vpBot = () => 36 + S.panel * (panelH() - 30)
   const vpCenterY = () => vpTop + (H - vpTop - vpBot()) / 2
   const toScreen = n => [W / 2 + (n.x - cam.x) * cam.k, vpCenterY() + (n.y - cam.y) * cam.k]
@@ -646,9 +646,12 @@
       return [m[1], decodeURIComponent(frag || '').replace(/&/g, ' '), col].filter(Boolean).join(' · ')
     }
     const [path, loc] = ref.split('#')
-    const file = path.split('/').pop()
-    const parent = path.split('/').slice(-2, -1)[0]
-    const head = /^(agent|transcript|session)/i.test(file) && parent ? parent.replace(/^(sweep\d-)/, '') + '/' + file : file
+    const segs = path.split('/')
+    const file = segs.pop()
+    // a file named like its siblings (agent-04.jsonl, transcript.jsonl) reads with the run it belongs to
+    while (segs.length > 1 && /^(agents|sessions|runs|transcripts|subagents|session-data|data|logs)$/i.test(segs[segs.length - 1])) segs.pop()
+    const run = segs[segs.length - 1]
+    const head = /^(agent|transcript|session|events|board|run|trace)/i.test(file) && run ? run + '/' + file : file
     const line = /^L(\d+)(?:\.b(\d+))?/.exec(loc || '')
     return line ? `${head}:${line[1]}${line[2] ? '.' + line[2] : ''}` : head + (loc ? '#' + loc : '')
   }
