@@ -628,6 +628,12 @@
     return { name: name, message: msg.slice(0, 400), line: line, source: src }
   }
   function toRoot(ret, k) {
+    if (ret && typeof ret.then === 'function') {
+      try { ret.then(null, () => {}) } catch (e) { /* nothing to wait for */ }
+      const e = new Error('the program returned a promise; a program runs start to end and returns a node, with no await or import')
+      e.name = 'ReturnError'
+      throw e
+    }
     if (ret instanceof Canvas) return ret.node()
     if (ret && typeof ret === 'object' && typeof ret.t === 'string') return ret
     if (typeof ret === 'string' || typeof ret === 'number') return k.text(String(ret))
