@@ -34,7 +34,7 @@ import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { citeCard, explainerCard } from './cards.js'
-import { cardStore, detailAction, detailIsOpen, detailKeys, detailPane, followDetail, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
+import { cardStore, detailAction, detailIsOpen, detailKeys, detailPane, followDetail, markOpen, noteDock, noteViewport, openDetailPane, paneColumns, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadList, threadOf } from './thread'
@@ -1411,7 +1411,8 @@ async function toggleClaims($: Engine, row: string): Promise<void> {
 
 /** The pane takes the keyboard. */
 async function openClaimsPane($: Engine): Promise<void> {
-  const r = await $.ui.open({ id: CPANE, title: 'Claims', focus: true, closeOnEscape: true, columns: 120 })
+  // docked beside the conversation, leaving it its share of the terminal (as the detail does)
+  const r = await $.ui.open({ id: CPANE, title: 'Claims', focus: true, closeOnEscape: true, columns: paneColumns() })
   if (r && (r as Any).isPlaced === false) $.ui.toast(`Claims: ${(r as Any).reason || 'the pane was not placed'}. Widen the terminal, then press c again.`)
 }
 
@@ -1424,6 +1425,7 @@ async function closeClaims($: Engine): Promise<void> {
 
 /** The Claims pane: the claims program (panes/claims.js) on the session's store, in the room the pane has. */
 async function claimsPaneNow($: Engine, e: Any): Promise<Any> {
+  noteDock(e)
   const st = ((await $.state.get(CLAIMPANE)).value as ClaimPane | null) ?? { row: '' }
   const w = Math.max(30, (e.props.bodyColumns ?? 120) - 1)
   const h = Math.max(6 + HEAD_ROWS, e.props.scroll?.bodyRows ?? 40)
@@ -2482,7 +2484,7 @@ export const registerShell: Register = (on, options) => {
       if (e.props.hasSurvey) return next(e)
       const els = $.ui.resolve(e) as Any
       const { Box, Text } = els
-      noteViewport(e.viewport)
+      if (!(await $.state.get(CLAIMPANE)).value) noteViewport(e.viewport)
       const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
       const line = await barEl($, els, bw, !!e.props.isWorking)
       const tray = (await $.state.get(TRAY)).value as Tray | null

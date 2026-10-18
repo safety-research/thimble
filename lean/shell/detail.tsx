@@ -77,11 +77,20 @@ let refocus = false
 let drawnSig = ''
 let paneFocused = false
 
-/** The terminal's width, from the band's viewport (shell.tsx) while no detail is docked: then the conversation has
- *  every column. While the detail is open its own drawing measures it (the conversation's columns, the dock's and the
- *  border between them). */
+/** The terminal's width, from the band's viewport (shell.tsx) while no pane of ours is docked: then the conversation
+ *  has every column. While one is docked its own drawing measures it (noteDock). */
 export function noteViewport(v: { columns?: number } | undefined): void {
   if (!isOpen && v && typeof v.columns === 'number' && v.columns > 0) viewCols = v.columns
+}
+
+/** A docked pane's drawing measures the terminal: the conversation's columns beside it, its own, and the border. */
+export function noteDock(e: Any): void {
+  if (e?.viewport?.columns && e.props?.placement === 'dock') viewCols = e.viewport.columns + (e.props.bodyColumns ?? 0) + 1
+}
+
+/** The columns a docked pane of ours asks for, leaving the chat its share (the detail's, the Claims pane's). */
+export function paneColumns(): number {
+  return detailColumns(viewCols)
 }
 
 /** The chat's columns beside the docked detail: about two fifths of the terminal, 48 to 80, so its lines read. */
@@ -351,7 +360,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const els = $.ui.resolve(e) as Any
   const { Box, Text, Button } = els
   // the terminal's width: the conversation's columns beside the dock, the dock's, and its border
-  if (e.viewport?.columns && e.props.placement === 'dock') viewCols = e.viewport.columns + (e.props.bodyColumns ?? 0) + 1
+  noteDock(e)
   viewing = e.props?.view?.agentId ?? null
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel) return Text({ dimColor: true, children: 'No card is open. A card Claude saves shows under its reply; open it from there.' })
@@ -582,10 +591,13 @@ export function registerDetail(on: Parameters<Register>[0]): void {
   // straight after a key that acted gives the key's letter back there (it began a word). Letters that arrive before
   // the ask line has the keys join the question. With the detail closed the message layer's keys act (shell.tsx).
   on('prompt.edit', async ($, e, next) => {
-    if (!e.key || e.key.ctrl || e.key.meta) return next(e)
     if (!isOpen) return next(e)
+    // a paste (or keys typed faster than the terminal sends them one by one) with no key: a question too
+    const paste = !e.key && !!e.inputText
+    if ((!e.key && !paste) || e.key?.ctrl || e.key?.meta) return next(e)
     const mine = keyChain.then(async () => {
       if (e.text !== '') return null
+      if (paste) { toAsk($, draft + String(e.inputText)); return { text: '', cursor: 0 } }
       const k = e.key!.key
       const now = Date.now()
       const typed = String(e.inputText || '')

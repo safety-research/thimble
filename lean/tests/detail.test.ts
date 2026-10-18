@@ -193,9 +193,11 @@ test('keys act only while the composer is empty; a key that began a word gives i
   expect(await pane($, clock)).not.toContain('how Claude drew this')
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"pl"')
   expect(await hintOf($)).toContain('↵ ask · esc back to the card')
-  // a letter that arrives before the ask line has the keys joins the question
+  // a letter that arrives before the ask line has the keys joins the question, and so does a paste (no key)
   expect(await ($ as Any).prompt.edit(edit('a'))).toEqual({ text: '', cursor: 0 })
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"pla"')
+  expect(await ($ as Any).prompt.edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'nts here?' } as never)).toEqual({ text: '', cursor: 0 })
+  expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"plants here?"')
   // with words in the composer (typed there before the detail opened), every key types there
   expect(await ($ as Any).prompt.edit(edit('p', 'what about '))).toEqual({ text: 'what about p', cursor: 12 })
   expect(await ($ as Any).prompt.edit(edit(']', 'x'))).toEqual({ text: 'x]', cursor: 2 })
@@ -203,7 +205,7 @@ test('keys act only while the composer is empty; a key that began a word gives i
   const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
   await ui.input({ key: await askKeyOf($), text: 'plants?' })
   await clock.settle()
-  expect(JSON.stringify(await $.ui.render(PANE))).not.toContain('"value":"pla"')
+  expect(JSON.stringify(await $.ui.render(PANE))).not.toContain('"value":"plants here?"')
   // h steps back to v1 (the history lives in the header)
   await clock.advance(1000)
   expect(await ($ as Any).prompt.edit(edit('h'))).toEqual({ text: '', cursor: 0 })
