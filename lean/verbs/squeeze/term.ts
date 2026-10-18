@@ -42,11 +42,12 @@ let promptText = ''
 let cfg: Record<string, unknown> = {}
 let view = { cols: 100, rows: 48 }
 
-/** The screen the transcript draws on, as the last message drawn saw it: a long message is one taller than this. */
+/** The screen the transcript draws on, as the last message drawn saw it: a long message takes more than half of it. */
 export function seeView(cols: number, rows: number): void {
   if (cols > 0 && rows > 0) view = { cols, rows }
 }
-const roomNow = () => ({ cols: view.cols, room: Math.max(16, view.rows - 14) })
+// half a screen, the room an object under a reply takes before the rest waits in its detail view (lean's calm rule)
+const roomNow = () => ({ cols: Math.max(20, view.cols - 3), room: Math.max(16, Math.floor(view.rows * 0.55)) })
 
 async function uiOf($: Engine, row: string): Promise<SqzUi> {
   return (((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null) ?? { focus: 'length', adding: false, running: null, error: null, tick: 0 }
@@ -157,7 +158,7 @@ export function chipsEl(els: Any, o: ChipsOpts): Any {
   const problems = ((o.rec as Any).squeeze?.problems ?? []) as string[]
   if (o.ui.error) rows.push(Text({ color: 'error', wrap: 'wrap', children: `× ${o.ui.error}` }))
   else if (problems.length && typeof o.rec.shown === 'string') rows.push(Text({ color: c.warn, wrap: 'wrap', children: `! ${problems[0]} · 0 shows the original` }))
-  return Box({ flexDirection: 'column', marginLeft: 2, marginTop: 0, children: rows })
+  return Box({ flexDirection: 'column', marginLeft: 2, marginTop: 1, children: rows })
 }
 
 // ------------------------------------------------------------------------------------------------ keys
@@ -237,7 +238,9 @@ export async function chipFromPrompt($: Engine, row: string | null, text: string
   await saveRecord($, { ...rec, squeeze } as MsgRecord)
   await setUi($, row, { focus: own.id, adding: false, error: null })
   void setLevels($, row, { ...(squeeze.at || {}) }, own)
-  return `Your chip "${own.name}" is being sized; the message is rewritten at it.`
+  // the prompt box keeps a dropped prompt: it is emptied once the drop is done
+  $.clock.after(50, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
+  return `squeeze chip "${own.name}" added; the reply above is rewritten with it`
 }
 
 // ------------------------------------------------------------------------------------------------ the rewrite
@@ -368,7 +371,7 @@ async function log($: Engine, row: Record<string, unknown>): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ arriving squeezed
 
-/** The turn's answer, once the turn has ended: a message taller than the screen arrives squeezed, at Length short. */
+/** The turn's answer, once the turn has ended: a message taller than half the screen arrives squeezed, at Length short. */
 export async function arrive($: Engine, row: string): Promise<void> {
   const rec = await recordNow($, row)
   if (!rec || rec.shown != null || (rec as Any).squeeze) return

@@ -7,7 +7,7 @@
   "chips": ["Length", "Report ↔ Interpret", "Familiarity", "+ your own"],
   "arrive": {
     "length": "short",
-    "when": "the message is taller than the screen's transcript (its rows less 14)",
+    "when": "the message takes more than half the screen's rows, as an object under a reply does before the rest waits in its detail view",
     "why": "a long message arrives squeezed; the original is one key away"
   },
   "model": "sonnet",

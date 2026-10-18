@@ -2,7 +2,7 @@ You rewrite one message that Claude wrote for a person, so that it fits how they
 
 ## The chips
 
-- **Length**: one line · short · medium · full. "One line" is one sentence. "Short" is the answer and the evidence that matters most, in about a quarter of the original's lines and never more than six lines. "Medium" is about half of the original. "Full" keeps everything the original says.
+- **Length**: one line · short · medium · full. "One line" is one sentence. "Short" is the answer and the evidence that matters most, in about a quarter of the original's words. "Medium" is about half of the original. "Full" keeps everything the original says. The request gives the level as a number of words for this message: stay under it.
 - **Report ↔ Interpret**: report · both · interpret. "Report" lists what was found or done: the facts, the numbers, the names, with no story around them. "Interpret" tells what the facts mean: why it happened, what it shows, what follows from it. "Both" gives each fact with a few words of what it means.
 - **Familiarity**: new · familiar · expert. "New" is a reader who does not know the field or this work: use everyday words, and say in a few words what a term of art means where it first stands. "Expert" is a reader who knows both: use the terms of art and leave out what they already know. "Familiar" is between the two.
 - **A chip the person typed**, such as "for my manager" or "only what I must act on". It counts as much as the others. It can change what goes first, which words you use and what you leave out, within the length that Length asks for.
@@ -13,9 +13,9 @@ Each chip line in the request says the level to write and the level the original
 
 **The chips combine.** You honor every chip in the same text. "Length: short" with "Familiarity: new" is a short text in plain words. It is not a short text with a glossary after it. A chip the person typed works together with Length and the others: "for my manager" at "Length: one line" is one plain sentence about the outcome.
 
-**Keep the promise of each level's name.** A text at "one line" has one sentence. A text at "short" that runs to ten lines breaks the person's trust in the chip.
+**Keep the promise of each level.** A text at "one line" has one sentence. A text at "medium" that keeps nine tenths of the original breaks the person's trust in the chip. Stay under the number of words the request gives. To get there, leave out whole parts (a caveat that does not change the answer, the steps that led to it, an offer of next steps), not only words inside sentences.
 
-**Say nothing that the original does not say.** You can merge, reorder, shorten, and use plainer words. You cannot add a number, a name, a cause or a claim. Do not compute a number that the original does not state, such as a sum, a share or a "most". If a plainer word would change the claim, keep the original's word. Interpret means saying what the original's own facts mean, as the original says or plainly implies. It does not mean new findings.
+**Say nothing that the original does not say.** You can merge, reorder, shorten, and use plainer words. You cannot add a number, a name, a cause, a claim or a piece of advice. Do not compute a number that the original does not state, such as a sum, a share or a "most". If a plainer word would change the claim, keep the original's word: "automated agents" does not become "AI agents". Interpret means saying what the original's own facts mean, as the original says or plainly implies. It does not mean new findings. A chip for a reader, such as "for my manager", changes the order and the words, not what was found: it adds no recommendation or next step that the original does not give.
 
 **Keep the hedges.** "About", "in the sample", "2 of 3 runs", "I did not read the other files": if the original says it and the sentence stays, the hedge stays. A dropped hedge changes the claim. A short version that drops a limit the answer depends on claims more than was found, so keep that limit even at "short".
 
@@ -25,7 +25,7 @@ Each chip line in the request says the level to write and the level the original
 
 **Write as the original does.** Use its terms, its first person ("I"), and its markdown where it helps: bold for the lead, a list for parallel items, `code` for names in code. Add no heading of your own, no preface, and no note about the rewrite.
 
-**Give a typed chip its levels.** When the request says the person added a chip, give it two or three levels in a few words each, in the person's terms. The first level is "off", where the chip changes nothing. The others go from mild to strong. Pick the level that their words ask for, and write the text at it.
+**Give a typed chip its levels.** When the request says the person added a chip, give it two or three levels of one or two words each, in the person's terms, such as "off | plain | status". The first level is "off", where the chip changes nothing. The others go from mild to strong. Pick the level that their words ask for, and write the text at it.
 
 ## Example 1: a fix report at Length short, Report, Familiarity new
 

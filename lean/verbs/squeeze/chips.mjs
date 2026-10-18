@@ -139,20 +139,36 @@ export function rowsOf(text, cols = 100) {
 }
 
 /**
- * Whether a message should arrive squeezed: it is taller than the screen leaves room for, so the person could not
- * read it whole without scrolling. `room` is the transcript's rows (the terminal's rows less the prompt and the rows
- * under the message); about 34 on a 48-row terminal.
+ * Whether a message should arrive squeezed: it takes more rows than `room`, half the screen (26 rows of a 48-row
+ * terminal), the most an object under a reply takes before the rest waits in its detail view. In past sessions the
+ * observer found every answer of 17 lines or more long enough to squeeze; at 100 columns those take 29 to 50 rows.
  */
-export function isLong(text, { cols = 100, room = 34 } = {}) {
+export function isLong(text, { cols = 100, room = 26 } = {}) {
   return rowsOf(text, cols) > Math.max(16, room)
 }
 
 // ------------------------------------------------------------------------------------------------ the call
 
+/** The words of a message as the person reads them: a citation counts its words, not its ref. */
+export function wordsOf(text) {
+  return String(text || '').replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
+}
+
+/** What a level of Length means for this message, in words: the model keeps a number better than a level's name. */
+export function lengthTarget(level, words) {
+  if (level === 0) return 'one sentence, at most 35 words'
+  // a quarter and a half of the original, but never longer than most of a short message, and short stays short
+  const round = n => (n >= 40 ? Math.round(n / 5) * 5 : Math.max(1, Math.round(n)))
+  if (level === 1) return `at most ${round(Math.min(120, Math.max(Math.min(30, words * 0.6), words * 0.25)))} words`
+  if (level === 2) return `at most ${round(Math.max(words * 0.5, Math.min(50, words * 0.8)))} words`
+  return `about ${words} words, as the original`
+}
+
 /** One chip as the request names it. */
-function chipLine(c, newOwn) {
+function chipLine(c, newOwn, words = 0) {
   if (newOwn && c.id === newOwn.id) return null
   const levels = c.levels.join(' · ')
+  if (c.id === 'length' && words) return `- ${c.name}: ${c.levels[c.level]}, ${lengthTarget(c.level, words)} (levels ${levels}; the original is at full, ${words} words)`
   if (c.kind === 'own') return `- ${c.name}: ${c.levels[c.level]} (the person's own chip, "${c.words}"; levels ${levels}; "${c.levels[0]}" changes nothing)`
   // where nobody has said where the original stands, a chip the person left alone keeps the original as it is
   if (!c.known && c.level === c.level0) return `- ${c.name}: as the original (levels ${levels})`
@@ -175,7 +191,8 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), newO
     String(rec?.text ?? ''),
     '</original>',
   ].join('\n')
-  const lines = chips.map(c => chipLine(c, newOwn)).filter(Boolean)
+  const words = wordsOf(rec?.text)
+  const lines = chips.map(c => chipLine(c, newOwn, words)).filter(Boolean)
   const tail = ['', 'The chips, each at the level to write now:', ...lines]
   if (newOwn) tail.push('', `The person added a chip in their own words: "${newOwn.words}". Give it its levels, pick the level their words ask for, and write the message at it, with the other chips as set.`)
   tail.push('', 'Write the message at these levels.')
@@ -184,6 +201,14 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), newO
     system: [{ text: String(system || ''), cache: true }],
     prompt: [{ text: head, cache: true }, { text: tail.join('\n') }],
   }
+}
+
+/** A level's name as a tile shows it: at most 20 characters, cut after a whole word. */
+function shortName(x) {
+  const t = str(x, 80)
+  if (t.length <= 20) return t
+  const cut = t.slice(0, 21).replace(/\s+\S*$/, '')
+  return cut || t.slice(0, 20)
 }
 
 /** The reply: the text in <text> tags, and a new chip's levels and pick when it gave them. */
@@ -196,7 +221,7 @@ export function readReply(raw) {
   const c = /<chip\b([^>]*)\/?>/i.exec(s)
   if (c) {
     const attr = name => (new RegExp(`${name}\\s*=\\s*"([^"]*)"`, 'i').exec(c[1]) || [])[1] || ''
-    const levels = attr('levels').split(/\s*[|·]\s*/).map(x => str(x, 24)).filter(Boolean).slice(0, 4)
+    const levels = attr('levels').split(/\s*[|·]\s*/).map(x => shortName(x)).filter(Boolean).slice(0, 4)
     if (levels.length >= 2) {
       const pick = attr('pick').trim().toLowerCase()
       let level = levels.findIndex(l => l.toLowerCase() === pick)

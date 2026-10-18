@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { newRecord, remark, withObserver } from '../../../shell/message.js'
+import { newRecord, remark, verbsOf, withObserver } from '../../../shell/message.js'
 import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, fromVersions, glyph, isLong, isOriginal, keyOf, noteFor, noteOf, ownChip, readReply, request, restore, rowsOf, stepAt, withOwn } from '../chips.mjs'
 import { parseWords, run } from '../run.mjs'
 
@@ -41,6 +41,10 @@ test('every message has the same chips: Length, Report ↔ Interpret, Familiarit
   assert.deepEqual(c2.map(c => c.levels[c.level]), ['full', 'report', 'expert'])
   assert.ok(c2.every(c => c.known))
   assert.equal(CHIPS.length, 3)
+  // the observer's s may carry only where the answer stands: the record keeps it, unlit
+  const kept = verbsOf({ s: { at: { interpret: 'Interpret', familiarity: 'new' } } })
+  assert.deepEqual(kept.s, { lit: false, note: '', at: { interpret: 'interpret', familiarity: 'new' }, chips: [] })
+  assert.deepEqual(chipsOf({ ...rec, verbs: kept }).map(c => c.levels[c.level]), ['full', 'interpret', 'new'])
 })
 
 test('a chip steps one level at a time and stops at its ends; the dots show where it is', () => {
@@ -69,7 +73,7 @@ test("the person's own chip combines with the fixed ones: one request carries ev
   assert.deepEqual(chips.map(c => c.name), ['Length', 'Report ↔ Interpret', 'Familiarity', 'For my manager'])
   const req = request(rec, { system: PROMPT, question: 'Why does it fail?', newOwn: own })
   const tail = req.prompt[1].text
-  assert.match(tail, /- Length: short \(levels one line · short · medium · full; the original is at full\)/)
+  assert.match(tail, /- Length: short, at most \d+ words \(levels one line · short · medium · full; the original is at full, \d+ words\)/)
   assert.match(tail, /- Familiarity: new /)
   assert.match(tail, /- Report ↔ Interpret: as the original/)
   assert.match(tail, /The person added a chip in their own words: "for my manager"/)
@@ -132,13 +136,13 @@ test('a level seen before comes back with no call, and the original comes back w
   assert.equal(fromVersions(orig, { length: 0 }, remark).shown, 'One line.')
 })
 
-test('a message taller than the screen arrives squeezed; the rows count as drawn', () => {
+test('a message taller than half the screen arrives squeezed; the rows count as drawn', () => {
   assert.equal(rowsOf('a\n\nb', 100), 3)
   assert.equal(rowsOf('word '.repeat(50).trim(), 100), 3)
   assert.equal(rowsOf('[a long label](q1#x@n)', 10), 1)
   const long = Array.from({ length: 40 }, (_, i) => `Line ${i} of a long answer.`).join('\n')
-  assert.ok(isLong(long, { cols: 100, room: 34 }))
-  assert.ok(!isLong(TEXT, { cols: 100, room: 34 }))
+  assert.ok(isLong(long, { cols: 100, room: 26 }))
+  assert.ok(!isLong(TEXT, { cols: 100, room: 26 }))
   assert.ok(!isLong(long, { cols: 100, room: 60 }))
 })
 
@@ -146,6 +150,8 @@ test('readReply takes the text from its tags, or the whole reply when it gave no
   assert.deepEqual(readReply('<text>\nA.\n</text>'), { text: 'A.', chip: null })
   assert.deepEqual(readReply('A plain reply.'), { text: 'A plain reply.', chip: null })
   assert.equal(readReply('<chip levels="off | on" pick="on"/><text>B</text>').chip.level, 1)
+  // a long level name is cut after a whole word, so a tile never shows half a word
+  assert.deepEqual(readReply('<chip levels="off | plain outcome | outcome and decision for you" pick="plain outcome"/><text>C</text>').chip, { levels: ['off', 'plain outcome', 'outcome and decision'], level: 1 })
 })
 
 test('run.mjs: the same rewrite from words, through ctx.model, for /verb and tools that hold a record', async () => {

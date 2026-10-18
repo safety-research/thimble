@@ -41,7 +41,7 @@ function world(on: any, replies: string[] = []) {
     return { text: e.text }
   })
   const fills: string[] = []
-  on('prompt.fill', (_$: unknown, e: { text: string }) => { fills.push(e.text); return { value: undefined } })
+  on('prompt.fill', (_$: unknown, e: { text: string }) => { fills.push(e.text); return { isFilled: true } })
   on('ui.toast', () => ({ value: undefined }))
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   // the model: each call answers with the next reply given, and is kept for the test to read
@@ -115,7 +115,7 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(call.system).toBe('THE PROMPT')
   expect(call.prompt).toContain('The person asked: when did the agents edit most?')
   expect(call.prompt).toContain(TEXT)
-  expect(call.prompt).toContain('- Length: medium (levels one line · short · medium · full; the original is at full)')
+  expect(call.prompt).toContain('- Length: medium, at most 14 words (levels one line · short · medium · full; the original is at full, 18 words)')
   expect(call.prompt).toContain('- Report ↔ Interpret: as the original')
   const rec = record(w)
   expect(rec.text).toBe(TEXT)
@@ -164,6 +164,9 @@ test("the person's own chip: + then its words and ↵ make it, the prompt never 
   expect((r as Any).drop).toContain('For my manager')
   expect(w.submitted.length).toBe(0)
   await clock.settle()
+  // the prompt box, which keeps a dropped prompt, is emptied
+  await (clock as Any).advance(100)
+  expect(w.fills.at(-1)).toBe('')
   expect(w.calls.length).toBe(2)
   const call = w.calls[1]
   expect(call.prompt).toContain('- Length: medium')
