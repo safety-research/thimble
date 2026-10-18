@@ -66,6 +66,8 @@ function world(on: any, serverLines: unknown[] = []) {
   on('agent.spawn', (_$: unknown, e: { subagent_type: string; prompt: string; description: string; cwd: string }) => { spawns.push(e); return { model: 'claude-test' } as never })
   on('config.list', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
+  // Claude Code's hint line under the prompt, as a hook leaves it
+  on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   return { runs, inputs, files, submitted, toasts, spawned, commands, spawns }
 }
@@ -78,6 +80,10 @@ function textOf(n: any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const hintOf = async ($: any) => textOf(await $.ui.render(HINT))
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const reply = ($: any, text = 'June 18 had the most saves.') => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
 
@@ -133,10 +139,9 @@ test('browser mode on: o browser under replies and cards, and /browser starts th
   textOf(await reply($))
   await clock.settle()
   const drawn = textOf(await reply($))
-  expect(drawn).toContain('o browser')
-  expect(drawn.match(/o browser/g)!.length).toBe(2)
-  // the chips stand in the message layer's rows: the answer's verb row and the card's row. A text between tool calls
-  // (not the turn's answer) has no row, so it draws as Claude Code draws it
+  // o is named once, in the hint line under the prompt, not in the rows
+  expect(drawn).not.toContain('o browser')
+  expect(await hintOf($)).toContain('o browser')
   expect(drawn).not.toContain('· · ')
   expect(textOf(await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: 'bbbbbbbb-0000', props: { text: 'Done.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never))).toBe('the reply')
   const r = await $.command.run({ command: 'browser', args: '' } as never)
@@ -202,10 +207,11 @@ test('browser mode turned off in /config ends the server and hides o again', { o
   await savedTurn($, on, clock)
   textOf(await reply($))
   await clock.settle()
-  expect(textOf(await reply($))).toContain('o browser')
+  expect(await hintOf($)).toContain('o browser')
   await $.config.set({ key: 'thimble-lean.browser', value: false } as never)
   await clock.settle()
   expect(textOf(await reply($))).not.toContain('browser')
+  expect(await hintOf($)).not.toContain('browser')
   const r = await $.command.run({ command: 'browser', args: '' } as never)
   expect(String(r.text)).toContain('Browser mode is off')
   expect(w.spawned.length).toBe(0)

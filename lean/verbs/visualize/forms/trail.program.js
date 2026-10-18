@@ -12,14 +12,20 @@ if (zoom === 'overview') {
   })
   // the strip: one cell per bucket of steps, its color what the run was doing then
   const W = Math.min(k.w - 2, 100), per = data.steps / W
-  const c = k.canvas(W, 2)
+  const c = k.canvas(W, 3)
   for (let x = 0; x < W; x++) {
     const step = Math.floor(x * per) + 1
     c.put(x, 0, '▆', tone[data.stations.find(t => step >= t.from && step <= t.to).activity])
   }
-  c.text(0, 1, '1', { tone: 'dim' })
-  c.text(W - 1, 1, k.fmt(data.steps), { tone: 'dim', align: 'right' })
-  return k.stack(map, c, k.legend(Object.entries(tone)), { gap: 1 })
+  // the colors labelled in place, each activity's name under where it first starts: no legend
+  let free = 0
+  for (const s of data.stations) {
+    const x = Math.floor((s.from - 1) / per)
+    if (x >= free && x + s.activity.length < W) { c.text(x, 1, s.activity, { tone: tone[s.activity] }); free = x + s.activity.length + 1 }
+  }
+  c.text(0, 2, '1', { tone: 'dim' })
+  c.text(W - 1, 2, k.fmt(data.steps), { tone: 'dim', align: 'right' })
+  return k.stack(map, c, { gap: 1 })
 }
 // zoomed into one station: a row of ticks per 60 steps, a failing step tall and red
 const s = data.stations.find(x => x.id === zoom), t = data.ticks[zoom], W = Math.min(60, k.w - 20)

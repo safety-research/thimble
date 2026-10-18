@@ -260,7 +260,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const o = p.object
   const theme = currentTheme()
   const ind = IND[theme]
-  const { grid, right } = unframe(p, W)
+  const { grid } = unframe(p, W)
   const parts = partsOf(grid)
   let part = parts.find((x: Any) => x.id === sel.region) ?? null
   if (!part && parts.length) {
@@ -290,9 +290,11 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     if (i) vText.push(Text({ dimColor: true, children: ' · ' }))
     vText.push(Text({ color: x.v === on ? ind : undefined, bold: x.v === on, dimColor: x.v !== on, children: `v${x.v}` }))
   })
+  // the header: the title, and at its right the card's id (shown here only) and its versions when it has more than one;
+  // where its values come from is the bar's one dim line
   kids.push(Box({ flexDirection: 'row', justifyContent: 'space-between', children: [
     Text({ bold: true, wrap: 'truncate-end', children: String(o.title || o.id) }),
-    Box({ flexDirection: 'row', flexShrink: 0, children: [Text({ dimColor: true, children: right ? ` ${cut(right, 30)}   ` : ' ' }), ...vText] }),
+    Box({ flexDirection: 'row', flexShrink: 0, children: [Text({ dimColor: true, children: ` card:${cut(String(o.id), 30)}` }), ...(versions.length > 1 ? [Text({ children: '   ' }), ...vText] : [])] }),
   ] }))
   const take = String(o.text || o.question || '')
   const refsOf = (id: string) => regionRefs(o, p.drawing, id).refs
@@ -310,7 +312,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const head = 1 + (take ? 2 : 0) + 1
   const barRows = sel.prog ? 1 : sel.bar === 'examples' ? 4 + EXR : 4
   const threadRow = thread && !TW ? 1 : 0
-  const room = R - head - barRows - threadRow - 1
+  const room = R - head - barRows - threadRow
   if (sel.prog) {
     kids.push(...programEls(els, o, p, part, room + barRows, C, ind))
   } else {
@@ -339,9 +341,8 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     kids.push(...(await barEls($, els, sel, o, p, part, meta, C, ind)))
   }
 
-  // ---- the thread (as one line when there is no room for its column) and the keys
+  // ---- the thread, as one line when there is no room for its column; the keys are in the hint line under the prompt
   if (threadRow) kids.push(threadLine(els, thread, ind))
-  kids.push(keysRow($, els, sel, part, versions.length, !!thread))
   const pageBox = Box({ flexDirection: 'column', width: C, children: kids })
   if (!TW) return pageBox
   return Box({ flexDirection: 'row', children: [
@@ -351,8 +352,8 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   ] })
 }
 
-/** The card's thread, the left column: the question that made the card, then each question asked here with its part,
- *  and the thread's answers with their citations. The newest at the bottom, above the prompt that asks it. */
+/** The card's thread, the left column: the card's question, then each question asked here with its part and the
+ *  thread's answers with their citations, the newest at the bottom; before the first, `❯ ask this card…`. */
 function threadColumn(els: Any, o: Any, thread: Any, part: Any, TW: number, R: number, ind: string): Any[] {
   const { Text } = els
   const w = TW - 1
@@ -364,15 +365,12 @@ function threadColumn(els: Any, o: Any, thread: Any, part: Any, TW: number, R: n
     if (about) lines.push(Text({ wrap: 'truncate-end', children: [Text({ dimColor: true, children: '  about ' }), Text({ color: ind, children: cut(about, w - 9) })] }))
     lines.push(Text({ children: ' ' }))
   }
+  // the card's question at the top, and until the person asks, a placeholder that says where a question goes
   if (o.question) {
-    say([{ s: String(o.question) }], Text({ color: ind, children: '▏ ' }), '▏ ')
-    lines.push(Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: '▏ ' }), Text({ color: ind, underline: true, children: `card:${cut(String(o.id), w - 10)}` })] }))
+    say([{ s: String(o.question), dim: true }], Text({ children: '' }), '')
     lines.push(Text({ children: ' ' }))
   }
-  if (!thread?.turns?.length) {
-    say([{ s: "This chat is the card's own thread. Ask about the card, or about the part you select. Claude in the main chat does not see it.", dim: true }], Text({ children: '' }), '')
-    lines.push(Text({ children: ' ' }))
-  }
+  if (!thread?.turns?.length) lines.push(Text({ dimColor: true, children: '❯ ask this card…' }))
   for (const t of thread?.turns || []) {
     if (t.role === 'person') { person(String(t.text), t.about); continue }
     const calls: string[] = t.calls || []
@@ -385,10 +383,8 @@ function threadColumn(els: Any, o: Any, thread: Any, part: Any, TW: number, R: n
   }
   if (thread?.status === 'running') lines.push(Text({ color: 'warning', children: '✻ answering…' }))
   if (thread?.status === 'failed') lines.push(Text({ color: 'error', wrap: 'wrap', children: `× ${cut(String(thread.error || 'the thread stopped'), w * 2)}` }))
-  const head = [Text({ children: [Text({ color: ind, bold: true, children: 'Thread' }), Text({ dimColor: true, children: ` · card:${cut(String(o.id), w - 16)}` })] }), Text({ dimColor: true, children: '─'.repeat(w) })]
-  const room = R - head.length - 1
-  const body = lines.length > room ? lines.slice(lines.length - room) : lines
-  return [...head, ...body]
+  const room = R - 1
+  return lines.length > room ? lines.slice(lines.length - room) : lines
 }
 
 /** Runs wrapped at word boundaries into lines of at most `w` characters. */
@@ -440,12 +436,10 @@ function cutRuns(runs: Any[], n: number): Any[] {
 async function barEls($: Engine, els: Any, sel: Detail, o: Any, p: Prepared, part: Any, meta: Any, C: number, ind: string): Promise<Any[]> {
   const { Box, Text } = els
   const bar = sel.bar ?? null
-  const rule = (label: string, on: boolean) => Text({ wrap: 'truncate-end', children: [Text({ color: on ? ind : undefined, dimColor: !on || undefined, children: `─ ${label} ` }), Text({ dimColor: true, children: '─'.repeat(Math.max(0, C - label.length - 4)) })] })
   const pad = (out: Any[], n: number) => { while (out.length < n) out.push(Text({ children: ' ' })); return out.slice(0, n) }
   const rows = bar === 'examples' ? 4 + EXR : 4
-  if (!bar || !part) {
-    return pad([rule('details', false), Text({ dimColor: true, children: part ? '  select a part and press ↵ to see its details' : '  this card has no parts to select' })], rows)
-  }
+  // empty until asked: whitespace, no frame and no words (the hint line says ↵ details)
+  if (!bar || !part) return pad([], rows)
   const cite = typeof meta.cite === 'string' ? p.drawing.cites?.[meta.cite] : null
   const set = exampleSet(p.drawing, meta)
   const { refs } = regionRefs(o, p.drawing, part.id)
@@ -459,25 +453,21 @@ async function barEls($: Engine, els: Any, sel: Detail, o: Any, p: Prepared, par
   const nrows = resolved?.count ?? (set ? set.total ?? set.records.length : cite ? (cite.rows?.length || 0) + (cite.more || 0) : null)
   const segs = fromLine(facts || { sources: cite?.source ? [{ path: cite.source }] : [] }, { rows: nrows, ...(cite?.source && !facts ? { source: cite.source } : {}) })
   const filter = namedKnob(p.drawing, 'filter')
-  const out: Any[] = [rule('details', true)]
+  // the details: the part's claim, then where it comes from as one dim line (with the filter the card has on)
+  const out: Any[] = [Text({ children: ' ' })]
   out.push(Text({ wrap: 'truncate-end', children: [Text({ bold: true, children: claim })] }))
   out.push(Text({ wrap: 'truncate-end', children: [
-    ...segs.map((x: Any) => Text({ bold: x.bold || undefined, dimColor: x.tone === 'dim' || x.tone === 'unseen' || undefined, color: x.tone === 'warn' ? 'warning' : undefined, children: x.t })),
+    ...segs.map((x: Any) => Text({ bold: x.bold || undefined, dimColor: x.tone !== 'warn' || undefined, color: x.tone === 'warn' ? 'warning' : undefined, children: x.t })),
     ...(filter && filter.i > 0 ? [Text({ dimColor: true, children: ' · ' }), Text({ color: ind, children: `filter on: ${filter.shown[filter.i]}` })] : []),
   ] }))
   // what the examples are examples of: the examples' own label, else the part's claim
   const of = String(set?.label || claim)
-  if (bar !== 'examples') {
-    out.push(Text({ dimColor: true, wrap: 'truncate-end', children: `  e examples of ${of}${total ? ` (${fmtN(total)})` : ''} · 0 clear` }))
-    return pad(out, rows)
-  }
+  if (bar !== 'examples') return pad(out, rows)
   const n = records.length
   const ex = n ? ((((sel.ex || 0) % n) + n) % n) : 0
-  const pos = n ? `[ ] ${ex + 1} of ${fmtN(total)}` : ''
-  out.push(Box({ flexDirection: 'row', justifyContent: 'space-between', children: [
-    Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: 'examples of: ' }), Text({ color: ind, bold: true, children: cut(of, C - pos.length - 16) })] }),
-    Text({ bold: true, children: pos ? ` ${pos}` : '' }),
-  ] }))
+  const pos = n ? `${ex + 1} of ${fmtN(total)}` : ''
+  out.push(Text({ children: ' ' }))
+  out.push(Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: `examples of ${cut(of, C - pos.length - 16)}` }), Text({ dimColor: true, children: pos ? ` · ${pos}` : '' })] }))
   const body: Any[] = []
   if (!n) {
     if (refs[0] && resolved === undefined) body.push(Text({ dimColor: true, children: '   reading the rows behind it…' }))
@@ -503,7 +493,6 @@ async function barEls($: Engine, els: Any, sel: Detail, o: Any, p: Prepared, par
     }
   }
   out.push(...pad(body, EXR - 1))
-  out.push(Text({ dimColor: true, children: '  e hide examples · [ ] flip · 0 clear' }))
   return pad(out, rows)
 }
 
@@ -538,30 +527,34 @@ function threadLine(els: Any, thread: Any, ind: string): Any {
   const { Text } = els
   const qs = thread.asks?.length || 0
   const state = thread.status === 'running' ? 'answering…' : thread.status === 'failed' ? `failed: ${cut(String(thread.error || ''), 60)}` : 'answered'
-  return Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: 'thread' }), Text({ dimColor: true, children: ` · ${qs} question${qs === 1 ? '' : 's'} · ${state} · t shows its steps` })] })
+  return Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: 'thread' }), Text({ dimColor: true, children: ` · ${qs} question${qs === 1 ? '' : 's'} · ${state}` })] })
 }
 
-function keysRow($: Engine, els: Any, sel: Detail, part: Any, nv: number, hasThread: boolean): Any {
-  const { Box, Button, Text } = els
-  const kids: Any[] = []
-  const sep = () => Text({ dimColor: true, children: ' · ' })
-  const key = (k: string, label: string) => [Text({ bold: true, children: k }), Text({ dimColor: true, children: ` ${label}` })]
-  const press = (k: string, label: string, a: { act: string }) => Button({ key: `k:${k}`, plain: true, hotkey: k, label, children: [Text({ dimColor: true, children: label })], onPress: () => keyPressed($, k, a) })
-  if (sel.prog) {
-    kids.push(press('p', 'close the program', { act: 'program' }), sep(), ...key('↑↓', 'part'))
-  } else {
-    kids.push(...key('↑↓', 'part'))
-    if (drawn?.filter) kids.push(sep(), press('f', 'filter', { act: 'filter' }))
-    kids.push(sep(), ...key('↵', 'details'), sep(), press('e', 'examples', { act: 'examples' }))
-    if (drawn?.zoom) kids.push(sep(), ...key('+ −', 'zoom'))
-    if (part?.knob) kids.push(sep(), ...key(', .', 'turn'))
-    kids.push(sep(), press('p', 'program', { act: 'program' }))
-    if (nv > 1) kids.push(sep(), press('h', 'v1 · v2', { act: 'version' }))
-    if (hasThread) kids.push(sep(), press('t', 'thread', { act: 'thread' }), sep(), press('m', 'send to main', { act: 'main' }))
-    if (browserOn()) kids.push(sep(), press('o', 'browser', { act: 'browser' }))
-  }
-  kids.push(sep(), ...key('esc', 'back'))
-  return Box({ flexDirection: 'row', flexWrap: 'wrap', children: kids })
+/** The detail's keys as the thimble line says them while the detail is open (shell.tsx): what works now, once. */
+export async function detailKeys($: Engine): Promise<string | null> {
+  if (!isOpen) return null
+  const sel = (await $.state.get(SEL)).value as Detail | null
+  if (!sel || sel.cite || sel.cites) return 'esc back'
+  const part = drawn?.parts.find((x: Any) => x.id === sel.region) ?? null
+  const latest = await loadObject($, { id: sel.id, v: null, root: sel.root }).catch(() => null)
+  return keysHint(sel, part, versionsOf(latest).length, !!threadFor({ object: sel.id }))
+}
+
+function keysHint(sel: Detail, part: Any, nv: number, hasThread: boolean): string {
+  if (sel.prog) return 'p closes the program · ↑↓ part · esc back'
+  const k: string[] = ['↑↓ part']
+  if (sel.bar === 'examples') k.push('[ ] flip', 'e hide examples', '0 clear')
+  else if (sel.bar === 'details') k.push('e examples', '0 clear')
+  else k.push('↵ details', 'e examples')
+  if (drawn?.zoom) k.push(sel.state && Object.keys(sel.state).length ? '+ − zoom' : '+ zoom in')
+  if (drawn?.filter) k.push('f filter')
+  if (part?.knob) k.push(', . turn')
+  k.push('p program')
+  if (nv > 1) k.push('h versions')
+  if (hasThread) k.push('t thread', 'm send to main')
+  if (browserOn()) k.push('o browser')
+  k.push('type to ask this card', 'esc back')
+  return k.join(' · ')
 }
 
 /** A key the pane's Button took (the pane holds the keys): the act, remembered so a word it began can take it back. */
@@ -669,25 +662,12 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     const sel = (await $.state.get(SEL)).value as Detail | null
     if (sel && (sel.prog || sel.bar) && (e.origin as { kind?: string }).kind === 'person') {
       await $.state.set(SEL, (sel.prog ? { ...sel, prog: false } : { ...sel, bar: barAfter(sel.bar ?? null, 'back') }) as Sel)
-      return { value: undefined }
+      // a refused close gives the keys back to the prompt: the pane takes them again, so the next esc reaches it
+      regrab($)
+      return { value: undefined } as Any
     }
     await closed($)
     return next(e)
-  })
-
-  // the hint under the prompt says where a question goes while the detail is open
-  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    try {
-      if (!isOpen) return next(e)
-      const sel = (await $.state.get(SEL)).value as Sel | null
-      if (!sel || sel.cite || sel.cites) return next(e)
-      const label = drawn?.parts.find((x: Any) => x.id === sel.region)?.label || 'this card'
-      if (e.props.isDraft) return next({ ...e, props: { ...e.props, hint: `↵ asks the card's thread about ${cut(String(label), 40)} · Claude here does not see it` } })
-      return next({ ...e, props: { ...e.props, hint: `↑↓ part · e examples · p program · type to ask the card's thread · esc back` } })
-    } catch (err) {
-      // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
-      return next(e)
-    }
   })
 
   // a prompt typed while the detail is open (the main view in front) asks the card's thread. It never reaches main:
@@ -707,7 +687,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     const r = await askThread($, { text: e.text, scope, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
     if (r.problem) return { drop: `${r.problem}. Your words are back in the prompt; esc closes the card, and the prompt then goes to Claude here.` }
     $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-    return { drop: `asked the card's thread about ${cut(aboutOf(scope), 40)}; Claude here does not see it` }
+    return { drop: `asked the card's thread about ${cut(aboutOf(scope), 40)}` }
   }).catch(($, e, next) => next(e))
 }
 

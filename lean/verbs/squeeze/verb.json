@@ -1,10 +1,10 @@
 {
   "key": "s",
   "name": "squeeze",
-  "line": "rewrite the message in place: its length, how much it interprets, how much it assumes, or your own chip",
+  "line": "rewrite the message in place: its length, how much it interprets, how much it assumes, or a stretch between two ends you name",
   "order": 1,
   "row": true,
-  "chips": ["Length", "Report ↔ Interpret", "Familiarity", "+ your own"],
+  "chips": ["Length", "Report ↔ Interpret", "Familiarity", "+ a stretch"],
   "arrive": {
     "length": "short",
     "when": "the message takes more than half the screen's rows, as an object under a reply does before the rest waits in its detail view",
@@ -14,6 +14,7 @@
   "effort": "low",
   "maxTokens": 4000,
   "timeoutMs": 90000,
+  "settleMs": 300,
   "color": {
     "light": "#b7791f",
     "dark": "#e0a43a"

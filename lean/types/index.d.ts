@@ -56,11 +56,11 @@ export type MsgRecord = {
   squeeze?: Squeeze
 }
 
-/** A message's squeeze: where its chips are, the person's own chips, every version written by its levels, the
+/** A message's squeeze: where its chips are, the person's stretches, every version written by its levels, the
  *  original's marks, whether it arrived squeezed, what a rewrite said that the original does not, and each call made. */
 export type Squeeze = {
   at?: Record<string, number>
-  own?: { id: string; name: string; words: string; levels: string[] }[]
+  own?: { id: string; kind?: 'stretch'; from: string; to: string }[]
   versions?: Record<string, string>
   orig?: { marks: Mark[] }
   auto?: boolean
@@ -68,9 +68,14 @@ export type Squeeze = {
   made?: { key: string; ms: number; model: string; usage?: unknown; at?: string }[]
 }
 
-/** The chips' line of one message as the person works it: the picked chip, whether they type their own chip, a call
- *  running (and the frame of its turning glyph), and a call that failed. */
-export type SqzUi = { focus: string; adding: boolean; running: { since: number } | null; error: string | null; tick: number }
+/** The chips' line of one message as the person works it: the picked chip, whether they type a stretch (and what
+ *  they typed), a call running (and the frame of its turning glyph), a call that failed, and the new text writing
+ *  itself in (`reveal.n` of its characters shown), and the levels a change on its way goes to (`want`). */
+export type SqzUi = { focus: string; adding: boolean; running: { since: number } | null; error: string | null; tick: number; typing?: string; reveal?: { n: number; total: number } | null; want?: Record<string, number> | null }
+
+/** The thimble line's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
+ *  changed (it brightens for a moment). */
+export type LineCounts = { cards: number; threads: number; cites: number; claims: number; cov: number; at: number; changed: Record<string, number> }
 
 /** One card of the tray: a mark of a message, or a citation inside a card. */
 export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' }
@@ -131,6 +136,8 @@ declare module 'claude-code' {
       sqz: StateFamily<SqzUi | null>
       /** what Claude reads with the next prompt of the version the person reads now, by row */
       sqznote: Record<string, string>
+      /** the thimble line's counts above the prompt */
+      counts: LineCounts | null
       /** where a card's values come from (object.js fromFacts), by root, id and version: the detail's "from" line */
       facts: StateFamily<unknown>
       /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */

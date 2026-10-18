@@ -3,7 +3,7 @@
 // it, in the session's store (thimble/claims/<session>.json); c lights under the answer with how many are new; c from
 // the empty prompt opens the Claims pane as a graph, focused: at rest an island of dots per cluster with its name and no
 // lines; the ring on a claim (arrow keys or a click) shows its card (the claim, Precisely, Based on, Judgment, Not
-// stated) and its links; r replays the graph in the order made and any key stops it; the hint line under the prompt
+// stated) and its links; r replays the graph in the order made and any key stops it; the thimble line above the prompt
 // says `r replay · esc close`; a question carries the claim the ring is on.
 // `claude plugin test lean`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
@@ -144,8 +144,9 @@ test('after a turn of work its claims are in the store, each where it was said w
   // c lights under the answer, with what the new claims leave open (c1 does not say what its "most" is out of)
   textOf(await reply($, R1, A1))
   await w.clock.settle()
-  const row = textOf(await reply($, R1, A1))
-  expect(row).toContain('● 1 claim needs a denominator')
+  // in the thimble line above the prompt, in place of its name
+  const row = textOf(await $.ui.render(HINT))
+  expect(row).toContain('c ● 1 claim needs a denominator')
   const rec = JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${R1.slice(0, 24)}.json`]!)
   expect(rec.verbs.c).toEqual({ lit: true, note: '1 claim needs a denominator', claims: ['c1', 'c2', 'c3'] })
   const log = JSON.parse(w.files['/home/t/.thimble/lean/observer/s-1.json']!).log.find((r: Any) => r.kind === 'look')
@@ -170,11 +171,11 @@ test('a later turn: a claim said again counts ×N; a correction is linked both w
   textOf(await reply($, R2, A2))
   await w.clock.settle()
   // a revision is a new claim: the note says nothing more of it
-  expect(textOf(await reply($, R2, A2))).toContain('● 1 new claim')
+  expect(textOf(await $.ui.render(HINT))).toContain('c ● 1 new claim')
 })
 
 const PANE = { plugin: 'thimble-lean', component: 'Pane', surface: 'terminal', requestId: 'claims', props: { bodyColumns: 110, scroll: { bodyRows: 30 }, isFocused: true, title: 'Claims' }, viewport: { columns: 200, rows: 50, isFullscreen: true } } as never
-const HINT = { component: 'PromptHint', surface: 'terminal', requestId: 'hint', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' } } as never
+const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 const focus = (el: string) => ({ requestId: 'claims', element: el, origin: { kind: 'person' } }) as never
 const edges = (t: string) => /[─│╱╲╌╎]/.test(t)
 
@@ -200,9 +201,9 @@ test('c opens Claims as a graph, focused: at rest an island of dots per cluster,
   expect(rest).toMatch(/○claim: The tilt in the edits is one editor\?/)
   expect(rest).toContain('◉')
   expect(edges(rest)).toBe(false)
-  // no sentence teaches the pane: its keys are in the hint line under the prompt, and they are only these
+  // no sentence teaches the pane: its keys are in the thimble line above the prompt, and they are only these
   expect(rest).not.toContain('↑')
-  expect(textOf(await $.ui.render(HINT))).toBe('r replay · esc close')
+  expect(textOf(await $.ui.render(HINT))).toContain('thimble  r replay · esc close')
 })
 
 test('the ring on a claim: its card says what it means, its links are thin lines, the rest fades; a click moves the ring', async ($, on) => {
@@ -224,7 +225,7 @@ test('the ring on a claim: its card says what it means, its links are thin lines
   expect(c1).toContain('not stated  Most of all June edits, or of the reverts?')
   // no bar of details, no sources on digits: the card is all
   expect(c1).not.toContain('said in turn')
-  expect(textOf(await $.ui.render(HINT))).toBe('r replay · esc close')
+  expect(textOf(await $.ui.render(HINT))).toContain('thimble  r replay · esc close')
   await ui.unmount()
 })
 
@@ -275,7 +276,7 @@ test('r replays the graph in the order the claims were made, "turn N of M" in th
   }
   expect(textOf(await $.ui.render(PANE))).toContain('Claims   4 · 3 clusters')
   expect(JSON.stringify(await $.ui.render(PANE))).not.toContain('"key":"search"')
-  expect(textOf(await $.ui.render(HINT))).toBe('r replay · esc close')
+  expect(textOf(await $.ui.render(HINT))).toContain('thimble  r replay · esc close')
 })
 
 test('a question asked with the ring on a claim carries it; c closes the pane', async ($, on) => {
