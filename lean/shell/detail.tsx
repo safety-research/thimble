@@ -22,7 +22,7 @@ import { renderTerm } from '../draw/term.js'
 import { paintRegions } from './cells'
 import { beganWord, examplesView, exampleSet, fromLine, keyOf, linkRuns, partOfLink, partsOf, partTop, programLines, stepPart, stepVersion, versionsOf } from './carddetail.js'
 import { chainWords, fromFacts, objectRefs, regionMeta, regionRefs } from './object.js'
-import { browserOn, citeLabels, currentTheme, leanEnv, loadObject, openBrowser, openDetail, prepared, preparedNow, select } from './shell'
+import { ask, browserOn, citeLabels, currentTheme, leanEnv, loadObject, openBrowser, openDetail, prepared, preparedNow, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
 import type { Scope } from './thread'
 import { aboutOf } from './threads.js'
@@ -580,6 +580,12 @@ export function registerDetail(on: Parameters<Register>[0]): void {
           return { text: '', cursor: 0 }
         }
       }
+      // v on an empty prompt, when nothing nearer took it (the message layer's verb row takes it where it runs): another
+      // view of the last answer, as visualize asks Claude for it
+      if (e.key.key === 'v' && e.text === '' && out.text === 'v') {
+        $.clock.after(0, () => { void pressVisualize($) })
+        return { text: '', cursor: 0 }
+      }
       return out
     }
     const mine = keyChain.then(async () => {
@@ -669,6 +675,25 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
     return { drop: `asked the card's thread about ${aboutOf(scope)}; Claude here does not see it` }
   }).catch(($, e, next) => next(e))
+}
+
+/** v: the visualize verb on the last answer (its words, and the card under it), run in its Node child; its request goes
+ *  to Claude as the person's press, its row reading `visualize your last answer`. */
+async function pressVisualize($: Engine): Promise<void> {
+  try {
+    const msgs = (await $.session.messages()) as Any[]
+    const lastA = [...(Array.isArray(msgs) ? msgs : [])].reverse().find(m => m?.role === 'assistant' && String(m.text || '').trim())
+    if (!lastA) { $.ui.toast('v makes another view of an answer; there is no answer yet.'); return }
+    const last = (await $.state.get(LAST)).value
+    const message = { text: String(lastA.text), objects: last ? [`${last.id}@${last.v ?? ''}`.replace(/@$/, '')] : [] }
+    const dir = $.plugin.root.replace(/\/+$/, '')
+    const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'run', 'visualize'], { stdin: JSON.stringify({ message, object: null, root: last?.root ?? String(await $.session.cwd()) }), timeoutMs: 60000 })
+    const out = JSON.parse(r.stdout || '{}')
+    if (out.error || !out.ask) { $.ui.toast(`visualize: ${String(out.error || 'it asked nothing').slice(0, 200)}`); return }
+    await ask($, String(out.ask), 'visualize', 'your last answer')
+  } catch (err) {
+    $.ui.toast(`visualize did not run (${String((err as Error)?.message || err).slice(0, 160)}); ask Claude for another view in words instead.`)
+  }
 }
 
 /** Whether the detail is open (for the shell and the tests). */

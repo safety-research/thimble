@@ -1,0 +1,11 @@
+{
+  "key": "v",
+  "name": "visualize",
+  "line": "another view of this answer: a card in the form that shows what it says",
+  "order": 0,
+  "row": true,
+  "color": { "light": "#4f46e5", "dark": "#9a93ff" },
+  "writer": "Claude, in the main conversation: the run asks Claude for the card, with the observer's proposals and the card forms (FORMS.md)",
+  "skill": "FORMS.md",
+  "run": "run.mjs"
+}

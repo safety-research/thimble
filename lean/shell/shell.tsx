@@ -417,7 +417,7 @@ async function settle($: Engine, ran: Ran, ref: ObjRef, at: string | null, inPan
 /** A verb's request to Claude, as a turn the person started: its row is the person's press in a few words (`explore
  *  01-saves`), as they would type it; the request itself (with what verbs said since Claude's last reply) goes just
  *  before it as a row the person does not see, for Claude alone. */
-async function ask($: Engine, request: string, verb: string, on: string): Promise<void> {
+export async function ask($: Engine, request: string, verb: string, on: string): Promise<void> {
   const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
   await $.state.set(NOTES, [])
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, request].join('\n\n') }] } })

@@ -111,6 +111,8 @@ export async function runVerb(word, input, { dir, lean } = {}) {
   let skill = ''
   try { skill = readFileSync(join(verb.dir, 'SKILL.md'), 'utf8') } catch { skill = '' }
   const ctx = {
+    // a verb of the message row: the message's record (CONTRACT 1), its row key and the session
+    message: input.message || null,
     object: input.object || null,
     region: input.region || null,
     regionMeta: input.regionMeta || null,
