@@ -312,7 +312,8 @@ function threadHtml(entry, m) {
     return `<div class="tq"><span>${esc(a.text)}</span></div><div class="ta">${a.error ? `<p class="problem">not sent: ${esc(a.error)}</p>` : ans ? messageHtml(ans.record).html : '<div class="wait"><span class="s7">✻</span>sent to the terminal session · the answer shows here when Claude writes it</div>'}</div>`
   }).join('')
 }
-const markKey = (entry, m) => (entry.row != null ? `${entry.row}:${entry.i}` : `${m.kind}:${m.ref || m.label}`)
+const markKey = (entry, m) => `${entry.row ?? ''}|${m.ref || m.gloss || m.label}`
+const scopeKey = s => (s?.mark ? `${s.row ?? ''}|${s.mark.ref || s.mark.gloss || s.mark.label}` : null)
 
 /** Claude's first message after the prompt an ask became, once it is in the session. */
 function answerTo(a) {
@@ -341,8 +342,9 @@ function said(text, bad) {
   if (!s) { s = document.createElement('span'); b.insertBefore(s, $('.model', b)) }
   s.className = bad ? 'err' : 'sent'
   s.textContent = text
+  $('.model', b).hidden = true
   clearTimeout(saidTimer)
-  saidTimer = setTimeout(() => s.remove(), bad ? 9000 : 3500)
+  saidTimer = setTimeout(() => { s.remove(); $('.model', b).hidden = false }, bad ? 9000 : 3500)
 }
 
 async function send() {
@@ -474,8 +476,10 @@ document.addEventListener('keydown', e => {
 
 // ---------------------------------------------------------------- start
 async function start() {
-  const v = await api('verbs')
+  const [v, a] = await Promise.all([api('verbs'), api('asks')])
   st.verbs = v.verbs || []
+  // what this session asked from its pages before, so their rows still say so
+  st.asks = (a.asks || []).map(x => ({ ...x, at: Date.parse(x.at) || 0, key: scopeKey(x.scope) }))
   await fontsReady
   await refreshSide()
   await refresh()
