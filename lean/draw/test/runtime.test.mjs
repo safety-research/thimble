@@ -133,3 +133,16 @@ test('the card\'s title is in every drawing, even when the program draws none', 
   // the program reads it, and the surface it is drawn on
   assert.match(gridText(renderTerm(run('return k.text(k.title + " · " + k.surface)'), { w: 80 })), /How the episodes ended · terminal/)
 })
+
+test('the browser surface: a plot or a canvas area takes a brush, which reads in its own units', () => {
+  const d = run(`
+    const c = k.canvas(40, 2)
+    c.text(0, 0, 'May 17 → Jul 2')
+    c.brush('days', 0, 1, 40, 1, { min: 0, max: 46 })
+    return k.stack(k.plot([{ name: 'calls', points: data.runs.map((r, i) => [i + 1, r.calls]) }], { h: 5, brush: 'runs' }), c)`)
+  const s = renderSvg(d, { w: 80 })
+  assert.deepEqual(s.brushes.map(b => [b.id, b.min, b.max]), [['runs', 1, 3], ['days', 0, 46]])
+  assert.match(s.svg, /<rect class="dk-brush" data-brush="runs" data-min="1" data-max="3"/)
+  // the terminal draws the same cells and no brush: there a program binds keys to the same state
+  assert.equal(JSON.stringify(renderTerm(d, { w: 80 }).marks), JSON.stringify(s.marks))
+})

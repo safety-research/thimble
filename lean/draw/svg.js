@@ -277,6 +277,8 @@ export function renderSvg(drawing, opts = {}) {
 
   // ------------------------------------------------ paint (out == null measures)
   const L = { bg: [], frame: [], mark: [], text: [], over: [] }
+  // brush areas (k.plot's brush, a canvas's c.brush): where a drag reads as a range of values
+  const brushes = []
   function paint(n, out, x, y, w) {
     if (!n || w <= 0) return 0
     const dry = !out
@@ -530,6 +532,7 @@ export function renderSvg(drawing, opts = {}) {
     const pw = Math.max(2 * cw, w - yw - 4)
     const col = v => ox + (tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * pw
     const row = v => oy + (ymax - clamp(v, ymin, ymax)) / ((ymax - ymin) || 1) * ph
+    if (!dry && n.brush) brushes.push({ id: n.brush.id, x: ox, y: oy, w: pw, h: ph, min: xmin, max: xmax, log: xlog })
     if (!dry) {
       if (ys.label) L.text.push(textSVG([{ s: ys.label, tone: 'dim' }], x, y, 'start', { size: fs - 1 }))
       L.text.push(textSVG([{ s: yl[0], tone: 'dim' }], ox - 6, oy - lh / 2, 'end', { size: fs - 1 }))
@@ -682,6 +685,7 @@ export function renderSvg(drawing, opts = {}) {
         case 'line': if (!dry) L.mark.push(`<line x1="${r1(X(op[1]) + cw / 2)}" y1="${r1(y + op[2] * rh / 2 + rh / 4)}" x2="${r1(X(op[3]) + cw / 2)}" y2="${r1(y + op[4] * rh / 2 + rh / 4)}" stroke="${C(op[5])}" stroke-width="2" stroke-linecap="round"/>`); draws++; break
         case 'bar': if (!dry) drawBar(X(op[1]), Y(op[2]), op[3] * cw, op[4], op[5], op[6]); mark({ k: 'bar', v: op[4], max: op[5] }); break
         case 'spark': if (!dry) drawSpark(X(op[1]), Y(op[2]), Math.max(1, op[3]) * cw, op[4], op[5], op[6], op[7]); mark({ k: 'spark', values: op[4] }); break
+        case 'brush': if (!dry) brushes.push({ id: op[1], x: X(op[2]), y: Y(op[3]), w: op[4] * cw, h: op[5] * rh, min: op[6], max: op[7], log: !!op[8] }); break
         case 'region': {
           mark({ k: 'region', id: op[1] })
           if (!dry) {
@@ -734,10 +738,13 @@ export function renderSvg(drawing, opts = {}) {
   const defs = `<defs><pattern id="${id}-hatch" patternUnits="userSpaceOnUse" width="4" height="4" patternTransform="rotate(45)"><rect width="4" height="4" fill="${theme === 'light' ? '#f4f2ed' : '#2a2926'}"/><line x1="0" y1="0" x2="0" y2="4" stroke="${C('unseen')}" stroke-width="1.6"/></pattern></defs>`
   const style = `<style>#${id} text{font-family:${SANS};font-size:${fs}px;font-variant-numeric:tabular-nums;font-kerning:normal}</style>`
   const svg = `<svg id="${id}" class="dk" xmlns="http://www.w3.org/2000/svg" width="${r1(w)}" height="${r1(h)}" viewBox="0 0 ${r1(w)} ${r1(h)}">${defs}${style}` +
-    `<g class="dk-bg">${L.bg.join('')}</g><g class="dk-frames">${L.frame.join('')}</g><g class="dk-marks">${L.mark.join('')}</g><g class="dk-text">${L.text.join('')}</g>${hits}</svg>`
-  return { svg, w, h, regions, marks: cx.marks, cut: cx.cut, warnings: drawing.warnings || [], error: drawing.error }
+    `<g class="dk-bg">${L.bg.join('')}</g><g class="dk-frames">${L.frame.join('')}</g><g class="dk-marks">${L.mark.join('')}</g><g class="dk-text">${L.text.join('')}</g>${brushSVG(brushes)}${hits}</svg>`
+  return { svg, w, h, regions, brushes, marks: cx.marks, cut: cx.cut, warnings: drawing.warnings || [], error: drawing.error }
 }
 const area = r => r.rects.reduce((s, q) => s + q.w * q.h, 0)
+// each brush area as a transparent rect that says how its x reads (draw/browser/events.js turns a drag on it into
+// {type: 'brush', id, from, to}); a crosshair cursor says it takes a drag
+const brushSVG = list => (list.length ? `<g class="dk-brushes">${list.map(b => `<rect class="dk-brush" data-brush="${xml(b.id)}" data-min="${b.min}" data-max="${b.max}"${b.log ? ' data-log="1"' : ''} x="${r1(b.x)}" y="${r1(b.y)}" width="${r1(b.w)}" height="${r1(b.h)}" fill="transparent" style="cursor:crosshair"/>`).join('')}</g>` : '')
 
 // box-drawing glyphs as strokes through the cell's middle (light, heavy and dashed)
 function boxPath(ch, x, y, cw, rh) {

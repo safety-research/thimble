@@ -39,6 +39,7 @@ import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf
 import { isRef, objectRefs, rankRow, recordRefs, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadOf } from './thread'
 import type { Scope as ThreadScope } from './thread'
+import { writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { markColors, messageEl, trayEl, verbColor, verbLineEl } from './view'
@@ -563,6 +564,8 @@ async function startServer($: Engine, root: string): Promise<{ base: string } | 
             } else if (msg.squeeze && typeof msg.squeeze === 'object') {
               // a squeeze chip pressed under a message in the browser: the same rewrite in place as a press here
               void sqFromBrowser($, msg.squeeze).then(said => { if (said) $.ui.toast(said) }, err => failed($, 'Squeeze from the browser did not run', err, 'Press s under the message here instead'))
+            } else if (msg.cardstate) {
+              await stateFromBrowser($, root, msg.cardstate)
             } else if (msg.back) {
               await backFromBrowser($, root, msg.back)
             } else if (msg.stopped) {
@@ -605,6 +608,15 @@ async function backFromBrowser($: Engine, root: string, back: { object: string; 
   await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
 }
 
+/** A card's interaction state the browser's program answered with: kept where both surfaces read it, and the open
+ *  detail here follows it (the same selection in the terminal and the browser). */
+async function stateFromBrowser($: Engine, root: string, c: { object: string; region: string | null; state: Record<string, unknown> }): Promise<void> {
+  if (!ID.test(c.object)) return
+  await writeCardState($, root, c.object, { state: c.state, region: c.region }, 'browser')
+  const sel = (await $.state.get(SEL)).value as Sel | null
+  if (sel && sel.id === c.object && sel.root === root && !sel.cite && !sel.cites) await $.state.set(SEL, { ...sel, state: c.state, region: c.region ?? sel.region })
+}
+
 /** The record of one of Claude's messages in this session (CONTRACT 1), or null. */
 async function recordOf($: Engine, root: string, row: string): Promise<Any | null> {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(row)) return null
@@ -612,7 +624,7 @@ async function recordOf($: Engine, root: string, row: string): Promise<Any | nul
   try { return (await $.fs.exists(file)) ? JSON.parse(String(await $.fs.read(file))) : null } catch { return null }
 }
 
-type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; thread?: string; claim?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
+type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; thread?: string; claim?: string; refs?: string[]; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
 
 /** What Claude reads beside a question asked in the browser: what it was asked about, and where its rows are. */
 export async function webContext($: Engine, root: string, scope: WebScope): Promise<string> {
@@ -670,10 +682,12 @@ async function askFromBrowser($: Engine, root: string, text: string, scope: WebS
       const card = scope.object && ID.test(scope.object) ? await withVersion($, { id: scope.object, v: scope.v ?? null, root }) : null
       const p = card ? await prepared($, card, 96) : null
       const region = scope.region && REGION.test(scope.region) ? scope.region : null
-      const refs = p?.object ? (region ? regionRefs(p.object, p.drawing, region).refs : objectRefs(p.object).map((c: Any) => c.ref)) : undefined
+      // a selection the card's program asked about (k.ask) names its own rows
+      const picked = Array.isArray(scope.refs) ? scope.refs.filter(x => isRef(x)) : []
+      const refs = picked.length ? picked : p?.object ? (region ? regionRefs(p.object, p.drawing, region).refs : objectRefs(p.object).map((c: Any) => c.ref)) : undefined
       const r = await askThread($, {
         text, root, ...(refs ? { refs } : {}),
-        scope: { ...(card ? { object: card.id, v: card.v } : {}), ...(region ? { region, label: scope.label || String(regionMeta(p?.drawing, region)?.label || region) } : {}), ...(scope.row ? { row: scope.row } : {}), ...(scope.mark ? { mark: scope.mark } : {}) },
+        scope: { ...(card ? { object: card.id, v: card.v } : {}), ...(region ? { region, label: scope.label || String(regionMeta(p?.drawing, region)?.label || region) } : picked.length && scope.label ? { label: scope.label } : {}), ...(scope.row ? { row: scope.row } : {}), ...(scope.mark ? { mark: scope.mark } : {}) },
         card: p?.object ? { id: p.object.id, v: p.object.version, title: p.object.title, file: `${root}/thimble/objects/${p.object.id}.json` } : null,
       })
       if (r.problem) $.ui.toast(`A question from the browser: ${r.problem}.`)

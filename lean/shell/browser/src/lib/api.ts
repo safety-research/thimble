@@ -1,6 +1,6 @@
 // api.ts: the page server's routes (shell/node/serve.mjs), in place of 0.9's API client. Every path starts with the
 // token, the first part of the page's own path. What the person does goes back to the terminal session as one line
-// (POST api/back): {ask, scope}, {verb, row}, {squeeze: {...}}.
+// (POST api/back): {ask, scope}, {verb, row}, {squeeze: {...}}, {cardstate: {...}}.
 
 export const BASE = location.pathname.split('/').slice(0, 2).join('/')
 
@@ -34,6 +34,7 @@ export type BackLine =
   | { ask: string; scope?: Scope }
   | { verb: string; row: string; proposal?: string }
   | { squeeze: { row: string; chip?: string; level?: number; custom?: string; reset?: boolean } }
+  | { cardstate: { object: string; region: string | null; state: Record<string, unknown> } }
 
 export interface Scope {
   row?: string
@@ -42,6 +43,7 @@ export interface Scope {
   region?: string
   label?: string
   thread?: string
+  refs?: string[]
   mark?: { kind: string; ref?: string; gloss?: string; label?: string; term?: string }
 }
 

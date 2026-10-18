@@ -386,6 +386,8 @@
         const n = node('plot', { series: S, h: clamp(int(o.h, 8), 3, 60), x: axis(o.x), y: axis(o.y) })
         if (o.dots) n.dots = true
         if (o.legend === false) n.legend = false
+        // brush: in the browser, a drag across the plot's x axis is an event {type: 'brush', id, from, to} in x's units
+        if (o.brush) { const b = typeof o.brush === 'string' ? o.brush : o.id != null ? String(o.id) : 'brush'; n.brush = { id: ID_RE.test(b) ? b : (slug(b) || 'brush') } }
         tick(S.reduce((s, q) => s + q.pts.length, 0) / 8)
         return sizing(n, o)
       },
@@ -865,6 +867,14 @@
     const rid = regionId(this._ctx, id, 'canvas region', m)
     if (!m.label) m.label = rid
     return this._op(['region', rid, fl(x), fl(y), Math.max(1, fl(w)), Math.max(1, fl(h)), m])
+  }
+  // a brush area: in the browser, a drag across cells x..x+w is an event {type: 'brush', id, from, to}, the cells read
+  // as min..max (default: the cell numbers); the terminal has no drag, so bind keys to the same state
+  Canvas.prototype.brush = function (id, x, y, w, h, o) {
+    o = isObj(o) ? o : {}
+    const bid = ID_RE.test(String(id)) ? String(id) : (slug(id) || 'brush')
+    const W = Math.max(1, fl(w))
+    return this._op(['brush', bid, fl(x), fl(y), W, Math.max(1, fl(h)), isFinite(num(o.min)) ? num(o.min) : 0, isFinite(num(o.max)) ? num(o.max) : W, !!o.log])
   }
   Canvas.prototype.node = function () { return { t: 'canvas', w: this.w, h: this.h, ops: this._ops.slice() } }
 

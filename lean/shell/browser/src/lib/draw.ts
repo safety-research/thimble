@@ -20,6 +20,7 @@ interface Mods {
   svg: any
   sandbox: any
   object: any
+  events: any
   measure: (s: string, o?: { size?: number; bold?: boolean; mono?: boolean }) => number
 }
 let mods: Promise<Mods> | null = null
@@ -43,14 +44,15 @@ function measureWith(): Mods['measure'] {
 export function drawModules(): Promise<Mods> {
   if (!mods) {
     mods = (async () => {
-      const [svg, sb, object, kit] = await Promise.all([
+      const [svg, sb, object, events, kit] = await Promise.all([
         serverModule('draw/svg.js'),
         serverModule('draw/browser/sandbox.js'),
         serverModule('lib/object.js'),
+        serverModule('draw/browser/events.js'),
         fetch(`${BASE}/draw/kit.js`).then((r) => r.text()),
       ])
       await fontsReady
-      return { svg, object, sandbox: sb.makeSandbox(kit), measure: measureWith() }
+      return { svg, object, events, sandbox: sb.makeSandbox(kit), measure: measureWith() }
     })()
   }
   return mods
@@ -72,6 +74,18 @@ export async function drawingOf(object: any, { w, mode = 'inline', state }: { w:
   const key = `${o.id}@${o.v}|${w}|${mode}|${state ? JSON.stringify(state) : ''}`
   if (!drawings.has(key)) drawings.set(key, m.sandbox.run(o, { w, h: 24, mode, state }))
   return drawings.get(key)!
+}
+
+/** What the person did, run as the card program's event (k.on): the drawing it answers with carries the new `state`
+ *  and, when a handler called k.ask, the selection to ask about. Never cached: an event happens once. */
+export async function eventOf(object: any, { w, mode = 'detail', state, event }: { w: number; mode?: string; state?: Record<string, unknown>; event: Record<string, unknown> }): Promise<any> {
+  const m = await drawModules()
+  return m.sandbox.run(m.object.forDrawing(object), { w, h: 24, mode, state, event })
+}
+
+/** The browser surface's event helpers (draw/browser/events.js). */
+export async function eventsLib(): Promise<any> {
+  return (await drawModules()).events
 }
 
 const words = (runs: any): string => (Array.isArray(runs) ? runs.map((r: any) => (r.br ? ' ' : r.s)).join('') : String(runs || '')).trim()
