@@ -241,8 +241,11 @@ test('r replays the graph in the order the claims were made, "turn N of M" in th
   // it grows in the order made: turn 1's three claims, then turn 2's correction; the head says which turn
   const seen: string[] = []
   const dots: number[] = []
+  // about three seconds in all
+  let ms = 0
   for (let i = 0; i < 60; i++) {
-    await w.clock.advance(80)
+    await w.clock.advance(100)
+    ms += 100
     await w.clock.settle()
     t = textOf(await $.ui.render(PANE))
     const m = /Claims {3}(turn \d of 2|replay)/.exec(t)
@@ -252,13 +255,15 @@ test('r replays the graph in the order the claims were made, "turn N of M" in th
     // the correction is hollow only once it is made: in turn 1 no ○ is drawn
     if (m[1] === 'turn 1 of 2') expect(t).not.toContain('○')
   }
-  expect(seen).toEqual(['turn 1 of 2', 'turn 2 of 2'])
+  expect(seen).toEqual(['replay', 'turn 1 of 2', 'turn 2 of 2'])
+  expect(ms).toBeGreaterThanOrEqual(3000)
+  expect(ms).toBeLessThanOrEqual(4200)
   expect(dots).toEqual([...dots].sort((a, b) => a - b))
   expect(t).toContain('Claims   4 · 3 clusters')
   // again, then any key stops it: the whole graph at once
   await ($ as Any).prompt.edit(key('r'))
   await w.clock.settle()
-  await w.clock.advance(80)
+  await w.clock.advance(900)
   await w.clock.settle()
   expect(textOf(await $.ui.render(PANE))).toContain('turn 1 of 2')
   await ($ as Any).prompt.edit(key('x'))

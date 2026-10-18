@@ -1377,6 +1377,8 @@ async function closeClaims($: Engine): Promise<void> {
 // bold. Any key stops it and shows the whole graph.
 export const REPLAY = { ms: 3200, tick: 80 }
 let replayGen = 0
+/** How often a replay grows: about three seconds in all, at most a frame per 80 ms. */
+const replayEvery = (n: number) => Math.max(REPLAY.tick, Math.floor(REPLAY.ms / Math.max(1, n)))
 
 /** r: the replay starts from no claims (the ring comes off, so no card covers the growth). */
 async function startReplay($: Engine): Promise<void> {
@@ -1386,19 +1388,20 @@ async function startReplay($: Engine): Promise<void> {
   if (!order.length) return
   const gen = ++replayGen
   await $.state.set(CLAIMPANE, { ...st, focus: null, replay: { gen, k: 0, order } })
-  $.clock.after(REPLAY.tick, () => { void replayTick($, gen) })
+  $.clock.after(replayEvery(order.length), () => { void replayTick($, gen) })
 }
 
 async function replayTick($: Engine, gen: number): Promise<void> {
   const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
   if (!st?.replay || st.replay.gen !== gen) return
   const n = st.replay.order.length
-  const step = Math.max(1, Math.ceil(n / (REPLAY.ms / REPLAY.tick)))
+  const every = replayEvery(n)
+  const step = Math.max(1, Math.round((n * every) / REPLAY.ms))
   const k = Math.min(n, st.replay.k + step)
-  // the last claims stay bold for a moment, then the graph is whole again
+  // the last claims stay marked for a moment, then the graph is whole again
   if (st.replay.k >= n) { await $.state.set(CLAIMPANE, { ...st, replay: null }); return }
   await $.state.set(CLAIMPANE, { ...st, replay: { ...st.replay, k } })
-  $.clock.after(k >= n ? 600 : REPLAY.tick, () => { void replayTick($, gen) })
+  $.clock.after(k >= n ? 600 : every, () => { void replayTick($, gen) })
 }
 
 /** Any key during a replay: the whole graph at once. Returns whether a replay was running. */
