@@ -893,6 +893,10 @@ The takeaway runs to {words} words. Cut it to 40 at most with `edit_card` and `t
 
 The takeaway cites none of the records the card shows. Link the words of each claim to the record that shows them, as in `[[posted the answer|{ref}]]`, with `edit_card` and `takeaway`.
 
+## takeaway-quote-missing
+
+These quotes are not in the records they cite: {quotes}. Before you answer, find the record that holds each one and cite it, or take the claim back, with `edit_card` and `takeaway`.
+
 ## card-installs
 
 {tool}: this code installs software or downloads files, which card code may not do. Use what is already installed, or tell the analyst what the analysis needs and why.
