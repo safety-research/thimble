@@ -10,7 +10,7 @@
 //   slim(object)               -> the object with only what digest reads: no data, no program, row sets as counts
 //   bareNumbers(text)          -> the numbers in an object's words that cite nothing
 //   digest(object, o)          -> the object's lineage in plain lines, as the person sees it, with its verb candidates
-//   parseAnswer(text)          -> {notes, line, settled, hints} from the fork's reply, or null
+//   parseAnswer(text)          -> {notes, line, settled, hints, verbs, glosses} from the fork's reply, or null
 //   pickHints(list, verbs)     -> the 2-3 verbs the observer chose for one object, checked against the verbs that exist
 
 const fmt = n => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n))
@@ -240,7 +240,10 @@ export function parseAnswer(text) {
       }
     : null
   const hints = d.hints && typeof d.hints === 'object' && !Array.isArray(d.hints) ? d.hints : {}
-  return { notes, line, settled: d.settled === true, hints }
+  // the message row: the verbs it lights and its glosses, read as given (shell/message.js verbsOf and glossesOf check them)
+  const verbs = d.verbs && typeof d.verbs === 'object' && !Array.isArray(d.verbs) ? d.verbs : {}
+  const glosses = Array.isArray(d.glosses) ? d.glosses : []
+  return { notes, line, settled: d.settled === true, hints, verbs, glosses }
 }
 
 /** The observer's choice for one object, kept only where it names a verb that exists: at most three, each with its
