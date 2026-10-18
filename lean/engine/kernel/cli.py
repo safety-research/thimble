@@ -16,6 +16,10 @@ session's permission mode and sandbox like any other command.
                                             uses it (queries, objects, answers), and in transcripts who read a
                                             passage and who wrote it after reading it
 
+In a query: load(glob, fields=[...]) gives a DataFrame with each row's `_ref`; tally(df, by) counts and keeps each
+group's rows; use("q3") is an earlier query's output; keep(name, x) and use(name) pass a named result or a label on;
+rows(glob), sample(df, n), pd, np, re, json. The last expression is the output. `lean q --help` says more.
+
 Add --json to sources, q, list, resolve, coverage or trace for the whole record.
 """
 from __future__ import annotations
@@ -549,6 +553,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-answers", action="store_true", help="skip the session transcripts (Claude's cited answers)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_trace)
+    args = sys.argv[1:] if argv is None else argv
+    if not args or args[0] in ("-h", "--help", "help"):
+        # the commands in one screen: argparse's usage lines would only repeat them
+        print(__doc__.strip())
+        return 0
     a = ap.parse_args(argv)
     if not getattr(a, "fn", None):
         print(__doc__.strip())
