@@ -146,7 +146,12 @@ async function act($: Engine, a: { act: string; dir?: number }): Promise<void> {
       // a card's own zoom and filter are knobs inside it: + and − turn the zoom, f cycles the filter
       const c = namedKnob(p.drawing, a.act)
       if (!c) return
-      const state = a.act === 'zoom' ? turnKnob(p.drawing, sel.state || {}, c.id, a.dir || 1) : cycleKnob(c, sel.state || {})
+      // + zooms into the selected part when the zoom has a level for it (a station `rerun-loop` for the part
+      // `st-rerun-loop`), else one level in; − goes back out to the overview
+      const into = (c.values as Any[]).find(v => typeof v === 'string' && v && sel.region && (sel.region === v || sel.region.endsWith(`-${v}`) || sel.region === `st-${v}`))
+      const state = a.act === 'filter' ? cycleKnob(c, sel.state || {})
+        : (a.dir || 1) > 0 ? (into != null && c.values[c.i] !== into ? { ...(sel.state || {}), [c.id]: into } : turnKnob(p.drawing, sel.state || {}, c.id, 1))
+          : { ...(sel.state || {}), [c.id]: c.values[0] }
       await $.state.set(SEL, { ...sel, state, region: null, ex: 0 } as Sel)
       return
     }
