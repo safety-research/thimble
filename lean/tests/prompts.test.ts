@@ -1,0 +1,62 @@
+// The registry from the hooks (prompts/prompts.ts): a verb's skill never replaces the lean skill (loaded first, the
+// lean skill's text comes with it, once), another version of a skill is served in place of its file's text, a skill
+// of another plugin is left alone, and each load is a line in the session's events.
+// `claude plugin test lean`.
+import { expect, mock, test } from 'claude-code/testing'
+
+import { promptStub } from './stubs'
+
+type Json = Record<string, unknown>
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Any = any
+
+function world(on: Any, env: Record<string, string> = {}) {
+  mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...env })
+  const clock = mock.clock(on, { now: 0 })
+  on('session.id', () => ({ value: 's-1' }))
+  on('session.cwd', () => ({ value: '/data' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', () => ({ value: false }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/skills/lean/SKILL.md') ? '---\nname: lean\ndescription: x\n---\n\nLEAN BODY: cite what you show.\n' : promptStub(e.path) ?? '' }))
+  // the engine's own expansion: the text as the skill computed it
+  on('skill.prompt', (_$: unknown, e: { text: string }) => ({ text: e.text }))
+  const events: Json[] = []
+  on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
+    if (e.argv.some(a => a.endsWith('telemetry/append.mjs'))) for (const l of String(e.init?.stdin ?? '').split('\n').filter(Boolean)) events.push(JSON.parse(l))
+    return { value: { exitCode: 0, stdout: '{}', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return { events, clock }
+}
+
+const load = ($: Any, skill: string, body: string, plugin = 'thimble-lean') =>
+  $.skill.prompt({ skill: `${plugin}:${skill}`, text: `Base directory for this skill: /p/${skill}\n\n${body}`, pluginName: plugin, source: 'plugin' })
+
+test("a verb's skill loaded before the lean skill brings the lean skill's text first, once", async ($, on) => {
+  const w = world(on)
+  const map = String((await load($, 'map', '# Map: lay the work out')).text)
+  expect(map.startsWith('LEAN BODY: cite what you show.')).toBe(true)
+  expect(map).toContain('The map skill, which builds on the lean skill above:')
+  expect(map).toContain('Base directory for this skill: /p/map\n\n# Map: lay the work out')
+  // the lean skill is in the conversation now: the next verb skill comes alone
+  const trace = String((await load($, 'trace', '# Trace')).text)
+  expect(trace).toBe('Base directory for this skill: /p/trace\n\n# Trace')
+  await w.clock.advance(100)
+  const lines = w.events.filter(e => e.kind === 'prompt')
+  expect(lines.map(e => e.via)).toEqual(['skill map', 'skill trace'])
+  expect(lines[0]!.with_lean).toBe(true)
+  expect(lines[0]!.prompt).toBe('map:skill')
+})
+
+test('the lean skill loaded first: a verb skill after it comes alone; a skill of another plugin is left as it is', async ($, on) => {
+  world(on)
+  const lean = String((await load($, 'lean', 'LEAN BODY as the file says')).text)
+  expect(lean).toBe('Base directory for this skill: /p/lean\n\nLEAN BODY as the file says')
+  expect(String((await load($, 'explore', '# Explore')).text)).toBe('Base directory for this skill: /p/explore\n\n# Explore')
+  expect(String((await load($, 'commit', '# Commit', 'other')).text)).toBe('Base directory for this skill: /p/commit\n\n# Commit')
+})
+
+test("another version of a skill's feature is served in place of its file's text, its base folder kept", async ($, on) => {
+  world(on, { LEAN_PROMPTS: 'lean:v1' })
+  const lean = String((await load($, 'lean', 'LEAN BODY as the file says')).text)
+  expect(lean).toBe('Base directory for this skill: /p/lean\n\nPROMPT lean:v1')
+})

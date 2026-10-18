@@ -38,8 +38,8 @@ type Any = any
 
 /** The session around the observer: one object on disk, the Node children, the model's two calls (answered by
  *  `question` and `fork`), the prompt and the band. */
-function world(on: Any, o: { question?: Json; fork?: Json | (() => Json) } = {}) {
-  mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
+function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: Record<string, string> } = {}) {
+  mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...(o.env ?? {}) })
   mock.store(on)
   on('session.cwd', () => ({ value: ROOT }))
   on('session.id', () => ({ value: 's-1' }))
@@ -53,8 +53,14 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json) } = {})
     return { value: undefined }
   })
   const runs: string[][] = []
-  on('process.run', (_$: unknown, e: { argv: string[] }) => {
+  // the session's events, as telemetry appends them through its Node child
+  const events: Json[] = []
+  on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     runs.push([...e.argv])
+    if (e.argv.some(a => a.endsWith('telemetry/append.mjs'))) {
+      for (const l of String(e.init?.stdin ?? '').split('\n').filter(Boolean)) events.push({ file: e.argv.at(-1), ...JSON.parse(l) })
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     let out = '{}'
     if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: DRAWING, verbs: VERBS, problems: [] })
     else if (e.argv.includes('coverage')) out = 'Coverage of this session · 4 source files\nNot read: 1 file (9 rows): events.jsonl'
@@ -101,7 +107,9 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json) } = {})
     files[`${DIR}/01-saves.json`] = JSON.stringify({ ...OBJECT, updated: new Date(clock.now()).toISOString() })
     return { result: 'saved 01-saves v1: thimble/objects/01-saves.json\n' }
   })
-  return { files, runs, forks, questions, submitted, filled, at, clock }
+  const toasts: string[] = []
+  on('ui.toast', (_$: unknown, e: unknown) => { toasts.push(typeof e === 'string' ? e : String((e as { text?: string; message?: string })?.text ?? (e as { message?: string })?.message ?? JSON.stringify(e))); return { value: undefined } })
+  return { files, runs, forks, questions, submitted, filled, at, clock, events, toasts }
 }
 
 // every string a drawn tree holds, in order
@@ -354,3 +362,84 @@ test('a term the person saw explained is never glossed again; glosses nobody ope
   // looks whose glosses nobody opened: after two, the next looks are told to give none
   expect([1, 2, 3, 4, 5, 9].map(glossSkipsFor)).toEqual([0, 0, 1, 2, 4, 8])
 })
+
+// ------------------------------------------------------------------------------------------------ lenses, versions, telemetry
+
+test('the pass composes the lenses over the new turn; each call and the turn are lines in the session events, with each lens\'s share', async ($, on) => {
+  const w = world(on, { fork: { notes: [{ note: 'Say the 6,543 counts reverts.' }], line: null, settled: false, verbs: { v: { note: '1 view ready', proposals: ['saves per day, June 18 marked'] } }, glosses: [], claims: [] } })
+  await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
+  await w.clock.settle()
+  await w.clock.advance(100)
+  await w.clock.settle()
+  // one call, the frame and the lenses as its system prompt, the turn and the digests as its message
+  expect(w.forks.length).toBe(1)
+  const p = w.forks[0]!
+  for (const x of ['FRAME', 'LENS notes', 'LENS line', 'LENS actions', 'LENS squeeze', 'LENS explain', 'LENS claims', 'REPLY {"notes": [], "line": null, "settled": false, "verbs": {}, "glosses": [], "claims": []}', 'TURN ', 'when did they edit most?', 'Object 01-saves v1']) expect(p).toContain(x)
+  expect(p).toContain('STEPS (no steps before the answer)')
+  const file = '/home/t/.thimble/lean/events/s-1.jsonl'
+  expect(w.events.every(e => e.file === file)).toBe(true)
+  const prompts = w.events.find(e => e.kind === 'prompts')!
+  expect((prompts.active as Json).observer).toBe('v2')
+  expect((prompts.active as Json)['lens-explain']).toBe('v2')
+  const q = w.events.find(e => e.kind === 'call' && e.feature === 'question')!
+  expect(q.prompt).toBe('question:v1')
+  expect(q.blocked).toBe(false)
+  const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
+  expect(pass.prompt).toBe('observer:v2')
+  expect(pass.blocked).toBe(false)
+  expect(pass.mode).toBe('lenses')
+  expect(pass.usage).toEqual(USAGE)
+  expect(Object.keys(pass.lenses as Json)).toEqual(['notes', 'line', 'actions', 'squeeze', 'explain', 'claims'])
+  expect((pass.lens_prompts as Json).actions).toBe('lens-actions:v2')
+  expect(((pass.lenses as Json).notes as Json).out).toBeGreaterThan(0)
+  const main = w.events.find(e => e.kind === 'turn')!
+  expect(main.feature).toBe('main')
+  expect(main.agent).toBe(null)
+  expect(typeof main.hook_ms).toBe('number')
+  // the merges: the note waits for Claude, v lit with its named view
+  await $.prompt.submit({ text: 'next', origin: { kind: 'composer' } } as never)
+  expect(w.submitted.at(-1)!.context.join('\n')).toContain('Say the 6,543 counts reverts.')
+  expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`]!).verbs.v.proposals).toEqual(['saves per day, June 18 marked'])
+})
+
+test('a lens turned off is neither asked nor merged; another frame version is read in its place', async ($, on) => {
+  const w = world(on, { env: { LEAN_PROMPTS: 'lens-explain:off,observer:attention-v1' }, fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS] } })
+  await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
+  await w.clock.settle()
+  await w.clock.advance(100)
+  await w.clock.settle()
+  expect(w.forks[0]).toContain('FRAME ATTENTION')
+  expect(w.forks[0]).not.toContain('LENS explain')
+  expect(w.forks[0]).toContain('REPLY {"notes": [], "line": null, "settled": false, "verbs": {}, "claims": []}')
+  expect(JSON.parse(w.files[MSGPATH]!).glosses).toEqual({})
+  const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
+  expect(pass.prompt).toBe('observer:attention-v1')
+  expect(Object.keys(pass.lenses as Json)).not.toContain('explain')
+  expect((w.events.find(e => e.kind === 'prompts')!.changed as string)).toBe('observer:attention-v1,lens-explain:off')
+})
+
+test('observer:v1 is the earlier pass, one prompt in a fork of the session; its reply merges through the same lenses', async ($, on) => {
+  const w = world(on, { env: { LEAN_PROMPTS: 'observer:v1' }, fork: { notes: [], line: null, settled: false, verbs: { v: { note: '2 views ready', proposals: ['a', 'b'] } }, glosses: [GLOSS] } })
+  await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
+  await w.clock.settle()
+  await w.clock.advance(100)
+  await w.clock.settle()
+  expect(w.forks[0]).toMatch(/^OBSERVER why June 18\?/)
+  const rec = JSON.parse(w.files[MSGPATH]!)
+  expect(rec.verbs.v.proposals).toEqual(['a', 'b'])
+  expect(Object.values(rec.glosses).map((g: Any) => g.term)).toEqual(['fixture scope'])
+  expect(w.events.find(e => e.kind === 'call' && e.feature === 'observer')!.mode).toBe('fork')
+})
+
+test('a version that does not exist: the default is read, and one line says so', async ($, on) => {
+  const w = world(on, { env: { LEAN_PROMPTS: 'observer:v9' }, fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [] } })
+  await turn($, w, w.clock, { id: 't1', prompt: 'when?', answer: 'June 18.', tools: 1 })
+  await w.clock.settle()
+  await w.clock.advance(100)
+  await w.clock.settle()
+  expect(w.forks[0]).toContain('FRAME\n')
+  expect(w.toasts.length).toBe(1)
+  expect(w.toasts[0]).toContain('no version observer:v9, so observer stays at v2')
+  expect((w.events.find(e => e.kind === 'prompts')!.problems as string[]).length).toBe(1)
+})
+
