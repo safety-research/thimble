@@ -765,6 +765,7 @@ async function wayRow(cx: Ctx, e: PaneEvent, view: string): Promise<RenderElemen
       <Button key="way-browser" label="↗" plain onPress={toBrowser} />
       {hiddenKeys(cx, e, [...(back ? [{ key: 'back', hotkey: 'b', onPress: () => void navBack(cx) }] : []), { key: 'close', hotkey: 'x', onPress: () => void closePanel(cx) }, { key: 'browser', hotkey: 'o', onPress: () => void toBrowser() }])}
       {listKeysEl(cx, e)}
+      {restKeyEl(cx, e)}
     </Box>
   )
 }
@@ -987,7 +988,7 @@ export function relayField(f: PanelField | null): void {
  *  then `Esc to leave the field`; while the prompt holds the keys, only how to give the panel them. */
 export function fieldHintsRow(els: El, hints: readonly string[], cols: number): RenderElement {
   endHints(hints)
-  return hintsEl(els, paneFocused && !rt.typeThrough ? [...hints, 'Esc to leave the field'] : [UNFOCUSED_HINT], cols)
+  return hintsEl(els, paneFocused && !rt.typeThrough ? [...hints, 'Esc to leave the field'] : [keysAwayHint()], cols)
 }
 
 /** Whether the pane holds the keys as it is drawn, its typing not on the way to the prompt. */
@@ -1164,6 +1165,22 @@ function listKeysEl(cx: Ctx, e: PaneEvent): RenderElement | null {
   )
 }
 
+/** The ring's place in a view with no list (a card, a citation, a label): a Button no row tall that does nothing, which
+ *  the panel puts the ring on as the view opens (term.ts giveKeys), so the ring rests on no text field and the view's
+ *  letters are its hotkeys, as its hint row says. Without it the ring stayed wherever Claude Code left it, at times on
+ *  the view's entry box, which then took `x` while the hint row said `x to close` (bug hunt L12). */
+export const RING_REST = 'keys-rest'
+
+function restKeyEl(cx: Ctx, e: PaneEvent): RenderElement | null {
+  if (listRelay || e.surface === 'mobile' || keysHidden()) return null
+  const { Box, Button } = cx.els(e)
+  return (
+    <Box key="rest-keys" width={0} height={0} flexShrink={0} overflow="hidden" flexDirection="row">
+      <Button key={RING_REST} label="·" plain onPress={() => undefined} />
+    </Box>
+  )
+}
+
 /** Whether the panel's focus ring rests on its list's keys (the relay), as the last `ui.focus` put it. */
 function listKeysHeld(): boolean {
   return paneFocused && !rt.typeThrough && RELAY_KEYS.includes(rt.panelFocus)
@@ -1211,7 +1228,7 @@ function endHints(hints: readonly string[], autoFocus = ''): string[] {
   // while the prompt holds the keys (Esc left a field, or a click on the prompt), a letter or Enter goes to the prompt,
   // and Enter would send it to main: no key of the panel's is named, only how to give the panel the keys; so too while
   // the panel's typing goes to the prompt (typeThrough)
-  if (!paneFocused || rt.typeThrough) return [UNFOCUSED_HINT]
+  if (!paneFocused || rt.typeThrough) return [keysAwayHint()]
   // `autoFocus`: the view's field that takes the ring as it opens, before any ui.focus says where the ring is; a ring
   // on a field this drawing does not draw (one of the view before, live check term-fix9, quirk 1) is on none
   const ring = rt.panelFocus ? (fieldsDrawing.has(rt.panelFocus) ? rt.panelFocus : '') : autoFocus
@@ -1231,6 +1248,18 @@ function endHints(hints: readonly string[], autoFocus = ''): string[] {
 
 /** The hint row while the panel does not hold the keys. */
 export const UNFOCUSED_HINT = 'click the panel for its keys'
+/** The hint row while the panel does not hold the keys and the prompt holds text: Claude Code then keeps the keys at the
+ *  prompt, a click on the panel included (bug hunt L12: a click on a card left them there, and `a` and the question
+ *  went to main's prompt). */
+export const DRAFT_HINT = 'empty the prompt, then click the panel for its keys'
+
+// whether the prompt held text as the panel was drawn without its keys
+let draftHeld = false
+
+/** How to give the panel its keys, while it is without them. */
+function keysAwayHint(): string {
+  return draftHeld ? DRAFT_HINT : UNFOCUSED_HINT
+}
 
 /** The key-hint row as bound now (endHints); none while an entry box holds the keys. */
 export function hintsRow(els: El, hints: readonly string[], cols: number, autoFocus = ''): RenderElement {
@@ -4406,7 +4435,7 @@ async function drawView(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // and Backspace do there
   if (f.typing) {
     endHints(f.hints)
-    body.push(hintsEl(els, paneFocused && !rt.typeThrough ? [...f.hints, 'Esc to leave the field'] : [UNFOCUSED_HINT], cols))
+    body.push(hintsEl(els, paneFocused && !rt.typeThrough ? [...f.hints, 'Esc to leave the field'] : [keysAwayHint()], cols))
   } else body.push(hintsEl(els, fitHints(endHints(hints), cols), cols))
   // the list's Space and Backspace reach the view while it binds them, whether or not its one hint row names them
   listExtraDrawing = { space: f.keys.includes('space'), backspace: f.keys.includes('backspace') }
@@ -4446,6 +4475,7 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
   // pane, ctrl+x tab)
   if (rt.typeThrough && !paneFocused) rt.typeAway = true
   else if (rt.typeThrough && rt.typeAway) keysBack()
+  draftHeld = !paneFocused || rt.typeThrough ? Boolean((await cx.promptText().catch(() => '')).trim()) : false
   bodyRows = pe.props.scroll?.bodyRows || 0
   // the list this drawing draws, read off its drawing (lines.tsx), for the relay in its title row (listKeysEl)
   takeListKeys()
@@ -4498,6 +4528,8 @@ export async function drawPanel(cx: Ctx, pe: PaneEvent): Promise<RenderElement> 
     viewField = null
   }
   listRelay = takeListKeys()
+  // a view with no list, and no field of its own the ring starts on, starts it on its resting place
+  if (!listRelay && !startRingDrawing && e.surface !== 'mobile') startRingDrawing = RING_REST
   const tree = await withWay(cx, e, p.view, body)
   hotkeys = hotkeysDrawing
   listExtra = listExtraDrawing

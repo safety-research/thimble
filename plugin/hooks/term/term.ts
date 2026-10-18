@@ -102,6 +102,9 @@ export const rt = {
   turn: null as Turn | null,
   // the cards a drawing named and no drawing read yet, which the session's timer reads (tick) to name them
   wanted: new Set<string>(),
+  // whether the prompt box holds text (register.tsx noteDraft): Claude Code then keeps the keys there, and the panel's
+  // hint row says to empty it first (panel.tsx DRAFT_HINT)
+  draftHeld: false,
   // the cards a drawing shows and nothing read yet, and those whose read Claude Code cut short: the session's card lane
   // reads them (cardsLane). A drawing starts no read with its own `$`: Claude Code cuts every run of a drawing it
   // abandons, and the card read `× card 1 cannot be drawn: … $.process.run(…) aborted` (bug hunt L7)
@@ -794,7 +797,7 @@ async function placePanel(cx: Ctx, p: TermPanel): Promise<void> {
     if (r.isPlaced) rt.retriedAt = 0
     await cx.setPending(r.isPlaced ? null : pendingOf(title, r.reason))
     // with a draft in the prompt the keys stay there (Claude Code keeps the person's typing)
-    if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
+    if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds text, so it keeps the keys: empty it, then click the panel for its keys')
     else if (r.isPlaced) giveKeys(cx, title, p.view === 'ask' ? ASK_FIELD : RELAY_PICK)
   } catch (err) {
     cx.log(`thimble-term: could not open the panel: ${String(err).slice(0, 200)}`)
@@ -859,7 +862,8 @@ function giveKeys(cx: Ctx, title: string, ringAsked = RELAY_PICK): void {
     const pane = (await cx.panes()).find(p => p.id === PANEL)
     if (!pane?.isPlaced) return
     if (pane.isFocused !== false) {
-      // a view with no list whose keys a field takes in their place (the empty labels list's entry box)
+      // a view with no list whose keys a field takes in their place (the empty labels list's entry box), or its resting
+      // place (panel.tsx RING_REST: a card, a citation), so the ring is never left on its entry box (bug hunt L12)
       const ringOn = ringAsked === RELAY_PICK && rt.startRing ? rt.startRing : ringAsked
       // the ring onto the list's keys (a ring there already stays, and the call says so); a view that draws none leaves
       // the ring where it is, off them. Neither raises a ui.focus (live check term-fix8, quirk 7)

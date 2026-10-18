@@ -678,10 +678,24 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // whether the prompt box holds text: when that changes the panel is drawn again, so its hint row says how to give it
+  // the keys (panel.tsx DRAFT_HINT)
+  const noteDraft = (cx: ReturnType<typeof cxOf>, text: string) => {
+    const held = Boolean(text.trim())
+    if (held === rt.draftHeld) return
+    rt.draftHeld = held
+    void cx.bumpPanel().catch(() => undefined)
+  }
+  on('prompt.change', async ($, e, next) => {
+    if (rt.sc) noteDraft(cxOf($), String(e.text ?? ''))
+    return next(e)
+  })
+
   // a citation typed or pasted into the prompt is painted there as the reply's are, purple and underlined
   on('prompt.edit', async ($, e, next) => {
     const r = await next(e)
     if (!rt.sc) return r
+    noteDraft(cxOf($), String(r.text ?? ''))
     const d = citeSpans(r.text).map(sp => ({ start: sp.at, end: sp.end, underline: true, color: COLORS.cite }))
     return d.length ? { ...r, decorations: [...(r.decorations ?? []), ...d] } : r
   })
