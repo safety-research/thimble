@@ -1,27 +1,19 @@
 {
   "key": "s",
   "name": "squeeze",
-  "line": "shorter on the dimensions that matter, still attached to the original",
+  "line": "rewrite the message in place: its length, how much it interprets, how much it assumes, or your own chip",
   "order": 1,
-  "absorbs": [
-    "Telescope",
-    "squeeze chips",
-    "session headlines"
-  ],
-  "auto": {
-    "lines": 16,
-    "chars": 1600,
-    "why": "long text arrives squeezed; the original is one key away"
-  },
-  "keys": {
-    "s": "shorter",
-    "S": "fuller",
-    "o": "the original beside it"
-  },
-  "model": "opus",
-  "effort": "low",
-  "maxTokens": 8000,
   "row": true,
+  "chips": ["Length", "Report ↔ Interpret", "Familiarity", "+ your own"],
+  "arrive": {
+    "length": "short",
+    "when": "the message takes more than half the screen's rows, as an object under a reply does before the rest waits in its detail view",
+    "why": "a long message arrives squeezed; the original is one key away"
+  },
+  "model": "sonnet",
+  "effort": "low",
+  "maxTokens": 4000,
+  "timeoutMs": 90000,
   "color": {
     "light": "#b7791f",
     "dark": "#e0a43a"

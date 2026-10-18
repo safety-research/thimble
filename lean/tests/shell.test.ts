@@ -216,24 +216,24 @@ async function savedTurn($: any, on: any, clock: { settle: () => Promise<void> }
   await clock.settle()
 }
 
-test('a verb of the message row: s opens its line, a pick runs it on the message, and what it made is drawn under the same message; Claude reads what it did with the next prompt', async ($, on) => {
-  const w = world(on, () => ({ verb: 'squeeze', saved: { id: '02-trace', v: 1 }, note: 'It squeezed the message to 2 lines.' }))
+test('a verb of the message row: v opens its line, a pick runs it on the message, and what it made is drawn under the same message; Claude reads what it did with the next prompt', async ($, on) => {
+  const w = world(on, () => ({ verb: 'visualize', saved: { id: '02-trace', v: 1 }, note: 'It drew the message as 2 bars.' }))
   const clock = mock.clock(on)
   await savedTurn($, on, clock)
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(1)
-  await ui.press({ key: verbKey('s') })
-  expect(textOf(await ui.drawn())).toContain('▸ 1 squeeze it')
+  await ui.press({ key: verbKey('v') })
+  expect(textOf(await ui.drawn())).toContain('▸ 1 a card of this message')
   await ui.press({ key: `vl-${AT}-opt-0` })
   await clock.settle()
-  // the verb ran with the message: its record, as an object with its words, and no words of its own
+  // the verb ran with the message: its record, as an object with its words, and the pick as its words
   const input = w.inputs[0] as { object: { kind: string; text: string; row: string }; message: { row: string; final: boolean }; args: string }
   expect(input.object.kind).toBe('message')
   expect(input.object.text).toBe('June 18 had the most saves.')
   expect(input.message.row).toBe(AT)
   expect(input.message.final).toBe(true)
-  expect(input.args).toBe('')
+  expect(input.args).toBe('a card of this message')
   // what it made is drawn under the same message, after the object there
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(2)
   expect(JSON.parse(w.files[SHOWN]!).under[AT].map((x: { id: string }) => x.id)).toEqual(['01-saves', '02-trace'])
@@ -242,10 +242,10 @@ test('a verb of the message row: s opens its line, a pick runs it on the message
   expect(w.submitted.length).toBe(0)
   await $.prompt.submit({ text: 'and this?' } as never)
   const context = w.submitted.at(-1)!.context.join('\n')
-  expect(context).toContain('The person ran the verb squeeze on the message "June 18 had the most saves."')
-  expect(context).toContain('It squeezed the message to 2 lines.')
+  expect(context).toContain('The person ran the verb visualize on the message "June 18 had the most saves."')
+  expect(context).toContain('It drew the message as 2 bars.')
   await $.prompt.submit({ text: 'more?' } as never)
-  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('ran the verb squeeze')
+  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('ran the verb visualize')
   await ui.unmount()
 })
 
@@ -432,7 +432,8 @@ test("a resumed session finds its messages on disk: their marks open from the ke
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
   await ($ as Any).prompt.edit(edit('0'))
   await ($ as Any).prompt.edit(edit('s'))
-  expect(textOf(await $.ui.render(RESUMED))).toContain('▸ 1 squeeze it')
+  // s opens the squeeze chips under it, in place of its verb row
+  expect(textOf(await $.ui.render(RESUMED))).toContain('Report ↔ Interpret')
 })
 
 test('a failure reads as plain words, never JSON; a refusal that needs nothing from the person says nothing', () => {

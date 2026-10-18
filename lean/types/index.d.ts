@@ -51,7 +51,25 @@ export type MsgRecord = {
   objects: string[]
   /** the turn's answer: the row its verb row is drawn under */
   final?: boolean
+  /** the squeeze chips' state (verbs/squeeze/chips.mjs): the levels set, the person's own chips, the versions written */
+  squeeze?: Squeeze
 }
+
+/** A message's squeeze: where its chips are, the person's own chips, every version written by its levels, the
+ *  original's marks, whether it arrived squeezed, what a rewrite said that the original does not, and each call made. */
+export type Squeeze = {
+  at?: Record<string, number>
+  own?: { id: string; name: string; words: string; levels: string[] }[]
+  versions?: Record<string, string>
+  orig?: { marks: Mark[] }
+  auto?: boolean
+  problems?: string[]
+  made?: { key: string; ms: number; model: string; usage?: unknown; at?: string }[]
+}
+
+/** The chips' line of one message as the person works it: the picked chip, whether they type their own chip, a call
+ *  running (and the frame of its turning glyph), and a call that failed. */
+export type SqzUi = { focus: string; adding: boolean; running: { since: number } | null; error: string | null; tick: number }
 
 /** One card of the tray: a mark of a message, or a citation inside a card. */
 export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' }
@@ -107,6 +125,10 @@ declare module 'claude-code' {
       running: StateFamily<string | null>
       /** the verbs of the row, as the registry lists them */
       rowverbs: { key: string; name: string; color?: unknown }[] | null
+      /** the squeeze chips' line of a message, by its row */
+      sqz: StateFamily<SqzUi | null>
+      /** what Claude reads with the next prompt of the version the person reads now, by row */
+      sqznote: Record<string, string>
     }
   }
 }
