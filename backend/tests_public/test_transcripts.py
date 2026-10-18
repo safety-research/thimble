@@ -148,6 +148,37 @@ def _cited_page(chats, rel: str, quote: str) -> dict:
     return r.json()
 
 
+def test_a_message_cited_by_its_pointer_in_a_one_line_store_of_messages_opens_at_its_turn(chats):
+    """Bug hunt L6: a document on one line that keeps its messages by id and lists them in conversations
+    (`{"messages": {"<id>": …}, "conversations": {"c1": {"messages": ["<id>", …]}}}`) starts every record on line 1, so a
+    citation of a message by its pointer opened at the first turn. Each such turn names its message (`ref`), and a page
+    asked with the citation's `ref` opens at that turn (`target`), also for a part of the message."""
+    order = ["k9", "a1", "z3", "m~2/b"]
+    words = {"k9": ("user", "Run the vote."), "a1": ("assistant", "VOTE: lottery"), "z3": ("user", "pushed"),
+             "m~2/b": ("assistant", "done")}
+    doc = {"agent": "u7", "system": "You keep the ledger.",
+           "messages": {k: {"id": k, "role": words[k][0], "content": words[k][1]} for k in ["a1", "z3", "k9", "m~2/b"]},
+           "conversations": {"c1": {"id": "c1", "messages": order}}}
+    (chats / "logs" / "store.json").write_text(json.dumps(doc))
+    rel = "logs/store.json"
+
+    def page(**params):
+        r = client.get(f"{CHATS}/source/turns", params={"path": rel, **params})
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    whole = page()
+    assert {t["line"] for t in whole["turns"]} == {1} and "target" not in whole
+    by_text = {t["text"]: t for t in whole["turns"]}
+    assert by_text["VOTE: lottery"]["ref"] == f"{rel}#/messages/a1"
+    assert by_text["done"]["ref"] == f"{rel}#/messages/m~02~1b"
+    voted = page(ref=f"{rel}#/messages/a1", line=1)
+    assert [t["text"] for t in voted["turns"] if t["i"] == voted["target"]] == ["VOTE: lottery"]
+    assert page(ref=f"{rel}#/messages/a1/content")["target"] == voted["target"]
+    assert [t["text"] for t in whole["turns"] if t["i"] == page(ref=f"{rel}#/messages/m~02~1b")["target"]] == ["done"]
+    assert "target" not in page(ref=f"{rel}#/messages/nope", line=1)
+
+
 def test_a_citation_of_words_in_a_one_line_json_transcript_opens_at_the_turn_that_holds_them(chats, monkeypatch):
     msgs = {"messages": [{"role": "user", "content": "Why does the nightly build fail?"},
                          {"role": "assistant", "content": "The groupby test drops the NaN key."},

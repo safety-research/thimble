@@ -1695,6 +1695,7 @@ def _parse_turns(path: Path, rel: str) -> dict[str, Any]:
             locator.place(conv)
             turns.extend(conv)
         _on_records(path, rel, turns)
+        _pool_refs(rel, whole, turns)
         for t, (_first, last) in zip(turns, turn_extents(turns)):
             t["end"] = last
     else:
@@ -1771,6 +1772,41 @@ def _on_records(path: Path, rel: str, turns: list[dict[str, Any]]) -> None:
             ts[0]["ref"] = f"{rel}#{idx.pointers[i]}"
 
 
+def _pool_refs(rel: str, whole: Any, turns: list[dict[str, Any]]) -> None:
+    """Each turn of a message that an id -> message mapping keeps (_message_pool), and that names no record yet, names
+    its message by the mapping's place and its id (`ref`, `<path>#/messages/<id>`), so that a citation of the message by
+    its pointer opens at the turn (turns_page) however the document's lines lie: a document on one line starts every
+    record on line 1."""
+    from . import records  # noqa: PLC0415 — records imports corpus, which imports this module
+
+    places: dict[str, str] = {}
+
+    def walk(v: Any, at: str, depth: int) -> None:
+        if depth > 6:
+            return
+        if isinstance(v, dict):
+            own = _message_pool(v)
+            for k, x in v.items():
+                here = f"{at}/{records.pointer_escape(str(k))}"
+                if own is not None and x is own:
+                    for ident in x:
+                        places.setdefault(str(ident), f"{here}/{records.pointer_escape(str(ident))}")
+                elif isinstance(x, (dict, list)):
+                    walk(x, here, depth + 1)
+        elif isinstance(v, list):
+            for i, x in enumerate(v):
+                if isinstance(x, (dict, list)):
+                    walk(x, f"{at}/{i}", depth + 1)
+
+    if not any(t.get("id") is not None and not t.get("ref") for t in turns):
+        return
+    walk(whole, "", 0)
+    for t in turns:
+        ident = t.get("id")
+        if ident is not None and not t.get("ref") and (place := places.get(str(ident))):
+            t["ref"] = f"{rel}#{place}"
+
+
 def turn_extents(turns: list[dict[str, Any]]) -> list[tuple[int, int]]:
     """Each turn of a whole-file JSON transcript as the lines it covers, (first, last): from the line its record starts
     on (`rec_line`), else the line of its words, through the line before the next turn's first; the last turn through
@@ -1829,11 +1865,13 @@ def _cited_turn(turns: list[dict[str, Any]], on_line: list[int], quote: str) -> 
 
 
 def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int | None = None,
-               quote: str | None = None) -> dict[str, Any]:
+               quote: str | None = None, ref: str | None = None) -> dict[str, Any]:
     """A page of parse_turns: `count` turns from index `start`, or, given a `line`, from a few turns before the turn it
     cites. That turn is the first standing on `line` (or whose record starts there: `rec_line`, _on_records) whose text
     holds `quote` (the words a span of that line quotes), else the first standing on `line`, else the last before it. A
-    turn found by its quote is `cited`: {i, quote}, the words as its text (or its blocks) hold them. Each turn's text is
+    turn found by its quote is `cited`: {i, quote}, the words as its text (or its blocks) hold them. Given a `ref` that
+    cites a record by its pointer (`<path>#/messages/<id>`, or a part of it), the page opens at the turn that is that
+    record (its `ref`), whose index is `target`, wherever its lines are. Each turn's text is
     cut at TURN_TEXT_MAX (`cut` says so), the cited turn's not before the quote's end, and so is each of its blocks
     (turn_blocks); a turn with fields (turn_fields) carries them, for Color by and Filter by, and one that is its
     record's names it (`ref`, `rec_line`). A whole-file JSON document's turn gives the last line it covers (`end`,
@@ -1843,7 +1881,11 @@ def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int
     turns = parsed["turns"]
     count = max(1, min(count, TURNS_PAGE_MAX))
     cited: tuple[int, int, int] | None = None
-    if line is not None:
+    target = next((i for i, t in enumerate(turns) if (r := t.get("ref")) and (ref == r or ref.startswith(r + "/"))),
+                  None) if ref else None
+    if target is not None:
+        start = max(0, target - min(5, count - 1))
+    elif line is not None:
         on_line = [i for i, t in enumerate(turns) if t["line"] == line or t.get("rec_line") == line]
         cited = _cited_turn(turns, on_line, quote) if quote and on_line else None
         if cited:
@@ -1877,15 +1919,18 @@ def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int
     if cited:
         i, a, b = cited
         out["cited"] = {"i": i, "quote": _words(turns[i])[a:b]}
+    if target is not None:
+        out["target"] = target
     return out
 
 
 @router.get("/corpora/{c}/source/turns")
 def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | None = None, block: int | None = None,
-              char_start: int | None = None, char_end: int | None = None) -> dict[str, Any]:
+              char_start: int | None = None, char_end: int | None = None, ref: str | None = None) -> dict[str, Any]:
     """A page of the turns of a JSON transcript (turns_page): 415 for one with no turns. `block`, `char_start` and
     `char_end` with `line` are a span of the raw file (`<path>#L<line>.b<block>:c<char_start>-<char_end>`, UTF-16
-    offsets), whose words pick the turn the page opens at."""
+    offsets), whose words pick the turn the page opens at; `ref`, a citation of a record by its pointer, picks the turn
+    that is that record."""
     from . import corpus  # noqa: PLC0415 — corpus imports nothing from here
 
     root = corpus._corpus(c)
@@ -1898,7 +1943,7 @@ def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | N
             quote = refs.resolve_base(root, f"{path}#L{line}.b{block}:c{char_start}-{char_end}").get("excerpt")
         except refs.RefError:
             quote = None
-    return turns_page(p, path, start, count, line, quote)
+    return turns_page(p, path, start, count, line, quote, ref)
 
 
 def _aider_turns(texts: Iterable[Any]) -> Iterator[dict[str, Any] | None]:

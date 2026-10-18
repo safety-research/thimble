@@ -21,6 +21,7 @@ import { Spinner } from '../../components/Spinner'
 import { api } from '../../lib/api'
 import { mdSyntax, plainMd } from '../../lib/mdPlain'
 import { findQuote } from '../../lib/quoteFind'
+import { parseRef } from '../../lib/refs'
 import { cleanTerminal, needsClean } from '../../lib/terminal'
 import type { Block, ChatTurn, SourceKind, SourceRecord, SourceTurn, SourceTurns, TranscriptHint } from '../../lib/types'
 import { FilterContext } from '../useFilterBy'
@@ -896,6 +897,12 @@ export function turnOver(turns: readonly SourceRecord[], line: number): SourceRe
  * turns loaded are the records Color by and Filter by read (`onRecords`), by the fields the server gives each. */
 function TurnsTranscript({ workspace, path, targetRef, unavailable, onRecords }: ViewProps) {
   const asked = useMemo(() => targetOf(targetRef, path), [targetRef, path])
+  // a citation of a record by its pointer (`…json#/messages/<id>`), whose turn the server finds (`target`) wherever its
+  // lines are: in a document on one line every record starts on line 1
+  const pointer = useMemo(() => {
+    const p = targetRef ? parseRef(targetRef) : null
+    return p?.kind === 'pointer' && p.path === path ? targetRef : undefined
+  }, [targetRef, path])
   const [data, setData] = useState<SourceTurns | null>(null)
   useEffect(() => onRecords?.(data ? turnRecords(data.turns) : null), [data, onRecords])
   useEffect(() => () => onRecords?.(null), [onRecords])
@@ -912,7 +919,7 @@ function TurnsTranscript({ workspace, path, targetRef, unavailable, onRecords }:
     setError(null)
     const span = askedStart != null && askedEnd != null ? { block: askedBlock ?? 0, start: askedStart, end: askedEnd } : undefined
     api
-      .sourceTurns(workspace, path, 0, TURNS_PAGE, askedLine, span)
+      .sourceTurns(workspace, path, 0, TURNS_PAGE, askedLine, span, pointer)
       .then((p) => alive && setData(p))
       .catch((e) => {
         if (!alive) return
@@ -922,7 +929,7 @@ function TurnsTranscript({ workspace, path, targetRef, unavailable, onRecords }:
     return () => {
       alive = false
     }
-  }, [workspace, path, askedLine, askedBlock, askedStart, askedEnd, unavailable])
+  }, [workspace, path, askedLine, askedBlock, askedStart, askedEnd, pointer, unavailable])
   const more = useCallback(
     (dir: 'earlier' | 'later') => {
       if (!data || loading.current) return
@@ -936,7 +943,7 @@ function TurnsTranscript({ workspace, path, targetRef, unavailable, onRecords }:
           setData((cur) => {
             if (!cur) return p
             const groups = { ...cur.groups, ...p.groups }
-            if (dir === 'earlier') return { ...p, cited: cur.cited, groups, turns: [...p.turns, ...cur.turns].slice(0, TURNS_CAP) }
+            if (dir === 'earlier') return { ...p, cited: cur.cited, target: cur.target, groups, turns: [...p.turns, ...cur.turns].slice(0, TURNS_CAP) }
             const turns = [...cur.turns, ...p.turns]
             const drop = Math.max(0, turns.length - TURNS_CAP)
             return { ...cur, groups, total: p.total, start: cur.start + drop, turns: turns.slice(drop) }
@@ -959,11 +966,13 @@ function TurnsTranscript({ workspace, path, targetRef, unavailable, onRecords }:
   }, [more])
   const turns = data?.turns ?? []
   const cited = data?.cited
-  // a citation scrolls to the turn holding the words it quotes, else to the first turn standing on its line, else the
-  // last before it
-  const holder = !asked ? null : cited ? (turns.find((t) => t.i === cited.i) ?? null) : lineHolder(turns, asked.line)
+  const recordTurn = data?.target
+  // a citation scrolls to the turn that is the record it names by its pointer, else to the turn holding the words it
+  // quotes, else to the first turn standing on its line, else the last before it
+  const holder =
+    pointer && recordTurn != null ? (turns.find((t) => t.i === recordTurn) ?? null) : !asked ? null : cited ? (turns.find((t) => t.i === cited.i) ?? null) : lineHolder(turns, asked.line)
   // the citation itself when the turn stands on its line, so another span of that line scrolls again
-  const cardRef = !holder ? undefined : holder.line === asked!.line ? targetRef : `${path}#L${holder.line}`
+  const cardRef = !holder ? undefined : asked && holder.line === asked.line ? targetRef : `${path}#L${holder.line}`
   const { target, hit } = useTarget(cardRef, path, rootRef, [data])
   // a turn with no words (nor blocks) gets no card, unless a citation points at it; the card before it shows its lines'
   // labels

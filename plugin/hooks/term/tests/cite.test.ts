@@ -376,8 +376,14 @@ test("`f` on a transcript's message cited by its pointer opens the transcript at
   // second
   w.pages[path] = (start: number) => ({ path, kind: 'text', total_lines: 1325, start, transcript: { format: 'json', score: 0.95 }, records: Array.from({ length: 200 }, (_, i) => ({ line: start + i, record: { _raw: `line ${start + i}` } })) })
   const page = (from: number) => ({ path, total: 440, start: from, n_groups: 1, groups: {}, turns: Array.from({ length: Math.min(200, 440 - from) }, (_, k) => ({ i: from + k, n: from + k + 1, line: 4 + 3 * (from + k), rec_line: 3 + 3 * (from + k), speaker: (from + k) % 2 ? 'assistant' : 'user', role: (from + k) % 2 ? 'assistant' : 'user', text: `message ${from + k}` })) })
-  // `--line n`: from a few turns before the turn whose record starts on it, as thimble pages it
-  w.turns[path] = (args: string[]) => (args[0] === '--line' ? page(Math.max(0, Math.floor((Number(args[1]) - 3) / 3) - 5)) : page(args[0] === '--start' ? Number(args[1]) : 0))
+  // `--ref` a record's pointer, else `--line n`: from a few turns before the turn that is that record, or whose record
+  // starts on the line, as thimble pages it
+  const flag = (args: string[], name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
+  w.turns[path] = (args: string[]) => {
+    if (flag(args, '--ref') === ref) return { ...page(295), target: 300 }
+    const line = flag(args, '--line')
+    return line ? page(Math.max(0, Math.floor((Number(line) - 3) / 3) - 5)) : page(Number(flag(args, '--start') ?? 0))
+  }
   w.resolve[ref] = { ref, kind: 'pointer', path, record: { id: '5f0e2a9b7c1d4e38', role: 'assistant', content: 'message 300' }, blocks: [{ kind: 'text', text: 'message 300' }], excerpt: 'message 300', meta: { n: 301, line: 903, end_line: 905 } }
   await start($, w)
   let pane = await clickCite($, w, `It says [message 300](${ref}) late.`, 10)
@@ -387,7 +393,7 @@ test("`f` on a transcript's message cited by its pointer opens the transcript at
   await pane.unmount()
   pane = (await $.ui.mount(PANE)) as unknown as M
   // the turns read are those around the message's record, and the header counts them
-  expect(w.calls.filter(c => c[2] === 'turns').map(c => c.slice(5).join(' '))).toContain(`${path} --line 903`)
+  expect(w.calls.filter(c => c[2] === 'turns').map(c => c.slice(5).join(' '))).toContain(`${path} --ref ${ref} --line 903`)
   expect(shown(await pane.drawn())).toContain('turns 296-440 of 440')
   // the message shows, chosen (`❯` on its speaker's row, its words under it)
   const rows = (((await pane.drawn({ in: 'm:file-body' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
@@ -401,6 +407,43 @@ test("`f` on a transcript's message cited by its pointer opens the transcript at
   // each turn shown starts on its speaker's row
   const started = rows.filter(r => /● (?:user|assistant)$/.test(r)).length
   expect(rows.at(-1)!.trim()).toBe(`↓ ${439 - (295 + started - 1)} more`)
+  await pane.unmount()
+})
+
+test("`f` on a message of a transcript kept on one line opens at that message, lit, and the window's counts add up to the header's (bug hunt L6)", { timeoutMs: 30_000 }, async ($, on) => {
+  // bug hunt L6 (B29 again): in a JSON document on one line every message's record starts on line 1, so `f` opened at
+  // the first turn, `turns 1-200 of 380` over `↓ 370 more`
+  const w = world(on)
+  const path = 'ep7/u3_chats.json'
+  const ref = `${path}#/messages/c41d07e2aa`
+  w.pages[path] = (start: number) => ({ path, kind: 'text', total_lines: 1, start, transcript: { format: 'json', score: 0.95 }, records: [{ line: 1, record: { _raw: '{"messages": {…}}' } }] })
+  const ids = Array.from({ length: 380 }, (_, k) => (k === 250 ? 'c41d07e2aa' : `m${k}`))
+  const page = (from: number) => ({ path, total: 380, start: from, n_groups: 1, groups: {}, turns: Array.from({ length: Math.min(200, 380 - from) }, (_, k) => ({ i: from + k, n: from + k + 1, line: 1, ref: `${path}#/messages/${ids[from + k]}`, speaker: (from + k) % 2 ? 'assistant' : 'user', role: (from + k) % 2 ? 'assistant' : 'user', text: `message ${from + k}` })) })
+  const flag = (args: string[], name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
+  w.turns[path] = (args: string[]) => (flag(args, '--ref') === ref ? { ...page(245), target: 250 } : page(Number(flag(args, '--start') ?? 0)))
+  w.resolve[ref] = { ref, kind: 'pointer', path, record: { role: 'assistant', content: 'VOTE: lottery' }, blocks: [{ kind: 'text', text: 'VOTE: lottery' }], excerpt: 'VOTE: lottery', meta: { n: 251, line: 1, end_line: 1 } }
+  await start($, w)
+  let pane = await clickCite($, w, `It voted [lottery](${ref}).`, 10)
+  await pane.press({ key: 'hk-files' })
+  await w.clock.settle()
+  await pane.unmount()
+  pane = (await $.ui.mount(PANE)) as unknown as M
+  expect(w.calls.filter(c => c[2] === 'turns').map(c => c.slice(5).join(' '))).toContain(`${path} --ref ${ref} --line 1`)
+  const drawn = shown(await pane.drawn())
+  expect(drawn).toContain('turns 246-380 of 380')
+  // the record's row names the message by its pointer, never `line 1`, which every message shares
+  expect(drawn).not.toContain('u3_chats.json line 1')
+  const rows = (((await pane.drawn({ in: 'm:file-body' })) as { children?: unknown[] }).children ?? []).map(r => shown(r))
+  const lit = rows.findIndex(r => r.startsWith('❯'))
+  expect(lit).toBeGreaterThanOrEqual(0)
+  expect(rows[lit + 1]).toContain('message 250')
+  // the turns cut off above and below, with those shown (each starts on its speaker's row), are the turns the header
+  // names
+  const started = rows.filter(r => /● (?:user|assistant)$/.test(r)).length
+  const up = Number(/↑ (\d+) more/.exec(rows.join('\n'))?.[1] ?? 0)
+  const down = Number(/↓ (\d+) more/.exec(rows.join('\n'))?.[1] ?? 0)
+  expect(started).toBeGreaterThan(1)
+  expect(up + started + down).toBe(380 - 245)
   await pane.unmount()
 })
 

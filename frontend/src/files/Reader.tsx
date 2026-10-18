@@ -1412,8 +1412,11 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const unread = fragment != null && targetOf(targetRef, path) == null && !recordAt && !recordPending ? fragment : null
   const page: SourcePage = useMemo(() => ({ path, kind, total_lines: total ?? 0, start: first ?? 1, records }), [path, kind, total, first, records])
   const ViewComponent = view?.component
-  // a record the server placed on lines is shown to the view as those lines, which it scrolls to and flashes
-  const viewTarget = findRef ?? (recordAt ? `${path}#L${recordAt.line}` + (recordAt.endLine > recordAt.line ? `-L${recordAt.endLine}` : '') : targetRef)
+  // a record the server placed on lines is shown to the view as those lines, which it scrolls to and flashes; the
+  // Transcript mode of a whole JSON document is given the record itself, whose turn the server finds wherever its lines
+  // are (a document on one line starts every record on line 1)
+  const turnsByRecord = isTranscript && builtins.transcript?.format === 'json'
+  const viewTarget = findRef ?? (recordAt && !turnsByRecord ? `${path}#L${recordAt.line}` + (recordAt.endLine > recordAt.line ? `-L${recordAt.endLine}` : '') : targetRef)
   const loadPage = useCallback((dir: 'earlier' | 'later') => void loadMore(dir), [loadMore])
   // the view is rendered again only when what it shows changes, not when the reader measures its scroll (the ruler's
   // thumb, the fade at the right edge) as the reader resizes or scrolls

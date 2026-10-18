@@ -117,7 +117,7 @@ const TIME_KEYS = ['time', 'timestamp', 'ts', 'created_at', 'date', 'at']
 /** A turn of a transcript: its line, who speaks, the words, when; a tool call folded to one line (`tool`); a whole-file
  *  JSON transcript's turn its index (`i`), the title of the conversation it is in (`group`), and the first line of the
  *  record that is its one turn (`rec`), where a citation of that record by its pointer opens. */
-type Turn = { n: number; who: string; text: string; time: string; tool?: boolean; i?: number; group?: string; rec?: number }
+type Turn = { n: number; who: string; text: string; time: string; tool?: boolean; i?: number; group?: string; rec?: number; ref?: string }
 
 /** A dotted key's value in a record (`data.speakerId`). */
 function dotted(o: Obj, key: string): unknown {
@@ -182,7 +182,7 @@ function turnsOfPage(tp: Obj): Turn[] | null {
     const text = noControls(demojibake(str(t.text))).replace(/\s+/g, ' ').trim()
     if (!text) continue
     const g = typeof t.group === 'number' ? t.group : null
-    out.push({ n: typeof t.line === 'number' ? t.line : 1, i: typeof t.i === 'number' ? t.i : out.length, ...(typeof t.rec_line === 'number' ? { rec: t.rec_line } : {}), who: noControls(demojibake(str(t.speaker) || str(t.role))), text, time: str(t.time), ...(titled && g !== null ? { group: noControls(titleOf(g)) || `Conversation ${g + 1}` } : {}) })
+    out.push({ n: typeof t.line === 'number' ? t.line : 1, i: typeof t.i === 'number' ? t.i : out.length, ...(typeof t.rec_line === 'number' ? { rec: t.rec_line } : {}), ...(typeof t.ref === 'string' && t.ref ? { ref: t.ref } : {}), who: noControls(demojibake(str(t.speaker) || str(t.role))), text, time: str(t.time), ...(titled && g !== null ? { group: noControls(titleOf(g)) || `Conversation ${g + 1}` } : {}) })
   }
   return out.length ? out : null
 }
@@ -579,8 +579,10 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   const body: RenderElement[] = [...headerEls(els, { title: p.title || path, cols, more })]
   // the record chosen, by its line; a whole-file JSON transcript's turn by its index. JSON shows one record: the chosen,
   // else the first
-  // a citation's line: the turn on it, or whose record starts there (a record cited by its pointer), else the last before
-  const pickedTurn = jsonMode ? (turns!.find(t => t.i === p.turn) ?? (p.line ? (turns!.find(t => t.n === p.line || t.rec === p.line) ?? turns!.filter(t => t.n < p.line!).at(-1)) : undefined)) : undefined
+  // a record cited by its pointer: the turn that is that record, as thimble found it (`target`); a citation's line: the
+  // turn on it, or whose record starts there, else the last before
+  const recordTurn = p.record && tpage && typeof tpage.target === 'number' ? turns!.find(t => t.i === tpage.target) : undefined
+  const pickedTurn = jsonMode ? (turns!.find(t => t.i === p.turn) ?? recordTurn ?? (p.line ? (turns!.find(t => t.n === p.line || t.rec === p.line) ?? turns!.filter(t => t.n < p.line!).at(-1)) : undefined)) : undefined
   const jsonRecs = mode === 'json' ? jsonRecords(page) : new Map<number, unknown>()
   const inPage = p.line && p.line >= first && p.line <= last ? p.line : 0
   const chosen = jsonMode ? (pickedTurn?.n ?? 0) : mode === 'json' ? (jsonRecs.has(inPage) ? inPage : ([...jsonRecs.keys()][0] ?? 0)) : inPage
@@ -604,7 +606,8 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // the record chosen, right under the header so it shows however long the view: its place a link to the citation
   // panel, and a blue "?" that asks a thread about it
   if (chosen) {
-    const ref = `${path}#L${chosen}`
+    // a turn that is a record of its document by its pointer is named by it, never by a line every record shares
+    const ref = jsonMode && pickedTurn?.ref ? pickedTurn.ref : `${path}#L${chosen}`
     const words = jsonMode ? (pickedTurn?.text ?? '') : (ls.find(l => l.n === chosen)?.text ?? '')
     const place = `↗ ${placeWords(ref)}`
     const ask = () => openAsk(cx, { kind: 'record', ref, text: clip(words, 600), label: `${placeWords(ref)}: ${clip(words, 200)}` })
@@ -676,15 +679,15 @@ async function drawFile(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
     // leave (live check term-fix8, quirk 1: ↓ scrolled the header away and chose no line), a table's column names kept
     const used = 1 + headRows + (modes.length > 1 ? 1 : 0) + (findRow ? 1 : 0) + 1 + (chosen ? 1 : 0) + labelRows.length + d.fixed + hintHeight(fileHints, cols)
     const chosenY = at >= 0 ? (d.at.get(unit) ?? -1) : -1
-    // a whole-file JSON transcript's window counts the turns cut off, those of its other pages too, as its header counts
-    // them (bug hunt B29: `turns 1-200 of 440` over `↓ 695 more`, the rows below)
+    // a whole-file JSON transcript's window counts the turns of the page its header names that it cuts off (`turns
+    // 201-400 of 440` over `↓ 190 more`), not rows; `earlier` and `later` read the other pages
     const starts = d.units.map(u => ({ i: u, y: (d!.at.get(u) ?? 0) - d!.fixed }))
     const turnCount = jsonMode
       ? (top: number, end: number) => {
           const shown = starts.filter(s => s.y >= top && s.y < end)
-          const first = shown[0]?.i ?? starts.find(s => s.y >= end)?.i ?? ttotal
+          const first = shown[0]?.i ?? starts.find(s => s.y >= end)?.i ?? tstart + tcount
           const last = shown.at(-1)?.i ?? first - 1
-          return { above: first, below: Math.max(0, ttotal - 1 - last) }
+          return { above: Math.max(0, first - tstart), below: Math.max(0, tstart + tcount - 1 - last) }
         }
       : undefined
     const win = windowList(`file:${path}`, d.lines.slice(d.fixed), d.hits.map(h => ({ ...h, y: h.y - d!.fixed })).filter(h => h.y >= 0), chosenY - d.fixed, paneRows() - used, () => cx.bumpPanel(), undefined, turnCount)

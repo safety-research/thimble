@@ -167,6 +167,9 @@ export type TermPanel = {
    *  that share a line, as in a file of one line, are told apart by it) */
   from?: number
   turn?: number
+  /** a whole JSON document's record a citation names by its pointer (`…json#/messages/<id>`): the Transcript tab opens
+   *  at the turn that is that record, lit, wherever its lines are (a document on one line starts each record on line 1) */
+  record?: string
   agent?: string
   target?: ChatTarget | null
   about?: string
