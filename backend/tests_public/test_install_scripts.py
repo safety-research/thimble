@@ -713,6 +713,9 @@ def browser_install(tmp_path: Path, *, browser: str = "", tty: bool = False) -> 
                           if browser == "starts" else '#!/bin/sh\necho "remote debugging is off by policy" >&2; exit 1\n')
         chrome.chmod(0o755)
         extra["THIMBLE_TEST_SYSTEM_BROWSER"] = f"chrome|Google Chrome|{chrome}"
+    else:
+        # none: a path that is not there, so a Chrome the machine has (GitHub's runners have one) is not found
+        extra["THIMBLE_TEST_SYSTEM_BROWSER"] = f"chrome|Google Chrome|{tmp_path / 'no-chrome'}"
     env = env_for(tmp_path, PATH=f"{stub_bin(tmp_path)}:/usr/bin:/bin", **extra)
     leader, follower = pty.openpty() if tty else (None, None)
     try:
