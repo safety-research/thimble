@@ -357,3 +357,24 @@ def test_big_files_are_parsed_once_in_workers_and_a_load_with_fields_reads_only_
     out = Q.run(st, "assistant rows per run", 'df = load("run*.jsonl", fields=["type", "run"])\ntally(df[df.type == "assistant"], "run")')
     assert out.get("error") is None
     assert [r["n"] for r in out["table"]] == [150, 150, 150, 150]
+
+
+def test_rows_are_counted_as_iter_rows_gives_them_in_workers_and_by_the_database(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`lean sources` counts each file's rows: a database's by its own count (a table its rows cannot be read from by
+    rowid gives none, as iter_rows gives none), and many big files in worker processes, with the same counts."""
+    con = sqlite3.connect(root / "two.db")
+    con.execute("create table a (x text)")
+    con.executemany("insert into a values (?)", [("p",), ("q",)])
+    con.execute("create table w (k text primary key, v text) without rowid")
+    con.execute("insert into w values ('k1', 'v1')")
+    con.commit()
+    con.close()
+    assert S.count_rows(root, "two.db") == sum(1 for _ in S.iter_rows(root, "two.db")) == 2
+    assert S.count_rows(root, "forge.db") == 3
+    for k in range(3):
+        with open(root / f"many{k}.jsonl", "w") as f:
+            f.write("".join(json.dumps({"i": i}) + "\n" for i in range(50 + k)))
+    rels = ["many0.jsonl", "many1.jsonl", "many2.jsonl", "two.db", "runs.csv"]
+    monkeypatch.setattr(S, "PARALLEL_MIN", 1)
+    sizes = {r: (root / r).stat().st_size for r in rels}
+    assert S._count_many(root, rels, sizes) == {r: S.count_rows(root, r) for r in rels} == {"many0.jsonl": 50, "many1.jsonl": 51, "many2.jsonl": 52, "two.db": 2, "runs.csv": 3}

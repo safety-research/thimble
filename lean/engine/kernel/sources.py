@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 from collections import defaultdict
 from contextlib import closing
 from dataclasses import dataclass
@@ -284,6 +285,21 @@ def count_lines(p: Path) -> int:
     return n + (0 if last == b"\n" else 1)
 
 
+def _count_sqlite(p: Path) -> int:
+    """The rows iter_rows gives of a database, counted by the database: each table's rows, for the tables whose rows
+    can be selected by rowid (iter_rows skips the others)."""
+    n = 0
+    with closing(sqlite3.connect(f"file:{p}?mode=ro", uri=True)) as con:
+        tables = [t for (t,) in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name").fetchall()]
+        for t in tables:
+            try:
+                con.execute(f'select rowid as "_rowid_", * from "{t}" limit 0')
+            except sqlite3.Error:
+                continue
+            n += con.execute(f'select count(*) from "{t}"').fetchone()[0]
+    return n
+
+
 def count_rows(root: Path, rel: str) -> int:
     p = root / rel
     kind = kind_of(p)
@@ -294,9 +310,35 @@ def count_rows(root: Path, rel: str) -> int:
             return max(0, count_lines(p) - 1)
         if kind == "json" and p.stat().st_size > 256 * 1024 * 1024:
             return 1
+        if kind == "sqlite":
+            return _count_sqlite(p)
         return sum(1 for _ in iter_rows(root, rel))
     except Exception:  # noqa: BLE001 — a file that cannot be read has no rows
         return 0
+
+
+PARALLEL_MIN = 64_000_000  # bytes of files not yet counted: counted in worker processes above this
+
+
+def _count_one(args: tuple[str, str]) -> int:
+    return count_rows(Path(args[0]), args[1])
+
+
+def _count_many(root: Path, rels: list[str], sizes: dict[str, int]) -> dict[str, int]:
+    """Rows of many files: in up to 8 worker processes when they are big together (Linux), else one after another."""
+    if len(rels) > 1 and sum(sizes.get(r, 0) for r in rels) >= PARALLEL_MIN and sys.platform.startswith("linux"):
+        n = max(1, min(8, (os.cpu_count() or 2) - 1, len(rels)))
+        if n > 1:
+            try:
+                import multiprocessing as mp
+                from concurrent.futures import ProcessPoolExecutor
+
+                order = sorted(rels, key=lambda r: -sizes.get(r, 0))
+                with ProcessPoolExecutor(max_workers=n, mp_context=mp.get_context("fork")) as ex:
+                    return dict(zip(order, ex.map(_count_one, [(str(root), r) for r in order], chunksize=4)))
+            except Exception:  # noqa: BLE001 — counted one after another below
+                pass
+    return {r: count_rows(root, r) for r in rels}
 
 
 def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, dict[str, Any]]:
@@ -308,11 +350,19 @@ def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, di
         except (OSError, ValueError):
             cache = {}
     out, changed = {}, False
+    # the files not counted yet (or changed since), counted together first
+    stats: dict[str, Any] = {}
+    for rel in rels:
+        try:
+            stats[rel] = (root / rel).stat()
+        except OSError:
+            continue
+    todo = [r for r, st in stats.items() if not ((c := cache.get(r)) and c.get("key") == f"{st.st_size}:{st.st_mtime_ns}")]
+    fresh = _count_many(root, todo, {r: stats[r].st_size for r in todo}) if todo else {}
     for rel in rels:
         p = root / rel
-        try:
-            st = p.stat()
-        except OSError:
+        st = stats.get(rel)
+        if st is None:
             continue
         key = f"{st.st_size}:{st.st_mtime_ns}"
         c = cache.get(rel)
@@ -320,7 +370,7 @@ def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, di
             out[rel] = c
             continue
         kind = kind_of_file(root, rel)
-        rows = count_rows(root, rel)
+        rows = fresh[rel] if rel in fresh else count_rows(root, rel)
         lines = rows if kind in ("jsonl", "transcript", "text") else (count_lines(p) if kind in ("markdown", "diff", "csv", "json") and st.st_size < 256 * 1024 * 1024 else 0)
         c = {"key": key, "kind": kind, "rows": rows, "lines": lines, "size": st.st_size}
         cache[rel] = c
