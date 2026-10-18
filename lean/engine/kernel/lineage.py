@@ -104,6 +104,22 @@ def words_of(row: S.Row) -> tuple[str, str]:
         if long:
             key, x = max(long, key=lambda kv: len(kv[1]))
             words = one(x)
+    used: set[str] = {key} if key else set()
+    if not words:
+        # an event row with no sentence in it (a request, a state change): what happened, from its short words, as
+        # "request · browse-bare · wiki dse", never its ids or its time
+        kinds, rest = [], []
+        for k, x in v.items():
+            if not isinstance(x, str) or not x.strip() or len(x) > 60 or re.search(r"(^|_)(id|uuid|ref|hash|key|url|path|sha)$", k, re.I):
+                continue
+            if re.match(r"^\d{4}-\d\d-\d\d([T ]\d\d:\d\d)?", x) or k in ("time", "date", "timestamp", "ts"):
+                continue
+            (kinds if re.search(r"(^|_)(type|kind|action|activity|status|outcome|result|event)$", k, re.I) else rest).append((k, x))
+        # only a row that says what kind of thing happened reads as words; a row of plain values reads as a table
+        if kinds:
+            picked = (kinds + rest)[:4]
+            used.update(k for k, _ in picked)
+            words = " · ".join(one(x) if (k, x) in kinds else f"{k} {one(x)}" for k, x in picked)
     if not words:
         return "", ""
     meta = []
@@ -111,7 +127,7 @@ def words_of(row: S.Row) -> tuple[str, str]:
         x = v.get(k)
         if len(meta) >= 3:
             break
-        if k == key or x in (None, "") or isinstance(x, (dict, list)) or len(one(x)) > 40:
+        if k in used or x in (None, "") or isinstance(x, (dict, list)) or len(one(x)) > 40:
             continue
         meta.append(f"{k} {x}" if isinstance(x, (int, float)) and not isinstance(x, bool) else one(x))
     return (words if len(words) <= 240 else words[:239] + "…"), " · ".join(meta)

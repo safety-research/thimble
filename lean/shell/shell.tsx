@@ -88,7 +88,9 @@ export const CPANE = 'claims'
 
 const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
-const SAVED = /^saved (\S+) v(\d+): \S+/gm
+const EVENTS = { plugin: 'thimble-lean', key: 'events' } as const
+// when this module loaded, in the kernel's seconds: the change feed's saves before it were placed by an earlier load
+const LOADED = Date.now() / 1000
 const rowKey = (id: string) => String(id).slice(0, 24)
 const refText = (r: { id: string; v: number | null }) => (r.v != null ? `${r.id}@${r.v}` : r.id)
 const cut = (s: string, n: number) => ([...s].length <= n ? s : [...s].slice(0, Math.max(0, n - 1)).join('') + '…')
@@ -273,6 +275,38 @@ async function setUnder($: Engine, at: string, list: Placed[]): Promise<void> {
     // the drawing holds for this session; only a resume would miss it
   }
   $.clock.after(0, () => { void recount($) })
+}
+
+/** The saves the kernel wrote to this session's change feed since the feed was last read: one JSON line per save in
+ *  $THIMBLE_HOME/lean/events/<session>.jsonl, each naming its object, version and folder. Read from the feed, a save
+ *  is seen however the command was written (`lean save … | tail -3`, a script that saves, a `cd` first). */
+async function newSaves($: Engine): Promise<ObjRef[]> {
+  const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
+  const file = `${home.replace(/\/+$/, '')}/lean/events/${safe(String(await $.session.id()))}.jsonl`
+  const seen = (await $.state.get(EVENTS)).value as { file: string; n: number } | undefined
+  if (!(await $.fs.exists(file))) {
+    if (!seen || seen.file !== file) await $.state.set(EVENTS, { file, n: 0 })
+    return []
+  }
+  const lines = String(await $.fs.read(file)).split('\n').filter(Boolean)
+  // with no mark yet (the first read since this module loaded), the saves made since it loaded are new: a resumed
+  // session's earlier saves are drawn from its placements, never placed twice
+  const from = seen && seen.file === file ? seen.n : 0
+  const since = seen && seen.file === file ? 0 : LOADED - 2
+  await $.state.set(EVENTS, { file, n: lines.length })
+  const out: ObjRef[] = []
+  for (const line of lines.slice(from)) {
+    try {
+      const ev = JSON.parse(line)
+      if (ev?.kind !== 'save' || typeof ev.object !== 'string' || !ID.test(ev.object) || typeof ev.root !== 'string' || !(Number(ev.t) >= since)) continue
+      const ref = { id: ev.object, v: Number(ev.version) || null, root: String(ev.root).replace(/\/+$/, '') }
+      out.push(ref)
+    } catch {
+      // a line being written: the next read has it whole
+    }
+  }
+  // an object saved twice in one call is drawn once, at its latest version
+  return out.filter((x, i) => !out.slice(i + 1).some(y => y.id === x.id && y.root === x.root))
 }
 
 /** One object under a row: a new version of one already there takes its place; a verb's object goes after the
@@ -1989,8 +2023,9 @@ export const registerShell: Register = (on, options) => {
       // the shell draws nothing it cannot; the session goes on
     }
     try {
-      // a resumed session: its objects drawn under the same rows again
+      // a resumed session: its objects drawn under the same rows again, and its earlier saves never placed twice
       await restoreShown($)
+      await newSaves($)
     } catch {
       // a session that cannot read its placements draws its new objects only
     }
@@ -2032,14 +2067,15 @@ export const registerShell: Register = (on, options) => {
         if (m && turn) turn.oriented += Number(m[1])
         await reloadClaims($)
       }
-      if (r.deny !== undefined || r.isError || input.agentId || !/\blean\b/.test(String(input.command)) || !text.includes('saved ')) return r
-      const cdTo = /^\s*cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*&&/.exec(String(input.command))
+      if (r.deny !== undefined) return r
+      // the saves this call made, from the kernel's change feed (never from what the call printed, which a pipe cuts);
+      // a subagent's saves (a side thread's) are read and left where its card is
+      const saves = await newSaves($)
+      if (input.agentId || !saves.length) return r
       notes = []
-      for (const m of text.matchAll(SAVED)) {
-        const id = String(m[1])
-        const root = await findRoot($, id, cdTo ? [String(cdTo[1] || cdTo[2] || cdTo[3])] : [])
-        if (!root) continue
-        const ref: ObjRef = { id, v: Number(m[2]), root }
+      for (const ref of saves) {
+        const id = ref.id
+        const root = ref.root
         // a new version of an object that could not be drawn takes its place where it was: a fix, not a new object
         const where = (await $.state.get({ ...WHERE, id })).value as string | undefined
         const before = where ? (((await $.state.get({ ...UNDER, id: where })).value ?? []) as ObjRef[]).find(x => x.id === id && x.root === root) : undefined
@@ -2113,6 +2149,12 @@ export const registerShell: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    try {
+      // a save the turn's last Bash call did not see (one run in the background): the feed read once more
+      if (e.agentId === undefined && turn) for (const ref of await newSaves($)) turn.unplaced = [...turn.unplaced.filter(x => !(x.id === ref.id && x.root === ref.root)), ref]
+    } catch {
+      // the next call reads the feed again
+    }
     try {
       // objects saved after the turn's last words: under those words (or the save's own row, with none)
       if (e.agentId === undefined && turn && turn.unplaced.length) {

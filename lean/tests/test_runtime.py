@@ -144,3 +144,12 @@ def test_every_card_has_a_title_even_when_claude_gave_none(root: Path) -> None:
     c = O.save(st, "c", {"text": "Three episodes ended [clean](runs.jsonl#L1). The rest did not."})
     assert c["title"] == "Three episodes ended clean." and c["title_from"] == "text"
     assert O.save(st, "runs-by-outcome", {"program": "return 1"})["title"] == "Runs by outcome"
+
+
+def test_an_event_row_reads_as_what_happened_not_its_ids(root: Path) -> None:
+    with open(root / "events.jsonl", "w") as f:
+        f.write(json.dumps({"event_id": "request:w:0", "event_type": "request", "time": "2026-05-17T05:46:45Z",
+                            "ip16": "10.1", "request_action": "browse-bare"}) + "\n")
+    rec = LIN.resolve(Store(root), "events.jsonl#L1", n=1)["records"][0]
+    assert rec["words"] == "request · browse-bare · ip16 10.1" and "event_id" not in rec["words"]
+    assert rec["meta"] == "2026-05-17T05:46:45Z"
