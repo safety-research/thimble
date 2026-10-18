@@ -176,6 +176,18 @@ def test_an_object_holds_its_lineage_and_a_value_resolves_to_its_rows(root: Path
     assert LIN.resolve(st, "obj:saves-per-day#/example")["rows"] == ["report.json#/messages/1"]
 
 
+def test_a_resolved_row_carries_its_words_not_a_dump_of_its_fields(root: Path) -> None:
+    st = Store(root)
+    r = LIN.resolve(st, "saves.jsonl#L4", n=1)
+    rec = r["records"][0]
+    assert rec["words"] == "save number 3" and rec["meta"].startswith("ann")
+    assert "id:" not in rec["words"]
+    assert rec["text"].startswith("id: 3"), "the CLI's excerpt is unchanged"
+    run = LIN.resolve(st, "agent.jsonl#L2", n=1)["records"][0]
+    assert run["words"] == "I will run the tests" and run["meta"] == "assistant"
+    assert "words" not in LIN.resolve(st, "runs.csv#row=1", n=1)["records"][0], "a row with no words has none"
+
+
 def test_a_wrong_citation_is_kept_as_a_problem_not_refused(root: Path) -> None:
     st = Store(root)
     q = Q.run(st, "n", 'df = load("saves.jsonl")\ndf["day"] = df.time.str[:10]\ntally(df, "day")')

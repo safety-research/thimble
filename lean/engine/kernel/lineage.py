@@ -55,21 +55,94 @@ def excerpt(row: S.Row, width: int = 240) -> str:
     return s if len(s) <= width else s[: width - 1] + "…"
 
 
+# the fields that hold a record's words, best first; then the fields that say whose and where it is (the shell's detail
+# view shows `words` and `meta`; `text` stays the excerpt the CLI prints)
+WORD_KEYS = ("text", "quote", "summary", "title", "message", "msg", "body", "content", "comment", "description", "subject",
+             "note", "change_summary", "reason", "answer", "question", "prompt")
+META_KEYS = ("user", "author", "agent", "sender", "name", "label", "page", "run", "step", "epoch", "rev", "kind", "type",
+             "event_type", "activity", "day", "date", "time")
+
+
+def words_of(row: S.Row) -> tuple[str, str]:
+    """A row as a person reads it: its meaningful words (its text, title, summary, message, body and the like; a
+    transcript row's first words or tool call) and a short line of whose and where it is. ('', '') when nothing in it
+    reads as words."""
+    v = row.value
+    one = lambda x: " ".join(str(x).split())  # noqa: E731
+    if isinstance(v, str):
+        return one(v)[:240], ""
+    if not isinstance(v, dict):
+        return "", ""
+    words, key = "", None
+    if v.get("type") in ("assistant", "user") and isinstance(v.get("message"), dict):
+        content = v["message"].get("content")
+        for b in (content if isinstance(content, list) else [{"type": "text", "text": content}]):
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "text" and str(b.get("text") or "").strip():
+                words = one(b["text"])
+            elif b.get("type") == "tool_use":
+                i = b.get("input") if isinstance(b.get("input"), dict) else {}
+                arg = next((i[k] for k in ("command", "file_path", "pattern", "path", "description", "query") if i.get(k)), "")
+                words = one(f"{b.get('name')}: {arg}" if arg else f"{b.get('name')}: {json.dumps(i, ensure_ascii=False)}")
+            elif b.get("type") == "tool_result":
+                c = b.get("content")
+                words = one(c if isinstance(c, str) else " ".join(str(x.get("text") or "") for x in c or [] if isinstance(x, dict)))
+            if words:
+                break
+        if words:
+            t = str(v.get("timestamp") or "")
+            return (words if len(words) <= 240 else words[:239] + "…"), " · ".join(x for x in (v["type"], t[11:16]) if x)
+        return "", ""
+    if not words:
+        key = next((k for k in WORD_KEYS if isinstance(v.get(k), str) and v[k].strip()), None)
+        if key:
+            words = one(v[key])
+    if not words:
+        long = [(k, x) for k, x in v.items() if isinstance(x, str) and len(x.strip()) >= 16 and " " in x.strip()
+                and not re.search(r"(id|uuid|ref|hash|key|url|path)$", k, re.I)]
+        if long:
+            key, x = max(long, key=lambda kv: len(kv[1]))
+            words = one(x)
+    if not words:
+        return "", ""
+    meta = []
+    for k in META_KEYS:
+        x = v.get(k)
+        if len(meta) >= 3:
+            break
+        if k == key or x in (None, "") or isinstance(x, (dict, list)) or len(one(x)) > 40:
+            continue
+        meta.append(f"{k} {x}" if isinstance(x, (int, float)) and not isinstance(x, bool) else one(x))
+    return (words if len(words) <= 240 else words[:239] + "…"), " · ".join(meta)
+
+
+def _record(row: S.Row) -> dict[str, Any]:
+    out: dict[str, Any] = {"ref": row.ref, "hash": S.row_hash(row.raw), "text": excerpt(row)}
+    words, meta = words_of(row)
+    if words:
+        out["words"] = words
+        if meta:
+            out["meta"] = meta
+    return out
+
+
 def records(st: Store, rowsets: list[str], n: int = 5, pick: str = "first", seed: int = 0) -> list[dict[str, Any]]:
-    """Up to n rows of the row sets, each {ref, hash, text}: the first ones in file order, or a random sample."""
+    """Up to n rows of the row sets, each {ref, hash, text, words?, meta?}: the first ones in file order, or a random
+    sample."""
     singles = R.expand(rowsets) if pick == "random" else None
     out = []
     if singles is not None:
         chosen = sorted(random.Random(seed).sample(singles, min(n, len(singles))), key=lambda r: (r.split("#")[0], _num(r)))
         for ref in chosen:
             for row in S.fetch(st.root, ref, limit=1):
-                out.append({"ref": row.ref, "hash": S.row_hash(row.raw), "text": excerpt(row)})
+                out.append(_record(row))
         return out
     for rs in rowsets:
         if len(out) >= n:
             break
         for row in S.fetch(st.root, rs, limit=n - len(out)):
-            out.append({"ref": row.ref, "hash": S.row_hash(row.raw), "text": excerpt(row)})
+            out.append(_record(row))
     return out
 
 

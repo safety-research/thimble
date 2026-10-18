@@ -14,6 +14,8 @@
 //   objectRefs(object) -> the refs the object's words cite (its lineage's citations), for the view with no region.
 //   recordRefs(drawing, regionId) -> the rows its examples name themselves (`ref` on a record), which need no resolve.
 //   rankRow(verbs, ranking) -> the hint row as the observer ranked it, with its few words per verb.
+//   fromFacts(object, coverage) -> where an object's values come from, as the detail's "from" line reads it: its
+//     sources, rows, labels and coverage (`lean coverage <id> --json`).
 
 const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
 
@@ -134,3 +136,27 @@ export function chainWords(r) {
   return { line: steps.join(' ← '), notes, records: r.records || [] }
 }
 
+/** Where an object's values come from, in the few facts the "from" line shows. `cov` is `lean coverage <id> --json`. */
+export function fromFacts(object, cov) {
+  const lin = object?.lineage || {}
+  const rows = lin.rows || {}
+  const sources = Object.entries(rows).map(([path, x]) => ({ path, rows: Number(x?.count) || 0 }))
+  for (const q of Object.values(lin.queries || {})) {
+    for (const x of q?.inputs || []) if (x?.path && !sources.some(s => s.path === x.path)) sources.push({ path: x.path, rows: null })
+  }
+  // a label is a query's kept column (CONTRACT: a label is a query that keeps a column), named where it is used
+  const labels = []
+  for (const q of Object.values(lin.queries || {})) {
+    for (const u of q?.uses || []) if (u?.name && !/^q\d+$/.test(u.name) && !labels.includes(u.name)) labels.push(u.name)
+    for (const k of q?.kept || []) if (k && !labels.includes(k)) labels.push(k)
+  }
+  const out = { sources, rows: sources.reduce((n, s) => n + (s.rows || 0), 0), labels }
+  if (cov && !cov.error && Array.isArray(cov.feeding)) {
+    const all = cov.feeding.length + (cov.not_feeding || []).length
+    out.coverage = { feeding: cov.feeding.length, files: all, notFeeding: (cov.not_feeding || []).slice(0, 12) }
+    for (const f of cov.feeding) { const s = out.sources.find(x => x.path === f.path); if (s && f.of != null) s.of = f.of }
+  }
+  const t = lin.coverage?.total
+  if (t) out.session = { files: t.files, notReadFiles: t.not_read_files, notReadRows: t.not_read_rows }
+  return out
+}

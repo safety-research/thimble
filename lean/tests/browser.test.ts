@@ -1,6 +1,7 @@
 // Browser mode (shell/shell.tsx): off by default, so nothing of it shows and no server starts; on, `o browser` shows
 // under replies and cards, /browser opens the session's page, and what the person does on a page comes back as one
-// line: an ask becomes a prompt that carries its scope, a verb press runs that verb on the message.
+// line: an ask about a message becomes a prompt that carries its scope, an ask about a card or a mark becomes a side
+// thread (shell/thread.ts) that main does not see, a verb press runs that verb on the message.
 // `claude plugin test lean`. The page server is answered here, at process.spawn, the drawing and verbs at process.run.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -59,10 +60,14 @@ function world(on: any, serverLines: unknown[] = []) {
   on('ui.toast', (_$: unknown, e: { text?: string }) => { toasts.push(String(e.text ?? '')); return { value: undefined } })
   const commands: string[] = []
   on('command.register', (_$: unknown, e: { name: string }) => { commands.push(e.name); return { value: { command: e.name } } })
+  // a side thread's agent: its type registered once, then started with the question
+  const spawns: { subagent_type: string; prompt: string; description: string; cwd: string }[] = []
+  on('agent.register', () => ({ value: { agent: 'thimble-lean:thread' } }))
+  on('agent.spawn', (_$: unknown, e: { subagent_type: string; prompt: string; description: string; cwd: string }) => { spawns.push(e); return { model: 'claude-test' } as never })
   on('config.list', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
-  return { runs, inputs, files, submitted, toasts, spawned, commands }
+  return { runs, inputs, files, submitted, toasts, spawned, commands, spawns }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,36 +155,38 @@ test('browser mode on: o browser under replies and cards, and /browser starts th
   expect(w.runs.filter(a => a[0] === '/usr/bin/open-page').at(-1)![1]).toBe('http://127.0.0.1:41234/tok/card/?o=01-saves&v=2#r=day-2026-06-18')
 })
 
-test('an ask from the browser goes to Claude as a prompt, its scope beside it for Claude alone', { options: { browser: true } }, async ($, on) => {
+test('an ask about a card from the browser is a side thread: its own agent gets the question with its part, and main gets nothing', { options: { browser: true } }, async ($, on) => {
   const w = world(on, [{ ask: 'why is this day so high?', scope: { object: '01-saves', v: 2, region: 'day-2026-06-18', label: 'Jun 18 6,543', row: AT } }])
   const session = mock.session(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'browser', args: '' } as never)
   await clock.settle()
-  // the row is the person's words; what it was about goes in a row before it that the person does not see
-  const asked = w.submitted.filter(s => s.text === 'why is this day so high?')
-  expect(asked.length).toBe(1)
-  const context = hidden(session)
-  expect(context).toContain('in the browser page of this session')
-  expect(context).toContain('01-saves@2')
-  expect(context).toContain('day-2026-06-18')
-  expect(context).toContain('q1#day=2026-06-18@n')
+  expect(w.submitted.filter(s => s.text === 'why is this day so high?').length).toBe(0)
+  expect(hidden(session)).not.toContain('why is this day so high?')
+  expect(w.spawns.length).toBe(1)
+  expect(w.spawns[0]!.subagent_type).toBe('thimble-lean:thread')
+  expect(w.spawns[0]!.prompt).toContain('why is this day so high?')
+  expect(w.spawns[0]!.prompt).toContain('the part "Jun 18 6,543" (day-2026-06-18) of the card "Saves per day" (01-saves@2')
+  expect(w.spawns[0]!.prompt).toContain('q1#day=2026-06-18@n')
+  // the browser page reads the thread from its file
+  const file = JSON.parse(w.files[`${ROOT}/thimble/threads/${SESSION}/card-01-saves.json`] || '{}')
+  expect(file.status).toBe('running')
+  expect(file.asks[0].text).toBe('why is this day so high?')
+  expect(file.turns[0].about).toBe('Jun 18 6,543')
 })
 
-test('an ask about a citation or a gloss names it; a verb pressed in the browser runs on the message', { options: { browser: true } }, async ($, on) => {
+test('an ask about a citation is a side thread about that mark; a verb pressed in the browser runs on the message', { options: { browser: true } }, async ($, on) => {
   const w = world(on, [
     { ask: 'where is this from?', scope: { row: AT, mark: { kind: 'cite', ref: 'q1#day=2026-06-18@n', label: '6,543' } } },
     { verb: 's', row: AT },
     { verb: 'z', row: AT },
   ])
-  const session = mock.session(on)
+  mock.session(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'browser', args: '' } as never)
   await clock.settle()
-  expect(w.submitted.map(s => s.text)).toContain('where is this from?')
-  const context = hidden(session)
-  expect(context).toContain('your citation "6,543" (q1#day=2026-06-18@n)')
-  expect(context).toContain('June 18 had 6,543')
+  expect(w.submitted.map(s => s.text)).not.toContain('where is this from?')
+  expect(w.spawns[0]!.prompt).toContain('About: Claude\'s citation "6,543" (q1#day=2026-06-18@n).')
   // s is squeeze's key: it ran on the message, as the terminal's verb row runs it, with the message's record
   const input = w.inputs[0] as { object: { id: string; kind: string }; message: { row: string }; row: string }
   expect(input.object.kind).toBe('message')
@@ -208,7 +215,7 @@ test('a squeeze chip pressed in the browser rewrites the message here, as a pres
   const SHORT = 'June 18: [6,543](q1#day=2026-06-18@n).'
   const w = world(on, [{ squeeze: { row: AT, chip: 'length', level: 2, name: 'Length', label: 'medium' } }, { squeeze: { row: 'zzzzzzzz-0000-0000-0000-', reset: true } }])
   const calls: unknown[] = []
-  on('model.complete', (_$: unknown, e: unknown) => { calls.push(e); return { value: { isAnswered: true, text: `<text>\n${SHORT}\n</text>`, usage: {} } } })
+  on('model.complete', (_$: unknown, e: unknown) => { calls.push(e); return { value: { isAnswered: true, text: `<text>\n${SHORT}\n</text>`, usage: { input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } } })
   const clock = mock.clock(on)
   await $.command.run({ command: 'browser', args: '' } as never)
   await clock.settle()

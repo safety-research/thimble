@@ -224,7 +224,7 @@ test('a verb of the message row: v opens its line, a pick runs it on the message
   await clock.settle()
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(1)
   await ui.press({ key: verbKey('v') })
-  expect(textOf(await ui.drawn())).toContain('▸ 1 a card of this message')
+  expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
   await ui.press({ key: `vl-${AT}-opt-0` })
   await clock.settle()
   // the verb ran with the message: its record, as an object with its words, and the pick as its words
@@ -233,7 +233,7 @@ test('a verb of the message row: v opens its line, a pick runs it on the message
   expect(input.object.text).toBe('June 18 had the most saves.')
   expect(input.message.row).toBe(AT)
   expect(input.message.final).toBe(true)
-  expect(input.args).toBe('a card of this message')
+  expect(input.args).toBe('')
   // what it made is drawn under the same message, after the object there
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(2)
   expect(JSON.parse(w.files[SHOWN]!).under[AT].map((x: { id: string }) => x.id)).toEqual(['01-saves', '02-trace'])
@@ -275,12 +275,12 @@ test("v asks Claude for a card of the message: the row reads as the person's pic
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
   await ui.press({ key: verbKey('v') })
-  expect(textOf(await ui.drawn())).toContain('▸ 1 a card of this message')
+  expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
   await ui.press({ key: `vl-${AT}-opt-0` })
   await clock.settle()
-  expect((w.inputs[0] as { args: string }).args).toBe('a card of this message')
+  expect((w.inputs[0] as { args: string }).args).toBe('')
   // the row reads as the press; Claude reads the request in a row before it that the person does not see
-  expect(w.submitted.map(x => x.text)).toEqual(['visualize a card of this message'])
+  expect(w.submitted.map(x => x.text)).toEqual(['visualize another view of this answer'])
   const rows = session.appended() as unknown as { door: string; message: { type: string; content: { text?: string }[] } }[]
   const hidden = rows.filter(r => r.door === 'note' && r.message.type === 'user' && r.message.content.some(b => String(b.text).includes(ask)))
   expect(hidden.length).toBe(1)
@@ -379,9 +379,10 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
   expect(textOf(await $.ui.render(BAND))).toContain('1 ask · 0 close')
-  // 1 asks: the footer says how, and the question is typed in the prompt
+  // 1 asks: the panel turns to the mark's side thread, and its footer says how to ask it
   expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(BAND))).toContain('type your question · ↵ sends it with this mark')
+  expect(textOf(await $.ui.render(BAND))).toContain('Ask about 6,543 saves')
+  expect(textOf(await $.ui.render(BAND))).toContain('type your question · ↵ sends it to a side thread · 0 back to the card')
   await ($ as Any).prompt.edit(edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('this one')
   await ($ as Any).prompt.edit(edit('['))
@@ -393,29 +394,39 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(textOf(await $.ui.render(BAND))).toBe('the reply')
   // v opens its line under the answer; i typed straight after was the start of a word
   expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(MOUNT))).toContain('▸ 1 a card of this message')
+  expect(textOf(await $.ui.render(MOUNT))).toContain('▸ 1 another view of this answer')
   expect(await ($ as Any).prompt.edit(edit('i'))).toEqual({ text: 'vi', cursor: 2 })
-  expect(textOf(await $.ui.render(MOUNT))).not.toContain('▸ 1 a card')
+  expect(textOf(await $.ui.render(MOUNT))).not.toContain('▸ 1 another view')
   // a key in a prompt with words in it is typed
   expect(await ($ as Any).prompt.edit(edit('s', 'so'))).toEqual({ text: 'sos', cursor: 3 })
 })
 
-test('a question asked with the tray open carries the mark to Claude, and its row says what it was about', async ($, on) => {
+test('a question asked with the tray open goes to the side thread of its mark: main never sees it, and the panel shows the thread', async ($, on) => {
   const w = world(on)
+  const spawns: Any[] = []
+  on('agent.register', () => ({ value: { agent: 'thimble-lean:thread' } }))
+  on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-test' } as never })
+  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `agent-${i + 1}`, type: 'thimble-lean:thread', description: 'thread', status: 'running' })) }))
+  on('session.messages', () => ({ value: [] }))
+  on('ui.status', () => ({ value: undefined }))
+  on('prompt.fill', () => ({ isFilled: true }))
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
   await ($ as Any).prompt.edit(edit(']'))
-  await $.prompt.submit({ text: 'why so high?', origin: { kind: 'composer' } } as never)
-  const context = w.submitted.at(-1)!.context.join('\n')
-  expect(context).toContain('citation of your reply open in the tray: 6,543 saves (q1#day=2026-06-18@n)')
-  expect(context).toContain('lean resolve q1#day=2026-06-18@n')
-  // the tray closes; the question's row names its mark, and the index keeps the scope
-  expect(textOf(await $.ui.render(BAND))).toBe('the reply')
-  await $.session.append({ door: 'prompt', uuid: 'qqqqqqqq-0000-0000-0000-000000000000', origin: { kind: 'composer' }, message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'why so high?' }] } } as never)
-  const row = await $.ui.render({ component: 'UserMessage', surface: 'terminal', requestId: 'qqqqqqqq-0000-0000-0000-000000000000', props: { text: 'why so high?', origin: { kind: 'composer' } }, viewport: { columns: 100, rows: 40 } } as never)
-  expect(textOf(row)).toContain('▸ about 6,543 saves')
-  const index = w.files[`${ROOT}/thimble/messages/s-1/index.jsonl`]!.trim().split('\n').map(l => JSON.parse(l))
-  expect(index.at(-1).scope).toEqual({ row: AT, mark: { kind: 'cite', ref: 'q1#day=2026-06-18@n', label: '6,543 saves' } })
+  const before = w.submitted.length
+  const r = await $.prompt.submit({ text: 'why so high?', origin: { kind: 'composer' } } as never)
+  // dropped from main, with where it went; the thread's agent got the question and what it is about
+  expect(String((r as Any).drop)).toContain('asked the side thread about 6,543 saves; Claude here does not see it')
+  expect(w.submitted.length).toBe(before)
+  expect(spawns[0].subagent_type).toBe('thimble-lean:thread')
+  expect(spawns[0].prompt).toContain('why so high?')
+  expect(spawns[0].prompt).toContain('About: Claude\'s citation "6,543 saves" (q1#day=2026-06-18@n).')
+  // the panel shows the thread: the question, and that it is being answered
+  const band = textOf(await $.ui.render(BAND))
+  expect(band).toContain('❯ why so high?')
+  expect(band).toContain('0 back to the card')
+  // its thread file is written for the browser
+  expect(Object.keys(w.files).some(f => f.includes('/thimble/threads/s-1/'))).toBe(true)
 })
 
 test("a resumed session finds its messages on disk: their marks open from the keys, and the keys act on its latest answer", async ($, on) => {

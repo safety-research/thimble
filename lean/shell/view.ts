@@ -261,6 +261,8 @@ export type TrayOpts = {
   title: string
   right: string
   grids: Any[] | null
+  /** rows of text in place of the card (a side thread), the newest at the bottom */
+  lines?: Any[]
   problem?: string | null
   links: { id: string; ref: string; label: string }[]
   depth: number
@@ -288,7 +290,9 @@ export function trayEl(els: Any, o: TrayOpts): Any {
   const sideR = Text({ color: tone, children: ' │' })
   const rows: Any[] = []
   const blank = (k: string) => Box({ key: k, flexDirection: 'row', children: [side, Text({ children: ' '.repeat(inner) }), sideR] })
-  if (!o.grids) {
+  if (o.lines) {
+    for (const [i, l] of o.lines.slice(-o.body).entries()) rows.push(Box({ key: `${o.key}-l${i}`, flexDirection: 'row', children: [side, Box({ width: inner, flexShrink: 0, children: [l] }), sideR] }))
+  } else if (!o.grids) {
     rows.push(Box({ key: `${o.key}-wait`, flexDirection: 'row', children: [side, Text({ dimColor: true, children: (o.problem ? cutTo(o.problem, inner) : 'reading it through the kernel…').padEnd(inner) }), sideR] }))
   } else {
     o.grids.forEach((g: Any, gi: number) => {

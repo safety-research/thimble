@@ -3,10 +3,9 @@
 //   inline     when Claude saves an object (`lean save` in Bash), the object is drawn under the turn's last reply, in
 //              cells (draw/term.js, draw/paint.js), with one quiet row under it: the 2-3 verbs picked for it, `? all`,
 //              and `open`. A click on a verb runs it, and what it makes is drawn under the same reply.
-//   detail     one pane, the object's detail view: the drawing with the selected region lit, the region's cite, its
-//              source rows (`lean resolve`) and its examples, the object's citations when no region is selected, its
-//              knobs (j k, or a click on ◂ ▸), and every verb on its key. The chat stays live beside it: while it is
-//              open, a prompt carries the object and the region to Claude, and the prompt's row says so.
+//   detail     one pane, the card detail (detail.tsx): header, the card with its parts, one "from" line, the
+//              examples of the selected part, the program behind p, and a side thread (thread.ts): while it is open,
+//              a prompt is a question for the card's thread, which main does not see.
 //   verbs      found by folder (lean/verbs/<name>/, shell/node/registry.mjs) and run in a Node child
 //              (shell/node/verb.mjs) by a press, a key or /verb. What a verb makes is drawn where the person pressed;
 //              what it says for Claude goes with the next prompt; a call it makes to the model is made here, with
@@ -29,10 +28,14 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { MsgRecord, ObjRef, Ran, Said, Sel, SqzUi, Tray, TrayFrame } from '../types'
 import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
-import { paintRegions, regionOfKey, selectable } from './cells'
+import { paintRegions, selectable } from './cells'
 import { cardKind, explainerCard, sourceCard } from './cards.js'
+import { detailIsOpen, detailPane, markOpen, openDetailPane, registerDetail } from './detail'
 import { newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
-import { chainWords, isRef, objectRefs, rankRow, recordRefs, regionMeta, regionRefs } from './object.js'
+import { isRef, objectRefs, rankRow, recordRefs, regionMeta, regionRefs } from './object.js'
+import { askThread, registerThreads, restoreThreads, threadFor, threadOf } from './thread'
+import type { Scope as ThreadScope } from './thread'
+import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { messageEl, trayEl, verbLineEl, verbRowEl } from './view'
 import type { RowVerb } from './view'
@@ -81,7 +84,7 @@ const stateKey = (state?: Record<string, unknown> | null) => (state && Object.ke
 
 // the module's own memory: lost on a reload, rebuilt from $.state and the object files
 const objects = new Map<string, Any>()
-const citeLabels = new Map<string, string>()
+export const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
 let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[] } | null = null
@@ -124,7 +127,7 @@ async function findRoot($: Engine, id: string, hints: string[] = []): Promise<st
   return null
 }
 
-async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
+export async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   const key = `${ref.root}|${ref.id}|${ref.v ?? ''}`
   if (ref.v != null && objects.has(key)) return objects.get(key)
   const latest = `${ref.root}/thimble/objects/${ref.id}.json`
@@ -138,14 +141,14 @@ async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   return o
 }
 
-const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline') => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}|${browserFlag ? 'web' : ''}`
+const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}|${browserFlag ? 'web' : ''}`
 
 /** The object drawn at `w` columns (with the knobs at `state`), with its verbs: the program runs in a Node child, in the
  *  contract's sandbox. `mode` is where it is drawn (k.mode): 'inline' under a reply, 'detail' in the detail view, where
- *  a program may show more. Kept per object version, width, state and mode; a failed one stays failed until the module
- *  reloads. */
-function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline'): Promise<Prepared> {
-  const key = prepKey(ref, w, state, mode)
+ *  a program may show more, in the `h` rows the detail gives it (k.h). Kept per object version, width, state, mode and
+ *  rows; a failed one stays failed until the module reloads. */
+export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24): Promise<Prepared> {
+  const key = prepKey(ref, w, state, mode, h)
   const hit = preps.get(key)
   if (hit) return Promise.resolve(hit)
   const running = pending.get(key)
@@ -160,7 +163,7 @@ function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unkn
     }
     if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h: 24, state: { ...(state || {}), browser: browserFlag }, mode }), timeoutMs: 30000 })
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}), browser: browserFlag }, mode }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, verbs: [], problems: [], error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     return { object, drawing: out.drawing, grid: renderTerm(out.drawing, { w }), verbs: out.verbs || [], problems: out.problems || [] }
@@ -172,12 +175,12 @@ function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unkn
 
 /** For a drawing hook: the object if it is ready; else null, with the work started outside the drawing (a render's
  *  dispatch may be abandoned, which would stop the child) and the drawing subscribed to its end. */
-async function preparedNow($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline'): Promise<Prepared | null> {
-  const key = prepKey(ref, w, state, mode)
+export async function preparedNow($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24): Promise<Prepared | null> {
+  const key = prepKey(ref, w, state, mode, h)
   const hit = preps.get(key)
   if (hit) return hit
   await $.state.get({ ...READY, id: key })
-  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state, mode).then(() => $.state.set({ ...READY, id: key }, Date.now())) })
+  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state, mode, h).then(() => $.state.set({ ...READY, id: key }, Date.now())) })
   return null
 }
 
@@ -300,7 +303,7 @@ async function restoreShown($: Engine): Promise<void> {
 // ------------------------------------------------------------------------------------------------ running things
 
 /** The env of the shell's own `lean` calls: the person's, never counted as what Claude read (coverage). */
-async function leanEnv($: Engine, root: string): Promise<Record<string, string>> {
+export async function leanEnv($: Engine, root: string): Promise<Record<string, string>> {
   return { LEAN_ROOT: root, LEAN_SESSION: `person-${String(await $.session.id()).slice(0, 8)}` }
 }
 
@@ -324,20 +327,20 @@ async function refsOf($: Engine, sel: Sel): Promise<{ refs: string[]; how: strin
   return { refs: objectRefs(p.object).map((c: Any) => c.ref), how: 'cited in its words' }
 }
 
-async function select($: Engine, sel: Sel): Promise<void> {
+export async function select($: Engine, sel: Sel): Promise<void> {
   await $.state.set(SEL, sel)
   const { refs } = await refsOf($, sel)
   await resolveRefs($, sel.root, refs)
 }
 
-async function openDetail($: Engine, at: ObjRef, region: string | null = null): Promise<void> {
+export async function openDetail($: Engine, at: ObjRef, region: string | null = null): Promise<void> {
   const ref = await withVersion($, at)
   const cur = (await $.state.get(SEL)).value
   // the knobs stay where the person turned them while it is the same object
   const state = cur && cur.id === ref.id && cur.root === ref.root ? cur.state : undefined
   await select($, { id: ref.id, v: ref.v, root: ref.root, region, ex: 0, all: false, ...(state ? { state } : {}) })
   const o = await loadObject($, ref)
-  await $.ui.open({ id: PANE, title: o?.title ? cut(String(o.title), 40) : ref.id, focus: true })
+  await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
 }
 
 /** The folder under analysis for a ref that names no object: the latest object's, else the nearest folder at or above
@@ -353,18 +356,6 @@ async function rootHere($: Engine): Promise<string | null> {
     d = d.slice(0, d.lastIndexOf('/'))
   }
   return null
-}
-
-/** A citation of Claude's words, opened in the detail view: where its value came from, down to its rows. */
-async function openCite($: Engine, ref: string | null, label: string): Promise<void> {
-  if (!ref) return
-  const root = await rootHere($)
-  if (!root) { $.ui.toast(`No thimble/ folder here to resolve ${ref}. Run lean in the data folder first.`); return }
-  const last = (await $.state.get(LAST)).value
-  await $.state.set(SEL, { id: last?.id ?? '', v: last?.v ?? null, root, region: null, ex: 0, all: false, cite: ref })
-  citeLabels.set(ref, label)
-  await $.ui.open({ id: PANE, title: 'citation', focus: true })
-  await resolveRefs($, root, [ref])
 }
 
 /** One call a verb made to the model, made here: the verb's Node child has no $. */
@@ -416,54 +407,15 @@ async function noteForClaude($: Engine, text: string): Promise<void> {
   await $.state.set(NOTES, [...cur, text].slice(-12))
 }
 
-/** After a verb ran: what it made is drawn where the person pressed (and opens in the detail view when they pressed
- *  it there), what it said goes to Claude with the next prompt, and a request for Claude goes as a prompt. */
-async function settle($: Engine, ran: Ran, ref: ObjRef, at: string | null, inPane: boolean): Promise<void> {
-  await $.state.set({ ...SAID, id: ref.id }, { verb: ran.verb, ...(ran.text ? { text: ran.text } : {}), ...(ran.error ? { error: ran.error } : {}) })
-  if (!ran.ask) await noteForClaude($, ranNote(ran))
-  else if (ran.note) await noteForClaude($, ran.note)
-  if (ran.saved) {
-    const where = at || ((await $.state.get({ ...WHERE, id: ref.id })).value as string | undefined) || null
-    // a new version of the same object (a squeeze moved) takes its place; the same version (an explore view opened)
-    // opens in the detail view, where its knobs turn
-    const same = ran.saved.id === ref.id
-    const unchanged = same && (ran.saved.v == null || ran.saved.v === ref.v)
-    if (where && !unchanged) await place($, where, same ? ran.saved : { ...ran.saved, from: ref.id })
-    if (inPane || !where || unchanged) await openDetail($, ran.saved)
-  }
-  if (ran.ask) void ask($, ran.ask, ran.verb, ran.on || refText(ref))
-  if (ran.error) failed($, `${ran.verb} did not run`, ran.error, 'Run it again with /verb, or ask Claude')
-  else if (!ran.saved && !ran.ask && ran.text && !inPane) $.ui.toast(cut(ran.text.split('\n')[0] || '', 200))
-}
 
 /** A verb's request to Claude, as a turn the person started: its row is the person's press in a few words (`explore
  *  01-saves`), as they would type it; the request itself (with what verbs said since Claude's last reply) goes just
  *  before it as a row the person does not see, for Claude alone. */
-async function ask($: Engine, request: string, verb: string, on: string): Promise<void> {
+export async function ask($: Engine, request: string, verb: string, on: string): Promise<void> {
   const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
   await $.state.set(NOTES, [])
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, request].join('\n\n') }] } })
   await $.prompt.submit({ text: `${verb} ${on}`, asUser: true })
-}
-
-/** A verb the person pressed (a click under an object, a key in the detail view). It runs here, outside the press, and
- *  the hint row says so while it runs. */
-function pressVerb($: Engine, verb: string, ref: ObjRef, region: string | null, at: string | null, inPane: boolean, extra?: Record<string, unknown>): void {
-  $.clock.after(0, () => {
-    void (async () => {
-      const busy = (await $.state.get({ ...SAID, id: ref.id })).value
-      if (busy?.running) return
-      await $.state.set({ ...SAID, id: ref.id }, { verb, running: true })
-      let ran: Ran
-      try {
-        const sel = inPane ? (await $.state.get(SEL)).value : null
-        ran = await execVerb($, verb, ref, region, 96, { state: sel && sel.id === ref.id ? sel.state : null, extra })
-      } catch (err) {
-        ran = { verb, on: refText(ref), error: String((err as Error)?.message || err).slice(0, 300) }
-      }
-      await settle($, ran, ref, at, inPane)
-    })()
-  })
 }
 
 // ------------------------------------------------------------------------------------------------ failures, in words
@@ -501,6 +453,11 @@ async function quietly(p: Promise<unknown>): Promise<void> {
 /** Whether browser mode is on: the plugin's `browser` setting, false at install. */
 export function browserOn(): boolean {
   return browserFlag
+}
+
+/** The theme the person picked (dark or light): the cards' palette follows it. */
+export function currentTheme(): 'dark' | 'light' {
+  return theme
 }
 
 /** The folder whose thimble/ the pages read: the latest object's, else the nearest with a thimble/ folder, else the
@@ -584,7 +541,7 @@ async function backFromBrowser($: Engine, root: string, back: { object: string; 
   const state = back.state && typeof back.state === 'object' && !Array.isArray(back.state) ? back.state : undefined
   await select($, { id: ref.id, v: ref.v, root: ref.root, region, ex: 0, all: false, ...(state ? { state } : {}) })
   const o = await loadObject($, ref)
-  await $.ui.open({ id: PANE, title: o?.title ? cut(String(o.title), 40) : ref.id })
+  await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
 }
 
 /** The record of one of Claude's messages in this session (CONTRACT 1), or null. */
@@ -594,7 +551,7 @@ async function recordOf($: Engine, root: string, row: string): Promise<Any | nul
   try { return (await $.fs.exists(file)) ? JSON.parse(String(await $.fs.read(file))) : null } catch { return null }
 }
 
-type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
+type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; thread?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
 
 /** What Claude reads beside a question asked in the browser: what it was asked about, and where its rows are. */
 export async function webContext($: Engine, root: string, scope: WebScope): Promise<string> {
@@ -623,11 +580,35 @@ export async function webContext($: Engine, root: string, scope: WebScope): Prom
   return lines.join('\n')
 }
 
-/** A question asked in the browser: a turn the person started, their words as the prompt; what it was asked about
- *  goes just before it as a row the person does not see, for Claude alone (as a verb's request does). Claude Code
- *  labels the prompt's row as the plugin's. */
+/** A question asked in the browser. About a card or a mark it is a side thread (thread.ts), which main does not see;
+ *  about a message as a whole it is a turn the person started, their words as the prompt, what it was asked about
+ *  just before it as a row for Claude alone (as a verb's request is). Claude Code labels that prompt's row as the
+ *  plugin's. */
 async function askFromBrowser($: Engine, root: string, text: string, scope: WebScope): Promise<void> {
   try {
+    // a question asked in a thread the page shows (its tree, its column): that thread again, on the part it is about
+    if (scope.thread) {
+      await restoreThreads($, root)
+      const t = threadOf(scope.thread)
+      if (t) {
+        const r = await askThread($, { text, root: t.root || root, scope: t.scope as ThreadScope, card: t.scope.object ? { id: t.scope.object, v: t.scope.v ?? null, title: t.card || undefined, file: `${t.root || root}/thimble/objects/${t.scope.object}.json` } : null })
+        if (r.problem) $.ui.toast(`A question from the browser: ${r.problem}.`)
+        return
+      }
+    }
+    if ((scope.object && ID.test(scope.object)) || scope.mark) {
+      const card = scope.object && ID.test(scope.object) ? await withVersion($, { id: scope.object, v: scope.v ?? null, root }) : null
+      const p = card ? await prepared($, card, 96) : null
+      const region = scope.region && REGION.test(scope.region) ? scope.region : null
+      const refs = p?.object ? (region ? regionRefs(p.object, p.drawing, region).refs : objectRefs(p.object).map((c: Any) => c.ref)) : undefined
+      const r = await askThread($, {
+        text, root, ...(refs ? { refs } : {}),
+        scope: { ...(card ? { object: card.id, v: card.v } : {}), ...(region ? { region, label: scope.label || String(regionMeta(p?.drawing, region)?.label || region) } : {}), ...(scope.row ? { row: scope.row } : {}), ...(scope.mark ? { mark: scope.mark } : {}) },
+        card: p?.object ? { id: p.object.id, v: p.object.version, title: p.object.title, file: `${root}/thimble/objects/${p.object.id}.json` } : null,
+      })
+      if (r.problem) $.ui.toast(`A question from the browser: ${r.problem}.`)
+      return
+    }
     const context = await webContext($, root, scope)
     const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
     await $.state.set(NOTES, [])
@@ -1050,11 +1031,14 @@ function messageObject(rec: MsgRecord): Any {
   return { id: `msg-${rec.row.slice(0, 8)}`, version: 1, kind: 'message', row: rec.row, session: rec.session, title: first.length > 60 ? first.slice(0, 59) + '…' : first, text }
 }
 
+// v's one option when the observer proposed none: visualize then picks the form itself (its args are empty)
+const ANOTHER_VIEW = 'another view of this answer'
+
 /** The options a verb's line offers for a message: v's proposals, squeeze's one press with its chips, atlas's offer. */
 function lineOptions(key: string, rec: MsgRecord | null): { options: { label: string; note?: string }[]; note?: string } {
   const lit = (rec?.verbs || {})[key] as Any
   if (key === 'v') {
-    const props = lit?.lit && Array.isArray(lit.proposals) && lit.proposals.length ? lit.proposals : ['a card of this message']
+    const props = lit?.lit && Array.isArray(lit.proposals) && lit.proposals.length ? lit.proposals : [ANOTHER_VIEW]
     return { options: props.map((p: string) => ({ label: p })) }
   }
   if (key === 's') {
@@ -1107,7 +1091,7 @@ async function runOnMessage($: Engine, word: string, key: string, rec: MsgRecord
     const dir = $.plugin.root.replace(/\/+$/, '')
     const input = {
       object: messageObject(rec), message: rec, row: rec.row, session: rec.session, root, region: null, regionMeta: null,
-      refs: rec.marks.filter(m => m.ref).map(m => m.ref), drawing: null, state: {}, args: key === 'v' ? choice : '', w: 96,
+      refs: rec.marks.filter(m => m.ref).map(m => m.ref), drawing: null, state: {}, args: key === 'v' && choice !== ANOTHER_VIEW ? choice : '', w: 96,
     }
     const answers: Record<string, unknown> = {}
     let out: Any = null
@@ -1179,14 +1163,58 @@ export async function answerRow($: Engine): Promise<string | null> {
   return ((await $.state.get(ANSWER)).value as string | null | undefined) ?? null
 }
 
+/** A side thread as the tray shows it: each question with a ❯, each answer's lines (citations read as their words),
+ *  and while it answers, that it does. `w` is the room inside the tray's frame. */
+function threadLines(els: Any, thread: Any, label: string, w: number): Any[] {
+  const { Text } = els
+  const out: Any[] = []
+  const wrap = (s: string, lead: string, style: Record<string, unknown> = {}) => {
+    const words = s.split(/\s+/).filter(Boolean)
+    let line = ''
+    let first = true
+    const push = () => { out.push(Text({ wrap: 'truncate-end', children: [Text({ dimColor: !first || undefined, children: first ? lead : '  ' }), Text({ ...style, children: line })] })); first = false; line = '' }
+    for (const word of words) {
+      if (line && [...line].length + 1 + [...word].length > w - 2) push()
+      line = line ? `${line} ${word}` : word
+    }
+    if (line || first) push()
+  }
+  if (!thread?.turns?.length) {
+    wrap(`Ask about ${label}. A side thread answers it with the data; Claude in the main chat does not see it.`, '', { dimColor: true })
+    return out
+  }
+  for (const t of thread.turns) {
+    if (t.role === 'person') { wrap(String(t.text), '❯ ', { bold: true }); continue }
+    String(t.text || '').replace(/`/g, '').replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').split(/\n+/).map((x: string) => x.trim()).filter(Boolean)
+      .forEach((para: string, i: number) => wrap(para, i ? '  ' : '⏺ '))
+  }
+  if (thread.status === 'running') out.push(Text({ color: 'warning', children: '✻ answering…' }))
+  if (thread.status === 'failed') wrap(`× ${thread.error || 'the thread stopped'}. Ask again, or 0 and ask Claude here.`, '', { color: 'error' })
+  return out
+}
+
+/** A question asked with the tray open: the side thread of its mark (thread.ts), which main does not see. The tray
+ *  then shows that thread. Returns the reason Claude Code shows for the dropped prompt. */
+async function askTrayThread($: Engine, text: string): Promise<string | null> {
+  const t = await trayScope($)
+  if (!t) return null
+  const root = (await rootHere($)) || String(await $.session.cwd())
+  const r = await askThread($, { text, root, scope: t.scope as ThreadScope, refs: t.refs, card: null })
+  if (r.problem) return `${r.problem}. Your words are back in the prompt; 0 closes the panel, and the prompt then goes to Claude here.`
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  if (tray) await $.state.set(TRAY, { ...tray, asking: true })
+  $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
+  return `asked the side thread about ${cut(t.label, 40)}; Claude here does not see it`
+}
+
 /** A question asked with the tray open: what it carries for Claude, and the row's few words for the person. */
-async function trayScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown> } | null> {
+async function trayScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown>; refs: string[] } | null> {
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const frame = trayTop(tray) as TrayFrame | null
   if (!frame) return null
   if (frame.row == null) {
     return {
-      label: frame.label || frame.ref!, scope: { mark: { kind: 'cite', ref: frame.ref, label: frame.label } },
+      label: frame.label || frame.ref!, scope: { mark: { kind: 'cite', ref: frame.ref, label: frame.label } }, refs: [frame.ref!],
       context: `The person asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`lean resolve ${frame.ref}\` shows its rows.`,
     }
   }
@@ -1197,13 +1225,13 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   if (m.kind === 'gloss') {
     const g = rec.glosses?.[m.gloss!] ?? { term: '' }
     return {
-      label: g.term, scope: { row: rec.row, mark: { kind: 'gloss', term: g.term } },
+      label: g.term, scope: { row: rec.row, mark: { kind: 'gloss', term: g.term } }, refs: (g.refs || []).slice(0, 3),
       context: `The person asked this with a gloss of your reply open in the tray: the term "${g.term}" in your reply that begins "${begins}". The gloss said: ${g.body || g.title || ''}${g.here ? ' ' + g.here : ''} "This" or "it" may mean that term.`,
     }
   }
   const label = m.kind === 'spark' ? `the sparkline of ${m.ref}` : String(m.label)
   return {
-    label, scope: { row: rec.row, mark: { kind: m.kind, ref: m.ref, label } },
+    label, scope: { row: rec.row, mark: { kind: m.kind, ref: m.ref, label } }, refs: [seriesRef(m.ref!)?.query ?? m.ref!],
     context: `The person asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`lean resolve ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
   }
 }
@@ -1213,6 +1241,8 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; meta?: true }; text: string; cursor: number; inputText: string }): Promise<{ text: string; cursor: number } | null> {
   const key = e.key
   if (!key || key.ctrl || key.meta || e.text !== '') { keyOpened = null; return null }
+  // the open detail takes its own keys (detail.tsx), and a letter there types the question for the card's thread
+  if (detailIsOpen()) return null
   const k = key.key
   const now = await $.clock.now()
   const tray = (await $.state.get(TRAY)).value as Tray | null
@@ -1234,7 +1264,7 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   if (k === '0' || k === 'backspace') {
     keyOpened = null
     if (pick) { await $.state.set(PICK, null); return consume }
-    if (tray) { await $.state.set(TRAY, trayBack(tray) as Tray | null); return consume }
+    if (tray) { await $.state.set(TRAY, tray.asking ? { ...tray, asking: false } : (trayBack(tray) as Tray | null)); return consume }
     return null
   }
   if (/^[1-9]$/.test(k)) {
@@ -1286,16 +1316,6 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
 }
 
 // ------------------------------------------------------------------------------------------------ drawing
-
-// a verb as a chip: its key and name. Where the key works (a focused pane) the Button carries it as its hotkey, and the
-// engine draws the key itself, as `s: squeeze`; elsewhere (the transcript, where a click runs it) it reads `s squeeze`.
-function verbChip(els: Any, key: string, v: Verb, onPress: () => unknown, o: { hotkey?: boolean; running?: boolean; dim?: boolean } = {}) {
-  const { Button, Text } = els
-  const name = o.running ? `${v.name}…` : v.name
-  if (o.hotkey && v.key) return Button({ key, plain: true, hotkey: v.key, label: v.name, dimColor: o.dim || undefined, children: [Text({ dimColor: true, children: name })], onPress })
-  const label = [v.key ? Text({ color: 'suggestion', children: v.key }) : null, Text({ dimColor: true, children: `${v.key ? ' ' : ''}${name}` })].filter(Boolean)
-  return Button({ key, plain: true, label: v.name, children: label, onPress })
-}
 
 const sep = (els: Any) => els.Text({ dimColor: true, children: ' · ' })
 
@@ -1358,200 +1378,6 @@ async function turnSel($: Engine, knob: string | null, dir: number): Promise<voi
   const state = turnKnob(p.drawing, cur.state || {}, id, dir)
   const now = (await $.state.get(SEL)).value as Sel | null
   if (now && now.id === cur.id) await $.state.set(SEL, { ...now, state, knob: id })
-}
-
-/** The detail view: one pane. The drawing (each part pressable, the selected one lit), what the selection rests on,
- *  then two quiet rows: what a prompt carries, and the keys. A drawing taller than the pane shows the rows around
- *  the selection, with how many are above and below. */
-async function detailEl($: Engine, e: Any): Promise<Any> {
-  const els = $.ui.resolve(e) as Any
-  const { Box, Text, Button, Link } = els
-  const sel = (await $.state.get(SEL)).value as Sel | null
-  if (!sel) return Text({ dimColor: true, children: 'No object is open. An object Claude saves shows under its reply; open it from there.' })
-  const cols = Math.max(30, (e.props.bodyColumns ?? 80) - 1)
-  if (sel.cites && !sel.cite) {
-    const shown = sel.cites.slice(0, Math.max(5, (e.props.scroll?.bodyRows ?? 40) - 4))
-    return Box({ flexDirection: 'column', children: [
-      Text({ bold: true, children: `${sel.cites.length} values cited in the reply` }),
-      Box({ flexDirection: 'column', marginTop: 1, children: shown.map((c, i) => Button({
-        key: `cl-${i}`, plain: true, label: c.label, onPress: () => openCite($, c.ref, c.label),
-        children: [Text({ children: cut(c.label, Math.max(10, Math.floor(cols / 2))) }), Text({ dimColor: true, children: `  ${cut(c.ref, Math.max(10, cols - Math.min([...c.label].length, Math.floor(cols / 2)) - 3))}` })],
-      })) }),
-      sel.cites.length > shown.length ? Text({ dimColor: true, children: `+ ${sel.cites.length - shown.length} more` }) : null,
-      Box({ marginTop: 1, children: [Text({ dimColor: true, children: 'tab and enter open one, with the rows behind it' })] }),
-    ].filter(Boolean) })
-  }
-  if (sel.cite) {
-    const label = citeLabels.get(sel.cite) || sel.cite
-    return Box({ flexDirection: 'column', children: [
-      Box({ flexDirection: 'row', justifyContent: 'space-between', children: [Text({ bold: true, wrap: 'truncate-end', children: `where ${label} comes from` }), Text({ dimColor: true, children: ` ${cut(sel.cite, 40)}` })] }),
-      Box({ flexDirection: 'column', marginTop: 1, children: await rowsEls($, els, sel.root, [sel.cite], '', cols) }),
-      Box({ flexDirection: 'column', marginTop: 1, children: [Text({ dimColor: true, wrap: 'truncate-end', children: `ask  the next prompt carries this citation · esc to type it` })] }),
-    ] })
-  }
-  const p = await preparedNow($, sel, Math.min(cols, 140), sel.state, 'detail')
-  if (!p) return Text({ dimColor: true, children: `drawing ${refText(sel)}…` })
-  if (p.error || !p.grid) return Text({ color: 'error', children: `× ${refText(sel)} cannot be drawn: ${p.error || 'no drawing'}` })
-  const o = p.object
-  const knobs: Any[] = p.drawing?.controls || []
-  const verbs = await rankedVerbs($, sel, p.verbs)
-
-  // what the selection rests on
-  const section: Any[] = []
-  if (sel.all) {
-    section.push(Text({ children: [Text({ bold: true, children: 'all verbs' }), Text({ dimColor: true, children: ` on ${o.id}${sel.region ? ' ▸ ' + sel.region : ''} · ● picked for it` })] }))
-    for (const v of verbs) {
-      section.push(Button({
-        key: `all:${v.name}`, plain: true, label: v.name, onPress: () => pressVerb($, v.name, sel, sel.region, null, true),
-        children: [Text({ dimColor: true, children: v.picked ? '● ' : '  ' }), Text({ color: 'suggestion', children: v.key || ' ' }), Text({ children: `  ${v.name.padEnd(10)} ` }), Text({ dimColor: true, children: cut(v.phrase || v.line, Math.max(10, cols - 18)) })],
-      }))
-    }
-    if (!verbs.length) section.push(Text({ dimColor: true, children: 'No verbs yet: a verb is a folder in lean/verbs/.' }))
-  } else if (sel.region) {
-    const meta = regionMeta(p.drawing, sel.region)
-    if (!meta) section.push(Text({ dimColor: true, children: `no part "${sel.region}" in this version` }))
-    else {
-      section.push(Text({ wrap: 'truncate-end', children: [Text({ bold: true, children: `▸ ${meta.label || sel.region}` }), Text({ dimColor: true, children: `  ${sel.region}` })] }))
-      const cite = typeof meta.cite === 'string' ? p.drawing.cites?.[meta.cite] : null
-      if (cite?.text || cite?.source) section.push(Text({ wrap: 'wrap', children: [Text({ children: `  ${cite.text || ''}` }), Text({ dimColor: true, children: cite.source ? ` · ${cite.source}` : '' })] }))
-      if (meta.note) section.push(Text({ dimColor: true, italic: true, wrap: 'wrap', children: `  ${meta.note}` }))
-      const { refs, how } = regionRefs(o, p.drawing, sel.region)
-      section.push(...(await rowsEls($, els, sel.root, refs, how, cols)))
-      const own = recordRefs(p.drawing, sel.region)
-      const ex = typeof meta.examples === 'string' ? p.drawing.examples?.[meta.examples] : null
-      if (ex && ex.records?.length) {
-        const i = ((sel.ex % ex.records.length) + ex.records.length) % ex.records.length
-        section.push(Box({ flexDirection: 'row', children: [
-          Text({ dimColor: true, children: `  example ${i + 1} of ${fmtN(ex.total ?? ex.records.length)}${ex.label ? ' · ' + ex.label : ''}  ` }),
-          Button({ key: 'ex-prev', plain: true, hotkey: 'j', label: 'previous example', children: [Text({ dimColor: true, children: '‹' })], onPress: () => stepExample($, -1) }),
-          Text({ children: '  ' }),
-          Button({ key: 'ex-next', plain: true, hotkey: 'k', label: 'next example', children: [Text({ dimColor: true, children: '›' })], onPress: () => stepExample($, 1) }),
-        ] }))
-        section.push(Text({ wrap: 'wrap', children: `  ${cut(exampleText(ex.fmt, ex.records[i]), cols * 3)}` }))
-      } else if (own.length) {
-        for (const r of own.slice(0, 3)) section.push(Text({ wrap: 'truncate-end', children: [Text({ dimColor: true, children: `  ${r.ref}  ` }), Text({ children: String(r.text) })] }))
-      }
-    }
-  } else {
-    const cites = objectRefs(o)
-    if (o.text) section.push(Text({ wrap: 'wrap', children: String(o.text).replace(/\[([^\]]+)\]\([^)\s]+\)/g, '$1') }))
-    if (cites.length) section.push(...(await rowsEls($, els, sel.root, cites.map((c: Any) => c.ref), '', cols)))
-    else if (!o.text) section.push(Text({ dimColor: true, children: selectable(p.grid).length ? 'Select a part to see its rows.' : 'It cites no rows and has no parts to select.' }))
-  }
-
-  // what the last verb on it said (or that one runs now)
-  const said = ((await $.state.get({ ...SAID, id: sel.id })).value ?? null) as Said | null
-  if (said?.running) section.push(Text({ dimColor: true, children: `${said.verb}…` }))
-  else if (said?.error) section.push(Text({ color: 'error', wrap: 'wrap', children: `${said.verb}: ${cut(said.error, cols * 2)}` }))
-  else if (said?.text) for (const [i, l] of said.text.split('\n').slice(0, 4).entries()) section.push(Text({ dimColor: true, wrap: 'truncate-end', children: `${i ? '  ' : said.verb + ': '}${l}` }))
-
-  // the two quiet rows: what a prompt carries, and the keys
-  const parts = selectable(p.grid)
-  const ask = Text({ dimColor: true, wrap: 'truncate-end', children: `ask  the next prompt carries ${o.id}${sel.region ? ' ▸ ' + sel.region : ''} · esc to type it` })
-  const row: Any[] = []
-  if (parts.length) row.push(Text({ color: 'suggestion', children: 'tab' }), Text({ dimColor: true, children: ' parts' }), sep(els))
-  const examples = !!(sel.region && typeof regionMeta(p.drawing, sel.region)?.examples === 'string')
-  if (knobs.length && !examples) {
-    const k = knobs.find(c => c.id === sel.knob) || knobs[0]
-    row.push(Button({ key: 'knob-down', plain: true, hotkey: 'j', label: `turn ${k.label} down`, children: [Text({ dimColor: true, children: '◂' })], onPress: () => turnSel($, k.id, -1) }))
-    row.push(Text({ children: ' ' }))
-    row.push(Button({ key: 'knob-up', plain: true, hotkey: 'k', label: `turn ${k.label} up`, children: [Text({ dimColor: true, children: '▸' })], onPress: () => turnSel($, k.id, 1) }))
-    row.push(Text({ dimColor: true, children: ` turn ${k.label}` }), sep(els))
-  }
-  // every verb works on its key here; those picked for the object read brighter
-  const running = said?.running ? said.verb : null
-  // the verbs of the message row work on their keys here too; m, x and t are card forms now (/verb and `all verbs` still run them)
-  const onRow = new Set((await rowVerbs($)).map(v => v.name))
-  for (const v of verbs) if (v.key && onRow.has(v.name)) row.push(verbChip(els, `k:${v.name}`, v, () => pressVerb($, v.name, sel, sel.region, null, true), { hotkey: true, running: running === v.name, dim: !v.picked }), sep(els))
-  row.push(Button({ key: 'k:all', plain: true, hotkey: 'h', label: 'all verbs', children: [Text({ dimColor: true, children: sel.all ? 'fewer verbs' : 'all verbs' })], onPress: () => toggleAll($) }))
-  if (browserFlag) {
-    row.push(sep(els))
-    row.push(Button({ key: 'k:web', plain: true, hotkey: 'o', label: 'open in browser', children: [Text({ dimColor: true, children: 'browser' })], onPress: async () => {
-      const cur = ((await $.state.get(SEL)).value ?? sel) as Sel
-      $.ui.toast(await openBrowser($, { id: cur.id, v: cur.v, region: cur.region, root: cur.root, row: ((await $.state.get({ ...WHERE, id: cur.id })).value as string | undefined) ?? null }))
-    } }))
-  }
-  const keys = Box({ flexDirection: 'row', flexWrap: 'wrap', children: row })
-  // the page's link only when no browser opened it (o opens it again otherwise)
-  const web = browserFlag ? (await $.state.get(WEB)).value : null
-  const page = web?.problem
-    ? Text({ dimColor: true, wrap: 'truncate-end', children: [web.opened && web.root === sel.root ? Link({ href: web.opened, children: 'the page ↗' }) : '', ` ${web.problem}`] })
-    : null
-
-  // the drawing's window: all of it when it fits, else the rows around the selection
-  const head = 1 + (o.question ? 1 : 0)
-  const fixed = head + 1 + rowsOf(section, cols) + 1 + 1 + 2 + (page ? 1 : 0)
-  const room = Math.max(6, (e.props.scroll?.bodyRows ?? 40) - fixed)
-  let from = 0
-  let rows = p.grid.h
-  if (p.grid.h > room) {
-    rows = room - 2
-    const r = sel.region ? p.grid.regions.find((x: Any) => x.id === sel.region && x.rects.length) : null
-    const at = r ? r.rects[0].y : 0
-    from = Math.max(0, Math.min(p.grid.h - rows, at - Math.floor(rows / 2)))
-  }
-  const above = from
-  const below = p.grid.h - from - rows
-  const onPress = (id: string, dir?: number) => {
-    if (dir) return turnSel($, id, dir)
-    if (knobOf(p.drawing, id)) return $.state.set(SEL, { ...sel, knob: id })
-    return select($, { ...sel, region: id === sel.region ? null : id, ex: 0, all: false })
-  }
-  const drawing = Box({ flexDirection: 'column', marginTop: 1, children: [
-    above ? Text({ dimColor: true, children: `↑ ${above} more row${above === 1 ? '' : 's'}` }) : null,
-    paintRegions(p.grid, els, { theme, selected: sel.region, key: 'pane', from, rows, onPress }),
-    below ? Text({ dimColor: true, children: `↓ ${below} more row${below === 1 ? '' : 's'}` }) : null,
-  ].filter(Boolean) })
-
-  return Box({ flexDirection: 'column', children: [
-    Box({ flexDirection: 'row', justifyContent: 'space-between', children: [Text({ bold: true, wrap: 'truncate-end', children: String(o.title || o.id) }), Text({ dimColor: true, children: ` ${o.id}@${o.version}` })] }),
-    o.question ? Text({ dimColor: true, wrap: 'truncate-end', children: String(o.question) }) : null,
-    drawing,
-    Box({ flexDirection: 'column', marginTop: 1, children: section }),
-    Box({ flexDirection: 'column', marginTop: 1, children: [ask, keys, page].filter(Boolean) }),
-  ].filter(Boolean) })
-}
-
-/** About how many rows these elements take at `cols` columns: one each, more for a long text that wraps. */
-function rowsOf(els: Any[], cols: number): number {
-  const text = (n: Any): string => (typeof n === 'string' ? n : Array.isArray(n) ? n.map(text).join('') : n?.props?.children != null ? text(n.props.children) : n?.children != null ? text(n.children) : '')
-  return els.reduce((sum, n) => sum + (n?.props?.wrap === 'wrap' || n?.wrap === 'wrap' ? Math.max(1, Math.ceil([...text(n)].length / Math.max(10, cols))) : 1), 0)
-}
-
-async function rowsEls($: Engine, els: Any, root: string, refs: string[], how: string, cols: number): Promise<Any[]> {
-  const { Text } = els
-  const out: Any[] = []
-  for (const ref of refs.slice(0, 3)) {
-    const r = (await $.state.get({ ...ROWS, id: `${root}|${ref}` })).value as Any
-    if (r === undefined) { out.push(Text({ dimColor: true, children: `  rows  resolving ${cut(ref, cols - 20)}…` })); continue }
-    const c = chainWords(r)
-    if (c.error) { out.push(Text({ color: 'error', wrap: 'wrap', children: `  rows  ${c.notes[0]}` })); continue }
-    out.push(Text({ wrap: 'truncate-end', children: [Text({ dimColor: true, children: '  rows  ' }), Text({ children: `← ${c.line}` }), Text({ dimColor: true, children: how && !how.startsWith('named') ? `  (${how})` : '' })] }))
-    for (const n of c.notes.slice(0, 2)) out.push(Text({ dimColor: true, italic: true, wrap: 'wrap', children: `        ${n}` }))
-    for (const rec of c.records.slice(0, 3)) out.push(Text({ wrap: 'truncate-end', children: [Text({ dimColor: true, children: `        ${rec.ref}  ` }), Text({ children: String(rec.text ?? '') })] }))
-    if (r.count != null && r.count > c.records.length) out.push(Text({ dimColor: true, children: `        + ${fmtN(r.count - c.records.length)} more · lean resolve ${cut(ref, Math.max(10, cols - 40))}` }))
-  }
-  return out
-}
-
-function exampleText(fmt: unknown, rec: Any): string {
-  if (typeof fmt === 'string' && rec && typeof rec === 'object') {
-    return fmt.replace(/\{([\w.]+)\}/g, (m, key) => {
-      const v = key.split('.').reduce((x: Any, k: string) => (x == null ? undefined : x[k]), rec)
-      return v === undefined ? m : String(v)
-    }).replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\n/g, ' · ')
-  }
-  return typeof rec === 'string' ? rec : JSON.stringify(rec)
-}
-
-async function stepExample($: Engine, d: number): Promise<void> {
-  const cur = (await $.state.get(SEL)).value
-  if (cur) await $.state.set(SEL, { ...cur, ex: cur.ex + d })
-}
-
-async function toggleAll($: Engine): Promise<void> {
-  const cur = (await $.state.get(SEL)).value
-  if (cur) await $.state.set(SEL, { ...cur, all: !cur.all })
 }
 
 /** What the person sees of an object Claude just saved, in a few lines for Claude: how big it is, how many parts they
@@ -1625,6 +1451,11 @@ async function verbTarget($: Engine, rest: string[]): Promise<{ ref: ObjRef | nu
 
 export const registerShell: Register = (on, options) => {
   browserFlag = (options as Any)?.browser === true
+
+  // the side threads and the card detail first: their hooks sit outside the shell's, so a question for a thread and a
+  // thread's report never reach the shell's prompt hooks (or main)
+  registerThreads(on, options)
+  registerDetail(on)
 
   // /config turns browser mode on or off: on, /browser is there and `o` shows; off, the server ends
   on('config.set', { key: /^thimble-lean(@[\w.-]+)?\.browser$/ }, async ($, e, next) => {
@@ -1883,9 +1714,20 @@ export const registerShell: Register = (on, options) => {
     const depth = tray?.stack.length ?? 1
     const links = card?.links ?? []
     const shut = depth > 1 ? '0 back' : '0 close'
-    const keys = tray?.asking
-      ? ['type your question · ↵ sends it with this mark', shut].join(' · ')
-      : ['1 ask', ...(links.length ? [`${links.length > 1 ? `2–${links.length + 1}` : '2'} open`] : []), shut].join(' · ')
+    if (tray?.asking) {
+      // 1 (or a question sent): the mark's side thread, its questions and answers, the newest at the bottom
+      const t = await trayScope($)
+      await $.state.get({ plugin: 'thimble-lean', key: 'thread', id: t ? threadKeyOf(t.scope) : '' })
+      const thread = t ? threadFor(t.scope as ThreadScope) : null
+      const lines = threadLines(els, thread, t?.label ?? title, w - 4)
+      const keys = [thread?.status === 'running' ? 'answering… · type to ask more' : thread ? 'type to ask more · ↵ sends it to this thread' : 'type your question · ↵ sends it to a side thread', '0 back to the card'].join(' · ')
+      return trayEl(els, {
+        key: 'tray', w, body: 9, theme, kind, title: t?.label ?? title, right: 'thread', grids: null, lines, links: [], depth, keys,
+        onLink: () => undefined,
+      })
+    }
+    const asked = (await (async () => { const t = await trayScope($); return t ? threadFor(t.scope as ThreadScope) : null })())
+    const keys = [asked ? '1 thread' : '1 ask', ...(links.length ? [`${links.length > 1 ? `2–${links.length + 1}` : '2'} open`] : []), shut].join(' · ')
     return trayEl(els, {
       key: 'tray', w, body: 9, theme, kind, title: card?.title && frame.row == null ? card.title : title, right: card?.right || (kind === 'gloss' ? 'explain' : 'cite'),
       grids: card?.grids ?? null, problem: card?.problem ?? null, links, depth, keys,
@@ -1941,6 +1783,12 @@ export const registerShell: Register = (on, options) => {
       const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
       if (pick?.verb === 's' && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin') {
         const drop = await chipFromPrompt($, pick.row, e.text)
+        if (drop) return { drop }
+      }
+      // a question typed with the tray open asks the mark's side thread; it never reaches main
+      const tray = (await $.state.get(TRAY)).value as Tray | null
+      if (tray && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind === 'composer' && String(e.text || '').trim() && !detailIsOpen()) {
+        const drop = await askTrayThread($, e.text)
         if (drop) return { drop }
       }
     } catch {
@@ -2047,25 +1895,11 @@ export const registerShell: Register = (on, options) => {
     return Box({ flexDirection: 'column', children: [own, ...drawn] })
   })
 
-  // the detail view
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => detailEl($, e))
-
-  // tab through the parts: each lights in the drawing as the ring reaches it
-  on('ui.focus', async ($, e, next) => {
-    const r = await next(e)
-    try {
-      const region = e.requestId === PANE && typeof e.element === 'string' ? regionOfKey(e.element) : null
-      if (region) {
-        const cur = (await $.state.get(SEL)).value
-        const p = cur ? await prepared($, cur, 96, cur.state) : null
-        if (cur && p && knobOf(p.drawing, region)) { if (cur.knob !== region) await $.state.set(SEL, { ...cur, knob: region }) }
-        else if (cur && cur.region !== region) await select($, { ...cur, region, ex: 0, all: false })
-      }
-    } catch {
-      // the ring moves whatever the shell makes of it
-    }
-    return r
-  }).catch(($, e, next) => next(e))
+  // the detail view (detail.tsx)
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    markOpen(true)
+    return detailPane($, e)
+  })
 }
 
 /** For tests: the module's memory, cleared. */
