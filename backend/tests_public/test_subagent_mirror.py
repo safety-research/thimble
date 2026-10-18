@@ -222,6 +222,43 @@ async def test_a_message_to_the_finished_agent_starts_its_next_run_and_the_short
     assert not any(r.get("tray") for r in users[:-1]), "a prompt or message main's call sent is not typed in the tray"
 
 
+async def test_bug_hunt_l17_a_hand_back_that_reaches_main_late_ends_no_later_run_of_its_agent(bridge, project, ended):
+    """Bug hunt round 11, L17: a view builder handed back its terminal page, and thimble sent it the browser page as its
+    next step, which started its next run. Main was in /compact, so the hand-back reached main 14 s later, and thimble
+    took it for the end of the new run: the browser page failed as empty while the builder still wrote it, and its
+    view_check and finish_view calls were refused. A hand-back ends only the run that made it: one whose report ended
+    an earlier run, or that was made before the current run began, ends nothing."""
+    lv, chat, path = await _click_orientation(bridge, project)
+    _write(path, _assistant(_use("toolu_hb", "SubagentHandback", {"message": "Built the Quill page."})))
+    session.tail_once(lv)
+    assert ended[-1] == ("ended", "orientation", 0, "done", "Built the Quill page.")
+    _write(path, {"type": "user", "isMeta": True, "origin": {"kind": "coordinator"},
+                  "message": {"content": "The coordinator sent a message while you were working:\nNow the other page."}})
+    session.tail_once(lv)
+    assert ("started", "orientation", 1) in ended
+    # main's /compact ends: the first hand-back reaches main only now
+    _write(Path(lv.transcript_path), _peer(AGENT, "Built the Quill page."), END)
+    session.tail_once(lv)
+    a = subagents.agent(CORPUS, AGENT)
+    assert (a["run"], a["status"]) == (1, "running"), "the late hand-back ends no later run"
+    assert [e for e in ended if e[0] == "ended"] == [("ended", "orientation", 0, "done", "Built the Quill page.")]
+    # the run's own hand-back ends it, once
+    _write(path, _assistant(_use("toolu_hb2", "SubagentHandback", {"message": "Built the other page too."})))
+    session.tail_once(lv)
+    _write(Path(lv.transcript_path), _peer(AGENT, "Built the other page too."), END)
+    session.tail_once(lv)
+    assert [e for e in ended if e[0] == "ended"][1:] == [("ended", "orientation", 1, "done", "Built the other page too.")]
+    # a hand-back the tail reads after the next run began, made before it began, is the earlier run's
+    subagents.run_again(CORPUS, AGENT, by="coordinator")
+    began = float(subagents.agent(CORPUS, AGENT)["last_start"])
+    with subagents.update(CORPUS) as state:
+        sf.registry(state)[AGENT]["last_start"] = began = max(began, 1000.0)
+    assert subagents.run_ended(CORPUS, AGENT, "done", "Late words.", source="handback", made_at=began - 5) is False
+    assert subagents.agent(CORPUS, AGENT)["status"] == "running"
+    assert subagents.run_ended(CORPUS, AGENT, "done", "New words.", source="handback", made_at=began + 5) is True
+    assert ended[-1] == ("ended", "orientation", 2, "done", "New words.")
+
+
 SAFEGUARD = ("API Error: Opus 4.8's safeguards flagged this message. Our intentionally broad safeguards allow us to "
              "deliver more capabilities faster, but can sometimes flag legitimate cybersecurity work.\n\nDetails: "
              "`[cyber]`\n\nRequest ID: req_011CfjqEMn9QjcrgsnMLfo4s")

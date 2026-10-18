@@ -3657,7 +3657,9 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 if sub.thimble:  # auto mode: the run's end and its report (module note)
                     from . import subagents  # noqa: PLC0415
 
-                    subagents.run_ended(lv.c, str(sub.agent_id), "done", sub.report, source="handback")
+                    # its record's time tells a late hand-back of an earlier run from this run's (bug hunt L17)
+                    subagents.run_ended(lv.c, str(sub.agent_id), "done", sub.report, source="handback",
+                                        made_at=_stamp(rec) or None)
                     sub.done = True
             n += 1
     return n

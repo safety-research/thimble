@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import importlib
 import inspect
 import json
@@ -1606,15 +1607,45 @@ def api_error(c: str, agent_id: str) -> str | None:
         return None
 
 
+HANDBACKS_KEPT = 8  # the hand-backs an agent's runs ended with that its registry entry keeps (`handbacks`), newest last
+
+
+def handback_key(report: str | None) -> str:
+    """A hand-back's report as one key, whichever signal brings it: its words alone, since Claude Code indents each line
+    of the report it gives main as a message (session.handback_report); '' for an empty report."""
+    words = " ".join(str(report or "").split())
+    return hashlib.sha256(words.encode("utf-8")).hexdigest()[:16] if words else ""
+
+
+def _earlier_handback(a: dict[str, Any], k: int, report: str | None, made_at: float | None) -> bool:
+    """Whether a hand-back that would end run `k` of the registry entry `a` is the end of an earlier run, which reached
+    thimble late: its report ended an earlier run already, or it was made (`made_at`, its transcript's time) before run
+    `k` began. A hand-back of run `k` is kept in `handbacks` (report key -> run), so a later signal of it ends nothing
+    (bug hunt L17: a view builder's hand-back reached main 14 s late, after /compact, and ended the run thimble had
+    resumed the builder for in the meantime, which failed the view's second page as empty while it was being built)."""
+    key = handback_key(report)
+    if not key:
+        return False
+    seen = a.get("handbacks") if isinstance(a.get("handbacks"), dict) else {}
+    began = float(a.get("last_start") or 0)
+    if made_at and k > 0 and began:
+        ran = k - 1 if made_at < began else k  # its time says which run made it, whatever an earlier signal said
+    else:
+        ran = min(int(seen.get(key, k)), k)
+    a["handbacks"] = dict(list({**{x: r for x, r in seen.items() if x != key}, key: ran}.items())[-HANDBACKS_KEPT:])
+    return ran < k
+
+
 def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source: str = "",
-              interrupted: bool = False) -> bool:
+              interrupted: bool = False, made_at: float | None = None) -> bool:
     """End the current run of a registered agent once: its status, its chat ended with the report (unless its type
     keeps its chat, Type.keeps_chat), and its role's end handler (Type.ended). A run whose latest reply is an API error (api_error: a refusal by the model's safeguards,
     retries run out) failed, with Claude Code's error line as its report, whichever signal ends it, unless the agent
     handed back or was stopped. A run whose hand-back the hand-back hook took (subagent_files.taken_handback) ends done
     with that report, whichever signal ends it (module note). A run that main's plan mode held at its end, and that left
     no work, failed too, with its role's line (_plan_end). A run that ended already (another signal of the same end) is
-    left alone. True when this call ended it."""
+    left alone, and so is a run that a hand-back of an earlier run would end (_earlier_handback; `made_at`, when the
+    hand-back was made, from the agent's transcript). True when this call ended it."""
     cls = None  # the class of the API error that failed it (session.api_error_class), for its notice
     if source != "handback":
         taken = files.taken_handback(agent(c, agent_id))
@@ -1634,6 +1665,9 @@ def run_ended(c: str, agent_id: str, status: str, report: str | None, *, source:
         if not isinstance(a, dict):
             return False
         k = int(a.get("run") or 0)
+        if source == "handback" and _earlier_handback(a, k, report, made_at):
+            log.info("%s: the hand-back of an earlier run of %s came late, so its run %s goes on", c, agent_id, k)
+            return False
         if a.get("ended_run") == k and a.get("status") not in ("running", "waiting"):
             return False
         status = status if status in ("done", "stopped", "failed") else "done"
