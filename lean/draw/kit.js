@@ -1682,7 +1682,11 @@
     // the full map: boxes in columns, each the shortest column so far
     const itemW = s => 2 + k.len(s.label) + 2 + k.len(fmt(nOf(s)))
     const boxW = G => clamp(Math.max(k.len(G.label) + k.len(fmt(G.total)) + 8, ...G.items.map(s => itemW(s) + 4)), 16, W)
-    const ncol = Math.max(1, Math.min(groups.length, Math.floor(W / Math.max(24, Math.min(40, ...groups.map(boxW))))))
+    // as many columns as keep every name whole; when none does, one column if it stays short, else as many as fit
+    const want = Math.max(...groups.map(boxW))
+    const whole = Math.max(1, Math.min(groups.length, Math.floor(W / want)))
+    const tall = groups.reduce((a, G) => a + Math.min(G.items.length, 12) + 2, 0)
+    const ncol = W / whole >= want || tall <= Math.max(k.h, 24) ? whole : Math.max(1, Math.min(groups.length, Math.floor(W / 24)))
     const colW = Math.floor(W / ncol)
     const maxItems = 12
     const heights = new Array(ncol).fill(0)
