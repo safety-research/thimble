@@ -1121,7 +1121,8 @@ def _citations_text(c: str, cell: dict[str, Any]) -> str:
     """What each of the card's links resolves to, one line each: the value the source shows and its excerpt, or why
     the link does not resolve; a link to a value the code types in says so (typed_links). A line's record gives first
     the fields of words its excerpt leaves out (refs.checked_text: a wiki save's edit summary), so the check reads the
-    record itself and not only what the card draws of it."""
+    record itself and not only what the card draws of it; a long record's line is the part of it around the words the
+    card quotes from it (_cite_cut)."""
     from . import refs as refs_mod  # noqa: PLC0415 — refs imports views and notebook lazily; kept off import time
 
     refs = render.cited_refs(cell)
@@ -1143,10 +1144,45 @@ def _citations_text(c: str, cell: dict[str, Any]) -> str:
         bit = f"{ref} shows {shown}" if shown not in (None, "") else ref
         if typed.get(ref):
             bit += ", " + "; ".join(typed[ref])
-        # a record cut short ends in `…`, so the check knows the rest of it may hold words the line does not
-        cut = excerpt[:CITE_CHARS].rstrip() + "…" if len(excerpt) > CITE_CHARS else excerpt
+        cut = _cite_cut(excerpt, _card_quotes(cell, ref))
         lines.append(f"- {bit}: {cut}" if excerpt else f"- {bit}")
     return "\n".join(lines)
+
+
+_LINK_RE = re.compile(r"\[\[([^\[\]|]*)\|([^\[\]|]+?)\]\]")
+_QUOTED_RE = re.compile(r"[\"“]([^\"“”]{4,}?)[\"”]")
+
+
+def _card_quotes(cell: dict[str, Any], ref: str) -> list[str]:
+    """The words the card quotes from `ref`: the quote add_card kept beside it (an example's payload `quotes`), and the
+    words in quotation marks of each takeaway link to it."""
+    payload = cell.get("payload") if isinstance(cell.get("payload"), dict) else {}
+    out = [q.strip() for r, q in zip(payload.get("refs") or [], payload.get("quotes") or [])
+           if isinstance(r, str) and r.strip() == ref and isinstance(q, str) and q.strip()]
+    for m in _LINK_RE.finditer(str(cell.get("takeaway") or "")):
+        if m.group(2).strip() == ref:
+            out += [q.strip() for q in _QUOTED_RE.findall(m.group(1))]
+    return out
+
+
+def _cite_cut(text: str, quotes: list[str]) -> str:
+    """A record's text on its citation's line, in at most CITE_CHARS: its start, or for a record whose start leaves out
+    the first words the card quotes from it, the part around them (bug hunt round 10, K3: the check read the start of a
+    message whose vote sat thousands of characters in, and said the card never showed one). A cut end is marked `…`, so
+    the check knows the rest of the record may hold words the line does not."""
+    from . import refs as refs_mod  # noqa: PLC0415
+
+    if len(text) <= CITE_CHARS:
+        return text
+    for q in quotes:
+        found = refs_mod._find_quote(text, q)
+        if found and found[1] > CITE_CHARS - 1:
+            a = max(0, found[0] - CITE_CHARS // 3)
+            b = min(len(text), a + CITE_CHARS)
+            return ("…" if a else "") + text[a:b].strip() + ("…" if b < len(text) else "")
+        if found:
+            break
+    return text[:CITE_CHARS].rstrip() + "…"
 
 
 def _context_text(c: str, cell: dict[str, Any], author: str) -> str:

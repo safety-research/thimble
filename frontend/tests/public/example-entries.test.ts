@@ -88,3 +88,25 @@ describe("a wiki save's edit summary, which its blocks leave out (bug hunt J6)",
     expect(marked(parts)).toEqual(['undo the seed shop advert'])
   })
 })
+
+describe("a quote inside a JSON record's list or object (bug hunt round 10, K3)", () => {
+  // the card showed `id`, `role` and `content` cut after one line, and never the vote the quote came from
+  const command = "cat >> NOTES.md <<'EOF'\n## Picnic, Saturday\n\nThe north gate of Willow Park, at eleven.\n\n`CHOICE: north gate` — Rowan\n\n(Maya brings the tables.)\nEOF"
+  const message = { id: 'm7', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_x1', name: 'Bash', input: { command, description: 'Add my choice' } }], first_seen_ts: 1782799367.69 }
+  const QUOTE = '`CHOICE: north gate` — Rowan'
+
+  test("a message the server reads as a tool call shows the call's command, the quoted words marked in it", () => {
+    const r = { ref: 'chat.json#/messages/m7', kind: 'pointer', path: 'chat.json', record: message, blocks: [{ kind: 'tool_use', text: `Bash\n${JSON.stringify({ command, description: 'Add my choice' }, null, 2)}` }], excerpt: '' } as unknown as ResolvedRef
+    const parts = entryParts(exampleEntries([r.ref], [QUOTE])[0], () => r)!
+    expect(parts.map((p) => p.kind)).toEqual(['tool'])
+    expect(marked(parts)).toEqual([QUOTE])
+  })
+
+  test("a record kept as its JSON shows the value that holds the quote, decoded, with the words around it, before its fields", () => {
+    const r = pointer('chat.json#/messages/m7', message)
+    const parts = entryParts(exampleEntries([r.ref], [QUOTE])[0], () => r)!
+    expect(parts[0]).toMatchObject({ kind: 'span', key: 'command', text: QUOTE })
+    expect((parts[0] as { before: string }).before).not.toContain('\\n')
+    expect(parts.at(-1)?.kind).toBe('fields')
+  })
+})

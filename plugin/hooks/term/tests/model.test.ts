@@ -7,7 +7,7 @@ import { changed, cliOf, parsePrinted } from '../data'
 import { cardsInline, citations, valueIn } from '../lib'
 import { showsValue } from '../cite'
 import { labelCard } from '../cell'
-import { cardsOfCall, labelOf, labelsOf, resolutionOf, runShown, threadOf, turnWords, verdictOf } from '../model'
+import { cardsOfCall, examplePassage, labelOf, labelsOf, resolutionOf, runShown, threadOf, turnWords, verdictOf } from '../model'
 import { RESOLVE } from './fixtures'
 
 const check = (raw: string) => {
@@ -151,4 +151,23 @@ test("a thread's question names each picture pasted with it as a chip, and leave
     { type: 'user', text: 'And [Image #2] here?' },
   ])
   expect(thread.turns.map(t => t.q)).toEqual(['[ picture 1 ] What do the red X marks mean?', 'And [Image #2] here?'])
+})
+
+test("an example finds the passage it quotes deep in its record: a span's own words in a tool's long output, a kept quote in a record kept as its JSON (bug hunt round 10, K3)", () => {
+  // the card drew the start of the record, which ends long before the words it quotes
+  const out = 'commit 4f2a\nAuthor: Rowan\n\n' + 'Moved the tables to the north gate. '.repeat(30) + '\n+`CHOICE: north gate` — Maya\n+(seconded)\n'
+  const at = out.indexOf('`CHOICE')
+  const span = { ref: 'picnic/maya.jsonl#L9.b0:c' + at + '-' + (at + 28), kind: 'span', path: 'picnic/maya.jsonl', line: 9, block: 0, start: at, end: at + 28, blocks: [{ kind: 'tool_result', text: out }], excerpt: out.slice(at, at + 28), meta: {} }
+  const v = verdictOf(citations(`[[${span.ref}]]`)[0]!, span as never)
+  const got = examplePassage(v, v.passage ?? '')!
+  expect(got.text.slice(got.mark[0], got.mark[1])).toBe('`CHOICE: north gate` — Maya')
+  expect(got.text.startsWith('…')).toBe(true)
+  expect(got.text.length).toBeLessThan(600)
+  // a record kept as its JSON: the string value that holds the kept quote, decoded, under its key
+  const record = { id: 'm2', content: [{ type: 'note', body: 'line one\nWe pick `CHOICE: beach`, says Rowan.\nline three' }] }
+  const raw = { ref: 'picnic/notes.json#/m/2', kind: 'pointer', path: 'picnic/notes.json', record, blocks: [{ kind: 'raw', text: JSON.stringify(record, null, 2) }], excerpt: JSON.stringify(record, null, 2), meta: {} }
+  const r = examplePassage(verdictOf(citations(`[[${raw.ref}]]`)[0]!, raw as never), 'We pick `CHOICE: beach`')!
+  expect(r.key).toBe('body')
+  expect(r.text).toBe('line one We pick `CHOICE: beach`, says Rowan. line three')
+  expect(r.text.slice(r.mark[0], r.mark[1])).toBe('We pick `CHOICE: beach`')
 })

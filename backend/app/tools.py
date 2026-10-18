@@ -2747,11 +2747,13 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if isinstance(within, str):
         within = {"label": within}
     defer = kind == "code" and cardrun.defers(ctx.c)  # the card runner: the code runs through `thimble-run label`
+    # a side thread's fork: its run is the thread's, which the thread's Stop stops too (bug hunt round 10, K4)
+    thread = await _fork_thread_id(ctx)
     s = await concepts.apply_scoped(ctx.c, scope=scope, name=name, kind=kind, text=text, values=values, paths=paths, limit=limit,
                                     comment=bool(args.get("comment")), filter=bool(args.get("filter")),
                                     created_by=ctx.created_by, chat=ctx.chat, group=target, question=question,
                                     card=not orienting, within=within, show=bool(args.get("show")), defer=defer,
-                                    unit=LABEL_UNITS.get(unit_arg),
+                                    unit=LABEL_UNITS.get(unit_arg), thread=thread,
                                     # who changed the label, which main's `rerun` event names: an agent by its key
                                     by=ctx.session or (concepts.BY_ANALYST if ctx.created_by == BROWSER_AUTHOR
                                                        else concepts.BY_MAIN))
@@ -2982,6 +2984,17 @@ async def _fork_of(ctx: Ctx) -> dict[str, Any] | None:
     if not subagents.fork_call(ctx.c, ctx.tool_use_id):
         return None
     return await subagents.fork_thread(ctx.c, ctx.tool_use_id) or {}
+
+
+async def _fork_thread_id(ctx: Ctx) -> str | None:
+    """The side thread whose fork made this call (_fork_of), whose Stop stops the work the call starts; None for any
+    other caller's call, or a fork whose thread is not known. Never raises."""
+    try:
+        meta = await _fork_of(ctx)
+    except Exception:  # noqa: BLE001 — the work runs either way, as main's
+        log.debug("the thread of call %s was not found", ctx.tool_use_id, exc_info=True)
+        return None
+    return str(meta["id"]) if meta and meta.get("id") else None
 
 
 # what a thread's anchor names (agents.new_thread), as the lines a ticket from the thread adds (_with_anchor)

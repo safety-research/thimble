@@ -773,14 +773,15 @@ async def typed_caller(c: str, call: str | None) -> str | None:
 async def fork_thread(c: str, call: str | None) -> dict[str, Any] | None:
     """The thread whose fork made the thimble call `call`: its chat's meta, which holds what the analyst pointed at
     (agents.new_thread: the anchor's refs, text, surface, element, selector and picture). The fork is found by the caller
-    hook's line, else by the transcript that holds the call (session.call_holder); None when the mirror follows no such
-    fork."""
-    from . import session  # noqa: PLC0415
+    hook's line, in the mirror or in the thread's meta (threads.by_fork_agent, which a process that runs no mirror reads
+    too), else by the transcript that holds the call (session.call_holder); None when no thread has such a fork."""
+    from . import session, threads  # noqa: PLC0415
 
     if not call:
         return None
     line = files.find_caller(ws(c), call)
-    chat = session.chat_of_agent(c, str((line or {}).get("agent_id") or "") or None)
+    agent_id = str((line or {}).get("agent_id") or "") or None
+    chat = session.chat_of_agent(c, agent_id) or threads.by_fork_agent(c, agent_id)
     if chat is None:
         held = await session.call_holder(c, call, CALLER_WAIT_S)
         chat = held.chat if isinstance(held, session.Sub) and held.thread else None
@@ -1097,21 +1098,106 @@ async def stop_fork(c: str, agent_id: str, thread: str, thread_id: str = "") -> 
     (THREAD_STOPPED_HINT, with `thread`, the thread's name as the thread list shows it), so that it does not take the
     thread's work up again (live check L4-12h), with the cards the fork made since the analyst's last message in the
     thread `thread_id`, a card with no takeaway marked unfinished on the canvas (threads.stopped_cards), so that what
-    main says of the Stop matches the canvas (bug hunt round 9, J5). A fork that had ended already counts as stopped,
-    and main is told nothing."""
+    main says of the Stop matches the canvas (bug hunt round 9, J5). The work the fork started that runs on without it
+    stops too, and main hears what stopped (stop_thread_work: a label's run, an agent main started at its request; bug
+    hunt round 10, K4). A fork that had ended already counts as stopped, and main hears only of that work."""
     ans = await stop(c, agent_id)
-    if not ans.refused and not ans.get("done"):
-        cards = ""
+    if ans.refused:
+        return ans
+    if ans.get("done"):
         if thread_id:
-            from . import threads  # noqa: PLC0415
+            await stop_left_work(c, thread_id, thread)
+        return ans
+    work = await stop_thread_work(c, thread_id) if thread_id else ""
+    cards = ""
+    if thread_id:
+        from . import threads  # noqa: PLC0415
 
-            try:
-                cards = stopped_cards_line(*threads.stopped_cards(c, thread_id))
-            except Exception:  # noqa: BLE001 — the Stop stands, and main hears of it without the cards
-                log.exception("%s: the cards of the stopped thread %s were not read", c, thread_id)
-        await note_main(c, " ".join(x for x in (tools.hint(THREAD_STOPPED_HINT, thread=thread, agent_id=agent_id),
-                                                cards) if x))
+        try:
+            cards = stopped_cards_line(*threads.stopped_cards(c, thread_id))
+        except Exception:  # noqa: BLE001 — the Stop stands, and main hears of it without the cards
+            log.exception("%s: the cards of the stopped thread %s were not read", c, thread_id)
+    await note_main(c, " ".join(x for x in (tools.hint(THREAD_STOPPED_HINT, thread=thread, agent_id=agent_id),
+                                            cards, work) if x))
     return ans
+
+
+async def stop_left_work(c: str, thread_id: str, thread: str) -> bool:
+    """The Stop of a side thread whose fork had ended: the work it started that runs on without it stops
+    (stop_thread_work), and main hears what stopped (THREAD_WORK_STOPPED_HINT). Whether anything stopped."""
+    work = await stop_thread_work(c, thread_id)
+    if work:
+        await note_main(c, " ".join((tools.hint(THREAD_WORK_STOPPED_HINT, thread=thread), work)))
+    return bool(work)
+
+
+THREAD_WORK_STOPPED_HINT = "thread-stopped-work-note"  # prompts/tools.md: {thread}: a side thread whose fork had ended
+THREAD_STOPPED = "thread-stopped"  # a request's `refused_kind`: the side thread that asked for the start was stopped
+# why such a start did not happen, as the analyst's notice and the request's card say it
+THREAD_STOPPED_WHY = "you stopped the side thread that asked for it"
+
+
+async def stop_thread_work(c: str, thread_id: str) -> str:
+    """The work a stopped side thread's fork started that runs on without it, stopped: each label's run it started, in
+    whichever process runs it (concepts.stop_thread_runs), and each agent main started at its request (the start
+    requests that name it `from_thread`, tools._ask_main): one main has not started yet is refused, one that runs is
+    stopped. What main hears of it (prompts/tools.md thread-stopped-labels, thread-stopped-agents), '' for nothing.
+    Never raises: the Stop of the fork stands either way."""
+    from . import concepts  # noqa: PLC0415 — concepts imports agents, which this module imports
+
+    parts: list[str] = []
+    try:
+        runs = await asyncio.to_thread(concepts.stop_thread_runs, c, thread_id)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the label runs of the stopped thread %s were not stopped", c, thread_id)
+        runs = []
+    agents_stopped: list[str] = []
+    try:
+        agents_stopped = await stop_thread_starts(c, thread_id)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the agents the stopped thread %s asked for were not stopped", c, thread_id)
+    if runs:
+        # where each run stood as it was asked to stop; it stops once the calls it has sent come back (the hint says so),
+        # and main hears of it now, before the fork's end wakes it
+        def said(r: dict[str, Any]) -> str:
+            unit = str(r.get("unit") or "record")
+            unit = {"agent": "file", "run": "run", "cell": "card", "span": "sentence"}.get(unit, unit)
+            done, total = r.get("done"), r.get("total")
+            n = (f"stopped at {int(done):,} of {int(total):,} {unit}s" if isinstance(done, int) and isinstance(total, int)
+                 else f"stopped at {int(done):,} {unit}s" if isinstance(done, int) else "")
+            return f"{r['name']} (concept:{r['id']}" + (f", {n})" if n else ")")
+        parts.append(tools.hint("thread-stopped-labels", labels=_listed([said(r) for r in runs])))
+    if agents_stopped:
+        parts.append(tools.hint("thread-stopped-agents", agents=_listed(agents_stopped)))
+    return " ".join(x for x in parts if x)
+
+
+def _listed(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+async def stop_thread_starts(c: str, thread_id: str) -> list[str]:
+    """The agents a stopped side thread's fork asked main to start (tools._ask_main, a start request's `from_thread`):
+    one main has not started yet is refused (THREAD_STOPPED), one that runs is stopped as the analyst's Stop of it
+    stops it. Each as `<agent> (<what was filed>)`, for main's note."""
+    state = read(c)
+    reg = files.registry(state)
+    out: list[str] = []
+    for rid, r in list(files.requests(state).items()):
+        if not isinstance(r, dict) or r.get("kind") != "start" or r.get("from_thread") != thread_id:
+            continue
+        ask = r.get("ask") if isinstance(r.get("ask"), dict) else {}
+        what = f"{ask.get('agent') or r.get('role') or 'an agent'}" + (f" ({ask['what']})" if ask.get("what") else "")
+        if r.get("state") == "pending":
+            if refuse(c, rid, THREAD_STOPPED_WHY, THREAD_STOPPED) is not None:
+                out.append(what)
+            continue
+        for agent_id, a in reg.items():
+            if isinstance(a, dict) and a.get("request") == rid and a.get("status") in ("running", "waiting"):
+                ans = await stop(c, agent_id)
+                if not ans.refused and not ans.get("done"):
+                    out.append(what)
+    return out
 
 
 def stopped_cards_line(finished: list[str], unfinished: list[str], changed: list[str]) -> str:

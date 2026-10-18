@@ -8,7 +8,7 @@ import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, Te
 import type { ThimbleCell, ThimbleLabel } from './cell'
 import { STOP_KINDS, clip, curlyQuotes, dateSpans, plainMarks, quoted, shownMatches, valueIn } from './lib'
 import type { Citation } from './lib'
-import { quotedWords, showsValue } from './cite'
+import { quoteSpan, quotedWords, showsValue } from './cite'
 
 type Obj = Record<string, unknown>
 
@@ -312,6 +312,133 @@ function blocksText(b: unknown): string {
   return Array.isArray(b) ? b.map(x => (isObj(x) ? str(x.text) : str(x))).join('\n') : ''
 }
 
+/** the input fields of a tool call that hold what it was asked to do, as the browser's example reads them (frontend
+ *  canvas/quotes.ts toolPart) */
+const TOOL_MAIN = ['command', 'cmd', 'code', 'query', 'pattern', 'url', 'file_path', 'path', 'prompt']
+const WORDS_PARTS = 24 // of a record's words an example's verdict keeps (wordsOf)
+const WORDS_CHARS = 20_000 // of one part's words
+
+/** A JSON value's string values, each under its key (an item of a list under the list's key), in order. */
+function stringsOf(v: unknown, key: string, out: [string, string][]): void {
+  if (out.length >= WORDS_PARTS) return
+  if (typeof v === 'string') {
+    if (v.trim()) out.push([key, v])
+  } else if (Array.isArray(v)) for (const x of v) stringsOf(x, key, out)
+  else if (isObj(v)) for (const [k, x] of Object.entries(v)) stringsOf(x, k, out)
+}
+
+/** A tool call's block (`<name>\n<input as JSON>`) as its tool's name and what it was asked to do: its command, else its
+ *  input's fields, a line each, decoded from the JSON. */
+function toolWords(text: string): [string, string] {
+  const nl = text.indexOf('\n')
+  const name = (nl < 0 ? text : text.slice(0, nl)).trim()
+  let input: unknown
+  try {
+    input = nl < 0 ? undefined : JSON.parse(text.slice(nl + 1))
+  } catch {
+    input = undefined
+  }
+  if (!isObj(input)) return [name, nl < 0 ? '' : text.slice(nl + 1).trim()]
+  const fields = input
+  const main = TOOL_MAIN.find(k => typeof fields[k] === 'string')
+  const rest = Object.entries(fields).filter(([k]) => k !== main && k !== 'description')
+  return [name, [main ? str(fields[main]) : '', ...rest.map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)].filter(Boolean).join('\n')]
+}
+
+/** A resolved record's words by part, as an example card quotes them and the browser reads them (frontend
+ *  canvas/quotes.ts blockParts): a text, a thought or a tool's output as written; a tool call as its tool's name and what
+ *  it was asked to do (toolWords); a record kept as its JSON (or an event's params) as each of its string values under
+ *  its key. [key, words], '' for no key; none for a place with no blocks, or with several records. */
+export function wordsOf(res: Resolution): [string, string][] {
+  if (!Array.isArray(res.blocks) || (Array.isArray(res.records) && res.records.length > 1)) return []
+  const out: [string, string][] = []
+  for (const b of res.blocks.filter(isObj)) {
+    if (out.length >= WORDS_PARTS) break
+    const kind = str(b.kind)
+    const text = str(b.text)
+    if (kind === 'tool_use') out.push(toolWords(text))
+    else if (kind === 'raw' || kind === 'event') {
+      try {
+        stringsOf(JSON.parse(text), '', out)
+      } catch {
+        out.push(['', text])
+      }
+    } else if (text.trim()) out.push(['', text])
+  }
+  return out.slice(0, WORDS_PARTS).map(([k, t]): [string, string] => [k, t.slice(0, WORDS_CHARS)])
+}
+
+/** Whether a record's blocks are its JSON whole (one `raw` block: a record of no shape thimble reads words in). */
+function keptAsJson(blocks: unknown): boolean {
+  return Array.isArray(blocks) && blocks.length === 1 && isObj(blocks[0]) && blocks[0].kind === 'raw'
+}
+
+const PASSAGE_BEFORE = 160 // characters of a record's words an example shows before the passage it quotes
+const PASSAGE_AFTER = 320 // and after it
+
+/** Words cut to the window from `lo` to `hi`, each cut at a word with `…` against the words, and where the window
+ *  starts in `text` less the `…`. */
+function cutWindow(text: string, lo: number, hi: number): { text: string; shift: number } {
+  let a = Math.max(0, lo)
+  let b = Math.min(text.length, hi)
+  if (a > 0) {
+    const sp = text.slice(a, a + 40).search(/\s/)
+    if (sp >= 0) a += sp + 1
+  }
+  if (b < text.length) {
+    const sp = text.slice(Math.max(a, b - 40), b).search(/\s\S*$/)
+    if (sp >= 0) b = Math.max(a, b - 40) + sp
+  }
+  const lead = a > 0 ? '…' : ''
+  return { text: `${lead}${text.slice(a, b)}${b < text.length ? '…' : ''}`, shift: a - lead.length }
+}
+
+/** Where `want` stands in a part's words on one line (`flat`): as written, as JSON writes it, or as the words a passage
+ *  of a JSON text decodes to (a span of a tool call's input). */
+function passageIn(flat: string, want: string): [number, number] | null {
+  const q = want.replace(/\s+/g, ' ').trim()
+  if (!q) return null
+  let plain = q
+  if (q.includes('\\')) {
+    try {
+      plain = (JSON.parse(`"${q.replace(/(^|[^\\])"/g, '$1\\"')}"`) as string).replace(/\s+/g, ' ').trim()
+    } catch {
+      plain = q
+    }
+  }
+  return quoteSpan(flat, q) ?? (plain !== q ? quoteSpan(flat, plain) : null)
+}
+
+const PASSAGES_SPAN = 600 // characters apart the passages of one record may stand to be drawn as one example
+
+/** The passages an example card quotes in its record's words (bug hunt round 10, K3: a transcript's message showed its
+ *  start, never the vote the card quoted from its tool call; a record cited twice drew twice the same): the first part of
+ *  the record (the verdict's `words`, wordsOf) that holds the first of `wants` (the quotes add_card kept, or spans' own
+ *  passages), on one line with the words around them (PASSAGE_BEFORE, PASSAGE_AFTER), `marks` where each of `wants` that
+ *  stands in that part within PASSAGES_SPAN of the first stands in it, `found` which of `wants` those are (the first
+ *  among them), and the part's key (a tool's name, a record's field). Null when no part holds the first. Pure. */
+export function examplePassages(v: TermVerdict, wants: readonly string[]): { key: string; text: string; marks: [number, number][]; found: number[] } | null {
+  if (!v.words?.length || !wants.some(w => w.trim())) return null
+  for (const [key, text] of v.words) {
+    const flat = text.replace(/\s+/g, ' ').trim()
+    const at = wants.map(w => passageIn(flat, w))
+    if (!at[0]) continue
+    const lo0 = at[0][0]
+    const found = at.flatMap((x, i) => (x && Math.abs(x[0] - lo0) <= PASSAGES_SPAN ? [i] : []))
+    const lo = Math.min(...found.map(i => at[i]![0]))
+    const hi = Math.max(...found.map(i => at[i]![1]))
+    const w = cutWindow(flat, lo - PASSAGE_BEFORE, hi + PASSAGE_AFTER)
+    return { key, text: w.text, marks: found.map((i): [number, number] => [at[i]![0] - w.shift, at[i]![1] - w.shift]), found }
+  }
+  return null
+}
+
+/** The passage one quote of an example stands at (examplePassages with one want), its one mark as `mark`. Pure. */
+export function examplePassage(v: TermVerdict, want: string): { key: string; text: string; mark: [number, number] } | null {
+  const got = examplePassages(v, [want])
+  return got ? { key: got.key, text: got.text, mark: got.marks[0]! } : null
+}
+
 function recordText(r: unknown): string {
   if (!isObj(r)) return str(r)
   const blocks = blocksText(r.blocks)
@@ -441,8 +568,15 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0, final = f
     out.lines = linesOf(res, c.display)
     const fields = fieldsOf(res)
     if (fields.length) out.fields = fields
-    // a row's fields, which an example card shows by their names, never as the JSON its excerpt is
+    // the record's words by part, and a span's own passage, where an example card finds what it quotes (examplePassage)
+    const words = wordsOf(res)
+    if (words.length) out.words = words
+    if (kind === 'span' && str(res.excerpt)) out.passage = str(res.excerpt)
+    // a row's fields, which an example card shows by their names, never as the JSON its excerpt is; so too a record
+    // kept as its JSON, one object of no shape thimble reads words in (bug hunt round 10, K3: a JSON lines record drew
+    // as `“{ "record": "message", "index": 84, …`)
     if ((kind === 'row' || kind === 'csvrow') && isObj(res.record)) out.record = res.record
+    else if ((kind === 'record' || kind === 'pointer') && isObj(res.record) && keptAsJson(res.blocks)) out.record = res.record
     // a command's output: the command that printed it, as its row names it (calls.py chip_line)
     if (kind === 'call' && str(meta.line)) out.command = str(meta.line)
     // the turn a chat log's line starts, so an example card quotes its words under its speaker (turnWords)

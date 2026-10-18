@@ -1930,6 +1930,18 @@ It had no takeaway yet for {cards}, which the canvas shows marked unfinished.
 
 It changed {cards}.
 
+## thread-stopped-labels
+
+The Stop also stopped the label runs the fork had started: {labels}. Each stops once the calls it has sent come back, so it may label a few more. The values they gave stay, and Run again on a label goes on with the rest.
+
+## thread-stopped-agents
+
+It also stopped what the fork had asked you to start: {agents}.
+
+## thread-stopped-work-note
+
+thimble: the analyst pressed Stop in thimble on the side thread {thread}, whose fork had ended already. Leave its work stopped: do not restart it unless the analyst asks.
+
 ## message_orientation-empty
 
 The message is empty. Pass what the analyst asks the orientation as `message`.

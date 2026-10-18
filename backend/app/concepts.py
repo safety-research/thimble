@@ -2376,6 +2376,24 @@ def request_stop(c: str, concept_id: str) -> bool:
     return True
 
 
+def stop_thread_runs(c: str, thread_id: str) -> list[dict]:
+    """The analyst stopped the side thread `thread_id`: each label run its fork started (the run record's `thread`), in
+    whichever process it runs, stops after its current unit as the label panel's Stop stops it (request_stop); the rows
+    written so far stay (bug hunt round 10, K4: a prompt label the fork had started ran to its end on the analyst's
+    tokens). {id, name, unit, done, total} of each run asked to stop, for what main hears."""
+    out: list[dict] = []
+    if not thread_id:
+        return out
+    for concept in list_concepts(_ws(c)):
+        run = current_run(c, concept["id"]) or {}
+        if run.get("status") != "running" or run.get("thread") != thread_id:
+            continue
+        if request_stop(c, concept["id"]):
+            out.append({"id": concept["id"], "name": concept["name"], "unit": concept.get("unit") or "record",
+                        "done": run.get("done"), "total": run.get("total")})
+    return out
+
+
 # --------------------------------------------------------------------------- classifiers
 
 
@@ -3954,12 +3972,15 @@ def _stored_stats(key: tuple[int, int] | None, stats: dict) -> dict | None:
             "counts": {str(k): int(v) for k, v in (stats.get("counts") or {}).items()}}
 
 
-def _run_record(c: str, concept_id: str, run_id: str, started: str, created_by: str, patterns: list[str], sources: list[dict]) -> dict:
-    """The run record as a run begins: stored and streamed."""
+def _run_record(c: str, concept_id: str, run_id: str, started: str, created_by: str, patterns: list[str], sources: list[dict],
+                thread: str | None = None) -> dict:
+    """The run record as a run begins: stored and streamed. `thread`: the side thread whose fork started the run, which
+    the thread's Stop stops too (stop_thread_runs)."""
     _runs.pop((c, concept_id), None)
     return _progress(c, concept_id, run_id=run_id, started=started, created_by=created_by, status="running", paths=patterns,
                      files_total=len(sources) if sources else None,
-                     bytes_total=sum(int(s.get("size_bytes") or 0) for s in sources) if sources else None)
+                     bytes_total=sum(int(s.get("size_bytes") or 0) for s in sources) if sources else None,
+                     **({"thread": thread} if thread else {}))
 
 
 def _patterns(paths: Any) -> list[str]:
@@ -3985,7 +4006,7 @@ async def _trial_takeaways_stale(c: str, ws: Path, concept_id: str) -> None:
 async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, limit: int | None = None, created_by: str = "user",
                     *, comment: bool = True, run_id: str | None = None, started: str | None = None,
                     sources: list[dict] | None = None, again: bool = False, by: str | None = None,
-                    resume: bool = False) -> dict:
+                    resume: bool = False, thread: str | None = None) -> dict:
     """Apply a concept over its unit's scope, write the label rows and return the run summary. start_apply runs this as a
     task. One run at a time per concept. A prompt kind always carries the analyst's latest values as few-shot examples
     (few_shot_examples), and the agreement it reports leaves those values out (held_out). With `again`, a prompt label
@@ -4045,7 +4066,7 @@ async def run_apply(c: str, concept_id: str, paths: list[str] | None = None, lim
         out.parent.mkdir(parents=True, exist_ok=True)
         run_id = run_id or _new_id()
         started = started or _now()
-        _run_record(c, concept_id, run_id, started, created_by, patterns, sources)
+        _run_record(c, concept_id, run_id, started, created_by, patterns, sources, thread)
         total: int | None = None
         matched: int | None = None
         units: list[Unit] = []
@@ -4403,10 +4424,11 @@ def scope_sources(c: str, unit: str, kind: str, patterns: list[str], limit: int 
 
 async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, limit: int | None = None, created_by: str = "user",
                       *, comment: bool = True, sources: list[dict] | None = None, again: bool = False,
-                      by: str | None = None, resume: bool = False) -> dict:
+                      by: str | None = None, resume: bool = False, thread: str | None = None) -> dict:
     """Begin an apply in the background and return its run record at once: 404 no such concept, 400 no matching files, 409 an
     apply of this concept is already running, in this process or another (`detail.run_id` names it). `sources` are the
-    files scope_sources already found; `by` names who runs it and `resume` asks to go on with a stopped run (run_apply)."""
+    files scope_sources already found; `by` names who runs it and `resume` asks to go on with a stopped run (run_apply);
+    `thread` the side thread whose fork starts it, whose Stop stops it too (stop_thread_runs)."""
     ws, concept = load_concept(c, concept_id)
     key = (c, concept_id)
     live = running_apply(c, concept_id) or live_run(c, concept_id)
@@ -4434,10 +4456,10 @@ async def start_apply(c: str, concept_id: str, paths: list[str] | None = None, l
         raise _already_running(live)
     run_id, started = _new_id(), _now()
     _cancel_event(c, concept_id).clear()
-    record = _run_record(c, concept_id, run_id, started, created_by, patterns, sources)
+    record = _run_record(c, concept_id, run_id, started, created_by, patterns, sources, thread)
     task = asyncio.get_running_loop().create_task(
         run_apply(c, concept_id, patterns, limit, created_by, comment=comment, run_id=run_id, started=started,
-                  sources=sources, again=again, by=by, resume=resume),
+                  sources=sources, again=again, by=by, resume=resume, thread=thread),
         name=f"thimble-apply-{concept_id}")
     _tasks[key] = task
     task.add_done_callback(partial(_apply_finished, key))
@@ -5153,7 +5175,7 @@ def _follow(c: str, concept: dict) -> Callable[[Any], Any]:
 async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, values: list[str] | None, paths: list[str] | None,
                        limit: int | None, comment: bool, filter: bool, created_by: str, chat: str | None, group: str | None,
                        question: str | None = None, card: bool = True, within: Any = None, show: bool = False,
-                       defer: bool = False, unit: str | None = None, by: str | None = None) -> dict:
+                       defer: bool = False, unit: str | None = None, by: str | None = None, thread: str | None = None) -> dict:
     """Define a label from a predicate and apply it over one scope: the concept, its card in `group` asking `question` unless
     `card` is False or the label ran before without one, the run in the background followed by an agent chat of role
     `labels`, and with `filter` the scope's filter set to the positive value. `within` {label, value?} runs a label over
@@ -5166,7 +5188,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     and nothing runs: the answer has `deferred: true` and the counts the label already holds. `unit`, for files, is what
     one value goes to (FILE_UNITS: record, agent for a whole file, run for a run directory); without it a label that
     exists keeps its unit, and a new one labels records. The answer's `cut` says which whole files or runs a prompt label
-    read only in part (read_cut). `by` names the caller for the reruns of the label's readers (changed_by)."""
+    read only in part (read_cut). `by` names the caller for the reruns of the label's readers (changed_by); `thread` the
+    side thread whose fork calls it, whose Stop stops the run too (stop_thread_runs)."""
     if scope not in SCOPES:
         raise HTTPException(400, f"scope must be one of {', '.join(SCOPES)}")
     if unit is not None and (scope != "files" or unit not in FILE_UNITS):
@@ -5217,7 +5240,10 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
     # a label that ran before without a card (the orientation's) keeps having none
     cardless = (prior is not None and prior["id"] == concept["id"] and bool(prior["applications"])
                 and not await asyncio.to_thread(_label_cards, ws, concept["id"]))
-    made = await asyncio.to_thread(label_card, c, concept, group, author, question) if card and not cardless else None
+    # a side thread's fork's label card is the thread's, as its add_card's cards are (agents.claim_cell), so the thread's
+    # Stop names it among the cards the fork made (threads.stopped_cards; bug hunt round 10, K4)
+    made = (await asyncio.to_thread(label_card, c, concept, group, f"chat:{thread}" if thread else author, question)
+            if card and not cardless else None)
     joined = same and running_apply(c, concept["id"]) is not None
     unchanged = same and not joined and await asyncio.to_thread(covered, c, concept, paths or [], limit)
     if show and unit in FILE_UNITS:
@@ -5232,7 +5258,8 @@ async def apply_scoped(c: str, *, scope: str, name: str, kind: str, text: str, v
                 "labels_path": str(labels_file(ws, concept["id"])), "unchanged": False, "deferred": True,
                 "stale": [x["id"] for x in stale]}
     if not joined and not unchanged:
-        await start_apply(c, concept["id"], paths or [], limit, author, comment=comment, sources=sources, by=by)
+        await start_apply(c, concept["id"], paths or [], limit, author, comment=comment, sources=sources, by=by,
+                          thread=thread)
         from . import cardrun  # noqa: PLC0415
 
         try:

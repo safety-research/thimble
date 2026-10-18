@@ -5,7 +5,7 @@
 import { axisTicks, numberTicks, ownTicks, placeLabels, wallClock } from './axis'
 import { cut, cw, fmt, formatted, itemsRow, middleCut, prefix, quoted, viewRef, visibleControls, width } from './lib'
 import type { Run, TableRuns } from './lib'
-import { COLORS, cellTint, seriesHue } from './paint'
+import { COLORS, cellTint, citeHighlight, seriesHue } from './paint'
 import { hueOf } from './labels'
 
 export { COLORS }
@@ -30,8 +30,10 @@ export type LabelInfo = { slug: string; name: string; kind: string; values: stri
 /** An example: its record, its words, and on a label card its value now, why, and whether the analyst set or agreed
  *  with it (`set`; `was` the value the label gave). `kept`: the words the card quotes from the record (its payload's
  *  `quotes`); `fields`: a database row's fields (lib.ts claimFields), which it shows in place of its words; `head`: a
- *  line's fields its words leave out (a wiki save's edit summary, bug hunt J6), each on a row before its words. */
-export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string; kept?: string; fields?: { read: [string, string][]; rest: [string, string][] }; head?: [string, string][] }
+ *  line's fields its words leave out (a wiki save's edit summary, bug hunt J6), each on a row before its words; `marks`:
+ *  where each passage the card quotes stands in its words (model.ts examplePassages), and `key` the part of the record
+ *  they are (a tool call's tool, a record's field). */
+export type CardExample = { ref: string; quote: string; note: string; value?: string; why?: string; set?: boolean; was?: string; kept?: string; fields?: { read: [string, string][]; rest: [string, string][] }; head?: [string, string][]; marks?: [number, number][]; key?: string }
 /** A plan card's step (cell.ts planSteps, backend notebook.plan_step_of): its words, its status (`not started`,
  *  `running`, `done`, `needs you`), what it makes, the note its agent left, and its time ('' for none). */
 export type PlanStep = { text: string; status: string; makes: string[]; note: string; time: string }
@@ -1585,6 +1587,66 @@ function quoteLines(words: string, room: number, max: number): string[] {
   return lines
 }
 
+/** The passages an example quotes inside its record's words (bug hunt round 10, K3): the words in quotation marks and
+ *  italic, after `key` dim (a tool call's tool) with the rows under it, in at most `max` rows of `room` cells, each row
+ *  broken at its last space; each passage (`marks`, [start, end) of `words`) on `hi`, the citation's highlight; where
+ *  the words take more rows, the rows from the one before the first passage's, a cut end marked `…`. */
+export function markedQuoteLines(words: string, marks: readonly [number, number][], key: string, room: number, max: number, hi: string): Line[] {
+  const q = quoted(words)
+  const shift = q === words ? 0 : 1
+  const spans = marks.map(([x, y]): [number, number] => [x + shift, y + shift]).sort((m, n) => m[0] - n[0])
+  const a = spans[0]?.[0] ?? 0
+  const keyW = key ? width(key) + 2 : 0
+  const w = Math.max(8, room - keyW - 1) // a cell kept for a `…`
+  const chars = [...q]
+  const at: number[] = [] // each character's offset in q
+  let o = 0
+  for (const ch of chars) {
+    at.push(o)
+    o += ch.length
+  }
+  at.push(o)
+  // rows as [first, end) character indexes
+  const rows: [number, number][] = []
+  let i = 0
+  while (i < chars.length) {
+    let end = i
+    let used = 0
+    while (end < chars.length && used + cw(chars[end]!) <= w) used += cw(chars[end++]!)
+    if (end < chars.length) {
+      const sp = chars.lastIndexOf(' ', end)
+      if (sp > i) end = sp
+    }
+    if (end === i) end = i + 1
+    rows.push([i, end])
+    i = end
+    while (chars[i] === ' ') i++
+  }
+  const markRow = Math.max(0, rows.findIndex(([s, e]) => at[e]! > a))
+  const first = rows.length > max ? Math.max(0, Math.min(rows.length - max, markRow - 1)) : 0
+  const shown = rows.slice(first, first + max)
+  return shown.map(([s, e], k): Line => {
+    const lo = at[s]!
+    const hiAt = at[e]!
+    const text = q.slice(lo, hiAt)
+    const pre = k === 0 && first > 0 ? '…' : ''
+    const post = k === shown.length - 1 && first + max < rows.length ? '…' : ''
+    const segs: Seg[] = [{ s: k === 0 ? key : ' '.repeat(width(key)), fg: COLORS.dim }, ...(key ? [{ s: '  ' }] : [])].filter(x => x.s !== '')
+    if (pre) segs.push({ s: pre, i: true })
+    let at0 = 0
+    for (const [x, y] of spans) {
+      const ma = Math.max(x, lo) - lo
+      const mb = Math.min(y, hiAt) - lo
+      if (mb <= ma || ma < at0) continue
+      segs.push({ s: text.slice(at0, ma), i: true }, { s: text.slice(ma, mb), i: true, bg: hi })
+      at0 = mb
+    }
+    segs.push({ s: text.slice(at0), i: true })
+    if (post) segs.push({ s: post, i: true })
+    return segs.filter(x => x.s !== '')
+  })
+}
+
 /** A field of a record the claim is about, in `room` cells: its name dim, then its value in quotation marks and italic,
  *  its line ends kept (its blank lines left out), wrapped under the value's first row, in at most `max` rows; words that
  *  do not fit end in `…` and the closing mark. */
@@ -1633,7 +1695,8 @@ function restLines(rest: readonly [string, string][], room: number, max: number)
  * Example records: per record, a ● at the content's edge (in its value's hue when a label the card read marks it, dim
  * when it marks it not, else the citation's purple, as its ↗ and place: one evidence color in a card, the owner 10-17:
  * "card bullet and citations are different colors") and thimble's note after it, regular; under the note, 2 cells in,
- * the record's words in quotation marks and italic, up to three rows, then ↗ and its place in purple and underlined, on
+ * the record's words in quotation marks and italic, up to three rows (where the card quotes a passage of them, the
+ * passage on the citation's highlight with the words around it: markedQuoteLines), then ↗ and its place in purple and underlined, on
  * the quote's last row where it fits, else on the row under it. A database row shows its fields in place of its words
  * (bug hunt B17): the fields the claim is about, each its name dim and its value as words are quoted, its line ends
  * kept, then its other fields on up to two dim rows, those the card names first. A line's fields its words leave out
@@ -1646,11 +1709,29 @@ const HEAD_FIELDS = 2 // of a line's fields its words leave out, drawn before it
  *  character left shown as a sign (lib.ts visibleControls), so the card draws. */
 const recordWords = (s: string) => visibleControls(demojibake(s))
 
+/** An example's words as recordWords draws them, with its passages' marks moved to where the passages stand then. */
+function markedWords(quote: string, marks?: readonly [number, number][]): { quote: string; marks?: [number, number][] } {
+  const ok = [...(marks ?? [])].filter(([x, y]) => y > x && y <= quote.length).sort((m, n) => m[0] - n[0])
+  if (!ok.length || ok.some((m, i) => i > 0 && m[0] < ok[i - 1]![1])) return { quote: recordWords(quote) }
+  let out = ''
+  let at = 0
+  const moved: [number, number][] = []
+  for (const [x, y] of ok) {
+    out += recordWords(quote.slice(at, x))
+    const mid = recordWords(quote.slice(x, y))
+    moved.push([out.length, out.length + mid.length])
+    out += mid
+    at = y
+  }
+  return { quote: out + recordWords(quote.slice(at)), marks: moved }
+}
+
 function exampleLayout(card: CardData, cols: number, hover: number): Layout {
   const exs = (card.examples ?? []).slice(0, 8).map(e => ({
     ...e,
     note: visibleControls(e.note),
-    quote: recordWords(e.quote),
+    ...markedWords(e.quote, e.marks),
+    ...(e.key ? { key: visibleControls(e.key) } : {}),
     ...(e.head ? { head: e.head.map(([k, v]): [string, string] => [visibleControls(k), recordWords(v)]) } : {}),
     ...(e.fields ? { fields: { read: e.fields.read.map(([k, v]): [string, string] => [visibleControls(k), recordWords(v)]), rest: e.fields.rest.map(([k, v]): [string, string] => [visibleControls(k), recordWords(v)]) } } : {}),
   }))
@@ -1683,6 +1764,9 @@ function exampleLayout(card: CardData, cols: number, hover: number): Layout {
         if (left <= 0) break
       }
       for (const l of restLines(e.fields.rest, room, 2)) rows.push([lead(), ...l])
+    } else if (e.marks?.length) {
+      // the passages the card quotes, on the citation's highlight, with the words around them (bug hunt round 10, K3)
+      for (const l of markedQuoteLines(e.quote, e.marks, e.key ?? '', room, 3, citeHighlight())) rows.push([lead(), ...l])
     } else {
       const said = e.quote.replace(/\s+/g, ' ').trim()
       const quote = said ? quoteLines(said, room, 3) : []
