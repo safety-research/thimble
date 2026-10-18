@@ -400,7 +400,7 @@ export function recordFor(kept, { row, session, text, at }) {
   if (kept && kept.text === String(text ?? '')) return kept
   const rec = newRecord({ row, session, text, at: at || kept?.at })
   if (!kept) return rec
-  return remark({ ...rec, glosses: kept.glosses || {}, verbs: kept.verbs || {}, objects: kept.objects || [], final: !!kept.final })
+  return remark({ ...rec, ...(kept.uuid ? { uuid: kept.uuid } : {}), glosses: kept.glosses || {}, verbs: kept.verbs || {}, objects: kept.objects || [], final: !!kept.final })
 }
 
 const VERB_KEYS = ['v', 's', 'a']

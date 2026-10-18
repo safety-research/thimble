@@ -39,6 +39,8 @@ export type Gloss = { term: string; title?: string; body?: string; here?: string
 export type MsgRecord = {
   v: 1
   row: string
+  /** the row's whole id, as the transcript's drawing names it (e.requestId) */
+  uuid?: string
   session: string
   at?: string | null
   text: string

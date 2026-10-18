@@ -76,7 +76,11 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
     if (on) p.backgroundColor = 'selectionBg'
   }
   const label = m.kind === 'gloss' ? `gloss ${r.s}` : m.kind === 'spark' ? `sparkline ${m.ref}` : `cite ${m.label}`
-  return els.Button({ key, plain: true, label, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
+  // the first run of a mark has a key of its own, `mk-<row>-<i>`, so the keys can scroll it into view
+  const seen = (o as MessageOpts & { seen?: Set<number> }).seen
+  const own = seen && !seen.has(r.mark as number) ? `mk-${o.rec.row}-${r.mark}` : key
+  seen?.add(r.mark as number)
+  return els.Button({ key: own, plain: true, label, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
 }
 
 /** One laid-out line: its runs, each mark a press. */
@@ -145,8 +149,9 @@ function tableLines(els: Any, o: MessageOpts, text: string, b: Any, key: string,
 }
 
 /** One of Claude's messages drawn from its record. */
-export function messageEl(els: Any, o: MessageOpts): Any {
+export function messageEl(els: Any, given: MessageOpts): Any {
   const { Box, Markdown } = els
+  const o = { ...given, seen: new Set<number>() }
   const text = shownOf(o.rec)
   const bs = blocks(text)
   const w = Math.max(20, o.cols)
@@ -233,7 +238,7 @@ export function verbLineEl(els: Any, o: VerbLineOpts): Any {
   if (o.note) kids.push(Text({ dimColor: true, children: `  ${o.note}` }))
   const n = Math.min(9, o.options.length)
   kids.push(Text({ children: '    ' }), Text({ dimColor: true, children: n > 1 ? `1–${n} ` : '1 ' }), Text({ dimColor: true, children: 'pick · ' }))
-  kids.push(Button({ key: `${o.key}-close`, plain: true, label: 'close', children: [Text({ dimColor: true, children: '⌫ close' })], onPress: o.onClose }))
+  kids.push(Button({ key: `${o.key}-close`, plain: true, label: 'close', children: [Text({ dimColor: true, children: '0 close' })], onPress: o.onClose }))
   return Box({ flexDirection: 'row', flexWrap: 'wrap', marginLeft: 2, children: kids })
 }
 
@@ -270,7 +275,7 @@ export function trayEl(els: Any, o: TrayOpts): Any {
     : Text({ color: c.cite, underline: o.kind === 'cite', bold: true, children: title })
   const top = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╭─ ' }), Text({ dimColor: true, children: back }), titleText, Text({ color: tone, children: ' ' + '─'.repeat(fill) + ' ' }), Text({ color: tone, children: o.right }), Text({ color: tone, children: ' ─╮' })] })
   const keysText = cutTo(o.keys, Math.max(4, o.w - 8))
-  const bottom = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╰─ ' }), Text({ dimColor: true, children: keysText }), Text({ color: tone, children: ' ' + '─'.repeat(Math.max(1, o.w - 5 - [...keysText].length - 2)) + '─╯' })] })
+  const bottom = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╰─ ' }), Text({ dimColor: true, children: keysText }), Text({ color: tone, children: ' ' + '─'.repeat(Math.max(1, o.w - 6 - width(keysText))) + '─╯' })] })
   const side = Text({ color: tone, children: '│ ' })
   const sideR = Text({ color: tone, children: ' │' })
   const rows: Any[] = []

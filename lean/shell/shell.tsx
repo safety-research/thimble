@@ -88,6 +88,7 @@ let msgFiles: { session: string; dir: string | null; index: Any[]; pending: Set<
 const cards = new Map<string, CardDrawn>()
 const cardPending = new Map<string, Promise<CardDrawn>>()
 let keyOpened: { key: string; at: number } | null = null
+let keyChain: Promise<unknown> = Promise.resolve()
 type CardDrawn = { title: string; right: string; kind: 'cite' | 'gloss' | 'spark'; grids: Any[] | null; links: { id: string; ref: string; label: string }[]; problem?: string | null }
 
 // ------------------------------------------------------------------------------------------------ objects
@@ -690,6 +691,10 @@ async function allMarks($: Engine): Promise<{ row: string; i: number }[]> {
 /** Open the tray on a mark of a message (a press on it, or ] and [): its message becomes the one the keys act on. */
 async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): Promise<void> {
   let rec = await recordNow($, row)
+  if (rec && !rec.uuid && drawn?.uuid) {
+    rec = { ...rec, uuid: drawn.uuid }
+    await saveRecord($, rec)
+  }
   if (!rec && drawn) {
     // a message drawn from its words alone (a resumed session with no record): its record is kept now
     rec = drawn
@@ -705,6 +710,14 @@ async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): P
   await $.state.set(SELROW, row === answer ? null : row)
   // a gloss opened: the observer's backoff for glosses starts over
   if (m.kind === 'gloss') await $.store.set('observer.glossUnopened', 0)
+  // the mark in view, when a key opened it (it may be in a message above the screen)
+  await revealMark($, rec!, i)
+}
+
+/** A mark brought into view where the transcript draws it now (a row far above the screen is not drawn, and the
+ *  engine moves the transcript only for a press, not for a key in the prompt, so then the tray's title names it). */
+async function revealMark($: Engine, rec: MsgRecord, i: number): Promise<void> {
+  await $.ui.scroll({ to: { key: `mk-${rec.row}-${i}` }, block: 'nearest' }).catch(() => undefined)
 }
 
 async function stepMark($: Engine, dir: number): Promise<void> {
@@ -878,6 +891,8 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
   await $.state.set(PICK, { row, verb: key })
   const answer = (await $.state.get(ANSWER)).value
   await $.state.set(SELROW, row === answer ? null : row)
+  // the line in view, when a key opened it under a message above the screen
+  await $.ui.scroll({ to: { key: `vl-${row}-opt-0` }, block: 'nearest' }).catch(() => undefined)
 }
 
 /** An option of the open line picked: the verb runs on the message, outside the press. */
@@ -983,6 +998,61 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
     label, scope: { row: rec.row, mark: { kind: m.kind, ref: m.ref, label } },
     context: `The person asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`lean resolve ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
   }
+}
+
+/** A key pressed while the prompt is empty: the box as it should stand when the shell took the key, or null to let
+ *  it through. */
+async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; meta?: true }; text: string; cursor: number; inputText: string }): Promise<{ text: string; cursor: number } | null> {
+  const key = e.key
+  if (!key || key.ctrl || key.meta || e.text !== '') { keyOpened = null; return null }
+  const k = key.key
+  const now = await $.clock.now()
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+  const verbs = await rowVerbs($)
+  const consume = { text: e.text, cursor: e.cursor }
+  if (k === ']' || k === '[') {
+    keyOpened = null
+    await $.state.set(PICK, null)
+    await stepMark($, k === ']' ? 1 : -1)
+    return consume
+  }
+  if (k === '0' || k === 'backspace') {
+    keyOpened = null
+    if (pick) { await $.state.set(PICK, null); return consume }
+    if (tray) { await $.state.set(TRAY, trayBack(tray) as Tray | null); return consume }
+    return null
+  }
+  if (/^[1-9]$/.test(k)) {
+    keyOpened = null
+    if (pick) return (await pickOption($, Number(k) - 1)) ? consume : null
+    if (tray) {
+      const frame = trayTop(tray) as TrayFrame | null
+      const ck = frame ? await cardKey($, frame) : ''
+      const drawn = frame ? [...cards.entries()].find(([c]) => c.startsWith(`${ck}|`))?.[1] : null
+      const link = drawn?.links?.[Number(k) - 1]
+      if (link && (await openLink($, link.id))) return consume
+    }
+    return null
+  }
+  // with the tray open the prompt is the tray's question: letters are typed
+  if (!tray && k.length === 1 && verbs.some(v => v.key === k)) {
+    const row = await actingRow($)
+    if (row) {
+      await pressRowVerb($, row, k)
+      keyOpened = { key: k, at: now }
+      return consume
+    }
+  }
+  if (pick && k.length === 1) {
+    await $.state.set(PICK, null)
+    const opened = keyOpened
+    keyOpened = null
+    // typed straight after the verb key: the letter was the start of a word
+    if (opened && now - opened.at < 700) return { text: `${opened.key}${e.inputText}`, cursor: opened.key.length + e.inputText.length }
+  }
+  keyOpened = null
+  return null
 }
 
 // ------------------------------------------------------------------------------------------------ drawing
@@ -1420,6 +1490,7 @@ export const registerShell: Register = on => {
         } else if (e.door === 'response' && msg.type === 'assistant' && text.trim()) {
           // one of Claude's messages: its record, with the marks in its words and each sparkline's values
           const made = newRecord({ row, session: String(await $.session.id()), text, at }) as MsgRecord
+          made.uuid = String(stored.uuid)
           made.objects = (((await $.state.get({ ...UNDER, id: row })).value ?? []) as Placed[]).map(x => x.id)
           const rec = await withSparkValues($, made)
           const rows = ((await $.state.get(MSGROWS)).value ?? []) as string[]
@@ -1474,7 +1545,8 @@ export const registerShell: Register = on => {
       const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at)))
       return Box({ flexDirection: 'column', children: [own, ...drawn] })
     }
-    const rec = await drawnRecord($, at, e.props.text)
+    const drawnRec = await drawnRecord($, at, e.props.text)
+    const rec: MsgRecord = drawnRec.uuid ? drawnRec : { ...drawnRec, uuid: e.requestId }
     const answer = (await $.state.get(ANSWER)).value
     const final = !!rec.final || answer === at
     if (!rec.marks.length && !final && !list.length) return next(e)
@@ -1523,7 +1595,7 @@ export const registerShell: Register = on => {
     const card = await cardNow($, frame, w)
     const depth = tray?.stack.length ?? 1
     const links = card?.links ?? []
-    const keys = ['type + ↵ ask', '] next mark', depth > 1 ? '⌫ back' : '⌫ close', ...(links.length ? [`${links.length > 1 ? `1–${links.length}` : '1'} open`] : [])].join(' · ')
+    const keys = ['type + ↵ ask', '] next mark', ...(links.length ? [`${links.length > 1 ? `1–${links.length}` : '1'} open`] : []), depth > 1 ? '0 back' : '0 close'].join(' · ')
     return trayEl(els, {
       key: 'tray', w, body: 9, theme, kind, title: card?.title && frame.row == null ? card.title : title, right: card?.right || (kind === 'gloss' ? 'gloss' : 'cite'),
       grids: card?.grids ?? null, problem: card?.problem ?? null, links, depth, keys,
@@ -1532,64 +1604,15 @@ export const registerShell: Register = on => {
   })
 
   // keys while the prompt is empty: v, s and a open their line under the message the keys act on; ] and [ move through
-  // the marks, opening the tray; a digit picks in the open line or opens a mark inside the card; ⌫ closes the line or
-  // goes back one card. Claude Code hands a plugin only the keys that edit the prompt, so tab, ↵ and esc stay its own.
-  // A verb key that began a word being typed (`visualize …`, `so …`) gives its letter back to the prompt.
+  // the marks, opening the tray; a digit picks in the open line or opens a mark inside the card; 0 closes the line or
+  // goes back one card. Claude Code hands a plugin only the keys that edit the prompt (tab, ↵, esc and a ⌫ with nothing
+  // to delete stay its own), so these are the keys. A verb key that began a word being typed (`visualize …`, `so …`)
+  // gives its letter back to the prompt. Keys are read one at a time, in the order pressed.
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
-    try {
-      const key = e.key
-      if (!key || key.ctrl || key.meta || e.text !== '') { keyOpened = null; return next(e) }
-      const k = key.key
-      const now = await $.clock.now()
-      const tray = (await $.state.get(TRAY)).value as Tray | null
-      const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-      const verbs = await rowVerbs($)
-      const consume = { text: e.text, cursor: e.cursor }
-      if (k === ']' || k === '[') {
-        keyOpened = null
-        await $.state.set(PICK, null)
-        await stepMark($, k === ']' ? 1 : -1)
-        return consume
-      }
-      if (k === 'backspace') {
-        keyOpened = null
-        if (pick) { await $.state.set(PICK, null); return consume }
-        if (tray) { await $.state.set(TRAY, trayBack(tray) as Tray | null); return consume }
-        return next(e)
-      }
-      if (/^[1-9]$/.test(k)) {
-        keyOpened = null
-        if (pick) return (await pickOption($, Number(k) - 1)) ? consume : next(e)
-        if (tray) {
-          const frame = trayTop(tray) as TrayFrame | null
-          const ck = frame ? await cardKey($, frame) : ''
-          const drawn = frame ? [...cards.entries()].find(([c]) => c.startsWith(`${ck}|`))?.[1] : null
-          const link = drawn?.links?.[Number(k) - 1]
-          if (link && (await openLink($, link.id))) return consume
-        }
-        return next(e)
-      }
-      // with the tray open the prompt is the tray's question: letters are typed
-      if (!tray && k.length === 1 && verbs.some(v => v.key === k)) {
-        const row = await actingRow($)
-        if (row) {
-          await pressRowVerb($, row, k)
-          keyOpened = { key: k, at: now }
-          return consume
-        }
-      }
-      if (pick && k.length === 1) {
-        await $.state.set(PICK, null)
-        const opened = keyOpened
-        keyOpened = null
-        // typed straight after the verb key: the letter was the start of a word
-        if (opened && now - opened.at < 700) return { text: `${opened.key}${e.inputText}`, cursor: opened.key.length + e.inputText.length }
-      }
-      keyOpened = null
-    } catch {
-      // a key the shell cannot read goes to the prompt
-    }
-    return next(e)
+    const mine = keyChain.then(() => emptyPromptKey($, e)).catch(() => null)
+    keyChain = mine
+    const r = await mine
+    return r ?? next(e)
   }).catch(($, e, next) => next(e))
 
   // a turn whose last word was a tool call: its objects under that call's row

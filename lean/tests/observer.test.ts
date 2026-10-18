@@ -324,11 +324,11 @@ test('a gloss is placed by its term in the answer, with a teal fill; its card sa
   expect(card).toContain('fixture scope')
   expect(card).toContain('gloss')
   expect(card).toContain('1 open')
-  // 1 opens the citation in it, over it; ⌫ comes back
+  // 1 opens the citation in it, over it; 0 comes back
   await ($ as Any).prompt.edit(key('1'))
   expect(textOf(await $.ui.render(BAND2))).toContain('conftest.py:14')
-  expect(textOf(await $.ui.render(BAND2))).toContain('⌫ back')
-  await ($ as Any).prompt.edit(key('backspace'))
+  expect(textOf(await $.ui.render(BAND2))).toContain('0 back')
+  await ($ as Any).prompt.edit(key('0'))
   expect(textOf(await $.ui.render(BAND2))).toContain('fixture scope')
 })
 

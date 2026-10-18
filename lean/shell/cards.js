@@ -42,7 +42,7 @@ export function linksIn(md) {
 
 /** Card words with each nested mark as a toolkit link to its cite (`[words¹](#n1)`), other markup escaped. */
 export function linkedText(md, links) {
-  const esc = s => String(s).replace(/[\\{}[\]*]/g, c => '\\' + c)
+  const esc = s => String(s).replace(/`([^`\n]+)`/g, '$1').replace(/[\\{}[\]*]/g, c => '\\' + c)
   let out = ''
   let i = 0
   const s = String(md || '')
@@ -82,8 +82,12 @@ function columnOf(query, ref) {
   } else if (frag && !col) col = frag
   const cols = table.length ? Object.keys(table[0]).filter(k => !k.startsWith('_')) : []
   if (!col) col = cols.find(c => typeof table[0]?.[c] === 'number' && !keys.includes(c)) || cols[cols.length - 1] || null
-  const keyCols = keys.length ? keys.filter(k => cols.includes(k)) : cols.filter(c => c !== col).slice(0, 1)
-  const labelOf = r => keyCols.map(k => String(r[k])).join(' · ') || ''
+  // the words a row is named by: its key columns, unless the key is only a row number (a frame's index), then its
+  // first column of words
+  const named = keys.filter(k => cols.includes(k) && k !== 'index' && !(table.length && table.every(r => Number.isInteger(r[k])) && k.endsWith('index')))
+  const words = cols.filter(c => c !== col && table.some(r => typeof r[c] === 'string'))
+  const keyCols = named.length ? named : words.length ? words.slice(0, 1) : cols.filter(c => c !== col).slice(0, 1)
+  const labelOf = r => keyCols.map(k => (r[k] === '' || r[k] == null ? '(none)' : String(r[k]))).join(' · ') || ''
   return { table, col, hot, keyCols, labelOf }
 }
 
@@ -104,7 +108,9 @@ const parts = []
 if (data.rows.length <= data.room) {
   parts.push(k.bars(data.rows.map(r => ({ label: r.label, value: r.value, tone: 'accent' })), { labelW: Math.min(data.labelW, Math.floor(k.w * 0.4)) }))
 } else {
-  parts.push(k.plot([{ name: data.col, values: data.rows.map(r => r.value) }], { h: Math.max(3, data.room - 1), legend: false }))
+  const n = data.rows.length
+  const ticks = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i).map(i => ({ at: i, label: data.rows[i].label }))
+  parts.push(k.plot([{ name: data.col, values: data.rows.map(r => r.value) }], { h: Math.max(3, data.room - 1), legend: false, x: { ticks } }))
   parts.push(k.text('{dim:' + k.escape(data.first) + '}', { wrap: false }))
 }
 parts.push(k.text(data.from, { wrap: false }))

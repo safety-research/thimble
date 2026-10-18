@@ -362,7 +362,7 @@ test("each row is written to the messages folder: an index line per row, and a r
   expect(MARKED.slice(rec.marks[0].start, rec.marks[0].end)).toBe('[6,543 saves](q1#day=2026-06-18@n)')
 })
 
-test('keys of an empty prompt: ] opens the tray on the next mark and ⌫ goes back; v opens its line, and a letter typed straight after gives v back to the prompt', async ($, on) => {
+test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back; v opens its line, and a letter typed straight after gives v back to the prompt', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
@@ -375,8 +375,8 @@ test('keys of an empty prompt: ] opens the tray on the next mark and ⌫ goes ba
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
   // with the tray open the prompt is its question: letters are typed
   expect(await ($ as Any).prompt.edit(edit('w'))).toEqual({ text: 'w', cursor: 1 })
-  // ⌫ on an empty prompt closes the tray
-  expect(await ($ as Any).prompt.edit(edit('backspace'))).toEqual({ text: '', cursor: 0 })
+  // 0 on an empty prompt closes the tray
+  expect(await ($ as Any).prompt.edit(edit('0'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toBe('the reply')
   // v opens its line under the answer; i typed straight after was the start of a word
   expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
