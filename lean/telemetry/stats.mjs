@@ -65,16 +65,27 @@ export function report(events, { plain = null, file = '' } = {}) {
   }
   for (const r of side) {
     const blocked = r.turn ? '-' : `${r.blocked} of ${r.calls}`
-    line(r.feature, r, `${blocked}${r.failed ? ` · ${r.failed} failed` : ''}${r.prompts?.size ? ` · ${[...r.prompts].join(', ')}` : ''}`)
-    totalW += r.w
+    line(r.feature, r, r.shadow ? `measured only, not in all · ${r.shadow}` : `${blocked}${r.failed ? ` · ${r.failed} failed` : ''}${r.prompts?.size ? ` · ${[...r.prompts].join(', ')}` : ''}`)
+    if (!r.shadow) totalW += r.w
     if (r.lenses) {
       const ls = Object.entries(r.lenses).sort((a, b) => b[1].w - a[1].w)
       for (const [name, L] of ls) lines.push(`${pad(`  lens ${name}`, 30)}${lpad('', 6)}${lpad(`${k(L.w)} (${Math.round((100 * L.w) / (r.w || 1))}%)`, 25)}${lpad(sec(L.ms), 9)}  ${L.prompts?.size ? [...L.prompts].join(', ') : ''}`)
     }
   }
   lines.push(`${pad('all', 30)}${lpad('', 6)}${lpad(k(totalW), 25)}${lpad(sec(totalMs), 9)}  (time: the main turns; side calls run after them)`)
+  // per main turn: all of thimble's cost, and the observer's pass (its share of all)
+  const turnsN = main.reduce((n, r) => n + (r.calls || 0), 0)
+  const pass = side.find(r => r.feature === 'observer')
+  if (turnsN && totalW) lines.push(`${pad('per main turn', 30)}${k(totalW / turnsN)} in all${pass ? ` · the pass ${k(pass.w / turnsN)} (${Math.round((100 * pass.w) / totalW)}% of all)` : ''}`)
+  const L = s.looks
+  if (L && (L.looks || L.skipped || L.pressed_lit || L.pressed_dim)) {
+    const lit = L.looks ? `v lit on ${L.v_lit} of ${L.looks} look${L.looks === 1 ? '' : 's'}` : 'no look ran'
+    const pressed = L.v_lit || L.pressed_lit || L.pressed_dim ? ` · v pressed ${L.pressed_lit} of ${L.v_lit} times lit${L.pressed_dim ? `, ${L.pressed_dim} while dim` : ''}` : ''
+    lines.push(`${pad('looks', 30)}${lit}${L.skipped ? ` (${L.skipped} skipped)` : ''}${pressed}`)
+    for (const [spec, x] of Object.entries(L.shadow || {})) lines.push(`${pad('looks (shadow)', 30)}v lit on ${x.v_lit} of ${x.looks} · ${spec}`)
+  }
   if (s.reads.length) lines.push(`read on demand: ${s.reads.map(r => `${r.prompt || r.feature} (${r.via})`).join(', ')}`)
-  const out = { session, features: rows.map(r => ({ ...r, prompts: [...(r.prompts || [])], lenses: r.lenses ? Object.fromEntries(Object.entries(r.lenses).map(([n, L]) => [n, { ...L, prompts: [...(L.prompts || [])] }])) : null })), total_w: totalW, main_ms: totalMs }
+  const out = { session, looks: s.looks, features: rows.map(r => ({ ...r, prompts: [...(r.prompts || [])], lenses: r.lenses ? Object.fromEntries(Object.entries(r.lenses).map(([n, L]) => [n, { ...L, prompts: [...(L.prompts || [])] }])) : null })), total_w: totalW, main_ms: totalMs }
   if (plain) {
     const pt = plainTurns(plain)
     const mainTurns = s.turns.filter(t => !t.agent)

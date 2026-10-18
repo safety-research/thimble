@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { parseAnswer } from '../../../observer/evidence.js'
-import { applyTurn, clusterFor, madeOrder, meaningOf, tagOf, timeline, emptyStore, findQuote, grownClusters, likeness, locate, mergeOrientation, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, sentenceAt, shortRef, sourcesNear, viewOf } from '../claims.js'
+import { applyTurn, basedOnFrom, claimless, clusterFor, madeOrder, meaningOf, nearLines, tagOf, timeline, emptyStore, findQuote, grownClusters, likeness, locate, mergeOrientation, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, sentenceAt, shortRef, sourcesNear, viewOf } from '../claims.js'
 import { cmdCheck, cmdSave, showLines } from '../cli.mjs'
 import { cost, estimate, looksLikeTranscript, runsOf } from '../estimate.mjs'
 import { askFor, loadStore, run, storeFile } from '../run.mjs'
@@ -45,7 +45,7 @@ function turn1() {
 
 // ------------------------------------------------------------------------------------------------ parsing
 
-test('the fork\'s claims are read as given, held to what the store needs: a claim or a "same", a quote, who said it', () => {
+test('the fork\'s claims are read as given, held to what the store needs: a claim (its words, else its quote) or a "same", a quote, who said it', () => {
   const got = parseClaims([
     { claim: '  June 18 had   6,543 saves ', quote: 'June 18 had 6,543 saves', kind: 'Event', cluster: 'k1' },
     { same: 'c2', quote: 'the edits were biased', by: 'person' },
@@ -58,6 +58,7 @@ test('the fork\'s claims are read as given, held to what the store needs: a clai
     ['June 18 had 6,543 saves', 'claude', 'event', null, null],
     ['', 'person', 'claim', 'c2', null],
     ['A correction', 'person', 'judgment', null, 'c1'],
+    ['No claim and no same', 'claude', 'claim', null, null],
   ])
   // the observer's answer keeps the claims and the clusters' renames for applyTurn
   const a = parseAnswer('{"notes": [], "line": null, "claims": [{"claim": "x", "quote": "y"}], "clusters": [{"id": "k1", "name": "z"}]}')
@@ -433,4 +434,40 @@ test('the session in time: one moment per message that first said claims, in the
   assert.equal(order.length, store.claims.length)
   assert.equal(tagOf('finding'), 'fact')
   assert.equal(tagOf('judgment call'), 'interp')
+})
+
+test('lens-claims v2: a new claim with no "claim" of its own is named by its quote; a claim said again keeps none', () => {
+  const [a, b] = parseClaims([{ quote: 'bots made only 4% of the edits', kind: 'finding' }, { same: 'c2', quote: 'the edits were biased' }])
+  assert.equal(a.text, 'Bots made only 4% of the edits')
+  assert.equal(b.text, '')
+  assert.equal(b.same, 'c2')
+})
+
+test('a turn whose words state nothing that could be true or false is claimless; a number, a citation, a cause or an "all" is not', () => {
+  assert.equal(claimless('Thanks! Can you look at the folder next?'), true)
+  assert.equal(claimless('June 18 had 6,543 saves.'), false)
+  assert.equal(claimless('See [this row](revisions.jsonl#L4).'), false)
+  assert.equal(claimless('The edits were biased because one editor drove them.'), false)
+  assert.equal(claimless('All of them stopped.'), false)
+})
+
+test('the claims so far that bear on a turn: all of a small store; of a long one, those that share two words or a number, and the latest', () => {
+  const store = emptyStore('s')
+  for (let i = 1; i <= 40; i++) store.claims.push({ id: `c${i}`, text: i === 3 ? 'AgentRelent made 316 edits on June 18' : `Claim number ${i} about wiki pages`, cluster: 'k1', said: [{ row: 'r' }] })
+  store.clusters.push({ id: 'k1', name: 'who edited' })
+  const near = nearLines(store, 'Was AgentRelent really behind the 316 edits?')
+  assert.match(near.claims, /- c3 · k1 · AgentRelent made 316 edits on June 18/)
+  assert.match(near.claims, /- c40 · /)
+  assert.doesNotMatch(near.claims, /- c10 · /)
+  assert.ok(near.left >= 20)
+  assert.match(near.clusters, /k1 · who edited/)
+  const small = { ...store, claims: store.claims.slice(0, 10) }
+  assert.equal(nearLines(small, 'nothing alike').left, 0)
+})
+
+test('"based on" from the rows behind a citation: the files, the group the value is of, and how many rows', () => {
+  assert.equal(basedOnFrom('q4#phase=3%20Jun18@n', { rows: ['revisions.jsonl#L28-31,41'], count: 6543 }), 'revisions.jsonl, phase 3 Jun18 · 6,543 rows')
+  assert.equal(basedOnFrom('revisions.jsonl#L4410', { rows: ['revisions.jsonl#L4410'], count: 1 }), 'revisions.jsonl, line 4410 · 1 row')
+  assert.equal(basedOnFrom('q5@total', { rows: ['a/b.jsonl#L1-3', 'c.jsonl#L2', 'd.jsonl#L1', 'e.jsonl#L1'], count: 4 }), 'b.jsonl, c.jsonl and 2 more · 4 rows')
+  assert.equal(basedOnFrom('q5@total', { rows: [], count: 0 }), null)
 })

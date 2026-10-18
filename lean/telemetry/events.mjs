@@ -16,6 +16,11 @@
 //        `hook_ms`: the time thimble's own hooks took inside a main turn, which is the latency thimble adds to it.
 //   {kind: 'prompts', active: {feature: version}, problems}              the versions in use, once per session
 //   {kind: 'prompt', feature, prompt, via}                               a text read on demand (`lean guide cards`)
+//   {kind: 'look', turn, lit, v, observer, prompts, skip?, shadow?}      one look of the observer after a turn: the verbs
+//        it lit (`v`: its note and proposals, or null), or why it skipped. With `shadow` (LEAN_PROMPTS_SHADOW), what
+//        a second pass with other versions would have lit; its call line carries the same `shadow`.
+//   {kind: 'press', verb, row, lit}                                       the person pressed a verb under a message,
+//        `lit`: whether it was lit then
 
 /** Price weights of a model call's tokens: input 1, cache write 1.25, cache read 0.1, output 5. */
 export const PRICE = { input_tokens: 1, cache_creation_input_tokens: 1.25, cache_read_input_tokens: 0.1, output_tokens: 5 }
@@ -75,12 +80,18 @@ export function summarize(events) {
   const turns = []
   let prompts = null
   const reads = []
+  const looks = []
+  const presses = []
   const row = name => (features[name] ??= { feature: name, calls: 0, w: 0, w_in: 0, w_out: 0, ms: 0, blocked: 0, failed: 0, usage: {}, prompts: new Set(), lenses: null })
   for (const e of events) {
     if (e.kind === 'prompts') prompts = e
     else if (e.kind === 'prompt') reads.push(e)
+    else if (e.kind === 'look') looks.push(e)
+    else if (e.kind === 'press') presses.push(e)
     else if (e.kind === 'call') {
-      const r = row(e.feature || 'other')
+      // a shadow pass (the same turn with other versions, measured only) is a row of its own
+      const r = row(e.shadow ? `${e.feature || 'other'} (shadow)` : e.feature || 'other')
+      if (e.shadow) r.shadow = String(e.shadow)
       const w = weighted(e.usage)
       r.calls += 1
       r.w += w.total
@@ -127,7 +138,24 @@ export function summarize(events) {
     if (!t.agent) r.hook_ms = (r.hook_ms || 0) + (t.hook_ms || 0)
     add(r.usage, t.usage)
   }
-  return { features, turns, prompts, reads }
+  return { features, turns, prompts, reads, looks: looksOf(looks, presses) }
+}
+
+/**
+ * How often the observer lit v, and whether the person pressed it: looks that ran (not skipped), the ones that lit v,
+ * and the presses of v that came when it was lit or dim; a shadow pass's looks counted apart, per spec.
+ */
+export function looksOf(looks, presses = []) {
+  const count = list => ({ looks: list.filter(l => !l.skip).length, skipped: list.filter(l => l.skip).length, v_lit: list.filter(l => !l.skip && (l.v || (Array.isArray(l.lit) && l.lit.includes('v')))).length })
+  const shadow = {}
+  for (const l of looks.filter(x => x.shadow)) (shadow[l.shadow] ??= []).push(l)
+  const v = presses.filter(p => p.verb === 'v')
+  return {
+    ...count(looks.filter(l => !l.shadow)),
+    pressed_lit: v.filter(p => p.lit).length,
+    pressed_dim: v.filter(p => !p.lit).length,
+    shadow: Object.fromEntries(Object.entries(shadow).map(([k, list]) => [k, count(list)])),
+  }
 }
 
 /**

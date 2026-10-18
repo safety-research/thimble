@@ -15,7 +15,7 @@ export const FEATURES = {
   observer: {
     about: "the post-turn pass: its frame, which holds the shared principles and composes the enabled lenses",
     reads: 'observer/observer.ts, after each turn of work',
-    default: 'v2',
+    default: 'v2-low',
     versions: {
       v1: { about: 'one prompt in a fork of the whole session, as before lenses', mode: 'fork' },
       v2: { about: 'the frame for the lenses: one call over the new turn and a digest of the state', mode: 'lenses' },
@@ -28,7 +28,7 @@ export const FEATURES = {
   'lens-notes': { about: 'lens: notes to Claude', reads: 'the pass', default: 'v1', optional: true },
   'lens-line': { about: 'lens: the rare line above the prompt', reads: 'the pass', default: 'v1', optional: true },
   'lens-actions': {
-    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v2', optional: true,
+    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v3', optional: true,
     versions: { v1: { about: "observer:v1's words on lit verbs" }, v2: { about: 'v lit with a named card when a claim would be clearer seen than read' }, v3: { about: "v2 from the principles of what is worth the person's attention: dim by default, lit only for a claim no card shows" } },
   },
   'lens-squeeze': { about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v1', optional: true },
@@ -37,7 +37,7 @@ export const FEATURES = {
     versions: { v1: { about: "observer:v1's words on glosses" }, v2: { about: 'marks on terms of art and coined names a claim turns on' } },
   },
   'lens-claims': {
-    about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v1', optional: true,
+    about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v2', optional: true,
     versions: { v1: { about: 'every part of each claim from the pass' }, v2: { about: "v1, terse: the quote names the claim, \"based on\" comes from the cited rows, the digest holds the claims that bear on the turn, a turn with no claims gives none" } },
   },
   squeeze: {

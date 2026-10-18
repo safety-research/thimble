@@ -108,6 +108,38 @@ export async function promptText($: Engine, feature: string, o: { skip?: (part: 
   return { text: R.texts.get(key)!, version: a.version, id: key, off: false }
 }
 
+/**
+ * The shadow A/B: LEAN_PROMPTS_SHADOW names other versions (feature:version pairs, as LEAN_PROMPTS does) that the
+ * observer runs a second pass with, on the same turn, after the first: recorded in the events with `shadow`, never shown
+ * and never merged, so `lean stats` compares two versions on the same context. Returns the versions the shadow pass
+ * uses where they differ from the active ones ({feature: version}), and the spec as given; null when none is set.
+ */
+export async function shadowVersions($: Engine): Promise<{ spec: string; versions: Record<string, string>; problems: string[] } | null> {
+  const spec = String((await $.env.get('LEAN_PROMPTS_SHADOW')) || '').trim()
+  if (!spec) return null
+  const { idx, active } = await registry($)
+  const c = choose(idx, { env: spec })
+  const versions: Record<string, string> = {}
+  for (const [name, a] of Object.entries(c.active as Record<string, Active>)) if (a.source !== 'default' && a.version !== active[name]?.version) versions[name] = a.version
+  return { spec, versions, problems: c.problems }
+}
+
+/** The text of one version of a feature, whatever is active (the shadow pass reads its versions with it). */
+export async function promptTextAt($: Engine, feature: string, version: string): Promise<{ text: string; version: string; id: string; off: boolean }> {
+  const { idx, active } = await registry($)
+  if (active[feature]?.version === version) return promptText($, feature)
+  const id = idOf(feature, version)
+  if (version === 'off') return { text: '', version, id, off: true }
+  const v = idx[feature]?.versions?.[version]
+  if (!v?.file) throw new Error(`no prompt version ${id}`)
+  const key = id
+  if (!R.texts.has(key)) {
+    const raw = String(await $.fs.read(`${$.plugin.root.replace(/\/+$/, '')}/${v.file}`))
+    R.texts.set(key, v.file.endsWith('SKILL.md') ? bodyOf(raw) : raw)
+  }
+  return { text: R.texts.get(key)!, version, id, off: false }
+}
+
 /** The ids of the versions in use for some features: {feature: 'feature:version'}. */
 export async function promptIds($: Engine, features: string[]): Promise<Record<string, string>> {
   const { active } = await registry($)

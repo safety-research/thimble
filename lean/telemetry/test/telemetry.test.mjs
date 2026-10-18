@@ -116,3 +116,28 @@ test('the command finds the newest session in THIMBLE_HOME, or one by id, and sa
   assert.ok(out.features.some(f => f.feature === 'observer' && f.lenses.claims))
   assert.deepEqual(parseLines('{"a":1}\n{bad\n\n{"b":2}'), [{ a: 1 }, { b: 2 }])
 })
+
+test('lean stats counts the looks: how often v lit and how often the person pressed it; a shadow pass is its own row, outside all', () => {
+  const U2 = { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+  const events = [
+    turnLine({ feature: 'main', ms: 10000, usage: U2 }), turnLine({ feature: 'main', ms: 10000, usage: U2 }),
+    callLine({ feature: 'observer', prompt: 'observer:v2-low', usage: U2, ms: 5000 }),
+    { ...callLine({ feature: 'observer', prompt: 'observer:v2', usage: { ...U2, output_tokens: 900 }, ms: 9000 }), shadow: 'observer:v2' },
+    { kind: 'look', turn: 1, lit: ['v'], v: { note: 'saves by day', proposals: ['saves per day'] } },
+    { kind: 'look', turn: 2, lit: [] },
+    { kind: 'look', turn: 3, skip: 'no work, no decision, no drift' },
+    { kind: 'look', turn: 1, shadow: 'observer:v2', lit: ['v'], v: {} },
+    { kind: 'look', turn: 2, shadow: 'observer:v2', lit: ['v'], v: {} },
+    { kind: 'press', verb: 'v', row: 'r1', lit: true },
+    { kind: 'press', verb: 'v', row: 'r2', lit: false },
+  ]
+  const s = summarize(events)
+  assert.deepEqual(s.looks, { looks: 2, skipped: 1, v_lit: 1, pressed_lit: 1, pressed_dim: 1, shadow: { 'observer:v2': { looks: 2, skipped: 0, v_lit: 2 } } })
+  const text = report(events).lines.join('\n')
+  assert.match(text, /\nobserver \(shadow\)\s+1\s+\S+k\s+9.0s\s+measured only, not in all · observer:v2/)
+  // all: the two turns and the pass, not the shadow (2 × 2.0k + 2.0k)
+  assert.match(text, /\nall\s+6\.0k/)
+  assert.match(text, /\nper main turn\s+3\.0k in all · the pass 1\.0k \(33% of all\)/)
+  assert.match(text, /\nlooks\s+v lit on 1 of 2 looks \(1 skipped\) · v pressed 1 of 1 times lit, 1 while dim/)
+  assert.match(text, /\nlooks \(shadow\)\s+v lit on 2 of 2 · observer:v2/)
+})

@@ -76,8 +76,9 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
     const out = typeof o.fork === 'function' ? o.fork() : o.fork ?? { notes: [], line: null, settled: false, hints: {} }
     return { value: { isAnswered: true, text: JSON.stringify(out), usage: USAGE } }
   }
-  on('model.complete', (_$: unknown, e: { prompt: string; system?: string }) => {
-    if (e.system) return pass(`${e.system}\n${e.prompt}`)
+  const efforts: (string | null)[] = []
+  on('model.complete', (_$: unknown, e: { prompt: string; system?: string; effort?: string }) => {
+    if (e.system) { efforts.push(e.effort ?? null); return pass(`${e.system}\n${e.prompt}`) }
     questions.push(String(e.prompt))
     return { value: { isAnswered: true, text: JSON.stringify(o.question ?? { parts: [], drift: null, decision: null }), usage: USAGE } }
   })
@@ -110,7 +111,7 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
   })
   const toasts: string[] = []
   on('ui.toast', (_$: unknown, e: unknown) => { toasts.push(typeof e === 'string' ? e : String((e as { text?: string; message?: string })?.text ?? (e as { message?: string })?.message ?? JSON.stringify(e))); return { value: undefined } })
-  return { files, runs, forks, questions, submitted, filled, at, clock, events, toasts }
+  return { files, runs, forks, questions, submitted, filled, at, clock, events, toasts, efforts }
 }
 
 // every string a drawn tree holds, in order
@@ -380,18 +381,25 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   const file = '/home/t/.thimble/lean/events/s-1.jsonl'
   expect(w.events.every(e => e.file === file)).toBe(true)
   const prompts = w.events.find(e => e.kind === 'prompts')!
-  expect((prompts.active as Json).observer).toBe('v2')
+  expect((prompts.active as Json).observer).toBe('v2-low')
   expect((prompts.active as Json)['lens-explain']).toBe('v2')
   const q = w.events.find(e => e.kind === 'call' && e.feature === 'question')!
   expect(q.prompt).toBe('question:v1')
   expect(q.blocked).toBe(false)
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
-  expect(pass.prompt).toBe('observer:v2')
+  expect(pass.prompt).toBe('observer:v2-low')
+  // the default pass runs at low effort: the same frame, less thinking (measured offline on 17 recorded looks: -28%)
+  expect(pass.effort).toBe('low')
+  expect(w.efforts).toEqual(['low'])
   expect(pass.blocked).toBe(false)
   expect(pass.mode).toBe('lenses')
   expect(pass.usage).toEqual(USAGE)
   expect(Object.keys(pass.lenses as Json)).toEqual(['notes', 'line', 'actions', 'squeeze', 'explain', 'claims'])
-  expect((pass.lens_prompts as Json).actions).toBe('lens-actions:v2')
+  expect((pass.lens_prompts as Json).actions).toBe('lens-actions:v3')
+  // one look line in the events: what it lit
+  const look = w.events.find(e => e.kind === 'look')!
+  expect(look.lit).toEqual(['v', 's'].filter(k => (look.lit as string[]).includes(k)))
+  expect((look.v as Json).proposals).toEqual(['saves per day, June 18 marked'])
   expect(((pass.lenses as Json).notes as Json).out).toBeGreaterThan(0)
   const main = w.events.find(e => e.kind === 'turn')!
   expect(main.feature).toBe('main')
@@ -401,6 +409,24 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   await $.prompt.submit({ text: 'next', origin: { kind: 'composer' } } as never)
   expect(w.submitted.at(-1)!.context.join('\n')).toContain('Say the 6,543 counts reverts.')
   expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`]!).verbs.v.proposals).toEqual(['saves per day, June 18 marked'])
+})
+
+test('the shadow A/B: LEAN_PROMPTS_SHADOW runs the same turn again with other versions, recorded apart and never merged', async ($, on) => {
+  const w = world(on, { env: { LEAN_PROMPTS_SHADOW: 'observer:v2,lens-actions:v2' }, fork: { notes: [{ note: 'Say the 6,543 counts reverts.' }], line: null, settled: false, verbs: { v: { note: 'saves by day', proposals: ['saves per day, June 18 marked'] } }, glosses: [], claims: [] } })
+  await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
+  await w.clock.settle()
+  await w.clock.advance(100)
+  await w.clock.settle()
+  // two passes on the same turn: the active versions at low effort, then the shadow's at the model's own effort
+  expect(w.forks.length).toBe(2)
+  expect(w.efforts).toEqual(['low', null])
+  const calls = w.events.filter(e => e.kind === 'call' && e.feature === 'observer')
+  expect(calls.map(c => [c.prompt, c.shadow ?? null])).toEqual([['observer:v2-low', null], ['observer:v2', 'observer:v2,lens-actions:v2']])
+  expect((calls[1]!.lens_prompts as Json).actions).toBe('lens-actions:v2')
+  expect(w.events.filter(e => e.kind === 'look').map(e => String(e.shadow ?? '')).sort()).toEqual(['', 'observer:v2,lens-actions:v2'])
+  // the shadow's note is never merged: Claude gets the note once
+  await $.prompt.submit({ text: 'next', origin: { kind: 'composer' } } as never)
+  expect(w.submitted.at(-1)!.context.join('\n').split('Say the 6,543 counts reverts.').length).toBe(2)
 })
 
 test('a lens turned off is neither asked nor merged; another frame version is read in its place', async ($, on) => {
