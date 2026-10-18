@@ -619,6 +619,7 @@ export function renderSvg(drawing, opts = {}) {
       const box = boxPath(ch, gx, gy, cw, rh)
       if (box) { L.mark.push(`<path d="${box.d}" fill="none" stroke="${C(tone)}" stroke-width="${box.sw}"${box.dash ? ' stroke-dasharray="4 3"' : ''}/>`); return }
       if (ch === '●') { L.mark.push(`<circle cx="${r1(gx + cw / 2)}" cy="${r1(gy + rh / 2)}" r="3.4" fill="${C(tone)}"/>`); return }
+      if (ch === '◉') { L.mark.push(`<circle cx="${r1(gx + cw / 2)}" cy="${r1(gy + rh / 2)}" r="5" fill="${C(tone)}"/>`); return }
       if (ch === '○') { L.mark.push(`<circle cx="${r1(gx + cw / 2)}" cy="${r1(gy + rh / 2)}" r="3" fill="none" stroke="${C(tone)}"/>`); return }
       if (ch === '■') { L.mark.push(`<rect x="${r1(gx + cw / 2 - 4)}" y="${r1(gy + rh / 2 - 4)}" width="8" height="8" rx="1" fill="${C(tone)}"/>`); return }
       L.text.push(`<text x="${r1(gx + cw / 2)}" y="${r1(base(gy))}" text-anchor="middle" fill="${C(tone)}"${o && o.b ? ' font-weight="600"' : ''}>${xml(ch)}</text>`)

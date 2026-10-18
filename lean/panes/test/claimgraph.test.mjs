@@ -1,8 +1,8 @@
-// The Claims graph in cells (shell/claimgraph.js): the layout keeps each cluster an island that fills the area, no two
+// The Claims graph in cells (panes/claimgraph.js): the layout keeps each cluster an island that fills the area, no two
 // claims touch and a cluster's name touches none; at rest no line is drawn; the hovered claim shows a card of what it
 // means (at most five lines in a thin frame) and its links, a revision dashed and faint; a claim whose denominator was
 // not stated has a faint ? beside it; a replay shows the claims made so far, the newest marked with their links.
-//   node --test lean/shell/test/claimgraph.test.mjs
+//   node --test lean/panes/test/claimgraph.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { applyTurn, emptyStore, viewOf } from '../../verbs/claims/claims.js'

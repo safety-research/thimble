@@ -17,7 +17,7 @@
 //              on a page comes back as one line: an `ask` goes to Claude as a prompt that carries its scope, a `verb`
 //              presses that verb on the message's card.
 //   claims     the session's claims (thimble/claims/<session>.json), which the observer's look adds each turn's to:
-//              c opens the Claims pane, focused (shell/claimsview.ts): the clusters with their claims as a graph; the
+//              c opens the Claims pane, focused (panes/claims.js, a program on the card runtime): the clusters with their claims as a graph; the
 //              claim the ring is on (arrow keys, or a click) shows what it means and its links; r replays the graph
 //              in the order the claims were made.
 //   resume     where each object is drawn is kept per session in $THIMBLE_HOME/lean/shown/<session>.json, so
@@ -46,10 +46,10 @@ import { markColors, messageEl, trayEl, verbColor, verbLineEl } from './view'
 import type { RowVerb } from './view'
 import { afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, chipFromPrompt, chipsEl, fromBrowser as sqFromBrowser, pressChip, revealedOf, seeView, setLevels as sqSetLevels, sLit, squeezeHint, squeezeKey, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { chipsOf as sqChips, isOriginal as sqIsOriginal, revealCut } from '../verbs/squeeze/chips.mjs'
-import { HEAD_ROWS, claimKey, claimOfKey, claimsHint, claimsPaneEl } from './claimsview'
-import type { Replay } from './claimsview'
-import { layout } from './claimgraph.js'
-import { emptyStore, madeOrder, readStore, viewOf } from '../verbs/claims/claims.js'
+import { HEAD_ROWS } from '../panes/claims.js'
+import { barText } from '../panes/host.js'
+import { paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneState, setTheme } from './panes'
+import { emptyStore, readStore } from '../verbs/claims/claims.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1426,108 +1426,43 @@ function freshOf(rec: MsgRecord | null): string[] {
   return Array.isArray(c?.claims) ? c.claims.map(String) : []
 }
 
-/** The Claims pane's state: the message it was opened from, the claim the ring is on (its card shows), and a replay
- *  while one grows the graph. */
-type ClaimPane = { row: string; focus: string | null; replay: Replay | null }
-
-/** The session's claims in the order they were made (claims.js madeOrder), by the order of the index. */
-async function orderNow($: Engine, store: ClaimsStore): Promise<string[]> {
-  const order = (await msgFilesNow($)).index.map(x => String(x.row))
-  return madeOrder(store, { order })
-}
-
-/** The graph's layout, computed once per store and size. */
-let graphLayout: { key: string; lay: Any } | null = null
-function layoutFor(store: ClaimsStore, view: Any, w: number, h: number): Any {
-  const key = `${store.session}|${store.updated}|${store.claims.length}|${store.clusters.map((c: Any) => c.id + c.name).join(',')}|${w}x${h}`
-  if (graphLayout?.key === key) return graphLayout.lay
-  const lay = layout(view.flat, (view.groups as Any[]).filter(g => g.id != null), { w, h })
-  graphLayout = { key, lay }
-  return lay
-}
+/** The Claims pane is open, from the message it was opened from (its new claims are marked). What the person does in
+ *  it (the claim hovered, a replay) is the pane program's state (panes/claims.js, shell/panes.ts). */
+type ClaimPane = { row: string }
 
 /** Open the Claims pane, focused, from a message; a second c closes it. */
 async function toggleClaims($: Engine, row: string): Promise<void> {
   if ((await $.state.get(CLAIMPANE)).value) { await closeClaims($); return }
   await reloadClaims($)
-  // at rest: no claim has the ring, so every cluster reads whole and no line is drawn; ↓ puts the ring on the first
-  await $.state.set(CLAIMPANE, { row, focus: null, replay: null } as ClaimPane)
+  await $.state.set(CLAIMPANE, { row } as ClaimPane)
   // after the key that asked for it is done, so the pane takes the keyboard from the prompt
-  $.clock.after(0, () => { void openClaimsPane($, null) })
+  $.clock.after(0, () => { void openClaimsPane($) })
 }
 
-/** The pane takes the keyboard, the ring on `focus`. */
-async function openClaimsPane($: Engine, focus: string | null): Promise<void> {
+/** The pane takes the keyboard. */
+async function openClaimsPane($: Engine): Promise<void> {
   const r = await $.ui.open({ id: CPANE, title: 'Claims', focus: true, closeOnEscape: true, columns: 120 })
-  if (focus) await quietly($.ui.focus({ requestId: CPANE, key: claimKey(focus) }))
   if (r && (r as Any).isPlaced === false) $.ui.toast(`Claims: ${(r as Any).reason || 'the pane was not placed'}. Widen the terminal, then press c again.`)
 }
 
 async function closeClaims($: Engine): Promise<void> {
   await $.state.set(CLAIMPANE, null)
+  paneClosed('claims')
   await quietly($.ui.close({ id: CPANE }))
 }
 
-// ------------------------------------------------------------------------------------------------ the replay
-// r grows the graph again in the order the claims were made: a few at a time, over about three seconds, the newest
-// bold. Any key stops it and shows the whole graph.
-export const REPLAY = { ms: 3200, tick: 80 }
-let replayGen = 0
-/** How often a replay grows: about three seconds in all, at most a frame per 80 ms. */
-const replayEvery = (n: number) => Math.max(REPLAY.tick, Math.floor(REPLAY.ms / Math.max(1, n)))
-
-/** r: the replay starts from no claims (the ring comes off, so no card covers the growth). */
-async function startReplay($: Engine): Promise<void> {
-  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
-  if (!st) return
-  const order = await orderNow($, await claimsStore($))
-  if (!order.length) return
-  const gen = ++replayGen
-  await $.state.set(CLAIMPANE, { ...st, focus: null, replay: { gen, k: 0, order } })
-  $.clock.after(replayEvery(order.length), () => { void replayTick($, gen) })
-}
-
-async function replayTick($: Engine, gen: number): Promise<void> {
-  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
-  if (!st?.replay || st.replay.gen !== gen) return
-  const n = st.replay.order.length
-  const every = replayEvery(n)
-  const step = Math.max(1, Math.round((n * every) / REPLAY.ms))
-  const k = Math.min(n, st.replay.k + step)
-  // the last claims stay marked for a moment, then the graph is whole again
-  if (st.replay.k >= n) { await $.state.set(CLAIMPANE, { ...st, replay: null }); return }
-  await $.state.set(CLAIMPANE, { ...st, replay: { ...st.replay, k } })
-  $.clock.after(k >= n ? 600 : every, () => { void replayTick($, gen) })
-}
-
-/** Any key during a replay: the whole graph at once. Returns whether a replay was running. */
-async function stopReplay($: Engine): Promise<boolean> {
-  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
-  if (!st?.replay) return false
-  await $.state.set(CLAIMPANE, { ...st, replay: null })
-  return true
-}
-
-/** The Claims pane, as a drawing reads it. */
+/** The Claims pane: the claims program (panes/claims.js) on the session's store, in the room the pane has. */
 async function claimsPaneNow($: Engine, e: Any): Promise<Any> {
-  const els = $.ui.resolve(e) as Any
-  const st = ((await $.state.get(CLAIMPANE)).value as ClaimPane | null) ?? { row: '', focus: null, replay: null }
-  const store = ((await $.state.get(CLAIMS)).value as ClaimsStore | null) ?? (emptyStore(String(await $.session.id())) as ClaimsStore)
-  const rec = st.row ? await recordNow($, st.row) : null
-  const view = viewOf(store, { fresh: freshOf(rec) })
+  const st = ((await $.state.get(CLAIMPANE)).value as ClaimPane | null) ?? { row: '' }
   const w = Math.max(30, (e.props.bodyColumns ?? 120) - 1)
-  const h = Math.max(6, (e.props.scroll?.bodyRows ?? 40) - HEAD_ROWS)
-  return claimsPaneEl(els, {
-    w, h, theme, view, lay: layoutFor(store, view, w, h), focus: st.focus, replay: st.replay,
-    // a click on a claim puts the ring there, as the arrow keys do
-    onHover: (id: string) => { void $.state.set(CLAIMPANE, { ...st, focus: id, replay: null }) },
-  })
+  const h = Math.max(6 + HEAD_ROWS, e.props.scroll?.bodyRows ?? 40)
+  return paneEl($, e, 'claims', { row: st.row || '' }, { w, h })
 }
 
 /** A question asked with the ring on a claim of the Claims pane: what it carries for Claude, and the row's few words. */
 async function claimScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown> } | null> {
-  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
-  const id = st?.focus
+  if (!(await $.state.get(CLAIMPANE)).value) return null
+  const id = (await paneState($, 'claims')).hover as string | null | undefined
   if (!id) return null
   const store = await claimsStore($)
   const c = store.claims.find((x: Any) => x.id === id)
@@ -1668,8 +1603,8 @@ async function threadInFront($: Engine): Promise<string | null> {
 async function focusKeys($: Engine): Promise<string | null> {
   const d = await detailKeys($)
   if (d) return d
-  // the Claims pane's own keys (claimsview.ts)
-  if ((await $.state.get(CLAIMPANE)).value) return claimsHint()
+  // the Claims pane's own keys, as its program names them (panes/claims.js)
+  if ((await $.state.get(CLAIMPANE)).value) return barText([paneDrawing('claims')]) || 'esc close'
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (pick?.verb === 's') {
     const ui = ((await $.state.get({ ...SQZ, id: pick.row })).value ?? null) as SqzUi | null
@@ -1799,7 +1734,12 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
  *  it through. */
 async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; meta?: true }; text: string; cursor: number; inputText: string }): Promise<{ text: string; cursor: number } | null> {
   const key = e.key
-  if (!key || key.ctrl || key.meta || e.text !== '') { keyOpened = null; await stopReplay($); return null }
+  if (!key || key.ctrl || key.meta || e.text !== '') {
+    keyOpened = null
+    // typing while a replay runs: the whole graph at once (the program's any-key), and the key types
+    if (key && !key.ctrl && !key.meta && (await $.state.get(CLAIMPANE)).value && (await paneState($, 'claims')).replay) await paneFire($, 'claims', {}, { type: 'key', key: key.key })
+    return null
+  }
   // the open detail takes its own keys (detail.tsx), and a letter there types the question for the card's thread
   if (detailIsOpen()) return null
   const k = key.key
@@ -1810,18 +1750,19 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   const consume = { text: e.text, cursor: e.cursor }
   // the Claims pane open: the keys a focused pane does not take come through here (its own are the arrow keys, ↵ and
   // esc): r replays the graph, and any key stops a replay; c (the verb key, below) closes the pane
-  const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
-  if (cp) {
+  // the Claims pane open: the keys a focused pane does not take come through here (its own are the arrow keys, ↵ and
+  // esc) and go to its program (r replays, any key stops a replay); c (the verb key, below) closes the pane
+  if ((await $.state.get(CLAIMPANE)).value) {
     const opened = keyOpened
     keyOpened = null
-    if (await stopReplay($)) {
-      // a letter typed straight after r: the r was the start of a word (a question about the claim the ring is on)
-      if (opened?.key === 'r' && now - opened.at < 700 && /^\S$/.test(k)) return { text: `r${e.inputText}`, cursor: 1 + e.inputText.length }
-      return consume
+    const replaying = !!(await paneState($, 'claims')).replay
+    // a letter typed straight after r: the r was the start of a word (a question about the claim the ring is on)
+    if (replaying && opened?.key === 'r' && now - opened.at < 700 && /^\S$/.test(k)) {
+      await paneFire($, 'claims', {}, { type: 'key', key: k })
+      return { text: `r${e.inputText}`, cursor: 1 + e.inputText.length }
     }
-    if (k === 'r') {
-      await startReplay($)
-      keyOpened = { key: 'r', at: now }
+    if (k !== 'c' && (await paneFire($, 'claims', {}, { type: 'key', key: k }))) {
+      if (k === 'r' && !replaying) keyOpened = { key: 'r', at: now }
       return consume
     }
   }
@@ -2011,7 +1952,65 @@ async function verbTarget($: Engine, rest: string[]): Promise<{ ref: ObjRef | nu
 
 // ------------------------------------------------------------------------------------------------ hooks
 
+// ------------------------------------------------------------------------------------------------ what panes read and do
+// The panes (shell/panes.ts) are programs on the card runtime: these are the stores they read by name, the folder their
+// state is kept in, and the actions their programs ask for with k.do and k.want.
+
+/** The session's folder and id, where a pane's state is kept (thimble/panes/<session>/). */
+export async function paneWhere($: Engine): Promise<{ root: string | null; session: string }> {
+  return { root: await rootHere($), session: String(await $.session.id()) }
+}
+
+/** One store a pane reads: `claims`, `index` (the session's rows in order), `record` (record:<row>) and the rest. */
+export async function paneStore($: Engine, kind: string, arg: string): Promise<unknown> {
+  switch (kind) {
+    case 'claims': return claimsStore($)
+    case 'index': return (await msgFilesNow($)).index.map(x => ({ row: String(x.row), kind: x.kind }))
+    case 'record': return arg ? await recordNow($, arg) : null
+    default: return paneStoreMore($, kind, arg)
+  }
+}
+
+/** Stores the squeeze chips and the card detail read (their modules add to this). */
+async function paneStoreMore(_$: Engine, _kind: string, _arg: string): Promise<unknown> {
+  return null
+}
+
+/** What a program wants that its data does not hold (k.want): {rows: [refs]} read through the kernel. */
+export async function paneWant($: Engine, _name: string, _args: Record<string, unknown>, request: Any): Promise<unknown> {
+  const root = await rootHere($)
+  if (Array.isArray(request?.rows) && root) {
+    const refs = request.rows.filter((r: unknown) => typeof r === 'string' && isRef(r)).slice(0, 200) as string[]
+    if (!refs.length) return { records: [], count: 0 }
+    // the rows the person flips through: read once per set, kept where the detail's own reads keep them
+    await resolveRefs($, root, refs)
+    return (await $.state.get({ ...ROWS, id: `${root}|${refsKey(refs.length > 1 ? refs.slice(0, 500) : refs)}` })).value ?? null
+  }
+  return { error: 'the terminal cannot read that' }
+}
+
+/** An action a pane's program asked for (k.do). False: the terminal has none by that name. */
+export async function paneAction($: Engine, pane: string, _args: Record<string, unknown>, a: Record<string, unknown>): Promise<string | boolean | void> {
+  const name = String(a.do || '')
+  if (pane === 'claims' && name === 'close') { await closeClaims($); return }
+  if (name === 'open') {
+    // a place a program opens: a card (its detail), a message (the keys act on it now)
+    if (typeof a.object === 'string' && ID.test(a.object)) {
+      const root = await rootHere($)
+      if (root) await openDetail($, { id: a.object, v: typeof a.v === 'number' ? a.v : null, root }, typeof a.region === 'string' ? a.region : null)
+      return
+    }
+    if (typeof a.row === 'string' && (await recordNow($, a.row))) {
+      await $.state.set(SELROW, a.row)
+      return 'That message is the one the keys act on now.'
+    }
+    return '× There is nothing here to open for that.'
+  }
+  return false
+}
+
 export const registerShell: Register = (on, options) => {
+  setTheme(() => theme)
   browserFlag = (options as Any)?.browser === true
 
   // the side threads and the card detail first: their hooks sit outside the shell's, so a question for a thread and a
@@ -2506,6 +2505,7 @@ export const registerShell: Register = (on, options) => {
   on('ui.close', { id: CPANE }, async ($, e, next) => {
     try {
       await $.state.set(CLAIMPANE, null)
+      paneClosed('claims')
     } catch {
       // the pane closes whatever the shell makes of it
     }
@@ -2518,13 +2518,9 @@ export const registerShell: Register = (on, options) => {
   on('ui.focus', async ($, e, next) => {
     const r = await next(e)
     try {
-      if (e.requestId === CPANE && !r.deny) {
-        // off the claims (onto the pane's close mark): no card
-        const claim = typeof e.element === 'string' ? claimOfKey(e.element) : null
-        const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
-        if (cp && (cp.focus !== claim || cp.replay)) {
-          await $.state.set(CLAIMPANE, { ...cp, focus: claim, replay: null })
-        }
+      if (e.requestId === CPANE && !r.deny && typeof e.element === 'string' && (await $.state.get(CLAIMPANE)).value) {
+        // the ring on a claim is the program's focus event (its card shows); off the claims (the close mark), none
+        if (!(await paneFocus($, 'claims', {}, e.element)) && (await paneState($, 'claims')).hover) await paneFire($, 'claims', {}, { type: 'focus', region: null })
       }
     } catch {
       // the ring moves whatever the shell makes of it

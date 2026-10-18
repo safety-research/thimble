@@ -1,4 +1,4 @@
-// Claims in a session (verbs/claims, shell/claimsview.ts, observer.ts): the observer's one look after a turn of work
+// Claims in a session (verbs/claims, panes/claims.js on shell/panes.ts, observer.ts): the observer's one look after a turn of work
 // gives the turn's claims, each with what it means; each is placed in the message that said it, with the citations near
 // it, in the session's store (thimble/claims/<session>.json); c lights under the answer with how many are new; c from
 // the empty prompt opens the Claims pane as a graph, focused: at rest an island of dots per cluster with its name and no
@@ -8,7 +8,8 @@
 // `claude plugin test lean`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { claimsPaneEl } from '../shell/claimsview'
+import '../draw/kit.js'
+import claimsPane from '../panes/claims.js'
 
 const ROOT = '/data'
 const STORE = `${ROOT}/thimble/claims/s-1.json`
@@ -177,6 +178,13 @@ test('a later turn: a claim said again counts ×N; a correction is linked both w
 const PANE = { plugin: 'thimble-lean', component: 'Pane', surface: 'terminal', requestId: 'claims', props: { bodyColumns: 110, scroll: { bodyRows: 30 }, isFocused: true, title: 'Claims' }, viewport: { columns: 200, rows: 50, isFullscreen: true } } as never
 const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 const focus = (el: string) => ({ requestId: 'claims', element: el, origin: { kind: 'person' } }) as never
+// a claim's dot is a part of the pane's drawing: its press's key is the cells' (r|<pane>|<row>|cl-<id>)
+async function dotKey($: Any, id: string): Promise<string> {
+  const m = new RegExp(`"key":"(r\\|p-claims\\|\\d+\\|cl-${id})"`).exec(JSON.stringify(await $.ui.render(PANE)))
+  if (!m) throw new Error(`no dot for ${id}`)
+  return m[1]!
+}
+const ringOn = async ($: Any, id: string) => $.ui.focus(focus(await dotKey($, id)))
 const edges = (t: string) => /[─│╱╲╌╎]/.test(t)
 
 async function twoTurns($: Any, on: Any) {
@@ -208,7 +216,7 @@ test('c opens Claims as a graph, focused: at rest an island of dots per cluster,
 
 test('the ring on a claim: its card says what it means, its links are thin lines, the rest fades; a click moves the ring', async ($, on) => {
   const w = await twoTurns($, on)
-  await $.ui.focus(focus('cl-c2'))
+  await ringOn($, 'c2')
   const t = textOf(await $.ui.render(PANE))
   expect(t).toContain("Kestrel made 41% of June's edits, 212 of them reverts")
   expect(t).toContain("precisely   41% of the 517 edits saved in June were Kestrel's; 212 of those were reverts")
@@ -218,7 +226,7 @@ test('the ring on a claim: its card says what it means, its links are thin lines
   // a click on another claim puts the ring there: its card, with its judgment and what it does not state
   const ui = await $.ui.mount(PANE)
   await w.clock.settle()
-  await ui.press({ key: 'cl-c1' })
+  await ui.press({ key: await dotKey($, 'c1') })
   await w.clock.settle()
   const c1 = textOf(await $.ui.render(PANE))
   expect(c1).toContain("judgment    'tilt' is a reading: no side was measured")
@@ -231,7 +239,7 @@ test('the ring on a claim: its card says what it means, its links are thin lines
 
 test('r replays the graph in the order the claims were made, "turn N of M" in the head; any key stops it; / t n are not its keys', async ($, on) => {
   const w = await twoTurns($, on)
-  await $.ui.focus(focus('cl-c2'))
+  await ringOn($, 'c2')
   await ($ as Any).prompt.edit(key('r'))
   await w.clock.settle()
   // it starts from nothing, with the ring off, so no card covers the growth
@@ -284,7 +292,7 @@ test('a question asked with the ring on a claim carries it; c closes the pane', 
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   await ($ as Any).prompt.edit(key('c'))
   await w.clock.settle()
-  await $.ui.focus(focus('cl-c2'))
+  await ringOn($, 'c2')
   await $.prompt.submit({ text: 'is 41% of all June edits or of the relay edits?', origin: { kind: 'composer' } } as never)
   const ctx = w.submitted.at(-1)!.context.join('\n')
   expect(ctx).toContain('the ring on a claim of this session in the Claims pane: c2 "Kestrel made 41% of June\'s edits, 212 of them reverts"')
@@ -295,12 +303,9 @@ test('a question asked with the ring on a claim carries it; c closes the pane', 
 })
 
 test('a graph with no layout (a drawing older than its module, after a reload) says so in one line and never throws', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const el = (t: string) => (p: any) => ({ t, ...p })
-  const els = { Box: el('Box'), Text: el('Text'), Button: el('Button') }
-  const claim = { id: 'c1', cluster: 'k1', text: 'June 18 was the busiest day', n: 1, said: [] }
-  const view = { flat: [claim], groups: [{ id: 'k1', name: 'the June 18 burst', claims: [claim] }], total: 1, clusters: 1 }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const drawn = claimsPaneEl(els, { w: 80, h: 20, theme: 'dark', view, lay: undefined, focus: null, replay: null, onHover: () => undefined }) as any
-  expect(JSON.stringify(drawn)).toContain('The graph could not be laid out. Press esc, then c to open it again.')
+  // the pane's program on data with no layout: one line, under the head
+  const DK = (globalThis as Any).DrawKit
+  const d = DK.run(claimsPane.program, { total: 1, clusters: 1, claims: [{ id: 'c1', cluster: 'k1', text: 'June 18 was the busiest day', n: 1, said: [], sources: [] }], groups: [{ id: 'k1', name: 'the June 18 burst', i: 0 }], order: ['c1'], w: 80, h: 20 }, { w: 80, h: 22 })
+  expect(d.error).toBeUndefined()
+  expect(JSON.stringify(d.root)).toContain('The graph could not be laid out. Press esc, then c to open it again.')
 })

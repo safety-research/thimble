@@ -39,7 +39,7 @@ export function runProgram(object, opts = {}) {
   context.__program = String(object && object.program != null ? object.program : '')
   context.__data = JSON.stringify(object && object.data !== undefined ? object.data : {})
   context.__opts = JSON.stringify({ w: opts.w, h: opts.h, mode: opts.mode, limit, state: opts.state, event: opts.event,
-    title: opts.title ?? object?.title, id: opts.id ?? object?.id, surface: opts.surface || 'terminal', maxBytes: opts.maxBytes })
+    title: opts.title ?? object?.title, id: opts.id ?? object?.id, surface: opts.surface || 'terminal', maxBytes: opts.maxBytes, got: opts.got })
   KIT_SCRIPT.runInContext(context, { timeout: 1000 })
   let text
   try {
