@@ -1,0 +1,10 @@
+{
+  "name": "lean-squeeze-demo",
+  "version": "0.1.0",
+  "description": "The Squeeze verb in a real session until the lean shell lands: long replies arrive squeezed on dimensions Claude picks, each line tied to the spans it came from; /squeeze moves along them.",
+  "author": {
+    "name": "Matthew Joerke"
+  },
+  "license": "Apache-2.0",
+  "types": "./types/index.d.ts"
+}
