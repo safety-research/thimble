@@ -1021,9 +1021,17 @@ The page's styles change how thimble's parts look, or draw chips of their own: {
 
 The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 
+## view-page-passed
+
+The view {view} now has its page for {place}, and the page passes thimble's checks. The failure of that page's earlier build no longer holds.
+
 ## finish-view-pass
 
 The checks passed, and the view is built: the analyst sees it now. Change nothing more, and end with one line saying what you built.
+
+## finish-view-pass-next
+
+The checks passed, and the view's page for {place} is built: the analyst sees it now. Do not end your run yet: thimble's next step for this view follows. Do it now, in this run.
 
 ## finish-view-fail
 

@@ -287,6 +287,10 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     dev.gate_step(c, slug, report, chat=prop.get("chat"))
     if ok:
         dev.register_pass(c, slug, agent_id)
+        # the page the build began with passed and the view lacks its other page: the builder goes on to it now, in
+        # this run, rather than after a hand-back (bug hunt round 11, L17)
+        if step := dev.next_page_step(c, slug, agent_id):
+            return tools.ok(step)
         stop_after_grace(c, key, agent_id)
         return tools.ok(tools.hint("finish-view-pass"))
     if attempt >= dev.MAX_ATTEMPTS:

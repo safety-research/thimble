@@ -2830,6 +2830,30 @@ def _passed(c: str, slug: str) -> None:
     view_review.after_built(c, slug)
 
 
+NEXT_PAGE_HINT = "finish-view-pass-next"  # prompts/tools.md: {place}, the page that passed; the step follows it
+
+
+def next_page_step(c: str, slug: str, agent_id: str) -> str:
+    """finish_view's pass of the page a build began with, while its builder still runs: the build goes on to the page
+    of the view's other place in the same run (views.build_other_page, not queued), and the builder gets that step
+    (change_text, prompts/dev-view-page.md) in finish_view's result, after NEXT_PAGE_HINT. Its attempts count afresh,
+    and the review starts once, when the build ends (_passed). '' when the build makes no other page (bug hunt round
+    11, L17: the builder handed back its terminal page before thimble's message with the browser page reached it, and
+    the resumed run was taken as ended by that hand-back, which a /compact in main held back 14 s)."""
+    from . import subagents, tools, views  # noqa: PLC0415
+
+    made = views.target_of(c, slug)
+    if not views.build_other_page(c, slug, queue=False):
+        return ""
+    prop = views.update_proposal(c, slug, status="building", changed=None, attempt=0, finish=None,
+                                 last_report=None) or {}
+    _view_runs.setdefault((c, slug), _Build(agent=agent_id, route=str(prop.get("route") or subagents.FOLLOW_ON)))
+    views._emit(c, slug, "building", chat=prop.get("chat"))
+    log.info("%s: the builder %s of %s goes on to the view's other page in the same run", c, agent_id, slug)
+    return "\n\n".join(x for x in (tools.hint(NEXT_PAGE_HINT, place=views.MISSING_PAGE_PLACE.get(made, "")),
+                                   change_text(c, prop)) if x)
+
+
 def stop_view(c: str, slug: str, why: str) -> bool:
     """Take the build of `slug` out of the queue and stop its builder through main's module (subagents.stop), or its
     program's task, which ends it as `why` says (_settle). Never blocks; the build leaves the pool at once so a
@@ -2955,18 +2979,30 @@ def _view_chat(c: str, prop: dict[str, Any]) -> str | None:
 
 def _change_failed_chip(c: str, prop: dict[str, Any], why: str) -> None:
     """Main's chip for a change to a built view that failed, or that main's quit stopped (MAIN_ENDED), since the view's
-    own chip shows it built again."""
+    own chip shows it built again. The build of the page the view lacks is thimble's step, not a change the analyst
+    asked for: its chip (`page`, the page's target) and notice say that page failed and the view keeps its other page
+    (bug hunt round 11, L17: "The change to the view Run Grid failed", though the analyst asked for no change)."""
+    from . import views  # noqa: PLC0415
+
     name = prop.get("name") or prop.get("slug")
     quit_ = why == MAIN_ENDED
-    text = (f"the change to the view {name} stopped when your Claude Code session ended, so the view is as it was"
-            if quit_ else f"the change to the view {name} failed, so it is as it was: {why}")
+    page = views.missing_page_target(prop.get("change"))
+    if page is not None:
+        place, kept = views.MISSING_PAGE_PLACE[page], views.MISSING_PAGE_PLACE[views.other_page(page)]
+        text = (f"the build of the view {name}'s page for {place} stopped when your Claude Code session ended" if quit_
+                else f"the view {name}'s page for {place} failed to build, so the view keeps its page for {kept}: {why}")
+        notice = PAGE_FAILED_TEXT.replace("{place}", place).replace("{kept}", kept)
+    else:
+        text = (f"the change to the view {name} stopped when your Claude Code session ended, so the view is as it was"
+                if quit_ else f"the change to the view {name} failed, so it is as it was: {why}")
+        notice = CHANGE_FAILED_TEXT
     try:
         agents.chip(c, "ticket", text, ref=f"view:{prop.get('slug')}", chat=prop.get("chat"),
-                    status="stopped" if quit_ else "failed")
+                    status="stopped" if quit_ else "failed", page=page)
     except Exception:  # noqa: BLE001
         log.exception("could not chip the failed change to %s/%s", c, prop.get("slug"))
     if not quit_:
-        _view_notice(c, prop, CHANGE_FAILED_TEXT, why, chat=prop.get("chat"))
+        _view_notice(c, prop, notice, why, chat=prop.get("chat"))
 
 
 def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None:
@@ -2999,6 +3035,8 @@ def _view_failed(c: str, slug: str, error: str, chat: str | None = None) -> None
 BUILD_FAILED_TEXT = "The view {name} failed to build: {why}."
 BUILD_REFUSED_TEXT = "The build of the view {name} didn't start: {why}."
 CHANGE_FAILED_TEXT = "The change to the view {name} failed, so the view is as it was: {why}."
+# the build of the page a view lacks failed: {place} that page's place, {kept} the place of the page the view keeps
+PAGE_FAILED_TEXT = "The view {name}'s page for {place} failed to build, so the view keeps its page for {kept}: {why}."
 
 
 def _view_notice(c: str, prop: dict[str, Any], text: str, why: Any, chat: Any = None) -> None:

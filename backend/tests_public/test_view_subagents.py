@@ -23,6 +23,7 @@ from subagent_fakes import bridge, hints  # noqa: F401 — fixtures
 from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 CORPUS = "boards"
+BUILD_OTHER_PAGE = views.build_other_page  # the gates fixture fakes it; the second page's test builds it
 READER = '''
 def build_index(paths):
     return {}
@@ -69,7 +70,7 @@ def gates(monkeypatch):
     monkeypatch.setattr(views, "gate", gate)
     monkeypatch.setattr(views, "gate_lines", lambda rep: list(rep.get("problems") or []) or ["the checks passed"])
     monkeypatch.setattr(views, "build_problem", lambda: "")
-    monkeypatch.setattr(views, "build_other_page", lambda c, slug: False)
+    monkeypatch.setattr(views, "build_other_page", lambda c, slug, **kw: False)
     return seen
 
 
@@ -519,3 +520,142 @@ async def test_bug_hunt_k6_a_build_pressed_in_the_terminal_tells_the_module_wher
     views.update_proposal(CORPUS, other, place=views.TERMINAL)
     await _started(other, route=subagents.FOLLOW_ON)
     assert "place" not in bridge.ops("spawn")[-1], "only a click is pressed somewhere"
+
+
+async def _first_page_passed(monkeypatch, name: str = "Run Board") -> tuple[str, str, str, Path, list]:
+    """A build pressed in the terminal whose terminal page just passed finish_view, with the browser page its next step:
+    (slug, agent, key, folder, the reviews started)."""
+    from app import headless
+
+    monkeypatch.setattr(views, "build_other_page", BUILD_OTHER_PAGE)
+    monkeypatch.setattr(views, "build_problem_for", lambda c, target=None: "")
+    monkeypatch.setattr(headless, "missing", lambda kind: "")
+    reviewed: list[tuple[str, str]] = []
+    monkeypatch.setattr(view_review, "after_built", lambda c, s: reviewed.append((s, views.target_of(c, s))))
+    slug = _propose(name, asked=True)
+    views.update_proposal(CORPUS, slug, place=views.TERMINAL, target=views.TERM_PAGE)
+    agent = await _started(slug)
+    key = view_tools.build_key(slug)
+    _draft(slug)
+    d = views.views_dir(CORPUS) / slug
+    (d / views.VIEW_HTML).unlink()
+    (d / views.VIEW_TERM).write_text("draw((d) => d.text('runs'))\n")
+    res = await _call("finish_view", {}, agent, key)
+    assert not res.is_error and "## The view's page for the browser workbench" in res.text, res.text[:300]
+    return slug, agent, key, d, reviewed
+
+
+async def test_bug_hunt_l17_a_failed_second_page_says_that_page_failed_never_a_change_the_analyst_asked_for(
+        board, bridge, gates, heard, hints, monkeypatch):
+    """Bug hunt round 11, L17: the browser page a build went on to make failed with "The change to the view Run Grid
+    failed, so the view is as it was", in both places, though the analyst asked for no change. The notice and main's
+    chip say the view's page for the browser failed to build and the view keeps its terminal page; Retry builds it."""
+    from app import notices
+
+    slug, agent, key, d, reviewed = await _first_page_passed(monkeypatch)
+    (d / views.VIEW_HTML).write_text("<p>FAIL</p>")
+    subagents.run_ended(CORPUS, agent, "done", "The browser page still fails.", source="handback")
+    await _until(lambda: reviewed, "the review of the terminal page never started")
+    [notice] = [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
+    assert notice["text"].startswith("The view Run Board's page for the browser workbench failed to build, so the "
+                                     "view keeps its page for the terminal panel: "), notice["text"]
+    assert "change" not in notice["text"] and "Retry" in json.dumps(notice.get("action"))
+    [chip] = [r for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1])
+              if r.get("type") == "chip" and r.get("kind") == "ticket"]
+    assert (chip["status"], chip["page"]) == ("failed", views.HTML_PAGE) and "change" not in chip["text"]
+    prop = _prop(slug)
+    assert (prop["status"], prop["target"], views.missing_page_target(prop["failed_change"])) == (
+        "built", views.TERM_PAGE, views.HTML_PAGE)
+    assert reviewed == [(slug, views.TERM_PAGE)]
+    # an analyst's change that fails still says so
+    views.revise(CORPUS, slug, "Add a legend.")
+    dev._change_failed_chip(CORPUS, _prop(slug), "problem: the page says FAIL")
+    texts = [n["text"] for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
+    assert texts[-1].startswith("The change to the view Run Board failed, so the view is as it was")
+
+
+async def test_bug_hunt_l17_a_page_whose_build_failed_that_passes_later_clears_its_notice_and_main_hears(
+        board, bridge, gates, hints, monkeypatch):
+    """Bug hunt round 11, L17: the browser page passed later as "a change made to the view outside thimble's agents",
+    and the browser drew it, but its failure notice stayed through /compact and `claude -c`, and main told the analyst
+    the page did not show. A page whose build failed that passes later settles that failure: its notice goes, the
+    view's chip shows it built, and main hears the view has the page."""
+    from app import notices
+
+    told: list[tuple[str, str, dict]] = []
+    monkeypatch.setattr(session, "push_event", lambda c, kind, text, **meta: told.append((kind, text, meta)) or True)
+    slug, agent, key, d, reviewed = await _first_page_passed(monkeypatch, "Lark Grid")
+    (d / views.VIEW_HTML).write_text("<p>FAIL</p>")
+    subagents.run_ended(CORPUS, agent, "done", "The browser page still fails.", source="handback")
+    await _until(lambda: reviewed, "the review of the terminal page never started")
+    assert [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
+    # the page is written again, with no agent of the view running, and passes
+    (d / views.VIEW_HTML).write_text("<p>larks</p>")
+    await views._gate_found(CORPUS, slug, views.digest(d))
+    assert views.has_page(views.read_built(CORPUS, slug), views.HTML_PAGE)
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"], "its failure notice is gone"
+    prop = _prop(slug)
+    assert (prop["status"], prop.get("failed_change"), prop.get("error")) == ("built", None, None)
+    kind, text, meta = told[-1]
+    assert (kind, meta) == ("view", {"view": slug})
+    assert text == tools.hint("view-page-passed", view="Lark Grid", place="the browser workbench")
+    assert "now has its page for the browser workbench" in text
+    # a pass that brings no page whose build failed tells main nothing more
+    n = len(told)
+    (d / views.VIEW_HTML).write_text("<p>larks, sorted</p>")
+    await views._gate_found(CORPUS, slug, views.digest(d))
+    assert len(told) == n
+
+
+async def test_bug_hunt_l17_a_build_s_second_page_is_the_next_step_of_the_same_run_then_one_review(
+        board, bridge, gates, heard, hints, monkeypatch):
+    """Bug hunt round 11, L17: once the terminal page of a build pressed in the terminal passed, the builder handed back
+    before thimble's message with the browser page reached it; thimble resumed it while that hand-back was on its way
+    to main, failed the browser page as empty while the builder still wrote it, refused its checks, and said "The
+    change to the view … failed", a change the analyst never asked for. The pass of the first page now gives the
+    builder the second page as its next step, in finish_view's result: it goes on in the same run, with no message
+    and no hand-back between the pages, its attempts count afresh, and the one review starts at its end."""
+    from app import headless, notices
+
+    monkeypatch.setattr(views, "build_other_page", BUILD_OTHER_PAGE)
+    monkeypatch.setattr(views, "build_problem_for", lambda c, target=None: "")
+    monkeypatch.setattr(headless, "missing", lambda kind: "")
+    reviewed: list[tuple[str, str]] = []
+    monkeypatch.setattr(view_review, "after_built", lambda c, s: reviewed.append((s, views.target_of(c, s))))
+    slug = _propose("Run Board", asked=True)
+    views.update_proposal(CORPUS, slug, place=views.TERMINAL, target=views.TERM_PAGE)
+    agent = await _started(slug)
+    key = view_tools.build_key(slug)
+    _draft(slug)
+    d = views.views_dir(CORPUS) / slug
+    (d / views.VIEW_HTML).unlink()
+    (d / views.VIEW_TERM).write_text("draw((d) => d.text('runs'))\n")
+    res = await _call("finish_view", {}, agent, key)
+    assert not res.is_error
+    assert res.text.startswith(tools.hint("finish-view-pass-next", place="the terminal panel")), res.text[:300]
+    assert "## The view's page for the browser workbench" in res.text and "the analyst asked for no change" in res.text
+    assert not res.text.endswith(tools.hint("finish-view-pass")), "the builder does not end after its first page"
+    assert [k for k, _ in heard] == ["view"], "main hears the terminal page is built"
+    prop = _prop(slug)
+    assert (prop["status"], prop["target"], prop["first_page"]) == ("building", views.HTML_PAGE, views.TERM_PAGE)
+    assert (prop.get("attempt"), prop.get("finish"), prop.get("changed")) == (0, None, None)
+    assert subagents.current(CORPUS, key).agent_id == agent and not bridge.ops("send"), "the same run, no message"
+    # the second page: its checks and its finish are the builder's own, its attempts counted from the first
+    (d / views.VIEW_HTML).write_text("<p>FAIL</p>")
+    res = await _call("finish_view", {}, agent, key)
+    assert res.is_error and f"attempt 1 of {dev.MAX_ATTEMPTS}" in res.text
+    (d / views.VIEW_HTML).write_text("<p>runs</p>")
+    assert "The checks pass." in (await _call("view_check", {}, agent, key)).text
+    res = await _call("finish_view", {}, agent, key)
+    assert not res.is_error and res.text.endswith(tools.hint("finish-view-pass"))
+    assert [k for k, _ in heard] == ["view", "view"] and reviewed == []
+    # its hand-back ends the build: one review, of the page it began with, and no failure anywhere
+    subagents.run_ended(CORPUS, agent, "done", "Built both pages.", source="handback")
+    await _until(lambda: reviewed, "the review never started")
+    await asyncio.sleep(0.05)
+    assert reviewed == [(slug, views.TERM_PAGE)]
+    prop = _prop(slug)
+    assert (prop["status"], prop.get("first_page"), prop.get("failed_change")) == ("built", None, None)
+    view = views.read_built(CORPUS, slug)
+    assert views.has_page(view, views.TERM_PAGE) and views.has_page(view, views.HTML_PAGE)
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"], "no failure notice"
