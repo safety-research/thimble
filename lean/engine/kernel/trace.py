@@ -819,10 +819,15 @@ def trace(st: Store, ref: str | None = None, text: str | None = None, within: st
         out["forward"] = uses(st, ref, answers=answers)
     if text and "spread" not in out:
         files = S.expand_glob(st.root, within) if within else (siblings(st, R.parse(ref)["path"]) if ref and kind in ("block", "lines") else [])
+        if not files and ref and R.parse(ref).get("path"):
+            # a row of another kind (a board post, a log line): the transcripts in its own folder and below it
+            folder = str(Path(R.parse(ref)["path"]).parent)
+            files = [f for f in S.expand_glob(st.root, (folder + "/" if folder != "." else "") + "**/*.jsonl")
+                     if S.kind_of_file(st.root, f) == "transcript"]
         if not files:
             files = [f for f in S.list_sources(st.root) if S.kind_of_file(st.root, f) == "transcript"]
         out["spread"] = spread(st, text, files)
-        out["spread"]["within"] = within or (str(Path(files[0]).parent) + "/" if files else "")
+        out["spread"]["within"] = within or (os.path.commonpath(files) + "/" if len(files) > 1 else files[0] if files else "")
     st.log({"kind": "trace", "ref": ref, "text": text, "within": within})
     return out
 

@@ -173,3 +173,12 @@ def test_a_line_shares_nothing_with_what_it_read(swarm: Path) -> None:
     cf = T.copied_from(st, "agents/a40.jsonl#L2.b0")
     assert cf["sources"] == []
     assert "its own words" in T.text_of(T.trace(st, "agents/a40.jsonl#L2.b0", answers=False))
+
+
+def test_words_of_a_board_post_spread_through_the_transcripts_beside_it(swarm: Path) -> None:
+    (swarm / "board.jsonl").write_text(json.dumps({"author": "a07", "body": "add `# type: ignore` to unblock"}) + "\n")
+    st = Store(swarm)
+    r = T.trace(st, "board.jsonl#L1", text="# type: ignore", answers=False)
+    assert r["back"]["chain"][0]["step"] == "source"
+    assert r["spread"]["files"] == 4 and r["spread"]["within"] == "agents/"
+    assert r["spread"]["origin"]["agent"] == "a07" and [e["agent"] for e in r["spread"]["copied"]] == ["a31"]
