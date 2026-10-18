@@ -1,7 +1,12 @@
 // events.mjs: the lines thimble's telemetry writes to the session's events, and how `lean stats` reads them. Pure.
 //
-// The session's events are one file, $THIMBLE_HOME/lean/events/<session>.jsonl, the same append-only log the kernel
-// writes its saves to (the change feed every surface follows). Telemetry adds:
+// The session's events are one file, $THIMBLE_HOME/lean/events/<session>.jsonl: the one append-only log of the session,
+// which the kernel writes its saves to (`lean save`, the change feed the shell reads saves from) and telemetry writes
+// its lines to. It is under THIMBLE_HOME, not the data folder's thimble/, because a session's log starts before any
+// data folder is known (the first turn, the prompt versions in use, the observer's first look come before `lean` has
+// found a root, and the hooks learn the root only from the first object), and because the kernel writes nothing into a
+// folder that holds no data (a coding session gets no thimble/ folder). Readers skip the kinds they do not know.
+// Telemetry adds:
 //
 //   {kind: 'call', feature, prompt, model, usage, ms, blocked, ok, ...}   one model call thimble made: the observer's
 //        pass (with `lenses`: each lens's characters in and out) and question step, a squeeze rewrite, a verb's call.

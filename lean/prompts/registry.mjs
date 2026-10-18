@@ -41,9 +41,17 @@ export const FEATURES = {
     versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" } },
   },
   forms: {
-    versions: { v1: { about: 'FORMS.md as v read it: the card forms, for another view' }, v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' }, principles: { about: 'the draft principles of a great output, no examples (ablation variant a)' } },
+    versions: {
+      runtime: {
+        about: "the card runtime's principles (the lean skill's card section, read where it stands) and the worked forms (forms:v2's examples)",
+        parts: [{ file: 'skills/lean/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/v2.md', section: 'Worked examples' }],
+      },
+      v1: { about: 'FORMS.md as v read it: the card forms, for another view' },
+      v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' },
+      principles: { about: 'the draft principles of a great output, no examples (ablation variant a)' },
+    },
     about: 'the card guidance: what makes a card good',
-    reads: 'beside the toolkit when Claude reads it before a card, and `lean guide cards` (v asks for it)', default: 'v2',
+    reads: 'beside the toolkit when Claude reads it before a card, and `lean guide cards` (v asks for it)', default: 'runtime',
     base: 'verbs/visualize',
   },
   thread: { about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v1' },
@@ -82,7 +90,7 @@ export function indexOf(found = {}) {
   const idx = {}
   for (const [name, f] of Object.entries(FEATURES)) {
     const versions = {}
-    for (const [v, meta] of Object.entries(f.versions || {})) versions[v] = { file: meta.file || `prompts/${name}/${v}.md`, ...meta }
+    for (const [v, meta] of Object.entries(f.versions || {})) versions[v] = { file: meta.parts ? null : meta.file || `prompts/${name}/${v}.md`, ...meta }
     for (const file of found[name] || []) {
       const v = String(file).replace(/\.md$/, '')
       if (!String(file).endsWith('.md') || v.startsWith('.') || v === OFF) continue
@@ -101,7 +109,7 @@ export function indexOf(found = {}) {
  */
 export function choose(idx, { setting = '', env = '' } = {}) {
   const active = {}
-  for (const [name, f] of Object.entries(idx)) active[name] = { version: f.default, file: f.versions[f.default]?.file ?? null, source: 'default' }
+  for (const [name, f] of Object.entries(idx)) active[name] = { version: f.default, file: f.versions[f.default]?.file ?? null, ...(f.versions[f.default]?.parts ? { parts: f.versions[f.default].parts } : {}), source: 'default' }
   const problems = []
   for (const [source, spec] of [['setting', setting], ['LEAN_PROMPTS', env]]) {
     const p = parseSpec(spec)
@@ -114,7 +122,7 @@ export function choose(idx, { setting = '', env = '' } = {}) {
         problems.push(`${source}: no version ${name}:${v}, so ${name} stays at ${active[name].version}; its versions are ${Object.keys(f.versions).join(', ')}${f.optional ? ', off' : ''}`)
         continue
       }
-      active[name] = { version: v, file: f.versions[v].file, source }
+      active[name] = { version: v, file: f.versions[v].file, ...(f.versions[v].parts ? { parts: f.versions[v].parts } : {}), source }
     }
   }
   return { active, problems }
@@ -141,6 +149,33 @@ export function bodyOf(text) {
   const s = String(text ?? '')
   const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(s)
   return m ? s.slice(m[0].length) : s
+}
+
+/**
+ * One section of a markdown text, by its heading's words: from that heading to the next heading of the same level or
+ * higher, the heading kept. '' when the text has no such heading. A version made of parts reads other texts where
+ * they stand (the lean skill's card section), so nothing has a second copy.
+ */
+export function sectionOf(text, heading) {
+  const lines = String(text ?? '').split('\n')
+  const at = lines.findIndex(l => /^#{1,6}\s/.test(l) && l.replace(/^#+\s*/, '').trim().toLowerCase().startsWith(String(heading).toLowerCase()))
+  if (at < 0) return ''
+  const level = /^#+/.exec(lines[at])[0].length
+  let end = lines.length
+  for (let i = at + 1; i < lines.length; i++) {
+    const m = /^(#{1,6})\s/.exec(lines[i])
+    if (m && m[1].length <= level) { end = i; break }
+  }
+  return lines.slice(at, end).join('\n').trim()
+}
+
+/** A version made of parts, from the texts of its files (`read(file)`): each part's section, or the whole body. */
+export function partsText(parts, read, skip = () => false) {
+  return parts.filter(p => !skip(p)).map(p => {
+    const raw = read(p.file)
+    const body = String(p.file).endsWith('SKILL.md') ? bodyOf(raw) : raw
+    return p.section ? sectionOf(body, p.section) : String(body).trim()
+  }).filter(Boolean).join('\n\n') + '\n'
 }
 
 /** Fill {{NAME}} placeholders from `vals` (a function value is called); unknown ones stay as written. */

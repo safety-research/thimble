@@ -17,7 +17,7 @@ function world(on: Any, env: Record<string, string> = {}) {
   on('session.cwd', () => ({ value: '/data' }))
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: String(e.path).endsWith('/prompts/lean') ? [{ name: 'v1.md', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] : [] }))
   on('fs.exists', () => ({ value: false }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/skills/lean/SKILL.md') ? '---\nname: lean\ndescription: x\n---\n\nLEAN BODY: cite what you show.\n' : promptStub(e.path) ?? '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/skills/lean/SKILL.md') ? '---\nname: lean\ndescription: x\n---\n\nLEAN BODY: cite what you show.\n\n## What the person sees\n\nTHE CARD SECTION\n\n## Example: one\n\nx\n' : promptStub(e.path) ?? '' }))
   // the engine's own expansion: the text as the skill computed it
   on('skill.prompt', (_$: unknown, e: { text: string }) => ({ text: e.text }))
   // a Read answered as core does: the file's text, as the model reads it
@@ -81,13 +81,23 @@ test('the first read of the toolkit in a session carries the card guidance as co
   expect(w.events.filter(e => e.kind === 'prompt').map(e => [e.prompt, e.via])).toEqual([['forms:principles', 'Read of draw/TOOLKIT.md']])
 })
 
-test('a toolkit read with sed in Bash carries the card guidance too', async ($, on) => {
+test("a toolkit read with sed in Bash carries the card guidance too: the lean skill's card section and the worked forms", async ($, on) => {
   world(on)
   const r = await $.tool.call({ tool: 'Bash', command: 'sed -n 1,80p /x/../plugin/draw/TOOLKIT.md' } as never) as Any
   expect(r.context.length).toBe(1)
-  expect(r.context[0]).toContain('The card guidance (forms:v2)')
-  expect(r.context[0]).toContain('THE CARD GUIDANCE')
+  expect(r.context[0]).toContain('The card guidance (forms:runtime)')
+  expect(r.context[0]).toContain('## What the person sees\n\nTHE CARD SECTION')
+  expect(r.context[0]).toContain('## Worked examples\n\nTHE WORKED FORMS')
+  expect(r.context[0]).not.toContain('OLD PRINCIPLES')
   const again = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
   expect(again.context ?? []).toEqual([])
+})
+
+test('with the lean skill loaded, its card section is in the conversation already: only the worked forms come', async ($, on) => {
+  world(on)
+  await load($, 'lean', 'LEAN BODY as the file says')
+  const r = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
+  expect(r.context[0]).toContain('THE WORKED FORMS')
+  expect(r.context[0]).not.toContain('THE CARD SECTION')
 })
 

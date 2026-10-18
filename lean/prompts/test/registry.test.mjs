@@ -12,7 +12,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { activeNow, loadIndex, ROOT, textOf } from '../node.mjs'
-import { FEATURES, bodyOf, choose, featureOfSkill, fill, idOf, indexOf, listing, parseSpec, specOf } from '../registry.mjs'
+import { FEATURES, bodyOf, choose, featureOfSkill, fill, idOf, indexOf, listing, parseSpec, partsText, sectionOf, specOf } from '../registry.mjs'
 
 const NODE = fileURLToPath(new URL('../node.mjs', import.meta.url))
 const sha = s => createHash('sha256').update(s).digest('hex').slice(0, 16)
@@ -36,7 +36,9 @@ test('the index has every feature with its default, the versions on disk, and a 
 test('the active version: the default, then the setting, then LEAN_PROMPTS; a missing version keeps the one before with one line', () => {
   const idx = indexOf({ forms: ['v1.md', 'v2.md', 'principles.md'] })
   const d = choose(idx)
-  assert.equal(d.active.forms.version, 'v2')
+  assert.equal(d.active.forms.version, 'runtime')
+  assert.equal(d.active.forms.file, null)
+  assert.equal(d.active.forms.parts.length, 2)
   assert.equal(d.active.forms.source, 'default')
   assert.deepEqual(d.problems, [])
   const s = choose(idx, { setting: 'forms:v1' })
@@ -48,7 +50,7 @@ test('the active version: the default, then the setting, then LEAN_PROMPTS; a mi
   const m = choose(idx, { setting: 'forms:v1', env: 'forms:v9,nothing:v1' })
   assert.equal(m.active.forms.version, 'v1')
   assert.equal(m.problems.length, 2)
-  assert.match(m.problems[0], /^LEAN_PROMPTS: no version forms:v9, so forms stays at v1; its versions are v1, v2, principles$/)
+  assert.match(m.problems[0], /^LEAN_PROMPTS: no version forms:v9, so forms stays at v1; its versions are runtime, v1, v2, principles$/)
   assert.match(m.problems[1], /no prompt feature "nothing"/)
 })
 
@@ -79,6 +81,23 @@ test('skills, bodies and placeholders', () => {
   assert.equal(fill('{{X}}', { X: '$& $1' }), '$& $1')
 })
 
+test('a version made of parts reads each section where it stands, and can leave a part out', () => {
+  const md = '# T\n\nintro\n\n## Principles\n\np one\n\n### deeper\n\nd\n\n## Examples\n\ne one\n'
+  assert.equal(sectionOf(md, 'principles'), '## Principles\n\np one\n\n### deeper\n\nd')
+  assert.equal(sectionOf(md, 'Examples'), '## Examples\n\ne one')
+  assert.equal(sectionOf(md, 'nothing'), '')
+  const files = { 'skills/x/SKILL.md': '---\nname: x\n---\n' + md, 'prompts/f/v.md': '# F\n\n## Worked examples\n\nw\n' }
+  const parts = [{ file: 'skills/x/SKILL.md', section: 'Principles' }, { file: 'prompts/f/v.md', section: 'Worked examples' }]
+  assert.equal(partsText(parts, f => files[f]), '## Principles\n\np one\n\n### deeper\n\nd\n\n## Worked examples\n\nw\n')
+  assert.equal(partsText(parts, f => files[f], p => p.file.endsWith('SKILL.md')), '## Worked examples\n\nw\n')
+  // the default card guidance: the lean skill's card section where it stands, then the worked forms
+  const t = textOf('cards', ROOT, {})
+  assert.equal(t.id, 'forms:runtime')
+  assert.match(t.text, /^## What the person sees\n/)
+  assert.match(t.text, /\n## Worked examples\n/)
+  assert.doesNotMatch(t.text, /## Example: a count/)
+})
+
 test("today's texts are the v1 of their features, byte for byte", () => {
   // the hashes of observer.md, question.md, squeeze's prompt.md and FORMS.md as they stood before the registry, and
   // the thread prompt's opening
@@ -93,7 +112,11 @@ test("today's texts are the v1 of their features, byte for byte", () => {
 test('every version file on disk is in the index, every default exists, and every lens fragment has its sections', () => {
   const idx = loadIndex()
   for (const [name, f] of Object.entries(idx)) {
-    for (const [v, meta] of Object.entries(f.versions)) assert.ok(readFileSync(join(ROOT, meta.file), 'utf8').trim().length > 0, `${name}:${v} has text`)
+    for (const [v, meta] of Object.entries(f.versions)) {
+      const text = meta.parts ? partsText(meta.parts, x => readFileSync(join(ROOT, x), 'utf8')) : readFileSync(join(ROOT, meta.file), 'utf8')
+      assert.ok(text.trim().length > 0, `${name}:${v} has text`)
+      for (const p of meta.parts || []) assert.ok(partsText([p], x => readFileSync(join(ROOT, x), 'utf8')).trim(), `${name}:${v} finds ${p.section} in ${p.file}`)
+    }
     let files = []
     try { files = readdirSync(join(ROOT, 'prompts', name)).filter(x => x.endsWith('.md')) } catch { files = [] }
     for (const file of files) assert.ok(f.versions[file.replace(/\.md$/, '')], `${name}/${file} is a version`)
@@ -126,7 +149,7 @@ test('`lean guide cards` prints the card guidance with its folder, and notes the
   // a version that does not exist: the default, with one line on stderr
   const m = spawnSync(process.execPath, [NODE, 'guide', 'cards'], { encoding: 'utf8', env: { PATH: process.env.PATH, THIMBLE_HOME: home, LEAN_PROMPTS: 'forms:v9' } })
   assert.equal(m.status, 0)
-  assert.match(m.stdout, /^\(forms:v2 ·/)
+  assert.match(m.stdout, /^\(forms:runtime ·/)
   assert.equal(m.stderr.trim().split('\n').length, 1)
-  assert.match(m.stderr, /no version forms:v9, so forms stays at v2/)
+  assert.match(m.stderr, /no version forms:v9, so forms stays at runtime/)
 })

@@ -15,7 +15,7 @@ const STUBS: Record<string, string> = {
   'lens-claims/v1': 'LENS claims\n<!-- digest -->\nCLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}} {{GROWN}}',
   'squeeze/v3': 'THE PROMPT',
   'thread/v1': 'THE THREAD PROMPT',
-  'forms/v2': 'THE CARD GUIDANCE',
+  'forms/v2': '# Card forms\n\n## Principles\n\nOLD PRINCIPLES\n\n## Worked examples\n\nTHE WORKED FORMS',
 }
 
 /** The stub text of a registry path (`…/prompts/<feature>/<version>.md`), or undefined for any other path. */

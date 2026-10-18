@@ -8,7 +8,7 @@
 import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ALIASES, FEATURES, bodyOf, choose, idOf, indexOf, listing } from './registry.mjs'
+import { ALIASES, FEATURES, bodyOf, choose, idOf, indexOf, listing, partsText } from './registry.mjs'
 
 export const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -34,6 +34,7 @@ export function textOf(feature, root = ROOT, env = process.env) {
   const a = active[name]
   if (!a) throw new Error(`no prompt feature "${feature}"; the features are ${Object.keys(idx).join(', ')}`)
   if (a.off) return { feature: name, version: a.version, id: idOf(name, a.version), text: '', file: null, problems }
+  if (a.parts) return { feature: name, version: a.version, id: idOf(name, a.version), text: partsText(a.parts, f => readFileSync(join(root, f), 'utf8')), file: null, problems }
   const raw = readFileSync(join(root, a.file), 'utf8')
   return { feature: name, version: a.version, id: idOf(name, a.version), text: a.file.endsWith('SKILL.md') ? bodyOf(raw) : raw, file: join(root, a.file), problems }
 }

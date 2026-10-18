@@ -5,8 +5,10 @@
 //
 // The card guidance (feature `forms`): Claude reads the drawing toolkit (draw/TOOLKIT.md) before it writes a card's
 // program, as the lean skill says; the first such read in a session carries the guidance's active version as context
-// beside the file (the person never sees it, and it is never in the conversation at rest). v's request asks for it
-// with `lean guide cards` when it was not read yet.
+// beside the file (the person never sees it, and it is never in the conversation at rest). The default version,
+// `runtime`, is the lean skill's card section (the card runtime's principles) and the worked forms: when the lean
+// skill is loaded, its section is in the conversation already, so only the worked forms come. v's request asks for
+// the guidance with `lean guide cards` when it was not read yet.
 //
 // Skills: Claude Code finds a skill's SKILL.md where it is, and that text is the version `skill`. When another version
 // of a skill's feature is active, the skill.prompt hook serves it in place of the file's text. The same hook makes sure
@@ -15,12 +17,12 @@
 import type { EngineInterface } from 'claude-code'
 
 import { record } from '../telemetry/telemetry'
-import { FEATURES, bodyOf, choose, featureOfSkill, idOf, indexOf, specOf } from './registry.mjs'
+import { FEATURES, bodyOf, choose, featureOfSkill, idOf, indexOf, partsText, specOf } from './registry.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Active = { version: string; file: string | null; source: string; off?: boolean }
+type Active = { version: string; file: string | null; source: string; off?: boolean; parts?: { file: string; section?: string }[] }
 
 const R = {
   setting: '',
@@ -78,12 +80,18 @@ export async function registry($: Engine): Promise<{ idx: Any; active: Record<st
  * The active text of a feature, as {text, version, id, off}. A version file that cannot be read falls back to the
  * default once, with one line that says so; a skill's in-place version is its body.
  */
-export async function promptText($: Engine, feature: string): Promise<{ text: string; version: string; id: string; off: boolean }> {
+export async function promptText($: Engine, feature: string, o: { skip?: (part: { file: string }) => boolean } = {}): Promise<{ text: string; version: string; id: string; off: boolean }> {
   const { idx, active } = await registry($)
   const a = active[feature]
   if (!a) throw new Error(`no prompt feature ${feature}`)
   if (a.off) return { text: '', version: a.version, id: idOf(feature, a.version), off: true }
   const key = `${feature}:${a.version}`
+  if (a.parts) {
+    // a version made of parts reads them where they stand, each time (a part may be left out: `skip`)
+    const texts: Record<string, string> = {}
+    for (const p of a.parts) if (!o.skip?.(p)) texts[p.file] = String(await $.fs.read(`${rootOf($)}/${p.file}`))
+    return { text: partsText(a.parts, (f: string) => texts[f] ?? '', o.skip), version: a.version, id: key, off: false }
+  }
   if (!R.texts.has(key)) {
     try {
       const raw = String(await $.fs.read(`${rootOf($)}/${a.file}`))
@@ -140,7 +148,8 @@ export function registerPrompts(on: Any, options: Any): void {
       if (!isRead && !isShell) return r
       await registry($)
       if (R.cardsGiven) return r
-      const t = await promptText($, 'forms')
+      // a part the conversation holds already (the lean skill's card section, once the lean skill is loaded) is left out
+      const t = await promptText($, 'forms', { skip: p => R.leanLoaded && p.file === 'skills/lean/SKILL.md' })
       if (t.off || !t.text.trim()) return r
       R.cardsGiven = true
       const base = (FEATURES.forms.versions as Any)?.[t.version]?.base || FEATURES.forms.base
