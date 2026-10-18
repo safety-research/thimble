@@ -91,20 +91,24 @@ function useIntoView(open: boolean) {
   return el
 }
 
+/** v's line under a message: the proposals program (lean/panes/proposals.js), the same one the terminal draws under
+ * it. A pick runs v on the message in the terminal; its keys are in the bar while it is open. */
 function Proposals({ row }: { row: Row }) {
   const open = useStore((s) => s.propsOpen === row.row)
-  const list = row.record?.verbs?.v?.proposals || []
-  const el = useIntoView(open && list.length > 0)
-  if (!open || !list.length) return null
+  const el = useIntoView(open)
+  if (!open) return null
   return (
     <div className="lean-props" ref={el}>
-      {list.map((p, i) => (
-        <button key={i} type="button" className="lean-prop" onClick={() => void pressVerb(row.row, 'v', p)}>
-          <span className="lean-prop-n">{i + 1}</span>
-          {p}
-        </button>
-      ))}
-      <span className="lean-hint">click to draw · 0 close</span>
+      <PaneView
+        name="proposals"
+        args={{ row: row.row, verb: 'v' }}
+        rows={3}
+        focus
+        onClose={() => setState({ propsOpen: null })}
+        actions={{ pick: (e) => void pressVerb(row.row, 'v', String(e.choice || '')) }}
+        onDrawn={() => el.current?.scrollIntoView({ block: 'nearest' })}
+        className="lean-props-pane"
+      />
     </div>
   )
 }

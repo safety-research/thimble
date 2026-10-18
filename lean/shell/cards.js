@@ -6,6 +6,9 @@
 //   sourceCard({ref, label, resolved, query, lines, path})  -> {title, right, parts: [{program, data}], links}
 //       a citation's card, whichever fits its ref: the query's output as bars around the cited row, a series as a
 //       small plot, a code hunk with the cited lines lit, or a table of the cited rows; with one `from` line
+//   citeCard({ref, label, root, room}, io)          -> the source card of a citation, its inputs read through `io`:
+//       {resolve(ref, n, label) -> lean resolve's JSON, read(path) -> text}. Both surfaces use it (the terminal with
+//       its own reads, the page server with Node's), so a citation's card is the same everywhere
 //   explainerCard({gloss})                          -> {title, right, parts, links}
 //       a gloss's card: what the term is, a tiny drawing when the observer gave a program, where it mattered here
 //   linksIn(markdown)                               -> the kernel refs a card's words cite, each a nested mark
@@ -224,4 +227,35 @@ export function explainerCard({ gloss }) {
   if (typeof g.program === 'string' && g.program.trim()) parts.push({ program: g.program, data: g.data && typeof g.data === 'object' ? g.data : {}, pic: true })
   if (g.here) parts.push(words(g.here))
   return { title: g.term || g.title || 'explain', right: 'explain', parts, links }
+}
+
+/** A citation's card, its inputs read through `io` ({resolve(ref, n, label), read(path)}): the ref resolved (a series
+ *  by its query), the query's record, the code file's lines. */
+export async function citeCard({ ref, label, root, room = 9 }, io) {
+  const series = seriesRef(ref)
+  const resolved = await io.resolve(series ? series.query : ref, 6, series ? undefined : label)
+  let query = null
+  const q = /^(q\d+)(?:[#@]|$)/.exec(ref)
+  if (q) {
+    try { query = JSON.parse(String(await io.read(`${root}/thimble/queries/${q[1]}.json`))) } catch { query = null }
+  }
+  let lines
+  const path = ref.split('#')[0]
+  if (cardKind(ref) === 'code') {
+    const m = /#L(\d+)(?:-L?(\d+))?$/.exec(ref)
+    const a = Number(m?.[1] || 1)
+    const b = Number(m?.[2] || a)
+    try {
+      const all = String(await io.read(path.startsWith('/') ? path : `${root}/${path}`)).split('\n')
+      const from = Math.max(1, a - 2)
+      const to = Math.min(all.length, Math.max(b + 2, from + room - 2))
+      lines = []
+      for (let n = from; n <= to; n++) lines.push({ n, text: all[n - 1] ?? '' })
+    } catch {
+      lines = undefined
+    }
+  }
+  const card = sourceCard({ ref, label, resolved, query, lines, path, room })
+  // a value with no rows behind it says why, in one line (the kernel's `why`)
+  return resolved && typeof resolved.why === 'string' && resolved.why ? { ...card, why: resolved.why } : card
 }

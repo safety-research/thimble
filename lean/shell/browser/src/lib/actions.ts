@@ -1,7 +1,7 @@
 // actions.ts: what the person does, in one place: step through the marks, open one in the bottom panel, press a verb
 // under a message, press a squeeze chip, ask. Everything that changes the session goes to the terminal as a line
 // (api.back); the page shows that it was sent, and the records show what came of it.
-import { back, type Scope } from './api'
+import { back, serverModule, type Scope } from './api'
 import { prepare } from './marks'
 import { getState, setState, type Row, type TrayEntry, type Verb } from './store'
 
@@ -29,16 +29,45 @@ export function stepMark(list: { row: string; i: number }[], dir: number): void 
   requestAnimationFrame(() => document.querySelector(`[data-row="${CSS.escape(next.row)}"] [data-mark="${next.i}"]`)?.scrollIntoView({ block: 'nearest' }))
 }
 
-/** Open a mark of a message as the panel's first card. */
+// the tray's own module (panes/tray.js), as the terminal runs it: a mark as a frame of the tray
+let trayMod: Promise<any> | null = null
+const trayModule = () => (trayMod ??= serverModule('code/panes/tray.js'))
+
+/** A mark the page shows ({row, i}: its place among the marks the page prepared) as a frame of the tray: the record's
+ *  own mark, as the terminal opens it, or a citation no mark covers. */
+async function frameAt(at: { row: string; i: number }): Promise<TrayEntry | null> {
+  const rec = getState().rows.find((r) => r.row === at.row)?.record
+  if (!rec) return null
+  const p = prepare(rec).marks[at.i]
+  if (!p) return null
+  const k = (rec.marks || []).findIndex((m: any) => m && m.start === p.start && m.end === p.end)
+  if (k >= 0) return (await trayModule()).frameOf(rec, k)
+  return { kind: p.kind === 'spark' ? 'spark' : 'cite', ref: p.ref, label: p.label }
+}
+
+/** The mark the page shows for a tray frame (to light it in the text), or null. */
+export function markOfFrame(rows: Row[], f: TrayEntry | undefined): { row: string; i: number } | null {
+  if (!f || f.row == null || f.i == null) return null
+  const rec = rows.find((r) => r.row === f.row)?.record
+  const m = rec?.marks?.[f.i]
+  if (!rec || !m) return null
+  const i = prepare(rec).marks.findIndex((x) => x.start === m.start && x.end === m.end)
+  return i >= 0 ? { row: f.row, i } : null
+}
+
+/** Open a mark of a message as the panel's first card (the terminal's tray opens it too). */
 export function openMark(at: { row: string; i: number }): void {
-  setState({ focus: at, tray: [at], trayAsk: false, thread: 'main' })
+  setState({ focus: at, trayAsk: false, thread: 'main' })
+  void frameAt(at).then((f) => {
+    if (f) setState({ tray: [f], trayAsk: false })
+  })
 }
 
 /** Open a citation inside a card, over the card it is in. */
 export function pushCite(entry: TrayEntry): void {
   const s = getState()
   const top = s.tray[s.tray.length - 1]
-  if (top && 'ref' in top && 'ref' in entry && top.ref === entry.ref) return
+  if (top && top.ref && entry.ref && top.ref === entry.ref && top.row == null) return
   setState({ tray: [...s.tray, entry].slice(-12), trayAsk: false })
 }
 
@@ -67,7 +96,8 @@ export async function pressVerb(row: string, key: string, proposal?: string): Pr
   const rec = s.rows.find((r) => r.row === row)?.record
   const v = rowVerbs(s.verbs).find((x) => x.key === key)
   if (!v) return
-  if (key === 'v' && !proposal && rec?.verbs?.v?.proposals?.length) {
+  // v opens its line of views under the message, as in the terminal (one option when none was proposed)
+  if (key === 'v' && !proposal && rec) {
     setState({ propsOpen: s.propsOpen === row ? null : row, squeezeOpen: null })
     return
   }

@@ -66,13 +66,24 @@ export const fontsReady: Promise<unknown> = Promise.race([
 /** The columns a drawing gets in `px` pixels. */
 export const columnsIn = (px: number): number => Math.max(36, Math.min(160, Math.floor((px - 8) / CW)))
 
+// the keys the page keeps where a card is drawn (panes/host.js hostKeys): a card's program learns them as k.keys
+let hostMod: Promise<any> | null = null
+const keysAt = async (mode: string) => {
+  hostMod ??= import(/* @vite-ignore */ `${BASE}/code/panes/host.js`)
+  try {
+    return { taken: (await hostMod).hostKeys(mode === 'detail' ? 'detail' : 'inline', 'browser') }
+  } catch {
+    return undefined
+  }
+}
+
 const drawings = new Map<string, Promise<any>>()
 /** Run an object's program for `w` columns ('inline' on the canvas, 'detail' in the card's detail; `state`: its knobs). */
 export async function drawingOf(object: any, { w, mode = 'inline', state }: { w: number; mode?: string; state?: Record<string, unknown> }): Promise<any> {
   const m = await drawModules()
   const o = m.object.forDrawing(object)
   const key = `${o.id}@${o.v}|${w}|${mode}|${state ? JSON.stringify(state) : ''}`
-  if (!drawings.has(key)) drawings.set(key, m.sandbox.run(o, { w, h: 24, mode, state }))
+  if (!drawings.has(key)) drawings.set(key, keysAt(mode).then((keys) => m.sandbox.run(o, { w, h: 24, mode, state, keys })))
   return drawings.get(key)!
 }
 
@@ -80,7 +91,7 @@ export async function drawingOf(object: any, { w, mode = 'inline', state }: { w:
  *  and, when a handler called k.ask, the selection to ask about. Never cached: an event happens once. */
 export async function eventOf(object: any, { w, mode = 'detail', state, event }: { w: number; mode?: string; state?: Record<string, unknown>; event: Record<string, unknown> }): Promise<any> {
   const m = await drawModules()
-  return m.sandbox.run(m.object.forDrawing(object), { w, h: 24, mode, state, event })
+  return m.sandbox.run(m.object.forDrawing(object), { w, h: 24, mode, state, event, keys: await keysAt(mode) })
 }
 
 /** The browser surface's event helpers (draw/browser/events.js). */

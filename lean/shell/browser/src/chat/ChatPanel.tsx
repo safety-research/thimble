@@ -9,7 +9,6 @@ import { ThreadTree, type ThreadNode } from '@09/components/ThreadTree'
 import { UserMessage } from '@09/components/Message'
 import { Message } from './Message'
 import { Tray } from '../tray/Tray'
-import { KeyBar } from './KeyBar'
 import { CitedText } from '../lib/marks'
 import { ask, pushCite } from '../lib/actions'
 import { hhmm } from '../lib/api'
@@ -168,7 +167,6 @@ export function ChatPanel() {
             </div>
           )}
         </div>
-        <KeyBar />
         <ComposerFrame
           value={draft}
           onChange={setDraft}

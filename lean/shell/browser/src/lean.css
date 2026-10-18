@@ -1519,3 +1519,39 @@ button.lean-keybar-key:hover span {
   margin-left: auto;
   min-width: 0;
 }
+
+/* the one bar across the foot of the page, under both columns: one line, never wrapped (KeyBar fits it to the width) */
+.lean-keybar-global {
+  flex: none;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
+  padding: 5px 24px 7px;
+  border-top: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
+  background: var(--bg-page);
+}
+.lean-keybar-global .lean-keybar-left {
+  flex-wrap: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lean-keybar-global .lean-keybar-counts {
+  flex: none;
+  padding-left: 18px;
+}
+
+/* the tray (panes/tray.js) at the foot of the chat: the program draws its own frame */
+.lean-tray-host {
+  display: none;
+}
+.lean-tray-host.is-open {
+  display: block;
+  padding: 2px 0 6px;
+}
+.lean-tray-host .lean-pane {
+  min-height: 0;
+}
+/* v's line under a message (panes/proposals.js) */
+.lean-props-pane {
+  min-height: 0;
+}

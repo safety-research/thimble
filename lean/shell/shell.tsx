@@ -33,7 +33,7 @@ import type { LineCounts, MsgRecord, ObjRef, Ran, Said, Sel, SqzUi, Tray, TrayFr
 import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
-import { cardKind, explainerCard, sourceCard } from './cards.js'
+import { citeCard, explainerCard } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKeys, detailPane, followDetail, markOpen, openDetailPane, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
@@ -799,7 +799,7 @@ async function verbFromBrowser($: Engine, root: string, key: string, row: string
 }
 
 /** Open a page of this session in the browser: the mirror (at a row), or a card's detail (on a part). */
-export async function openBrowser($: Engine, at: { id?: string; v?: number | null; region?: string | null; row?: string | null; root?: string } = {}): Promise<string> {
+export async function openBrowser($: Engine, at: { id?: string; v?: number | null; region?: string | null; row?: string | null; root?: string; view?: string; claim?: string | null } = {}): Promise<string> {
   if (!browserFlag) return 'Browser mode is off. Turn on Browser in /config (thimble-lean), then press o or type /browser.'
   const root = at.root || (await webRoot($))
   const s = await startServer($, root)
@@ -808,10 +808,14 @@ export async function openBrowser($: Engine, at: { id?: string; v?: number | nul
     return `No page: ${s.problem}. Try /browser again; if it fails twice, turn Browser off and on in /config.`
   }
   const q = (o: Record<string, unknown>) => Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')
+  // the page opens where the person is: a card's detail on its part, the Claims graph on the claim the ring is on, or
+  // the session at the message the keys act on
   const url = at.id
     ? `${s.base}/card/?${q({ o: at.id, v: at.v, from: at.row })}${at.region ? `#r=${encodeURIComponent(at.region)}` : ''}`
-    : `${s.base}/mirror/${at.row ? `#row=${encodeURIComponent(at.row)}` : ''}`
-  const what = at.id ? `${at.id}${at.region ? ' ▸ ' + at.region : ''}` : 'this session'
+    : at.view
+      ? `${s.base}/app/?${q({ view: at.view, claim: at.claim })}`
+      : `${s.base}/mirror/${at.row ? `#row=${encodeURIComponent(at.row)}` : ''}`
+  const what = at.id ? `${at.id}${at.region ? ' ▸ ' + at.region : ''}` : at.view === 'claims' ? `the claims${at.claim ? ` at ${at.claim}` : ''}` : 'this session'
   const browser = await $.env.get('BROWSER')
   const tries = browser ? [[browser, url]] : [['xdg-open', url], ['open', url]]
   for (const argv of tries) {
@@ -1154,34 +1158,12 @@ async function drawPart($: Engine, part: { program: string; data: unknown }, w: 
   return { drawing: out.drawing, grid: renderTerm(out.drawing, { w }) }
 }
 
-/** A citation's card spec: the ref resolved, the query's record or the code file's lines read. */
+/** A citation's card spec (cards.js citeCard): the ref resolved, the query's record or the code file's lines read, as
+ *  the person's own reads. */
 async function sourceSpec($: Engine, ref: string, label: string, room: number): Promise<Any> {
   const root = await rootHere($)
   if (!root) return { title: label, right: 'cite', problem: `no thimble/ folder here to read ${ref} from; run lean in the data folder first` }
-  const series = seriesRef(ref)
-  const resolved = await resolveJson($, root, series ? series.query : ref, 6, series ? undefined : label)
-  let query: Any = null
-  const q = /^(q\d+)(?:[#@]|$)/.exec(ref)
-  if (q) {
-    try { query = JSON.parse(String(await $.fs.read(`${root}/thimble/queries/${q[1]}.json`))) } catch { query = null }
-  }
-  let lines: { n: number; text: string }[] | undefined
-  const path = ref.split('#')[0]!
-  if (cardKind(ref) === 'code') {
-    const m = /#L(\d+)(?:-L?(\d+))?$/.exec(ref)
-    const a = Number(m?.[1] || 1)
-    const b = Number(m?.[2] || a)
-    try {
-      const all = String(await $.fs.read(path.startsWith('/') ? path : `${root}/${path}`)).split('\n')
-      const from = Math.max(1, a - 2)
-      const to = Math.min(all.length, Math.max(b + 2, from + room - 2))
-      lines = []
-      for (let n = from; n <= to; n++) lines.push({ n, text: all[n - 1] ?? '' })
-    } catch {
-      lines = undefined
-    }
-  }
-  return sourceCard({ ref, label, resolved, query, lines, path, room })
+  return citeCard({ ref, label, root, room }, { resolve: (r: string, n: number, l?: string) => resolveJson($, root, r, n, l), read: (p: string) => $.fs.read(p) })
 }
 
 /** The message as an object a verb reads: its words as shown, its row and its session. */
@@ -1588,7 +1570,7 @@ async function focusKeys($: Engine): Promise<string | null> {
   const d = await detailKeys($)
   if (d) return d
   // the Claims pane's own keys, as its program names them (panes/claims.js)
-  if ((await $.state.get(CLAIMPANE)).value) return barText([await paneNow($, 'claims')]) || 'esc close'
+  if ((await $.state.get(CLAIMPANE)).value) return [barText([await paneNow($, 'claims')]) || 'esc close', ...(browserFlag ? ['o browser'] : [])].join(' · ')
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (pick?.verb === 's') {
     // the chips' own keys, as their program names them (panes/chips.js), after what it says of the message now
@@ -1836,7 +1818,9 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
     keyOpened = null
     if (pick) await $.state.set(PICK, null)
     const row = await actingRow($)
-    $.clock.after(0, () => { void openBrowser($, { row }).then(said => $.ui.toast(said)) })
+    // from the Claims pane: the graph in the browser, on the claim the ring is on here
+    const claims = (await $.state.get(CLAIMPANE)).value ? { view: 'claims', claim: String((await paneState($, 'claims')).hover || '') || null } : {}
+    $.clock.after(0, () => { void openBrowser($, { row, ...claims }).then(said => $.ui.toast(said)) })
     return consume
   }
   if (pick && k.length === 1) {

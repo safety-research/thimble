@@ -384,15 +384,16 @@ function Record({ r, raw, flash, covered }: { r: Rec; raw: boolean; flash: boole
 // ---------------------------------------------------------------- Claims and the views
 
 /** Claims: the Claims pane (lean/panes/claims.js), the same program the terminal's c opens, on the session's claims
- * store (thimble/claims/<session>.json) and the same state: hover a claim for what it means, r replays the graph in
+ * store (thimble/claims/<session>.json); its hover and replay are this page's own: hover a claim for what it means, r replays the graph in
  * the order the claims were made, a click on the claim shown opens the message where it was said. */
 function ClaimsView() {
   const rows = useStore((s) => s.rows)
   const latest = [...rows].reverse().find((r) => r.kind === 'assistant' && r.record)?.row || ''
+  const claimSeed = useStore((s) => s.claimSeed)
   return (
     <>
       <div className="files-body is-view lean-claims-pane">
-        <PaneView name="claims" args={{ row: latest }} focus onClose={() => setState({ filesView: 'browser' })} />
+        <PaneView name="claims" args={{ row: latest }} focus seed={claimSeed ? { hover: claimSeed } : null} onClose={() => setState({ filesView: 'browser' })} />
       </div>
       <PaneStatus name="Files" meta="view · Claims" />
     </>

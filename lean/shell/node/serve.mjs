@@ -59,6 +59,7 @@ import { createServer } from 'node:http'
 import { basename, extname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { fromFacts, isRef } from '../object.js'
+import { citeCard } from '../cards.js'
 
 export { fromFacts }
 import { listVerbs } from './registry.mjs'
@@ -486,6 +487,24 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       if (!ref || refs.some(r => r.length > 2000 || /[\n\r\0]/.test(r))) return json({ error: 'no ref' }, 400)
       const n = Math.max(1, Math.min(20, Number(url.searchParams.get('n')) || 5))
       return leanJson(lean, root, ['resolve', ...refs, '-n', String(n)], personEnv).then(r => json(r.error ? { ref, ...r } : r))
+    }
+    if (api === 'card') {
+      // a citation's source card, as the terminal's tray builds it (cards.js citeCard): its parts' programs and data,
+      // which the page draws in its sandbox. Files are read only inside the folder.
+      const ref = url.searchParams.get('ref') || ''
+      if (!ref || ref.length > 2000 || /[\n\r\0]/.test(ref)) return json({ error: 'no ref' }, 400)
+      const label = (url.searchParams.get('label') || ref).slice(0, 300)
+      const room = Math.max(3, Math.min(30, Number(url.searchParams.get('room')) || 9))
+      const io = {
+        resolve: (r, n, l) => leanJson(lean, root, ['resolve', r, '-n', String(n), ...(l && l !== r ? ['--label', l] : [])], personEnv),
+        read: async path => {
+          const rel = String(path).startsWith(root) ? String(path).slice(root.length).replace(/^\/+/, '') : String(path)
+          const f = rel.startsWith('/') ? null : fileUnder(root, rel)
+          if (!f) throw new Error(`not in this folder: ${path}`)
+          return readFileSync(f, 'utf8')
+        },
+      }
+      return citeCard({ ref, label, root, room }, io).then(c => json(c), e => json({ error: String(e && e.message || e).slice(0, 300) }, 500))
     }
     if (api === 'verbs') {
       const { verbs } = listVerbs()
