@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { bareNumbers, digest, hintsFor, isRepeat, parseAnswer, pickHints, rowCount, rowsIn } from '../evidence.js'
+import { bareNumbers, digest, fewInputs, hintsFor, isRepeat, parseAnswer, pickHints, rowCount, rowsIn, slim } from '../evidence.js'
 import { rankRow } from '../../shell/object.js'
 
 const OBJECT = {
@@ -78,4 +78,16 @@ test("the hint row as the observer ranked it: its verbs first, in its order, wit
   assert.deepEqual(row.map(v => [v.name, v.picked, v.hint ?? null]), [['trace', true, 'trace the 412'], ['squeeze', true, null], ['explore', false, null]])
   assert.equal(rankRow(VERBS, null), VERBS)
   assert.equal(rankRow(VERBS, { verbs: [{ verb: 'map' }] }), VERBS)
+})
+
+test('a slimmed object keeps what the digest reads and drops its data, program and row sets; many inputs read as patterns', () => {
+  const big = { ...OBJECT, program: 'x'.repeat(1000), data: { rows: Array.from({ length: 1000 }, (_, i) => ({ n: i, _rows: [`a.jsonl#L${i}`] })) } }
+  const s = slim(big)
+  assert.equal(s.data, undefined)
+  assert.equal(s.program, undefined)
+  assert.equal(s.lineage.cites[0].rows, undefined)
+  assert.equal(s.lineage.cites[0].rows_n, 412)
+  assert.equal(digest(s, { verbs: VERBS }), digest(OBJECT, { verbs: VERBS }))
+  const inputs = Array.from({ length: 96 }, (_, i) => ({ path: `runs/sweep${1 + (i % 2)}-opus/agents/agent-${String(i).padStart(2, '0')}.jsonl`, rows_read: 10 }))
+  assert.deepEqual(fewInputs(inputs), [{ path: 'runs/sweep*-opus/agents/agent-*.jsonl (96 files)', rows_read: 960 }])
 })

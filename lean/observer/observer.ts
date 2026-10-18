@@ -240,22 +240,19 @@ async function rootNow($: Engine): Promise<string | null> {
 type Seen = { object: Any; ref: ObjRef; isNew: boolean }
 
 /** The objects Claude saved in this session: those saved since `since` (new), then the latest older ones, up to
- *  CONTEXT_OBJECTS in all (every new one is kept). Objects a verb the person pressed made are not Claude's. */
+ *  CONTEXT_OBJECTS in all (every new one is kept), each slimmed to what the digest reads. A Node child reads them
+ *  (node/objects.mjs), so an object of megabytes is read too. Objects a verb the person pressed made are not Claude's. */
 async function objectsNow($: Engine, root: string, since: number): Promise<Seen[]> {
-  const dir = `${root}/thimble/objects`
-  const files = ((await $.fs.list(dir).catch(() => [])) as { name: string }[]).filter(f => f.name.endsWith('.json'))
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `--allow-fs-read=${root}/thimble`, `${dir}/observer/node/objects.mjs`, root, S.session], { timeoutMs: 60000 })
+  let list: Any[] = []
+  try { list = r.exitCode === 0 ? JSON.parse(r.stdout) : [] } catch { list = [] }
   const mine: Seen[] = []
-  for (const f of files) {
-    try {
-      const o = JSON.parse(String(await $.fs.read(`${dir}/${f.name}`)))
-      if (!o || o.session !== S.session) continue
-      const t = Date.parse(String(o.updated || o.created || ''))
-      mine.push({ object: o, ref: { id: String(o.id), v: Number(o.version) || null, root }, isNew: !!since && t >= since - 2000 })
-    } catch {
-      // a file being written: the next look reads it
-    }
+  for (const o of Array.isArray(list) ? list : []) {
+    if (!o || o.session !== S.session) continue
+    const t = Date.parse(String(o.updated || o.created || ''))
+    mine.push({ object: o, ref: { id: String(o.id), v: Number(o.version) || null, root }, isNew: !!since && t >= since - 2000 })
   }
-  mine.sort((a, b) => Date.parse(String(b.object.updated || '')) - Date.parse(String(a.object.updated || '')))
   const fresh = mine.filter(x => x.isNew)
   return [...fresh, ...mine.filter(x => !x.isNew).slice(0, Math.max(0, CONTEXT_OBJECTS - fresh.length))]
 }
@@ -323,7 +320,7 @@ async function look($: Engine, t: Look): Promise<void> {
     const digests: string[] = []
     for (const x of objs) {
       verbs[x.ref.id] = await verbsOf($, x.ref).catch(() => [])
-      const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(() => '') : ''
+      const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(err => `(the person cannot see it: it does not draw: ${cut(String((err as Error)?.message || err), 160)})`) : ''
       digests.push(digest(x.object, { verbs: verbs[x.ref.id], isNew: x.isNew, drawn }))
     }
     const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through lean)'

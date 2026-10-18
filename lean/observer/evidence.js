@@ -7,6 +7,7 @@
 // judged by hand, the problems `lean save` found, and the verbs that could act on it. That is what this writes.
 //
 //   rowCount(rowsets)          -> how many source rows a list of row sets names (null when one names a whole file)
+//   slim(object)               -> the object with only what digest reads: no data, no program, row sets as counts
 //   bareNumbers(text)          -> the numbers in an object's words that cite nothing
 //   digest(object, o)          -> the object's lineage in plain lines, as the person sees it, with its verb candidates
 //   parseAnswer(text)          -> {notes, line, settled, hints} from the fork's reply, or null
@@ -77,8 +78,8 @@ export function bareNumbers(text) {
 }
 
 function citeLine(c) {
-  const rows = rowCount(c.rows)
-  const files = filesOf(c.rows)
+  const rows = c.rows_n !== undefined ? c.rows_n : rowCount(c.rows)
+  const files = c.rows_files || filesOf(c.rows)
   const label = c.label != null ? `"${cut(c.label, 40)}"` : c.quote != null ? `quote "${cut(c.quote, 50)}"` : 'a value'
   const value = c.value !== undefined ? ` = ${typeof c.value === 'number' ? fmt(c.value) : cut(JSON.stringify(c.value), 30)}` : ''
   const behind = rows != null ? `rests on ${fmt(rows)} row${rows === 1 ? '' : 's'}${files.length ? ' of ' + files.slice(0, 2).join(', ') : ''}` : files.length ? `rests on all of ${files.slice(0, 2).join(', ')}` : 'rests on no rows'
@@ -117,7 +118,7 @@ export function digest(object, o = {}) {
   if (binds.length) L.push(`  data bound to queries: ${binds.slice(0, 8).map(b => `${b.at || '/'} ← ${b.ref}${b.lineage && b.lineage !== 'exact' ? ` (${b.lineage})` : ''}`).join('; ')}`)
   const qs = Object.values(lin.queries || {})
   for (const q of qs.slice(0, 8)) {
-    const inputs = (q.inputs || []).map(x => `${x.path}${x.rows_read != null ? ` (${fmt(x.rows_read)} rows read)` : ''}`).join(', ')
+    const inputs = fewInputs(q.inputs).map(x => `${x.path}${x.rows_read != null ? ` (${fmt(x.rows_read)} rows read)` : ''}`).join(', ')
     const uses = (q.uses || []).map(u => (typeof u === 'string' ? u : `${u.name || u.label || u.query}${u.version != null ? ' v' + u.version : ''}${u.query ? ' from ' + u.query : ''}`)).filter(Boolean)
     const kept = Array.isArray(q.kept) && q.kept.length ? `; keeps ${q.kept.join(', ')} for later queries` : ''
     const mode = MODES[q.lineage] ? `; ${MODES[q.lineage]}` : ''
@@ -133,7 +134,8 @@ export function digest(object, o = {}) {
     for (const [f, st] of Object.entries(cov.files || {})) (by[st] ??= []).push(f)
     const parts = Object.entries(by).map(([st, fs]) => `${st} ${fs.length > 4 ? `${fs.length} files` : fs.join(', ')}`)
     const nr = cov.not_read || []
-    if (nr.length) parts.push(`not read ${nr.length > 6 ? `${nr.length} files, as ${nr.slice(0, 4).join(', ')}` : nr.join(', ')}`)
+    const nn = cov.not_read_count ?? nr.length
+    if (nn) parts.push(`not read ${nn > 6 ? `${fmt(nn)} files, as ${nr.slice(0, 4).join(', ')}` : nr.join(', ')}`)
     L.push(`  when it was saved the session had: ${parts.join('; ')}`)
   }
   const dec = lin.declared ?? object.declared
@@ -154,6 +156,56 @@ export function digest(object, o = {}) {
     L.push(`  its hint row now: ${verbs.filter(v => v.picked).map(v => v.name).join(', ') || 'none'}${named.length ? ` (Claude named ${named.join(', ')})` : ''}`)
   }
   return L.join('\n')
+}
+
+/** A query's inputs in a few lines: many like files (a run's 776 transcripts) as one pattern with how many files and
+ *  rows, as `runs/sweep*-opus-emergent_prs/agents/agent-*.jsonl (48 files)`, each segment's digits starred. */
+export function fewInputs(inputs, max = 6) {
+  const list = Array.isArray(inputs) ? inputs : []
+  if (list.length <= max) return list
+  const groups = new Map()
+  for (const x of list) {
+    const key = String(x.path || '').split('/').map(seg => seg.replace(/\d+/g, '*')).join('/')
+    const g = groups.get(key) || { n: 0, rows: 0 }
+    g.n += 1
+    g.rows += Number(x.rows_read) || 0
+    groups.set(key, g)
+  }
+  const ranked = [...groups.entries()].sort((a, b) => b[1].n - a[1].n)
+  const out = ranked.slice(0, 4).map(([k, g]) => ({ path: `${k} (${fmt(g.n)} files)`, rows_read: g.rows }))
+  const rest = ranked.slice(4)
+  if (rest.length) out.push({ path: `${fmt(rest.reduce((n, [, g]) => n + g.n, 0))} other files`, rows_read: rest.reduce((n, [, g]) => n + g.rows, 0) })
+  return out
+}
+
+/** The object with only what `digest` reads: its words, its lineage without query code, each citation's row sets as a
+ *  count and a list of files, at most 40 citations. Small, whatever the object's data: an object of a swarm can hold
+ *  megabytes of rows. */
+export function slim(o) {
+  if (!o || typeof o !== 'object') return null
+  const lin = o.lineage || {}
+  const cites = (lin.cites || []).slice(0, 40).map(c => {
+    const { rows, quote, ...rest } = c
+    return { ...rest, ...(quote != null ? { quote: cut(quote, 120) } : {}), rows_n: rowCount(rows), rows_files: filesOf(rows) }
+  })
+  const queries = {}
+  for (const [k, q] of Object.entries(lin.queries || {}).slice(0, 12)) {
+    const { code, ...rest } = q || {}
+    queries[k] = { ...rest, inputs: fewInputs(rest.inputs) }
+  }
+  const rows = {}
+  for (const [f, r] of Object.entries(lin.rows || {})) rows[f] = { count: r && r.count }
+  const cov = lin.coverage || {}
+  const pick = (x, keys) => Object.fromEntries(keys.filter(k => x[k] !== undefined).map(k => [k, x[k]]))
+  return {
+    ...pick(o, ['id', 'version', 'session', 'created', 'updated', 'title', 'question', 'text', 'hints', 'verb', 'declared']),
+    lineage: {
+      queries, bindings: (lin.bindings || []).slice(0, 20).map(b => pick(b, ['at', 'ref', 'query', 'lineage'])), cites, rows,
+      coverage: { files: cov.files || {}, not_read: (cov.not_read || []).slice(0, 30), not_read_count: (cov.not_read || []).length },
+      declared: lin.declared, problems: (lin.problems || []).slice(0, 10),
+      ...(lin.cites && lin.cites.length > 40 ? { cites_count: lin.cites.length } : {}),
+    },
+  }
 }
 
 /** The JSON object in a reply, or null. */

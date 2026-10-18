@@ -4,6 +4,7 @@
 // `claude plugin test lean`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { slim } from '../observer/evidence.js'
 import { skipsFor } from '../observer/observer'
 
 const ROOT = '/data'
@@ -55,6 +56,7 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json) } = {})
     let out = '{}'
     if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: DRAWING, verbs: VERBS, problems: [] })
     else if (e.argv.includes('coverage')) out = 'Coverage of this session · 4 source files\nNot read: 1 file (9 rows): events.jsonl'
+    else if (e.argv.some(a => a.endsWith('objects.mjs'))) out = JSON.stringify(Object.entries(files).filter(([k]) => k.startsWith(DIR + '/')).map(([, v]) => slim(JSON.parse(v))).filter(o => o && o.session === e.argv.at(-1)))
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const forks: string[] = []
