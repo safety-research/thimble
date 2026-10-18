@@ -335,3 +335,32 @@ test("an example of a JSON lines record of no known shape draws its fields, not 
   expect(text.join('\n')).toContain('shed/log.jsonl line 7')
   await ui.unmount()
 })
+
+test("an example whose ref names only a line draws the passage its takeaway quotes from that record, marked, in a field the record's words leave out too (bug hunt L5)", { timeoutMs: 30_000 }, async ($, on) => {
+  // the card's refs named lines, its quotes stood only in its takeaway: each record drew from its start, the quoted
+  // error of the second unseen and nothing marked
+  const w = world(on)
+  const result = '\n<counter>42</counter> wren@shed:/tmp/pkg$ \n' + '/usr/bin/kettle\n'.repeat(12) + "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'gizmo'\n<counter>43</counter> wren@shed:/tmp/pkg$ "
+  const rec = { record: 'message', index: 61, role: 'Assistant', type: 'ToolMessage', tool_name: 'terminal', tool_call: { session_name: 'main', text: 'which kettle; python3 -c "import gizmo"' }, tool_result: result }
+  w.resolve['shed/log.jsonl#L62'] = { ref: 'shed/log.jsonl#L62', kind: 'record', path: 'shed/log.jsonl', line: 62, record: rec, blocks: [{ kind: 'text', text: rec.tool_call.text }], fields: [{ key: 'tool_result', text: result.trim() }], excerpt: rec.tool_call.text, meta: {} }
+  const words = 'Hello from the shed. '.repeat(30) + 'Error: the gate is locked for port 8443. Bye.'
+  w.resolve['shed/log.jsonl#L4'] = { ref: 'shed/log.jsonl#L4', kind: 'record', path: 'shed/log.jsonl', line: 4, record: { text: words }, blocks: [{ kind: 'text', text: words }], excerpt: words, meta: {} }
+  w.cells.x0line00 = {
+    id: 'x0line00', notebook: 'g1', kind: 'example', title: 'Which commands failed?', labels: [], created_by: 'main', ts: '2026-10-06T10:00:00+00:00',
+    takeaway: `The gate said [["Error: the gate is locked for port 8443"|shed/log.jsonl#L4]] and Python gave [["ModuleNotFoundError: No module named 'gizmo'"|shed/log.jsonl#L62]].`,
+    payload: { refs: ['shed/log.jsonl#L4', 'shed/log.jsonl#L62'] },
+  }
+  await start($, w)
+  await turn($, w, 'x0line00')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const client = (await ui.find({ type: 'Client', key: 'card-t0-x0line00' })) as unknown as { props: { props: { card: Parameters<typeof cardLayout>[0] } } }
+  const lay = cardLayout(client.props.props.card, 120, -1).lines
+  const text = lay.map(l => l.map(x => x.s).join(''))
+  const lit = lay.flatMap(l => l.filter(x => x.bg).map(x => x.s)).join('|')
+  expect(lit).toContain('Error: the gate is locked for port 8443')
+  expect(lit).toContain("ModuleNotFoundError: No module named 'gizmo'")
+  // the second record at its tool's result, where the error stands, not its command or the result's first lines
+  expect(text.find(t => t.startsWith('●') && t.includes('tool_result'))).toBeDefined()
+  expect(text.join('\n')).not.toContain('<counter>42</counter>')
+  await ui.unmount()
+})

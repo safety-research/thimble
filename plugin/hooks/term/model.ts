@@ -411,15 +411,21 @@ function passageIn(flat: string, want: string): [number, number] | null {
 
 const PASSAGES_SPAN = 600 // characters apart the passages of one record may stand to be drawn as one example
 
+// a field the record's words leave out that is no longer than this and on one line is drawn whole on a row of its own
+// before the words (draw.ts exampleLayout `head`), so no passage of it is looked for
+const HEAD_FIELD = 120
+
 /** The passages an example card quotes in its record's words (bug hunt round 10, K3: a transcript's message showed its
  *  start, never the vote the card quoted from its tool call; a record cited twice drew twice the same): the first part of
- *  the record (the verdict's `words`, wordsOf) that holds the first of `wants` (the quotes add_card kept, or spans' own
- *  passages), on one line with the words around them (PASSAGE_BEFORE, PASSAGE_AFTER), `marks` where each of `wants` that
- *  stands in that part within PASSAGES_SPAN of the first stands in it, `found` which of `wants` those are (the first
- *  among them), and the part's key (a tool's name, a record's field). Null when no part holds the first. Pure. */
+ *  the record (the verdict's `words`, wordsOf, then the long fields its words leave out, such as a tool's result) that
+ *  holds the first of `wants` (the quotes add_card kept, spans' own passages, or the takeaway's quotes of the record), on
+ *  one line with the words around them (PASSAGE_BEFORE, PASSAGE_AFTER), `marks` where each of `wants` that stands in that
+ *  part within PASSAGES_SPAN of the first stands in it, `found` which of `wants` those are (the first among them), and
+ *  the part's key (a tool's name, a record's field). Null when no part holds the first. Pure. */
 export function examplePassages(v: TermVerdict, wants: readonly string[]): { key: string; text: string; marks: [number, number][]; found: number[] } | null {
-  if (!v.words?.length || !wants.some(w => w.trim())) return null
-  for (const [key, text] of v.words) {
+  const parts = [...(v.words ?? []), ...(v.fields ?? []).filter(([, t]) => t.trim().length > HEAD_FIELD || t.trim().includes('\n'))]
+  if (!parts.length || !wants.some(w => w.trim())) return null
+  for (const [key, text] of parts) {
     const flat = text.replace(/\s+/g, ' ').trim()
     const at = wants.map(w => passageIn(flat, w))
     if (!at[0]) continue

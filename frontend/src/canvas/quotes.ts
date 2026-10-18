@@ -581,6 +581,27 @@ export function markQuotes(parts: readonly QuotePart[], quotes: readonly string[
   return out
 }
 
+const QUOTE_MARKS = '"\'“”‘’'
+
+/** The words in quotation marks a citation shows (`"ModuleNotFoundError: …"`), without the marks; '' for any other value.
+ * Pure. */
+export function quotedWords(display: string): string {
+  const d = display.trim()
+  return d.length > 2 && QUOTE_MARKS.includes(d[0]) && QUOTE_MARKS.includes(d[d.length - 1]) ? d.slice(1, -1).trim() : ''
+}
+
+/** The words an example card quotes from each of its refs: the quote add_card kept beside it, else, for a ref that names
+ * a whole record, the words in quotation marks of the first takeaway link to that record (bug hunt L5: the refs named
+ * lines and the quotes stood only in the takeaway); '' for none. A span names its own passage. Pure. */
+export function exampleQuotes(refs: readonly string[], quotes: readonly unknown[], takeaway: string): string[] {
+  const told = [...takeaway.matchAll(/\[\[([^\]|]*)\|([^\]]*)\]\]/g)].map((m) => ({ words: quotedWords(m[1]), record: recordOf(m[2].trim()) })).filter((c) => c.words)
+  return refs.map((r, i) => {
+    const kept = typeof quotes[i] === 'string' ? (quotes[i] as string).trim() : ''
+    if (kept || SPAN_REF.test(r)) return kept
+    return told.find((c) => c.record === recordOf(r))?.words ?? ''
+  })
+}
+
 /** One entry of an example card: the record it shows once, the address that opens it, and the refs it stands for, each
  * with the quote kept beside it ('' for none). */
 export interface ExampleEntry {
