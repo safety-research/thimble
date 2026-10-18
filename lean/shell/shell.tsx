@@ -1692,16 +1692,20 @@ async function focusKeys($: Engine): Promise<string | null> {
   return null
 }
 
-/** The thimble line: its label, what the keys do now at its left, the counts at its right. Null with nothing to say. */
-async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
+/** The thimble line: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
+ *  Where the band is too narrow for one row (beside a docked pane), the label, the keys and the counts each take
+ *  their own rows, wrapped at words. */
+async function barEl($: Engine, els: Any, w: number, working = false): Promise<Any | null> {
   const { Box, Button, Text } = els
-  const sep = (k: string) => Text({ key: k, dimColor: true, children: ' · ' })
   const left: Any[] = []
+  let leftText = ''
   const keys = await focusKeys($)
   if (keys) {
     const tone = keys.startsWith('×') ? { color: 'error' } : keys.startsWith('!') ? { color: 'warning' } : { dimColor: true }
     left.push(Text({ key: 'keys', ...tone, wrap: 'wrap', children: keys }))
-  } else {
+    leftText = keys
+  } else if (!working) {
+    // (while Claude works the verbs wait: they act on its answer, which is not there yet)
     const row = await actingRow($)
     const rec = row ? await recordNow($, row) : null
     if (row && rec) {
@@ -1712,47 +1716,58 @@ async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
       const sv = sLit(rec, sqUi)
       if (sv) lit.s = sv
       else delete lit.s
-      const item = (k: string, label: string, kids: Any[], onPress: () => unknown) => {
-        if (left.length) left.push(sep(`sep-${k}`))
-        left.push(Button({ key: `bar-${k}`, plain: true, label, children: kids, onPress }))
+      const item = (k: string, label: string, key: string, color: string, words: string, wordsColor: string | null, onPress: () => unknown) => {
+        if (left.length) { left.push(Text({ key: `sep-${k}`, dimColor: true, children: ' · ' })); leftText += ' · ' }
+        left.push(Button({ key: `bar-${k}`, plain: true, label, onPress, children: [Text({ color, bold: true, children: key }), Text(wordsColor ? { color: wordsColor, children: ` ${words}` } : { dimColor: true, children: ` ${words}` })] }))
+        leftText += `${key} ${words}`
       }
       for (const v of verbs) {
         const color = verbColor(v.key, theme, v.color)
         const on = lit[v.key]
         const more = running === v.key ? '…' : ''
-        item(v.key, v.name, on?.lit && on.note
-          ? [Text({ color, bold: true, children: v.key }), Text({ color, children: ` ● ${on.note}${more}` })]
-          : [Text({ color, bold: true, children: v.key }), Text({ dimColor: true, children: ` ${v.name}${more}` })], () => pressRowVerb($, row, v.key))
+        if (on?.lit && on.note) item(v.key, v.name, v.key, color, `● ${on.note}${more}`, color, () => pressRowVerb($, row, v.key))
+        else item(v.key, v.name, v.key, color, `${v.name}${more}`, null, () => pressRowVerb($, row, v.key))
       }
-      if (rec.marks.length) item('marks', 'cite & explain', [Text({ color: markColors(theme).cite, bold: true, children: ']' }), Text({ dimColor: true, children: ' cite & explain' })], () => stepMark($, 1))
+      if (rec.marks.length) item('marks', 'cite & explain', ']', markColors(theme).cite, 'cite & explain', null, () => stepMark($, 1))
       const ref = await focusedCard($)
-      if (ref) item('detail', 'open detail', [Text({ color: FOCUS[theme], bold: true, children: '1' }), Text({ dimColor: true, children: ' open detail' })], () => openDetail($, ref))
-      if (browserFlag) item('web', 'browser', [Text({ color: FOCUS[theme], bold: true, children: 'o' }), Text({ dimColor: true, children: ' browser' })], async () => $.ui.toast(await openBrowser($, { row })))
+      if (ref) item('detail', 'open detail', '1', FOCUS[theme], 'open detail', null, () => openDetail($, ref))
+      if (browserFlag) item('web', 'browser', 'o', FOCUS[theme], 'browser', null, async () => $.ui.toast(await openBrowser($, { row })))
     }
   }
   const c = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
   const now = await $.clock.now()
-  const items: [keyof LineCounts, number, string][] = c ? [
+  const items: [string, number, string][] = c ? [
     ['cards', c.cards, c.cards === 1 ? '1 card' : `${fmtN(c.cards)} cards`],
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`],
     ['cites', c.cites, c.cites === 1 ? '1 cite' : `${fmtN(c.cites)} cites`],
     ['claims', c.claims, c.claims === 1 ? '1 claim' : `${fmtN(c.claims)} claims`],
     ['cov', c.cov, `coverage ${percent(c.cov)}`],
   ] : []
-  const right: Any[] = []
-  for (const [k, n, label] of items.filter(([, n]) => n > 0)) {
-    if (right.length) right.push(sep(`csep-${String(k)}`))
-    const bright = now - (c!.changed[String(k)] ?? 0) < BRIGHT_MS
-    right.push(Text({ key: `count-${String(k)}`, ...(bright ? { bold: true } : { dimColor: true }), children: label }))
-    void n
+  const shown = items.filter(([, n]) => n > 0)
+  const counts: Any[] = []
+  for (const [k, , label] of shown) {
+    if (counts.length) counts.push(Text({ key: `csep-${k}`, dimColor: true, children: ' · ' }))
+    const bright = now - (c!.changed[k] ?? 0) < BRIGHT_MS
+    counts.push(Text({ key: `count-${k}`, ...(bright ? { bold: true } : { dimColor: true }), children: label }))
   }
+  const countsText = shown.map(([, , l]) => l).join(' · ')
   const where = await threadInFront($)
-  if (!left.length && !right.length && !where) return null
-  const label = Text({ key: 'bar-label', color: FOCUS[theme], children: where ?? 'thimble' })
-  return Box({ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', width: w, children: [
-    Box({ key: 'bar-left', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, marginRight: 2, children: [label, Text({ key: 'bar-gap', children: '  ' }), ...left] }),
-    Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: right }),
-  ] })
+  if (!left.length && !counts.length && !where) return null
+  const name = where ?? 'thimble'
+  const label = Text({ key: 'bar-label', color: FOCUS[theme], wrap: 'truncate-end', children: name })
+  const right = counts.length ? Text({ key: 'bar-right', wrap: 'wrap', children: counts }) : null
+  // one row where everything fits, the counts at its right
+  if ([...name].length + 2 + [...leftText].length + 4 + [...countsText].length <= w) {
+    return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [
+      Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, Text({ key: 'bar-gap', children: '  ' }), ...left] }),
+      ...(right ? [Box({ key: 'bar-counts', flexShrink: 0, children: [right] })] : []),
+    ] })
+  }
+  // too narrow: the label, the keys and the counts each on rows of their own, wrapped at words
+  const rows: Any[] = [label]
+  if (left.length) rows.push(keys ? left[0] : Box({ key: 'bar-left', flexDirection: 'row', flexWrap: 'wrap', children: left }))
+  if (right) rows.push(right)
+  return Box({ flexDirection: 'column', width: w, children: rows })
 }
 
 /** A key pressed while the prompt is empty: the box as it should stand when the shell took the key, or null to let
@@ -2245,7 +2260,7 @@ export const registerShell: Register = (on, options) => {
       const els = $.ui.resolve(e) as Any
       const { Box, Text } = els
       const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
-      const line = await barEl($, els, bw)
+      const line = await barEl($, els, bw, !!e.props.isWorking)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       const above = trayTop(tray) ? await trayBand($, e, els, tray!) : null
       // the observer's line (observer.ts, inside this hook): drawn by its own hook when it has one open
