@@ -3,10 +3,11 @@
 /** One object as the shell points at it: its id, its version (null: the latest) and the folder that holds it. */
 export type ObjRef = { id: string; v: number | null; root: string }
 
-/** What the detail view shows: the object, the selected region, which example, and whether `? all` is open; the
- *  knobs' values the person set (`state`) and the knob turned last; or, with `cite`, one citation of Claude's words
- *  and the rows behind it; or, with `cites`, the values a reply cites, each a press from its rows. */
-export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null; cites?: { ref: string; label: string }[]; state?: Record<string, unknown>; knob?: string | null }
+/** What the detail view shows: the object, the selected region (its part), which example, and whether `? all` is open;
+ *  the knobs' values the person set (`state`) and the knob turned last; `prog` while the program is laid over the card
+ *  (`p`); or, with `cite`, one citation of Claude's words and the rows behind it; or, with `cites`, the values a reply
+ *  cites, each a press from its rows. */
+export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null; cites?: { ref: string; label: string }[]; state?: Record<string, unknown>; knob?: string | null; prog?: boolean }
 
 /** A verb's run, as the /verb command's row draws it. */
 export type Ran = { verb: string; text?: string; note?: string; ask?: string; error?: string; saved?: ObjRef | null; on?: string }
@@ -59,6 +60,10 @@ declare module 'claude-code' {
       ranked: StateFamily<Ranking | null>
       /** the observer's line above the prompt, or none */
       line: ObserverLine | null
+      /** where a card's values come from (object.js fromFacts), by root, id and version: the detail's "from" line */
+      facts: StateFamily<unknown>
+      /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
+      thread: StateFamily<unknown>
     }
   }
 }
