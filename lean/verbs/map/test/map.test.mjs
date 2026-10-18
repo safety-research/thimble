@@ -222,3 +222,16 @@ test("the skill's examples are JSON the kernel takes, and draw", () => {
     assert.equal(d.error, undefined, b)
   }
 })
+
+test('one thread with many stations, full: down the left, a station a row with its note and its share', () => {
+  const stations = Array.from({ length: 11 }, (_, i) => ({ id: 's' + i, label: `station number ${i} with a long name`, note: `what happened at ${i}, said in a few more words than fit` }))
+  const moves = stations.map((s, i) => ({ thread: 'a', station: s.id, start: i * 10 + 1, end: i * 10 + 10, _rows: [`a.jsonl#L${i * 10 + 1}-${i * 10 + 10}`] }))
+  const g = draw({ title: 'long', unit: 'calls', threads: [{ id: 'a', steps: 110 }], moves, stations, links: [{ from: 's9', to: 's4', label: 'goes back' }], full: true }, { w: 72 })
+  const lines = g.text.split('\n')
+  assert.ok(lines.some(l => /●\s+1\s+station number 0/.test(l)), g.text)
+  assert.ok(g.text.includes('↺') && g.text.includes('back: station number 9'), g.text)
+  assert.ok(g.text.includes('110 calls in all'), g.text)
+  const r = region(g, 'st-s3')
+  assert.equal(r.rects.length, 1)
+  assert.ok(r.rects[0].h >= 2, 'the station and its note are one part')
+})
