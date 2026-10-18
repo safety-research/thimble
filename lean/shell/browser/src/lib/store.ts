@@ -127,6 +127,8 @@ export interface State {
   detailBar: 'examples' | 'from' | 'program' | null
   exampleAt: number
   pendingThread: { row: string; ref: string; at: number } | null
+  /** a row of the chat the page's link named (#row=): scrolled to and lit once */
+  flashRow: string | null
 }
 
 let state: State = {
@@ -155,6 +157,7 @@ let state: State = {
   detailBar: null,
   exampleAt: 0,
   pendingThread: null,
+  flashRow: null,
 }
 const subs = new Set<() => void>()
 

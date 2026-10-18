@@ -42,7 +42,7 @@ export function FilesPane() {
   const views = useMemo(() => objects.filter((o) => VIEW_VERBS.has(String(o.verb))), [objects])
   const options = [
     { value: 'browser', label: 'File browser', icon: 'folder' as IconName },
-    ...(claims ? [{ value: 'claims', label: 'Claims', icon: 'graph' as IconName }] : []),
+    { value: 'claims', label: 'Claims', icon: 'graph' as IconName },
     ...views.map((v) => ({ value: `view:${v.id}`, label: v.title.replace(/^Trace · /, 'Trace · ').slice(0, 32), icon: 'view' as IconName })),
   ]
   const value = options.some((o) => o.value === view) ? view : 'browser'
@@ -53,7 +53,7 @@ export function FilesPane() {
         <Segmented label="Views" size="lg" value={value} onChange={(v) => setState({ filesView: v })} options={options} />
       </div>
       {value === 'browser' && <Browser />}
-      {value === 'claims' && claims && <ClaimsView claims={claims} />}
+      {value === 'claims' && <ClaimsView claims={claims} />}
       {shownView && <BigView view={shownView} />}
     </div>
   )
@@ -88,9 +88,13 @@ function Browser() {
     setAt(m ? Number(m[1]) : null)
     setState({ file: null })
   }, [want])
+  // first the file this session read most of: computed over, then read, then the largest
   useEffect(() => {
-    if (!open && sources?.length) setOpen([...sources].sort((a, b) => b.rows - a.rows)[0].path)
-  }, [sources])
+    if (open || !sources?.length) return
+    const rank = (s: Source) => ['computed', 'read', 'searched', 'named'].indexOf(cov[s.path]?.status ?? '')
+    const by = [...sources].sort((a, b) => ((rank(a) + 5) % 5) - ((rank(b) + 5) % 5) || b.rows - a.rows)
+    if (Object.keys(cov).length || sources.length === 1) setOpen(by[0].path)
+  }, [sources, cov])
   const cur = sources?.find((s) => s.path === open) ?? null
   const totals = sources ? `${sources.length} files · ${fmt(sources.reduce((n, s) => n + (s.rows || 0), 0))} rows` : ''
   return (
@@ -375,14 +379,33 @@ function Record({ r, raw, flash, covered }: { r: Rec; raw: boolean; flash: boole
 
 // ---------------------------------------------------------------- Claims and the views
 
-/** Claims: the newest atlas object, drawn by the Atlas page in a frame (as 0.9 shows a page in Files). */
-function ClaimsView({ claims }: { claims: ObjectInfo }) {
+/** Claims: the Claims page (shell/browser/claims/, its own page folder) in a frame, as 0.9 shows a page in Files.
+ * Until that page is there, the newest atlas object drawn by the Atlas page, or a line that says how to make one. */
+function ClaimsView({ claims }: { claims: ObjectInfo | null }) {
+  const [page, setPage] = useState<'claims' | 'atlas' | 'none' | null>(null)
+  useEffect(() => {
+    let alive = true
+    void fetch(`${BASE}/claims/`, { cache: 'no-store' })
+      .then((r) => alive && setPage(r.ok ? 'claims' : claims ? 'atlas' : 'none'))
+      .catch(() => alive && setPage(claims ? 'atlas' : 'none'))
+    return () => {
+      alive = false
+    }
+  }, [claims?.id])
+  const src = page === 'claims' ? `${BASE}/claims/` : page === 'atlas' && claims ? `${BASE}/atlas/?o=${encodeURIComponent(claims.id)}` : null
   return (
     <>
       <div className="files-body is-view">
-        <iframe className="lean-view-frame" title="Claims" src={`${BASE}/atlas/?o=${encodeURIComponent(claims.id)}`} />
+        {src ? (
+          <iframe className="lean-view-frame" title="Claims" src={src} />
+        ) : page === 'none' ? (
+          <div className="lean-claims-none">
+            <p className="lean-doc-none">No claims yet.</p>
+            <p className="lean-doc-hint">Press c under a message. Claude extracts the claims of the work so far, with their sources, and they show here.</p>
+          </div>
+        ) : null}
       </div>
-      <PaneStatus name="Files" meta={`view · Claims · ${claims.id} v${claims.version}`} />
+      <PaneStatus name="Files" meta={`view · Claims${page === 'atlas' && claims ? ` · ${claims.id} v${claims.version}` : ''}`} />
     </>
   )
 }

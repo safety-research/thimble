@@ -160,6 +160,16 @@ function isWorking(rows: Row[]): boolean {
 
 function MainRows({ rows, working }: { rows: Row[]; working: boolean }) {
   const asks = useStore((s) => s.asks)
+  const flash = useStore((s) => s.flashRow)
+  useEffect(() => {
+    if (!flash) return
+    const el = document.querySelector(`.chat [data-row="${CSS.escape(flash)}"]`)
+    if (!el) return
+    el.scrollIntoView({ block: 'center' })
+    el.classList.add('lean-flash')
+    setState({ flashRow: null })
+    window.setTimeout(() => el.classList.remove('lean-flash'), 2400)
+  }, [flash, rows.length])
   if (!rows.length)
     return (
       <div className="chat-empty lean-chat-empty">

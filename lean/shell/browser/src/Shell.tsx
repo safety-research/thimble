@@ -39,6 +39,8 @@ function fromUrl() {
   const h = new URLSearchParams(location.hash.slice(1))
   const card = q.get('card') || q.get('o')
   if (card) setState({ surface: 'canvas', card: { id: card, v: q.get('v') ? Number(q.get('v')) : null, region: h.get('r') }, selected: card })
+  const row = h.get('row')
+  if (row) setState({ flashRow: row, thread: 'main' })
   const view = q.get('view')
   if (view) setState({ surface: 'files', filesView: view })
 }
@@ -165,6 +167,10 @@ function useKeys() {
         if (s.card) return e.preventDefault(), setState({ card: null, thread: 'main' })
         if (k === 'Escape' && s.selected) return setState({ selected: null })
         return
+      }
+      if (/^[1-9]$/.test(k) && s.propsOpen) {
+        const p = s.rows.find((r) => r.row === s.propsOpen)?.record?.verbs?.v?.proposals?.[Number(k) - 1]
+        if (p) return e.preventDefault(), void pressVerb(s.propsOpen, 'v', p)
       }
       if (k === '1') {
         if (s.tray.length && !s.trayAsk) return e.preventDefault(), setState({ trayAsk: true })
