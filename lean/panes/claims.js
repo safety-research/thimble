@@ -227,7 +227,7 @@ function vectorGraph(k, data, { claims, byId, visible, newest, hover, colorOf })
   let lines = []
   if (ringOn) {
     const c0 = byId.get(hover)
-    lines = cardLines(c0, Math.min(data.w - 8, 58), { cite: 'accent', amber: 'warn', color: colorOf(c0) })
+    lines = cardLines(c0, Math.min(data.w - 8, 72), { cite: 'accent', amber: 'warn', color: colorOf(c0) })
     // the browser sets the words in a proportional face, narrower than the cells they count (bold a little wider); a
     // label's column stays cells wide
     const wide = r => r.s.length * (r.style && r.style.bold ? 0.92 : 0.86)
