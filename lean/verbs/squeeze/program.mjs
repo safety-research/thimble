@@ -98,10 +98,16 @@ export function squeezeProgram(k, data) {
     const mine = {}
     from.forEach(s => { mine[s] = 1 })
     const paras = from.map(s => byId[s].b).filter((b, j, all) => all.indexOf(b) === j)
+    const all = data.blocks || []
     const rows = paras.map(b => {
-      const blk = (data.blocks || []).find(x => x.b === b) || { spans: [] }
+      const at = all.findIndex(x => x.b === b)
+      const blk = all[at] || { spans: [] }
       const parts = blk.spans.filter(id => byId[id]).map(id => mine[id] ? `{ink:${link(span(id), data.focus)}}` : `{dim:${k.escape(span(id))}}`)
-      return k.beside(k.text(`{dim:¶${b}}`, { w: 5, wrap: false }), k.text(parts.join(' ')), { gap: 1 })
+      // a table row reads with its table's header row above it
+      let head = at
+      while (blk.kind === 'row' && head > 0 && all[head - 1].kind === 'row') head--
+      const header = head < at && all[head].spans[0] && byId[all[head].spans[0]] ? k.text(`{dim:${k.escape(span(all[head].spans[0]))}}`) : false
+      return k.beside(k.text(`{dim:¶${b}}`, { w: 5, wrap: false }), k.stack(header, k.text(parts.join(' '))), { gap: 1 })
     })
     return k.stack(
       k.beside(k.text(`{dim:line ${i + 1} of ${(v.lines || []).length}}`, { w: 11, wrap: false }), lines[i], { gap: 1 }),

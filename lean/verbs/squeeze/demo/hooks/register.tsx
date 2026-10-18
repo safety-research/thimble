@@ -159,7 +159,8 @@ function messagesToUnits(msgs: Any[]): { id: string; text: string }[] {
     cur = null
   }
   for (const m of msgs) {
-    if (m.role === 'user' && m.text && !(m.toolResults || []).length) { flush(); cur = { you: m.text, claude: [], tools: 0 } }
+    // a turn starts at the person's own words (a slash command's record is not a turn)
+    if (m.role === 'user' && m.text && !(m.toolResults || []).length && !/^\s*(<command-|\/)/.test(m.text)) { flush(); cur = { you: m.text, claude: [], tools: 0 } }
     else if (m.role === 'assistant' && cur) { if (m.text) cur.claude.push(m.text); cur.tools += (m.toolUses || []).length }
   }
   flush()
@@ -247,7 +248,7 @@ export const register: Register = on => {
       const msgs = await $.session.messages()
       for (let i = msgs.length - 1; i >= 0 && !entry; i--) {
         const m = msgs[i]
-        if (m.role !== 'assistant' || !isLong(m.text, verb.auto || {})) continue
+        if (!m || m.role !== 'assistant' || !isLong(m.text, verb.auto || {})) continue
         const key = keyOf(m.text)
         entry = replies.get(key)
         if (!entry) {
@@ -304,8 +305,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
     if (e.props.command !== 'squeeze' || e.props.isErrored) return next(e)
     try {
-      const m = /\[squeeze ([^\]]+)\]/.exec(e.props.text)
-      const s = m ? shown.get(m[1]) : undefined
+      const marker = /\[squeeze ([^\]]+)\]/.exec(e.props.text)?.[1]
+      const s = marker ? shown.get(marker) : undefined
       if (!s) return next(e)
       if (s.moved) {
         const { Text } = $.ui.resolve(e)
@@ -316,7 +317,7 @@ export const register: Register = on => {
       }
       const w = Math.max(40, Math.min(140, (e.viewport?.columns ?? 100) - 4))
       const d = await drawOf($, s.object, w)
-      return view($.ui.resolve(e), { object: s.object, d, region: s.region }, `cmd-${m![1].replace(/\W+/g, '-')}`, false)
+      return view($.ui.resolve(e), { object: s.object, d, region: s.region }, `cmd-${(marker || '').replace(/\W+/g, '-')}`, false)
     } catch {
       return next(e)
     }

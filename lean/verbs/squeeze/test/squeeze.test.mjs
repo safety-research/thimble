@@ -8,7 +8,7 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { runProgram } from '../../../draw/sandbox-node.mjs'
 import { renderSvg } from '../../../draw/svg.js'
-import { renderTerm } from '../../../draw/term.js'
+import { gridText, renderTerm } from '../../../draw/term.js'
 import { COPIES } from '../demo/sync.mjs'
 import { applies } from '../hint.mjs'
 import { isSqueeze, normalize, parseAnswer, run, strayNumbers } from '../run.mjs'
@@ -127,6 +127,10 @@ test('the squeeze draws the same regions in both renderers: a line each, its cit
   const focus = { ...r.object, data: { ...r.object.data, focus: 'line-2' } }
   const t = renderTerm(runProgram(focus, { w: 90 }), { w: 90 })
   assert.ok(t.regions.find(x => x.id === 'line-2').rects.length >= 2, 'the focused line and its span in its paragraph')
+  // a line from a table row shows the row under its table's header
+  const row = r.object.data.spans.find(x => x.kind === 'row' && /rerun/.test(x.text)).id
+  const fromRow = { ...r.object, data: { ...r.object.data, focus: 'line-1', versions: [{ ...r.object.data.versions[0], lines: [{ text: 'Reran it 840 times.', from: [row] }] }] } }
+  assert.match(gridText(renderTerm(runProgram(fromRow, { w: 90 }), { w: 90 })), /step · runs\n.*rerun · 840/)
 })
 
 test('moving along a dimension uses a version already written, and writes a missing one with one more call', async () => {
