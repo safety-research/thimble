@@ -1,0 +1,21 @@
+{
+  "key": "a",
+  "name": "atlas",
+  "line": "the claims, findings and judgment calls in the work, with their evidence, in named clusters",
+  "order": 1.5,
+  "row": true,
+  "offer": "estimate.mjs",
+  "writer": "a subagent of main, guided by SKILL.md: it reads with lean rows and lean q and writes the atlas as JSON; main saves it with `lean verb atlas save`, so the object is drawn under main's reply",
+  "adds": "a later message adds its claims with one quiet $.model.complete call (run.mjs), saved as the atlas's next version",
+  "forms": {
+    "terminal": "a cluster list: each cluster's name, a dot per claim colored by kind, its count and its lead claim",
+    "detail": "every claim under its cluster, each one a part with its evidence",
+    "browser": "a force graph of the claims (shell/browser/atlas/)"
+  },
+  "keys": {
+    "a": "with no atlas yet: ask Claude to build it (offered with its time and cost, never started on its own); with one: add this message's claims, or show it"
+  },
+  "model": "sonnet",
+  "effort": "low",
+  "maxTokens": 4000
+}
