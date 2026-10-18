@@ -118,6 +118,10 @@ def _bind(st: Store, ref: str, at: str, ctx: dict[str, Any]) -> Any:
     ctx["queries"].add(q["id"])
     table = q.get("table") or []
     rows = q.get("rows")
+    if q.get("truncated") and not ("row" in p or "keys" in p):
+        # the record keeps the first TABLE_MAX rows of an output: an object bound to all of it would show a part as the whole
+        ctx["problems"].append(f"{at or '/'}: {q['id']} has more rows than its record keeps ({len(table):,} kept), so this "
+                               "part shows only them: bind a smaller table (one row per thread, station or group)")
     frag = {k: p[k] for k in ("row", "keys") if k in p}
     idx = Q.find_rows(q, frag) if frag else list(range(len(table)))
     if frag and not idx:

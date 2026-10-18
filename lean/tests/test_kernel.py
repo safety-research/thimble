@@ -285,3 +285,12 @@ def test_a_new_version_saved_from_the_object_file_keeps_its_bindings(root: Path)
     changed["days"][0]["n"] = 99
     third = O.save(st, "per-day", {"title": "Saves", "data": changed})
     assert third["source"]["data"]["days"][0]["n"] == 99 and third["source"]["data"]["peak"] == f"{q['id']}#day=2026-06-02@n"
+
+
+def test_an_object_bound_to_a_cut_table_says_so(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Q, "TABLE_MAX", 4)
+    st = Store(root)
+    q = Q.run(st, "every save", 'load("saves.jsonl")[["_ref", "user"]]')
+    assert q["truncated"] and len(q["table"]) == 4
+    obj = O.save(st, "saves", {"title": "Saves", "data": {"rows": q["id"], "first": f"{q['id']}#row=1@user"}})
+    assert len(obj["lineage"]["problems"]) == 1 and "more rows than its record keeps" in obj["lineage"]["problems"][0]
