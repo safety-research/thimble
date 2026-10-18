@@ -207,4 +207,16 @@ test("a thread's turns come from its subagent's transcript; its answer is its la
   assert.match(sent, /side thread about Rerun loop on the card "Run r17"/)
   assert.match(sent, /The thread answered: 480 came after\./)
   assert.equal(toMain({ scope: {}, turns: [{ role: 'person', text: 'q' }] }), '')
+  // a later question sent to the agent while it runs comes wrapped, in a reminder or not: its words are the question
+  const later = turnsOf([
+    { role: 'user', content: 'what share?' },
+    { role: 'assistant', content: [{ type: 'text', text: 'About 16%.' }] },
+    { role: 'user', content: [{ type: 'text', text: '<system-reminder>\nSomeone sent a message while you were working:\nand on one wiki alone?\n\nAddress this before completing your current task.\n</system-reminder>' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'About 17%.' }] },
+    { role: 'user', content: 'Someone sent a message while you were working:\nand per day?\n\nAddress this before completing your current task.' },
+    { role: 'assistant', content: [{ type: 'text', text: 'One day.' }, { type: 'tool_use', name: 'Bash', input: { command: 'lean q "days"' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'd', content: 'rows' }, { type: 'text', text: '<system-reminder>\nSomeone sent a message while you were working:\nand by hour?\n</system-reminder>' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Mostly 20:00.' }] },
+  ])
+  assert.deepEqual(later.map(t => [t.role, t.text]), [['person', 'what share?'], ['claude', 'About 16%.'], ['person', 'and on one wiki alone?'], ['claude', 'About 17%.'], ['person', 'and per day?'], ['claude', ''], ['person', 'and by hour?'], ['claude', 'Mostly 20:00.']])
 })

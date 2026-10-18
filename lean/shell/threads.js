@@ -62,6 +62,9 @@ export function nextMessage({ text, scope = {}, last = null }) {
 const oneLine = s => String(s).replace(/\s+/g, ' ').trim().slice(0, 160)
 const textOf = c => (typeof c === 'string' ? c : Array.isArray(c) ? c.filter(b => b && b.type === 'text').map(b => b.text).join('\n') : '')
 const HANDBACK = /^(SubagentHandback|SendUserMessage)$/
+// Claude Code's wrapper of a message sent to an agent while it works, and its reminders
+const REMINDER = /<system-reminder>([\s\S]*?)<\/system-reminder>/g
+const QUEUED = /^[^\n]*sent a message while you were working:\s*([\s\S]*?)\s*(?:Address this before completing your current task\.)?\s*$/
 
 /** The report a subagent handed back, when it ended that way (auto mode): its message. */
 function handback(content) {
@@ -87,8 +90,15 @@ export function turnsOf(messages) {
   for (const m of messages || []) {
     const c = m?.content
     if (m?.role === 'user') {
-      const t = textOf(c).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim()
-      if (t && !(Array.isArray(c) && c.some(b => b && b.type === 'tool_result'))) out.push({ role: 'person', text: t })
+      const blocks = Array.isArray(c) ? c : [{ type: 'text', text: String(c ?? '') }]
+      const texts = blocks.filter(b => b && b.type === 'text').map(b => String(b.text || ''))
+      // a later question reaches a running agent wrapped as a message "sent while you were working", in or out of a
+      // reminder, and may ride with the tool results of the step it interrupts: its words are the person's turn
+      const queued = texts.flatMap(x => [...[...x.matchAll(REMINDER)].map(y => y[1].trim()), x.replace(REMINDER, '').trim()])
+        .map(x => QUEUED.exec(x)?.[1]).filter(Boolean)
+      const plain = texts.join('\n').replace(REMINDER, '').trim()
+      const t = queued.length ? queued.join('\n').trim() : blocks.some(b => b && b.type === 'tool_result') ? '' : plain
+      if (t) out.push({ role: 'person', text: t })
       continue
     }
     if (m?.role !== 'assistant') continue

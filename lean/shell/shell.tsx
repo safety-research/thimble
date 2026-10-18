@@ -863,6 +863,8 @@ async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): P
   }
   const m = rec?.marks?.[i]
   if (!m) return
+  // a resumed session's side threads, read back once (outside any drawing), so the panel knows a mark's thread
+  await restoreThreads($, (await rootHere($)) || undefined).catch(() => undefined)
   await $.state.set(PICK, null)
   await $.state.set(TRAY, trayOpen({ row, i }) as Tray)
   const answer = (await $.state.get(ANSWER)).value
