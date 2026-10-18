@@ -96,7 +96,9 @@ async function fullMap(ctx, o) {
       hints: ['trace', 'map'],
       declared: { made_by: 'the map verb', from: ref(o), why: 'the full map of a mini map' },
     },
-    text: `The full map of ${o.title || o.id}: every station, its lanes split by the lens. Tab selects a station or a lane; its rows show below it.`,
+    text: threadCount(o.data) > 1
+      ? `The full map of ${o.title || o.id}: every station, its lanes split by the lens. Tab selects a station or a lane; its rows show below the map.`
+      : `The full map of ${o.title || o.id}: a station a row, with its first step, its note and its share. Tab selects one; its rows show below the map.`,
     note: `The person opened the full map of ${ref(o)}. It is the same spec with full: true.`,
   }
 }
