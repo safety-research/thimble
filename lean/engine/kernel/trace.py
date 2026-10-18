@@ -827,6 +827,13 @@ def trace(st: Store, ref: str | None = None, text: str | None = None, within: st
         if not files:
             files = [f for f in S.list_sources(st.root) if S.kind_of_file(st.root, f) == "transcript"]
         out["spread"] = spread(st, text, files)
+        for rec in (out.get("back") or {}).get("records") or []:
+            # the line of a cited row that holds the words, so the path shows them where they stand
+            try:
+                row = S.fetch(st.root, rec["ref"], limit=1)
+                rec["line"] = _line_with(S.text_of(row[0]), text) if row else None
+            except R.RefError:
+                pass
         out["spread"]["within"] = within or (os.path.commonpath(files) + "/" if len(files) > 1 else files[0] if files else "")
     st.log({"kind": "trace", "ref": ref, "text": text, "within": within})
     return out
