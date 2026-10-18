@@ -10,6 +10,9 @@ In the folder under analysis (the root), the `thimble/` folder holds what the pe
     thimble/results/q<n>.pkl                each query's output table, which a later query reads with use("q<n>")
     thimble/ledger.jsonl                    one line per `lean` call that read rows (what was read and how)
 
+Under $THIMBLE_HOME/lean/events/<session>.jsonl the session's change feed: one line per change a surface draws (a
+saved object), so the terminal and the browser learn of a save from the kernel, not from what a command printed.
+
 Outside it, under $THIMBLE_HOME/lean (default ~/.thimble/lean): seen/<session>.jsonl, where the hooks module keeps the
 files that Claude's own Read, Grep and Bash calls touched in each session (so a coding session in another folder never
 gets a thimble/ folder), and cache/<folder>/, row counts and loaded frames, safe to delete. Nothing here writes into a
@@ -70,6 +73,23 @@ class Store:
         row = {"t": round(time.time(), 3), "session": self.session, **row}
         with open(self.dir / "ledger.jsonl", "a") as f:
             f.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+
+    def emit(self, row: dict[str, Any]) -> None:
+        """One event of the session's change feed: $THIMBLE_HOME/lean/events/<session>.jsonl, one JSON line each,
+        appended in one write. A surface follows the file by its size; an event names its folder, so the reader needs
+        no other context."""
+        try:
+            d = thimble_home() / "lean" / "events"
+            d.mkdir(parents=True, exist_ok=True)
+            row = {"t": round(time.time(), 3), "session": self.session, "root": str(self.root), **row}
+            line = json.dumps(row, ensure_ascii=False, default=str) + "\n"
+            fd = os.open(d / f"{safe(self.session)}.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+            try:
+                os.write(fd, line.encode())
+            finally:
+                os.close(fd)
+        except OSError:
+            pass
 
     def ledger(self, session: str | None = "") -> list[dict[str, Any]]:
         """Rows of the ledger: of this session (the default), of `session`, or of every session (None)."""

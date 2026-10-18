@@ -78,9 +78,14 @@ function columnOf(query, ref) {
   if (/^row=(\d+)$/.test(frag)) hot = Number(frag.slice(4)) - 1
   else if (frag && frag.includes('=')) {
     const want = Object.fromEntries(frag.split('&').map(p => { const j = p.indexOf('='); return [decodeURIComponent(p.slice(0, j)), decodeURIComponent(p.slice(j + 1))] }))
-    hot = table.findIndex(r => Object.entries(want).every(([k, v]) => String(r[k]) === v))
+    // a key value as written, else by its slug (the kernel writes "won (clean ep)" as won-clean-ep)
+    const slug = x => String(x ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    const colOf = (r, k) => (k in r ? k : Object.keys(r).find(c => slug(c) === slug(k)))
+    hot = table.findIndex(r => Object.entries(want).every(([k, v]) => String(r[colOf(r, k)]) === v))
+    if (hot < 0) hot = table.findIndex(r => Object.entries(want).every(([k, v]) => { const c = colOf(r, k); return c != null && slug(v) && slug(r[c]) === slug(v) }))
   } else if (frag && !col) col = frag
   const cols = table.length ? Object.keys(table[0]).filter(k => !k.startsWith('_')) : []
+  if (col && !cols.includes(col)) col = cols.find(c => c.toLowerCase().replace(/[^a-z0-9]+/g, '-') === col.toLowerCase().replace(/[^a-z0-9]+/g, '-')) || col
   if (!col) col = cols.find(c => typeof table[0]?.[c] === 'number' && !keys.includes(c)) || cols[cols.length - 1] || null
   // the words a row is named by: its key columns, unless the key is only a row number (a frame's index), then its
   // first column of words
@@ -146,9 +151,11 @@ return k.text(data.text)`
  * A citation's card. `resolved` is `lean resolve <ref> --json`; `query` the query's record (thimble/queries/q<n>.json)
  * for a query ref; `lines` the file's lines around the cited ones, for a code ref ({n, text}); `room` the card's rows.
  */
-export function sourceCard({ ref, label, resolved, query, lines, path, room = 9 }) {
-  const kind = cardKind(ref)
+export function sourceCard({ ref: wrote, label, resolved, query, lines, path, room = 9 }) {
   const r = resolved || {}
+  // a citation of a whole query that the kernel narrowed to the row holding its value: the card is about that row
+  const ref = typeof r.narrowed === 'string' && r.narrowed ? r.narrowed : wrote
+  const kind = cardKind(ref)
   const count = r.count != null ? `${fmtN(r.count)} source row${r.count === 1 ? '' : 's'}` : ''
   const files = filesOf(r, query)
   const fromParts = []

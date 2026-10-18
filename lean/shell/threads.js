@@ -41,13 +41,14 @@ export function samePart(a = {}, b = {}) {
 export function firstMessage({ text, scope = {}, card = null, refs = [], root = '', selFile = '' }) {
   const lines = [String(text || '').trim(), '']
   if (card) {
-    const part = scope.region ? `the part "${aboutOf(scope)}" (${scope.region}) of ` : ''
+    // a part of the card, or a selection the card's program named (k.ask: a brushed range, several rows)
+    const part = scope.region ? `the part "${aboutOf(scope)}" (${scope.region}) of ` : scope.label ? `the selection "${scope.label}" in ` : ''
     lines.push(`About: ${part}the card "${card.title || card.id}" (${card.id}@${card.v ?? card.version}, ${card.file || `thimble/objects/${card.id}.json`}).`)
   } else if (scope.mark) {
     const m = scope.mark
     lines.push(m.kind === 'gloss' ? `About: the term "${m.term || m.label}" in Claude's message.` : `About: Claude's citation "${m.label || m.ref}" (${m.ref}).`)
   }
-  if (refs.length) lines.push(`Its rows: ${refs.slice(0, 3).join(', ')} (\`lean resolve <ref>\` opens them).`)
+  if (refs.length) lines.push(`Its rows: ${refs.slice(0, 6).join(', ')}${refs.length > 6 ? ` and ${refs.length - 6} more` : ''} (\`lean resolve <ref>\` opens them).`)
   if (root) lines.push(`The data: ${root}`)
   if (selFile) lines.push(`The part the person has selected now, for a later message that names none: ${selFile}`)
   return lines.join('\n').trim()

@@ -132,6 +132,10 @@ export interface State {
   flashRow: string | null
   /** words a control puts in the chat's composer (New view), to edit and send */
   composerFill: { text: string; at: number } | null
+  /** each card's interaction state (its program's k.on handlers set it; the terminal keeps the same, by card id) */
+  cardStates: Record<string, Record<string, unknown>>
+  /** a selection a card's program asked about (k.ask): the chat's next question goes to the card's thread with it */
+  cardAsk: { object: string; label: string; region?: string; refs?: string[] } | null
 }
 
 let state: State = {
@@ -162,6 +166,8 @@ let state: State = {
   pendingThread: null,
   flashRow: null,
   composerFill: null,
+  cardStates: {},
+  cardAsk: null,
 }
 const subs = new Set<() => void>()
 
@@ -196,6 +202,14 @@ async function refresh(): Promise<void> {
   if (!o.error && !same(o.objects, state.objects)) patch.objects = o.objects || []
   if (!t.error && !same(t.threads, state.threads)) patch.threads = t.threads || []
   if (!a.error && !same(a.asks, state.asks)) patch.asks = a.asks || []
+  // the open card's interaction state, as the terminal may have changed it (thimble/objects/.state/<id>.json)
+  const open = state.card
+  if (open) {
+    const r = await api(`object/${encodeURIComponent(open.id)}`)
+    const kept = r.state
+    if (kept && kept.state && !same(kept.state, state.cardStates[open.id])) patch.cardStates = { ...state.cardStates, [open.id]: kept.state }
+    if (kept && kept.by === 'terminal' && kept.region && state.card && kept.region !== state.card.region) patch.card = { ...state.card, region: kept.region }
+  }
   setState(patch)
 }
 

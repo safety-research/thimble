@@ -168,3 +168,20 @@ test("a gloss's explainer card: what it is, its drawing, where it mattered, each
   assert.deepEqual(here.regions.map(r => r.id).sort(), ['n1', 'n2'])
   assert.deepEqual(linksIn('[a](q1#row=1@n) and [b](https://x.org) and [a again](q1#row=1@n)').map(l => l.ref), ['q1#row=1@n'])
 })
+
+test('a citation whose key holds spaces and brackets is one mark, and its card opens the row behind the value it shows', () => {
+  // Claude copied the key's words into the ref: still one link, nothing of it spills into the prose
+  const text = 'Clean wins took a median of [110](q11#outcome=won (clean ep)@median) calls; all runs [4 failed](q11).'
+  const marks = linkMarks(text)
+  assert.deepEqual(marks.map(m => [m.ref, m.label]), [['q11#outcome=won (clean ep)@median', '110'], ['q11', '4 failed']])
+  assert.equal(text.slice(marks[0].end), ' calls; all runs [4 failed](q11).')
+  // the kernel narrowed the whole-query cite to the row holding its value: the card's hot row is that row
+  const query = { id: 'q11', about: 'runs by outcome', keys: ['outcome'], table: [{ outcome: 'won (clean ep)', n: 3, median: 110 }, { outcome: 'failed/adversarial', n: 4, median: 165 }, { outcome: 'contested', n: 1, median: 190 }] }
+  const resolved = { ref: 'q11#outcome=failed/adversarial@n', narrowed: 'q11#outcome=failed/adversarial@n', wrote: 'q11', count: 4, rows: ['runs.jsonl#L6-9'], records: [], chain: [] }
+  const card = sourceCard({ ref: 'q11', label: '4 failed', resolved, query })
+  const rows = card.parts[0].data.rows
+  assert.deepEqual(rows.filter(r => r.hot).map(r => [r.label, r.value]), [['failed/adversarial', 4]])
+  // a key written as its slug finds its row in the card too
+  const slugged = sourceCard({ ref: 'q11#outcome=won-clean-ep@median', label: '110', resolved: { count: 3, rows: [], records: [], chain: [] }, query })
+  assert.deepEqual(slugged.parts[0].data.rows.filter(r => r.hot).map(r => r.label), ['won (clean ep)'])
+})

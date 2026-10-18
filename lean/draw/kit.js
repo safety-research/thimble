@@ -200,8 +200,41 @@
 
     const k = {
       w: W, h: H, mode: opts.mode || 'inline', state: clone(ctx.state) || {},
+      // the card as the host knows it: its title (drawn by the host when the program draws none), its id, the surface
+      // it is drawn on, and the event this run answers (a key, a press, a brush), else null
+      title: opts.title != null ? clean(String(opts.title)) : '', id: opts.id != null ? String(opts.id) : '',
+      surface: opts.surface === 'browser' ? 'browser' : 'terminal', event: ctx.event ? clone(ctx.event) : null,
       tones: TONES.slice(), cats: CATS.slice(),
       fmt: fmt, num: num, escape: escapeMarkup,
+
+      // ---------------- interaction: what the person does reaches the program as an event, and the program answers
+      // with new state, which the host keeps (the terminal and the browser show the same) and runs the program with.
+      // k.on(name, fn, label): name is a key ('j', 'space', 'return'), 'press' or 'press:<region id>', 'brush' or
+      // 'brush:<id>', or any event name a surface sends. fn(event) returns a patch of the state, or calls k.set and
+      // k.ask. Handlers run after the program has drawn once, so they see every name it defined.
+      on(name, fn, label) {
+        const n = String(name == null ? '' : name).trim()
+        if (!n || typeof fn !== 'function') { warn(ctx, 'k.on needs (name, fn): a key, "press", "brush" or "press:<id>", and a function'); return k }
+        if (!ctx.handlers.some(h => h.name === n)) ctx.handlers.push({ name: n, fn: fn, label: label != null ? clean(String(label)).slice(0, 40) : '' })
+        return k
+      },
+      // k.set(key, value) or k.set({...}): the state a handler leaves for the next run
+      set(key, value) {
+        if (ctx.phase !== 'handle') { warn(ctx, 'k.set changes the state only inside a k.on handler; read k.state to draw'); return k }
+        if (isObj(key)) Object.keys(key).forEach(x => { ctx.patch[x] = clone(key[x]) })
+        else if (key != null) ctx.patch[String(key)] = clone(value)
+        return k
+      },
+      // k.ask(selection): open a side thread scoped to what is selected. selection: {label, region, rows, refs, text}:
+      // rows are rows of the card's data (each knows its source rows); text, when given, is asked at once
+      ask(sel) {
+        if (ctx.phase !== 'handle') { warn(ctx, 'k.ask opens a thread only inside a k.on handler, when the person acts'); return k }
+        ctx.ask = askOf(ctx, sel)
+        return k
+      },
+      // the refs of rows of the card's data (a row, a list of rows, or a value that holds rows): what a cite or an
+      // ask names, so a program can say which rows a selection stands for
+      rows(x) { return refsIn(ctx, x) },
       cat(i) { return CATS[((i | 0) % 6 + 6) % 6] },
       // the width of a string in columns, as the terminal counts it (wide characters count 2)
       len(s) { return Array.from(clean(s)).reduce((n, ch) => n + (ch === '\n' ? 0 : wide(ch.codePointAt(0)) ? 2 : 1), 0) },
@@ -286,10 +319,14 @@
             k.text(texts[i], { w: valW, align: 'right', bold: !!(it.bold || o.bold), tone: isFinite(vals[i]) ? 'ink' : 'unseen', raw: true }),
             notes && k.text(' ' + (it.note == null ? '' : it.note), { w: noteW + 1, tone: 'dim', wrap: false }),
             { gap: 1 })
+          // an item made from a row of the card's data (the row itself, a spread of it, or {row}) is a part by itself:
+          // its rows open with no ref written
+          const from = lineageOf(ctx, it)
           const id = it.id != null ? it.id : typeof it.cite === 'string' ? it.cite : typeof it.examples === 'string' ? it.examples : null
-          if (id == null && !it.cite && !it.examples && !it.meta) return row
-          const meta = it.meta || {}
-          return k.region(id != null ? id : slug(it.label), Object.assign({}, meta, { label: it.regionLabel || `${it.label == null ? '' : it.label} ${texts[i]}`.trim(), cite: it.cite != null ? it.cite : meta.cite, examples: it.examples != null ? it.examples : meta.examples }), row)
+          if (id == null && !it.cite && !it.examples && !it.meta && !from) return row
+          const meta = Object.assign({}, it.meta || {})
+          if (from && meta.ref == null && !lineageOf(ctx, meta)) meta.ref = from
+          return k.region(id != null ? id : (slug(it.label) || refSlug(from)), Object.assign({}, meta, { label: it.regionLabel || `${it.label == null ? '' : it.label} ${texts[i]}`.trim(), cite: it.cite != null ? it.cite : meta.cite, examples: it.examples != null ? it.examples : meta.examples }), row)
         })
         return k.stack(rows, { gap: o.gap ? 1 : 0 })
       },
@@ -349,6 +386,8 @@
         const n = node('plot', { series: S, h: clamp(int(o.h, 8), 3, 60), x: axis(o.x), y: axis(o.y) })
         if (o.dots) n.dots = true
         if (o.legend === false) n.legend = false
+        // brush: in the browser, a drag across the plot's x axis is an event {type: 'brush', id, from, to} in x's units
+        if (o.brush) { const b = typeof o.brush === 'string' ? o.brush : o.id != null ? String(o.id) : 'brush'; n.brush = { id: ID_RE.test(b) ? b : (slug(b) || 'brush') } }
         tick(S.reduce((s, q) => s + q.pts.length, 0) / 8)
         return sizing(n, o)
       },
@@ -360,7 +399,8 @@
         let cols = Array.isArray(o.cols) ? o.cols : null
         if (!cols) {
           cols = []
-          rows.forEach(r => { if (isObj(r)) Object.keys(r).forEach(kk => { if (cols.indexOf(kk) < 0) cols.push(kk) }) })
+          // the kernel's own fields (_ref, _rows) are lineage, not columns
+          rows.forEach(r => { if (isObj(r)) Object.keys(r).forEach(kk => { if (cols.indexOf(kk) < 0 && kk.charAt(0) !== '_') cols.push(kk) }) })
           if (!cols.length && rows.length && Array.isArray(rows[0])) cols = rows[0].map((_, i) => i)
         }
         cols = cols.map(c => isObj(c) ? Object.assign({}, c, { key: c.key != null ? c.key : c.label }) : { key: c })
@@ -389,11 +429,13 @@
         })
         const outRows = cells.map((cs, i) => {
           const r = { cells: cs }
-          const rid = typeof o.id === 'function' ? o.id(shown[i], i) : null
+          const from = isObj(shown[i]) ? lineageOf(ctx, shown[i]) : null
+          const rid = typeof o.id === 'function' ? o.id(shown[i], i) : from ? refSlug(from) || null : null
           const rc = typeof o.cite === 'function' ? o.cite(shown[i], i) : null
           const re = typeof o.examples === 'function' ? o.examples(shown[i], i) : null
-          if (rid != null || rc || re) {
-            r.meta = metaOf({ label: cs.map(plain).join(' ').replace(/\s+/g, ' ').trim().slice(0, 60), cite: rc, examples: re }, 'table row')
+          // a row of the card's data is a part by itself: selected, it opens its source rows
+          if (rid != null || rc || re || from) {
+            r.meta = metaOf({ label: cs.map(plain).join(' ').replace(/\s+/g, ' ').trim().slice(0, 60), cite: rc, examples: re, ref: from || undefined }, 'table row')
             r.region = regionId(ctx, rid, 'table row', r.meta)
           }
           return r
@@ -416,8 +458,11 @@
       // ---------------- meaning
       region(id, meta, kid) {
         if ((isNode(meta) || meta instanceof Canvas) && !(isNode(kid) || kid instanceof Canvas)) { const t = meta; meta = kid; kid = t }
+        const press = isObj(meta) && typeof meta.onPress === 'function' ? meta.onPress : null
         const m = metaOf(meta, 'region')
         const n = node('region', { id: regionId(ctx, id, 'region', m), meta: m, kid: asNode(kid) || k.space(1, 1) })
+        // a press on this part: the same as k.on('press:<id>', fn)
+        if (press) k.on('press:' + n.id, press, m.label || n.id)
         if (!m.label) m.label = labelOf(n.kid) || (m.cite && ctx.cites[m.cite] && ctx.cites[m.cite].text) || (m.examples && ctx.examples[m.examples] && ctx.examples[m.examples].label) || n.id
         return n
       },
@@ -558,6 +603,12 @@
     if (m.tone) o.tone = toneOf(m.tone, ctx)
     if (m.cite != null) o.cite = typeof m.cite === 'string' ? m.cite : registerCite(ctx, m.cite.id, m.cite)
     if (m.examples != null) o.examples = typeof m.examples === 'string' ? m.examples : registerExamples(ctx, Array.isArray(m.examples) ? null : m.examples.id, m.examples)
+    // a meta that is a row of the card's data, a spread of one, or holds one as `row` or `from`: the part opens its rows
+    const from = lineageOf(ctx, m)
+    const named = ['ref', 'refs', 'rows', '_ref', '_rows'].some(x => o[x] != null)
+    if (!named && from) o.ref = from
+    delete o.onPress
+    for (const key of ['row', 'from']) if (isObj(m[key]) && lineageOf(ctx, m[key])) { if (o.ref == null) o.ref = lineageOf(ctx, m[key]); delete o[key] }
     if (o.label == null) delete o.label
     if (o.cite == null) delete o.cite
     if (o.examples == null) delete o.examples
@@ -575,6 +626,172 @@
     }
     walk(n)
     return out.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().slice(0, 72)
+  }
+
+
+  // ---------------------------------------------------------------- lineage: rows of the card's data
+  // The kernel binds each row of a query's output into the card's data with `_ref` (its own ref, such as
+  // q3#day=2026-06-18) and `_rows` (its source rows). Every such row is indexed here, so a part drawn from one (the row
+  // itself, a spread of it, or {row}) opens its rows with no ref written, and a part drawn from none is matched to the
+  // row whose words and numbers it shows. A row with `_rows` and no `_ref` (an older card) gets the pointer ref
+  // obj:<id>#/<path> when the host names the card.
+  function indexRows(ctx, data, id) {
+    ctx.rowsOf = typeof WeakMap === 'function' ? new WeakMap() : null
+    ctx.rowList = []
+    let seen = 0
+    const walk = (v, ptr, depth) => {
+      if (depth > 8 || seen > 50000 || v == null || typeof v !== 'object') return
+      seen++
+      if (Array.isArray(v)) { v.forEach((x, i) => walk(x, ptr + '/' + i, depth + 1)); return }
+      const has = typeof v._ref === 'string' && v._ref
+      if (!has && Array.isArray(v._rows) && v._rows.length && id) v._ref = 'obj:' + id + '#' + (ptr || '/')
+      if (typeof v._ref === 'string' && v._ref) {
+        if (ctx.rowsOf) ctx.rowsOf.set(v, v._ref)
+        if (ctx.rowList.length < 20000) ctx.rowList.push({ obj: v, ref: v._ref })
+      }
+      for (const key of Object.keys(v)) if (key !== '_rows' && v[key] && typeof v[key] === 'object') walk(v[key], ptr + '/' + key.replace(/~/g, '~0').replace(/\//g, '~1'), depth + 1)
+    }
+    walk(data, '', 0)
+  }
+  function lineageOf(ctx, x, depth) {
+    if (!isObj(x)) return null
+    const hit = ctx.rowsOf && ctx.rowsOf.get(x)
+    if (hit) return hit
+    if (typeof x._ref === 'string' && x._ref) return x._ref
+    if (!depth) for (const key of ['row', 'from']) { if (isObj(x[key])) { const r = lineageOf(ctx, x[key], 1); if (r) return r } }
+    return null
+  }
+  function refsIn(ctx, x) {
+    const out = []
+    const add = r => { if (typeof r === 'string' && r && out.indexOf(r) < 0 && out.length < 200) out.push(r) }
+    const walk = (v, depth) => {
+      if (v == null || depth > 3 || out.length >= 200) return
+      if (typeof v === 'string') { if (/^(q\d+|obj:)/.test(v) || v.indexOf('#') > 0) add(v); return }
+      if (Array.isArray(v)) { v.forEach(y => walk(y, depth + 1)); return }
+      if (!isObj(v)) return
+      const r = lineageOf(ctx, v)
+      if (r) { add(r); return }
+      Object.keys(v).forEach(key => { if (key !== '_rows') walk(v[key], depth + 1) })
+    }
+    walk(x, 0)
+    return out
+  }
+  // a ref as a region id: q3#day=2026-06-18 -> day-2026-06-18, obj:x#/days/3 -> days-3
+  function refSlug(ref) {
+    if (typeof ref !== 'string') return ''
+    const frag = ref.split('#').slice(1).join('#').replace(/@.*$/, '')
+    return slug(frag.replace(/[=&/]+/g, '-')) || slug(ref)
+  }
+  // a key value as a ref writes it (the kernel's refs.ref_value): as it is when safe, else its slug
+  function refValue(v) {
+    const s = typeof v === 'boolean' ? String(v) : v == null ? '' : String(v)
+    if (/^[A-Za-z0-9_.:~,/+-]+$/.test(s)) return s
+    return s.replace(/[^A-Za-z0-9_.:~,/+-]+/g, '-').replace(/^-+|-+$/g, '') || encodeURIComponent(s)
+  }
+  function askOf(ctx, sel) {
+    const ev = ctx.event || {}
+    if (sel == null) sel = { region: ev.region || null }
+    if (typeof sel === 'string') sel = { label: sel }
+    if (!isObj(sel)) sel = {}
+    const out = {}
+    if (sel.label != null) out.label = clean(String(sel.label)).slice(0, 200)
+    const region = sel.region != null ? String(sel.region) : null
+    if (region && ID_RE.test(region)) out.region = region
+    const refs = refsIn(ctx, [sel.rows, sel.row, sel.refs, sel.ref].filter(x => x != null))
+    if (refs.length) out.refs = refs
+    if (typeof sel.text === 'string' && sel.text.trim()) out.text = clean(sel.text).slice(0, 2000)
+    if (sel.note != null) out.note = clean(String(sel.note)).slice(0, 400)
+    if (!out.label) out.label = out.region || (refs.length ? `${refs.length} row${refs.length === 1 ? '' : 's'} of the card` : 'this card')
+    return out
+  }
+
+  // A part with no rows of its own is matched to the rows of the card's data whose words it shows (its id, its label,
+  // its text) and, to tell them apart, whose numbers it shows. One row wins: its ref. Several rows of one query that
+  // share the words win together: the ref of the column value they share (q3#outcome=won-clean-ep). A tie between
+  // unrelated rows, or no words in common, matches nothing: a guess never picks between two rows.
+  function matchRegions(ctx, regions, rootNode) {
+    const rows = ctx.rowList || []
+    if (!rows.length || rows.length > 5000) return
+    const strs = new Map(), nums = new Map()
+    rows.forEach((r, i) => {
+      for (const key of Object.keys(r.obj)) {
+        if (key.charAt(0) === '_') continue
+        const v = r.obj[key]
+        if (typeof v === 'string') {
+          const t = v.trim().toLowerCase()
+          if (t.length < 2 || t.length > 80) continue
+          if (!strs.has(t)) strs.set(t, [])
+          const l = strs.get(t)
+          if (l.length < 200) l.push([i, key])
+        } else if (typeof v === 'number' && isFinite(v)) {
+          if (!nums.has(v)) nums.set(v, [])
+          nums.get(v).push(i)
+        }
+      }
+    })
+    if (strs.size > 6000) return
+    const texts = new Map()
+    const textOf = n => {
+      const out = []
+      const vals = []
+      const walk = x => {
+        if (!x || out.length > 60) return
+        if (x.t === 'text') out.push(plain(x.runs))
+        else if (x.t === 'bar') { if (isFinite(x.value)) vals.push(x.value) }
+        else if (x.t === 'table') x.rows.forEach(r => out.push(r.cells.map(plain).join(' ')))
+        else if (x.t === 'canvas') x.ops.forEach(op => { if (op[0] === 'text') out.push(plain(op[3])); if (op[0] === 'bar') vals.push(op[4]) })
+        ;(x.kids || []).forEach(walk)
+        if (x.kid) walk(x.kid)
+      }
+      walk(n)
+      return { text: out.join(' '), vals }
+    }
+    const kidOf = new Map()
+    const collect = n => {
+      if (!n || typeof n !== 'object') return
+      if (n.t === 'region') kidOf.set(n.id, n.kid)
+      ;(n.kids || []).forEach(collect)
+      if (n.kid) collect(n.kid)
+    }
+    collect(rootNode)
+    const word = (text, w) => {
+      let at = text.indexOf(w)
+      while (at >= 0) {
+        const a = text.charAt(at - 1), b = text.charAt(at + w.length)
+        if (!/[a-z0-9]/.test(a) && !/[a-z0-9]/.test(b)) return true
+        at = text.indexOf(w, at + 1)
+      }
+      return false
+    }
+    for (const r of regions) {
+      const m = r.meta || (r.meta = {})
+      if (['ref', 'refs', 'rows', '_ref', '_rows'].some(x => m[x] != null) || m.knob || (m.cite && ctx.cites[m.cite] && (ctx.cites[m.cite].ref || (ctx.cites[m.cite].rows || []).length))) continue
+      ctx.ops += 1
+      const kid = kidOf.get(r.id)
+      const got = kid ? (texts.get(r.id) || textOf(kid)) : { text: '', vals: [] }
+      const text = (String(r.id).replace(/[-_]+/g, ' ') + ' ' + (m.label || '') + ' ' + got.text).toLowerCase()
+      const idSlug = String(r.id).toLowerCase()
+      const score = new Map(), field = new Map()
+      for (const [t, list] of strs) {
+        if (!(word(text, t) || (t.length >= 3 && idSlug.indexOf(slug(t)) >= 0 && slug(t).length >= 3))) continue
+        for (const [i, key] of list) { score.set(i, (score.get(i) || 0) + 2); if (!field.has(i)) field.set(i, [key, t]) }
+      }
+      if (!score.size) continue
+      const shown = got.vals.concat((text.match(/-?\d[\d,]*(?:\.\d+)?/g) || []).map(x => +x.replace(/,/g, '')).filter(isFinite))
+      for (const v of shown) for (const i of (nums.get(v) || [])) if (score.has(i)) score.set(i, score.get(i) + 1)
+      let best = 0
+      score.forEach(v => { if (v > best) best = v })
+      const top = []
+      score.forEach((v, i) => { if (v === best) top.push(i) })
+      if (top.length === 1) { m.ref = rows[top[0]].ref; m.lineage = 'matched'; continue }
+      // several rows share the words: one query's rows with the same value in one column are one group
+      const q = rows[top[0]].ref.split('#')[0]
+      const f = field.get(top[0])
+      if (top.length <= 500 && /^q\d+$/.test(q) && top.every(i => rows[i].ref.split('#')[0] === q && field.get(i) && field.get(i)[0] === f[0] && field.get(i)[1] === f[1])) {
+        m.ref = `${q}#${refValue(f[0])}=${refValue(rows[top[0]].obj[f[0]])}`
+        m.lineage = 'matched'
+      }
+    }
   }
 
   // ---------------------------------------------------------------- series for plots
@@ -650,6 +867,14 @@
     const rid = regionId(this._ctx, id, 'canvas region', m)
     if (!m.label) m.label = rid
     return this._op(['region', rid, fl(x), fl(y), Math.max(1, fl(w)), Math.max(1, fl(h)), m])
+  }
+  // a brush area: in the browser, a drag across cells x..x+w is an event {type: 'brush', id, from, to}, the cells read
+  // as min..max (default: the cell numbers); the terminal has no drag, so bind keys to the same state
+  Canvas.prototype.brush = function (id, x, y, w, h, o) {
+    o = isObj(o) ? o : {}
+    const bid = ID_RE.test(String(id)) ? String(id) : (slug(id) || 'brush')
+    const W = Math.max(1, fl(w))
+    return this._op(['brush', bid, fl(x), fl(y), W, Math.max(1, fl(h)), isFinite(num(o.min)) ? num(o.min) : 0, isFinite(num(o.max)) ? num(o.max) : W, !!o.log])
   }
   Canvas.prototype.node = function () { return { t: 'canvas', w: this.w, h: this.h, ops: this._ops.slice() } }
 
@@ -1782,36 +2007,101 @@
     return out
   }
 
+  // what to fix, in a few words, for each way a program fails: the fallback line says it after the error
+  function fixFor(error, limit) {
+    const m = String(error.message || '')
+    if (error.name === 'TimeLimit') return `it ran past ${limit} ms: draw fewer rows (bind a smaller table) or loop less`
+    if (error.name === 'SizeLimit') return 'draw fewer parts, or bind a smaller table and draw a summary of it'
+    if (error.name === 'ReturnError') return 'end the program with return and a node, such as return k.stack(...)'
+    if (error.name === 'ProgramError') return 'save the card with a program'
+    if (error.name === 'SyntaxError') return `the program does not parse${error.line ? ` near line ${error.line}` : ''}: check its brackets and quotes`
+    let x = /Cannot read propert(?:y|ies) of (undefined|null)(?: \(reading '([^']*)'\))?/.exec(m)
+    if (x) return `a value is ${x[1]} where the program reads ${x[2] ? '.' + x[2] : 'a field'}: check the names in the card's data`
+    x = /(\w+) is not defined/.exec(m)
+    if (x) return `${x[1]} is not defined: a program has only k and data`
+    x = /(\S+) is not a function/.exec(m)
+    if (x) return `${x[1]} is not a function: check its name in the toolkit or the data`
+    return 'fix the program and save the card again'
+  }
+  function newCtx(state, event, limit) {
+    return { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: limit, handlers: [], patch: {}, phase: 'draw', ask: null, event: event || null, rowsOf: null, rowList: [] }
+  }
+  // one run of the program: (ctx, root node) or throws
+  function runOnce(program, data, opts, ctx, W, H) {
+    const k = makeKit(ctx, W, H, opts)
+    let fn
+    if (typeof program === 'function') fn = program
+    else if (typeof program === 'string' && program.trim()) {
+      // eslint-disable-next-line no-new-func
+      fn = new Function('k', 'data', ...SHADOW, PRELUDE + program + '\n}).call(undefined, k, data)')
+    } else { const e = new Error('the card has no program'); e.name = 'ProgramError'; throw e }
+    const d = clone(data == null ? {} : data)
+    indexRows(ctx, d, opts.id)
+    return { k: k, root: toRoot(fn.call(undefined, k, d), k) }
+  }
+  // the handlers an event reaches: k.on(name) for its key, its type, or its type and target
+  function handlersFor(ctx, event) {
+    if (!isObj(event)) return []
+    const names = []
+    const type = String(event.type || '')
+    if (type === 'key' && event.key != null) names.push(String(event.key))
+    if (type) names.push(type)
+    if (type && (event.region || event.id)) names.unshift(type + ':' + (event.region || event.id))
+    const out = []
+    names.forEach(n => ctx.handlers.forEach(h => { if (h.name === n && out.indexOf(h) < 0) out.push(h) }))
+    return out
+  }
+
   /**
    * Run a program. `program` is the source of a function body (a string) or a function (k, data) => node.
-   * opts: {w: columns (default 96), h: rows the host prefers (default 24), mode: 'inline' | 'detail', limit: ms (default 2000)}
-   * Returns the drawing; on an error, `drawing.error` = {name, message, line, source} and root draws the error.
+   * opts: {w: columns (default 96), h: rows the host prefers (default 24), mode: 'inline' | 'detail', limit: ms (default
+   * 2000), maxBytes: the drawing's budget (default 2 MB), state: the card's interaction state, event: what the person
+   * did ({type: 'key', key} | {type: 'press', region} | {type: 'brush', id, from, to} | any {type}), title, id, surface}
+   * With an event, the program runs once to learn its handlers, the handler the event reaches runs and patches the
+   * state, and the program runs again with the new state: the drawing carries `state` and, when a handler called
+   * k.ask, `ask`. Returns the drawing; on an error, `drawing.error` = {name, message, line, source, fix} and the root
+   * is one line that says what failed and what to fix, under the card's title.
    */
   function run(program, data, opts) {
     opts = opts || {}
     const W = clamp(int(opts.w, 96), 8, MAX_SIDE), H = clamp(int(opts.h, 24), 3, MAX_SIDE)
-    const state = isObj(opts.state) ? (clone(opts.state) || {}) : {}
-    const ctx = { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: Math.max(50, num(opts.limit) || 2000) }
-    const k = makeKit(ctx, W, H, opts)
-    let rootNode = null, error = null
+    const limit = Math.max(50, num(opts.limit) || 2000)
+    const maxBytes = Math.max(10000, num(opts.maxBytes) || 2000000)
+    let state = isObj(opts.state) ? (clone(opts.state) || {}) : {}
+    const event = isObj(opts.event) ? clone(opts.event) : null
+    let ctx = newCtx(state, event, limit)
+    let rootNode = null, error = null, asked = null, handled = null
+    const t0 = ctx.t0
     try {
-      let fn
-      if (typeof program === 'function') fn = program
-      else if (typeof program === 'string' && program.trim()) {
-        // eslint-disable-next-line no-new-func
-        fn = new Function('k', 'data', ...SHADOW, PRELUDE + program + '\n}).call(undefined, k, data)')
-      } else { const e = new Error('the object has no program'); e.name = 'ProgramError'; throw e }
-      rootNode = toRoot(fn.call(undefined, k, clone(data == null ? {} : data)), k)
+      rootNode = runOnce(program, data, opts, ctx, W, H).root
+      if (event) {
+        const hs = handlersFor(ctx, event)
+        if (hs.length) {
+          handled = hs[0].name
+          ctx.phase = 'handle'
+          const ret = hs[0].fn(clone(event))
+          if (isObj(ret)) Object.keys(ret).forEach(x => { ctx.patch[x] = clone(ret[x]) })
+          asked = ctx.ask
+          const patch = ctx.patch
+          if (Object.keys(patch).length) {
+            state = Object.assign({}, state, patch)
+            const again = newCtx(clone(state), null, limit)
+            again.t0 = t0
+            again.ops = ctx.ops
+            again.nextCheck = ctx.ops + 2000
+            ctx = again
+            rootNode = runOnce(program, data, opts, ctx, W, H).root
+          }
+        }
+      }
     } catch (e) {
       error = errorInfo(e, typeof program === 'string' ? program : '')
-      const kk = makeKit({ warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: {}, seq: 0, ops: 0, nextCheck: Infinity, t0: 0, limit: Infinity }, W, H, opts)
-      const lines = [kk.text(`{bad:**${escapeMarkup(error.name)}**} ${escapeMarkup(error.message)}`)]
-      if (error.line) lines.push(kk.text(`{dim:line ${error.line}}  ${escapeMarkup(error.source)}`, { wrap: false }))
-      lines.push(kk.text('{dim:the program failed, so nothing else was drawn}'))
-      rootNode = kk.frame(kk.stack(lines), { title: 'program error', tone: 'bad', grow: 1 })
     }
-    const regions = error ? [] : collectRegions(rootNode)
+    const title = opts.title != null && String(opts.title).trim() ? clean(String(opts.title)) : (rootNode && rootNode.t === 'frame' && rootNode.title ? plain(rootNode.title).trim() : '')
+    let regions = []
     if (!error) {
+      regions = collectRegions(rootNode)
+      try { matchRegions(ctx, regions, rootNode) } catch (e) { /* matching is a help, never a failure */ }
       const known = {}
       regions.forEach(r => { known[r.id] = 1 })
       ctx.links.forEach(id => { if (!known[id] && !ctx.cites[id] && !ctx.examples[id] && !ctx.controls[id]) warn(ctx, `a link points at "#${id}", which no region, k.cite, k.examples or k.knob defines`) })
@@ -1821,13 +2111,39 @@
         if (r.meta.examples && !ctx.examples[r.meta.examples]) warn(ctx, `region "${r.id}" points at examples "${r.meta.examples}", which no k.examples defines`)
       })
     }
-    const ms = Math.round((nowMs() - ctx.t0) * 10) / 10
-    const out = { kit: KIT, w: W, h: H, mode: opts.mode || 'inline', root: rootNode, cites: error ? {} : ctx.cites, examples: error ? {} : ctx.examples, regions: regions, warnings: ctx.warnings, ms: ms }
-    // knobs, in the order the program made them: what a host turns, and the state it ran with
-    const controls = Object.keys(ctx.controls).map(id => ctx.controls[id])
-    if (controls.length && !error) { out.controls = controls; out.state = state }
-    if (error) out.error = error
-    return JSON.parse(JSON.stringify(out))
+    const ms = Math.round((nowMs() - t0) * 10) / 10
+    const finish = () => {
+      const out = { kit: KIT, w: W, h: H, mode: opts.mode || 'inline', title: title, root: rootNode, cites: error ? {} : ctx.cites, examples: error ? {} : ctx.examples, regions: error ? [] : regions, warnings: ctx.warnings, ms: ms }
+      const controls = Object.keys(ctx.controls).map(id => ctx.controls[id])
+      if (controls.length && !error) out.controls = controls
+      if (!error && (controls.length || Object.keys(state).length)) out.state = state
+      // what reaches the program: the keys and events its handlers take, which a host shows and routes to it
+      if (!error && ctx.handlers.length) out.on = ctx.handlers.map(h => ({ name: h.name, label: h.label }))
+      if (handled) out.handled = handled
+      if (asked && !error) out.ask = asked
+      if (error) out.error = error
+      return out
+    }
+    if (error) rootNode = fallback(error, title, limit, W, H, opts)
+    let out = finish()
+    let text = JSON.stringify(out)
+    if (!error && text.length > maxBytes) {
+      error = { name: 'SizeLimit', message: `the drawing is ${(text.length / 1e6).toFixed(1)} MB, over the ${(maxBytes / 1e6).toFixed(1)} MB budget`, line: null, source: '' }
+      rootNode = fallback(error, title, limit, W, H, opts)
+      out = finish()
+      text = JSON.stringify(out)
+    }
+    return JSON.parse(text)
+  }
+  // the readable fallback: one line under the title that says what failed and what to fix
+  function fallback(error, title, limit, W, H, opts) {
+    error.fix = fixFor(error, limit)
+    const kk = makeKit(newCtx({}, null, Infinity), W, H, opts || {})
+    const where = error.line ? ` (line ${error.line})` : ''
+    // the message only when the fix does not already say it
+    const generic = /^fix the program/.test(error.fix) || error.name === 'SizeLimit'
+    const what = generic ? `: ${String(error.message).slice(0, 120)}` : ''
+    return kk.text(`{bad:×} ${title ? `**${escapeMarkup(title)}** ` : ''}{dim:could not draw:} ${escapeMarkup(error.name)}${escapeMarkup(what)}${where} {dim:· fix:} ${escapeMarkup(error.fix)}`)
   }
 
   root.DrawKit = { KIT: KIT, TONES: TONES, CATS: CATS, run: run, fmt: fmt, inline: (s, o) => inline(s, o, { warnings: [], links: [] }), wide: wide, plain: plain }

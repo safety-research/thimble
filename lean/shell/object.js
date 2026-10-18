@@ -6,7 +6,9 @@
 //   chainWords(resolved) -> {line, notes, records}: `lean resolve --json` in a few words, as both views print it.
 //
 //   regionRefs(object, drawing, regionId) -> {refs, how}
-//     1. the refs the program named: the region meta's `ref` (one or a list), else its cite's `ref`;
+//     1. the refs the program named: the region meta's `ref` (one or a list; the runtime sets it for a part drawn from
+//        a row of the card's data, or matched by its words), the row's own `_ref`, `refs`, `rows` or `_rows`, else its
+//        cite's `ref`;
 //     2. else the row of the object's data the region stands for, found by name: a row that carries `_rows` (the
 //        kernel's source rows) and whose value appears in the region's id, as day "2026-06-18" in "day-2026-06-18";
 //        the longest such value wins, and a tie finds none, so a guess never picks between two rows;
@@ -17,7 +19,7 @@
 //   fromFacts(object, coverage) -> where an object's values come from, as the detail's "from" line reads it: its
 //     sources, rows, labels and coverage (`lean coverage <id> --json`).
 
-const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
+const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|@|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
 
 /** Whether a string reads as a kernel ref (a query's value, an object's value, or a source row). */
 export function isRef(s) {
@@ -40,13 +42,24 @@ export function regionRefs(object, drawing, id) {
   if (!id) return { refs: [], how: '' }
   const meta = regionMeta(drawing, id) || {}
   const own = listOf(meta.ref)
-  if (own.length) return { refs: own, how: 'named' }
+  if (own.length) return { refs: own, how: meta.lineage === 'matched' ? 'matched by its words' : 'named' }
+  // a part drawn from a row of the card's data carries that row's own ref, or its source rows
+  for (const k of ['_ref', 'refs', 'rows', '_rows']) {
+    const got = listOf(meta[k])
+    if (got.length) return { refs: got, how: 'its row' }
+  }
   const cite = typeof meta.cite === 'string' ? drawing?.cites?.[meta.cite] : meta.cite
   const viaCite = listOf(cite?.ref)
   if (viaCite.length) return { refs: viaCite, how: 'named' }
   const hit = rowByName(object, id)
   if (hit) return { refs: [`obj:${object.id}#${hit.pointer}`], how: `matched by name: ${hit.key} = ${hit.value}` }
   return { refs: [], how: '' }
+}
+
+/** The key a part's rows are kept under once resolved: its one ref, or its refs together (resolved as one set). */
+export function refsKey(refs) {
+  const list = (refs || []).filter(Boolean)
+  return list.length > 1 ? list.slice(0, 500).join(' ') : list[0] || ''
 }
 
 /** The data row (one that carries `_rows`) whose value the region's id holds; null when none or two tie. */

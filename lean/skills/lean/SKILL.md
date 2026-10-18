@@ -30,18 +30,20 @@ not need to repeat what the object shows: say what it means and what to look at.
 what to see. Label marks in place (a bar part's `label`, a station's name) rather than in a legend, and leave sources
 and ids out: the detail view shows where each value comes from.
 
-**Keep it to about one screen.** Under a reply the person sees about half a screen of it; the rest waits in the
-detail view. Real records belong in `k.examples` on the part they explain: the person sees them there one at a time
-when they select the part, so the object need not list them.
+**A card is a small program, and its form is yours.** Use any layout, zoom, filter or interaction that helps the
+claim. The helpers in `../../draw/TOOLKIT.md` (from this skill's base folder; read it before your first card) are
+conveniences, not a form to fill. One program draws in the terminal and the browser. Under a reply the person sees
+about half a screen; the detail view (`k.mode === 'detail'`) has more room.
 
-**Write the program against the drawing toolkit.** It is in `draw/TOOLKIT.md` of this plugin (from this skill's base
-folder, `../../draw/TOOLKIT.md`). Read it before your first object. The same program draws in the browser.
+**Values keep their rows by themselves.** Bind query outputs in the card's data (`"data": {"days": "q1"}`). A part you
+draw from a row of it (the row, a copy, or `row: d` in a region's meta) opens its source rows and real examples when the
+person selects it, with no ref written. A value the program computes has no rows: say what it rests on.
 
-**Name the parts the person may ask about, and give each the ref of its value.** Wrap a bar, a row or a point in
-`k.region(id, { label, ref }, part)`, where `ref` is the kernel ref of the value it shows, such as
-`q1#day=2026-06-18@n`. In `k.bars`, a bar's meta goes in its item: `{ id, label, value, meta: { ref } }`. When the
-person selects that part, the terminal opens its source rows with `lean resolve`. A part with no `ref` is matched to a
-data row by its id when it can be, as `day-2026-06-18` to the row whose day is `2026-06-18`.
+**Interaction is state.** `k.on(key | 'press:<id>' | 'brush', fn, label)` returns the new state, and the card draws
+again from `k.state`, the same in both surfaces. In a handler, `k.ask({label, rows})` sends the person's next question
+to the card's thread with those rows. Add an interaction only when it answers a likely next question.
+
+A card that fails draws one line with what to fix: fix it and save again under the same name.
 
 **Suggest the verbs that help, if any.** Under the object the person sees a row of 2–3 verbs and `? all`. An object
 may name them itself: `"hints": ["squeeze", "trace"]`. Leave it out when you have no reason to choose.

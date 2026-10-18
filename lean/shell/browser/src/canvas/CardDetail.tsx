@@ -7,10 +7,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@09/components/Button'
 import { Icon } from '@09/components/Icon'
 import { Spinner } from '@09/components/Spinner'
-import { api, fmt, hhmm, resolveRef } from '../lib/api'
-import { objectLib } from '../lib/draw'
+import { api, back as sendBack, fmt, hhmm, objectOf, resolveRef } from '../lib/api'
+import { columnsIn, eventOf, eventsLib, objectLib } from '../lib/draw'
 import { CitedText } from '../lib/marks'
-import { pushCite } from '../lib/actions'
+import { ask, pushCite } from '../lib/actions'
 import { recordWords as wordsOfRecord, wordsOf } from '../lib/records'
 import { cardGroups, getState, setState, useStore } from '../lib/store'
 import { useDrawn } from './CardFace'
@@ -36,7 +36,20 @@ export function CardDetail() {
     return () => ro.disconnect()
   }, [])
   const [hover, setHover] = useState<string | null>(null)
-  const d = useDrawn(card.id, card.v, w - 56, 'detail', { selected: card.region, hover })
+  // the card's interaction state: where the person (here or in the terminal) left it, kept by the terminal session
+  const cardState = useStore((s) => s.cardStates[card.id])
+  useEffect(() => {
+    let alive = true
+    void objectOf(card.id, null).then((r) => {
+      const kept = r?.state
+      if (!alive || !kept || getState().cardStates[card.id] !== undefined) return
+      setState((s) => ({ cardStates: { ...s.cardStates, [card.id]: kept.state || {} }, card: s.card && s.card.id === card.id && !s.card.region && kept.region ? { ...s.card, region: kept.region } : s.card }))
+    })
+    return () => {
+      alive = false
+    }
+  }, [card.id])
+  const d = useDrawn(card.id, card.v, w - 56, 'detail', { selected: card.region, hover, state: cardState })
   const o = d?.object
   const versions = d?.versions || []
   const part = d?.parts.find((p) => p.id === card.region) || null
@@ -67,6 +80,51 @@ export function CardDetail() {
   }, [])
 
   const pick = (region: string | null) => setState((s) => ({ card: s.card ? { ...s.card, region } : null, exampleAt: 0, detailBar: s.detailBar === 'program' ? 'program' : null }))
+  // what the person does on the card, as its program's event (k.on): the state it answers with is kept here and sent
+  // to the terminal session, which keeps it for both surfaces; an ask(selection) points the chat's next question at it
+  const fire = async (event: Record<string, unknown>): Promise<boolean> => {
+    if (!o || !d?.drawing) return false
+    const ev = await eventsLib()
+    if (!ev.takes(d.drawing, event)) return false
+    const got = await eventOf(o, { w: columnsIn(w - 56), state: cardState || {}, event })
+    if (got?.error) {
+      setState({ sent: { text: `the card could not answer: ${got.error.name} · fix: ${got.error.fix || 'its program'}`, at: Date.now(), error: got.error.message } })
+      return true
+    }
+    const st = got.state || cardState || {}
+    const region = typeof event.region === 'string' ? event.region : card.region
+    setState((s) => ({ cardStates: { ...s.cardStates, [card.id]: st }, card: s.card ? { ...s.card, region } : null }))
+    void sendBack({ cardstate: { object: card.id, region, state: st } })
+    const a = got.ask
+    if (a && a.text) void ask(a.text, { object: card.id, ...(o.version != null ? { v: o.version } : {}), ...(a.region ? { region: a.region } : {}), label: a.label, ...(a.refs ? { refs: a.refs } : {}) })
+    else if (a) setState({ cardAsk: { object: card.id, label: a.label, ...(a.region ? { region: a.region } : {}), ...(a.refs ? { refs: a.refs } : {}) } })
+    return true
+  }
+  const fireRef = useRef(fire)
+  fireRef.current = fire
+  useEffect(() => {
+    current.fire = (e) => fireRef.current(e)
+    return () => {
+      current.fire = null
+      current.on = []
+    }
+  }, [])
+  current.on = d?.drawing?.on || []
+  // a drag across a brush area of the card (k.plot's brush, a canvas's c.brush) is its program's brush event
+  const brushHost = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = brushHost.current
+    if (!el) return
+    let off: (() => void) | null = null
+    let alive = true
+    void eventsLib().then((ev) => {
+      if (alive) off = ev.attachBrush(el, (e: Record<string, unknown>) => void fireRef.current(e))
+    })
+    return () => {
+      alive = false
+      off?.()
+    }
+  }, [!!d?.drawing])
   const from = facts?.sources?.length ? facts.sources.map((x: any) => x.path).join(', ') : ''
   return (
     <div className="board" data-panel="canvas">
@@ -118,16 +176,21 @@ export function CardDetail() {
                           <span className="lean-card-right">click a part for details</span>
                         </div>
                       )}
-                      <div
-                        className="lean-svg lean-svg-big"
-                        onClick={(e) => {
-                          const r = (e.target as Element).closest('[data-region]')?.getAttribute('data-region') ?? null
-                          pick(r && r !== card.region ? r : null)
-                        }}
-                        onMouseMove={(e) => setHover((e.target as Element).closest('[data-region]')?.getAttribute('data-region') ?? null)}
-                        onMouseLeave={() => setHover(null)}
-                        dangerouslySetInnerHTML={{ __html: d.svg }}
-                      />
+                      <div ref={brushHost} className="lean-card-host">
+                        <div
+                          className="lean-svg lean-svg-big"
+                          onClick={(e) => {
+                            const r = (e.target as Element).closest('[data-region]')?.getAttribute('data-region') ?? null
+                            // a press the program answers (k.on('press:<id>')) is its event; any other selects the part
+                            void fire({ type: 'press', region: r }).then((taken) => {
+                              if (!taken) pick(r && r !== card.region ? r : null)
+                            })
+                          }}
+                          onMouseMove={(e) => setHover((e.target as Element).closest('[data-region]')?.getAttribute('data-region') ?? null)}
+                          onMouseLeave={() => setHover(null)}
+                          dangerouslySetInnerHTML={{ __html: d.svg }}
+                        />
+                      </div>
                     </>
                   )}
                   {d?.bottom && <div className="lean-card-bottom">{d.bottom}</div>}
@@ -219,9 +282,9 @@ function PartFacts({ part, drawing, object }: { part: Part; drawing: any; object
       const lib = await objectLib()
       const { refs } = lib.regionRefs(object, drawing, part.id)
       if (!refs.length) return alive && setLine(part.meta?.note ? String(part.meta.note) : 'this part names no rows')
-      const r = await resolveRef(refs[0], 1)
+      const r = await resolveRef(refs, 1)
       const files = [...new Set((r.rows || []).map((x: string) => String(x).split('#')[0]))] as string[]
-      if (alive) setLine([refs[0], files.length ? `from ${files.join(', ')}` : '', r.count != null ? `${fmt(r.count)} rows` : ''].filter(Boolean).join(' · '))
+      if (alive) setLine([refs.length > 1 ? `${refs.length} rows of the card` : refs[0], files.length ? `from ${files.join(', ')}` : '', r.count != null ? `${fmt(r.count)} rows` : ''].filter(Boolean).join(' · '))
     })()
     return () => {
       alive = false
@@ -257,7 +320,7 @@ function Examples({ part, drawing, object }: { part: Part | null; drawing: any; 
       const lib = await objectLib()
       const { refs } = lib.regionRefs(object, drawing, part.id)
       if (!refs.length) return alive && setRows({ label: part.label, total: 0, recs: [] })
-      const r = await resolveRef(refs[0], 12)
+      const r = await resolveRef(refs, 12)
       const recs = await wordsOf(r.records || [])
       if (alive) setRows({ label: part.label, total: r.count ?? recs.length, recs })
     })()
@@ -335,10 +398,19 @@ function Program({ program, part }: { program: string; part: Part | null }) {
   )
 }
 
-/** The detail's keys: [ ] examples, f from, p program; read by the shell's key handler. */
+// the open card's event, for the page's key handler
+const current: { fire: ((e: Record<string, unknown>) => Promise<boolean>) | null; on: { name: string }[] } = { fire: null, on: [] }
+
+/** The detail's keys: the card program's own first (k.on), then [ ] examples, p program; read by the shell's key
+ *  handler. A card's key that its program takes is sent to it as an event (it runs once more with it). */
 export function detailKey(k: string): boolean {
   const s = getState()
   if (!s.card) return false
+  const name = k === ' ' ? 'space' : k === 'Enter' ? 'return' : k
+  if (current.fire && k !== 'Escape' && k !== '0' && current.on.some((h) => h.name === name || h.name === 'key')) {
+    void current.fire({ type: 'key', key: name, ...(s.card.region ? { region: s.card.region } : {}) })
+    return true
+  }
   if (k === '[' || k === ']') {
     setState({ detailBar: 'examples', exampleAt: s.detailBar === 'examples' ? Math.max(0, s.exampleAt + (k === ']' ? 1 : -1)) : 0 })
     return true

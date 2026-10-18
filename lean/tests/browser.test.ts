@@ -19,7 +19,6 @@ const RECORD = { v: 1, row: AT, session: SESSION, text: 'June 18 had [6,543](q1#
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function world(on: any, serverLines: unknown[] = []) {
-  on('tool.call', () => ({ result: 'saved 01-saves v2: thimble/objects/01-saves.json\n' }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('config.set', (_$: unknown, e: { value: unknown }) => ({ value: e.value }))
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', BROWSER: '/usr/bin/open-page' })
@@ -31,6 +30,11 @@ function world(on: any, serverLines: unknown[] = []) {
     [`${ROOT}/thimble/objects/01-saves.json`]: JSON.stringify(OBJECT),
     [`${ROOT}/thimble/messages/${SESSION}/${AT}.json`]: JSON.stringify(RECORD),
   }
+  // a Bash call saves 01-saves v2: the kernel writes the save to the session's change feed
+  on('tool.call', () => {
+    files['/home/t/.thimble/lean/events/s-1.jsonl'] = (files['/home/t/.thimble/lean/events/s-1.jsonl'] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: SESSION, root: ROOT, object: '01-saves', version: 2 }) + '\n'
+    return { result: 'saved 01-saves v2: thimble/objects/01-saves.json\n' }
+  })
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` }))
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))

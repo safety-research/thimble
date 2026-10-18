@@ -31,6 +31,7 @@ export function ChatPanel() {
   const threads = useStore((s) => s.threads)
   const current = useStore((s) => s.thread)
   const card = useStore((s) => s.card)
+  const cardAsk = useStore((s) => s.cardAsk)
   const objects = useStore((s) => s.objects)
   const loaded = useStore((s) => s.loaded)
   const problem = useStore((s) => s.problem)
@@ -109,7 +110,14 @@ export function ChatPanel() {
     const text = draft
     let scope = {}
     if (thread) scope = { ...(thread.scope || {}), thread: thread.id }
-    else if (current.startsWith('card:') && card) scope = { object: card.id, ...(card.v != null ? { v: card.v } : {}), ...(card.region ? { region: card.region } : {}), label: cardInfo?.title }
+    else if (current.startsWith('card:') && card) {
+      // a selection the card's program asked about (k.ask) comes before the part, for this one question
+      const sel = getState().cardAsk
+      scope = sel && sel.object === card.id
+        ? { object: card.id, ...(card.v != null ? { v: card.v } : {}), ...(sel.region ? { region: sel.region } : {}), label: sel.label, ...(sel.refs ? { refs: sel.refs } : {}) }
+        : { object: card.id, ...(card.v != null ? { v: card.v } : {}), ...(card.region ? { region: card.region } : {}), label: cardInfo?.title }
+      if (sel) setState({ cardAsk: null })
+    }
     setDraft('')
     near.current = true
     if (!(await ask(text, scope))) setDraft(text)
@@ -163,7 +171,7 @@ export function ChatPanel() {
           value={draft}
           onChange={setDraft}
           onSubmit={() => void send()}
-          placeholder={isMain ? 'Reply to main…' : current.startsWith('card:') || thread?.scope?.object ? 'Ask about this card…' : `Reply in ${curPath}…`}
+          placeholder={isMain ? 'Reply to main…' : cardAsk && current.startsWith('card:') ? `Ask about ${cardAsk.label}…` : current.startsWith('card:') || thread?.scope?.object ? 'Ask about this card…' : `Reply in ${curPath}…`}
           model={<span className="lean-composer-to" title={isMain ? 'goes to the terminal session as your prompt' : 'a side thread: main does not see it'}>{curPath}</span>}
           textRef={composer}
           rows={2}

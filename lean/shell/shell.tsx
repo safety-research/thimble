@@ -36,9 +36,10 @@ import { paintRegions, selectable } from './cells'
 import { cardKind, explainerCard, sourceCard } from './cards.js'
 import { detailIsOpen, detailKeys, detailPane, markOpen, openDetailPane, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
-import { isRef, objectRefs, rankRow, recordRefs, regionMeta, regionRefs } from './object.js'
+import { isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadOf } from './thread'
 import type { Scope as ThreadScope } from './thread'
+import { writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { markColors, messageEl, trayEl, verbColor, verbLineEl } from './view'
@@ -89,7 +90,9 @@ export const CPANE = 'claims'
 
 const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
-const SAVED = /^saved (\S+) v(\d+): \S+/gm
+const EVENTS = { plugin: 'thimble-lean', key: 'events' } as const
+// when this module loaded, in the kernel's seconds: the change feed's saves before it were placed by an earlier load
+const LOADED = Date.now() / 1000
 const rowKey = (id: string) => String(id).slice(0, 24)
 const refText = (r: { id: string; v: number | null }) => (r.v != null ? `${r.id}@${r.v}` : r.id)
 const cut = (s: string, n: number) => ([...s].length <= n ? s : [...s].slice(0, Math.max(0, n - 1)).join('') + '…')
@@ -276,6 +279,38 @@ async function setUnder($: Engine, at: string, list: Placed[]): Promise<void> {
   $.clock.after(0, () => { void recount($) })
 }
 
+/** The saves the kernel wrote to this session's change feed since the feed was last read: one JSON line per save in
+ *  $THIMBLE_HOME/lean/events/<session>.jsonl, each naming its object, version and folder. Read from the feed, a save
+ *  is seen however the command was written (`lean save … | tail -3`, a script that saves, a `cd` first). */
+async function newSaves($: Engine): Promise<ObjRef[]> {
+  const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
+  const file = `${home.replace(/\/+$/, '')}/lean/events/${safe(String(await $.session.id()))}.jsonl`
+  const seen = (await $.state.get(EVENTS)).value as { file: string; n: number } | undefined
+  if (!(await $.fs.exists(file))) {
+    if (!seen || seen.file !== file) await $.state.set(EVENTS, { file, n: 0 })
+    return []
+  }
+  const lines = String(await $.fs.read(file)).split('\n').filter(Boolean)
+  // with no mark yet (the first read since this module loaded), the saves made since it loaded are new: a resumed
+  // session's earlier saves are drawn from its placements, never placed twice
+  const from = seen && seen.file === file ? seen.n : 0
+  const since = seen && seen.file === file ? 0 : LOADED - 2
+  await $.state.set(EVENTS, { file, n: lines.length })
+  const out: ObjRef[] = []
+  for (const line of lines.slice(from)) {
+    try {
+      const ev = JSON.parse(line)
+      if (ev?.kind !== 'save' || typeof ev.object !== 'string' || !ID.test(ev.object) || typeof ev.root !== 'string' || !(Number(ev.t) >= since)) continue
+      const ref = { id: ev.object, v: Number(ev.version) || null, root: String(ev.root).replace(/\/+$/, '') }
+      out.push(ref)
+    } catch {
+      // a line being written: the next read has it whole
+    }
+  }
+  // an object saved twice in one call is drawn once, at its latest version
+  return out.filter((x, i) => !out.slice(i + 1).some(y => y.id === x.id && y.root === x.root))
+}
+
 /** One object under a row: a new version of one already there takes its place; a verb's object goes after the
  *  object it came from (and after what came from it before). */
 async function place($: Engine, at: string, ref: Placed): Promise<void> {
@@ -331,10 +366,14 @@ export async function leanEnv($: Engine, root: string): Promise<Record<string, s
 
 async function resolveRefs($: Engine, root: string, refs: string[]): Promise<void> {
   const dir = $.plugin.root.replace(/\/+$/, '')
-  for (const ref of refs.slice(0, 3)) {
+  // a part with several refs (a selection, a group of rows) is one set of rows: resolved together, kept under them all
+  const sets = refs.length > 1 ? [refs.slice(0, 500)] : refs.map(r => [r])
+  for (const set of sets) {
+    const ref = refsKey(set)
     const at = { ...ROWS, id: `${root}|${ref}` }
     if ((await $.state.get(at)).value !== undefined) continue
-    const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', '3', '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+    // a few rows spread across the part's rows (the kernel's default), enough to flip through as its examples
+    const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ...set, '-n', '8', '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
     let v: unknown
     try { v = JSON.parse(r.stdout) } catch { v = { ref, error: (r.stdout + r.stderr).trim().slice(0, 400) || 'lean resolve gave nothing' } }
     await $.state.set(at, v)
@@ -535,6 +574,8 @@ async function startServer($: Engine, root: string): Promise<{ base: string } | 
             } else if (msg.squeeze && typeof msg.squeeze === 'object') {
               // a squeeze chip pressed under a message in the browser: the same rewrite in place as a press here
               void sqFromBrowser($, msg.squeeze).then(said => { if (said) $.ui.toast(said) }, err => failed($, 'Squeeze from the browser did not run', err, 'Press s under the message here instead'))
+            } else if (msg.cardstate) {
+              await stateFromBrowser($, root, msg.cardstate)
             } else if (msg.back) {
               await backFromBrowser($, root, msg.back)
             } else if (msg.stopped) {
@@ -577,6 +618,15 @@ async function backFromBrowser($: Engine, root: string, back: { object: string; 
   await openDetailPane($, o?.title ? cut(String(o.title), 40) : ref.id)
 }
 
+/** A card's interaction state the browser's program answered with: kept where both surfaces read it, and the open
+ *  detail here follows it (the same selection in the terminal and the browser). */
+async function stateFromBrowser($: Engine, root: string, c: { object: string; region: string | null; state: Record<string, unknown> }): Promise<void> {
+  if (!ID.test(c.object)) return
+  await writeCardState($, root, c.object, { state: c.state, region: c.region }, 'browser')
+  const sel = (await $.state.get(SEL)).value as Sel | null
+  if (sel && sel.id === c.object && sel.root === root && !sel.cite && !sel.cites) await $.state.set(SEL, { ...sel, state: c.state, region: c.region ?? sel.region })
+}
+
 /** The record of one of Claude's messages in this session (CONTRACT 1), or null. */
 async function recordOf($: Engine, root: string, row: string): Promise<Any | null> {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/.test(row)) return null
@@ -584,7 +634,7 @@ async function recordOf($: Engine, root: string, row: string): Promise<Any | nul
   try { return (await $.fs.exists(file)) ? JSON.parse(String(await $.fs.read(file))) : null } catch { return null }
 }
 
-type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; thread?: string; claim?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
+type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; thread?: string; claim?: string; refs?: string[]; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
 
 /** What Claude reads beside a question asked in the browser: what it was asked about, and where its rows are. */
 export async function webContext($: Engine, root: string, scope: WebScope): Promise<string> {
@@ -642,10 +692,12 @@ async function askFromBrowser($: Engine, root: string, text: string, scope: WebS
       const card = scope.object && ID.test(scope.object) ? await withVersion($, { id: scope.object, v: scope.v ?? null, root }) : null
       const p = card ? await prepared($, card, 96) : null
       const region = scope.region && REGION.test(scope.region) ? scope.region : null
-      const refs = p?.object ? (region ? regionRefs(p.object, p.drawing, region).refs : objectRefs(p.object).map((c: Any) => c.ref)) : undefined
+      // a selection the card's program asked about (k.ask) names its own rows
+      const picked = Array.isArray(scope.refs) ? scope.refs.filter(x => isRef(x)) : []
+      const refs = picked.length ? picked : p?.object ? (region ? regionRefs(p.object, p.drawing, region).refs : objectRefs(p.object).map((c: Any) => c.ref)) : undefined
       const r = await askThread($, {
         text, root, ...(refs ? { refs } : {}),
-        scope: { ...(card ? { object: card.id, v: card.v } : {}), ...(region ? { region, label: scope.label || String(regionMeta(p?.drawing, region)?.label || region) } : {}), ...(scope.row ? { row: scope.row } : {}), ...(scope.mark ? { mark: scope.mark } : {}) },
+        scope: { ...(card ? { object: card.id, v: card.v } : {}), ...(region ? { region, label: scope.label || String(regionMeta(p?.drawing, region)?.label || region) } : picked.length && scope.label ? { label: scope.label } : {}), ...(scope.row ? { row: scope.row } : {}), ...(scope.mark ? { mark: scope.mark } : {}) },
         card: p?.object ? { id: p.object.id, v: p.object.version, title: p.object.title, file: `${root}/thimble/objects/${p.object.id}.json` } : null,
       })
       if (r.problem) $.ui.toast(`A question from the browser: ${r.problem}.`)
@@ -996,9 +1048,11 @@ async function cardNow($: Engine, frame: TrayFrame, w: number): Promise<CardDraw
 }
 
 /** `lean resolve <ref> --json`, as the person's own read (never counted as Claude's coverage). */
-async function resolveJson($: Engine, root: string, ref: string, n = 6): Promise<Any> {
+async function resolveJson($: Engine, root: string, ref: string, n = 6, label?: string): Promise<Any> {
   const dir = $.plugin.root.replace(/\/+$/, '')
-  const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', String(n), '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+  // with the citation's words, a citation of a whole query opens the row that holds the value it shows
+  const words = label && label !== ref ? ['--label', label] : []
+  const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
   try { return JSON.parse(r.stdout) } catch { return { ref, error: (r.stdout + r.stderr).trim().slice(0, 300) || 'lean resolve gave nothing' } }
 }
 
@@ -1048,7 +1102,7 @@ async function sourceSpec($: Engine, ref: string, label: string, room: number): 
   const root = await rootHere($)
   if (!root) return { title: label, right: 'cite', problem: `no thimble/ folder here to read ${ref} from; run lean in the data folder first` }
   const series = seriesRef(ref)
-  const resolved = await resolveJson($, root, series ? series.query : ref)
+  const resolved = await resolveJson($, root, series ? series.query : ref, 6, series ? undefined : label)
   let query: Any = null
   const q = /^(q\d+)(?:[#@]|$)/.exec(ref)
   if (q) {
@@ -1996,8 +2050,9 @@ export const registerShell: Register = (on, options) => {
       // the shell draws nothing it cannot; the session goes on
     }
     try {
-      // a resumed session: its objects drawn under the same rows again
+      // a resumed session: its objects drawn under the same rows again, and its earlier saves never placed twice
       await restoreShown($)
+      await newSaves($)
     } catch {
       // a session that cannot read its placements draws its new objects only
     }
@@ -2039,14 +2094,15 @@ export const registerShell: Register = (on, options) => {
         if (m && turn) turn.oriented += Number(m[1])
         await reloadClaims($)
       }
-      if (r.deny !== undefined || r.isError || input.agentId || !/\blean\b/.test(String(input.command)) || !text.includes('saved ')) return r
-      const cdTo = /^\s*cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*&&/.exec(String(input.command))
+      if (r.deny !== undefined) return r
+      // the saves this call made, from the kernel's change feed (never from what the call printed, which a pipe cuts);
+      // a subagent's saves (a side thread's) are read and left where its card is
+      const saves = await newSaves($)
+      if (input.agentId || !saves.length) return r
       notes = []
-      for (const m of text.matchAll(SAVED)) {
-        const id = String(m[1])
-        const root = await findRoot($, id, cdTo ? [String(cdTo[1] || cdTo[2] || cdTo[3])] : [])
-        if (!root) continue
-        const ref: ObjRef = { id, v: Number(m[2]), root }
+      for (const ref of saves) {
+        const id = ref.id
+        const root = ref.root
         // a new version of an object that could not be drawn takes its place where it was: a fix, not a new object
         const where = (await $.state.get({ ...WHERE, id })).value as string | undefined
         const before = where ? (((await $.state.get({ ...UNDER, id: where })).value ?? []) as ObjRef[]).find(x => x.id === id && x.root === root) : undefined
@@ -2120,6 +2176,12 @@ export const registerShell: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    try {
+      // a save the turn's last Bash call did not see (one run in the background): the feed read once more
+      if (e.agentId === undefined && turn) for (const ref of await newSaves($)) turn.unplaced = [...turn.unplaced.filter(x => !(x.id === ref.id && x.root === ref.root)), ref]
+    } catch {
+      // the next call reads the feed again
+    }
     try {
       // objects saved after the turn's last words: under those words (or the save's own row, with none)
       if (e.agentId === undefined && turn && turn.unplaced.length) {
