@@ -29,8 +29,9 @@ export type ObserverLine = {
   prompts: number
 }
 
-/** The browser page's server: its base URL (token included), or why there is none. */
-export type Web = { base?: string; root?: string; problem?: string; opened?: string }
+/** Browser mode (`on`, the `browser` setting) and its page server: its base URL (token included), the page opened
+ *  last, why there is none, or why it stopped on its own (no page open). */
+export type Web = { on?: boolean; base?: string; root?: string; problem?: string; opened?: string; stopped?: string }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -42,7 +43,7 @@ declare module 'claude-code' {
       /** the latest object drawn, which /obj opens with no argument */
       last: ObjRef | null
       /** the object and region a prompt was asked about, by the prompt row's id */
-      asked: StateFamily<{ id: string; v: number | null; region: string | null; label: string }>
+      asked: StateFamily<{ id: string; v: number | null; region: string | null; label: string; via?: 'browser' }>
       /** a verb running on an object, or what it said last, by the object's id */
       said: StateFamily<Said | null>
       /** words for Claude alone, given with the next prompt */
