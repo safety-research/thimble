@@ -141,6 +141,17 @@ test('links alone make a flow map; loose names are read (nodes, edges, source, t
   assert.ok(g.text.includes('answered') && g.text.includes('30'), g.text)
 })
 
+test('flows with no threads, calm: the biggest flows, about three quarters of the whole, the rest named in a line', () => {
+  const nodes = ['a', 'b', 'c', 'd'].map(id => ({ id, label: 'from ' + id })).concat(['w', 'x', 'y', 'z'].map(id => ({ id, label: 'to ' + id })))
+  const links = []
+  ;['a', 'b', 'c', 'd'].forEach((f, i) => ['w', 'x', 'y', 'z'].forEach((t, j) => links.push({ from: f, to: t, n: i === j ? 1000 : 10 + i + j })))
+  const g = draw({ title: 'flows', unit: 'saves', nodes, links }, { w: 100 })
+  assert.ok(g.text.includes('1,000'), g.text)
+  assert.ok(/12 smaller flows not drawn \(\d+ saves of 4,\d+\)/.test(g.text), g.text)
+  const full = draw({ title: 'flows', unit: 'saves', nodes, links, full: true }, { w: 100 })
+  assert.ok(!full.text.includes('not drawn'))
+})
+
 test('regions: a strip of groups to scale, then boxes of stations with their counts', () => {
   const data = { title: 'what it holds', unit: 'saves',
     groups: [{ id: 'coord', label: 'coordination pages' }, { id: 'links', label: 'link pages' }],
@@ -207,7 +218,7 @@ test('the hint says what m would do for this object', () => {
   assert.equal(applies({ program: PROGRAM, data: ONE }), 'full map · 5 stations')
   assert.equal(applies({ program: PROGRAM, data: { ...ONE, full: true } }), 'map the threads of one station')
   assert.equal(applies({ program: 'x', lineage: { rows: { 'runs/a/agents/agent-01.jsonl': { count: 4 }, 'runs/a/agents/agent-02.jsonl': { count: 9 } } } }), 'map the 2 runs')
-  assert.equal(applies({ program: 'x', lineage: { rows: { 'revisions.jsonl': { count: 14591 } } } }), 'map what revisions.jsonl holds')
+  assert.equal(applies({ program: 'x', lineage: { rows: { 'revisions.jsonl': { count: 14591 } } } }), null)
   assert.equal(applies({ program: 'x', lineage: { rows: { 'a.csv': { count: 10 } } } }), null)
   assert.equal(applies(null), null)
 })

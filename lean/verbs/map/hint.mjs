@@ -5,8 +5,8 @@
 // It reads only what the object holds (its program, data and lineage), so the shell can ask it of every object drawn.
 //   a mini map               "full map · 12 stations"
 //   a full map               "map the threads of one station"
-//   an object over runs      "map the 48 runs" (its rows come from transcripts or from several files of one kind)
-//   an object over a dataset "map what revisions.jsonl holds" (one file with many rows)
+//   an object over runs      "map the 48 runs" (its rows come from agent, run or session transcripts)
+// Other objects get no hint: m stays in `?` for them, where pressing it asks Claude to map the work.
 import { isMap } from './run.mjs'
 
 const fmt = n => Number(n).toLocaleString('en-US')
@@ -25,9 +25,6 @@ export function applies(object) {
   const runs = files.filter(f => /(agent|run|session|transcript|trajector)/i.test(f) && /\.jsonl$/i.test(f))
   if (runs.length >= 2) return `map the ${fmt(runs.length)} runs`
   if (runs.length === 1) return 'map this run'
-  if (files.length >= 3) return `map the ${fmt(files.length)} files`
-  const big = files.map(f => ({ f, n: Number(rows[f] && rows[f].count) || 0 })).sort((a, b) => b.n - a.n)[0]
-  if (big && big.n >= 500) return `map what ${big.f.split('/').pop()} holds`
   return null
 }
 

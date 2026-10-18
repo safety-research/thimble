@@ -2,7 +2,7 @@
   "key": "m",
   "name": "map",
   "line": "lay the work out by its own structure, so its shape is visible",
-  "order": 4,
+  "order": 0,
   "absorbs": [
     "Trail (a metro map of work the model builds)",
     "Atlas (concepts the model extracts, drawn as regions)",
