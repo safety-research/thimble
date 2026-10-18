@@ -1386,7 +1386,7 @@ async function claimsPaneNow($: Engine, e: Any): Promise<Any> {
   const h = Math.max(6, (e.props.scroll?.bodyRows ?? 40) - HEAD_ROWS - BAR_ROWS)
   const set = (patch: Partial<ClaimPane>) => $.state.set(CLAIMPANE, { ...st, ...patch })
   return claimsPaneEl(els, {
-    w, h, theme, view, lay: layoutFor(store, view, w, h), moments, cursor: st.cursor, focus: st.focus, selected: st.selected, search: st.search,
+    w, h, theme, view, lay: layoutFor(store, view, w, h), moments, cursor: st.cursor, focus: st.focus, selected: st.selected, search: st.search, searching: st.searching,
     onSelect: (id: string) => set({ focus: id, selected: st.selected === id ? null : id }),
     onSource: (i: number) => { if (st.selected) void openClaimSource($, st.selected, i) },
     onSearch: (value: string) => set({ search: value }),

@@ -150,7 +150,9 @@ export function compose(o) {
   const set = (x, y, ch, style, extra = {}) => { if (y >= 0 && y < H && x >= 0 && x < W) cells[y][x] = { ch, style, ...extra } }
   const shown = o.claims.filter(c => !o.visible || o.visible.has(c.id))
   const byId = new Map(o.claims.map(c => [c.id, c]))
-  const near = o.focus && (!o.visible || o.visible.has(o.focus)) ? neighbours(o.claims, o.focus) : new Map()
+  // a search lights its matches alone: the ring's links and words wait until it is cleared (or the ring is on a match)
+  const ringOn = o.focus && (!o.visible || o.visible.has(o.focus)) && (!o.matches || o.matches.has(o.focus))
+  const near = ringOn ? neighbours(o.claims, o.focus) : new Map()
   const lit = id => (o.matches ? o.matches.has(id) : !o.focus || id === o.focus || near.has(id))
   // the clusters' names, dim, where their claims are
   for (const n of o.lay.names) {
@@ -205,7 +207,7 @@ export function compose(o) {
       return
     }
   }
-  if (o.focus && (!o.visible || o.visible.has(o.focus))) {
+  if (ringOn) {
     const c = byId.get(o.focus)
     place(o.focus, c.text, { bold: true, strike: !!c.revised_by && (!o.visible || o.visible.has(c.revised_by)), sel: o.focus === o.selected })
   }

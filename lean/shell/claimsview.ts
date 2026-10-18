@@ -37,6 +37,7 @@ export type ClaimsPaneOpts = {
   focus: string | null
   selected: string | null
   search: string | null
+  searching: boolean
   onSelect: (id: string) => unknown
   onSource: (i: number) => unknown
   onSearch: (value: string) => unknown
@@ -86,21 +87,18 @@ export function claimsPaneEl(els: Any, o: ClaimsPaneOpts): Any {
   const visible = shownAt(o.moments, o.cursor)
   const matches = matchesOf(v.flat, o.search)
   // the head: how many, or the search, or the time
-  let head: Any
-  if (o.search != null) {
-    const n = matches ? [...matches].filter(id => !visible || visible.has(id)).length : 0
-    head = Box({ key: 'head', flexDirection: 'row', width: w, children: [
-      Text({ color: tone, bold: true, children: 'Claims   ' }),
-      Input({ key: 'search', label: '/ ', value: o.search, autoFocus: true, submitLabel: 'done', onInput: (x: string) => o.onSearch(x), onSubmit: (x: string) => o.onSearchDone(x) }),
-      Text({ dimColor: true, children: `   ${n} match${n === 1 ? '' : 'es'}` }),
-    ] })
-  } else if (visible) {
-    const m = o.moments[o.cursor ?? 0]
-    const name = m ? (m.by === 'orientation' ? 'the corpus' : `turn ${m.turn ?? '?'} · ${m.what}`) : ''
-    head = Box({ key: 'head', flexDirection: 'row', width: w, children: [Text({ color: tone, bold: true, children: 'Claims   ' }), Text({ dimColor: true, children: `${name} · ${visible.size} of ${v.total}` })] })
-  } else {
-    head = Box({ key: 'head', flexDirection: 'row', width: w, children: [Text({ color: tone, bold: true, children: 'Claims   ' }), Text({ dimColor: true, children: `${v.total} · ${v.clusters} cluster${v.clusters === 1 ? '' : 's'}` })] })
-  }
+  // the head: how many, or where time is, and the search (a field while it is typed, then its words)
+  const n = matches ? [...matches].filter(id => !visible || visible.has(id)).length : 0
+  const m = visible ? o.moments[o.cursor ?? 0] : null
+  const where = visible ? `${m ? (m.by === 'orientation' ? 'the corpus' : `turn ${m.turn ?? '?'} · ${m.what}`) : ''} · ${visible.size} of ${v.total}` : `${v.total} · ${v.clusters} cluster${v.clusters === 1 ? '' : 's'}`
+  const head = Box({ key: 'head', flexDirection: 'row', width: w, children: [
+    Text({ color: tone, bold: true, children: 'Claims   ' }),
+    ...(o.searching
+      ? [Text({ children: '/ ' }), Input({ key: 'search', value: o.search ?? '', autoFocus: true, submitLabel: 'done', onInput: (x: string) => o.onSearch(x), onSubmit: (x: string) => o.onSearchDone(x) }), Text({ dimColor: true, children: `   ${n} match${n === 1 ? '' : 'es'}` })]
+      : o.search
+        ? [Text({ children: `/ ${o.search}` }), Text({ dimColor: true, children: `   ${n} match${n === 1 ? '' : 'es'}${visible ? '   ' + where : ''}` })]
+        : [Text({ dimColor: true, children: where })]),
+  ] })
   if (!v.total) {
     return Box({ flexDirection: 'column', width: w, children: [head, Text({ children: ' ' }), Text({ dimColor: true, children: 'No claims yet.' })] })
   }
