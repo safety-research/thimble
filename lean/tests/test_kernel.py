@@ -231,3 +231,21 @@ def test_the_command_runs_a_query_from_a_heredoc(root: Path) -> None:
     assert "[1](q1#passed=0@n)" in out.stdout
     res = subprocess.run([str(lean), "resolve", "q1#passed=1@n"], text=True, capture_output=True, cwd=root, env=env, timeout=60)
     assert "2 source rows: runs.csv#row=1,3" in res.stdout
+
+
+def test_a_query_prints_little_beyond_what_claude_asked_for(root: Path) -> None:
+    st = Store(root)
+    # a long result shows its first and last rows, as many as fit, and keeps them all
+    long = Q.run(st, "many rows", 'import pandas as pd\npd.DataFrame({"i": range(500), "text": ["x" * 120] * 500})')
+    assert len(long["stdout"]) < Q.SHOW + 400 and "(500 rows, the first and last" in long["stdout"]
+    assert len(long["table"]) == 500
+    # a short table shows whole
+    short = Q.run(st, "few rows", 'df = load("saves.jsonl")\ntally(df, "user")')
+    assert "rows, the first" not in short["stdout"] and "ann" in short["stdout"]
+    # a query that ends by keeping a result prints nothing more
+    kept = Q.run(st, "keep", 'df = load("saves.jsonl")\nkeep("users", df.user)')
+    assert kept["stdout"].strip() == "" and kept["kept"] == ["users"]
+    # an error shows the query's own lines, not the kernel's frames
+    bad = Q.run(st, "bad", 'df = load("saves.jsonl")\ndef f(x):\n    return x.nope\ndf.id.map(f)')
+    assert "line 3, in f: return x.nope" in bad["stdout"] and "AttributeError" in bad["stdout"]
+    assert "query.py" not in bad["stdout"]

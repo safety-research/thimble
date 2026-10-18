@@ -214,6 +214,9 @@ def cmd_q(a: argparse.Namespace) -> int:
             print(f"no query {a.rerun}")
             return 1
         q = Q.run(st, old.get("about") or "", old["code"], rerun_of=old["id"])
+        if a.json:
+            out_json(q)
+            return 1 if q["error"] else 0
         same = q["out_hash"] == old.get("out_hash")
         changed = Q.stale_inputs(st, old)
         print(f"{q['id']} ran {old['id']} again: its output is {'the same' if same else 'different'}"
@@ -247,7 +250,8 @@ def cmd_q(a: argparse.Namespace) -> int:
     if q["external"]:
         tail.append(f"read {len(q['external'])} file(s) outside the folder ({', '.join(q['external'][:2])}), which no lineage traces")
     print(" · ".join(tail))
-    if not q["error"]:
+    if not q["error"] and q.get("table") is not None:
+        # a query that only printed has no output rows to keep: nothing to say about them
         print(_lineage_line(q))
     return 1 if q["error"] else 0
 
@@ -266,7 +270,7 @@ def _lineage_line(q: dict[str, Any]) -> str:
         "matched": f"Each output row keeps its source rows (found by {', '.join(q.get('keys') or [])} in `{q.get('frame')}`; the counts agree).",
         "key": f"Each output row keeps the rows that share its {', '.join(q.get('keys') or [])} in `{q.get('frame')}` (no count to check them by).",
         "superset": f"The rows found by {', '.join(q.get('keys') or [])} in `{q.get('frame')}` hold more than the counts: tally() keeps them exactly.",
-        "query": "No rows per output row: each value rests on every row the query read (tally() or a `_refs` column keeps them).",
+        "query": "No rows per output row: each value rests on all the rows read (tally() keeps them per row).",
     }.get(mode or "query", "")
     return say + (f" Cite a value as {ex}." if ex else "")
 
@@ -316,7 +320,8 @@ def cmd_save(a: argparse.Namespace) -> int:
     if rows:
         print("  source rows behind its values: " + ", ".join(f"{f} ({x['count']:,})" for f, x in list(rows.items())[:6]))
     t = lin["coverage"]["total"]
-    print(f"  this session has not read {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows)")
+    if t["not_read_files"]:
+        print(f"  this session has not read {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows)")
     ex = _value_example(obj)
     if ex:
         print(f"Cite or resolve one of its values as {ex}.")

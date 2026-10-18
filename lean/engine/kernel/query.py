@@ -48,9 +48,10 @@ from urllib.parse import quote
 
 from . import refs as R
 from . import sources as S
-from .store import Store
+from .store import Store, thimble_home
 
 CUT = 12000  # characters of a query's printed output Claude reads
+SHOW = 3000  # characters of the result (the last expression) shown when it is a long table; the query keeps it all
 TABLE_MAX = 5000  # rows of an output table kept
 
 
@@ -218,18 +219,26 @@ def jsonable(v: Any) -> Any:
 
 
 def show(v: Any) -> str:
+    """The result as Claude reads it. A table of up to 60 rows shows whole when it fits in SHOW characters; a longer or
+    wider one shows as many of its first and last rows as fit, and says how many it has (the query keeps them all)."""
     try:
         import pandas as pd
-        if isinstance(v, pd.DataFrame):
-            vv = v.drop(columns=[c for c in ("_refs",) if c in v.columns])
-            s = vv.to_string(max_rows=60, max_cols=14, max_colwidth=60)
-            if len(v) > 60:
-                s += f"\n({len(v):,} rows)"
-            return s
-        if isinstance(v, pd.Series):
-            s = v.to_string(max_rows=60)
-            if len(v) > 60:
-                s += f"\n({len(v):,} rows)"
+        if isinstance(v, (pd.DataFrame, pd.Series)):
+            vv = v.drop(columns=[c for c in ("_refs",) if c in v.columns]) if isinstance(v, pd.DataFrame) else v
+
+            def render(n: int) -> str:
+                if isinstance(vv, pd.DataFrame):
+                    return vv.to_string(max_rows=n, max_cols=14, max_colwidth=60)
+                return vv.to_string(max_rows=n)
+
+            n = 60
+            s = render(n)
+            if len(s) > SHOW and len(v) > 10:
+                per_row = max(1, len(s) // (s.count("\n") + 1))
+                n = max(10, min(60, SHOW // per_row) // 2 * 2)
+                s = render(n)
+            if len(v) > n:
+                s += f"\n({len(v):,} rows, the first and last {n // 2} shown)"
             return s
     except ImportError:
         pass
@@ -374,11 +383,13 @@ def run_code(st: Store, code: str) -> dict[str, Any]:
                             "uses": [], "frames": []}
     root = str(st.root) + os.sep
     rec_dir = str(st.dir) + os.sep
+    # the kernel's own files (its code, its cache of loaded frames) are no input of the query
+    own = (str(Path(__file__).resolve().parents[2]) + os.sep, str(thimble_home().resolve() / "lean") + os.sep)
 
     def audit(ev: str, args: tuple) -> None:
         if ev == "open" and args and isinstance(args[0], (str, os.PathLike)):
             p = os.path.abspath(os.fspath(args[0]))
-            if p.startswith(rec_dir):
+            if p.startswith(rec_dir) or p.startswith(own):
                 return
             if p.startswith(root):
                 info["opened"].add(os.path.relpath(p, root))
@@ -403,12 +414,14 @@ def run_code(st: Store, code: str) -> dict[str, Any]:
                     last = eval(compile(ast.Expression(tail.value), "<query>", "eval"), ns)
                 elif "result" in ns:
                     last = ns["result"]
-                if last is not None:
+                # a query that ends by keeping a result (keep("kind", values)) printed what it meant to show already
+                kept_last = (tail is not None and isinstance(tail.value, ast.Call)
+                             and isinstance(tail.value.func, ast.Name) and tail.value.func.id == "keep")
+                if last is not None and not kept_last:
                     print(show(last))
             except Exception as e:  # noqa: BLE001
                 err = f"{type(e).__name__}: {e}"
-                tb = traceback.format_exc().splitlines()
-                print("\n".join(tb[-6:]))
+                print(query_traceback(e, code))
     finally:
         os.chdir(old)
     lin = output_lineage(last, ns, info["frames"]) if err is None else {"table": None, "rows": None, "keys": [], "mode": "query", "frame": None}
@@ -426,6 +439,20 @@ def run_code(st: Store, code: str) -> dict[str, Any]:
     return {"stdout": buf.getvalue(), "error": err, "seconds": round(time.time() - t0, 2), "inputs": inputs,
             "samples": info["samples"], "external": sorted(info["external"])[:20],
             "kept": info["kept"], "uses": _dedupe(info["uses"]), **lin}
+
+
+def query_traceback(e: BaseException, code: str) -> str:
+    """The error as Claude reads it: the query's own lines on the way to it, then the error (the kernel's frames and
+    the library's inner frames say nothing about the query)."""
+    lines = code.splitlines()
+    out = []
+    for fr in traceback.extract_tb(e.__traceback__):
+        if fr.filename == "<query>" and fr.lineno:
+            src = lines[fr.lineno - 1].strip() if 0 < fr.lineno <= len(lines) else ""
+            out.append(f"  line {fr.lineno}" + (f", in {fr.name}" if fr.name not in ("<module>", "<lambda>") else "") + (f": {src}" if src else ""))
+    out = out[-4:]
+    out.append("".join(traceback.format_exception_only(type(e), e)).strip())
+    return "\n".join(out)
 
 
 def _dedupe(xs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -515,5 +542,6 @@ def cite_example(q: dict[str, Any]) -> str | None:
     if keys:
         # a value with a space or a bracket is percent-encoded, so the citation stays one Markdown link
         frag = "&".join(f"{k}={quote(str(r[k]), safe='-_.:~,')}" for k in keys)
-        return f"[{shown}]({q['id']}#{frag}@{col})"
+        if len(frag) <= 100:
+            return f"[{shown}]({q['id']}#{frag}@{col})"
     return f"[{shown}]({q['id']}#row=1@{col})"
