@@ -20,9 +20,9 @@
 //     person sees the map under the reply, not its spec.
 // So pressing m on something that is not a map yet asks Claude to map it (`ask`, a prompt the person sees as sent by
 // thimble). Everything else the verb does is code, with no model:
-//   m on a map          the full map, opened in the detail view. Until the shell draws the detail view with
-//                       k.mode 'detail' (where the same object shows in full), this is a sibling object
-//                       `<name>-full`, kept once per version.
+//   m on a map          the full map in place: a sibling object `<name>-full` (the same spec, full: true, kept once
+//                       per version), drawn under the calm map where the person pressed, as the mockup's enter did.
+//                       Opening the calm map itself shows it full too: the detail view draws in k.mode 'detail'.
 //   m on a station      a map of the threads through it (a lane: the threads in it); one thread is drawn as its own
 //                       line. Its data is the map's, filtered, so each station still names its rows.
 //   m on anything else  asks Claude to map it.
