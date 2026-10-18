@@ -48,7 +48,7 @@ import { afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, chipFromPrompt
 import { chipsOf as sqChips, isOriginal as sqIsOriginal, revealCut } from '../verbs/squeeze/chips.mjs'
 import { HEAD_ROWS } from '../panes/claims.js'
 import { barText } from '../panes/host.js'
-import { paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneState, setTheme } from './panes'
+import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneOf, paneState, setPaneState, setTheme } from './panes'
 import { emptyStore, readStore } from '../verbs/claims/claims.js'
 
 type Engine = EngineInterface
@@ -569,6 +569,12 @@ async function startServer($: Engine, root: string): Promise<{ base: string } | 
               void sqFromBrowser($, msg.squeeze).then(said => { if (said) $.ui.toast(said) }, err => failed($, 'Squeeze from the browser did not run', err, 'Press s under the message here instead'))
             } else if (msg.cardstate) {
               await stateFromBrowser($, root, msg.cardstate)
+            } else if (msg.panestate && typeof msg.panestate === 'object') {
+              // the browser's run of a pane's program answered with a state: the same pane here shows it
+              await paneFromBrowser($, msg.panestate)
+            } else if (msg.act && typeof msg.act === 'object') {
+              // an action the browser's run of a pane's program asked for, done here as the terminal's run would
+              void paneActFromBrowser($, msg.act)
             } else if (msg.back) {
               await backFromBrowser($, root, msg.back)
             } else if (msg.stopped) {
@@ -618,6 +624,27 @@ async function stateFromBrowser($: Engine, root: string, c: { object: string; re
   await writeCardState($, root, c.object, { state: c.state, region: c.region }, 'browser')
   const sel = (await $.state.get(SEL)).value as Sel | null
   if (sel && sel.id === c.object && sel.root === root && !sel.cite && !sel.cites) await $.state.set(SEL, { ...sel, state: c.state, region: c.region ?? sel.region })
+}
+
+/** A pane's state from the browser's run of its program: kept and drawn here (the same pane, the same state). */
+async function paneFromBrowser($: Engine, q: { pane: string; args?: Record<string, unknown>; state: Record<string, unknown> }): Promise<void> {
+  try {
+    paneOf(q.pane)
+  } catch {
+    return
+  }
+  await setPaneState($, q.pane, q.args || {}, q.state || {}, 'browser')
+}
+
+/** An action a pane's program asked for in the browser (k.do), done as the terminal's run would do it. */
+async function paneActFromBrowser($: Engine, q: Record<string, unknown>): Promise<void> {
+  const pane = String(q.pane || '')
+  try {
+    paneOf(pane)
+  } catch {
+    return
+  }
+  await act($, instance(pane, (q.args as Record<string, unknown>) || {}), q)
 }
 
 /** The record of one of Claude's messages in this session (CONTRACT 1), or null. */

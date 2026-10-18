@@ -136,6 +136,12 @@ export interface State {
   cardStates: Record<string, Record<string, unknown>>
   /** a selection a card's program asked about (k.ask): the chat's next question goes to the card's thread with it */
   cardAsk: { object: string; label: string; region?: string; refs?: string[] } | null
+  /** one more on each change the page server announces: a pane reads its stores again */
+  version: number
+  /** the keys of the pane that has the focus, in words, for the bar above the composer (panes/PaneView) */
+  keybar: { from: string; keys: string; status: string | null } | null
+  /** what a pane's program asked about (k.ask): the chat's next question carries it */
+  paneAsk: { pane: string; args: Record<string, unknown>; ask: { label?: string; region?: string; refs?: string[]; text?: string } } | null
 }
 
 let state: State = {
@@ -168,6 +174,9 @@ let state: State = {
   composerFill: null,
   cardStates: {},
   cardAsk: null,
+  version: 0,
+  keybar: null,
+  paneAsk: null,
 }
 const subs = new Set<() => void>()
 
@@ -228,6 +237,7 @@ export async function start(): Promise<void> {
   await Promise.all([refresh(), refreshInfo(true)])
   follow(
     () => {
+      setState({ version: state.version + 1 })
       void refresh()
       void refreshInfo()
     },
