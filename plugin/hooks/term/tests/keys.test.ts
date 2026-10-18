@@ -8,7 +8,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine, Mounted } from 'claude-code/testing'
 
-import { RELAY, UNFOCUSED_HINT } from '../panel'
+import { DRAFT_HINT, RELAY, UNFOCUSED_HINT } from '../panel'
 import { CWD, WS, shown, takesKeys, world } from './fixtures'
 import type { World } from './fixtures'
 
@@ -190,7 +190,8 @@ test('keys · home · a word typed while home holds the keys reaches the prompt 
   const s = await seen($, SHORT, 'home')
   expect(s.rows.join('\n')).toContain('Documents (')
   expect(s.text).not.toMatch(/home › threads/)
-  expect(s.hint).toBe(UNFOCUSED_HINT)
+  // the prompt holds the `t`, so Claude Code keeps the keys there, a click on the panel included (bug hunt L12)
+  expect(s.hint).toBe(DRAFT_HINT)
 })
 
 test('keys · home · typing faster than the panel draws: once a key went to the prompt every key does, until the panel is given its keys back; a paste reaches the prompt whole; a single key stays a shortcut', { timeoutMs: 30_000 }, async ($, on) => {

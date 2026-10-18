@@ -142,12 +142,13 @@ export function useTarget(targetRef: string | undefined, path: string, rootRef: 
     const blockEl = target.block != null ? card.querySelector<HTMLElement>(`.reader-block[data-block="${target.block}"]`) : null
     // centre a span's highlight rather than its block, which may be much taller than the view; a view that draws no
     // blocks (Raw), or draws the words elsewhere in the record (a post's field), marks the span outside the block. A
-    // record taller than the view shows from its start, where its number is.
+    // record taller than the view shows from its start, where its number is. The highlight is centred sideways too, so
+    // a Table's column that holds it comes into view clear of the faded right edge (bug hunt L10).
     const place = () => {
       const hl = blockEl?.querySelector<HTMLElement>('.hl') ?? card.querySelector<HTMLElement>('.hl')
       const el = hl ?? blockEl ?? card
       const room = scrollBox(el)?.clientHeight ?? window.innerHeight
-      el.scrollIntoView({ block: !hl && el.getBoundingClientRect().height > room ? 'start' : 'center' })
+      el.scrollIntoView({ block: !hl && el.getBoundingClientRect().height > room ? 'start' : 'center', inline: hl ? 'center' : 'nearest' })
     }
     place()
     // a record drawn again after the scroll (a long line's syntax colours arriving) moves the place: it is centred again

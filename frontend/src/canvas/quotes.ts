@@ -596,6 +596,14 @@ export function recordOf(ref: string): string {
   return SPAN_REF.exec(ref)?.[1] ?? ref
 }
 
+/** The span an example card quotes in the record `ref` names: a citation of its takeaway that names the record by its
+ * line alone (`<path>#L<n>`) opens the record at the words the card quotes there (bug hunt L10), the first of them when
+ * it quotes several. Null for a ref that is not a line, or a record the card quotes with no span. Pure. */
+export function quotedSpan(refs: readonly string[], ref: string): string | null {
+  if (!/#L\d+$/.test(ref)) return null
+  return refs.find((r) => r !== ref && SPAN_REF.test(r) && recordOf(r) === ref) ?? null
+}
+
 /** An example card's refs as its entries, in order: the refs that name one record (the same file and pointer, row or
  * line, such as three quotes of one JSON value or two spans of one line) are one entry, whose address is that record;
  * a ref alone keeps its own address. `quotes` is the payload's, one per ref. Pure. */

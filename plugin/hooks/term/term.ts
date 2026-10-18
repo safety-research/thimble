@@ -102,6 +102,14 @@ export const rt = {
   turn: null as Turn | null,
   // the cards a drawing named and no drawing read yet, which the session's timer reads (tick) to name them
   wanted: new Set<string>(),
+  // whether the prompt box holds text (register.tsx noteDraft): Claude Code then keeps the keys there, and the panel's
+  // hint row says to empty it first (panel.tsx DRAFT_HINT)
+  draftHeld: false,
+  // the cards a drawing shows and nothing read yet, and those whose read Claude Code cut short: the session's card lane
+  // reads them (cardsLane). A drawing starts no read with its own `$`: Claude Code cuts every run of a drawing it
+  // abandons, and the card read `× card 1 cannot be drawn: … $.process.run(…) aborted` (bug hunt L7)
+  unread: new Set<string>(),
+  cardsReading: false,
   // the latest row of main's chat a line can stand under (signal.ts isAnchor)
   anchor: '',
   // main's rows by the first ROW_PREFIX characters of their uuid: the uuid each is stored under and how many blocks it
@@ -335,16 +343,47 @@ async function putCard(cx: Ctx, cell: ThimbleCell): Promise<void> {
 export async function loadCards(cx: Ctx, ids: readonly string[], opts: { named?: boolean } = {}): Promise<void> {
   if (!rt.sc) return
   if (!opts.named) drew(cx, ids)
-  for (const id of ids) {
+  for (const [i, id] of ids.entries()) {
     const got = await readState(cx, rt.sc, 'card', [id])
+    // a read Claude Code cut short (the drawing, press or call that asked was abandoned, and every later call of its `$`
+    // is cut too) says nothing of the card: it and the rest keep what they show and are read again by the card lane
+    if (!got.ok && cutShort(got.error)) {
+      for (const rest of ids.slice(i)) (opts.named ? rt.wanted : rt.unread).add(rest)
+      return
+    }
     const cell = got.ok ? cellOf(got.value) : null
     if (cell) await putCard(cx, cell)
     else {
-      // a card that cannot be read is said so, in red, never by its id
-      const why = got.ok ? '' : got.error
+      // a card that cannot be read is said so, in red, never by its id, nor by the command's path
+      const why = got.ok ? '' : plainRunError(got.error)
       const prev = await cx.card(id)
       await cx.setCard(id, { id, data: null, takeaway: '', busy: '', error: !why || why.includes(id) ? 'the card is not in this workspace' : why, group: '', by: '', kind: '', label: '', code: '', rev: (prev?.rev ?? 0) + 1 })
     }
+  }
+}
+
+/** Whether a run's error is Claude Code cutting it short (`$.process.run(…) aborted`): the hook call that made it was
+ *  abandoned, which says nothing of what the run would have answered. */
+export function cutShort(error: string): boolean {
+  return /\$\.process\.run\b.*\baborted\b|\bAbortError\b/.test(error)
+}
+
+/** A run's error in the words a person reads: without Claude Code's `HooksError: thimble:` and the command's path. */
+export function plainRunError(error: string): string {
+  return error.replace(/^HooksError:\s*[\w-]+:\s*/, '').replace(/\$\.process\.run(?:\([^)]*\))?:?\s*/, 'thimble ').trim()
+}
+
+/** The card lane (every 250 ms, the session's own timer): the cards a drawing showed unread, and those whose read was
+ *  cut short, read now, so they draw within a moment of the drawing that asked. One pass at a time. */
+export async function cardsLane(cx: Ctx): Promise<void> {
+  if (!rt.sc || rt.cardsReading || !rt.unread.size) return
+  rt.cardsReading = true
+  try {
+    const ids = [...rt.unread]
+    rt.unread.clear()
+    await loadCards(cx, ids)
+  } finally {
+    rt.cardsReading = false
   }
 }
 
@@ -758,7 +797,7 @@ async function placePanel(cx: Ctx, p: TermPanel): Promise<void> {
     if (r.isPlaced) rt.retriedAt = 0
     await cx.setPending(r.isPlaced ? null : pendingOf(title, r.reason))
     // with a draft in the prompt the keys stay there (Claude Code keeps the person's typing)
-    if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds a draft, so it keeps the keys: click the panel to use its keys')
+    if (r.isPlaced && (await cx.promptText().catch(() => '')).trim()) cx.toast('the prompt holds text, so it keeps the keys: empty it, then click the panel for its keys')
     else if (r.isPlaced) giveKeys(cx, title, p.view === 'ask' ? ASK_FIELD : RELAY_PICK)
   } catch (err) {
     cx.log(`thimble-term: could not open the panel: ${String(err).slice(0, 200)}`)
@@ -823,7 +862,8 @@ function giveKeys(cx: Ctx, title: string, ringAsked = RELAY_PICK): void {
     const pane = (await cx.panes()).find(p => p.id === PANEL)
     if (!pane?.isPlaced) return
     if (pane.isFocused !== false) {
-      // a view with no list whose keys a field takes in their place (the empty labels list's entry box)
+      // a view with no list whose keys a field takes in their place (the empty labels list's entry box), or its resting
+      // place (panel.tsx RING_REST: a card, a citation), so the ring is never left on its entry box (bug hunt L12)
       const ringOn = ringAsked === RELAY_PICK && rt.startRing ? rt.startRing : ringAsked
       // the ring onto the list's keys (a ring there already stays, and the call says so); a view that draws none leaves
       // the ring where it is, off them. Neither raises a ui.focus (live check term-fix8, quirk 7)
@@ -1604,8 +1644,8 @@ export async function startingTick(cx: Ctx): Promise<void> {
 }
 
 /** The refresh loop (every second), the labels' lane and their runs' lane (every second), the clock of a thread's start
- *  (every second), the citation queue (every 250 ms) and the view pump, once per module copy, from the moment thimble is
- *  on. */
+ *  (every second), the citation queue and the card lane (every 250 ms) and the view pump, once per module copy, from the
+ *  moment thimble is on. */
 export function startTimers(cx: Ctx): void {
   if (rt.timers) return
   rt.timers = true
@@ -1616,6 +1656,7 @@ export function startTimers(cx: Ctx): void {
   cx.every(1000, () => void runsLane(cx).catch(quiet))
   cx.every(1000, () => void startingTick(cx).catch(quiet))
   cx.every(250, () => void checkQueued(cx).catch(quiet))
+  cx.every(250, () => void cardsLane(cx).catch(quiet))
   // the open view matched to what the panel draws, and thimble's view host started the first time a view opens, from a
   // timer of the session's, which lives as long as it (viewhost.ts)
   cx.every(PUMP_MS, () => void viewPump(cx).catch(quiet))

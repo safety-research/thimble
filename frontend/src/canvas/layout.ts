@@ -5,7 +5,7 @@
 // groups that follow each other in a column wrap into rows (gridOf), so Fit shows a frame of many groups readably. A child
 // with a `pos` is placed free inside the frame. A thread's frame that no one has placed stands right of the card it is
 // about. A collapsed frame shows its nested groups and its first card, with the edges of the others stacked under it. Root frames sit at their `pos`, or below the root before them; loose cards sit
-// at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
+// at their own `pos`. Empty thread groups and an empty orientation deck are not drawn. `View` is the plane's pan and zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
@@ -88,7 +88,8 @@ export interface Board {
 
 /**
  * The board from the canvas route: a frame per group (the loose group draws none: its cards are loose, at the root),
- * a nested group whose parent is not drawn at the root, and a thread's group only while something is in it.
+ * a nested group whose parent is not drawn at the root, and a thread's group or the orientation's (role exploration)
+ * only while something is in it, so an orientation that failed or stopped before its first card leaves no empty frame.
  */
 export function boardOf(data: CanvasResponse): Board {
   const loose = new Set(data.groups.filter((g) => g.kind === 'loose').map((g) => g.id))
@@ -97,13 +98,13 @@ export function boardOf(data: CanvasResponse): Board {
   for (const c of data.cells) cellsIn.set(c.notebook, (cellsIn.get(c.notebook) ?? 0) + 1)
   const kidsOf = new Map<string, string[]>()
   for (const g of all.values()) if (g.parent && all.has(g.parent) && g.parent !== g.id) kidsOf.set(g.parent, [...(kidsOf.get(g.parent) ?? []), g.id])
-  // a thread's frame is drawn while it or a frame in it holds a card
+  // a thread's frame, or the orientation's, is drawn while it or a frame in it holds a card
   const full = (id: string, seen = new Set<string>()): boolean => {
     if (seen.has(id)) return false
     seen.add(id)
     return (cellsIn.get(id) ?? 0) > 0 || (kidsOf.get(id) ?? []).some((k) => full(k, seen))
   }
-  const drawn = new Set([...all.values()].filter((g) => !isThreadGroup(g) || full(g.id)).map((g) => g.id))
+  const drawn = new Set([...all.values()].filter((g) => !(isThreadGroup(g) || g.role === 'exploration') || full(g.id)).map((g) => g.id))
   // a parent chain that loops, or runs through a group not drawn, ends at the root
   const parentOf = (g: Group): string | null => {
     const p = g.parent
@@ -225,11 +226,14 @@ export function gridOf(boxes: readonly { w: number; h: number }[]): Grid {
 /** A card's height: its own, else the measured content, else a guess until it is measured. */
 export const cellHeight = (c: BoardCell, heights: Readonly<Record<string, number>>): number => c.h ?? heights[c.id] ?? UNMEASURED_H
 
+/** Which frames are expanded: a set of them, or the canvas's own test (every frame but those the analyst collapsed). */
+export type Opened = Pick<ReadonlySet<string>, 'has'>
+
 /**
- * Where every frame and card sits. `open` names the expanded frames; `heights` the measured height of each card with
+ * Where every frame and card sits. `open` tells the expanded frames; `heights` the measured height of each card with
  * no height of its own. Pure, so a drag and a reload agree.
  */
-export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Layout {
+export function layoutBoard(board: Board, open: Opened, heights: Readonly<Record<string, number>>): Layout {
   const rel = new Map<string, Pos>()
   const size = new Map<string, { w: number; h: number }>()
   const decks = new Set<string>()
@@ -529,7 +533,7 @@ const sameRect = (a: Rect | undefined, b: Rect | undefined): boolean => !!a && !
  * Where the card `id`, placed free in `data`, stands so that it covers nothing: at its own `pos`, or straight below it
  * at the first place where it overlaps no other drawn card and no frame it is not in. Null when it has no `pos`. Pure.
  */
-export function clearPos(data: CanvasResponse, id: string, open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Pos | null {
+export function clearPos(data: CanvasResponse, id: string, open: Opened, heights: Readonly<Record<string, number>>): Pos | null {
   const start = boardOf(data).cellById.get(id)?.pos ?? null
   if (!start) return start
   const placed = (y: number) => patchCellLocal(data, id, { pos: { x: start.x, y } })
@@ -551,7 +555,7 @@ export function clearPos(data: CanvasResponse, id: string, open: ReadonlySet<str
 
 /** Where a card dropped free at `pos` in `group` (null: loose, on the board) stands: there, or moved down clear of what
  * it would cover (clearPos). Pure. */
-export function placeFree(data: CanvasResponse, id: string, group: string | null, pos: Pos, open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Pos {
+export function placeFree(data: CanvasResponse, id: string, group: string | null, pos: Pos, open: Opened, heights: Readonly<Record<string, number>>): Pos {
   return clearPos(moveLocal(data, [id], group, undefined, pos), id, open, heights) ?? pos
 }
 
@@ -569,7 +573,7 @@ export interface Beside {
  * the flow and the sibling is placed free to its right, level with it, so the cards after them in the flow stay below
  * them. A card placed free moves down clear of what it would cover (clearPos). Pure.
  */
-export function placeBeside(data: CanvasResponse, id: string, group: string, ref: string, side: 'L' | 'R', open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Beside {
+export function placeBeside(data: CanvasResponse, id: string, group: string, ref: string, side: 'L' | 'R', open: Opened, heights: Readonly<Record<string, number>>): Beside {
   const relTo = (d: CanvasResponse, of: string, dx: number): Pos | null => {
     const lay = layoutBoard(boardOf(d), open, heights)
     const r = lay.rects.get(of)

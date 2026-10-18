@@ -715,8 +715,10 @@ export function registerBand(on: On): void {
       ) : (
         s.s
       )
-    // one blank row between Claude Code's own rows above (its spinner, a tip) and the line (the owner, 10-17)
-    rows.push(<Text key="above-summary-gap"> </Text>)
+    // one blank row between thimble's rows above the line (a notice, the view proposal) and the line (the owner, 10-17).
+    // With none, the line is thimble's first row: Claude Code draws its `[-]` beside a band's first row, and on a blank
+    // row it stood alone above the line, over nothing (bug hunt L14)
+    if (rows.length) rows.push(<Text key="above-summary-gap"> </Text>)
     rows.push(
       <Box key="above-summary" flexDirection="row">
         <Text>{'  '}</Text>
