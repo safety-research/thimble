@@ -22,7 +22,7 @@
 // object's program runs only in the drawing contract's sandbox.
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { MsgRecord, ObjRef, Ran, Said, Sel, Tray, TrayFrame } from '../types'
+import type { MsgRecord, ObjRef, Ran, Said, Sel, SqzUi, Tray, TrayFrame } from '../types'
 import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, regionOfKey, selectable } from './cells'
@@ -32,6 +32,8 @@ import { chainWords, isRef, objectRefs, rankRow, recordRefs, regionMeta, regionR
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { messageEl, trayEl, verbLineEl, verbRowEl } from './view'
 import type { RowVerb } from './view'
+import { afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, chipFromPrompt, chipsEl, pressChip, seeView, setLevels as sqSetLevels, sLit, squeezeKey, takeNotes as sqNotes } from '../verbs/squeeze/term'
+import { chipsOf as sqChips, isOriginal as sqIsOriginal } from '../verbs/squeeze/chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -61,6 +63,7 @@ const ANSWER = { plugin: 'thimble-lean', key: 'answer' } as const
 const CARDREADY = { plugin: 'thimble-lean', key: 'cardready' } as const
 const RUNNING = { plugin: 'thimble-lean', key: 'running' } as const
 const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
+const SQZ = { plugin: 'thimble-lean', key: 'sqz' } as const
 
 const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
@@ -609,7 +612,7 @@ export async function saveRecord($: Engine, rec: MsgRecord): Promise<void> {
 }
 
 /** A record: this session's, else the one a resumed session left on disk. */
-async function recordNow($: Engine, row: string): Promise<MsgRecord | null> {
+export async function recordNow($: Engine, row: string): Promise<MsgRecord | null> {
   const held = (await $.state.get({ ...MSG, id: row })).value as MsgRecord | null | undefined
   if (held) return held
   const f = await msgFilesNow($)
@@ -962,6 +965,28 @@ async function runOnMessage($: Engine, word: string, key: string, rec: MsgRecord
   }
 }
 
+/** The person's prompt that a message of Claude's answers: the nearest user row before it in the index. */
+export async function questionBefore($: Engine, row: string): Promise<string> {
+  const f = await msgFilesNow($)
+  const i = f.index.findIndex(x => x.row === row)
+  for (let j = (i < 0 ? f.index.length : i) - 1; j >= 0; j--) if (f.index[j].kind === 'user' && f.index[j].text) return String(f.index[j].text)
+  return ''
+}
+
+/** The chips' + pressed: the prompt takes the + and the person types their chip after it. */
+async function startOwnChip($: Engine, row: string): Promise<void> {
+  const ui = ((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null
+  await $.state.set({ ...SQZ, id: row }, { focus: ui?.focus ?? 'length', running: ui?.running ?? null, error: null, tick: ui?.tick ?? 0, adding: true })
+  await $.prompt.fill({ text: '+', mode: 'replace' })
+}
+
+/** The chips' 0 pressed: the original again, or with the chips at the original, the chips close. */
+async function originalOrClose($: Engine, row: string): Promise<void> {
+  const rec = await recordNow($, row)
+  if (!rec || sqIsOriginal(sqChips(rec))) { await $.state.set(PICK, null); return }
+  await sqSetLevels($, row, {})
+}
+
 /** What the observer gave for the turn's answer: its lit verbs and glosses, in the answer's record. */
 export async function applyObserver($: Engine, row: string, out: { verbs: Record<string, unknown>; glosses: Record<string, unknown> }): Promise<MsgRecord | null> {
   const rec = await recordNow($, row)
@@ -1021,6 +1046,12 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   const verbs = await rowVerbs($)
   const consume = { text: e.text, cursor: e.cursor }
+  // the squeeze chips open under a message: their keys first (1-9 pick, < > change, + your own chip, 0 original)
+  if (pick && pick.verb === 's' && !tray) {
+    const r = await squeezeKey($, pick.row, k)
+    if (r === 'consume') { keyOpened = null; return consume }
+    if (r === 'type') { keyOpened = null; return null }
+  }
   if (k === ']' || k === '[') {
     keyOpened = null
     await $.state.set(PICK, null)
@@ -1533,6 +1564,8 @@ export const registerShell: Register = on => {
         const rec = await recordNow($, row)
         if (rec && !rec.final) await saveRecord($, { ...rec, final: true })
         await $.state.set(ANSWER, row)
+        // a message taller than the screen arrives squeezed (one call, outside the turn's end)
+        $.clock.after(0, () => { void sqArrive($, row).catch(() => undefined) })
       }
     } catch {
       // a turn with no verb row is better than one that does not end
@@ -1559,21 +1592,36 @@ export const registerShell: Register = on => {
     const rec: MsgRecord = drawnRec.uuid ? drawnRec : { ...drawnRec, uuid: e.requestId }
     const answer = (await $.state.get(ANSWER)).value
     const final = !!rec.final || answer === at
-    if (!rec.marks.length && !final && !list.length) return next(e)
+    // the screen a long message is measured against (Squeeze), and a rewrite of this message running
+    seeView(e.viewport?.columns ?? 100, e.viewport?.rows ?? 48)
+    const sqUi = ((await $.state.get({ ...SQZ, id: at })).value ?? null) as SqzUi | null
+    const busy = busyGlyph(sqUi)
+    if (!rec.marks.length && !final && !list.length && rec.shown == null && !busy) return next(e)
     const tray = (await $.state.get(TRAY)).value as Tray | null
     const base = trayBase(tray) as TrayFrame | null
     const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
     const parts: Any[] = []
-    parts.push(rec.marks.length
-      ? messageEl(els, { rec, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec) })
+    parts.push(rec.marks.length || rec.shown != null || busy
+      ? messageEl(els, { rec, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy, lead: busy })
       : await next(e))
     if (final) {
       const verbs = await rowVerbs($)
       const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
       const sel = (await $.state.get(SELROW)).value
       const running = ((await $.state.get({ ...RUNNING, id: at })).value ?? null) as string | null
-      parts.push(verbRowEl(els, { key: `vr-${at}`, verbs, lit: rec.verbs || {}, open: pick && pick.row === at ? pick.verb : null, running, selected: sel === at, theme, onPress: (k: string) => pressRowVerb($, at, k) }))
-      if (pick && pick.row === at) {
+      // s lights from the message's squeeze: `6 of 33 lines` while squeezed, the length of a long original
+      const lit: Record<string, { lit?: boolean; note?: string }> = { ...(rec.verbs || {}) }
+      const s = sLit(rec, sqUi)
+      if (s) lit.s = s
+      else delete lit.s
+      if (pick && pick.row === at && pick.verb === 's') {
+        // the chips in place of the verb row (B2), with the keys that work now under them
+        parts.push(chipsEl(els, {
+          key: `vl-${at}`, rec, theme, ui: sqUi ?? { focus: 'length', adding: false, running: null, error: null, tick: 0 },
+          onPick: (id: string) => pressChip($, at, id), onAdd: () => startOwnChip($, at), onOriginal: () => originalOrClose($, at),
+        }))
+      } else parts.push(verbRowEl(els, { key: `vr-${at}`, verbs, lit, open: pick && pick.row === at ? pick.verb : null, running, selected: sel === at, theme, onPress: (k: string) => pressRowVerb($, at, k) }))
+      if (pick && pick.row === at && pick.verb !== 's') {
         const verb = verbs.find(v => v.key === pick.verb)
         if (verb) {
           const { options, note } = lineOptions(pick.verb, rec)
@@ -1622,7 +1670,16 @@ export const registerShell: Register = on => {
     const mine = keyChain.then(() => emptyPromptKey($, e)).catch(() => null)
     keyChain = mine
     const r = await mine
-    return r ?? next(e)
+    if (r) return r
+    const out = await next(e)
+    try {
+      const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+      const dec = await sqAfterEdit($, pick?.verb === 's' ? pick.row : null, out.text, theme)
+      if (dec) return { ...out, decorations: [...(out.decorations ?? []), ...dec] }
+    } catch {
+      // the edit lands whatever the chips make of it
+    }
+    return out
   }).catch(($, e, next) => next(e))
 
   // a turn whose last word was a tool call: its objects under that call's row
@@ -1648,8 +1705,18 @@ export const registerShell: Register = on => {
   // the prompt carries what verbs said for Claude since its last reply, and the open object with its selected part
   on('prompt.submit', async ($, e, next) => {
     if (e.command) return next(e)
+    try {
+      const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+      if (pick?.verb === 's' && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin') {
+        const drop = await chipFromPrompt($, pick.row, e.text)
+        if (drop) return { drop }
+      }
+    } catch {
+      // a prompt goes in as typed when the chips cannot take it
+    }
     const context: string[] = []
     try {
+      context.push(...(await sqNotes($)))
       const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
       if (notes.length) {
         context.push(notes.join('\n'))

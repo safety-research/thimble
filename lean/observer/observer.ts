@@ -436,7 +436,8 @@ async function look($: Engine, t: Look): Promise<void> {
       const shown = kept ? String(kept.shown ?? kept.text) : answer
       const verbs = litVerbs(out.verbs)
       if (!inRow.some(v => v.key === 'a')) delete (verbs as Record<string, unknown>).a
-      const glosses = glossSkip > 0 ? {} : glossesOf(out.glosses, shown, glossed)
+      // glosses are kept by the words Claude wrote, so a term a squeeze left out is placed again when the original shows
+      const glosses = glossSkip > 0 ? {} : glossesOf(out.glosses, kept ? String(kept.text) : shown, glossed)
       const rec = await applyObserver($, at, { verbs, glosses })
       const placed = rec ? Object.entries(rec.glosses || {}).filter(([id]) => rec.marks.some(m => m.gloss === id)).map(([, g]) => g.term) : []
       row.verbs_lit = Object.keys(verbs)

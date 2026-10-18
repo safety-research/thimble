@@ -424,6 +424,11 @@ export function verbsOf(out) {
       if (!r.proposals.length && !note) continue
     }
     if (k === 's') {
+      // where the answer stands on the squeeze's fixed chips, by a level's name: {interpret: 'report', familiarity: 'expert'}
+      if (v.at && typeof v.at === 'object' && !Array.isArray(v.at)) {
+        r.at = {}
+        for (const [id, lv] of Object.entries(v.at).slice(0, 6)) if (typeof lv === 'string' || Number.isInteger(lv)) r.at[str(id, 24)] = typeof lv === 'string' ? str(lv, 24).toLowerCase() : lv
+      }
       r.chips = (Array.isArray(v.chips) ? v.chips : []).filter(c => c && typeof c === 'object').slice(0, 3).map((c, i) => {
         const levels = (Array.isArray(c.levels) ? c.levels : []).map(l => str(l, 24)).filter(Boolean).slice(0, 5)
         const level = Number.isInteger(c.level) && c.level >= 0 && c.level < levels.length ? c.level : Math.max(0, levels.length - 1)
@@ -435,6 +440,8 @@ export function verbsOf(out) {
       r.offer = { what: str(o.what, 60) || note, minutes: Number(o.minutes) > 0 ? Math.round(Number(o.minutes)) : null, tokens: Number(o.tokens) > 0 ? Math.round(Number(o.tokens)) : null }
     }
     if (!r.note) r.note = k === 'v' ? `${r.proposals.length} view${r.proposals.length === 1 ? '' : 's'} ready` : k === 'a' ? r.offer.what : ''
+    // s may carry only where the answer stands on its chips: kept, and not lit
+    if (!r.note && k === 's' && r.at && Object.keys(r.at).length) { res[k] = { ...r, lit: false }; continue }
     if (!r.note) continue
     res[k] = r
   }

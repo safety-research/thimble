@@ -47,11 +47,15 @@ export type MessageOpts = {
   theme: Theme
   focus: number | null
   onMark: (i: number) => unknown
+  /** a rewrite of it is running (squeeze): the words dim, and `lead` takes the place of its first ● */
+  dim?: boolean
+  lead?: string | null
 }
 
 /** A run as a Text: Claude Code's styles for bold, italic and inline code. */
-function runText(els: Any, r: Run) {
+function runText(els: Any, r: Run, dim = false) {
   const p: Any = { children: r.s }
+  if (dim) p.dimColor = true
   if (r.b) p.bold = true
   if (r.it) p.italic = true
   if (r.code) p.color = 'permission'
@@ -86,13 +90,14 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
 /** One laid-out line: its runs, each mark a press. */
 function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] = []) {
   const kids: Any[] = [...lead]
-  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : runText(els, r)))
+  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : runText(els, r, !!o.dim)))
   if (!runs.some(r => r.mark !== undefined)) return els.Text({ key, wrap: 'truncate-end', children: kids })
   return els.Box({ key, flexDirection: 'row', children: kids.map(k => (typeof k === 'string' ? els.Text({ children: k }) : k)) })
 }
 
 /** The 2 columns left of a reply: Claude Code's ● on the reply's first row, else blank. */
-function margin(els: Any, dot: boolean) {
+function margin(els: Any, dot: boolean, lead?: string | null, theme: Theme = 'dark') {
+  if (lead) return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ color: verbColor('s', theme), children: lead })] })
   return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ children: dot ? '●' : ' ' })] })
 }
 
@@ -159,7 +164,7 @@ export function messageEl(els: Any, given: MessageOpts): Any {
   let dot = o.first
   let k = 0
   const push = (content: Any[], gap: boolean) => {
-    rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [margin(els, dot), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
+    rows.push(Box({ key: `${o.key}-b${k++}`, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [margin(els, dot, rows.length === 0 ? o.lead : null, o.theme), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false
   }
   let i = 0
@@ -173,7 +178,7 @@ export function messageEl(els: Any, given: MessageOpts): Any {
     // a run of blocks with no mark: Claude Code's own Markdown, whole
     let j = i
     while (j + 1 < bs.length && !marksIn(o.rec.marks, bs[j + 1].start, bs[j + 1].end).length) j++
-    push([Markdown({ text: text.slice(b.start, bs[j].end) })], b.gap && i > 0)
+    push([Markdown({ text: text.slice(b.start, bs[j].end), ...(o.dim ? { dimColor: true } : {}) })], b.gap && i > 0)
     i = j + 1
   }
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })

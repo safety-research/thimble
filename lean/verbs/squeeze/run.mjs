@@ -1,380 +1,69 @@
-// run.mjs: the Squeeze verb (key s). Squeeze makes something shorter on the dimensions that matter, while each
-// squeezed line stays attached to the spans of the original it came from.
+// run.mjs: the Squeeze verb (key s) run as any verb is (shell/node/verb.mjs): on a message of Claude's, with words that
+// set its chips. The terminal does not come here: it draws the chips under the message and makes the same call in the
+// hooks module (term.ts), with no Node child. This path is for /verb and for tools that hold a record.
 //
-//   run(ctx) -> {object?, text?, note?}
+//   run(ctx) -> {message?, text?, note?}
+//   ctx.message   the message's record (CONTRACT 1)
+//   ctx.args      the chips to set, as words: "length=short familiarity=new", "+for my manager" (the person's own
+//                 chip), "original"; '' squeezes it to Length short, as a long message arrives
+//   ctx.model     {complete(request)}: one call to the session's model ($.model.complete, through the shell)
 //
-// ctx, from the shell (shell/node/verb.mjs) or cli.mjs:
-//   object   what to squeeze: anything with `text` (a reply, a report, a kernel object), or `units` [{id, text}] (a
-//            session's turns, a run's steps; `unit` names one, as in 'turn'), or a squeeze object made earlier (then
-//            `args` moves it). An object whose own words are short is squeezed as the person sees it: its drawing's
-//            lines (ctx.drawing), one unit each.
-//   region   the selected region id, if any (`line-2` of a squeeze: `why` tells where it came from)
-//   args     optional words: '' makes a squeeze (or squeezes more), 'shorter', 'fuller', a dimension's id (its next
-//            level), 'reader=new to it', 'original', 'why 2', or any request in plain words ("for my manager")
-//   model    {complete(request)}: the session's model, one quiet call ($.model.complete, through the shell)
-//   skill    the text of SKILL.md
-//   verb     verb.json as parsed: its `model`, `effort` and `maxTokens` are the defaults below
-//
-// It returns the new object (a squeeze: program + data + lineage, drawn by program.mjs), a short plain text of what
-// the person sees (for a renderer that draws no objects), and a note for main (one line it may read).
-//
-// ---------------------------------------------------------------------------------------------- how versions are made
-// Both ways, with one skill (SKILL.md):
-//
-// 1. Pressing s, and the default that long text arrives squeezed, run here: one quiet $.model.complete call with
-//    SKILL.md as its system prompt and the original cut into numbered spans as its prompt. The model picks the
-//    dimensions for THIS text and writes the version shown first plus up to two neighbors; a move to a point not yet
-//    written is one more call that writes that version alone. Why here and not main:
-//    - no clutter: main's chat gets no tool row and no second copy of the text; the person sees only the object;
-//    - cost: the call reads the text once (a few thousand tokens) on a mid-size model, instead of main's model
-//      writing every version and carrying them in its context for the rest of the session;
-//    - Manual mode stays manual: the call reads only text already on screen and writes no file. run() returns the
-//      object; the caller keeps it outside the person's folder ($THIMBLE_HOME) until the person keeps it.
-// 2. Main writes a squeeze, guided by the same skill, when the person asks for one in words, or when a good squeeze
-//    needs files main has not shown yet (a transcript behind a summary). Main reads through its own tools, so every
-//    read and write goes through the permission mode, and it saves with `lean verb squeeze ... --from FILE`, a Bash
-//    call Manual mode asks about like any other. cli.mjs builds the same object from main's JSON.
-//
-// No imports beyond this folder and no Node: the shell's hooks module imports this file.
+// It returns the record with `shown` set to the new text and its marks placed again (`message`), the text, and a note
+// for Claude.
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { remark } from '../../shell/message.js'
+import { ARRIVE, applyRewrite, checkRewrite, chipsOf, isOriginal, noteFor, ownChip, readReply, request, restore, withOwn } from './chips.mjs'
 
-import { cut, expand, lineCount, numbered, plain } from './spans.mjs'
-import { PROGRAM } from './program.mjs'
+const PROMPT = fileURLToPath(new URL('./prompt.md', import.meta.url))
 
-const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 8000, timeoutMs: 120000 }
-const MAX_DIMS = 3
-const MAX_LEVELS = 5
-
-/** The JSON a model call answers with. The code reads exactly this; SKILL.md says why and shows it in examples. */
-export const FORMAT = `Answer with one JSON object and nothing else (no prose, no code fence):
-{"dims": [{"id": "length", "name": "length", "levels": ["one line", "short", "most of it"], "why": "one line on why this matters for this text"}],
- "first": {"length": 0},
- "versions": [{"at": {"length": 0},
-               "lines": [{"text": "a squeezed line", "from": ["1.1", "3.2-3.4"]}],
-               "out": [{"what": "a few words naming what this version leaves out", "from": ["4.1-4.6"]}]}]}
-- dims: one to three, chosen for this text and this reader. List first the one that makes the text shorter: the
-  person's "shorter" and "fuller" move along it. Levels go from most squeezed to fullest, two to four of them. The
-  original itself is always one key away, so no level needs to be the whole text.
-- first: where the version the person sees first sits, one level per dimension.
-- versions: the one at "first", and at most two neighbors the person is likely to want next. Each line names in
-  "from" every span it came from, by id or range. "out" names what the version leaves out.`
-
-// ---------------------------------------------------------------------------------------------- small helpers
-
-function hash(s) {
-  let h = 0x811c9dc5
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
-  return h.toString(16).padStart(8, '0')
-}
-const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32) || 'text'
-const atKey = at => Object.keys(at || {}).sort().map(k => `${k}=${at[k]}`).join('&')
-const clampInt = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(v) || 0)))
-
-/** The skill's text without its frontmatter. */
-function skillText(s) {
-  return String(s || '').replace(/^---\n[\s\S]*?\n---\n/, '').trim()
-}
-
-/** The first JSON object in a model's answer (a code fence or a line of prose around it is tolerated). */
-export function parseAnswer(text) {
-  const t = String(text || '').replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '')
-  const a = t.indexOf('{')
-  const b = t.lastIndexOf('}')
-  if (a < 0 || b <= a) throw new Error('the answer holds no JSON object')
-  return JSON.parse(t.slice(a, b + 1))
-}
-
-/** Numbers a line states that none of its spans states: a squeezed line must not add a number. */
-export function strayNumbers(line, spanTexts) {
-  const norm = s => String(s).replace(/(\d),(?=\d{3}\b)/g, '$1')
-  const src = norm(spanTexts.join(' '))
-  const nums = (norm(line).match(/\d+(?:\.\d+)?/g) || []).filter(n => n.length > 1 || Number(n) > 9)
-  return [...new Set(nums.filter(n => !new RegExp(`(^|[^\\d.])${n.replace('.', '\\.')}(?![\\d])`).test(src)))]
-}
-
-// ---------------------------------------------------------------------------------------------- the original
-
-// the marks of a drawing that carry no words: bars, rules, frames, dots
-const MARKS = /[\u2500-\u259f\u25a0-\u25ff\u2800-\u28ff·•]+/g
-
-/** The lines a person sees of a drawing (`{rows}` from renderTerm, or its text), without bars and frames: the
- *  original of an object whose own words are short. */
-export function drawnLines(gridOrText) {
-  const text = typeof gridOrText === 'string' ? gridOrText : (gridOrText?.rows || []).map(r => r.filter(c => !c.cont).map(c => c.ch).join('')).join('\n')
-  return text.split('\n').map(l => l.replace(MARKS, ' ').replace(/\s+/g, ' ').trim()).filter(l => /[\p{L}\p{N}]/u.test(l))
-}
-
-/** What an object offers to squeeze: its spans and blocks, how long it is, and how to name it. With `shown` (the
- *  lines the person sees of it), an object whose own words are short offers those lines instead, one unit each. */
-export function originalOf(object, shown) {
-  const o = object || {}
-  const own = typeof o.text === 'string' ? o.text : typeof o.data?.text === 'string' ? o.data.text : ''
-  if (!(Array.isArray(o.units) && o.units.length) && Array.isArray(shown) && shown.length >= 4 && !isLong(own, { lines: 4, chars: 300 })) {
-    return originalOf({ units: shown.map((text, i) => ({ id: String(i + 1), text })) })
+/** The levels the words ask for: `name=level` for each chip named, by its id, its name or its first word. */
+export function parseWords(rec, words) {
+  const at = { ...(rec.squeeze?.at || {}) }
+  const chips = chipsOf(rec)
+  const w = String(words || '').trim()
+  if (!w) return { at: { ...at, length: ARRIVE } }
+  if (/^(original|restore|0)$/i.test(w)) return { at: {}, original: true }
+  if (w.startsWith('+')) return { at, own: w }
+  for (const m of w.matchAll(/([\w↔ -]+?)\s*=\s*([\w -]+?)(?=\s+[\w↔-]+\s*=|$)/g)) {
+    const name = m[1].trim().toLowerCase()
+    const chip = chips.find(c => c.id === name || c.name.toLowerCase() === name || c.name.toLowerCase().split(/\s+/)[0] === name)
+    if (!chip) throw new Error(`no chip "${m[1].trim()}": the chips are ${chips.map(c => c.name).join(', ')}`)
+    const lv = chip.levels.indexOf(m[2].trim().toLowerCase())
+    if (lv < 0) throw new Error(`${chip.name} has the levels ${chip.levels.join(', ')}`)
+    at[chip.id] = lv
   }
-  if (Array.isArray(o.units) && o.units.length) {
-    const spans = o.units.map((u, i) => ({ id: String(u.id ?? i + 1), b: i + 1, kind: 'unit', text: String(u.text ?? ''), cites: u.ref ? [u.ref] : [] }))
-    return {
-      spans, blocks: spans.map(s => ({ b: s.b, kind: 'unit', lead: '', spans: [s.id] })),
-      lines: spans.length, text: spans.map(s => s.text).join('\n'),
-    }
-  }
-  const text = typeof o.text === 'string' ? o.text : typeof o.data?.text === 'string' ? o.data.text : ''
-  const { spans, blocks } = cut(text)
-  return { spans, blocks, lines: lineCount(text), text }
+  return { at }
 }
 
-export const isSqueeze = o => !!(o && o.kind === 'squeeze' && o.data && Array.isArray(o.data.versions))
-
-/** Is this text long enough that it should arrive squeezed? (the default; the shell asks before it squeezes) */
-export function isLong(text, opts = {}) {
-  const lines = lineCount(text)
-  const chars = String(text || '').length
-  return lines >= (opts.lines ?? 16) || chars >= (opts.chars ?? 1600)
-}
-
-// ---------------------------------------------------------------------------------------------- reading an answer
-
-/** A model's (or main's) answer, held to what the object needs: known span ids, levels in range, a problem named on
- *  each line that cites no span or states a number its spans do not. */
-export function normalize(raw, spans, prevDims) {
-  const problems = []
-  const byId = new Map(spans.map(s => [s.id, s]))
-  let dims = Array.isArray(raw.dims) && raw.dims.length ? raw.dims : prevDims || []
-  dims = dims.slice(0, MAX_DIMS).map((d, i) => {
-    const levels = (Array.isArray(d.levels) ? d.levels : []).map(x => String(x)).filter(Boolean).slice(0, MAX_LEVELS)
-    return { id: slug(d.id || d.name || `dim${i + 1}`), name: String(d.name || d.id || `dimension ${i + 1}`), levels: levels.length ? levels : ['short', 'fuller'], why: d.why ? String(d.why) : '' }
-  })
-  if ((raw.dims || []).length > MAX_DIMS) problems.push(`the model chose ${(raw.dims || []).length} dimensions; the first ${MAX_DIMS} are kept`)
-  const fixAt = at => Object.fromEntries(dims.map(d => [d.id, clampInt((at || {})[d.id] ?? (at || {})[d.name], 0, d.levels.length - 1)]))
-  const versions = []
-  for (const v of Array.isArray(raw.versions) ? raw.versions : []) {
-    const at = fixAt(v.at)
-    const lines = (Array.isArray(v.lines) ? v.lines : []).map(l => {
-      const line = typeof l === 'string' ? { text: l, from: [] } : l || {}
-      const from = expand(line.from || [], spans)
-      const out = { text: String(line.text || '').trim(), from }
-      if (!from.length) out.problem = 'cites no span of the original'
-      else {
-        const stray = strayNumbers(plain(out.text), from.map(id => plain(byId.get(id).text)))
-        if (stray.length) out.problem = `${stray.map(n => `"${n}"`).join(', ')} ${stray.length === 1 ? 'is' : 'are'} not in the spans it cites`
-      }
-      return out
-    }).filter(l => l.text)
-    const outs = (Array.isArray(v.out) ? v.out : []).map(o => (typeof o === 'string' ? { what: o, from: [] } : { what: String(o.what || ''), from: expand(o.from || [], spans) })).filter(o => o.what)
-    if (!lines.length) { problems.push(`a version at ${atKey(at)} has no lines`); continue }
-    lines.filter(l => l.problem).forEach(l => problems.push(`${atKey(at)}: "${l.text.slice(0, 60)}" ${l.problem}`))
-    versions.push({ at, lines, out: outs })
-  }
-  const first = raw.first ? fixAt(raw.first) : versions.length ? versions[0].at : fixAt({})
-  return { dims, versions, first, problems }
-}
-
-// ---------------------------------------------------------------------------------------------- the model call
-
-async function complete(ctx, prompt) {
-  const cfg = { ...DEFAULTS, ...(ctx.verb || {}), ...(ctx.settings || {}) }
-  const model = ctx.model && typeof ctx.model.complete === 'function' ? ctx.model : null
-  if (!model) throw new Error('no model to write the squeeze: ctx.model.complete (the plugin\'s $.model.complete) is missing')
-  const skill = ctx.skill
-  if (!skill) throw new Error('no skill text: pass ctx.skill (the text of SKILL.md)')
-  const system = [{ text: skillText(skill) + '\n\n' + FORMAT, cache: true }]
-  const r = await model.complete({ model: cfg.model, system, prompt, maxTokens: cfg.maxTokens, effort: cfg.effort, timeoutMs: cfg.timeoutMs })
-  if (!r || !r.isAnswered) {
-    const why = r ? (r.reason === 'api-error' ? `the API answered ${r.status ?? 'nothing'} (${r.error || 'error'})` : r.reason) : 'no result'
-    const e = new Error(`the model gave no squeeze: ${why}`)
-    e.usage = r && r.usage
-    throw e
-  }
-  return { answer: parseAnswer(r.text), usage: r.usage, model: cfg.model }
-}
-
-function request(orig, o, extra) {
-  const head = []
-  if (o.question) head.push(`The person asked: ${o.question}`)
-  if (o.title) head.push(`It is: ${o.title}`)
-  head.push(`The original, ${orig.lines} lines, cut into ${orig.spans.length} spans:`)
-  return head.join('\n') + '\n\n' + numbered(orig.spans) + '\n\n' + extra
-}
-
-// ---------------------------------------------------------------------------------------------- making and moving
-
-/** The plain text a person sees of a squeeze at its `at` (for a renderer that draws no objects, and for main). */
-export function shownText(sq) {
-  const d = sq.data
-  const v = versionAt(d, d.at) || d.versions[0]
-  const where = d.dims.map(x => `${x.name}: ${x.levels[v.at[x.id] ?? 0]}`).join(' · ')
-  const out = (v.out || []).map(o => o.what).join(' · ')
-  return v.lines.map(l => plain(l.text)).join('\n') + `\n(${v.lines.length} of ${d.of.lines} lines · ${where}${out ? ` · left out: ${out}` : ''})`
-}
-
-export function versionAt(d, at) {
-  return d.versions.find(v => atKey(v.at) === atKey(at))
-}
-
-/** A squeeze object from an original and an answer (the model's, or main's). */
-export function build(object, orig, norm, made) {
-  const o = object || {}
-  const ref = o.ref || (o.id ? (String(o.id).includes(':') ? String(o.id) : `obj:${o.id}`) : `text:${hash(orig.text)}`)
-  const title = o.title || plain(orig.spans[0]?.text || '').slice(0, 60) || 'text'
-  const data = {
-    of: { id: ref, title, lines: orig.lines, question: o.question || undefined, unit: o.unit || undefined },
-    spans: orig.spans, blocks: orig.blocks, dims: norm.dims, versions: norm.versions,
-    at: versionAt({ versions: norm.versions }, norm.first) ? norm.first : norm.versions[0].at,
-  }
-  const sq = {
-    id: `squeeze-${slug(title)}-${hash(orig.text).slice(0, 6)}`, v: 1, kind: 'squeeze', verb: 'squeeze',
-    title: `Squeezed: ${title}`, question: o.question, contract: 'lean/draw', program: PROGRAM, data,
-    lineage: lineageOf(data, [made], norm.problems),
-  }
-  sq.text = shownText(sq)
-  return sq
-}
-
-/** Each line's link to the spans it came from, and through them to whatever the original cited. */
-function lineageOf(data, made, problems) {
-  const byId = new Map(data.spans.map(s => [s.id, s]))
-  const cites = []
-  const rows = new Set()
-  data.versions.forEach((v, vi) => v.lines.forEach((l, li) => {
-    const via = [...new Set(l.from.flatMap(id => byId.get(id)?.cites || []))]
-    via.forEach(r => rows.add(r))
-    cites.push({ in: `/versions/${vi}/lines/${li}`, of: data.of.id, spans: l.from, ...(via.length ? { via } : {}), ...(l.problem ? { problem: l.problem } : {}) })
-  }))
-  return { of: data.of.id, cites, rows: [...rows], made, problems: problems || [] }
-}
-
-function withVersion(sq, change) {
-  const next = { ...sq, v: (sq.v || sq.version || 1) + 1, data: { ...sq.data } }
-  change(next)
-  next.text = shownText(next)
-  return next
-}
-
-/** What the person's words ask for. */
-export function parseArgs(args, dims) {
-  const a = String(args || '').trim()
-  const low = a.toLowerCase()
-  if (!a) return { kind: 'default' }
-  if (a === 'S' || /^(fuller|longer|more detail|f)$/.test(low)) return { kind: 'step', by: 1 }
-  if (/^(shorter|more|less|s)$/.test(low)) return { kind: 'step', by: -1 }
-  if (/^(original|full|o)$/.test(low)) return { kind: 'show', show: 'original' }
-  if (/^(squeezed|back)$/.test(low)) return { kind: 'show', show: null }
-  if (/^again$/.test(low)) return { kind: 'again' }
-  const why = /^(?:why|from|where)\s+(?:line\s*)?(\d+)$/.exec(low) || /^(?:line\s*)?(\d+)$/.exec(low)
-  if (why) return { kind: 'why', line: Number(why[1]) }
-  const set = /^([\w -]+?)\s*[=:]\s*(.+)$/.exec(a)
-  const dim = d => (dims || []).find(x => x.id === slug(d) || x.name.toLowerCase() === d.toLowerCase())
-  if (set && dim(set[1])) return { kind: 'set', dim: dim(set[1]).id, level: set[2].trim() }
-  if (dim(a)) return { kind: 'set', dim: dim(a).id, level: '+1' }
-  return { kind: 'ask', text: a }
-}
-
-/** The verb. */
 export async function run(ctx) {
-  const o = ctx.object
-  if (!o) return { text: 'Nothing to squeeze: no object is selected.' }
-  if (isSqueeze(o)) return move(ctx, o)
-  const orig = originalOf(o, shownOf(ctx))
-  if (orig.spans.length < 2 || !isLong(orig.text, { lines: 4, chars: 300 })) {
-    return { text: `It is already short (${orig.lines} ${orig.lines === 1 ? 'line' : 'lines'}), so there is nothing to squeeze.` }
+  let rec = ctx.message
+  if (!rec || typeof rec.text !== 'string') return { text: 'Squeeze works on a message of Claude\'s: press s under it to open its chips.' }
+  const want = parseWords(rec, ctx.args)
+  if (want.original) {
+    const back = restore(rec, remark)
+    return { message: back, text: back.text, note: noteFor(back) }
   }
-  const args = parseArgs(ctx.args)
-  const ask = args.kind === 'ask' ? `The person asked for this squeeze: "${args.text}". Choose dimensions that serve it, and put "first" where it asks.\n\n` : ''
-  const { answer, usage, model } = await complete(ctx, request(orig, o, ask + 'Choose the dimensions and write the versions.'))
-  const norm = normalize(answer, orig.spans)
-  if (!norm.versions.length) throw new Error(`the model wrote no usable version${norm.problems.length ? ': ' + norm.problems[0] : ''}`)
-  const sq = build(o, orig, norm, { by: 'model', model, usage, at: new Date().toISOString(), asked: ctx.args || '' })
-  return { object: sq, text: sq.text, note: noteFor(sq, 'squeezed') }
-}
-
-async function move(ctx, sq) {
-  const d = sq.data
-  const args = ctx.region && /^line-\d+$/.test(ctx.region) && !ctx.args ? { kind: 'why', line: Number(ctx.region.slice(5)) } : parseArgs(ctx.args, d.dims)
-  const cur = (versionAt(d, d.at) || d.versions[0]).at
-  if (args.kind === 'why') {
-    const v = versionAt(d, d.at) || d.versions[0]
-    const l = v.lines[args.line - 1]
-    if (!l) return { text: `This version has ${v.lines.length} lines; there is no line ${args.line}.` }
-    const byId = new Map(d.spans.map(s => [s.id, s]))
-    return { text: `Line ${args.line} came from ${l.from.join(', ') || 'no span'}:\n` + l.from.map(id => `  [${id}] ${plain(byId.get(id).text)}`).join('\n') + (l.problem ? `\n  (${l.problem})` : '') }
+  let newOwn = null
+  if (want.own) {
+    newOwn = ownChip(rec, want.own)
+    if (!newOwn) return { text: 'A chip needs a few words after the +, such as "+ for my manager".' }
+    rec = { ...rec, squeeze: withOwn(rec, newOwn) }
+    want.at = { ...rec.squeeze.at }
   }
-  if (args.kind === 'show') return { object: withVersion(sq, n => { n.data.show = args.show }), text: args.show ? 'The original, with what this version keeps underlined.' : sq.text }
-  if (args.kind === 'again') {
-    // made afresh, as a new version of the same object, so a selection or a handoff to it still finds it
-    const r = await run({ ...ctx, object: { ref: d.of.id, title: d.of.title, question: d.of.question, text: originalText(d) }, args: '' })
-    if (r.object) {
-      Object.assign(r.object, { id: sq.id, v: (sq.v || sq.version || 1) + 1 })
-      r.object.data.of = d.of
-      r.object.text = shownText(r.object)
-    }
-    return r
+  const probe = { ...rec, squeeze: { ...(rec.squeeze || {}), at: want.at } }
+  if (!newOwn && isOriginal(chipsOf(probe))) {
+    const back = restore(probe, remark)
+    return { message: back, text: back.text, note: noteFor(back) }
   }
-  let at = { ...cur }
-  let ask = ''
-  if (args.kind === 'default' || args.kind === 'step') {
-    const dim = d.dims[0]
-    const by = args.kind === 'default' ? -1 : args.by
-    const to = (cur[dim.id] ?? 0) + by
-    if (to < 0) return { object: sq, text: `This is the shortest version on ${dim.name}. The original is one key away.` }
-    if (to >= dim.levels.length) return { object: withVersion(sq, n => { n.data.show = 'original' }), text: `This was the fullest version on ${dim.name}; here is the original beside it.` }
-    at[dim.id] = to
-  } else if (args.kind === 'set') {
-    const dim = d.dims.find(x => x.id === args.dim)
-    const i = args.level === '+1' ? ((cur[dim.id] ?? 0) + 1) % dim.levels.length : dim.levels.findIndex(x => x.toLowerCase() === args.level.toLowerCase())
-    if (i < 0) return { object: sq, text: `${dim.name} has the levels ${dim.levels.join(', ')}.` }
-    at[dim.id] = i
-  } else if (args.kind === 'ask') {
-    ask = args.text
-  }
-  if (!ask) {
-    const have = versionAt(d, at)
-    if (have) {
-      const next = withVersion(sq, n => { n.data.at = have.at; n.data.show = null })
-      return { object: next, text: next.text, note: noteFor(next, 'moved') }
-    }
-  }
-  // a version nobody wrote yet: one more call writes it (or, for words, adjusts the dimensions and writes one)
-  const orig = { spans: d.spans, blocks: d.blocks, lines: d.of.lines, text: originalText(d) }
-  const written = d.versions.map(v => ({ at: v.at, lines: v.lines.map(l => ({ text: l.text, from: l.from })) }))
-  const extra = `The dimensions so far: ${JSON.stringify(d.dims)}\nThe versions written so far: ${JSON.stringify(written)}\n\n` + (ask
-    ? `The person asked: "${ask}". Write one version for it. Keep the dimensions, or replace the last one with a dimension that names what they asked for; answer with "dims" (all of them), "first" (where the new version sits) and "versions" (the new one only).`
-    : `Write the version at ${JSON.stringify(at)} only. A version at the same level of "${d.dims[0].id}" as one already written is about as long as it. Answer with {"versions": [ ... ]}.`)
-  const { answer, usage, model } = await complete(ctx, request(orig, { title: d.of.title, question: d.of.question }, extra))
-  const norm = normalize(answer, d.spans, d.dims)
-  if (!norm.versions.length) throw new Error(`the model wrote no usable version${norm.problems.length ? ': ' + norm.problems[0] : ''}`)
-  const fresh = ask ? norm.versions[0] : { ...norm.versions[0], at }
-  const next = withVersion(sq, n => {
-    const dimsChanged = ask && JSON.stringify(norm.dims) !== JSON.stringify(d.dims)
-    n.data.dims = norm.dims
-    const keep = dimsChanged ? d.versions.filter(v => norm.dims.every(x => v.at[x.id] != null)) : d.versions
-    n.data.versions = keep.filter(v => atKey(v.at) !== atKey(fresh.at)).concat([fresh])
-    n.data.at = fresh.at
-    n.data.show = null
-    const own = ownLineage(sq)
-    n.lineage = lineageOf(n.data, (own.made || []).concat([{ by: 'model', model, usage, at: new Date().toISOString(), asked: ctx.args || '' }]), (own.problems || []).concat(norm.problems))
-  })
-  return { object: next, text: next.text, note: noteFor(next, 'moved') }
-}
-
-/** The lines the person sees of the object, when the shell drew it. */
-function shownOf(ctx) {
-  if (!ctx.drawing || !ctx.draw || typeof ctx.draw.renderTerm !== 'function') return null
-  try { return drawnLines(ctx.draw.renderTerm(ctx.drawing, { w: ctx.w || 96 })) } catch { return null }
-}
-
-/** The squeeze's own lineage: as it made it, or as the kernel keeps it once saved (under `declared`). */
-function ownLineage(sq) {
-  const l = sq.lineage || {}
-  return l.declared?.squeeze || l
-}
-
-function originalText(d) {
-  return d.blocks.map(b => b.lead + b.spans.map(id => d.spans.find(s => s.id === id)?.text || '').join(' ')).join('\n\n')
-}
-
-function noteFor(sq, how) {
-  const d = sq.data
-  const v = versionAt(d, d.at) || d.versions[0]
-  const where = d.dims.map(x => `${x.name} ${x.levels[v.at[x.id] ?? 0]}`).join(', ')
-  return `The person sees ${d.of.id} ${how === 'moved' ? 'now ' : ''}squeezed to ${v.lines.length} of ${d.of.lines} lines (${where}); the original is unchanged and one key away.`
+  if (!ctx.model || typeof ctx.model.complete !== 'function') throw new Error('no model to write the rewrite: ctx.model.complete is missing')
+  const cfg = ctx.verb || {}
+  const req = request(probe, { system: readFileSync(PROMPT, 'utf8'), question: ctx.question || '', newOwn, model: cfg.model || 'sonnet', effort: cfg.effort || 'low', maxTokens: cfg.maxTokens || 4000 })
+  const t0 = Date.now()
+  const r = await ctx.model.complete(req)
+  if (!r || !r.isAnswered) throw new Error(`the rewrite did not come back: ${r ? r.reason : 'no result'}`)
+  const reply = readReply(r.text)
+  const checked = checkRewrite(rec.text, reply.text)
+  const next = applyRewrite(rec, { text: checked.text, at: want.at, newOwn, chip: reply.chip, made: { ms: Date.now() - t0, model: req.model, usage: r.usage }, problems: checked.problems }, remark)
+  return { message: next, text: next.shown ?? next.text, note: noteFor(next) }
 }
