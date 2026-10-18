@@ -7,7 +7,7 @@
 // ↵ on a card opens its detail · v s a press a verb on the message in focus (the last, with none).
 import { $, $$, api, back, esc, fmt, follow, objectOf, pageUrl, parseObj } from '../common/base.js'
 import { citedHtml, messageHtml, plain, sparkSvg } from '../common/marks.js'
-import { columnsIn, drawingOf, fontsReady, svgOf } from '../common/draw.js'
+import { columnsIn, drawingOf, fontsReady, svgOf, unframe } from '../common/draw.js'
 import { drawSide, sideData, titleOf } from '../common/side.js'
 import { chainWords, isRef } from '../lib/object.js'
 
@@ -22,7 +22,8 @@ const st = {
   card: null,             // the card in focus: 'row|id'
 }
 const nodes = new Map()   // row -> {el, sig}
-const cards = new Map()   // 'id@v|w' -> svg html
+const cards = new Map()   // 'id@v|w' -> the card drawn
+const CAP = 340           // the most of a card drawn under a reply, in pixels
 const tx = $('#tx'), scroll = $('#scroll'), tray = $('#tray'), th = $('#th'), tb = $('#tb')
 const prompt = $('#prompt'), cbox = $('#cbox'), scopeEl = $('#scope'), ckeys = $('#ckeys')
 
@@ -60,9 +61,13 @@ function head() {
 
 // ---------------------------------------------------------------- the transcript
 const nearBottom = () => scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 80
+// whether the view follows the newest row: it does until the person scrolls up, and again once they scroll down
+let stick = true
+scroll.addEventListener('scroll', () => { stick = nearBottom() }, { passive: true })
+const follow2 = () => { if (stick) scroll.scrollTop = scroll.scrollHeight }
 
 function render() {
-  const stick = nearBottom()
+  const stickNow = stick || nearBottom()
   $('#empty')?.remove()
   const keep = new Set()
   let prev = null
@@ -91,7 +96,7 @@ function render() {
   } else if (w) w.remove()
   if (!st.rows.length) tx.innerHTML = '<p class="notice" id="empty">No messages yet. Each prompt and each of Claude\'s messages shows here as the terminal draws it.</p>'
   paintMarks()
-  if (stick) scroll.scrollTop = scroll.scrollHeight
+  if (stickNow) scroll.scrollTop = scroll.scrollHeight
 }
 
 function userEl(row) {
@@ -156,21 +161,24 @@ async function fillCard(el, ref) {
     if (r.error) { el.innerHTML = `<div class="err">× ${esc(ref.id)} cannot be drawn: ${esc(r.error)}</div>`; return }
     const o = r.object
     const key = `${o.id}@${o.version}|${w}`
-    let svg = cards.get(key)
-    if (!svg) {
+    let got = cards.get(key)
+    if (!got) {
       await fontsReady
-      const d = await drawingOf(o, { w, mode: 'inline' })
+      const u = unframe(await drawingOf(o, { w, mode: 'inline' }))
+      const d = u.drawing
       const s = svgOf(d, { w })
-      svg = d.error ? `<div class="err">× its program failed: ${esc(d.error.name)}: ${esc(d.error.message)}</div>${s.svg}` : s.svg
-      cards.set(key, svg)
+      got = { ...u, h: s.h, svg: d.error ? `<div class="err">× its program failed: ${esc(d.error.name)}: ${esc(d.error.message)}</div>${s.svg}` : s.svg }
+      cards.set(key, got)
     }
-    const kind = o.verb || (o.lineage?.queries ? Object.keys(o.lineage.queries).length + ' quer' + (Object.keys(o.lineage.queries).length === 1 ? 'y' : 'ies') : '')
     el.dataset.v = o.version
-    el.innerHTML = `<div class="ch"><b>${esc(o.title || o.id)}</b><span class="meta">${esc(o.id)} · v${esc(o.version)}${kind ? ' · ' + esc(kind) : ''}</span></div><div class="cb">${svg}</div>` +
-      `<div class="cf"><button data-act="open"><kbd>↵</kbd>open</button><button data-act="ask"><kbd>?</kbd>ask</button><span class="sp"></span><span>${r.versions.length > 1 ? r.versions.map(x => 'v' + x.v).join(' · ') : ''}</span></div>`
+    // calm: under a reply a card takes at most about half a screen; the rest waits on its page
+    el.classList.toggle('capped', got.h > CAP)
+    el.innerHTML = `<div class="ch"><b>${esc(got.title || o.title || o.id)}</b><span class="meta">${esc(got.right || '')}</span></div><div class="cb">${got.svg}${got.bottom ? `<p class="cnote">${esc(got.bottom)}</p>` : ''}</div>` +
+      `<div class="cf"><button data-act="open"><kbd>↵</kbd>${got.h > CAP ? `${Math.round((got.h - CAP) / 20)} more rows · open` : 'open'}</button><button data-act="ask"><kbd>?</kbd>ask</button><span class="sp"></span><span>${esc(o.id)} · ${r.versions.length > 1 ? r.versions.map(x => 'v' + x.v).join(' · ') : 'v' + esc(o.version)}</span></div>`
   } catch (e) {
     el.innerHTML = `<div class="err">× ${esc(ref.id)} cannot be drawn: ${esc(String(e?.message || e))}</div>`
   }
+  follow2()
 }
 
 // ---------------------------------------------------------------- marks and the tray

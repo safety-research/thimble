@@ -35,6 +35,19 @@ export async function drawingOf(object, { w, mode = 'inline', state } = {}) {
   return p
 }
 
+const words = runs => (Array.isArray(runs) ? runs.map(r => (r.br ? ' ' : r.s)).join('') : String(runs || '')).trim()
+
+/**
+ * A drawing whose whole is one frame, as its inside: the page draws the card's own border and title, so the frame's
+ * title, its right and its bottom words come back as text for the card's header ({drawing, title, right, bottom}).
+ * A frame that says the program failed stays as it is.
+ */
+export function unframe(drawing) {
+  const r = drawing?.root
+  if (!r || r.t !== 'frame' || !r.kid || r.tone === 'bad' || drawing.error) return { drawing, title: '', right: '', bottom: '' }
+  return { drawing: { ...drawing, root: r.kid }, title: words(r.title), right: words(r.right), bottom: words(r.bottom) }
+}
+
 /**
  * The drawing as SVG: {svg, w, h, regions, error}. `selected` gets an outline over its parts; `hover` a faint one.
  * `parts` lists the parts a person can select, top to bottom (knobs left out).

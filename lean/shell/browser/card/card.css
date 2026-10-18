@@ -87,6 +87,9 @@ table.rows td.n, table.rows th.n { text-align: right; }
 #tmsgs .say ul, #tmsgs .say ol { margin: 2px 0 6px 18px; }
 #tmsgs .say table.md { font-size: 12px; border-collapse: collapse; margin: 4px 0; }
 #tmsgs .say table.md td, #tmsgs .say table.md th { padding: 2px 10px 2px 0; text-align: left; }
+#tmsgs .whole { font-size: 12px; color: var(--mut); text-decoration: none; margin-top: -4px; }
+#tmsgs .whole:hover { color: var(--ind); }
+#tmsgs .say table.md td.n { white-space: nowrap; text-align: right; }
 #tmsgs .made { display: flex; gap: 7px; align-items: center; font-size: 12px; color: var(--mut); }
 #tmsgs .made i { width: 7px; height: 7px; border-radius: 50%; background: var(--good); display: inline-block; }
 #tmsgs .made code { font-family: var(--mono); font-size: 11.5px; color: var(--ink2); }

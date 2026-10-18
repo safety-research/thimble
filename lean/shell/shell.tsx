@@ -1131,7 +1131,9 @@ export const registerShell: Register = (on, options) => {
     try {
       if (e.agentId === undefined && stored.uuid) {
         const msg = e.message as { type?: string; content?: unknown }
-        if (pendingAsk && e.door === 'prompt' && msg.type === 'user') {
+        const said = typeof msg.content === 'string' ? msg.content : Array.isArray(msg.content) ? (msg.content as { type?: string; text?: string }[]).filter(b => b.type === 'text').map(b => b.text).join('') : ''
+        // the prompt's row: typed in the composer, or a question from the browser (stored as the plugin's, as the person's words)
+        if (pendingAsk && msg.type === 'user' && (e.door === 'prompt' || (pendingAsk.about.via === 'browser' && said.trim() === pendingAsk.text.trim()))) {
           await $.state.set({ ...ASKED, id: rowKey(stored.uuid) }, pendingAsk.about)
           pendingAsk = null
         }

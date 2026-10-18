@@ -8,7 +8,7 @@
 // when it comes. p lays the program over the page, its lines that drew the part lit. esc goes back.
 import { $, $$, api, back, esc, fmt, follow, objectOf, pageUrl } from '../common/base.js'
 import { citedHtml, messageHtml, plain } from '../common/marks.js'
-import { columnsIn, drawingOf, fontsReady, svgOf } from '../common/draw.js'
+import { columnsIn, drawingOf, fontsReady, svgOf, unframe } from '../common/draw.js'
 import { drawSide, sideData } from '../common/side.js'
 import { knobOf, turn } from '../draw/handoff.js'
 import { chainWords, isRef, regionRefs } from '../lib/object.js'
@@ -46,7 +46,7 @@ async function load(v) {
 async function draw() {
   await fontsReady
   st.w = columnsIn($('#dcard').clientWidth - 44)
-  st.drawing = await drawingOf(st.object, { w: st.w, mode: 'detail', state: Object.keys(st.state).length ? st.state : undefined })
+  st.drawing = unframe(await drawingOf(st.object, { w: st.w, mode: 'detail', state: Object.keys(st.state).length ? st.state : undefined })).drawing
   paint()
 }
 
@@ -242,7 +242,7 @@ function answerAfter(i) {
 
 function thread() {
   const box = $('#tmsgs')
-  const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60
+  const stick = box.childElementCount > 0 && box.scrollHeight - box.scrollTop - box.clientHeight < 60
   let h = ''
   // the turn that made the card: the prompt before it, and Claude's message that carries it
   const at = st.rows.findIndex(r => r.kind === 'assistant' && (r.row === st.from || (r.record?.objects || []).some(x => String(x).split('@')[0] === st.id)))
@@ -250,7 +250,7 @@ function thread() {
     let u = at
     while (u >= 0 && st.rows[u].kind !== 'user') u--
     if (u >= 0) h += `<div class="bub">${esc(st.rows[u].text)}</div>`
-    h += `<div class="say">${messageHtml(st.rows[at].record).html}</div>`
+    h += lead(st.rows[at])
   }
   // what was asked here, and the answer once it came
   for (const a of st.asks.filter(x => x.scope?.object === st.id)) {
@@ -263,12 +263,22 @@ function thread() {
     for (const r of ans) {
       const made = (r.record.objects || []).map(String).filter(x => x.split('@')[0] === st.id)
       if (made.length) h += `<div class="made"><i></i><b>cards</b><code>saved ${esc(st.id)}${st.latest ? ' v' + esc(st.latest) : ''}</code></div>`
-      h += `<div class="say">${messageHtml(r.record).html}</div>`
+      h += lead(r)
     }
   }
   if (!h) h = `<div class="when">questions here go to the terminal session with this card</div>`
   box.innerHTML = h
   if (stick) box.scrollTop = box.scrollHeight
+}
+
+/** A message of Claude's in the thread: its first paragraph, and the whole of it a click away in the mirror. */
+function lead(row) {
+  const rec = row.record
+  const text = String(rec.shown ?? rec.text ?? '')
+  const cut = text.search(/\n\s*\n/)
+  if (cut < 0 || cut > 900) return `<div class="say">${messageHtml(rec).html}</div>`
+  const first = { ...rec, shown: text.slice(0, cut), marks: (rec.marks || []).filter(m => m.end <= cut) }
+  return `<div class="say">${messageHtml(first).html}</div><a class="whole" href="${pageUrl('mirror', {}, { row: row.row })}">the whole message ›</a>`
 }
 
 async function ask() {
@@ -318,7 +328,7 @@ function showCite(ref) {
 function flip(step, to) { st.ex = to != null ? to : st.ex + step; evidence(true) }
 async function turnKnob(id, step) {
   st.state = turn(st.drawing, st.state, id, step)
-  st.drawing = await drawingOf(st.object, { w: st.w, mode: 'detail', state: st.state })
+  st.drawing = unframe(await drawingOf(st.object, { w: st.w, mode: 'detail', state: st.state })).drawing
   paint()
 }
 async function showVersion(v) {

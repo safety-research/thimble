@@ -162,6 +162,11 @@ test('an ask from the browser goes to Claude as a prompt, its scope beside it fo
   expect(context).toContain('01-saves@2')
   expect(context).toContain('day-2026-06-18')
   expect(context).toContain('q1#day=2026-06-18@n')
+  // the prompt's row, once stored, says where it came from and what it was about
+  const PROMPT = 'cccccccc-1111-2222-3333-444444444444'
+  await $.session.append({ door: 'prompt', uuid: PROMPT, origin: { kind: 'plugin', name: 'thimble-lean', asUser: true }, message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'why is this day so high?' }] } } as never)
+  const row = textOf(await $.ui.render({ component: 'UserMessage', surface: 'terminal', requestId: PROMPT, props: { text: 'why is this day so high?', origin: { kind: 'plugin', name: 'thimble-lean', asUser: true } }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never))
+  expect(row).toContain('▸ from the browser · about 01-saves@2 ▸ Jun 18 6,543')
 })
 
 test('an ask about a citation or a gloss names it; a verb pressed in the browser runs on the message\'s card', { options: { browser: true } }, async ($, on) => {
