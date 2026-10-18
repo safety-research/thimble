@@ -54,7 +54,7 @@ export function makeSandbox(kitSource, { limit = 2000 } = {}) {
       const id = ++seq
       return new Promise(res => {
         waiting.set(id, res)
-        iframe.contentWindow.postMessage({ id, program: String(object.program || ''), data: JSON.parse(JSON.stringify(object.data ?? {})), opts: { w: opts.w, h: opts.h, mode: opts.mode, limit: opts.limit || limit } }, '*')
+        iframe.contentWindow.postMessage({ id, program: String(object.program || ''), data: JSON.parse(JSON.stringify(object.data ?? {})), opts: { w: opts.w, h: opts.h, mode: opts.mode, limit: opts.limit || limit, state: opts.state ? JSON.parse(JSON.stringify(opts.state)) : undefined } }, '*')
       })
     },
   }

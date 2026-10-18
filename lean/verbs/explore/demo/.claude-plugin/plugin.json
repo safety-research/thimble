@@ -1,0 +1,7 @@
+{
+  "name": "lean-explore-demo",
+  "version": "0.1.0",
+  "author": { "name": "Matthew Joerke" },
+  "license": "Apache-2.0",
+  "description": "Explore (x) in Claude Code until the lean shell lands: /explore turns the last object or reply into a view Claude writes, with knobs to turn (◂ ▸), parts to select (tab) and their real rows (↵). Load it beside the lean plugin; run node lean/verbs/explore/demo/sync.mjs first."
+}

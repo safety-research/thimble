@@ -2,7 +2,8 @@
 // selection in the URL hash (handoff.js), so the terminal can open the browser on the same object and region, and
 // the browser can hand the same selection back as a command.
 //
-// Keys: tab and shift+tab move between regions, ← → flip examples, esc clears the selection.
+// Keys: tab and shift+tab move between regions, ← → turn a knob (k.knob) when the object has one, else flip examples,
+// esc clears the selection. A click on a knob's ◂ or ▸ turns it; the program runs again with the new state.
 // (Bundled by build.mjs after svg.js, handoff.js and sandbox.js, so their names are in scope.)
 
 const OBJECTS = JSON.parse(document.getElementById('objects').textContent)
@@ -12,7 +13,7 @@ const sandbox = makeSandbox(KIT_SOURCE)
 const measureType = canvasMeasure(document)
 const $ = sel => document.querySelector(sel)
 const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-const view = { ref: null, region: null, hover: null, wForced: null, drawing: null, result: null, ex: 0, theme: 'light' }
+const view = { ref: null, region: null, hover: null, wForced: null, drawing: null, result: null, ex: 0, theme: 'light', state: {} }
 
 function columns() { return view.wForced || Math.max(60, Math.min(140, Math.floor(($('#stage').clientWidth - 8) / PAGE_CW))) }
 function current() {
@@ -23,8 +24,8 @@ function current() {
 async function load() {
   const o = current()
   view.ref = objectRef(o)
-  view.drawing = await sandbox.run(o, { w: columns(), h: 24 })
-  if (view.region && !view.drawing.regions.some(r => r.id === view.region) && !(view.drawing.cites || {})[view.region]) view.region = null
+  view.drawing = await sandbox.run(o, { w: columns(), h: 24, state: view.state })
+  if (view.region && !view.drawing.regions.some(r => r.id === view.region) && !(view.drawing.cites || {})[view.region] && !knobOf(view.drawing, view.region)) view.region = null
   nav()
   draw()
 }
@@ -34,7 +35,7 @@ function draw() {
   view.result = res
   $('#stage').innerHTML = res.svg
   detail()
-  const sel = { object: current().id, v: current().v, region: view.region || undefined, w: view.wForced || undefined }
+  const sel = { object: current().id, v: current().v, region: view.region || undefined, w: view.wForced || undefined, state: view.state }
   history.replaceState(null, '', toHash(sel))
 }
 
@@ -61,9 +62,16 @@ function detail() {
   const box = $('#detail')
   const d = view.drawing
   const r = view.result.regions.find(x => x.id === view.region)
-  const sel = { object: current().id, v: current().v, region: view.region || undefined }
+  const sel = { object: current().id, v: current().v, region: view.region || undefined, state: view.state }
+  const knobs = d.controls || []
+  const turnHint = knobs.length ? ` · ← → turn ${esc(knobs[0].label)}` : ''
   if (!r) {
-    box.innerHTML = `<p class="hint">${view.result.regions.filter(x => x.rects.length).length} parts · tab or a click selects one · <code>${esc(toCommand(sel))}</code> opens this in the terminal</p>`
+    box.innerHTML = `<p class="hint">${view.result.regions.filter(x => x.rects.length && !x.meta.knob).length} parts · tab or a click selects one${turnHint} · <code>${esc(toCommand(sel))}</code> opens this in the terminal</p>`
+    return
+  }
+  if (r.meta.knob) {
+    const c = knobOf(d, r.meta.knob)
+    box.innerHTML = `<div class="head"><b>${esc(c.label)}</b><span class="id">${esc(c.id)}</span><span class="back">back to terminal <code>${esc(toCommand(sel))}</code></span></div><p>${esc(c.shown[c.i])} <span class="dim">· ${c.i + 1} of ${c.values.length} · ← → or a click on ◂ ▸ turns it</span></p>`
     return
   }
   const cite = r.meta.cite && d.cites[r.meta.cite]
@@ -91,23 +99,44 @@ function step(dir) {
   select(list[i < 0 ? (dir > 0 ? 0 : list.length - 1) : (i + dir + list.length) % list.length].id)
 }
 
-$('#stage').addEventListener('click', e => { const t = e.target.closest('[data-region]'); select(t ? t.dataset.region : null) })
+// turn a knob: the program runs again with the new state, and the selection stays where it was
+function turnKnob(id, step) {
+  const next = turn(view.drawing, view.state, id, step)
+  if (JSON.stringify(next) === JSON.stringify(view.state)) return
+  view.state = next
+  load()
+}
+$('#stage').addEventListener('click', e => {
+  const t = e.target.closest('[data-region]')
+  const r = t && view.result.regions.find(x => x.id === t.dataset.region)
+  if (r && r.meta.knob) {
+    // a click on the left third of ◂ value ▸ turns it down, on the right third up
+    const b = t.getBoundingClientRect(), f = (e.clientX - b.left) / (b.width || 1)
+    if (f < 0.34 || f > 0.66) { view.region = r.id; turnKnob(r.meta.knob, f < 0.34 ? -1 : 1); return }
+  }
+  select(t ? t.dataset.region : null)
+})
 $('#stage').addEventListener('mousemove', e => {
   const t = e.target.closest('[data-region]')
   const id = t ? t.dataset.region : null
   if (id !== view.hover) { view.hover = id; draw() }
 })
 $('#stage').addEventListener('mouseleave', () => { if (view.hover) { view.hover = null; draw() } })
-$('#objects-nav').addEventListener('click', e => { const b = e.target.closest('button[data-ref]'); if (b) { view.ref = b.dataset.ref; view.region = null; load() } })
+$('#objects-nav').addEventListener('click', e => { const b = e.target.closest('button[data-ref]'); if (b) { view.ref = b.dataset.ref; view.region = null; view.state = {}; load() } })
 $('#detail').addEventListener('click', e => { const b = e.target.closest('button[data-ex]'); if (b) { view.ex += Number(b.dataset.ex); detail() } })
 addEventListener('keydown', e => {
   if (e.key === 'Tab') { e.preventDefault(); step(e.shiftKey ? -1 : 1) }
   else if (e.key === 'Escape') select(null)
-  else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') { view.ex += e.key === 'ArrowRight' ? 1 : -1; detail() }
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const step = e.key === 'ArrowRight' ? 1 : -1
+    const r = view.result.regions.find(x => x.id === view.region)
+    if ((view.drawing.controls || []).length) turnKnob(r && r.meta.knob ? r.meta.knob : null, step)
+    else { view.ex += step; detail() }
+  }
 })
 addEventListener('resize', () => { if (!view.wForced) load() })
 
 // the handoff: #o=<id>@<v>&r=<region>&w=<columns>
 const sel0 = fromHash(location.hash)
-if (sel0) { view.ref = sel0.v != null ? `${sel0.object}@${sel0.v}` : sel0.object; view.region = sel0.region || null; view.wForced = sel0.w || null }
+if (sel0) { view.ref = sel0.v != null ? `${sel0.object}@${sel0.v}` : sel0.object; view.region = sel0.region || null; view.wForced = sel0.w || null; view.state = sel0.state || {} }
 load().then(() => { document.body.dataset.ready = '1' })

@@ -23,7 +23,7 @@ const RUN_SCRIPT = new vm.Script(
 /**
  * Run `object.program` on `object.data` in a fresh vm context.
  * @param {{program: string, data?: unknown}} object
- * @param {{w?: number, h?: number, mode?: string, limit?: number}} [opts]
+ * @param {{w?: number, h?: number, mode?: string, limit?: number, state?: object}} [opts] state: the knobs' values (k.knob)
  * @returns {object} the drawing
  */
 export function runProgram(object, opts = {}) {
@@ -36,7 +36,7 @@ export function runProgram(object, opts = {}) {
   // only strings cross in
   context.__program = String(object && object.program != null ? object.program : '')
   context.__data = JSON.stringify(object && object.data !== undefined ? object.data : {})
-  context.__opts = JSON.stringify({ w: opts.w, h: opts.h, mode: opts.mode, limit })
+  context.__opts = JSON.stringify({ w: opts.w, h: opts.h, mode: opts.mode, limit, state: opts.state })
   KIT_SCRIPT.runInContext(context, { timeout: 1000 })
   let text
   try {
