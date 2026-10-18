@@ -1231,31 +1231,28 @@
     return g
   }
 
-  // ---- the mini form of many threads: an origin, the stations Claude marked `key` (else the first column where the
-  // threads split widely), and where they end; each thread's other stops are folded into the lanes between them
+  // ---- the mini form of many threads: an origin, the first place they split, and where they end. The split is the
+  // earliest stations that share out the threads between them (each thread in one), taken from the stations Claude
+  // marked `key`, else from the stations a tenth to nine tenths of the threads pass; each thread's other stops are
+  // folded into the lanes between them
   function mapReduce(M, threads, unit) {
     const ST = M.stations
     const nT = threads.length
     const ends = new Set(threads.map(t => t.stops[t.stops.length - 1].station))
-    let keep = [...ST.values()].filter(s => s.raw.key || s.raw.mini).map(s => s.id)
-    if (!keep.length) {
-      // columns as the longest path from a start
-      const pred = {}
-      threads.forEach(t => t.stops.forEach((s, i) => { pred[s.station] = pred[s.station] || new Set(); if (i && t.stops[i - 1].station !== s.station) pred[s.station].add(t.stops[i - 1].station) }))
-      const rank = {}, busy = {}
-      const rk = id => { if (rank[id] != null) return rank[id]; if (busy[id]) return 0; busy[id] = 1; let r = 0; for (const p of pred[id] || []) r = Math.max(r, rk(p) + 1); busy[id] = 0; return (rank[id] = r) }
-      Object.keys(pred).forEach(rk)
-      const byRank = {}
-      Object.keys(rank).forEach(id => { if (!ends.has(id)) (byRank[rank[id]] = byRank[rank[id]] || []).push(id) })
-      const big = id => ST.get(id).threads.length >= Math.max(2, Math.ceil(nT * 0.1))
-      let best = null
-      Object.keys(byRank).map(Number).sort((a, b) => a - b).forEach(r => {
-        const ids = byRank[r].filter(big)
-        const covered = new Set()
-        ids.forEach(id => ST.get(id).threads.forEach(t => covered.add(t)))
-        if (ids.length >= 2 && covered.size >= nT * 0.5 && (!best || ids.length > best.length)) best = ids
-      })
-      keep = best || Object.keys(rank).filter(id => !ends.has(id) && ST.get(id).threads.length >= nT * 0.3)
+    const pos = {}
+    threads.forEach(t => {
+      const seen = new Set()
+      t.stops.forEach((s, i) => { if (seen.has(s.station)) return; seen.add(s.station); const a = pos[s.station] = pos[s.station] || [0, 0]; a[0] += i / Math.max(1, t.stops.length - 1); a[1]++ })
+    })
+    const at = id => (pos[id] ? pos[id][0] / pos[id][1] : 1)
+    const keyed = [...ST.values()].filter(s => (s.raw.key || s.raw.mini) && !ends.has(s.id) && s.threads.length)
+    const cands = (keyed.length ? keyed : [...ST.values()].filter(s => !ends.has(s.id) && s.threads.length >= Math.max(2, Math.ceil(nT * 0.1)) && s.threads.length < nT * 0.9))
+      .sort((a, b) => at(a.id) - at(b.id) || b.threads.length - a.threads.length)
+    const covered = new Set()
+    let keep = []
+    for (const s of cands) {
+      const over = s.threads.filter(t => covered.has(t)).length
+      if (over <= s.threads.length * 0.2) { keep.push(s.id); s.threads.forEach(t => covered.add(t)) }
     }
     keep = keep.concat([...ends])
     if (keep.length < 2) return null
