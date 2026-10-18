@@ -148,8 +148,10 @@ def _figure(f: Any, notes: Notes) -> dict[str, Any] | None:
 
 
 def read_model(c: str, doc: dict[str, Any], renderer: str) -> dict[str, Any]:
-    """The document as every format reads it (module note)."""
-    from . import report_types, video  # noqa: PLC0415
+    """The document as every format reads it (module note). A deck's units carry the slide's layout as the editor draws
+    it (slides.layout_of and its format): the layout, its card slots, the figure's side and width, the grid, and the
+    quote with its speaker, kept out of the paragraphs."""
+    from . import report_types, slides, video  # noqa: PLC0415
 
     notes = Notes(c)
     title = _collapse(doc.get("title")) or _collapse(doc.get("type")) or "Report"
@@ -174,14 +176,21 @@ def read_model(c: str, doc: dict[str, Any], renderer: str) -> dict[str, Any]:
                           "sentences": [_sentence(x, notes) for x in p.get("sentences") or [] if isinstance(x, dict)]}
                          for p in u["paragraphs"] if isinstance(p, dict)]
             else:
-                paras = [{"id": None, "kind": "", "speaker": "",
-                          "sentences": [_sentence(x, notes) for x in report_types.unit_sentences(u)]}]
+                body = slides.body_sentences(u) if renderer == "slides" else report_types.unit_sentences(u)
+                paras = [{"id": None, "kind": "", "speaker": "", "sentences": [_sentence(x, notes) for x in body]}]
             figs_raw = list(u.get("figures") or []) + ([u["figure"]] if isinstance(u.get("figure"), dict) else [])
             figs = [f for f in (_figure(x, notes) for x in figs_raw) if f]
-            units.append({"heading": _collapse(u.get("heading")), "level": report_types._level(u.get("level")),
-                          "tldr": report_types._is_tldr(u.get("heading")), "layout": u.get("layout") or "",
-                          "side": u.get("card") or "", "paragraphs": [p for p in paras if p["sentences"] or p["kind"] == "divider"],
-                          "figures": figs, "speaker_notes": plain_text(u["notes"]) if isinstance(u.get("notes"), str) else ""})
+            unit = {"heading": _collapse(u.get("heading")), "level": report_types._level(u.get("level")),
+                    "tldr": report_types._is_tldr(u.get("heading")), "layout": u.get("layout") or "",
+                    "side": u.get("card") or "", "paragraphs": [p for p in paras if p["sentences"] or p["kind"] == "divider"],
+                    "figures": figs, "speaker_notes": plain_text(u["notes"]) if isinstance(u.get("notes"), str) else ""}
+            if renderer == "slides":
+                q = slides.quote_of(u)
+                fmt = slides.clean_format(u.get("format"))
+                unit.update({"layout": slides.layout_of(u), "slots": slides.slots_of(u), "grid": slides.is_grid(u),
+                             "side": fmt.get("side", "right"), "width": fmt.get("width", slides.WIDTH_DEFAULT),
+                             "quote": {**_sentence(q, notes), "speaker": _collapse(q.get("speaker"))} if q else None})
+            units.append(unit)
         if renderer not in ("slides", "story"):
             units.sort(key=lambda u: 0 if u["tldr"] else 1)
     return {"title": title, "renderer": renderer, "lead": lead, "claims": claims, "units": units, "lines": lines,
@@ -211,6 +220,9 @@ def to_markdown(m: dict[str, Any]) -> str:
     for k, u in enumerate(m["units"], 1):
         if m["renderer"] == "slides":
             out += [f"## {u['heading'] or f'Slide {k}'}", ""]
+            q = u.get("quote")
+            if q and q["text"]:
+                out += ["> " + _md_sentence(q) + (f"\n>\n> — {q['speaker']}" if q["speaker"] else ""), ""]
         elif u["heading"]:
             out += [f"{'#' * max(2, u['level'])} {u['heading']}", ""]
         for p in u["paragraphs"]:
@@ -337,25 +349,51 @@ section.story figure{margin-top:4px}
 @media print{@page{size:A4 landscape;margin:14mm}section.story{break-before:page;margin:0}section.story:first-of-type{break-before:auto}}
 """
 
+# Each slide is laid out at the deck editor's design size (frontend Deck.tsx SLIDE_W×SLIDE_H, 960×540) with the
+# editor's paddings, type scale and per-layout rules (frontend/src/styles/report.css), and printed on a page of exactly
+# that size (960px = 10in × 5.625in at 96dpi), so the PDF matches the slide on screen.
 SLIDES_CSS = """
-main{max-width:1000px;padding-top:32px}
-.slide{position:relative;width:100%;aspect-ratio:16/9;background:var(--white);border-radius:12px;margin:0 0 28px;
-padding:44px 56px;display:flex;flex-direction:column;gap:14px;overflow:hidden;box-shadow:0 0 0 1px rgba(var(--ink-rgb),.08)}
-.slide h2{font-size:30px;margin:0}
-.slide.layout-title{justify-content:center}
-.slide.layout-title h2{font-size:40px}
-.slide .body{display:flex;gap:28px;flex:1;min-height:0}
-.slide .copy{flex:1;min-width:0;font-size:19px}
-.slide .figs{flex:1;min-width:0;display:grid;gap:12px;align-content:start}
-.slide .figs figure{margin:0}
-.slide .figs img{max-height:360px;width:auto;max-width:100%;object-fit:contain}
-.slide .num{position:absolute;right:20px;bottom:14px;font-size:12px;color:var(--ink-500)}
-.speaker{font-size:13px;color:var(--ink-500);margin:-16px 4px 28px}
-.slide .figs{overflow:hidden}.slide .figs figcaption{font-size:12px;margin-top:4px}
+main{max-width:1008px;padding-top:32px}
 .deck-title{font-size:15px;color:var(--ink-500);margin:0 0 16px}
-@media print{@page{size:13.333in 7.5in;margin:0}html,body{background:var(--white)}main{max-width:none;padding:0}
-.deck-title{display:none}.slide{width:13.333in;height:7.5in;aspect-ratio:auto;border-radius:0;box-shadow:none;margin:0;
-break-after:page;padding:.6in .8in}.slide .figs img{max-height:4.2in}.speaker{display:none}.notes{break-before:page;padding:.6in .8in;margin:0;border:0}}
+.slide{position:relative;width:960px;height:540px;background:var(--white);border-radius:12px;margin:0 auto 28px;
+padding:52px 64px 56px;display:flex;flex-direction:column;gap:24px;overflow:hidden;box-shadow:0 0 0 1px rgba(var(--ink-rgb),.08)}
+.slide h2{font:500 34px/1.2 var(--font-body);letter-spacing:-.015em;margin:0}
+.slide .lines{flex:1 1 auto;min-height:0;overflow:hidden;font-size:22px;line-height:1.55}
+.slide .lines p,.slide .lines ul{margin:0;font-size:inherit}
+.slide .lines ul{padding-left:1.1em}
+.slide .lines li+li{margin-top:8px}
+.slide .title-box{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:18px;text-align:center}
+.slide .title-box h2{font-size:52px}
+.slide .title-box .lines{flex:none;font-size:24px;color:var(--ink-700)}
+.slide .title-box .lines ul{padding:0;list-style:none}
+.slide .row{flex:1;min-height:0;display:grid;gap:36px}
+.slide .cards{flex:1;min-height:0;display:grid;gap:28px}
+.slide .cards.grid{gap:18px 28px}
+.slide .stack{min-width:0;min-height:0;display:grid;gap:18px}
+.slide .slot{min-width:0;min-height:0;display:flex;flex-direction:column;gap:8px;margin:0}
+.slide .slot .fit{flex:1;min-height:0;display:flex;align-items:flex-start;justify-content:center;overflow:hidden}
+.slide .slot img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
+.slide .slot figcaption{flex:none;font-size:15px;line-height:1.35;margin:0}
+.slide .cards .slot figcaption,.slide .stack .slot figcaption{font-size:13px}
+.slide .kicker h2{font:500 18px/1.3 var(--font-body);color:var(--ink-700)}
+.slide.layout-card{gap:12px;padding:24px 32px 28px}
+.slide.layout-card>.slot{flex:1}
+.slide .quote-box{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:22px;padding:0 40px}
+.slide .quote-box .qfig{flex:1;min-height:0;display:flex;flex-direction:column}
+.slide .quote-box .qfig>.slot{flex:1}
+.slide blockquote.q{margin:0;padding:0;border:0;font-size:38px;line-height:1.35;letter-spacing:-.01em;color:var(--ink-900)}
+.slide blockquote.q p{margin:0}
+.slide blockquote.q p::before{content:'\\201C'}
+.slide blockquote.q p::after{content:'\\201D'}
+.slide blockquote.q.q-m{font-size:30px}
+.slide blockquote.q.q-l{font-size:24px}
+.slide .quote-box .who{font-size:20px;color:var(--ink-700);margin:0}
+.slide .quote-box .lines{flex:none;max-height:120px;font-size:18px;color:var(--ink-700)}
+.slide .num{position:absolute;right:20px;bottom:14px;font-size:12px;color:var(--ink-500)}
+.speaker{font-size:13px;color:var(--ink-500);margin:-16px auto 28px;max-width:960px}
+@media print{@page{size:10in 5.625in;margin:0}html,body{background:var(--white)}main{max-width:none;padding:0}
+.deck-title{display:none}.slide{border-radius:0;box-shadow:none;margin:0;break-after:page}
+.speaker{display:none}.notes{break-before:page;padding:.5in .66in;margin:0;border:0}}
 """
 
 
@@ -435,6 +473,56 @@ def _notes_html(m: dict[str, Any]) -> str:
     return f'<section class="notes"><h2>Sources</h2><ol>{"".join(items)}</ol></section>'
 
 
+def _slot_html(f: dict[str, Any] | None, pics: dict[str, dict[str, Any]]) -> str:
+    """A card slot as the slide shows it: the card scaled to fit it, its caption under it; an empty slot keeps its
+    place in the layout."""
+    if f is None:
+        return '<div class="slot"></div>'
+    pic = pics.get(f["card"]) or {}
+    cap = f'<figcaption>{inline_html(f["caption"])}{_cites_html(f["notes"])}</figcaption>' if f["caption"] else ""
+    return f'<figure class="slot" id="card-{_esc(f["card"])}"><div class="fit">{card_html(pic)}</div>{cap}</figure>'
+
+
+def _slide_html(u: dict[str, Any], k: int, pics: dict[str, dict[str, Any]]) -> str:
+    """Slide `k` in its layout, arranged as the deck's editor draws it (frontend Deck.tsx SlideBody): the layout's
+    cells with the figure's side and width, the cards of its slots (the rest stay unseen, as on screen), the grid,
+    and the quote with its speaker."""
+    layout, n = u["layout"], u.get("slots") or 0
+    figs = u["figures"]
+    slot = lambda i: _slot_html(figs[i] if i < len(figs) else None, pics)  # noqa: E731
+    heading = f"<h2>{inline_html(u['heading'])}</h2>" if u["heading"] else ""
+    lines = '<div class="lines">' + "".join(_para_html(p) for p in u["paragraphs"]) + "</div>"
+    if layout == "title":
+        body = f'<div class="title-box">{heading}{lines}</div>'
+    elif layout == "figure":
+        w = int(u.get("width") or 50)
+        cards = f'<div class="stack" style="grid-template-rows:repeat({n},minmax(0,1fr))">{"".join(slot(i) for i in range(n))}</div>' if n > 1 else slot(0)
+        cols = f"{w}fr {100 - w}fr" if u.get("side") == "left" else f"{100 - w}fr {w}fr"
+        pair = cards + lines if u.get("side") == "left" else lines + cards
+        body = heading + f'<div class="row" style="grid-template-columns:{cols}">{pair}</div>'
+    elif layout == "card":
+        body = f'<div class="kicker">{heading}</div>{slot(0)}'
+    elif layout == "figures":
+        cols = 2 if u.get("grid") else max(1, n)
+        rows = -(-max(1, n) // cols)
+        grid = f"grid-template-columns:repeat({cols},minmax(0,1fr));grid-template-rows:repeat({rows},minmax(0,1fr))"
+        body = heading + f'<div class="cards{" grid" if u.get("grid") else ""}" style="{grid}">{"".join(slot(i) for i in range(n))}</div>'
+    elif layout == "quote":
+        q = u.get("quote")
+        if not (q and q["text"]) and figs:  # a quote slide without a quote shows its first card in the quote's place
+            quote = f'<div class="qfig">{slot(0)}</div>'
+        elif q and q["text"]:
+            size = "" if len(q["text"]) <= 120 else " q-m" if len(q["text"]) <= 240 else " q-l"
+            who = f'<p class="who">— {inline_html(q["speaker"])}</p>' if q["speaker"] else ""
+            quote = f'<blockquote class="q{size}"><p>{inline_html(q["text"])}{_cites_html(q["notes"])}</p></blockquote>{who}'
+        else:
+            quote = ""
+        body = f'<div class="quote-box"><div class="kicker">{heading}</div>{quote}{lines}</div>'
+    else:
+        body = heading + lines
+    return f'<section class="slide layout-{_esc(layout)}">{body}<span class="num">{k}</span></section>'
+
+
 def _unit_body(u: dict[str, Any], pics: dict[str, dict[str, Any]]) -> str:
     """A section's paragraphs with each figure after the paragraph it follows, the rest at the end."""
     placed: dict[Any, list[str]] = {}
@@ -464,13 +552,8 @@ def to_html(m: dict[str, Any], pics: dict[str, dict[str, Any]], *, faces: str | 
         css += SLIDES_CSS
         parts.append(f'<p class="deck-title">{_esc(m["title"])}</p>')
         for k, u in enumerate(m["units"], 1):
-            layout = u["layout"] or ("title" if k == 1 and not u["figures"] else "text")
-            copy = "".join(_para_html(p) for p in u["paragraphs"])
-            figs = "".join(_figure_html(f, pics) for f in u["figures"])
-            head = f"<h2>{inline_html(u['heading'])}</h2>" if u["heading"] else ""
-            body = f'<div class="body"><div class="copy">{copy}</div>' + (f'<div class="figs">{figs}</div>' if figs else "") + "</div>"
             speaker = f'<p class="speaker">{inline_html(u["speaker_notes"])}</p>' if u["speaker_notes"] else ""
-            parts.append(f'<section class="slide layout-{_esc(layout)}">{head}{body}<span class="num">{k}</span></section>{speaker}')
+            parts.append(_slide_html(u, k, pics) + speaker)
     elif m["renderer"] == "story":
         css += STORY_CSS
         parts.append(f"<h1>{inline_html(m['title'])}</h1>{lead}")

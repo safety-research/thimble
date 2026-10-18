@@ -73,6 +73,33 @@ async def test_html_is_one_file_that_loads_nothing_and_links_each_citation(repor
     assert "<link" not in page and 'src="http' not in page and "<script src" not in page
 
 
+async def test_slides_export_lays_each_slide_out_as_the_editor_shows_it(report):
+    """The deck's HTML (which the PDF prints) keeps each slide's layout as the editor draws it: the figure's side and
+    width, the grid, the quote with its speaker, and only the cards the slide's slots show."""
+    doc = {"title": "Deck", "slides": [
+        {"id": "a1b2c3d4", "heading": "Side", "layout": "figure", "format": {"side": "left", "width": 30},
+         "sentences": [{"id": "0000s001", "text": "One line."}],
+         "figures": [{"id": "0000f001", "cell": f"card:{report}", "caption": ""},
+                     {"id": "0000f002", "cell": f"card:{report}", "caption": "unseen"}]},
+        {"id": "b2c3d4e5", "heading": "Grid", "layout": "figures", "format": {"slots": 4, "grid": True},
+         "sentences": [], "figures": [{"id": "0000f003", "cell": f"card:{report}", "caption": ""}]},
+        {"id": "c3d4e5f6", "heading": "Said", "layout": "quote", "figures": [],
+         "sentences": [{"id": "0000q001", "text": "We saw it happen.", "quote": True, "speaker": "ana"}]},
+    ]}
+    m = exports.read_model(CORPUS, doc, "slides")
+    page = exports.to_html(m, {report: {"title": "How many deletions?", "text": "27"}}, faces="")
+    side = page.split('class="slide layout-figure"')[1].split("</section>")[0]
+    assert "grid-template-columns:30fr 70fr" in side and side.index('class="slot"') < side.index('class="lines"')
+    assert "unseen" not in page  # the slide's one slot shows one card; the rest stay unseen, as on screen
+    grid = page.split('class="slide layout-figures"')[1].split("</section>")[0]
+    assert "repeat(2,minmax(0,1fr))" in grid and grid.count('class="slot"') == 4
+    quote = page.split('class="slide layout-quote"')[1].split("</section>")[0]
+    assert "We saw it happen." in quote.split("<blockquote")[1] and "— ana" in quote
+    assert page.count("We saw it happen.") == 1  # the quote stands in the quote cell, not among the lines
+    md = exports.to_markdown(m)
+    assert "> We saw it happen." in md and "> — ana" in md
+
+
 async def test_routes_offer_the_formats_and_save_markdown_as_a_file(report, monkeypatch):
     await _write(report)
     monkeypatch.setattr(exports, "browser", lambda: ("off", "the browser is off in thimble's config"))
