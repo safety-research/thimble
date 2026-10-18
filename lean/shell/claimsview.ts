@@ -1,12 +1,13 @@
 // claimsview.ts: the Claims pane as Claude Code elements: a graph of the session's claims in terminal cells. No `$`:
-// the shell resolves the elements and hands in the store's view (verbs/claims/claims.js viewOf, timeline), the
-// layout (claimgraph.js) and what a press does.
+// the shell resolves the elements and hands in the store's view (verbs/claims/claims.js viewOf), the layout
+// (claimgraph.js) and what a press does.
 //
 //   claimsPaneEl(els, o)   at rest, one island of dots per cluster with its name dim at its centre, and no lines; the
-//                          ring on a claim shows its whole text beside it, keeps its links bright and draws them as thin
-//                          lines, and fades the rest; ↵ fills the bar under the graph (the claim, said in turn N, ×N,
-//                          its sources as cite marks, what it revised or what revised it). The keys are in the hint line
-//                          under the prompt (claimsHint), never in the pane.
+//                          claim the pointer or the ring is on shows a card of what it means beside it (the claim as
+//                          said, Precisely, Based on, Judgment, Not stated), keeps its links bright and draws them as
+//                          thin lines, and fades the rest. A replay (r) grows the graph again in the order the claims
+//                          were made, "turn 2 of 4" in the head, its newest claims marked with their links. The keys
+//                          are in the hint line under the prompt (claimsHint), never in the pane.
 import { compose } from './claimgraph.js'
 import { markColors, verbColor } from './view'
 import type { Theme } from './view'
@@ -26,56 +27,48 @@ export const amberOf = (theme: Theme) => (theme === 'light' ? '#b7791f' : '#e0a4
 export const claimKey = (id: string) => `cl-${id}`
 export const claimOfKey = (key: string) => (/^cl-(.+)$/.exec(String(key || '')) || [])[1] ?? null
 
+/** A replay: how many claims of the order made are grown so far. */
+export type Replay = { gen: number; k: number; order: string[] }
+
 export type ClaimsPaneOpts = {
   w: number
   h: number
   theme: Theme
   view: Any
   lay: Any
-  moments: Any[]
-  cursor: number | null
   focus: string | null
-  selected: string | null
-  search: string | null
-  searching: boolean
-  onSelect: (id: string) => unknown
-  onSource: (i: number) => unknown
-  onSearch: (value: string) => unknown
-  onSearchDone: (value: string) => unknown
+  replay: Replay | null
+  onHover: (id: string) => unknown
 }
 
-/** The rows the bar under the graph takes (a rule and three lines), kept whether or not a claim is selected, so the
- *  graph does not move; and the head's. */
-export const BAR_ROWS = 4
+/** The head's rows (its line and a blank row). */
 export const HEAD_ROWS = 2
 
-/** The claims the time cursor shows (null: all of them). */
-export function shownAt(moments: Any[], cursor: number | null): Set<string> | null {
-  if (cursor == null) return null
-  const out = new Set<string>()
-  moments.forEach((m: Any, i: number) => { if (i <= cursor) for (const id of m.claims) out.add(id) })
-  return out
-}
-/** The claims a search lights: its words in the claim or in a place it was said (null: no search). */
-export function matchesOf(flat: Any[], q: string | null): Set<string> | null {
-  const s = String(q || '').trim().toLowerCase()
-  if (!s) return null
-  return new Set(flat.filter(c => c.text.toLowerCase().includes(s) || (c.said || []).some((p: Any) => String(p.quote || '').toLowerCase().includes(s))).map(c => c.id))
+/** The claims a replay shows (null: all of them), and the ones it added last (about a fifth of a second's worth of
+ *  the replay: they are marked, with their links). */
+export function replayShows(r: Replay | null): { visible: Set<string> | null; newest: Set<string> } {
+  if (!r) return { visible: null, newest: new Set() }
+  const recent = Math.max(1, Math.round(r.order.length * 0.18))
+  return { visible: new Set(r.order.slice(0, r.k)), newest: new Set(r.order.slice(Math.max(0, r.k - recent), r.k)) }
 }
 
-const cutTo = (s: string, n: number) => (s.length <= n ? s : s.slice(0, Math.max(0, n - 1)) + '…')
+/** Where a replay is, for the head: "turn 2 of 4" (the turn of the claim it showed last), "the corpus", or "replay"
+ *  before the first claim. */
+export function replayWhere(r: Replay, flat: Any[]): string {
+  const last = r.k ? flat.find(c => c.id === r.order[r.k - 1]) : null
+  if (!last) return 'replay'
+  if (last.by === 'orientation') return 'the corpus'
+  const turns = flat.map(c => c.turn).filter((t: unknown) => typeof t === 'number') as number[]
+  return last.turn == null ? 'replay' : `turn ${last.turn} of ${Math.max(...turns)}`
+}
 
-/** The hint line under the prompt while the pane has the keys: only the keys of what has focus. */
-export function claimsHint(o: { search: string | null; searching: boolean; time: boolean; selected: Any | null; offer: Any | null }): string {
-  if (o.searching) return 'type to search · ↵ done · esc close'
-  if (o.time) return '] [ turn · t now · esc close'
-  const n = o.selected ? Math.min(7, (o.selected.sources || []).length) : 0
-  const offer = o.offer ? ` · m map the corpus ~${o.offer.minutes} min ~${Math.round((o.offer.tokens || 0) / 1000)}k tokens` : ''
-  return `↑ ↓ move · ↵ select${n ? ` · ${n > 1 ? `1–${n}` : '1'} source` : ''} · n cluster · / search · t time · esc close${offer}`
+/** The hint line under the prompt while the pane has the keys. (Its argument is not read: every state has these keys.) */
+export function claimsHint(_o?: unknown): string {
+  return 'r replay · esc close'
 }
 
 export function claimsPaneEl(els: Any, o: ClaimsPaneOpts): Any {
-  const { Box, Button, Text, Input } = els
+  const { Box, Button, Text } = els
   const tone = verbColor('c', o.theme)
   const amber = amberOf(o.theme)
   const cite = markColors(o.theme).cite
@@ -84,28 +77,16 @@ export function claimsPaneEl(els: Any, o: ClaimsPaneOpts): Any {
   const groups = (v.groups as Any[]).filter(g => g.id != null)
   const colorOfCluster = new Map<string, string>(groups.map((g, i) => [String(g.id), clusterColor(i, o.theme)]))
   const colorOf = (c: Any) => colorOfCluster.get(String(c.cluster)) || (o.theme === 'light' ? '#85837c' : '#9c978d')
-  const visible = shownAt(o.moments, o.cursor)
-  const matches = matchesOf(v.flat, o.search)
-  // the head: how many, or the search, or the time
-  // the head: how many, or where time is, and the search (a field while it is typed, then its words)
-  const n = matches ? [...matches].filter(id => !visible || visible.has(id)).length : 0
-  const m = visible ? o.moments[o.cursor ?? 0] : null
-  const where = visible ? `${m ? (m.by === 'orientation' ? 'the corpus' : `turn ${m.turn ?? '?'} · ${m.what}`) : ''} · ${visible.size} of ${v.total}` : `${v.total} · ${v.clusters} cluster${v.clusters === 1 ? '' : 's'}`
-  const head = Box({ key: 'head', flexDirection: 'row', width: w, children: [
-    Text({ color: tone, bold: true, children: 'Claims   ' }),
-    ...(o.searching
-      ? [Text({ children: '/ ' }), Input({ key: 'search', value: o.search ?? '', autoFocus: true, submitLabel: 'done', onInput: (x: string) => o.onSearch(x), onSubmit: (x: string) => o.onSearchDone(x) }), Text({ dimColor: true, children: `   ${n} match${n === 1 ? '' : 'es'}` })]
-      : o.search
-        ? [Text({ children: `/ ${o.search}` }), Text({ dimColor: true, children: `   ${n} match${n === 1 ? '' : 'es'}${visible ? '   ' + where : ''}` })]
-        : [Text({ dimColor: true, children: where })]),
-  ] })
+  const { visible, newest } = replayShows(o.replay)
+  const where = o.replay ? replayWhere(o.replay, v.flat) : `${v.total} · ${v.clusters} cluster${v.clusters === 1 ? '' : 's'}`
+  const head = Box({ key: 'head', flexDirection: 'row', width: w, children: [Text({ color: tone, bold: true, children: 'Claims   ' }), Text({ dimColor: true, children: where })] })
   if (!v.total) {
     return Box({ flexDirection: 'column', width: w, children: [head, Text({ children: ' ' }), Text({ dimColor: true, children: 'No claims yet.' })] })
   }
   // a layout that is missing (a drawing older than its module, after a reload) says so; it never throws
   if (!o.lay || !o.lay.pos) return Box({ flexDirection: 'column', width: w, children: [head, Text({ children: ' ' }), Text({ color: 'error', children: 'The graph could not be laid out. Press esc, then c to open it again.' })] })
-  // the graph, a cell per character; a claim's cell a press, so the ring lands on it and ↵ selects it
-  const rows = compose({ claims: v.flat, clusters: groups, lay: o.lay, visible, focus: o.focus, selected: o.selected, matches, query: o.search, colorOf, amber })
+  // the graph, a cell per character; a claim's cell a press, so the ring (or a click) lands on it and its card shows
+  const rows = compose({ claims: v.flat, clusters: groups, lay: o.lay, visible, newest, focus: o.replay ? null : o.focus, colorOf, amber, cite })
   // a faded claim keeps a pale tint of its color (the dim attribute would turn it gray)
   const paper = o.theme === 'light' ? [255, 255, 255] : [30, 30, 30]
   const fade = (hex: string) => {
@@ -119,40 +100,13 @@ export function claimsPaneEl(els: Any, o: ClaimsPaneOpts): Any {
     if (st.color) p.color = st.faint && /^#[0-9a-f]{6}$/i.test(st.color) ? fade(st.color) : st.color
     if (st.dim || (st.faint && !st.color)) p.dimColor = true
     if (st.bold) p.bold = true
-    if (st.strike) p.strikethrough = true
-    if (st.sel) p.backgroundColor = o.theme === 'light' ? '#e4ddfb' : '#322b52'
-    if (st.mark) { p.backgroundColor = o.theme === 'light' ? '#f6e3a8' : '#5a4a1f'; p.color = o.theme === 'light' ? '#1f1e1c' : '#ffffff' }
+    if (st.underline) p.underline = true
+    // a replay's newest claims, marked as the demo marks them
+    if (st.mark) p.backgroundColor = o.theme === 'light' ? '#f6e3a8' : '#5a4a1f'
     return p
   }
   const graph = rows.map((runs: Any[], y: number) => Box({ key: `g${y}`, flexDirection: 'row', width: w, height: 1, children: runs.map((r, i) => (r.node
-    ? Button({ key: claimKey(r.node), plain: true, label: `claim: ${(v.flat as Any[]).find(c => c.id === r.node)?.text ?? ''}`, children: [Text({ ...style(r.style), children: r.s })], onPress: () => o.onSelect(r.node) })
+    ? Button({ key: claimKey(r.node), plain: true, label: `claim: ${(v.flat as Any[]).find(c => c.id === r.node)?.text ?? ''}`, children: [Text({ ...style(r.style), children: r.s })], onPress: () => o.onHover(r.node) })
     : Text({ key: `t${y}-${i}`, ...style(r.style), children: r.s }))) }))
-  // the bar: the selected claim, said in turn N, ×N, its sources as cite marks, what it revised or what revised it
-  const bar: Any[] = []
-  const c = o.selected ? (v.flat as Any[]).find(x => x.id === o.selected) : null
-  if (c) {
-    const first = c.said[0] || {}
-    const said = first.by === 'orientation' ? 'from the corpus orientation' : `said in turn ${first.turn ?? '?'}${first.by === 'person' ? ' by you' : ''}`
-    const revised = !!c.revised_by && (!visible || visible.has(c.revised_by))
-    bar.push(Text({ key: 'b-rule', dimColor: true, children: '─'.repeat(w) }))
-    bar.push(Box({ key: 'b1', flexDirection: 'row', width: w, children: [
-      Text({ color: colorOf(c), children: '● ' }),
-      Text({ bold: true, ...(revised ? { strikethrough: true } : {}), children: cutTo(c.text, w - 12) }),
-      ...(revised ? [Text({ dimColor: true, children: '  revised' })] : []),
-    ] }))
-    const kids: Any[] = [Text({ dimColor: true, children: `  ${said}` })]
-    if (c.n >= 2) kids.push(Text({ dimColor: true, children: ' · ' }), Text({ color: tone, bold: true, children: `×${c.n}` }))
-    ;(c.sources || []).slice(0, 7).forEach((s: Any, i: number) => {
-      kids.push(Text({ dimColor: true, children: ' · ' }))
-      kids.push(Button({ key: `src-${i}`, plain: true, label: `cite ${s.label || s.ref}`, children: [Text({ color: cite, underline: true, children: cutTo(String(s.label || s.ref), 28) })], onPress: () => o.onSource(i) }))
-    })
-    bar.push(Box({ key: 'b2', flexDirection: 'row', width: w, children: kids }))
-    const rep = revised ? c.replacement : null
-    const org = c.original && (!visible || visible.has(c.original.id)) ? c.original : null
-    if (rep) bar.push(Box({ key: 'b3', flexDirection: 'row', width: w, children: [Text({ dimColor: true, children: `  revised in turn ${rep.turn ?? '?'} to ` }), Text({ children: cutTo(rep.text, w - 26) })] }))
-    else if (org) bar.push(Box({ key: 'b3', flexDirection: 'row', width: w, children: [Text({ dimColor: true, children: '  revised from ' }), Text({ dimColor: true, strikethrough: true, children: cutTo(org.text, w - 36) }), Text({ dimColor: true, children: ` · said in turn ${org.turn ?? '?'}` })] }))
-    else if (first.quote) bar.push(Text({ key: 'b3', dimColor: true, children: cutTo(`  "${first.quote}"`, w) }))
-  }
-  while (bar.length < BAR_ROWS) bar.push(Text({ key: `b-pad${bar.length}`, children: ' ' }))
-  return Box({ flexDirection: 'column', width: w, children: [head, Text({ key: 'sp', children: ' ' }), ...graph, ...bar] })
+  return Box({ flexDirection: 'column', width: w, children: [head, Text({ key: 'sp', children: ' ' }), ...graph] })
 }

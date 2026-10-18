@@ -1,20 +1,20 @@
 {
   "key": "c",
   "name": "claims",
-  "line": "the claims made in this session, deduped and grouped by what the work is doing, each with where it was said, its sources and how often it was said again",
+  "line": "the claims made in this session, deduped and grouped by what the work is doing, each with what exactly it means and where it was said",
   "order": 1.5,
   "row": true,
   "store": "thimble/claims/<session>.json (CONTRACT 7), written by claims.js",
-  "writer": "the observer's one fork after each turn of work gives the turn's claims, and claims.js applyTurn places, dedupes, links and clusters them; the corpus orientation (a subagent of main, guided by SKILL.md) adds the corpus's claims with `lean verb claims save`",
-  "offer": "estimate.mjs: the corpus orientation, offered in the list with its time and tokens, never started on its own",
+  "writer": "the observer's one fork after each turn of work gives the turn's claims, each with what it means (precisely, based_on, judgment, unstated), and claims.js applyTurn places, dedupes, links and clusters them; the corpus orientation (a subagent of main, guided by SKILL.md) adds the corpus's claims with `lean verb claims save`",
+  "offer": "estimate.mjs: the time and tokens of the corpus orientation, which /verb claims orient asks Claude to start",
   "forms": {
-    "terminal": "c under a message: the clusters with their claims (+ new, struck through → the replacement, ×N); a claim opens in the tray with where it was said, its sources and what revised it",
-    "browser": "shell/browser/claims/: clusters as regions, revised claims struck through and linked, a claim's panel"
+    "terminal": "c: the claims as a graph, an island of dots per cluster; the claim the ring is on shows a card of what it means and its links; r replays the graph in the order the claims were made",
+    "browser": "shell/browser/claims/: the same graph; pointing at a claim shows its card and its links; a click opens the message where it was said; Replay or r grows the graph again"
   },
   "keys": {
-    "c": "open or close the claims list under the message",
-    "1-9": "open a cluster (its first claim in the tray), or the orientation's offer; in a claim's card, 1 asks and 2-9 open its sources",
-    "] [": "step through the claims",
-    "0": "close the claim's card, then the list"
+    "c": "open or close the claims graph",
+    "arrow keys": "move the ring from claim to claim",
+    "r": "replay the graph in the order the claims were made (any key stops it)",
+    "esc": "close the graph"
   }
 }

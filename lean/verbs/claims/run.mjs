@@ -1,13 +1,13 @@
 // run.mjs: the Claims verb (key c). The session's claims are kept in thimble/claims/<session>.json (claims.js): the
 // observer's one look after each turn of work adds the turn's claims, so pressing c needs no model call. The shell
-// draws the list itself (shell/claimsview.ts); this run answers /verb claims and the list's one offer:
+// draws the graph itself (shell/claimsview.ts); this run answers /verb claims and /verb claims orient:
 //
 //   run(ctx) -> {text, note}          the claims so far, in a line
 //   run(ctx) with args 'orient'       -> {ask}: the corpus orientation, which a subagent of main does
 //
 // ---------------------------------------------------------------------------------------------- the corpus orientation
-// The list offers it with its time and tokens (estimate.mjs, fitted to three live builds), and only the person's press
-// runs it. Pressing it asks main (`ask`) to start one subagent with a brief; the subagent reads with `lean sources`,
+// Its time and tokens come from estimate.mjs (fitted to three live builds), and only the person's /verb claims orient
+// runs it. That asks main (`ask`) to start one subagent with a brief; the subagent reads with `lean sources`,
 // `lean rows` and `lean q`, writes its claims as JSON and checks them with `lean verb claims check`; main then runs
 // `lean verb claims save`, which puts them in the session's Claims marked as the orientation's. Why a subagent and not
 // main: building it reads tens of thousands of tokens of rows; in main they would ride along with every later request,

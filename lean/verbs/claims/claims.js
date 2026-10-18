@@ -4,7 +4,8 @@
 // The store is one JSON file per session, thimble/claims/<session>.json (CONTRACT 7):
 //
 //   {v: 1, session, updated,
-//    claims: [{id, text, kind, by, cluster, turn, said: [place], sources: [{ref, label}], revises?, revised_by?}],
+//    claims: [{id, text, kind, by, cluster, turn, said: [place], sources: [{ref, label}], revises?, revised_by?,
+//              precisely?, based_on?, judgment?, unstated?}],
 //    clusters: [{id, name, turn, named, from?}],
 //    gaps: [{turn, why}]}
 //
@@ -12,9 +13,15 @@
 //            (claude | person), the words matched and their sentence, as offsets into the row's markdown. A claim
 //            from the corpus orientation has {by: 'orientation', at} and its evidence as sources.
 //   ×N       a claim's said.length: each distinct place it was said.
+//   what it means (the fork gives it with the claim, so pointing at a claim costs nothing):
+//            precisely  the claim restated so it can be checked: the quantity, what it is counted out of, the window,
+//                       how it was measured
+//            based_on   the evidence in a few words: source · scope · rows
+//            judgment   only when a word of the claim is Claude's reading, not a measurement: that word and why
+//            unstated   only when `precisely` needs a denominator or a window Claude did not state: what is missing
 //
 // After a turn of work the observer's one fork lists the turn's claims ({claim, quote, by, kind, cluster, same,
-// revises}); applyTurn places each by its quote in the turn's messages, takes the citations in or near its sentence
+// revises, precisely, based_on, judgment, unstated}); applyTurn places each by its quote in the turn's messages, takes the citations in or near its sentence
 // as its sources, merges a restatement into the claim it repeats (a new place, so ×N grows), links a correction both
 // ways (revises / revised_by), and puts each new claim in a cluster: one named so far, or a new one.
 import { blocks, linkMarks } from '../../shell/message.js'
@@ -249,7 +256,7 @@ export function sourcesNear(md, start, end, text = '') {
 }
 
 /** Sources as {ref, label}: a bare ref (an older store, an orientation's evidence) is read as its own label. */
-export const sourceOf = x => (typeof x === 'string' ? { ref: x, label: shortRef(x) } : x && typeof x.ref === 'string' ? { ref: x.ref, label: x.label || shortRef(x.ref) } : null)
+export const sourceOf = x => (typeof x === 'string' ? { ref: x, label: shortRef(x) } : x && typeof x.ref === 'string' ? { ref: x.ref, label: x.label || shortRef(x.ref), ...(Array.isArray(x.values) ? { values: x.values } : {}) } : null)
 
 /** A ref as a person reads it: a row as `file:line`, a query value as `q3 · day=… · n`. */
 export function shortRef(ref) {
@@ -287,7 +294,7 @@ export function wordsIn(md, start, end) {
 
 /**
  * Where a claim was said: its quote found in one of the turn's places (the person's message for `by: person`, else
- * Claude's messages, newest first; then any). A place is {row, by, turn, text}; returns the place as the store keeps
+ * Claude's messages, newest first; then any). A place is {row, by, turn, text, sparks?: {ref: values}}; returns the place as the store keeps
  * it, with the sources near it, or null when the quote is in none of them.
  */
 export function locate(quote, places, by = 'claude', text = '') {
@@ -298,6 +305,8 @@ export function locate(quote, places, by = 'claude', text = '') {
     const hit = findQuote(p.text, quote)
     if (!hit) continue
     const sent = sentenceAt(p.text, hit.start, hit.end)
+    // a sparkline's values come along with its source, so the views draw it with no lookup
+    const sources = sourcesNear(p.text, hit.start, hit.end, text).map(s => (p.sparks && Array.isArray(p.sparks[s.ref]) ? { ...s, values: p.sparks[s.ref] } : s))
     return {
       place: {
         row: p.row, by: p.by || 'claude', turn: p.turn ?? null,
@@ -305,7 +314,7 @@ export function locate(quote, places, by = 'claude', text = '') {
         sentence: cutTo(wordsIn(p.text, sent.start, sent.end), MAX_SENTENCE),
         start: hit.start, end: hit.end,
       },
-      sources: sourcesNear(p.text, hit.start, hit.end, text),
+      sources,
       exact: hit.exact,
     }
   }
@@ -381,6 +390,17 @@ function applyClusters(store, list, grown, turn) {
 
 // ------------------------------------------------------------------------------------------------ one turn
 
+/** What a claim means, as the fork gave it: each part a short line of plain words, or left out. */
+export const MEANING = { precisely: 240, based_on: 140, judgment: 160, unstated: 160 }
+export function meaningOf(x) {
+  const out = {}
+  for (const [k, n] of Object.entries(MEANING)) {
+    const v = str(x?.[k] ?? (k === 'based_on' ? x?.basedOn : undefined), n).trim()
+    if (v && !/^(none|n\/a|-|null)$/i.test(v)) out[k] = v
+  }
+  return out
+}
+
 /** The fork's claims, held to what the store needs; anything else is dropped. */
 export function parseClaims(list) {
   const out = []
@@ -392,7 +412,7 @@ export function parseClaims(list) {
     const text = str(x.claim ?? x.text, MAX_TEXT)
     if (!quote || (!same && !text)) continue
     // `at`: its place in the fork's list (1 for the first), which a later claim of the same turn revises as "#1"
-    out.push({ at: i + 1, text, quote, by, kind: kindOf(x.kind), cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null })
+    out.push({ at: i + 1, text, quote, by, kind: kindOf(x.kind), cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null, meaning: meaningOf(x) })
   }
   return out.slice(0, 40)
 }
@@ -414,8 +434,9 @@ export function restates(store, text, skip = new Set()) {
 /**
  * One turn's claims into the store (changed in place, and returned). `places` are the turn's messages, each
  * {row, by, turn, text}; `out` is the fork's {claims, clusters}; `grown` the clusters the fork was offered to rename
- * or split. Returns {store, added, restated, revised, dropped, clusters}: the ids of new claims, of claims said again,
- * of claims a new one corrects, and why each dropped one was dropped.
+ * or split. Returns {store, added, restated, revised, unstated, dropped, clusters}: the ids of new claims, of claims
+ * said again, of claims a new one corrects, of new claims whose denominator or window was not stated, and why each
+ * dropped one was dropped.
  */
 export function applyTurn(store, { places = [], out = {}, turn = null, at = null, grown = [] } = {}) {
   const res = { store, added: [], restated: [], revised: [], dropped: [], clusters: [] }
@@ -439,6 +460,8 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     }
     if (target) {
       local.set(it.at, target.id)
+      // a restatement can say what the claim means when the first saying did not
+      for (const [k, v] of Object.entries(it.meaning)) if (!target[k]) target[k] = v
       if (!target.said.some(p => samePlace(p, where.place))) {
         target.said.push(where.place)
         addSources(target, where.sources)
@@ -447,7 +470,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
       continue
     }
     const id = nextId(store.claims, 'c')
-    const claim = { id, text: it.text, kind: it.kind, by: it.by, cluster: clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources }
+    const claim = { id, text: it.text, kind: it.kind, by: it.by, cluster: clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources, ...it.meaning }
     const old = it.revises ? store.claims.find(c => c.id === it.revises) : null
     if (old) {
       claim.revises = old.id
@@ -460,6 +483,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     res.added.push(id)
     local.set(it.at, id)
   }
+  res.unstated = res.added.filter(id => store.claims.find(c => c.id === id)?.unstated)
   res.clusters = applyClusters(store, out?.clusters, grown, turn)
   // a cluster named this turn counts its first claims as named
   for (const c of store.clusters) if (!c.named) c.named = Math.max(1, sizeOf(store, c.id))
@@ -474,12 +498,13 @@ export function noteGap(store, turn, why) {
   return store
 }
 
-/** The note `c` lights with for one turn: "1 claim revised · 3 new", "3 new claims", or '' when nothing new came. A
- *  revision comes first: it changes what the person was told. */
+/** The note `c` lights with for one turn: what the new claims leave open first ("2 claims need a denominator": their
+ *  denominator or window was not stated), else "3 new claims", or '' when nothing new came. A revision is a new claim
+ *  too: the graph shows the claim it replaced as a hollow dot, and nothing more says so. */
 export function noteFor(res) {
   const n = res?.added?.length || 0
-  const r = res?.revised?.length || 0
-  if (r) return `${r} claim${r === 1 ? '' : 's'} revised${n - r > 0 ? ` · ${n - r} new` : ''}`
+  const open = res?.unstated?.length || 0
+  if (open) return `${open} claim${open === 1 ? ' needs' : 's need'} a denominator`
   return n ? `${n} new claim${n === 1 ? '' : 's'}` : ''
 }
 
@@ -561,7 +586,7 @@ export function mergeOrientation(store, data, { at = null, turn = null } = {}) {
  * The store as the views list it: the clusters in the order their work began (the session's first, the orientation's
  * after), each with its claims in the order said, and the claims between clusters last. `fresh` holds the ids to mark
  * as new (a message's own). Each claim carries `n` (×N), `replacement` (the claim that revised it) and `order` (its
- * place in the flat list that ] and [ step through).
+ * place in the flat list).
  */
 export function viewOf(store, { fresh = [] } = {}) {
   const isNew = new Set(fresh)
@@ -586,7 +611,7 @@ export function viewOf(store, { fresh = [] } = {}) {
  * The session in time: one moment per message that first said a claim (the person's prompt, Claude's messages, the
  * corpus orientation), in the order said. `order` is the session's message rows in order (its index); `final` the
  * rows that are a turn's answer. Each moment is {key, row, by, turn, what, claims: [ids first said there]}, `what`
- * being 'you', 'answer', 'working' or 'corpus'. The views replay the claims moment by moment.
+ * being 'you', 'answer', 'working' or 'corpus'. A replay grows the graph in this order.
  */
 export function timeline(store, { order = [], final = [] } = {}) {
   const pos = new Map(order.map((r, i) => [r, i]))
@@ -609,13 +634,9 @@ export function timeline(store, { order = [], final = [] } = {}) {
   return list
 }
 
-/** The claims said by moment k of a timeline (all of them for k past its end), and those first said at k. */
-export function claimsAt(moments, k) {
-  const upto = new Set()
-  const at = new Set()
-  moments.forEach((m, i) => { if (i <= k) for (const id of m.claims) { upto.add(id); if (i === k) at.add(id) } })
-  return { upto, at }
-}
+/** The claims in the order they were made (the order a replay grows them in): the timeline's moments, each one's
+ *  claims in the order said. */
+export const madeOrder = (store, o = {}) => timeline(store, o).flatMap(m => m.claims)
 
 /** The claims first said in a turn (a message's new claims). */
 export const claimsOfTurn = (store, turn) => store.claims.filter(c => c.turn === turn && c.by !== 'orientation').map(c => c.id)

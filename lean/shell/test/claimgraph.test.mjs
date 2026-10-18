@@ -1,17 +1,18 @@
 // The Claims graph in cells (shell/claimgraph.js): the layout keeps each cluster an island that fills the area, no two
-// claims touch and a cluster's name touches none; at rest no line is drawn; the ring's claim shows its text and its
-// links, a revision dashed; a search lights its matches with their labels, the words found marked.
+// claims touch and a cluster's name touches none; at rest no line is drawn; the hovered claim shows a card of what it
+// means (at most five lines in a thin frame) and its links, a revision dashed and faint; a claim whose denominator was
+// not stated has a faint ? beside it; a replay shows the claims made so far, the newest marked with their links.
 //   node --test lean/shell/test/claimgraph.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { applyTurn, emptyStore, viewOf } from '../../verbs/claims/claims.js'
-import { compose, layout, line, neighbours } from '../claimgraph.js'
+import { cardLines, compose, layout, line, neighbours } from '../claimgraph.js'
 
 function store() {
   const s = emptyStore('s1')
   const text = Array.from({ length: 18 }, (_, i) => `Fact number ${i + 1} holds for wiki ${'abc'[i % 3]}.`).join(' ')
   applyTurn(s, { places: [{ row: 'r1', by: 'claude', turn: 1, text }], turn: 1, out: { claims: Array.from({ length: 18 }, (_, i) => ({ claim: `Fact ${i + 1} about wiki ${'abc'[i % 3]}`, quote: `Fact number ${i + 1} holds`, kind: 'finding', cluster: `wiki ${'abc'[i % 3]}` })) } })
-  applyTurn(s, { places: [{ row: 'r2', by: 'claude', turn: 2, text: 'No: fact number 2 is wrong, it is 3.' }], turn: 2, out: { claims: [{ claim: 'Fact 2 is wrong; it is 3', quote: 'fact number 2 is wrong', kind: 'finding', revises: 'c2' }] } })
+  applyTurn(s, { places: [{ row: 'r2', by: 'claude', turn: 2, text: 'No: fact number 2 is wrong, it is 3.' }], turn: 2, out: { claims: [{ claim: 'Fact 2 is wrong; it is 3', quote: 'fact number 2 is wrong', kind: 'finding', revises: 'c2', precisely: 'Wiki b holds 3 of the facts, not 2, counted over all its pages', based_on: 'q2 · wiki b, all pages · 3 rows', judgment: "'wrong' is a reading: the first count used one page", unstated: 'All of June, or only after June 18?' }] } })
   return s
 }
 const draw = (rows) => rows.map(r => r.map(x => x.s).join('')).join('\n')
@@ -38,11 +39,11 @@ test('the layout: each cluster an island, no two claims touching, every claim in
   assert.deepEqual([...layout(v.flat, groups, { w: 100, h: 30 }).pos], [...lay.pos])
 })
 
-test('at rest no line is drawn; the ring\'s claim shows its text and its links, a revision dashed in amber; the rest fades', () => {
+test('at rest no line is drawn; the hovered claim shows its card and its links, a revision dashed and faint; the rest fades', () => {
   const v = viewOf(store())
   const groups = v.groups.filter(g => g.id)
-  const lay = layout(v.flat, groups, { w: 100, h: 30 })
-  const base = { claims: v.flat, clusters: groups, lay, visible: null, selected: null, matches: null, colorOf: c => `#00000${groups.findIndex(g => g.id === c.cluster)}`, amber: '#e0a43a' }
+  const lay = layout(v.flat, groups, { w: 120, h: 30 })
+  const base = { claims: v.flat, clusters: groups, lay, visible: null, colorOf: c => `#00000${groups.findIndex(g => g.id === c.cluster)}`, amber: '#e0a43a', cite: '#4f46e5' }
   const rest = compose({ ...base, focus: null })
   const t = draw(rest)
   assert.doesNotMatch(t, /[─│╱╲╌╎]/)
@@ -50,35 +51,67 @@ test('at rest no line is drawn; the ring\'s claim shows its text and its links, 
   assert.equal((t.match(/○/g) || []).length, 1)
   for (const name of ['wiki a', 'wiki b', 'wiki c']) assert.ok(t.includes(name))
   assert.ok(rest.flat().filter(r => r.node).every(r => !r.style.faint))
-  // the ring on the correction: its text, a dashed amber line to the claim it revised, the rest faded
+  // the claim whose window was not stated has a faint ? beside it
+  const p19 = lay.pos.get('c19')
+  assert.equal(rest[p19.y].map(r => r.s).join('')[p19.x + 1], '?')
+  // the hover on the correction: its card, a faint dashed amber line to the claim it revised, the rest faded
   const near = neighbours(v.flat, 'c19')
   assert.equal(near.get('c2'), 'revised')
   const f = compose({ ...base, focus: 'c19' })
   const ft = draw(f)
-  assert.ok(ft.includes('Fact 2 is wrong; it is 3'))
-  assert.ok(f.flat().some(r => r.style && r.style.color === '#e0a43a'))
+  for (const words of ['│ ● Fact 2 is wrong; it is 3', 'precisely   Wiki b holds 3 of the facts, not 2', 'based on    q2 · wiki b, all pages · 3 rows', "judgment    'wrong' is a reading", 'not stated  All of June, or only after June 18?']) assert.ok(ft.includes(words), words)
+  // five lines in a thin frame
+  assert.ok(f.card && f.card.h === 7)
+  assert.ok(ft.includes('┌─') && ft.includes('─┘'))
+  assert.ok(f.flat().some(r => r.style && r.style.color === '#e0a43a' && r.style.faint && /[╌╎╱╲]/.test(r.s)))
+  // the card never covers its own claim, and Based on reads as a cite
+  const pf = lay.pos.get('c19')
+  assert.ok(!(pf.y >= f.card.y && pf.y < f.card.y + f.card.h && pf.x >= f.card.x && pf.x < f.card.x + f.card.w))
+  assert.ok(f.flat().some(r => r.style && r.style.color === '#4f46e5' && r.style.underline && r.s.includes('q2 · wiki b')))
+  // every claim keeps its press, also one the card covers, so a focus ring kept by place stays on its claim
   const nodes = f.flat().filter(r => r.node)
-  assert.equal(nodes.find(r => r.node === 'c2').style.faint, false)
-  assert.ok(nodes.filter(r => r.style.faint).length >= 15)
+  assert.equal(nodes.length, 19)
+  assert.equal(nodes.find(r => r.node === 'c19').style.faint, false)
+  assert.ok(nodes.filter(r => r.style?.faint).length >= 8)
   // lines are cells of glyphs between two claims, their ends left out
   assert.deepEqual(line({ x: 0, y: 0 }, { x: 4, y: 0 }).map(p => p.ch).join(''), '───')
   assert.deepEqual(line({ x: 0, y: 0 }, { x: 0, y: 3 }).map(p => p.ch).join(''), '││')
 })
 
-test('a search lights its matches with their labels, the words found marked; time shows the claims made by then', () => {
+test('a card is at most five lines: the claim and Precisely wrap to two while there is room; a sparkline draws beside Based on', () => {
+  const text = (lines) => lines.map(l => l.map(r => r.s).join(''))
+  const long = { text: 'June 18 had the most saves of any day in the wiki, by far, and most were by agents', precisely: 'June 18 had 6,543 saves, the most of the 92 days from May 1 to July 31, counted from revisions.jsonl', based_on: 'q1 · revisions.jsonl, May–July · 6,543 rows', sources: [{ ref: 'q1@n', values: [1, 2, 9, 3] }] }
+  const a = text(cardLines(long, 60))
+  assert.equal(a.length, 5)
+  assert.ok(a[0].startsWith('● June 18 had the most saves'))
+  assert.ok(a[2].startsWith('precisely'))
+  assert.ok(a[3].startsWith('            '))
+  assert.match(a[4], /^based on {4}q1 · revisions\.jsonl.*[▁▂▃▄▅▆▇]{4}$/)
+  // with a judgment and what was not stated, the claim and Precisely take one line each
+  const b = text(cardLines({ ...long, judgment: "'by far' is a reading: no test", unstated: 'Of all days, or of weekdays?' }, 60))
+  assert.equal(b.length, 5)
+  assert.deepEqual(b.map(l => l.slice(0, 11).trim()), ['● June 18 h', 'precisely', 'based on', 'judgment', 'not stated'])
+  assert.ok(b.every(l => l.length <= 60))
+  // a claim with none of it (an older store): its words, and its sources as Based on
+  assert.deepEqual(text(cardLines({ text: 'Bots made 4% of edits', sources: [{ ref: 'q5#bot=yes@share', label: '4%' }] }, 60)), ['● Bots made 4% of edits', 'based on    q5 · bot=yes · share'])
+})
+
+test('a replay shows the claims made so far, the newest marked with their links, and no revision before it is made', () => {
   const v = viewOf(store())
   const groups = v.groups.filter(g => g.id)
   const lay = layout(v.flat, groups, { w: 120, h: 34 })
-  const matches = new Set(['c1', 'c19'])
-  const rows = compose({ claims: v.flat, clusters: groups, lay, visible: null, focus: null, selected: null, matches, query: 'wrong', colorOf: () => '#000000', amber: '#e0a43a' })
+  const order = v.flat.map(c => c.id).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
+  const visible = new Set(order.slice(0, 18))
+  const rows = compose({ claims: v.flat, clusters: groups, lay, visible, newest: new Set(['c18']), focus: null, colorOf: () => '#000000', amber: '#e0a43a' })
   const t = draw(rows)
-  assert.ok(t.includes('Fact 1 about wiki a'))
-  assert.ok(t.includes('Fact 2 is wrong; it is 3'))
-  assert.ok(rows.flat().some(r => r.style && r.style.mark && r.s.includes('wrong')))
-  assert.ok(rows.flat().filter(r => r.node && !matches.has(r.node)).every(r => r.style.faint))
-  // at turn 1 the correction is not made yet: 18 claims, none hollow
-  const visible = new Set(v.flat.filter(c => c.turn === 1).map(c => c.id))
-  const t1 = draw(compose({ claims: v.flat, clusters: groups, lay, visible, focus: null, selected: null, matches: null, colorOf: () => '#000000', amber: '#e0a43a' }))
-  assert.equal((t1.match(/[●○◉]/g) || []).length, 18)
-  assert.ok(!t1.includes('○'))
+  assert.equal((t.match(/[●○◉]/g) || []).length, 18)
+  assert.ok(!t.includes('○'))
+  assert.equal(rows.flat().find(r => r.node === 'c18').style.mark, true)
+  assert.equal(rows.flat().find(r => r.node === 'c17').style.mark, undefined)
+  // the newest claim's links are drawn (c18 was said beside c17 in the same message)
+  assert.match(t, /[─│╱╲]/)
+  // a cluster's name shows once a claim of it is made
+  const first = compose({ claims: v.flat, clusters: groups, lay, visible: new Set(['c1']), focus: null, colorOf: () => '#000000', amber: '#e0a43a' })
+  assert.ok(draw(first).includes('wiki a'))
+  assert.ok(!draw(first).includes('wiki b'))
 })

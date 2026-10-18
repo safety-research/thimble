@@ -120,7 +120,7 @@ declare module 'claude-code' {
       /** the tray above the prompt, or none */
       tray: Tray | null
       /** the line a verb opened under a message's verb row, or none */
-      /** the line a verb opened under a message's verb row (for c, the claims list, with the cluster opened), or none */
+      /** the line a verb opened under a message's verb row (c opens the Claims pane instead), or none */
       pick: { row: string; verb: string; open?: string | null } | null
       /** the message the keys act on, when the person picked one other than the latest */
       selrow: string | null
@@ -146,11 +146,9 @@ declare module 'claude-code' {
       claims: Record<string, unknown> | null
       /** a turn's prompt row, its number and Claude's message rows, by turn id: where its claims were said */
       turns: StateFamily<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null>
-      /** the Claims pane: the message it was opened from, the claim the ring is on and the one selected, the time
-       *  cursor, the search */
-      claimpane: { row: string; focus: string | null; selected: string | null; cursor: number | null; search: string | null; searching: boolean } | null
-      /** what the corpus orientation would map in the folder, with its time and tokens */
-      claimoffer: { root: string; offer: { what: string; minutes: number | null; tokens: number | null } | null } | null
+      /** the Claims pane: the message it was opened from, the claim the ring is on (its card shows), and the replay
+       *  while one grows the graph (how many of the claims, in the order made, are shown) */
+      claimpane: { row: string; focus: string | null; replay: { gen: number; k: number; order: string[] } | null } | null
     }
   }
 }
