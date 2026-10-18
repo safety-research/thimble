@@ -278,7 +278,11 @@ const addSources = (claim, list) => {
 
 /** The words a person reads in [start, end) of the markdown, on one line. */
 export function wordsIn(md, start, end) {
-  return plainOf(String(md || '').slice(start, end)).plain.replace(/\s+/g, ' ').trim()
+  // read as a whole, so a range that ends inside a link's words still reads as words
+  const p = plainOf(md)
+  let out = ''
+  for (let i = 0; i < p.plain.length; i++) if (p.at[i] >= start && p.at[i] < end) out += p.plain[i]
+  return out.replace(/\s+/g, ' ').trim()
 }
 
 /**

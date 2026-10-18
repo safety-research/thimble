@@ -108,6 +108,8 @@ test('a claim is placed in the message that says it: the person\'s for theirs, e
   assert.equal(w.place.sentence, 'Bots made 4% of edits.')
   assert.equal(A1.slice(w.place.start, w.place.end), 'Bots made [4%](q5#bot=yes@share) of edits')
   assert.equal(locate('not in any message at all here', PLACES1), null)
+  // a quote that ends inside a citation's words reads as words, with no markdown
+  assert.equal(locate('June 18 had 6,543', PLACES1).place.quote, 'June 18 had 6,543')
 })
 
 // ------------------------------------------------------------------------------------------------ a turn
