@@ -273,29 +273,43 @@ function Examples({ part, drawing, object }: { part: Part | null; drawing: any; 
     )
   if (!rows.recs.length) return <div className="lean-detail-body lean-tray-note">{part ? `No examples are attached to ${part.label}, and it names no rows.` : 'Select a part to see examples of it.'}</div>
   const k = Math.min(rows.recs.length - 1, Math.max(0, at))
-  const show = rows.recs.slice(k, k + 4)
+  const show = rows.recs.slice(k, k + 6)
   return (
     <div className="lean-detail-body">
       <div className="lean-ex-head">
-        <span className="lean-ex-dot" />
         <b>Examples of {rows.label}</b>
         <span className="lean-ex-count">
-          {k + 1}–{Math.min(rows.recs.length, k + 4)} of {fmt(rows.total || rows.recs.length)}
+          {k + 1}–{Math.min(rows.recs.length, k + 6)} of {fmt(rows.total || rows.recs.length)}
         </span>
       </div>
-      {show.map((r, j) => (
-        <div key={j} className={`lean-ex${j === 0 ? ' is-on' : ''}`}>
-          <div className="lean-ex-words">“{r.words.length > 280 ? r.words.slice(0, 279) + '…' : r.words}”</div>
-          <div className="lean-ex-meta">
-            {[r.meta, r.ref].filter(Boolean).join(' · ')}
-            {r.ref && (
-              <button type="button" className="lean-linkish" onClick={() => setState({ surface: 'files', filesView: 'browser', file: r.ref!, card: null, thread: 'main' })}>
-                open in Files
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
+      <table className="lean-ex-table">
+        <thead>
+          <tr>
+            <th>row</th>
+            <th>who · when</th>
+            <th>what it says</th>
+          </tr>
+        </thead>
+        <tbody>
+          {show.map((r, j) => (
+            <tr key={j} className={j === 0 ? 'is-on' : undefined}>
+              <td className="lean-ex-ref">
+                {r.ref ? (
+                  <button type="button" className="lean-tray-rowref" title="open in Files" onClick={() => setState({ surface: 'files', filesView: 'browser', file: r.ref!, card: null, thread: 'main' })}>
+                    {r.ref.replace(/^.*#/, '')}
+                  </button>
+                ) : (
+                  j + k + 1
+                )}
+              </td>
+              <td className="lean-ex-meta">{r.meta}</td>
+              <td className="lean-ex-words" title={r.words}>
+                {r.words}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

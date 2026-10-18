@@ -1390,3 +1390,40 @@ kbd {
   vertical-align: middle;
   font: var(--type-mono-sm);
 }
+
+/* the examples as 0.9 sets a table of rows: one line each, its words cut, all of them on hover */
+.lean-ex-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+.lean-ex-table th {
+  padding: 0 10px 4px 0;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.1);
+  font: 500 10px var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  text-align: left;
+}
+.lean-ex-table th:first-child {
+  width: 70px;
+}
+.lean-ex-table th:nth-child(2) {
+  width: 32%;
+}
+.lean-ex-table td {
+  padding: 4px 10px 4px 0;
+  border-bottom: 1px solid rgba(var(--ink-rgb), 0.05);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lean-ex-table td.lean-ex-meta {
+  font: var(--type-mono-sm);
+  color: var(--text-secondary);
+}
+.lean-ex-table tr.is-on td {
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+}
