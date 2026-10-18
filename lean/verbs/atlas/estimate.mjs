@@ -15,7 +15,7 @@
 //   dataset  no transcripts: the records files (jsonl, csv, json, databases), else every source file. "map 4 files".
 //
 // Time and tokens grow slowly with the size: the subagent reads a sample of a large folder and counts the rest in
-// code. MODEL holds the rule, fitted to live builds (pandas-swarm, ml-tasks, collusion-wiki); tokens are
+// code. MODEL holds the rule, fitted to three live builds; tokens are
 // price-weighted (input 1, cache write 1.25, cache read 0.1, output 5).
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
@@ -30,13 +30,16 @@ const TRANSCRIPT_KEYS = /"(message|subtype|session_id|sessionId)"\s*:/
 const HEAD = 16 * 1024
 const MAX_FILES = 50000
 
-/** The rule for time and tokens: base + per unit (up to `cap` units) + per doubling of the size in MB. */
+/** The rule for time and tokens: base + per unit (up to `cap` units) + per doubling of the size in MB. Fitted to three
+ *  live builds (subagent plus main's share, price-weighted): 4 files of 42 MB in 3.9 min and ~300k; 16 runs of 5.1 GB
+ *  in 6.0 min and ~460k; 24 runs of 1.0 GB in 6.7 min and ~550k. Main's share grows with its own context, not the
+ *  folder's, so the token figure is a middle value. */
 export const MODEL = {
   cap: 60,
-  base: { minutes: 3, tokens: 260000 },
-  unit: { minutes: 0.05, tokens: 2500 },
-  log2mb: { minutes: 0.25, tokens: 9000 },
-  add: { minutes: 0.3, tokens: 9000 },
+  base: { minutes: 2.7, tokens: 240000 },
+  unit: { minutes: 0.1, tokens: 10000 },
+  log2mb: { minutes: 0.15, tokens: 5000 },
+  add: { minutes: 0.2, tokens: 9000 },
 }
 
 const fmt = n => Number(n).toLocaleString('en-US')
