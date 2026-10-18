@@ -2,6 +2,7 @@
 resolving a value to its rows, and coverage. Run: LEAN_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import os
@@ -267,3 +268,20 @@ def test_a_later_query_uses_an_earlier_querys_output_without_running_it_again(ro
     printed = Q.run(st, "printed", 'print(1)')
     bad = Q.run(st, "use it", 'use("%s")' % printed["id"])
     assert bad["error"] and "only printed" in bad["error"]
+
+
+def test_a_new_version_saved_from_the_object_file_keeps_its_bindings(root: Path) -> None:
+    st = Store(root)
+    q = Q.run(st, "saves per day", 'df = load("saves.jsonl")\ndf["day"] = df.time.str[:10]\ntally(df, "day")')
+    first = O.save(st, "per-day", {"title": "Saves", "data": {"days": q["id"], "peak": f"{q['id']}#day=2026-06-02@n"}})
+    # Claude loads the saved object, changes the title, and saves the data it read back, written out
+    again = {"title": "Saves per day", "data": copy.deepcopy(first["data"])}
+    second = O.save(st, "per-day", again)
+    assert second["source"]["data"] == {"days": q["id"], "peak": f"{q['id']}#day=2026-06-02@n"}
+    assert sorted(b["at"] for b in second["lineage"]["bindings"]) == ["/days", "/peak"]
+    assert second["data"] == first["data"]
+    # a part Claude changed stays as Claude wrote it
+    changed = copy.deepcopy(first["data"])
+    changed["days"][0]["n"] = 99
+    third = O.save(st, "per-day", {"title": "Saves", "data": changed})
+    assert third["source"]["data"]["days"][0]["n"] == 99 and third["source"]["data"]["peak"] == f"{q['id']}#day=2026-06-02@n"
