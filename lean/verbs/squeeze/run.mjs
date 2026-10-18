@@ -3,15 +3,16 @@
 //
 //   run(ctx) -> {object?, text?, note?}
 //
-// ctx, from the shell (or the demo plugin, or cli.mjs):
+// ctx, from the shell (shell/node/verb.mjs) or cli.mjs:
 //   object   what to squeeze: anything with `text` (a reply, a report, a kernel object), or `units` [{id, text}] (a
 //            session's turns, a run's steps; `unit` names one, as in 'turn'), or a squeeze object made earlier (then
-//            `args` moves it)
+//            `args` moves it). An object whose own words are short is squeezed as the person sees it: its drawing's
+//            lines (ctx.drawing), one unit each.
 //   region   the selected region id, if any (`line-2` of a squeeze: `why` tells where it came from)
 //   args     optional words: '' makes a squeeze (or squeezes more), 'shorter', 'fuller', a dimension's id (its next
 //            level), 'reader=new to it', 'original', 'why 2', or any request in plain words ("for my manager")
-//   model    {complete(request)}: the plugin's $.model.complete, wrapped (req => $.model.complete(req))
-//   skill    the text of SKILL.md (else ctx.read(<this folder>/SKILL.md) is tried)
+//   model    {complete(request)}: the session's model, one quiet call ($.model.complete, through the shell)
+//   skill    the text of SKILL.md
 //   verb     verb.json as parsed: its `model`, `effort` and `maxTokens` are the defaults below
 //
 // It returns the new object (a squeeze: program + data + lineage, drawn by program.mjs), a short plain text of what
@@ -92,9 +93,24 @@ export function strayNumbers(line, spanTexts) {
 
 // ---------------------------------------------------------------------------------------------- the original
 
-/** What an object offers to squeeze: its spans and blocks, how long it is, and how to name it. */
-export function originalOf(object) {
+// the marks of a drawing that carry no words: bars, rules, frames, dots
+const MARKS = /[\u2500-\u259f\u25a0-\u25ff\u2800-\u28ff·•]+/g
+
+/** The lines a person sees of a drawing (`{rows}` from renderTerm, or its text), without bars and frames: the
+ *  original of an object whose own words are short. */
+export function drawnLines(gridOrText) {
+  const text = typeof gridOrText === 'string' ? gridOrText : (gridOrText?.rows || []).map(r => r.filter(c => !c.cont).map(c => c.ch).join('')).join('\n')
+  return text.split('\n').map(l => l.replace(MARKS, ' ').replace(/\s+/g, ' ').trim()).filter(l => /[\p{L}\p{N}]/u.test(l))
+}
+
+/** What an object offers to squeeze: its spans and blocks, how long it is, and how to name it. With `shown` (the
+ *  lines the person sees of it), an object whose own words are short offers those lines instead, one unit each. */
+export function originalOf(object, shown) {
   const o = object || {}
+  const own = typeof o.text === 'string' ? o.text : typeof o.data?.text === 'string' ? o.data.text : ''
+  if (!(Array.isArray(o.units) && o.units.length) && Array.isArray(shown) && shown.length >= 4 && !isLong(own, { lines: 4, chars: 300 })) {
+    return originalOf({ units: shown.map((text, i) => ({ id: String(i + 1), text })) })
+  }
   if (Array.isArray(o.units) && o.units.length) {
     const spans = o.units.map((u, i) => ({ id: String(u.id ?? i + 1), b: i + 1, kind: 'unit', text: String(u.text ?? ''), cites: u.ref ? [u.ref] : [] }))
     return {
@@ -159,9 +175,8 @@ async function complete(ctx, prompt) {
   const cfg = { ...DEFAULTS, ...(ctx.verb || {}), ...(ctx.settings || {}) }
   const model = ctx.model && typeof ctx.model.complete === 'function' ? ctx.model : null
   if (!model) throw new Error('no model to write the squeeze: ctx.model.complete (the plugin\'s $.model.complete) is missing')
-  let skill = ctx.skill
-  if (!skill && typeof ctx.read === 'function' && ctx.dir) skill = await ctx.read(`${ctx.dir}/SKILL.md`).catch(() => '')
-  if (!skill) throw new Error('no skill text: pass ctx.skill (SKILL.md) or ctx.read and ctx.dir')
+  const skill = ctx.skill
+  if (!skill) throw new Error('no skill text: pass ctx.skill (the text of SKILL.md)')
   const system = [{ text: skillText(skill) + '\n\n' + FORMAT, cache: true }]
   const r = await model.complete({ model: cfg.model, system, prompt, maxTokens: cfg.maxTokens, effort: cfg.effort, timeoutMs: cfg.timeoutMs })
   if (!r || !r.isAnswered) {
@@ -259,7 +274,7 @@ export async function run(ctx) {
   const o = ctx.object
   if (!o) return { text: 'Nothing to squeeze: no object is selected.' }
   if (isSqueeze(o)) return move(ctx, o)
-  const orig = originalOf(o)
+  const orig = originalOf(o, shownOf(ctx))
   if (orig.spans.length < 2 || !isLong(orig.text, { lines: 4, chars: 300 })) {
     return { text: `It is already short (${orig.lines} ${orig.lines === 1 ? 'line' : 'lines'}), so there is nothing to squeeze.` }
   }
@@ -335,9 +350,22 @@ async function move(ctx, sq) {
     n.data.versions = keep.filter(v => atKey(v.at) !== atKey(fresh.at)).concat([fresh])
     n.data.at = fresh.at
     n.data.show = null
-    n.lineage = lineageOf(n.data, (sq.lineage?.made || []).concat([{ by: 'model', model, usage, at: new Date().toISOString(), asked: ctx.args || '' }]), (sq.lineage?.problems || []).concat(norm.problems))
+    const own = ownLineage(sq)
+    n.lineage = lineageOf(n.data, (own.made || []).concat([{ by: 'model', model, usage, at: new Date().toISOString(), asked: ctx.args || '' }]), (own.problems || []).concat(norm.problems))
   })
   return { object: next, text: next.text, note: noteFor(next, 'moved') }
+}
+
+/** The lines the person sees of the object, when the shell drew it. */
+function shownOf(ctx) {
+  if (!ctx.drawing || !ctx.draw || typeof ctx.draw.renderTerm !== 'function') return null
+  try { return drawnLines(ctx.draw.renderTerm(ctx.drawing, { w: ctx.w || 96 })) } catch { return null }
+}
+
+/** The squeeze's own lineage: as it made it, or as the kernel keeps it once saved (under `declared`). */
+function ownLineage(sq) {
+  const l = sq.lineage || {}
+  return l.declared?.squeeze || l
 }
 
 function originalText(d) {

@@ -11,7 +11,7 @@ import { renderSvg } from '../../../draw/svg.js'
 import { gridText, renderTerm } from '../../../draw/term.js'
 import { nodeCtx, toAnsi } from '../cli.mjs'
 import { applies } from '../hint.mjs'
-import { countRows, explorable, explorationOf, keys, press, request, rowsFor, run, turnKnob } from '../run.mjs'
+import { countRows, explorable, explorationOf, hint, keys, press, request, rowsFor, run, turnKnob } from '../run.mjs'
 import { viewLines } from '../view.mjs'
 
 const HERE = fileURLToPath(new URL('..', import.meta.url))
@@ -24,13 +24,12 @@ function fakeKernel(objects = []) {
   const calls = []
   return {
     calls,
-    resolve: async (ref, { n = 5 } = {}) => { calls.push(['resolve', ref, n]); return { count: countRows(ref), records: Array.from({ length: Math.min(n, countRows(ref) || 1) }, (_, i) => ({ ref: `${ref.split('#')[0]}#L${i + 1}`, text: `row ${i + 1} of ${ref}` })) } },
+    resolve: async (ref, n = 5) => { calls.push(['resolve', ref, n]); return { count: countRows(ref), records: Array.from({ length: Math.min(n, countRows(ref) || 1) }, (_, i) => ({ ref: `${ref.split('#')[0]}#L${i + 1}`, text: `row ${i + 1} of ${ref}` })) } },
     rows: async (ref, { n = 5, fields = [] } = {}) => { calls.push(['rows', ref, n, fields.join(',')]); return Array.from({ length: Math.min(n, countRows(ref)) }, (_, i) => ({ ref: `${ref.split('#')[0]}#L${i + 1}`, value: { user: 'red-fox', text: `save ${i + 1}` } })) },
-    list: async () => objects,
-    load: async name => objects.find(o => o.id === name) || null,
+    objects: () => objects,
   }
 }
-const ctxOf = (object, kernel, extra) => Object.assign({ object, kernel, draw: { run: async (o, opts) => runProgram(o, opts) }, w: 96, h: 24, skill: '/x/lean/verbs/explore/SKILL.md' }, extra)
+const ctxOf = (object, kernel, extra) => Object.assign({ object, kernel, draw: { runProgram }, w: 96, h: 24, verb: { dir: '/x/lean/verbs/explore' } }, extra)
 
 test('the skill\'s worked examples run, in both renderers, each with a knob and parts that lead to rows', () => {
   assert.equal(PROGRAMS.length, 3)
@@ -46,24 +45,28 @@ test('the skill\'s worked examples run, in both renderers, each with a knob and 
   })
 })
 
-test('x on something with no explore view asks Claude to write one, in a note the person sees as a turn', async () => {
+test('x on something with no explore view asks Claude to write one (ask), which the shell sends as a turn', async () => {
   const plain = { id: '02-saves-per-day', version: 1, title: 'Saves per day', program: 'return k.text("hi")', data: {} }
   const r = await run(ctxOf(plain, fakeKernel([plain])))
   assert.equal(r.view, undefined)
-  assert.match(r.note, /read \/x\/lean\/verbs\/explore\/SKILL\.md/)
-  assert.match(r.note, /lean save explore-saves-per-day --from FILE/)
-  assert.match(r.note, /"of": "02-saves-per-day"/)
-  assert.doesNotMatch(r.note, /Check that it draws/)
-  assert.match((await run(ctxOf(plain, fakeKernel([plain]), { check: 'node cli.mjs --text' }))).note, /Check that it draws, as the person will see it, with `node cli\.mjs --text explore-saves-per-day`/)
+  assert.equal(r.note, undefined)
+  assert.match(r.ask, /read \/x\/lean\/verbs\/explore\/SKILL\.md/)
+  assert.match(r.ask, /lean save explore-saves-per-day --from FILE/)
+  assert.match(r.ask, /"of": "02-saves-per-day"/)
+  assert.match(r.ask, /Check that it draws, as the person will see it, with `lean verb explore --text explore-saves-per-day`/)
+  assert.match((await run(ctxOf(plain, fakeKernel([plain]), { check: 'node cli.mjs --text' }))).ask, /with `node cli\.mjs --text explore-saves-per-day`/)
   const reply = await run(ctxOf(null, fakeKernel(), { reply: { text: 'Jun 18 had the most saves: 6,543 of 14,591.\nMore.' } }))
-  assert.match(reply.note, /your reply that begins "Jun 18 had the most saves: 6,543 of 14,591\."/)
+  assert.match(reply.ask, /your reply that begins "Jun 18 had the most saves: 6,543 of 14,591\."/)
   // once Claude wrote one, x on the same object opens it at once
   const ex = obj(0, { of: '02-saves-per-day', updated: '2026-10-18T09:00:00Z' })
   assert.equal(explorationOf([plain, ex], plain).id, ex.id)
   const again = await run(ctxOf(plain, fakeKernel([plain, ex])))
-  assert.equal(again.object.id, ex.id)
+  // the view Claude saved opens as it is: the shell is handed its id and version, so nothing is saved again
+  assert.deepEqual(again.object, { id: ex.id, version: 1 })
   assert.equal(again.note, undefined)
-  assert.match(again.text, /◂ ▸ split · tab parts · ↵ rows/)
+  assert.equal(again.ask, undefined)
+  assert.match(again.text, /^Opened 03-explore-saves: turn split; select a part to read its rows\.$/)
+  assert.match(hint(again.view), /◂ ▸ split · tab parts · ↵ rows/)
 })
 
 test('a knob turns, the sentence follows, and rows open under the selected part', async () => {
@@ -138,7 +141,7 @@ test('rows: refs come from the part\'s meta or its cite; row sets count without 
   const c = await rowsFor(d, 'c2', kernel)
   assert.equal(c.note, 'this part names no rows')
   assert.ok(explorable(d))
-  // a program that throws offers no keys, and its error goes back to Claude as a note
+  // a program that throws offers no keys, and its error goes back to Claude as a note (no turn of its own)
   const bad = { id: '09-explore-bad', version: 1, verb: 'explore', program: 'return data.nope.x', data: {} }
   const r = await run(ctxOf(bad, fakeKernel()))
   assert.deepEqual(keys(r.view), [])

@@ -2,8 +2,9 @@
 //
 // Who writes the view: Claude, in the main conversation, guided by SKILL.md, saving it with `lean save`. This module
 // writes no program and calls no model. When the person presses x on something that has no explorable view yet,
-// run() answers with a note that asks Claude to write one; the host submits it as a turn the person sees. When the
-// object already is explorable (it has a knob, or parts that lead to rows), run() opens it at once.
+// run() answers with an `ask` that asks Claude to write one; the shell submits it as a turn, drawn as one line. When
+// the object already is explorable (it has a knob, or parts that lead to rows), run() opens it at once. A view that
+// fails to draw goes back to Claude as a `note`, read with its next prompt: no turn and no row of its own.
 //
 // Why Claude in the main conversation and not a quiet model call:
 //   - every mark must lead to real rows, and a view often needs a grain the reply never computed (per day and wiki,
@@ -14,7 +15,7 @@
 //   - one writer: the model that wrote the reply knows which sentence claims what.
 // The cost: x on a plain reply starts a visible turn, about half a minute. x on an explorable object costs nothing.
 //
-// The module is plain JavaScript with no Node and no `$`: the host hands in what it needs.
+// The module is plain JavaScript with no Node and no `$`: the shell hands in what it needs (shell/node/verb.mjs).
 //
 //   ctx = {
 //     object,   the object as the kernel keeps it (thimble/objects/<id>.json), or null for a bare reply
@@ -22,19 +23,21 @@
 //     region,   the selected region id, or null
 //     state,    the knobs' values the person set, { id: value }
 //     w, h,     the room the view has, in cells
-//     kernel,   { resolve(ref, { n }) -> `lean resolve REF --json`, list() -> [object], load(name) -> object | null,
+//     kernel,   { resolve(ref, n) -> `lean resolve REF --json`, objects() -> [object],
 //                 rows(ref, { n, fields }) -> [{ ref, value }] as `lean rows REF --fields` reads them (optional) }
-//     draw,     { run(object, { w, h, state }) -> drawing (sandboxed) }
-//     skill,    the path of this verb's SKILL.md, for the note to Claude
+//     draw,     { runProgram(object, { w, h, state }) -> drawing (sandboxed) }
+//     verb,     this verb's verb.json with `dir`, its folder: the request names its SKILL.md there
 //     open,     true: open any object that has a program as it is, even one that is not an explore view
-//     check,    a command that draws a saved view as text (cli.mjs), for Claude to check what it made
+//     check,    a command that draws a saved view as text, for Claude to check what it made (default
+//               `lean verb explore --text`)
 //   }
-//   run(ctx) -> { object?, view?, text?, note? }
-//     object  the object to show (an explore object Claude wrote earlier counts)
+//   run(ctx) -> { object?, view?, text?, note?, ask? }
+//     object  the object to show, as {id, version}: an explore object Claude wrote earlier
 //     view    { object, drawing, state, region, rows? }: the object drawn, its drawing, the knobs' values, the
 //             selection and the rows it opened
 //     text    one line for the person
-//     note    a request to Claude: the host submits it as a turn the person sees
+//     note    words for Claude alone (a view that failed to draw)
+//     ask     a request to Claude: the shell submits it as a turn
 //
 // The host's keys go through press(view, key, ctx), which turns knobs, moves the selection and opens rows.
 import { knobOf, turn } from '../../draw/handoff.js'
@@ -67,38 +70,50 @@ export async function run(ctx) {
   const obj = ctx.object || null
   let target = obj
   // an object that is not an explore view: open the one Claude wrote for it, if there is one
-  if (obj && !isExplore(obj) && ctx.kernel && ctx.kernel.list) {
-    const ex = explorationOf(await ctx.kernel.list(), obj)
+  if (obj && !isExplore(obj) && ctx.kernel && (ctx.kernel.objects || ctx.kernel.list)) {
+    const ex = explorationOf(await (ctx.kernel.objects ? ctx.kernel.objects() : ctx.kernel.list()), obj)
     if (ex) target = ex
   }
   if (!target || !target.program || (!isExplore(target) && !ctx.open)) {
-    return { text: 'Claude is writing a view of this you can explore.', note: request(ctx) }
+    return { text: 'Claude is writing a view of this you can explore.', ask: request(ctx) }
   }
   const view = await open(target, ctx)
+  const shown = { id: target.id, version: target.version }
   if (view.drawing.error) {
     const e = view.drawing.error
-    return { object: target, view, text: `The view's program failed (${e.name}); Claude is fixing it.`,
+    return { object: shown, view, text: `The view's program failed (${e.name}). Claude reads why with your next prompt.`,
       note: `The explore view ${target.id} failed to draw: ${e.name}: ${e.message}${e.line ? ` (line ${e.line}: ${e.source})` : ''}. Fix its program and save it again under the same name.` }
   }
   if (!explorable(view.drawing)) {
-    return { object: target, view, text: 'Nothing in this view leads to rows yet; Claude is adding them.', note: request(ctx, target) }
+    return { object: shown, view, text: 'Nothing in this view leads to rows yet; Claude is adding them.', ask: request(ctx, target) }
   }
-  return { object: target, view, text: hint(view) }
+  return { object: shown, view, text: opened(target, view) }
+}
+
+/** What the person can do with a view that opened, in the shell's words. */
+function opened(target, view) {
+  const knobs = (view.drawing.controls || []).map(c => c.label || c.id)
+  return `Opened ${target.id}${knobs.length ? `: turn ${knobs.join(', ')}` : ''}; select a part to read its rows.`
+}
+
+/** An object drawn with the shell's sandbox: draw.runProgram (or a host's own draw.run). */
+async function drawOf(ctx, object, opts) {
+  return ctx.draw.runProgram ? ctx.draw.runProgram(object, opts) : ctx.draw.run(object, opts)
 }
 
 /** The view of an object at a state: its drawing, the knobs' values, the selection. */
 export async function open(object, ctx) {
   const state = Object.assign({}, ctx.state || {})
-  const drawing = await ctx.draw.run(object, { w: ctx.w || 100, h: ctx.h || 24, state })
+  const drawing = await drawOf(ctx, object, { w: ctx.w || 100, h: ctx.h || 24, state })
   const view = { object, drawing, state: drawing.state || state, region: ctx.region || null }
   if (view.region && !regionOf(drawing, view.region, ctx.w)) view.region = null
   return view
 }
 
-/** The note that asks Claude to write the view. */
+/** The request that asks Claude to write the view. */
 export function request(ctx, existing) {
   const obj = existing || ctx.object
-  const skill = ctx.skill || 'lean/verbs/explore/SKILL.md'
+  const skill = ctx.verb && ctx.verb.dir ? `${String(ctx.verb.dir).replace(/\/+$/, '')}/SKILL.md` : 'the explore skill'
   const what = obj
     ? `the object ${obj.id}${obj.title ? ` ("${obj.title}")` : ''} (thimble/objects/${obj.id}.json)`
     : ctx.reply && ctx.reply.text ? `your reply that begins "${firstLine(ctx.reply.text)}"` : 'your last reply'
@@ -107,7 +122,7 @@ export function request(ctx, existing) {
     `The person pressed x (Explore) on ${what}. Make it a view they can explore: read ${skill} first.`,
     `Reuse the queries you already ran; run a new \`lean q\` only where a mark needs rows you have not kept.`,
     `Save it with \`lean save ${name} --from FILE\`, with "verb": "explore"${obj ? ` and "of": "${obj.id}"` : ''} in the JSON.`,
-    ctx.check ? `Check that it draws, as the person will see it, with \`${ctx.check} ${name}\`.` : '',
+    `Check that it draws, as the person will see it, with \`${ctx.check || 'lean verb explore --text'} ${name}\`.`,
     `Then say in one line what the person can turn or open. Do not repeat the answer.`,
   ].filter(Boolean).join(' ')
 }
@@ -157,7 +172,7 @@ export async function turnKnob(view, id, step, ctx) {
   const state = turn(view.drawing, view.state, id, step)
   if (JSON.stringify(state) === JSON.stringify(view.state)) return view
   const before = view.region ? rectOf(view.drawing, view.region, w) : null
-  const drawing = await ctx.draw.run(view.object, { w, h: ctx.h || 24, state })
+  const drawing = await drawOf(ctx, view.object, { w, h: ctx.h || 24, state })
   const next = Object.assign({}, view, { drawing, state: drawing.state || state })
   if (next.region && !regionOf(drawing, next.region, w)) next.region = before ? regionAtRect(drawing, before, w) : null
   if (view.rows) next.rows = next.region && !knobOf(drawing, next.region) ? await rowsFor(drawing, next.region, ctx.kernel) : null
@@ -220,7 +235,7 @@ export async function rowsFor(drawing, id, kernel, o = {}) {
       if (fields && countRows(ref) != null) {
         const rows = await kernel.rows(ref, { n: Math.max(1, n - out.records.length), fields })
         got = { records: rows.map(x => ({ ref: x.ref, text: fields.map(f => flat(x.value && x.value[f])).filter(Boolean).join(' · ') })) }
-      } else got = await kernel.resolve(ref, { n: Math.max(1, n - out.records.length) })
+      } else got = await kernel.resolve(ref, Math.max(1, n - out.records.length))
     } catch (e) { out.note = `the kernel could not read ${ref}: ${String(e && e.message || e).slice(0, 200)}`; continue }
     if (got && got.error) out.note = got.error
     if (countRows(ref) == null && got && typeof got.count === 'number') out.count += got.count

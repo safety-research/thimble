@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url'
 import { runProgram } from '../../../draw/sandbox-node.mjs'
 import { renderSvg } from '../../../draw/svg.js'
 import { gridText, renderTerm } from '../../../draw/term.js'
-import { COPIES } from '../demo/sync.mjs'
 import { applies } from '../hint.mjs'
 import { isSqueeze, normalize, parseAnswer, run, strayNumbers } from '../run.mjs'
 import { cut, expand, sentences } from '../spans.mjs'
@@ -110,8 +109,8 @@ test('run makes a squeeze with one quiet model call: the skill as system prompt,
 
 test('the squeeze draws the same regions in both renderers: a line each, its cite holding its spans', async () => {
   const r = await run({ object: { text: REPORT }, model: fakeModel(ANSWER), skill: SKILL })
-  for (const w of [80, 140]) {
-    const d = runProgram(r.object, { w })
+  for (const [w, mode] of [[80, 'inline'], [140, 'inline'], [80, 'detail'], [140, 'detail']]) {
+    const d = runProgram(r.object, { w, mode })
     assert.equal(d.error, undefined, d.error && d.error.message)
     assert.deepEqual(d.warnings, [])
     const t = renderTerm(d, { w }), s = renderSvg(d, { w })
@@ -119,9 +118,10 @@ test('the squeeze draws the same regions in both renderers: a line each, its cit
     assert.deepEqual(t.regions.map(x => x.id).slice(0, 2), ['line-1', 'line-2'])
     assert.deepEqual(d.cites['line-1'].rows.map(x => x.span), ['1.1', '3.1'])
     assert.ok(t.regions.some(x => x.id === 'dim-story'), 'each dimension Claude chose is drawn')
-    // wide, the original is drawn beside it: a line's spans are links into its region, so selecting it lights them
+    // in the detail view the original is drawn with it (beside it when wide): a line's spans are links into its
+    // region, so selecting it lights them; under a reply the version is drawn alone
     const line1 = t.regions.find(x => x.id === 'line-1')
-    if (w >= 110) assert.ok(line1.rects.length > 1, 'the spans of line 1 join its region')
+    if (mode === 'detail') assert.ok(line1.rects.length > 1, 'the spans of line 1 join its region')
     else assert.equal(line1.rects.length, 1)
   }
   const focus = { ...r.object, data: { ...r.object.data, focus: 'line-2' } }
@@ -188,8 +188,4 @@ test('main\'s path: the CLI lists the spans, then checks and draws the squeeze m
   assert.match(out, /3 of \d+ lines/)
   assert.match(out, /"31" is not in the spans it cites/)
   assert.match(cli('sq.json', '--focus', 'line-2', '--text'), /came from 1 span of the original \(5\.1\)/)
-})
-
-test('the demo plugin\'s copies are current (node lean/verbs/squeeze/demo/sync.mjs)', () => {
-  for (const [from, to] of COPIES) assert.equal(readFileSync(VERB + 'demo/hooks/lib/' + to, 'utf8'), readFileSync(from, 'utf8'), `${to} is stale`)
 })

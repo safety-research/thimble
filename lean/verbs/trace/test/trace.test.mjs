@@ -57,7 +57,7 @@ const show = (object, w = 100) => gridText(renderTerm(runProgram(object, { w }),
 test('a value: the short path names its query, the label it builds on, its rows, the files not behind it and the answer', async () => {
   const out = await run({ ref: VALUE.ref, kernel: kernelFor({ [VALUE.ref]: VALUE }), draw, w: 100 })
   assert.equal(out.object.verb, 'trace')
-  assert.deepEqual(out.object.source, { ref: VALUE.ref, text: undefined, label: undefined })
+  assert.deepEqual(out.object.traced, { ref: VALUE.ref, text: undefined, label: undefined })
   const text = show(out.object)
   for (const s of ['3 · message', 'q2 · saves per kind', 'uses "kind", kept by q1', '3 of 8 rows · saves.jsonl', 'not behind it: pages.jsonl', 'answer, turn 1', 't full trace'])
     assert.ok(text.includes(s), `missing "${s}" in\n${text}`)
@@ -106,12 +106,20 @@ test('t on the trace itself asks Claude for the full trace; a program that fails
   assert.equal(applies(out.object), null) // a full trace offers no further t
 })
 
-test('without a model, the full trace is asked of Claude in the conversation', async () => {
+test('without a model, the full trace is asked of Claude in the conversation (ask)', async () => {
   const first = await run({ ref: VALUE.ref, kernel: kernelFor({ [VALUE.ref]: VALUE }), draw })
-  const out = await run({ object: first.object, kernel: kernelFor({ [VALUE.ref]: VALUE }), draw, ask: 'which rows are links?' })
+  assert.deepEqual(first.object.hints, ['trace'])
+  const out = await run({ object: first.object, kernel: kernelFor({ [VALUE.ref]: VALUE }), draw, args: 'which rows are links?' })
   assert.equal(out.object, undefined)
-  assert.match(out.note, /full trace of obj:uses#\/kinds\/1\/n: "which rows are links\?"/)
-  assert.match(out.note, /lean trace obj:uses#\/kinds\/1\/n --json/)
+  assert.match(out.ask, /full trace of obj:uses#\/kinds\/1\/n: "which rows are links\?"/)
+  assert.match(out.ask, /lean trace obj:uses#\/kinds\/1\/n --json/)
+})
+
+test('in the shell: the refs it found behind the selected part are what t follows', () => {
+  const object = { id: '01-saves', title: 'Saves', lineage: { bindings: [{ at: '/days', ref: 'q1' }] } }
+  assert.deepEqual(targetOf({ object, region: 'day-2026-06-18', regionMeta: { label: 'Jun 18' }, refs: ['obj:01-saves#/days/1'] }), { ref: 'obj:01-saves#/days/1', text: undefined, label: 'Jun 18' })
+  // with no part selected, the object itself
+  assert.deepEqual(targetOf({ object, refs: ['q1#day=2026-06-18@n'] }), { ref: 'obj:01-saves#/days', label: 'Saves' })
 })
 
 test('what to trace: a citation, a region with a ref or a cite, a quote, or the object', () => {
@@ -160,9 +168,4 @@ test('a reply is read for its title, its program and its judgments', () => {
   const r = parseReply('Here it is.\ntitle: spread of the note\n```javascript\nreturn k.text("x")\n```\n```json\n{"groups": []}\n```')
   assert.deepEqual(r, { title: 'spread of the note', program: 'return k.text("x")', data: { groups: [] } })
   assert.equal(parseReply('no code').program, null)
-})
-
-test("the demo plugin's copies of the verb, the renderer and the skill are current (node demo-plugin/sync.mjs)", async () => {
-  const { COPIES, copyOf } = await import('../demo-plugin/sync.mjs')
-  for (const [src, dst] of COPIES) assert.equal(readFileSync(HERE + '../demo-plugin/' + dst, 'utf8'), copyOf(src), `${dst} is stale`)
 })

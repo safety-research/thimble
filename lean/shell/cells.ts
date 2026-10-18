@@ -7,6 +7,8 @@
 //   paintRegions(grid, els, {theme, selected, key, from, rows, onPress}) -> one Box of rows
 //   from, rows: the window of rows to draw (default all), so a tall object fits a pane
 //   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back)
+//   a knob's dial (`label ◂ value ▸`, k.dial) is three Buttons: ◂ calls onPress(id, -1), ▸ onPress(id, 1), the rest
+//   onPress(id), so a click turns it where the person clicks
 import { paintGrid } from '../draw/paint.js'
 import { hex, termColor } from '../draw/palette.js'
 
@@ -40,7 +42,7 @@ export function selectable(grid: Grid): Region[] {
   return grid.regions.filter(r => r.rects.length && !r.link).slice().sort((a, b) => (a.rects[0]!.y - b.rects[0]!.y) || (a.rects[0]!.x - b.rects[0]!.x))
 }
 
-export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'light'; selected?: string | null; key?: string; from?: number; rows?: number; onPress?: (id: string) => unknown }): Any {
+export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'light'; selected?: string | null; key?: string; from?: number; rows?: number; onPress?: (id: string, turn?: number) => unknown }): Any {
   const { Box, Text, Button } = els
   const theme = opts.theme || 'dark'
   const key = opts.key || 'cells'
@@ -97,9 +99,27 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       const run: Seg[] = []
       while (i < segs.length && segs[i]!.region === g.region) run.push(segs[i++]!)
       const id = g.region
-      kids.push(Button({ key: `r|${key}|${y}|${id}`, plain: true, label: String(grid.regions.find(r => r.id === id)?.meta?.label || id), children: run.map(text), onPress: () => opts.onPress!(id) }))
+      const region = grid.regions.find(r => r.id === id)
+      const label = String(region?.meta?.label || id)
+      if (region?.meta?.knob) { kids.push(...dial(run, id, label)); continue }
+      kids.push(Button({ key: `r|${key}|${y}|${id}`, plain: true, label, children: run.map(text), onPress: () => opts.onPress!(id) }))
     }
     return Box({ flexDirection: 'row', children: kids })
+
+    // a dial: ◂ turns it down, ▸ up, a press between them selects it
+    function dial(run: Seg[], id: string, label: string): Any[] {
+      const subs: Seg[] = []
+      for (const g of run) for (const piece of g.s.split(/([◂▸])/)) if (piece) subs.push({ ...g, s: piece })
+      const left = subs.findIndex(x => x.s === '◂')
+      const right = subs.map(x => x.s).lastIndexOf('▸')
+      const parts: [Seg[], number, string][] = left >= 0 && right > left
+        ? [[subs.slice(0, left + 1), -1, 'down'], [subs.slice(left + 1, right), 0, 'at'], [subs.slice(right), 1, 'up']]
+        : [[subs, 0, 'at']]
+      return parts.filter(([xs]) => xs.length).map(([xs, turn, what]) => Button({
+        key: turn ? `t|${key}|${y}|${id}|${what}` : `r|${key}|${y}|${id}`, plain: true, label: turn ? `${label} ${what}` : label,
+        children: xs.map(text), onPress: () => (turn ? opts.onPress!(id, turn) : opts.onPress!(id)),
+      }))
+    }
   }
 }
 

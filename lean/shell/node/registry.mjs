@@ -3,7 +3,7 @@
 //   verb.json   {"key": "s", "name": "squeeze", "line": "one line on what it does", ...any other field}
 //   run.mjs     export async function run(ctx) -> {object?, text?, note?, ask?}   (verb.mjs builds ctx)
 //   SKILL.md    the verb's one-page skill for Claude; the plugin lists ./verbs/ as a skills folder
-//   hint.mjs    optional: export function applies(object) -> a short phrase for THIS object, or null
+//   hint.mjs    optional: export function applies(object, {drawing}) -> a short phrase for THIS object, or null
 //
 // Nothing else registers a verb: adding the folder adds it, to the hint row, to the `?` list and to /verb. The
 // registry keeps every field of verb.json as given and checks none against a schema.
@@ -50,26 +50,28 @@ export function findVerb(verbs, word) {
   return verbs.find(v => v.name.toLowerCase() === w) || verbs.find(v => v.folder.toLowerCase() === w) || verbs.find(v => v.key === w) || null
 }
 
-/** The verb's phrase for this object: its hint.mjs's applies(object), or null (no hint.mjs, null, or it threw). */
-export async function phraseFor(verb, object) {
+/** The verb's phrase for this object: its hint.mjs's applies(object, {drawing}), or null (no hint.mjs, null, or it
+ *  threw). `drawing` is the object as the person sees it, when the caller drew it. */
+export async function phraseFor(verb, object, extra = {}) {
   if (!verb.hasHint) return null
   try {
     const mod = await import(pathToFileURL(join(verb.dir, 'hint.mjs')).href)
-    const p = typeof mod.applies === 'function' ? await mod.applies(object) : null
+    const p = typeof mod.applies === 'function' ? await mod.applies(object, extra) : null
     return typeof p === 'string' && p.trim() ? p.trim().slice(0, 200) : null
   } catch { return null }
 }
 
 /**
- * Every verb with its phrase for this object and whether it is picked for the hint row. The 2-3 picked: the verbs the
- * object names in its own `hints` field (Claude's or a later observer's ranking) first, then the verbs whose hint.mjs
- * has a phrase for it, in registry order. With none of either, none is picked: the row shows `? all` alone.
+ * Every verb with its phrase for this object and whether it is picked for the hint row. The rule, for now (a quiet
+ * observer will rank them later): the verbs the object names in its own `hints` field first (Claude's ranking), then
+ * the verbs whose hint.mjs has a phrase for it, by their `order` field, at most `max`. With none of either, none is
+ * picked: the row shows `? all` alone.
  */
-export async function verbsFor(object, { dir = VERBS, max = 3 } = {}) {
+export async function verbsFor(object, { dir = VERBS, max = 3, drawing = null } = {}) {
   const { verbs, problems } = listVerbs(dir)
   const out = []
   for (const v of verbs) {
-    out.push({ key: v.key || null, name: v.name, line: String(v.line || ''), folder: v.folder, phrase: await phraseFor(v, object), extra: extraFields(v) })
+    out.push({ key: v.key || null, name: v.name, line: String(v.line || ''), folder: v.folder, phrase: await phraseFor(v, object, { drawing }), extra: extraFields(v) })
   }
   const named = (Array.isArray(object?.hints) ? object.hints : []).map(h => findVerb(verbs, typeof h === 'string' ? h : h?.verb || h?.name)).filter(Boolean)
   const picked = []

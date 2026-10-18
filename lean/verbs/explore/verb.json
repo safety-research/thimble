@@ -2,6 +2,7 @@
   "key": "x",
   "name": "explore",
   "line": "turn it into a view you can explore, with the real rows one key below",
+  "order": 2,
   "absorbs": ["the Explore button", "sparkline prose", "concept explorables", "what-if knobs"],
   "writer": "Claude, in the main conversation, guided by SKILL.md, saving the view with `lean save`",
   "skill": "SKILL.md",

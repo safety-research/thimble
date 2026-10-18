@@ -1,5 +1,0 @@
-{
-  "name": "lean-draw-demo",
-  "version": "0.1.0",
-  "description": "Draws lean thimble objects in the terminal with the drawing contract: /draw <object> [region], and a draw tool Claude can call with a program of its own."
-}

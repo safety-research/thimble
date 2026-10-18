@@ -5,6 +5,7 @@
 // drawing. "back to terminal" sends the selection to the terminal, which opens its detail view on that region.
 //
 // Keys: tab and shift+tab move between regions, ← → flip examples, esc clears the selection, enter sends it back.
+// A knob's dial (k.dial) turns with a click: ◂ side down, ▸ side up; its values travel with the selection both ways.
 // (Bundled by serve.mjs after svg.js, handoff.js, sandbox.js and shell/object.js, so their names are in scope.)
 
 const OBJECT = forDrawing(JSON.parse(document.getElementById('object').textContent))
@@ -15,14 +16,14 @@ const sandbox = makeSandbox(KIT_SOURCE)
 const measureType = canvasMeasure(document)
 const $ = sel => document.querySelector(sel)
 const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-const view = { region: null, cite: null, hover: null, wForced: null, drawing: null, result: null, ex: 0, said: null, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }
+const view = { region: null, cite: null, hover: null, wForced: null, drawing: null, result: null, ex: 0, said: null, state: {}, theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light' }
 const resolved = new Map()
 
 function columns() { return view.wForced || Math.max(60, Math.min(140, Math.floor(($('#stage').clientWidth - 8) / PAGE_CW))) }
-function selection() { return { object: OBJECT.id, v: OBJECT.v, region: view.region || undefined } }
+function selection() { return { object: OBJECT.id, v: OBJECT.v, region: view.region || undefined, state: Object.keys(view.state).length ? view.state : undefined } }
 
 async function load() {
-  view.drawing = await sandbox.run(OBJECT, { w: columns(), h: 24 })
+  view.drawing = await sandbox.run(OBJECT, { w: columns(), h: 24, state: view.state })
   if (view.region && !regionMeta(view.drawing, view.region)) view.region = null
   head()
   words()
@@ -158,7 +159,18 @@ async function back() {
   said()
 }
 
-$('#stage').addEventListener('click', e => { const t = e.target.closest('[data-region]'); select(t ? t.dataset.region : null) })
+$('#stage').addEventListener('click', e => {
+  const t = e.target.closest('[data-region]')
+  const id = t ? t.dataset.region : null
+  if (id && knobOf(view.drawing, id)) {
+    // a knob: the left half of its dial turns it down, the right half up
+    const box = t.getBoundingClientRect()
+    view.state = turn(view.drawing, view.state, id, e.clientX < box.left + box.width / 2 ? -1 : 1)
+    load()
+    return
+  }
+  select(id)
+})
 $('#stage').addEventListener('mousemove', e => {
   const t = e.target.closest('[data-region]')
   const id = t ? t.dataset.region : null
@@ -178,5 +190,5 @@ addEventListener('resize', () => { if (!view.wForced) load() })
 
 // the handoff: #o=<id>@<v>&r=<region>&w=<columns>
 const sel0 = fromHash(location.hash)
-if (sel0 && sel0.object === OBJECT.id) { view.region = sel0.region || null; view.wForced = sel0.w || null }
+if (sel0 && sel0.object === OBJECT.id) { view.region = sel0.region || null; view.wForced = sel0.w || null; view.state = sel0.state || {} }
 load().then(() => { document.body.dataset.ready = '1' })

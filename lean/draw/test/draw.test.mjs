@@ -1,6 +1,6 @@
 // The drawing contract's tests: node --test lean/draw/test
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { loadExamples } from '../examples/load.mjs'
@@ -113,14 +113,6 @@ test('the handoff carries the object and its selection both ways', () => {
   const t = renderTerm(runProgram(o, { w: 100 }), { w: 100 })
   const b = renderSvg(runProgram(o, { w: 140 }), { w: 140 })
   for (const r of t.regions) assert.ok(b.regions.some(x => x.id === r.id && x.rects.length), `the browser lost ${r.id}`)
-})
-
-test('the demo plugin carries the current renderer files', () => {
-  const lib = DRAW + 'demo-plugin/hooks/lib/'
-  for (const f of readdirSync(lib)) {
-    if (f === 'README') continue
-    assert.equal(readFileSync(lib + f, 'utf8'), readFileSync(DRAW + f, 'utf8'), `demo-plugin/hooks/lib/${f} is out of date: run node lean/draw/demo-plugin/sync.mjs`)
-  }
 })
 
 test('the toolkit doc\'s programs run', () => {

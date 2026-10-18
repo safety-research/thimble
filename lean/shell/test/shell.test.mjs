@@ -12,7 +12,7 @@ import { runProgram } from '../../draw/sandbox-node.mjs'
 import { prep } from '../node/prep.mjs'
 import { findVerb, listVerbs, verbsFor } from '../node/registry.mjs'
 import { startServer } from '../node/serve.mjs'
-import { runVerb } from '../node/verb.mjs'
+import { runVerb, specOf } from '../node/verb.mjs'
 
 function verbsDir(spec) {
   const dir = mkdtempSync(join(tmpdir(), 'verbs-'))
@@ -58,11 +58,36 @@ test('the hint row picks the verbs the object names, then those whose hint.mjs h
   assert.deepEqual(none.verbs.filter(v => v.picked), [])
 })
 
-test('the echo verb is in the plugin and has a phrase for an object with data', async () => {
-  const { verbs } = await verbsFor({ id: '01-x', data: { days: [] } })
-  const echo = verbs.find(v => v.name === 'echo')
-  assert.equal(echo.key, 'e')
-  assert.match(echo.phrase, /1 part/)
+test('the plugin\'s verbs are squeeze, explore and trace, on s, x and t, in that order', async () => {
+  const { verbs, problems } = listVerbs()
+  assert.deepEqual(problems, [])
+  assert.deepEqual(verbs.map(v => [v.key, v.name]), [['s', 'squeeze'], ['x', 'explore'], ['t', 'trace']])
+  // a chart of numbers whose rows keep their source rows: explore and trace say what they would do for it
+  const object = { id: '01-x', title: 'Saves', data: { days: [{ day: '2026-06-18', n: 3, _rows: ['r.jsonl#L1-3'] }] }, lineage: { bindings: [{ at: '/days', ref: 'q1' }] } }
+  const picked = (await verbsFor(object)).verbs.filter(v => v.picked)
+  assert.deepEqual(picked.map(v => v.name), ['explore', 'trace'])
+  assert.match(picked[0].phrase, /explore 1 day/)
+})
+
+test('a verb that calls the model stops until the shell has its answer, then runs with it', async () => {
+  const dir = verbsDir({
+    asks: { 'verb.json': '{}', 'run.mjs': 'export async function run(ctx) { const r = await ctx.model.complete({ model: "haiku", prompt: "hi" }); return { text: `said ${r.text}` } }' },
+    swallows: { 'verb.json': '{}', 'run.mjs': 'export async function run(ctx) { try { await ctx.model.fork({ prompt: "why" }) } catch { return { text: "gave up" } } return { text: "never" } }' },
+  })
+  const input = { object: { id: '01-x', version: 1 }, root: tmpdir() }
+  const first = await runVerb('asks', input, { dir })
+  assert.equal(first.need.kind, 'complete')
+  assert.deepEqual(first.need.request, { model: 'haiku', prompt: 'hi' })
+  const second = await runVerb('asks', { ...input, answers: { [first.need.key]: { isAnswered: true, text: 'hello' } } }, { dir })
+  assert.equal(second.text, 'said hello')
+  // a verb that catches the stop itself still waits for its call
+  assert.equal((await runVerb('swallows', input, { dir })).need.kind, 'fork')
+})
+
+test('a verb\'s object is saved by the kernel, its own lineage kept as declared', () => {
+  const { name, spec } = specOf({ id: 'squeeze-x-1', v: 2, title: 't', program: 'p', data: {}, lineage: { cites: [1] }, declared: { read: 'a' } }, 'squeeze')
+  assert.equal(name, 'squeeze-x-1')
+  assert.deepEqual(spec, { title: 't', program: 'p', data: {}, declared: { read: 'a', squeeze: { cites: [1] } } })
 })
 
 test('a verb runs with the object, the region and its refs; a verb that throws comes back as an error', async () => {

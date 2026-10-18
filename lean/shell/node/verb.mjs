@@ -1,31 +1,44 @@
 // verb.mjs: run one verb on one object, the way a key press, a click or /verb runs it.
 //
 //   node verb.mjs list                         -> {verbs, problems}
-//   node verb.mjs run <name|key> < {object, region, root, lean, w}  -> {verb, text?, note?, ask?, saved?, error?}
+//   node verb.mjs run <name|key> < {object, region, root, w, ...}  -> {verb, text?, note?, ask?, saved?, error?, need?}
 //
 // It imports lean/verbs/<name>/run.mjs and calls run(ctx) with:
 //
-//   ctx.object   the object as the kernel keeps it: {id, version, title, program, data, lineage, text, ...}
-//   ctx.region   the selected region's id, or null; ctx.regionMeta its meta from the drawing, when it ran
-//   ctx.refs     the kernel refs behind the region (or behind the object's citations, with none selected), which
-//                `ctx.kernel.resolve` opens down to their source rows
-//   ctx.root     the folder under analysis (where thimble/ is)
-//   ctx.verb     the verb's own verb.json, every field kept
-//   ctx.kernel   the `lean` command: run(args, {input}) -> {code, stdout, stderr}; resolve(ref, n) and list(id) parse
-//                its --json; save(name, spec) saves an object and returns {id, v, out}
-//   ctx.draw     {runProgram, renderTerm, renderSvg, gridText}: the drawing contract, to draw or check an object
-//   ctx.w        the columns the person's terminal has for it
+//   ctx.object     the object as the kernel keeps it: {id, version, title, program, data, lineage, text, ...}
+//   ctx.region     the selected region's id, or null; ctx.regionMeta its meta from the drawing
+//   ctx.refs       the kernel refs behind the region (or behind the object's citations, with none selected), which
+//                  `ctx.kernel.resolve` opens down to their source rows
+//   ctx.drawing    the object as the person sees it: its program's drawing (regions, cites, examples, knobs)
+//   ctx.state      the knobs' values the person set ({} for none)
+//   ctx.args       the words the person typed after the verb (`/verb squeeze fuller`), else ''
+//   ctx.root       the folder under analysis (where thimble/ is)
+//   ctx.verb       the verb's own verb.json, every field kept, with `dir`, its folder
+//   ctx.skill      the text of the verb's SKILL.md ('' when it has none)
+//   ctx.kernel     the `lean` command: run(args, {input}) -> {code, stdout, stderr}; json(args) parses its --json;
+//                  resolve(ref, n) and list(id) as `lean resolve`/`lean list`; objects() every object as saved;
+//                  save(name, spec) saves an object and returns {id, v, out}
+//   ctx.draw       {runProgram, renderTerm, renderSvg, gridText}: the drawing contract, to draw or check an object
+//   ctx.model      {complete(request), fork(request)}: one quiet call to the session's own model, as $.model.complete
+//                  (no history) and $.model.fork (over the conversation) answer it: {isAnswered, text, usage, reason}
+//   ctx.w          the columns the person's terminal has for it
 //
 // run(ctx) returns any of:
-//   object  an object to show: one the verb saved itself ({id} or {id, version}), or a spec this runner saves with
-//           `lean save` ({name?, title, program, data, ...}), so its lineage is the kernel's like any other object
-//   text    words for the person; Claude reads them too, as a command's output
-//   note    words for Claude alone, kept beside the output
-//   ask     a request for Claude, sent as a prompt once the session is idle, when the verb needs the model to do
-//           its work (a squeeze written by Claude, say); the person sees it in the transcript as sent by thimble
+//   object  an object to show: a spec this runner saves with `lean save` ({name?, title, program, data, ...}; a
+//           `lineage` of the verb's own rides along under `declared`), or one the verb saved itself ({id, version})
+//   text    words for the person; Claude reads them too
+//   note    words for Claude alone, before its next reply
+//   ask     a request for Claude, sent as a prompt once the session is idle, when the verb needs Claude to do the work
+//           with its tools (a view that needs a new query, say)
 // Any other field is kept and handed back.
+//
+// The model, across a process: the hooks module holds $.model, this process does not. A call of ctx.model that has
+// no answer yet stops the run: the runner hands back {need: {kind, request, key}}, the module makes the call and runs
+// the verb again with every answer so far in `answers`, and the same call then resolves at once. A verb needs nothing
+// for this but to call ctx.model again the same way, which a run of the same input does.
 import { spawnSync } from 'node:child_process'
-import { realpathSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runProgram } from '../../draw/sandbox-node.mjs'
@@ -46,14 +59,45 @@ export function kernelFor(root, lean = LEAN) {
   }
   return {
     run,
+    json,
     resolve: (ref, n = 5) => json(['resolve', ref, '-n', String(n)]),
     list: id => json(id ? ['list', id] : ['list']),
+    objects() {
+      const d = join(root, 'thimble', 'objects')
+      if (!existsSync(d)) return []
+      const out = []
+      for (const f of readdirSync(d).filter(x => x.endsWith('.json')).sort()) {
+        try { out.push(JSON.parse(readFileSync(join(d, f), 'utf8'))) } catch { /* a file being written */ }
+      }
+      return out
+    },
     save(name, spec) {
       const r = run(['save', ...(name ? [name] : [])], { input: JSON.stringify(spec) })
       const m = /saved (\S+) v(\d+)/.exec(r.stdout)
       return m ? { id: m[1], v: Number(m[2]), out: r.stdout } : { error: (r.stdout + r.stderr).trim().slice(0, 600) }
     },
   }
+}
+
+const keyOf = (kind, request) => createHash('sha256').update(kind + '\n' + JSON.stringify(request)).digest('hex').slice(0, 24)
+
+/** ctx.model for one run: answers from `answers`, else the first call without one is said in `need` and stops it. */
+function modelFor(answers, need) {
+  const call = kind => async request => {
+    const key = keyOf(kind, request)
+    if (answers && answers[key]) return answers[key]
+    if (!need.call) need.call = { kind, request, key }
+    throw Object.assign(new Error('the model call is being made; this run waits for it'), { needsModel: true })
+  }
+  return { complete: call('complete'), fork: call('fork') }
+}
+
+/** The spec a verb's object becomes for `lean save`: the kernel keeps its own lineage, so a verb's rides along as
+ *  declared, and the kernel's own fields (id, version) are left to it. */
+export function specOf(o, verbName) {
+  const { name, id, version, v, lineage, ...spec } = o
+  if (lineage !== undefined) spec.declared = { ...(spec.declared && typeof spec.declared === 'object' ? spec.declared : {}), [verbName]: lineage }
+  return { name: name || id || null, spec }
 }
 
 /** Run one verb. Never throws: a verb that fails comes back as {error}. */
@@ -63,15 +107,23 @@ export async function runVerb(word, input, { dir, lean } = {}) {
   if (!verb) return { error: `no verb "${word}"; the verbs: ${verbs.map(v => v.name).join(', ') || 'none'}` }
   const root = String(input.root || process.cwd())
   const kernel = kernelFor(root, lean)
+  const need = {}
+  let skill = ''
+  try { skill = readFileSync(join(verb.dir, 'SKILL.md'), 'utf8') } catch { skill = '' }
   const ctx = {
     object: input.object || null,
     region: input.region || null,
     regionMeta: input.regionMeta || null,
     refs: Array.isArray(input.refs) ? input.refs : [],
+    drawing: input.drawing || null,
+    state: input.state && typeof input.state === 'object' ? input.state : {},
+    args: typeof input.args === 'string' ? input.args : '',
     root,
     verb: { ...verb },
+    skill,
     kernel,
     draw: { runProgram, renderTerm, renderSvg, gridText },
+    model: modelFor(input.answers, need),
     w: Number(input.w) || 96,
   }
   let out
@@ -80,15 +132,18 @@ export async function runVerb(word, input, { dir, lean } = {}) {
     if (typeof mod.run !== 'function') return { verb: verb.name, error: `${verb.folder}/run.mjs exports no run(ctx)` }
     out = (await mod.run(ctx)) || {}
   } catch (e) {
+    if (need.call) return { verb: verb.name, need: need.call }
     return { verb: verb.name, error: `${verb.name} failed: ${String(e && e.message || e).slice(0, 600)}` }
   }
+  // a verb that caught the stop itself still waits for its call
+  if (need.call) return { verb: verb.name, need: need.call }
   const res = { ...out, verb: verb.name }
   const o = out.object
   if (o && typeof o === 'object') {
     delete res.object
-    if (o.id && (o.version != null || o.v != null || !o.program)) res.saved = { id: String(o.id), v: Number(o.version ?? o.v) || null }
+    if (o.id && o.program == null) res.saved = { id: String(o.id), v: Number(o.version ?? o.v) || null }
     else {
-      const { name, ...spec } = o
+      const { name, spec } = specOf(o, verb.name)
       const s = kernel.save(name || (input.object ? `${input.object.id}-${verb.name}`.replace(/^\d+-/, '') : verb.name), spec)
       if (s.error) res.error = `${verb.name} made an object the kernel did not save: ${s.error}`
       else res.saved = { id: s.id, v: s.v }

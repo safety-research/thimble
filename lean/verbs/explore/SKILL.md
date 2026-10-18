@@ -19,8 +19,8 @@ sentences at the top are enough.
 
 **Every mark leads to its rows.** Bind the data from `lean q`: `"data": {"days": "q1"}`. Each bound row keeps
 `_rows`, its source rows. Put them in the part's meta: `k.region(id, { label, rows: d._rows, fields: ['user',
-'text'] }, part)`. `fields` names what a person needs to read one row. The person presses ↵ on the part and reads
-the rows. If you have only a total, run a query that keeps the rows (`tally`) before you draw it.
+'text'] }, part)`. `fields` names what a person needs to read one row. The person selects the part and reads the
+rows under it. If you have only a total, run a query that keeps the rows (`tally`) before you draw it.
 
 **Turn what the answer assumes into a knob.** A threshold, a scale, a split, a window of time, the step of a run:
 `k.knob(id, { values, at, label })` returns the value the person set. Draw what follows from it, words included,
@@ -56,12 +56,13 @@ it again under the same name and keep the region ids, so the selection survives.
    `{"title": "...", "verb": "explore", "of": "<the object's id, if there is one>", "data": {"days": "q1"}}`.
 3. `lean save explore-<name> --from spec.json --program view.js`. Fix each problem that its output lists, then save
    again.
-4. Look at it as the person will: `node lean/verbs/explore/cli.mjs explore-<name> --text` prints the view, and
-   `--keys "right enter"` presses keys. A program that throws draws only its error.
+4. Look at it as the person will: `lean verb explore --text explore-<name>` prints the view, and
+   `--keys "right enter"` presses keys. A program that throws draws only its error: fix it and save it again under
+   the same name, and the fixed version takes its place under your reply.
 5. Tell the person in one line what they can turn or open. Do not repeat the answer.
 
-The view shows under your reply. The person turns knobs with ◂ ▸, moves between parts with tab, and reads rows with
-↵. You see none of this unless they ask you something.
+The view shows under your reply. The person opens it, turns knobs (a click on ◂ ▸, or j and k), moves between
+parts with tab, and reads each part's rows under it. You see none of this unless they ask you something.
 
 ## Example: saves per day, from a wiki's edit log
 
@@ -95,7 +96,7 @@ return k.frame(k.stack(
 ## Example: an agent's run, step by step
 
 The answer was "It claimed the PR at step 7, set up the build until step 40, then edited and tested." The person
-scrubs a cursor along the run. Under the strip is the step at the cursor, and ↵ opens its call and its result.
+scrubs a cursor along the run. Under the strip is the step at the cursor; selecting it opens its call and its result.
 The query that made `data.steps` gave each step `_refs` of two rows: the tool call and its result.
 
 ```js
