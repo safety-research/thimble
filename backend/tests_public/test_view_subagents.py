@@ -522,6 +522,58 @@ async def test_bug_hunt_k6_a_build_pressed_in_the_terminal_tells_the_module_wher
     assert "place" not in bridge.ops("spawn")[-1], "only a click is pressed somewhere"
 
 
+async def _first_page_passed(monkeypatch, name: str = "Run Board") -> tuple[str, str, str, Path, list]:
+    """A build pressed in the terminal whose terminal page just passed finish_view, with the browser page its next step:
+    (slug, agent, key, folder, the reviews started)."""
+    from app import headless
+
+    monkeypatch.setattr(views, "build_other_page", BUILD_OTHER_PAGE)
+    monkeypatch.setattr(views, "build_problem_for", lambda c, target=None: "")
+    monkeypatch.setattr(headless, "missing", lambda kind: "")
+    reviewed: list[tuple[str, str]] = []
+    monkeypatch.setattr(view_review, "after_built", lambda c, s: reviewed.append((s, views.target_of(c, s))))
+    slug = _propose(name, asked=True)
+    views.update_proposal(CORPUS, slug, place=views.TERMINAL, target=views.TERM_PAGE)
+    agent = await _started(slug)
+    key = view_tools.build_key(slug)
+    _draft(slug)
+    d = views.views_dir(CORPUS) / slug
+    (d / views.VIEW_HTML).unlink()
+    (d / views.VIEW_TERM).write_text("draw((d) => d.text('runs'))\n")
+    res = await _call("finish_view", {}, agent, key)
+    assert not res.is_error and "## The view's page for the browser workbench" in res.text, res.text[:300]
+    return slug, agent, key, d, reviewed
+
+
+async def test_bug_hunt_l17_a_failed_second_page_says_that_page_failed_never_a_change_the_analyst_asked_for(
+        board, bridge, gates, heard, hints, monkeypatch):
+    """Bug hunt round 11, L17: the browser page a build went on to make failed with "The change to the view Run Grid
+    failed, so the view is as it was", in both places, though the analyst asked for no change. The notice and main's
+    chip say the view's page for the browser failed to build and the view keeps its terminal page; Retry builds it."""
+    from app import notices
+
+    slug, agent, key, d, reviewed = await _first_page_passed(monkeypatch)
+    (d / views.VIEW_HTML).write_text("<p>FAIL</p>")
+    subagents.run_ended(CORPUS, agent, "done", "The browser page still fails.", source="handback")
+    await _until(lambda: reviewed, "the review of the terminal page never started")
+    [notice] = [n for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
+    assert notice["text"].startswith("The view Run Board's page for the browser workbench failed to build, so the "
+                                     "view keeps its page for the terminal panel: "), notice["text"]
+    assert "change" not in notice["text"] and "Retry" in json.dumps(notice.get("action"))
+    [chip] = [r for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1])
+              if r.get("type") == "chip" and r.get("kind") == "ticket"]
+    assert (chip["status"], chip["page"]) == ("failed", views.HTML_PAGE) and "change" not in chip["text"]
+    prop = _prop(slug)
+    assert (prop["status"], prop["target"], views.missing_page_target(prop["failed_change"])) == (
+        "built", views.TERM_PAGE, views.HTML_PAGE)
+    assert reviewed == [(slug, views.TERM_PAGE)]
+    # an analyst's change that fails still says so
+    views.revise(CORPUS, slug, "Add a legend.")
+    dev._change_failed_chip(CORPUS, _prop(slug), "problem: the page says FAIL")
+    texts = [n["text"] for n in notices.open_notices(CORPUS) if n.get("kind") == "view"]
+    assert texts[-1].startswith("The change to the view Run Board failed, so the view is as it was")
+
+
 async def test_bug_hunt_l17_a_build_s_second_page_is_the_next_step_of_the_same_run_then_one_review(
         board, bridge, gates, heard, hints, monkeypatch):
     """Bug hunt round 11, L17: once the terminal page of a build pressed in the terminal passed, the builder handed back

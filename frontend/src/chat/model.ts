@@ -81,6 +81,8 @@ export interface ChipRow {
   message?: string
   /** the view a `view_failed` line names (backend dev._repairs_failed), whose chip it shows */
   view?: string
+  /** the page a view lacked whose build failed or stopped (`term-page`, `html-page`; backend dev._change_failed_chip) */
+  page?: string
 }
 export interface AgentRow {
   kind: 'agent'
@@ -239,7 +241,7 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
         return
       }
       case 'chip': {
-        rows.push({ kind: 'chip', index, chip: String(e.kind), text: chipText(String(e.kind), e.text), ref: e.ref, ts: e.ts, status: typeof e.status === 'string' ? e.status : undefined, chat: typeof e.chat === 'string' ? e.chat : undefined, generation: typeof e.generation === 'number' ? e.generation : undefined, writer: typeof e.writer === 'string' ? e.writer : undefined, message: typeof e.message === 'string' ? e.message : undefined, view: typeof e.view === 'string' ? e.view : undefined })
+        rows.push({ kind: 'chip', index, chip: String(e.kind), text: chipText(String(e.kind), e.text), ref: e.ref, ts: e.ts, status: typeof e.status === 'string' ? e.status : undefined, chat: typeof e.chat === 'string' ? e.chat : undefined, generation: typeof e.generation === 'number' ? e.generation : undefined, writer: typeof e.writer === 'string' ? e.writer : undefined, message: typeof e.message === 'string' ? e.message : undefined, view: typeof e.view === 'string' ? e.view : undefined, page: typeof e.page === 'string' ? e.page : undefined })
         return
       }
       case 'agent': {

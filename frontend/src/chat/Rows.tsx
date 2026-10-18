@@ -747,19 +747,27 @@ function CallOutput({ text, callRef: ref, failed, focus }: { text: string; callR
   )
 }
 
+/** The place of a view's page by its target (backend views.MISSING_PAGE_PLACE). */
+const PAGE_PLACE: Record<string, string> = { 'term-page': 'the terminal panel', 'html-page': 'the browser workbench' }
+
 /** A dev ticket's end in main, in a few words: applied, stopped, or failed (a change to a view that failed, or that the
- * analyst's quit stopped, puts the view back as it was); the thread its chip opens has the reason. Other chips keep their
- * text. Pure. */
-export function ticketChipText(item: Pick<ChipRowT, 'status' | 'text' | 'ref'>): string {
+ * analyst's quit stopped, puts the view back as it was); the thread its chip opens has the reason. The build of the page a
+ * view lacked (`page`) is thimble's step, not a change the analyst asked for, so its words name the page. Other chips keep
+ * their text. Pure. */
+export function ticketChipText(item: Pick<ChipRowT, 'status' | 'text' | 'ref' | 'page'>): string {
+  const view = item.ref?.startsWith('view:')
+  const place = view && item.page ? PAGE_PLACE[item.page] : undefined
   switch (item.status) {
     case 'applied':
       return 'Dev ticket applied'
     case 'stopped':
-      return item.ref?.startsWith('view:') ? 'The change to the view stopped when your Claude Code session ended, so it is as it was' : 'Dev ticket stopped'
+      if (place) return `The build of the view's page for ${place} stopped when your Claude Code session ended`
+      return view ? 'The change to the view stopped when your Claude Code session ended, so it is as it was' : 'Dev ticket stopped'
     case 'failed':
     case 'needs manual merge':
     case 'rolled back':
-      return item.ref?.startsWith('view:') ? 'The change to the view failed, so it is as it was' : item.status === 'rolled back' ? 'Dev ticket rolled back' : 'Dev ticket failed'
+      if (place) return `The view's page for ${place} failed to build, so the view keeps its other page`
+      return view ? 'The change to the view failed, so it is as it was' : item.status === 'rolled back' ? 'Dev ticket rolled back' : 'Dev ticket failed'
     default:
       return item.text
   }
