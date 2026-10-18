@@ -948,6 +948,34 @@ def from_links(text: str) -> str:
     return _LINK_RE.sub(_link_citation, mixed_links(text))
 
 
+# A code fence with what it holds (to its closing fence, or the text's end), or a code span: where an answer's text is
+# left as written (chat_form).
+_CODE_RE = re.compile(r"^[ \t]*(```|~~~)[^\n]*(?:\n.*?(?:^[ \t]*\1[^\n]*$|\Z)|\Z)|(`+)[^`\n]+?\2", re.M | re.S)
+
+
+def _single(m: "re.Match[str]") -> str:
+    """A value-ref in single brackets (_SINGLE_RE) as its citation, or as written when the part after the bar is no
+    ref or the part before it is one."""
+    display, ref = m.group(1).strip(), m.group(2).strip()
+    if not display or _REF_SHAPE.match(display) or not _REF_SHAPE.match(ref):
+        return m.group()
+    return f"[[{display}|{ref}]]"
+
+
+def chat_form(text: str) -> str:
+    """An answer's text (main's, a thread's) with its citations in their chat form: each Markdown link to a ref
+    (from_links), and each value-ref in single brackets, `["Filename … is invalid"|transcript.jsonl#L2059]`, written
+    `[[…|…]]` as a takeaway's is (normalise_markup). Code spans and fences are left as written. Idempotent."""
+    text = from_links(text)
+    if "|" not in text:
+        return text
+    out, at = [], 0
+    for m in _CODE_RE.finditer(text):
+        out += [_SINGLE_RE.sub(_single, text[at:m.start()]), m.group()]
+        at = m.end()
+    return "".join([*out, _SINGLE_RE.sub(_single, text[at:])])
+
+
 def to_links(text: str) -> str:
     """`text` with each citation written as the Markdown link the terminal shows as its text, the inverse of
     from_links: `[[31|card:<id>#a/b]]` becomes `[31](card:<id>#a/b)` and `[[card:<id>]]` becomes `[↗](card:<id>)`, with
@@ -977,12 +1005,6 @@ def normalise_markup(text: str) -> str:
             return m.group()
         return f"[[{display}|{ref}]]"
 
-    def single(m: "re.Match[str]") -> str:
-        display, ref = m.group(1).strip(), m.group(2).strip()
-        if not display or _REF_SHAPE.match(display) or not _REF_SHAPE.match(ref):
-            return m.group()
-        return f"[[{display}|{ref}]]"
-
     def bare(m: "re.Match[str]") -> str:
         shown, bar, ref = m.group(1).rpartition("|")
         return f"[[{ref.strip()}]]" if bar and shown.strip() in BARE_LINK_TEXTS and ref.strip() else m.group()
@@ -993,7 +1015,7 @@ def normalise_markup(text: str) -> str:
     # a citation without a value written with the link text as its value (`[[↗|ref]]`) is the bare ref, never a value
     # the check looks for at its place (live check term-fix7: a takeaway's `[[↗|events.jsonl#L1063]]` was red)
     text = _SPAN_RE.sub(bare, text)
-    text = _SINGLE_RE.sub(single, text)
+    text = _SINGLE_RE.sub(_single, text)
     return _BARE_NUMBER_RE.sub(lambda m: m.group(1), text)
 
 

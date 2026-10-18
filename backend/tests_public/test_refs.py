@@ -96,3 +96,24 @@ def test_bug_hunt_e2_a_link_whose_words_are_in_double_brackets_cites_its_target(
     # a citation followed by words in parentheses, and a web link, stay as written
     assert cite.from_links("[[card:tally-ends]](above)") == "[[card:tally-ends]](above)"
     assert cite.from_links("[[↗]](https://example.org/a)") == "[[↗]](https://example.org/a)"
+
+
+def test_an_answer_s_quote_in_single_brackets_is_a_citation(workspaces_tmp):
+    """Bug hunt L9: a thread's answer quoted records as `["…"|transcript.jsonl#L2059]`, which a takeaway reads as a
+    citation (normalise_markup) but the thread showed as raw markup and never checked. An answer's text, main's or a
+    thread's, writes it as `[["…"|ref]]`; code is left as written, and so are brackets whose part after the bar is no
+    ref."""
+    from app import agents, cite, session, threads
+
+    said = ('It looped on ["Filename \'wren-ui-2.7.1.tar.gz\' is invalid…"|logs/run.jsonl#L2059]; then '
+            '["200 OK"|logs/run.jsonl#L2061] and [3 retries|logs/run.jsonl#L12-L14]. '
+            'Code `x = a[i|j.k]` and [left|right] stay.\n\n```\nm = [tag|notes.md]\n```')
+    chat = ('It looped on [["Filename \'wren-ui-2.7.1.tar.gz\' is invalid…"|logs/run.jsonl#L2059]]; then '
+            '[["200 OK"|logs/run.jsonl#L2061]] and [[3 retries|logs/run.jsonl#L12-L14]]. '
+            'Code `x = a[i|j.k]` and [left|right] stay.\n\n```\nm = [tag|notes.md]\n```')
+    assert cite.chat_form(said) == chat and cite.chat_form(chat) == chat
+    assert session.visible(said) == chat
+    meta = agents.new_agent("mini", agents.KIND_THREAD, "Why did it loop?", announce=False)
+    threads.reply("mini", meta["id"], said, by="fork")
+    texts = [r.get("delta") for r in agents.read_events(agents.paths("mini", meta["id"])[1]) if r.get("type") == "text"]
+    assert texts == [chat]

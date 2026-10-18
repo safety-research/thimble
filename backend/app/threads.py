@@ -745,9 +745,9 @@ def session_ended(c: str, sid: str) -> None:
 def reply(c: str, thread_id: str, text: str, *, by: str) -> None:
     """The thread's visible reply: a `text` record marked `reply`, so the fold shows it as the model's message and
     fork_finished knows the run answered. Every reply is this one record, its citations in their chat form
-    (cite.from_links), so the browser and the terminal check them as they check any answer's."""
+    (cite.chat_form), so the browser and the terminal check them as they check any answer's."""
     _, log_path = agents.paths(c, thread_id)
-    agents.append(log_path, {"type": "text", "delta": cite.from_links(text), "reply": True, "by": by})
+    agents.append(log_path, {"type": "text", "delta": cite.chat_form(text), "reply": True, "by": by})
     agents.notify(c, thread_id)
 
 

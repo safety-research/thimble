@@ -2119,11 +2119,11 @@ def visible(text: str, notes: bool = False) -> str:
     """A text as a chat shows it (module note, the end token): empty when it is only END_TOKEN or NO_CONTENT, the words
     before the token when it ends with it (END_RE), and any other text as it is, without its lines that open with
     TERMINAL_ONLY unless `notes` keeps them (main's reply to a hand-back of HANDBACK_ROWS), and with the citations written
-    as Markdown links for the terminal in their chat form (cite.from_links)."""
+    as Markdown links for the terminal or in single brackets in their chat form (cite.chat_form)."""
     if text.strip() == NO_CONTENT:
         return ""
     m = END_RE.search(text)
-    text = cite.from_links(text[: m.start()].rstrip() if m else text)
+    text = cite.chat_form(text[: m.start()].rstrip() if m else text)
     if notes or TERMINAL_ONLY not in text:
         return text
     return "\n".join(ln for ln in text.split("\n") if not ln.lstrip().startswith(TERMINAL_ONLY)).strip()
