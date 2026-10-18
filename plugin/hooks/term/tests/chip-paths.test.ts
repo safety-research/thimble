@@ -25,3 +25,13 @@ test('a reply notes every file it cites before it draws a chip, and only as much
   expect(drawn).toEqual(['[ r1/forge.db line 3 ]', '[ r2/forge.db line 3 ]'])
   forgetCitedFiles()
 })
+
+test("a long run folder that tells same-named files apart is kept whole, never cut from its start", () => {
+  forgetCitedFiles()
+  const text = 'It looped [[otter-pond__strict-fan-out/transcript.jsonl#L840]] while [[otter-pond__strict/transcript.jsonl#L12]] and [[kestrel-nine__goal/transcript.jsonl#L1167]] ran on [[otter-pond__loose-fan-out-with-retries-and-a-very-long-name/transcript.jsonl#L3]].'
+  const got = chips(text)
+  expect(got.slice(0, 3)).toEqual(['[ otter-pond__strict-fan-out/transcript.jsonl line 840 ]', '[ otter-pond__strict/transcript.jsonl line 12 ]', '[ kestrel-nine__goal/transcript.jsonl line 1167 ]'])
+  // past the longest a chip may be, the file's shared name is cut first, then the folder in its middle, its two ends kept
+  expect(got[3]).toMatch(/^\[ otter-pond__loose.*….*name\/… line 3 \]$/)
+  forgetCitedFiles()
+})

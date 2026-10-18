@@ -440,10 +440,13 @@ export function isChip(c: Citation): boolean {
 
 /** The most cells a chip's words take, its brackets aside. */
 export const CHIP_MAX = 30
+/** The most cells the words of a chip of a file take when its folders tell it from another cited file of its name
+ *  (`habit-tracker__specified/transcript.jsonl line 840`). */
+export const CHIP_PATH_MAX = 60
 
 /** What a chip says inside its brackets, short (Matt, 2026-10-07): `card:<name>` for a card or one of its cells, by
  *  the name it is cited by (Matt, 2026-10-16: `[ card:how-many-prs ]`, never `[ card:8fa134 ]`; cardName), `card` while
- *  an older card's name is not read; `card output line 1` for a line it printed, `events.jsonl line 12` for a file's line (its name cut in its middle, the line kept),
+ *  an older card's name is not read; `card output line 1` for a line it printed, `events.jsonl line 12` for a file's line (its name cut in its middle, the line kept; the folders that tell it from another cited file of its name kept whole),
  *  a label by its name (`edit purpose`, `edit purpose · yes` for a value), `report`, `slides` or `story` for a document
  *  or a passage of one, `output line 1` for a command's output. Never an id. */
 export function chipWords(c: Citation): string {
@@ -489,10 +492,19 @@ export function chipWords(c: Citation): string {
   const item = /^\/(?:[^/]+\/)?(\d+)$/.exec(frag)
   const where = lines ? (lines[2] && lines[2] !== lines[1] ? ` lines ${lines[1]}-${lines[2]}` : ` line ${lines[1]}`) : row ? ` row ${row[1]}` : page ? ` page ${page[1]}` : item ? ` item ${Number(item[1]) + 1}` : frag ? ` ${frag}` : ''
   if (width(`${name}${where}`) <= CHIP_MAX) return `${name}${where}`
-  const room = CHIP_MAX - width(where)
   const slash = name.lastIndexOf('/')
-  const file = name.slice(slash + 1)
-  if (slash > 0 && room - width(file) - 1 >= 4) return `${middleCut(name.slice(0, slash), room - width(file) - 1)}/${file}${where}`
+  if (slash > 0) {
+    // the folders tell this file from the other cited files of its name (the runs of a task each hold a
+    // `transcript.jsonl`): they stay whole up to CHIP_PATH_MAX, and the file's name, which those files share, is cut
+    // first
+    const dir = name.slice(0, slash)
+    const file = name.slice(slash + 1)
+    if (width(`${name}${where}`) <= CHIP_PATH_MAX) return `${name}${where}`
+    const fileRoom = CHIP_PATH_MAX - width(`${dir}/${where}`)
+    if (fileRoom >= 8) return `${dir}/${middleCut(file, fileRoom)}${where}`
+    return `${middleCut(dir, CHIP_PATH_MAX - width(`/…${where}`))}/…${where}`
+  }
+  const room = CHIP_MAX - width(where)
   return room >= 8 ? `${middleCut(name, room)}${where}` : cut(`${name}${where}`, CHIP_MAX)
 }
 
