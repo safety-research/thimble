@@ -2,8 +2,10 @@
 the video extension's video file.
 
 Every format starts from one reading of the document (read_model): its title, lead, units (a report's sections, a
-story's sections, a deck's slides, a video's lines), their figures and the citations, numbered in order of first use;
-a card a sentence names as a noun is written as the card's title (report_types.card_nouns).
+story's sections, a deck's slides, a video's lines), their figures and the citations, numbered in order of first use.
+The citations hold true references alone — the corpus's records and files; a ref to a canvas card is left out, since an
+export is detached from the workspace (Notes). A card a sentence names as a noun is written as the card's title
+(report_types.card_nouns).
 Markdown writes the citations as footnotes; HTML is one self-contained file (fonts, pictures and styles inlined) with
 the citations as numbered notes linked from the text; PDF is that HTML printed by the browser. A video's HTML is its
 player and its PDF a frame per line (film_export.py).
@@ -70,7 +72,10 @@ _INLINE_RE = re.compile(r"\*\*(.+?)\*\*|(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*]
 
 
 class Notes:
-    """The document's citations, numbered in order of first use; each {n, ref, label, quote, card}."""
+    """The document's citations, numbered in order of first use; each {n, ref, label, quote}. A ref to a canvas card
+    (a card, or a line or value of its output) is no citation here: an export is detached from the workspace, so a card
+    link is dead weight for its reader, and the references hold only what stands on its own — the corpus's records and
+    files. A card still shows as a figure, and one a sentence names as a noun still reads as its title."""
 
     def __init__(self, c: str):
         from .report_types import _Citations  # noqa: PLC0415 — report_types imports much of the app
@@ -83,6 +88,11 @@ class Notes:
     def note(self, ref: str) -> int | None:
         if ref in self._n:
             return self._n[ref]
+        try:
+            if refs.parse_ref(ref).get("kind") == "cell":
+                return None  # a canvas card is no reference in an export (class note)
+        except ValueError:
+            return None
         label = self.cites.cite(ref)
         if not label:
             return None
@@ -92,19 +102,11 @@ class Notes:
                 res = refs.resolve(self.corpus, ref) or {}
             except Exception:  # noqa: BLE001 — a ref that no longer resolves keeps its label
                 res = {}
-            quote = "" if re.fullmatch(r"card:[0-9a-f]{8}", ref) else _collapse(res.get("excerpt") or "")
+            quote = _collapse(res.get("excerpt") or "")
             if len(quote) > QUOTE_CHARS:
                 quote = quote[: QUOTE_CHARS - 1].rstrip() + "…"
-        card = None
-        try:
-            p = refs.parse_ref(ref)
-            if p.get("kind") == "cell":
-                card = str(p["cell_id"])
-        except ValueError:
-            pass
-        title = self.cites.titles.get(card, "") if card else ""
         n = len(self.rows) + 1
-        self.rows.append({"n": n, "ref": ref, "label": label, "quote": quote, "card": card, "title": title})
+        self.rows.append({"n": n, "ref": ref, "label": label, "quote": quote})
         self._n[ref] = n
         return n
 
@@ -243,8 +245,7 @@ def to_markdown(m: dict[str, Any]) -> str:
 
 
 def _note_text(r: dict[str, Any]) -> str:
-    what = r["label"] + (f" “{r['title']}”" if r["title"] else "")
-    return what + (f": “{r['quote']}”" if r["quote"] else "")
+    return r["label"] + (f": “{r['quote']}”" if r["quote"] else "")
 
 
 def _clock(t: float) -> str:
@@ -428,8 +429,6 @@ def _notes_html(m: dict[str, Any]) -> str:
     items = []
     for r in m["notes"]:
         label = f'<span class="ref">{_esc(r["label"])}</span>'
-        if r["title"]:
-            label += f" “{_esc(r['title'])}”"
         quote = f" <q>{_esc(r['quote'])}</q>" if r["quote"] else ""
         items.append(f'<li id="note-{r["n"]}">{label}{quote}</li>')
     return f'<section class="notes"><h2>Sources</h2><ol>{"".join(items)}</ol></section>'
