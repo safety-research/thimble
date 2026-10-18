@@ -117,3 +117,30 @@ def test_an_answer_s_quote_in_single_brackets_is_a_citation(workspaces_tmp):
     threads.reply("mini", meta["id"], said, by="fork")
     texts = [r.get("delta") for r in agents.read_events(agents.paths("mini", meta["id"])[1]) if r.get("type") == "text"]
     assert texts == [chat]
+
+
+async def test_a_value_cited_at_a_view_s_unit_is_never_failed_for_want_of_it_in_the_unit_s_words(workspaces_tmp, monkeypatch):
+    """Bug hunt L19: `89` linked to a view's run was checked against the run's prompt, which the view's reader gives as
+    the unit's excerpt, and failed, though the view shows 89 for the run. A view's unit gives no values to check against:
+    a value its label or excerpt holds is found there, and any other has only its place checked. A key the view does not
+    have still fails."""
+    from app import local, verify
+
+    unit = {"ref": "view:lattice-grid/owl-quiz", "kind": "view", "slug": "lattice-grid", "key": "owl-quiz", "record": None,
+            "label": "owl-quiz · specified", "excerpt": "TASK. Train a small model, up to 24 GPU-hours.", "refs": [],
+            "meta": {"slug": "lattice-grid"}}
+
+    def resolve(corpus_dir, ref):
+        if ref.endswith("/nope"):
+            raise refs.RefError("the view 'Lattice Grid' has no 'nope'", 404)
+        return dict(unit, ref=ref)
+
+    monkeypatch.setattr(refs, "resolve", resolve)
+    assert refs.place_only(unit) and "owl-quiz · specified" in refs.checked_text(unit)
+    root = config.corpus_dir("mini")
+    assert await verify._ref_check(root, "view:lattice-grid/owl-quiz", "89") is None
+    assert await verify._ref_check(root, "view:lattice-grid/nope", "89") is not None
+    got = await local._resolve("mini", [], [json.dumps([{"ref": "view:lattice-grid/owl-quiz", "value": "89"},
+                                                        {"ref": "view:lattice-grid/owl-quiz", "value": "24"},
+                                                        {"ref": "view:lattice-grid/nope", "value": "7"}])])
+    assert [g["state"] for g in got] == ["ok", "ok", "missing"]

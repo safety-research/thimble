@@ -8,6 +8,7 @@ import { cardsInline, citations, valueIn } from '../lib'
 import { showsValue } from '../cite'
 import { labelCard } from '../cell'
 import { cardsOfCall, examplePassage, labelOf, labelsOf, resolutionOf, runShown, threadOf, turnWords, verdictOf } from '../model'
+import { citeStatus } from '../reply'
 import { RESOLVE } from './fixtures'
 
 const check = (raw: string) => {
@@ -170,4 +171,24 @@ test("an example finds the passage it quotes deep in its record: a span's own wo
   expect(r.key).toBe('body')
   expect(r.text).toBe('line one We pick `CHOICE: beach`, says Rowan. line three')
   expect(r.text.slice(r.mark[0], r.mark[1])).toBe('We pick `CHOICE: beach`')
+})
+
+test("a value cited at a view's unit is found where the unit's words show it, and else has only its place checked, never failed (bug hunt L19)", async () => {
+  // `rl-20q [89](view:run-grid/rl-20q__specified)` was red: its unit resolved to the run's prompt, which holds no 89,
+  // though the view shows 89 legs for the run; `chess-nano [24]` passed only because its prompt says "24 GPU-hours"
+  const unit = (key: string, excerpt: string) => ({ ref: `view:lattice-grid/${key}`, kind: 'view', slug: 'lattice-grid', key, record: null, label: key.replace('__', ' · '), excerpt, refs: [`${key}/prompt.md#L1`], meta: { slug: 'lattice-grid', name: 'Lattice Grid' } })
+  const one = (raw: string, res: Record<string, unknown>) => {
+    const c = citations(raw)[0]!
+    return { c, v: verdictOf(c, res as never) }
+  }
+  const hidden = one('[89](view:lattice-grid/owl-quiz__specified)', unit('owl-quiz__specified', 'TASK. Train a small model to ask questions, up to 24 GPU-hours.'))
+  expect(hidden.v.status).toBe('ok')
+  expect(hidden.v.placeOnly).toBe(true)
+  expect(await citeStatus({} as never, hidden.c, hidden.v)).toMatch(/^found .*; only its place is checked$/)
+  const said = one('[24](view:lattice-grid/kestrel__goal)', unit('kestrel__goal', 'Train a chess model, up to 24 GPU-hours.'))
+  expect(said.v.status).toBe('ok')
+  expect(said.v.placeOnly).toBeUndefined()
+  // a key the view does not have is still missing
+  const gone = one('[7](view:lattice-grid/nope)', { ref: 'view:lattice-grid/nope', error: "the view 'Lattice Grid' has no 'nope'" })
+  expect(gone.v.status).toBe('missing')
 })

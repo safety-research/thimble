@@ -590,6 +590,9 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerd
     if (turn && typeof turn.speaker === 'string' && typeof turn.at === 'number') out.turn = { speaker: turn.speaker, at: turn.at }
   }
   if (!showsValue(c.display)) return { ...out, why: 'the place resolves; the citation shows no value' }
+  // a view's unit: its reader says what the unit is (its label, an excerpt such as a run's prompt), not the values the
+  // view shows for it, so a value those words leave out has only its place checked, never failed (bug hunt L19)
+  if (kind === 'view' && !valueIn(c.display!, `${str(res.label)}\n${str(res.excerpt)}`)) return { ...out, placeOnly: true, why: "the view's unit resolves; its view gives no values to check the cited one against" }
   const where = span && 'value' in span ? str(span.value) : span && 'text' in span ? str(span.text) : kind === 'cell' ? str(res.excerpt) : out.lines.filter(l => l.hit).map(l => l.text).join('\n') || str(res.excerpt)
   const holds = span && 'value' in span ? shownMatches(str(span.value), c.display!) || valueIn(c.display!, where) : valueIn(c.display!, where)
   return holds ? { ...out, why: 'the value is at its place' } : { ...out, status: 'differs', why: span && 'value' in span ? `the place shows ${str(span.value)}` : 'the value is not at its place' }

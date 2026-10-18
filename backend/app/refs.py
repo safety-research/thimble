@@ -450,10 +450,12 @@ def fields_text(out: dict[str, Any]) -> str:
 
 def checked_text(out: dict[str, Any]) -> str:
     """The text a check of a value or a quote reads at a resolved ref: its excerpt, after the fields of its records that
-    the excerpt leaves out (fields_text), such as a wiki save's edit summary. A block's or a span's excerpt is that
+    the excerpt leaves out (fields_text), such as a wiki save's edit summary; a view's unit's label and excerpt. A block's or a span's excerpt is that
     passage alone. A JSON document's value is read whole, past its excerpt's cut (EXCERPT_MAX): a message as its words
     (_message_blocks) and then its JSON, so a quote deep in a tool's output is at its place (bug hunt round 10, K3)."""
     excerpt = str(out.get("excerpt") or "")
+    if out.get("kind") == "view":
+        return "\n".join(t for t in (str(out.get("label") or ""), excerpt) if t)
     if out.get("kind") == "pointer":
         words = _join_blocks(out.get("blocks") or [])
         if not words or excerpt.startswith(words):
@@ -462,6 +464,13 @@ def checked_text(out: dict[str, Any]) -> str:
     if out.get("kind") not in ("record", "range"):
         return excerpt
     return "\n".join(t for t in (fields_text(out), excerpt) if t)
+
+
+def place_only(out: dict[str, Any]) -> bool:
+    """Whether a value cited at the resolved place `out` has only its place checked when checked_text does not hold it:
+    a view's unit, whose reader says what the unit is (its label and an excerpt, such as a run's prompt), not the values
+    the view shows for it, so a value the view shows is never failed for want of them there."""
+    return out.get("kind") == "view"
 
 
 def _strings(v: Any) -> list[str]:

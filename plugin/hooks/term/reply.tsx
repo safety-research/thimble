@@ -210,10 +210,10 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
         ? `not found: ${await placeName(cx, c.ref)} does not exist`
         : status === 'differs'
           ? `not found ${where}`
-          : c.display !== null && !valued
+          : c.display !== null && (!valued || v.placeOnly)
             ? `found ${where}; only its place is checked`
             : `found ${where}`
-  if (check.state === 'verified') return valued ? `${place}, and a script got the same ${isNumber(c.display!) ? 'number' : 'value'}` : place
+  if (check.state === 'verified') return valued && !v?.placeOnly ? `${place}, and a script got the same ${isNumber(c.display!) ? 'number' : 'value'}` : place
   if (check.state === 'refuted') return `${place}, but a script got ${check.source || 'another value'}`
   if (check.state === 'typed') return `${place}, but ${check.why || 'typed in the code, not computed'}`
   if (check.state === 'running') return `${place}; ◌ being checked`
