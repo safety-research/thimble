@@ -73,8 +73,9 @@ export type Squeeze = {
  *  itself in (`reveal.n` of its characters shown). */
 export type SqzUi = { focus: string; adding: boolean; running: { since: number } | null; error: string | null; tick: number; typing?: string; reveal?: { n: number; total: number } | null }
 
-/** The thimble line's counts, as last counted, and when each changed (it brightens for a moment). */
-export type LineCounts = { cards: number; threads: number; cites: number; claims: number; read: number; files: number; at: number; changed: Record<string, number> }
+/** The thimble line's counts, as last counted (`cov` the share of the folder's data read, 0 to 1), and when each
+ *  changed (it brightens for a moment). */
+export type LineCounts = { cards: number; threads: number; cites: number; claims: number; cov: number; at: number; changed: Record<string, number> }
 
 /** One card of the tray: a mark of a message, or a citation inside a card. */
 export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' }
@@ -119,7 +120,8 @@ declare module 'claude-code' {
       /** the tray above the prompt, or none */
       tray: Tray | null
       /** the line a verb opened under a message's verb row, or none */
-      pick: { row: string; verb: string } | null
+      /** the line a verb opened under a message's verb row (for c, the claims list, with the cluster opened), or none */
+      pick: { row: string; verb: string; open?: string | null } | null
       /** the message the keys act on, when the person picked one other than the latest */
       selrow: string | null
       /** the row of the latest turn's answer */
@@ -140,6 +142,15 @@ declare module 'claude-code' {
       facts: StateFamily<unknown>
       /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
       thread: StateFamily<unknown>
+      /** this session's claims (CONTRACT 7), as held for the drawing; thimble/claims/<session>.json on disk */
+      claims: Record<string, unknown> | null
+      /** a turn's prompt row, its number and Claude's message rows, by turn id: where its claims were said */
+      turns: StateFamily<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null>
+      /** the Claims pane: the message it was opened from, the claim the ring is on and the one selected, the time
+       *  cursor, the search */
+      claimpane: { row: string; focus: string | null; selected: string | null; cursor: number | null; search: string | null; searching: boolean } | null
+      /** what the corpus orientation would map in the folder, with its time and tokens */
+      claimoffer: { root: string; offer: { what: string; minutes: number | null; tokens: number | null } | null } | null
     }
   }
 }

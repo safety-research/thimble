@@ -1,5 +1,5 @@
-// FilesPane.tsx: 0.9's Files on lean's kernel. The views bar holds the File browser, Claims (the newest atlas object,
-// drawn by the Atlas page) and each view (a big card: a map, a trace or an explore view), as 0.9 holds its pages. The
+// FilesPane.tsx: 0.9's Files on lean's kernel. The views bar holds the File browser, Claims (the session's claims, drawn
+// by the Claims page) and each view (a big card: a map, a trace or an explore view), as 0.9 holds its pages. The
 // File browser lists the sources (`lean sources`), each with what this session read of it (`lean coverage`: computed,
 // read, searched, named or not read), and reads a file's records through `lean rows`, the rows this session read
 // marked. Nothing here counts as Claude's reading: the page's reads go under the person's own session.
@@ -9,7 +9,7 @@ import { Segmented } from '@09/components/Button'
 import { PaneStatus } from '@09/components/PaneStatus'
 import { Spinner } from '@09/components/Spinner'
 import { api, BASE, fmt } from '../lib/api'
-import { isClaims, setState, useStore, type ObjectInfo } from '../lib/store'
+import { setState, useStore, type ObjectInfo } from '../lib/store'
 import { VIEW_VERBS } from '../chat/Message'
 import { useDrawn } from '../canvas/CardFace'
 
@@ -38,7 +38,6 @@ const glyph = (p: string): IconName => (/\.(jsonl|json)$/.test(p) ? 'braces' : /
 export function FilesPane() {
   const view = useStore((s) => s.filesView)
   const objects = useStore((s) => s.objects)
-  const claims = useMemo(() => [...objects].filter(isClaims).sort((a, b) => String(b.updated).localeCompare(String(a.updated)))[0] ?? null, [objects])
   const views = useMemo(() => objects.filter((o) => VIEW_VERBS.has(String(o.verb))), [objects])
   const options = [
     { value: 'browser', label: 'File browser', icon: 'folder' as IconName },
@@ -57,7 +56,7 @@ export function FilesPane() {
         </button>
       </div>
       {value === 'browser' && <Browser />}
-      {value === 'claims' && <ClaimsView claims={claims} />}
+      {value === 'claims' && <ClaimsView />}
       {shownView && <BigView view={shownView} />}
     </div>
   )
@@ -383,33 +382,26 @@ function Record({ r, raw, flash, covered }: { r: Rec; raw: boolean; flash: boole
 
 // ---------------------------------------------------------------- Claims and the views
 
-/** Claims: the Claims page (shell/browser/claims/, its own page folder) in a frame, as 0.9 shows a page in Files.
- * Until that page is there, the newest atlas object drawn by the Atlas page, or a line that says how to make one. */
-function ClaimsView({ claims }: { claims: ObjectInfo | null }) {
-  const [page, setPage] = useState<'claims' | 'atlas' | 'none' | null>(null)
+/** Claims: the Claims page (shell/browser/claims/, its own page folder) in a frame, as 0.9 shows a page in Files: the
+ * claims of this session from its store (thimble/claims/<session>.json), with its own empty state. Embedded
+ * (?embed=1), it leaves out its header; a press on a place where a claim was said comes back as {type: 'thimble:row'},
+ * which opens that message in the chat. */
+function ClaimsView() {
   useEffect(() => {
-    let alive = true
-    void fetch(`${BASE}/claims/`, { cache: 'no-store' })
-      .then((r) => alive && setPage(r.ok ? 'claims' : claims ? 'atlas' : 'none'))
-      .catch(() => alive && setPage(claims ? 'atlas' : 'none'))
-    return () => {
-      alive = false
+    const on = (e: MessageEvent) => {
+      const m = e.data as { type?: string; row?: unknown } | null
+      if (!m || m.type !== 'thimble:row' || typeof m.row !== 'string') return
+      setState({ thread: 'main', flashRow: m.row })
     }
-  }, [claims?.id])
-  const src = page === 'claims' ? `${BASE}/claims/` : page === 'atlas' && claims ? `${BASE}/atlas/?o=${encodeURIComponent(claims.id)}` : null
+    addEventListener('message', on)
+    return () => removeEventListener('message', on)
+  }, [])
   return (
     <>
       <div className="files-body is-view">
-        {src ? (
-          <iframe className="lean-view-frame" title="Claims" src={src} />
-        ) : page === 'none' ? (
-          <div className="lean-claims-none">
-            <p className="lean-doc-none">No claims yet.</p>
-            <p className="lean-doc-hint">Press c under a message. Claude extracts the claims of the work so far, with their sources, and they show here.</p>
-          </div>
-        ) : null}
+        <iframe className="lean-view-frame" title="Claims" src={`${BASE}/claims/?embed=1`} />
       </div>
-      <PaneStatus name="Files" meta={`view · Claims${page === 'atlas' && claims ? ` · ${claims.id} v${claims.version}` : ''}`} />
+      <PaneStatus name="Files" meta="view · Claims" />
     </>
   )
 }

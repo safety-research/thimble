@@ -88,7 +88,7 @@ const AT = ROW.slice(0, 24)
 const MOUNT = { plugin: 'thimble-lean', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
 const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never
 const verbKey = (k: string) => `vr-${AT}-verb-${k}`
-const HINT = { plugin: 'thimble-lean', component: 'PromptHint', surface: 'terminal', requestId: 'hint', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
+const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hintOf = async ($: any) => textOf(await $.ui.render(HINT))
 
@@ -109,7 +109,7 @@ const markdowns = (t: Node) => { const out: string[] = []; walk(t, x => { if (x.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const reply = ($: any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
 
-test('an object Claude saves is drawn under the next words of the turn; the verb row is under the answer, and open under the object', async ($, on) => {
+test('an object Claude saves is drawn under the next words of the turn; its verbs and 1 open detail are in the thimble line', async ($, on) => {
   world(on)
   const clock = mock.clock(on)
   const opened: string[] = []
@@ -129,15 +129,13 @@ test('an object Claude saves is drawn under the next words of the turn; the verb
   expect(drawn).toContain('the reply')
   expect(drawn).toContain('Jun 18')
   expect(drawn).toContain('6,543')
-  // the message's verb row, its keys alone, then the object with nothing under it; the keys act on this answer, so the
-  // hint line under the prompt says what 1 does, and 1 on an empty prompt opens the card's detail view
-  expect(drawn).toContain('v  s')
+  // the message, then the object with nothing under it; the keys act on this answer, so the thimble line above the
+  // prompt names its verbs and what 1 does, and 1 on an empty prompt opens the card's detail view
   expect(drawn).not.toContain('visualize')
   expect(drawn).not.toContain('1 open detail')
-  expect(await hintOf($)).toBe('1 open detail')
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · 1 open detail')
   expect(drawn).not.toContain('x explore')
   expect(drawn).not.toContain('? all')
-  expect(drawn.indexOf('v  s')).toBeLessThan(drawn.indexOf('Jun 18'))
   expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
   expect(opened).toEqual(['object'])
 })
@@ -203,8 +201,9 @@ test('a reply draws its citations inline, each underlined and a press that opens
   await clock.settle()
   const card = textOf(await $.ui.render(BAND))
   expect(card).toContain('Jun 18')
-  expect(card).not.toContain('1 ask')
-  expect(await hintOf($)).toBe('1 ask · ] [ next mark · 0 close')
+  // the tray's keys are in the thimble line under it, not on its frame
+  expect(card.split('╯')[0]).not.toContain('1 ask')
+  expect(await hintOf($)).toContain('thimble  1 ask · ] [ next · 0 close')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
   await ui.unmount()
 })
@@ -231,7 +230,8 @@ test('a verb of the message row: v opens its line, a pick runs it on the message
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(1)
-  await ui.press({ key: verbKey('v') })
+  // v on an empty prompt, as the thimble line names it
+  await ($ as Any).prompt.edit(edit('v'))
   expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
   await ui.press({ key: `vl-${AT}-opt-0` })
   await clock.settle()
@@ -282,7 +282,8 @@ test("v asks Claude for a card of the message: the row reads as the person's pic
   await savedTurn($, on, clock)
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
-  await ui.press({ key: verbKey('v') })
+  // v on an empty prompt, as the thimble line names it
+  await ($ as Any).prompt.edit(edit('v'))
   expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
   await ui.press({ key: `vl-${AT}-opt-0` })
   await clock.settle()
@@ -383,17 +384,18 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   await markedTurn($, on, clock)
   // the hint line names the key that opens the answer's marks; the verb row does not
   expect(textOf(await $.ui.render({ ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never))).not.toContain('marks')
-  expect(await hintOf($)).toBe('] 2 marks')
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · ] cite & explain')
   // the thimble line above the prompt counts what the session holds
-  expect(textOf(await $.ui.render(BAND))).toBe('thimble · 2 cites')
+  expect(textOf(await $.ui.render(BAND))).toContain('2 cites')
+  expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
   expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
-  expect(await hintOf($)).toBe('1 ask · ] [ next mark · 0 close')
+  expect(await hintOf($)).toContain('thimble  1 ask · ] [ next · 0 close')
   // 1 asks: the panel turns to the mark's side thread, and the hint line says how to ask it
   expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('ask about 6,543 saves…')
-  expect(await hintOf($)).toBe('type to ask · 0 back to the card')
+  expect(await hintOf($)).toContain('type to ask · ↵ asks this thread · 0 back to the card')
   // the thimble line names the thread the prompt goes to
   expect(textOf(await $.ui.render(BAND))).toContain('thimble:main/6,543 saves')
   await ($ as Any).prompt.edit(edit(']'))
@@ -404,7 +406,8 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(await ($ as Any).prompt.edit(edit('w'))).toEqual({ text: 'w', cursor: 1 })
   // 0 on an empty prompt closes the tray
   expect(await ($ as Any).prompt.edit(edit('0'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(BAND))).toBe('thimble · 2 cites')
+  expect(textOf(await $.ui.render(BAND))).toContain('2 cites')
+  expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
   // v opens its line under the answer; i typed straight after was the start of a word
   expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(MOUNT))).toContain('▸ 1 another view of this answer')
@@ -454,7 +457,7 @@ test("a resumed session finds its messages on disk: their marks open from the ke
   w.files[`${dir}/${AT}.json`] = JSON.stringify(rec)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   const RESUMED = { ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never
-  expect(textOf(await $.ui.render(RESUMED))).toContain('s ● 24 lines')
+  expect(textOf(await $.ui.render(HINT))).toContain('s ● 24 lines')
   await ($ as Any).prompt.edit(edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
   await ($ as Any).prompt.edit(edit('0'))

@@ -81,7 +81,7 @@ function textOf(n: any): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const HINT = { plugin: 'thimble-lean', component: 'PromptHint', surface: 'terminal', requestId: 'hint', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
+const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hintOf = async ($: any) => textOf(await $.ui.render(HINT))
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

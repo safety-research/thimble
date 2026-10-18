@@ -70,9 +70,9 @@ const edit = (key: string, text = '') => ({ origin: { kind: 'composer' }, key: {
 const record = (w: { files: Record<string, string> }) => JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${AT}.json`]!)
 // the new text writing itself in, tick by tick, until it is whole
 const writtenIn = async (clock: Any) => { for (let i = 0; i < 120; i++) await clock.advance(50) }
-const HINT = { plugin: 'thimble-lean', component: 'PromptHint', surface: 'terminal', requestId: 'hint', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' }, viewport: { columns: 100, rows: 48, isFullscreen: true } } as never
+const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const hintOf = async ($: any, draft = false) => textOf(await $.ui.render({ ...(HINT as object), props: { isDraft: draft, isWorking: false, hint: '? for shortcuts' } } as never))
+const hintOf = async ($: any, _draft = false) => textOf(await $.ui.render(HINT))
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function answered($: any, on: any, clock: { settle: () => Promise<void> }, text = TEXT) {
@@ -90,26 +90,28 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   const w = world(on)
   const clock = mock.clock(on)
   await answered($, on, clock)
-  // the verb row: the keys alone
-  expect(textOf(await $.ui.render(view(TEXT)))).toContain('v  s')
+  // the verbs are in the thimble line above the prompt, in words; nothing under the answer
+  expect(await hintOf($)).toContain('thimble  v visualize · s squeeze')
+  expect(textOf(await $.ui.render(view(TEXT)))).not.toContain('visualize')
   expect(await ($ as Any).prompt.edit(edit('s'))).toEqual({ text: '', cursor: 0 })
   const drawn = textOf(await $.ui.render(view(TEXT)))
-  expect(drawn).not.toContain('v  s')
+  expect(drawn).not.toContain('visualize')
   expect(drawn).toContain(' Length ○○○● full ')
   expect(drawn).toContain(' Report ↔ Interpret ○●○ balanced ')
   expect(drawn).toContain(' Familiarity ○○●○○ working ')
   expect(drawn).toContain('+')
-  // nothing under the chips: their keys are in the hint line, once
+  // nothing under the chips: their keys are in the thimble line, once
   expect(drawn).not.toContain('change')
-  expect(await hintOf($)).toBe('1–3 chip · < > change · + stretch · 0 close')
+  expect(await hintOf($)).toContain('1–3 chip · < > change · + stretch · 0 close')
   // only the picked chip has a fill
   const tree = JSON.stringify(await $.ui.render(view(TEXT)))
   expect((tree.match(/"backgroundColor":"#4a3b1d"/g) || []).length).toBe(7)
   // a short answer: nothing was squeezed, no call made
   expect(w.calls.length).toBe(0)
-  // s again closes them
+  // s again closes them, and the thimble line has the verbs back
   await ($ as Any).prompt.edit(edit('s'))
-  expect(textOf(await $.ui.render(view(TEXT)))).toContain('v  s')
+  expect(textOf(await $.ui.render(view(TEXT)))).not.toContain('Length')
+  expect(await hintOf($)).toContain('v visualize · s squeeze')
 })
 
 test('a chip change rewrites the message in place with one call; the citations are placed again on the new text; 0 restores the original', async ($, on) => {
@@ -143,7 +145,7 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(drawn).not.toContain('from this one')
   expect(drawn).toContain('Length ○○●○ medium')
   expect(drawn).not.toContain('rewriting')
-  expect(await hintOf($)).toBe('1–3 chip · < > change · + stretch · 0 original · s done')
+  expect(await hintOf($)).toContain('1–3 chip · < > change · + stretch · 0 original · s done')
   await ui.unmount()
   await ($ as Any).prompt.edit(edit('0'))
   await clock.settle()
@@ -208,14 +210,14 @@ test('a stretch: + then two ends and ↵ make a chip that stands at the original
   expect(plus.text).toBe('+')
   expect(plus.decorations.some((d: Any) => d.virtualText === ' between … and …')).toBe(true)
   expect(textOf(await $.ui.render(view(TEXT)))).toContain('stretch between … and …')
-  expect(await hintOf($)).toBe('type two ends, such as engineer and manager · ↵ makes the stretch · ⌫ cancels')
+  expect(await hintOf($)).toContain('type two ends, such as engineer and manager · ↵ makes the stretch · ⌫ cancels')
   const typed = await ($ as Any).prompt.edit(edit('e', '+'))
   expect(typed.text).toBe('+e')
   expect(typed.decorations.some((d: Any) => d.virtualText === ' and …')).toBe(true)
   const both = await ($ as Any).prompt.edit({ origin: { kind: 'composer' }, key: { key: 'r' }, text: '+engineer and manage', cursor: 20, start: 20, end: 20, inputText: 'r' } as never)
   expect(both.text).toBe('+engineer and manager')
   expect(textOf(await $.ui.render(view(TEXT)))).toContain('stretch between engineer and manager')
-  expect(await hintOf($, true)).toBe('↵ makes engineer ↔ manager · ⌫ the + cancels')
+  expect(await hintOf($, true)).toContain('↵ makes engineer ↔ manager · ⌫ the + cancels')
   const r = await $.prompt.submit({ text: '+engineer and manager', origin: { kind: 'composer' } } as never)
   expect((r as Any).drop).toBe('stretch engineer ↔ manager')
   expect(w.submitted.length).toBe(0)
@@ -229,7 +231,7 @@ test('a stretch: + then two ends and ↵ make a chip that stands at the original
   let drawn = textOf(await $.ui.render(view(TEXT)))
   expect(drawn).toContain(' engineer ●○○○ manager ')
   expect(drawn).toContain('Length ○○●○ medium')
-  expect(await hintOf($)).toBe('1–4 chip · < > change · + stretch · 0 original · s done')
+  expect(await hintOf($)).toContain('1–4 chip · < > change · + stretch · 0 original · s done')
   // > steps it toward manager: one call, with Length still at medium
   await ($ as Any).prompt.edit(edit('>'))
   await clock.settle()
@@ -266,7 +268,7 @@ test('a long answer arrives squeezed: one call at Length short, the verb row say
   expect(rec.marks.map((m: Any) => m.ref)).toEqual(['q2#run=1@n'])
   await writtenIn(clock)
   const drawn = textOf(await $.ui.render(view(LONG)))
-  expect(drawn).toContain('s ● 1 of 44 lines')
+  expect(await hintOf($)).toContain('s ● 1 of 44 lines')
   expect(drawn).not.toContain('Run 30 landed')
   await ($ as Any).prompt.edit(edit('s'))
   expect(textOf(await $.ui.render(view(LONG)))).toContain('Length ○●○○ short')

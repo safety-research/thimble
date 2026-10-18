@@ -59,11 +59,11 @@ test('the hint row picks the verbs the object names, then those whose hint.mjs h
   assert.deepEqual(none.verbs.filter(v => v.picked), [])
 })
 
-test('the plugin\'s verbs are map, visualize, squeeze, atlas, explore and trace, on m, v, s, a, x and t, in that order; v, s and a are the message row\'s', async () => {
+test('the plugin\'s verbs are map, visualize, squeeze, claims, explore and trace, on m, v, s, c, x and t, in that order; v, s and c are the message row\'s', async () => {
   const { verbs, problems } = listVerbs()
   assert.deepEqual(problems, [])
-  assert.deepEqual(verbs.map(v => [v.key, v.name]), [['m', 'map'], ['v', 'visualize'], ['s', 'squeeze'], ['a', 'atlas'], ['x', 'explore'], ['t', 'trace']])
-  assert.deepEqual(verbs.filter(v => v.row === true).map(v => v.key), ['v', 's', 'a'])
+  assert.deepEqual(verbs.map(v => [v.key, v.name]), [['m', 'map'], ['v', 'visualize'], ['s', 'squeeze'], ['c', 'claims'], ['x', 'explore'], ['t', 'trace']])
+  assert.deepEqual(verbs.filter(v => v.row === true).map(v => v.key), ['v', 's', 'c'])
   // a chart of numbers whose rows keep their source rows: explore and trace say what they would do for it
   const object = { id: '01-x', title: 'Saves', data: { days: [{ day: '2026-06-18', n: 3, _rows: ['r.jsonl#L1-3'] }] }, lineage: { bindings: [{ at: '/days', ref: 'q1' }] } }
   const picked = (await verbsFor(object)).verbs.filter(v => v.picked)
@@ -207,8 +207,8 @@ const JSON_H = { 'content-type': 'application/json' }
 test('pages are folders behind the token: each folder of shell/browser/ is a page, with the drawing modules beside them', async () => {
   const { root, lean } = browserRoot()
   const pages = mkdtempSync(join(tmpdir(), 'pages-'))
-  for (const d of ['app', 'atlas']) { mkdirSync(join(pages, d)); writeFileSync(join(pages, d, 'index.html'), `<title>${d}</title>`) }
-  writeFileSync(join(pages, 'atlas', 'graph.js'), 'export const x = 1')
+  for (const d of ['app', 'claims']) { mkdirSync(join(pages, d)); writeFileSync(join(pages, d, 'index.html'), `<title>${d}</title>`) }
+  writeFileSync(join(pages, 'claims', 'graph.js'), 'export const x = 1')
   writeFileSync(join(pages, '.hidden'), 'no')
   const { server, port, token } = await startServer({ root, session: SID, lean, pages })
   try {
@@ -227,8 +227,8 @@ test('pages are folders behind the token: each folder of shell/browser/ is a pag
     assert.equal((await call(port, { path: `/${token}/card/?o=01-saves&v=2&from=a1` })).headers.location, `/${token}/app/?card=01-saves&v=2&from=a1`)
     assert.match(page.headers['content-security-policy'], /connect-src 'self'/)
     // a page another part adds is served as it is: no change to the server
-    assert.match((await call(port, { path: `/${token}/atlas/` })).text, /atlas/)
-    const js = await call(port, { path: `/${token}/atlas/graph.js` })
+    assert.match((await call(port, { path: `/${token}/claims/` })).text, /claims/)
+    const js = await call(port, { path: `/${token}/claims/graph.js` })
     assert.equal(js.status, 200)
     assert.match(js.headers['content-type'], /javascript/)
     // the renderer and object.js, which every page imports
@@ -280,6 +280,13 @@ test('the JSON routes: this session\'s messages with their records, a record, an
     // the row's verbs: the CONTRACT's three while no verb carries row: true
     const v = JSON.parse((await call(port, { path: `/${token}/api/verbs` })).text).verbs
     assert.ok(v.length >= 1 && v.every(x => /^[a-z0-9]$/.test(x.key)))
+    // the session's claims (CONTRACT 7): none yet, then the store as written, with an ETag
+    assert.deepEqual(JSON.parse((await call(port, { path: `/${token}/api/claims` })).text).store.claims, [])
+    mkdirSync(join(root, 'thimble', 'claims'), { recursive: true })
+    writeFileSync(join(root, 'thimble', 'claims', `${SID}.json`), JSON.stringify({ v: 1, session: SID, claims: [{ id: 'c1', text: 'June 18 was busiest', said: [{ row: 'a1' }], sources: [] }], clusters: [] }))
+    const cl = await call(port, { path: `/${token}/api/claims` })
+    assert.equal(JSON.parse(cl.text).store.claims[0].text, 'June 18 was busiest')
+    assert.equal((await call(port, { path: `/${token}/api/claims`, headers: { 'if-none-match': cl.headers.etag } })).status, 304)
     // a resolve runs as the person's read, never counted as what Claude read
     const r = JSON.parse((await call(port, { path: `/${token}/api/resolve?ref=${encodeURIComponent('q1#day=2026-06-18@n')}` })).text)
     assert.equal(r.count, 2)
@@ -449,6 +456,9 @@ test('a scope keeps only what it should; the from line counts labels once and co
   assert.deepEqual(scopeOf({ row: 'r1', v: 3, region: 'x' }), { row: 'r1' })
   assert.deepEqual(scopeOf({ object: 'o1', v: 'two', mark: { kind: 'gloss', gloss: 'g1', term: 'fixture scope', ref: 'not a ref' } }), { object: 'o1', mark: { kind: 'gloss', gloss: 'g1', term: 'fixture scope' } })
   assert.equal(backLine([]).error, 'not an object')
+  // a claim's id rides along (an ask from the Claims page); anything else in its place is dropped
+  assert.deepEqual(scopeOf({ claim: 'c12', label: 'June 18 was busiest' }), { claim: 'c12', label: 'June 18 was busiest' })
+  assert.deepEqual(scopeOf({ claim: '../c1' }), {})
   const f = fromFacts({ lineage: { queries: { q1: { kept: ['kind'], inputs: [{ path: 'a.csv' }] }, q2: { uses: [{ name: 'kind' }] } } } }, { error: 'no lean' })
   assert.deepEqual(f, { sources: [{ path: 'a.csv', rows: null }], rows: 0, labels: ['kind'] })
 })

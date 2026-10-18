@@ -97,7 +97,7 @@ function textOf(n: any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-const HINT = { plugin: 'thimble-lean', component: 'PromptHint', surface: 'terminal', requestId: 'hint', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' }, viewport: { columns: 140, rows: 40, isFullscreen: true } } as never
+const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 140, rows: 40, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hintOf = async ($: any) => textOf(await $.ui.render(HINT))
@@ -133,7 +133,7 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   // the empty bar is whitespace: no frame, no words; its keys are in the hint line
   expect(t).not.toContain('details')
   expect(t).not.toContain('esc back')
-  expect(await hintOf($)).toBe('↑↓ part · ↵ details · e examples · p program · h versions · type to ask this card · esc back')
+  expect(await hintOf($)).toContain('↑↓ part · ↵ details · e examples · p program · h versions · type to ask this card · esc back')
   // ↵ on the selected part (the ring's press) fills the bar with its details: where it comes from, and its examples one key away
   const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
   await clock.settle()

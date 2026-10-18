@@ -16,6 +16,9 @@
 //              (shell/node/serve.mjs), alive while a page is open and ended with the session. What the person does
 //              on a page comes back as one line: an `ask` goes to Claude as a prompt that carries its scope, a `verb`
 //              presses that verb on the message's card.
+//   claims     the session's claims (thimble/claims/<session>.json), which the observer's look adds each turn's to:
+//              c opens the Claims pane, focused (shell/claimsview.ts): the clusters with their claims, the time strip
+//              (] [ replay them in the order made) and the details of the claim the ring is on (↑ ↓).
 //   resume     where each object is drawn is kept per session in $THIMBLE_HOME/lean/shown/<session>.json, so
 //              `claude -c` and `--resume` draw the objects under the same replies again.
 //
@@ -30,17 +33,20 @@ import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { cardKind, explainerCard, sourceCard } from './cards.js'
-import { detailIsOpen, detailPane, markOpen, openDetailPane, registerDetail } from './detail'
+import { detailIsOpen, detailKeys, detailPane, markOpen, openDetailPane, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { isRef, objectRefs, rankRow, recordRefs, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadOf } from './thread'
 import type { Scope as ThreadScope } from './thread'
 import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
-import { messageEl, trayEl, verbLineEl, verbRowEl } from './view'
+import { markColors, messageEl, trayEl, verbColor, verbLineEl } from './view'
 import type { RowVerb } from './view'
 import { afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, chipFromPrompt, chipsEl, fromBrowser as sqFromBrowser, pressChip, revealedOf, seeView, setLevels as sqSetLevels, sLit, squeezeHint, squeezeKey, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { chipsOf as sqChips, isOriginal as sqIsOriginal, revealCut } from '../verbs/squeeze/chips.mjs'
+import { BAR_ROWS, HEAD_ROWS, claimKey, claimOfKey, claimsHint, claimsPaneEl, matchesOf } from './claimsview'
+import { layout } from './claimgraph.js'
+import { emptyStore, readStore, timeline, viewOf } from '../verbs/claims/claims.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,6 +79,11 @@ const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
 const SQZ = { plugin: 'thimble-lean', key: 'sqz' } as const
 const LINE = { plugin: 'thimble-lean', key: 'line' } as const
 const COUNTS = { plugin: 'thimble-lean', key: 'counts' } as const
+const CLAIMS = { plugin: 'thimble-lean', key: 'claims' } as const
+const TURNS = { plugin: 'thimble-lean', key: 'turns' } as const
+const CLAIMOFFER = { plugin: 'thimble-lean', key: 'claimoffer' } as const
+const CLAIMPANE = { plugin: 'thimble-lean', key: 'claimpane' } as const
+export const CPANE = 'claims'
 
 const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
@@ -89,7 +100,7 @@ const objects = new Map<string, Any>()
 export const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
-let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[] } | null = null
+let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; rows: string[]; oriented: number } | null = null
 let theme: 'dark' | 'light' = 'dark'
 let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string }; scope?: Record<string, unknown> } | null = null
 let server: { base: string; root: string } | null = null
@@ -450,6 +461,13 @@ function failed($: Engine, what: string, err: unknown, fix: string): void {
   if (why != null) $.ui.toast(`${what}: ${why}. ${fix}`)
 }
 
+/** A pane that cannot draw: one plain line that says so and how to get it back, never the error itself. */
+function paneProblem($: Engine, e: Any, what: string, err: unknown): Any {
+  const { Text } = $.ui.resolve(e) as Any
+  const why = plainWhy(err)
+  return Text({ color: 'error', wrap: 'wrap', children: `${what} could not be drawn${why ? ` (${why})` : ''}. Press esc, then open it again.` })
+}
+
 /** An engine call whose refusal needs nothing from the person (a scroll a key asked for): it is dropped quietly. */
 async function quietly(p: Promise<unknown>): Promise<void> {
   try { await p } catch { /* a refusal: the tray shows the mark anyway */ }
@@ -558,7 +576,7 @@ async function recordOf($: Engine, root: string, row: string): Promise<Any | nul
   try { return (await $.fs.exists(file)) ? JSON.parse(String(await $.fs.read(file))) : null } catch { return null }
 }
 
-type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; thread?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
+type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; thread?: string; claim?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
 
 /** What Claude reads beside a question asked in the browser: what it was asked about, and where its rows are. */
 export async function webContext($: Engine, root: string, scope: WebScope): Promise<string> {
@@ -572,6 +590,15 @@ export async function webContext($: Engine, root: string, scope: WebScope): Prom
     lines.push(`They asked it on the page of ${ref.id}@${o?.version ?? ref.v} "${o?.title || ''}" (${root}/thimble/objects/${ref.id}.json)${region ? `, with its part ${region} ("${label}") selected. "This" may mean that part.` : '.'}`)
     const refs = o && region ? regionRefs(o, p.drawing, region).refs : o ? objectRefs(o).map((c: Any) => c.ref) : []
     if (refs.length) lines.push(`${region ? 'That part rests' : 'Its words rest'} on ${refs.slice(0, 3).join(', ')}; \`lean resolve <ref>\` opens the rows, \`lean list ${ref.id}\` the object's lineage.`)
+  }
+  if (scope.claim && /^c\d{1,6}$/.test(scope.claim)) {
+    const store = await claimsStore($)
+    const c = store.claims.find((x: Any) => x.id === scope.claim)
+    if (c) {
+      const first = (c.said || [])[0]
+      const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
+      lines.push(`They asked it about the claim ${c.id} "${c.text}" on the page of this session's claims${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}${first?.quote ? `, first said as "${first.quote}"` : ''}.${refs.length ? ` It rests on ${refs.join(', ')}.` : ''} "This" may mean that claim.`)
+    }
   }
   const m = scope.mark
   if (m && m.kind === 'gloss') {
@@ -628,6 +655,11 @@ async function askFromBrowser($: Engine, root: string, text: string, scope: WebS
 
 /** A verb pressed under a message in the browser: run here as the terminal's verb row runs it, on the message. */
 async function verbFromBrowser($: Engine, root: string, key: string, row: string, proposal: string | null): Promise<void> {
+  if (key === 'c') {
+    // the claims are the browser's own tab; pressed on a message there, the list opens under it here too
+    if (await recordNow($, row)) await pressRowVerb($, row, 'c')
+    return
+  }
   const verb = (await rowVerbs($)).find(v => v.key === key)
   if (!verb) { $.ui.toast(`The browser pressed ${key}, but no verb of the row is on that key, so nothing ran.`); return }
   const rec = (await recordNow($, row)) ?? ((await recordOf($, root, row)) as MsgRecord | null)
@@ -1043,7 +1075,8 @@ function messageObject(rec: MsgRecord): Any {
 // v's one option when the observer proposed none: visualize then picks the form itself (its args are empty)
 const ANOTHER_VIEW = 'another view of this answer'
 
-/** The options a verb's line offers for a message: v's proposals, squeeze's one press with its chips, atlas's offer. */
+/** The options a verb's line offers for a message: v's proposals, squeeze's one press with its chips. (c opens the
+ *  claims list instead of a line.) */
 function lineOptions(key: string, rec: MsgRecord | null): { options: { label: string; note?: string }[]; note?: string } {
   const lit = (rec?.verbs || {})[key] as Any
   if (key === 'v') {
@@ -1054,11 +1087,6 @@ function lineOptions(key: string, rec: MsgRecord | null): { options: { label: st
     const chips = lit?.lit && Array.isArray(lit.chips) ? lit.chips : []
     return { options: [{ label: 'squeeze it' }], note: chips.map((c: Any) => `${c.name}: ${c.levels?.[c.level] ?? ''}`).join(' · ') }
   }
-  if (key === 'a') {
-    const o = lit?.offer || {}
-    const cost = [o.minutes ? `about ${o.minutes} min` : '', o.tokens ? `${Math.round(o.tokens / 1000)}k tokens` : ''].filter(Boolean).join(' · ')
-    return { options: [{ label: o.what || 'map the claims of this work', ...(cost ? { note: cost } : {}) }] }
-  }
   return { options: [{ label: `run ${key}` }] }
 }
 
@@ -1066,6 +1094,8 @@ function lineOptions(key: string, rec: MsgRecord | null): { options: { label: st
 async function pressRowVerb($: Engine, row: string, key: string): Promise<void> {
   const cur = (await $.state.get(PICK)).value as Any
   if (cur && cur.row === row && cur.verb === key) { await $.state.set(PICK, null); return }
+  // c: the Claims pane, read again (the orientation may have added claims), opened or closed
+  if (key === 'c') { await toggleClaims($, row); return }
   await $.state.set(TRAY, null)
   await $.state.set(PICK, { row, verb: key })
   const answer = (await $.state.get(ANSWER)).value
@@ -1249,6 +1279,260 @@ async function askTrayThread($: Engine, text: string): Promise<string | null> {
   return `asked the thread of ${cut(t.label, 40)}`
 }
 
+// ------------------------------------------------------------------------------------------------ claims
+//
+// The session's claims (CONTRACT 7) are kept in <root>/thimble/claims/<session>.json, beside its messages, so the
+// browser's page server reads the same. The observer's one look adds each turn's claims (observer.ts); `lean verb
+// claims save` adds the corpus orientation's. c under a message opens the list there; a claim opens in the tray.
+
+type ClaimsStore = ReturnType<typeof emptyStore> & Record<string, Any>
+type Place = { row: string; by: 'person' | 'claude'; turn: number | null; text: string }
+
+/** The claims file of this session, or null while there is no folder under analysis. */
+async function claimsFile($: Engine): Promise<string | null> {
+  const root = await rootHere($)
+  return root ? `${root.replace(/\/+$/, '')}/thimble/claims/${safe(String(await $.session.id()))}.json` : null
+}
+
+/** This session's claims: as held, else as on disk, else none yet. A copy: the caller may change it. */
+export async function claimsStore($: Engine): Promise<ClaimsStore> {
+  const session = String(await $.session.id())
+  const held = (await $.state.get(CLAIMS)).value as ClaimsStore | null | undefined
+  if (held && held.session === session) return JSON.parse(JSON.stringify(held))
+  return reloadClaims($)
+}
+
+/** The claims read again from disk (the orientation's CLI wrote them, or a resumed session), and held. */
+async function reloadClaims($: Engine): Promise<ClaimsStore> {
+  const session = String(await $.session.id())
+  const file = await claimsFile($)
+  let store = emptyStore(session) as ClaimsStore
+  try {
+    if (file && (await $.fs.exists(file))) store = readStore(String(await $.fs.read(file)), session) as ClaimsStore
+    else {
+      const held = (await $.state.get(CLAIMS)).value as ClaimsStore | null | undefined
+      if (held && held.session === session) store = held
+    }
+  } catch {
+    // a file it cannot read: the claims start again, and the next save writes a whole one
+  }
+  await $.state.set(CLAIMS, store)
+  return JSON.parse(JSON.stringify(store))
+}
+
+/** The claims kept: held for the drawing, and written for the browser and a resumed session. With no folder yet they
+ *  are held only, and the next save writes them. */
+export async function saveClaims($: Engine, store: ClaimsStore): Promise<void> {
+  await $.state.set(CLAIMS, store)
+  const file = await claimsFile($)
+  if (file) await $.fs.write(file, JSON.stringify(store, null, 1))
+  // the thimble line counts the claims again
+  $.clock.after(0, () => { void recount($) })
+}
+
+/** A turn's prompt row, its turn number (the person's prompts so far) and Claude's message rows. */
+async function turnOf($: Engine, rows: string[]): Promise<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null }> {
+  const idx = (await msgFilesNow($)).index
+  const first = rows.length ? idx.findIndex(x => x.row === rows[0]) : -1
+  let p = -1
+  for (let i = (first < 0 ? idx.length : first) - 1; i >= 0; i--) if (idx[i].kind === 'user') { p = i; break }
+  const prompt = p >= 0 ? { row: String(idx[p].row), text: String(idx[p].text || '') } : null
+  return { prompt, rows: [...rows], turn: p >= 0 ? idx.slice(0, p + 1).filter(x => x.kind === 'user').length : null }
+}
+
+/** Where a turn's claims can have been said: the person's prompt, then each of Claude's messages in the turn. */
+export async function turnPlaces($: Engine, turnId: string): Promise<{ turn: number | null; rows: string[]; places: Place[] }> {
+  const t = (await $.state.get({ ...TURNS, id: turnId })).value as { prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null | undefined
+  if (!t) return { turn: null, rows: [], places: [] }
+  const places: Place[] = []
+  if (t.prompt?.text) places.push({ row: t.prompt.row, by: 'person', turn: t.turn, text: t.prompt.text })
+  for (const row of t.rows) {
+    const rec = await recordNow($, row)
+    if (rec?.text) places.push({ row, by: 'claude', turn: t.turn, text: rec.text })
+  }
+  return { turn: t.turn, rows: t.rows, places }
+}
+
+/** One verb of a message's row lit (or dimmed, with null), its other verbs kept. */
+export async function setVerb($: Engine, row: string, key: string, v: Record<string, unknown> | null): Promise<void> {
+  const rec = await recordNow($, row)
+  if (!rec) return
+  const verbs = { ...(rec.verbs || {}) } as Record<string, Any>
+  if (v) verbs[key] = v
+  else delete verbs[key]
+  await saveRecord($, { ...rec, verbs })
+}
+
+/** What the corpus orientation would map here, with its time and tokens (verbs/claims/estimate.mjs), once per folder. */
+async function claimOffer($: Engine): Promise<Any | null> {
+  const root = await rootHere($)
+  if (!root) return null
+  const held = (await $.state.get(CLAIMOFFER)).value as Any
+  if (held && held.root === root) return held.offer
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  try {
+    const r = await $.process.run(['node', `${dir}/verbs/claims/estimate.mjs`, root], { timeoutMs: 30000 })
+    const e = r.exitCode === 0 ? JSON.parse(r.stdout) : null
+    const offer = e?.offer ? { what: String(e.offer.what), minutes: e.offer.minutes ?? null, tokens: e.offer.tokens ?? null } : null
+    await $.state.set(CLAIMOFFER, { root, offer })
+    return offer
+  } catch {
+    await $.state.set(CLAIMOFFER, { root, offer: null })
+    return null
+  }
+}
+
+/** The claims the list marks as new under a message: those the observer counted for it. */
+function freshOf(rec: MsgRecord | null): string[] {
+  const c = (rec?.verbs as Any)?.c
+  return Array.isArray(c?.claims) ? c.claims.map(String) : []
+}
+
+/** The Claims pane's state: the message it was opened from, the claim the ring is on, the claim selected (↵), the
+ *  time cursor (null: now; a moment while time is on), and the search (null: none; `searching` while typing it). */
+type ClaimPane = { row: string; focus: string | null; selected: string | null; cursor: number | null; search: string | null; searching: boolean }
+
+/** The session's moments (claims.js timeline): the messages that first said claims, in the order of the index. */
+async function momentsNow($: Engine, store: ClaimsStore): Promise<Any[]> {
+  const order = (await msgFilesNow($)).index.map(x => String(x.row))
+  return timeline(store, { order })
+}
+
+/** The graph's layout, computed once per store and size. */
+let graphLayout: { key: string; lay: Any } | null = null
+function layoutFor(store: ClaimsStore, view: Any, w: number, h: number): Any {
+  const key = `${store.session}|${store.updated}|${store.claims.length}|${store.clusters.map((c: Any) => c.id + c.name).join(',')}|${w}x${h}`
+  if (graphLayout?.key === key) return graphLayout.lay
+  const lay = layout(view.flat, (view.groups as Any[]).filter(g => g.id != null), { w, h })
+  graphLayout = { key, lay }
+  return lay
+}
+
+/** Open the Claims pane, focused, from a message (the ring on the first claim that message added); a second c closes
+ *  it. */
+async function toggleClaims($: Engine, row: string): Promise<void> {
+  if ((await $.state.get(CLAIMPANE)).value) { await closeClaims($); return }
+  await reloadClaims($)
+  await claimOffer($)
+  // at rest: no claim has the ring, so every cluster reads whole and no line is drawn; ↓ puts the ring on the first
+  await $.state.set(CLAIMPANE, { row, focus: null, selected: null, cursor: null, search: null, searching: false } as ClaimPane)
+  // after the key that asked for it is done, so the pane takes the keyboard from the prompt
+  $.clock.after(0, () => { void openClaimsPane($, null) })
+}
+
+/** The pane takes the keyboard, the ring on `focus` (a search being typed keeps its field). */
+async function openClaimsPane($: Engine, focus: string | null): Promise<void> {
+  const r = await $.ui.open({ id: CPANE, title: 'Claims', focus: true, closeOnEscape: true, columns: 120 })
+  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (focus && !st?.searching) await quietly($.ui.focus({ requestId: CPANE, key: claimKey(focus) }))
+  if (r && (r as Any).isPlaced === false) $.ui.toast(`Claims: ${(r as Any).reason || 'the pane was not placed'}. Widen the terminal, then press c again.`)
+}
+
+async function closeClaims($: Engine): Promise<void> {
+  await $.state.set(CLAIMPANE, null)
+  await quietly($.ui.close({ id: CPANE }))
+}
+
+async function setPane($: Engine, patch: Partial<ClaimPane>, regrab = true): Promise<void> {
+  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (!st) return
+  const next = { ...st, ...patch }
+  await $.state.set(CLAIMPANE, next)
+  // a key that came through the prompt: once it is done, the pane takes the keys back
+  if (regrab) $.clock.after(0, () => { void openClaimsPane($, next.focus) })
+}
+
+/** ] and [: the time cursor one moment on or back; at the end of time, time is off. */
+async function stepTime($: Engine, dir: number): Promise<void> {
+  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (!st) return
+  const ms = await momentsNow($, await claimsStore($))
+  if (!ms.length) return
+  const last = ms.length - 1
+  const next = Math.max(0, Math.min(last, (st.cursor ?? last) + dir))
+  await setPane($, { cursor: next === last && dir > 0 ? null : next })
+}
+
+/** t: time on (from the first moment, the claims appear in the order made), or off (now). */
+async function toggleTime($: Engine): Promise<void> {
+  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (!st) return
+  await setPane($, { cursor: st.cursor == null ? 0 : null })
+}
+
+/** n: the ring to the first claim of the next cluster. */
+async function nextCluster($: Engine): Promise<void> {
+  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (!st) return
+  const groups = (viewOf(await claimsStore($)).groups as Any[]).filter(g => g.claims.length)
+  if (!groups.length) return
+  const k = groups.findIndex(g => g.claims.some((c: Any) => c.id === st.focus))
+  const g = groups[(k + 1) % groups.length]
+  await setPane($, { focus: g.claims[0].id })
+}
+
+/** The corpus orientation asked for: the claims verb asks Claude to start it (a subagent reads the corpus). */
+async function orient($: Engine, row: string): Promise<void> {
+  const rec = await recordNow($, row)
+  if (!rec) { $.ui.toast('The orientation needs a message to start from. Press c under one of Claude\'s replies.'); return }
+  await closeClaims($)
+  await $.state.set(PICK, null)
+  await $.state.set(TRAY, null)
+  $.clock.after(0, () => { void runOnMessage($, 'claims', 'c', rec, 'orient') })
+}
+
+/** The Claims pane, as a drawing reads it. */
+async function claimsPaneNow($: Engine, e: Any): Promise<Any> {
+  const els = $.ui.resolve(e) as Any
+  const st = ((await $.state.get(CLAIMPANE)).value as ClaimPane | null) ?? { row: '', focus: null, selected: null, cursor: null, search: null, searching: false }
+  const store = ((await $.state.get(CLAIMS)).value as ClaimsStore | null) ?? (emptyStore(String(await $.session.id())) as ClaimsStore)
+  const rec = st.row ? await recordNow($, st.row) : null
+  const view = viewOf(store, { fresh: freshOf(rec) })
+  const moments = await momentsNow($, store)
+  const w = Math.max(30, (e.props.bodyColumns ?? 120) - 1)
+  const h = Math.max(6, (e.props.scroll?.bodyRows ?? 40) - HEAD_ROWS - BAR_ROWS)
+  const set = (patch: Partial<ClaimPane>) => $.state.set(CLAIMPANE, { ...st, ...patch })
+  return claimsPaneEl(els, {
+    w, h, theme, view, lay: layoutFor(store, view, w, h), moments, cursor: st.cursor, focus: st.focus, selected: st.selected, search: st.search, searching: st.searching,
+    onSelect: (id: string) => set({ focus: id, selected: st.selected === id ? null : id }),
+    onSource: (i: number) => { if (st.selected) void openClaimSource($, st.selected, i) },
+    onSearch: (value: string) => set({ search: value }),
+    onSearchDone: (value: string) => {
+      const m = matchesOf(view.flat, value)
+      const first = m && m.size ? (view.flat as Any[]).find(c => m.has(c.id))?.id ?? null : null
+      void set({ search: value.trim() ? value : null, searching: false, ...(first ? { focus: first } : {}) }).then(() => { if (first) void quietly($.ui.focus({ requestId: CPANE, key: claimKey(first) })) })
+    },
+  })
+}
+
+/** A source of the claim the ring is on: its source card in the tray, through the kernel like any citation. */
+async function openClaimSource($: Engine, id: string, i: number): Promise<boolean> {
+  const store = await claimsStore($)
+  const c = store.claims.find((x: Any) => x.id === id)
+  const s = c?.sources?.[i]
+  if (!s) return false
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  await $.state.set(TRAY, trayPush(tray, { ref: s.ref, label: s.label || s.ref, kind: 'cite' }) as Tray)
+  return true
+}
+
+/** A question asked with the Claims pane open on a claim: what it carries for Claude, and the row's few words. */
+async function claimScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown> } | null> {
+  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  const id = st?.selected ?? st?.focus
+  if (!id) return null
+  const store = await claimsStore($)
+  const c = store.claims.find((x: Any) => x.id === id)
+  if (!c) return null
+  const first = (c.said || [])[0]
+  const where = first ? (first.by === 'orientation' ? 'from the corpus orientation' : `said in turn ${first.turn ?? '?'} by ${first.by === 'person' ? 'the person' : 'you'}: "${first.quote}"`) : ''
+  const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
+  return {
+    label: `claim: ${c.text}`, scope: { claim: c.id, ...(first?.row ? { row: first.row } : {}) },
+    context: `The person asked this with a claim of this session selected in the Claims pane: ${c.id} "${c.text}"${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}, ${where}.${refs.length ? ` It rests on ${refs.join(', ')}; \`lean resolve <ref>\` shows the rows.` : ''} "This" or "it" may mean that claim.`,
+  }
+}
+
 /** A question asked with the tray open: what it carries for Claude, and the row's few words for the person. */
 async function trayScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown>; refs: string[] } | null> {
   const tray = (await $.state.get(TRAY)).value as Tray | null
@@ -1278,21 +1562,45 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   }
 }
 
-// ------------------------------------------------------------------------------------------------ the two quiet lines
+// ------------------------------------------------------------------------------------------------ the thimble line
 //
-// The thimble line, above the prompt: what this session holds, in counts that are not zero (`thimble · 2 cards ·
-// 2 threads · 11 cites · 31 claims · 31/40 files`). A count that changed is drawn bright for a moment, then dims.
-// While a thread is in front (the card detail, or a mark's thread in the tray) it names that thread at its right.
+// One bar above the prompt, where thimble 0.9 puts its line; the area under the prompt stays Claude Code's own.
 //
-// The hint line, under the prompt (Claude Code's own line, rewritten): the keys of what has focus, once. The chips'
-// keys, the tray's, a verb's open line, and at rest the marks and the card of the message the keys act on. No key is
-// drawn in a card, a panel or a header.
+//   thimble  v visualize · s ● 6 of 24 lines · c claims · ] cite & explain · 1 open detail      2 cards · 11 cites · coverage 34%
+//
+// At its left, what the keys do now, in words as Claude Code says its own keys: at rest the verbs of the message the
+// keys act on (a lit one with its note in place of its name), `] cite & explain` when that message has marks, `1 open
+// detail` when a card is under it, `o browser` in browser mode. While a pane, the tray or the chips have focus, the
+// left side is their keys instead, and it comes back after. At its right, the session's counts that are not zero: a
+// count that changed is drawn bright for a moment, then dims. Inside a thread (the card detail, a mark's thread) its
+// label names the thread the prompt goes to, `thimble:main/<it>`.
 
 const BRIGHT_MS = 1600
 
+/** The read share of a file as `lean coverage` reports it: rows computed over, or lines read, or rows shown, of its
+ *  rows; a file searched or named counts as not read. */
+function readShare(f: Any): number {
+  if (!f || !f.rows) return 0
+  if (f.computed) return Math.min(1, f.computed / f.rows)
+  if (f.read_lines) return Math.min(1, f.read_lines / Math.max(1, f.lines || f.rows))
+  if (f.shown) return Math.min(1, f.shown / f.rows)
+  return 0
+}
+
+/** A share as the line says it: `34%`, a decimal under 1%, `<0.01%`, and 100% only when all was read. */
+export function percent(part: number): string {
+  if (!(part > 0)) return '0%'
+  if (part >= 1) return '100%'
+  const p = 100 * part
+  if (p < 0.01) return '<0.01%'
+  if (p < 0.1) return `${(Math.floor(p * 100) / 100).toFixed(2)}%`
+  if (p < 1) return `${(Math.floor(p * 10) / 10).toFixed(1)}%`
+  return `${Math.min(99, Math.round(p))}%`
+}
+
 /** This session's counts for the thimble line, counted again: the cards drawn, the side threads, the citations in
- *  Claude's words, the claims kept, and (with `coverage`) what Claude read of the folder's files. A count that
- *  changed is stamped, so it brightens. */
+ *  Claude's words, the claims kept, and (with `coverage`) the share of the folder's data Claude has read, by rows. A
+ *  count that changed is stamped, so it brightens. */
 export async function recount($: Engine, o: { coverage?: boolean } = {}): Promise<void> {
   try {
     const old = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
@@ -1310,21 +1618,21 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
       const file = `${root.replace(/\/+$/, '')}/thimble/claims/${safe(String(await $.session.id()))}.json`
       try { claims = (await $.fs.exists(file)) ? (JSON.parse(String(await $.fs.read(file))).claims || []).length : 0 } catch { /* a file being written: the last count stands */ }
     }
-    let read = old?.read ?? 0
-    let files = old?.files ?? 0
+    let cov = old?.cov ?? 0
     if (o.coverage && root) {
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {
         const r = await $.process.run([`${dir}/bin/lean`, 'coverage', '--json'], { cwd: root, env: { LEAN_ROOT: root, LEAN_SESSION: String(await $.session.id()) }, timeoutMs: 60000 })
-        const t = JSON.parse(r.stdout).total
-        if (t && Number.isFinite(t.files)) { files = Number(t.files); read = files - Number(t.not_read_files || 0) }
+        const files = (JSON.parse(r.stdout).files || []) as Any[]
+        const rows = files.reduce((n, f) => n + (Number(f.rows) || 0), 0)
+        if (rows > 0) cov = files.reduce((n, f) => n + readShare(f) * (Number(f.rows) || 0), 0) / rows
       } catch {
-        // the line keeps the last count it had
+        // the line keeps the last share it had
       }
     }
-    const next: LineCounts = { cards, threads: threadCount(), cites, claims, read, files, at: now, changed: { ...(old?.changed || {}) } }
-    for (const k of ['cards', 'threads', 'cites', 'claims', 'read'] as const) if (old && next[k] !== old[k]) next.changed[k] = now
-    if (!old) for (const k of ['cards', 'threads', 'cites', 'claims', 'read'] as const) if (next[k]) next.changed[k] = now
+    const next: LineCounts = { cards, threads: threadCount(), cites, claims, cov, at: now, changed: { ...(old?.changed || {}) } }
+    const keys = ['cards', 'threads', 'cites', 'claims', 'cov'] as const
+    for (const k of keys) if (old ? next[k] !== old[k] : next[k] > 0) next.changed[k] = now
     if (old && JSON.stringify({ ...old, at: 0 }) === JSON.stringify({ ...next, at: 0 })) return
     await $.state.set(COUNTS, next)
     // the brightened counts dim again
@@ -1332,32 +1640,6 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
   } catch {
     // the line keeps the counts it had
   }
-}
-
-/** The thimble line: `thimble`, then each count that is not zero, a changed one bright; at the right, the thread in
- *  front, if any. Null when there is nothing to count. */
-async function thimbleLineEl($: Engine, els: Any, w: number): Promise<Any | null> {
-  const c = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
-  const where = await threadInFront($)
-  if (!c && !where) return null
-  const now = await $.clock.now()
-  const { Box, Text } = els
-  const items: [string, number, string][] = c ? [
-    ['cards', c.cards, c.cards === 1 ? '1 card' : `${fmtN(c.cards)} cards`],
-    ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`],
-    ['cites', c.cites, c.cites === 1 ? '1 cite' : `${fmtN(c.cites)} cites`],
-    ['claims', c.claims, c.claims === 1 ? '1 claim' : `${fmtN(c.claims)} claims`],
-    ['read', c.read, `${fmtN(c.read)}/${fmtN(c.files)} files`],
-  ] : []
-  const shown = items.filter(([, n]) => n > 0)
-  if (!shown.length && !where) return null
-  const left: Any[] = [Text({ color: FOCUS[theme], children: 'thimble' })]
-  for (const [k, , label] of shown) {
-    const bright = now - (c!.changed[k] ?? 0) < BRIGHT_MS
-    left.push(Text({ dimColor: true, children: ' · ' }), Text({ ...(bright ? { color: 'text', bold: true } : { dimColor: true }), children: label }))
-  }
-  const right = where ? [Text({ dimColor: true, wrap: 'truncate-end', children: cut(where, Math.max(12, Math.floor(w / 2))) })] : []
-  return Box({ flexDirection: 'row', justifyContent: 'space-between', width: w, children: [Text({ wrap: 'truncate-end', children: left }), ...right] })
 }
 
 /** The thread the prompt goes to now, as `thimble:main/<it>`: the open card's, or the tray's mark's. Null in main. */
@@ -1374,48 +1656,103 @@ async function threadInFront($: Engine): Promise<string | null> {
   return null
 }
 
-/** The hint line's words for what has focus now, or null to leave Claude Code's own line. */
-async function hintNow($: Engine, draft: boolean, view: { columns?: number; rows?: number } = {}): Promise<string | null> {
+/** The keys of what has focus now, as words (`1–4 chip · < > change · …`), or null at rest. */
+async function focusKeys($: Engine): Promise<string | null> {
+  const d = await detailKeys($)
+  if (d) return d
+  const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (cp) {
+    const store = ((await $.state.get(CLAIMS)).value as ClaimsStore | null)
+    const offer = store && !store.orientation ? ((await $.state.get(CLAIMOFFER)).value as Any)?.offer ?? null : null
+    const selected = cp.selected && store ? store.claims.find((c: Any) => c.id === cp.selected) ?? null : null
+    return claimsHint({ search: cp.search, searching: cp.searching, time: cp.cursor != null, selected, offer })
+  }
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-  const tray = (await $.state.get(TRAY)).value as Tray | null
   if (pick?.verb === 's') {
     const ui = ((await $.state.get({ ...SQZ, id: pick.row })).value ?? null) as SqzUi | null
     const rec = await recordNow($, pick.row)
-    if (draft && !ui?.adding) return null
     return rec ? squeezeHint(rec, ui) : null
   }
+  const tray = (await $.state.get(TRAY)).value as Tray | null
   if (tray) {
     const t = await trayScope($)
     const thread = t ? threadFor(t.scope as ThreadScope) : null
-    if (draft) return `↵ asks ${t ? `the thread of ${cut(t.label, 30)}` : 'its thread'}`
-    if (tray.asking) return `${thread?.status === 'running' ? 'answering… · ' : ''}type to ask · 0 back to the card`
+    if (tray.asking) return `${thread?.status === 'running' ? 'answering… · ' : ''}type to ask · ↵ asks this thread · 0 back to the card`
     const frame = trayTop(tray) as TrayFrame | null
     const ck = frame ? await cardKey($, frame) : ''
     const drawn = frame ? [...cards.entries()].find(([k]) => k.startsWith(`${ck}|`))?.[1] : null
     const links = drawn?.links ?? []
-    return [thread ? '1 thread' : '1 ask', ...(links.length ? [`${links.length > 1 ? `2–${links.length + 1}` : '2'} open`] : []), '] [ next mark', tray.stack.length > 1 ? '0 back' : '0 close'].join(' · ')
+    return [thread ? '1 thread' : '1 ask', ...(links.length ? [`${links.length > 1 ? `2–${links.length + 1}` : '2'} open`] : []), '] [ next', tray.stack.length > 1 ? '0 back' : '0 close'].join(' · ')
   }
-  if (draft) return null
   if (pick) {
     const rec = await recordNow($, pick.row)
     const n = Math.min(9, lineOptions(pick.verb, rec).options.length)
     return `${n > 1 ? `1–${n}` : '1'} pick · 0 close`
   }
-  const row = await actingRow($)
-  if (!row) return null
-  const out: string[] = []
-  const rec = await recordNow($, row)
-  const n = rec?.marks?.length ?? 0
-  if (n) out.push(`] ${n} mark${n === 1 ? '' : 's'}`)
-  const ref = await focusedCard($)
-  if (ref) {
-    const cols = Math.max(40, Math.min(120, (view.columns ?? 100) - 4))
-    const p = preps.get(prepKey(ref, cols))
-    const more = p?.grid ? p.grid.h - Math.min(p.grid.h, inlineRows(view.rows ?? 48)) : 0
-    out.push(`1 open detail${more > 0 ? ` · ${more} more rows there` : ''}`)
+  return null
+}
+
+/** The thimble line: its label, what the keys do now at its left, the counts at its right. Null with nothing to say. */
+async function barEl($: Engine, els: Any, w: number): Promise<Any | null> {
+  const { Box, Button, Text } = els
+  const sep = (k: string) => Text({ key: k, dimColor: true, children: ' · ' })
+  const left: Any[] = []
+  const keys = await focusKeys($)
+  if (keys) {
+    const tone = keys.startsWith('×') ? { color: 'error' } : keys.startsWith('!') ? { color: 'warning' } : { dimColor: true }
+    left.push(Text({ key: 'keys', ...tone, wrap: 'wrap', children: keys }))
+  } else {
+    const row = await actingRow($)
+    const rec = row ? await recordNow($, row) : null
+    if (row && rec) {
+      const verbs = await rowVerbs($)
+      const running = ((await $.state.get({ ...RUNNING, id: row })).value ?? null) as string | null
+      const sqUi = ((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null
+      const lit: Record<string, { lit?: boolean; note?: string }> = { ...(rec.verbs || {}) }
+      const sv = sLit(rec, sqUi)
+      if (sv) lit.s = sv
+      else delete lit.s
+      const item = (k: string, label: string, kids: Any[], onPress: () => unknown) => {
+        if (left.length) left.push(sep(`sep-${k}`))
+        left.push(Button({ key: `bar-${k}`, plain: true, label, children: kids, onPress }))
+      }
+      for (const v of verbs) {
+        const color = verbColor(v.key, theme, v.color)
+        const on = lit[v.key]
+        const more = running === v.key ? '…' : ''
+        item(v.key, v.name, on?.lit && on.note
+          ? [Text({ color, bold: true, children: v.key }), Text({ color, children: ` ● ${on.note}${more}` })]
+          : [Text({ color, bold: true, children: v.key }), Text({ dimColor: true, children: ` ${v.name}${more}` })], () => pressRowVerb($, row, v.key))
+      }
+      if (rec.marks.length) item('marks', 'cite & explain', [Text({ color: markColors(theme).cite, bold: true, children: ']' }), Text({ dimColor: true, children: ' cite & explain' })], () => stepMark($, 1))
+      const ref = await focusedCard($)
+      if (ref) item('detail', 'open detail', [Text({ color: FOCUS[theme], bold: true, children: '1' }), Text({ dimColor: true, children: ' open detail' })], () => openDetail($, ref))
+      if (browserFlag) item('web', 'browser', [Text({ color: FOCUS[theme], bold: true, children: 'o' }), Text({ dimColor: true, children: ' browser' })], async () => $.ui.toast(await openBrowser($, { row })))
+    }
   }
-  if (browserFlag) out.push('o browser')
-  return out.length ? out.join(' · ') : null
+  const c = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
+  const now = await $.clock.now()
+  const items: [keyof LineCounts, number, string][] = c ? [
+    ['cards', c.cards, c.cards === 1 ? '1 card' : `${fmtN(c.cards)} cards`],
+    ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`],
+    ['cites', c.cites, c.cites === 1 ? '1 cite' : `${fmtN(c.cites)} cites`],
+    ['claims', c.claims, c.claims === 1 ? '1 claim' : `${fmtN(c.claims)} claims`],
+    ['cov', c.cov, `coverage ${percent(c.cov)}`],
+  ] : []
+  const right: Any[] = []
+  for (const [k, n, label] of items.filter(([, n]) => n > 0)) {
+    if (right.length) right.push(sep(`csep-${String(k)}`))
+    const bright = now - (c!.changed[String(k)] ?? 0) < BRIGHT_MS
+    right.push(Text({ key: `count-${String(k)}`, ...(bright ? { bold: true } : { dimColor: true }), children: label }))
+    void n
+  }
+  const where = await threadInFront($)
+  if (!left.length && !right.length && !where) return null
+  const label = Text({ key: 'bar-label', color: FOCUS[theme], children: where ?? 'thimble' })
+  return Box({ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', width: w, children: [
+    Box({ key: 'bar-left', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, marginRight: 2, children: [label, Text({ key: 'bar-gap', children: '  ' }), ...left] }),
+    Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: right }),
+  ] })
 }
 
 /** A key pressed while the prompt is empty: the box as it should stand when the shell took the key, or null to let
@@ -1431,6 +1768,30 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   const verbs = await rowVerbs($)
   const consume = { text: e.text, cursor: e.cursor }
+  // the Claims pane open: the keys a focused pane does not take come through here (its own are ↑ ↓, ↵ and esc):
+  // ] [ through time, t time on or off, n the next cluster, / a search, 1–7 a source of the claim selected, m the corpus
+  // orientation, 0 closes (a source card in the tray first); c (the verb key, below) closes it too
+  const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (cp) {
+    keyOpened = null
+    if (k === ']' || k === '[') { await stepTime($, k === ']' ? 1 : -1); return consume }
+    if (k === '0') {
+      if (tray) await $.state.set(TRAY, trayBack(tray) as Tray | null)
+      else await closeClaims($)
+      return consume
+    }
+    if (k === 't') { await toggleTime($); return consume }
+    if (k === 'n') { await nextCluster($); return consume }
+    if (k === '/') { await setPane($, { search: cp.search ?? '', searching: true }); return consume }
+    if (/^[1-7]$/.test(k) && cp.selected) {
+      if (await openClaimSource($, cp.selected, Number(k) - 1)) { await setPane($, {}); return consume }
+      return null
+    }
+    if (k === 'm') {
+      const store = await claimsStore($)
+      if (!store.orientation && ((await $.state.get(CLAIMOFFER)).value as Any)?.offer) { await orient($, cp.row); return consume }
+    }
+  }
   // the squeeze chips open under a message: their keys first (1-9 pick, < > change, + your own chip, 0 original)
   if (pick && pick.verb === 's' && !tray) {
     const r = await squeezeKey($, pick.row, k)
@@ -1451,7 +1812,7 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   }
   if (/^[1-9]$/.test(k)) {
     keyOpened = null
-    if (pick) return (await pickOption($, Number(k) - 1)) ? consume : null
+    if (pick && !tray) return (await pickOption($, Number(k) - 1)) ? consume : null
     if (tray) {
       // 1 asks about the card's mark: the footer then says how; the question is typed in the prompt
       if (k === '1') { await $.state.set(TRAY, { ...tray, asking: true }); return consume }
@@ -1668,7 +2029,7 @@ export const registerShell: Register = (on, options) => {
   // a turn of main's: the objects it saved, and its last text row, under which they are drawn
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      turn = { unplaced: [], lastRow: '', calls: [], placed: [] }
+      turn = { unplaced: [], lastRow: '', calls: [], placed: [], rows: [], oriented: 0 }
       // a new turn: the keys act on its answer again, and a verb's open line closes
       try {
         await $.state.set(SELROW, null)
@@ -1686,6 +2047,12 @@ export const registerShell: Register = (on, options) => {
     try {
       const input = e as unknown as { command?: string; agentId?: string; tool_use_id?: string }
       const text = typeof r.text === 'string' ? r.text : typeof r.result === 'string' ? r.result : ''
+      // the corpus orientation's claims went into the store: the list reads it again, and c lights under the answer
+      if (r.deny === undefined && !r.isError && !input.agentId && /\blean\s+verb\s+claims\s+save\b/.test(String(input.command))) {
+        const m = /(\d+) new claims? from the corpus/.exec(text)
+        if (m && turn) turn.oriented += Number(m[1])
+        await reloadClaims($)
+      }
       if (r.deny !== undefined || r.isError || input.agentId || !/\blean\b/.test(String(input.command)) || !text.includes('saved ')) return r
       const cdTo = /^\s*cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*&&/.exec(String(input.command))
       notes = []
@@ -1755,6 +2122,8 @@ export const registerShell: Register = (on, options) => {
           await indexRow($, { row, kind: 'assistant', at })
           await saveRecord($, rec)
           $.clock.after(0, () => { void recount($) })
+          // the turn's messages, where its claims are found
+          if (turn && !turn.rows.includes(row)) turn.rows.push(row)
         }
       }
     } catch {
@@ -1785,118 +2154,118 @@ export const registerShell: Register = (on, options) => {
         $.clock.after(0, () => { void sqArrive($, row).catch(() => undefined) })
         // the thimble line: what this turn read, saved and cited
         $.clock.after(0, () => { void recount($, { coverage: true }) })
+        // claims the corpus orientation saved in this turn light c under its answer
+        if (turn.oriented) await setVerb($, row, 'c', { lit: true, note: `${turn.oriented} claims from the corpus` })
       }
     } catch {
       // a turn with no verb row is better than one that does not end
+    }
+    try {
+      // the turn's prompt and messages, for the observer's claims
+      if (e.agentId === undefined && turn) await $.state.set({ ...TURNS, id: e.turnId }, await turnOf($, turn.rows))
+    } catch {
+      // the claims of this turn are then read from its answer alone
     }
     if (e.agentId === undefined) turn = null
     return done
   })
 
   // one of Claude's messages drawn from its record: its marks inline (a citation underlined, a gloss on a teal fill, a
-  // sparkline in place, each a press that opens the tray), the verb row under a turn's answer, the line a verb opened,
-  // then the objects its turn saved. A message with none of these is Claude Code's own drawing.
+  // sparkline in place, each a press that opens the tray), while a squeeze rewrites it its new text writing in from the
+  // top, the line a verb opened under it (squeeze's chips, v's proposals), then the objects its turn saved. Its verbs
+  // and keys are in the thimble line above the prompt. A message with none of these is Claude Code's own drawing.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    const at = rowKey(e.requestId)
-    const list = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as ObjRef[]
-    const els = $.ui.resolve(e) as Any
-    const { Box } = els
-    if (e.props.isSummary) {
-      if (!list.length) return next(e)
-      const own = await next(e)
-      const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at)))
-      return Box({ flexDirection: 'column', children: [own, ...drawn] })
-    }
-    await $.state.get(WEB)
-    const drawnRec = await drawnRecord($, at, e.props.text)
-    const rec: MsgRecord = drawnRec.uuid ? drawnRec : { ...drawnRec, uuid: e.requestId }
-    const answer = (await $.state.get(ANSWER)).value
-    const final = !!rec.final || answer === at
-    // the screen a long message is measured against (Squeeze), a rewrite of this message running, and its new text
-    seeView(e.viewport?.columns ?? 100, e.viewport?.rows ?? 48)
-    const sqUi = ((await $.state.get({ ...SQZ, id: at })).value ?? null) as SqzUi | null
-    const busy = busyGlyph(sqUi)
-    // a new version writing itself in from the top: the first `n` characters, cut where the markdown reads whole
-    const n = revealedOf(sqUi)
-    const shownNow = n == null ? rec : (() => {
-      const part = revealCut(shownOf(rec), n) as string
-      return { ...rec, shown: part, marks: rec.marks.filter(m => m.end <= part.length) } as MsgRecord
-    })()
-    // the verb row is drawn under the message the keys act on only: the latest answer, or the one picked
-    const acting = final ? await actingRow($) : null
-    const keyed = final && acting === at
-    if (!rec.marks.length && !keyed && !list.length && rec.shown == null && !busy && n == null) return next(e)
-    const tray = (await $.state.get(TRAY)).value as Tray | null
-    const base = trayBase(tray) as TrayFrame | null
-    const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
-    const parts: Any[] = []
-    parts.push(rec.marks.length || rec.shown != null || busy || n != null
-      ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy, lead: busy })
-      : await next(e))
-    if (keyed) {
-      const verbs = await rowVerbs($)
+    try {
+      const at = rowKey(e.requestId)
+      const list = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as ObjRef[]
+      const els = $.ui.resolve(e) as Any
+      const { Box } = els
+      if (e.props.isSummary) {
+        if (!list.length) return next(e)
+        const own = await next(e)
+        const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at)))
+        return Box({ flexDirection: 'column', children: [own, ...drawn] })
+      }
+      await $.state.get(WEB)
+      const drawnRec = await drawnRecord($, at, e.props.text)
+      const rec: MsgRecord = drawnRec.uuid ? drawnRec : { ...drawnRec, uuid: e.requestId }
+      // the screen a long message is measured against (Squeeze), a rewrite of this message running, and its new text
+      seeView(e.viewport?.columns ?? 100, e.viewport?.rows ?? 48)
+      const sqUi = ((await $.state.get({ ...SQZ, id: at })).value ?? null) as SqzUi | null
+      const busy = busyGlyph(sqUi)
+      // a new version writing itself in from the top: the first `n` characters, cut where the markdown reads whole
+      const n = revealedOf(sqUi)
+      const shownNow = n == null ? rec : (() => {
+        const part = revealCut(shownOf(rec), n) as string
+        return { ...rec, shown: part, marks: rec.marks.filter(m => m.end <= part.length) } as MsgRecord
+      })()
       const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-      const sel = (await $.state.get(SELROW)).value
-      const running = ((await $.state.get({ ...RUNNING, id: at })).value ?? null) as string | null
-      // s lights from the message's squeeze: `6 of 33 lines` while squeezed, the length of a long original
-      const lit: Record<string, { lit?: boolean; note?: string }> = { ...(rec.verbs || {}) }
-      const s = sLit(rec, sqUi)
-      if (s) lit.s = s
-      else delete lit.s
-      if (pick && pick.row === at && pick.verb === 's') {
-        // the chips in place of the verb row (B2); their keys are in the hint line under the prompt
+      const open = pick && pick.row === at ? pick.verb : null
+      if (!rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null) return next(e)
+      const tray = (await $.state.get(TRAY)).value as Tray | null
+      const base = trayBase(tray) as TrayFrame | null
+      const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
+      const parts: Any[] = []
+      parts.push(rec.marks.length || rec.shown != null || busy || n != null
+        ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy, lead: busy })
+        : await next(e))
+      if (open === 's') {
+        // the chips under the message; their keys are in the thimble line
         parts.push(chipsEl(els, {
           key: `vl-${at}`, rec, theme, ui: sqUi ?? { focus: 'length', adding: false, running: null, error: null, tick: 0 },
           onPick: (id: string) => pressChip($, at, id), onAdd: () => startOwnChip($, at), onOriginal: () => originalOrClose($, at),
         }))
-      } else parts.push(verbRowEl(els, { key: `vr-${at}`, verbs, lit, open: pick && pick.row === at ? pick.verb : null, running, selected: !!sel && sel === at, theme, onPress: (k: string) => pressRowVerb($, at, k) }))
-      if (pick && pick.row === at && pick.verb !== 's') {
-        const verb = verbs.find(v => v.key === pick.verb)
+      } else if (open) {
+        const verb = (await rowVerbs($)).find(v => v.key === open)
         if (verb) {
-          const { options, note } = lineOptions(pick.verb, rec)
+          const { options, note } = lineOptions(open, rec)
           parts.push(verbLineEl(els, { key: `vl-${at}`, verb, options, ...(note ? { note } : {}), theme, onPick: (i: number) => pickOption($, i), onClose: () => $.state.set(PICK, null) }))
         }
       }
-    }
-    if (list.length) {
-      // the newest card under the message the keys act on is the one 1 opens: its frame says so, in the keys' color
-      const focus = !tray && !(await $.state.get(PICK)).value && (acting ?? (await actingRow($))) === at
-      parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at, focus && i === list.length - 1)))))
-    }
-    return parts.length === 1 ? parts[0] : Box({ flexDirection: 'column', children: parts })
-  })
-
-  // the band above the prompt: the tray when it is open (one small panel, a fixed number of rows, so the transcript
-  // scrolls above it; it shows the card on top of its stack: a citation's source card or a gloss's explainer card),
-  // else the observer's line when one is open; then the thimble line under either
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
-    const els = $.ui.resolve(e) as Any
-    const { Box } = els
-    const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
-    const line = await thimbleLineEl($, els, bw)
-    const tray = (await $.state.get(TRAY)).value as Tray | null
-    const above = trayTop(tray) ? await trayBand($, e, els, tray!) : null
-    // the observer's line (observer.ts, inside this hook): drawn by its own hook when it has one open
-    const own = above ?? ((await $.state.get(LINE)).value ? await next(e) : null)
-    if (!line) return own ?? next(e)
-    return own ? Box({ flexDirection: 'column', children: [own, Box({ marginTop: 1, children: [line] })] }) : line
-  })
-
-  // the hint line under the prompt: the keys of what has focus, once (the card detail draws its own, detail.tsx)
-  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    if (e.props.isWorking || detailIsOpen()) return next(e)
-    try {
-      const hint = await hintNow($, !!e.props.isDraft, { columns: e.viewport?.columns, rows: e.viewport?.rows })
-      return hint ? next({ ...e, props: { ...e.props, hint } }) : next(e)
+      if (list.length) {
+        // the newest card under the message the keys act on is the one 1 opens: its frame says so, in the keys' color
+        const focus = !tray && !pick && (await actingRow($)) === at
+        parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at, focus && i === list.length - 1)))))
+      }
+      return parts.length === 1 ? parts[0] : Box({ flexDirection: 'column', children: parts })
     } catch {
+      // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
       return next(e)
     }
   })
 
-  // keys while the prompt is empty: v, s and a open their line under the message the keys act on; ] and [ move through
-  // the marks, opening the tray; a digit picks in the open line or opens a mark inside the card; 0 closes the line or
-  // goes back one card. Claude Code hands a plugin only the keys that edit the prompt (tab, ↵, esc and a ⌫ with nothing
+  // the band above the prompt: the tray when it is open (one small panel, a fixed number of rows, so the transcript
+  // scrolls above it; it shows the card on top of its stack: a citation's source card or a gloss's explainer card),
+  // else the observer's line when one is open; then the thimble line, the one bar: what the keys do now at its left,
+  // the session's counts at its right. While Claude works, a blank row stands between its spinner and the bar; at rest
+  // there is none, so Claude Code's [-] never stands alone on a blank row.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    try {
+      if (e.props.hasSurvey) return next(e)
+      const els = $.ui.resolve(e) as Any
+      const { Box, Text } = els
+      const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
+      const line = await barEl($, els, bw)
+      const tray = (await $.state.get(TRAY)).value as Tray | null
+      const above = trayTop(tray) ? await trayBand($, e, els, tray!) : null
+      // the observer's line (observer.ts, inside this hook): drawn by its own hook when it has one open
+      const own = above ?? ((await $.state.get(LINE)).value ? await next(e) : null)
+      if (!line) return own ?? next(e)
+      const rows: Any[] = []
+      if (own) rows.push(own, Text({ key: 'bar-gap', children: ' ' }))
+      else if (e.props.isWorking) rows.push(Text({ key: 'bar-gap', children: ' ' }))
+      rows.push(line)
+      return Box({ flexDirection: 'column', children: rows })
+    } catch {
+      // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
+      return next(e)
+    }
+  })
+
+  // keys while the prompt is empty: v and s open their line under the message the keys act on, and c the claims list;
+  // ] and [ move through the marks, opening the tray (through the claims while the list or a claim is open); a digit
+  // picks in the open line, opens a cluster of the list, or opens a mark or a source inside the card; 0 closes the
+  // card, then the line or list. Claude Code hands a plugin only the keys that edit the prompt (tab, ↵, esc and a ⌫ with nothing
   // to delete stay its own), so these are the keys. A verb key that began a word being typed (`visualize …`, `so …`)
   // gives its letter back to the prompt. Keys are read one at a time, in the order pressed.
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
@@ -1917,22 +2286,32 @@ export const registerShell: Register = (on, options) => {
 
   // a turn whose last word was a tool call: its objects under that call's row
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
-    const at = e.props.tool_use_id
-    const list = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as ObjRef[]
-    if (!list.length || e.props.isErrored) return next(e)
-    const { Box } = $.ui.resolve(e) as Any
-    const own = await next(e)
-    const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `call-${at.slice(-10)}-${i}`, at)))
-    return Box({ flexDirection: 'column', children: [own, ...drawn] })
+    try {
+      const at = e.props.tool_use_id
+      const list = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as ObjRef[]
+      if (!list.length || e.props.isErrored) return next(e)
+      const { Box } = $.ui.resolve(e) as Any
+      const own = await next(e)
+      const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `call-${at.slice(-10)}-${i}`, at)))
+      return Box({ flexDirection: 'column', children: [own, ...drawn] })
+    } catch (err) {
+      // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
+      return next(e)
+    }
   })
 
   // a prompt asked while the detail view was open: under it, what it carried
   on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'composer' } } }, async ($, e, next) => {
-    const about = (await $.state.get({ ...ASKED, id: rowKey(e.requestId) })).value
-    if (!about) return next(e)
-    const { Box, Text } = $.ui.resolve(e) as Any
-    const own = await next(e)
-    return Box({ flexDirection: 'column', children: [own, Text({ dimColor: true, wrap: 'truncate-end', children: `  ▸ about ${about.id}${about.v != null ? '@' + about.v : ''}${about.region ? ' ▸ ' + about.label : ''}` })] })
+    try {
+      const about = (await $.state.get({ ...ASKED, id: rowKey(e.requestId) })).value
+      if (!about) return next(e)
+      const { Box, Text } = $.ui.resolve(e) as Any
+      const own = await next(e)
+      return Box({ flexDirection: 'column', children: [own, Text({ dimColor: true, wrap: 'truncate-end', children: `  ▸ about ${about.id}${about.v != null ? '@' + about.v : ''}${about.region ? ' ▸ ' + about.label : ''}` })] })
+    } catch (err) {
+      // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
+      return next(e)
+    }
   })
 
   // the prompt carries what verbs said for Claude since its last reply, and the open object with its selected part
@@ -1963,7 +2342,9 @@ export const registerShell: Register = (on, options) => {
       }
       const sel = (await $.state.get(SEL)).value
       // a question asked with the tray open is about its card's mark (CONTRACT 6: a prompt to main carrying the scope)
-      const scoped = !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin' ? await trayScope($) : null
+      // a source card in the tray first, then the claim the Claims pane has the ring on
+      const mine = !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin'
+      const scoped = mine ? (await trayScope($)) ?? (await claimScope($)) : null
       await $.state.set(PICK, null)
       const open = !scoped && !e.isMeta && (await $.ui.panes()).some(x => x.id === PANE && x.isPlaced)
       if (scoped) {
@@ -2044,21 +2425,67 @@ export const registerShell: Register = (on, options) => {
 
   // a verb's row: its words, then the object it made, drawn with its own hint row
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
-    if (e.props.command !== 'verb' || e.props.isErrored) return next(e)
-    const at = `cmd|${e.props.args.trim().slice(0, 300)}`
-    const list = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as ObjRef[]
-    if (!list.length) return next(e)
-    const { Box } = $.ui.resolve(e) as Any
-    const own = await next(e)
-    const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `verb-${e.requestId.slice(-10)}-${i}`, at)))
-    return Box({ flexDirection: 'column', children: [own, ...drawn] })
+    try {
+      if (e.props.command !== 'verb' || e.props.isErrored) return next(e)
+      const at = `cmd|${e.props.args.trim().slice(0, 300)}`
+      const list = ((await $.state.get({ ...UNDER, id: at })).value ?? []) as ObjRef[]
+      if (!list.length) return next(e)
+      const { Box } = $.ui.resolve(e) as Any
+      const own = await next(e)
+      const drawn = await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `verb-${e.requestId.slice(-10)}-${i}`, at)))
+      return Box({ flexDirection: 'column', children: [own, ...drawn] })
+    } catch (err) {
+      // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
+      return next(e)
+    }
   })
 
   // the detail view (detail.tsx)
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    markOpen(true)
-    return detailPane($, e)
+    try {
+      markOpen(true)
+      return await detailPane($, e)
+    } catch (err) {
+      // a detail that cannot draw says so in one plain line
+      return paneProblem($, e, 'The card', err)
+    }
   })
+
+  // the Claims pane (c), and its close by the person (esc, the close mark)
+  on('ui.render', { component: 'Pane', requestId: CPANE }, async ($, e) => {
+    try {
+      await $.state.get(CLAIMS)
+      await $.state.get(CLAIMPANE)
+      return await claimsPaneNow($, e)
+    } catch (err) {
+      // a graph that cannot draw says so in one plain line
+      return paneProblem($, e, 'The claims', err)
+    }
+  })
+  on('ui.close', { id: CPANE }, async ($, e, next) => {
+    try {
+      await $.state.set(CLAIMPANE, null)
+    } catch {
+      // the pane closes whatever the shell makes of it
+    }
+    return next(e)
+  })
+
+
+  // the Claims pane: the ring on a claim shows its details (the detail's own ring is detail.tsx's)
+  on('ui.focus', async ($, e, next) => {
+    const r = await next(e)
+    try {
+      const claim = e.requestId === CPANE && typeof e.element === 'string' ? claimOfKey(e.element) : null
+      if (claim) {
+        const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+        if (cp && cp.focus !== claim) await $.state.set(CLAIMPANE, { ...cp, focus: claim })
+      }
+    } catch {
+      // the ring moves whatever the shell makes of it
+    }
+    return r
+  }).catch(($, e, next) => next(e))
 }
 
 /** For tests: the module's memory, cleared. */
@@ -2077,6 +2504,7 @@ export function resetShell(): void {
   cardPending.clear()
   keyOpened = null
   keyChain = Promise.resolve()
+  graphLayout = null
 }
 
 export { isRef }

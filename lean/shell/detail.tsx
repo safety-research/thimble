@@ -525,7 +525,16 @@ function threadLine(els: Any, thread: Any, ind: string): Any {
   return Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: 'thread' }), Text({ dimColor: true, children: ` · ${qs} question${qs === 1 ? '' : 's'} · ${state}` })] })
 }
 
-/** The detail's keys as the hint line under the prompt says them: what works now, once. */
+/** The detail's keys as the thimble line says them while the detail is open (shell.tsx): what works now, once. */
+export async function detailKeys($: Engine): Promise<string | null> {
+  if (!isOpen) return null
+  const sel = (await $.state.get(SEL)).value as Detail | null
+  if (!sel || sel.cite || sel.cites) return 'esc back'
+  const part = drawn?.parts.find((x: Any) => x.id === sel.region) ?? null
+  const latest = await loadObject($, { id: sel.id, v: null, root: sel.root }).catch(() => null)
+  return keysHint(sel, part, versionsOf(latest).length, !!threadFor({ object: sel.id }))
+}
+
 function keysHint(sel: Detail, part: Any, nv: number, hasThread: boolean): string {
   if (sel.prog) return 'p closes the program · ↑↓ part · esc back'
   const k: string[] = ['↑↓ part']
@@ -652,18 +661,6 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     }
     await closed($)
     return next(e)
-  })
-
-  // the hint under the prompt says where a question goes while the detail is open
-  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    if (!isOpen) return next(e)
-    const sel = (await $.state.get(SEL)).value as Sel | null
-    if (!sel || sel.cite || sel.cites) return next(e)
-    const part = drawn?.parts.find((x: Any) => x.id === sel.region) ?? null
-    const label = part?.label || 'this card'
-    if (e.props.isDraft) return next({ ...e, props: { ...e.props, hint: `↵ asks this card's thread about ${cut(String(label), 40)}` } })
-    const latest = await loadObject($, { id: sel.id, v: null, root: sel.root }).catch(() => null)
-    return next({ ...e, props: { ...e.props, hint: keysHint(sel as Detail, part, versionsOf(latest).length, !!threadFor({ object: sel.id })) } })
   })
 
   // a prompt typed while the detail is open (the main view in front) asks the card's thread. It never reaches main:

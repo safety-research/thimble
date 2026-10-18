@@ -1,8 +1,8 @@
-// estimate.mjs: what pressing `a` would map in a folder, and about how long and how many tokens it would take. The
-// observer reads it to light `a` as an offer ("map 40 runs · ~2 min"); it never starts anything.
+// estimate.mjs: what the corpus orientation would map in a folder, and about how long and how many tokens it would
+// take. The claims list offers it with these ("map 40 runs · ~6 min · ~460k tokens"); it never starts anything.
 //
-//   node estimate.mjs ROOT        prints the estimate as JSON (the observer runs it as a Node child)
-//   estimate(root) -> {kind, unit, n, what, detail, minutes, tokens, note, offer, atlas, ...}
+//   node estimate.mjs ROOT        prints the estimate as JSON (the shell runs it as a Node child when c opens the list)
+//   estimate(root) -> {kind, unit, n, what, detail, minutes, tokens, note, offer, ...}
 //
 // It looks only at the folder's file list and sizes, plus the first 16 KiB of each .jsonl file (to tell a chat
 // transcript from other records). It reads no row in full and writes nothing, so it can run after every turn: a
@@ -39,7 +39,6 @@ export const MODEL = {
   base: { minutes: 2.7, tokens: 240000 },
   unit: { minutes: 0.1, tokens: 10000 },
   log2mb: { minutes: 0.15, tokens: 5000 },
-  add: { minutes: 0.2, tokens: 9000 },
 }
 
 const fmt = n => Number(n).toLocaleString('en-US')
@@ -134,30 +133,12 @@ export function cost(n, bytes, model = MODEL) {
   return { minutes: Math.max(1, Math.round(minutes)), tokens: Math.round(tokens / 10000) * 10000 }
 }
 
-/** The atlas already saved in the folder, if any: {id, version, claims, clusters, updated}. */
-export function atlasIn(root) {
-  const dir = join(root, 'thimble', 'objects')
-  if (!existsSync(dir)) return null
-  let best = null
-  for (const f of readdirSync(dir)) {
-    if (!/(^|-)atlas\.json$/.test(f)) continue
-    try {
-      const o = JSON.parse(readFileSync(join(dir, f), 'utf8'))
-      if (!Array.isArray(o?.data?.claims)) continue
-      const clusters = new Set(o.data.claims.map(c => c.cluster).filter(c => c != null && c !== ''))
-      const a = { id: o.id, version: o.version, claims: o.data.claims.length, clusters: clusters.size, updated: o.updated }
-      if (!best || String(a.updated) > String(best.updated)) best = a
-    } catch { /* a file being written */ }
-  }
-  return best
-}
 
 /** The estimate for a folder (see the head of this file). */
 export function estimate(root, { files } = {}) {
   const t0 = Date.now()
   const all = files || listFiles(root)
   const transcripts = all.filter(f => f.ext === '.jsonl' || f.ext === '.ndjson').map(f => ({ ...f, head: head(join(root, f.path)) })).filter(f => looksLikeTranscript(f.head))
-  const atlas = atlasIn(root)
   let out
   if (transcripts.length) {
     const { common, runs } = runsOf(transcripts)
@@ -181,10 +162,6 @@ export function estimate(root, { files } = {}) {
   out.files = all.length
   out.note = `${out.what} · ~${out.minutes} min`
   out.offer = { what: out.what, minutes: out.minutes, tokens: out.tokens }
-  if (atlas) {
-    out.atlas = atlas
-    out.add = { what: 'add this message\'s claims to the map', minutes: MODEL.add.minutes, tokens: MODEL.add.tokens }
-  } else out.atlas = null
   out.ms = Date.now() - t0
   return out
 }
