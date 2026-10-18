@@ -1,9 +1,9 @@
 // Claims in a session (verbs/claims, shell/claimsview.ts, observer.ts): the observer's one look after a turn of work
 // gives the turn's claims; each is placed in the message that said it, with the citations near it, in the session's
-// store (thimble/claims/<session>.json); c lights under the answer with how many are new; c from the empty prompt
-// opens the clusters with their claims under it (a revised claim struck through, → its replacement, ×N); a digit
-// opens a cluster and its first claim in the tray, with where it was said and its sources; ] [ step through the
-// claims; 0 closes the card, then the list; a question asked from the card carries the claim.
+// store (thimble/claims/<session>.json); c lights under the answer with how many are new or revised; c from the empty
+// prompt opens the Claims pane, focused (clusters with their claims, fact or interp, ×N; a revised claim struck
+// through with └→ its replacement under it); the ring on a claim shows where it was said, its sources and ×N; ] [
+// replay the claims in the order made; 2–8 open a source in the tray; 0 closes; a question asked carries the claim.
 // `claude plugin test lean`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -61,6 +61,11 @@ function world(on: Any, forks: Record<string, unknown>[]) {
     else if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: { kit: 1, w: 40, h: 1, root: { t: 'text', runs: [{ s: 'rows', tone: 'ink' }] }, cites: {}, examples: {}, regions: [], warnings: [] }, verbs: [], problems: [] })
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
+  const opened: Record<string, unknown>[] = []
+  on('ui.open', (_$: unknown, e: Record<string, unknown>) => { opened.push(e); return { value: { isPlaced: true } } })
+  on('ui.focus', () => ({ value: {} }))
+  on('ui.close', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
   const prompts: string[] = []
   on('model.complete', () => ({ value: { isAnswered: true, text: JSON.stringify({ parts: [], drift: null, decision: null }), usage: USAGE } }))
   on('model.fork', (_$: unknown, e: { prompt: string }) => {
@@ -80,7 +85,7 @@ function world(on: Any, forks: Record<string, unknown>[]) {
   on('config.list', () => ({ value: [] }))
   on('turn.step', async function* (_$: unknown, e: Any) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [{ id: 'u1', name: 'Bash', input: {} }] } })
   const clock = mock.clock(on, { now: NOW })
-  return { files, runs, prompts, submitted, clock }
+  return { files, runs, prompts, submitted, clock, opened }
 }
 
 function textOf(n: Any): string {
@@ -143,7 +148,10 @@ test('after a turn of work its claims are in the store, each where it was said w
   expect(log.claims.added).toEqual(['c1', 'c2', 'c3'])
 })
 
-test('a later turn: a claim said again counts ×N, a correction strikes the old claim through and links it to the new one', async ($, on) => {
+const PANE = { component: 'Pane', surface: 'terminal', requestId: 'claims', props: { bodyColumns: 120, scroll: { bodyRows: 46 } } } as never
+const focus = (el: string) => ({ requestId: 'claims', element: el, origin: { kind: 'person' } }) as never
+
+test('a later turn: a claim said again counts ×N; a correction is linked both ways, and c lights with "1 claim revised"', async ($, on) => {
   const w = world(on, [FORK1, FORK2])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   await turn($, w, { id: 't2', user: U2, prompt: Q2, row: R2, answer: A2 })
@@ -157,85 +165,99 @@ test('a later turn: a claim said again counts ×N, a correction strikes the old 
   expect(c1.said.map((p: Any) => [p.by, p.turn])).toEqual([['claude', 1], ['person', 2]])
   expect(c1.said[1].row).toBe(U2.slice(0, 24))
   expect(store.claims.find((c: Any) => c.id === 'c3').said.length).toBe(2)
-  // c under the second answer: one new, one revised
   textOf(await reply($, R2, A2))
   await w.clock.settle()
-  expect(textOf(await reply($, R2, A2))).toContain('● 1 new claim · 1 revised')
-
-  // c from the empty prompt: the clusters with their claims under the answer
-  await ($ as Any).prompt.edit(key('c'))
-  await w.clock.settle()
-  const list = await reply($, R2, A2)
-  const t = textOf(list)
-  expect(t).toContain('claims · 4 in 3 clusters · 1 new')
-  expect(t).toContain('turns 1–2')
-  for (const name of ['1 testing for bias', '2 finding who edited', '3 the June 18 burst']) expect(t).toContain(name)
-  expect(t).toContain(' + ● The tilt is two editors')
-  expect(t).toContain('×2')
-  expect(t).toContain(' → The tilt is two editors')
-  expect(struck(list).join('|')).toContain('The tilt in the edits is one editor')
-  expect(t).toContain('4 orient on the whole corpus · map 4 files · ~4 min · ~310k tokens')
-  expect(t).toContain('1–3 open a cluster · ] [ step through claims · 4 orient · 0 close')
-
-  // 1 opens the first cluster and its first claim in the tray: where it was said, its sources, what revised it
-  await ($ as Any).prompt.edit(key('1'))
-  await w.clock.settle()
-  const card = textOf(await $.ui.render(TRAY))
-  expect(card).toContain('The tilt in the edits is one editor')
-  expect(card).toContain('judgment call · ×2 · turn 1')
-  expect(card).toContain('said   turn 1  Claude "The tilt is one editor"')
-  expect(card).toContain('turn 2  you    "the tilt is one editor"')
-  expect(card).toMatch(/from {3}2 41%.* {2}3 212 of them/)
-  expect(card).toContain('revised → The tilt is two editors, Kestrel and Wren, not one')
-  expect(card).toContain('1 ask · 2–3 open a source · ] [ next claim · 0 back')
-  // the list now says how to go back, and lights the claim
-  expect(textOf(await reply($, R2, A2))).toContain('] [ step through claims · 0 back to the list')
-
-  // ] steps to the next claim; 2 opens its first source over it, and 0 comes back
-  await ($ as Any).prompt.edit(key(']'))
-  await w.clock.settle()
-  expect(textOf(await $.ui.render(TRAY))).toContain('The tilt is two editors, Kestrel and Wren, not one')
-  expect(textOf(await $.ui.render(TRAY))).toContain('revises ← The tilt in the edits is one editor')
-  await ($ as Any).prompt.edit(key('2'))
-  await w.clock.settle()
-  textOf(await $.ui.render(TRAY))
-  await w.clock.settle()
-  const src = textOf(await $.ui.render(TRAY))
-  expect(src).toContain('0 back')
-  expect(w.runs.some(a => a.includes('resolve') && a.includes('q8#user=top2@share'))).toBe(true)
-  await ($ as Any).prompt.edit(key('0'))
-  expect(textOf(await $.ui.render(TRAY))).toContain('The tilt is two editors')
-
-  // 1 asks: the question carries the claim to Claude
-  await ($ as Any).prompt.edit(key('1'))
-  expect(textOf(await $.ui.render(TRAY))).toContain('type your question · ↵ sends it with this claim')
-  await $.prompt.submit({ text: 'why two and not three?', origin: { kind: 'composer' } } as never)
-  const ctx = w.submitted.at(-1)!.context.join('\n')
-  expect(ctx).toContain('a claim of this session open in the tray: c4 "The tilt is two editors, Kestrel and Wren, not one"')
-  expect(ctx).toContain('q8#user=top2@share')
+  expect(textOf(await reply($, R2, A2))).toContain('● 1 claim revised')
 })
 
-test('0 closes the claim\'s card, then the list; c again closes it too; the orientation\'s offer asks Claude to start it', async ($, on) => {
+test('c opens the Claims pane, focused: clusters with their claims, fact or interp, ×N, a revised claim struck through with └→ its replacement', async ($, on) => {
+  const w = world(on, [FORK1, FORK2])
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  await turn($, w, { id: 't2', user: U2, prompt: Q2, row: R2, answer: A2 })
+  await ($ as Any).prompt.edit(key('c'))
+  await w.clock.settle()
+  expect(w.opened.at(-1)).toMatchObject({ id: 'claims', focus: true })
+  const pane = await $.ui.render(PANE)
+  const t = textOf(pane)
+  expect(t).toContain("Claims · 4 from Claude's work and our chat · deduped · 3 clusters")
+  expect(t).toContain('↑ ↓ claim · ] [ time · ')
+  for (const name of ['● testing for bias · 2', '● finding who edited · 1', '● the June 18 burst · 1']) expect(t).toContain(name)
+  expect(t).toMatch(/The tilt in the edits is one editor +revised/)
+  expect(t).toMatch(/└→ The tilt is two editors, Kestrel and Wren, not one +fact/)
+  expect(t).toMatch(/June 18 had 6,543 saves, the busiest day +fact +×2/)
+  expect(t).toMatch(/Kestrel made 41% of June's edits, 212 of them reverts +fact/)
+  expect(struck(pane).join('|')).toContain('The tilt in the edits is one editor')
+  expect(struck(pane).join('|')).not.toContain('two editors')
+  expect(t).toContain('orient on the whole corpus · map 4 files · ~4 min · ~310k tokens')
+  // the time strip: one dot per message that said claims, the turns named
+  expect(t).toContain('turn 1')
+  expect(t).toContain('▲ turn 2 · answer · 4 of 4 claims')
+  // the ring starts on the claim the message added; the details say where it was said
+  expect(t).toContain('said in turn 2 by Claude')
+  // the ring on the revised claim: where it was said twice, its sources as cite marks, what revised it
+  await $.ui.focus(focus('cl-c1'))
+  const d = textOf(await $.ui.render(PANE))
+  expect(d).toContain('revised in turn 2 → The tilt is two editors')
+  expect(d).toContain('said in turn 1 by Claude · ×2 restated, merged · interp · testing for bias')
+  expect(d).toMatch(/sources .*41%.*212 of them/)
+  expect(d).toContain('turn 1  Claude "The tilt is one editor"')
+  expect(d).toContain('turn 2  you    "the tilt is one editor"')
+  expect(d).toContain(' · 2–3 open a source · 0 close')
+  // 2 opens its first source in the tray
+  await ($ as Any).prompt.edit(key('2'))
+  await w.clock.settle()
+  const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 50, isFullscreen: true } } as never
+  textOf(await $.ui.render(BAND))
+  await w.clock.settle()
+  expect(textOf(await $.ui.render(BAND))).toContain('41%')
+  expect(w.runs.some(a => a.includes('resolve') && a.includes('q4#user=Kestrel@share'))).toBe(true)
+  // 0 closes the source card first
+  await ($ as Any).prompt.edit(key('0'))
+  expect(textOf(await $.ui.render(BAND))).not.toContain('41%')
+})
+
+test('] [ replay the claims in the order made: later claims are not shown yet, and a revision only once it was made', async ($, on) => {
+  const w = world(on, [FORK1, FORK2])
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  await turn($, w, { id: 't2', user: U2, prompt: Q2, row: R2, answer: A2 })
+  await ($ as Any).prompt.edit(key('c'))
+  await w.clock.settle()
+  await ($ as Any).prompt.edit(key('['))
+  await w.clock.settle()
+  const back = await $.ui.render(PANE)
+  const t = textOf(back)
+  expect(t).toContain('▲ turn 1 · answer · 3 of 4 claims')
+  expect(t).toContain("Claims · 3 from Claude's work")
+  expect(t).not.toContain('Kestrel and Wren')
+  expect(t).toMatch(/The tilt in the edits is one editor +interp +claim:/)
+  expect(t).toMatch(/June 18 had 6,543 saves, the busiest day +fact +claim:/)
+  expect(t).toContain('the claim the ring was on is said later, in turn 2')
+  expect(struck(back).join('|')).not.toContain('The tilt in the edits')
+  // the pane takes the keys back after a key that came through the prompt
+  expect(w.opened.filter(o => o.id === 'claims').length).toBe(2)
+  await ($ as Any).prompt.edit(key(']'))
+  await w.clock.settle()
+  expect(textOf(await $.ui.render(PANE))).toContain('▲ turn 2 · answer · 4 of 4 claims')
+})
+
+test('a question asked with the ring on a claim carries it; 0 closes the pane; m asks Claude for the corpus orientation', async ($, on) => {
   const w = world(on, [FORK1])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   await ($ as Any).prompt.edit(key('c'))
   await w.clock.settle()
-  await ($ as Any).prompt.edit(key('2'))
-  expect(textOf(await $.ui.render(TRAY))).toContain("Kestrel made 41% of June's edits")
+  await $.ui.focus(focus('cl-c2'))
+  await ($ as Any).prompt.edit(key('1'))
+  expect(textOf(await $.ui.render(PANE))).toContain('type your question below · ↵ sends it with this claim')
+  await $.prompt.submit({ text: 'is 41% of all June edits or of the relay edits?', origin: { kind: 'composer' } } as never)
+  const ctx = w.submitted.at(-1)!.context.join('\n')
+  expect(ctx).toContain('a claim of this session selected in the Claims pane: c2 "Kestrel made 41% of June\'s edits, 212 of them reverts"')
+  expect(ctx).toContain('q4#user=Kestrel@share')
+  // 0 closes the pane; c opens it again, and m asks for the orientation (the claims verb run with "orient")
   await ($ as Any).prompt.edit(key('0'))
-  expect(textOf(await $.ui.render(TRAY))).not.toContain('Kestrel made')
-  expect(textOf(await reply($, R1, A1))).toContain('claims · 3 in 3 clusters')
-  await ($ as Any).prompt.edit(key('0'))
-  expect(textOf(await reply($, R1, A1))).not.toContain('claims · 3 in 3 clusters')
-  await ($ as Any).prompt.edit(key('c'))
-  expect(textOf(await reply($, R1, A1))).toContain('claims · 3 in 3 clusters')
-  await w.clock.advance(800)
-  await ($ as Any).prompt.edit(key('c'))
-  expect(textOf(await reply($, R1, A1))).not.toContain('claims · 3 in 3 clusters')
-  // the offer: its digit runs the claims verb with "orient", which asks Claude for the subagent
+  await w.clock.settle()
   await ($ as Any).prompt.edit(key('c'))
   await w.clock.settle()
-  await ($ as Any).prompt.edit(key('4'))
+  await ($ as Any).prompt.edit(key('m'))
   await w.clock.settle()
   const ran = w.runs.find(a => a.some(x => x.endsWith('verb.mjs')) && a.includes('run'))
   expect(ran?.includes('claims')).toBe(true)

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { parseAnswer } from '../../../observer/evidence.js'
-import { applyTurn, clusterFor, emptyStore, findQuote, grownClusters, likeness, locate, mergeOrientation, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, sentenceAt, shortRef, sourcesNear, viewOf } from '../claims.js'
+import { applyTurn, claimsAt, clusterFor, tagOf, timeline, emptyStore, findQuote, grownClusters, likeness, locate, mergeOrientation, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, sentenceAt, shortRef, sourcesNear, viewOf } from '../claims.js'
 import { cmdCheck, cmdSave, showLines } from '../cli.mjs'
 import { cost, estimate, looksLikeTranscript, runsOf } from '../estimate.mjs'
 import { askFor, loadStore, run, storeFile } from '../run.mjs'
@@ -164,7 +164,8 @@ test('a correction stays: the old claim is revised by the new one, and the new o
   assert.equal(c5.cluster, c1.cluster)
   // the person said it too: their place counts
   assert.deepEqual(c1.said.map(p => p.by), ['claude', 'person'])
-  assert.equal(noteFor(res), '1 new claim · 1 revised')
+  assert.equal(noteFor(res), '1 claim revised')
+  assert.equal(noteFor({ added: ['c7', 'c8', 'c9'], revised: ['c2'] }), '1 claim revised · 2 new')
   const v = viewOf(store, { fresh: res.added })
   const g = v.groups.find(x => x.id === c1.cluster)
   assert.equal(g.claims.find(c => c.id === 'c1').replacement.id, 'c5')
@@ -173,6 +174,22 @@ test('a correction stays: the old claim is revised by the new one, and the new o
   // the fork reads it as revised, so it is not said again as if it held
   assert.match(promptLines(store).claims, /- c1 · k1 · The tilt in the edits is one editor \(revised by c5, ×2\)/)
   assert.match(showLines(store).join('\n'), /c1 ~~The tilt in the edits is one editor~~ → c5/)
+})
+
+test('a claim the person states and Claude corrects in the same turn is revised by its place in the list, #N', () => {
+  const { store } = turn1()
+  const Q = "I'll tell my manager the edits were biased and that bots drove it."
+  const A = 'Bots made only [4%](q5#bot=yes@share) of the edits, so they did not drive it.'
+  const res = applyTurn(store, { places: [{ row: 'u4', by: 'person', turn: 4, text: Q }, { row: 'r6', by: 'claude', turn: 4, text: A }], turn: 4, out: { claims: [
+    { claim: 'Bots drove the bias', quote: 'bots drove it', by: 'person', kind: 'claim', cluster: 'k4' },
+    { claim: 'Bots made only 4% of edits, so they did not drive it', quote: 'Bots made only 4% of the edits', kind: 'finding', cluster: 'k4', revises: '#1' },
+    { claim: 'A revision of nothing', quote: 'so they did not drive it', kind: 'finding', revises: '#9' },
+  ] } })
+  assert.deepEqual(res.added, ['c5', 'c6', 'c7'])
+  assert.deepEqual(res.revised, ['c5'])
+  const c5 = store.claims.find(c => c.id === 'c5')
+  assert.deepEqual([c5.by, c5.revised_by], ['person', 'c6'])
+  assert.equal(store.claims.find(c => c.id === 'c7').revises, undefined)
 })
 
 // ------------------------------------------------------------------------------------------------ clusters
@@ -364,4 +381,23 @@ test('lean verb claims check holds a good file and names a quote that is not in 
   assert.equal(cmdCheck(file, l => lines.push(l)), 1)
   assert.ok(lines.some(l => l.includes("the quote 'the scale is broken' is not in trials/t2.jsonl#L2")), lines.join('\n'))
   assert.match(lines.at(-1), /1 problem \(above\)\. 3 of 4 citations hold/)
+})
+
+// ------------------------------------------------------------------------------------------------ time
+
+test('the session in time: one moment per message that first said claims, in the order of the index, each named', () => {
+  const { store } = turn1()
+  applyTurn(store, { places: [{ row: 'u3', by: 'person', turn: 2, text: "I'll say the tilt is one editor" }, { row: 'r9', by: 'claude', turn: 2, text: 'No: it is two editors, not one.' }], turn: 2, out: { claims: [
+    { same: 'c1', quote: 'the tilt is one editor', by: 'person' },
+    { claim: 'The tilt is two editors', quote: 'it is two editors, not one', kind: 'finding', revises: 'c1' },
+    { claim: 'The person will tell the team', quote: "I'll say the tilt", by: 'person', kind: 'claim' },
+  ] } })
+  mergeOrientation(store, DATA, { turn: 2 })
+  const ms = timeline(store, { order: ['u1', 'r1', 'r2', 'u3', 'r9'] })
+  assert.deepEqual(ms.map(m => [m.turn, m.row, m.what, m.claims.length]), [[1, 'r2', 'answer', 4], [2, 'u3', 'you', 1], [2, 'r9', 'answer', 1], [2, null, 'corpus', 4]])
+  const at1 = claimsAt(ms, 0)
+  assert.equal(at1.upto.size, 4)
+  assert.deepEqual([...claimsAt(ms, 2).at], ['c5'])
+  assert.equal(tagOf('finding'), 'fact')
+  assert.equal(tagOf('judgment call'), 'interp')
 })

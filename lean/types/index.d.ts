@@ -53,8 +53,8 @@ export type MsgRecord = {
   final?: boolean
 }
 
-/** One card of the tray: a mark of a message, a citation inside a card, or a claim of the session's Claims. */
-export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite'; claim?: string }
+/** One card of the tray: a mark of a message, or a citation inside a card. */
+export type TrayFrame = { row?: string; i?: number; ref?: string; label?: string; kind?: 'cite' }
 
 /** The tray: the stack of cards it shows, the top one drawn; `asking` once 1 was pressed (its footer says how to ask). */
 export type Tray = { stack: TrayFrame[]; asking?: boolean }
@@ -112,6 +112,8 @@ declare module 'claude-code' {
       claims: Record<string, unknown> | null
       /** a turn's prompt row, its number and Claude's message rows, by turn id: where its claims were said */
       turns: StateFamily<{ prompt: { row: string; text: string } | null; rows: string[]; turn: number | null } | null>
+      /** the Claims pane: the message it was opened from, the claim the ring is on, the time cursor, asking */
+      claimpane: { row: string; focus: string | null; cursor: number | null; asking: boolean } | null
       /** what the corpus orientation would map in the folder, with its time and tokens */
       claimoffer: { root: string; offer: { what: string; minutes: number | null; tokens: number | null } | null } | null
     }

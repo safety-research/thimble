@@ -376,14 +376,15 @@ function applyClusters(store, list, grown, turn) {
 /** The fork's claims, held to what the store needs; anything else is dropped. */
 export function parseClaims(list) {
   const out = []
-  for (const x of Array.isArray(list) ? list : []) {
+  for (const [i, x] of (Array.isArray(list) ? list : []).entries()) {
     if (!x || typeof x !== 'object') continue
     const quote = str(x.quote, 400)
     const by = String(x.by || '').toLowerCase().startsWith('person') || String(x.by || '').toLowerCase() === 'you' ? 'person' : 'claude'
     const same = str(String(x.same ?? ''), 20)
     const text = str(x.claim ?? x.text, MAX_TEXT)
     if (!quote || (!same && !text)) continue
-    out.push({ text, quote, by, kind: kindOf(x.kind), cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null })
+    // `at`: its place in the fork's list (1 for the first), which a later claim of the same turn revises as "#1"
+    out.push({ at: i + 1, text, quote, by, kind: kindOf(x.kind), cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null })
   }
   return out.slice(0, 40)
 }
@@ -411,7 +412,11 @@ export function restates(store, text, skip = new Set()) {
 export function applyTurn(store, { places = [], out = {}, turn = null, at = null, grown = [] } = {}) {
   const res = { store, added: [], restated: [], revised: [], dropped: [], clusters: [] }
   const items = parseClaims(out?.claims)
+  // this turn's claims by their place in the fork's list: a claim the person states and Claude corrects in the same
+  // turn is revised as "#N"
+  const local = new Map()
   for (const it of items) {
+    if (it.revises && /^#\d+$/.test(it.revises)) it.revises = local.get(Number(it.revises.slice(1))) || null
     const where = locate(it.quote, places, it.by)
     if (!where) { res.dropped.push({ claim: it.text || it.same, why: `its words "${cutTo(it.quote, 60)}" are not in this turn's messages` }); continue }
     let target = it.same && !it.revises ? store.claims.find(c => c.id === it.same) : null
@@ -424,6 +429,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
       if (twin) continue
     }
     if (target) {
+      local.set(it.at, target.id)
       if (!target.said.some(p => samePlace(p, where.place))) {
         target.said.push(where.place)
         addSources(target, where.sources)
@@ -443,6 +449,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     }
     store.claims.push(claim)
     res.added.push(id)
+    local.set(it.at, id)
   }
   res.clusters = applyClusters(store, out?.clusters, grown, turn)
   // a cluster named this turn counts its first claims as named
@@ -458,15 +465,18 @@ export function noteGap(store, turn, why) {
   return store
 }
 
-/** The note `c` lights with for one turn: "3 new claims · 1 revised", or '' when nothing new came. */
+/** The note `c` lights with for one turn: "1 claim revised · 3 new", "3 new claims", or '' when nothing new came. A
+ *  revision comes first: it changes what the person was told. */
 export function noteFor(res) {
   const n = res?.added?.length || 0
   const r = res?.revised?.length || 0
-  const parts = []
-  if (n) parts.push(`${n} new claim${n === 1 ? '' : 's'}`)
-  if (r) parts.push(`${r} revised`)
-  return parts.join(' · ')
+  if (r) return `${r} claim${r === 1 ? '' : 's'} revised${n - r > 0 ? ` · ${n - r} new` : ''}`
+  return n ? `${n} new claim${n === 1 ? '' : 's'}` : ''
 }
+
+/** Whether a kind reads as a fact (what the setup or the data shows) or an interpretation (a reading or an assertion):
+ *  the tag the views show beside a claim. */
+export const tagOf = kind => (['fact', 'finding', 'event'].includes(kindOf(kind)) ? 'fact' : 'interp')
 
 // ------------------------------------------------------------------------------------------------ what the fork reads
 
@@ -554,13 +564,48 @@ export function viewOf(store, { fresh = [] } = {}) {
   if (loose.length) groups.push({ id: null, name: 'between clusters', claims: loose })
   const flat = []
   for (const g of groups) {
-    g.claims = g.claims.map(c => ({ ...c, n: c.said.length, fresh: isNew.has(c.id), replacement: c.revised_by ? byId.get(c.revised_by) || null : null, original: c.revises ? byId.get(c.revises) || null : null }))
+    g.claims = g.claims.map(c => ({ ...c, n: c.said.length, tag: tagOf(c.kind), fresh: isNew.has(c.id), replacement: c.revised_by ? byId.get(c.revised_by) || null : null, original: c.revises ? byId.get(c.revises) || null : null }))
     g.fresh = g.claims.filter(c => c.fresh).length
     g.revised = g.claims.filter(c => c.revised_by).length
     for (const c of g.claims) { c.order = flat.length; flat.push(c) }
   }
   const turns = store.claims.map(c => c.turn).filter(t => typeof t === 'number')
   return { groups, flat, total: store.claims.length, clusters: groups.filter(g => g.id).length, fresh: isNew.size, turns: turns.length ? [Math.min(...turns), Math.max(...turns)] : null, gaps: store.gaps || [] }
+}
+
+/**
+ * The session in time: one moment per message that first said a claim (the person's prompt, Claude's messages, the
+ * corpus orientation), in the order said. `order` is the session's message rows in order (its index); `final` the
+ * rows that are a turn's answer. Each moment is {key, row, by, turn, what, claims: [ids first said there]}, `what`
+ * being 'you', 'answer', 'working' or 'corpus'. The views replay the claims moment by moment.
+ */
+export function timeline(store, { order = [], final = [] } = {}) {
+  const pos = new Map(order.map((r, i) => [r, i]))
+  const fin = new Set(final)
+  const ms = new Map()
+  for (const c of store.claims || []) {
+    const p = (c.said || [])[0] || {}
+    const corpus = c.by === 'orientation' || p.by === 'orientation'
+    const key = corpus ? `corpus:${c.turn ?? ''}` : p.row ? `row:${p.row}` : `turn:${c.turn ?? ''}`
+    if (!ms.has(key)) ms.set(key, { key, row: corpus ? null : p.row || null, by: corpus ? 'orientation' : p.by || c.by || 'claude', turn: c.turn ?? null, claims: [] })
+    ms.get(key).claims.push(c.id)
+  }
+  const num = id => Number(String(id).replace(/\D/g, '')) || 0
+  const rank = m => [m.turn ?? 1e9, m.by === 'orientation' ? 1e9 : m.row != null && pos.has(m.row) ? pos.get(m.row) : 1e8 + Math.min(...m.claims.map(num))]
+  const list = [...ms.values()].sort((a, b) => { const x = rank(a), y = rank(b); return x[0] - y[0] || x[1] - y[1] })
+  // a turn's last message of Claude's is its answer, unless the index says which is
+  const lastOfTurn = new Map()
+  list.forEach(m => { if (m.by === 'claude') lastOfTurn.set(m.turn, m.key) })
+  for (const m of list) m.what = m.by === 'person' ? 'you' : m.by === 'orientation' ? 'corpus' : (fin.size ? fin.has(m.row) : lastOfTurn.get(m.turn) === m.key) ? 'answer' : 'working'
+  return list
+}
+
+/** The claims said by moment k of a timeline (all of them for k past its end), and those first said at k. */
+export function claimsAt(moments, k) {
+  const upto = new Set()
+  const at = new Set()
+  moments.forEach((m, i) => { if (i <= k) for (const id of m.claims) { upto.add(id); if (i === k) at.add(id) } })
+  return { upto, at }
 }
 
 /** The claims first said in a turn (a message's new claims). */

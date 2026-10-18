@@ -18,8 +18,8 @@
 //              on a page comes back as one line: an `ask` goes to Claude as a prompt that carries its scope, a `verb`
 //              presses that verb on the message's card.
 //   claims     the session's claims (thimble/claims/<session>.json), which the observer's look adds each turn's to:
-//              c under a message opens the clusters with their claims there (shell/claimsview.ts), a claim opens in
-//              the tray with where it was said and its sources, and ] [ step through them.
+//              c opens the Claims pane, focused (shell/claimsview.ts): the clusters with their claims, the time strip
+//              (] [ replay them in the order made) and the details of the claim the ring is on (↑ ↓).
 //   resume     where each object is drawn is kept per session in $THIMBLE_HOME/lean/shown/<session>.json, so
 //              `claude -c` and `--resume` draw the objects under the same replies again.
 //
@@ -39,8 +39,8 @@ import { chainWords, isRef, objectRefs, rankRow, recordRefs, regionMeta, regionR
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { messageEl, trayEl, verbLineEl, verbRowEl } from './view'
 import type { RowVerb } from './view'
-import { claimCardEl, claimsListEl, listDigits } from './claimsview'
-import { emptyStore, readStore, viewOf } from '../verbs/claims/claims.js'
+import { claimKey, claimOfKey, claimsPaneEl } from './claimsview'
+import { emptyStore, readStore, timeline, viewOf } from '../verbs/claims/claims.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,6 +73,8 @@ const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
 const CLAIMS = { plugin: 'thimble-lean', key: 'claims' } as const
 const TURNS = { plugin: 'thimble-lean', key: 'turns' } as const
 const CLAIMOFFER = { plugin: 'thimble-lean', key: 'claimoffer' } as const
+const CLAIMPANE = { plugin: 'thimble-lean', key: 'claimpane' } as const
+export const CPANE = 'claims'
 
 const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
@@ -1084,13 +1086,10 @@ function lineOptions(key: string, rec: MsgRecord | null): { options: { label: st
 /** A verb key under a message: its line opens (a press on the open one closes it). */
 async function pressRowVerb($: Engine, row: string, key: string): Promise<void> {
   const cur = (await $.state.get(PICK)).value as Any
-  if (cur && cur.row === row && cur.verb === key) { await $.state.set(PICK, null); if (key === 'c') await $.state.set(TRAY, null); return }
+  if (cur && cur.row === row && cur.verb === key) { await $.state.set(PICK, null); return }
+  // c: the Claims pane, read again (the orientation may have added claims), opened or closed
+  if (key === 'c') { await toggleClaims($, row); return }
   await $.state.set(TRAY, null)
-  if (key === 'c') {
-    // the claims list: read again (the orientation may have added some), with the orientation's offer beside it
-    await reloadClaims($)
-    await claimOffer($)
-  }
   await $.state.set(PICK, { row, verb: key })
   const answer = (await $.state.get(ANSWER)).value
   await $.state.set(SELROW, row === answer ? null : row)
@@ -1281,103 +1280,91 @@ function freshOf(rec: MsgRecord | null): string[] {
   return Array.isArray(c?.claims) ? c.claims.map(String) : []
 }
 
-/** The claim the tray shows, if its card started from a claim. */
-function claimInTray(tray: Tray | null): string | null {
-  const f = tray?.stack?.[0] as (TrayFrame & { claim?: string }) | undefined
-  return f?.claim ? String(f.claim) : null
+/** The Claims pane's state: the message it was opened from, the claim the ring is on, the time cursor (null: now), and
+ *  whether 1 was pressed to ask. */
+type ClaimPane = { row: string; focus: string | null; cursor: number | null; asking: boolean }
+
+/** The session's moments (claims.js timeline): the messages that first said claims, in the order of the index. */
+async function momentsNow($: Engine, store: ClaimsStore): Promise<Any[]> {
+  const order = (await msgFilesNow($)).index.map(x => String(x.row))
+  return timeline(store, { order })
 }
 
-/** A claim opened in the tray; the list (when open) opens its cluster and lights it. */
-async function openClaim($: Engine, id: string): Promise<void> {
-  const store = await claimsStore($)
-  const c = store.claims.find((x: Any) => x.id === id)
-  if (!c) return
-  await $.state.set(TRAY, { stack: [{ claim: id } as TrayFrame] } as Tray)
-  const pick = (await $.state.get(PICK)).value as Any
-  if (pick && pick.verb === 'c') await $.state.set(PICK, { ...pick, open: c.cluster ?? null })
+/** Open the Claims pane, focused, from a message (the claims that message added get the ring first); a second c
+ *  closes it. */
+async function toggleClaims($: Engine, row: string): Promise<void> {
+  if ((await $.state.get(CLAIMPANE)).value) { await closeClaims($); return }
+  const store = await reloadClaims($)
+  await claimOffer($)
+  const rec = await recordNow($, row)
+  const fresh = freshOf(rec)
+  const first = fresh[0] ?? (viewOf(store).flat as Any[])[0]?.id ?? null
+  await $.state.set(CLAIMPANE, { row, focus: first, cursor: null, asking: false } as ClaimPane)
+  // after the key that asked for it is done, so the pane takes the keyboard from the prompt
+  $.clock.after(0, () => { void openClaimsPane($, first) })
 }
 
-/** A cluster of the list opened: all its claims show, and its first opens in the tray. */
-async function openCluster($: Engine, id: string | null): Promise<void> {
-  const store = await claimsStore($)
-  const g = viewOf(store).groups.find((x: Any) => (x.id ?? null) === id)
-  const pick = (await $.state.get(PICK)).value as Any
-  if (pick && pick.verb === 'c') await $.state.set(PICK, { ...pick, open: id })
-  if (g?.claims?.length) await openClaim($, g.claims[0].id)
+async function openClaimsPane($: Engine, first: string | null): Promise<void> {
+  const r = await $.ui.open({ id: CPANE, title: 'Claims', focus: true, closeOnEscape: true, columns: 112 })
+  if (first) await quietly($.ui.focus({ requestId: CPANE, key: claimKey(first) }))
+  if (r && (r as Any).isPlaced === false) $.ui.toast(`Claims: ${(r as Any).reason || 'the pane was not placed'}. Widen the terminal, then press c again.`)
 }
 
-/** ] and [ through the claims, in the list's order: from none, the message's first new claim (or the first). */
-async function stepClaim($: Engine, dir: number): Promise<void> {
+async function closeClaims($: Engine): Promise<void> {
+  await $.state.set(CLAIMPANE, null)
+  await quietly($.ui.close({ id: CPANE }))
+}
+
+/** ] and [ in the pane: the time cursor one moment on or back, so the claims replay in the order made. */
+async function stepTime($: Engine, dir: number): Promise<void> {
+  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (!st) return
   const store = await claimsStore($)
-  const pick = (await $.state.get(PICK)).value as Any
-  const rec = pick?.row ? await recordNow($, pick.row) : null
-  const flat = viewOf(store, { fresh: freshOf(rec) }).flat as Any[]
-  if (!flat.length) { $.ui.toast('No claims yet: they are read after each turn of work.'); return }
-  const cur = claimInTray((await $.state.get(TRAY)).value as Tray | null)
-  const k = cur ? flat.findIndex(c => c.id === cur) : -1
-  const next = k < 0 ? (dir > 0 ? flat.find(c => c.fresh) || flat[0] : flat[flat.length - 1]) : flat[(k + dir + flat.length) % flat.length]
-  await openClaim($, next.id)
+  const ms = await momentsNow($, store)
+  if (!ms.length) return
+  const last = ms.length - 1
+  const cur = st.cursor ?? last
+  const next = Math.max(0, Math.min(last, cur + dir))
+  await $.state.set(CLAIMPANE, { ...st, cursor: next === last ? null : next })
+  // the key came through the prompt: once it is done, the pane takes the keys back, the ring where it was
+  $.clock.after(0, () => { void openClaimsPane($, st.focus) })
 }
 
 /** The corpus orientation asked for: the claims verb asks Claude to start it (a subagent reads the corpus). */
 async function orient($: Engine, row: string): Promise<void> {
   const rec = await recordNow($, row)
   if (!rec) { $.ui.toast('The orientation needs a message to start from. Press c under one of Claude\'s replies.'); return }
+  await closeClaims($)
   await $.state.set(PICK, null)
   await $.state.set(TRAY, null)
   $.clock.after(0, () => { void runOnMessage($, 'claims', 'c', rec, 'orient') })
 }
 
-/** The list under a message, as a drawing reads it. */
-async function claimsListNow($: Engine, els: Any, at: string, rec: MsgRecord, pick: Any, cols: number): Promise<Any> {
+/** The Claims pane, as a drawing reads it. */
+async function claimsPaneNow($: Engine, e: Any): Promise<Any> {
+  const els = $.ui.resolve(e) as Any
+  const st = ((await $.state.get(CLAIMPANE)).value as ClaimPane | null) ?? { row: '', focus: null, cursor: null, asking: false }
   const store = ((await $.state.get(CLAIMS)).value as ClaimsStore | null) ?? (emptyStore(String(await $.session.id())) as ClaimsStore)
-  const tray = (await $.state.get(TRAY)).value as Tray | null
   const offer = ((await $.state.get(CLAIMOFFER)).value as Any)?.offer ?? null
+  const rec = st.row ? await recordNow($, st.row) : null
   const view = viewOf(store, { fresh: freshOf(rec) })
+  const moments = await momentsNow($, store)
   const o = store.orientation as Any
-  return claimsListEl(els, {
-    key: `vl-${at}`, w: Math.max(50, Math.min(112, cols - 2)), theme, view, selected: claimInTray(tray), open: pick.open ?? null,
-    offer, oriented: o && o.claims ? { claims: Number(o.claims), clusters: Number(o.clusters) || 0 } : null, cardOpen: !!claimInTray(tray),
-    onClaim: (id: string) => openClaim($, id), onCluster: (id: string | null) => openCluster($, id), onOffer: () => orient($, at), onClose: () => $.state.set(PICK, null),
+  const set = (patch: Partial<ClaimPane>) => $.state.set(CLAIMPANE, { ...st, ...patch })
+  return claimsPaneEl(els, {
+    w: Math.max(40, (e.props.bodyColumns ?? 120) - 1), h: e.props.scroll?.bodyRows ?? 40, theme, view, moments,
+    cursor: st.cursor ?? Math.max(0, moments.length - 1), focus: st.focus, asking: st.asking,
+    offer: o && o.claims ? null : offer, oriented: o && o.claims ? { claims: Number(o.claims), clusters: Number(o.clusters) || 0 } : null,
+    onFocus: (id: string) => set({ focus: id, asking: false }),
+    onSource: (i: number) => { if (st.focus) void openClaimSource($, st.focus, i) },
+    onTime: (k: number) => set({ cursor: k }),
+    onOrient: () => orient($, st.row),
+    onClose: () => closeClaims($),
+    onAsk: () => set({ asking: true }),
   })
 }
 
-/** A digit with the list open: a cluster, or the orientation's offer. */
-async function claimsDigit($: Engine, n: number): Promise<boolean> {
-  const pick = (await $.state.get(PICK)).value as Any
-  if (!pick || pick.verb !== 'c') return false
-  const store = await claimsStore($)
-  const view = viewOf(store)
-  const offer = ((await $.state.get(CLAIMOFFER)).value as Any)?.offer ?? null
-  const d = listDigits(view, store.orientation ? null : offer)
-  if (d.offer === n) { await orient($, pick.row); return true }
-  const g = view.groups.find((x: Any) => d.clusters.get(String(x.id)) === n)
-  if (!g) return false
-  await openCluster($, g.id ?? null)
-  return true
-}
-
-/** The claim card in the tray, as a drawing reads it. */
-async function claimCardNow($: Engine, els: Any, id: string, tray: Tray, w: number): Promise<Any | null> {
-  const store = ((await $.state.get(CLAIMS)).value as ClaimsStore | null) ?? null
-  if (!store) return null
-  const v = viewOf(store)
-  const c = (v.flat as Any[]).find(x => x.id === id)
-  if (!c) return null
-  const g = (v.groups as Any[]).find(x => x.claims.some((y: Any) => y.id === id))
-  const n = Math.min(8, (c.sources || []).length)
-  const keys = tray.asking
-    ? 'type your question · ↵ sends it with this claim · 0 back'
-    : ['1 ask', n ? `${n > 1 ? `2–${n + 1}` : '2'} open a source` : '', '] [ next claim', '0 back'].filter(Boolean).join(' · ')
-  return claimCardEl(els, {
-    key: 'claim-card', w, body: 7, theme, claim: c, cluster: g?.name || 'between clusters', keys,
-    onSource: (i: number) => openClaimSource($, id, i),
-    onClaim: (other: string) => openClaim($, other),
-    onPlace: (row: string) => quietly($.ui.scroll({ to: { key: `msg-${row}-b0` }, block: 'center' })),
-  })
-}
-
-/** A source of the claim in the tray: its source card over the claim's, through the kernel like any citation. */
+/** A source of the claim the ring is on: its source card in the tray, through the kernel like any citation. */
 async function openClaimSource($: Engine, id: string, i: number): Promise<boolean> {
   const store = await claimsStore($)
   const c = store.claims.find((x: Any) => x.id === id)
@@ -1388,23 +1375,27 @@ async function openClaimSource($: Engine, id: string, i: number): Promise<boolea
   return true
 }
 
+/** A question asked with the Claims pane open on a claim: what it carries for Claude, and the row's few words. */
+async function claimScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown> } | null> {
+  const st = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (!st?.focus) return null
+  const store = await claimsStore($)
+  const c = store.claims.find((x: Any) => x.id === st.focus)
+  if (!c) return null
+  const first = (c.said || [])[0]
+  const where = first ? (first.by === 'orientation' ? 'from the corpus orientation' : `said in turn ${first.turn ?? '?'} by ${first.by === 'person' ? 'the person' : 'you'}: "${first.quote}"`) : ''
+  const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
+  return {
+    label: `claim: ${c.text}`, scope: { claim: c.id, ...(first?.row ? { row: first.row } : {}) },
+    context: `The person asked this with a claim of this session selected in the Claims pane: ${c.id} "${c.text}"${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}, ${where}.${refs.length ? ` It rests on ${refs.join(', ')}; \`lean resolve <ref>\` shows the rows.` : ''} "This" or "it" may mean that claim.`,
+  }
+}
+
 /** A question asked with the tray open: what it carries for Claude, and the row's few words for the person. */
 async function trayScope($: Engine): Promise<{ context: string; label: string; scope: Record<string, unknown> } | null> {
   const tray = (await $.state.get(TRAY)).value as Tray | null
-  const frame = trayTop(tray) as (TrayFrame & { claim?: string }) | null
+  const frame = trayTop(tray) as TrayFrame | null
   if (!frame) return null
-  if (frame.claim) {
-    const store = await claimsStore($)
-    const c = store.claims.find((x: Any) => x.id === frame.claim)
-    if (!c) return null
-    const first = (c.said || [])[0]
-    const where = first ? (first.by === 'orientation' ? 'from the corpus orientation' : `said in turn ${first.turn ?? '?'} by ${first.by === 'person' ? 'the person' : 'you'}: "${first.quote}"`) : ''
-    const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
-    return {
-      label: `claim: ${c.text}`, scope: { claim: c.id, ...(first?.row ? { row: first.row } : {}) },
-      context: `The person asked this with a claim of this session open in the tray: ${c.id} "${c.text}"${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}, ${where}.${refs.length ? ` It rests on ${refs.join(', ')}; \`lean resolve <ref>\` shows the rows.` : ''} "This" or "it" may mean that claim.`,
-    }
-  }
   if (frame.row == null) {
     return {
       label: frame.label || frame.ref!, scope: { mark: { kind: 'cite', ref: frame.ref, label: frame.label } },
@@ -1440,32 +1431,41 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   const verbs = await rowVerbs($)
   const consume = { text: e.text, cursor: e.cursor }
-  const claims = pick?.verb === 'c' || !!claimInTray(tray)
+  // the Claims pane open: ] [ move through time, 0 closes (a source card in the tray first), 1 asks, 2–8 a source,
+  // m the corpus orientation; c (the verb key, below) closes it
+  const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+  if (cp) {
+    if (k === ']' || k === '[') { keyOpened = null; await stepTime($, k === ']' ? 1 : -1); return consume }
+    if (k === '0') {
+      keyOpened = null
+      if (tray) await $.state.set(TRAY, trayBack(tray) as Tray | null)
+      else await closeClaims($)
+      return consume
+    }
+    if (!tray && /^[1-8]$/.test(k) && cp.focus) {
+      keyOpened = null
+      if (k === '1') { await $.state.set(CLAIMPANE, { ...cp, asking: true }); return consume }
+      return (await openClaimSource($, cp.focus, Number(k) - 2)) ? consume : null
+    }
+    if (!tray && k === 'm') {
+      const store = await claimsStore($)
+      if (!store.orientation) { await orient($, cp.row); return consume }
+    }
+  }
   if (k === ']' || k === '[') {
     keyOpened = null
-    // with the claims list or a claim open, ] and [ step through the claims
-    if (claims) { await stepClaim($, k === ']' ? 1 : -1); return consume }
     await $.state.set(PICK, null)
     await stepMark($, k === ']' ? 1 : -1)
     return consume
   }
   if (k === '0' || k === 'backspace') {
     keyOpened = null
-    // a claim's card closes before the list under it
-    if (tray && claims) { await $.state.set(TRAY, trayBack(tray) as Tray | null); return consume }
     if (pick) { await $.state.set(PICK, null); return consume }
     if (tray) { await $.state.set(TRAY, trayBack(tray) as Tray | null); return consume }
     return null
   }
   if (/^[1-9]$/.test(k)) {
     keyOpened = null
-    const top = trayTop(tray) as (TrayFrame & { claim?: string }) | null
-    if (top?.claim) {
-      // the claim's card: 1 asks, 2–9 open its sources
-      if (k === '1') { await $.state.set(TRAY, { ...tray!, asking: true }); return consume }
-      return (await openClaimSource($, top.claim, Number(k) - 2)) ? consume : null
-    }
-    if (pick?.verb === 'c' && !tray) return (await claimsDigit($, Number(k))) ? consume : null
     if (pick && !tray) return (await pickOption($, Number(k) - 1)) ? consume : null
     if (tray) {
       // 1 asks about the card's mark: the footer then says how; the question is typed in the prompt
@@ -2072,10 +2072,7 @@ export const registerShell: Register = (on, options) => {
         ...(browserFlag ? [browserChip(els, `vr-${at}-web`, async () => $.ui.toast(await openBrowser($, { row: at })))] : []),
       ]
       parts.push(verbRowEl(els, { key: `vr-${at}`, verbs, lit: rec.verbs || {}, open: pick && pick.row === at ? pick.verb : null, running, selected: sel === at, theme, onPress: (k: string) => pressRowVerb($, at, k), after }))
-      if (pick && pick.row === at && pick.verb === 'c') {
-        await $.state.get(CLAIMS)
-        parts.push(await claimsListNow($, els, at, rec, pick, cols))
-      } else if (pick && pick.row === at) {
+      if (pick && pick.row === at) {
         const verb = verbs.find(v => v.key === pick.verb)
         if (verb) {
           const { options, note } = lineOptions(pick.verb, rec)
@@ -2095,14 +2092,10 @@ export const registerShell: Register = (on, options) => {
   // card on top of its stack: a citation's source card or a gloss's explainer card.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const tray = (await $.state.get(TRAY)).value as Tray | null
-    const frame = trayTop(tray) as (TrayFrame & { claim?: string }) | null
+    const frame = trayTop(tray) as TrayFrame | null
     if (!frame || e.props.hasSurvey) return next(e)
     const els = $.ui.resolve(e) as Any
     const w = Math.max(40, Math.min(104, (e.props.bodyColumns ?? 100) - 3))
-    if (frame.claim) {
-      await $.state.get(CLAIMS)
-      return (await claimCardNow($, els, frame.claim, tray!, w)) ?? next(e)
-    }
     let kind: 'cite' | 'gloss' | 'spark' = 'cite'
     let title = frame.label || frame.ref || ''
     if (frame.row != null) {
@@ -2171,13 +2164,17 @@ export const registerShell: Register = (on, options) => {
       }
       const sel = (await $.state.get(SEL)).value
       // a question asked with the tray open is about its card's mark (CONTRACT 6: a prompt to main carrying the scope)
-      const scoped = !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin' ? await trayScope($) : null
+      // a source card in the tray first, then the claim the Claims pane has the ring on
+      const mine = !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin'
+      const scoped = mine ? (await trayScope($)) ?? (await claimScope($)) : null
       await $.state.set(PICK, null)
       const open = !scoped && !e.isMeta && (await $.ui.panes()).some(x => x.id === PANE && x.isPlaced)
       if (scoped) {
         context.push(scoped.context)
         pendingAsk = { text: e.text, about: { id: scoped.label, v: null, region: null, label: scoped.label }, scope: scoped.scope }
         await closeTray($)
+        const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+        if (cp?.asking) await $.state.set(CLAIMPANE, { ...cp, asking: false })
       } else if (sel && open && sel.cite) {
         pendingAsk = { text: e.text, about: { id: sel.cite, v: null, region: null, label: citeLabels.get(sel.cite) || sel.cite } }
         context.push(`The person asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`lean resolve ${sel.cite}\` shows its rows.`)
@@ -2265,10 +2262,32 @@ export const registerShell: Register = (on, options) => {
   // the detail view
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => detailEl($, e))
 
+  // the Claims pane (c), and its close by the person (esc, the close mark)
+  on('ui.render', { component: 'Pane', requestId: CPANE }, async ($, e) => {
+    await $.state.get(CLAIMS)
+    await $.state.get(CLAIMPANE)
+    return claimsPaneNow($, e)
+  })
+  on('ui.close', async ($, e, next) => {
+    const r = await next(e)
+    try {
+      if ((e as Any).id === CPANE) await $.state.set(CLAIMPANE, null)
+    } catch {
+      // the pane closes whatever the shell makes of it
+    }
+    return r
+  })
+
   // tab through the parts: each lights in the drawing as the ring reaches it
   on('ui.focus', async ($, e, next) => {
     const r = await next(e)
     try {
+      // the Claims pane: the ring on a claim shows its details
+      const claim = e.requestId === CPANE && typeof e.element === 'string' ? claimOfKey(e.element) : null
+      if (claim) {
+        const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
+        if (cp && cp.focus !== claim) await $.state.set(CLAIMPANE, { ...cp, focus: claim, asking: false })
+      }
       const region = e.requestId === PANE && typeof e.element === 'string' ? regionOfKey(e.element) : null
       if (region) {
         const cur = (await $.state.get(SEL)).value
