@@ -3,12 +3,16 @@
 /** One object as the shell points at it: its id, its version (null: the latest) and the folder that holds it. */
 export type ObjRef = { id: string; v: number | null; root: string }
 
-/** What the detail view shows: the object, the selected region, which example, and whether `? all` is open; or, with
- *  `cite`, one citation of Claude's words and the rows behind it. */
-export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null }
+/** What the detail view shows: the object, the selected region, which example, and whether `? all` is open; the
+ *  knobs' values the person set (`state`) and the knob turned last; or, with `cite`, one citation of Claude's words
+ *  and the rows behind it. */
+export type Sel = ObjRef & { region: string | null; ex: number; all: boolean; cite?: string | null; state?: Record<string, unknown>; knob?: string | null }
 
 /** A verb's run, as the /verb command's row draws it. */
 export type Ran = { verb: string; text?: string; note?: string; ask?: string; error?: string; saved?: ObjRef | null; on?: string }
+
+/** A verb running on an object (the hint row says so), or what it said last (the detail view shows it). */
+export type Said = { verb: string; text?: string; error?: string; running?: boolean }
 
 /** The browser page's server: its base URL (token included), or why there is none. */
 export type Web = { base?: string; root?: string; problem?: string; opened?: string }
@@ -24,8 +28,14 @@ declare module 'claude-code' {
       last: ObjRef | null
       /** the object and region a prompt was asked about, by the prompt row's id */
       asked: StateFamily<{ id: string; v: number | null; region: string | null; label: string }>
-      /** a verb's run, by the /verb command's arguments */
-      ran: StateFamily<Ran>
+      /** a verb running on an object, or what it said last, by the object's id */
+      said: StateFamily<Said | null>
+      /** words for Claude alone, given with the next prompt */
+      notes: string[]
+      /** the row an object is drawn under, by the object's id: a verb's object is drawn under the same row */
+      where: StateFamily<string>
+      /** a verb's request to Claude, by a hash of its words: its row reads as one line */
+      asks: StateFamily<{ verb: string; on: string }>
       /** `lean resolve --json` of a ref, by root and ref */
       rows: StateFamily<unknown>
       web: Web

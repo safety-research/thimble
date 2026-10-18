@@ -1,5 +1,0 @@
-{
-  "name": "lean-trace-demo",
-  "version": "0.1.0",
-  "description": "The Trace verb in a Claude Code session until the shell's t key lands: /t <a number or a quote you see | a ref> draws the short path in the transcript; /t step <part> follows one step; /t full asks Claude for the full trace."
-}

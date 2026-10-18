@@ -1,3 +1,0 @@
-# copies of lean/draw and lean/verbs/explore modules that sync.mjs writes (a hooks module imports only files inside its plugin)
-hooks/lib/
-.claude-plugin/types/

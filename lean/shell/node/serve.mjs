@@ -7,7 +7,8 @@
 //   GET  /<token>/o/<id>[?v=<k>]   the object's page: the same program, drawn as SVG (draw/svg.js) in the browser's
 //                                  sandbox, with the selection in the URL hash (#o=<id>@<v>&r=<region>&w=<cols>)
 //   GET  /<token>/resolve?ref=…    `lean resolve <ref> -n 5 --json`: where a value came from, down to its rows
-//   POST /<token>/back             {object, v, region}: the selection, handed to the terminal on stdout
+//   POST /<token>/back             {object, v, region, state?}: the selection (and the knobs' values), handed to the
+//                                  terminal on stdout
 //
 // It serves the browser and nothing else: it starts no `claude`, holds no credential and reads only the objects
 // under <folder>/thimble/objects. The token in every path keeps other pages and other users of this machine out; the
@@ -96,6 +97,8 @@ export function startServer({ root, lean = join(LEAN_DIR, 'bin/lean'), port = 0,
           let sel
           try { sel = JSON.parse(body) } catch { return send(400, 'application/json', '{"error":"not json"}') }
           const out = { object: String(sel.object || ''), v: sel.v == null ? null : Number(sel.v), region: sel.region && REGION.test(String(sel.region)) ? String(sel.region) : null }
+          // the knobs' values, as plain data
+          if (sel.state && typeof sel.state === 'object' && !Array.isArray(sel.state) && Object.keys(sel.state).length) out.state = JSON.parse(JSON.stringify(sel.state))
           if (!ID.test(out.object)) return send(400, 'application/json', '{"error":"no object"}')
           onBack(out)
           send(200, 'application/json', JSON.stringify({ ok: true, ...out }))

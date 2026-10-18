@@ -8,21 +8,21 @@
 // region with its ref, so t on a step traces on from there. t on the trace itself asks Claude for the full trace:
 // Claude writes a program against the drawing contract for this case and decides how deep to go (prompt.mjs).
 //
-// ctx, as the shell gives it (every field optional but one of ref, region or object):
-//   ref        a ref the person selected directly (a citation's target), or {ref, text}
-//   text       words to follow through transcripts (a quote the person selected)
+// ctx, as the shell gives it (shell/node/verb.mjs; every field optional but one of ref, region or object):
 //   object     the object on screen: a kernel object (id, data, lineage, ...) or a drawn one; a trace object made here
-//              carries verb: 'trace' and its target in `source`
-//   region     the selected region: an id, or {id, meta}; meta.ref, meta.text or meta.cite lead to what it shows
-//   drawing    the object's drawing (kit.js), where a region's meta and its cite are looked up when region is an id
-//   kernel     how to run `lean`: a function (args) -> stdout text or parsed JSON, or {json(args)} or {run(args)}
+//              carries verb: 'trace' and its target in `traced`
+//   region     the selected region's id; regionMeta its meta (meta.ref, meta.text or meta.cite lead to what it shows)
+//   refs       the kernel refs behind the selected region, as the shell found them
+//   drawing    the object's drawing (kit.js), where a region's cite is looked up
+//   kernel     how to run `lean`: {run(args) -> {stdout}}, or a function (args) -> stdout text or parsed JSON
 //   draw       {runProgram(object, {w}) -> drawing, or a promise of one}, to check a program Claude wrote before it
 //              is shown
-//   model      one completion: a function (prompt) -> text, or $.model's {fork} or {complete}; absent, the full trace
-//              is asked of Claude in the conversation (note)
+//   model      the session's model: $.model's {fork} or {complete} (through the shell), or a function (prompt) ->
+//              text; absent, the full trace is asked of Claude in the conversation (ask)
 //   skill      the text of this verb's SKILL.md, and toolkit the text of lean/draw/TOOLKIT.md: what Claude reads
 //              before it writes the full trace (a short fallback stands in for each when absent)
-//   w          the width in columns; ask: the person's words, when they typed some with the key
+//   w          the width in columns; args: the person's words, when they typed some with the verb
+//   ref, text  a ref or words to trace directly (cli.mjs), without an object
 //   full       true to go straight to the full trace
 //
 // No file, process or network access here: everything goes through ctx, so the shell can import this in its hooks
@@ -44,7 +44,7 @@ export function targetOf(ctx) {
   const region = typeof ctx.region === 'string'
     ? (ctx.drawing?.regions || []).find(x => x.id === ctx.region) || { id: ctx.region }
     : ctx.region
-  const meta = region?.meta || {}
+  const meta = ctx.regionMeta || region?.meta || {}
   const cite = typeof meta.cite === 'string' ? ctx.drawing?.cites?.[meta.cite] : (meta.cite && typeof meta.cite === 'object' ? meta.cite : null)
   const label = meta.label || cite?.text
   const text = meta.text || meta.quote || cite?.quote || ctx.text
@@ -52,8 +52,12 @@ export function targetOf(ctx) {
     if (isRef(c)) return { ref: c.trim(), text, label }
     if (c && typeof c === 'object' && isRef(c.ref)) return { ref: c.ref, text: c.quote || text, label }
   }
+  // the refs the shell found behind the selected part (a data row matched by the part's id, say)
+  const found = region && (ctx.refs || []).find(isRef)
+  if (found) return { ref: found.trim(), text, label }
   const obj = ctx.object
-  if (obj?.verb === 'trace' && obj.source && !region) return { ...obj.source, again: true }
+  const traced = obj?.traced || (obj?.source && (obj.source.ref || obj.source.text) ? obj.source : null)
+  if (obj?.verb === 'trace' && traced && !region) return { ...traced, again: true }
   if (text && !obj) return { text, label }
   if (obj?.id && obj.lineage) {
     // a kernel object with one value bound: that value; else the whole object
@@ -68,7 +72,7 @@ export function targetOf(ctx) {
 
 async function kernelJson(kernel, args) {
   if (!kernel) throw new Error('no kernel to ask')
-  const call = typeof kernel === 'function' ? kernel : kernel.json || kernel.run || kernel.lean
+  const call = typeof kernel === 'function' ? kernel : kernel.run || kernel.lean || kernel.json
   if (typeof call !== 'function') throw new Error('the kernel has no way to run `lean`')
   let out = await call.call(kernel, [...args, '--json'])
   if (out && typeof out === 'object' && 'stdout' in out) out = out.stdout
@@ -235,7 +239,7 @@ export function traceId(t) {
 function traceObject(t, program, data, extra = {}) {
   const id = traceId(t)
   return { id, verb: 'trace', title: 'Trace · ' + (data.title || data.facts?.title || ''), program, data,
-    source: { ref: t.ref, text: t.text, label: t.label }, ...extra }
+    traced: { ref: t.ref, text: t.text, label: t.label }, ...extra }
 }
 
 /** What Claude is told after the short path: what the person is looking at, in a few lines. */
@@ -261,7 +265,7 @@ async function ask(model, prompt) {
 
 /** Claude writes the full trace's program; it runs once here, and once more with the error if it failed. */
 export async function compose(ctx, f, t) {
-  let prompt = composePrompt(f, t, { w: ctx.w || 100, ask: ctx.ask, skill: ctx.skill, toolkit: ctx.toolkit })
+  let prompt = composePrompt(f, t, { w: ctx.w || 100, ask: ctx.ask || ctx.args, skill: ctx.skill, toolkit: ctx.toolkit })
   let last = ''
   for (let attempt = 0; attempt < 2; attempt++) {
     const reply = await ask(ctx.model, prompt)
@@ -295,12 +299,14 @@ export async function run(ctx) {
   const full = ctx.full || t.again
   if (!full) {
     const data = shortData(f, t, w)
-    return { object: traceObject(t, SHORT_PATH, data), note: noteFor(f, t, data) }
+    // the short path names t first under it: t again draws the full trace
+    return { object: traceObject(t, SHORT_PATH, data, { hints: ['trace'] }), note: noteFor(f, t, data) }
   }
   if (!ctx.model) {
+    const words = ctx.ask || ctx.args
     return {
       text: 'Asked Claude for the full trace.',
-      note: `The person asked for the full trace of ${t.ref || JSON.stringify(t.text)}${ctx.ask ? `: "${ctx.ask}"` : ''}. ` +
+      ask: `The person asked for the full trace of ${t.ref || JSON.stringify(t.text)}${words ? `: "${words}"` : ''}. ` +
         `Run \`lean trace ${t.ref || ''}${t.text ? ` --text ${JSON.stringify(t.text)}` : ''} --json\`, decide how deep to go for what they asked, ` +
         'and draw it as an object (the trace skill has the principles and examples).',
     }

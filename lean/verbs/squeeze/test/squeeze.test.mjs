@@ -9,7 +9,6 @@ import { fileURLToPath } from 'node:url'
 import { runProgram } from '../../../draw/sandbox-node.mjs'
 import { renderSvg } from '../../../draw/svg.js'
 import { gridText, renderTerm } from '../../../draw/term.js'
-import { COPIES } from '../demo/sync.mjs'
 import { applies } from '../hint.mjs'
 import { isSqueeze, normalize, parseAnswer, run, strayNumbers } from '../run.mjs'
 import { cut, expand, sentences } from '../spans.mjs'
@@ -188,8 +187,4 @@ test('main\'s path: the CLI lists the spans, then checks and draws the squeeze m
   assert.match(out, /3 of \d+ lines/)
   assert.match(out, /"31" is not in the spans it cites/)
   assert.match(cli('sq.json', '--focus', 'line-2', '--text'), /came from 1 span of the original \(5\.1\)/)
-})
-
-test('the demo plugin\'s copies are current (node lean/verbs/squeeze/demo/sync.mjs)', () => {
-  for (const [from, to] of COPIES) assert.equal(readFileSync(VERB + 'demo/hooks/lib/' + to, 'utf8'), readFileSync(from, 'utf8'), `${to} is stale`)
 })

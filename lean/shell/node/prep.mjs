@@ -1,6 +1,8 @@
 // prep.mjs: what the terminal needs to draw one object: its drawing at a width, and the verbs for it.
 //
-//   node --permission --allow-fs-read=<lean> prep.mjs < {object, w, h}  ->  {drawing, verbs, problems}
+//   node --permission --allow-fs-read=<lean> prep.mjs < {object, w, h, state}  ->  {drawing, verbs, problems}
+//
+// `state` holds the knobs' values the person set (k.knob): the program runs with them.
 //
 // The object's program runs in the drawing contract's sandbox (draw/sandbox-node.mjs: a fresh vm context with the
 // toolkit and the data only). Started with --permission, this process reads only the plugin's folder and writes no
@@ -11,10 +13,10 @@ import { runProgram } from '../../draw/sandbox-node.mjs'
 import { forDrawing } from '../object.js'
 import { verbsFor } from './registry.mjs'
 
-export async function prep({ object, w = 96, h = 24 }) {
+export async function prep({ object, w = 96, h = 24, state }) {
   const o = forDrawing(object || {})
-  const drawing = runProgram(o, { w, h })
-  const { verbs, problems } = await verbsFor(object || {})
+  const drawing = runProgram(o, { w, h, state: state && typeof state === 'object' ? state : undefined })
+  const { verbs, problems } = await verbsFor(object || {}, { drawing })
   return { drawing, verbs, problems }
 }
 

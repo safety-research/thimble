@@ -1,7 +1,8 @@
 {
   "key": "s",
-  "name": "Squeeze",
+  "name": "squeeze",
   "line": "shorter on the dimensions that matter, still attached to the original",
+  "order": 1,
   "absorbs": ["Telescope", "squeeze chips", "session headlines"],
   "auto": { "lines": 16, "chars": 1600, "why": "long text arrives squeezed; the original is one key away" },
   "keys": { "s": "shorter", "S": "fuller", "o": "the original beside it" },
