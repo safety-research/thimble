@@ -36,7 +36,6 @@ export function Tray() {
   if (!top || !m) return null
   const kind = m.kind === 'gloss' ? 'explain' : m.kind === 'spark' ? 'series' : 'cite'
   const close = () => setState({ tray: [], trayAsk: false, focus: null })
-  const backOne = () => setState((s) => ({ tray: s.tray.slice(0, -1), trayAsk: false, focus: s.tray.length > 1 ? s.focus : null }))
   const send = async () => {
     const text = q.trim()
     if (!text) return
@@ -71,17 +70,6 @@ export function Tray() {
       {m.ref && m.kind !== 'gloss' && <div className="lean-tray-ref">{m.ref}</div>}
       <div className="lean-tray-body">{m.kind === 'gloss' ? <ExplainBody m={m} /> : <SourceBody m={m} />}</div>
       <MarkThreads m={m} row={'row' in top ? top.row : null} />
-      <footer className="lean-tray-keys">
-        <button type="button" className="lean-key" onClick={() => setState({ trayAsk: true })}>
-          <kbd>1</kbd> ask
-        </button>
-        <span className="lean-verb-sep">·</span>
-        <button type="button" className="lean-key" onClick={backOne}>
-          <kbd>0</kbd> {tray.length > 1 ? 'back' : 'close'}
-        </button>
-        <span className="lean-verb-sep">·</span>
-        <span>] next mark</span>
-      </footer>
       {asking && (
         <form
           className="lean-tray-ask"

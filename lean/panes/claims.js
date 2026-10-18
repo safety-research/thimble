@@ -162,21 +162,45 @@ export function program(k, data) {
     return s.faint ? `${base}-faint` : base
   }
   rows.forEach((runs, y) => {
+    // runs of one style are one text, even across a claim's cell (a claim under the card keeps its press there): so
+    // a proportional face in the browser draws the card's words whole; each claim's cell is a part of its own
     let x = 0
+    let cur = null
+    const flush = () => {
+      if (!cur) return
+      if (cur.s.trim()) {
+        if (cur.mark) c.bg(cur.x, y, Array.from(cur.s).length, 1, 'warn-faint')
+        // lines (the card's frame, a link) stay on their cells, so the browser draws them as strokes there; words are
+        // one text each
+        let at = cur.x
+        for (const piece of cur.s.match(/[─│┌┐└┘╌╎]+|[^─│┌┐└┘╌╎]+/g) || []) {
+          const n = Array.from(piece).length
+          if (/^─+$/.test(piece)) c.hline(at, y, n, '─', cur.tone)
+          else if (/^[─│┌┐└┘╌╎]+$/.test(piece)) Array.from(piece).forEach((ch, i) => c.put(at + i, y, ch, cur.tone))
+          else if (piece.trim()) c.text(at, y, piece, { tone: cur.tone, bold: cur.bold, raw: true })
+          at += n
+        }
+      }
+      cur = null
+    }
     for (const r of runs) {
       const t = toneOf(r.style)
       const bold = !!(r.style && r.style.bold)
+      const mark = !!(r.style && r.style.mark)
+      // a claim's dot outside the card stands alone (its own glyph, drawn as a dot)
+      if (r.node && r.s.trim() && /^[●◉○]$/.test(r.s)) {
+        flush()
+        if (mark) c.put(x, y, r.s, t, { bold, bg: 'warn-faint' })
+        else c.put(x, y, r.s, t, { bold })
+      } else if (cur && cur.tone === t && cur.bold === bold && cur.mark === mark) cur.s += r.s
+      else { flush(); cur = { x, s: r.s, tone: t, bold, mark } }
       if (r.node) {
         const cl = byId.get(r.node)
-        if (r.style && r.style.mark) c.put(x, y, r.s, t, { bold, bg: 'warn-faint' })
-        else c.text(x, y, r.s, { tone: t, bold, raw: true })
-        c.region(claimRegion(r.node), x, y, 1, 1, { label: `claim: ${cl ? cl.text : r.node}`, claim: r.node, refs: cl ? cl.sources.map(s => s.ref).filter(Boolean) : [] })
-      } else if (r.s.trim()) {
-        if (r.style && r.style.mark) for (let i = 0; i < r.s.length; i++) c.put(x + i, y, r.s[i], t, { bold, bg: 'warn-faint' })
-        else c.text(x, y, r.s, { tone: t, bold, raw: true })
+        c.region(claimRegion(r.node), x, y, 1, 1, { label: `claim: ${cl ? cl.text : r.node}`, claim: r.node, refs: cl ? cl.sources.map(q => q.ref).filter(Boolean) : [] })
       }
-      x += r.s.length
+      x += Array.from(r.s).length
     }
+    flush()
   })
   return k.stack(head, k.text(' '), c)
 }

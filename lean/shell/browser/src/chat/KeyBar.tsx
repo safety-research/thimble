@@ -56,7 +56,13 @@ export function KeyBar() {
     // what the pane says of itself now (k.status: `s ● 6 of 24 lines`, a problem), then its keys
     left = [...(keybar.status ? segments(keybar.status).map((x) => ({ ...x, lit: true })) : []), ...segments(keybar.keys)]
   } else if (tray.length) {
-    left = segments(trayAsk ? 'type to ask · ↵ asks this thread · 0 back' : `1 ask · ${tray.length > 1 ? '0 back' : '0 close'} · ] next`)
+    // the bottom panel's keys, each a press too (the panel itself names none: they are here, once)
+    const acts: Record<string, () => void> = {
+      '1': () => setState({ trayAsk: true }),
+      '0': () => setState((s) => (s.trayAsk ? { trayAsk: false } : { tray: s.tray.slice(0, -1), focus: s.tray.length > 1 ? s.focus : null })),
+      ']': () => stepMark(marks, 1),
+    }
+    left = segments(trayAsk ? 'type to ask · ↵ asks this thread · 0 back' : `1 ask · ${tray.length > 1 ? '0 back' : '0 close'} · ] next`).map((g) => (acts[g.key] ? { ...g, act: acts[g.key] } : g))
   } else if (!card && rec) {
     left = rowVerbs(verbs).map((v) => {
       const st = rec.verbs?.[v.key] || rec.verbs?.[v.send] || {}
