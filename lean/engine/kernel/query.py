@@ -1,9 +1,15 @@
 """Queries: Python that Claude runs over the sources like a notebook cell, kept with its code, inputs and output, and
 with the source rows behind each row of its output.
 
-The query's namespace (copied from thimble-lite's query kernel and extended):
+    lean q "what it answers" <<'PY'
+    ...
+    PY
 
-    load(glob, fields=None)     a pandas DataFrame, one row per source row, with `_ref` (its stable id) and `_file`
+The code runs in the folder; its last expression (or a variable named `result`) is its output. Its namespace (copied
+from thimble-lite's query kernel and extended):
+
+    load(glob, fields=None)     a pandas DataFrame, one row per source row, with `_ref` (its stable id) and `_file`;
+                                "x.db#table" (or table="table") reads one table of a database
     rows(glob)                  (ref, row) pairs one at a time, for files too large to load
     tally(df, by=None, **aggs)  a groupby that keeps each group's rows: columns `n` and `_refs`
     sample(df, n=3, seed=0)     n rows at random
@@ -78,7 +84,7 @@ def _frame_cache(st: Store, rel: str):
     p = st.root / rel
     s = p.stat()
     key = hashlib.sha1(f"{rel}:{s.st_size}:{s.st_mtime_ns}".encode()).hexdigest()[:16]
-    return st.dir / "cache" / "frames" / f"{key}.pkl"
+    return st.cache / "frames" / f"{key}.pkl"
 
 
 def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
@@ -90,10 +96,9 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
     pd.set_option("display.max_colwidth", 60)
     pd.set_option("display.max_rows", 60)
 
-    def load(pattern: str, fields: list[str] | None = None) -> "pd.DataFrame":
-        """Every row of the files a path or glob names, with `_ref` (cite it) and `_file`. `x.db#table` reads one
-        table of a database."""
-        table = None
+    def load(pattern: str, fields: list[str] | None = None, table: str | None = None) -> "pd.DataFrame":
+        """Every row of the files a path or glob names, with `_ref` (cite it) and `_file`. `x.db#table` (or
+        table="name") reads one table of a database."""
         if "#" in pattern:
             pattern, table = pattern.split("#", 1)
         files = S.expand_glob(st.root, pattern)
@@ -156,8 +161,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
 
     def keep(name: str, obj: Any) -> Any:
         """Keep a result for a later query (use(name)), with this query as its source."""
-        d = st.sub("cache") / "kept"
-        d.mkdir(exist_ok=True)
+        d = st.sub("kept")
         pd.to_pickle(obj, d / f"{slug(name)}.pkl")
         info["kept"].append(name)
         return obj
@@ -167,7 +171,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         if name not in reg:
             raise KeyError(f"nothing kept as {name!r}; kept: {', '.join(reg) or 'nothing'}")
         info["uses"].append({"name": name, "query": reg[name]})
-        obj = pd.read_pickle(st.dir / "cache" / "kept" / f"{slug(name)}.pkl")
+        obj = pd.read_pickle(st.dir / "kept" / f"{slug(name)}.pkl")
         if isinstance(obj, pd.DataFrame) and "_ref" in obj.columns:
             info["frames"].append(obj)
         return obj

@@ -60,7 +60,7 @@ def cmd_sources(a: argparse.Namespace) -> int:
     st = Store()
     files = S.expand_glob(st.root, a.glob) if a.glob else S.list_sources(st.root)
     files = [f for f in files if S.kind_of(Path(f))]
-    cnt = S.counts(st.root, files, st.dir / "cache" / "counts.json")
+    cnt = S.counts(st.root, files, st.cache / "counts.json")
     if a.json:
         out_json([{"path": f, **{k: v for k, v in cnt.get(f, {}).items() if k != "key"}} for f in files])
         return 0
@@ -181,7 +181,7 @@ def cmd_rows(a: argparse.Namespace) -> int:
     how = "the first in file order" if a.first else f"chosen at random (seed {a.seed})"
     cond = " matching" if (rx or where) else ""
     if a.first and not (rx or where):
-        cnt = S.counts(st.root, files, st.dir / "cache" / "counts.json")
+        cnt = S.counts(st.root, files, st.cache / "counts.json")
         all_rows = sum(c.get("rows", 0) for c in cnt.values())
         where_ = files[0] if len(files) == 1 else f"{len(files)} files"
         print(f"\nthe first {len(kept)} of {fmt(all_rows)} rows in {where_}. Cite one as [↗](<ref>).")
@@ -227,7 +227,7 @@ def cmd_q(a: argparse.Namespace) -> int:
         return 1 if q["error"] else 0
     print(f"{q['id']} · {a.about}")
     print(_cut(q["stdout"], q["id"]).rstrip())
-    cnt = S.counts(st.root, [x["path"] for x in q["inputs"]], st.dir / "cache" / "counts.json")
+    cnt = S.counts(st.root, [x["path"] for x in q["inputs"]], st.cache / "counts.json")
     read = []
     for x in q["inputs"]:
         tot = cnt.get(x["path"], {}).get("rows")
@@ -368,7 +368,10 @@ def cmd_list(a: argparse.Namespace) -> int:
         print(f"  v{h['v']} {h['at']} {h.get('change') or ''}")
     for qid, q in sorted((lin.get("queries") or {}).items(), key=lambda kv: int(kv[0][1:])):
         stale = Q.stale_inputs(st, q)
-        ins = ", ".join(f"{x['path']} ({fmt(x.get('rows_read'))} rows)" for x in q.get("inputs") or [])
+        inputs = q.get("inputs") or []
+        ins = ", ".join(f"{x['path']} ({fmt(x.get('rows_read'))} rows)" for x in inputs[:3])
+        if len(inputs) > 3:
+            ins += f" and {len(inputs) - 3} more files ({fmt(sum(x.get('rows_read') or 0 for x in inputs[3:]))} rows)"
         print(f"  {qid} · {q.get('about')} · reads {ins or 'nothing'} · rows: {q.get('lineage')}" + (f" · CHANGED: {', '.join(stale)}" if stale else ""))
     for b in lin.get("bindings") or []:
         print(f"  data{b['at'] or '/'} ← {b['ref']}")
@@ -480,7 +483,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--fields")
     p.add_argument("--width", type=int, default=300)
     p.set_defaults(fn=cmd_rows)
-    p = sub.add_parser("q", aliases=["query"], help="run Python over the sources and keep its lineage")
+    p = sub.add_parser("q", aliases=["query"], help="run Python over the sources and keep its lineage",
+                       description=Q.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("about", nargs="?", default="", help="what the query answers, in a few words")
     p.add_argument("--code")
     p.add_argument("--rerun", metavar="QID")

@@ -266,7 +266,7 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
     """What this session (or `session`, or all sessions for None) read of every source file, file by file and by
     group of like files."""
     files = S.list_sources(st.root)
-    cnt = S.counts(st.root, files, st.dir / "cache" / "counts.json")
+    cnt = S.counts(st.root, files, st.cache / "counts.json")
     known = set(files)
     per: dict[str, dict[str, Any]] = {f: {"computed": 0, "queries": [], "shown": set(), "lines": [], "searched": False,
                                           "matched": 0, "named": False} for f in files}
@@ -409,7 +409,7 @@ def coverage_text(cov: dict[str, Any], max_lines: int = 40) -> str:
 def object_coverage(st: Store, obj: dict[str, Any]) -> dict[str, Any]:
     """Which source files feed an object's values, and which do not."""
     files = S.list_sources(st.root)
-    cnt = S.counts(st.root, files, st.dir / "cache" / "counts.json")
+    cnt = S.counts(st.root, files, st.cache / "counts.json")
     rows = (obj.get("lineage") or {}).get("rows") or {}
     feeding = []
     for f in files:

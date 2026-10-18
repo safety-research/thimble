@@ -6,12 +6,13 @@ In the folder under analysis (the root), the `thimble/` folder holds what the pe
     thimble/objects/.versions/<id>/v<k>.json  its earlier versions
     thimble/queries/q<n>.json               each query with its code, inputs, output and row lineage (query.py)
     thimble/labels/<name>.json              each label with every version of its values (labels.py)
+    thimble/kept/<name>.pkl                 results a query kept with keep(), which a later query reads with use()
     thimble/ledger.jsonl                    one line per `lean` call that read rows (what was read and how)
-    thimble/cache/                          row counts and frames, safe to delete
 
-Outside it, under $THIMBLE_HOME/lean/seen/<session>.jsonl (default ~/.thimble), the hooks module keeps the files that
-Claude's own Read and Grep calls touched in each session, so a coding session in another folder never gets a thimble/
-folder. Nothing here writes into a source file.
+Outside it, under $THIMBLE_HOME/lean (default ~/.thimble/lean): seen/<session>.jsonl, where the hooks module keeps the
+files that Claude's own Read, Grep and Bash calls touched in each session (so a coding session in another folder never
+gets a thimble/ folder), and cache/<folder>/, row counts and loaded frames, safe to delete. Nothing here writes into a
+source file.
 """
 from __future__ import annotations
 
@@ -54,6 +55,7 @@ class Store:
         self.root = Path(root).resolve() if root else find_root()
         self.session = session or session_id()
         self.dir = self.root / DIR
+        self.cache = thimble_home() / "lean" / "cache" / safe(str(self.root))[-100:]
 
     def sub(self, name: str) -> Path:
         d = self.dir / name
