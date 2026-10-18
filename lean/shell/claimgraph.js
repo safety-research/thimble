@@ -268,7 +268,7 @@ export function compose(o) {
   let card = null
   if (ringOn) {
     const c0 = byId.get(o.focus)
-    const lines = cardLines(c0, Math.min(W - 8, 84), { cite: o.cite, amber: o.amber, color: o.colorOf(c0) })
+    const lines = cardLines(c0, Math.min(W - 8, 100), { cite: o.cite, amber: o.amber, color: o.colorOf(c0) })
     const inner = Math.max(...lines.map(l => l.reduce((n, r) => n + r.s.length, 0)))
     const bw = inner + 4, bh = lines.length + 2
     const p = o.lay.pos.get(o.focus)

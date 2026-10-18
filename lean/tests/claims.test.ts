@@ -210,8 +210,7 @@ test('the ring on a claim: its card says what it means, its links are thin lines
   await $.ui.focus(focus('cl-c2'))
   const t = textOf(await $.ui.render(PANE))
   expect(t).toContain("Kestrel made 41% of June's edits, 212 of them reverts")
-  // precisely wraps to a second line in the card's frame
-  expect(t).toMatch(/precisely {3}41% of the 517 edits saved in June were Kestrel's; 212 of those were *│[^│]*│ +reverts/)
+  expect(t).toContain("precisely   41% of the 517 edits saved in June were Kestrel's; 212 of those were reverts")
   expect(t).toContain('based on    q4 · revisions.jsonl, June · 517 rows')
   expect(t).not.toContain('judgment')
   expect(edges(t)).toBe(true)
