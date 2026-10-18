@@ -9,8 +9,9 @@ when wants_check() holds and the workspace's automatic check is on (auto: thimbl
 new change to the card cancels a running check and starts the next. At most READ_CONCURRENCY readings run at once. Each check:
 1. Draw: render.render_card shoots the card with the app's own card face; a card that did not draw ends the check
    `error`. Where no card can be drawn (render.down), no check begins, and one that began is taken off the card.
-2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
-   card (context.render) and the picture, names what fails each criterion, and gives the replacement card. The reading
+2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code (with thimble.chart's help when
+   the code calls it: _chart_text), the work that led to the card (context.render) and the picture, names what fails
+   each criterion, and gives the replacement card. The reading
    is an agent of the analyst's Claude Code session (agent_call.py: thimble starts no `claude` of its own), so a
    check needs that session: with none running thimble in the folder it ends `error`, and its notice gives the fix.
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
@@ -25,7 +26,9 @@ new change to the card cancels a running check and starts the next. At most READ
 4. Tell main: a fix that changed what a card of main's shows is told to main in one line, the parts it changed and the
    problems the reading found (tell_main), held for main's next turn as a quiet event (events.QUIET_KINDS, FIXED_EVENT)
    with no line in main's terminal and no row in its chat. So main neither repeats a claim the fix took out nor guesses
-   who changed its card (bug hunt D6). The check's agent itself ends without a hand-back to main (agent_call.py).
+   who changed its card (bug hunt D6). A replacement that was not kept is told the same way, with the problems the
+   reading found and why it was not kept, so main fixes the card itself (tell_unfixed; bug hunt L8: the card stayed
+   wrong and main kept its claim). The check's agent itself ends without a hand-back to main (agent_call.py).
 A check past check_timeout(effort) ends `error`; waits for API capacity are left out of that time. A trial run on the
 kernel is always settled, even when the check is stopped mid-trial. Timings go to
 workspaces/<c>/card-checks/timings.jsonl and pictures under workspaces/<c>/card-checks/<card>/. A refused reading
@@ -856,6 +859,26 @@ def parts_words(fields: list[str] | tuple[str, ...]) -> str:
     return words[0] if len(words) == 1 else f"{', '.join(words[:-1])} and {words[-1]}" if words else ""
 
 
+def _said(problems: list[str]) -> str:
+    """The problems a reading found as one passage of sentences, at most TOLD_CHARS."""
+    said = " ".join(p if p[-1] in ".!?" else f"{p}." for p in (" ".join(str(x).split()) for x in problems) if p)
+    return said if len(said) <= TOLD_CHARS else said[: TOLD_CHARS - 1].rsplit(" ", 1)[0] + "…"
+
+
+def _hold(c: str, cid: str, line: str) -> bool:
+    """`line` held for main's next turn as a FIXED_EVENT of card `cid`; whether it was held. Never raises."""
+    from . import events  # noqa: PLC0415
+    from . import subagent_files as files  # noqa: PLC0415
+
+    try:
+        main = files.main_session(config.workspace_path(c)) or None
+        events.post(c, FIXED_EVENT, {"text": line, "card": f"card:{cid}"}, line="", session=main)
+    except Exception as e:  # noqa: BLE001 — no session listens (409), or the workspace is gone: the card stands
+        log.info("card check: main was not told of the check of card:%s (%s)", cid, getattr(e, "detail", e))
+        return False
+    return True
+
+
 def tell_main(c: str, cid: str, author: str, fix: dict[str, Any], problems: list[str]) -> bool:
     """Tell main of a fix of card `cid` when main made the card (`author` MAIN): one line held for main's next turn
     (FIXED_EVENT, `## card-fixed` and `## card-fixed-why` of prompts/tools.md), the parts the fix changed and the
@@ -864,25 +887,30 @@ def tell_main(c: str, cid: str, author: str, fix: dict[str, Any], problems: list
     the line was held; never raises."""
     if author != MAIN:
         return False
-    from . import events, tools  # noqa: PLC0415
-    from . import subagent_files as files  # noqa: PLC0415
+    from . import tools  # noqa: PLC0415
 
     parts = parts_words(list(fix.get("fields") or []))
     if not parts:
         return False
-    said = " ".join(p if p[-1] in ".!?" else f"{p}." for p in (" ".join(str(x).split()) for x in problems) if p)
-    if len(said) > TOLD_CHARS:
-        said = said[: TOLD_CHARS - 1].rsplit(" ", 1)[0] + "…"
+    said = _said(problems)
     line = tools.hint("card-fixed", cid=cid, parts=parts)
     if said:
         line = f"{line} {tools.hint('card-fixed-why', problems=said)}"
-    try:
-        main = files.main_session(config.workspace_path(c)) or None
-        events.post(c, FIXED_EVENT, {"text": line, "card": f"card:{cid}"}, line="", session=main)
-    except Exception as e:  # noqa: BLE001 — no session listens (409), or the workspace is gone: the fix stands
-        log.info("card check: main was not told of the fix of card:%s (%s)", cid, getattr(e, "detail", e))
+    return _hold(c, cid, line)
+
+
+def tell_unfixed(c: str, cid: str, author: str, problems: list[str], why: str) -> bool:
+    """Tell main that the check found `problems` in card `cid`, a card main made, and could not fix them, since its
+    replacement was not kept (`why`): one line held for main's next turn as tell_main's is (`## card-unfixed` of
+    prompts/tools.md), so main fixes the card itself (bug hunt L8: the revision of a chart main had called side by side,
+    which stacked, did not run, and the card stayed wrong with nothing said). Whether the line was held; never raises."""
+    said = _said(problems)
+    if author != MAIN or not said:
         return False
-    return True
+    from . import tools  # noqa: PLC0415
+
+    line = tools.hint("card-unfixed", cid=cid, why=" ".join(str(why).split()), problems=said)
+    return _hold(c, cid, line) if line else False
 
 
 async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], failed: list[str],
@@ -950,6 +978,7 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
             await _settle(c, cid, tid, keep=False)
             checkstore.record_rejected(c, cid, run.check, patch, why)
             _end(run, "error", f"its revision was not kept: {why}")
+            tell_unfixed(c, cid, run.author, failed, why)
             return
         applied = checkstore.apply_fix(c, cid, run.check, patch, cand, failed[0] if failed else "")
         keep, settled = applied is not None, True
@@ -1303,14 +1332,15 @@ def _assessment(raw: Any) -> list[dict[str, Any]] | None:
 async def card_input(c: str, cell: dict[str, Any], run: _Run, picture: str | None,
                      secs: dict[str, str]) -> dict[str, Any]:
     """The card-check task's input (tasks.py): the card's id, kind, question, takeaway, citations, code and the
-    context it was made in, each '' for none; the `typed` and `kept` parts of the reading's card (_typed_text,
-    _kept_text); the path of its picture, None when it was not drawn; and the effort the check reads at."""
+    context it was made in, each '' for none; the `chart`, `typed` and `kept` parts of the reading's card (_chart_text,
+    _typed_text, _kept_text); the path of its picture, None when it was not drawn; and the effort the check reads at."""
     code = str(cell.get("code") or "").strip()
     return {"card": {"id": run.cid, "kind": str(cell.get("kind") or "code"), "question": str(cell.get("title") or ""),
                      "takeaway": str(cell.get("takeaway") or "").strip(),
                      "citations": await asyncio.to_thread(_citations_text, c, cell) or "",
                      "code": code[:CODE_CHARS], "context": await asyncio.to_thread(_context_text, c, cell, run.author) or "",
-                     "typed": _typed_text(c, cell, secs), "kept": await asyncio.to_thread(_kept_text, c, cell, secs)},
+                     "chart": _chart_text(code, secs), "typed": _typed_text(c, cell, secs),
+                     "kept": await asyncio.to_thread(_kept_text, c, cell, secs)},
             "picture": picture, "effort": run.effort or await asyncio.to_thread(read_effort, c)}
 
 
@@ -1332,7 +1362,7 @@ async def check_task(c: str, inp: dict[str, Any], *, model: str | None = None) -
         "citations": str(card.get("citations") or "") or none,
         "code": f"```python\n{code}\n```" if code else none,
         "context": str(card.get("context") or "") or none,
-        "typed": str(card.get("typed") or ""), "kept": str(card.get("kept") or ""),
+        "chart": str(card.get("chart") or ""), "typed": str(card.get("typed") or ""), "kept": str(card.get("kept") or ""),
     })
     images = []
     if isinstance(inp.get("picture"), str) and inp["picture"]:
@@ -1401,6 +1431,30 @@ def _type_of(cell: dict[str, Any] | None) -> str:
 
     made = cardtypes.card_of((cell or {}).get("outputs"))
     return str(made.get("type") or "") if made else ""
+
+
+# a call of thimble.chart in a card's code
+CHART_CALL = re.compile(r"\bthimble\.chart\s*\(")
+
+
+def chart_help() -> str:
+    """thimble.chart's help (kernel_thimble.chart's docstring): what it draws, its kinds with their columns, and its
+    options."""
+    import inspect  # noqa: PLC0415
+
+    from . import kernel_thimble  # noqa: PLC0415
+
+    return inspect.cleandoc(kernel_thimble.chart.__doc__ or "")
+
+
+def _chart_text(code: str, secs: dict[str, str]) -> str:
+    """The `chart` section of the reading's card, for a card whose code calls thimble.chart: the kinds, columns and
+    options it takes (chart_help), so a replacement calls it with names it takes (bug hunt L8: a revision called
+    `stacked=False` for `stack=False`, did not run, and the card stayed wrong); '' for any other, or for a prompt with no
+    such section."""
+    if not CHART_CALL.search(code) or "chart" not in secs:
+        return ""
+    return "\n" + _fill(secs["chart"], {"help": chart_help()}).strip()
 
 
 def _typed_text(c: str, cell: dict[str, Any], secs: dict[str, str]) -> str:
