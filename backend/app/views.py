@@ -35,10 +35,11 @@ files aside and restores them if the change fails. Progress is `view {slug, stat
 
 Pages. A view has the pages it has: view.html, which the browser workbench draws, and view.term.js, a program on the
 terminal view kit (term_views.py) that the terminal panel draws. A build makes the page of its target first (TARGETS, a
-build target flag of the view prompts, prompts.rendering): `term-page` for a build started while the session's transport
-is local (before the analyst opens the browser), `html-page` after the press (default_target), kept on its proposal
-(target_of). Once that page passes, the view opens there, and the same build goes on to the page of the other place,
-as a revision that reuses the reader.py that passed (build_other_page; bug hunt round 9, J13: a view built in the
+build target flag of the view prompts, prompts.rendering): the page of where the analyst pressed Build (accept's
+`place`: a press in the terminal makes `term-page`, one in the browser `html-page`), else `term-page` for a build
+started while the session's transport is local (before the analyst opens the browser) and `html-page` after the press
+(default_target), kept on its proposal (target_of). Once that page passes, the view opens there, and the same build
+goes on to the page of the other place, as a revision that reuses the reader.py that passed (build_other_page; bug hunt round 9, J13: a view built in the
 terminal was built again when the browser first opened it, 7 minutes more, then a second review); the review, of the
 page the build began with (`first_page`), starts when the build ends. A view that still lacks a page, such as one this
 machine could not build, builds it on its first open in that place (ensure_page): the browser shows "building the page
@@ -109,6 +110,11 @@ VIEW_TERM = "view.term.js"  # a view's terminal program, beside its page (term_v
 TERM_PAGE, HTML_PAGE = TARGETS = ("term-page", "html-page")
 PAGE_OF = {TERM_PAGE: VIEW_TERM, HTML_PAGE: VIEW_HTML}
 LEGACY_MODE_OF = {TERM_PAGE: "terminal", HTML_PAGE: "browser"}  # STUB(core): 0.8.0's prompts.py names modes
+# where the analyst pressed a view's Build or Retry (`place` on its proposal: accept, retry), and the page a build
+# accepted there makes first (bug hunt round 10, K6: `build it` in the terminal after the browser had opened once was
+# taken for a browser click, which built the browser's page first and told main the analyst pressed it in the browser)
+TERMINAL, BROWSER = PLACES = ("terminal", "browser")
+TARGET_OF_PLACE = {TERMINAL: TERM_PAGE, BROWSER: HTML_PAGE}
 # what the browser's frame shows while the page it lacks is built (ensure_page); term_views.BUILDING the terminal's
 BUILDING_HTML = "building the page for the browser…"
 # the change a build of the page a view lacks gets (revise, ensure_page): the builder's registered prompt names the
@@ -3054,15 +3060,17 @@ def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: 
 
 def revise(c: str, slug: str, request: str, *, description: str | None = None, task: str | None = None,
            claims: Any = None, arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False,
-           route: str = CLICK, values: dict[str, Any] | None = None, target: str | None = None) -> dict[str, Any]:
+           route: str = CLICK, values: dict[str, Any] | None = None, target: str | None = None,
+           place: str | None = None) -> dict[str, Any]:
     """A change to the view `slug`, as a build on its proposal (made from the view when it has none): `request` is the
     analyst's words, and given fields replace the proposal's. A `description` is the proposal made again (propose), so
     its task and arrangement replace the old ones with it, a 0.7.0 spec too. A built view's files are copied aside first
     (restore_built), and the proposal is marked `revision` and `changed`. Queued at once (dev.queue_view), as part of
-    the start that asked for it (`route`), where a running builder of the view gets the change as a message, and a
-    finished one that main's session can still reach runs again with it; a typed change (main's propose_view) is
-    started by its caller. `target` names the page the change builds (ensure_page); without it the build makes the
-    page of where it starts (default_target). 404 for no such view or proposal."""
+    the start that asked for it (`route`, pressed in `place` when the press names where: retry), where a running
+    builder of the view gets the change as a message, and a finished one that main's session can still reach runs
+    again with it; a typed change (main's propose_view) is started by its caller. `target` names the page the change
+    builds (ensure_page); without it the build makes the page of where it starts (default_target). 404 for no such
+    view or proposal."""
     request = str(request or "").strip()
     _stop_review(c, slug)
     with _proposals_lock:
@@ -3083,6 +3091,7 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
                                   "change": change or None, "changed": True, "revision": revision or None,
                                   "asked": True if asked else None, "failed_change": None, "ts": _now(),
                                   "route": route, "refused": None, "stopped_by": None,
+                                  "place": place if place in PLACES else None,
                                   # the page an open asked for while a review ran (ensure_page) is built now
                                   **({"page_wanted": None} if target == prop.get("page_wanted") else {}),
                                   # a change to a build that goes keeps its page; another builds where it starts
@@ -3139,11 +3148,12 @@ def click_refused(c: str, slug: str) -> dict[str, Any] | None:
     return prop
 
 
-def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, Any]:
+def retry(c: str, slug: str, values: dict[str, Any] | None = None, *, place: str | None = None) -> dict[str, Any]:
     """Queue a failed proposal again (Build or Retry on its chip, a click), with the run's `values` when the Build menu
     names them, else Settings' dev row; a new builder goes on from the draft in the view's folder. A built view whose
-    last change failed (`failed_change`) is changed again with the same request. 404 for no such proposal, 409 for one
-    that is built with no failed change, queued or building."""
+    last change failed (`failed_change`) is changed again with the same request. `place` is where the analyst pressed
+    it (PLACES), which main hears (accept); the build makes the page it made before. 404 for no such proposal, 409 for
+    one that is built with no failed change, queued or building."""
     prop = read_proposal(c, slug)
     if prop is None:
         raise HTTPException(404, f"no such proposal: {slug}")
@@ -3155,11 +3165,11 @@ def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, 
         # a failed build of the page a view lacked (ensure_page) builds that page again, wherever Retry is pressed
         missing = {MISSING_PAGE_REQUEST.format(page=PAGE_OF[t], place=MISSING_PAGE_PLACE[t]): t for t in TARGETS}
         return revise(c, slug, str(prop["failed_change"]), asked=True, route=CLICK, values=vals,
-                      target=missing.get(str(prop["failed_change"])))
+                      target=missing.get(str(prop["failed_change"])), place=place)
     if prop.get("status") != "failed":
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not failed")
     prop = update_proposal(c, slug, status="queued", error=None, refused=None, route=CLICK, repairs=0,
-                           values=vals, stopped_by=None) or prop
+                           values=vals, stopped_by=None, place=place if place in PLACES else None) or prop
     _emit(c, slug, "queued", chat=prop.get("chat"))
     _queue(c, slug)
     return prop
@@ -5636,11 +5646,14 @@ async def _suggest_again(c: str, rel: str) -> None:
         _suggest_notice(c)
 
 
-def accept(c: str, slug: str) -> dict[str, Any]:
+def accept(c: str, slug: str, *, place: str | None = None) -> dict[str, Any]:
     """Build a view proposal the analyst accepted, or a suggested viewer of an earlier version: its proposal queued as
     one the analyst asked for and accepted, on the build path every view takes, with the answer stamped (`answer`
-    "accepted", `answered_at`). A click that cannot start a builder now comes back refused (click_refused), the view
-    proposal still waiting. 404 for no such proposal, 409 for one that is not suggested."""
+    "accepted", `answered_at`). `place` is where the analyst pressed it (PLACES), kept on the proposal so main hears
+    where (dev.start_build): the build makes that place's page first (TARGET_OF_PLACE), then the other's
+    (build_other_page); with no place, the page of default_target. A click that cannot start a builder now comes back
+    refused (click_refused), the view proposal still waiting. 404 for no such proposal, 409 for one that is not
+    suggested."""
     prop = read_proposal(c, slug)
     if prop is None:
         raise HTTPException(404, f"no such proposal: {slug}")
@@ -5650,8 +5663,10 @@ def accept(c: str, slug: str) -> dict[str, Any]:
     if (refused := click_refused(c, slug)) is not None:
         return refused
     now = _now()
+    where = place if place in PLACES else None
     prop = update_proposal(c, slug, status="queued", asked=True, accepted=True, ts=now, route=CLICK, refused=None,
-                           answer="accepted", answered_at=now) or prop
+                           answer="accepted", answered_at=now, place=where,
+                           target=TARGET_OF_PLACE[where] if where else None) or prop
     _emit(c, slug, "queued", asked=True)
     _queue(c, slug)
     return prop
@@ -5800,7 +5815,7 @@ async def accept_route(c: str, slug: str, request: Request) -> dict[str, Any]:
     _click(request)
     config.workspace_dir(c)
     _bind_loop()
-    return accept(c, slug)
+    return accept(c, slug, place=BROWSER)
 
 
 @router.post("/ws/{c}/views/proposals/{slug}/reject")
@@ -5851,7 +5866,7 @@ async def build_route(c: str, slug: str, request: Request, body: BuildBody | Non
     config.workspace_dir(c)
     _bind_loop()
     values = {k: v for k, v in (("model", body.model if body else None), ("effort", body.effort if body else None)) if v}
-    return retry(c, slug, values or None)
+    return retry(c, slug, values or None, place=BROWSER)
 
 
 @router.post("/ws/{c}/views/proposals/{slug}/retry")
@@ -5861,7 +5876,7 @@ async def retry_route(c: str, slug: str, request: Request) -> dict[str, Any]:
     _click(request)
     config.workspace_dir(c)
     _bind_loop()
-    return retry(c, slug)
+    return retry(c, slug, place=BROWSER)
 
 
 @router.post("/ws/{c}/views/proposals/{slug}/stop")

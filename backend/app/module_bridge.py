@@ -669,18 +669,18 @@ def rekey(c: str, old: str, new: str) -> None:
         _loop.call_soon_threadsafe(_wake, c)
 
 
-def _note(role: str, what: str, route: str = "click") -> str:
+def _note(role: str, what: str, route: str = "click", place: str | None = None) -> str:
     """The one line the module appends to main at a start: hint module-started-note with the role and `what`, a
-    server-checked name, how it started (`route`: HOW), and AGENT left for the module to fill. '' when the hint is
-    missing. An agent whose key names nothing after its role, the orientation's, is "for this corpus" (lane D's
-    {what})."""
+    server-checked name, how it started (`route`, and for a click the `place` it was pressed in: sf.how), and AGENT left
+    for the module to fill. '' when the hint is missing. An agent whose key names nothing after its role, the
+    orientation's, is "for this corpus" (lane D's {what})."""
     from . import tools  # noqa: PLC0415
 
     # a check tells main nothing: its comments show on the answer or the document, never in main's chat (SPEC-v2 J7);
     # nor does the card check's agent, whose answer reaches only the server (agent_call.py)
     if role in ("check", "call"):
         return ""
-    return tools.hint(NOTE_HINT, role=role, agent=AGENT, what=sf.note_what(what), how=HOW.get(route) or HOW["click"])
+    return tools.hint(NOTE_HINT, role=role, agent=AGENT, what=sf.note_what(what), how=sf.how(route, place))
 
 
 def _answer(op: str, raw: Any) -> Answer:
@@ -718,7 +718,7 @@ def _args(op: str, args: dict[str, Any]) -> dict[str, Any]:
         role = str(args.get("role") or "")
         out = {"role": role, "prompt": str(args.get("prompt") or ""), "description": str(args.get("description") or ""),
                "values": dict(args.get("values") or {}),
-               "note": _note(role, str(args.get("what") or ""), str(args.get("route") or "click"))}
+               "note": _note(role, str(args.get("what") or ""), str(args.get("route") or "click"), args.get("place"))}
         if args.get("request"):
             out["request"] = str(args["request"])
         if args.get("drop"):  # the card check's: the reason the terminal UI gives when it drops the agent's hand-back
@@ -1535,7 +1535,8 @@ async def state_route(cwd: str, session: str) -> dict[str, Any]:
         parent = str(e.get("parent") or "")
         # a role's own child (the critic) is its parent's to tell of; one a thread's fork started (U5) is main's
         if role and role != HELPER and not (parent and parent in agents):
-            line = _note(role, _what(e), str(e.get("route") or ("click" if e.get("plugin_started") else "typed")))
+            line = _note(role, _what(e), str(e.get("route") or ("click" if e.get("plugin_started") else "typed")),
+                         e.get("place"))
             line = line.replace(AGENT, aid)
             if line:
                 notes.append(line)

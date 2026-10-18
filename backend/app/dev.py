@@ -2583,12 +2583,15 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
         await subagents.out_of_plan(c)
     name = str(prop.get("name") or slug)
     asked = bool(prop.get("asked"))
+    # where the analyst pressed a click (views.accept, retry), which main's note at the start names
+    place = prop.get("place") if route == subagents.CLICK and prop.get("place") in views.PLACES else None
     with views.spawning(c, target):  # the builder's registration renders for this build's page
         ans = await subagents.start_job(c, _builder(), _key(slug), build_task(c, prop, repair=repair), vals, route,
                                         description=f"view: {name}",
                                         chat={"title": f"view: {name}", "view": slug, "announce": asked,
                                               **({"asked": True} if asked else {})},
-                                        work=view_work_dir(c, slug), call=call)
+                                        work=view_work_dir(c, slug), call=call,
+                                        fields={"place": place} if place else None)
     if ans.typed:
         _view_runs[key] = _Build(request=str(ans.get("request") or ""), route=route)
         views.update_proposal(c, slug, status="building", request=ans.get("request"))

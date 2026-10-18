@@ -191,3 +191,49 @@ async def test_a_view_built_in_the_terminal_gets_its_browser_page_in_the_same_bu
     assert len(queued) == 1 and reviewed == [("board", views.TERM_PAGE)]
     assert views.read_proposal(c, "board").get("first_page") is None
     assert views._public(views.read_built(c, "board"))["browser_page"] is True
+
+
+async def test_bug_hunt_k6_build_it_pressed_in_the_terminal_builds_the_terminal_page_first_and_main_hears_where(
+        workspaces_tmp, tmp_path, monkeypatch, queued):
+    """Bug hunt round 10, K6: `build it` pressed in the terminal after the browser had opened once was taken for a
+    browser click: main heard that the analyst started the builder "in the browser", and the build made the browser's
+    page first, so the analyst who pressed in the terminal waited 22 minutes for their page. A press is recorded where
+    it was made: the terminal's builds the terminal page first (then the browser's, in the same build), the browser's
+    the browser page, and main's note at the builder's start names the place."""
+    from app import local_hooks, subagents, term_acts
+    from app import subagent_files as sf
+
+    c = _corpus(tmp_path, monkeypatch, "board", "server")  # the browser opened once: the server's transport
+    assert views.default_target(c) == views.HTML_PAGE
+    offered = {"name": "Board", "description": "The posts.", "task": "Read the board.", "claims": ["board.jsonl"],
+               "status": "suggested", "route": "click", "offered": {"at": 1.0, "after": "main", "why": "posts"}}
+    views._save_proposals(c, [{"slug": "board", **offered}, {"slug": "threads", **offered, "name": "Threads"},
+                              {"slug": "posts", **offered, "name": "Posts"}])
+    monkeypatch.setattr(subagents, "refusal_before", lambda c, click=False: None)
+    got = await term_acts.act_route(c, term_acts.ActBody(kind="view-accept", payload={"slug": "board"}))
+    assert got == {"queued": True} and queued == [(c, "board")]
+    prop = views.read_proposal(c, "board")
+    assert (prop["place"], prop["target"], views.target_of(c, "board")) == ("terminal", views.TERM_PAGE,
+                                                                             views.TERM_PAGE)
+    # the builder's task and registration are the terminal page's
+    task = dev.build_task(c, prop)
+    assert "install the packages the page loads there" not in task
+    # the browser's press builds the browser's page; one in the terminal before the press, the terminal's
+    views.accept(c, "threads", place=views.BROWSER)
+    assert (views.read_proposal(c, "threads")["place"], views.target_of(c, "threads")) == ("browser", views.HTML_PAGE)
+    local_hooks.ANSWERS["view-accept"](c, {"slug": "posts"})
+    assert (views.read_proposal(c, "posts")["place"], views.target_of(c, "posts")) == ("terminal", views.TERM_PAGE)
+    # main's note at the start says where the analyst pressed; a click that names no place is the browser's
+    assert sf.how("click", "terminal") == "in the terminal" and sf.how("click", "browser") == "in the browser"
+    assert sf.how("click") == "in the browser" and sf.how("follow-on", "terminal") == sf.HOW["follow-on"]
+    from subagent_fakes import real_bridge
+
+    note = real_bridge._note("view-builder", "board", "click", "terminal")
+    assert "view-builder for board in the terminal," in note and "browser" not in note, note
+    wire = real_bridge._args("spawn", {"role": "view-builder", "prompt": "p", "what": "board", "route": "click",
+                                       "place": "terminal"})
+    assert "in the terminal" in wire["note"]
+    # after /clear a new main hears of the running builder with the same words
+    state = {"agents": {"abuilder01": {"type": "thimble:view-builder", "key": "view:board", "status": "running",
+                                       "route": "click", "place": "terminal", "plugin_started": True}}}
+    assert any("in the terminal" in line for line in sf.started_notes(state))

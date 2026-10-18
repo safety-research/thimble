@@ -226,10 +226,10 @@ async def test_after_the_press_the_terminal_s_accept_reaches_the_server_with_the
     accepted: list[str] = []
     refusal = {"kind": "no-module", "reason": "Claude Code's session is not ready for thimble yet"}
     answers = iter([{"slug": "board", "status": "queued"}, {"slug": "board", "status": "suggested", "refused": refusal}])
-    monkeypatch.setattr(views, "accept", lambda c, slug: accepted.append(slug) or next(answers))
+    monkeypatch.setattr(views, "accept", lambda c, slug, place=None: accepted.append((slug, place)) or next(answers))
     _press(ws)
     out = await local.act(CORPUS, "view-accept", {"slug": "board"}, session=MAIN)
-    assert accepted == ["board"] and out == {"ok": True, "queued": True, "via": "server"}
+    assert accepted == [("board", "terminal")] and out == {"ok": True, "queued": True, "via": "server"}
     assert asked == [("POST", f"/api/ws/{CORPUS}/act")] and hook_auth.guarded("POST", asked[0][1])
     out = await local.act(CORPUS, "view-accept", {"slug": "board"}, session=MAIN)
     assert out["queued"] is False and out["reason"] == refusal["reason"], "a refusal comes back with its reason"

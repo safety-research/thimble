@@ -536,8 +536,8 @@ async def test_the_analyst_s_answers_to_a_view_proposal_reach_the_views_through_
     monkeypatch.setattr(dev, "queue_view", lambda c, slug: made.append(("accept", c, slug)))
     monkeypatch.setattr(views, "answer_offer", lambda c, slug, answer, **kw: made.append((answer, c, slug)) or {})
 
-    def retry(c, slug):
-        made.append(("retry", c, slug))
+    def retry(c, slug, place=None):
+        made.append(("retry", c, slug, place))
         raise HTTPException(409, "the view 'Edit Bursts' is building, not failed")
 
     monkeypatch.setattr(views, "retry", retry)
@@ -545,9 +545,10 @@ async def test_the_analyst_s_answers_to_a_view_proposal_reach_the_views_through_
     for kind in ("view-accept", "view-reject", "view-retry"):
         assert await _call(kind, {"cwd": str(config.corpus_dir(CORPUS)), "slug": "edit-bursts"}) >= 1
     assert made == [("accept", CORPUS, "edit-bursts"), ("rejected", CORPUS, "edit-bursts"),
-                    ("retry", CORPUS, "edit-bursts")]
+                    ("retry", CORPUS, "edit-bursts", "terminal")]
     row = views.read_proposal(CORPUS, "edit-bursts")
     assert (row["status"], row["asked"], row["accepted"]) == ("queued", True, True), "accepted: queued as asked for"
+    assert (row["place"], row["target"]) == ("terminal", views.TERM_PAGE), "pressed in the terminal (bug hunt K6)"
 
 
 async def test_a_notice_s_try_again_checks_for_a_view_proposal_and_the_holder_waits_for_the_check(ws, project,
@@ -590,7 +591,7 @@ async def test_a_notice_dismissed_in_the_terminal_is_dismissed_by_the_holder(ws,
     # a notice's Retry: the notice it was pressed on is dismissed before the view is built again
     from app import views
 
-    monkeypatch.setattr(views, "retry", lambda c, slug: calls.append(("retry", c, slug)))
+    monkeypatch.setattr(views, "retry", lambda c, slug, place=None: calls.append(("retry", c, slug)))
     del calls[:]
     assert await _call("view-retry", {"cwd": cwd, "slug": "edit-bursts", "notice": "n4"}) >= 1
     assert calls == [(CORPUS, "n4"), ("retry", CORPUS, "edit-bursts")]
