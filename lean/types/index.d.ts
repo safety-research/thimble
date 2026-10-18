@@ -14,6 +14,21 @@ export type Ran = { verb: string; text?: string; note?: string; ask?: string; er
 /** A verb running on an object (the hint row says so), or what it said last (the detail view shows it). */
 export type Said = { verb: string; text?: string; error?: string; running?: boolean }
 
+/** The hint row of one object version as the observer ranked it: its 2-3 verbs, each with a few words for this object. */
+export type Ranking = { verbs: { verb: string; phrase?: string }[]; at: number; by: 'observer' }
+
+/** The observer's one line above the prompt: the line, then (after Learn more) its explanation, written already. */
+export type ObserverLine = {
+  kind: 'offer' | 'explained'
+  line: string
+  title: string
+  explanation: string
+  decision: string
+  shownAt: number
+  /** prompts the person submitted while it was open: it clears at the second */
+  prompts: number
+}
+
 /** The browser page's server: its base URL (token included), or why there is none. */
 export type Web = { base?: string; root?: string; problem?: string; opened?: string }
 
@@ -39,6 +54,10 @@ declare module 'claude-code' {
       web: Web
       /** when an object's drawing at a width became ready, by root, id, version and width: a drawing waiting on it redraws */
       ready: StateFamily<number>
+      /** the observer's ranking of an object version's hint row, by root, id and version */
+      ranked: StateFamily<Ranking | null>
+      /** the observer's line above the prompt, or none */
+      line: ObserverLine | null
     }
   }
 }

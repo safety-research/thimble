@@ -62,10 +62,10 @@ export async function phraseFor(verb, object, extra = {}) {
 }
 
 /**
- * Every verb with its phrase for this object and whether it is picked for the hint row. The rule, for now (a quiet
- * observer will rank them later): the verbs the object names in its own `hints` field first (Claude's ranking), then
- * the verbs whose hint.mjs has a phrase for it, by their `order` field, at most `max`. With none of either, none is
- * picked: the row shows `? all` alone.
+ * Every verb with its phrase for this object and whether it is picked for the hint row. The rule, until the observer
+ * ranks the row (lean/observer/, applied in the shell by object.js rankRow): the verbs the object names in its own
+ * `hints` field first (Claude's ranking), then the verbs whose hint.mjs has a phrase for it, by their `order` field, at
+ * most `max`. With none of either, none is picked: the row shows `? all` alone.
  */
 export async function verbsFor(object, { dir = VERBS, max = 3, drawing = null } = {}) {
   const { verbs, problems } = listVerbs(dir)

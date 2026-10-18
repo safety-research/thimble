@@ -13,6 +13,7 @@
 //     3. else none.
 //   objectRefs(object) -> the refs the object's words cite (its lineage's citations), for the view with no region.
 //   recordRefs(drawing, regionId) -> the rows its examples name themselves (`ref` on a record), which need no resolve.
+//   rankRow(verbs, ranking) -> the hint row as the observer ranked it, with its few words per verb.
 
 const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
 
@@ -92,6 +93,24 @@ export function forDrawing(object) {
     return { ...o, program: PLAIN, data: { title: o.title, id: o.id, text } }
   }
   return o
+}
+
+/**
+ * The hint row as a ranking orders it (the observer's, lean/observer/): its 2-3 verbs picked first, in its order, each
+ * with its few words for this object as `hint`; every other verb unpicked. A ranking that names no verb there is, or
+ * no ranking, leaves the verbs as the shell's own rule picked them.
+ *   verbs    [{key, name, line, phrase, picked}] as the registry lists them
+ *   ranking  {verbs: [{verb, phrase?}]} or null
+ */
+export function rankRow(verbs, ranking) {
+  const list = (Array.isArray(ranking?.verbs) ? ranking.verbs : []).filter(r => (verbs || []).some(v => v.name === r.verb))
+  if (!list.length) return verbs
+  const at = name => list.findIndex(r => r.verb === name)
+  const out = verbs.map(v => {
+    const r = list[at(v.name)]
+    return r ? { ...v, picked: true, hint: r.phrase || null, phrase: r.phrase || v.phrase } : { ...v, picked: false, hint: null }
+  })
+  return out.sort((a, b) => (a.picked === b.picked ? (a.picked ? at(a.name) - at(b.name) : 0) : a.picked ? -1 : 1))
 }
 
 const n = x => (typeof x === 'number' ? x.toLocaleString('en-US') : String(x))

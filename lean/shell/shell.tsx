@@ -24,14 +24,14 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, Ran, Said, Sel } from '../types'
 import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
-import { renderTerm } from '../draw/term.js'
+import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, regionOfKey, selectable } from './cells'
-import { chainWords, isRef, objectRefs, recordRefs, regionMeta, regionRefs } from './object.js'
+import { chainWords, isRef, objectRefs, rankRow, recordRefs, regionMeta, regionRefs } from './object.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Verb = { key: string | null; name: string; line: string; phrase: string | null; picked: boolean; extra?: Record<string, unknown> }
+type Verb = { key: string | null; name: string; line: string; phrase: string | null; picked: boolean; hint?: string | null; extra?: Record<string, unknown> }
 type Prepared = { object: Any; drawing: Any; grid: Any; verbs: Verb[]; problems: string[]; error?: string }
 type Placed = ObjRef & { from?: string }
 
@@ -46,6 +46,7 @@ const READY = { plugin: 'thimble-lean', key: 'ready' } as const
 const SAID = { plugin: 'thimble-lean', key: 'said' } as const
 const NOTES = { plugin: 'thimble-lean', key: 'notes' } as const
 const WHERE = { plugin: 'thimble-lean', key: 'where' } as const
+const RANKED = { plugin: 'thimble-lean', key: 'ranked' } as const
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
@@ -148,8 +149,27 @@ async function withVersion($: Engine, ref: ObjRef): Promise<ObjRef> {
   return { ...ref, v: o?.version != null ? Number(o.version) : null }
 }
 
-async function verbsOf($: Engine, ref: ObjRef): Promise<Verb[]> {
+/** The verbs for an object as the registry's rule picks them, each with its hint.mjs phrase (what the observer reads). */
+export async function verbsOf($: Engine, ref: ObjRef): Promise<Verb[]> {
   return (await prepared($, ref, 96)).verbs
+}
+
+/** The object as the person sees it under a reply, as plain text at 96 columns (what the observer reads). */
+export async function drawnTextOf($: Engine, ref: ObjRef): Promise<string> {
+  const p = await prepared($, ref, 96)
+  if (p.error || !p.grid) return `(it cannot be drawn: ${p.error || 'no drawing'})`
+  const err = p.drawing?.error ? `\n(its program failed: ${p.drawing.error.name}: ${p.drawing.error.message})` : ''
+  return gridText(p.grid) + err
+}
+
+/** The state key of an object version's ranking. */
+export const rankedId = (ref: ObjRef) => `${ref.root}|${ref.id}|${ref.v ?? ''}`
+
+/** The verbs as the hint row shows them: as the observer ranked them for this version, once it has, else the rule's. A
+ *  drawing that reads it redraws when the ranking comes. */
+async function rankedVerbs($: Engine, ref: ObjRef, verbs: Verb[]): Promise<Verb[]> {
+  const r = (await $.state.get({ ...RANKED, id: rankedId(ref) })).value
+  return r ? (rankRow(verbs, r) as Verb[]) : verbs
 }
 
 // ------------------------------------------------------------------------------------------------ where objects are drawn
@@ -500,15 +520,34 @@ function verbChip(els: Any, key: string, v: Verb, onPress: () => unknown, o: { h
 
 const sep = (els: Any) => els.Text({ dimColor: true, children: ' · ' })
 
-/** The one quiet row under an object: the picked verbs, `? all`, and `open` (with how many rows wait there). */
-function hintRow($: Engine, els: Any, ref: ObjRef, verbs: Verb[], key: string, o: { fullscreen: boolean; at: string; more: number; said: Said | null }) {
+/** Which picked verbs read as the observer's few words, best first, while the row fits in `room` columns (the rest
+ *  read as their names), and the columns the row then takes: its verbs, `? all`, and `open` at its right. */
+function hintWords(ref: ObjRef, verbs: Verb[], o: { fullscreen: boolean; more: number }, room: number): { words: string[]; width: number } {
+  const tail = o.fullscreen ? (o.more ? `${o.more} more rows · open ›` : 'open ›') : `/obj ${refText(ref)} opens it`
+  const picked = verbs.filter(v => v.picked).slice(0, 3)
+  const len = (s: string) => 2 + [...s].length + 3
+  let width = picked.reduce((n, v) => n + len(v.name), 6) + tail.length + 2
+  const words: string[] = []
+  for (const v of picked) {
+    if (!v.hint) continue
+    const more = len(v.hint) - len(v.name)
+    if (width + more > room) break
+    width += more
+    words.push(v.name)
+  }
+  return { words, width }
+}
+
+/** The one quiet row under an object: the picked verbs, `? all`, and `open` (with how many rows wait there). With
+ *  `words`, a verb the observer ranked reads as its few words for this object (`t trace 2,327 to its rows`). */
+function hintRow($: Engine, els: Any, ref: ObjRef, verbs: Verb[], key: string, o: { fullscreen: boolean; at: string; more: number; said: Said | null; words: string[] }) {
   const { Box, Button, Text } = els
   const picked = verbs.filter(v => v.picked).slice(0, 3)
   const running = o.said?.running ? o.said.verb : null
   const kids: Any[] = []
   picked.forEach((v, i) => {
     if (i) kids.push(sep(els))
-    kids.push(verbChip(els, `${key}:v:${v.name}`, v, () => pressVerb($, v.name, ref, null, o.at, false), { running: running === v.name }))
+    kids.push(verbChip(els, `${key}:v:${v.name}`, v.hint && o.words.includes(v.name) ? { ...v, name: v.hint } : v, () => pressVerb($, v.name, ref, null, o.at, false), { running: running === v.name }))
   })
   if (running && !picked.some(v => v.name === running)) kids.push(...(picked.length ? [sep(els)] : []), Text({ dimColor: true, children: `${running}…` }))
   if (kids.length) kids.push(sep(els))
@@ -541,11 +580,14 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string)
   const more = p.grid.h - rows
   // a click on a part opens the detail view on it; on a knob's ◂ ▸, opens it and turns the knob there
   const onPress = fullscreen ? (id: string, dir?: number) => (dir ? openTurned($, ref, id, dir) : openDetail($, ref, knobOf(p.drawing, id) ? null : id)) : undefined
+  // the row's few words as far as they fit the screen, which may widen it past the drawing; else the verbs' names
+  const verbs = await rankedVerbs($, ref, p.verbs)
+  const { words, width } = hintWords(ref, verbs, { fullscreen, more }, Math.max(40, (e.viewport?.columns ?? 100) - 4))
   return Box({
-    flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40),
+    flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40, words.length ? width : 0),
     children: [
       paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress }),
-      hintRow($, els, ref, p.verbs, `${key}-${ref.id}`, { fullscreen, at, more, said }),
+      hintRow($, els, ref, verbs, `${key}-${ref.id}`, { fullscreen, at, more, said, words }),
     ],
   })
 }
@@ -601,18 +643,19 @@ async function detailEl($: Engine, e: Any): Promise<Any> {
   if (p.error || !p.grid) return Text({ color: 'error', children: `× ${refText(sel)} cannot be drawn: ${p.error || 'no drawing'}` })
   const o = p.object
   const knobs: Any[] = p.drawing?.controls || []
+  const verbs = await rankedVerbs($, sel, p.verbs)
 
   // what the selection rests on
   const section: Any[] = []
   if (sel.all) {
     section.push(Text({ children: [Text({ bold: true, children: 'all verbs' }), Text({ dimColor: true, children: ` on ${o.id}${sel.region ? ' ▸ ' + sel.region : ''} · ● picked for it` })] }))
-    for (const v of p.verbs) {
+    for (const v of verbs) {
       section.push(Button({
         key: `all:${v.name}`, plain: true, label: v.name, onPress: () => pressVerb($, v.name, sel, sel.region, null, true),
         children: [Text({ dimColor: true, children: v.picked ? '● ' : '  ' }), Text({ color: 'suggestion', children: v.key || ' ' }), Text({ children: `  ${v.name.padEnd(10)} ` }), Text({ dimColor: true, children: cut(v.phrase || v.line, Math.max(10, cols - 18)) })],
       }))
     }
-    if (!p.verbs.length) section.push(Text({ dimColor: true, children: 'No verbs yet: a verb is a folder in lean/verbs/.' }))
+    if (!verbs.length) section.push(Text({ dimColor: true, children: 'No verbs yet: a verb is a folder in lean/verbs/.' }))
   } else if (sel.region) {
     const meta = regionMeta(p.drawing, sel.region)
     if (!meta) section.push(Text({ dimColor: true, children: `no part "${sel.region}" in this version` }))
@@ -666,7 +709,7 @@ async function detailEl($: Engine, e: Any): Promise<Any> {
   }
   // every verb works on its key here; those picked for the object read brighter
   const running = said?.running ? said.verb : null
-  for (const v of p.verbs) if (v.key) row.push(verbChip(els, `k:${v.name}`, v, () => pressVerb($, v.name, sel, sel.region, null, true), { hotkey: true, running: running === v.name, dim: !v.picked }), sep(els))
+  for (const v of verbs) if (v.key) row.push(verbChip(els, `k:${v.name}`, v, () => pressVerb($, v.name, sel, sel.region, null, true), { hotkey: true, running: running === v.name, dim: !v.picked }), sep(els))
   row.push(Button({ key: 'k:all', plain: true, hotkey: 'h', label: 'all verbs', children: [Text({ dimColor: true, children: sel.all ? 'fewer verbs' : 'all verbs' })], onPress: () => toggleAll($) }))
   row.push(sep(els))
   row.push(Button({ key: 'k:web', plain: true, hotkey: 'o', label: 'open in browser', children: [Text({ dimColor: true, children: 'browser' })], onPress: async () => $.ui.toast(await openBrowser($, (await $.state.get(SEL)).value ?? sel)) }))
@@ -1052,7 +1095,7 @@ export const registerShell: Register = on => {
     if (!word || word === '?' || word === 'all') {
       const t = await parseTarget($, rest)
       if (!t.ref) return { text: 'No object yet: the verbs work on an object Claude saved.' }
-      const verbs = await verbsOf($, t.ref)
+      const verbs = await rankedVerbs($, t.ref, await verbsOf($, t.ref))
       const lines = verbs.map(v => `${v.picked ? '●' : ' '} ${v.key || ' '}  ${v.name.padEnd(10)} ${v.phrase || v.line}`)
       return { text: verbs.length ? `The verbs for ${refText(t.ref)} (● picked for it):\n${lines.join('\n')}` : 'No verbs yet: a verb is a folder in lean/verbs/.' }
     }
