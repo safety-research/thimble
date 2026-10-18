@@ -2058,9 +2058,9 @@ function howWords(c: Citation, v: TermVerdict | undefined, check: { state?: stri
   if (!v || v.status === 'pending') return `${SPIN} thimble is reading its place`
   if (v.status === 'missing') return 'thimble looked for its place and found none'
   const shows = c.display !== null && showsValue(c.display) && !v.placeOnly
-  // words that show no value only name their place: the check reads that the place is there; so does a value at a
-  // view's unit, whose view gives no values to check it against
-  const noValue = c.display === null ? '' : v.placeOnly ? "; its view gives no values to check the cited one against, so only its place is checked" : '; its words show no value, so only its place is checked'
+  // words that show no value only name their place: the check reads that the place is there; so does a value whose
+  // place gives nothing to check it against (placeOnly)
+  const noValue = c.display === null ? '' : v.placeOnly ? `; ${v.placeOnly}, so only its place is checked` : '; its words show no value, so only its place is checked'
   const found = v.status === 'differs' ? 'did not find it' : 'found it'
   let words: string
   if (v.kind === 'cell') {

@@ -304,7 +304,7 @@ async def _ref_check(corpus: Path, ref: str, display: str | None, *, decrease: b
     if (out.get("meta") or {}).get("span_missing"):
         return WHY_SPAN_MISSING
     if display is not None and not _value_matches(display, refs.checked_text(out), decrease=decrease) \
-            and not refs.place_only(out):
+            and not refs.place_only(out, display):
         return WHY_VALUE
     return None
 

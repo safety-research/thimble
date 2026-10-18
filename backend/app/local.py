@@ -1109,7 +1109,7 @@ async def _resolve(c: str, args: list[str], pos: list[str]) -> Any:
         if (got.get("meta") or {}).get("span_missing"):
             return {**got, "state": "missing", "why": verify.WHY_SPAN_MISSING}
         if value is not None and not verify._value_matches(str(value), refs.checked_text(got)) \
-                and not refs.place_only(got):
+                and not refs.place_only(got, str(value)):
             return {**got, "state": "differs", "why": verify.WHY_VALUE}
         return {**got, "state": "ok"}
 

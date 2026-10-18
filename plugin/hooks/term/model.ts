@@ -592,10 +592,24 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerd
   if (!showsValue(c.display)) return { ...out, why: 'the place resolves; the citation shows no value' }
   // a view's unit: its reader says what the unit is (its label, an excerpt such as a run's prompt), not the values the
   // view shows for it, so a value those words leave out has only its place checked, never failed (bug hunt L19)
-  if (kind === 'view' && !valueIn(c.display!, `${str(res.label)}\n${str(res.excerpt)}`)) return { ...out, placeOnly: true, why: "the view's unit resolves; its view gives no values to check the cited one against" }
+  if (kind === 'view' && !valueIn(c.display!, `${str(res.label)}\n${str(res.excerpt)}`)) return { ...out, placeOnly: 'its view gives no values to check the cited one against', why: 'the place resolves; only its place is checked' }
   const where = span && 'value' in span ? str(span.value) : span && 'text' in span ? str(span.text) : kind === 'cell' ? str(res.excerpt) : out.lines.filter(l => l.hit).map(l => l.text).join('\n') || str(res.excerpt)
   const holds = span && 'value' in span ? shownMatches(str(span.value), c.display!) || valueIn(c.display!, where) : valueIn(c.display!, where)
+  // a number that is its place's own (`lines [4](…#L4) and [62](…#L62)`) names the place, not a value it shows
+  if (!holds && ownNumber(c.ref, c.display!)) return { ...out, placeOnly: "the number is its place's own", why: 'the place resolves; only its place is checked' }
   return holds ? { ...out, why: 'the value is at its place' } : { ...out, status: 'differs', why: span && 'value' in span ? `the place shows ${str(span.value)}` : 'the value is not at its place' }
+}
+
+/** Whether `display` is a whole number that is the cited place's own number: a line of the cited lines (`#L62`,
+ *  `#L5-L9`, a span of a line), a page (`#p3`) or a row (`#row=12`). Pure. */
+export function ownNumber(ref: string, display: string): boolean {
+  const n = /^\d{1,3}(?:,\d{3})*$|^\d+$/.test(display.trim()) ? Number(display.trim().replaceAll(',', '')) : NaN
+  if (!Number.isInteger(n)) return false
+  const frag = ref.split('#').slice(1).join('#')
+  const lines = /^L(\d+)(?:-L?(\d+))?(?:\.b\d+(?::c\d+-\d+)?)?$/.exec(frag)
+  if (lines) return n >= Number(lines[1]) && n <= Number(lines[2] ?? lines[1])
+  const one = /^(?:p|page=|row=)(\d+)$/.exec(frag)
+  return one ? n === Number(one[1]) : false
 }
 
 const MD_FILE = /\.(?:md|markdown|mdx)$/i

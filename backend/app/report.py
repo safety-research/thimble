@@ -526,8 +526,9 @@ async def heal_sentences(c: str, sentences: list[dict[str, Any]], *, unwrap: boo
                 external[(display, ref)] = "the cited span is gone"
                 continue
             excerpt = refs.checked_text(out)
-            # words that show no value name the link, and so does a value at a view's unit its words leave out
-            holds = _value_matches(display, excerpt) or not cite.shows_value(display) or refs.place_only(out)
+            # words that show no value name the link, and so do a value at a view's unit its words leave out and a
+            # line's own number (refs.place_only)
+            holds = _value_matches(display, excerpt) or not cite.shows_value(display) or refs.place_only(out, display)
             external[(display, ref)] = None if holds else {"why": "the value is not at this reference", "source": _source_numbers(excerpt)}
 
         prior = x.get("healed") if isinstance(x.get("healed"), list) else ()
@@ -593,7 +594,7 @@ async def verify_and_tag(c: str, sentences: list[dict[str, Any]]) -> dict[str, A
         exc = None if out is None else refs.checked_text(out)
         if exc is not None and not cite.is_card_ref(r) and not cite.shows_value(display):
             continue  # a file place that resolves, cited by words that show no value: they name the link (heal_sentences)
-        if exc is None or not (_value_matches(display, exc) or refs.place_only(out)):
+        if exc is None or not (_value_matches(display, exc) or refs.place_only(out, display)):
             failed.append({"sentence_id": sid, "ref": r, "value": display})
     value_pairs = {(sid, r) for sid, r, _ in values}
     spans = [r for r in distinct if r not in broken_set and cite.is_card_ref(r) and ("#" in r or "@out" in r)]

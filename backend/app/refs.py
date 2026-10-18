@@ -466,11 +466,24 @@ def checked_text(out: dict[str, Any]) -> str:
     return "\n".join(t for t in (fields_text(out), excerpt) if t)
 
 
-def place_only(out: dict[str, Any]) -> bool:
+_OWN_PLACE_RE = re.compile(r"^L(\d+)(?:-L?(\d+))?(?:\.b\d+(?::c\d+-\d+)?)?$|^(?:p|page=|row=)(\d+)$")
+
+
+def place_only(out: dict[str, Any], display: str | None = None) -> bool:
     """Whether a value cited at the resolved place `out` has only its place checked when checked_text does not hold it:
     a view's unit, whose reader says what the unit is (its label and an excerpt, such as a run's prompt), not the values
-    the view shows for it, so a value the view shows is never failed for want of them there."""
-    return out.get("kind") == "view"
+    the view shows for it, so a value the view shows is never failed for want of them there; and a whole number
+    `display` that is the place's own (a line of the cited lines, as in `lines [4](a.jsonl#L4) and [62](a.jsonl#L62)`,
+    a page, a row), which names the place rather than a value it shows."""
+    if out.get("kind") == "view":
+        return True
+    d = str(display or "").strip().replace(",", "")
+    m = _OWN_PLACE_RE.match(str(out.get("ref") or "").partition("#")[2])
+    if not d.isdigit() or not m:
+        return False
+    if m[3]:
+        return int(d) == int(m[3])
+    return int(m[1]) <= int(d) <= int(m[2] or m[1])
 
 
 def _strings(v: Any) -> list[str]:

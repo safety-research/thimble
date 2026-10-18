@@ -144,3 +144,19 @@ async def test_a_value_cited_at_a_view_s_unit_is_never_failed_for_want_of_it_in_
                                                         {"ref": "view:lattice-grid/owl-quiz", "value": "24"},
                                                         {"ref": "view:lattice-grid/nope", "value": "7"}])])
     assert [g["state"] for g in got] == ["ok", "ok", "missing"]
+
+
+async def test_a_number_that_is_its_place_s_own_names_the_place(monkeypatch):
+    """`lines [4](a.jsonl#L4) and [62](a.jsonl#L62)`: a whole number that is the cited line's (a range's, a page's, a
+    row's) own number names the place, so a check that does not find it there checks only the place; any other number
+    not there still fails."""
+    from app import verify
+
+    rec = lambda ref: {"ref": ref, "kind": "record", "path": "a.jsonl", "excerpt": "The gate is locked."}  # noqa: E731
+    assert refs.place_only(rec("a.jsonl#L62"), "62") and refs.place_only(rec("a.jsonl#L5-L9"), "7")
+    assert refs.place_only(rec("a.jsonl#L62.b0:c3-9"), "62") and refs.place_only(rec("doc.pdf#p3"), "3")
+    assert not refs.place_only(rec("a.jsonl#L62"), "63") and not refs.place_only(rec("a.jsonl#L62"), "6.2")
+    monkeypatch.setattr(refs, "resolve", lambda corpus_dir, ref: rec(ref))
+    root = config.corpus_dir("mini")
+    assert await verify._ref_check(root, "a.jsonl#L62", "62") is None
+    assert await verify._ref_check(root, "a.jsonl#L62", "63") == verify.WHY_VALUE
