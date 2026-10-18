@@ -479,3 +479,27 @@ test("the SSH row of a remote press is one row: its words (no browser here, the 
   expect(words(await open.find({ type: 'Box', key: 'above-remote' }))).toBe(`  browser${remoteWords({ tunnel, et: null })}copycopy linkdismiss`)
   await open.unmount()
 })
+
+test('bug hunt L14: with nothing above it the thimble line is thimble\'s first row in the band, so Claude Code\'s `[-]` never stands alone on a blank row; a notice above it keeps one blank row between them', { timeoutMs: 30_000 }, async ($, on) => {
+  const w = panelWorld(on)
+  await start($, w)
+  // thimble's rows in the band, in order: each keyed Box by its key, a blank row as `blank` (the engine's own rows, which
+  // come first, left out)
+  const ours = async (m: M) => {
+    const root = (await m.drawn()) as unknown as Node
+    const kids = ((root.children ?? root.props?.children ?? []) as unknown[]).flat(9).filter(Boolean) as (Node & { part?: unknown })[]
+    return kids.filter(k => !k.part).map(k => keyOf(k) || (words(k).trim() === '' ? 'blank' : words(k)))
+  }
+  const m = await band($, 184)
+  expect(await line(m)).toContain('thimble cards 12')
+  expect(await ours(m)).toEqual(['above-summary'])
+  await m.unmount()
+  // a notice: its row, one blank row, then the line
+  w.states.home.notices = [{ id: 'n7', key: 'check:quill', kind: 'check', text: 'The check Quill details failed: its model call was refused.', agent: 'Quill details', chat: '', at: '2026-10-16T16:10:00Z', acts: [] }]
+  w.stamps.set(`${WS}/notices.json`, 9)
+  await w.clock.advance(1100)
+  await w.clock.settle()
+  const m2 = await band($, 184)
+  expect(await ours(m2)).toEqual(['above-notice-n7', 'blank', 'above-summary'])
+  await m2.unmount()
+})
