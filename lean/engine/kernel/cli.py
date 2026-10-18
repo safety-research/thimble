@@ -188,7 +188,7 @@ def cmd_rows(a: argparse.Namespace) -> int:
     else:
         scope = f"{fmt(total)} in {files[0]}" if len(files) == 1 else f"{fmt(total)} in {len(files)} files"
         print(f"\n{len(kept)} of {fmt(matched)}{cond} rows (of {scope}), {how}. Cite one as [↗](<ref>).")
-    scanned = files if (rx or where or not a.first) else []
+    scanned = files if (rx or where) else []
     st.log({"kind": "rows", "how": "first" if a.first else "random", "target": a.target, "search": a.search,
             "where": a.where, "matched": matched, "total": total, "scanned": scanned, "shown": [k.ref for k in kept]})
     return 0

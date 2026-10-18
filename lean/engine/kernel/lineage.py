@@ -361,7 +361,7 @@ def file_line(o: dict[str, Any]) -> str:
         unit = "lines" if o["kind"] not in ("jsonl", "transcript") else "rows"
         bits.append(f"read {o['read_lines']:,} of {o['lines']:,} {unit}")
     if o["shown"]:
-        bits.append(f"{o['shown']:,} rows shown")
+        bits.append(f"{o['shown']:,} row{'s' if o['shown'] != 1 else ''} shown")
     if o["searched"] and s != "computed":
         bits.append("searched" + (f" ({o['matched']} hits)" if o["matched"] else ""))
     if o["named"] and not bits:
