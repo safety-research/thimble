@@ -27,6 +27,16 @@ const RESOLVED = { ref: 'q1#day=2026-06-18@n', chain: [{ step: 'query', id: 'q1'
 const TRACE = { ...OBJECT, id: '02-trace', title: 'Trace · Jun 18', verb: 'trace' }
 const SHOWN = '/home/t/.thimble/lean/shown/s-1.json'
 
+// the kernel's change feed: a save is a line there, which the shell reads after the Bash call (never its printed words)
+const EVENTS = '/home/t/.thimble/lean/events/s-1.jsonl'
+/** A Bash call that saves `id` at version `v`: the kernel writes the save to the change feed, and prints that it saved. */
+function saving(files: Record<string, string>, id = '01-saves', v = 1, root = ROOT) {
+  return () => {
+    files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root, object: id, version: v }) + '\n'
+    return { result: `saved ${id} v${v}: thimble/objects/${id}.json\n` }
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Verb = (input: any) => unknown
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,12 +121,12 @@ const markdowns = (t: Node) => { const out: string[] = []; walk(t, x => { if (x.
 const reply = ($: any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
 
 test('an object Claude saves is drawn under the next words of the turn; its verbs and 1 open detail are in the thimble line', async ($, on) => {
-  world(on)
+  const w = world(on)
   const clock = mock.clock(on)
   const opened: string[] = []
   on('ui.open', (_$: unknown, e: { id: string }) => { opened.push(e.id); return { value: { isPlaced: true } } })
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
-  on('tool.call', () => ({ result: 'saved 01-saves v1: thimble/objects/01-saves.json\n  /days ← q1 (exact)\n' }))
+  on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   const saved = await $.tool.call({ tool: 'Bash', command: "lean save saves <<'JSON'\n{}\nJSON" } as never)
   // Claude reads what the person sees of it, after the command's own output
@@ -139,6 +149,26 @@ test('an object Claude saves is drawn under the next words of the turn; its verb
   expect(drawn).not.toContain('? all')
   expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
   expect(opened).toEqual(['object'])
+})
+
+test('a save is seen from the kernel\'s change feed, not from what the call printed: a pipe that cut "saved" still draws it', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  // `lean save saves --from card.json | tail -1`: the line that says saved is gone, the feed has the save; then a
+  // call that only prints the words
+  let call = 0
+  on('tool.call', () => (++call === 1 ? (saving(w.files)(), { result: '  this session has not read 3 of 4 source files\n' }) : { result: 'saved 09-other v1: thimble/objects/09-other.json\n' }))
+  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
+  const saved = await $.tool.call({ tool: 'Bash', command: 'lean save saves --from card.json | tail -1' } as never)
+  expect(String((saved as { context?: string[] }).context)).toContain('01-saves@1 is drawn for the person under your reply')
+  await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
+  await $.turn.complete({ turnId: 't1', answer: 'June 18 had the most saves.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.settle()
+  expect(textOf(await reply($))).toContain('6,543')
+  // a call that saved nothing adds nothing, however its output reads
+  const echo = await $.tool.call({ tool: 'Bash', command: 'echo "saved 09-other v1: thimble/objects/09-other.json"' } as never)
+  expect((echo as { context?: string[] }).context ?? []).toEqual([])
 })
 
 test('a reply after no save draws as Claude Code draws it', async ($, on) => {
@@ -170,8 +200,8 @@ test('while the detail view is open, a prompt carries the object and its selecte
 })
 
 test('/verb ? lists every verb for the object, the picked ones marked', async ($, on) => {
-  world(on)
-  on('tool.call', () => ({ result: 'saved 01-saves v1: thimble/objects/01-saves.json\n' }))
+  const w = world(on)
+  on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
   const r = await $.command.run({ command: 'verb', args: '?' } as never)
@@ -214,9 +244,9 @@ test('a reply draws its citations inline, each underlined and a press that opens
 
 /** A turn that saves 01-saves and ends with words: the object is drawn under them. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function savedTurn($: any, on: any, clock: { settle: () => Promise<void> }) {
+async function savedTurn($: any, on: any, clock: { settle: () => Promise<void> }, files: Record<string, string>) {
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
-  on('tool.call', () => ({ result: 'saved 01-saves v1: thimble/objects/01-saves.json\n' }))
+  on('tool.call', saving(files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
@@ -227,7 +257,7 @@ async function savedTurn($: any, on: any, clock: { settle: () => Promise<void> }
 test('a verb of the message row: v opens its line, a pick runs it on the message, and what it made is drawn under the same message; Claude reads what it did with the next prompt', async ($, on) => {
   const w = world(on, () => ({ verb: 'visualize', saved: { id: '02-trace', v: 1 }, note: 'It drew the message as 2 bars.' }))
   const clock = mock.clock(on)
-  await savedTurn($, on, clock)
+  await savedTurn($, on, clock, w.files)
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(1)
@@ -280,7 +310,7 @@ test("v asks Claude for a card of the message: the row reads as the person's pic
   const w = world(on, () => ({ verb: 'visualize', text: 'Claude is making a card of this message.', ask }))
   const session = mock.session(on)
   const clock = mock.clock(on)
-  await savedTurn($, on, clock)
+  await savedTurn($, on, clock, w.files)
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
   // v on an empty prompt, as the thimble line names it
@@ -303,7 +333,7 @@ test('a view that fails to draw: no prompt and no row; Claude reads why, at once
   on('ui.open', () => ({ value: { isPlaced: true } }))
   const clock = mock.clock(on)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
-  on('tool.call', () => ({ result: 'saved 01-saves v1: thimble/objects/01-saves.json\n' }))
+  on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   const saved = await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
   expect(String((saved as { context?: string[] }).context)).toContain('Fix the program and save it again under the same name now')
@@ -319,7 +349,7 @@ test('an object whose file cannot be read is not drawn in silence: Claude reads 
   const w = world(on)
   w.files[FILE] = '{"id": "01-saves", "data": ' // a read that does not give the whole file, as one over 4 MiB
   mock.clock(on)
-  on('tool.call', () => ({ result: 'saved 01-saves v1: thimble/objects/01-saves.json\n' }))
+  on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   const saved = await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
   expect(String((saved as { context?: string[] }).context)).toContain('The person cannot see 01-saves')

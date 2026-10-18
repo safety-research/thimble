@@ -94,6 +94,7 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json) } = {})
   const clock = mock.clock(on, { now: NOW })
   on('tool.call', () => {
     files[`${DIR}/01-saves.json`] = JSON.stringify({ ...OBJECT, updated: new Date(clock.now()).toISOString() })
+    files['/home/t/.thimble/lean/events/s-1.jsonl'] = (files['/home/t/.thimble/lean/events/s-1.jsonl'] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: '01-saves', version: 1 }) + '\n'
     return { result: 'saved 01-saves v1: thimble/objects/01-saves.json\n' }
   })
   return { files, runs, forks, questions, submitted, filled, at, clock }

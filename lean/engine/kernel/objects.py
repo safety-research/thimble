@@ -128,8 +128,14 @@ def _bind(st: Store, ref: str, at: str, ctx: dict[str, Any]) -> Any:
         ctx["problems"].append(f"{at or '/'}: {q['id']} has no output row {ref.partition('#')[2]}")
         return None
 
+    # each row carries its own ref (q3#day=2026-06-18) beside its source rows, so whatever draws it can cite it and
+    # open its rows with no work by the program
+    own = Q.row_refs(q)
+
     def row(i: int) -> dict[str, Any]:
         r = dict(table[i])
+        if i < len(own):
+            r["_ref"] = own[i]
         if rows and i < len(rows):
             r["_rows"] = rows[i]
         return r
@@ -137,8 +143,9 @@ def _bind(st: Store, ref: str, at: str, ctx: dict[str, Any]) -> Any:
     b: dict[str, Any] = {"at": at, "ref": ref, "query": q["id"], "lineage": q.get("lineage")}
     col = p.get("col")
     if col is not None:
-        if idx and col not in table[idx[0]]:
-            ctx["problems"].append(f"{at or '/'}: {q['id']}'s output has no column {col!r}; it has {', '.join(table[idx[0]])}")
+        col = Q.column(table[idx[0]], col) if idx else col
+        if idx and col is None:
+            ctx["problems"].append(f"{at or '/'}: {q['id']}'s output has no column {p['col']!r}; it has {', '.join(table[idx[0]])}")
             return None
         if frag and len(idx) == 1:
             if rows and idx[0] < len(rows):
@@ -188,17 +195,26 @@ def _cite(st: Store, ref: str, where: str, ctx: dict[str, Any], quote: str | Non
             if not q:
                 raise R.RefError(f"no query {p['query']}")
             ctx["queries"].add(q["id"])
+            if label is not None:
+                # a citation of a whole query (or of a row set) whose words show one value: the row that holds it
+                from . import lineage as LIN
+
+                got = LIN.narrow(st, ref, label)
+                if got:
+                    c["wrote"], c["ref"], ref = ref, got[0], got[0]
+                    p = R.parse(ref)
             frag = {k: p[k] for k in ("row", "keys") if k in p}
             idx = Q.find_rows(q, frag) if frag else []
             if frag and not idx:
                 raise R.RefError(f"{q['id']} has no output row {ref.partition('#')[2].partition('@')[0]}")
             if "col" in p and len(idx) == 1:
                 row = (q.get("table") or [])[idx[0]]
-                if p["col"] not in row:
+                col = Q.column(row, p["col"])
+                if col is None:
                     raise R.RefError(f"{q['id']}'s output has no column {p['col']!r}")
-                c["value"] = row[p["col"]]
-                if label is not None and not number_matches(label, row[p["col"]]):
-                    raise R.RefError(f"the citation shows {label!r} but {ref} holds {row[p['col']]!r}")
+                c["value"] = row[col]
+                if label is not None and not number_matches(label, row[col]):
+                    raise R.RefError(f"the citation shows {label!r} but {ref} holds {row[col]!r}")
                 if q.get("rows") and idx[0] < len(q["rows"]):
                     c["rows"] = q["rows"][idx[0]]
             elif frag and q.get("rows"):
@@ -321,9 +337,10 @@ KEPT = ("id", "version", "created", "updated", "session", "history", "data", "so
 
 
 def _bare(v: Any) -> Any:
-    """A value of data without the kernel's `_rows`, to compare what Claude passed back with what a query filled in."""
+    """A value of data without the kernel's `_rows` and `_ref`, to compare what Claude passed back with what a query
+    filled in."""
     if isinstance(v, dict):
-        return {k: _bare(x) for k, x in v.items() if k != "_rows"}
+        return {k: _bare(x) for k, x in v.items() if k not in ("_rows", "_ref")}
     if isinstance(v, list):
         return [_bare(x) for x in v]
     return v
@@ -380,6 +397,14 @@ def save(st: Store, name: str | None, spec: dict[str, Any], change: str | None =
         if k not in KEPT and k != "declared":
             obj[k] = v
     obj.setdefault("contract", CONTRACT)
+    # every card has a title the renderers can draw, even when the program draws none: Claude's, else one made from
+    # its question, its first words or its name, marked as made
+    title, made = title_of(spec, name or oid)
+    obj["title"] = title
+    if made:
+        obj["title_from"] = made
+    else:
+        obj.pop("title_from", None)
     obj["data"] = data
     obj["source"] = spec
     obj["lineage"] = lineage
@@ -391,7 +416,31 @@ def save(st: Store, name: str | None, spec: dict[str, Any], change: str | None =
     st.write_json(d / f"{oid}.json", obj)
     st.log({"kind": "save", "object": oid, "version": version, "queries": sorted(lineage["queries"]),
             "problems": len(lineage["problems"])})
+    # the session's change feed: a surface (the terminal under a reply, the browser) learns of the save from here,
+    # never from what the command printed, which a pipe may cut
+    st.emit({"kind": "save", "object": oid, "version": version, "title": title, "problems": len(lineage["problems"])})
     return obj
+
+
+def title_of(spec: dict[str, Any], name: str | None) -> tuple[str, str | None]:
+    """(the card's title, where it came from when Claude gave none: "question", "text" or "name")."""
+    t = spec.get("title")
+    if isinstance(t, str) and t.strip():
+        return " ".join(t.split()), None
+
+    def short(s: str) -> str:
+        s = " ".join(R.LINK_RE.sub(lambda m: m[1], s).replace("**", "").split())
+        return s if len(s) <= 80 else s[:79].rsplit(" ", 1)[0] + "…"
+
+    q = spec.get("question")
+    if isinstance(q, str) and q.strip():
+        return short(q), "question"
+    text = spec.get("text")
+    if isinstance(text, str) and text.strip():
+        first = re.split(r"(?<=[.!?])\s", text.strip(), maxsplit=1)[0]
+        return short(first), "text"
+    words = re.sub(r"^\d+-", "", str(name or "card")).replace("-", " ").replace("_", " ").strip() or "card"
+    return words[:1].upper() + words[1:], "name"
 
 
 def update(st: Store, name: str, changes: dict[str, Any], rerun: bool = False, change: str | None = None) -> tuple[dict[str, Any], dict[str, str]]:

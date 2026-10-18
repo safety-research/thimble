@@ -12,6 +12,7 @@
 //     {"squeeze": {row, chip?, level?, name?, label?, custom?, reset?}}       a squeeze chip pressed under a message:
 //                                                     a chip set to a level, the person's own chip, or the original
 //     {"back": {object, v, region, state?}}                                    a selection handed back (the old page)
+//     {"cardstate": {object, region, state}}          a card's interaction state the page's program answered with
 //   and {"stopped": "<why>"} when it ends on its own.
 //
 // What it serves, every path behind the token:
@@ -182,7 +183,7 @@ export function rowsOf(stdout) {
 /** A cheap signature of what the pages show: the messages folder and the objects folder, by size and time. */
 function signature(root, session) {
   const parts = []
-  const dirs = [join(root, 'thimble', 'objects')]
+  const dirs = [join(root, 'thimble', 'objects'), join(root, 'thimble', 'objects', '.state')]
   if (session) dirs.unshift(join(root, 'thimble', 'messages', session), threadsDir(root, session))
   // the session's claims (CONTRACT 7)
   if (session) {
@@ -228,6 +229,14 @@ export function backLine(body) {
     } else return { error: 'a squeeze names a chip and a level, a custom chip, or reset' }
     return { squeeze: out }
   }
+  if (body.cardstate && typeof body.cardstate === 'object' && !Array.isArray(body.cardstate)) {
+    // a card's interaction state the page's program answered with (k.on): the terminal keeps it, and opens the card there
+    const c = body.cardstate
+    if (typeof c.object !== 'string' || !ID.test(c.object)) return { error: 'no object' }
+    const st = c.state && typeof c.state === 'object' && !Array.isArray(c.state) ? JSON.parse(JSON.stringify(c.state)) : {}
+    if (JSON.stringify(st).length > 20000) return { error: 'a card state over 20 KB' }
+    return { cardstate: { object: c.object, region: typeof c.region === 'string' && REGION.test(c.region) ? c.region : null, state: st } }
+  }
   if (typeof body.verb === 'string') {
     if (!/^[a-z0-9]$/.test(body.verb)) return { error: 'a verb is one key' }
     if (typeof body.row !== 'string' || !ROW.test(body.row)) return { error: 'no row' }
@@ -252,6 +261,8 @@ export function scopeOf(s) {
     if (typeof s.region === 'string' && REGION.test(s.region)) out.region = s.region
   }
   if (typeof s.label === 'string' && s.label.trim()) out.label = s.label.trim().slice(0, 200)
+  // the rows of a selection a card's program asked about (k.ask): kernel refs only
+  if (Array.isArray(s.refs)) { const refs = s.refs.filter(r => typeof r === 'string' && isRef(r)).slice(0, 50); if (refs.length) out.refs = refs }
   if (typeof s.thread === 'string' && THREAD.test(s.thread)) out.thread = s.thread
   if (typeof s.claim === 'string' && /^c\d{1,6}$/.test(s.claim)) out.claim = s.claim
   const m = s.mark
@@ -389,7 +400,9 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       const latest = readJson(join(root, 'thimble', 'objects', `${args[0]}.json`)) || object
       const versions = (latest.history || []).map(h => ({ v: h.v, at: h.at, change: h.change || null }))
       if (!versions.length) versions.push({ v: latest.version, at: latest.updated || null, change: null })
-      return json({ object, versions, latest: latest.version })
+      // where the person left the card's interaction (either surface): thimble/objects/.state/<id>.json
+      const state = readJson(join(root, 'thimble', 'objects', '.state', `${args[0]}.json`))
+      return json({ object, versions, latest: latest.version, ...(state ? { state } : {}) })
     }
     if (api === 'objects') {
       let names = []
@@ -407,10 +420,12 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       return leanJson(lean, root, ['coverage', args[0]], personEnv).then(cov => json(fromFacts(object, cov)))
     }
     if (api === 'resolve') {
-      const ref = url.searchParams.get('ref') || ''
-      if (!ref || ref.length > 2000 || /[\n\r\0]/.test(ref)) return json({ error: 'no ref' }, 400)
+      // one ref, or several (?ref=a&ref=b): a part's rows as one set
+      const refs = url.searchParams.getAll('ref').filter(Boolean).slice(0, 500)
+      const ref = refs[0] || ''
+      if (!ref || refs.some(r => r.length > 2000 || /[\n\r\0]/.test(r))) return json({ error: 'no ref' }, 400)
       const n = Math.max(1, Math.min(20, Number(url.searchParams.get('n')) || 5))
-      return leanJson(lean, root, ['resolve', ref, '-n', String(n)], personEnv).then(r => json(r.error ? { ref, ...r } : r))
+      return leanJson(lean, root, ['resolve', ...refs, '-n', String(n)], personEnv).then(r => json(r.error ? { ref, ...r } : r))
     }
     if (api === 'verbs') {
       const { verbs } = listVerbs()

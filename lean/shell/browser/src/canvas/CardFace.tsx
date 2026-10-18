@@ -55,7 +55,9 @@ export function useDrawn(id: string, v: number | null, px: number, mode = 'inlin
 }
 
 export function CardFace({ id, row, width, selected }: { id: string; row: string | null; width: number; selected: boolean }) {
-  const d = useDrawn(id, null, width)
+  // the board draws the card where the person left it (its interaction state, the same in the terminal)
+  const kept = useStore((s) => s.cardStates[id])
+  const d = useDrawn(id, null, width, 'inline', kept ? { state: kept } : {})
   const o = d?.object
   const thread = useStore((s) => cardThread(s.threads, id))
   const open = (e: React.MouseEvent) => {

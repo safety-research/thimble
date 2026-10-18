@@ -20,6 +20,41 @@
 import { isRef } from './object.js'
 
 const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
+
+/**
+ * Each `[words](target)` of a text, as the regex's matches read ({index, 0: whole, 1: words, 2: target}). A target may
+ * hold balanced brackets, and a query ref may hold spaces up to its closing bracket, so a ref Claude wrote with a key's
+ * words in it, `[202](q11#run_result=won (clean ep)@median)`, is one link and nothing of it spills into the prose (the
+ * kernel's refs.link_spans reads the same).
+ */
+export function linkSpans(text) {
+  const s = String(text || '')
+  const out = []
+  let i = 0
+  for (;;) {
+    const a = s.indexOf('[', i)
+    if (a < 0) break
+    const b = s.indexOf(']', a + 1)
+    if (b < 0) break
+    const words = s.slice(a + 1, b)
+    if (!words || words.includes('\n') || words.includes('[') || s[b + 1] !== '(') { i = a + 1; continue }
+    let depth = 0
+    let j = b + 2
+    for (; j < s.length && s[j] !== '\n'; j++) {
+      if (s[j] === '(') depth++
+      else if (s[j] === ')') { if (depth === 0) break; depth-- }
+    }
+    if (j >= s.length || s[j] !== ')') { i = a + 1; continue }
+    const target = s.slice(b + 2, j)
+    if (target.trim() && (!/\s/.test(target.trim()) || /^q\d+#/.test(target.trim()))) {
+      const m = [s.slice(a, j + 1), words, target]
+      m.index = a
+      out.push(m)
+      i = j + 1
+    } else i = a + 1
+  }
+  return out
+}
 const SPARK_LABEL = /^\s*~\s*$/
 
 /** Where code stands in markdown: fenced blocks and inline code spans, as [start, end) ranges. */
@@ -53,7 +88,7 @@ export function linkMarks(text) {
   const s = String(text || '')
   const code = codeRanges(s)
   const out = []
-  for (const m of s.matchAll(LINK)) {
+  for (const m of linkSpans(s)) {
     const ref = String(m[2]).trim()
     const start = m.index
     const end = start + m[0].length
@@ -79,7 +114,7 @@ export function findTerm(text, term, taken = []) {
   const s = String(text || '')
   const blocked = [...codeRanges(s), ...taken.map(m => [m.start, m.end])]
   // link targets are blocked too, so a term is never found inside a ref
-  for (const m of s.matchAll(LINK)) blocked.push([m.index, m.index + m[0].length])
+  for (const m of linkSpans(s)) blocked.push([m.index, m.index + m[0].length])
   const edge = '(?<![\\p{L}\\p{N}_])'
   const tail = '(?![\\p{L}\\p{N}_])'
   for (const flags of ['gu', 'giu']) {

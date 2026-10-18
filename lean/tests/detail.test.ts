@@ -34,7 +34,7 @@ const edit = (key: string, text = '') => ({ origin: { kind: 'composer' }, key: {
 type Any = any
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function world(on: any) {
+function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('session.cwd', () => ({ value: ROOT }))
   on('session.id', () => ({ value: SESSION }))
@@ -46,9 +46,14 @@ function world(on: any) {
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => { files[e.path] = String(e.content ?? e.text ?? e.data ?? ''); return { value: undefined } })
-  on('process.run', (_$: unknown, e: { argv: string[] }) => {
+  const preps: Any[] = []
+  on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     let out: unknown = {}
-    if (e.argv.some(a => a.endsWith('prep.mjs'))) out = { drawing: DRAWING, verbs: [], problems: [] }
+    if (e.argv.some(a => a.endsWith('prep.mjs'))) {
+      const input = JSON.parse(String(e.init?.stdin || '{}'))
+      preps.push(input)
+      out = { drawing: prep(input), verbs: [], problems: [] }
+    }
     else if (e.argv.includes('coverage')) out = COVERAGE
     else if (e.argv.includes('resolve')) out = { ref: e.argv[2], chain: [], rows: [], count: 0, records: [], notes: [] }
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -56,6 +61,7 @@ function world(on: any) {
   const opened: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
   on('ui.focus', () => ({}))
+  on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble-lean' }] : [] }))
   const views: Any[] = []
   on('ui.view', (_$: unknown, e: Any) => { views.push(e); return { value: {} } })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
@@ -86,7 +92,7 @@ function world(on: any) {
   // Claude Code's hint line under the prompt, as a hook leaves it
   on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
   on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }) as never)
-  return { files, opened, views, fills, submitted, spawns, sent, toasts, status }
+  return { files, opened, views, fills, submitted, spawns, sent, toasts, status, preps }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -263,3 +269,55 @@ test('with no detail open, a prompt goes to Claude as always', async ($, on) => 
   expect(w.spawns.length).toBe(0)
 })
 
+
+test('a card is a program: its own keys reach it in the open detail, the state it answers with is kept for the browser, and ask(selection) scopes the next question', async ($, on) => {
+  // the program as the sandbox would run it: j steps a day (k.on('j')), a asks about the days it has selected (k.ask)
+  const prep = (input: Any) => {
+    const at = Number(input.state?.at ?? 0)
+    const ev = input.event
+    const base = { ...DRAWING, on: [{ name: 'j', label: 'next day' }, { name: 'a', label: 'ask about these' }] }
+    if (ev?.key === 'j') return { ...base, state: { at: at + 1 }, handled: 'j' }
+    if (ev?.key === 'a') return { ...base, state: { at }, handled: 'a', ask: { label: '2 days from Jun 17', refs: ['q1#day=2026-06-17', 'q1#day=2026-06-18'] } }
+    return { ...base, state: { at } }
+  }
+  const w = world(on, prep)
+  const clock = mock.clock(on)
+  mock.session(on)
+  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await pane($, clock)
+  // the bar names the card's own keys beside the detail's
+  expect(await hintOf($)).toContain('j next day · a ask about these')
+  // j is the card's: the program runs with the key, and its new state is what the detail draws and the browser opens
+  expect(await ($ as Any).prompt.edit(edit('j'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  expect(w.preps.some(x => x.event?.type === 'key' && x.event.key === 'j' && x.event.region === 'day-2026-06-18')).toBe(true)
+  const kept = JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`] ?? '{}')
+  expect(kept).toMatchObject({ state: { at: 1 }, region: 'day-2026-06-18', by: 'terminal' })
+  await pane($, clock)
+  expect(w.preps.at(-1).state).toMatchObject({ at: 1 })
+  // a: the program asks about its own selection; the next question goes to the card's thread with those rows
+  await clock.advance(1000)
+  expect(await ($ as Any).prompt.edit(edit('a'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  expect(await hintOf($)).toContain('type to ask about 2 days from Jun 17')
+  const r = await $.prompt.submit({ text: 'what changed between them?', origin: { kind: 'composer' } } as never)
+  await clock.advance(100)
+  expect(String((r as Any).drop)).toContain("asked the card's thread about 2 days from Jun 17")
+  expect(w.submitted).not.toContain('what changed between them?')
+  expect(String(w.spawns[0]?.prompt)).toContain('the selection "2 days from Jun 17" in the card')
+  expect(String(w.spawns[0]?.prompt)).toContain('q1#day=2026-06-17, q1#day=2026-06-18')
+  // the selection was for that question: the next one is about the part again
+  expect(await hintOf($)).toContain('type to ask this card')
+})
+
+test('a prompt after the pane has gone goes to Claude, even when the module still marks the detail open', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await pane($, clock)
+  // the pane went without a close the module heard: Claude Code lists it no more
+  w.opened.length = 0
+  await $.prompt.submit({ text: 'and across all the runs?', origin: { kind: 'composer' } } as never)
+  expect(w.submitted).toContain('and across all the runs?')
+  expect(w.spawns.length).toBe(0)
+})

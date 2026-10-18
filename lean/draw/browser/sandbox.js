@@ -20,9 +20,10 @@ export function makeSandbox(kitSource, { limit = 2000 } = {}) {
       timer = setTimeout(() => {
         worker.terminate(); start();
         const p = pending; pending = null;
-        parent.postMessage({ id: p.id, drawing: { kit: 1, w: p.opts.w, h: p.opts.h, regions: [], cites: {}, examples: {}, warnings: [],
-          error: { name: 'TimeLimit', message: 'the program ran past its time limit and was stopped' },
-          root: { t: 'frame', tone: 'bad', grow: 1, title: [{ s: 'program error', tone: 'bad', b: true }], kid: { t: 'text', runs: [{ s: 'TimeLimit: the program was stopped, so nothing was drawn', tone: 'dim' }] } } } }, '*');
+        const fix = 'it ran past its time: draw fewer rows (bind a smaller table) or loop less';
+        parent.postMessage({ id: p.id, drawing: { kit: 1, w: p.opts.w, h: p.opts.h, title: p.opts.title || '', regions: [], cites: {}, examples: {}, warnings: [],
+          error: { name: 'TimeLimit', message: 'the program ran past its time limit and was stopped', fix },
+          root: { t: 'text', runs: [{ s: '× ', tone: 'bad' }, { s: (p.opts.title ? p.opts.title + ' ' : ''), tone: 'ink', b: true }, { s: 'could not draw: TimeLimit · fix: ' + fix, tone: 'dim' }] } } }, '*');
         next();
       }, (p => (p.opts.limit || ${limit}) + 1500)(pending));
       worker.postMessage(pending);
@@ -54,7 +55,8 @@ export function makeSandbox(kitSource, { limit = 2000 } = {}) {
       const id = ++seq
       return new Promise(res => {
         waiting.set(id, res)
-        iframe.contentWindow.postMessage({ id, program: String(object.program || ''), data: JSON.parse(JSON.stringify(object.data ?? {})), opts: { w: opts.w, h: opts.h, mode: opts.mode, limit: opts.limit || limit, state: opts.state ? JSON.parse(JSON.stringify(opts.state)) : undefined } }, '*')
+        const plainOf = v => (v == null ? undefined : JSON.parse(JSON.stringify(v)))
+        iframe.contentWindow.postMessage({ id, program: String(object.program || ''), data: JSON.parse(JSON.stringify(object.data ?? {})), opts: { w: opts.w, h: opts.h, mode: opts.mode, limit: opts.limit || limit, state: plainOf(opts.state), event: plainOf(opts.event), title: opts.title ?? object.title, id: opts.id ?? object.id, surface: 'browser', maxBytes: opts.maxBytes } }, '*')
       })
     },
   }

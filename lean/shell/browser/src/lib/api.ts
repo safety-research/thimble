@@ -1,6 +1,6 @@
 // api.ts: the page server's routes (shell/node/serve.mjs), in place of 0.9's API client. Every path starts with the
 // token, the first part of the page's own path. What the person does goes back to the terminal session as one line
-// (POST api/back): {ask, scope}, {verb, row}, {squeeze: {...}}.
+// (POST api/back): {ask, scope}, {verb, row}, {squeeze: {...}}, {cardstate: {...}}.
 
 export const BASE = location.pathname.split('/').slice(0, 2).join('/')
 
@@ -34,6 +34,7 @@ export type BackLine =
   | { ask: string; scope?: Scope }
   | { verb: string; row: string; proposal?: string }
   | { squeeze: { row: string; chip?: string; level?: number; custom?: string; reset?: boolean } }
+  | { cardstate: { object: string; region: string | null; state: Record<string, unknown> } }
 
 export interface Scope {
   row?: string
@@ -42,6 +43,7 @@ export interface Scope {
   region?: string
   label?: string
   thread?: string
+  refs?: string[]
   mark?: { kind: string; ref?: string; gloss?: string; label?: string; term?: string }
 }
 
@@ -81,10 +83,12 @@ export function objectOf(id: string, v?: number | null): Promise<any> {
 }
 
 const resolved = new Map<string, Promise<any>>()
-/** `lean resolve <ref>` through the server: where a value came from, down to its rows. */
-export function resolveRef(ref: string, n = 8): Promise<any> {
-  const key = `${ref}|${n}`
-  if (!resolved.has(key)) resolved.set(key, api(`resolve?ref=${encodeURIComponent(ref)}&n=${n}`))
+/** `lean resolve <ref>` through the server: where a value came from, down to its rows. Several refs (a selection, a
+ *  group of rows) resolve as one set. */
+export function resolveRef(ref: string | string[], n = 8): Promise<any> {
+  const refs = (Array.isArray(ref) ? ref : [ref]).filter(Boolean).slice(0, 500)
+  const key = `${refs.join(' ')}|${n}`
+  if (!resolved.has(key)) resolved.set(key, api(`resolve?${refs.map((r) => `ref=${encodeURIComponent(r)}`).join('&')}&n=${n}`))
   return resolved.get(key)!
 }
 

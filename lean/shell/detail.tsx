@@ -21,9 +21,11 @@ import { knobOf, turn as turnKnob } from '../draw/handoff.js'
 import { renderTerm } from '../draw/term.js'
 import { paintRegions } from './cells'
 import { barAfter, beganWord, cycleKnob, examplesView, exampleSet, fromLine, keyOf, linkRuns, namedKnob, partOfLink, partsOf, partTop, programLines, stepPart, stepVersion, versionsOf } from './carddetail.js'
-import { chainWords, fromFacts, objectRefs, regionMeta, regionRefs } from './object.js'
+import { chainWords, fromFacts, objectRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { browserOn, citeLabels, currentTheme, leanEnv, loadObject, openBrowser, prepared, preparedNow, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
+import { cardEvent, cardKey, cardKeysHint, ownState, pressTaken, readCardState, writeCardState } from './runtime'
+import type { CardAsk } from './runtime'
 import type { Scope } from './thread'
 import { aboutOf } from './threads.js'
 
@@ -31,7 +33,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Prepared = { object: Any; drawing: Any; grid: Any; verbs: Any[]; problems: string[]; error?: string }
-type Detail = Sel & { prog?: boolean; bar?: 'details' | 'examples' | null }
+type Detail = Sel & { prog?: boolean; bar?: 'details' | 'examples' | null; ask?: CardAsk | null }
 
 export const PANE = 'object'
 export const COLUMNS = 400
@@ -48,7 +50,10 @@ const fmtN = (x: unknown) => (typeof x === 'number' ? x.toLocaleString('en-US') 
 // the module's memory of the detail: whether it is open, what it drew last (for the ring and the keys), the key that
 // acted last (for a word it began), the agent in the main view, and the latest version seen of each card
 let isOpen = false
-let drawn: { id: string; parts: Any[]; from: number; rows: number; pixel: Set<number>; w: number; h: number; zoom: boolean; filter: boolean } | null = null
+let drawn: { id: string; parts: Any[]; from: number; rows: number; pixel: Set<number>; w: number; h: number; zoom: boolean; filter: boolean; on?: Any[] } | null = null
+// the card states this open detail has kept (by card), and the cards it has opened where the other surface left them
+const kept = new Map<string, string>()
+const seeded = new Set<string>()
 let lastKey: { key: string; at: number; undo: Sel | null } | null = null
 let viewing: string | null = null
 let ringY = -1
@@ -71,6 +76,7 @@ export async function openDetailPane($: Engine, title: string): Promise<void> {
 
 async function closed($: Engine): Promise<void> {
   isOpen = false
+  seeded.clear()
   setThreadWindow(false)
   drawn = null
   if (viewing) { viewing = null; await $.ui.view({}).catch(() => undefined) }
@@ -193,6 +199,54 @@ async function act($: Engine, a: { act: string; dir?: number }): Promise<void> {
   }
 }
 
+/** What the person did in the card, as its program's event: the program answers with new state (kept where the browser
+ *  reads it too), and an ask(selection) opens the card's thread on that selection: asked at once when the program gave
+ *  the words, else the person's next question goes there. */
+async function cardAct($: Engine, event: Record<string, unknown>): Promise<void> {
+  const cur = await current($)
+  if (!cur || !drawn) return
+  const { sel, p } = cur
+  const got = await cardEvent($, p.object, sel, event, { w: drawn.w, h: drawn.h, browser: browserOn() })
+  if (!got || got.drawing?.error) {
+    $.ui.toast(`× The card could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
+    return
+  }
+  const region = typeof event.region === 'string' ? event.region : sel.region
+  let next: Detail = { ...(sel as Detail), state: got.state, region, ex: 0 }
+  const ask = got.ask
+  if (ask && ask.text) {
+    const o = p.object
+    const refs = ask.refs?.length ? ask.refs : ask.region ? regionRefs(o, p.drawing, ask.region).refs : []
+    const r = await askThread($, { text: ask.text, scope: { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label }, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
+    if (r.problem) $.ui.toast(`× ${r.problem}`)
+  } else if (ask) next = { ...next, ask }
+  await $.state.set(SEL, next)
+  await writeCardState($, sel.root, sel.id, { state: next.state, region: next.region }, 'terminal')
+}
+
+/** The card opens where the person (here or in the browser) left it, and what they change here is kept for the
+ *  browser: thimble/objects/.state/<id>.json. */
+function syncCardState($: Engine, sel: Detail): void {
+  const id = `${sel.root}|${sel.id}`
+  const now = JSON.stringify({ s: ownState(sel.state), r: sel.region ?? null })
+  if (!seeded.has(id)) {
+    seeded.add(id)
+    kept.set(id, now)
+    $.clock.after(0, () => {
+      void (async () => {
+        const was = await readCardState($, sel.root, sel.id)
+        if (!was || Object.keys(ownState(sel.state)).length || sel.region || (!Object.keys(was.state).length && !was.region)) return
+        const cur = (await $.state.get(SEL)).value as Detail | null
+        if (cur && cur.id === sel.id && cur.root === sel.root) await $.state.set(SEL, { ...cur, state: { ...was.state, ...(cur.state || {}) }, region: cur.region ?? was.region })
+      })().catch(() => undefined)
+    })
+    return
+  }
+  if (kept.get(id) === now) return
+  kept.set(id, now)
+  $.clock.after(0, () => { void writeCardState($, sel.root, sel.id, { state: sel.state, region: sel.region }, 'terminal').catch(() => undefined) })
+}
+
 /** Select a part: its rows resolve, the examples go back to the first, and the card's thread learns which part the
  *  person has selected now (a question typed in the thread's own view carries no part of its own). */
 async function selectPart($: Engine, sel: Detail, id: string): Promise<void> {
@@ -257,6 +311,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const p = await preparedNow($, sel, W, sel.state, 'detail', H)
   if (!p) return Text({ dimColor: true, children: `drawing ${sel.id}…` })
   if (p.error || !p.grid) return Text({ color: 'error', wrap: 'wrap', children: `× ${sel.id} cannot be drawn: ${p.error || 'no drawing'}. Ask Claude to fix its program and save it again.` })
+  syncCardState($, sel)
   const o = p.object
   const theme = currentTheme()
   const ind = IND[theme]
@@ -326,12 +381,14 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     rows = Math.min(rows, grid.h - from)
     const pixel = new Set<number>()
     for (let y = 0; y < grid.h; y++) if (grid.rows[y].some((c: Any) => c.px) && !grid.rows[y].some((c: Any) => c.b || c.ref || c.w2)) pixel.add(y)
-    drawn = { id: sel.id, parts, from, rows, pixel, w: W, h: H, zoom: !!namedKnob(p.drawing, 'zoom'), filter: !!namedKnob(p.drawing, 'filter') }
+    drawn = { id: sel.id, parts, from, rows, pixel, w: W, h: H, zoom: !!namedKnob(p.drawing, 'zoom'), filter: !!namedKnob(p.drawing, 'filter'), on: p.drawing?.on || [] }
     const top = partTop(part)
     const gutter = Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: Array.from({ length: rows }, (_, i) => Text({ color: ind, bold: true, children: top && top.y === from + i ? '▸' : ' ' })) })
     // a click selects a part; ↵ on the selected part (the ring's press) fills the bar with its details
     const onPress = (id: string, dir?: number) => {
       if (dir) return $.state.set(SEL, { ...sel, region: id, state: turnKnob(p.drawing, sel.state || {}, id, dir), knob: id })
+      // a part the program answers a press on: the press is the program's (k.on('press:<id>'))
+      if (pressTaken(p.drawing, id)) return cardAct($, { type: 'press', region: id })
       if (id === sel.region) return $.state.set(SEL, { ...sel, bar: barAfter(sel.bar ?? null, 'details') } as Sel)
       return selectPart($, sel, id)
     }
@@ -443,7 +500,7 @@ async function barEls($: Engine, els: Any, sel: Detail, o: Any, p: Prepared, par
   const cite = typeof meta.cite === 'string' ? p.drawing.cites?.[meta.cite] : null
   const set = exampleSet(p.drawing, meta)
   const { refs } = regionRefs(o, p.drawing, part.id)
-  const resolved = refs[0] ? (await $.state.get({ ...ROWS, id: `${sel.root}|${refs[0]}` })).value as Any : undefined
+  const resolved = refs[0] ? (await $.state.get({ ...ROWS, id: `${sel.root}|${refsKey(refs)}` })).value as Any : undefined
   const chain = resolved ? chainWords(resolved) : null
   const records = set ? set.records : chain && !chain.error ? chain.records : []
   const total = set ? (set.total ?? set.records.length) : resolved?.count ?? records.length
@@ -549,11 +606,12 @@ function keysHint(sel: Detail, part: Any, nv: number, hasThread: boolean): strin
   if (drawn?.zoom) k.push(sel.state && Object.keys(sel.state).length ? '+ − zoom' : '+ zoom in')
   if (drawn?.filter) k.push('f filter')
   if (part?.knob) k.push(', . turn')
+  k.push(...cardKeysHint({ on: drawn?.on }))
   k.push('p program')
   if (nv > 1) k.push('h versions')
   if (hasThread) k.push('t thread', 'm send to main')
   if (browserOn()) k.push('o browser')
-  k.push('type to ask this card', 'esc back')
+  k.push(sel.ask ? `type to ask about ${cut(String(sel.ask.label), 40)}` : 'type to ask this card', 'esc back')
   return k.join(' · ')
 }
 
@@ -617,6 +675,15 @@ export function registerDetail(on: Parameters<Register>[0]): void {
         if (back.undo) await $.state.set(SEL, back.undo)
         return { text: `${back.key}${e.inputText}`, cursor: back.key.length + e.inputText.length }
       }
+      // the card's own keys (its program's k.on) come before the detail's letters
+      const cur = await current($)
+      const own = cur ? cardKey(cur.p.drawing, k) : null
+      if (own) {
+        lastKey = null
+        await cardAct($, { type: 'key', key: own, ...(cur!.sel.region ? { region: cur!.sel.region } : {}) })
+        regrab($)
+        return { text: '', cursor: 0 }
+      }
       const ctx = await keyCtx($)
       const a = ctx ? keyOf(k, ctx) : null
       // ↑ with the keys in the prompt would recall an earlier prompt into it: here it moves the part, and the keys go
@@ -674,6 +741,9 @@ export function registerDetail(on: Parameters<Register>[0]): void {
   // Claude Code shows it as dropped, with where it went, and the thread's column shows the question and its answer.
   on('prompt.submit', { origin: { kind: 'composer' } }, async ($, e, next) => {
     if (!isOpen || e.command || e.isMeta || !String(e.text || '').trim()) return next(e)
+    // the pane may have gone without its close reaching this module (a re-render marked it open again): a prompt goes
+    // to the card's thread only while the pane is really there, else to Claude as always
+    if (!(await paneShown($))) { await closed($); return next(e) }
     const sel = (await $.state.get(SEL)).value as Sel | null
     if (!sel || sel.cite || sel.cites) return next(e)
     const p = await prepared($, sel, drawn?.w ?? COLUMNS - 2, sel.state, 'detail', drawn?.h ?? 24)
@@ -682,13 +752,28 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     const meta = sel.region ? regionMeta(p.drawing, sel.region) : null
     const label = String(meta?.label || drawn?.parts.find((x: Any) => x.id === sel.region)?.label || sel.region || '')
     const row = ((await $.state.get({ ...WHERE, id: sel.id })).value as string | undefined) ?? undefined
-    const scope: Scope = { object: sel.id, v: o.version ?? sel.v, ...(sel.region ? { region: sel.region, label } : {}), ...(row ? { row } : {}) }
-    const refs = sel.region ? regionRefs(o, p.drawing, sel.region).refs : objectRefs(o).map((c: Any) => c.ref)
+    // a selection the card's program asked about (k.ask: a brushed range, several runs) comes before the part
+    const ask = (sel as Detail).ask || null
+    const scope: Scope = ask
+      ? { object: sel.id, v: o.version ?? sel.v, ...(ask.region ? { region: ask.region } : {}), label: ask.label, ...(row ? { row } : {}) }
+      : { object: sel.id, v: o.version ?? sel.v, ...(sel.region ? { region: sel.region, label } : {}), ...(row ? { row } : {}) }
+    const refs = ask?.refs?.length ? ask.refs : ask?.region ? regionRefs(o, p.drawing, ask.region).refs : sel.region ? regionRefs(o, p.drawing, sel.region).refs : objectRefs(o).map((c: Any) => c.ref)
+    if (ask) await $.state.set(SEL, { ...sel, ask: null } as Detail)
     const r = await askThread($, { text: e.text, scope, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
     if (r.problem) return { drop: `${r.problem}. Your words are back in the prompt; esc closes the card, and the prompt then goes to Claude here.` }
     $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
     return { drop: `asked the card's thread about ${cut(aboutOf(scope), 40)}` }
   }).catch(($, e, next) => next(e))
+}
+
+/** Whether Claude Code shows the detail's pane now (a failed check counts as shown: the module's own state stands). */
+async function paneShown($: Engine): Promise<boolean> {
+  try {
+    const panes = await $.ui.panes()
+    return Array.isArray(panes) ? panes.some(x => x.id === PANE && x.isPlaced && (x as Any).isShown !== false) : true
+  } catch {
+    return true
+  }
 }
 
 /** Whether the detail is open (for the shell and the tests). */

@@ -23,7 +23,10 @@ Query values:
     q<n>                          the query and its whole output
     q<n>#row=<i>                  row i (1-based) of its output table
     q<n>#<col>=<value>[&...]      the output row whose key columns hold these values
-    ...@<col>                     one cell of that row, such as q3#day=2026-06-16@n
+    ...@<col>                     one cell of that row, such as q3#day=2026-06-16@n (q3@n: the column n)
+
+A key value with a space, a bracket or other punctuation is written as its slug, so a ref stays one Markdown link:
+"won (clean ep)" is `q11#run_result=won-clean-ep`. A value is found as written, percent-encoded, or by its slug.
 
 Object values:
 
@@ -34,12 +37,12 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 _NUMS = r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*"
 _FP = r"[^#\s](?:[^#\n]*[^#\s])?"  # a path may hold spaces inside it, never at its ends, never a `#`
-_QUERY = re.compile(r"^(q\d+)(?:#(.*))?$")
+_QUERY = re.compile(r"^(q\d+)(?:#(.*)|(@.*))?$")
 _OBJ = re.compile(r"^obj:([A-Za-z0-9_.-]+)(?:#(/.*)?)?$")
 _LINES = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
 _LINESET = re.compile(r"^L(" + _NUMS + r")$")
@@ -89,7 +92,7 @@ def parse(ref: str) -> dict[str, Any]:
     if not ref:
         raise RefError("an empty ref")
     if m := _QUERY.match(ref):
-        return {"kind": "query", "query": m[1], **_query_fragment(m[2] or "")}
+        return {"kind": "query", "query": m[1], **_query_fragment(m[2] or m[3] or "")}
     if m := _OBJ.match(ref):
         return {"kind": "object", "object": m[1], "pointer": m[2] or ""}
     path, hash_, frag = ref.partition("#")
@@ -235,18 +238,72 @@ def count(rowsets: list[str]) -> int:
 
 
 LINK_RE = re.compile(r"\[([^\]\n]*)\]\(([^)\s]+)\)")
+_SAFE_VALUE = re.compile(r"^[A-Za-z0-9_.:~,/+-]+$")
+
+
+def ref_value(v: Any) -> str:
+    """A key value as a ref writes it: as it is when it holds only safe characters, else its slug ("won (clean ep)" ->
+    "won-clean-ep"), so the ref stays one Markdown link and Claude never has to quote it."""
+    if isinstance(v, bool):
+        s = "true" if v else "false"
+    elif isinstance(v, float) and v.is_integer():
+        s = str(int(v))
+    else:
+        s = "" if v is None else str(v)
+    if _SAFE_VALUE.match(s):
+        return s
+    t = re.sub(r"[^A-Za-z0-9_.:~,/+-]+", "-", s).strip("-")
+    return t or quote(s, safe="")
+
+
+def value_slug(s: Any) -> str:
+    """The form two key values are compared in when neither matches as written: lower case, words joined by -."""
+    return re.sub(r"[^a-z0-9]+", "-", str(s).lower()).strip("-")
+
+
+def link_spans(text: str):
+    """(label, target, start, end) of each `[label](target)`. A target may hold balanced brackets, and a query ref
+    (q3#...) may hold spaces up to its closing bracket, so `[202](q11#run_result=won (clean ep)@median)` is one link."""
+    s = text or ""
+    i = 0
+    while True:
+        a = s.find("[", i)
+        if a < 0:
+            return
+        b = s.find("]", a + 1)
+        if b < 0:
+            return
+        label = s[a + 1:b]
+        if "\n" in label or b + 1 >= len(s) or s[b + 1] != "(":
+            i = a + 1
+            continue
+        depth, j = 0, b + 2
+        while j < len(s) and s[j] != "\n":
+            if s[j] == "(":
+                depth += 1
+            elif s[j] == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            j += 1
+        if j >= len(s) or s[j] != ")":
+            i = a + 1
+            continue
+        target = s[b + 2:j].strip()
+        if target and (not re.search(r"\s", target) or re.match(r"^q\d+#", target)):
+            yield label, target, a, j + 1
+        i = j + 1
 
 
 def links(text: str) -> list[tuple[str, str]]:
     """(label, target) of each markdown link of a text whose target parses as a ref."""
     out = []
-    for m in LINK_RE.finditer(text or ""):
-        target = m[2]
+    for label, target, _, _ in link_spans(text):
         if target.startswith(("http://", "https://", "mailto:")):
             continue
         try:
             parse(target)
         except RefError:
             continue
-        out.append((m[1], target))
+        out.append((label, target))
     return out
