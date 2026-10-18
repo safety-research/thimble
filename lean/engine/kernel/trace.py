@@ -358,8 +358,24 @@ def _sentence(text: str, start: int, end: int, width: int = 220) -> str:
     b = min(b_candidates) if b_candidates else len(text)
     s = text[a + 1 if a >= 0 else 0:b + 1].strip()
     s = _LINKS.sub(lambda m: m[1], s)
+    if s.startswith("|"):  # a row of a Markdown table: its cells, without the pipes
+        s = " · ".join(c.strip() for c in s.strip("|").split("|") if c.strip() and not set(c.strip()) <= set("-: "))
     s = " ".join(s.split())
     return s if len(s) <= width else s[: width - 1] + "…"
+
+
+def _is_prompt(line: str) -> bool:
+    """Whether a transcript line is a prompt the person typed: not a tool result, a skill's text, a hook's context or
+    a command's echo."""
+    try:
+        v = json.loads(line)
+    except ValueError:
+        return False
+    if v.get("type") != "user" or v.get("isMeta") or v.get("isSidechain"):
+        return False
+    c = (v.get("message") or {}).get("content")
+    text = c if isinstance(c, str) else " ".join(str(b.get("text") or "") for b in c or [] if isinstance(b, dict) and b.get("type") == "text")
+    return bool(text.strip()) and not text.lstrip().startswith(("<command-", "<local-command", "<bash-", "<system-reminder"))
 
 
 def _answers(st: Store, match: _Matcher, limit: int) -> list[dict[str, Any]]:
@@ -372,7 +388,7 @@ def _answers(st: Store, match: _Matcher, limit: int) -> list[dict[str, Any]]:
             continue
         with f:
             for n, line in enumerate(f, 1):
-                if '"type":"user"' in line.replace(" ", "") and '"tool_result"' not in line:
+                if '"user"' in line and '"tool_result"' not in line and _is_prompt(line):
                     turn += 1
                 if '"assistant"' not in line or "](" not in line:
                     continue

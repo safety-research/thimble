@@ -38,7 +38,7 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def _answer(tmp: Path, session: str, texts: list[str]) -> None:
     p = tmp / "cc" / "projects" / "-wiki" / f"{session}.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
-    recs = []
+    recs = [{"type": "user", "isMeta": True, "message": {"role": "user", "content": [{"type": "text", "text": "a skill's text"}]}}]
     for t in texts:
         recs.append({"type": "user", "message": {"role": "user", "content": "a question"}})
         recs.append({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": t}]},
@@ -63,7 +63,7 @@ def test_uses_of_a_row_and_of_a_value(root: Path, tmp_path: Path) -> None:
     assert not q1["error"] and not q2["error"]
     O.save(st, "uses", {"title": "Uses", "data": {"kinds": "q2", "example": {"ref": "saves.jsonl#L3", "quote": "save 2"}},
                         "text": "Messages: [3](q2#kind=message@n)."})
-    _answer(tmp_path, "sess-0001", ["Of 8 saves, [3](q2#kind=message@n) are messages.", "Links: [4](q2#kind=links@n)."])
+    _answer(tmp_path, "sess-0001", ["Of 8 saves, [3](q2#kind=message@n) are messages.", "| links | [4](q2#kind=links@n) |"])
 
     # a row: the query rows that rest on it, the object's value and citation, the answer whose value rests on it
     u = T.uses(st, "saves.jsonl#L3")
@@ -77,6 +77,7 @@ def test_uses_of_a_row_and_of_a_value(root: Path, tmp_path: Path) -> None:
     u = T.uses(st, "q2#kind=message@n")
     assert u["objects"][0]["id"] == "01-uses"
     assert [a["turn"] for a in u["answers"]] == [1]
+    assert T.uses(st, "q2#kind=links@n")["answers"][0]["text"] == "links · 4"  # a table row reads as its cells
     u = T.uses(st, "q1")
     assert [q["id"] for q in u["queries"]] == ["q2"] and "kind" in u["queries"][0]["how"]
 
