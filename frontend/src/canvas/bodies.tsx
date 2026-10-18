@@ -15,6 +15,7 @@ import { againWords, classesOf, colourVar, isFilesLabel, isMultiClass, labelStat
 import { ReadCutLine } from '../files/ReadCutLine'
 import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { onCiteClick } from '../lib/citeTargets'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { loadSettings, modelLabel } from '../lib/models'
 import { addressLabel, hiddenPath } from '../lib/refs'
@@ -31,7 +32,7 @@ import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { TypeCard } from './TypeCard'
-import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
+import { entryParts, exampleEntries, quotedSpan, type ExampleEntry } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 /** Words as a sentence: the first letter capitalized and a period at the end. */
@@ -54,7 +55,7 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
       const raw = Array.isArray(payload.refs) ? (payload.refs as unknown[]) : []
       const quotes = Array.isArray(payload.quotes) ? (payload.quotes as unknown[]) : []
       const refs = raw.filter((r): r is string => typeof r === 'string')
-      return <ExampleBody refs={refs} quotes={raw.flatMap((r, i) => (typeof r === 'string' ? [quotes[i]] : []))} ws={ws} big={big} question={cell.title ?? ''} takeaway={cell.takeaway ?? ''} />
+      return <ExampleBody cellId={cell.id} refs={refs} quotes={raw.flatMap((r, i) => (typeof r === 'string' ? [quotes[i]] : []))} ws={ws} big={big} question={cell.title ?? ''} takeaway={cell.takeaway ?? ''} />
     }
     case 'label': {
       const concept = typeof payload.concept === 'string' ? payload.concept : ''
@@ -191,8 +192,21 @@ function MediaExample({ ws, media }: { ws: string; media: MediaRef }) {
  * (canvas/quotes exampleEntries, entryParts). A ref to an image, recording or video shows the file itself
  * (MediaExample).
  */
-function ExampleBody({ refs, quotes, ws, big, question = '', takeaway = '' }: { refs: string[]; quotes: unknown[]; ws: string; big: boolean; question?: string; takeaway?: string }) {
+function ExampleBody({ cellId, refs, quotes, ws, big, question = '', takeaway = '' }: { cellId: string; refs: string[]; quotes: unknown[]; ws: string; big: boolean; question?: string; takeaway?: string }) {
   const [got, setGot] = useState<Record<string, ResolvedRef | null>>({})
+  // a citation of the takeaway that names a quoted record by its line opens it in Files at the words the card quotes
+  // there, marked, as the record's address does (lib/citeTargets)
+  useEffect(
+    () =>
+      onCiteClick(cellId, (ref) => {
+        const span = quotedSpan(refs, ref)
+        if (!span) return false
+        track('chip-teleport', { target: span, detail: { kind: 'example-takeaway' } })
+        teleport(span, { browser: true })
+        return true
+      }),
+    [cellId, refs],
+  )
   useEffect(() => {
     let alive = true
     for (const ref of new Set(refs.filter((r) => !mediaOf(r)))) void resolvedOf(ws, ref).then((r) => alive && setGot((cur) => (cur[ref] === r ? cur : { ...cur, [ref]: r })))
