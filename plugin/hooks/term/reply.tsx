@@ -650,6 +650,47 @@ async function withQuotes(cx: Ctx, data: CardData, takeaway = ''): Promise<CardD
   return { ...data, examples }
 }
 
+/** How many characters a Client's props come to as Claude Code counts them (its props check): a string its length and
+ *  its quotes, a number as written, a key its length and 4, an item 1; and how many values they hold. */
+export function propsSize(v: unknown, n = { chars: 0, values: 0 }): { chars: number; values: number } {
+  n.values++
+  if (typeof v === 'string') n.chars += v.length + 2
+  else if (typeof v === 'number') n.chars += String(v).length
+  else if (typeof v === 'boolean' || v === null) n.chars += 5
+  else if (Array.isArray(v)) {
+    n.chars += 2
+    for (const x of v) {
+      n.chars += 1
+      propsSize(x, n)
+    }
+  } else if (v && typeof v === 'object') {
+    n.chars += 2
+    for (const [k, x] of Object.entries(v)) {
+      n.chars += k.length + 4
+      propsSize(x, n)
+    }
+  }
+  return n
+}
+
+/** The characters of card props one drawing holds at most: Claude Code draws at most 100,000 characters of a tree (its
+ *  words, keys and Client props) and cuts every row after them, so 60,000 of them for its cards leave the rest for its
+ *  words (bug hunt K2: a chart of 33 lines took them all, and the cards and the sentence after it drew empty); and the
+ *  values a Client's props hold at most (Claude Code's 20,000). */
+export const CARDS_ROOM = 60_000
+const PROPS_VALUES = 20_000
+// what each drawing (its `cx`, one per hook call) has given its cards so far
+const spent = new WeakMap<object, number>()
+
+/** Whether a card's Client props fit in what is left of this drawing's room for cards (CARDS_ROOM); if so, they take it. */
+function cardRoom(cx: Ctx, props: unknown): boolean {
+  const size = propsSize(props)
+  const used = spent.get(cx) ?? 0
+  if (size.values > PROPS_VALUES || used + size.chars > CARDS_ROOM) return false
+  spent.set(cx, used + size.chars)
+  return true
+}
+
 /** `clip`: at most `rows` rows of the card's plot or body, and none of what stands under it, where the card holds more
  *  than a row past them (a side thread's subject); `more` shows it whole. */
 export type CardOpts = { pane?: boolean; takeaway?: boolean; order?: number; in?: 'reply' | 'report'; focus?: Focus; clip?: { rows: number; more: () => void } }
@@ -711,14 +752,18 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
       hidden = left
     }
   }
-  if (live) {
+  // a card is a Client while its props fit in what is left of the drawing's room for cards (cardRoom), else its rows are
+  // drawn as they stand, with no pointer on them, so a large card never leaves an empty box or cuts what follows it
+  const props = live ? JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(name ? { name } : {}), ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}), ...(clip !== undefined ? { clip } : {}) })) : null
+  const client = props !== null && cardRoom(cx, props)
+  if (client) {
     const { Client } = cx.els(e)
-    rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={JSON.parse(JSON.stringify({ card: data, cols: inner, meta, ...(name ? { name } : {}), ...(opts.pane ? { pane: true, plotRows: 16 } : {}), ...(opts.focus ? { focus: opts.focus } : {}), ...(clip !== undefined ? { clip } : {}) }))} />)
+    rows.push(<Client key={`card-${key}-${id}`} module="./card.tsx" width={inner} props={props} />)
   } else {
     const state = meta.busy || meta.error ? [[{ s: meta.busy || meta.error || '', fg: meta.error ? COLORS.problem : COLORS.dim }]] : []
-    const first = cardLayout(data, inner, -1)
+    const first = cardLayout(data, inner, -1, opts.pane ? 16 : undefined)
     const lit = opts.focus ? focusItem(data, first.items, opts.focus) : -1
-    const body = lit >= 0 ? cardLayout(data, inner, lit).lines : first.lines
+    const body = lit >= 0 ? cardLayout(data, inner, lit, opts.pane ? 16 : undefined).lines : first.lines
     rows.push(<Box flexDirection="column">{paintLines(Box, Text, [...(opts.pane ? [] : [...titleLines(data.question, inner, name).lines, []]), ...(clip !== undefined ? body.slice(0, clip) : body), ...state, ...(clip !== undefined ? [] : labelHead(data, inner).lines)])}</Box>)
   }
   // a custom card is HTML: the terminal draws its table or its words (cell.ts cardOfCell), and its link opens the whole
@@ -736,7 +781,7 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   } else if (opts.takeaway !== false && tc.takeaway.trim()) {
     // a blank row before the takeaway, which would otherwise read as one with the row above it, the label row's or the
     // card's last (Matt, 2026-10-16); none where the card's last row is its readout, blank while nothing is pointed at
-    const readoutLast = live && !custom && !labelHead(data, inner).lines.length && !(data.params ?? []).length && (cardLayout(data, inner, -1).items.length > 0 || Boolean(meta.busy || meta.error))
+    const readoutLast = client && !custom && !labelHead(data, inner).lines.length && !(data.params ?? []).length && (cardLayout(data, inner, -1).items.length > 0 || Boolean(meta.busy || meta.error))
     if (!readoutLast) rows.push(<Text key={`gap-${key}-${id}`}> </Text>)
     rows.push(<Box flexDirection="column" width={inner}>{await drawReply(cx, e, tc.takeaway, inner, { margin: 0, prefix: `tk-${key}-`, card: id })}</Box>)
   }

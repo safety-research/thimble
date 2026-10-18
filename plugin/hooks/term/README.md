@@ -45,7 +45,16 @@ links and checks none; Checks off draws no tint.
 **Colors** (`palette.gen.ts`). The cards' series and the label colors are the browser's tokens (light paper on a light
 Claude Code theme, Dark on any other), written by `scripts/dev/sync_palette.py`. A chart with more than seven series
 takes seven label colors after the seven series (`paint.ts` seriesHue), so up to fourteen series each have a color of
-their own.
+their own; past fourteen, a line chart's lines of the 13 values that reach highest keep one each and the others are
+muted (dim, drawn under them, `● N more` in the key). A chart's `detail` field draws a line per value in its color
+value's hue.
+
+**A reply's room** (`reply.tsx` cardRoom). Claude Code draws at most 100,000 characters of one tree (a reply with its
+cards: their words, keys and Client props) and cuts every row after them, so a card's drawing data is kept small: a line
+card keeps at most about 1,000 points (`cell.ts` thinLines: each line its first, its last and its lowest and highest of
+each run of points), and the cards of one drawing take at most 60,000 characters of Client props; a card past that
+draws its rows as they stand, with no pointer on them, so it never leaves an empty box or cuts the cards and words after
+it (bug hunt K2).
 
 ## What it draws
 
@@ -91,7 +100,7 @@ Claude Code's panel chrome, no right-click menu.
   notice that it finished the thread by its first question, and so does the fork's prompt in ctrl+o; a tool's words draw
   their straight quotation marks curly, which Claude Code does not escape; thimble's tool results keep their card ids, which main
   cites. A bar card keeps the order its chart's label axis sorts, and a bar chart with its values written on its bars is a bar card too; a bar chart with a color field has one row per label, its series stacked in their hues and its key below, and timestamps as labels read as the browser's axis writes them (`May 24`). A table, a timeline, a diagram, an example and a label draw
-  directly; a simple bar or line chart draws as text, a stacked area chart as its bands, a dots chart as its rows of dots with a text layer's words beside them, a heatmap as its grid of shaded cells, and a faceted chart as one of these per panel, side by side where they fit, their scales shared and one key under them; any other chart as a table of its rows while they are few, else as a note that the browser draws it with a `view in browser ↗` link; a note, a custom card, a
+  directly; a simple bar or line chart draws as text, a stacked area chart as its bands, a dots chart as its rows of dots with a text layer's words beside them, a heatmap as its grid of cells shaded on its color scale (log, symlog, sqrt), its numbers on them where a text layer writes them, and a faceted chart as one of these per panel, side by side where they fit, their scales shared and one key under them; any other chart as a table of its rows while they are few, else as a note that the browser draws it with a `view in browser ↗` link; a note, a custom card, a
   code card and a card type's card as their words.
 - **Rows under main's replies.** `↳ thread · "<the turn's question>" · answered` when a side thread's turn ends while the
   panel shows something else (`failed` in red, `new` in green until it is read; a stop, the analyst's or the end of the

@@ -108,6 +108,16 @@ export function passageTint(hex: string, lit: boolean): string {
   return tintOf(hex, painted.theme, lit ? 0.3 : 0.16)
 }
 
+/** A heat cell's background with its words on it: `hex` as `share` of a tint of the theme, and the color its words take
+ *  to read on it (near black on a light tint, white on a dark one); null while the theme is not known, since a tint for
+ *  the wrong theme hides the words on it (a heat card then draws its shades as glyphs, bug hunt K1). */
+export function cellTint(hex: string, share: number): { bg: string; fg: string } | null {
+  if (!painted.known) return null
+  const bg = tintOf(hex, painted.theme, share)
+  const lum = [1, 3, 5].map(i => parseInt(bg.slice(i, i + 2), 16) / 255).reduce((a, c, i) => a + c * [0.2126, 0.7152, 0.0722][i]!, 0)
+  return { bg, fg: lum > 0.45 ? '#1e1e1e' : '#ffffff' }
+}
+
 /** Where a citation's value stands in its place (its cited lines, a card's cited cell or row, the code that types it):
  *  Claude Code's violet (COLORS.cite: rgb(175,135,255) on dark themes, rgb(135,0,255) on light) blended toward the
  *  theme's background, so the text on it keeps its own color (v9 review: "the cited value highlighted in purple in the

@@ -593,6 +593,10 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   Feb 1`). An axis that names its own values (Vega-Lite's `axis.values`, as thimble.chart's weekly and monthly lines
   do) ticks at those, as the browser's does, every second or third where they do not all fit. Categories stand at the
   ends and the middle. A legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
+  A chart's `detail` field draws a line per value, each in its color value's hue, the key naming the color values. Past
+  fourteen hues the 13 values whose lines reach highest keep one each, the others dim and drawn under them, `● N more`
+  dim in the key (bug hunt K2). A card too large for its reply's room draws its rows with no pointer on them, never an
+  empty box.
 - A dots chart (thimble.chart("dots"), or dots along rows: x numbers or times, y the rows' names): a row per row of the
   chart in the order its axis sorts them, its name at the content's edge as a bar's label, then its dots on one x axis
   for all rows, a cell's glyph saying how many dots it holds (`●` the most or near it, `•` past a third, `·` fewer), in
@@ -626,8 +630,12 @@ The same reply's first row under the pointer, and a passage a thread was asked a
 - A stacked area chart: its bands, each cell's two halves in the hue of the band that holds their middle (`█`, `▀`,
   `▄`), stacked by the chart's `order` field, else by the series' names, the first lowest; the key in the legend's order.
 - A heatmap: a row per y value, its name at the content's edge, then a cell per x value as wide as the room allows,
-  shaded from the least number to the most (`·░▒▓█`, the least a dim dot, in the first hue), the x values' names under
-  their columns, and the key `0 ·░▒▓█ 0.31  share`. A cell's readout names its row, its column and its number.
+  shaded on the chart's color scale (log, symlog, sqrt or linear) from the least number to the most (`░▒▓█` in the
+  first hue); a dim `·` for a cell that holds 0 and only for such a cell, so a cell with a number never reads as 0. Where
+  the chart writes its numbers on its cells (a text layer) and they fit, each cell is its number on its shade's tint, a
+  0 dim on none, as the browser draws them. The x values' names under their columns, and the key: the dot of a 0, each
+  shade with the least number it holds, and the numbers' name with the scale (`· 0  ░ ≥1  ▒ ≥8  ▓ ≥72  █ ≥615   Calls,
+  log scale`; bug hunt K1). A cell's readout names its row, its column and its number.
 - A faceted chart (`.facet(column=…)`, a `row` or `column` channel, thimble.chart's `panels`): each panel's title in
   bold over its picture as its kind draws, side by side as many to a row as are 40 cells wide, else one under another;
   the panels share their scales but those the chart keeps to each panel, every panel of bars lists every label, a value
