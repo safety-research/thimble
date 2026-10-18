@@ -84,8 +84,10 @@ export function report(events, { plain = null, file = '' } = {}) {
     lines.push(`${pad('looks', 30)}${lit}${L.skipped ? ` (${L.skipped} skipped)` : ''}${pressed}`)
     for (const [spec, x] of Object.entries(L.shadow || {})) lines.push(`${pad('looks (shadow)', 30)}v lit on ${x.v_lit} of ${x.looks} · ${spec}`)
   }
+  const C = s.checks
+  if (C) lines.push(`${pad('saves checked', 30)}${C.saves} save${C.saves === 1 ? '' : 's'} · ${C.tried} interaction${C.tried === 1 ? '' : 's'} tried · ${C.failed} with a failure${C.cut ? ` · ${C.cut} cut` : ''} · ${C.median_ms} ms median, ${C.max_ms} ms most · ${C.chars} characters to Claude`)
   if (s.reads.length) lines.push(`read on demand: ${s.reads.map(r => `${r.prompt || r.feature} (${r.via})`).join(', ')}`)
-  const out = { session, looks: s.looks, features: rows.map(r => ({ ...r, prompts: [...(r.prompts || [])], lenses: r.lenses ? Object.fromEntries(Object.entries(r.lenses).map(([n, L]) => [n, { ...L, prompts: [...(L.prompts || [])] }])) : null })), total_w: totalW, main_ms: totalMs }
+  const out = { session, looks: s.looks, checks: s.checks, features: rows.map(r => ({ ...r, prompts: [...(r.prompts || [])], lenses: r.lenses ? Object.fromEntries(Object.entries(r.lenses).map(([n, L]) => [n, { ...L, prompts: [...(L.prompts || [])] }])) : null })), total_w: totalW, main_ms: totalMs }
   if (plain) {
     const pt = plainTurns(plain)
     const mainTurns = s.turns.filter(t => !t.agent)

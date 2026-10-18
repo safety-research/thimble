@@ -59,7 +59,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Verb = { key: string | null; name: string; line: string; phrase: string | null; picked: boolean; hint?: string | null; extra?: Record<string, unknown> }
-type Prepared = { object: Any; drawing: Any; grid: Any; verbs: Verb[]; problems: string[]; error?: string }
+type Prepared = { object: Any; drawing: Any; grid: Any; verbs: Verb[]; problems: string[]; error?: string; check?: { line: string | null; tried: number; total: number; failed: number; cut: number; ms: number } }
 type Placed = ObjRef & { from?: string }
 
 export const PANE = 'object'
@@ -166,13 +166,14 @@ const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null,
 /** The object drawn at `w` columns (with the knobs at `state`), with its verbs: the program runs in a Node child, in the
  *  contract's sandbox. `mode` is where it is drawn (k.mode): 'inline' under a reply, 'detail' in the detail view, where
  *  a program may show more, in the `h` rows the detail gives it (k.h). Kept per object version, width, state, mode and
- *  rows; a failed one stays failed until the module reloads. */
-export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24): Promise<Prepared> {
+ *  rows; a failed one stays failed until the module reloads. `check` (a save) also tries the card's interactions once
+ *  (draw/exercise.mjs), in the same child. */
+export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24, check = false): Promise<Prepared> {
   const key = prepKey(ref, w, state, mode, h)
   const hit = preps.get(key)
-  if (hit) return Promise.resolve(hit)
+  if (hit && (!check || hit.check || hit.error || hit.drawing?.error)) return Promise.resolve(hit)
   const running = pending.get(key)
-  if (running) return running
+  if (running && !check) return running
   const p = (async (): Promise<Prepared> => {
     let object: Any | null
     try {
@@ -183,14 +184,14 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
     }
     if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}), browser: browserFlag }, mode }), timeoutMs: 30000 })
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: { ...(state || {}), browser: browserFlag }, mode, ...(check ? { check: true } : {}) }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, verbs: [], problems: [], error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     // under a reply a card is its title, its chart and its takeaway: the words at the right of its frame (its sources)
     // wait in the detail's from line
     const root = out.drawing?.root
     const bare = mode === 'inline' && root && root.t === 'frame' && root.right && !out.drawing.error ? { ...out.drawing, root: { ...root, right: undefined } } : out.drawing
-    return { object, drawing: out.drawing, grid: renderTerm(bare, { w }), verbs: out.verbs || [], problems: out.problems || [] }
+    return { object, drawing: out.drawing, grid: renderTerm(bare, { w }), verbs: out.verbs || [], problems: out.problems || [], ...(out.check ? { check: out.check } : {}) }
   })()
   pending.set(key, p)
   void p.then(x => { preps.set(key, x); pending.delete(key) }, () => pending.delete(key))
@@ -1935,6 +1936,7 @@ function drawnNote(p: Prepared, ref: ObjRef): string {
   const parts = selectable(p.grid)
   const lines = [`${refText(ref)} is drawn for the person under your reply: ${p.grid.h} rows by ${p.grid.w} columns, ${parts.length} part${parts.length === 1 ? '' : 's'} they can select.`]
   if (d.error) lines.push(`Its program failed: ${d.error.name}: ${d.error.message}${d.error.line ? ` (line ${d.error.line})` : ''}. They see the error in its place. Fix the program and save it again under the same name now; the new version takes its place under your reply.`)
+  if (p.check?.line) lines.push(p.check.line)
   for (const w of (d.warnings || []).slice(0, 5)) lines.push(`Warning: ${w}`)
   const empty = Object.entries(d.examples || {}).filter(([, x]: [string, Any]) => !x?.records?.length).map(([id]) => id)
   if (empty.length) lines.push(`${empty.length} example set${empty.length === 1 ? ' has' : 's have'} no records, so the person sees none for ${empty.length === 1 ? 'it' : 'them'}: ${empty.slice(0, 4).join(', ')}${empty.length > 4 ? ', …' : ''}.`)
@@ -2233,7 +2235,10 @@ export const registerShell: Register = (on, options) => {
           if (input.tool_use_id) turn.calls.push(input.tool_use_id)
         }
         await $.state.set(LAST, ref)
-        notes.push(drawnNote(await prepared($, ref, 96), ref))
+        // drawn as under the reply, and its interactions tried once, as the person would, so a failing one is fixed now
+        const p = await prepared($, ref, 96, null, 'inline', 24, true)
+        notes.push(drawnNote(p, ref))
+        if (p.check) void recordEvent($, { kind: 'check', id, v: p.object?.version ?? null, tried: p.check.tried, total: p.check.total, failed: p.check.failed, cut: p.check.cut, ms: p.check.ms, chars: p.check.line ? p.check.line.length : 0 })
       }
     } catch {
       // watching never changes a call's result

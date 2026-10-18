@@ -26,6 +26,9 @@ const VERBS = [
 const RESOLVED = { ref: 'q1#day=2026-06-18@n', chain: [{ step: 'query', id: 'q1', about: 'saves per day' }], rows: ['revisions.jsonl#L28-31'], count: 4, records: [{ ref: 'revisions.jsonl#L28', text: 'x' }], notes: [] }
 
 const TRACE = { ...OBJECT, id: '02-trace', title: 'Trace · Jun 18', verb: 'trace' }
+// what prep.mjs answers for a save's check (its interactions tried once): all ran, unless a test sets a failure
+const ALL_RAN = { line: null, tried: 2, total: 2, failed: 0, cut: 0, ms: 3 }
+let checked: unknown = ALL_RAN
 const SHOWN = '/home/t/.thimble/lean/shown/s-1.json'
 
 // the kernel's change feed: a save is a line there, which the shell reads after the Bash call (never its printed words)
@@ -58,12 +61,14 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
   })
   const runs: string[][] = []
   const inputs: unknown[] = []
+  const stdins: string[] = []
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     runs.push([...e.argv])
+    stdins.push(String(e.init?.stdin ?? ''))
     // the feed's new bytes (`tail -c +N <file>`): the test's files are ASCII, so a byte is a character
     if (e.argv[0] === 'tail') return { value: { exitCode: 0, stdout: (files[e.argv[3]!] ?? '').slice(Number(e.argv[2]!.slice(1)) - 1), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     let out: unknown = {}
-    if (e.argv.some(a => a.endsWith('prep.mjs'))) out = { drawing, verbs: VERBS, problems: [] }
+    if (e.argv.some(a => a.endsWith('prep.mjs'))) out = { drawing, verbs: VERBS, problems: [], ...(JSON.parse(String(e.init?.stdin || '{}')).check ? { check: checked } : {}) }
     else if (e.argv.some(a => a.endsWith('verb.mjs'))) {
       const input = JSON.parse(String(e.init?.stdin || '{}'))
       inputs.push(input)
@@ -86,7 +91,7 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   // Claude Code's hint line under the prompt, as a hook leaves it
   on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
-  return { runs, inputs, files, submitted, toasts, reads }
+  return { runs, inputs, files, submitted, toasts, reads, stdins }
 }
 
 // every string a drawn tree holds, in order
@@ -173,6 +178,36 @@ test('a save is seen from the kernel\'s change feed, not from what the call prin
   // a call that saved nothing adds nothing, however its output reads
   const echo = await $.tool.call({ tool: 'Bash', command: 'echo "saved 09-other v1: thimble/objects/09-other.json"' } as never)
   expect((echo as { context?: string[] }).context ?? []).toEqual([])
+})
+
+test("a save tries the card's interactions once in the same child: a failure is one line for Claude, a pass adds nothing, and each check is in the events", async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  let n = 0
+  on('tool.call', () => saving(w.files, '01-saves', ++n)())
+  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
+  const ok = String(((await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)) as { context?: string[] }).context)
+  // the save's own drawing asked for the check, in the one child that drew it
+  const preps = w.runs.map((r, i) => (r.some(a => a.endsWith('prep.mjs')) ? JSON.parse(w.stdins[i]!) : null)).filter(Boolean)
+  expect(preps.length).toBe(1)
+  expect(preps[0].check).toBe(true)
+  expect(ok).toContain('01-saves@1 is drawn for the person under your reply')
+  expect(ok).not.toContain('Tried as the person would')
+  const line = 'Tried as the person would, turning zoom to orient fails: TypeError: data.steps.filter is not a function (line 22) (state {"zoom":"orient"}); 9 more fail the same way. Fix the program or the data it binds and save it again under the same name now, before the person tries it.'
+  checked = { line, tried: 10, total: 10, failed: 10, cut: 0, ms: 21 }
+  try {
+    w.files[FILE] = JSON.stringify({ ...OBJECT, version: 2 })
+    const bad = String(((await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)) as { context?: string[] }).context)
+    expect(bad).toContain(line)
+    await clock.advance(100)
+    await clock.settle()
+    const logged = w.stdins.filter(x => x.includes('"kind":"check"')).join('\n')
+    expect(logged).toContain('"failed":10')
+    expect(logged).toContain('"ms":21')
+  } finally {
+    checked = ALL_RAN
+  }
 })
 
 test('the change feed is read from where the last read stopped: a call that saved nothing reads none of it, a later save only the new bytes', async ($, on) => {
