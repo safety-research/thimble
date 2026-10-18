@@ -225,11 +225,14 @@ export function gridOf(boxes: readonly { w: number; h: number }[]): Grid {
 /** A card's height: its own, else the measured content, else a guess until it is measured. */
 export const cellHeight = (c: BoardCell, heights: Readonly<Record<string, number>>): number => c.h ?? heights[c.id] ?? UNMEASURED_H
 
+/** Which frames are expanded: a set of them, or the canvas's own test (every frame but those the analyst collapsed). */
+export type Opened = Pick<ReadonlySet<string>, 'has'>
+
 /**
- * Where every frame and card sits. `open` names the expanded frames; `heights` the measured height of each card with
+ * Where every frame and card sits. `open` tells the expanded frames; `heights` the measured height of each card with
  * no height of its own. Pure, so a drag and a reload agree.
  */
-export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Layout {
+export function layoutBoard(board: Board, open: Opened, heights: Readonly<Record<string, number>>): Layout {
   const rel = new Map<string, Pos>()
   const size = new Map<string, { w: number; h: number }>()
   const decks = new Set<string>()
@@ -529,7 +532,7 @@ const sameRect = (a: Rect | undefined, b: Rect | undefined): boolean => !!a && !
  * Where the card `id`, placed free in `data`, stands so that it covers nothing: at its own `pos`, or straight below it
  * at the first place where it overlaps no other drawn card and no frame it is not in. Null when it has no `pos`. Pure.
  */
-export function clearPos(data: CanvasResponse, id: string, open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Pos | null {
+export function clearPos(data: CanvasResponse, id: string, open: Opened, heights: Readonly<Record<string, number>>): Pos | null {
   const start = boardOf(data).cellById.get(id)?.pos ?? null
   if (!start) return start
   const placed = (y: number) => patchCellLocal(data, id, { pos: { x: start.x, y } })
@@ -551,7 +554,7 @@ export function clearPos(data: CanvasResponse, id: string, open: ReadonlySet<str
 
 /** Where a card dropped free at `pos` in `group` (null: loose, on the board) stands: there, or moved down clear of what
  * it would cover (clearPos). Pure. */
-export function placeFree(data: CanvasResponse, id: string, group: string | null, pos: Pos, open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Pos {
+export function placeFree(data: CanvasResponse, id: string, group: string | null, pos: Pos, open: Opened, heights: Readonly<Record<string, number>>): Pos {
   return clearPos(moveLocal(data, [id], group, undefined, pos), id, open, heights) ?? pos
 }
 
@@ -569,7 +572,7 @@ export interface Beside {
  * the flow and the sibling is placed free to its right, level with it, so the cards after them in the flow stay below
  * them. A card placed free moves down clear of what it would cover (clearPos). Pure.
  */
-export function placeBeside(data: CanvasResponse, id: string, group: string, ref: string, side: 'L' | 'R', open: ReadonlySet<string>, heights: Readonly<Record<string, number>>): Beside {
+export function placeBeside(data: CanvasResponse, id: string, group: string, ref: string, side: 'L' | 'R', open: Opened, heights: Readonly<Record<string, number>>): Beside {
   const relTo = (d: CanvasResponse, of: string, dx: number): Pos | null => {
     const lay = layoutBoard(boardOf(d), open, heights)
     const r = lay.rects.get(of)

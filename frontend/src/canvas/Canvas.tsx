@@ -92,6 +92,7 @@ import {
   zoomTo,
   type Board,
   type Insertion,
+  type Opened,
   type Rect,
   type View,
 } from './layout'
@@ -174,10 +175,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const [keep, setKeep] = useState<Set<string> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
-  const openKey = storageKey(ws, 'canvas-open')
-  const [open, setOpenState] = useState<ReadonlySet<string>>(() => new Set(readStorage<string[]>(openKey, [])))
-  // no frame kept open or shut yet in this browser: the analyst's own frame, Your work, opens on the first read
-  const firstOpen = useRef(readStorage<string[] | null>(openKey, null) == null)
+  // Every frame is open, so every card is drawn, until the analyst collapses it; the frames they collapsed are kept per
+  // browser (bug hunt L3: frames started collapsed, so a group said 3 and drew 1)
+  const shutKey = storageKey(ws, 'canvas-shut')
+  const [shut, setShutState] = useState<ReadonlySet<string>>(() => new Set(readStorage<string[]>(shutKey, [])))
+  const open = useMemo<Opened>(() => ({ has: (id: string) => !shut.has(id) }), [shut])
   // the card filter as the analyst sets it, shown at once; the server's canvas filter holds it (filters, loadFilters)
   const [cardFilter, setCardFilterState] = useState<CardFilter>(NO_FILTER)
   const viewKey = storageKey(ws, 'canvas-view')
@@ -216,22 +218,26 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const vp = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setOpenState(new Set(readStorage<string[]>(openKey, [])))
-    firstOpen.current = readStorage<string[] | null>(openKey, null) == null
-  }, [openKey])
+    setShutState(new Set(readStorage<string[]>(shutKey, [])))
+  }, [shutKey])
   useEffect(() => {
     const kept = readView(viewKey)
     placed.current = kept != null
     setViewState(kept ?? DEFAULT_VIEW)
   }, [viewKey])
-  const setOpen = useCallback(
+  const setShut = useCallback(
     (f: (cur: ReadonlySet<string>) => ReadonlySet<string>) =>
-      setOpenState((cur) => {
+      setShutState((cur) => {
         const next = f(cur)
-        writeStorage(openKey, [...next])
+        if (next !== cur) writeStorage(shutKey, [...next])
         return next
       }),
-    [openKey],
+    [shutKey],
+  )
+  /** opens the frames `ids` (those the analyst collapsed) */
+  const openFrames = useCallback(
+    (ids: readonly string[]) => setShut((cur) => (ids.some((g) => cur.has(g)) ? new Set([...cur].filter((g) => !ids.includes(g))) : cur)),
+    [setShut],
   )
   const setView = useCallback(
     (f: View | ((v: View) => View)) =>
@@ -410,19 +416,12 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     drawnCells.current = null
   }, [ws])
   useEffect(() => {
-    if (!data || !firstOpen.current) return
-    const own = analystGroup(data.groups)
-    if (!own) return
-    firstOpen.current = false
-    setOpen((cur) => (cur.has(own.id) ? cur : new Set([...cur, own.id])))
-  }, [data, setOpen])
-  useEffect(() => {
     if (!data || !board) return
     const fresh = newPlans(data.cells, drawnCells.current)
     drawnCells.current = new Set(data.cells.map((c) => c.id))
-    const shut = [...new Set(fresh.flatMap((id) => framesAbove(board, id)))].filter((g) => !open.has(g))
-    if (shut.length) setOpen((cur) => new Set([...cur, ...shut]))
-  }, [data, board, open, setOpen])
+    const closed = [...new Set(fresh.flatMap((id) => framesAbove(board, id)))].filter((g) => !open.has(g))
+    if (closed.length) openFrames(closed)
+  }, [data, board, open, openFrames])
   // the box the comments beside the cards cover (CommentLayer), which Fit, the minimap and the Content pill take in
   const [noteBox, setNoteBox] = useState<Rect | null>(null)
   const content = useMemo(() => (lay ? extentOf([...lay.rects.values(), ...(noteBox ? [noteBox] : [])]) : null), [lay, noteBox])
@@ -498,7 +497,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   // card in view (anchorShift), before the change is painted. Not while they drag or size a card or right after they
   // changed the board, open or collapse a frame, or when a card went (their delete moves the cards after it up); nor
   // before the view is placed or the cards are first measured, which places them where the kept view saw them.
-  const anchorPrev = useRef<{ lay: NonNullable<typeof lay>; open: ReadonlySet<string>; cards: string[]; measured: boolean; busy: boolean } | null>(null)
+  const anchorPrev = useRef<{ lay: NonNullable<typeof lay>; open: Opened; cards: string[]; measured: boolean; busy: boolean } | null>(null)
   useLayoutEffect(() => {
     const prev = anchorPrev.current
     const cards = shownBoard ? shownBoard.cells.map((c) => c.id) : []
@@ -521,7 +520,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const peeked = useRef<Set<string>>(new Set())
   const peek = (ids: string[]) => {
     for (const g of ids) peeked.current.add(g)
-    setOpen((cur) => new Set([...cur, ...ids]))
+    openFrames(ids)
   }
   /** collapses the peeked frames that do not hold `at` (a frame, or null for the bare board) */
   const collapsePeeked = (at: string | null) => {
@@ -531,7 +530,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (!drop.length) return
     for (const g of drop) peeked.current.delete(g)
     track('ui-click', { target: drop.map((g) => `group:${g}`).join(','), detail: { action: 'collapse', via: 'outside' } })
-    setOpen((cur) => new Set([...cur].filter((g) => !drop.includes(g))))
+    setShut((cur) => new Set([...cur, ...drop]))
   }
   const planeAt = (clientX: number, clientY: number): Pos => {
     const r = vp.current!.getBoundingClientRect()
@@ -847,7 +846,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         clickOn.current = null
         peeked.current.delete(gid)
         track('ui-click', { target: `group:${gid}`, detail: { action: live.current.open.has(gid) ? 'collapse' : 'expand' } })
-        setOpen((cur) => {
+        setShut((cur) => {
           const next = new Set(cur)
           if (next.has(gid)) next.delete(gid)
           else next.add(gid)
@@ -957,7 +956,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         made = await canvasApi.createGroup(ws, { title, pos: { x: Math.round(box.x - PAD), y: Math.round(box.y - HEAD) } })
       }
       await canvasApi.move(ws, { cells: picked.map((c) => c.id), group: made.id })
-      setOpen((cur) => new Set([...cur, made.id]))
+      openFrames([made.id])
       setSel([])
       setGsel(made.id)
       setRenaming(made.id)
@@ -974,7 +973,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     try {
       const g = analystGroup(data.groups) ?? (await api.createGroup(ws, { title: 'Your work', role: 'analyst' }))
       const cell = await api.addCell(ws, g.id, { kind: 'code', title: 'New card', code: '' })
-      setOpen((cur) => new Set([...cur, g.id]))
+      openFrames([g.id])
       setSel([cell.id])
       setGsel(null)
       setEditing({ id: cell.id, field: 'title' })
@@ -990,7 +989,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     track('ui-click', { target: 'canvas:group', detail: { action: 'add' } })
     try {
       const g = await canvasApi.createGroup(ws, { title: nextGroupTitle(data.groups) })
-      setOpen((cur) => new Set([...cur, g.id]))
+      openFrames([g.id])
       setSel([])
       setGsel(g.id)
       setRenaming(g.id)

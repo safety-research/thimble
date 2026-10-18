@@ -55,7 +55,6 @@ beforeAll(async () => {
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root" style="position:absolute;inset:0;display:flex"></div></body></html>' })
   })
   await page.goto(`${ORIGIN}/`)
-  await page.evaluate((ids) => localStorage.setItem('thimble:w:canvas-open', JSON.stringify(ids)), GROUPS.map((g) => g.id))
   await page.addScriptTag({ path: script })
   await page.waitForSelector('[data-cell="t0"]')
   await page.waitForTimeout(300)
