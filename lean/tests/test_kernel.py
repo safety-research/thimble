@@ -333,3 +333,27 @@ def test_row_sets_of_many_block_refs_compress_and_expand_fast_and_the_same(root:
     assert R.expand(["a b/c.jsonl#L007.b02 "]) == ["a b/c.jsonl#L7.b2"]
     with pytest.raises(R.RefError):
         R.expand(["q12#L3.b1"])
+
+
+def test_big_files_are_parsed_once_in_workers_and_a_load_with_fields_reads_only_those_columns(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A load over many big files not yet in the cache parses them in worker processes and keeps each frame by columns;
+    a later load reads them from the cache, only the columns it names, and gives the same frame as a parse would."""
+    for k in range(4):
+        with open(root / f"run{k}.jsonl", "w") as f:
+            for i in range(300):
+                f.write(json.dumps({"type": "assistant" if i % 2 else "user", "n": i, "run": k, "message": {"content": "x" * 50}}) + "\n")
+    monkeypatch.setattr(Q, "CACHE_MIN", 1_000)
+    monkeypatch.setattr(Q, "PARALLEL_MIN", 10_000)
+    st = Store(root)
+    files = [f"run{k}.jsonl" for k in range(4)]
+    Q._warm_cache(st, files)
+    for rel in files:
+        cp = Q._frame_cache(st, rel)
+        assert cp.exists() and cp.with_suffix(".json").exists()
+        whole = Q._parse_frame(st.root, rel, None)
+        assert Q._load_frame(cp, None).equals(whole)
+        part = Q._load_frame(cp, ["n", "nothing"])
+        assert list(part.columns) == ["_ref", "_file", "n"] and part.equals(whole[["_ref", "_file", "n"]])
+    out = Q.run(st, "assistant rows per run", 'df = load("run*.jsonl", fields=["type", "run"])\ntally(df[df.type == "assistant"], "run")')
+    assert out.get("error") is None
+    assert [r["n"] for r in out["table"]] == [150, 150, 150, 150]

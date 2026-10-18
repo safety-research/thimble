@@ -223,7 +223,17 @@ def compress(refs: list[str]) -> list[str]:
     groups: dict[tuple[str, str], list[int]] = {}
     # the other refs once each, in first-seen order (a dict, so a row with 100,000 block refs is not a quadratic scan)
     other: dict[str, None] = {}
+    is_db: dict[str, bool] = {}
     for r in refs:
+        # a line ref (f#L12), the most common: read here as _unit reads it (isdecimal is what \d matches)
+        path, _, frag = r.partition("#")
+        if frag[:1] == "L" and frag[1:].isdecimal():
+            db = is_db.get(path)
+            if db is None:
+                db = is_db[path] = path.lower().endswith(DB_SUFFIXES)
+            if not db:
+                groups.setdefault((path, "L"), []).append(int(frag[1:]))
+                continue
         u = _unit(r)
         if u is None:
             other.setdefault(r, None)
