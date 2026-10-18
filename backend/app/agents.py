@@ -1151,7 +1151,8 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
     session.cancelled: {stopped, cancelled} when no turn of main's runs, with or without the module); main's running
     turn ends through the module as Esc ends it (subagents.stop_main, `$.turn.abort`), and the mirror ends the turn
     (session.turn_stopped); a side thread's fork stops as an agent does (subagents.stop_fork,
-    TaskStop of the fork that answers it), {stopped: false, kind: no-fork} while it has none. Both are clicks too, and
+    TaskStop of the fork that answers it) with the work it started (a label's run, subagents.stop_thread_work),
+    {stopped: false, kind: no-fork} while it has none and none of that work runs. Both are clicks too, and
     each that stopped something tells main so, in a line no chat shows. A server task stops as before; the analyst's
     own subagent of main is main's to stop, so main is asked to."""
     if chat_id == MAIN_ID:
@@ -1175,6 +1176,9 @@ async def interrupt_route(c: str, chat_id: str, request: Request) -> dict:
         subagents.analyst_only(request)
         fork = meta.get("fork") if isinstance(meta.get("fork"), dict) else {}
         if not fork.get("agent_id") or fork.get("ended"):
+            # no fork runs, but the work an earlier one started may (a label's run): it stops, and main hears of it
+            if await subagents.stop_left_work(c, chat_id, thread_name(meta)):
+                return {"stopped": True}
             return {"stopped": False, "kind": NO_FORK, "reason": "its fork has not started yet"}
         ans = await subagents.stop_fork(c, str(fork["agent_id"]), thread_name(meta), chat_id)
         if ans.refused:

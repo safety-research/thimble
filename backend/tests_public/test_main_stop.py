@@ -219,3 +219,63 @@ async def test_a_stop_while_main_runs_a_turn_ends_it_and_takes_back_the_question
     assert [op for op, _ in bridge.calls] == ["abort", "note"]
     assert not events._pending.get((CORPUS, SID)) and not agents.running(CORPUS, agents.MAIN_ID)
     assert _notes() == [session.CANCELLED_TEXT, session.STOPPED_TEXT]
+
+
+async def test_a_thread_s_stop_stops_the_label_run_its_fork_started_and_main_hears_what_stopped(bridge, analyst):
+    """Bug hunt round 10, K4: Stop on a side thread stopped its fork, but the prompt label the fork had started ran on
+    to its end (222 → 726 of 1,189 records), and main said the thread's work had stopped. A run the fork starts is the
+    thread's (its run record's `thread`); the thread's Stop stops it wherever it runs (concepts.request_stop, the stop
+    file of the process that runs it), and the note main gets names the run and how far it got. A run of main's own
+    is left alone."""
+    import os
+    import time
+
+    from app import concepts, subagent_files, tools
+
+    tid = agents.new_thread(CORPUS, "card:abc123", "Who voted when?", "who-voted-when")["id"]
+    agents.update_agent(CORPUS, tid, fork={"agent_id": "afork7"})
+    ws = config.workspace_dir(CORPUS)
+
+    async def label(name: str, call: str) -> str:
+        res = await tools.call(CORPUS, "apply_label", {"scope": "files", "name": name, "paths": ["**/*.jsonl"],
+                                                       "predicate": {"kind": "regex", "text": "(?i)merge"}},
+                               actor="analyst", notebook=None, terminal=False, tool_use_id=call)
+        assert not res.is_error, res.text
+        return str(concepts.find_concept(ws, name)["id"])
+
+    # the fork's call (the caller hook's line names it) makes the thread's run; main's own makes none
+    subagent_files.add_caller(ws, "toolu_fork1", "afork7", subagent_files.FORK_TYPE)
+    subagent_files.add_caller(ws, "toolu_main1", "", "")
+    assert (concepts.current_run(CORPUS, await label("merge talk", "toolu_fork1")) or {}).get("thread") == tid
+    mine = await label("merge words", "toolu_main1")
+    assert "thread" not in (concepts.current_run(CORPUS, mine) or {})
+
+    # each run going on in another process (the session's shim), as its run file says
+    def running(cid: str, thread: str | None) -> None:
+        rec = {"concept": cid, "run_id": f"r-{cid}", "status": "running", "done": 222, "total": 1189,
+               "pid": os.getpid() + 1, "beat": time.time(), **({"thread": thread} if thread else {})}
+        concepts.run_file(ws, cid).write_text(json.dumps(rec))
+
+    k = concepts.find_concept(ws, "merge talk")["id"]
+    running(k, tid)
+    running(mine, None)
+    # an agent the fork asked main to start (tools._ask_main), which main has not started yet
+    from app import subagents  # noqa: PLC0415
+
+    rid = subagents.new_request(CORPUS, "start", "writer:summary", {"subagent_type": "thimble:writer"}, None,
+                                subagents.TYPED, role="writer", from_thread=tid,
+                                ask={"what": "the request to write Summary (report:summary)", "agent": "the writer"})
+    bridge.answers = [{"ok": True}, {"ok": True}]
+    assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True}
+    assert [op for op, _ in bridge.calls] == ["stop", "note"]
+    assert concepts.stop_file(ws, k).exists(), "the thread's run is asked to stop, in the process that runs it"
+    assert not concepts.stop_file(ws, mine).exists(), "main's own run goes on"
+    note = str(bridge.calls[-1][1].get("text") or "")
+    said = tools.hint("thread-stopped-labels", labels=f"merge talk (concept:{k}, stopped at 222 of 1,189 records)")
+    assert said and said in note, note
+    card = next(cell for _nb, cell in concepts._label_cards(ws, k))
+    assert card["created_by"] == f"chat:{tid}", "the label's card is the thread's, as its add_card's cards are"
+    assert tools.hint("thread-stopped-made", cards=f"card:{card['id']}") in note, note
+    assert tools.hint("thread-stopped-unfinished", cards=f"card:{card['id']}") in note, "it has no takeaway yet"
+    assert subagents.request(CORPUS, rid)["state"] == "refused", "the start it asked for does not happen"
+    assert tools.hint("thread-stopped-agents", agents="the writer (the request to write Summary (report:summary))") in note

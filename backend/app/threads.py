@@ -140,6 +140,18 @@ def by_fork_name(c: str, name: str) -> str | None:
     return None
 
 
+def by_fork_agent(c: str, agent_id: str | None) -> str | None:
+    """The thread whose fork is the agent `agent_id`, as its meta records it (fork_started), read in any process; else
+    None."""
+    if not agent_id:
+        return None
+    for m in agents.list_chats(c):
+        fork = m.get("fork") if isinstance(m.get("fork"), dict) else {}
+        if m.get("kind") == agents.KIND_THREAD and fork.get("agent_id") == agent_id:
+            return str(m["id"])
+    return None
+
+
 def first_question(c: str, thread_id: str) -> str:
     """The thread's first question on one line, '' while its log holds none (or for no thread)."""
     if not thread_id or agents.meta_or_none(c, thread_id) is None:
