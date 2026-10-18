@@ -189,7 +189,7 @@ async function rootHere($: Engine): Promise<string | null> {
   if (env) return env
   let d = String(await $.session.cwd()).replace(/\/+$/, '')
   while (d) {
-    if (await $.fs.exists(`${d}/thimble/queries`)) return d
+    if ((await $.fs.exists(`${d}/thimble/objects`)) || (await $.fs.exists(`${d}/thimble/queries`))) return d
     d = d.slice(0, d.lastIndexOf('/'))
   }
   return null
@@ -572,7 +572,8 @@ async function parseTarget($: Engine, words: string[]): Promise<{ ref: ObjRef | 
   }
   const m = /^([^@\s]+)(?:@(\d+))?$/.exec(first)
   if (!m || !m[1] || !ID.test(m[1])) return { ref: null, region: null, problem: `"${first}" is not an object id` }
-  const hints = [sel?.root, last?.root].filter(Boolean) as string[]
+  const here = await rootHere($)
+  const hints = [...new Set([sel?.root, last?.root, here].filter(Boolean))] as string[]
   let id: string = m[1]
   let root = await findRoot($, id, hints)
   if (!root) {

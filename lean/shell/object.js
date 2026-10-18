@@ -18,7 +18,7 @@ const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|$)|[^\s#]+#(?:L\d|r\d|\
 
 /** Whether a string reads as a kernel ref (a query's value, an object's value, or a source row). */
 export function isRef(s) {
-  return typeof s === 'string' && s.length < 2000 && KERNEL_REF.test(s)
+  return typeof s === 'string' && s.length < 2000 && !/^[a-z][a-z0-9+.-]*:\/\//i.test(s) && KERNEL_REF.test(s)
 }
 
 function listOf(v) {
