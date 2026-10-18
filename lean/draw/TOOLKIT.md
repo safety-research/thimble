@@ -44,6 +44,12 @@ the person would want to see real records, attach them: `k.examples(id, { label,
 points at both: `{ cite: 'day-06-18', examples: 'saves-06-18' }`. In text, `[1,546](#day-06-18)` links words to a
 cite or a region.
 
+**Let the person turn what you assumed.** When a result rests on a choice (a threshold, a scale, a split, which step
+of a run), make the choice a knob: `const s = k.knob('scale', { values: [1, 2, 4, 8], at: 8 })`. The program reads
+the value and draws what follows from it, words included. The person turns it with ◂ ▸ and the program runs again
+with the new value. Show the knob where it acts, with `k.dial('scale')` or a link `[◂ ×8 ▸](#scale)` in a sentence.
+One knob is usually enough; a view with several is harder to read.
+
 **Draw what is not in hand.** Files you did not read, rows you could not get: draw them with `k.unseen()`, hatched,
 not as a blank or a footnote.
 
@@ -80,6 +86,15 @@ Values:
 - `k.unseen({ label, w, h })`.
 - Conveniences: `k.bars(items, { max, labelW })` for rows of label, bar, value and note; `k.legend(items)`;
   `k.dots(n, total)`.
+
+Knobs:
+
+- `k.knob(id, { values, at, label, fmt })` returns the value the person set, else `at` (else the first value).
+  `values` is a list of numbers, words or anything JSON, or `{ min, max, step }` in place of it. `fmt(value)` is how
+  the person reads a value. Up to 2,000 values: a run's steps fit.
+- `k.dial(id, { label, w })` draws the knob as `label ◂ value ▸`. Any link to the knob's id, `[words](#id)`, is the
+  knob too.
+- `k.state` holds every knob's value as the host ran the program.
 
 Meaning:
 

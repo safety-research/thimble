@@ -33,6 +33,7 @@
   const MAX_CITE_ROWS = 50
   const MAX_RECORDS = 200
   const MAX_SERIES_POINTS = 2000
+  const MAX_KNOB = 2000
   const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/
 
   // ---------------------------------------------------------------- small utilities
@@ -198,7 +199,7 @@
     const metaOf = (m, where) => normMeta(m, ctx, where)
 
     const k = {
-      w: W, h: H, mode: opts.mode || 'inline',
+      w: W, h: H, mode: opts.mode || 'inline', state: clone(ctx.state) || {},
       tones: TONES.slice(), cats: CATS.slice(),
       fmt: fmt, num: num, escape: escapeMarkup,
       cat(i) { return CATS[((i | 0) % 6 + 6) % 6] },
@@ -426,6 +427,52 @@
       examples(id, e) {
         if (isObj(id) && e == null) { e = id; id = e.id }
         return registerExamples(ctx, id, e)
+      },
+
+      // ---------------- knobs: a value the person turns (◂ ▸); the host runs the program again with the new value
+      // values: a list (numbers, words, anything JSON), or {min, max, step}. at: the value it starts at.
+      // fmt: a function, a value as the person reads it. Returns the value the person set, else `at`.
+      knob(id, o) {
+        o = o || {}
+        let kid = String(id == null ? '' : id)
+        if (!ID_RE.test(kid)) { const t = slug(kid) || 'knob'; warn(ctx, `knob id "${kid}" uses characters ids cannot hold; it is "${t}"`); kid = t }
+        if (ctx.controls[kid]) { warn(ctx, `knob "${kid}" is defined twice; the first one is kept`); return clone(ctx.controls[kid].values[ctx.controls[kid].i]) }
+        let values = Array.isArray(o.values) ? o.values.map(v => clone(v)).filter(v => v !== undefined) : null
+        if (!values && isFinite(num(o.min)) && isFinite(num(o.max))) {
+          const mn = num(o.min), mx = num(o.max), st = Math.abs(num(o.step)) || 1
+          values = []
+          for (let v = mn; v <= mx + st * 1e-9 && values.length < MAX_KNOB; v += st) values.push(+v.toPrecision(12))
+        }
+        if (!values || !values.length) { warn(ctx, `knob "${kid}" has no values; give it values: [...] or min and max`); values = [o.at === undefined ? 0 : clone(o.at)] }
+        if (values.length > MAX_KNOB) { warn(ctx, `knob "${kid}" has ${values.length} values; keeps the first ${MAX_KNOB}`); values = values.slice(0, MAX_KNOB) }
+        const key = v => JSON.stringify(v)
+        const find = v => {
+          const i = values.findIndex(x => key(x) === key(v))
+          if (i >= 0 || typeof v !== 'number') return i
+          // a number between values: the nearest one
+          let best = -1, d = Infinity
+          values.forEach((x, j) => { if (typeof x === 'number' && Math.abs(x - v) < d) { d = Math.abs(x - v); best = j } })
+          return best
+        }
+        let start = o.at === undefined ? 0 : find(o.at)
+        if (start < 0) { warn(ctx, `knob "${kid}" starts at ${key(o.at)}, which is not one of its values; it starts at the first`); start = 0 }
+        let i = start
+        if (Object.prototype.hasOwnProperty.call(ctx.state, kid)) { const j = find(ctx.state[kid]); if (j >= 0) i = j }
+        const shown = values.map((v, j) => {
+          if (typeof o.fmt === 'function') { try { return clean(o.fmt(v, j)) } catch (e) { return clean(String(v)) } }
+          return typeof v === 'number' ? fmt(v) : clean(typeof v === 'object' && v ? JSON.stringify(v) : String(v))
+        })
+        tick(values.length / 8)
+        ctx.controls[kid] = { id: kid, label: o.label != null ? clean(o.label) : kid, values: values, shown: shown, i: i, start: start }
+        return clone(values[i])
+      },
+      // the knob drawn where the program puts it: `label ◂ value ▸`, a link to the knob, so a person can select and turn it
+      dial(id, o) {
+        o = o || {}
+        const c = ctx.controls[String(id)]
+        if (!c) { warn(ctx, `k.dial("${id}") comes before k.knob("${id}"), or there is no such knob`); return k.text(String(id), { tone: 'dim' }) }
+        const label = o.label === false ? '' : (o.label != null ? String(o.label) : c.label)
+        return k.text(`${label ? '{dim:' + escapeMarkup(label) + '} ' : ''}[◂ ${escapeMarkup(c.shown[c.i])} ▸](#${c.id})`, { wrap: false, w: o.w, bold: o.bold })
       },
 
       // ---------------- raw cells
@@ -665,7 +712,8 @@
   function run(program, data, opts) {
     opts = opts || {}
     const W = clamp(int(opts.w, 96), 8, MAX_SIDE), H = clamp(int(opts.h, 24), 3, MAX_SIDE)
-    const ctx = { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: Math.max(50, num(opts.limit) || 2000) }
+    const state = isObj(opts.state) ? (clone(opts.state) || {}) : {}
+    const ctx = { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: Math.max(50, num(opts.limit) || 2000) }
     const k = makeKit(ctx, W, H, opts)
     let rootNode = null, error = null
     try {
@@ -678,7 +726,7 @@
       rootNode = toRoot(fn.call(undefined, k, clone(data == null ? {} : data)), k)
     } catch (e) {
       error = errorInfo(e, typeof program === 'string' ? program : '')
-      const kk = makeKit({ warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], seq: 0, ops: 0, nextCheck: Infinity, t0: 0, limit: Infinity }, W, H, opts)
+      const kk = makeKit({ warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: {}, seq: 0, ops: 0, nextCheck: Infinity, t0: 0, limit: Infinity }, W, H, opts)
       const lines = [kk.text(`{bad:**${escapeMarkup(error.name)}**} ${escapeMarkup(error.message)}`)]
       if (error.line) lines.push(kk.text(`{dim:line ${error.line}}  ${escapeMarkup(error.source)}`, { wrap: false }))
       lines.push(kk.text('{dim:the program failed, so nothing else was drawn}'))
@@ -688,7 +736,8 @@
     if (!error) {
       const known = {}
       regions.forEach(r => { known[r.id] = 1 })
-      ctx.links.forEach(id => { if (!known[id] && !ctx.cites[id] && !ctx.examples[id]) warn(ctx, `a link points at "#${id}", which no region, k.cite or k.examples defines`) })
+      ctx.links.forEach(id => { if (!known[id] && !ctx.cites[id] && !ctx.examples[id] && !ctx.controls[id]) warn(ctx, `a link points at "#${id}", which no region, k.cite, k.examples or k.knob defines`) })
+      Object.keys(ctx.controls).forEach(id => { if (known[id]) warn(ctx, `knob "${id}" has the id of a region; a link to "#${id}" selects the region, not the knob`) })
       regions.forEach(r => {
         if (r.meta.cite && !ctx.cites[r.meta.cite]) warn(ctx, `region "${r.id}" cites "${r.meta.cite}", which no k.cite defines`)
         if (r.meta.examples && !ctx.examples[r.meta.examples]) warn(ctx, `region "${r.id}" points at examples "${r.meta.examples}", which no k.examples defines`)
@@ -696,6 +745,9 @@
     }
     const ms = Math.round((nowMs() - ctx.t0) * 10) / 10
     const out = { kit: KIT, w: W, h: H, mode: opts.mode || 'inline', root: rootNode, cites: error ? {} : ctx.cites, examples: error ? {} : ctx.examples, regions: regions, warnings: ctx.warnings, ms: ms }
+    // knobs, in the order the program made them: what a host turns, and the state it ran with
+    const controls = Object.keys(ctx.controls).map(id => ctx.controls[id])
+    if (controls.length && !error) { out.controls = controls; out.state = state }
     if (error) out.error = error
     return JSON.parse(JSON.stringify(out))
   }

@@ -4,10 +4,10 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { loadExamples } from '../examples/load.mjs'
-import { fromArgs, fromHash, objectRef, toCommand, toHash } from '../handoff.js'
+import { fromArgs, fromHash, knobOf, objectRef, toCommand, toHash, turn } from '../handoff.js'
 import { runProgram } from '../sandbox-node.mjs'
 import { renderSvg } from '../svg.js'
-import { len, nextRegion, regionAt, renderTerm } from '../term.js'
+import { gridText, len, nextRegion, regionAt, renderTerm } from '../term.js'
 
 const DRAW = fileURLToPath(new URL('..', import.meta.url))
 const examples = loadExamples()
@@ -166,4 +166,55 @@ test('paint.js draws text rows as Text and pixel rows as one Raster', async () =
   const tinted = [...words].filter((v, i) => i % 3 === 2 && v === sel).length
   const textTinted = kids.filter(k => k.type === 'Text').some(k => k.props.children.some(c => c.props.backgroundColor === 'selectionBg'))
   assert.ok(tinted > 0 || textTinted, 'the selected region is tinted')
+})
+
+test('a knob keeps its value across runs: the host turns it, the program runs again, words and marks follow', () => {
+  const program = `
+    const s = k.knob('scale', { values: [1, 2, 4, 8, 16], at: 2, label: 'lr scale', fmt: v => '×' + v })
+    const step = k.knob('step', { min: 0, max: 199, label: 'step' })
+    return k.stack(
+      k.text(\`gap **\${data.gap[s]}** pts when lr is scaled by [◂ ×\${s} ▸](#scale)\`),
+      k.dial('step'),
+      k.region('step-' + step, { label: 'step ' + step, rows: ['run.jsonl#L' + (step + 1)] }, k.bar(step, { max: 199 })))`
+  const data = { gap: { 1: 28, 2: 18.4, 4: 9.7, 8: 1.6, 16: 9.5 } }
+  const d0 = runProgram({ program, data }, { w: 80 })
+  assert.deepEqual(d0.controls.map(c => [c.id, c.i, c.values.length]), [['scale', 1, 5], ['step', 0, 200]])
+  assert.equal(d0.controls[0].shown[1], '×2')
+  assert.deepEqual(d0.state, {})
+  // ▸ three times on scale: stops at the last value; the program reads it and rewrites the sentence
+  let st = {}
+  for (let i = 0; i < 3; i++) st = turn(runProgram({ program, data }, { w: 80, state: st }), st, 'scale', 1)
+  assert.deepEqual(st, { scale: 16 })
+  st = turn(runProgram({ program, data }, { w: 80, state: st }), st, 'scale', 1)
+  assert.deepEqual(st, { scale: 16 }, 'a knob stops at its end')
+  // the first knob turns when no id is given; a step of 25 scrubs a run
+  st = turn(d0, st, null, -1)
+  assert.deepEqual(st, { scale: 1 })
+  st = turn(d0, st, 'step', 25)
+  const d1 = runProgram({ program, data }, { w: 80, state: st })
+  assert.equal(d1.controls[1].i, 25)
+  const t = renderTerm(d1, { w: 80 }), s = renderSvg(d1, { w: 80 })
+  assert.match(gridText(t), /gap 28 pts when lr is scaled by ◂ ×1 ▸/)
+  assert.match(gridText(t), /step ◂ 25 ▸/)
+  // the region follows the knob, with its rows; the knob's link is a part the person can select
+  assert.deepEqual(t.regions.find(r => r.id === 'step-25').meta.rows, ['run.jsonl#L26'])
+  assert.deepEqual(t.regions.filter(r => r.meta.knob).map(r => r.id), ['scale', 'step'])
+  assert.deepEqual(s.regions.map(r => [r.id, r.meta]), t.regions.map(r => [r.id, r.meta]), 'both renderers mean the same')
+  assert.equal(knobOf(d1, 'step').label, 'step')
+  // a value that is not one of the knob's goes to the nearest number; a word that is not one keeps the start
+  const d2 = runProgram({ program, data }, { w: 80, state: { scale: 7, step: 'x' } })
+  assert.deepEqual(d2.controls.map(c => c.i), [3, 0])
+  assert.deepEqual(d2.warnings, [])
+  // the state rides the handoff: the URL and the command
+  const sel = { object: 'sweep', v: 3, region: 'step-25', state: { scale: 8, split: 'by wiki' } }
+  assert.deepEqual(fromHash(toHash(sel)), sel)
+  assert.deepEqual(fromArgs(toCommand(sel).replace(/^\/draw /, '')), sel)
+})
+
+test('a knob that is badly made still draws, and says why', () => {
+  const d = runProgram({ program: `const a = k.knob('a b', {}); const b = k.knob('ok', { values: ['all', 'links'], at: 'none' }); return k.stack(k.dial('nope'), k.text('[x](#ok)'), k.text(String(a) + ' ' + b))` }, { w: 60 })
+  assert.equal(d.error, undefined)
+  assert.ok(d.warnings.some(w => /a b/.test(w)) && d.warnings.some(w => /no values/.test(w)))
+  assert.ok(d.warnings.some(w => /starts at "none"/.test(w)) && d.warnings.some(w => /k.dial\("nope"\)/.test(w)))
+  assert.ok(!d.warnings.some(w => /link points at "#ok"/.test(w)), 'a link to a knob is a known id')
 })

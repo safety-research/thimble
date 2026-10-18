@@ -13,6 +13,7 @@
 //   marks    the same list term.js returns for the same drawing: what was drawn, renderer-free
 // Pure: no DOM unless `measure` uses one (canvasMeasure below). In Node it measures with approxMeasure.
 import { distribute } from './flex.js'
+import { knobOf } from './handoff.js'
 import { hex } from './palette.js'
 
 export const SANS = '"Instrument Sans", Inter, -apple-system, "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif'
@@ -705,6 +706,7 @@ export function renderSvg(drawing, opts = {}) {
       const meta = {}
       if (drawing.cites && drawing.cites[l.ref]) { meta.cite = l.ref; meta.label = drawing.cites[l.ref].text || l.ref }
       else if (drawing.examples && drawing.examples[l.ref]) { meta.examples = l.ref; meta.label = drawing.examples[l.ref].label || l.ref }
+      else if (knobOf(drawing, l.ref)) { const c = knobOf(drawing, l.ref); meta.knob = c.id; meta.label = `${c.label} ${c.shown[c.i]}` }
       else meta.label = l.ref
       e = { id: l.ref, meta, rects: [], link: true }
       regions.push(e)

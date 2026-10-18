@@ -17,6 +17,7 @@
 //   cut      what did not fit: text cut with …, notes left out, cells clipped
 // No `$`, no DOM, no Node: the mod imports it (paint.js turns the rows into Text and Raster elements).
 import { distribute } from './flex.js'
+import { knobOf } from './handoff.js'
 
 const SPARK = '▁▂▃▄▅▆▇█'
 const BAR = '▆'
@@ -643,6 +644,7 @@ export function renderTerm(drawing, opts = {}) {
       const meta = {}
       if (drawing.cites && drawing.cites[l.ref]) { meta.cite = l.ref; meta.label = drawing.cites[l.ref].text || l.ref }
       else if (drawing.examples && drawing.examples[l.ref]) { meta.examples = l.ref; meta.label = drawing.examples[l.ref].label || l.ref }
+      else if (knobOf(drawing, l.ref)) { const c = knobOf(drawing, l.ref); meta.knob = c.id; meta.label = `${c.label} ${c.shown[c.i]}` }
       else meta.label = l.ref
       e = { id: l.ref, meta, rects: [], link: true }
       regions.push(e)
@@ -675,3 +677,4 @@ export function nextRegion(grid, id, dir = 1) {
   if (i < 0) return list[dir > 0 ? 0 : list.length - 1].id
   return list[(i + dir + list.length) % list.length].id
 }
+
