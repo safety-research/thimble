@@ -662,6 +662,8 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     const sel = (await $.state.get(SEL)).value as Detail | null
     if (sel && (sel.prog || sel.bar) && (e.origin as { kind?: string }).kind === 'person') {
       await $.state.set(SEL, (sel.prog ? { ...sel, prog: false } : { ...sel, bar: barAfter(sel.bar ?? null, 'back') }) as Sel)
+      // a refused close gives the keys back to the prompt: the pane takes them again, so the next esc reaches it
+      regrab($)
       return { value: undefined } as Any
     }
     await closed($)

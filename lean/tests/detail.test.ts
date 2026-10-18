@@ -262,3 +262,4 @@ test('with no detail open, a prompt goes to Claude as always', async ($, on) => 
   expect(w.submitted).toContain('what next?')
   expect(w.spawns.length).toBe(0)
 })
+
