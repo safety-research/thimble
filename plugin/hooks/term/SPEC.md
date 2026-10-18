@@ -607,6 +607,11 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   (the agent it names) stand a cell after their dot, else after the row's last dot. Under the rows the x axis as a line
   chart's, its labels dim under `┬`. A cell's dots are one mark; the readout names its row, its x and how many
   (`opus-emergent  16 PRs opened · 2 dots`). The first 30 rows, then `… N more`.
+- A start-to-end chart (bars or rules from `x` to `x2` along times or numbers, a Gantt chart; thimble.chart's range):
+  drawn as a dots chart whose rows hold spans, on an x axis over every start and end. A bar or a rule alone is a bar
+  from its start's cell to its end's in its hue; a range with a dot at each end is a `─` line in the rule gray from its
+  start to a `●` in its hue at its end, as the browser mutes its line and lightens its start, and the key names the two
+  ends (`──● start to end`; bug hunt L2). A span is one mark; the readout names its start, its end and how long it lasts.
 - A table: the column names bold, a `─` rule under each name as wide as its column, the rows right under it; numbers
   right-aligned in the card's column formats, as the browser's table writes them (`1,446`). Markdown tables in a reply take the same header.
 - A timeline: the axis across the content with its `●` marks in hue on a rule-gray line, its two end times dim under

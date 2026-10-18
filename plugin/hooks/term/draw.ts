@@ -16,8 +16,9 @@ export type Line = Seg[]
 export type BarRow = { label: string; value: number; group: string }
 /** A row of a dots card (cell.ts dotsCard): its name, its dots (each its x, a number or a time as written, and the
  *  value of the chart's color field it is colored by, '' for none), and the words a text layer writes beside them. */
-/** A dots card's row: its dots, each at `x`, or a bar from `x` to `x2` (a start-to-end chart's), and words beside them. */
-export type DotRow = { name: string; dots: { x: string | number; x2?: string | number; group: string }[]; notes: { x: string | number; text: string }[] }
+/** A dots card's row: its dots, each at `x`, or a span from `x` to `x2` (a start-to-end chart's: a bar, or with `ends` a
+ *  line from its start to a dot at its end), and words beside them. */
+export type DotRow = { name: string; dots: { x: string | number; x2?: string | number; group: string; ends?: boolean }[]; notes: { x: string | number; text: string }[] }
 export type Cell = string | number | boolean | null
 export type CardParam = { name: string; value: string | number; default: string | number; choices: (string | number)[] }
 export type DiagramNode = { id: string; label: string; ref?: string; detail?: string }
@@ -54,6 +55,8 @@ export type CardData = {
   series?: { name: string; points: [string | number, number][]; group?: string }[]
   /** a dots card's rows, in the order its rows' axis sorts them */
   strips?: DotRow[]
+  /** a start-to-end chart's end field, where its spans have a dot at each end: its key names the start (`x`) and it */
+  x2?: string
   /** a line card's x axis's own ticks, as its x values are written (Vega-Lite's `axis.values`: thimble.chart's at each
    *  time of weekly or monthly data), which the axis names in place of round ones */
   xTicks?: (string | number)[]
@@ -918,8 +921,9 @@ export function dotGlyph(n: number, most: number): string {
  * group's; the words a text layer writes stand a cell after their dot, or after the row's last dot where something
  * stands there. Under the rows, the x axis's ticks, as a line chart names them, and the groups' legend. The first
  * MAX_BARS rows, then `… N more`. A cell's dots are one mark: the readout names its row, its x and how many. A
- * start-to-end chart's span (cell.ts spansCard) is a bar from its start's cell to its end's, one mark whose readout
- * names its start, its end and how long it lasts.
+ * start-to-end chart's span (cell.ts spansCard) is a bar from its start's cell to its end's, or with a dot at each end
+ * a line from its start to a dot at its end, one mark whose readout names its start, its end and how long it lasts; its
+ * key names its two ends. The x axis covers every start and end.
  */
 /** A dots card's x kind and the range of its x scale, over its first MAX_BARS rows; null for a card with no dot. */
 function dotsScale(card: CardData) {
@@ -953,7 +957,7 @@ function dotsLayout(card: CardData, cols: number, hover: number, shared: Shared 
   const hue = (g: string) => (g ? groupHue(card, g, groups) : (classColour(card, g) ?? one()))
   // each row's cells that hold dots, left to right, with their dots, and each span from its first cell to its last
   // (`end`): the marks the pointer picks, row by row
-  type Mark = { row: number; cell: number; end?: number; dots: DotRow['dots'] }
+  type Mark = { row: number; cell: number; end?: number; rev?: boolean; dots: DotRow['dots'] }
   const marks: Mark[] = []
   strips.forEach((r, row) => {
     const by = new Map<number, Mark['dots']>()
@@ -963,7 +967,7 @@ function dotsLayout(card: CardData, cols: number, hover: number, shared: Shared 
       if (!Number.isFinite(v)) continue
       if (d.x2 !== undefined) {
         const v2 = xOf(d.x2)
-        if (Number.isFinite(v2)) mine.push({ row, cell: cellOf(Math.min(v, v2)), end: cellOf(Math.max(v, v2)), dots: [d] })
+        if (Number.isFinite(v2)) mine.push({ row, cell: cellOf(Math.min(v, v2)), end: cellOf(Math.max(v, v2)), dots: [d], ...(v2 < v ? { rev: true } : {}) })
         continue
       }
       const c = cellOf(v)
@@ -1001,10 +1005,18 @@ function dotsLayout(card: CardData, cols: number, hover: number, shared: Shared 
       const tally = new Map<string, number>()
       for (const d of m.dots) tally.set(d.group, (tally.get(d.group) ?? 0) + 1)
       const group = [...tally].sort((a, b) => b[1] - a[1])[0]![0]
-      // a span: a bar over its cells, as a bar card's, in its group's hue, the text color under the pointer
+      // a span: a bar over its cells, as a bar card's, in its group's hue; one with a dot at each end, a line in the rule
+      // gray from its start to a ● in its hue at its end, as the browser draws a range, its line muted and its start
+      // lighter than its end (bug hunt L2); the text color under the pointer
       if (m.end !== undefined) {
         if (used.slice(m.cell, m.end + 1).some(Boolean)) continue
-        cells[m.cell] = { s: '█'.repeat(m.end - m.cell + 1), fg: hot === m ? COLORS.text : hue(group) }
+        const fg = hot === m ? COLORS.text : hue(group)
+        const line = hot === m ? COLORS.text : COLORS.rule
+        const n = m.end - m.cell - 1
+        if (!m.dots[0]!.ends) cells[m.cell] = { s: '█'.repeat(m.end - m.cell + 1), fg }
+        else if (n < 0) cells[m.cell] = { s: '●', fg }
+        else if (m.rev) (cells[m.cell] = { s: '●', fg }), (cells[m.cell + 1] = { s: '─'.repeat(n + 1), fg: line })
+        else (cells[m.cell] = { s: '─'.repeat(n + 1), fg: line }), (cells[m.end] = { s: '●', fg })
         for (let k = m.cell; k <= m.end; k++) used[k] = true
         continue
       }
@@ -1060,9 +1072,12 @@ function dotsLayout(card: CardData, cols: number, hover: number, shared: Shared 
   ticks.labels.forEach((l, i) => (xl += ' '.repeat(Math.max(0, ticks.x[i]! - width(xl))) + l))
   if (single) xl = ' '.repeat(single[0]!) + xName(xs[0]!)
   lines.push([{ s: pad0 + xl, fg: COLORS.dim }])
-  // the legend on its own row under the chart; none when a label it read names the groups on its label row
+  // the legend on its own row under the chart, after the key of a span's ends where its spans have them; no groups when a
+  // label it read names them on its label row
   const named = new Set(cardLabels(card).flatMap(l => l.values))
-  if (shared.key !== false && groups.length && !groups.every(g => named.has(g))) lines.push(...flow(groups.map(g => [{ s: '● ', fg: hue(g) }, { s: g }]), cols))
+  const keyed = shared.key !== false && groups.length > 0 && !groups.every(g => named.has(g))
+  const ends: Line[] = card.x2 && marks.some(m => m.dots[0]!.ends && m.end !== undefined && m.end > m.cell) ? [[{ s: '──', fg: COLORS.rule }, { s: '● ', fg: COLORS.dim }, { s: `${card.x} to ${card.x2}` }]] : []
+  if (shared.key !== false && (keyed || ends.length)) lines.push(...flow([...ends, ...(keyed ? groups.map(g => [{ s: '● ', fg: hue(g) }, { s: g }] as Line) : [])], cols))
   // a row's dots: the mark nearest the pointer's cell on its row
   const hit = (x: number, y: number): number => {
     const row = owner[y]

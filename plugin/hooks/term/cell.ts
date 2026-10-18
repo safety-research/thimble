@@ -3,12 +3,12 @@
 //
 // The map of card kinds (the two-modes study): a table, a timeline, a diagram, an example and a label draw directly; a
 // simple bar or line chart (one Altair layer, x and y fields; a bar's groups stacked or side by side; a line per `detail`
-// value) draws as text, at most MAX_LINE_POINTS points of its lines, a stacked area chart as its bands, a dots chart as
-// its rows of dots with the words a text layer writes beside them, a heatmap as its grid of cells shaded on its color
-// scale with the numbers a text layer writes on them, and a faceted chart as one of these per panel; any other chart
-// draws as a table of its rows when they are few, else as a short note that the browser draws it; a note is prose; a
-// code card, a card type's card and a matplotlib figure draw as their printed text; a custom HTML card draws as its
-// text. A label card's counts and records come from the label (`thimble state label`).
+// value) draws as text, at most MAX_LINE_POINTS points of its lines, a stacked area chart as its bands, a start-to-end
+// chart as its spans, a dots chart as its rows of dots with the words a text layer writes beside them, a heatmap as its
+// grid of cells shaded on its color scale with the numbers a text layer writes on them, and a faceted chart as one of
+// these per panel; any other chart draws as a table of its rows when they are few, else as a short note that the
+// browser draws it; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text;
+// a custom HTML card draws as its text. A label card's counts and records come from the label (`thimble state label`).
 import type { TermLinks } from './types'
 import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, DotRow, HeatScale, Panel, PlanStep } from './draw'
 import { MAX_TABLE_ROWS, amount } from './draw'
@@ -507,38 +507,53 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
   return null
 }
 
-/** A chart of bars from a start to an end (Altair's `mark_bar` with `x` and `x2` along times or numbers and its rows'
- *  names down `y`, a Gantt chart; or the same on its side, `y` and `y2`) as a dots card whose rows hold spans: each row's
- *  bars on the start-to-end axis, colored by the chart's color field, in the order the names' axis sorts them (bug hunt
- *  C9: it drew as a table of raw ISO times). A time written as a number is the instant it counts in ms, as Vega-Lite
- *  reads one. Null for any other chart. */
+/** A chart of bars or rules from a start to an end (Altair's `mark_bar` or `mark_rule` with `x` and `x2` along times or
+ *  numbers and its rows' names down `y`, a Gantt chart; or the same on its side, `y` and `y2`), alone or with a dot at
+ *  each end (thimble.chart's range), as a dots card whose rows hold spans: each row's spans on one axis over their starts
+ *  and ends, colored by the chart's color field, in the order the names' axis sorts them (bug hunt C9: it drew as a
+ *  table of raw ISO times). A span with dots at its ends is marked `ends`, and the card names its end field (`x2`). A
+ *  time written as a number is the instant it counts in ms, as Vega-Lite reads one. Null for any other chart. */
 export function spansCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
-  if (spec.layer || spec.facet || spec.hconcat || spec.vconcat || spec.concat || spec.spec || markOf(spec) !== 'bar') return null
-  const enc = spec.encoding ?? {}
+  if (spec.facet || spec.hconcat || spec.vconcat || spec.concat || spec.spec) return null
+  const layers = (spec.layer ?? [spec]).map(l => ({ ...l, encoding: { ...(spec.layer ? spec.encoding : {}), ...l.encoding }, data: l.data ?? spec.data }))
+  if (layers.some(l => l.layer || l.facet || l.hconcat || l.vconcat || l.concat || l.spec)) return null
   const along = (e: Enc | undefined) => Boolean(e?.field) && !e!.aggregate && (e!.type === 'temporal' || e!.type === 'quantitative')
   const discrete = (e: Enc | undefined) => Boolean(e?.field) && (e!.type === 'nominal' || e!.type === 'ordinal')
-  const ch = enc.x2?.field && along(enc.x) && discrete(enc.y) ? (['x', 'x2', 'y'] as const) : enc.y2?.field && along(enc.y) && discrete(enc.x) ? (['y', 'y2', 'x'] as const) : null
-  if (!ch) return null
-  const [a, a2, d] = ch
+  const chOf = (enc: Record<string, Enc | undefined>) =>
+    enc.x2?.field && along(enc.x) && discrete(enc.y) ? (['x', 'x2', 'y'] as const) : enc.y2?.field && along(enc.y) && discrete(enc.x) ? (['y', 'y2', 'x'] as const) : null
+  // the one layer of bars or rules from a start to an end (bug hunt L2: thimble.chart's range, a rule with a dot at each
+  // end, drew as the dots at its starts alone)
+  const spans = layers.filter(l => SPAN_MARKS.has(markOf(l)) && chOf(l.encoding))
+  if (spans.length !== 1) return null
+  const span = spans[0]!
+  const enc = span.encoding
+  const [a, a2, d] = chOf(enc)!
   const from = enc[a]!.field!
   const to = enc[a2]!.field!
   const name = enc[d]!.field!
+  // its other layers: dots on its rows at its starts or ends (a dumbbell's), and rules across the chart (a mark's);
+  // a chart of any other layer is no start-to-end chart
+  const others = layers.filter(l => l !== span)
+  const ends = others.filter(l => DOT_MARKS.has(markOf(l)) && l.encoding[d]?.field === name && [from, to].includes(l.encoding[a]?.field ?? ''))
+  if (!others.every(l => ends.includes(l) || (markOf(l) === 'rule' && !l.encoding[d]?.field))) return null
   const time = enc[a]!.type === 'temporal'
-  const gf = enc.color?.field && enc.color.field !== name ? enc.color.field : ''
+  // the color field: the span's own, else its ends' (thimble.chart's range colors its ends and leaves its line muted)
+  const color = [enc, ...ends.map(l => l.encoding)].map(e => e.color?.field).find(f => f && f !== name) ?? ''
   // a value along the axis: a time as written, or a number (a time's ms as its ISO time); '' for none
   const at = (v: unknown): string | number => (typeof v === 'number' && Number.isFinite(v) ? (time ? new Date(v).toISOString() : v) : typeof v === 'string' && v.trim() ? v : '')
-  const rows = sortedBars(vegaRows(spec, spec).filter(r => at(r[from]) !== '' && at(r[to]) !== ''), enc, d, name)
+  const rows = sortedBars(vegaRows(span, spec).filter(r => at(r[from]) !== '' && at(r[to]) !== ''), enc, d, name)
   if (!rows.length) return null
   const strips = new Map<string, DotRow>()
   for (const r of rows) {
     const key = String(r[name] ?? '')
     const row = strips.get(key) ?? strips.set(key, { name: key, dots: [], notes: [] }).get(key)!
-    row.dots.push({ x: at(r[from]), x2: at(r[to]), group: gf ? String(r[gf] ?? '') : '' })
+    row.dots.push({ x: at(r[from]), x2: at(r[to]), group: color ? String(r[color] ?? '') : '', ...(ends.length ? { ends: true } : {}) })
   }
-  return { ...blank(cell, 'dots'), x: from, y: name, strips: [...strips.values()] }
+  return { ...blank(cell, 'dots'), x: from, y: name, strips: [...strips.values()], ...(ends.length ? { x2: to } : {}) }
 }
 
-// the marks a dots chart draws its dots with
+// the marks a start-to-end chart draws its spans with, and those a dots chart draws its dots with
+const SPAN_MARKS = new Set(['bar', 'rule'])
 const DOT_MARKS = new Set(['point', 'circle', 'square', 'tick'])
 
 /** A dots chart (thimble.chart("dots"), or any chart of dots along rows: x numbers or times, y the rows' names) as a
