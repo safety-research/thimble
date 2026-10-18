@@ -404,3 +404,20 @@ test('a question asked with the tray open carries the mark to Claude, and its ro
   const index = w.files[`${ROOT}/thimble/messages/s-1/index.jsonl`]!.trim().split('\n').map(l => JSON.parse(l))
   expect(index.at(-1).scope).toEqual({ row: AT, mark: { kind: 'cite', ref: 'q1#day=2026-06-18@n', label: '6,543 saves' } })
 })
+
+test("a resumed session finds its messages on disk: their marks open from the keys, and the keys act on its latest answer", async ($, on) => {
+  const w = world(on)
+  mock.clock(on)
+  const dir = `${ROOT}/thimble/messages/s-1`
+  const rec = { v: 1, row: AT, session: 's-1', text: MARKED, shown: null, marks: [{ kind: 'cite', start: 7, end: 42, ref: 'q1#day=2026-06-18@n', label: '6,543 saves' }], glosses: {}, verbs: { s: { lit: true, note: '24 lines' } }, objects: [], final: true }
+  w.files[`${dir}/index.jsonl`] = `${JSON.stringify({ row: 'pppppppp-0000-0000-0000-', kind: 'user', text: 'when?' })}\n${JSON.stringify({ row: AT, kind: 'assistant' })}\n`
+  w.files[`${dir}/${AT}.json`] = JSON.stringify(rec)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
+  const RESUMED = { ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never
+  expect(textOf(await $.ui.render(RESUMED))).toContain('s ● 24 lines')
+  await ($ as Any).prompt.edit(edit(']'))
+  expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
+  await ($ as Any).prompt.edit(edit('0'))
+  await ($ as Any).prompt.edit(edit('s'))
+  expect(textOf(await $.ui.render(RESUMED))).toContain('▸ 1 squeeze it')
+})

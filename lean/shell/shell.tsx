@@ -546,33 +546,31 @@ async function messagesDir($: Engine): Promise<{ session: string; dir: string | 
   return { session, dir: root ? `${root.replace(/\/+$/, '')}/thimble/messages/${safe(session)}` : null }
 }
 
-/** The index and folder of this session, read once per load of the module (a resumed session finds its own). */
+/** The index and folder of this session, read once per load of the module (a resumed session finds its own). A
+ *  folder that appears later (lean made thimble/, or the session's root became known) is read then, and what was kept
+ *  in memory meanwhile is written there. */
 async function msgFilesNow($: Engine): Promise<NonNullable<typeof msgFiles>> {
   const { session, dir } = await messagesDir($)
-  if (msgFiles && msgFiles.session === session) {
-    if (!msgFiles.dir && dir) {
-      // a root appeared (lean made thimble/): everything kept in memory is written now
-      msgFiles.dir = dir
-      msgFiles.pending.add('index')
-      for (const row of ((await $.state.get(MSGROWS)).value ?? []) as string[]) msgFiles.pending.add(row)
+  if (msgFiles && msgFiles.session === session && (msgFiles.dir === dir || !dir)) return msgFiles
+  if (!msgFiles || msgFiles.session !== session) msgFiles = { session, dir: null, index: [], pending: new Set(), loaded: false }
+  const f = msgFiles
+  f.dir = dir
+  if (!dir) return f
+  try {
+    if (await $.fs.exists(`${dir}/index.jsonl`)) {
+      const kept = String(await $.fs.read(`${dir}/index.jsonl`)).split('\n').filter(Boolean).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+      f.index = [...kept, ...f.index.filter(x => !kept.some((k: Any) => k.row === x.row))]
     }
-    return msgFiles
+  } catch {
+    // an index it cannot read: this session's rows start a new one
   }
-  msgFiles = { session, dir, index: [], pending: new Set(), loaded: false }
-  if (dir) {
-    try {
-      if (await $.fs.exists(`${dir}/index.jsonl`)) {
-        msgFiles.index = String(await $.fs.read(`${dir}/index.jsonl`)).split('\n').filter(Boolean).map(l => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
-        const rows = msgFiles.index.filter(x => x.kind === 'assistant').map(x => String(x.row))
-        const held = ((await $.state.get(MSGROWS)).value ?? []) as string[]
-        if (rows.length) await $.state.set(MSGROWS, [...new Set([...rows, ...held])])
-      }
-    } catch {
-      // an index it cannot read: this session's rows start a new one
-    }
-  }
-  msgFiles.loaded = true
-  return msgFiles
+  // (no write to $.state here: a drawing reads this; messageRows joins the index's rows and this load's)
+  const held = ((await $.state.get(MSGROWS)).value ?? []) as string[]
+  // everything kept in memory while there was no folder is written now
+  f.pending.add('index')
+  for (const row of held) f.pending.add(row)
+  f.loaded = true
+  return f
 }
 
 /** Writes what waits: the index and each record that changed. A failure leaves them waiting for the next write. */
@@ -674,12 +672,24 @@ async function loadRowVerbs($: Engine): Promise<void> {
 async function actingRow($: Engine): Promise<string | null> {
   const sel = (await $.state.get(SELROW)).value as string | null | undefined
   if (sel) return sel
-  return ((await $.state.get(ANSWER)).value as string | null | undefined) ?? null
+  const answer = (await $.state.get(ANSWER)).value as string | null | undefined
+  if (answer) return answer
+  // a resumed session: the latest answer its records name
+  const rows = await messageRows($)
+  for (const row of [...rows].reverse()) if ((await recordNow($, row))?.final) return row
+  return null
 }
 
 /** Every mark position of this session's messages, in reading order. */
+/** The rows of Claude's messages in this session, oldest first: the index's (a resumed session's too) and this load's. */
+async function messageRows($: Engine): Promise<string[]> {
+  const f = await msgFilesNow($)
+  const held = ((await $.state.get(MSGROWS)).value ?? []) as string[]
+  return [...new Set([...f.index.filter(x => x.kind === 'assistant').map(x => String(x.row)), ...held])]
+}
+
 async function allMarks($: Engine): Promise<{ row: string; i: number }[]> {
-  const rows = ((await $.state.get(MSGROWS)).value ?? []) as string[]
+  const rows = await messageRows($)
   const msgs: { row: string; marks: unknown[] }[] = []
   for (const row of rows) {
     const rec = await recordNow($, row)
@@ -1759,6 +1769,11 @@ export function resetShell(): void {
   server = null
   serverStarting = null
   shown = null
+  msgFiles = null
+  cards.clear()
+  cardPending.clear()
+  keyOpened = null
+  keyChain = Promise.resolve()
 }
 
 export { isRef }
