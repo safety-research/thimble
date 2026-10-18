@@ -1,8 +1,10 @@
 // A document's sentences as plain prose where the editor is not shown (a slide, a story's beat, a page's claims): each
 // sentence a span with `data-anchor` and `data-sid`, inline markdown rendered, citations as RefChip, and the tint of a
-// shown comment's check (checkComments.ts passageFlags).
+// shown comment's check (checkComments.ts passageFlags). Each sentence's citations show how its healing pass left them
+// (lib/citeChecks healChecks).
 import type { ReactNode } from 'react'
-import { GlyphCites, RefChip } from '../components/RefChip'
+import { CiteChecksContext, GlyphCites, RefChip } from '../components/RefChip'
+import { healChecks } from '../lib/citeChecks'
 import type { WriteupSentence } from '../lib/types'
 import type { Flag } from './checkComments'
 import { parseInline, type InlineNode } from './inlineParse'
@@ -74,7 +76,7 @@ export function Prose({ ws, slug, sentences, flags, className, anchors = true }:
                 data-sid={anchors ? s.id : undefined}
                 data-cids={flag?.cids.join(' ')}
               >
-                {inline(parseInline(s.text.trim()), ws)}
+                <CiteChecksContext.Provider value={healChecks(s.healed)}>{inline(parseInline(s.text.trim()), ws)}</CiteChecksContext.Provider>
               </span>
             </span>
           )

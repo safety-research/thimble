@@ -1,16 +1,19 @@
 // @vitest-environment jsdom
-// One comment card for every comment, in the Report's margin and on the canvas (src/report/CommentCard.tsx): its
-// header is its check's name in the check's color beside the color square, with no "Claude" before it; it shows its
-// statement, and its details only once Show more under the statement opens them (Show less folds them again), their
-// citations as chips; ✓ (Done) resolves it, and its head holds nothing else (no Ask, no Know it); a click makes it
-// active, with a field whose text opens a thread anchored to the comment's place with the comment's id and words.
+// One comment card for every comment, in the Report's margin, on the canvas and under Claude's answer in main's chat
+// (src/report/CommentCard.tsx): its header is its check's name in the check's color beside the color square, with no
+// "Claude" before it; it shows its statement, and its details only once Show more under the statement opens them
+// (Show less folds them again), their citations as chips; ✓ (Done) resolves it, and its head holds nothing else (no
+// Ask, no Know it); a click makes it active, with a field whose text opens a thread anchored to the comment's place
+// with the comment's id and words.
 import { act, useState } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { CommentCard, threadText, type CommentThread, type CommentView } from '../../src/report/CommentCard.tsx'
-import { extraEvidence, openComments } from '../../src/report/checkComments.ts'
+import { CommentCard, type CommentThread, type CommentView } from '../../src/report/CommentCard.tsx'
 import { api } from '../../src/lib/api.ts'
 import { bus } from '../../src/lib/bus.ts'
-import type { ChatMeta, WriteupComment } from '../../src/lib/types.ts'
+import { type AnswerComment } from '../../src/chat/answerComments.ts'
+import { foldRecords } from '../../src/chat/model.ts'
+import { Rows } from '../../src/chat/Rows.tsx'
+import type { ChatMeta, ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => {
@@ -36,76 +39,6 @@ function Held({ comment, onResolve, thread = ON_STEP }: { comment: CommentView; 
 }
 
 const click = (el: Element | null) => act(async () => (el as HTMLElement).click())
-
-describe('what a comment shows', () => {
-  test("its check's name in the check's color and its statement; its details only once Show more under it opens them", async () => {
-    const el = await mount(<Held comment={IMPORTANT} />)
-    const name = el.querySelector<HTMLElement>('.wu-cm-name')!
-    expect(name.textContent).toBe('Important details')
-    expect(name.style.color).toBe('var(--label-2)')
-    expect(el.querySelector<HTMLElement>('.wu-cm-sq')!.style.background).toBe('var(--label-2)')
-    expect(el.querySelector('.wu-cm-head')!.textContent).not.toContain('Claude')
-    expect(el.querySelector('.wu-cm-head')!.textContent).not.toContain('Heads up')
-    expect(el.querySelector('.wu-cm-statement')!.textContent).toBe('Blocking the web also blocks GitHub.')
-    expect(el.querySelector('.wu-cm-details')).toBeNull()
-    expect(el.textContent).not.toContain('Bake them')
-
-    // no chevron in the header: the control is a button of words, after the statement
-    expect(el.querySelector('.wu-cm .wu-chev')).toBeNull()
-    expect([...el.querySelectorAll('.wu-cm-head button')].map((b) => b.textContent?.trim() || b.getAttribute('aria-label'))).toEqual(['Done'])
-    expect(el.textContent).not.toContain('Ask')
-    expect(el.textContent).not.toContain('Know it')
-    const more = el.querySelector<HTMLButtonElement>('.wu-cm-more')!
-    expect(more.tagName).toBe('BUTTON')
-    expect(more.textContent).toBe('Show more')
-    expect(more.getAttribute('aria-expanded')).toBe('false')
-    const order = (a: Element, b: Element) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING
-    expect(order(el.querySelector('.wu-cm-statement')!, more)).toBeTruthy()
-    await click(more)
-    expect(more.getAttribute('aria-expanded')).toBe('true')
-    expect(more.textContent).toBe('Show less')
-    const details = el.querySelector('.wu-cm-details')!
-    expect(order(details, more)).toBeTruthy() // Show less stands under the details it folds
-    expect([...details.querySelectorAll('li')].map((li) => li.textContent?.trim())).toEqual(['The pandas build fetches two libraries from GitHub 2.', 'Bake them into the image.'])
-    expect([...details.querySelectorAll<HTMLElement>('.refchip')].map((c) => c.dataset.ref)).toEqual(['card:abc123#libs/TOTAL'])
-    expect(el.querySelector('.wu-cm-reply')).toBeNull() // Show more opens the details, not the field
-    await click(more)
-    expect(el.querySelector('.wu-cm-details')).toBeNull()
-    expect(more.textContent).toBe('Show more')
-  })
-
-  test('a comment with no details has no Show more; the refs its statement cited show as chips in its details', async () => {
-    const plain = await mount(<Held comment={{ ...IMPORTANT, details: '', evidence: [] }} />)
-    expect(plain.querySelector('.wu-cm-more')).toBeNull()
-    expect(plain.textContent).not.toContain('Show more')
-    expect(extraEvidence(['card:a', 'card:b'], 'see [[card:a]]')).toEqual(['card:b'])
-    const cited = await mount(<Held comment={{ ...IMPORTANT, details: '', evidence: ['card:abc123'] }} />)
-    await click(cited.querySelector('.wu-cm-more'))
-    expect([...cited.querySelectorAll<HTMLElement>('.wu-cm-details .refchip')].map((c) => c.dataset.ref)).toEqual(['card:abc123'])
-  })
-
-  test("Claude's note and the analyst's own name their author, each with ✓ alone in its head", async () => {
-    const el = await mount(
-      <>
-        <Held comment={{ ...IMPORTANT, id: 'n1', check: null, author: 'claude' }} />
-        <Held comment={{ ...IMPORTANT, id: 'n2', check: null, author: 'analyst', details: '' }} />
-      </>,
-    )
-    expect([...el.querySelectorAll('.wu-cm-name')].map((n) => n.textContent)).toEqual(['Claude', 'You'])
-    expect([...el.querySelectorAll('.wu-cm-head')].map((h) => [...h.querySelectorAll('button')].map((b) => b.getAttribute('aria-label')))).toEqual([['Done'], ['Done']])
-  })
-
-  test("a document's stored comments carry their details to the margin; one resolved as known before 0.7.0 stays resolved", () => {
-    const stored = [
-      { id: 'c1', sentence_id: 's1', text: 'The table counts 311, not 411.', details: 'See [[card:abc123]].', author: 'check', check: 'unverified', status: 'open', evidence: 'card:abc123' },
-      { id: 'c2', sentence_id: 's1', text: 'The account is a bot.', details: '', author: 'check', check: 'important-details', status: 'dismissed', resolution: 'known' },
-    ] as unknown as WriteupComment[]
-    const got = openComments(stored, [])
-    expect(got.map((c) => c.id)).toEqual(['c1'])
-    const [c] = got
-    expect([c.text, c.details, c.evidence]).toEqual(['The table counts 311, not 411.', 'See [[card:abc123]].', ['card:abc123']])
-  })
-})
 
 describe("a comment's actions", () => {
   test("✓ resolves a check's comment, once per press; the citation check's tag has no ✓", async () => {
@@ -151,9 +84,75 @@ describe("a comment's actions", () => {
     ])
     expect(opened).toEqual(['t1'])
   })
+})
 
-  test("a thread from the Report's margin is anchored to the comment's passage", () => {
-    const thread: CommentThread = { anchor: 'report:report#s4', passage: 'Most saves came in one week of June.', surface: 'report' }
-    expect(threadText({ ...IMPORTANT, check: null, author: 'claude', details: '' }, 'Claude', thread)).toBe('Most saves came in one week of June.\n\nClaude’s comment k1: Blocking the web also blocks GitHub.')
+// main's chat: a check's comment on Claude's answer opens under the answer from its tinted passage, as this same card
+// (src/chat/AnswerComment.tsx, src/chat/Rows.tsx).
+describe("a check's comment on Claude's answer, in main's chat", () => {
+  const TURN = '5e55a000-0000-4000-8000-00000000a001'
+  const ROW = '5e55a000-0000-4000-8000-00000000a002'
+  const ANSWER = 'The board holds 412 posts. After 19 June there are **0 new messages** to other agents.\n\nThe rest is quiet.'
+  const answerComment = (): AnswerComment => ({
+    id: 'ac1', check: 'important-details', check_name: 'Important details', color: 2, turn: TURN, row: ROW, ref: `answer:${TURN}#s2`,
+    start: 27, end: 90, quote: 'After 19 June there are **0 new messages** to other agents.', text: 'The label could not read 899 revisions.',
+    details: 'See [[card:hidden-revisions]] for them.', status: 'open',
+  })
+  let posts: string[] = []
+  const records: ChatRecord[] = [{ type: 'user', text: 'What happened after 19 June?' }, { type: 'text', delta: ANSWER, uuid: ROW } as ChatRecord, { type: 'done', result: null } as ChatRecord]
+  async function chat(): Promise<HTMLElement> {
+    posts = []
+    vi.stubGlobal('fetch', async (url: unknown, init: RequestInit = {}) => {
+      const u = String(url)
+      if (init.method === 'POST') posts.push(u)
+      const body = u.endsWith('/answer-comments') ? { comments: [answerComment()], running: [] } : u.includes('/answer-comments/') ? { ok: true } : {}
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    const el = await mount(<Rows rows={foldRecords(records)} ws="mini" chat="main" />)
+    await settle()
+    await settle()
+    return el
+  }
+  afterEach(() => vi.unstubAllGlobals())
+
+  test('the tinted passage opens the comment card the canvas draws, at rest: name, statement, Show more and ✓', async () => {
+    const el = await chat()
+    const tint = el.querySelector<HTMLElement>('mark.answer-tint')!
+    expect(el.querySelector('.wu-cm')).toBeNull()
+    await click(tint)
+    const card = el.querySelector<HTMLElement>('.chat-assistant .wu-cm.answer-cm')!
+    expect(card.dataset.comment).toBe('ac1')
+    expect(card.classList.contains('wu-cm-active')).toBe(false)
+    expect(card.querySelector<HTMLElement>('.wu-cm-sq')!.style.background).toBe('var(--label-2)')
+    expect(card.querySelector('.wu-cm-name')?.textContent).toBe('Important details')
+    expect(card.querySelector('.wu-cm-statement')?.textContent).toBe(answerComment().text)
+    expect(card.querySelector('.wu-cm-details')).toBeNull()
+    expect(card.querySelector('.wu-cm-more')?.getAttribute('aria-expanded')).toBe('false')
+    expect(card.querySelector('.wu-cm-resolve')).not.toBeNull()
+    // the head holds the name and ✓ alone: no Close, no Done button, no <details> disclosure
+    expect(card.querySelectorAll('button').length).toBe(2)
+    expect(card.querySelector('details')).toBeNull()
+    expect(el.querySelector('mark.answer-tint-open')).not.toBeNull()
+    // Show more opens the details, their citation a chip
+    await click(card.querySelector('.wu-cm-more'))
+    expect(card.querySelector('.wu-cm-details [data-ref="card:hidden-revisions"]')).not.toBeNull()
+    // a second click on the passage folds the card away
+    await click(el.querySelector('mark.answer-tint'))
+    expect(el.querySelector('.wu-cm')).toBeNull()
+  })
+
+  test('a click makes it active with its field, a click outside lets it go, and ✓ dismisses it and its tint', async () => {
+    const el = await chat()
+    await click(el.querySelector('mark.answer-tint'))
+    const card = () => el.querySelector<HTMLElement>('.wu-cm.answer-cm')!
+    await click(card().querySelector('.wu-cm-statement'))
+    expect(card().classList.contains('wu-cm-active')).toBe(true)
+    expect(card().querySelector('.wu-cm-reply textarea')).not.toBeNull()
+    await act(async () => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+    expect(card().classList.contains('wu-cm-active')).toBe(false)
+    await click(card().querySelector('.wu-cm-resolve'))
+    await settle()
+    expect(posts).toEqual(['/api/ws/mini/answer-comments/ac1/dismiss'])
+    expect(el.querySelector('.wu-cm')).toBeNull()
+    expect(el.querySelector('mark.answer-tint')).toBeNull()
   })
 })

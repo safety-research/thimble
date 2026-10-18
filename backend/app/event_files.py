@@ -1,15 +1,25 @@
-"""Events to main in terminal mode, where no server holds them (events.py has the design of browser mode). Every process
-of the session that posts an event (the MCP shim, the hooks' backend calls, the renderer's acts) writes it to a file in
-the workspace, and main's watcher (plugin/bin/.thimble-watch, the asyncRewake hook) takes it from there:
+"""Events to a session on local transport, where no server holds them (events.py has the design of the server's
+queue). Every process of the session that posts an event (the MCP shim, the hooks' backend calls, the terminal UI's
+acts) writes it to a file in the workspace, and the session's watcher (plugin/bin/.thimble-watch, the asyncRewake hook)
+takes it from there:
 
-  events/queue.jsonl   one line per event, as the model reads it: {id, kind, text, line, said, at}; then, once main's
-                       watcher took it, {taken: id, session, at}, which wakes main with `text`; once main's held hook
-                       printed its `said` in the terminal, {shown: id}. A line for main's terminal that sends main no event
-                       (events.show) is {show: line, at}. Trimmed to the lines still needed once it grows past
-                       TRIM_BYTES.
-  held-events.json     the quiet events (events.QUIET_KINDS) as notes, which ask main for nothing: they ride along with
-                       the next event under MEANWHILE, or with main's next prompt (the held hook), as in browser mode,
-                       whose file this is.
+  events/queue.jsonl   one line per event, as the model reads it: {id, kind, text, line, said, at, to?, riders?,
+                       told_parts?, analyst?}; then, once a watcher took it, {taken: id, session, at}, which wakes that session
+                       with `text`, or one whose session is CANCELLED, for an event the analyst's Stop took back before
+                       any watcher took it; once main's held hook printed its `said` in the terminal, {shown: id}. A
+                       line for main's terminal that sends main no event (events.show) is {show: line, at}. Trimmed to
+                       the lines still needed once it grows past TRIM_BYTES.
+  held-events.json     the quiet events (events.QUIET_KINDS) as notes, which ask for nothing: they ride along with the
+                       next event under MEANWHILE, or with the session's next prompt (the held hook). The server keeps
+                       main's here too. A note of a failed run of one of thimble's agents names the run in `about`, and
+                       goes once main reads that failure in Claude Code's own line (drop_held).
+
+An event names the session it is for in `to` (a peer: a second session that turned thimble on beside a live main), or
+none, which is main's; a session takes only its own (take: `to` that is the session, or a session --rekey moved to it,
+and with no `to` only main). Once a press made main's transport the server, an event for main that a process of the
+session still posts here (a label run that the shim started before the press and that ends after it) waits for thimble's
+server, which takes main's waiting events and held notes into its own queue, in order, at each pull of main's watcher
+(drain, held_for), and marks them taken by SERVER_TAKER, so no local watcher takes them too.
 
 A write takes an exclusive flock on `<file>.lock` beside its file (the form of ledger.locked), re-reads the file and
 appends to it or replaces it whole (a temporary file renamed over it). An append that holds the queue's lock and pops
@@ -23,7 +33,6 @@ import contextlib
 import fcntl
 import json
 import os
-import re
 import secrets
 import time
 from pathlib import Path
@@ -37,13 +46,14 @@ TRIM_BYTES = 256 * 1024
 KEEP_S = 24 * 3600.0  # a taken event's lines are dropped this long after it was posted, once the file is trimmed
 MEANWHILE = "meanwhile:"  # events.MEANWHILE
 SAID = "› "  # events.SAID: opens the analyst's own words in an event's line
-# the kinds of event whose line main's terminal leaves out (said): Claude Code draws a hook's systemMessage under the
-# hook's name (`UserPromptSubmit says: …`), a row no render hook reaches, and the terminal's own rows already say these:
-# a thread's question in its fork's row and its `↳` row (thimble-term), a writer's end in its hand-back's row. A thread's
-# event wakes main, whose turn Claude Code opens with a `● thimble` row no hook removes, so it keeps one short line under
-# that row (short_line) rather than none
-TOLD_IN_CHAT = ("thread", "written")
-SHORT_CHARS = 60  # of a thread's question, or of a message to it, in its short line
+# the kinds of event whose line main's terminal prints (said): the analyst's own words to main from the browser (`› how
+# many…`), which nothing else in the chat says. Claude Code draws a hook's systemMessage as a row of its own under the
+# hook's name (`UserPromptSubmit says: …`), which no render hook reaches, and every other event's line said again what a
+# row of the chat says (bug hunt 9, friction 5): a thread's question its fork's row and its `↳` row, a writer's, a view
+# build's or the orientation's end main's `↳` line and the thimble line, a label's run main's reply
+SHOWN_KINDS = ("main", "card")
+SERVER_TAKER = "server"  # the `session` of a {taken} record the server wrote as it took the event into its queue (drain)
+CANCELLED = "cancelled"  # the `session` of a {taken} record for an event the analyst's Stop took back (cancel)
 
 
 def queue_path(ws: Path) -> Path:
@@ -136,13 +146,48 @@ def _trim(path: Path) -> None:
 # --------------------------------------------------------------------------- held events
 
 
-def held(ws: Path) -> list[dict[str, Any]]:
-    """The quiet events waiting for the next event or main's next prompt, as notes."""
+def _main(ws: Path) -> str:
+    """Main's session in the workspace folder `ws` (subagent_files.main_session), '' when none is recorded."""
+    from . import subagent_files  # noqa: PLC0415 — standard library only
+
+    try:
+        return subagent_files.main_session(Path(ws))
+    except (OSError, ValueError):
+        return ""
+
+
+def _moved_to(ws: Path, sid: str) -> str:
+    from . import subagent_files  # noqa: PLC0415
+
+    try:
+        return subagent_files.moved_to(subagent_files.read(Path(ws)), sid)
+    except (OSError, ValueError):
+        return sid
+
+
+def for_session(ws: Path, rec: dict[str, Any], session: str | None, main: str | None = None) -> bool:
+    """Whether the event or note `rec` is for `session` (module note): its `to` is `session`, or a session --rekey moved
+    to it; with no `to`, it is main's, and `session` must be main's (any session while none is recorded). A `session`
+    of None asks for main's."""
+    to = str(rec.get("to") or "")
+    if to:
+        return bool(session) and (to == session or _moved_to(ws, to) == session)
+    main = _main(ws) if main is None else main
+    return session is None or not main or session == main
+
+
+def held(ws: Path, session: str | None = None, *, everyone: bool = False) -> list[dict[str, Any]]:
+    """The quiet events waiting for the next event or the next prompt of `session` (main's when None), as notes; every
+    session's with `everyone`."""
     try:
         notes = json.loads(held_path(ws).read_text("utf-8"))
     except (OSError, ValueError):
         return []
-    return [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
+    notes = [n for n in notes if isinstance(n, dict)] if isinstance(notes, list) else []
+    if everyone:
+        return notes
+    main = _main(ws)
+    return [n for n in notes if for_session(ws, n, session, main)]
 
 
 def _keep_held(ws: Path, notes: list[dict[str, Any]]) -> None:
@@ -154,21 +199,45 @@ def _keep_held(ws: Path, notes: list[dict[str, Any]]) -> None:
             path.unlink()
 
 
-def hold(ws: Path, note: dict[str, Any]) -> None:
-    """A quiet event (events.QUIET_KINDS) held for the next event or main's next prompt."""
+def hold(ws: Path, note: dict[str, Any], to: str | None = None) -> None:
+    """A quiet event (events.QUIET_KINDS) held for the next event or the next prompt of session `to` (main's when
+    None)."""
     path = held_path(ws)
     with locked(path):
-        _keep_held(ws, [*held(ws), note])
+        _keep_held(ws, [*held(ws, everyone=True), {**note, **({"to": to} if to else {})}])
 
 
-def pop_held(ws: Path) -> list[dict[str, Any]]:
-    """The quiet events waiting, as notes, and no longer waiting."""
+def drop_held(ws: Path, about: str) -> list[dict[str, Any]]:
+    """The held events that tell of the run `about` (events.post's `about`), no longer waiting; the ones that went."""
     path = held_path(ws)
     with locked(path):
-        notes = held(ws)
-        if notes:
-            _keep_held(ws, [])
-    return notes
+        everyone = held(ws, everyone=True)
+        gone = [n for n in everyone if about and n.get("about") == about]
+        if gone:
+            _keep_held(ws, [n for n in everyone if not any(n is g for g in gone)])
+    return gone
+
+
+def pop_held(ws: Path, session: str | None = None) -> list[dict[str, Any]]:
+    """The quiet events waiting for `session` (main's when None), as notes, and no longer waiting."""
+    path = held_path(ws)
+    with locked(path):
+        everyone = held(ws, everyone=True)
+        main = _main(ws)
+        mine = [n for n in everyone if for_session(ws, n, session, main)]
+        if mine:
+            _keep_held(ws, [n for n in everyone if not any(n is m for m in mine)])
+    return [{k: v for k, v in n.items() if k != "to"} for n in mine]
+
+
+def keep_held(ws: Path, notes: list[dict[str, Any]]) -> None:
+    """Main's held notes replaced by `notes` (the server's, events._keep_held); the notes held for other sessions
+    stay."""
+    path = held_path(ws)
+    with locked(path):
+        main = _main(ws)
+        others = [n for n in held(ws, everyone=True) if not for_session(ws, n, None, main)]
+        _keep_held(ws, [*others, *notes])
 
 
 def held_line(note: dict[str, Any]) -> str:
@@ -178,8 +247,11 @@ def held_line(note: dict[str, Any]) -> str:
 
 
 def meanwhile(notes: list[dict[str, Any]]) -> str:
-    """Held events as MEANWHILE and one line each; '' for none."""
-    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) if notes else ""
+    """Held events as MEANWHILE and one line each, then the later parts of main's guidance they carry
+    (disclose.told); '' for none."""
+    from . import disclose  # noqa: PLC0415 — standard library only at import time
+
+    return "\n".join([MEANWHILE, *(held_line(h) for h in notes)]) + disclose.told(notes) if notes else ""
 
 
 def joined(notes: list[dict[str, Any]]) -> str:
@@ -188,56 +260,39 @@ def joined(notes: list[dict[str, Any]]) -> str:
 
 
 def said(notes: list[dict[str, Any]]) -> str:
-    """The lines main's held hook prints in the terminal for these events: joined, those of TOLD_IN_CHAT as their short
-    line, or left out."""
+    """The lines main's held hook prints in the terminal for these events: those of SHOWN_KINDS, the analyst's own words,
+    joined; none for any other event."""
     out = []
     for n in notes:
         kind = str((n.get("meta") or {}).get("kind") or "")
-        line = short_line(n) if kind in TOLD_IN_CHAT else str(n.get("terminal") or "")
+        line = str(n.get("terminal") or "") if kind in SHOWN_KINDS else ""
         if line:
             out.append(line)
     return "\n".join(out)
 
 
-def short_line(note: dict[str, Any]) -> str:
-    """The one short line for an event of TOLD_IN_CHAT: a thread's question in quotation marks (`new thread: "Make a
-    small table card…"`), or a message to a thread after its first question (`thread "Make a small…": "And on 19
-    June?"`); '' for a writer's end, whose hand-back's row says it and which opens no `● thimble` row."""
-    if str((note.get("meta") or {}).get("kind") or "") != "thread":
-        return ""
-    line = str(note.get("terminal") or "").removeprefix(SAID)
-    if line.startswith("new thread: "):
-        return f'new thread: "{_cut(line.removeprefix("new thread: "), SHORT_CHARS)}"'
-    m = re.match(r'^thread (\u201c[^\u201d]*\u201d|"[^"]*"): (.+)$', line)
-    return f'thread {m.group(1)}: "{_cut(m.group(2), SHORT_CHARS)}"' if m else _cut(line, SHORT_CHARS)
-
-
-def _cut(text: str, n: int) -> str:
-    """`text` cut to `n` characters at a word, with an ellipsis right after the last word kept."""
-    text = " ".join(text.split())
-    if len(text) <= n:
-        return text
-    head = text[: n - 1]
-    word = head.rsplit(" ", 1)[0]
-    return (word if len(word) > n // 2 else head).rstrip(" ,;:.") + "\u2026"
-
-
 # --------------------------------------------------------------------------- the queue
 
 
-def append(ws: Path, note: dict[str, Any], render: Callable[[dict[str, Any]], str]) -> dict[str, Any]:
-    """An event for main (events.post in terminal mode): the note ({content, meta, terminal}) with the held events
-    riding along under MEANWHILE, as the model reads it (`render`, events.render), appended to the queue. The record."""
+def append(ws: Path, note: dict[str, Any], render: Callable[[dict[str, Any]], str],
+           to: str | None = None) -> dict[str, Any]:
+    """An event for session `to` (main's when None; events.post on local transport): the note ({content, meta,
+    terminal}) with the session's held events riding along under MEANWHILE, as the model reads it (`render`,
+    events.render), appended to the queue. The record keeps those held events (`riders`), the names of the later
+    parts of main's guidance the note carries (`told_parts`), which a Stop gives back (cancel), and whether it is the
+    analyst's own message (`analyst`), which a Stop takes back."""
     path = queue_path(ws)
     with locked(path):
-        riders = pop_held(ws)
+        riders = pop_held(ws, to)
         shown = said([note, *riders])
         if riders:
             note = {**note, "content": f"{note.get('content') or ''}\n\n{meanwhile(riders)}",
                     "terminal": joined([note, *riders])}
         meta = note.get("meta") or {}
         rec = {"id": str(meta.get("event") or secrets.token_hex(4)), "kind": str(meta.get("kind") or ""),
-               "text": render(note), "line": str(note.get("terminal") or ""), "said": shown, "at": time.time()}
+               "text": render(note), "line": str(note.get("terminal") or ""), "said": shown, "at": time.time(),
+               **({"to": to} if to else {}), **({"riders": riders} if riders else {}),
+               **({k: note[k] for k in ("told_parts", "analyst") if note.get(k)})}
         _append(path, rec)
     return rec
 
@@ -250,25 +305,60 @@ def show(ws: Path, line: str) -> None:
             _append(path, {"show": line, "at": time.time()})
 
 
-def waiting(ws: Path) -> list[dict[str, Any]]:
-    """The events main's watcher has not taken yet, oldest first."""
+def waiting(ws: Path, session: str | None = None, *, everyone: bool = False) -> list[dict[str, Any]]:
+    """The events for `session` (main's when None; every session's with `everyone`) that no watcher has taken yet,
+    oldest first."""
     recs = _lines(queue_path(ws))
     taken = {str(r["taken"]) for r in recs if r.get("taken")}
-    return [r for r in recs if r.get("id") and r.get("text") and str(r["id"]) not in taken]
+    left = [r for r in recs if r.get("id") and r.get("text") and str(r["id"]) not in taken]
+    if everyone:
+        return left
+    main = _main(ws)
+    return [r for r in left if for_session(ws, r, session, main)]
 
 
 def take(ws: Path, session: str) -> dict[str, Any] | None:
-    """The oldest event main's watcher has not taken, now taken by main's session `session`; None when none waits."""
+    """The oldest event for session `session` (module note) that no watcher has taken, now taken by it; None when none
+    waits."""
     path = queue_path(ws)
     if not path.exists():
         return None
     with locked(path):
-        left = waiting(ws)
+        left = waiting(ws, session)
         if not left:
             return None
         rec = left[0]
         _append(path, {"taken": rec["id"], "session": session, "at": time.time()})
     return rec
+
+
+def cancel(ws: Path) -> list[dict[str, Any]]:
+    """The analyst's own messages to main (`analyst`) that no watcher has taken, oldest first, each now taken by
+    CANCELLED, so that no watcher and no server takes them (the analyst's Stop, events.cancel_waiting); [] when none
+    waits."""
+    path = queue_path(ws)
+    if not path.exists():
+        return []
+    with locked(path):
+        gone = [r for r in waiting(ws) if r.get("analyst")]
+        if gone:
+            now = time.time()
+            _append(path, *({"taken": r["id"], "session": CANCELLED, "at": now} for r in gone))
+    return gone
+
+
+def drain(ws: Path) -> list[dict[str, Any]]:
+    """Main's events that no watcher has taken, oldest first, each now taken by the server (SERVER_TAKER), which queues
+    them for main's watcher's pull (module note); [] when none waits."""
+    path = queue_path(ws)
+    if not path.exists():
+        return []
+    with locked(path):
+        left = waiting(ws)
+        if left:
+            now = time.time()
+            _append(path, *({"taken": r["id"], "session": SERVER_TAKER, "at": now} for r in left))
+    return left
 
 
 def unshown(ws: Path, session: str) -> list[str]:
@@ -304,6 +394,7 @@ def posted(ws: Path, event_id: str) -> bool:
     return bool(event_id) and any(r.get("id") == event_id for r in _lines(queue_path(ws)))
 
 
-def queued_words(ws: Path) -> list[str]:
-    """The analyst's words of the events waiting for main (their lines after SAID), for the statusline."""
-    return [str(r.get("line") or "")[len(SAID):] for r in waiting(ws) if str(r.get("line") or "").startswith(SAID)]
+def queued_words(ws: Path, session: str | None = None) -> list[str]:
+    """The analyst's words of the events waiting for `session` (main's when None; their lines after SAID), for the
+    statusline."""
+    return [str(r.get("line") or "")[len(SAID):] for r in waiting(ws, session) if str(r.get("line") or "").startswith(SAID)]

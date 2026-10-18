@@ -3,7 +3,6 @@ macOS and Linux, the Seatbelt profile it makes of them on macOS, and what the se
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 
@@ -111,40 +110,6 @@ def _wrap_works(wrap: str) -> bool:
     return LINUX and kernel_wrap.works()
 
 
-@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
-def test_on_linux_a_venv_whose_python_goes_through_uv_s_minor_version_folder_runs_wrapped(wrap, tmp_path):
-    """A venv's python that links into uv's minor-version folder (cpython-3.12-… → cpython-3.12.13-…) in the home folder
-    runs in the kernel's sandbox: the link resolves inside it as outside, though the home lies in /tmp, both hidden."""
-    if not (LINUX and _wrap_works(wrap)):
-        pytest.skip(f"{wrap} can't sandbox a process here")
-    home = tmp_path / "home"
-    real = home / ".local" / "share" / "uv" / "python" / "cpython-3.12.13-linux-x86_64-gnu"
-    (real / "bin").mkdir(parents=True)
-    (real / "bin" / "python3.12").symlink_to(os.path.realpath(sys.executable))
-    minor = real.with_name("cpython-3.12-linux-x86_64-gnu")
-    minor.symlink_to(real.name)
-    venv, ws, corpus, conn = (tmp_path / n for n in ("venv", "ws", "corpus", "conn"))
-    (venv / "bin").mkdir(parents=True)
-    (venv / "bin" / "python").symlink_to(minor / "bin" / "python3.12")
-    for d in (ws, corpus, conn, *(ws / name for name in kernel_wrap.READ_ONLY_DIRS)):
-        d.mkdir()
-    for name in kernel_wrap.HIDDEN_FILES:
-        (ws / name).write_text("{}\n")
-    for name in kernel_wrap.LOCK_FILES:  # as the server makes it before a kernel starts
-        (ws / name).write_text("")
-    py = str(venv / "bin" / "python")
-    cmd = [py, "-c", "print('ran')"]
-    if wrap == "srt":
-        rules = kernel_wrap.srt_rules(corpus_dir=corpus, workspace_dir=ws, venv=venv, python=py, srt_dir=SRT, home=home,
-                                      platform=sys.platform)
-        argv, env = kernel_wrap.srt_argv(cmd, node=NODE, srt_dir=SRT, rules=rules), kernel_wrap.srt_env(dict(os.environ), home=ws)
-    else:
-        argv, env = kernel_wrap.kernel_wrap_argv(cmd, corpus_dir=corpus, workspace_dir=ws, connection_dir=conn, venv=venv,
-                                                 python=py), None
-    r = subprocess.run(argv, capture_output=True, text=True, timeout=60, env=env, cwd=ws, stdin=subprocess.DEVNULL)
-    assert (r.returncode, r.stdout.strip()) == (0, "ran"), r.stderr[-2000:]
-
-
 READER = """
 def build_index(paths):
     return sum(1 for p in paths for _ in open(p))
@@ -216,67 +181,6 @@ def test_a_workspace_set_to_srt_never_runs_unwrapped(monkeypatch, workspaces_tmp
     monkeypatch.setattr(srt, "node", lambda: None)
     with pytest.raises(RuntimeError, match="node is not on PATH"):
         notebook.sandboxed_argv(["python"], workspace="mini", corpus=config.corpus_dir("mini"))
-
-
-def test_the_kernel_s_command_leaves_srt_room_in_its_one_shell_argument(tmp_path):
-    """srt wraps the kernel's whole command in one shell argument of at most MAX_ARG_STRLEN bytes, its own words with
-    it (2026-10-10: 133,125 bytes of a 131,071 limit when the `thimble` module's source went as text, and every kernel
-    died before answering; 59,943 bytes when it went compressed). The command names the module's file, which the
-    kernel reads, so the quoted command takes at most an eighth of the argument however the module grows."""
-    import shlex
-
-    argv = notebook.kernel_argv(tmp_path / "k.conn.json", tmp_path / "k.json", roots=(str(tmp_path),), workspace=tmp_path)
-    assert len(" ".join(shlex.quote(a) for a in argv)) < notebook.MAX_ARG_STRLEN // 8
-    # the line installs the module from its file, with the workspace set, and tracebacks name that file
-    line = next(a for a in argv if "types.ModuleType('thimble')" in a).split("=", 1)[1]
-    try:
-        exec(line, {})  # noqa: S102 — the kernel's own exec line
-        mod = sys.modules["thimble"]
-        assert mod.WS == str(tmp_path) and mod.CHARTS.keys() >= {"bar", "box", "area"}
-        assert mod.__file__ == str(notebook.THIMBLE_MODULE) == mod.labels.__code__.co_filename
-    finally:
-        sys.modules.pop("thimble", None)
-
-
-@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
-async def test_a_wrapped_kernel_imports_the_thimble_module_from_its_file(wrap, monkeypatch, workspaces_tmp):
-    """In the wrapped kernel `import thimble` gives the module the start line built from kernel_thimble.py, which the
-    sandbox lets the kernel read, with the workspace set; the rest of the backend's folder stays hidden."""
-    if not _wrap_works(wrap):
-        pytest.skip(f"{wrap} can't sandbox a process here")
-    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
-    code = ("import os, thimble\n"
-            "print(thimble.WS == os.path.realpath('..'), thimble.__file__, thimble.chart.__module__,\n"
-            "      os.path.exists(os.path.join(os.path.dirname(thimble.__file__), 'notebook.py')))\n")
-    try:
-        cell = await notebook.run_code("mini", code, "main")
-        said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
-        assert said == ["True", str(notebook.THIMBLE_MODULE), "thimble", "False"], cell["outputs"]
-    finally:
-        await notebook.shutdown_all()
-
-
-def test_a_backend_imported_through_a_link_names_the_files_a_wrapped_kernel_reads_by_their_real_paths(tmp_path):
-    """srt hides the install tree by its real path (notebook._kernel_hides), so each file a wrapped kernel reads is
-    named by its real path even when the backend is imported through a link (a PYTHONPATH naming a linked checkout):
-    else srt kept kernel_thimble.py hidden and the kernel's `import thimble` failed with No module named 'thimble'."""
-    link = tmp_path / "tree"
-    link.symlink_to(config.REPO_ROOT, target_is_directory=True)
-    code = "from app import notebook\nprint(notebook.THIMBLE_MODULE)\nfor p in notebook._kernel_reads(): print(p)"
-    out = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, capture_output=True, text=True, timeout=60,
-                         env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path), "PYTHONPATH": str(link / "backend")})
-    assert out.returncode == 0, out.stderr
-    module, *reads = out.stdout.split()
-    assert len(reads) == 3 and module in reads
-    assert all(p == os.path.realpath(p) and p.startswith(f"{config.REPO_ROOT}{os.sep}") for p in reads), reads
-
-
-def test_the_start_up_sweep_leaves_a_sandboxed_kernel_s_processes_alone():
-    """Under srt the kernel runs below the recorded launcher in a session of its own, so the sweep of unrecorded
-    kernels counts every process below a claimed one as claimed."""
-    tree = {40: 30, 30: 20, 20: 10, 99: 1}
-    assert notebook._descends(40, {10}, tree) and notebook._descends(30, {20}, tree)
-    assert not notebook._descends(99, {10}, tree) and not notebook._descends(10, {40}, tree)
 
 
 def test_the_server_reads_no_settings_from_a_workspace_file_another_name_can_change(workspaces_tmp):

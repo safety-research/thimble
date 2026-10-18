@@ -1,11 +1,11 @@
 """Terminal views: a view's view.term.js drawn in thimble-term's panel, as its view.html is drawn in the browser.
 
-A view built in terminal mode has view.term.js beside its reader.py: a program the view builder writes on the terminal
-view kit (term_kit/kit.mjs, docs/terminal-views.md). The program runs sandboxed, as a view's page runs in a sandboxed
-iframe: one process per open view, alive while the view is open, which reads no file, opens no socket and starts no
-process. It hears the panel's size, the theme, what thimble keeps for the view, the analyst's keys and clicks and the
-answers of its reader queries, and answers each with a frame: rows of styled runs, their hot regions, the keys it binds
-and the words of its hint row.
+A view built for the terminal (its build's target `term-page`, views.py) has view.term.js beside its reader.py: a
+program the view builder writes on the terminal view kit (term_kit/kit.mjs, docs/terminal-views.md). The program runs
+sandboxed, as a view's page runs in a sandboxed iframe: one process per open view, alive while the view is open, which
+reads no file, opens no socket and starts no process. It hears the panel's size, the theme, what thimble keeps for the
+view, the analyst's keys and clicks and the answers of its reader queries, and answers each with a frame: rows of styled
+runs, their hot regions, the keys it binds and the words of its hint row.
 
     thimble-term ──POST /open /event /close──▶ host (this module, `thimble view host`) ──stdin──▶ sandboxed program
                  ◀────── stdout: frames ──────                                       ◀──stdout──  (runtime.mjs + kit)
@@ -71,7 +71,7 @@ SYNC_WAIT_S = 2.0  # how long a sync waits for the program's answer
 # the longest message a program takes (runtime.mjs LINE_MAX): a reader answer longer than this reaches the program as an
 # error that says to page it, rather than being dropped, which would leave the view loading for good
 ANSWER_MAX = 16 * 1024 * 1024
-# the view checks' draws of a view built in terminal mode (views.term_draws): its columns and theme as it opens, each
+# the view checks' draws of a view built for the terminal (views.term_draws): its columns and theme as it opens, each
 # CHECK_ROWS tall, as a laptop's terminal and a large screen show the panel
 CHECK_DRAWS = ((120, "light"), (120, "dark"), (200, "light"), (200, "dark"))
 CHECK_ROWS = 40
@@ -85,8 +85,9 @@ IDLE_S = 600.0  # the host ends this long after its last view closed
 LINE_MAX = 8 * 1024 * 1024
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ")
 TOKEN_HEADER = "x-thimble-token"
-NOT_TERMINAL = ("This view was built in browser mode, so only the browser draws it. To see it, quit, run `thimble mode "
-                "browser`, and start `thimble` again in this folder.")
+# what the panel shows while the page a view lacks for the terminal is built (views.ensure_page, which the panel's
+# `thimble act view-term-page` asks for)
+BUILDING = "building the terminal page…"
 
 
 class TermViewError(Exception):
@@ -102,8 +103,9 @@ class SandboxError(TermViewError):
 
 def term_view(c: str, slug: str, *, live: bool = False) -> tuple[dict[str, Any], str]:
     """(the view as it last passed its checks, its view.term.js) for workspace `c`; TermViewError for a view that is
-    not there, never passed, or has no view.term.js (built in browser mode). `live`: the view's live folder, its draft,
-    which the view's checks draw (draw_check)."""
+    not there or never passed, and for one with no view.term.js yet (built for the browser), whose build the panel asks
+    for (`thimble act view-term-page`: views.ensure_page in the process that follows builds, not this host) while it
+    shows BUILDING. `live`: the view's live folder, its draft, which the view's checks draw (draw_check)."""
     from . import views  # noqa: PLC0415
 
     view = views.read_view(c, slug) if live else views.read_built(c, slug)
@@ -111,7 +113,7 @@ def term_view(c: str, slug: str, *, live: bool = False) -> tuple[dict[str, Any],
         raise TermViewError(f"there is no view {slug!r}")
     path = Path(view["dir"]) / VIEW_TERM
     if not path.is_file():
-        raise TermViewError(NOT_TERMINAL)
+        raise TermViewError(BUILDING)
     return view, path.read_text("utf-8")
 
 
@@ -123,8 +125,10 @@ def has_term(view: dict[str, Any] | None) -> bool:
 
 def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]]:
     """Every label over files as the kit's Color by lists it: views.label_definition's {id, name, kind, text, spec,
-    scope, values: [{name, highlight, meaning, n}]}, with `here` for a label whose scope holds one of the view's files
-    and `on` for one the analyst turned on in Files or filters by, which the view opens colored by, as in the browser."""
+    scope, values: [{name, highlight, meaning, n}]}, with `here` for a label whose scope holds one of the view's files,
+    `on` for one the analyst turned on in Files or filters by, and for one on and here `marking`, whether it gives some
+    record of the view's files a value it colors by. The view opens colored by a label on, here and marking, as in the
+    browser, else on its own field: a label that marks none of them (its run found nothing) colors no row."""
     from . import concepts, views  # noqa: PLC0415
 
     try:
@@ -136,6 +140,7 @@ def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]
         f = concepts.read_filters(ws).get("files") or {}
     except Exception:  # noqa: BLE001
         f = {}
+    files = set(claimed) if claimed is not None else None
     out: list[dict[str, Any]] = []
     for k in ks:
         if k.get("unit") not in concepts.FILE_UNITS or k.get("marks") == "file":
@@ -148,8 +153,23 @@ def labels_list(c: str, claimed: list[str] | None = None) -> list[dict[str, Any]
         globs = [g for g in re.split(r",\s+", glob) if g.strip()]
         d["here"] = not globs or claimed is None or any(views.glob_matches(p, g) for g in globs for p in claimed)
         d["on"] = bool(k.get("shown") or f.get("concept") == k["id"])
+        if d["on"] and d["here"]:
+            d["marking"] = _marking(ws, k["id"], d, files)
         out.append(d)
     return out
+
+
+def _marking(ws: Path, concept_id: str, d: dict[str, Any], files: set[str] | None) -> bool:
+    """Whether label `d` gives a record of `files` (of any file for None, before the corpus is walked) one of the values
+    it colors by, those it highlights; true while its rows cannot be read yet, as before it was asked."""
+    from . import concepts  # noqa: PLC0415
+
+    values = d.get("values") or []
+    lit = {str(v.get("name")) for v in values if v.get("highlight", True)} if values else None
+    try:
+        return concepts.marks_some(ws, concept_id, files, lit) is not False
+    except Exception:  # noqa: BLE001 — a label whose rows cannot be read may mark them
+        return True
 
 
 def probe_label() -> dict[str, Any]:
@@ -161,7 +181,7 @@ def probe_label() -> dict[str, Any]:
     return {"id": kernel_thimble.PROBE_ID, "name": name, "kind": "", "text": "", "spec": "", "scope": "",
             "values": [{"name": name, "highlight": True, "n": None,
                         "meaning": f"the checks' test label: about one record in {views.PROBE_EVERY}"}],
-            "here": True, "on": True}
+            "here": True, "on": True, "marking": True}
 
 
 def labels_signature(c: str) -> str:
@@ -238,7 +258,7 @@ def denied_roots() -> list[Path]:
 
 def node_problem() -> str:
     """Why no view program runs on this machine for want of Node, '' when its Node is NODE_MIN or newer: what a view
-    build in terminal mode needs (views.build_problem_for). The line reaches the orientation and main too, so it names
+    build for the terminal needs (views.build_problem_for). The line reaches the orientation and main too, so it names
     what is missing and no command."""
     from . import srt  # noqa: PLC0415
 

@@ -22,16 +22,17 @@ One fence for main and its agents. thimble's agents are subagents of main and ru
 adds no rule, working directory or sandbox to main's session, only the hooks module's denies (module_rules). So the
 orientation's `web`, `network` and `data` are main's keys, which every agent shares; the other agents keep only `web:
 off`, which keeps that one agent off the web tools. Code tickets' agents are subagents of main too. The dev agent alone
-keeps its own permission mode, fast mode and fence keys, for `thimble fix` and an extension's program that runs the dev
-agent, which stay jobs of the server.
+keeps its own permission mode and fence keys, for an extension's program that runs the dev agent, a job of the server.
 Installs follow Claude Code's permission mode: thimble adds no rule for them. The web tools do too at `web` "ask":
 Manual asks for them as Claude Code does, and auto mode's classifier judges them. An `ask` rule would also ask in auto
 mode, since Claude Code obeys an explicit ask rule there (live check: the checks asked three times for the web in auto
 mode). The keys earlier builds read for this,
-`installs`, and each agent's own `fast` and `permissionMode` and `web` other than "off" but the dev agent's
-(IGNORED_KEYS), are read and ignored, so an earlier config stays valid; `ignored` lists those a file holds, and a save
-from the Settings pane drops them. `suggest` (the viewer suggestion's call) and `refusal` (the model and effort a refused classifier call runs
-again on, which `off` turns off) are classifier rows.
+`installs`, each agent's own `fast` (no agent has a fast mode of its own: each runs as a subagent of main), and
+`permissionMode` and `web` other than "off" but the dev agent's (IGNORED_KEYS), are read and ignored, so an earlier
+config stays valid; `ignored` lists those a file holds, and a save from the Settings pane drops them. `labels` and
+`suggest` (the viewer suggestion) are model calls through main's own API client (model_call.py), `cardCheck` is the
+card check's `thimble:call` subagent of main, which reads the card's picture, and `refusal` is the model and effort a
+refused call runs on again, which `off` turns off.
 
 Extensions' programs. An extension's program that runs an agent or one of its tasks (harness.py) is no subagent of main:
 it runs in a box of its own and keeps its power. So it takes its agent's own `env`, `sandbox`, `network` and `data`
@@ -70,6 +71,7 @@ SUBAGENT_ROLES = ("orientation", "critic", "writer", "checks")  # the agents tha
 # the keys of each agent that earlier builds read and this one reads and ignores (module note, one fence)
 IGNORED_KEYS: dict[str, tuple[str, ...]] = {
     **{a: ("fast", "permissionMode") for a in ("orientation", "critic", "writer", "checks")},
+    **{a: ("fast",) for a in ("dev", "labels", "cardCheck", "suggest")},
 }
 IGNORED_TOP = ("installs",)  # top-level keys read and ignored
 # the keys of an agent that runs as a subagent of main which only an extension's program running the agent reads (module
@@ -79,6 +81,8 @@ PROGRAM_DEFAULTS = {"env": [], "sandbox": "on", "network": "on", "data": "ask"}
 # the prompt file under prompts/ that an agent's `prompt` replaces
 PROMPT_FILES = {"orientation": "orient", "critic": "critic", "writer": "writer", "checks": "check", "dev": "dev",
                 "labels": "labels", "cardCheck": "card-check"}
+# the keys of `features` (features.BLOCK_KEYS): turn on when Claude reads data, labels, checks, citation marks, coverage
+FEATURES = ("labels", "checks", "citationMarks", "coverage")
 SANDBOX_USES = ("when-available", "never")
 BROWSERS = ("system", "bundled", "off")
 # `askKey`: the key held with a click to ask about what it points at in the browser (pointer/CmdPointer), "meta" (⌘, or
@@ -93,6 +97,12 @@ ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 # (card_wait_s), at most half the permission hook's own timeout, so the hook is never ended first
 CARD_WAIT_MINUTES = 10
 CARD_WAIT_MAX = permission_hook.TIMEOUT // 120
+# `modelCalls`: how many model calls thimble runs at once through the analyst's Claude Code session, at most (model_call):
+# a prompt label's batches, a label draft, a view fit, a viewer suggestion, a program's ask, a view proposal's fork. The
+# server path before 0.9.0 ran 24; 12 stays under Claude Code's 20 background agents' worth of requests and leaves the
+# analyst's own session room, and a run that the API pushes back on (429, 529) halves its own share (concepts)
+MODEL_CALLS = 12
+MODEL_CALLS_MAX = 64
 SERVER_JSON = "server.json"  # in thimble's home: the server's address and the token of its local API (hook_auth)
 MAIN_MODES = "main-modes.json"  # in thimble's home: the permission mode main last reported, per workspace (session.note_mode)
 SESSION_KEY = "session.key"  # in thimble's home: the secret of the sessions' tokens (hook_auth.SESSION_KEY)
@@ -108,7 +118,7 @@ ASK_WITHOUT_SANDBOX = ("dev",)
 
 
 def _session_agent(web: str, network: str = "on") -> dict[str, Any]:
-    return {"model": None, "effort": None, "fast": None, "permissionMode": None, "web": web, "network": network,
+    return {"model": None, "effort": None, "permissionMode": None, "web": web, "network": network,
             "sandbox": "on", "data": "ask", "env": [], "memory": "inherit", "prompt": None}
 
 
@@ -124,6 +134,7 @@ DEFAULTS: dict[str, Any] = {
     "sandbox": {"use": "when-available", "enforce": False},
     "browser": None,
     "cardWait": CARD_WAIT_MINUTES,
+    "modelCalls": MODEL_CALLS,
     "askKey": None,
     "extensions": {},
     "agents": {
@@ -134,16 +145,19 @@ DEFAULTS: dict[str, Any] = {
         "critic": _subagent(None),
         "writer": _subagent(None),
         "checks": _subagent(None),
-        "dev": _session_agent("off"),  # its `fast` is `thimble fix`'s (config.FAST_OF_TICKETS)
+        "dev": _session_agent("off"),
         # `network`, `data` and `env` reach only an extension's program that runs one of their tasks (harness.py)
-        **{a: {"model": None, "effort": None, "fast": None, "network": "on", "data": "ask", "env": [], "prompt": None}
+        **{a: {"model": None, "effort": None, "network": "on", "data": "ask", "env": [], "prompt": None}
            for a in CALLS},
-        "suggest": {"model": None, "effort": None, "fast": None},
+        "suggest": {"model": None, "effort": None},
         "refusal": {"model": None, "effort": None, "off": None},
     },
     # `views.propose`: whether thimble shows the analyst view proposals, after a turn and for a file type
     # (propose_views); null is on, and the view proposal card's Don't ask again sets it false
     "views": {"propose": None},
+    # the feature switches of features.py that 0.8.0 had no key for, each true, false or null (on); set for the whole
+    # machine, in the file in thimble's home (feature)
+    "features": {k: None for k in FEATURES},
 }
 # `agents.cardCheck.auto`: whether the card check reads each new card by itself (card_check.auto); null is on
 DEFAULTS["agents"]["cardCheck"]["auto"] = None
@@ -158,16 +172,35 @@ EXTENSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # the extensions thimble ships under a new name, by their old name: a config's settings of an old name are the new one's
 RENAMED_EXTENSIONS = {"swarm": "swarm-orient"}
 
+# in thimble's home: the press's sign-in redirect files (open_cmd) and each session's activation files (activate.py:
+# the session marker, its guide state and its guide marker, GUIDE_MARKER); LINKS_DIR, below, holds the one-time links of
+# a remote press
+OPEN_DIR = "open"
+UP_DIR = "up"
+GUIDE_MARKER = "guide-marker"
+
+
 def private_paths() -> list[str]:
     """The files the hooks module keeps from file tools, and an extension program's box from the program: the local
-    API's token, the key the sessions' tokens are signed with, and the hashes of the browsers signed in
-    (hook_auth.PAIRED_FILE)."""
-    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, PAIRED_JSON)]
+    API's token, the key the sessions' tokens are signed with, the hashes of the browsers signed in
+    (hook_auth.PAIRED_FILE), the press's sign-in files and one-time links, and the sessions' activation files, whose
+    guide markers prove thimble's guidance (guide.py)."""
+    return [str(global_file().parent / name) for name in (SERVER_JSON, SESSION_KEY, PAIRED_JSON, OPEN_DIR, LINKS_DIR,
+                                                          UP_DIR)]
+
+
+PRIVATE_FOLDERS = (OPEN_DIR, "links", UP_DIR)  # the folders among private_paths, whose files the rules cover too
 
 
 def private_rules() -> list[str]:
-    """Claude Code's deny rules for reading and editing private_paths, which also cover Bash commands such as `cat`."""
-    return [rule for p in private_paths() for rule in (f"Read(/{p})", f"Edit(/{p})")]
+    """Claude Code's deny rules for reading and editing private_paths, which also cover Bash commands such as `cat`; a
+    folder's rules cover the files under it too (`/**`)."""
+    out: list[str] = []
+    for p in private_paths():
+        out += [f"Read(/{p})", f"Edit(/{p})"]
+        if Path(p).name in PRIVATE_FOLDERS:
+            out += [f"Read(/{p}/**)", f"Edit(/{p}/**)"]
+    return out
 
 
 class ConfigError(RuntimeError):
@@ -302,6 +335,23 @@ def card_wait_s() -> float:
     return (got if got is not None else CARD_WAIT_MINUTES) * 60.0
 
 
+def _model_calls(value: Any) -> int | None:
+    """A `modelCalls` value, None when it is not a whole number from 1 to MODEL_CALLS_MAX."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MODEL_CALLS_MAX:
+        return None
+    return value
+
+
+def model_calls() -> int:
+    """How many model calls run at once, at most (model_call): `modelCalls` of the file in thimble's home, else
+    MODEL_CALLS, also when the file has an error."""
+    try:
+        got = _model_calls(_raw(global_file()).get("modelCalls"))
+    except ConfigError:
+        got = None
+    return got if got is not None else MODEL_CALLS
+
+
 def ask_key() -> str:
     """The key held with a click to ask in the browser: `askKey` of the file in thimble's home, else "meta", also when
     the file has an error."""
@@ -317,6 +367,14 @@ def propose_views(c: str | None) -> bool:
     `views.propose` is false, and on while the config has an error, as the other keys then take their defaults
     (load_or_defaults)."""
     return load_or_defaults(c)[0]["views"].get("propose") is not False
+
+
+def feature(c: str | None, key: str) -> bool:
+    """Whether the feature switch `key` of `features` (FEATURES) is on: not false in the file in thimble's home, and on
+    while the config has an error, as the other keys then take their defaults (load_or_defaults)."""
+    if key not in FEATURES:
+        raise ValueError(f"{key!r} is not a key of features; one of {', '.join(FEATURES)}")
+    return (load_or_defaults(c)[0].get("features") or {}).get(key) is not False
 
 
 def _words(values: tuple[str, ...]) -> str:
@@ -344,7 +402,15 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
                            f"{', '.join(known)}{more}")
         return True
 
-    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "askKey", "extensions", "agents", "views"))
+    keys("", data, (*IGNORED_TOP, "sandbox", "browser", "cardWait", "modelCalls", "askKey", "extensions", "agents",
+                    "views", "features"))
+    if "features" in data:
+        if scope != "global":
+            out.append("features are set for the whole machine, in the config in thimble's home, not per workspace")
+        elif keys("features", data["features"], FEATURES):
+            for k, v in data["features"].items():
+                if k in FEATURES and not isinstance(v, (bool, type(None))):
+                    out.append(f"features.{k} is {json.dumps(v)}; it takes true, false or null")
     if "browser" in data:
         if scope != "global":
             out.append("browser is set for the whole machine, in the config in thimble's home, not per workspace")
@@ -356,6 +422,12 @@ def _problems(data: dict[str, Any], scope: str, base: Path) -> list[str]:
         elif data["cardWait"] is not None and _card_wait(data["cardWait"]) is None:
             out.append(f"cardWait is {json.dumps(data['cardWait'])}; it takes a number of minutes above 0 and up to "
                        f"{CARD_WAIT_MAX}, or null")
+    if "modelCalls" in data:
+        if scope != "global":
+            out.append("modelCalls is set for the whole machine, in the config in thimble's home, not per workspace")
+        elif data["modelCalls"] is not None and _model_calls(data["modelCalls"]) is None:
+            out.append(f"modelCalls is {json.dumps(data['modelCalls'])}; it takes a whole number from 1 to "
+                       f"{MODEL_CALLS_MAX}, or null")
     if "askKey" in data:
         if scope != "global":
             out.append("askKey is set for the whole machine, in the config in thimble's home, not per workspace")
@@ -419,7 +491,7 @@ def _agent_problems(name: str, conf: Any, base: Path) -> list[str]:
             efforts = config.role_efforts(ROLES[name]) if name in ROLES and k == "effort" else config.ROLE_EFFORTS
             if v not in efforts and not (name == "orientation" and k == "effort" and v in config.LEGACY_EFFORTS):
                 out.append(f"{at} is {json.dumps(v)}; it takes {_words(tuple(e for e in efforts if e))} or null")
-        elif k in ("fast", "auto", "off"):
+        elif k in ("auto", "off"):
             if not isinstance(v, bool):
                 out.append(f"{at} is {json.dumps(v)}; it takes true, false or null")
         elif k == "permissionMode":
@@ -604,11 +676,12 @@ def set_extension_enabled(name: str, on: bool) -> None:
 
 
 def leaves(patch: dict[str, Any], at: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], Any]]:
-    """Each (path, value) of a nested patch; an object under `agents.<name>`, `sandbox` or `views` is walked, any other
-    value is a leaf."""
+    """Each (path, value) of a nested patch; an object under `agents.<name>`, `sandbox`, `views` or `features` is walked,
+    any other value is a leaf."""
     out: list[tuple[tuple[str, ...], Any]] = []
     for k, v in patch.items():
-        if isinstance(v, dict) and (len(at) < 2 and k in ("agents", "sandbox", "views") or at == ("agents",)):
+        if isinstance(v, dict) and (len(at) < 2 and k in ("agents", "sandbox", "views", "features")
+                                    or at == ("agents",)):
             out.extend(leaves(v, (*at, k)))
         else:
             out.append(((*at, k), v))
@@ -660,9 +733,8 @@ _STRICT = {"manual": 0, "auto": 1, "bypass": 2}
 
 def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]:
     """An earlier build's `models` (less main's) and `permission_modes` as settings of this file: each role's model and
-    effort, and its fast mode where the agent still takes one, the orientation subagents' model and effort as the
-    orientation's subagentModel and subagentEffort, and the dev agent's row, or `views` where its own row is not set, the
-    stricter of the two when both are. The other agents' rows are left out: they run in main's mode now (module note, one
+    effort, the orientation subagents' model and effort as the orientation's subagentModel and subagentEffort, and the
+    dev agent's row, or `views` where its own row is not set, the stricter of the two when both are. The other agents' rows are left out: they run in main's mode now (module note, one
     fence)."""
     by_role = {role: name for name, role in ROLES.items()}
     agents: dict[str, dict[str, Any]] = {}
@@ -685,8 +757,6 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
             mine["model"] = conf["model"].strip()
         if effort and (effort in config.role_efforts(role) or role == "orient" and effort in config.LEGACY_EFFORTS):
             mine["effort"] = effort
-        if isinstance(conf.get("fast"), bool) and "fast" in DEFAULTS["agents"][name]:
-            mine["fast"] = conf["fast"]
         if mine:
             agents.setdefault(name, {}).update(mine)
     got = {a: m for a, m in rows.items() if m in PERMISSION_MODES and a in ("dev", "views")}
@@ -699,9 +769,9 @@ def legacy_patch(models: dict[str, Any], rows: dict[str, Any]) -> dict[str, Any]
 
 
 def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> dict[str, Any]:
-    """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, fast?, off?}} (main's left
+    """The Settings pane's changes as settings of this file: `models` {role: {model?, effort?, off?}} (main's left
     out, '' for back to the default; `subagents` is thimble:orient-helper's row, the orientation's subagentModel and
-    subagentEffort; `fast` only for an agent that takes it, `off` only for the refusal row; an extension's agent,
+    subagentEffort; `off` only for the refusal row; a `fast` an earlier tab sends is left out; an extension's agent,
     "<ext>:<name>", takes its model and effort only) and `rows` {row of modes.AGENTS: mode, None for main's}, `views`
     being the dev agent's row of earlier builds. A row of an agent that runs in main's mode now, which an earlier tab may
     send, is left out (modes.IGNORED_ROWS)."""
@@ -725,7 +795,7 @@ def pane_patch(models: dict[str, Any] | None, rows: dict[str, Any] | None) -> di
             continue
         if name is None:
             raise ConfigError(f"no role {role!r}; one of {', '.join(by_role)}, or an extension's agent")
-        for k in ("model", "effort", "fast", "off"):
+        for k in ("model", "effort", "off"):
             if k in conf and k in DEFAULTS["agents"][name]:
                 v = conf[k]
                 agents.setdefault(name, {})[k] = (str(v).strip() or None) if k in ("model", "effort") and v is not None else v
@@ -1006,7 +1076,7 @@ def config_files(c: str | None) -> list[Path]:
     return [global_file(), *([workspace_file(c)] if c else [])]
 
 
-LINKS_DIR = "links"  # under thimble's home: the dashboard link, with no code, and notes for main's terminal (cli.LINKS_DIR)
+LINKS_DIR = "links"  # under thimble's home: notes for main's terminal (cli.LINKS_DIR), a remote press's one-time link
 # the workspace's files and folders main and its agents may not edit, since thimble keeps its records there: the checks,
 # the chats, the extensions' state, the run record, the folder of the files the hooks trust (trusted/: subagents.json,
 # callers.jsonl, launch.json), the views' state (proposals with their attempt counts, the versions readers are served),

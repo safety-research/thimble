@@ -185,6 +185,37 @@ export const otherValues = (values: readonly string[], value: string | null | un
 /** A row's effective value: the analyst's verdict when there is one, else the classifier's label. */
 export const effectiveValue = (row: Pick<LabelRow, 'label' | 'analyst'>): string | null => row.analyst ?? row.label ?? null
 
+/** Below this confidence a labeled record is unsure (backend concepts.UNSURE_BELOW). */
+export const UNSURE_BELOW = 0.6
+/** The values that say nothing, which count as no category fit (backend concepts.QUIET_VALUES). */
+export const QUIET_VALUES: ReadonlySet<string> = new Set(['no', 'none', 'other', 'no match', 'not', 'neither', 'n/a', 'unknown'])
+/** The EXAMPLES segment of the records with no category fit and the unsure ones, across every value. */
+export const UNSURE_KEY = '\u0000unsure'
+export const UNSURE_LABEL = 'no fit · unsure'
+/** How many rows the no-fit and unsure segment reads at once, to sort them on the page. */
+export const UNSURE_PAGE = 200
+
+/** How a record fits its label, as the terminal's Labels view groups it (backend concepts.unsure): `no-fit` when the
+ * classifier gave it no value, a value off the label's list or one that says nothing (QUIET_VALUES); `unsure` when its
+ * confidence is below UNSURE_BELOW; else `sure`. The analyst's own value always fits. Pure. */
+export function fitOf(row: Pick<LabelRow, 'label' | 'analyst' | 'confidence'>, values: readonly string[]): 'no-fit' | 'unsure' | 'sure' {
+  if (row.analyst) return 'sure'
+  const v = row.label
+  if (v == null || !v.trim() || (values.length > 0 && !values.includes(v)) || QUIET_VALUES.has(v.trim().toLowerCase())) return 'no-fit'
+  if (typeof row.confidence === 'number' && row.confidence < UNSURE_BELOW) return 'unsure'
+  return 'sure'
+}
+
+/** `rows` with the records with no category fit first, then the unsure ones by confidence, lowest first, then the rest
+ * in their order (backend concepts.unsure's order). Pure. */
+export function unsureFirst<T extends Pick<LabelRow, 'label' | 'analyst' | 'confidence'>>(rows: readonly T[], values: readonly string[]): T[] {
+  const rank = { 'no-fit': 0, unsure: 1, sure: 2 } as const
+  return rows
+    .map((row, i) => ({ row, i, fit: fitOf(row, values) }))
+    .sort((a, b) => rank[a.fit] - rank[b.fit] || (a.fit === 'unsure' ? (a.row.confidence ?? 0) - (b.row.confidence ?? 0) : 0) || a.i - b.i)
+    .map((x) => x.row)
+}
+
 export interface CoverageGroups {
   /** the first files with rows, by path */
   covered: CoverageFile[]

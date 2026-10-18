@@ -1,7 +1,8 @@
 ---
 name: Unverifiable
 color: 5
-covers: [documents, cards]
+covers: [documents, cards, answers]
+about: it looks for claims that no evidence can support
 shown: false
 ---
 

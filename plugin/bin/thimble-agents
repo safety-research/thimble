@@ -14,10 +14,10 @@ The first two lines make this file both a shell script and a Python program, as 
 standard library and prints nothing of thimble's when no server answers within WAIT_S, or when the answer does not
 prove it is thimble's (the token in server.json, as bin/.thimble-watch proves it; app/hook_auth.py).
 
-In terminal mode (THIMBLE_WS names the workspace folder, whose launch.json says `mode: terminal`) no server runs: the
-same line and list come from the workspace's files (file_agents): thimble's running agents from subagents.json, the
-orientation's cards from its deck's notebook, and the analyst's words main has not got yet from the event queue
-(app/event_files.py).
+On local transport (the session's transport in its workspace's launch.json, app/subagent_files.py transport: before a
+press of the browser workbench, and always for a peer) no server runs for the session: the same line and list come from
+the workspace's files (file_agents): thimble's running agents from subagents.json, the orientation's cards from its
+deck's notebook, and the analyst's words main has not got yet from the event queue (app/event_files.py).
 """
 import hashlib
 import hmac
@@ -69,7 +69,7 @@ def request_proof(token: str, base: str, nonce: str) -> str:
 
 
 def agents(cwd: str, session: str | None) -> dict:
-    ws = term_ws()
+    ws = local_ws(cwd, session)
     if ws is not None:
         return file_agents(ws)
     found = server()
@@ -97,16 +97,22 @@ STATUS_CHARS = 110  # app/tray.py STATUS_CHARS
 SAID = "› "  # app/events.py SAID
 
 
-def term_ws() -> Path | None:
-    """The workspace folder THIMBLE_WS names when its launch.json says terminal mode (bin/.thimble-watch term_ws)."""
-    named = os.environ.get("THIMBLE_WS") or ""
-    if not named:
-        return None
+def local_ws(cwd: str, session: str | None) -> Path | None:
+    """The workspace folder of `cwd` when `session` runs on local transport there (module note), as bin/.thimble-watch
+    reads it with app/subagent_files.py from this plugin copy's tree; None after a press, and for a folder of no
+    workspace."""
+    tree = os.environ.get("THIMBLE_APP_DIR") or str(Path(__file__).resolve().parents[2])
+    backend = str(Path(tree) / "backend")
+    if backend not in sys.path:
+        sys.path.insert(0, backend)
     try:
-        data = json.loads((Path(named) / "trusted" / "launch.json").read_text("utf-8"))
-    except (OSError, ValueError):
+        from app import subagent_files as sf  # noqa: PLC0415 — standard library only
+    except ImportError:
         return None
-    return Path(named) if isinstance(data, dict) and data.get("mode") == "terminal" else None
+    ws = sf.workspace_folder(cwd)
+    if ws is None:
+        return None
+    return ws if sf.transport(ws, session or None) == sf.LOCAL else None
 
 
 def _json(path: Path) -> dict:

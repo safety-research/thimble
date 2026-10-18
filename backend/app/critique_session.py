@@ -3,9 +3,10 @@ itself (depth 2) after its `critique` call returns.
 
 The critic reviews the orientation's whole transcript and cards for coverage and competing accounts, and checks the
 drafted deck's claims against the calls that should support them. Its registration (definition) is prompts/critic.md
-with shared.md loaded as the skill `thimble:shared`, the `critic` role's model and effort from Settings, and of thimble's
-tools OWN_TOOLS, so it adds no card. It writes only in its own work folder, critique-work/<chat>; when its run ends, its
-subagents' `tmp_*` folders and the large files no card uses are deleted there (work_files.after_run).
+with thimble's shared guidance at its end (write_session.shared_guidance: shared.md rendered for the workspace, after
+the body that opens with preamble.md), the `critic` role's model and effort from Settings, and of thimble's tools OWN_TOOLS, so it adds no card. It
+writes only in its own work folder, critique-work/<chat>; when its run ends, its subagents' `tmp_*` folders and the
+large files no card uses are deleted there (work_files.after_run).
 
 The transcript. Raw transcripts run to megabytes of JSON and Read cuts lines at 2,000 characters, so the critique
 renders the orientation's agent transcript and its descendants' into one digest, each tool call under its ref in the
@@ -47,7 +48,6 @@ TITLE = "critique"  # its step's title, so the browser names it `<caller>/critiq
 DIGEST_DIR = "critique"  # the one folder outside the corpus and the work folders the critic reads
 WORK_DIR = "critique-work"  # critique-work/<chat>, the critic's own folder, where it may write
 BRIEF_FILE = "brief.md"  # in critique/<chat>: the critic's first message, with brief-2.md… when one file is too large
-SKILLS = ("thimble:shared",)
 OWN_TOOLS = ("read_ref", "list_cards")  # the critic's thimble tools
 
 
@@ -88,14 +88,14 @@ def session_key(caller: str) -> str:
 
 def definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:critic` for workspace `c` (subagents.roles adds its model, effort and
-    `background`): critic.md's body, its frontmatter's description, shared.md as the skill `thimble:shared`, and the
-    thimble tools that are not the critic's taken away."""
-    from . import cli, prompts, userconf  # noqa: PLC0415
+    `background`): critic.md's body with thimble's shared guidance at its end (write_session.shared_guidance), its
+    frontmatter's description, and the thimble tools that are not the critic's taken away. It loads no skill."""
+    from . import cli, prompts, userconf, write_session  # noqa: PLC0415
 
     with prompts.custom(userconf.prompt_files(c, "critic")):
         _, agent = cli.agent_definition(AGENT)
     out = {k: agent[k] for k in ("description", "prompt") if k in agent}
-    out["skills"] = list(dict.fromkeys([*SKILLS, *(agent.get("skills") or [])]))
+    out["prompt"] = f"{str(out.get('prompt') or '').rstrip()}\n\n{write_session.shared_guidance(c)}"
     out["disallowedTools"] = tools.not_own(OWN_TOOLS)
     return out
 

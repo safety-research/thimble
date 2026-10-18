@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from app import agents, config, events, session, subagents
+from app import agents, config, events, session
 from subagent_fakes import bridge  # noqa: F401 — fixture
 
 CORPUS = "mini"
@@ -95,58 +95,6 @@ async def test_main_s_stop_aborts_its_turn_through_the_module_and_the_mirror_end
     assert lv.turn_open and agents.running(CORPUS, agents.MAIN_ID)
 
 
-async def test_a_prompt_that_waited_and_started_the_next_turn_before_the_stop_was_read_goes_on(bridge, turn, analyst):
-    """After the abort, Claude Code takes up a prompt that waited at once: the read finds the next turn open, which the
-    Stop leaves alone, so its answer shows."""
-    p, lv = turn
-    _write(p, [_say("Agent 3 ran most of them."), _human("Now per day."), _say("Per day, the runs peak on Monday.")])
-    bridge.answers = [{"ok": True}]
-    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True}
-    assert lv.turn_open and agents.running(CORPUS, agents.MAIN_ID)
-    assert [r.get("delta") for r in _main_log() if r.get("type") == "text"][-1] == "Per day, the runs peak on Monday."
-    assert not _notes()
-
-
-async def test_a_stop_when_main_ran_no_turn_is_done_and_ends_a_turn_an_interrupt_left_open_with_no_note_of_its_own(
-        bridge, turn, analyst):
-    p, lv = turn
-    # a turn the mirror holds open whose end it has yet to read: the done Stop leaves it to the mirror
-    bridge.answers = [{"error": "main is not running a turn", "gone": True}]
-    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True, "done": True}
-    assert lv.turn_open and agents.running(CORPUS, agents.MAIN_ID) and not _notes()
-    # Esc in the terminal: Claude Code writes its interrupt line and no turn_duration
-    _write(p, [_human("[Request interrupted by user]")])
-    session.tail_once(lv)
-    assert _notes() == [session.INTERRUPTED_TEXT] and agents.running(CORPUS, agents.MAIN_ID)
-    bridge.answers = [{"error": "main is not running a turn", "gone": True}]
-    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True, "done": True}
-    assert not agents.running(CORPUS, agents.MAIN_ID)
-    assert _notes() == [session.INTERRUPTED_TEXT]
-
-
-async def test_without_the_module_main_s_stop_is_refused_and_the_turn_goes_on(bridge, turn, analyst):
-    bridge.is_live, bridge.reason = False, "Claude Code did not load thimble's hooks module"
-    got = await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst)
-    assert got == {"stopped": False, "kind": subagents.NO_MODULE, "reason": "Claude Code did not load thimble's hooks module"}
-    assert bridge.calls == []
-    assert agents.running(CORPUS, agents.MAIN_ID) and not _notes()
-
-
-async def test_a_side_thread_s_stop_stops_its_fork_through_the_module_and_one_with_no_fork_says_so(bridge, analyst):
-    tid = agents.new_thread(CORPUS, "card:abc123", "Runs per agent", "runs-per-agent")["id"]
-    got = await agents.interrupt_route(CORPUS, tid, analyst)
-    assert got["stopped"] is False and got["kind"] == agents.NO_FORK
-    agents.update_agent(CORPUS, tid, fork={"agent_id": "afork1", "ended": "2026-10-15T10:00:00+00:00"})
-    assert (await agents.interrupt_route(CORPUS, tid, analyst))["kind"] == agents.NO_FORK, "a fork that ended is none"
-    assert bridge.calls == []
-    agents.update_agent(CORPUS, tid, fork={"agent_id": "afork1"})
-    assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True}
-    assert [(op, args.get("agent")) for op, args in bridge.calls] == [("stop", "afork1"), ("note", None)]
-    # a fork that had ended already counts as stopped
-    bridge.answers = [{"error": "Task afork1 is not running", "gone": True}]
-    assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True, "done": True}
-
-
 async def test_main_s_stop_and_a_thread_s_take_the_analyst_s_cookie(bridge, plugin_headers):
     from starlette.requests import Request
 
@@ -160,55 +108,174 @@ async def test_main_s_stop_and_a_thread_s_take_the_analyst_s_cookie(bridge, plug
     assert bridge.calls == [], "the module is never asked"
 
 
-async def test_a_stop_of_main_tells_main_so_its_next_turn_leaves_the_stopped_work_alone(bridge, turn, analyst):
-    """Live check L4-12: Stop ended main's turn, but nothing told main so, and a check's report back to main started a
-    new turn in which main ran the stopped work again. A Stop that ended a turn appends main-stopped-note to main
-    through the module after the abort; one that found no turn running, or that the module refused, appends none."""
-    bridge.answers = [{"ok": True}]
-    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True}
-    assert bridge.calls == [("abort", {}), ("note", {"text": "MAIN STOPPED"})]
-    for answer, said in (({"error": "main is not running a turn", "gone": True}, {"stopped": True, "done": True}),
-                         ({"error": "the abort failed"},
-                          {"stopped": False, "kind": "error", "reason": "the abort failed"})):
-        bridge.calls.clear()
-        bridge.answers = [answer]
-        assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == said
-        assert [op for op, _ in bridge.calls] == ["abort"], answer
+async def test_a_thread_s_stop_tells_main_the_cards_its_fork_made_and_its_half_made_card_says_it_is_unfinished(
+        bridge, analyst):
+    """Bug hunt round 9, J5: after Stop on a side thread, main said "it was stopped before it made any card or chart",
+    while the thread's half-made chart, with no takeaway, sat on the canvas with no word of it. The note main gets names
+    the cards the fork made since the analyst's last message in the thread; one with no takeaway stays, marked
+    unfinished, until a takeaway is written."""
+    from app import notebook, tools
 
-
-async def test_a_stop_of_a_side_thread_tells_main_so_it_leaves_the_thread_s_work_alone(bridge, analyst):
-    """Live check L4-12h: the Stop of a side thread stopped its fork, and main then took the thread's work up again.
-    A Stop that stopped the fork appends thread-stopped-note to main through the module after the stop, naming the
-    thread as the thread list shows it and the fork; one whose fork had ended already, or that the module refused,
-    appends none."""
-    tid = agents.new_thread(CORPUS, "card:abc123", "Runs per agent", "runs-per-agent")["id"]
+    tid = agents.new_thread(CORPUS, "card:abc123", "What did the admin revert?", "what-did-the-admin")["id"]
     agents.update_agent(CORPUS, tid, fork={"agent_id": "afork1"})
+    nb = notebook.active_notebook_id(CORPUS)
+
+    def card(title: str, takeaway: str = "") -> str:
+        cell = notebook.new_cell("note", f"chat:{tid}", title, notebook.MAIN, payload={"text": "x"}, workspace=CORPUS)
+        cell["takeaway"] = takeaway
+        return str(notebook.insert_cell(CORPUS, nb, cell)["id"])
+
+    earlier = card("Who reverted first?", "The admin, on Jun 18.")  # an answer to the thread's first question
+    import time
+
+    time.sleep(1.1)
+    agents.Recorder(CORPUS, tid).record("user", text="go through every revert, with a chart", by="browser")
+    time.sleep(1.1)
+    done = card("How many reverts per page?", "Most pages had one.")
+    half = card("What kinds of saves did the reverts undo?")
+    bridge.answers = [{"ok": True}, {"ok": True}]
     assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True}
     assert [op for op, _ in bridge.calls] == ["stop", "note"]
-    assert bridge.calls[1][1] == {"text": "THREAD STOPPED main/runs-per-agent afork1"}
-    agents.rename_chat(CORPUS, tid, "agent runs")
-    bridge.calls.clear()
-    assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True}
-    assert bridge.calls[-1] == ("note", {"text": "THREAD STOPPED main/agent runs afork1"}), "its name as renamed"
-    for answer in ({"error": "Task afork1 is not running", "gone": True}, {"deny": "thimble refused this call"}):
-        bridge.calls.clear()
-        bridge.answers = [answer]
-        await agents.interrupt_route(CORPUS, tid, analyst)
-        assert [op for op, _ in bridge.calls] == ["stop"], answer
+    note = str(bridge.calls[-1][1].get("text") or "")
+    stopped = tools.hint("thread-stopped-note", thread=agents.thread_name(agents.read_meta(CORPUS, tid)), agent_id="afork1")
+    assert note == " ".join([stopped, tools.hint("thread-stopped-made", cards=f"card:{done} and card:{half}"),
+                             tools.hint("thread-stopped-unfinished", cards=f"card:{half}")])
+    assert f"card:{earlier}" not in note, "a card of the thread's earlier question is no part of the stopped work"
+    cells = {c["id"]: c for c in notebook.load_notebook(CORPUS, nb)["cells"]}
+    assert cells[half].get("unfinished") == "stopped" and not cells[done].get("unfinished")
+    notebook.append_takeaway(CORPUS, half, "Mostly link lists.")
+    assert not {c["id"]: c for c in notebook.load_notebook(CORPUS, nb)["cells"]}[half].get("unfinished")
 
 
-def test_the_note_main_gets_never_shows_as_a_line_of_the_analyst_s(turn):
-    """The note reaches main as Claude Code 2.1.300 records a plugin's `$.session.append` (live check L4's transcript):
-    a user record marked isMeta with the plugin's origin. Neither that record nor a queued prompt of the plugin's with
-    the same text is a line of the analyst's in main's chat, and the turn goes on."""
-    p, lv = turn
-    note = "thimble: the analyst pressed Stop in thimble and ended your turn."
-    origin = {"kind": "plugin", "name": "thimble"}
-    _write(p, [{"type": "user", "isMeta": True, "origin": origin, "promptId": "p1",
-                "message": {"role": "user", "content": [{"type": "text", "text": note}]}},
-               {"type": "user", "origin": origin, "message": {"role": "user", "content": [{"type": "text", "text": note}]}},
-               {"type": "attachment", "attachment": {"type": "queued_command", "prompt": note, "origin": origin}}])
+class _Req:
+    async def is_disconnected(self) -> bool:
+        return False
+
+
+def _idle_main(tmp_path, transport: str) -> tuple[Path, session.Live]:
+    """Main attached and idle at its prompt (no turn yet), its transport `transport` as launch.json records it, and on
+    the server its shim subscribed, as after the `thimble` command."""
+    from terminal_fakes import write_launch
+
+    import os
+
+    ws = config.workspace_dir(CORPUS)
+    write_launch(ws, session=SID, transport=transport, pid=os.getpid())
+    p = tmp_path / f"{SID}.jsonl"
+    p.write_text("")
+    lv = session.attach(CORPUS, SID, str(config.corpus_dir(CORPUS)), str(p))
+    assert lv is not None
     session.tail_once(lv)
-    assert [r for r in _main_log() if note in str(r.get("text") or "")] == []
-    assert [r.get("text") for r in _main_log() if r.get("type") == "user"] == ["Count the runs per agent."]
-    assert lv.turn_open
+    events._subs.setdefault(CORPUS, set()).add(events.Sub(SID))
+    assert not lv.turn_open
+    return ws, lv
+
+
+async def test_a_stop_of_a_question_idle_main_has_not_got_takes_it_back_so_main_never_runs_it(bridge, tmp_path, analyst):
+    """Bug hunt G1: the analyst's first question from the browser waited for main's watcher, and Stop answered "It had
+    already ended." with the button spinning on, and the question ran minutes later. Stop takes back a message main has
+    not got: main stops running, its chat says so, no watcher gets it, the held event that rode along waits again and
+    the later parts of main's guidance it carried go with the next question."""
+    ws, lv = _idle_main(tmp_path, "server")
+    events.post(CORPUS, "labeled", {"text": "refunds: 12 yes", "name": "refunds"})
+    asked = events.post(CORPUS, "main", {"text": "What are these runs?"})
+    waiting = events._pending[(CORPUS, SID)][0]
+    assert asked["delivered"] == 1 and agents.running(CORPUS, agents.MAIN_ID)
+    assert "thimble's events arrive as" in waiting["content"] and "meanwhile:" in waiting["content"]
+    assert events.held(CORPUS) == [], "the held event rides along with the question"
+    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True, "cancelled": 1}
+    assert bridge.calls == [], "no turn of main's runs, so the module is asked nothing"
+    assert not agents.running(CORPUS, agents.MAIN_ID)
+    assert _notes() == [session.CANCELLED_TEXT]
+    assert (await events.pull_route(_Req(), cwd=str(config.corpus_dir(CORPUS)), session=SID, wait=0.2)).status_code == 204
+    assert [n["meta"]["kind"] for n in events.held(CORPUS)] == ["labeled"]
+    events.post(CORPUS, "main", {"text": "Which setup merged the most PRs?"})
+    again = events._pending[(CORPUS, SID)][0]
+    assert "Which setup" in again["content"] and "thimble's events arrive as" in again["content"]
+    assert [r["meta"]["kind"] for r in again["riders"]] == ["labeled"]
+
+
+async def test_on_local_transport_stop_takes_the_question_back_from_the_queue_file(bridge, tmp_path, analyst):
+    """Before a press the question waits in the workspace's queue file for main's watcher, which must never take it. A
+    request server code wrote to main (to stop the analyst's own subagent) is not the analyst's message, and stays."""
+    from app import event_files
+
+    ws, lv = _idle_main(tmp_path, "local")
+    request = events.post(CORPUS, "main", {"text": "Stop the subagent a1."}, mirror=False, line="› Stop a1")
+    asked = events.post(CORPUS, "main", {"text": "What are these runs?"})
+    assert [r["id"] for r in event_files.waiting(ws)] == [request["id"], asked["id"]]
+    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True, "cancelled": 1}
+    assert [r["id"] for r in event_files.waiting(ws)] == [request["id"]]
+    assert event_files.take(ws, SID)["id"] == request["id"] and event_files.take(ws, SID) is None
+    assert not agents.running(CORPUS, agents.MAIN_ID) and _notes() == [session.CANCELLED_TEXT]
+
+
+async def test_a_stop_while_main_runs_a_turn_ends_it_and_takes_back_the_question_that_waits(bridge, turn, analyst):
+    p, lv = turn
+    events._subs.setdefault(CORPUS, set()).add(events.Sub(SID))
+    events.post(CORPUS, "main", {"text": "And per day?"})
+    bridge.answers = [{"ok": True}]
+    assert await agents.interrupt_route(CORPUS, agents.MAIN_ID, analyst) == {"stopped": True}
+    assert [op for op, _ in bridge.calls] == ["abort", "note"]
+    assert not events._pending.get((CORPUS, SID)) and not agents.running(CORPUS, agents.MAIN_ID)
+    assert _notes() == [session.CANCELLED_TEXT, session.STOPPED_TEXT]
+
+
+async def test_a_thread_s_stop_stops_the_label_run_its_fork_started_and_main_hears_what_stopped(bridge, analyst):
+    """Bug hunt round 10, K4: Stop on a side thread stopped its fork, but the prompt label the fork had started ran on
+    to its end (222 → 726 of 1,189 records), and main said the thread's work had stopped. A run the fork starts is the
+    thread's (its run record's `thread`); the thread's Stop stops it wherever it runs (concepts.request_stop, the stop
+    file of the process that runs it), and the note main gets names the run and how far it got. A run of main's own
+    is left alone."""
+    import os
+    import time
+
+    from app import concepts, subagent_files, tools
+
+    tid = agents.new_thread(CORPUS, "card:abc123", "Who voted when?", "who-voted-when")["id"]
+    agents.update_agent(CORPUS, tid, fork={"agent_id": "afork7"})
+    ws = config.workspace_dir(CORPUS)
+
+    async def label(name: str, call: str) -> str:
+        res = await tools.call(CORPUS, "apply_label", {"scope": "files", "name": name, "paths": ["**/*.jsonl"],
+                                                       "predicate": {"kind": "regex", "text": "(?i)merge"}},
+                               actor="analyst", notebook=None, terminal=False, tool_use_id=call)
+        assert not res.is_error, res.text
+        return str(concepts.find_concept(ws, name)["id"])
+
+    # the fork's call (the caller hook's line names it) makes the thread's run; main's own makes none
+    subagent_files.add_caller(ws, "toolu_fork1", "afork7", subagent_files.FORK_TYPE)
+    subagent_files.add_caller(ws, "toolu_main1", "", "")
+    assert (concepts.current_run(CORPUS, await label("merge talk", "toolu_fork1")) or {}).get("thread") == tid
+    mine = await label("merge words", "toolu_main1")
+    assert "thread" not in (concepts.current_run(CORPUS, mine) or {})
+
+    # each run going on in another process (the session's shim), as its run file says
+    def running(cid: str, thread: str | None) -> None:
+        rec = {"concept": cid, "run_id": f"r-{cid}", "status": "running", "done": 222, "total": 1189,
+               "pid": os.getpid() + 1, "beat": time.time(), **({"thread": thread} if thread else {})}
+        concepts.run_file(ws, cid).write_text(json.dumps(rec))
+
+    k = concepts.find_concept(ws, "merge talk")["id"]
+    running(k, tid)
+    running(mine, None)
+    # an agent the fork asked main to start (tools._ask_main), which main has not started yet
+    from app import subagents  # noqa: PLC0415
+
+    rid = subagents.new_request(CORPUS, "start", "writer:summary", {"subagent_type": "thimble:writer"}, None,
+                                subagents.TYPED, role="writer", from_thread=tid,
+                                ask={"what": "the request to write Summary (report:summary)", "agent": "the writer"})
+    bridge.answers = [{"ok": True}, {"ok": True}]
+    assert await agents.interrupt_route(CORPUS, tid, analyst) == {"stopped": True}
+    assert [op for op, _ in bridge.calls] == ["stop", "note"]
+    assert concepts.stop_file(ws, k).exists(), "the thread's run is asked to stop, in the process that runs it"
+    assert not concepts.stop_file(ws, mine).exists(), "main's own run goes on"
+    note = str(bridge.calls[-1][1].get("text") or "")
+    said = tools.hint("thread-stopped-labels", labels=f"merge talk (concept:{k}, stopped at 222 of 1,189 records)")
+    assert said and said in note, note
+    card = next(cell for _nb, cell in concepts._label_cards(ws, k))
+    assert card["created_by"] == f"chat:{tid}", "the label's card is the thread's, as its add_card's cards are"
+    assert tools.hint("thread-stopped-made", cards=f"card:{card['id']}") in note, note
+    assert tools.hint("thread-stopped-unfinished", cards=f"card:{card['id']}") in note, "it has no takeaway yet"
+    assert subagents.request(CORPUS, rid)["state"] == "refused", "the start it asked for does not happen"
+    assert tools.hint("thread-stopped-agents", agents="the writer (the request to write Summary (report:summary))") in note

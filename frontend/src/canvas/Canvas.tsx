@@ -4,7 +4,8 @@
 // deck; a switch to the tab while it has its dot lands by landing.ts. Every card carries `data-anchor`, so ⌘-click
 // reaches it. The comments the checks over the cards leave sit beside the cards (CommentLayer.tsx), and the top bar's
 // Comments lists those checks with their switches (Controls.tsx, report/Checks.tsx CheckRows). A plan card main adds
-// opens the frames it is in, so the next phase's plan shows below the finished one.
+// opens the frames it is in, so the next phase's plan shows below the finished one. A demo page's board is read
+// (lib/demo, bug hunt F5): its cards and frames pan, open and select, but nothing moves, resizes, renames or goes.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react'
 import { ChipContext } from '../chat/markdown'
 import { readSeen } from '../chat/seen'
@@ -15,6 +16,7 @@ import { Spinner } from '../components/Spinner'
 import { TipButton } from '../components/Tooltip'
 import { api, canvasApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
+import { isDemo, useDemo } from '../lib/demo'
 import { isReplay } from '../lib/events'
 import { CHECK_WORDS, checkState, type CheckFilterState } from '../lib/cardCheck'
 import { freeKeyHeld, pointKeyHeld } from '../lib/platform'
@@ -45,6 +47,7 @@ import {
   PAD,
   activeFrame,
   analystGroup,
+  anchorShift,
   boardOf,
   cardCount,
   cardsIn,
@@ -89,6 +92,7 @@ import {
   zoomTo,
   type Board,
   type Insertion,
+  type Opened,
   type Rect,
   type View,
 } from './layout'
@@ -105,6 +109,8 @@ const SETTLE_MS = 1500
 const WAIT_MS = 5000
 /** how long a card stays in view on the shown tab before it counts as seen (landing.ts) */
 const SEEN_MS = 800
+/** how long after the analyst changed the board the view does not pan to keep the cards in view still (anchorShift) */
+const ANALYST_QUIET_MS = 2000
 /** the controls' column at the bottom right, which Fit leaves clear */
 const CONTROLS_W = 180 + 14 + 16
 
@@ -169,10 +175,11 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const [keep, setKeep] = useState<Set<string> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [missing, setMissing] = useState(false)
-  const openKey = storageKey(ws, 'canvas-open')
-  const [open, setOpenState] = useState<ReadonlySet<string>>(() => new Set(readStorage<string[]>(openKey, [])))
-  // no frame kept open or shut yet in this browser: the analyst's own frame, Your work, opens on the first read
-  const firstOpen = useRef(readStorage<string[] | null>(openKey, null) == null)
+  // Every frame is open, so every card is drawn, until the analyst collapses it; the frames they collapsed are kept per
+  // browser (bug hunt L3: frames started collapsed, so a group said 3 and drew 1)
+  const shutKey = storageKey(ws, 'canvas-shut')
+  const [shut, setShutState] = useState<ReadonlySet<string>>(() => new Set(readStorage<string[]>(shutKey, [])))
+  const open = useMemo<Opened>(() => ({ has: (id: string) => !shut.has(id) }), [shut])
   // the card filter as the analyst sets it, shown at once; the server's canvas filter holds it (filters, loadFilters)
   const [cardFilter, setCardFilterState] = useState<CardFilter>(NO_FILTER)
   const viewKey = storageKey(ws, 'canvas-view')
@@ -182,6 +189,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const placed = useRef(readView(viewKey) != null)
   const [heights, setHeights] = useState<Record<string, number>>({})
   const [sel, setSel] = useState<string[]>([])
+  // the card a ref opened selected (a chip, the landing on the newest card), which is no frame the analyst worked in
+  const [refSel, setRefSel] = useState<string | null>(null)
   const [gsel, setGsel] = useState<string | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
   const [marquee, setMarquee] = useState<Rect | null>(null)
@@ -211,22 +220,26 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const vp = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setOpenState(new Set(readStorage<string[]>(openKey, [])))
-    firstOpen.current = readStorage<string[] | null>(openKey, null) == null
-  }, [openKey])
+    setShutState(new Set(readStorage<string[]>(shutKey, [])))
+  }, [shutKey])
   useEffect(() => {
     const kept = readView(viewKey)
     placed.current = kept != null
     setViewState(kept ?? DEFAULT_VIEW)
   }, [viewKey])
-  const setOpen = useCallback(
+  const setShut = useCallback(
     (f: (cur: ReadonlySet<string>) => ReadonlySet<string>) =>
-      setOpenState((cur) => {
+      setShutState((cur) => {
         const next = f(cur)
-        writeStorage(openKey, [...next])
+        if (next !== cur) writeStorage(shutKey, [...next])
         return next
       }),
-    [openKey],
+    [shutKey],
+  )
+  /** opens the frames `ids` (those the analyst collapsed) */
+  const openFrames = useCallback(
+    (ids: readonly string[]) => setShut((cur) => (ids.some((g) => cur.has(g)) ? new Set([...cur].filter((g) => !ids.includes(g))) : cur)),
+    [setShut],
   )
   const setView = useCallback(
     (f: View | ((v: View) => View)) =>
@@ -369,8 +382,13 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   }, [ws, canvasFilter?.concept, canvasFilter?.value])
 
   // a change the route has not made yet, shown at once; the reload after the route agrees with it
+  const demo = useDemo()
+  // when the analyst last changed the board here (a move, a delete, a rename), which the view does not pan to undo
+  const analystAt = useRef(0)
   const change = useCallback(
     async (local: (d: CanvasResponse) => CanvasResponse, remote: () => Promise<unknown>) => {
+      if (isDemo()) return
+      analystAt.current = performance.now()
       setData((d) => (d ? local(d) : d))
       try {
         await remote()
@@ -392,7 +410,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const cells = board.cells.map((c) => (c.id === sizing.id ? { ...c, w: sizing.w, h: sizing.h, pos: sizing.pos } : c))
     return { ...board, cells, cellById: new Map(cells.map((c) => [c.id, c] as const)) }
   }, [board, sizing])
-  const lay = useMemo(() => (shownBoard ? layoutBoard(shownBoard, open, heights) : null), [shownBoard, open, heights])
+  // the cards with comments beside them while their check is on (CommentLayer), whatever the filters keep: the column
+  // of their outermost frame keeps room for the comments
+  const notedCards = useMemo(() => new Set(shownCanvasComments(notes.comments, checks.on, () => true, null).map((c) => c.card)), [notes.comments, checks.on])
+  const lay = useMemo(() => (shownBoard ? layoutBoard(shownBoard, open, heights, notedCards) : null), [shownBoard, open, heights, notedCards])
   // a plan card main just added, such as the next phase's plan after a finished one, opens the frames it is in, so it
   // shows below the cards before it rather than under the first card of a collapsed frame
   const drawnCells = useRef<Set<string> | null>(null)
@@ -400,19 +421,12 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     drawnCells.current = null
   }, [ws])
   useEffect(() => {
-    if (!data || !firstOpen.current) return
-    const own = analystGroup(data.groups)
-    if (!own) return
-    firstOpen.current = false
-    setOpen((cur) => (cur.has(own.id) ? cur : new Set([...cur, own.id])))
-  }, [data, setOpen])
-  useEffect(() => {
     if (!data || !board) return
     const fresh = newPlans(data.cells, drawnCells.current)
     drawnCells.current = new Set(data.cells.map((c) => c.id))
-    const shut = [...new Set(fresh.flatMap((id) => framesAbove(board, id)))].filter((g) => !open.has(g))
-    if (shut.length) setOpen((cur) => new Set([...cur, ...shut]))
-  }, [data, board, open, setOpen])
+    const closed = [...new Set(fresh.flatMap((id) => framesAbove(board, id)))].filter((g) => !open.has(g))
+    if (closed.length) openFrames(closed)
+  }, [data, board, open, openFrames])
   // the box the comments beside the cards cover (CommentLayer), which Fit, the minimap and the Content pill take in
   const [noteBox, setNoteBox] = useState<Rect | null>(null)
   const content = useMemo(() => (lay ? extentOf([...lay.rects.values(), ...(noteBox ? [noteBox] : [])]) : null), [lay, noteBox])
@@ -468,8 +482,13 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   }, [data != null])
 
   // the frame the analyst last selected or worked in, reported to the server as it changes: a model's card whose call
-  // names no group goes there (tools.default_group). Clearing the selection reports nothing, so the last frame stays.
-  const workFrame = useMemo(() => (board ? activeFrame(board, gsel, sel) : null), [board, gsel, sel])
+  // names no group goes there (tools.default_group). Clearing the selection reports nothing, so the last frame stays,
+  // and so does a card a ref selected until the analyst presses it (bug hunt L18: the canvas landed on a label's new
+  // card, and every later card main made with no group went into the label's group)
+  const workFrame = useMemo(() => {
+    if (!board || (refSel && !gsel && sel.length === 1 && sel[0] === refSel)) return null
+    return activeFrame(board, gsel, sel)
+  }, [board, gsel, sel, refSel])
   const reported = useRef<{ ws: string; group: string } | null>(null)
   useEffect(() => {
     if (!workFrame || (reported.current?.ws === ws && reported.current.group === workFrame)) return
@@ -480,15 +499,38 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   }, [ws, workFrame])
 
   // the latest of everything, for the window listeners a press installs
-  const live = useRef({ data, board, lay, view, sel, open, heights })
-  live.current = { data, board, lay, view, sel, open, heights }
+  const live = useRef({ data, board, lay, view, sel, open, heights, notedCards })
+  live.current = { data, board, lay, view, sel, open, heights, notedCards }
+
+  // the board does not move under the analyst: when the layout changes while they move nothing (a card above the view
+  // grew or shrank as its chart, takeaway or status changed, or a card was added), the view pans by the move of the first
+  // card in view (anchorShift), before the change is painted. Not while they drag or size a card or right after they
+  // changed the board, open or collapse a frame, or when a card went (their delete moves the cards after it up); nor
+  // before the view is placed or the cards are first measured, which places them where the kept view saw them.
+  const anchorPrev = useRef<{ lay: NonNullable<typeof lay>; open: Opened; cards: string[]; measured: boolean; busy: boolean } | null>(null)
+  useLayoutEffect(() => {
+    const prev = anchorPrev.current
+    const cards = shownBoard ? shownBoard.cells.map((c) => c.id) : []
+    const busy = !!drag || !!sizing
+    anchorPrev.current = lay ? { lay, open, cards, measured: Object.keys(heights).length > 0, busy } : null
+    if (!prev || !lay || prev.lay === lay || !active || !vpReady || !placed.current || busy || prev.busy || !prev.measured || prev.open !== open) return
+    if (performance.now() - analystAt.current < ANALYST_QUIET_MS || prev.cards.some((id) => !lay.rects.has(id))) return
+    const shift = anchorShift(prev.lay.rects, lay.rects, prev.cards, live.current.view, vpSize.w, vpSize.h)
+    if (!shift) return
+    setViewState((v) => {
+      const next = { ...v, x: v.x - shift.dx * v.scale, y: v.y - shift.dy * v.scale }
+      writeStorage(viewKey, next)
+      return next
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lay])
 
   // frames opened by a click on their collapsed deck or by a teleport (not by their title): each collapses again at a
   // click on the bare board outside it, never at a click on a card or a frame's title. Kept for the page's life only.
   const peeked = useRef<Set<string>>(new Set())
   const peek = (ids: string[]) => {
     for (const g of ids) peeked.current.add(g)
-    setOpen((cur) => new Set([...cur, ...ids]))
+    openFrames(ids)
   }
   /** collapses the peeked frames that do not hold `at` (a frame, or null for the bare board) */
   const collapsePeeked = (at: string | null) => {
@@ -498,7 +540,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (!drop.length) return
     for (const g of drop) peeked.current.delete(g)
     track('ui-click', { target: drop.map((g) => `group:${g}`).join(','), detail: { action: 'collapse', via: 'outside' } })
-    setOpen((cur) => new Set([...cur].filter((g) => !drop.includes(g))))
+    setShut((cur) => new Set([...cur, ...drop]))
   }
   const planeAt = (clientX: number, clientY: number): Pos => {
     const r = vp.current!.getBoundingClientRect()
@@ -673,6 +715,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const r = l?.rects.get(id)
     if (!b || !l || !bc || !r) return
     setGsel(null)
+    setRefSel(null)
     setRenaming(null)
     if (editing && editing.id !== id) setEditing(null)
     if (e.shiftKey) {
@@ -684,6 +727,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     let moved = false
     let last: Drag | null = null
     const mv = (ev: MouseEvent) => {
+      if (isDemo()) return
       const p = planeAt(ev.clientX, ev.clientY)
       if (!moved && Math.hypot(p.x - p0.x, p.y - p0.y) * live.current.view.scale < DRAG_SLOP) return
       if (!moved) setSel([id])
@@ -718,7 +762,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
 
   // a card dropped free, or beside a sibling, stands where it covers no other card (layout.ts placeFree, placeBeside)
   const dropCard = (d: Drag) => {
-    const { data: d0, board: b, lay: l, open: o, heights: hs } = live.current
+    const { data: d0, board: b, lay: l, open: o, heights: hs, notedCards: ns } = live.current
     if (!d0 || !b || !l) return
     const me = b.cellById.get(d.id)
     if (!me) return
@@ -734,7 +778,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (target && frame && d.ins?.side && d.ins.ref) {
       // beside a sibling: on the right the card is placed free at the sibling's side; on the left it takes the
       // sibling's place and the sibling moves right
-      const at = placeBeside(d0, d.id, target, d.ins.ref, d.ins.side, o, hs)
+      const at = placeBeside(d0, d.id, target, d.ins.ref, d.ins.side, o, hs, ns)
       if (d.ins.side === 'R' || !at.ref) {
         const pos = at.pos
         void change((x) => moveLocal(x, [d.id], target, undefined, pos), () => canvasApi.move(ws, { cells: [d.id], group: target, pos }))
@@ -760,7 +804,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const own = l.rects.get(d.id)
     if (target && target === me.parent && !me.pos && own && contains(own, { x: d.x + own.w / 2, y: d.y + own.h / 2 })) return
     const at = frame ? { x: Math.round(d.x - frame.x), y: Math.round(d.y - frame.y) } : { x: Math.round(d.x), y: Math.round(d.y) }
-    const pos = placeFree(d0, d.id, target, at, o, hs)
+    const pos = placeFree(d0, d.id, target, at, o, hs, ns)
     void change((x) => moveLocal(x, [d.id], target, undefined, pos), () => canvasApi.move(ws, { cells: [d.id], group: target, pos }))
   }
 
@@ -781,6 +825,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     let moved = false
     let last: Drag | null = null
     const mv = (ev: MouseEvent) => {
+      if (isDemo()) return
       const p = planeAt(ev.clientX, ev.clientY)
       if (!moved && Math.hypot(p.x - p0.x, p.y - p0.y) * live.current.view.scale < DRAG_SLOP) return
       moved = true
@@ -801,7 +846,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       if (clickTimer.current != null) {
         window.clearTimeout(clickTimer.current)
         clickTimer.current = null
-        if (clickOn.current === gid) {
+        if (clickOn.current === gid && !isDemo()) {
           setRenaming(gid)
           return
         }
@@ -812,7 +857,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         clickOn.current = null
         peeked.current.delete(gid)
         track('ui-click', { target: `group:${gid}`, detail: { action: live.current.open.has(gid) ? 'collapse' : 'expand' } })
-        setOpen((cur) => {
+        setShut((cur) => {
           const next = new Set(cur)
           if (next.has(gid)) next.delete(gid)
           else next.add(gid)
@@ -838,7 +883,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   // edge is dragged; a card in a frame's flow keeps its place and grows or shrinks from its right or bottom. Only what
   // the edge changes is written.
   const onResizeStart = (e: ReactMouseEvent<HTMLElement>, id: string, edge: Edge = 'se') => {
-    if (e.button !== 0 || pointKeyHeld(e)) return
+    if (e.button !== 0 || pointKeyHeld(e) || isDemo()) return
     e.stopPropagation()
     e.preventDefault()
     const { board: b, lay: l } = live.current
@@ -922,7 +967,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         made = await canvasApi.createGroup(ws, { title, pos: { x: Math.round(box.x - PAD), y: Math.round(box.y - HEAD) } })
       }
       await canvasApi.move(ws, { cells: picked.map((c) => c.id), group: made.id })
-      setOpen((cur) => new Set([...cur, made.id]))
+      openFrames([made.id])
       setSel([])
       setGsel(made.id)
       setRenaming(made.id)
@@ -939,7 +984,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     try {
       const g = analystGroup(data.groups) ?? (await api.createGroup(ws, { title: 'Your work', role: 'analyst' }))
       const cell = await api.addCell(ws, g.id, { kind: 'code', title: 'New card', code: '' })
-      setOpen((cur) => new Set([...cur, g.id]))
+      openFrames([g.id])
       setSel([cell.id])
       setGsel(null)
       setEditing({ id: cell.id, field: 'title' })
@@ -955,7 +1000,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     track('ui-click', { target: 'canvas:group', detail: { action: 'add' } })
     try {
       const g = await canvasApi.createGroup(ws, { title: nextGroupTitle(data.groups) })
-      setOpen((cur) => new Set([...cur, g.id]))
+      openFrames([g.id])
       setSel([])
       setGsel(g.id)
       setRenaming(g.id)
@@ -1092,10 +1137,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         setDetail(null)
         setLabelPanel(null)
         setEditing(null)
-      } else if ((e.key === 'Backspace' || e.key === 'Delete') && (sel.length || gsel) && !renaming) {
+      } else if ((e.key === 'Backspace' || e.key === 'Delete') && (sel.length || gsel) && !renaming && !isDemo()) {
         e.preventDefault()
         deleteSelection()
-      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && sel.length > 1) {
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'g' && sel.length > 1 && !isDemo()) {
         e.preventDefault()
         void groupSelection()
       } else if (e.key === 'Enter' && sel.length === 1) {
@@ -1220,7 +1265,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (settling.current) window.clearTimeout(settling.current.timer)
     const cellId = board.cellById.has(id) ? id : null
     const still = pendingStill.current
-    if (cellId && !still) setSel([cellId])
+    if (cellId && !still) {
+      setSel([cellId])
+      setRefSel(cellId)
+    }
     const el = cellId ? cardEls.current.get(cellId)?.querySelector<HTMLElement>('.canvas-card') : null
     const flash = still ? () => undefined : flashCard
     // the view centres on a part of a card it opened when that part is outside the viewport (a card taller than it)
@@ -1490,7 +1538,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                               <span className="frame-name">{g.name}</span>
                             )}
                             <span className="frame-count">{cardCount(board, g.id)}</span>
-                            {gsel === g.id && renaming !== g.id && (
+                            {gsel === g.id && renaming !== g.id && !demo && (
                               <TipButton tip="Delete group" className="frame-delete" onMouseDown={(e) => e.stopPropagation()} onClick={() => deleteSelection()}>
                                 <Icon name="trash" size={13} />
                               </TipButton>

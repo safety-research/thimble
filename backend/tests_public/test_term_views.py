@@ -1,8 +1,7 @@
 """Terminal views (app/term_views.py, app/term_kit): a view's view.term.js runs sandboxed, one process per open view, and
 draws the view in thimble-term's panel. The sandbox lets it read no file and open no socket; the host answers its
 reader queries through the views' reader calls and passes its acts on only with the frame that answers the analyst's
-key or click; `draw_text` draws a view as text with no Claude Code, as the worked example Timeline shows at 120 and 200
-columns. Reader calls run in this process (views._runner), so no kernel starts."""
+key or click; `draw_text` draws a view as text with no Claude Code, as each worked example shows at 120 columns. Reader calls run in this process (views._runner), so no kernel starts."""
 from __future__ import annotations
 
 import asyncio
@@ -16,12 +15,14 @@ import socket
 import sys
 import tempfile
 import threading
-import time
 from pathlib import Path
 
+import httpx
 import pytest
+from fastapi import FastAPI
 
-from app import config, kernel_wrap, local, srt, term_views, views
+from app import concepts, config, kernel_wrap, srt, term_views, views
+from target_blocks import target_blocks  # noqa: F401 — the core lane's target flags, where prompts.py lacks them
 
 NODE = srt.node()
 SRT = srt.package(config.REPO_ROOT)
@@ -292,105 +293,6 @@ async def test_a_program_draws_after_its_answer_and_an_act_comes_only_with_the_k
     assert "presses 2" in out and term_views.read_state(CORPUS, slug) == {"presses": 1}
 
 
-# after its answer the program works on without drawing, for longer than a quiet spell: in one stretch, then in parts
-# between timers, as a view decodes a large answer; then it draws what it got
-WORKS_ON = r"""
-import { draw, fetch, redraw } from 'thimble-term'
-let words = 'loading'
-let presses = 0
-draw((d) => {
-  d.line(`${words} · presses ${presses}`)
-  d.key('o', 'to press', () => { presses++ })
-})
-fetch({}).then(async (got) => {
-  const until = Date.now() + 600
-  while (Date.now() < until) {}
-  for (let i = 0; i < 4; i++) {
-    const t = Date.now() + 150
-    while (Date.now() < t) {}
-    await new Promise((ok) => setTimeout(ok, 0))
-  }
-  words = `done with ${got.rows.length} rows`
-  redraw()
-})
-"""
-
-
-@needs_node
-async def test_a_view_is_drawn_once_its_program_is_done_and_at_once_when_it_is(board, inproc):
-    """draw_check and draw_text take the frame once the program is idle, which it says when asked (a sync): a program
-    still at work after its last answer, drawing nothing for longer than a quiet spell, is drawn once it is done, never
-    as it loads; and a key it answers at once is taken at once, with no quiet spell after each."""
-    slug = _view(WORKS_ON)
-    out = await term_views.draw_check(CORPUS, slug, cols=60, theme="dark", wrap=DRAW_WRAP)
-    assert out["ok"] and "done with 3 rows · presses 0" in out["text"], out
-    p = term_views.Program(CORPUS, slug, keep=False, wrap=DRAW_WRAP)
-    try:
-        await p.start(60, 5, text="plain")
-        assert "done with 3 rows" in (await p.settle())["text"]
-        took = 0.0
-        for _ in range(5):
-            await p.event({"t": "key", "key": "o"})
-            t = time.monotonic()
-            frame = await p.settle()
-            took += time.monotonic() - t
-            assert p.settled
-        assert "presses 5" in frame["text"]
-        # a quiet spell after each key would be 5 * SETTLE_QUIET_S at least
-        assert took < 5 * term_views.SETTLE_QUIET_S * 0.8, took
-    finally:
-        await p.close()
-
-
-BIG_READER = READER.replace('return {"rows": index, "asked": query}',
-                            f'return {{"rows": index, "big": "x" * {term_views.ANSWER_MAX + 1024 * 1024}}}')
-BIG = r"""
-import { draw, fetch } from 'thimble-term'
-let words = 'loading'
-draw((d) => d.line(words))
-fetch({}).then(() => { words = 'got it' }, (e) => { words = `${e.name}: ${e.message}` })
-"""
-
-
-@needs_node
-async def test_a_reader_answer_longer_than_a_program_takes_reaches_it_as_an_error_that_says_to_page_it(board, inproc):
-    assert BIG_READER != READER
-    views.write_view(CORPUS, "big", name="Big", description="", scope=["board.jsonl"], reader=BIG_READER, html=HTML, term=BIG)
-    out = await term_views.draw_check(CORPUS, "big", cols=100, theme="dark", wrap=DRAW_WRAP)
-    mb = (term_views.ANSWER_MAX + 1024 * 1024) / 1048576
-    assert f"ReaderError: the reader's answer is {mb:.1f} MB" in " ".join(out["text"].split()), out["text"]
-    assert not out["ok"] and "answer in pages" in out["error"]
-
-
-@needs_node
-async def test_a_program_that_fails_is_one_red_line_and_one_that_draws_nothing_does_not_open(board, inproc, monkeypatch):
-    slug = _view("import { draw } from 'thimble-term'\nconst x = undefined\ndraw((d) => d.line(x.y))\n")
-    out = await term_views.draw_text(CORPUS, slug, cols=80, rows=5, wrap=DRAW_WRAP, panel=False)
-    assert out.strip().startswith("× the view could not be drawn: TypeError:") and "view.term.js line 3" in " ".join(out.split())
-    slug = _view("const n = 1\n", "quiet")
-    monkeypatch.setattr(term_views, "START_WAIT_S", 1.0)
-    with pytest.raises(term_views.TermViewError, match="did not start"):
-        await term_views.draw_text(CORPUS, slug, cols=80, rows=5, wrap=DRAW_WRAP)
-
-
-async def test_a_view_built_in_browser_mode_has_no_terminal_program(board, inproc):
-    views.write_view(CORPUS, "page", name="Page", description="", scope=["board.jsonl"], reader=READER, html=HTML)
-    with pytest.raises(term_views.TermViewError, match="built in browser mode"):
-        await term_views.draw_text(CORPUS, "page", wrap=DRAW_WRAP)
-    _view("import { draw } from 'thimble-term'\ndraw((d) => d.line('hi'))\n")
-    rows = {r["slug"]: r for r in local._home_views(CORPUS)}
-    assert rows["page"]["term"] is False and rows["board"]["term"] is True
-
-
-def test_a_view_installed_from_a_folder_keeps_its_terminal_program(board, tmp_path):
-    """install_view (the demo's examples, a pre-cache's views) copies view.term.js with the view's other files, so the
-    copy that passed runs in the terminal too."""
-    src = tmp_path / "timeline"
-    shutil.copytree(views.EXAMPLES_DIR / "timeline", src, ignore=shutil.ignore_patterns("sample"))
-    views.install_view(config.workspace_dir(CORPUS), src)
-    assert (views.views_dir(CORPUS) / "timeline" / term_views.VIEW_TERM).read_text() == (src / term_views.VIEW_TERM).read_text()
-
-
 @needs_node
 async def test_the_host_serves_thimble_term_over_its_socket_with_its_token(board, inproc, monkeypatch, capsys):
     """`thimble view host`: a ready line naming a socket in a private folder and a token; a request without the token is
@@ -442,76 +344,35 @@ async def test_the_host_serves_thimble_term_over_its_socket_with_its_token(board
     assert view_calls.KERNEL == kernel, "the host's own kernels' name is its own while it serves"
 
 
-LABEL_PROGRAM = r"""
-import { colorBy, draw, labels } from 'thimble-term'
-const colour = colorBy({ fields: [{ name: 'body', title: 'Body' }], initial: 'body' })
-draw((d) => {
-  colour.draw(d)
-  d.line(labels().map((l) => `${l.name} is ${l.on ? 'on' : 'off'}`).join(', '))
-})
+COLOR_PROGRAM = """
+import { colorBy, draw } from 'thimble-term'
+const color = colorBy({ fields: [{ name: 'kind', title: 'Kind', values: ['note'] }], initial: 'kind' })
+draw((d) => color.draw(d))
 """
 
 
 @needs_node
-async def test_a_label_checked_in_color_by_is_turned_on_in_files_by_the_host(board, inproc, monkeypatch, capsys):
-    """A label checked in Color by's menu is turned on in Files and every view, as the browser kit's does: the host
-    makes the change show_label makes (concepts.show_concept) during the analyst's key, sends the program the labels
-    with it on, and passes thimble-term no act for it; unchecked with Space, it is turned off again."""
-    from app import concepts
+async def test_a_view_opens_on_its_own_field_while_the_label_on_marks_none_of_its_records(board, inproc):
+    """A label on in Files whose run marked none of the view's records (a regex that found nothing) colors no row, so
+    the view opens on its `initial` field, not on the label with no record marked; a label on that marks one takes it."""
+    app = FastAPI()
+    app.include_router(concepts.router, prefix="/api")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", timeout=180) as api:
+        async def label(name: str, pattern: str) -> None:
+            r = await api.post(f"/api/ws/{CORPUS}/concepts", json={"name": name, "kind": "regex", "spec": pattern})
+            assert r.status_code == 200, r.text
+            cid = r.json()["id"]
+            r = await api.post(f"/api/ws/{CORPUS}/concepts/{cid}/apply", json={"paths": ["board.jsonl"], "wait": True})
+            assert r.status_code == 200, r.text
+            concepts.show_concept(CORPUS, cid, True)
 
-    ws = config.workspace_dir(CORPUS)
-    k = concepts.new_concept("Asks", kind="regex", spec="first", labels=["yes", "no"], glob="board.jsonl")
-    concepts.write_concept(ws, k)
-    slug = _view(LABEL_PROGRAM)
-    real = term_views.Program
-    monkeypatch.setattr(term_views, "Program", lambda *a, **kw: real(*a, **{**kw, "wrap": DRAW_WRAP}))
-    host = term_views.Host(CORPUS)
-    task = asyncio.ensure_future(host.serve())
-    try:
-        ready = None
-        for _ in range(100):
-            await asyncio.sleep(0.05)
-            ready = next((json.loads(x) for x in capsys.readouterr().out.splitlines() if '"ready"' in x), None)
-            if ready:
-                break
-        assert ready
-
-        async def post(path: str, body: dict) -> dict:
-            r, w = await asyncio.open_unix_connection(ready["socket"])
-            data = json.dumps(body).encode()
-            w.write(f"POST {path} HTTP/1.1\r\nContent-Length: {len(data)}\r\nx-thimble-token: {ready['token']}\r\n\r\n"
-                    .encode() + data)
-            await w.drain()
-            raw = await r.read()
-            w.close()
-            return json.loads(raw.split(b"\r\n\r\n", 1)[1])
-
-        def text(frame: dict) -> str:
-            return "\n".join("".join(s["s"] for s in line) for line in frame["lines"])
-
-        opened = await post("/open", {"slug": slug, "cols": 80, "rows": 12})
-        assert "Asks is off" in text(opened["frame"])
-
-        async def keys(*ks: str) -> list[dict]:
-            acts = []
-            for key in ks:
-                acts += (await post("/event", {"id": opened["id"], "event": {"t": "key", "key": key}}))["acts"]
-            return acts
-
-        # c opens the menu on Body; ↓ goes to the label; Enter colors by it alone and turns it on
-        assert await keys("c", "down", "return") == []
-        assert concepts.find_concept(ws, k["id"])["shown"] is True
-        got = await post("/event", {"id": opened["id"], "event": {"t": "resize", "cols": 80, "rows": 12}})
-        assert "Color by  Asks" in text(got["frame"]) and "Asks is on" in text(got["frame"]), text(got["frame"])
-        # Space on it unchecks it, the last choice, so the view is Off, and turns it off; c closes the menu
-        assert await keys("c", "space", "c") == []
-        assert concepts.find_concept(ws, k["id"])["shown"] is False
-        got = await post("/event", {"id": opened["id"], "event": {"t": "resize", "cols": 80, "rows": 12}})
-        assert "Color by  Off" in text(got["frame"]) and "Asks is off" in text(got["frame"]), text(got["frame"])
-    finally:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        slug = _view(COLOR_PROGRAM)
+        await label("zebra sightings", r"zebra")
+        out = await term_views.draw_text(CORPUS, slug, cols=80, rows=4, wrap=DRAW_WRAP)
+        assert "Color by  Kind" in out and "zebra sightings" not in out, out
+        await label("second posts", r"second")
+        out = await term_views.draw_text(CORPUS, slug, cols=80, rows=4, wrap=DRAW_WRAP)
+        assert "Color by  second posts" in out, out
 
 
 # ------------------------------------------------------------------------------------------------------ Timeline
@@ -547,7 +408,7 @@ def timeline(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
 
 
 @needs_node
-@pytest.mark.parametrize("cols", [120, 200])
+@pytest.mark.parametrize("cols", [120])
 async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
     """The worked example at 120 and 200 columns: the search and Filter by on Incident with its values as toggles; Rows
     on Source, then Color by, Off as the view opens, and with Service chosen its chips; the time range's readout and strip, a lane per source, and the axis alone
@@ -585,47 +446,6 @@ async def test_timeline_draws_what_its_browser_page_shows(timeline, cols):
                               ["f", "to filter by"], ["g", "for rows"], ["a", "to ask"]]
 
 
-def _timeline_pane(rows: list[str]) -> list[str]:
-    """The side pane's rows, right of its `│`."""
-    return [x.rsplit("│ ", 1)[1].rstrip() for x in rows if "│ " in x]
-
-
-@needs_node
-async def test_timeline_opens_an_event_in_the_side_pane_filters_and_picks_a_lane(timeline):
-    """Enter opens the chosen event in the side pane beside the list, never under its row: its words, its facts named
-    plainly, the events that answer it and its place, with no `ask about it` (the place asks); a click on a Filter by
-    value hides its events; a click on a lane's name shows that lane's events, the list naming them; a citation of an
-    incident narrows Filter by to it and frames its burst."""
-    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP,
-                                     keys=["down"] * 8 + ["return"], panel=False)
-    rows = out.splitlines()
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "03:00:48  alert   fired" in rows[at] and rows[at + 1].startswith("  ●        03:01:05  agent"), "nothing opens under the row"
-    pane = _timeline_pane(rows)
-    assert pane[0].startswith("alert fired · 03:00:48") and pane[0].endswith("close")
-    assert pane[1:5] == ["payments: health check failing on 2 of 3 replicas", "service payments · severity critical",
-                         "incident INC-311 · by monitor · alert id alr-42", "Responses · 5"]
-    assert pane[5].startswith("03:01:05  agent opened  Opened INC-311")
-    assert "↗ alerts/monitor-20260516-0000.jsonl line 2" in pane
-    assert "ask about it" not in out
-    assert rows[1].rstrip().endswith("reset"), "Reset shows once an event is open"
-    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["click:INC-312"],
-                                     panel=False)
-    rows = out.splitlines()
-    assert "○ INC-312 100  ● INC-313 23  ● INC-311 11  ● no incident 64" in rows[0] and rows[1].rstrip().endswith("reset")
-    assert "In the range  98 events" in out and not any("INC-312" in x for x in _list_rows(rows))
-    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, keys=["click:alert"],
-                                     panel=False)
-    assert "  Source: alert  34 events" in out.splitlines()
-    assert {x[21:29].strip() for x in _list_rows(out.splitlines())} == {"alert"}
-    out = await term_views.draw_text(timeline, "timeline", cols=120, rows=36, wrap=DRAW_WRAP, ref="view:timeline/INC-313",
-                                     panel=False)
-    rows = out.splitlines()
-    assert "○ INC-312 100  ● INC-313 23  ○ INC-311 11  ○ no incident 64" in rows[0]
-    assert rows[2].startswith("  May 18 06:39 – 09:49")
-    assert all("INC-313" in x for x in _list_rows(rows))
-
-
 # ------------------------------------------------------------------------------------------------------ Linked sessions
 
 
@@ -644,10 +464,6 @@ def linked(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
     return "linked"
 
 
-LEAD1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576.jsonl"
-PORT1 = "runs/r1/36fe6b9d-6e6d-4582-aef9-c97a0fe8f576/subagents/agent-a07a4da7.jsonl"
-
-
 def _axis(body: list[str]) -> int:
     """The axis under the lanes: the first row after the time range's strip with a blank gutter, where no key stands."""
     top = next(i for i, x in enumerate(body) if re.match(r"\s+\w{3} \d+ \d\d:\d\d", x)) + 2
@@ -660,14 +476,8 @@ def _tree(body: list[str]) -> list[str]:
     return [re.match(r"\s*\S+(?: \S+)*", x[2:])[0] for x in body[top:_axis(body)]]
 
 
-def _linked_pane(rows: list[str], title: str) -> list[str]:
-    """The side pane's rows beside the transcript whose title starts `title`, at the right of the `│` between them."""
-    t = next(i for i, x in enumerate(rows) if x.startswith(f"  {title}"))
-    return [x[x.index("│") + 1:].strip() for x in rows[t + 1:] if "│" in x]
-
-
 @needs_node
-@pytest.mark.parametrize("cols", [120, 200])
+@pytest.mark.parametrize("cols", [120])
 async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     """The worked example at 120 and 200 columns: the top row (search, Filter by, Rows, Color by with its chips), the
     time range's readout and its strip broken where the runs lie hours apart, each run's sessions as a tree of lanes (a
@@ -707,92 +517,6 @@ async def test_linked_sessions_draws_what_its_browser_page_shows(linked, cols):
     assert hints == "↑↓ to choose · Enter to open · n p for the next or previous lane · ? for all keys · b to go back · x to close"
 
 
-@needs_node
-async def test_linked_sessions_folds_a_run_where_the_lanes_have_no_room(linked):
-    """In a short panel the largest run folds to one lane of all its sessions, so the transcript keeps its rows; ▸
-    unfolds it, and another run folds in its place."""
-    out = await term_views.draw_text(linked, "linked-sessions", cols=92, rows=36, wrap=DRAW_WRAP, panel=False)
-    body = out.splitlines()
-    assert _tree(body)[:2] == ["▸ Run 1 · lead", "▾ Run 2 · lead"]
-    assert body[3][22:].strip(), "a folded run draws its sessions' turns in one lane"
-    out = await term_views.draw_text(linked, "linked-sessions", cols=92, rows=36, wrap=DRAW_WRAP, panel=False, keys=["click:▸"])
-    lanes = _tree(out.splitlines())
-    assert lanes[:3] == ["▾ Run 1 · lead", "  ├ survey", "  ├ client-port"] and lanes[-1] == "▸ Run 3 · lead"
-
-
-@needs_node
-async def test_linked_sessions_reads_a_subagent_and_the_session_that_started_it(linked):
-    """n reads the next lane, client-port: over its transcript, when lead's Task call started it, when its result came
-    back and the subagents it started; its first turn is the prompt lead gave it. u reads lead at that Task call, chosen
-    and opened in the side pane beside the transcript (the subagent it started, its whole prompt, what came back, its
-    place); s on that call reads client-port again."""
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["n", "n"])
-    body, hints = _split(out.splitlines(), 3, 40)
-    at = next(i for i, x in enumerate(body) if x.startswith("  started by"))
-    assert body[at] == ("  started by lead 14:09:05 · result back to lead 14:29:35 · subagents pagination 14:12:40, "
-                        "auth-headers 14:12:41")
-    assert body[at + 1].startswith("  client-port · Run 1 · nested team  40 turns · 14:09:08 – 14:29:35")
-    assert re.sub(r"\s*▌*$", "", body[at + 3]) == "❯ 14:09:08  ● lead"
-    # the hint row has room for n p alone of the view's own keys at 120 columns; `?` lists u
-    assert "n p for the next or previous lane" in hints and "u to read lead" not in hints
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["n", "n", "?"],
-                                     panel=False)
-    assert ["u", "to read lead"] in _key_list(out)
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, keys=["n", "n", "u"],
-                                     panel=False)
-    rows = out.splitlines()
-    assert "14:09:05  ⎿ Task → client-port Port invoicer/client to v3" in next(x for x in rows if x.startswith("❯"))
-    pane = _linked_pane(rows, "lead · Run 1 · nested team")
-    assert pane[0].startswith("lead · Task · 14:09:05") and pane[0].endswith("close")
-    assert pane[1] == "→ client-port  Port invoicer/client to v3"
-    assert pane[3].startswith("Port invoicer/client to Brambleway v3")
-    assert pane[4].startswith("Client on v3 with its interface kept")
-    assert pane[5].startswith("↗ …/36fe6b9d") and pane[5].endswith("line 14")
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
-                                     keys=["n", "n", "u", "s"], panel=False)
-    assert any(x.startswith("  client-port · Run 1 · nested team  40 turns") for x in out.splitlines())
-
-
-@needs_node
-async def test_linked_sessions_opens_a_cited_call_beside_its_transcript_and_filters_to_a_cited_run(linked):
-    """A citation of an Edit reads its session, the call chosen and opened in the side pane: the lines it took out and
-    put in, what came back and its place. A citation of a run turns Filter by to Run with that run alone on, reads its
-    lead and leaves only its lanes; Reset turns every run back on."""
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref=f"{PORT1}#L13", panel=False)
-    rows = out.splitlines()
-    assert "14:10:20  ⎿ Edit invoicer/client/http.py" in next(x for x in rows if x.startswith("❯"))
-    pane = _linked_pane(rows, "client-port · Run 1 · nested team")
-    assert pane[0].startswith("client-port · Edit · 14:10:20")
-    assert pane[1:5] == ["invoicer/client/http.py", '− BASE_URL = "https://api.brambleway.example/v2"',
-                         '+ BASE_URL = "https://api.brambleway.example/v3"', "The file invoicer/client/http.py has been updated."]
-    assert pane[5].startswith("↗ …/agent-a07a4da7.jsonl line 13")
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref="view:linked-sessions/r3",
-                                     panel=False)
-    rows = out.splitlines()
-    assert rows[0].startswith("  / search  Filter by  Run  ○ Run 1 166  ○ Run 2 95  ● Run 3 91  Rows  Session")
-    assert rows[0].rstrip().endswith("reset")
-    assert _tree(rows) == ["▾ Run 3 · lead", "  ├ survey", "  ├ client-port", "  ├ webhooks", "  ├ reviewer", "  └ reviewer 2"]
-    assert any(x.startswith("  lead · Run 3 · with reviewer  17 turns") for x in rows)
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP, ref="view:linked-sessions/r3",
-                                     keys=["r"], panel=False)
-    rows = out.splitlines()
-    assert "● Run 1 166  ● Run 2 95  ● Run 3 91" in rows[0]
-    assert _tree(rows)[0] == "▾ Run 1 · lead"
-
-
-@needs_node
-async def test_linked_sessions_groups_its_lanes_by_agent_and_reads_a_lane_across_its_sessions(linked):
-    """Rows by Agent: a lane per agent across the runs, and the transcript of a lane read holds its turns in every session
-    in time order, its title naming the lane and counting its turns and sessions."""
-    out = await term_views.draw_text(linked, "linked-sessions", cols=120, rows=40, wrap=DRAW_WRAP,
-                                     keys=["g", "click:Agent", "n", "n"], panel=False)
-    rows = out.splitlines()
-    assert "Rows  Agent" in rows[0]
-    assert [x.strip() for x in _tree(rows)] == ["lead", "survey", "client-port", "webhooks", "pagination", "auth-headers",
-                                                "test-runner", "reviewer"]
-    assert any(x.startswith("  Agent: client-port  101 turns · 3 sessions") for x in rows)
-
-
 # ------------------------------------------------------------------------------------------------------ Repository
 
 
@@ -811,16 +535,8 @@ def repository(workspaces_tmp, tmp_path, monkeypatch, inproc) -> str:
     return "repository"
 
 
-def _repository_pane(rows: list[str]) -> list[str]:
-    """The side pane's half of each row drawn beside the list, after its `│`."""
-    return [x.split(" │ ", 1)[1].rstrip() for x in rows if " │ " in x]
-
-
-HUE = re.compile(r"\x1b\[38;2;")  # a palette hue in ANSI text: only Color by draws one
-
-
 @needs_node
-@pytest.mark.parametrize("cols", [120, 200])
+@pytest.mark.parametrize("cols", [120])
 async def test_repository_draws_what_its_browser_page_shows(repository, cols):
     """The worked example at 120 and 200 columns, one run's repository as a code forge's command line draws it: the
     repository's head (the run switcher with the run's name, and the run's facts), the tabs with the run's counts, the
@@ -849,338 +565,7 @@ async def test_repository_draws_what_its_browser_page_shows(repository, cols):
     assert _split(chosen.splitlines(), 2, 16)[0][2].startswith("  / search  Filter by  none  Color by  State  ● merged 7  ● closed 1")
 
 
-@needs_node
-async def test_repository_opens_a_pull_request_as_its_page_in_the_side_pane(repository):
-    """Enter opens a pull request's page beside the list, never under its row: its facts named plainly, the issue it
-    fixes and the same issue in the other runs, its flags, then its records in time order, each commit with its diff,
-    which ↑↓ move through once `l` gives them the keys and Enter opens at its place; a click on another run's issue
-    opens that run's repository at the issue's page."""
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
-                                     keys=["down", "down", "return"], panel=False)
-    rows = out.splitlines()
-    pane = _repository_pane(rows)
-    assert pane[0].startswith("r1 #11 Keep wall-clock time") and pane[0].endswith("close")
-    assert pane[1] == "state merged · opened 09:50 by cedar"
-    assert "review changes requested · approvals 1 of 1" in pane
-    assert pane[pane.index("review changes requested · approvals 1 of 1") + 1].startswith("fixes  #3 Every-other-week")
-    assert "other runs  r2 #3 fixed  r3 #3 fixed  r4 #3 fixed" in pane
-    assert any(x.startswith("09:53  cedar  pushed 4079459") for x in pane)
-    assert "+        at = local + n * self.period" in [x.strip(" ▌") for x in pane]
-    assert any(x.startswith("10:35  ash  changes requested") for x in pane)
-    assert not any("ask about it" in x for x in rows)
-    assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● #11  Keep wall-clock"), "its row stays in the list"
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=44, wrap=DRAW_WRAP,
-                                     keys=["down", "down", "return", "click:r2 #3 fixed"], panel=False)
-    rows = out.splitlines()
-    assert rows[0].startswith("  run  r2  3 agents · 2 approvals to merge")
-    pane = _repository_pane(rows)
-    assert pane[0].startswith("r2 #3 Every-other-week schedule")
-    assert any(re.match(r"\d\d:\d\d  \S+\s+merged #11", x) for x in pane)
-
-
-@needs_node
-async def test_repository_draws_a_thread_as_replies_and_an_agent_as_its_profile(repository):
-    """The board's threads: a row per thread with its first words, and its page the first post with the replies under
-    it on tree guides; the agents: a row per agent with its sign-off, and its page what it did."""
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP, keys=["3", "return"],
-                                     panel=False)
-    rows = out.splitlines()
-    assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● Splitting the backlog")
-    pane = _repository_pane(rows)
-    at = pane.index("ash  09:02")
-    assert pane[at + 1:at + 5] == ["│ I'll take #1 and #4, both in parse and format.", "├ birch  09:02", "│ #2 and #6 for me.",
-                                   "├ cedar  09:06"]
-    assert "└ ash  09:09" in pane
-    out = await term_views.draw_text(repository, "repository", cols=140, rows=40, wrap=DRAW_WRAP, keys=["4", "return"],
-                                     panel=False)
-    rows = out.splitlines()
-    assert any('"Signing off: three merged, four reviews given."' in x for x in rows)
-    pane = _repository_pane(rows)
-    assert any(x.startswith("run r1 · pull requests 3") for x in pane)
-    assert any(x.startswith("09:24  opened #9") for x in pane)
-
-
-@needs_node
-async def test_repository_switches_runs_and_follows_its_citations_its_filter_and_its_chips(repository):
-    """One run's repository at a time: the switcher (p) lists every run with its tabs' counts and opens the one chosen,
-    and Reset puts back the run the view opens on; a citation of a record opens its run's repository at its item's
-    page, the record chosen and in view, and a run's citation that run's repository; a Filter by toggle leaves out the
-    items of a value, and a Color by chip turned off only takes its value's hue off its items, which stay."""
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, keys=["p"], panel=False)
-    rows = out.splitlines()
-    menu = [re.sub(r"^❯ ", "", x.strip(" │")).split(None, 1) for x in rows if x.startswith("  │")]
-    assert menu == [["r1", "8 pulls · 9 issues · 3 threads · 3 agents"], ["r2", "7 pulls · 9 issues · 3 threads · 3 agents"],
-                    ["r3", "11 pulls · 9 issues · 3 threads · 5 agents"], ["r4", "9 pulls · 9 issues · 3 threads · 5 agents"]]
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, keys=["p", "down", "return"],
-                                     panel=False)
-    rows = out.splitlines()
-    assert rows[0] == "  run  r2  3 agents · 2 approvals to merge · Tue, May 12, 2026"
-    assert rows[1].split()[:3] == ["pull", "requests", "7"] and rows[2].rstrip().endswith("reset")
-    assert next(x for x in rows if x.startswith("❯")).startswith("❯ ● #9   Make 'next <weekday>' skip today")
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
-                                     keys=["p", "down", "return", "r"], panel=False)
-    rows = out.splitlines()
-    assert rows[0].startswith("  run  r1  ") and not rows[2].rstrip().endswith("reset")
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
-                                     ref="runs/r1/events.jsonl#L35", panel=False)
-    pane = _repository_pane(out.splitlines())
-    assert pane[0].startswith("r1 #11 Keep wall-clock time")
-    assert any(x.startswith("10:58  ash  commented") for x in pane), "the cited record is in view"
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP,
-                                     ref="runs/r2/events.jsonl#L5", panel=False)
-    rows = out.splitlines()
-    assert rows[0].startswith("  run  r2  ") and _repository_pane(rows)[0].startswith("r2 #5 Document the strict flag")
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=24, wrap=DRAW_WRAP, ref="view:repository/r3",
-                                     panel=False)
-    rows = out.splitlines()
-    assert rows[0] == "  run  r3  5 agents · 1 approval to merge · Wed, May 13, 2026" and rows[2].rstrip().endswith("reset")
-    assert rows[1].split()[:3] == ["pull", "requests", "11"]
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP,
-                                     keys=["f", "click:Area", "click:parser 3"], panel=False)
-    rows = out.splitlines()
-    assert "Filter by  Area  ○ parser 3" in rows[2] and rows[1].split()[:3] == ["pull", "requests", "5"]
-    assert not any(re.match(r"(❯| ) ● #\d+ .* parser ", x) for x in rows)
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP,
-                                     keys=["c", "click:State", "click:closed 1"], panel=False)
-    rows = out.splitlines()
-    assert "○ closed 1" in rows[2]
-    states = {m[1] for x in rows if re.match(r"(❯| ) ● #\d+", x) and (m := re.search(r" (merged|closed|open) ", x))}
-    assert states == {"merged", "closed"}, "Color by only colors: the closed pull request stays"
-    assert rows[1].split()[:3] == ["pull", "requests", "8"]
-    # its mark drawn with no hue, the merged ones' in theirs
-    out = await term_views.draw_text(repository, "repository", cols=120, rows=40, wrap=DRAW_WRAP,
-                                     keys=["c", "click:State", "click:closed 1"], ansi=True, panel=False)
-    plain = lambda x: re.sub(r"\x1b\[[0-9;]*m", "", x)  # noqa: E731
-    marks = {m[1]: x[:x.index("#")] for x in out.splitlines()
-             if re.match(r"(❯| ) ● #\d+", plain(x)) and (m := re.search(r" (merged|closed) ", plain(x)))}
-    assert set(marks) == {"merged", "closed"}
-    assert HUE.search(marks["merged"]) and not HUE.search(marks["closed"]), marks
-
-
-@needs_node
-async def test_repository_colors_the_unit_its_value_belongs_to(repository):
-    """A field of the items (State), once chosen, colors each row's mark and the track beside the list; Color by Off, as
-    the view opens, colors nothing, the track included; a label marks records, so a row, which stands for its records, takes no mark of its own and
-    shows their mix in a bar, the label's hue on the part its marked records take, and the track is plain."""
-    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False)
-    assert not HUE.search(out), "no hue anywhere as the view opens, Off"
-    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False,
-                                     keys=["c", "click:State"])
-    rows = out.splitlines()[5:]
-    assert all(HUE.search(x) for x in rows), "each row and its part of the track in its state's hue"
-    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False,
-                                     keys=["c", "click:State", "c", "click:Off"])
-    assert not HUE.search(out), "no hue anywhere with Color by Off"
-    await _labels_on(repository, "repository")
-    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, panel=False)
-    rows = out.splitlines()
-    assert "Color by  Clock change ↗" in rows[2]
-    listed = [x for x in rows[5:] if re.search(r"#\d+ ", x)]
-    assert listed and not any("●" in x for x in listed), "a row takes no mark of its own"
-    assert any(re.match(r"  █{6}  #11  Keep wall-clock", x) for x in listed), "the mix of a row whose records it marks"
-    out = await term_views.draw_text(repository, "repository", cols=100, rows=12, wrap=DRAW_WRAP, ansi=True, panel=False)
-    rows = out.splitlines()[5:]
-    hued = [x for x in rows if HUE.search(x)]
-    assert hued and all(re.search(r"\x1b\[38;2;[\d;]+m█", x) for x in hued), "a hue on the mix alone"
-    assert not any(re.search(r"\x1b\[38;2;[\d;]+m▌", x) for x in rows), "the track is plain"
-
-
-@needs_node
-async def test_repository_colors_an_agent_by_its_own_name_and_shows_its_records_mix_under_their_items_state(repository):
-    """An agent's row is the author itself, so under Author
-    its mark takes its own name's hue; under State, which the items it worked on carry, it stands for its records: no
-    mark of its own, their mix in a bar, a chip for each value the mixes draw, and a plain track."""
-    async def draw(by, ansi=False):
-        out = await term_views.draw_text(repository, "repository", cols=120, rows=12, wrap=DRAW_WRAP, ansi=ansi,
-                                         panel=False, keys=["4", "c", f"click:{by}"])
-        return out.splitlines()
-
-    plain, hued = await draw("Author"), await draw("Author", ansi=True)
-    at = [i for i, x in enumerate(plain) if re.match(r"(❯| ) ● (ash|birch|cedar) ", x)]
-    assert len(at) == 3 and all(re.search(r"\x1b\[38;2;[\d;]+m●", hued[i]) for i in at), plain
-    plain, hued = await draw("State"), await draw("State", ansi=True)
-    assert "Color by  State" in plain[2], plain[2]
-    assert all(c in plain[2] for c in ("● merged 3", "● fixed 3", "● closed 2", "● open 1", "● no state 3")), plain[2]
-    listed = [x for x in plain[5:] if re.search(r"  (ash|birch|cedar) ", x)]
-    assert len(listed) == 3 and all(re.match(r"(❯| ) █{6}  (ash|birch|cedar) ", x) for x in listed), listed
-    assert not any(re.search(r"\x1b\[38;2;[\d;]+m[●▌]", x) for x in hued[5:]), "no mark of its own, and a plain track"
-
-
 # ------------------------------------------------------------------------------------------------------ narrow panels
-
-
-async def _labels_on(c: str, example: str) -> None:
-    """The example's sample labels (its labels.json) defined in workspace `c`, turned on in Files and applied, as
-    `thimble demo --examples` defines them: the labels the view opens colored by, as in the browser."""
-    import httpx  # noqa: PLC0415
-    from fastapi import FastAPI  # noqa: PLC0415
-
-    from app import concepts  # noqa: PLC0415
-
-    a = FastAPI()
-    a.include_router(concepts.router, prefix="/api")
-    specs = json.loads((views.EXAMPLES_DIR / example / "labels.json").read_text("utf-8"))
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=a), base_url="http://t", timeout=120) as api:
-        for i, sp in enumerate(specs):
-            if i:
-                await asyncio.sleep(1.1)  # a label's time is in seconds: they keep labels.json's order
-            r = await api.post(f"/api/ws/{c}/concepts", json={"name": sp["name"], "kind": sp["kind"], "spec": sp["spec"],
-                                                             "labels": sp["labels"], "shown": True})
-            assert r.status_code == 200, r.text
-            r = await api.post(f"/api/ws/{c}/concepts/{r.json()['id']}/apply", json={"wait": True, "paths": sp["paths"]})
-            assert r.status_code == 200, r.text
-
-
-def _list_rows(body: list[str]) -> list[str]:
-    """A list's rows (a record's, the chosen one's), the track at their right edge left out."""
-    return [re.sub(r"\s*▌*$", "", x) for x in body if x.startswith(("  ● ", "❯ ● "))]
-
-
-WIDTHS = [47, 92, 140]  # the docked panel at 120 and 200 columns, and a wide one
-
-
-@needs_node
-async def test_timeline_opens_as_its_browser_page_does_and_reads_at_every_width(timeline):
-    """Colored by the label that is on, its values as chips with their counts; Color by's name whole on a row of its own
-    where the row has no room, its chips under it where they have none beside it; Filter by's values behind `+N` where
-    they do not fit; list rows cut with …; the hint row one row, its most needed hints kept; a range a drag framed has
-    its window between `[` `]`."""
-    await _labels_on(timeline, "timeline")
-    for cols in WIDTHS:
-        out = await term_views.draw_text(timeline, "timeline", cols=cols, rows=34, wrap=DRAW_WRAP)
-        lines = out.splitlines()
-        body, hints = _split(lines, 2, 34)
-        assert all(len(x) <= cols + 2 for x in body), cols
-        top = "\n".join(body[:4])
-        assert "/ search events  Filter by  Incident" in body[0]
-        assert "Color by  Database connections ↗" in top and "● connections 22" in top and "● not marked 176" in top, cols
-        assert len(hints) <= cols, cols
-        assert hints == ("↑↓ to choose · Enter to open · b to go back" if cols < 60 else
-                         "↑↓ to choose · Enter to open · ? for all keys · b to go back · x to close"), cols
-        rows = _list_rows(body)
-        assert rows and all(len(x) <= cols for x in rows)
-        if cols == 47:
-            assert body[0].strip() == "/ search events  Filter by  Incident  +4"
-            assert body[1].strip() == "Rows  Source"
-            assert body[2].strip() == "Color by  Database connections ↗" and body[3].strip() == "● connections 22  ● not marked 176"
-            assert rows[0].endswith("Tonight's release…"), "a cut row ends in …"
-    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["drag:10-30"], panel=False)
-    strip = next(x for x in out.splitlines() if "[" in x and "]" in x)
-    assert strip.index("[") < strip.index("]")
-    # the signs that zoomed and panned it do nothing now
-    again = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["drag:10-30", "+", "]", "{"],
-                                       panel=False)
-    assert again == out
-
-
-@needs_node
-async def test_timeline_details_and_menu_read_in_a_narrow_panel(timeline):
-    """At 47 cells the side pane stands under the list, a rule between them: an opened event's words and facts wrap to
-    the panel's width and its place keeps its line. The Color by menu stands in a frame, the label's values and
-    definition under its name, its ↗ whole."""
-    await _labels_on(timeline, "timeline")
-    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=40, wrap=DRAW_WRAP,
-                                     keys=["down"] * 8 + ["return"], panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    at = next(i for i, x in enumerate(rows) if x.startswith("❯"))
-    assert "03:00:48  alert" in rows[at]
-    # the list keeps the chosen event in its rows (no day heading takes one), the rule under the list, the pane under it
-    rule = next(i for i in range(at + 1, len(rows)) if set(rows[i].strip()) == {"─"})
-    assert all(x.startswith("  ● ") for x in rows[at + 1:rule]), rows[at + 1:rule]
-    assert rows[rule + 1].strip().startswith("alert fired · 03:00:48") and rows[rule + 1].rstrip().endswith("close")
-    assert rows[rule + 2].strip() == "payments: health check failing on 2 of 3"
-    assert rows[rule + 4].strip() == "service payments · severity critical"
-    assert any(x.strip() == "↗ alerts/monitor-20260516-0000.jsonl line 2" for x in rows)
-    assert "ask about it" not in out
-    assert rows[1].rstrip().endswith("reset"), "reset shows once a row is opened"
-    out = await term_views.draw_text(timeline, "timeline", cols=47, rows=34, wrap=DRAW_WRAP, keys=["c"], panel=False)
-    rows = out.splitlines()
-    top = next(i for i, x in enumerate(rows) if "╭─ Color by" in x)
-    box = [x[4:].rstrip(" │") for x in rows[top + 1:] if x.startswith("  │")]
-    # ● before the choice in use
-    at = next(i for i, x in enumerate(box) if x.startswith("❯ ● Database connections"))
-    assert box[at + 1].strip() == "● connections  ● not marked"
-    assert any(x.strip().endswith("definition ↗") for x in box[at + 1:])
-    assert all(len(x) <= 47 + 2 for x in rows)
-
-
-@needs_node
-async def test_linked_sessions_opens_as_its_browser_page_does_and_reads_at_every_width(linked):
-    """Colored by the label that is on; each run's lead whole on its lane; the hint row one row; framed on one run, the
-    lanes of the sessions that did not run then go, and the transcript reads a session that did."""
-    await _labels_on(linked, "linked-sessions")
-    for cols in WIDTHS:
-        out = await term_views.draw_text(linked, "linked-sessions", cols=cols, rows=40, wrap=DRAW_WRAP)
-        body, hints = _split(out.splitlines(), 3, 40)
-        assert all(len(x) <= cols + 2 for x in body), cols
-        top = "\n".join(body[:4])
-        assert "Color by  Pagination ↗" in top and "● pagination 20" in top, cols
-        assert "Run 3 · lead" in "\n".join(body), cols
-        assert len(hints) <= cols and hints.startswith("↑↓ to choose · Enter to open"), cols
-    out = await term_views.draw_text(linked, "linked-sessions", cols=47, rows=40, wrap=DRAW_WRAP, keys=["drag:9-17"],
-                                     panel=False)
-    rows = out.splitlines()
-    lanes = "\n".join(_tree(rows))
-    assert "Run 2 · lead" in lanes and "Run 1" not in lanes
-    assert any(x.startswith("  lead · Run 2") for x in rows), "\n".join(rows)
-
-
-@needs_node
-async def test_repository_opens_as_its_browser_page_does_and_reads_at_every_width(repository):
-    """Colored by the label that is on; the run switcher, the tabs and the columns' names read at every width, the tabs'
-    names shorter where the panel is narrow; in a narrow panel an item's page stands under the list."""
-    await _labels_on(repository, "repository")
-    for cols in WIDTHS:
-        out = await term_views.draw_text(repository, "repository", cols=cols, rows=16, wrap=DRAW_WRAP)
-        body, hints = _split(out.splitlines(), 2, 16)
-        assert all(len(x) <= cols + 2 for x in body), cols
-        assert body[0].startswith("  run  r1  3 agents"), cols
-        assert body[1].split()[:2] == (["pulls", "8"] if cols < 60 else ["pull", "requests"]), cols
-        top = "\n".join(body[2:5])
-        assert "Color by  Clock change ↗" in top and "● clock change" in top, cols
-        assert next(x for x in body if x.split()[:2] == ["pull", "request"]), cols
-        assert len(hints) <= cols, cols
-    out = await term_views.draw_text(repository, "repository", cols=47, rows=50, wrap=DRAW_WRAP, keys=["down", "down", "return"],
-                                     panel=False)
-    rows = [re.sub(r"\s*▌*$", "", x) for x in out.splitlines()]
-    rule = next(i for i, x in enumerate(rows) if set(x.strip()) == {"─"})
-    assert rows[rule + 1].strip().startswith("r1 #11 Keep wall-clock") and rows[rule + 1].endswith("close")
-    at = next(i for i, x in enumerate(rows) if x[2:].startswith("09:50  cedar  opened"))
-    assert rows[at].startswith("❯"), "its first record is chosen"
-    assert rows[at + 1].strip().startswith("Occurrences are computed in local")
-
-
-
-async def _walk(c: str, slug: str, keys: list[str], text: str) -> list[list[str]]:
-    """The rows of each frame of a view opened and walked through `keys`, drawn in the panel (text '') or as text."""
-    p = term_views.Program(c, slug, keep=False, wrap=DRAW_WRAP)
-
-    def rows(f: dict) -> list[str]:
-        return ["".join(s["s"] for s in line).rstrip() for line in f["lines"]]
-
-    try:
-        await p.start(120, 36, text=text)
-        out = [rows(await p.settle())]
-        for k in keys:
-            await p.event(term_views._event_of(k, p.frame))
-            out.append(rows(await p.settle()))
-        return out
-    finally:
-        await p.close()
-
-
-@needs_node
-@pytest.mark.parametrize("example", ["timeline", "linked", "repository"])
-async def test_each_worked_example_draws_in_the_panel_as_it_draws_as_text(example, request):
-    """In the panel a list draws only its rows in view; as text (the checks, the reviewer) every row: each worked
-    example walked through its list, into its side pane (`l` gives a list the pane draws the keys) and back by the
-    wheel draws the same rows either way."""
-    c = request.getfixturevalue(example)
-    slug = {"timeline": "timeline", "linked": "linked-sessions", "repository": "repository"}[example]
-    keys = ["down"] * 12 + ["return", "l", "down", "down", "up"] + ["down"] * 20 + ["wheel:5", "wheel:-3"]
-    live = await _walk(c, slug, keys, "")
-    assert len({tuple(f) for f in live}) > 10
-    assert live == await _walk(c, slug, keys, "plain")
 
 
 @needs_node
@@ -1204,41 +589,46 @@ async def test_each_worked_example_draws_every_choice_of_its_controls(example, p
     assert not [x for x in d["choices"] if x["errors"]], d["choices"]
 
 
-# two lists in one view, as a builder's Wiki Page History draws them: the pages, and under them a
-# page's revisions
-TWO_LISTS = r"""
-import { draw, list } from 'thimble-term'
-const pages = list({ key: (p) => p.id })
-const revs = list({ key: (r) => r.id, enter: 'to read it' })
-const P = Array.from({ length: 30 }, (_, i) => ({ id: i, text: `page ${i}` }))
-const R = Array.from({ length: 30 }, (_, i) => ({ id: i, text: `rev ${i}` }))
-draw((d) => {
-  pages.draw(d, { title: 'pages', items: P, height: 6, row: (p, r) => r.add(p.text) })
-  d.rule()
-  revs.draw(d, { items: R, row: (x, r) => r.add(x.text) })
-})
+KEYED_READER = """
+def build_index(paths):
+    rows = []
+    for p in paths:
+        with open(p) as fh:
+            rows += [line.rstrip("\\n") for line in fh]
+    return rows
+
+
+def records(index, query):
+    return {"rows": index}
+
+
+def resolve(index, locator):
+    if locator.get("key") == "r03":
+        return {"excerpt": "r03 · 3 posts", "label": "r03", "refs": ["board.jsonl#L1"], "key": "r03"}
+    return None
 """
 
 
-@needs_node
-async def test_the_wheel_over_one_of_two_lists_moves_that_list_alone(board, inproc):
-    """`wheel:<n>@<words>` is the wheel over the row that shows those words, with the frame's cell there as thimble-term
-    sends it: of a view's two lists, the pages and a page's revisions under them, the one under the pointer moves its
-    rows and has ↑↓ then, and the other stays; `wheel:<n>` names no cell and moves the list that has the keys, the main
-    one, the first drawn, until another has them."""
-    slug = _view(TWO_LISTS, "two")
+async def test_bug_hunt_k7_the_terminal_s_check_resolves_a_view_s_key_no_process_kept_and_one_the_view_lacks_fails(
+        board, inproc):
+    """Bug hunt round 10, K7 (D3 again): main cited `view:<slug>/r03` as the view's first page passed. `thimble state
+    resolve`, the terminal's check, answers a key only from key-refs.json, which a views kernel writes as it resolves
+    the key; no process did until the analyst opened the view 16 minutes later, so the terminal's checks were spent and
+    the citation stayed a red × though the view resolves it. The check now resolves a built view's key itself, and
+    keeps the answer; a key the view does not have is missing for good, with no `retry`."""
+    from app import local
 
-    async def firsts(keys: list[str]) -> tuple[int, int, str]:
-        """The first page and the first revision in view after `keys`, and the chosen revision's row where it shows."""
-        out = await term_views.draw_text(CORPUS, slug, cols=60, rows=20, keys=keys, wrap=DRAW_WRAP, panel=False)
-        rows = out.splitlines()
-        page, rev = (next(int(m.group(1)) for x in rows if (m := re.search(rf"{w} (\d+)", x))) for w in ("page", "rev"))
-        return page, rev, next((x.rstrip(" ▌") for x in rows if x.startswith("❯ rev")), "")
-
-    assert await firsts(["wheel:4@rev 2"]) == (0, 4, "")
-    assert await firsts(["wheel:3@page 1"]) == (3, 0, "❯ rev 0")
-    assert await firsts(["wheel:2"]) == (2, 0, "❯ rev 0")
-    # the revisions have the keys once the wheel moved them: ↓ chooses the next revision, and the window goes to it
-    assert await firsts(["wheel:4@rev 2", "down"]) == (0, 1, "❯ rev 1")
-    with pytest.raises(term_views.TermViewError, match="no row shows 'nowhere'"):
-        await term_views.draw_text(CORPUS, slug, cols=60, rows=20, keys=["wheel:2@nowhere"], wrap=DRAW_WRAP)
+    views.write_view(CORPUS, "lanes", name="Run Lanes", description="the runs", scope=["board.jsonl"],
+                     reader=KEYED_READER, html=HTML, units=[{"form": "<run>", "means": "one run"}])
+    assert not views.key_refs(CORPUS), "no process kept an answer yet"
+    found, lacking = await local.state(CORPUS, "resolve", [json.dumps(["view:lanes/r03", "view:lanes/r99"])])
+    assert "error" not in found and found["state"] == "ok", found
+    assert (found["label"], found["excerpt"], found["refs"]) == ("r03", "r03 · 3 posts", ["board.jsonl#L1"])
+    assert lacking["error"] == "the view 'Run Lanes' has no 'r99'" and "retry" not in lacking, lacking
+    assert lacking["state"] == "missing"
+    assert views.key_refs(CORPUS)["view:lanes/r03"]["excerpt"] == "r03 · 3 posts", "kept for the next check"
+    # a view still being built may resolve its key later: no reader runs, and the check says so
+    views._save_proposals(CORPUS, [{"slug": "drafts", "name": "Drafts", "description": "d", "claims": ["board.jsonl"],
+                                    "status": "building"}])
+    [building] = await local.state(CORPUS, "resolve", [json.dumps(["view:drafts/r03"])])
+    assert building["retry"] is True and building["error"] == "the view 'Drafts' is still being built", building

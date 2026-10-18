@@ -1,6 +1,7 @@
 /* ref chips (components/RefChip). A standalone ref renders through the shared Chip (components.css), the evidence or
    the accent chip. Here: the inline citation, its states, the links toggle, the hover label that names the evidence,
-   and a table's cited cell. */
+   and a table's cited cell. A citation is always purple and underlined while the links are on; a small spinner
+   follows it while it is checked, and one that failed is red with ×. */
 .refchip.refchip-value {
   display: inline;
   margin: 0;
@@ -13,10 +14,11 @@
   font-variant-numeric: tabular-nums;
   white-space: normal;
   vertical-align: baseline;
+  color: var(--text-accent);
   text-decoration-line: underline;
   text-decoration-style: solid;
   text-decoration-thickness: 1px;
-  text-decoration-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  text-decoration-color: var(--accent);
   text-underline-offset: 3px;
   cursor: pointer;
   transition: var(--transition-color), text-decoration-color var(--dur-fast) var(--ease-out);
@@ -25,12 +27,22 @@
 .refchip.refchip-value:focus-visible {
   color: var(--text-accent);
   text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
   outline: none;
+}
+/* what follows a citation: the spinner while it is checked, × in red when it failed */
+.refchip-mark {
+  margin-left: 0.25em;
+}
+.refchip-x {
+  color: var(--status-negative);
+  font-weight: 600;
 }
 /* the links toggle is off (lib/links): a citation chip goes, a cited number stays as plain text, and the space before
    a bare chip (`refchip-gap`) goes with it */
 :root[data-links='off'] .refchip-citation:not(.refchip-value),
-:root[data-links='off'] .refchip-gap {
+:root[data-links='off'] .refchip-gap,
+:root[data-links='off'] .refchip-mark {
   display: none;
 }
 :root[data-links='off'] .refchip-citation.refchip-value,
@@ -52,11 +64,10 @@
 .refedit-token .chip-ico {
   stroke-width: 2px;
 }
-/* states: unable to verify, a dashed underline in the negative; not linked and unknown, dotted and quiet */
+/* states: unable to verify, red with its underline (× follows it); not linked and unknown, dotted and quiet */
 .refchip.refchip-value.broken,
 .refchip.refchip-value.broken:hover {
-  color: inherit;
-  text-decoration-style: dashed;
+  color: var(--status-negative);
   text-decoration-color: var(--status-negative);
 }
 .refchip.refchip-value.refchip-quiet,
@@ -88,6 +99,38 @@
   color: var(--text-tertiary);
   background: none;
   cursor: default;
+}
+/* a click on a citation the check rewrote: what Claude wrote, what the check made it, and why */
+.refchip-history {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-hairline);
+}
+.refchip-pop > .refchip-history:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.refchip-history-rev {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 0;
+  font: var(--type-body-sm);
+}
+.refchip-history-rev + .refchip-history-rev {
+  margin-top: 6px;
+}
+.refchip-history-rev dt {
+  color: var(--text-tertiary);
+}
+.refchip-history-rev dd {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.refchip-history-rev dd.refchip-history-was {
+  color: var(--text-secondary);
 }
 /* a chip that arrived after its text fades in */
 .refchip-late {

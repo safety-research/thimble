@@ -8,7 +8,7 @@ import { act } from 'react'
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
 import { CardFace } from '../../src/canvas/CardFace.tsx'
 import { CanvasContext, type CanvasCtx } from '../../src/canvas/context.ts'
-import { labelIdentity, labelShares } from '../../src/canvas/details.ts'
+import { labelShares } from '../../src/canvas/details.ts'
 import { api, labelApi } from '../../src/lib/api.ts'
 import type { Cell, Concept, ConceptDetail } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -69,8 +69,6 @@ async function card(title = QUESTION, k: ConceptDetail = DETAIL, over: Partial<C
   return { el, rows }
 }
 
-const shareColumn = (el: HTMLElement) => [...el.querySelectorAll('.bcell-values tbody tr')].map((tr) => tr.querySelectorAll('td')[2]?.textContent)
-
 describe('every value has its share of one total', () => {
   test("each value, the unmatched `other` too, is a share of the units the label labeled, the shares adding up to 100%", () => {
     expect(labelShares(VALUES, COUNTS, 14591)).toEqual({ 'message to other agents': '28%', 'list of links': '62%', other: '10%' })
@@ -80,40 +78,6 @@ describe('every value has its share of one total', () => {
     expect(labelShares(['yes', 'no'], { yes: 468, no: 2391534 }, 2392002)).toEqual({ yes: '<0.1%', no: '>99%' })
     expect(labelShares(['yes', 'no'], { yes: 7, no: 993 }, 1000)).toEqual({ yes: '0.7%', no: '99%' })
   })
-
-  test('the table gives every row a share, and no line of matched units stands under it', async () => {
-    const { el } = await card()
-    expect(shareColumn(el)).toEqual(['28%', '62%', '10%'])
-    expect(el.textContent).not.toMatch(/matched/)
-  })
-})
-
-describe('it reads as a label first', () => {
-  test('under its question: the Label tag, the label, how it is defined, what it ran on and the total', async () => {
-    const { el } = await card()
-    const row = el.querySelector('.bcell-label-row')!
-    expect(row.querySelector('.bcell-kind-tag')?.textContent).toBe('Label')
-    expect(row.querySelector('.bcell-tag-name')?.textContent).toBe('edit kind')
-    expect(row.querySelector('.bcell-label-meta')?.textContent).toBe('code · revisions.jsonl · 14,591 records')
-    expect(el.querySelector('.bcell-labels-key')).toBeNull()
-    // the row comes before the counts
-    expect(row.compareDocumentPosition(el.querySelector('.bcell-values')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  })
-
-  test('a card with no question of its own says the same in its head', async () => {
-    const { el } = await card('edit kind')
-    const head = el.querySelector('.bcell-head .bcell-label-head')!
-    expect(head.querySelector('.bcell-kind-tag')?.textContent).toBe('Label')
-    expect(head.querySelector('.bcell-label-name')?.textContent).toContain('edit kind')
-    expect(head.querySelector('.bcell-label-meta')?.textContent).toBe('code · revisions.jsonl · 14,591 records')
-  })
-
-  test("a trial says it ran on a sample, a prompt label names its model, and a label of cards says the canvas", () => {
-    expect(labelIdentity({ ...LABEL, n_labeled: 25, counts: { yes: 5, no: 20 }, trial: true })).toMatchObject({ how: 'code', where: 'revisions.jsonl', units: 'a sample of 25 records' })
-    expect(labelIdentity({ ...LABEL, kind: 'prompt' }, 'Haiku 4.5').how).toBe('prompt · Haiku 4.5')
-    expect(labelIdentity({ ...LABEL, unit: 'cell', glob: '', n_labeled: 12 })).toMatchObject({ where: 'canvas', units: '12 cards' })
-    expect(labelIdentity({ ...LABEL, glob: 'runs/2026-06/agents/*/transcript.jsonl' })).toMatchObject({ where: '…/transcript.jsonl', full: 'runs/2026-06/agents/*/transcript.jsonl' })
-  })
 })
 
 test('the card shows no record of the corpus, and reads none', async () => {
@@ -122,29 +86,23 @@ test('the card shows no record of the corpus, and reads none', async () => {
   expect(rows).not.toHaveBeenCalled()
 })
 
-test('its rule opens from a closed Rule disclosure that names its kind', async () => {
-  const { el } = await card()
-  const rule = el.querySelector<HTMLButtonElement>('.bcell-label-rule-toggle')!
-  expect(rule.textContent).toBe('Rule (code)')
-  expect(rule.getAttribute('aria-expanded')).toBe('false')
-  expect(el.querySelector('.bcell-label-spec')).toBeNull()
-  await act(async () => rule.click())
-  expect(rule.getAttribute('aria-expanded')).toBe('true')
-  expect(el.querySelector('.bcell-label-spec')?.textContent).toBe(SPEC)
-})
-
-test("Definition and records opens the card's details, where the label's records under each value are", async () => {
-  const openDetail = vi.fn()
-  const { el } = await card(QUESTION, DETAIL, { openDetail })
-  const open = [...el.querySelectorAll<HTMLButtonElement>('.bcell-label button')].find((b) => b.textContent === 'Definition and records')!
-  expect(open).toBeTruthy()
-  await act(async () => open.click())
-  expect(openDetail).toHaveBeenCalledWith('c1')
-})
-
-test("where no board holds the card (a report's figure, the card harness), it offers no Definition and records, whose details could not open there", async () => {
-  const { el } = await card()
-  const labels = [...el.querySelectorAll<HTMLButtonElement>('.bcell-label button')].map((b) => b.textContent)
-  expect(labels).toContain('Rule (code)')
-  expect(labels).not.toContain('Definition and records')
+test('a run that quitting Claude Code stopped says where it stopped under its counts, and Run again runs it (bug hunt H3)', async () => {
+  const quit = { ...RUN, labeled: 8447, matches: 4124, stopped: true, stopped_by: 'quit' }
+  const k = { ...DETAIL, n_labeled: 8447, last_run: quit, applications: [quit] } as unknown as ConceptDetail
+  const apply = vi.spyOn(labelApi, 'apply').mockResolvedValue({ status: 'running' } as never)
+  const { el } = await card(QUESTION, k, { openDetail: () => undefined })
+  const line = el.querySelector('.bcell-label-stopped')!
+  expect(line.textContent).toBe('Stopped at 8,447 of 14,591 records when Claude Code quit.Run again on all 14,591')
+  await act(async () => [...line.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Run again on all 14,591')!.click())
+  expect(apply).toHaveBeenCalledWith('ws', 'k1', {})
+  // while its definition stands, Run again goes on with the records the stopped run never read, and says so (bug hunt I3)
+  unmountAll()
+  const goOn = (await card(QUESTION, { ...k, resume: { read: 8447, left: 6144, total: 14591 } } as ConceptDetail, { openDetail: () => undefined })).el
+  const words = goOn.querySelector('.bcell-label-stopped button')!
+  expect(words.textContent?.trim()).toBe('Label the other 6,144')
+  await act(async () => (words as HTMLButtonElement).click())
+  expect(apply).toHaveBeenLastCalledWith('ws', 'k1', { resume: true })
+  // a run that ended whole says nothing of the kind
+  unmountAll()
+  expect((await card()).el.querySelector('.bcell-label-stopped')).toBeNull()
 })

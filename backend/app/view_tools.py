@@ -3,11 +3,13 @@
 server ran around a `claude -p` session are tools they call (plan, lane E):
 
   view_check     the draft check (views.check_answer), as often as the agent wants: the gate with the locators it names,
-                 and a picture of the page as it opens when it asks for one
+                 and a picture of the page as it opens when it asks for one, in the result (with_pictures)
   finish_view    the builder's end: the gates of record (views.gate); a pass registers the view (views.mark_built) and
                  tells main (the `view` event), a failure answers what failed and the attempt, up to dev.MAX_ATTEMPTS
+  view_reference thimble's docs of the view kit and the worked examples the builder names, whole, for the page its build
+                 makes (reference), so it reads none of thimble's files
   view_pictures  the reviewer's pictures (view_review.shoot): the overview first, then up to view_review.EXTRA_SHOTS
-                 more states a round, into views-work/<slug>/review/<round>/, whose paths it opens with Read
+                 more states a round, into views-work/<slug>/review/<round>/, each in the result (with_pictures)
   finish_review  the reviewer's end of a round: the gate over its revision, which stays (a round counted, up to
                  view_review.ROUNDS) or is undone (the view as it last passed)
 
@@ -22,8 +24,10 @@ view_review.subagent_ended read the outcome the tool kept on the proposal)."""
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import logging
+from pathlib import Path
 from typing import Any
 
 from . import config, subagents, tools
@@ -32,7 +36,7 @@ log = logging.getLogger("thimble.view_tools")
 
 BUILDER = "view-builder"  # subagents.TYPES
 REVIEWER = "view-reviewer"
-BUILDER_TOOLS = ("read_ref", "view_check", "finish_view")  # a builder's thimble tools
+BUILDER_TOOLS = ("read_ref", "view_check", "finish_view", "view_reference")  # a builder's thimble tools
 REVIEWER_TOOLS = ("read_ref", "view_check", "view_pictures", "finish_review")  # a reviewer's
 FINISH_GRACE_S = 120.0  # after a pass or the last attempt, how long the agent may still run before it is stopped
 # the fixed descriptions main's agent list shows (V5: main keeps the first description it sees)
@@ -40,6 +44,14 @@ BUILDER_DESCRIPTION = ("thimble's builder of one view of the analyst's corpus. t
                        "Agent call that starts it.")
 REVIEWER_DESCRIPTION = ("thimble's reviewer of one view it built: it looks at pictures of the view and fixes clear "
                         "problems in how it draws. thimble starts it.")
+# view_reference's docs of the view kit for each page a build makes, by the names the builder gives them, and the
+# worked examples' files for that page (reference)
+REFERENCE_DOCS = {
+    "html-page": ("color", "time-range", "rows-and-filters", "search-table-diff", "charts"),
+    "term-page": ("terminal-views",)}
+EXAMPLES = ("timeline", "repository", "linked-sessions")  # plugin/viewers/<name> (views.EXAMPLES_DIR)
+EXAMPLE_FILES = {"html-page": ("view.json", "reader.py", "view.html"),
+                 "term-page": ("view.json", "reader.py", "view.term.js")}
 UNCHANGED_REPORT = "the view's files are as they were before the change, so the change is not made yet"
 NOT_YOURS = "{tool} is the tool of the agent thimble started for this view, and this call is not that agent's"
 
@@ -64,24 +76,42 @@ def slug_of(key: str | None) -> str:
 def builder_definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:view-builder` for workspace `c` (subagents.roles adds its model, effort and
     `background`): prompts/dev.md with prompts/dev-view.md, the fixed part of every build, as its task (the dev agent's
-    prompt as the config or the active extensions change it), a fixed description, and the thimble tools that are not
-    a builder's taken away. The view a run builds is in its prompt (dev.build_task)."""
+    prompt as the config or the active extensions change it), rendered for the page the build starting now makes
+    (views.spawn_target; the module registers the type again before each spawn), a fixed description, and the thimble
+    tools that are not a builder's taken away. The view a run builds is in its prompt (dev.build_task)."""
     from . import dev, prompts, userconf, views  # noqa: PLC0415 — dev imports the view modules, which import this one
 
-    with prompts.custom(userconf.prompt_files(c, "dev")):
-        prompt = prompts.render_dev("dev-view", {"corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
-                                                 "docs": str(config.REPO_ROOT / "docs"),
-                                                 "attempts": str(dev.MAX_ATTEMPTS)})
+    with prompts.custom(userconf.prompt_files(c, "dev")), prompts.rendering(views.target_flags(c, views.spawn_target(c))):
+        prompt = prompts.render_dev("dev-view", _builder_values(c))
     return {"description": BUILDER_DESCRIPTION, "prompt": prompt, "disallowedTools": tools.not_own(BUILDER_TOOLS)}
+
+
+def _builder_values(c: str) -> dict[str, str]:
+    from . import dev, views  # noqa: PLC0415
+
+    return {"corpus": str(config.corpus_dir(c)), "examples": str(views.EXAMPLES_DIR),
+            "docs": str(config.REPO_ROOT / "docs"), "attempts": str(dev.MAX_ATTEMPTS)}
+
+
+def builder_instructions(c: str, target: str) -> str:
+    """prompts/dev-view.md as the builder's registration renders it for a build of `target` (builder_definition),
+    without the dev preamble: what a builder that started for the view's other page gets with the build of this one
+    (dev.change_text), so it builds it as a build of this page starts."""
+    from . import prompts, userconf, views  # noqa: PLC0415
+
+    with prompts.custom(userconf.prompt_files(c, "dev")), prompts.rendering(views.target_flags(c, target)):
+        return prompts.render("dev-view", _builder_values(c)).strip()
 
 
 def reviewer_definition(c: str) -> dict[str, Any]:
     """The registration of `thimble:view-reviewer` for workspace `c`: the `review` section of prompts/view-review.md,
     the view-review task's part (tasks.py), as the active extensions change it, a fixed description, and the thimble
-    tools that are not a reviewer's taken away. The view a run reviews is in its prompt (view_review.task)."""
-    from . import prompts, tasks, view_review  # noqa: PLC0415
+    tools that are not a reviewer's taken away, rendered for the page of the view the review starting now looks at
+    (views.spawn_target). The view a run reviews is in its prompt (view_review.task)."""
+    from . import prompts, tasks, view_review, views  # noqa: PLC0415
 
-    with prompts.custom(tasks.files(c, view_review.PROMPT)):
+    with prompts.custom(tasks.files(c, view_review.PROMPT)), \
+            prompts.rendering(views.target_flags(c, views.spawn_target(c))):
         prompt = view_review.reviewer_prompt(c)
     return {"description": REVIEWER_DESCRIPTION, "prompt": prompt,
             "disallowedTools": [*tools.not_own(REVIEWER_TOOLS), "Monitor"]}  # a review ends with its turn
@@ -170,12 +200,26 @@ def cancel_grace(c: str, agent_id: str) -> None:
 # --------------------------------------------------------------------------- view_check
 
 
+def with_pictures(text: str, paths: list[str]) -> tools.ToolResult:
+    """A result of `text` with each picture of `paths` after it as an image block, so the agent sees it with no Read
+    call of its own: in Manual mode each Read outside the analyst's folder is a permission ask (bug hunt I12). A
+    picture that cannot be read is left out; its path stays in the text."""
+    content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+    for path in paths:
+        try:
+            data = Path(path).read_bytes()
+        except OSError:
+            continue
+        content.append({"type": "image", "data": base64.b64encode(data).decode("ascii"), "mimeType": "image/png"})
+    return tools.ToolResult(content)
+
+
 def _check_text(answer: dict[str, Any]) -> str:
     lines = [str(x) for x in answer.get("lines") or []]
     head = "The checks pass." if answer.get("ok") else "The checks fail."
     out = "\n".join([head, *lines])
     if answer.get("png"):
-        out += f"\n\nThe picture of the page as it opens, which Read opens: {answer['png']}"
+        out += f"\n\nThe picture of the page as it opens follows this text ({answer['png']})."
     if answer.get("drawing"):
         out += f"\n\nThe view as it opens, drawn as text as the panel shows it:\n\n{answer['drawing']}"
     return out
@@ -183,8 +227,8 @@ def _check_text(answer: dict[str, Any]) -> str:
 
 async def tool_view_check(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_check`: the checks of the view the caller builds or reviews, with the `locators` it names beside the
-    sampled lines, and with `picture` a picture of the page as it opens, or in terminal mode the view drawn as text
-    (views.check_answer)."""
+    sampled lines, and with `picture` a picture of the page as it opens, or for a term-page build the view drawn as
+    text (views.check_answer)."""
     from . import views  # noqa: PLC0415
 
     slug = _program_call(ctx)
@@ -198,7 +242,7 @@ async def tool_view_check(ctx: Any, args: dict[str, Any]) -> Any:
     raw = [raw] if isinstance(raw, str) else raw
     locators = [str(x).strip() for x in raw if str(x).strip()]
     answer = await views.check_answer(ctx.c, slug, locators, bool(args.get("picture")))
-    return tools.ok(_check_text(answer))
+    return with_pictures(_check_text(answer), [str(answer["png"])] if answer.get("png") else [])
 
 
 # --------------------------------------------------------------------------- finish_view
@@ -243,6 +287,10 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     dev.gate_step(c, slug, report, chat=prop.get("chat"))
     if ok:
         dev.register_pass(c, slug, agent_id)
+        # the page the build began with passed and the view lacks its other page: the builder goes on to it now, in
+        # this run, rather than after a hand-back (bug hunt round 11, L17)
+        if step := dev.next_page_step(c, slug, agent_id):
+            return tools.ok(step)
         stop_after_grace(c, key, agent_id)
         return tools.ok(tools.hint("finish-view-pass"))
     if attempt >= dev.MAX_ATTEMPTS:
@@ -254,13 +302,62 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     return tools.err(tools.hint("finish-view-fail", report=lines, n=str(attempt), of=str(dev.MAX_ATTEMPTS)))
 
 
+# --------------------------------------------------------------------------- view_reference
+
+
+def _names(raw: Any) -> list[str]:
+    raw = [raw] if isinstance(raw, str) else raw if isinstance(raw, list) else []
+    return list(dict.fromkeys(str(x).strip().removesuffix(".md") for x in raw if str(x).strip()))
+
+
+def reference(target: str, docs: list[str], examples: list[str]) -> str:
+    """The docs `docs` of the view kit for a build of the page `target` (REFERENCE_DOCS, docs/<name>.md), then each
+    worked example of `examples` with its files for that page (EXAMPLE_FILES), each whole in a tag that names it. A
+    file that cannot be read is left out."""
+    from . import views  # noqa: PLC0415
+
+    def text(path: Path) -> str | None:
+        try:
+            return path.read_text("utf-8").strip()
+        except (OSError, UnicodeDecodeError):
+            log.warning("view_reference leaves out %s, which cannot be read", path)
+            return None
+
+    parts = [f'<doc name="{name}">\n{t}\n</doc>' for name in docs
+             if (t := text(config.REPO_ROOT / "docs" / f"{name}.md")) is not None]
+    parts += [f'<example view="{ex}" file="{name}">\n{t}\n</example>' for ex in examples for name in EXAMPLE_FILES[target]
+              if (t := text(views.EXAMPLES_DIR / ex / name)) is not None]
+    return "\n\n".join(parts)
+
+
+async def tool_view_reference(ctx: Any, args: dict[str, Any]) -> Any:
+    """`view_reference`: the docs and the worked examples the builder names, for the page its build makes
+    (views.target_of), whole in one result (reference), so that it reads none of thimble's files: in Manual mode each
+    Read outside the analyst's folder is a permission ask, and bug hunt 8's builder read thimble's docs, examples and
+    code in about 25 of one build's 63 asks. A name it does not know is an error result that lists the names."""
+    from . import views  # noqa: PLC0415
+
+    try:
+        slug, _ = await _caller(ctx, "view_reference", BUILDER)
+    except Refused as e:
+        return tools.err(str(e))
+    target = views.target_of(ctx.c, slug)
+    docs, examples = _names(args.get("docs")), _names(args.get("examples"))
+    unknown = [d for d in docs if d not in REFERENCE_DOCS[target]] + [x for x in examples if x not in EXAMPLES]
+    if unknown or not (docs or examples):
+        return tools.err(f"view_reference: name docs among {', '.join(REFERENCE_DOCS[target])} and examples among "
+                         f"{', '.join(EXAMPLES)}" + (f" ({', '.join(unknown)} is none of them)" if unknown else ""))
+    return tools.ok(await asyncio.to_thread(reference, target, docs, examples))
+
+
 # --------------------------------------------------------------------------- view_pictures
 
 
 async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     """`view_pictures`: pictures of the view the caller reviews, the overview first in each round, then the states it
-    asks for, up to view_review.EXTRA_SHOTS more a round, with the records the pages fetched, what the checks found and
-    what an extension's program that replaces the view-review task found in them (view_review.pictures)."""
+    asks for, up to view_review.EXTRA_SHOTS more a round, each in the result (with_pictures), with the records the
+    pages fetched, what the checks found and what an extension's program that replaces the view-review task found in
+    them (view_review.pictures)."""
     from . import view_review  # noqa: PLC0415
 
     try:
@@ -268,10 +365,11 @@ async def tool_view_pictures(ctx: Any, args: dict[str, Any]) -> Any:
     except Refused as e:
         return tools.err(str(e))
     try:
-        paths, records, reading = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
+        paths, records, reading, pngs = await view_review.pictures(ctx.c, slug, agent_id, args.get("states") or [])
     except view_review.NoPictures as e:
         return tools.err(str(e))
-    return tools.ok("\n\n".join(x for x in (tools.hint("view-pictures", paths=paths, records=records), reading) if x))
+    text = "\n\n".join(x for x in (tools.hint("view-pictures", paths=paths, records=records), reading) if x)
+    return with_pictures(text, pngs)
 
 
 # --------------------------------------------------------------------------- finish_review

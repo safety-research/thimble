@@ -8,13 +8,15 @@ both (subagents.py has the design):
                   (`main`) and main's end (`main_end`)
   callers.jsonl   one line per thimble tool call: {tool_use_id, agent_id, agent_type, ts}, agent_id and agent_type
                   empty for main's own call, trimmed to the last CALLERS_KEEP_S
-  launch.json     what the launcher started main with (lane A writes it), with the session's mode (`mode`: browser or
-                  terminal), which every process of the session reads here (session_mode)
+  launch.json     which session is main here and how it reaches thimble: {session, pid, config_dir, via, transport:
+                  local | server, at, peers, moved}, written only by activation (app/activate.py write_launch); every
+                  process of the session reads its transport here (transport)
 
-In terminal mode (no server) two more files are in the folder, and subagents.json holds more:
+While the session's transport is local (no server: before the analyst's first press of the browser workbench, and
+always for a peer) two more files are in the folder, and subagents.json holds more:
 
   roles.json      the roles the module registers ({at, digest, roles: {name: spec}}), as GET /api/module/roles serves
-                  them in browser mode (module_bridge.roles_file writes it)
+                  them once the transport is server (module_bridge.roles_file writes it)
   module.json     what the module writes, and only the module: {session, version, load, beat, plan, plan_at, problem,
                   taken, answers, ended, gone}, its times in milliseconds since the epoch (module_bridge has the
                   design); a reader retries a read that a write cut short (read_module), since the module can only
@@ -58,11 +60,16 @@ STATE = "subagents.json"
 CALLERS = "callers.jsonl"
 LAUNCH = "launch.json"
 FILES = (STATE, CALLERS, LAUNCH)  # in DIR
-ROLES_FILE = "roles.json"  # in DIR, terminal mode: the roles the module registers (module note)
-MODULE_OUT = "module.json"  # in DIR, terminal mode: what the module writes, and only the module (module note)
-BROWSER, TERMINAL = "browser", "terminal"  # the session's mode, launch.json's `mode` (session_mode)
-MODES = (BROWSER, TERMINAL)
-WS_ENV = "THIMBLE_WS"  # the workspace folder, which the launcher exports in terminal mode only
+ROLES_FILE = "roles.json"  # in DIR, local transport: the roles the module registers (module note)
+MODULE_OUT = "module.json"  # in DIR, local transport: what the module writes, and only the module (module note)
+# in DIR: a typed start's whole prompt, <request id>.md, which the module's spawn hook gives its agent in place of the
+# short prompt main typed (subagents.start_job's `inline`); it goes when the agent takes up its start (subagents.bind)
+INLINE = "inline"
+LOCAL, SERVER = "local", "server"  # a session's transport, launch.json's `transport` (transport)
+TRANSPORTS = (LOCAL, SERVER)
+# launch.json of 0.8.0 named a mode instead: its browser mode ran on the server, its terminal mode had none
+LEGACY_MODES = {"browser": SERVER, "terminal": LOCAL}
+WS_ENV = "THIMBLE_WS"  # a workspace folder a process is told to use (the card runner's trial, cardrun.trial_env)
 LOCK = f"{STATE}.lock"  # the lock of subagents.json's writers, this module's and module_bridge's, in the workspace folder
 LOCK_WAIT_S = 2.0
 LOCK_POLL_S = 0.01
@@ -76,7 +83,7 @@ PLUGIN = "thimble"
 PREFIX = f"{PLUGIN}:"
 # thimble's seven roles: the agents that have a key, a chat and a run of their own. thimble:orient-helper, and an extension's
 # agent registered under the plugin's name, are none of them: any agent may start one (agent_check).
-ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "dev-ticket")
+ROLES = ("orientation", "critic", "writer", "view-builder", "view-reviewer", "check", "dev-ticket", "call")
 HELPER = "orient-helper"
 PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's module made ($.agent.spawn, $.tool.call)
 # the agent type of a thread's fork, which Claude Code tells not to start subagents (its fork boilerplate: "Do NOT spawn
@@ -85,6 +92,7 @@ PLUGIN_CALL = "toolu_plugin_"  # the tool_use_id prefix of a call thimble's modu
 FORK_TYPE = "fork"
 AGENT_TOOLS = ("Agent", "Task")
 SEND_TOOL = "SendMessage"
+MAIN_TO = "main"  # SendMessage's `to` for the main conversation, which a background subagent may name
 STOP_TOOL = "TaskStop"
 REQUEST_PREFIX = "req_"
 REQUEST_RE = re.compile(r"\breq_[0-9a-f]{10}\b")
@@ -135,6 +143,33 @@ def trusted_dir(ws: Path) -> Path:
 
 def state_path(ws: Path) -> Path:
     return trusted_dir(ws) / STATE
+
+
+def inline_path(ws: Path, rid: str) -> Path:
+    """Where the typed start `rid` keeps the whole prompt its agent gets (INLINE)."""
+    return trusted_dir(ws) / INLINE / f"{rid}.md"
+
+
+def write_inline(ws: Path, rid: str, prompt: str) -> None:
+    """The typed start `rid`'s whole prompt, written whole (a temporary file renamed), private to this user; the files
+    of starts that ended without taking theirs up go once older than DONE_KEEP_S."""
+    path = inline_path(ws, rid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    t = time.time()
+    for old in path.parent.glob("*.md"):
+        with contextlib.suppress(OSError):
+            if t - old.stat().st_mtime > DONE_KEEP_S:
+                old.unlink()
+    tmp = path.with_suffix(".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(prompt)
+    os.replace(tmp, path)
+
+
+def drop_inline(ws: Path, rid: str) -> None:
+    with contextlib.suppress(OSError):
+        inline_path(ws, rid).unlink()
 
 
 def callers_path(ws: Path) -> Path:
@@ -307,21 +342,14 @@ def tree() -> Path:
     return Path(named) if named else Path(__file__).resolve().parents[2]
 
 
-def hint(name: str, *, session_mode: str | None = None, **values: Any) -> str:
-    """A hint section of prompts/tools.md with its {placeholders} filled, as app.tools.hint reads it; '' when absent.
-    In terminal mode (`session_mode`, else THIMBLE_MODE) the section `## <name>@terminal` comes first when there is one
-    (prompts.section's rule)."""
+def hint(name: str, **values: Any) -> str:
+    """A hint section of prompts/tools.md with its {placeholders} filled, as app.tools.hint reads it; '' when absent."""
     try:
         text = tree().joinpath(*TOOLS_MD).read_text("utf-8")
     except OSError:
         return ""
-    mode = session_mode or os.environ.get("THIMBLE_MODE") or ""
-    body = ""
-    for heading in ([f"{name}@{mode}"] if mode in MODES else []) + [name]:
-        m = re.search(rf"^## {re.escape(heading)}[ \t]*\n(.*?)(?=^## \S|\Z)", text, re.M | re.S)
-        if m:
-            body = m.group(1).strip()
-            break
+    m = re.search(rf"^## {re.escape(name)}[ \t]*\n(.*?)(?=^## \S|\Z)", text, re.M | re.S)
+    body = m.group(1).strip() if m else ""
     try:
         return body.format(**values) if body else ""
     except (KeyError, IndexError, ValueError):
@@ -393,7 +421,10 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
     not one of thimble's roles go on.
 
     SendMessage to a registered agent of a role claims the pending message request with the same text; with none it is
-    denied. TaskStop claims a pending stop request of its agent and is never denied."""
+    denied, unless a subagent sends it to its own parent (the registry's `parent`), which goes on. A SendMessage to main
+    from an agent of thimble's whose parent is another agent (a helper of the orientation) is denied with its parent's
+    id, so that it sends the message there (D12: a helper's note after a cut-off report took a turn of main's in the
+    analyst's chat). TaskStop claims a pending stop request of its agent and is never denied."""
     name = str(hook.get("tool_name") or "")
     inp = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
     caller = str(hook.get("agent_id") or "") or None
@@ -450,11 +481,18 @@ def check_call(state: dict[str, Any], hook: dict[str, Any]) -> str | None:
         return None
     if name == SEND_TOOL:
         to = str(inp.get("to") or inp.get("recipient") or "")
+        parent = str((registry(state).get(caller) or {}).get("parent") or "") if caller else ""
+        if parent and to.strip().lower() == MAIN_TO:
+            return hint("agent-check-to-parent", parent=parent)
         agent = registry(state).get(to)
         if not isinstance(agent, dict) or agent.get("role") not in ROLES:
             return None
         if plan:
             return hint("start-plan-mode")
+        if parent and parent == to:
+            # a subagent's message to its own parent, such as the rest of a cut-off report (B6): it adds no run that a
+            # hand-back of that subagent would not add
+            return None
         text = str(inp.get("message") if inp.get("message") is not None else inp.get("content") or "")
         plugin = call.startswith(PLUGIN_CALL)
 
@@ -638,6 +676,7 @@ def _take(state: dict[str, Any], agent_id: str, rid: str, req: dict[str, Any], s
     entry = {"key": req.get("key"), "type": agent_type, "role": role_of(agent_type), "request": rid,
              "parent": req.get("caller"), "chat": req.get("chat"), "run": 0,
              "values": req.get("values") or {}, "route": req.get("route"),
+             **({"place": req["place"]} if req.get("place") else {}),
              "plugin_started": str(req.get("claimed_by") or "").startswith(PLUGIN_CALL),
              "sessions": [session] if session else [], "started": t, "last_start": t, "starts": 1,
              "status": "running", "work": req.get("work"), "handed_back": False}
@@ -755,6 +794,40 @@ def record_stop(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] |
     return entry
 
 
+HANDBACK_TOOL = "SubagentHandback"  # auto mode's tool for a subagent's report to its caller (session.HANDBACK_TOOL)
+# the roles whose hand-back thimble takes itself (record_handback): a check's and the card check's agents, whose reports
+# are thimble's alone; every other agent's hand-back reaches main as Claude Code sends it
+QUIET_ROLES = ("check", "call")
+
+
+def record_handback(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any] | None:
+    """The hand-back hook's record (PreToolUse of SubagentHandback): for an agent of a QUIET_ROLES role that thimble's
+    module started, the report and the run it ends, `handback` {run, report, at} on its registry entry, which it
+    returns; the hook then refuses the call, so the report never enters main's queue. None for any other agent, and for
+    a check that main's own Agent call started (run_check), since Claude Code tells main of that agent's end, and an end
+    with no report would ask main to ask the agent for it."""
+    if str(hook.get("tool_name") or "") != HANDBACK_TOOL or role_of(hook.get("agent_type")) not in QUIET_ROLES:
+        return None
+    agent = str(hook.get("agent_id") or "")
+    entry = registry(state).get(agent) if agent else None
+    if not isinstance(entry, dict) or entry.get("role") not in QUIET_ROLES:
+        return None
+    if not entry.get("plugin_started") and not str(spawn_call(hook, agent) or "").startswith(PLUGIN_CALL):
+        return None
+    inp = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
+    entry["handback"] = {"run": int(entry.get("run") or 0), "report": str(inp.get("message") or "").strip(), "at": now()}
+    return entry
+
+
+def taken_handback(entry: Any) -> str | None:
+    """The report of the hand-back the hook took in the agent's current run (record_handback), '' for an empty one; None
+    when it took none in that run."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("handback"), dict):
+        return None
+    got = entry["handback"]
+    return str(got.get("report") or "") if int(got.get("run") or 0) == int(entry.get("run") or 0) else None
+
+
 NO_CALL = "no-call"  # subagents.NO_CALL: a typed start whose caller's turn ended without its Agent call
 
 
@@ -813,11 +886,12 @@ def record_end(state: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any]:
     return end
 
 
-def rekey(state: dict[str, Any], old: str, new: str) -> list[str]:
+def rekey(state: dict[str, Any], old: str, new: str, main: bool = True) -> list[str]:
     """After /clear or an in-session /resume (SessionStart `clear` or `resume`): the running agents of session `old` take
-    session `new` (each agent's `sessions`, newest last), and `main` names `new`. The move is also kept where lane M's
-    module_bridge reads the moves it accepts a hello from (`module.rekeyed`, old to new), for a server that starts after
-    the hook ran. The agents moved."""
+    session `new` (each agent's `sessions`, newest last), and when `old` was main's session (`main`), `main` names `new`.
+    The move is also kept where module_bridge reads the moves it accepts a hello from (`module.rekeyed`, old to new), for
+    a server that starts after the hook ran; main_session follows those moves from launch.json's session alone, so a
+    peer's move never makes it main. The agents moved."""
     if not old or not new or old == new:
         return []
     moved = []
@@ -828,17 +902,18 @@ def rekey(state: dict[str, Any], old: str, new: str) -> list[str]:
         if sessions and sessions[-1] == old:
             a["sessions"] = [*sessions, new]
             moved.append(agent_id)
-    main = state.get("main") if isinstance(state.get("main"), dict) else {}
-    state["main"] = {**main, "session": new, "previous": [*(main.get("previous") or []), old][-8:], "moved_at": now()}
+    if main:
+        rec = state.get("main") if isinstance(state.get("main"), dict) else {}
+        state["main"] = {**rec, "session": new, "previous": [*(rec.get("previous") or []), old][-8:], "moved_at": now()}
     module = state.get("module") if isinstance(state.get("module"), dict) else {}
     moves = {str(k): str(v) for k, v in (module.get("rekeyed") or {}).items()} if isinstance(
         module.get("rekeyed"), dict) else {}
     moves.pop(new, None)  # a move back (/resume to the session before) ends the chain at `new`
     moves[old] = new
     state["module"] = {**module, "rekeyed": dict(list(moves.items())[-REKEYS_KEPT:]),
-                       # terminal mode: the lines the module appends to the new main, one per running agent, which has
-                       # no record of them (module_bridge.state_route gives the same lines in browser mode)
-                       "notes": {"session": new, "lines": started_notes(state), "at": now()}}
+                       # local transport: the lines the module appends to the new main, one per running agent, which has
+                       # no record of them (module_bridge.state_route gives the same lines on the server)
+                       **({"notes": {"session": new, "lines": started_notes(state), "at": now()}} if main else {})}
     return moved
 
 
@@ -849,6 +924,19 @@ def rekey(state: dict[str, Any], old: str, new: str) -> list[str]:
 # for (a view build's review or repair, a check after a writer), or main's own Agent call for a typed request
 HOW = {"click": "in the browser", "follow-on": "as the next step of a run they asked for in thimble",
        "typed": "through your own Agent call"}
+# a click's {how} by where the analyst pressed it, as its start's request names it (`place`: a view's Build or Retry,
+# views.PLACES); a click that names no place was the browser's (bug hunt round 10, K6: `build it` pressed in the
+# terminal reached main as started "in the browser")
+HOW_PLACE = {"terminal": "in the terminal", "browser": "in the browser"}
+
+
+def how(route: Any, place: Any = None) -> str:
+    """module-started-note's {how} for a start of `route`, pressed in `place` when a click names where (HOW_PLACE)."""
+    if route == "click" and place in HOW_PLACE:
+        return HOW_PLACE[str(place)]
+    return HOW.get(str(route or "")) or HOW["click"]
+
+
 NOTE_HINT = "module-started-note"  # prompts/tools.md: {role}, {agent}, {what}, {how}
 WHAT_CHARS = 120
 WHAT_ORIENTATION = "this corpus"  # module-started-note's {what} for an agent whose key has no name (the orientation)
@@ -868,7 +956,7 @@ def key_what(key: Any) -> str:
     return key.split(":", 1)[1].replace(":", " on ") if ":" in key else ""
 
 
-def started_notes(state: dict[str, Any], session_mode: str | None = None) -> list[str]:
+def started_notes(state: dict[str, Any]) -> list[str]:
     """The note a new main gets for each running agent of thimble's roles (but the orientation's own children, which its
     orientation tells of, and the helper): hint module-started-note, with the agent's id, its role, its key's name and
     how it started."""
@@ -879,14 +967,15 @@ def started_notes(state: dict[str, Any], session_mode: str | None = None) -> lis
             continue
         state_ = str(e.get("status") or "")
         role = role_of(e.get("type")) or (str(e.get("role") or "") if e.get("role") in ROLES else None)
-        if not role or (state_ and state_ not in RUNNING) or (not state_ and e.get("ended")):
+        # a check tells main nothing (module_bridge._note)
+        if not role or role == "check" or (state_ and state_ not in RUNNING) or (not state_ and e.get("ended")):
             continue
         parent = str(e.get("parent") or "")
         if parent and parent in agents:
             continue
         route = str(e.get("route") or ("click" if e.get("plugin_started") else "typed"))
-        line = hint(NOTE_HINT, session_mode=session_mode, role=role, agent=aid, what=note_what(key_what(e.get("key"))),
-                    how=HOW.get(route) or HOW["click"])
+        line = hint(NOTE_HINT, role=role, agent=aid, what=note_what(key_what(e.get("key"))),
+                    how=how(route, e.get("place")))
         if line:
             out.append(line)
     return out
@@ -955,7 +1044,7 @@ def find_caller(ws: Path, tool_use_id: str) -> dict[str, Any] | None:
     return None
 
 
-# --------------------------------------------------------------------------- terminal mode
+# --------------------------------------------------------------------------- launch.json and local transport
 
 
 def _json_file(path: Path) -> dict[str, Any]:
@@ -983,18 +1072,50 @@ def launch(ws: Path) -> dict[str, Any]:
     return dict(hit[1])
 
 
-def session_mode(ws: Path | None) -> str:
-    """The mode of the session launch.json names (`mode`: browser or terminal), as launch_mode.session_mode reads it;
-    browser when it names none, or for no workspace."""
+def transport(ws: Path | None, sid: str | None = None) -> str:
+    """How session `sid` of the workspace folder `ws` reaches thimble: SERVER once a press of the browser workbench made
+    main's transport the server (launch.json `transport: server`) and `sid` is main's session (main_session, through
+    every move --rekey recorded), or no `sid` is given, which asks for main's; LOCAL before the press (activation
+    writes `transport: local`), for a peer (`peers`), for a session another took main from (`moved`), for any other
+    session, and for no workspace. A record with no `transport` is 0.8.0's: its `mode` decides (LEGACY_MODES), and a
+    workspace no session turned thimble on in (no record, or one with neither field: a demo's, a browser's opened from
+    a shell) is the server's, as 0.8.0's browser default was. The switch is one way: nothing writes `local` over
+    `server` for the same main in the same `claude` process; main's session continued in a new one after a quit starts
+    local again (app/activate.py continue_main)."""
     if ws is None:
-        return BROWSER
-    mode = launch(ws).get("mode")
-    return mode if mode in MODES else BROWSER
+        return LOCAL
+    rec = launch(ws)
+    kind = rec.get("transport")
+    if kind not in TRANSPORTS:
+        kind = LEGACY_MODES.get(str(rec.get("mode") or ""), SERVER)
+    if kind != SERVER:
+        return LOCAL
+    if sid is None:
+        return SERVER
+    if sid in _sids(rec.get("moved")) or sid in _sids(rec.get("peers")):
+        return LOCAL
+    main = main_session(ws)
+    return SERVER if not main or sid == main else LOCAL
+
+
+def _sids(v: Any) -> set[str]:
+    return {str(x) for x in v if isinstance(x, str) and x} if isinstance(v, list) else set()
+
+
+def peers(ws: Path | None) -> set[str]:
+    """The sessions launch.json names as peers of main (activation beside a live main)."""
+    return _sids(launch(ws).get("peers")) if ws is not None else set()
+
+
+def moved(ws: Path | None) -> set[str]:
+    """The sessions launch.json names as moved: each was main until another session took main (activate.take_main)."""
+    return _sids(launch(ws).get("moved")) if ws is not None else set()
 
 
 def terminal(ws: Path | None) -> bool:
-    """Whether the session of the workspace folder `ws` runs in terminal mode (session_mode)."""
-    return session_mode(ws) == TERMINAL
+    """Whether main's session of the workspace folder `ws` runs on local transport (transport). Kept for the callers
+    that still ask in 0.8.0's words."""
+    return transport(ws) == LOCAL
 
 
 def roles_path(ws: Path) -> Path:
@@ -1066,7 +1187,7 @@ def main_pid(ws: Path) -> int | None:
 
 
 def record_mode(state: dict[str, Any], session: str, mode: str) -> bool:
-    """The mode hook's record in terminal mode: the permission mode Claude Code reports for main's session `session`
+    """The mode hook's record on local transport: the permission mode Claude Code reports for main's session `session`
     (`main.permission_mode`, `main.mode_at`), and the mode before plan mode (`main.before_plan`). True when it changed."""
     if not mode:
         return False
@@ -1082,7 +1203,7 @@ def record_mode(state: dict[str, Any], session: str, mode: str) -> bool:
 
 
 def main_mode(ws: Path, state: dict[str, Any] | None = None, module: dict[str, Any] | None = None) -> str | None:
-    """Main's permission mode in terminal mode: what main's hooks reported last (record_mode), unless the module saw
+    """Main's permission mode on local transport: what main's hooks reported last (record_mode), unless the module saw
     plan mode begin or end since (module.json `plan`, `plan_at`), while main was idle; None before any report."""
     state = read(ws) if state is None else state
     module = read_module(ws) if module is None else module
@@ -1098,12 +1219,12 @@ def main_mode(ws: Path, state: dict[str, Any] | None = None, module: dict[str, A
     return mode
 
 
-MODULE_KIND = "module"  # the kind of a request entry that asks the module for an op (terminal mode)
+MODULE_KIND = "module"  # the kind of a request entry that asks the module for an op (local transport)
 
 
 def add_module_request(state: dict[str, Any], op: str, args: dict[str, Any], session: str, wait_s: float | None,
                        of: str | None = None) -> str:
-    """A request to the module in terminal mode (module note): an entry of `requests` of kind MODULE_KIND, which the
+    """A request to the module on local transport (module note): an entry of `requests` of kind MODULE_KIND, which the
     module takes while `module` is pending and `expires_at` (time.time()) is ahead, answering it in module.json under
     the entry's id. `of` names the start, message or stop request it stands for. With `wait_s` None nobody waits for
     the answer (a stop of a late spawn, a register): it expires after DONE_KEEP_S. The id."""
@@ -1116,10 +1237,14 @@ def add_module_request(state: dict[str, Any], op: str, args: dict[str, Any], ses
 
 
 def end_module_request(state: dict[str, Any], rid: str, how: str) -> None:
-    """The module request `rid` ended: answered or expired (`how`); it leaves the open states, so _prune drops it."""
+    """The module request `rid` ended: answered or expired (`how`); it leaves the open states, so _prune drops it. A
+    spawn's prompt goes with it, since the module takes only pending requests: a check's holds its whole task, which
+    this file, read by every hook, would otherwise keep for DONE_KEEP_S."""
     r = requests(state).get(rid)
     if isinstance(r, dict) and r.get("kind") == MODULE_KIND:
         r.update(module=how, state="done" if how == "answered" else "expired", at=now())
+        if isinstance(r.get("args"), dict) and "prompt" in r["args"]:
+            r["args"] = {k: v for k, v in r["args"].items() if k != "prompt"}
 
 
 FORKING = "forking"  # subagents.json: the forks of threads that are starting, by the call's `thread:<name>` (fork_ref)
@@ -1129,8 +1254,8 @@ FORK_REF_RE = re.compile(r"^\s*thread:([A-Za-z0-9_-]{1,64})\s*$")  # threads.FOR
 FORK_RUNNING = "The fork of thread {thread} is running already and answers in the thread, so this turn needs nothing more."
 QUESTION_CHARS = 60  # of the first question that names a thread in FORK_RUNNING
 # subagents.json: each Agent call the agent-check hook let through as a thread's fork, by its tool_use id: {ref: its
-# `thread:<name>`, at}. Claude Code's subagent meta file holds the call's description, which thimble-term rewrites to the
-# thread's question in terminal mode, so the mirror knows the fork's thread from here (fork_call_ref), whatever main
+# `thread:<name>`, at}. Claude Code's subagent meta file holds the call's description, which the terminal UI rewrites to the
+# thread's question, so the mirror knows the fork's thread from here (fork_call_ref), whatever main
 # passed and whichever of the file and main's tool_use it reads first
 FORK_CALLS = "fork_calls"
 FORK_CALLS_KEEP_S = 7 * 86400.0  # long enough for a --continue days later to find its forks' threads again
@@ -1139,7 +1264,7 @@ FORK_CALLS_MAX = 500
 
 def fork_ref(tool_input: dict[str, Any]) -> str | None:
     """threads.fork_ref: the `thread:<name>` of an Agent call for a thread's fork, its description or else its prompt
-    (thimble-term gives the call the thread's question as its description in terminal mode)."""
+    (the terminal UI gives the call the thread's question as its description)."""
     for key in ("description", "prompt"):
         value = str(tool_input.get(key) or "")
         if FORK_REF_RE.match(value):
@@ -1212,7 +1337,7 @@ def fork_call_ref(state: dict[str, Any], tool_use_id: Any) -> str | None:
 
 def fork_check(state: dict[str, Any], tool_input: dict[str, Any], ws: Path | None = None,
                tool_use_id: str | None = None) -> str | None:
-    """Terminal mode's dedupe of a thread's fork (subagents.fork_check in browser mode): main's Agent call that would
+    """Local transport's dedupe of a thread's fork (subagents.fork_check after a press): main's Agent call that would
     start a second fork of the thread it names (`thread:<name>`, fork_ref) while the first starts or runs: why it must
     not run, naming the thread by its first question in workspace `ws`; else None, and the call is recorded, by its
     `tool_use_id` too (note_fork_call)."""
@@ -1250,8 +1375,8 @@ def _server_env(home: Path) -> dict[str, Any]:
 
 def use_env() -> None:
     """The data and workspaces folders a hook's process names, as cli.resolve_env picks them: THIMBLE_DATA_DIR and
-    THIMBLE_WORKSPACES_DIR, else in terminal mode the folder above THIMBLE_WS (the workspace folder the launcher
-    exports), else those the last server.json names, else the defaults. Set in this process's environment before
+    THIMBLE_WORKSPACES_DIR, else the folder above THIMBLE_WS (a workspace folder a process is told to use), else those
+    the last server.json names, else the defaults. Set in this process's environment before
     app.config is imported."""
     ws = os.environ.get(WS_ENV) or ""
     if ws and not os.environ.get("THIMBLE_WORKSPACES_DIR"):

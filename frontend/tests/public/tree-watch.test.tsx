@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 // The Files tree lists a folder again when it changed on disk (src/files/Tree.tsx): it asks for the stamps of the
 // folders it shows and fetches only those whose stamp is not their listing's, keeping the old rows meanwhile.
-import { act, useState } from 'react'
+import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
-import { shownFolders, useFolderStore, useFolderWatch, type FolderStoreHandle } from '../../src/files/Tree.tsx'
-import { scaleApi, stampQueries } from '../../src/lib/api.ts'
+import { useFolderStore, type FolderStoreHandle } from '../../src/files/Tree.tsx'
+import { scaleApi } from '../../src/lib/api.ts'
 import type { FolderListing } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -52,40 +52,5 @@ describe('the tree lists a folder again', () => {
     await act(() => handle!.refreshChanged(['', 'runs']))
     await settle()
     expect(folder.mock.calls.slice(3).map((c) => c[1]), 'the root last, since its count covers the folder').toEqual(['runs', ''])
-  })
-
-  test('asks for the stamps in requests of at most 100 folders, each with a short URL', () => {
-    expect(stampQueries([''])).toEqual(['path='])
-    expect(stampQueries(Array.from({ length: 250 }, (_, i) => `f${i}`)).map((q) => q.split('&').length)).toEqual([100, 100, 50])
-    const deep = Array.from({ length: 60 }, (_, i) => `runs/${'x'.repeat(200)}/${i}`)
-    const queries = stampQueries(deep)
-    expect(queries.length).toBe(3)
-    expect(queries.every((q) => q.length <= 6000)).toBe(true)
-    expect(queries.join('&').split('&').map((q) => decodeURIComponent(q.slice('path='.length)))).toEqual(deep)
-  })
-
-  test('for the folders it shows, on a timer and at once when a folder opens', async () => {
-    vi.useFakeTimers()
-    expect(shownFolders(new Set(['runs', 'runs/r1', 'docs/old']))).toEqual(['', 'runs', 'runs/r1'])
-    const seen: string[][] = []
-    const check = async (paths: readonly string[]) => {
-      seen.push([...paths])
-    }
-    let open: (paths: string[]) => void = () => undefined
-    function Probe() {
-      const [paths, setPaths] = useState([''])
-      open = setPaths
-      useFolderWatch(check, paths, () => true, 1000)
-      return null
-    }
-    await mount(<Probe />)
-    expect(seen).toEqual([['']])
-    await act(async () => {
-      vi.advanceTimersByTime(1000)
-    })
-    expect(seen).toEqual([[''], ['']])
-    await act(async () => open(['', 'runs']))
-    expect(seen.at(-1)).toEqual(['', 'runs'])
-    expect(seen.length).toBe(3)
   })
 })

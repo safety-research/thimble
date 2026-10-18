@@ -225,27 +225,41 @@ export interface AgentCardProps {
   briefAbove?: boolean
 }
 
+/** What the browser's Stop answered (stopAnswer): `ok` when the stop went through, was done already or was asked of
+ * main, with `note`, a line to show then; else `text`, why thimble did not stop it and how to stop it in the terminal,
+ * in the tone `kind`. */
+export type StopAnswer = { ok: true; note?: string } | { ok: false; text: string; kind?: 'error' }
+
 /** The browser's Stop of one of thimble's agents (the orientation, a writer, a check's run), of main's turn or of a side
  * thread's fork: its chat is interrupted (backend agents.interrupt_route), which stops it through thimble's plugin. A
- * Stop that found it ended already counts as done; one thimble could not pass on says how to stop it in the terminal,
- * for main with Esc (MAIN_ESC_LINE, which is all it says when thimble's module does not run in main's session). The
- * analyst's own subagent of main, which only main can stop, is asked of main, and a toast says so. Resolves true when
- * the stop went through, was done already or was asked of main, false otherwise. */
-export function stopSession(ws: string, chat: string, role: string): Promise<boolean> {
+ * Stop that found it ended already counts as done; one thimble could not pass on says why and how to stop it in the
+ * terminal, for main with Esc (MAIN_ESC_LINE, all it says when the server gave no reason). The analyst's own subagent
+ * of main, which only main can stop, is asked of main. */
+export function stopAnswer(ws: string, chat: string, role: string): Promise<StopAnswer> {
   track('chat-interrupt', { target: `chat:${chat}`, detail: { role } })
   const main = chat === 'main'
-  const failed = (reason: string) => (main && !reason ? { text: MAIN_ESC_LINE } : { text: main ? mainStopFailedLine(reason) : stopFailedLine(reason), kind: 'error' as const })
+  const failed = (reason: string): StopAnswer => (main && !reason ? { ok: false, text: MAIN_ESC_LINE } : { ok: false, text: main ? mainStopFailedLine(reason) : stopFailedLine(reason), kind: 'error' })
   return api
     .interrupt(ws, chat)
-    .then((r) => {
-      if (r.stopped) return (r.done && bus.emit('toast', { text: STOP_DONE_LINE }), true)
-      if (r.asked === 'main') return (bus.emit('toast', { text: 'Asked main to stop it.' }), true)
-      if (r.kind) return (bus.emit('toast', failed(r.kind === 'no-module' && main ? '' : (r.reason ?? ''))), false)
+    .then((r): StopAnswer => {
+      if (r.stopped) return r.done ? { ok: true, note: STOP_DONE_LINE } : { ok: true }
+      if (r.asked === 'main') return { ok: true, note: 'Asked main to stop it.' }
+      if (r.kind) return failed(r.reason ?? '')
       // the server answers `stopped: false` when it runs nothing for this chat, which would otherwise look as if Stop
       // had worked
-      return (bus.emit('toast', { text: 'Could not stop it: thimble runs nothing for it.', kind: 'error' }), false)
+      return { ok: false, text: 'Could not stop it: thimble runs nothing for it.', kind: 'error' }
     })
-    .catch((e: Error) => (bus.emit('toast', failed(e.message)), false))
+    .catch((e: Error) => failed(e.message))
+}
+
+/** The Stop of stopAnswer, its lines in a toast. Resolves true when the stop went through, was done already or was
+ * asked of main, false otherwise. */
+export function stopSession(ws: string, chat: string, role: string): Promise<boolean> {
+  return stopAnswer(ws, chat, role).then((a) => {
+    if (a.ok) return (a.note && bus.emit('toast', { text: a.note }), true)
+    bus.emit('toast', a.kind ? { text: a.text, kind: a.kind } : { text: a.text })
+    return false
+  })
 }
 
 /** Write again on a writer that main's quit stopped: its request made anew as a click (subagents.again). */

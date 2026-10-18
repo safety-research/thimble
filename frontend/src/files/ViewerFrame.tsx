@@ -101,6 +101,9 @@ export interface ViewerFrameProps {
   byId?: ReadonlyMap<string, Concept>
   /** the labels that mark the view's files, listed first to the page */
   first?: ReadonlySet<string>
+  /** the labels that give a record of the view's files a value they highlight (labels.viewMarking): Color by opens on a
+   * label that is on only when it is one of them; every label without it */
+  marking?: ReadonlySet<string>
   /** what the page's label controls do; without it they can only mark records and set the filter */
   labelActions?: ViewLabelActions
   /** with a label filter on, how many anchored refs the page and its reader leave out for it; null without a filter or
@@ -392,7 +395,7 @@ function useViewLabels(
   return useMemo(() => ({ add, see, reset, ready }), [add, see, reset, ready])
 }
 
-export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, labelActions, onHidden, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query, host }: ViewerFrameProps) {
+export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit, labels = NO_LABELS, filter = null, filterFiles, byId = NO_CONCEPTS, first, marking, labelActions, onHidden, onError, onNoPage, className, quote, onQuoteMissing, version, restore, handle, card, onSettled, onQuery, targetPick, query, host }: ViewerFrameProps) {
   const ref = useRef<HTMLIFrameElement>(null)
   const hosted = useRef(host)
   hosted.current = host
@@ -473,7 +476,7 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
   const post = (msg: unknown) => ref.current?.contentWindow?.postMessage(msg, '*')
   const resolveToken = (name: string) => token(name) || `var(${name})`
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const all = useMemo(() => pageLabelList(byId.values(), resolveToken, first), [byId, first, resolved, key])
+  const all = useMemo(() => pageLabelList(byId.values(), resolveToken, first, marking), [byId, first, marking, resolved, key])
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const palette = useMemo(() => pagePalette(resolveToken), [resolved, key])
   const marks = useViewLabels(ws, slug, version, labels, filter, filterFiles, byId, all, palette, post, !card && !isHosted)
@@ -626,7 +629,9 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
           try {
             const key = typeof d.key === 'string' ? d.key : undefined
             const res = own ? { data: await own.records(d.query, f.ctrl.signal) } : c ? await api.cardTypeRecords(ws, c.type, c.id, d.query) : await api.viewRecords(ws, slug, d.query, version, { call: f.call, signal: f.ctrl.signal, key, frame: frameId, turn: askedTurn })
-            if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data })
+            // with the values of the fields of the records the reader read, which the page's Color by lists (bug hunt G5)
+            const fields = 'fields' in res && res.fields && typeof res.fields === 'object' ? res.fields : undefined
+            if (calls.current.get(id) === f) post({ type: P + 'result', id: d.id, data: res.data, ...(fields ? { fields } : {}) })
             const left = 'hidden' in res ? res.hidden : undefined
             if (f.view && left !== undefined && askedUnder === filterNow.current && askedTurn === turn.current && left !== hidden.current.reader) {
               hidden.current.reader = typeof left === 'number' ? left : null

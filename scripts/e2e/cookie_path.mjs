@@ -7,8 +7,12 @@
 // signed in, and its reads answer), opens a link into the app in a new tab (no sign-in again) and a new link there (the
 // key stays), opens the other server's page by 127.0.0.1 and by localhost, which asks for its own /api/ paths, an
 // image, an event stream and a guessed /b/<key>/api/ path (no request it gets carries thimble's cookie), then takes the
-// page's key away (the sign-in line shows) and opens a new link (signed in again, with a new key). It prints one JSON
-// line per browser and exits 1 when a check fails.
+// page's key away (the sign-in line shows) and opens a new link (signed in again, with a new key). The 0.9.0 sign-in:
+// the press's way in (a 60 s code minted with an open id, in a redirect file the browser opens from disk: the claim
+// deletes the file and writes its claim mark), the cookie's 30 days, and stale tabs: a server stopped for good ends the
+// page's stream with `stopping` (the page stops), and after a server killed outright another program that binds its port
+// gets the page's challenge on the plain path and no cookie or key (the page stops too). It prints one JSON line per
+// browser and exits 1 when a check fails.
 //
 //   node scripts/e2e/cookie_path.mjs [--browsers chromium,firefox,webkit] [--dist DIR] [--port N] [--other-port N]
 //
@@ -16,7 +20,7 @@
 // (cd frontend && npx playwright install chromium firefox webkit; PLAYWRIGHT_BROWSERS_PATH is honored). Everything it
 // starts runs in a temporary folder of its own (thimble's home, data, workspaces, HOME and Claude Code's config folder)
 // and stops at the end. The two ports are free ones unless --port (thimble's) and --other-port name them.
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { createHmac, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
@@ -24,7 +28,7 @@ import { createRequire } from 'node:module'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const args = process.argv.slice(2)
@@ -38,7 +42,10 @@ const PYTHON = join(REPO, 'backend', '.venv', 'bin', 'python')
 const require = createRequire(join(REPO, 'frontend', 'package.json'))
 const pw = require('playwright')
 // the one line a browser that is not signed in sees (frontend shell/SignIn), its span in backticks drawn as code
-const SIGN_IN_LINE = "This browser isn't signed in. Open the link /thimble shows in your terminal, or run `thimble up` in a shell."
+const SIGN_IN_LINE = "This browser isn't signed in. Type `/thimble browser` in your Claude Code terminal, or press o in thimble's panel."
+// what a stopped page says (frontend shell/ServerDown STOPPED_LINE)
+const STOPPED_LINE = "thimble's page stopped with the Claude Code session. To start it again, run thimble in a terminal in the folder with your files, or continue the session there with claude -c and type /thimble browser. This tab reloads by itself once the page runs again."
+const DAY_S = 24 * 3600
 const KEY_ITEM = 'thimble-browser-key'
 const WAIT_MS = 30_000
 
@@ -85,24 +92,37 @@ async function main() {
   const otherPort = Number(opt('--other-port', 0)) || (await freePort())
   const origin = `http://127.0.0.1:${port}`
   const serverLog = []
-  const server = spawn(PYTHON, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port), '--log-level', 'warning'], {
-    cwd: join(REPO, 'backend'),
-    env: {
-      PATH: '/usr/bin:/bin',
-      HOME: join(tmp, 'user'),
-      LANG: 'C.UTF-8',
-      CLAUDE_CONFIG_DIR: join(tmp, 'cc'),
-      THIMBLE_HOME: home,
-      THIMBLE_DATA_DIR: join(tmp, 'data'),
-      THIMBLE_WORKSPACES_DIR: join(tmp, 'workspaces'),
-      THIMBLE_FRONTEND_DIST: DIST,
-      THIMBLE_PORT: String(port),
-      THIMBLE_CARD_CHECK: 'off',
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const serverEnv = (p) => ({
+    PATH: '/usr/bin:/bin',
+    HOME: join(tmp, 'user'),
+    LANG: 'C.UTF-8',
+    CLAUDE_CONFIG_DIR: join(tmp, 'cc'),
+    THIMBLE_HOME: home,
+    THIMBLE_DATA_DIR: join(tmp, 'data'),
+    THIMBLE_WORKSPACES_DIR: join(tmp, 'workspaces'),
+    THIMBLE_FRONTEND_DIST: DIST,
+    THIMBLE_PORT: String(p),
+    THIMBLE_CARD_CHECK: 'off',
   })
-  server.stdout.on('data', (b) => serverLog.push(String(b)))
-  server.stderr.on('data', (b) => serverLog.push(String(b)))
+  const startServer = (p) => {
+    const proc = spawn(PYTHON, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(p), '--log-level', 'warning'], {
+      cwd: join(REPO, 'backend'), env: serverEnv(p), stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    proc.stdout.on('data', (b) => serverLog.push(String(b)))
+    proc.stderr.on('data', (b) => serverLog.push(String(b)))
+    return proc
+  }
+  const healthy = async (o, proc) => {
+    const until = Date.now() + WAIT_MS
+    for (;;) {
+      if (await fetch(`${o}/api/health`).then((r) => r.ok, () => false)) return
+      if (Date.now() > until || proc.exitCode != null) throw new Error(`thimble's server did not start:\n${serverLog.join('').slice(-2000)}`)
+      await sleep(250)
+    }
+  }
+  const exited = (proc) => new Promise((ok) => (proc.exitCode != null || proc.signalCode != null ? ok() : proc.once('exit', ok)))
+  const server = startServer(port)
+  const extra = [] // the servers the stale-tab checks start
   const seen = [] // what the other server got: {host, path, cookie}
   const other = http.createServer((req, res) => {
     seen.push({ host: req.headers.host, method: req.method, path: req.url, cookie: req.headers.cookie || '' })
@@ -116,21 +136,27 @@ async function main() {
   let failed = false
   try {
     await new Promise((ok) => other.listen(otherPort, '127.0.0.1', ok))
-    const until = Date.now() + WAIT_MS
-    for (;;) {
-      const up = await fetch(`${origin}/api/health`).then((r) => r.ok, () => false)
-      if (up) break
-      if (Date.now() > until || server.exitCode != null) throw new Error(`thimble's server did not start:\n${serverLog.join('').slice(-2000)}`)
-      await sleep(250)
-    }
-    const signed = (path, body) => fetch(`${origin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...proof(token, port) }, body: JSON.stringify(body) })
+    await healthy(origin, server)
+    const signedAt = (o, p) => (path, body) => fetch(`${o}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...proof(token, p) }, body: JSON.stringify(body) })
+    const signed = signedAt(origin, port)
     const reg = await (await signed('/api/corpora/register', { path: join(tmp, 'corpus') })).json()
     wsName = String(reg.name || '')
     if (!wsName) throw new Error(`the corpus was not registered: ${JSON.stringify(reg)}`)
-    const link = async () => {
-      const r = await (await signed('/api/ui/pair', { ws: wsName })).json()
+    const link = async (o = origin, p = port) => {
+      const r = await (await signedAt(o, p)('/api/ui/pair', { ws: wsName })).json()
       if (!r.code) throw new Error(`no sign-in code: ${JSON.stringify(r)}`)
-      return `${origin}/?ws=${encodeURIComponent(wsName)}#p=${r.code}`
+      return `${o}/?ws=${encodeURIComponent(wsName)}#p=${r.code}`
+    }
+    // the press's way in: a 60 s code made with an open id, in the redirect file backend app/opener.py writes
+    const pressed = async () => {
+      const oid = randomBytes(12).toString('base64url')
+      const r = await (await signed('/api/ui/pair', { ws: wsName, ttl: 60, open: oid })).json()
+      if (!r.code || r.expires_s !== 60) throw new Error(`no 60 s code: ${JSON.stringify({ expires_s: r.expires_s })}`)
+      const w = spawnSync(PYTHON, ['-c', 'import sys; from app import opener; print(opener.write_redirect(sys.argv[1], sys.argv[2]))',
+        `${origin}/?ws=${encodeURIComponent(wsName)}#p=${r.code}`, oid], { cwd: join(REPO, 'backend'), env: serverEnv(port), encoding: 'utf8' })
+      const file = (w.stdout || '').trim()
+      if (!file || !existsSync(file)) throw new Error(`no redirect file: ${w.stderr.slice(0, 300)}`)
+      return { file, claim: join(home, 'open', `${oid}.claimed`) }
     }
     for (const name of BROWSERS) {
       const type = pw[name]
@@ -154,6 +180,8 @@ async function main() {
         const jar = (await ctx.cookies()).filter((c) => c.name.startsWith('thimble-ui-'))
         check(jar.length === 1 && jar[0].path === `/b/${key}/api/` && jar[0].httpOnly && jar[0].sameSite === 'Strict',
           `the cookie is scoped to the browser's own path, HttpOnly and SameSite=Strict (${jar.map((c) => `${c.name} ${c.path} httpOnly=${c.httpOnly} sameSite=${c.sameSite}`).join(', ')})`)
+        const cookieDays = (jar[0]?.expires ?? 0) > 0 ? (jar[0].expires - Date.now() / 1000) / DAY_S : 0
+        check(cookieDays > 29 && cookieDays <= 30.01, `the cookie lasts 30 days (${cookieDays.toFixed(2)})`)
         const reads = await page.evaluate(async ([k, ws]) => ({
           under: (await fetch(`/b/${k}/api/ws/${ws}/canvas`)).status,
           plain: (await fetch(`/api/ws/${ws}/canvas`)).status,
@@ -183,6 +211,23 @@ async function main() {
           check(got.length >= 6 && !leaked.length,
             `the page of another server at ${host} gets no cookie of thimble's on ${got.length} requests (${got.map((s) => `${s.method} ${s.path.split('?')[0]}`).join(', ')})${leaked.length ? `; LEAKED on ${leaked.map((s) => s.path).join(', ')}` : ''}`)
         }
+        // 3b. the press's way in, in a browser of its own: the redirect file, opened from disk, signs it in; the claim
+        // deletes the file and writes its claim mark
+        const own = await browser.newContext()
+        try {
+          const pr = await pressed()
+          const pp = await own.newPage()
+          await pp.goto(pathToFileURL(pr.file).href)
+          await shell(pp)
+          let marked = false
+          for (let i = 0; i < 20 && !marked; i++) {
+            marked = existsSync(pr.claim)
+            if (!marked) await sleep(250)
+          }
+          check(marked && !existsSync(pr.file) && !(await signInShown(pp)), `the redirect file signs in (claim mark ${marked ? 'written' : 'missing'}, file ${existsSync(pr.file) ? 'left' : 'deleted'})`)
+        } finally {
+          await own.close()
+        }
         // 4. a browser that lost its key shows the sign-in line, and a new link signs it in again
         await page.evaluate((item) => localStorage.removeItem(item), KEY_ITEM)
         await page.goto(`${origin}/?ws=${encodeURIComponent(wsName)}`)
@@ -194,6 +239,60 @@ async function main() {
         const again = await page.evaluate((item) => localStorage.getItem(item) || '', KEY_ITEM)
         check(!!again && again !== key && !(await signInShown(page)), 'a new link signs it in again, with a new key')
         await ctx.close()
+        // 5. stale tabs, each against a server of its own on a port of its own
+        const stale = await browser.newContext().catch(() => null)
+        try {
+          if (!stale) throw new Error('no browser context')
+          // a server stopped for good ends the page's stream with `stopping`: the page stops
+          const p1 = await freePort()
+          const s1 = startServer(p1)
+          extra.push(s1)
+          const o1 = `http://127.0.0.1:${p1}`
+          await healthy(o1, s1)
+          const page1 = await stale.newPage()
+          await page1.goto(await link(o1, p1))
+          await shell(page1)
+          await page1.waitForTimeout(1_000)
+          s1.kill('SIGTERM')
+          await exited(s1)
+          const stopped1 = await page1.locator('.stopped-line').waitFor({ timeout: 10_000 }).then(() => true, () => false)
+          const said = stopped1 ? (await page1.locator('.stopped-line').innerText()).replace(/\s+/g, ' ').trim() : ''
+          check(stopped1 && said === STOPPED_LINE, `a server stopped for good stops the page ("${said}")`)
+          await page1.close()
+          // a server killed outright, and another program on its port: the page asks the challenge with no credential, gets
+          // no answer it takes, and stops; the program gets no cookie and no key
+          const p2 = await freePort()
+          const s2 = startServer(p2)
+          extra.push(s2)
+          const o2 = `http://127.0.0.1:${p2}`
+          await healthy(o2, s2)
+          const page2 = await stale.newPage()
+          await page2.goto(await link(o2, p2))
+          await shell(page2)
+          await page2.waitForTimeout(1_000)
+          const key2 = await page2.evaluate((item) => localStorage.getItem(item) || '', KEY_ITEM)
+          s2.kill('SIGKILL')
+          await exited(s2)
+          const got = []
+          const impostor = http.createServer((req, res) => {
+            got.push({ path: req.url || '', cookie: req.headers.cookie || '' })
+            res.writeHead(200, { 'content-type': 'application/json' }).end('{}')
+          })
+          await new Promise((ok) => impostor.listen(p2, '127.0.0.1', ok))
+          try {
+            const stopped2 = await page2.locator('.stopped-line').waitFor({ timeout: 20_000 }).then(() => true, () => false)
+            const leaked = got.filter((g) => g.cookie.includes('thimble-ui-') || g.path.includes(key2) || g.path.startsWith('/b/'))
+            const hello = got.filter((g) => g.path.startsWith('/api/hello?'))
+            check(stopped2 && hello.length >= 1 && !leaked.length,
+              `after the server died, the program on its port got ${got.length} requests (${[...new Set(got.map((g) => g.path.split('?')[0]))].join(', ')}): ${hello.length} challenges, ${leaked.length} with the cookie or the key; the page ${stopped2 ? 'stopped' : 'did not stop'}`)
+          } finally {
+            await new Promise((ok) => impostor.close(ok))
+          }
+        } catch (e) {
+          check(false, `the stale-tab checks stopped: ${String(e?.message || e).split('\n')[0]}`)
+        } finally {
+          await stale?.close().catch(() => undefined)
+        }
       } catch (e) {
         check(false, `the run stopped: ${String(e?.message || e).split('\n')[0]}`)
       } finally {
@@ -204,8 +303,8 @@ async function main() {
     }
   } finally {
     other.close()
-    server.kill('SIGTERM')
-    await new Promise((ok) => (server.exitCode != null ? ok() : server.once('exit', ok)))
+    for (const proc of [server, ...extra]) if (proc.exitCode == null && proc.signalCode == null) proc.kill('SIGTERM')
+    await Promise.all([server, ...extra].map(exited))
     rmSync(tmp, { recursive: true, force: true })
   }
   if (!results.length) failed = true

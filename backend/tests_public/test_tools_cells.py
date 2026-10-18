@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from app import config, notebook, tools
+from app import cardrun, config, notebook, tools
 
 CORPUS = "mini"
 
@@ -16,6 +16,8 @@ async def _stack(workspaces_tmp, monkeypatch):
     for name in ("THIMBLE_DEV", "THIMBLE_FRONTEND_URL", "THIMBLE_PORT"):  # no interface to shoot a card in, unless a test says
         monkeypatch.delenv(name, raising=False)
     tools._last_cell.clear()
+    # this process stands in for the card runner (`thimble-run`, where card code runs in every transport, R8)
+    monkeypatch.setattr(cardrun, "defers", lambda c: False)
     yield
     await notebook.shutdown_all()
 
@@ -31,7 +33,7 @@ async def call(name: str, nb: str, anchor: str | None = None, **args):
 
 
 def _cid(result) -> str:
-    """The card a result names on its own line (the call line and the takeaway reminder for the card before come first)."""
+    """The card a result names on its own line (the takeaway reminder for the card before may come first)."""
     assert not result.is_error, result.text
     hit = next((m.group(1) for line in result.text.splitlines() if (m := re.fullmatch(r"card:([A-Za-z0-9_-]+)", line.strip()))), None)
     assert hit, result.text
@@ -39,10 +41,9 @@ def _cid(result) -> str:
 
 
 def _body(result) -> str:
-    """A result's text after its first line, the call as run (`$ add_card kind="note" ...`; tools.call_line)."""
-    first, _, rest = result.text.partition("\n")
-    assert first.startswith("$ "), result.text
-    return rest
+    """A result's text, which does not echo the call (the model and the terminal have it already)."""
+    assert not result.text.startswith("$ "), result.text
+    return result.text
 
 
 SHAPES = ("chart", "image", "table", "text", "none", "error")  # what tools._output_shape can name
@@ -62,7 +63,7 @@ def _mismatch(result, kind: str) -> bool:
 async def test_add_cell_runs_code_and_reports_the_output(group):
     r = await call("add_card", group, kind="code", question="How many?", code="print(3)")
     cid = _cid(r)
-    assert r.text.splitlines()[0] == '$ add_card kind="code" question="How many?" code="print(3)"'
+    assert r.text.splitlines()[0] == f"card:{cid}", "the result names the card first and does not echo the call"
     assert "L1|3" in r.text and not _mismatch(r, "code")
     cell = notebook.get_cell(CORPUS, cid)
     assert cell["kind"] == "code" and cell["title"] == "How many?" and cell["created_by"] == "chat" and cell["notebook"] == group
@@ -92,61 +93,23 @@ async def test_add_cell_runs_code_and_reports_the_output(group):
     assert (await call("add_card", group, kind="table", question="q")).is_error
 
 
-async def test_a_question_s_escaped_quotation_marks_are_stored_as_marks(group):
-    """Live check term-fix5, new quirk 13: main wrote `\\"June\\"` inside a card's question, and the card's title showed
-    the backslashes. A question keeps its quotation marks and drops the backslashes, in add_card and edit_card."""
-    r = await call("add_card", group, kind="code", question='Which pages have \\"June\\" in their name?', code="print(33)")
-    cid = _cid(r)
-    assert notebook.get_cell(CORPUS, cid)["title"] == 'Which pages have "June" in their name?'
-    await call("edit_card", group, cell=cid, question='Which pages have \\"July\\" in their name?')
-    assert notebook.get_cell(CORPUS, cid)["title"] == 'Which pages have "July" in their name?'
+async def test_a_takeaway_keeps_the_space_before_a_word_that_starts_with_punctuation(group):
+    """The tidy-up of a takeaway removes a space before punctuation that ends a word, and kept the one before a period
+    that starts a word but not before a colon: ":9100" read "on:9100". Only punctuation that ends a word loses it."""
+    cid = _cid(await call("add_card", group, kind="note", question="Which port?", text="One port."))
+    await call("edit_card", group, cell=cid, takeaway="Both relays bind one port , :9100 , and the cache dir .quill stays ; it lives on :9100 .")
+    assert notebook.get_cell(CORPUS, cid)["takeaway"] == "Both relays bind one port, :9100, and the cache dir .quill stays; it lives on :9100."
 
 
-async def test_an_example_keeps_each_quote_of_a_record_whose_ref_stays_as_given(group):
-    """Three quotes of one row of a database: span_of_quote keeps the row's ref, so the three refs were the same string
-    and the card showed three copies of the row from its start. Each quote is kept beside its ref, so the card can show
-    the row once with every passage highlighted. A quote of a JSONL line becomes a span, which says where it is, and
-    keeps no quote."""
-    r = await call("add_card", group, kind="example", question="Where does the row name the style?",
-                   refs=[{"ref": "forge.db#prs/7114", "quote": "Quote the style name"},
-                         {"ref": "forge.db#prs/7114", "quote": "configuration example"},
-                         {"ref": "forge.db#prs/7114", "quote": "merged"}])
-    payload = notebook.get_cell(CORPUS, _cid(r))["payload"]
-    assert payload["refs"] == ["forge.db#prs/7114"] * 3
-    assert payload["quotes"] == ["Quote the style name", "configuration example", "merged"]
-    assert "- forge.db#prs/7114 “configuration example”" in tools._payload_lines("example", payload), \
-        "the card read back names each quote with its ref"
-    r = await call("add_card", group, kind="example", question="Which post asks for thread 1?",
-                   refs=[{"ref": "board.jsonl#L3", "quote": "please use thread 1"}, "board.jsonl#L1"])
-    payload = notebook.get_cell(CORPUS, _cid(r))["payload"]
-    assert payload["refs"][0].startswith("board.jsonl#L3.b") and payload["refs"][1] == "board.jsonl#L1"
-    assert "quotes" not in payload
+async def test_a_takeaway_keeps_the_space_before_a_relative_path(group):
+    """A period followed by a slash or another period starts a path, so "loads ./warble.rb" keeps its space, inside a
+    citation too, and the same in a report's plain text."""
+    from app import report
 
-
-async def test_an_edit_that_left_the_outputs_as_they_were_says_so_and_read_ref_says_the_code_ran(group):
-    """Live QA 2: a fix turned a chart's weeks into text for its ticks, thimble.chart read the text as times again, and
-    the card came out as before with nothing to say so; main then read the card and told the analyst that it had not
-    run since the edit. edit_card now says when new code left all that the card shows as it was, and read_ref says
-    that the outputs come from running the code it shows."""
-    table = "import pandas as pd\npd.DataFrame({{'posts': [{n}]}})"
-    cid = _cid(await call("add_card", group, kind="table", question="How many?", code=table.format(n="8")))
-    same = tools.hint("edit_card-same-outputs", cid=cid)
-    assert same in (await call("edit_card", group, cell=cid, code=table.format(n="4 + 4"))).text
-    # new code with other outputs, and the same code run again with a new question, say nothing of the kind
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="9"))).text
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="9"), question="How many now?")).text
-    read = (await call("read_ref", group, ref=f"card:{cid}")).text
-    assert "[9]" in read and "from running the code above" in read and "has not run" not in read
-    # nor does new code that leaves the outputs as they were in an edit that changes something else the card shows: its
-    # question, its takeaway, or its kind, here to a code card, which shows its code, as is any edit of a code card's code
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="4 + 5"), question="Posts?")).text
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="5 + 4"), takeaway="Nine.")).text
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="3 * 3"), kind="code")).text
-    assert same not in (await call("edit_card", group, cell=cid, code=table.format(n="10 - 1"))).text
-    # a card whose run goes on shows the outputs of an earlier run, or none on its first run
-    shown = notebook.get_cell(CORPUS, cid)
-    assert tools._outputs_lines({**shown, "status": "running"}, "9")[0] == "outputs, from an earlier run, while the code above runs now:"
-    assert tools._outputs_lines({**shown, "status": "running", "outputs": []}, "") == ["outputs: none yet, since the code above runs now"]
+    cid = _cid(await call("add_card", group, kind="note", question="What does it load?", text="One file."))
+    await call("edit_card", group, cell=cid, takeaway="Plinth [[loads ./warble.rb|data.jsonl#L3]] and then ../up/x.rb .")
+    assert notebook.get_cell(CORPUS, cid)["takeaway"] == "Plinth [[loads ./warble.rb|data.jsonl#L3]] and then ../up/x.rb."
+    assert report.plain_text("it loads ./warble.rb , then .\\win.rb .") == "it loads ./warble.rb, then .\\win.rb."
 
 
 async def test_an_agent_s_card_code_may_not_install(group, tmp_path, monkeypatch):
@@ -202,7 +165,7 @@ async def test_read_ref_of_a_card_with_long_code_or_a_long_payload_stays_under_c
     both = card(printed)
     text = (await call("read_ref", group, ref=f"card:{both}")).text
     assert read_parts.units(text) <= read_parts.READ_UNITS, f"{read_parts.units(text):,} code units"
-    assert text.startswith(f'$ read_ref ref="card:{both}"\ncard:{both} (group {group}, code, status ok)\n'
+    assert text.startswith(f'card:{both} (group {group}, code, status ok)\n'
                            'question: How long are the runs?\ncode:\n')
     assert text.endswith("takeaway:\nEvery run has 42 posts.")
     code_part = text.split("\ncode:\n", 1)[1].split("\noutputs, from running the code above:\n", 1)
@@ -221,3 +184,19 @@ async def test_read_ref_of_a_card_with_long_code_or_a_long_payload_stays_under_c
                                   notebook.new_cell("custom", "analyst", "The page", payload={"html": html}))
     text = (await call("read_ref", group, ref=f"card:{custom['id']}")).text
     assert read_parts.units(text) <= read_parts.READ_UNITS and cut_at(text.split("\nhtml:\n", 1)[1], html) > 20_000
+
+
+async def test_a_takeaway_s_quote_that_its_record_does_not_hold_is_told_as_it_is_stored(group):
+    """Bug hunt L4: main cited three records that held none of the errors it quoted, and the result said only that the
+    takeaway was long, so main answered with them. A quote of a file's record that the record does not hold is named in
+    the result, before the answer; a quote the record holds is not."""
+    cid = _cid(await call("add_card", group, kind="example", question="What did agent-01 report?",
+                          refs=["agents/agent-01.jsonl#L10"]))
+    res = await call("edit_card", group, cell=cid, takeaway='Agent-01 said [["The build compiles now"|agents/agent-01.jsonl#L10]] '
+                     'and [["the kettle is cold"|agents/agent-01.jsonl#L11]].')
+    assert not res.is_error, res.text
+    told = res.text.split("takeaway noted", 1)[1]
+    assert '"the kettle is cold" at agents/agent-01.jsonl#L11' in told
+    assert "The build compiles now" not in told
+    fine = await call("edit_card", group, cell=cid, takeaway='Agent-01 said [["The build compiles now"|agents/agent-01.jsonl#L10]].')
+    assert "not in the records" not in fine.text

@@ -2,7 +2,15 @@
 // server closed (an answer that is no stream, such as the 401 of a browser that is no longer signed in) makes the page
 // ask whether it is still signed in (lib/api checkSignedIn), so a signed-out tab shows shell/SignIn's line rather than
 // that the server is down.
+//
+// The stale-tab guard (lib/stale): the page itself reconnects, never the browser's own retry, since a reopen sends the
+// cookie and the key in the path. A failure makes the page suspect, and each reopen waits for the challenge to pass
+// first. The server's `stopping` event (it stops for good), the challenge failing, and MAX_FAILURES failed reconnects
+// in a row stop the page, and with it every stream.
 import { checkSignedIn } from './api'
+import { browserKey } from './browserKey'
+import { bus } from './bus'
+import { markSuspect, MAX_FAILURES, pageStopped, stopPage, verified } from './stale'
 
 /** The server's keepalive cadence (backend EventSourceResponse ping=15). */
 export const PING_MS = 15_000
@@ -10,6 +18,8 @@ export const PING_MS = 15_000
 export const STALL_MS = 2 * PING_MS + 5_000
 export const RETRY_MS = 5_000
 export const RETRY_MAX_MS = 30_000
+/** The event the server ends a stream with when it stops for good (backend main.STOPPING_EVENT). */
+export const STOPPING = 'stopping'
 
 export interface StreamOptions {
   /** named events handed to `onEvent` besides `message`; `ping` never is */
@@ -25,9 +35,10 @@ export interface StreamOptions {
 
 /** Open `url` as a stream that reconnects; returns the release. */
 export function openStream(url: string, opts: StreamOptions): () => void {
-  if (typeof EventSource !== 'function') return () => {}
+  if (typeof EventSource !== 'function' || pageStopped()) return () => {}
   let es: EventSource | null = null
   let timer: number | null = null
+  // failed reconnects in a row: a challenge nothing answered, or a reopened stream that failed before it opened
   let failures = 0
   let released = false
   let interrupted = false
@@ -35,6 +46,20 @@ export function openStream(url: string, opts: StreamOptions): () => void {
   const clear = () => {
     if (timer != null) window.clearTimeout(timer)
     timer = null
+  }
+  const close = () => {
+    clear()
+    es?.close()
+    es = null
+  }
+  const offStopped = bus.on('pageStopped', () => {
+    released = true
+    close()
+  })
+  const release = () => {
+    released = true
+    offStopped()
+    close()
   }
   const handler = (ev: Event) => {
     alive()
@@ -48,14 +73,44 @@ export function openStream(url: string, opts: StreamOptions): () => void {
     }
     opts.onEvent(ev.type, data, me.lastEventId ?? '')
   }
+  const retry = () => {
+    clear()
+    timer = window.setTimeout(() => void reopen(), Math.min(RETRY_MS * 2 ** failures, RETRY_MAX_MS))
+  }
+  const failed = () => {
+    failures++
+    if (failures >= MAX_FAILURES) stopPage('failures')
+    else retry()
+  }
+  // the stream is down: tell the caller, close it (no retry of the browser's own), and reopen after a wait
+  const down = (closed: boolean) => {
+    if (released) return
+    interrupted = true
+    markSuspect()
+    opts.onDown?.()
+    close()
+    if (closed) void checkSignedIn()
+    retry()
+  }
+  // a reopen sends credentials: only once the challenge passed (lib/stale verified); a page with no key has none to send
+  const reopen = async () => {
+    if (released) return
+    if (!browserKey()) {
+      open()
+      return
+    }
+    const v = await verified()
+    if (released) return
+    if (v === 'stopped') release()
+    else if (v === 'down') failed()
+    // signed out: the page shows the sign-in line; the stream asks again after a wait, and opens under a new key
+    else if (v === 'out') retry()
+    else open()
+  }
   const alive = () => {
     clear()
     timer = window.setTimeout(() => {
-      if (released) return
-      es?.close()
-      interrupted = true
-      opts.onDown?.()
-      open()
+      if (!released) down(false)
     }, STALL_MS)
   }
   const open = () => {
@@ -64,35 +119,29 @@ export function openStream(url: string, opts: StreamOptions): () => void {
     alive()
     for (const name of ['message', ...(opts.events ?? [])]) cur.addEventListener(name, handler)
     cur.addEventListener('ping', alive)
+    cur.addEventListener(STOPPING, () => stopPage('stopping'))
     cur.onerror = () => {
       if (released || es !== cur) return
-      // the browser retries a dropped stream itself (readyState CONNECTING); its reopen is a reopen all the same
-      interrupted = true
-      opts.onDown?.()
-      if (cur.readyState !== EventSource.CLOSED) return
-      void checkSignedIn()
-      clear()
-      const wait = Math.min(RETRY_MS * 2 ** failures, RETRY_MAX_MS)
-      failures++
-      timer = window.setTimeout(() => {
-        if (!released && es === cur) open()
-      }, wait)
+      if (interrupted) {
+        // a reopen that failed before it opened
+        failures++
+        if (failures >= MAX_FAILURES) {
+          close()
+          stopPage('failures')
+          return
+        }
+      }
+      down(cur.readyState === EventSource.CLOSED)
     }
     cur.onopen = () => {
       if (released || es !== cur) return
       failures = 0
       alive()
-      const reopen = interrupted
+      const reopened = interrupted
       interrupted = false
-      if (reopen) opts.onReopen?.()
+      if (reopened) opts.onReopen?.()
     }
   }
   open()
-  return () => {
-    if (released) return
-    released = true
-    clear()
-    es?.close()
-    es = null
-  }
+  return release
 }

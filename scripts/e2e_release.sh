@@ -44,7 +44,7 @@
 #     the check, the stand-in session stopped, and the launcher in `tmux -L $THIMBLE_E2E_SOCKET` (default
 #     thimble-e2e-<port>): the module's hello and thimble's types in main's first agent listing, a spawn through the
 #     bridge on exact values, its toolu_plugin_ id, a deny, the hand-back, the descendants' values, a follow-up, /clear,
-#     a stop, the classifier smoke and the quit. Claude Code must trust the folder main runs in, and the check never
+#     a stop and the quit. Claude Code must trust the folder main runs in, and the check never
 #     answers its trust question yes, so set THIMBLE_E2E_TRUSTED_DIR to a folder Claude Code trusts: the corpus copy for
 #     this check goes into a new folder there, removed on exit. Both run models on the caller's own Claude login.
 #

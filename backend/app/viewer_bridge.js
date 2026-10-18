@@ -120,6 +120,27 @@
   // so leaves the label filter to thimble, and the Color by choice that the marks are drawn by (colourHook)
   var kitFns = []
   var colourHook = null
+  // the values of the fields of the records the fetches' readers read, merged ({field: {value: n}}, the most a fetch
+  // counted of each), and the kit's parts that hear them (Color by's menu lists them)
+  var fieldsHeard = null
+  var fieldFns = []
+  function heardFields(fields) {
+    var all = fieldsHeard || {}
+    for (var f in fields) {
+      var vs = fields[f]
+      if (!Object.prototype.hasOwnProperty.call(fields, f) || !vs || typeof vs !== 'object') continue
+      var mine = all[f] || (all[f] = {})
+      for (var v in vs) if (Object.prototype.hasOwnProperty.call(vs, v) && typeof vs[v] === 'number') mine[v] = Math.max(mine[v] || 0, vs[v])
+    }
+    fieldsHeard = all
+    for (var i = 0; i < fieldFns.length; i++) {
+      try {
+        fieldFns[i](all)
+      } catch (e) {
+        report(e)
+      }
+    }
+  }
   var ownSize = false // the page said the height it needs, so the document's own height is no longer sent
   // The analyst's gesture: transient user activation in this frame, read through the getter as it was when the bridge
   // ran, so a page that redefines it later changes what it reads itself but not what the bridge reads
@@ -607,7 +628,10 @@
       if (!p) return
       delete pending[d.id]
       if (d.error) p.reject(d.cancelled ? aborted() : new Error(d.error))
-      else p.resolve(d.data)
+      else {
+        if (d.fields && typeof d.fields === 'object') heardFields(d.fields)
+        p.resolve(d.data)
+      }
       showWait()
     } else if (d.type === P + 'progress') {
       var q = pending[d.id]
@@ -1960,6 +1984,12 @@
     labels: function (fn) {
       kitFns.push(fn)
       if (labelState) fn(labelState, true, true)
+    },
+    // fn(fields) hears the values of the fields of the records a fetch's reader read ({field: {value: n}}), which Color
+    // by lists for a field whose values the page has not shown all of; those heard so far at once
+    fields: function (fn) {
+      fieldFns.push(fn)
+      if (fieldsHeard) fn(fieldsHeard)
     },
     colour: function (hook) {
       colourHook = hook || null

@@ -1,0 +1,841 @@
+// What thimble-term reads from `thimble state`, put in the forms its drawing takes (no `$`): cells, a citation's check,
+// a thread's chat as a side thread's turns, the threads list, the agents, the workspace's counts; and the rules for what
+// a turn of main made (the cards each tool call names) and what main's reply shows (no end token).
+//
+// Each reader takes the shape the server's GET route for that surface answers, and is lenient: a field it cannot read
+// is left out rather than failing the drawing.
+import type { ChatThread, ChatThreadTurn, TermAgent, TermHome, TermThreadRow, TermVerdict } from './types'
+import type { ThimbleCell, ThimbleLabel } from './cell'
+import { STOP_KINDS, clip, curlyQuotes, dateSpans, plainMarks, quoted, shownMatches, valueIn } from './lib'
+import type { Citation } from './lib'
+import { quoteSpan, quotedWords, showsValue } from './cite'
+
+type Obj = Record<string, unknown>
+
+const isObj = (v: unknown): v is Obj => Boolean(v) && typeof v === 'object' && !Array.isArray(v)
+const str = (v: unknown): string => (typeof v === 'string' ? v : v === null || v === undefined ? '' : String(v))
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : Array.isArray(v) ? v.length : 0)
+
+// ------------------------------------------------------------------------------------------------ cells and labels
+
+/** The cells `thimble state cards --since` printed: the canvas route's `{groups, cells}`, or a list of cells. */
+export function cellsOf(v: unknown): ThimbleCell[] {
+  const list = Array.isArray(v) ? v : isObj(v) && Array.isArray(v.cells) ? v.cells : []
+  return list.filter((c): c is ThimbleCell => isObj(c) && typeof c.id === 'string')
+}
+
+/** The cell `thimble state card <id>` printed: the cell route's cell, or `{cell}`. */
+export function cellOf(v: unknown): ThimbleCell | null {
+  const c = isObj(v) && isObj(v.cell) ? v.cell : v
+  return isObj(c) && typeof c.id === 'string' ? (c as ThimbleCell) : null
+}
+
+/** A label with its counts in `label_stats`, where the drawing reads them: the concept routes give them as `counts`
+ *  and `n_labeled` beside the concept's fields (concepts.with_stats); the label's stored file holds `label_stats`. */
+function withStats(c: Obj): ThimbleLabel {
+  if (isObj(c.label_stats) || !isObj(c.counts)) return c as ThimbleLabel
+  return { ...c, label_stats: { counts: c.counts as Record<string, number>, ...(typeof c.n_labeled === 'number' ? { n_labeled: c.n_labeled } : {}) } } as ThimbleLabel
+}
+
+/** The label `thimble state label <id>` printed: the concept route's concept, or `{concept, rows}`. */
+export function labelOf(v: unknown): ThimbleLabel | null {
+  if (!isObj(v)) return null
+  const c = isObj(v.concept) && typeof v.concept.id === 'string' ? { ...v.concept, ...(Array.isArray(v.rows) ? { rows: v.rows } : {}) } : v
+  return typeof c.id === 'string' ? withStats(c) : null
+}
+
+/** The labels `thimble state labels` printed: the concepts route's list. */
+export function labelsOf(v: unknown): ThimbleLabel[] {
+  const list = Array.isArray(v) ? v : isObj(v) && Array.isArray(v.labels) ? v.labels : isObj(v) && Array.isArray(v.concepts) ? v.concepts : []
+  return list.filter((c): c is Obj => isObj(c) && typeof c.id === 'string').map(withStats)
+}
+
+/** The count a link to a label shows now (`concept:<id>/<value>`; the label whole, `value` '', for the records it
+ *  labeled), with the analyst's verdicts, as the label card's bars read it; null when the label or the value is not
+ *  known. */
+export function labelCountNow(l: ThimbleLabel | null | undefined, value: string): number | null {
+  if (!l) return null
+  const counts = l.verdicts?.counts ?? l.label_stats?.counts
+  if (!counts) return null
+  if (!value) return l.label_stats?.n_labeled ?? Object.values(counts).reduce((a, b) => a + b, 0)
+  return value in counts ? counts[value]! : (l.labels ?? []).includes(value) ? 0 : null
+}
+
+/** What a takeaway's link to a label says when the label no longer counts its number (a verdict, or a run, changed the
+ *  counts): the count now, and that the verdicts are in it; '' when the number is the count, or no number (live check
+ *  term-fix7, quirk 8: after a verdict the takeaway's 180 and 4,399 stayed blue beside bars reading 179 and 4,400). */
+export function labelLinkStale(display: string | null, l: ThimbleLabel | null | undefined, value: string): string {
+  const now = labelCountNow(l, value)
+  if (now === null || display === null || !/^[-−]?(?:\d{1,3}(?:,\d{3})+|\d+)$/.test(display.trim())) return ''
+  if (shownMatches(display.trim(), String(now))) return ''
+  return `the label counts ${now.toLocaleString('en-US')} now${l?.verdicts?.set ? ', with your verdicts' : ''}`
+}
+
+/** The label a label card counts: its payload's concept, else the first label it carries. */
+export function labelIdOf(cell: ThimbleCell): string {
+  const p = cell.payload
+  const c = p && typeof p === 'object' ? str((p as Obj).concept) : ''
+  return c || (cell.kind === 'label' ? str(cell.labels?.[0]) : '')
+}
+
+// ------------------------------------------------------------------------------------------------ main's turn
+
+const CARD_TOOLS = /^mcp__plugin_thimble_thimble__(add_card|edit_card|add_cell|edit_cell)$/
+const LABEL_TOOL = /^mcp__plugin_thimble_thimble__apply_label$/
+const RUN_RE = /(?:^|[\s/'"])thimble-run['"]?\s+(card|label|stale)\b\s*['"]?([A-Za-z0-9_-]*)/g
+
+/** The cards a call of main's names as its own: add_card's and edit_card's card, apply_label's label card; for a Bash
+ *  command that runs `thimble-run` (`thimble-run card <id>`, or several in a shell loop), each card it names and each
+ *  card its output names on a line of its own (`card:<id>`, as add_card prints it), the label card of a code label's
+ *  `thimble-run label`; never a card the run says the workspace does not have (`thimble-run: there is no card:<id>`, an
+ *  id main guessed: bug hunt J11, where it drew `× card 4 cannot be drawn` and counted in the footer). */
+export function cardsOfCall(tool: string, input: unknown, text: string): string[] {
+  const inp = isObj(input) ? input : {}
+  if (CARD_TOOLS.test(tool)) {
+    // the card on a line of its own, else the card the call names, else the first the result names whole: never one in
+    // the result's `$ edit_card …` line, which echoes the call cut short (`[[5,884|card:e157e5…`, live QA on 0.7.0)
+    const own = /^card:([A-Za-z0-9_-]+)\s*$/m.exec(text)?.[1]
+    const named = str(inp.card).replace(/^(?:card|cell):/, '')
+    const said = /\bcard:([A-Za-z0-9_-]+)(?![A-Za-z0-9_…-])/.exec(text.split('\n').filter(l => !l.startsWith('$ ')).join('\n'))?.[1]
+    const id = own || named || said
+    return id ? [id] : []
+  }
+  if (LABEL_TOOL.test(tool)) {
+    const card = /The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]/.exec(text)?.[1]
+    return card ? [card] : []
+  }
+  if (tool === 'Bash') {
+    const cmd = str(inp.command)
+    if (!/thimble-run\b/.test(cmd)) return []
+    const out = new Set<string>()
+    for (const m of cmd.matchAll(RUN_RE)) if (m[1] === 'card' && m[2]) out.add(m[2])
+    for (const m of text.matchAll(/^card:([A-Za-z0-9_-]+)\s*$/gm)) out.add(m[1]!)
+    const card = /The label's card is \[\[card:([A-Za-z0-9_-]+)\]\]/.exec(text)?.[1]
+    if (card) out.add(card)
+    for (const m of text.matchAll(/\bthere is no card:([A-Za-z0-9_-]+)/g)) out.delete(m[1]!)
+    return [...out]
+  }
+  return []
+}
+
+/** A shell command without the variable settings and `cd`s it opens with (`W=/long/work/folder; python3 …`,
+ *  `cd "$W" && …`), which are the same in every step of an agent's run: what is left tells its steps apart. */
+export function bareCommand(command: string): string {
+  const lead = /^(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|[^\s;&]*)\s*(?:;|&&|\n)?\s*|^cd\s+(?:'[^']*'|"[^"]*"|[^\s;&]+)\s*(?:;|&&|\n)\s*/
+  let s = command.trim()
+  for (let m = lead.exec(s); m && m[0].length && m[0].length < s.length; m = lead.exec(s)) s = s.slice(m[0].length)
+  return s
+}
+
+/** What a step of an agent's run did, as the agent page lists it (panel.tsx drawAgent), after the tool's name: its
+ *  question; a Bash call's description, else its command with no leading settings (bareCommand); a file by its folder
+ *  and its name; a pattern, a name or a description. Bug hunt J2: a helper's 26 Bash steps all read `Bash ·
+ *  W=/mnt/…/workspaces/…`, the description each call carried left out. */
+export function stepWords(tool: string, input: unknown): string {
+  const inp = isObj(input) ? input : {}
+  const name = tool.replace(/^mcp__.*__/, '')
+  const path = str(inp.file_path ?? inp.notebook_path)
+  const file = path.split('/').length > 3 ? `…/${path.split('/').slice(-2).join('/')}` : path
+  const what = str(inp.question) || (name === 'Bash' ? str(inp.description) || bareCommand(str(inp.command)) : str(inp.command)) || file || str(inp.pattern) || str(inp.name) || str(inp.description)
+  const words = what.replace(/\s+/g, ' ').trim()
+  return words ? `${name} · ${words}` : name
+}
+
+/** The card ids a Bash command that runs `thimble-run card` names: after `card` or `card:`, or in a shell loop's list
+ *  (`for c in prs-merged 9b4bb0cb; do $B card $c; done`); a name such as `prs-merged` or an older card's random id. */
+export function runIds(command: string): string[] {
+  if (!/thimble-run\b/.test(command) || !/\bcard\b/.test(command)) return []
+  const out = new Set<string>()
+  for (const m of command.matchAll(/\bcard(?::|\s+['"]?)([A-Za-z0-9_][A-Za-z0-9_-]*)/g)) out.add(m[1]!)
+  for (const m of command.matchAll(/\bfor\s+\w+\s+in\s+([^;\n]+)[;\n]/g)) {
+    for (const w of m[1]!.split(/\s+/)) {
+      const id = w.replace(/^['"]|['"]$/g, '')
+      if (/^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(id)) out.add(id)
+    }
+  }
+  return [...out]
+}
+
+/** A Bash command that runs `thimble-run`, as its row shows it: the verb, and for `card` each card by its question
+ *  (`questionOf`), never the install path or an id; a shell loop's cards too. Cards not read yet are counted. */
+export function runShown(command: string, questionOf: (id: string) => string | undefined): string {
+  const verb = /(?:thimble-run|\$\{?\w+\}?)['"]?\s+['"]?(card|label|stale)\b/.exec(command)?.[1]
+  if (verb !== 'card') return verb ? `thimble-run ${verb}` : 'thimble-run'
+  const ids = runIds(command)
+  const named = ids.map(questionOf).filter((q): q is string => Boolean(q))
+  // each question cut at a word, never mid-word
+  const short = (q: string) => quoted(clip(q, 40))
+  if (named.length && named.length === ids.length) return `thimble-run card ${named.map(short).join(', ')}`
+  return ids.length > 1 ? `thimble-run card · ${ids.length} cards` : 'thimble-run card'
+}
+
+type NamedRow = { id: string; title: string; question?: string; fork?: string }
+
+/** A thread's first question as its rows name it: one line, its citations as their words. */
+function questionWords(q: string | undefined): string {
+  return (q ?? '').replace(/\[\[([^|\]]*)\|[^\]]*\]\]/g, '$1').replace(/\s+/g, ' ').trim()
+}
+
+/** The thread a fork's name names: the slug its forks run under (`fork_name`), its title or its id. */
+function bySlug(rows: readonly NamedRow[], name: string): NamedRow | undefined {
+  return rows.find(x => x.fork === name || x.title === name || x.id === name)
+}
+
+/** main's `↳ thread <name>: …` lines (main.md's form, `<name>` the fork's slug) with each thread named by its first
+ *  question in quotation marks, as the chat names a thread everywhere else. */
+export function namedThreads(text: string, rows: readonly NamedRow[]): string {
+  if (!/↳\s*thread\s+[A-Za-z0-9_-]/.test(text)) return text
+  return text.replace(/(↳\s*thread\s+)([A-Za-z0-9_-]+)(\s*:)/g, (m, lead: string, name: string, colon: string) => {
+    const q = questionWords(bySlug(rows, name)?.question)
+    if (!q) return m
+    return `${lead}${quoted(clip(q, 40))}${colon}`
+  })
+}
+
+/** main's own `↳ thread <name>: …` lines left out for each thread whose row thimble-term drew in main's chat (`told`,
+ *  by id): the row says the thread answered, so the chat does not say it twice. `<name>` is the fork's slug, or the
+ *  thread's first question in quotation marks. */
+export function withoutToldThreads(text: string, rows: readonly NamedRow[], told: ReadonlySet<string>): string {
+  if (!told.size || !/↳\s*thread\s/.test(text)) return text
+  const lines = text.split('\n')
+  const kept = lines.filter(l => {
+    const m = /^\s*↳\s*thread\s+("[^"]*"|“[^”]*”|[A-Za-z0-9_:,.-]+?)\s*:/.exec(l)
+    if (!m) return true
+    const name = m[1]!
+    const words = /^["“]/.test(name) ? questionWords(name.slice(1, -1)).replace(/…$/, '') : ''
+    const r = words ? rows.find(x => words.length >= 8 && questionWords(x.question).startsWith(words)) : bySlug(rows, name)
+    return !(r && told.has(r.id))
+  })
+  if (kept.length === lines.length) return text
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+// main's own line about a writer's end (prompts/main.md: `↳ The writer finished; thimble shows it.`, also `↳ The report
+// writer finished, …`), which it writes once for the writer's message and again for Claude Code's task notification
+const WRITER_LINE = /^\s*↳\s*(?:the\s+)?(?:[\w-]+\s+)?writer\b/i
+
+/** Whether a reply holds main's `↳ The writer …` line. */
+export function saysWriter(text: string): boolean {
+  return text.split('\n').some(l => WRITER_LINE.test(l))
+}
+
+/** A reply without main's `↳ The writer …` lines: for a row whose writer's end an earlier row said already (live check
+ *  term-fix6, new quirk 6: `↳ The writer finished the report; thimble shows it.` once after the writer's message and
+ *  again after the task notification). */
+export function withoutWriterLines(text: string): string {
+  if (!saysWriter(text)) return text
+  return text.split('\n').filter(l => !WRITER_LINE.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** The subagent run a prompt of main's reports on: Claude Code's hand-back of the agent's last report (`<agent-message
+ *  from="<id>">` around its `[Subagent hand-back]` frame) or its task notification (`<task-id><id></task-id>`). One run
+ *  of one of thimble's agents brings both, one after the other, and main answers each with a `↳` line
+ *  (prompts/main.md). null for any other prompt. */
+export function reportOf(text: string): { agent: string; kind: 'hand-back' | 'notice' } | null {
+  const notice = /<task-notification>[\s\S]*?<task-id>\s*([^<\s]+)\s*<\/task-id>/.exec(text)
+  if (notice) return { agent: notice[1]!, kind: 'notice' }
+  const back = /<agent-message from="([^"]+)">\s*\[Subagent hand-back\]/.exec(text)
+  return back ? { agent: back[1]!, kind: 'hand-back' } : null
+}
+
+/** A reply's `↳` lines, each trimmed. */
+export function noteLines(text: string): string[] {
+  return text.split('\n').map(l => l.trim()).filter(l => l.startsWith('↳'))
+}
+
+/** A reply without the lines given (trimmed, as noteLines gives them). */
+export function withoutLines(text: string, lines: readonly string[]): string {
+  const drop = new Set(lines)
+  const kept = text.split('\n').filter(l => !drop.has(l.trim()))
+  return kept.length === text.split('\n').length ? text : kept.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** An Agent call's description or a task notification's words with each thread's fork (`thread:<slug>`, in quotation
+ *  marks or not) named by the thread's first question, as everywhere else: `thread "How many of the 2,994…"`. A fork
+ *  of a thread not listed keeps its words. */
+export function namedForks(text: string, rows: readonly NamedRow[], n = 40): string {
+  if (!/\bthread:/.test(text)) return text
+  return text.replace(/"?\bthread:([^\s"]+?)([.,;:]*)"?(?=\s|$)/g, (m, slug: string, tail: string) => {
+    const q = questionWords(bySlug(rows, slug)?.question)
+    return q ? `thread ${quoted(clip(q, n))}${tail}` : m
+  })
+}
+
+/** A reply without main's own `↳` lines (a hand-back's or a thread's note to the terminal): the answer a thread about
+ *  it is told. */
+export function withoutNotes(text: string): string {
+  return text.split('\n').filter(l => !/^\s*↳/.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/** The description main's Agent call for a thread's fork runs with: the thread's first question, `thread: How many…`,
+ *  in place of `thread:<slug>`, so that Claude Code's agent tray and exit dialog name the thread as the chat does. No
+ *  quotation marks around the question, since Claude Code puts the description in its own (`Agent "thread: How
+ *  many…" finished`); straight ones inside it are curly. null
+ *  for any other call, for a thread not listed, and when the call's prompt is not `thread:<name>`, which must stay to
+ *  name the fork (backend threads.fork_ref). */
+export function forkDescription(input: Record<string, unknown>, rows: readonly NamedRow[]): string | null {
+  if (input.subagent_type !== 'fork') return null
+  const ref = /^\s*thread:([A-Za-z0-9_-]{1,64})\s*$/
+  const prompt = typeof input.prompt === 'string' ? ref.exec(input.prompt) : null
+  if (!prompt || typeof input.description !== 'string' || !ref.test(input.description)) return null
+  const q = questionWords(bySlug(rows, prompt[1]!)?.question)
+  return q ? `thread: ${curlyQuotes(clip(q, 40))}` : null
+}
+
+/** main's end token: what it ends a turn with when it has nothing for the analyst, which no chat shows (session.py). */
+export const END_TOKEN = '(shown in the dashboard)'
+const END_RE = /[ \t]*[*_]*\(shown in the dashboard\)\.?[*_]*\.?\s*$/i
+
+/** A reply block as the analyst reads it: without main's end token. */
+export function withoutEnd(text: string): string {
+  const m = END_RE.exec(text)
+  return m ? text.slice(0, m.index).replace(/\s+$/, '') : text
+}
+
+// ------------------------------------------------------------------------------------------------ a citation's check
+
+type Resolution = Obj & { error?: unknown; retry?: unknown; excerpt?: unknown; meta?: unknown; path?: unknown; line?: unknown; kind?: unknown; record?: unknown; context?: unknown; blocks?: unknown; end_line?: unknown; fields?: unknown }
+
+/** The resolution of one ref out of what `thimble state resolve` printed: `{ref: resolution}`, a list of resolutions
+ *  (each naming its `ref`), or `{refs: …}` around either. */
+export function resolutionOf(v: unknown, ref: string): Resolution | null {
+  const inner = isObj(v) && (isObj(v.refs) || Array.isArray(v.refs)) ? v.refs : v
+  if (Array.isArray(inner)) {
+    const hit = inner.find(x => isObj(x) && x.ref === ref)
+    return isObj(hit) ? (hit as Resolution) : null
+  }
+  if (isObj(inner) && isObj(inner[ref])) return inner[ref] as Resolution
+  return null
+}
+
+function blocksText(b: unknown): string {
+  return Array.isArray(b) ? b.map(x => (isObj(x) ? str(x.text) : str(x))).join('\n') : ''
+}
+
+/** the input fields of a tool call that hold what it was asked to do, as the browser's example reads them (frontend
+ *  canvas/quotes.ts toolPart) */
+const TOOL_MAIN = ['command', 'cmd', 'code', 'query', 'pattern', 'url', 'file_path', 'path', 'prompt']
+const WORDS_PARTS = 24 // of a record's words an example's verdict keeps (wordsOf)
+const WORDS_CHARS = 20_000 // of one part's words
+
+/** A JSON value's string values, each under its key (an item of a list under the list's key), in order. */
+function stringsOf(v: unknown, key: string, out: [string, string][]): void {
+  if (out.length >= WORDS_PARTS) return
+  if (typeof v === 'string') {
+    if (v.trim()) out.push([key, v])
+  } else if (Array.isArray(v)) for (const x of v) stringsOf(x, key, out)
+  else if (isObj(v)) for (const [k, x] of Object.entries(v)) stringsOf(x, k, out)
+}
+
+/** A tool call's block (`<name>\n<input as JSON>`) as its tool's name and what it was asked to do: its command, else its
+ *  input's fields, a line each, decoded from the JSON. */
+function toolWords(text: string): [string, string] {
+  const nl = text.indexOf('\n')
+  const name = (nl < 0 ? text : text.slice(0, nl)).trim()
+  let input: unknown
+  try {
+    input = nl < 0 ? undefined : JSON.parse(text.slice(nl + 1))
+  } catch {
+    input = undefined
+  }
+  if (!isObj(input)) return [name, nl < 0 ? '' : text.slice(nl + 1).trim()]
+  const fields = input
+  const main = TOOL_MAIN.find(k => typeof fields[k] === 'string')
+  const rest = Object.entries(fields).filter(([k]) => k !== main && k !== 'description')
+  return [name, [main ? str(fields[main]) : '', ...rest.map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)].filter(Boolean).join('\n')]
+}
+
+/** A resolved record's words by part, as an example card quotes them and the browser reads them (frontend
+ *  canvas/quotes.ts blockParts): a text, a thought or a tool's output as written; a tool call as its tool's name and what
+ *  it was asked to do (toolWords); a record kept as its JSON (or an event's params) as each of its string values under
+ *  its key. [key, words], '' for no key; none for a place with no blocks, or with several records. */
+export function wordsOf(res: Resolution): [string, string][] {
+  if (!Array.isArray(res.blocks) || (Array.isArray(res.records) && res.records.length > 1)) return []
+  const out: [string, string][] = []
+  for (const b of res.blocks.filter(isObj)) {
+    if (out.length >= WORDS_PARTS) break
+    const kind = str(b.kind)
+    const text = str(b.text)
+    if (kind === 'tool_use') out.push(toolWords(text))
+    else if (kind === 'raw' || kind === 'event') {
+      try {
+        stringsOf(JSON.parse(text), '', out)
+      } catch {
+        out.push(['', text])
+      }
+    } else if (text.trim()) out.push(['', text])
+  }
+  return out.slice(0, WORDS_PARTS).map(([k, t]): [string, string] => [k, t.slice(0, WORDS_CHARS)])
+}
+
+/** Whether a record's blocks are its JSON whole (one `raw` block: a record of no shape thimble reads words in). */
+function keptAsJson(blocks: unknown): boolean {
+  return Array.isArray(blocks) && blocks.length === 1 && isObj(blocks[0]) && blocks[0].kind === 'raw'
+}
+
+const PASSAGE_BEFORE = 160 // characters of a record's words an example shows before the passage it quotes
+const PASSAGE_AFTER = 320 // and after it
+
+/** Words cut to the window from `lo` to `hi`, each cut at a word with `…` against the words, and where the window
+ *  starts in `text` less the `…`. */
+function cutWindow(text: string, lo: number, hi: number): { text: string; shift: number } {
+  let a = Math.max(0, lo)
+  let b = Math.min(text.length, hi)
+  if (a > 0) {
+    const sp = text.slice(a, a + 40).search(/\s/)
+    if (sp >= 0) a += sp + 1
+  }
+  if (b < text.length) {
+    const sp = text.slice(Math.max(a, b - 40), b).search(/\s\S*$/)
+    if (sp >= 0) b = Math.max(a, b - 40) + sp
+  }
+  const lead = a > 0 ? '…' : ''
+  return { text: `${lead}${text.slice(a, b)}${b < text.length ? '…' : ''}`, shift: a - lead.length }
+}
+
+/** Where `want` stands in a part's words on one line (`flat`): as written, as JSON writes it, or as the words a passage
+ *  of a JSON text decodes to (a span of a tool call's input). */
+function passageIn(flat: string, want: string): [number, number] | null {
+  const q = want.replace(/\s+/g, ' ').trim()
+  if (!q) return null
+  let plain = q
+  if (q.includes('\\')) {
+    try {
+      plain = (JSON.parse(`"${q.replace(/(^|[^\\])"/g, '$1\\"')}"`) as string).replace(/\s+/g, ' ').trim()
+    } catch {
+      plain = q
+    }
+  }
+  return quoteSpan(flat, q) ?? (plain !== q ? quoteSpan(flat, plain) : null)
+}
+
+const PASSAGES_SPAN = 600 // characters apart the passages of one record may stand to be drawn as one example
+
+// a field the record's words leave out that is no longer than this and on one line is drawn whole on a row of its own
+// before the words (draw.ts exampleLayout `head`), so no passage of it is looked for
+const HEAD_FIELD = 120
+
+/** The passages an example card quotes in its record's words (bug hunt round 10, K3: a transcript's message showed its
+ *  start, never the vote the card quoted from its tool call; a record cited twice drew twice the same): the first part of
+ *  the record (the verdict's `words`, wordsOf, then the long fields its words leave out, such as a tool's result) that
+ *  holds the first of `wants` (the quotes add_card kept, spans' own passages, or the takeaway's quotes of the record), on
+ *  one line with the words around them (PASSAGE_BEFORE, PASSAGE_AFTER), `marks` where each of `wants` that stands in that
+ *  part within PASSAGES_SPAN of the first stands in it, `found` which of `wants` those are (the first among them), and
+ *  the part's key (a tool's name, a record's field). Null when no part holds the first. Pure. */
+export function examplePassages(v: TermVerdict, wants: readonly string[]): { key: string; text: string; marks: [number, number][]; found: number[] } | null {
+  const parts = [...(v.words ?? []), ...(v.fields ?? []).filter(([, t]) => t.trim().length > HEAD_FIELD || t.trim().includes('\n'))]
+  if (!parts.length || !wants.some(w => w.trim())) return null
+  for (const [key, text] of parts) {
+    const flat = text.replace(/\s+/g, ' ').trim()
+    const at = wants.map(w => passageIn(flat, w))
+    if (!at[0]) continue
+    const lo0 = at[0][0]
+    const found = at.flatMap((x, i) => (x && Math.abs(x[0] - lo0) <= PASSAGES_SPAN ? [i] : []))
+    const lo = Math.min(...found.map(i => at[i]![0]))
+    const hi = Math.max(...found.map(i => at[i]![1]))
+    const w = cutWindow(flat, lo - PASSAGE_BEFORE, hi + PASSAGE_AFTER)
+    return { key, text: w.text, marks: found.map((i): [number, number] => [at[i]![0] - w.shift, at[i]![1] - w.shift]), found }
+  }
+  return null
+}
+
+/** The passage one quote of an example stands at (examplePassages with one want), its one mark as `mark`. Pure. */
+export function examplePassage(v: TermVerdict, want: string): { key: string; text: string; mark: [number, number] } | null {
+  const got = examplePassages(v, [want])
+  return got ? { key: got.key, text: got.text, mark: got.marks[0]! } : null
+}
+
+function recordText(r: unknown): string {
+  if (!isObj(r)) return str(r)
+  const blocks = blocksText(r.blocks)
+  return blocks || str(r.text) || (isObj(r.record) ? JSON.stringify(r.record) : str(r.record))
+}
+
+/** Where the shown value stands in a line: each [start, end) of it. */
+function spansIn(line: string, display: string | null): number[][] {
+  const words = quotedWords(display) || (display ?? '').trim()
+  if (!words) return []
+  const out: number[][] = []
+  const lower = line.toLowerCase()
+  const w = words.toLowerCase()
+  for (let i = lower.indexOf(w); i >= 0 && out.length < 4; i = lower.indexOf(w, i + w.length)) out.push([i, i + w.length])
+  if (out.length) return out
+  // a date in words (`23 June`) where the line writes it in digits (2026-06-23)
+  const dates = dateSpans(words, line)
+  if (dates.length) return dates.slice(0, 4)
+  // a number written another way (3,908 against 3908): each number of the line that matches it
+  for (const m of line.matchAll(/[-−]?\d[\d,]*(?:\.\d+)?%?/g)) if (shownMatches(m[0], words)) out.push([m.index!, m.index! + m[0].length])
+  return out.slice(0, 4)
+}
+
+/** A value as one line of JSON written as Python writes it (`{"a": 1, "b": [2, 3]}`), the way a JSON lines file holds
+ *  its records. */
+export function jsonLine(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(jsonLine).join(', ')}]`
+  if (isObj(v)) return `{${Object.entries(v).map(([k, x]) => `${JSON.stringify(k)}: ${jsonLine(x)}`).join(', ')}}`
+  return JSON.stringify(v) ?? 'null'
+}
+
+/** A record around a cited one as one line, as Raw draws the file's lines: a JSON record as its line of JSON, a text
+ *  line as its words. */
+export function recordLine(r: unknown): string {
+  if (!isObj(r)) return str(r).replace(/\s*\n\s*/g, ' ')
+  const rec = r.record
+  if (isObj(rec) && Object.keys(rec).length === 1 && typeof rec._raw === 'string') return rec._raw
+  if (isObj(rec) && Object.keys(rec).length === 1 && typeof rec.text === 'string') return rec.text
+  if (isObj(rec) || Array.isArray(rec)) return jsonLine(rec)
+  return recordText(r).replace(/\s*\n\s*/g, ' ')
+}
+
+/** A record around a cited one as one line, drawn as the cited record is drawn: its words, as the file's reader shows
+ *  them (a transcript's message, an event's params), when thimble reads words in it; else as Raw draws it (recordLine: a
+ *  JSON record as its line of JSON). Live check term-fix10, low quirk: the cited line read as its words and the lines
+ *  around it as raw JSON. */
+export function aroundLine(r: unknown): string {
+  const blocks = isObj(r) && Array.isArray(r.blocks) ? r.blocks.filter(isObj) : []
+  const words = blocks.length && blocks.every(b => typeof b.kind === 'string' && b.kind !== 'raw') ? blocksText(blocks) : ''
+  return words.trim() ? words.replace(/\s*\n\s*/g, ' ') : recordLine(r)
+}
+
+/** A resolved line's fields of words its blocks leave out (the server's `fields`: a wiki save's edit summary beside its
+ *  page text), of its record or of each record of a range, as [key, words]. */
+export function fieldsOf(res: Resolution): [string, string][] {
+  const recs = Array.isArray(res.records) && res.records.length ? res.records : [res]
+  return recs.flatMap(r => (isObj(r) && Array.isArray(r.fields) ? r.fields : []).filter(isObj).map((f): [string, string] => [str(f.key), str(f.text)]).filter(([k, t]) => k !== '' && t.trim() !== ''))
+}
+
+/** The lines of a resolved place, the cited ones hit (a record over its rows, at most 31), with the fields its words
+ *  leave out under them, each `key: words` on a hit row (fieldsOf: the value a citation shows may stand there), each
+ *  record around them one line, drawn as the cited one is (aroundLine). */
+function linesOf(res: Resolution, display: string | null): TermVerdict['lines'] {
+  const out: TermVerdict['lines'] = []
+  const line = typeof res.line === 'number' ? res.line : 0
+  const ctx = isObj(res.context) ? res.context : {}
+  const push = (n: number, text: string, hit: boolean) => {
+    for (const [k, t] of text.split('\n').entries()) {
+      if (k > 30) break
+      out.push({ n: k === 0 ? n : 0, text: t, hit, ...(hit ? { spans: spansIn(t, display) } : {}) })
+    }
+  }
+  const before = Array.isArray(ctx.before) ? ctx.before : []
+  const after = Array.isArray(ctx.after) ? ctx.after : []
+  const around = (n: number, r: unknown) => out.push({ n, text: aroundLine(r), hit: false })
+  before.forEach((r, i) => around(isObj(r) && typeof r.line === 'number' ? r.line : line - before.length + i, r))
+  if (Array.isArray(res.records) && res.records.length) res.records.forEach((r, i) => push(isObj(r) && typeof r.line === 'number' ? r.line : line + i, recordText(r), true))
+  else push(line, line ? blocksText(res.blocks) || str(res.excerpt) : str(res.excerpt), true)
+  for (const [k, t] of fieldsOf(res)) {
+    const text = `${k}: ${t.replace(/\s+/g, ' ').trim()}`
+    out.push({ n: 0, text, hit: true, field: true, spans: spansIn(text, display) })
+  }
+  after.forEach((r, i) => around(isObj(r) && typeof r.line === 'number' ? r.line : line + 1 + i, r))
+  return out
+}
+
+/** A citation's check from its resolution: missing when the place does not resolve (or a card's cited cell or line is
+ *  gone), differs when it resolves and its shown value (a number or quoted words) is not there, else ok. A place that
+ *  may resolve soon (`retry`: a view's key while its view is being built) is pending for as long as thimble says so,
+ *  checked again (term.ts resolveCitations): a red × is only for a place that does not resolve (bug hunt K7). */
+export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerdict {
+  const base = { ref: c.ref, display: c.display, kind: '', lines: [] as TermVerdict['lines'], at }
+  if (!res) return { ...base, status: 'pending', why: 'not checked yet' }
+  if (res.error !== undefined && res.retry === true) return { ...base, status: 'pending', why: `checked again soon: ${str(res.error)}` }
+  if (res.error !== undefined) return { ...base, status: 'missing', why: `the place does not resolve: ${str(res.error)}` }
+  const kind = str(res.kind)
+  const meta = isObj(res.meta) ? res.meta : {}
+  const span = isObj(meta.span) ? meta.span : null
+  const out: TermVerdict = { ...base, kind, status: 'ok', why: 'the place resolves', lines: [] }
+  if (kind === 'cell') {
+    out.card = str(res.cell_id)
+    if (span && 'col' in span) {
+      out.column = str(span.col)
+      out.row = str(span.row)
+      out.value = str(span.value)
+    }
+    if (meta.span_missing) return { ...out, status: 'missing', why: 'the card no longer shows the cited cell or line' }
+    // lines the card printed: the cited ones lit among the two on each side the excerpt holds (refs.SPAN_CONTEXT_LINES)
+    if (span && 'line' in span && typeof span.line === 'number') {
+      const first = span.line
+      const last = typeof span.end_line === 'number' ? span.end_line : first
+      const start = Math.max(1, first - 2)
+      out.lines = str(res.excerpt).split('\n').map((t, k) => {
+        const n = start + k
+        const hit = n >= first && n <= last
+        // the value marked where it stands; a citation of the line with no words marks the line
+        return { n, text: t, hit, ...(hit ? { spans: c.display === null ? [[0, t.length]] : spansIn(t, c.display) } : {}) }
+      })
+    }
+  } else {
+    out.path = str(res.path)
+    if (typeof res.line === 'number') out.line = res.line
+    // where its file opens: the cited line, or the first line of a record cited by its pointer (bug hunt B29: a
+    // transcript's message opened its file at the first turn)
+    const fileLine = typeof res.line === 'number' ? res.line : typeof meta.line === 'number' ? meta.line : 0
+    if (fileLine > 0) out.fileLine = fileLine
+    out.lines = linesOf(res, c.display)
+    const fields = fieldsOf(res)
+    if (fields.length) out.fields = fields
+    // the record's words by part, and a span's own passage, where an example card finds what it quotes (examplePassage)
+    const words = wordsOf(res)
+    if (words.length) out.words = words
+    if (kind === 'span' && str(res.excerpt)) out.passage = str(res.excerpt)
+    // a row's fields, which an example card shows by their names, never as the JSON its excerpt is; so too a record
+    // kept as its JSON, one object of no shape thimble reads words in (bug hunt round 10, K3: a JSON lines record drew
+    // as `“{ "record": "message", "index": 84, …`)
+    if ((kind === 'row' || kind === 'csvrow') && isObj(res.record)) out.record = res.record
+    else if ((kind === 'record' || kind === 'pointer') && isObj(res.record) && keptAsJson(res.blocks)) out.record = res.record
+    // a command's output: the command that printed it, as its row names it (calls.py chip_line)
+    if (kind === 'call' && str(meta.line)) out.command = str(meta.line)
+    // the turn a chat log's line starts, so an example card quotes its words under its speaker (turnWords)
+    const turn = isObj(meta.turn) ? meta.turn : null
+    if (turn && typeof turn.speaker === 'string' && typeof turn.at === 'number') out.turn = { speaker: turn.speaker, at: turn.at }
+  }
+  if (!showsValue(c.display)) return { ...out, why: 'the place resolves; the citation shows no value' }
+  // a view's unit: its reader says what the unit is (its label, an excerpt such as a run's prompt), not the values the
+  // view shows for it, so a value those words leave out has only its place checked, never failed (bug hunt L19)
+  if (kind === 'view' && !valueIn(c.display!, `${str(res.label)}\n${str(res.excerpt)}`)) return { ...out, placeOnly: 'its view gives no values to check the cited one against', why: 'the place resolves; only its place is checked' }
+  const where = span && 'value' in span ? str(span.value) : span && 'text' in span ? str(span.text) : kind === 'cell' ? str(res.excerpt) : out.lines.filter(l => l.hit).map(l => l.text).join('\n') || str(res.excerpt)
+  const holds = span && 'value' in span ? shownMatches(str(span.value), c.display!) || valueIn(c.display!, where) : valueIn(c.display!, where)
+  // a number that is its place's own (`lines [4](…#L4) and [62](…#L62)`) names the place, not a value it shows
+  if (!holds && ownNumber(c.ref, c.display!)) return { ...out, placeOnly: "the number is its place's own", why: 'the place resolves; only its place is checked' }
+  return holds ? { ...out, why: 'the value is at its place' } : { ...out, status: 'differs', why: span && 'value' in span ? `the place shows ${str(span.value)}` : 'the value is not at its place' }
+}
+
+/** Whether `display` is a whole number that is the cited place's own number: a line of the cited lines (`#L62`,
+ *  `#L5-L9`, a span of a line), a page (`#p3`) or a row (`#row=12`). Pure. */
+export function ownNumber(ref: string, display: string): boolean {
+  const n = /^\d{1,3}(?:,\d{3})*$|^\d+$/.test(display.trim()) ? Number(display.trim().replaceAll(',', '')) : NaN
+  if (!Number.isInteger(n)) return false
+  const frag = ref.split('#').slice(1).join('#')
+  const lines = /^L(\d+)(?:-L?(\d+))?(?:\.b\d+(?::c\d+-\d+)?)?$/.exec(frag)
+  if (lines) return n >= Number(lines[1]) && n <= Number(lines[2] ?? lines[1])
+  const one = /^(?:p|page=|row=)(\d+)$/.exec(frag)
+  return one ? n === Number(one[1]) : false
+}
+
+const MD_FILE = /\.(?:md|markdown|mdx)$/i
+const MD_LINK = /\[([^[\]\n]*)\]\([^()\s]*\)/g
+
+/** A line of a markdown file as its words: its bold, italic and code marks and a link's target left out, as the
+ *  browser's Transcript mode shows a markdown chat log (bug hunt B20). */
+function plainMdLine(text: string): string {
+  return plainMarks(text.replace(/^\s{0,3}(?:#{1,6}\s+|>\s?)/, '').replace(MD_LINK, '$1'))
+}
+
+/** What an example card quotes of a chat log's cited place (bug hunt D9): for a line that starts a turn, its speaker and
+ *  its words from where they start; for lines of a markdown chat log, their words, the speakers as plain text; on one
+ *  line, a markdown line's without its syntax. Null for any other place. Pure. */
+export function turnWords(v: TermVerdict): { speaker: string; words: string } | null {
+  if (!v.turn) return null
+  const md = MD_FILE.test(v.path ?? '')
+  const hits = v.lines.filter(l => l.hit)
+  if (v.kind === 'range') {
+    const words = hits.map(l => (md ? plainMdLine(l.text) : l.text)).join(' ').replace(/\s+/g, ' ').trim()
+    return words ? { speaker: '', words } : null
+  }
+  const line = hits[0]?.text ?? ''
+  if (v.turn.at > line.length) return null
+  const rest = line.slice(v.turn.at)
+  const words = (md ? plainMdLine(rest) : rest).replace(/\s+/g, ' ').trim()
+  return words ? { speaker: v.turn.speaker, words } : null
+}
+
+// ------------------------------------------------------------------------------------------------ threads and agents
+
+/** A chat's meta and events as `thimble state thread` printed them (`{meta, events}`). */
+export function chatOf(v: unknown): { meta: Obj; events: Obj[] } {
+  if (!isObj(v)) return { meta: {}, events: [] }
+  return { meta: isObj(v.meta) ? v.meta : {}, events: Array.isArray(v.events) ? v.events.filter(isObj) : [] }
+}
+
+/** A thread question's words with each picture the analyst pasted with it (Claude Code's `[Image #1]`, when its
+ *  record names `pictures` the thread keeps) as a chip, `[ picture 1 ]`, so the terminal says a picture came with it
+ *  rather than showing Claude Code's placeholder (bug hunt I5). */
+export function pictureChips(text: string, pictures: number): string {
+  return pictures ? text.replace(/\[Image #(\d+)\]/g, (_, n: string) => `[ picture ${n} ]`) : text
+}
+
+/** A chat as a side thread's turns: each analyst message a question, the text after it its answer, its tool calls
+ *  counted, answered by its first reply (`reply_in_thread`'s `text` record, marked `reply`) or `done`, failed (or
+ *  stopped) by `error`. In terminal mode main often answers with `reply_in_thread` alone, and no `done` follows. The
+ *  answer is that first reply (SPEC.md, "The threads panel"): what the fork writes after it, as it makes a card, is its
+ *  working, not the answer. Two texts a tool call or a whole message parts are two paragraphs, never one run of words.
+ *  `cards`: the cards the turn made or changed, by its tool results' `cell_id`; `at`: when its question was asked. */
+export function threadOf(meta: Obj, events: readonly Obj[]): ChatThread {
+  const turns: ChatThreadTurn[] = []
+  let cur: ChatThreadTurn | null = null
+  // a tool call since the turn's last text: the next text starts a paragraph
+  let parted = false
+  const open = (q: string, ts?: unknown) => {
+    const at = Date.parse(str(ts))
+    cur = { q, a: '', state: 'running', tools: 0, partial: '', cards: [], ...(Number.isFinite(at) ? { at } : {}) }
+    turns.push(cur)
+    parted = false
+  }
+  for (const e of events) {
+    const t = str(e.type)
+    if (t === 'user') {
+      open(pictureChips(str(e.text), Array.isArray(e.images) ? e.images.length : 0), e.ts)
+      continue
+    }
+    if (t === 'again' && (!cur || (cur as ChatThreadTurn).state !== 'running')) open(str(e.text), e.ts)
+    if (!cur) open(str(meta.anchor_text) || str(meta.title))
+    const c = cur as unknown as ChatThreadTurn
+    if (t === 'text') {
+      // words after an end that said the turn went unanswered (main's turn ended before its fork replied): the
+      // answer, which replaces what the end said
+      if (c.state === 'error') {
+        c.state = 'running'
+        c.a = ''
+        delete c.stopped
+      }
+      // the answer is the turn's first reply: later words are the fork's working
+      if (c.state === 'done') continue
+      const words = str(e.delta ?? e.text)
+      const whole = e.reply === true || Boolean(e.by)
+      // the reply alone is the answer, without the working words before it
+      if (e.reply === true) c.a = ''
+      const sep = c.a.trim() && (parted || whole) ? '\n\n' : ''
+      c.a = `${sep ? c.a.trimEnd() : c.a}${sep}${sep ? words.trimStart() : words}`
+      c.partial = c.a
+      parted = false
+      if (e.reply === true && c.state === 'running') c.state = 'done'
+    } else if (t === 'tool_use') {
+      c.tools++
+      parted = true
+    } else if (t === 'tool_result') {
+      const card = str(e.cell_id)
+      if (card && !c.cards!.includes(card)) c.cards!.push(card)
+    } else if (t === 'done') {
+      c.state = 'done'
+      if (!c.a.trim() && e.result) c.a = str(e.result)
+    } else if (t === 'error') {
+      c.state = 'error'
+      c.a = str(e.error ?? e.message ?? e.text) || c.a
+      if (STOP_KINDS.includes(str(e.kind))) c.stopped = true
+    }
+  }
+  const last = turns.at(-1)
+  if (last && last.state === 'running' && meta.running === false && last.a.trim()) last.state = 'done'
+  const at = Date.parse(str(meta.last_ts) || str(meta.created_at))
+  return {
+    id: str(meta.id),
+    label: str(meta.anchor_text) || str(meta.title) || 'the analyst\'s question',
+    ref: str(meta.anchor),
+    context: '',
+    agentId: '',
+    engine: '',
+    turns,
+    file: '',
+    parent: str(meta.parent) === 'main' ? '' : str(meta.parent),
+    ...(Number.isFinite(at) ? { at } : {}),
+  }
+}
+
+/** How many answers a chat has given (`done` records), from its meta's count when the list gives one. */
+function answersOf(meta: Obj): number {
+  for (const k of ['answers', 'n_answers']) if (typeof meta[k] === 'number') return meta[k] as number
+  return meta.status === 'done' ? 1 : 0
+}
+
+/** The side threads `thimble state threads` listed (the chats route's metas), oldest first, each with what the rows
+ *  above the prompt and the home panel need. Unread: the meta's `unread`, else its answers past `seen`. */
+export function threadRowsOf(v: unknown): TermThreadRow[] {
+  const list = Array.isArray(v) ? v : isObj(v) && Array.isArray(v.chats) ? v.chats : isObj(v) && Array.isArray(v.threads) ? v.threads : []
+  return list
+    .filter(isObj)
+    .filter(m => str(m.kind) === 'thread')
+    .map(m => {
+      const answers = answersOf(m)
+      const seen = typeof m.seen === 'number' ? (m.seen as number) : answers
+      const unread = typeof m.unread === 'number' ? (m.unread as number) : typeof m.unread === 'boolean' ? (m.unread ? 1 : 0) : Math.max(0, answers - seen)
+      return {
+        id: str(m.id),
+        title: str(m.title),
+        anchor: str(m.anchor),
+        anchorText: str(m.anchor_text),
+        running: Boolean(m.running),
+        answers,
+        seen,
+        unread,
+        at: str(m.last_ts) || str(m.created_at),
+        parent: str(m.parent),
+        created: str(m.created_at),
+        element: str(m.anchor_element),
+        question: str(m.question),
+        fork: str(m.fork_name),
+        forkAgent: isObj(m.fork) ? str(m.fork.agent_id) : '',
+        turn: str(m.turn),
+      }
+    })
+}
+
+/** thimble's agents as `thimble state agents` listed them (the agents route's `{rows}`). */
+export function agentsOf(v: unknown): TermAgent[] {
+  const rows = Array.isArray(v) ? v : isObj(v) && Array.isArray(v.rows) ? v.rows : isObj(v) && Array.isArray(v.agents) ? v.agents : []
+  return rows.filter(isObj).map(r => ({
+    name: str(r.name),
+    label: str(r.label) || str(r.name),
+    state: str(r.state) || str(r.status),
+    kind: str(r.kind),
+    chat: str(r.chat),
+    role: str(r.role),
+    started: str(r.started ?? r.started_at ?? r.created_at),
+  }))
+}
+
+/** The workspace's counts from `thimble state home`: a number or a list for each kind. */
+export function homeOf(v: unknown, at = 0): TermHome | null {
+  if (!isObj(v)) return null
+  const counts = isObj(v.counts) ? v.counts : v
+  const docs = counts.docs ?? counts.reports ?? counts.documents
+  return {
+    cards: num(counts.cards),
+    labels: num(counts.labels),
+    docs: isObj(docs) ? Object.values(docs).filter(d => !isObj(d) || d.exists !== false).length : num(docs),
+    threads: num(counts.threads),
+    views: num(counts.views),
+    files: num(counts.files),
+    at,
+  }
+}
+
+/** The documents `thimble state docs` listed (the types route's `{slug: {exists, title, …}}`, or a list), those that
+ *  exist or are being written. */
+export function docsOf(v: unknown): { slug: string; title: string; renderer: string; status: string; generation: number; at: string }[] {
+  const entries: [string, Obj][] = Array.isArray(v) ? v.filter(isObj).map(d => [str(d.slug ?? d.type), d]) : isObj(v) ? Object.entries(v).filter((e): e is [string, Obj] => isObj(e[1])) : []
+  return entries
+    .filter(([, d]) => d.exists !== false || d.status === 'generating')
+    .map(([slug, d]) => ({ slug, title: str(d.title) || str(d.name) || slug, renderer: str(d.renderer) || 'document', status: str(d.status) || (d.exists === false ? 'generating' : 'written'), generation: typeof d.generation === 'number' ? d.generation : 0, at: str(d.generated_at) }))
+}
+
+/** One ui.jsonl record as `thimble state ui --after <n>` printed it. */
+export type UiRecord = { n: number; kind: string; args: Obj }
+
+export function uiRecordsOf(v: unknown): UiRecord[] {
+  const list = Array.isArray(v) ? v : isObj(v) && Array.isArray(v.records) ? v.records : []
+  return list.filter(isObj).map(r => ({ n: typeof r.n === 'number' ? r.n : 0, kind: str(r.kind), args: isObj(r.args) ? r.args : {} }))
+}
+
+// ------------------------------------------------------------------------------------------------ documents
+
+export type DocSentence = { id?: string; text?: string; bullet?: string }
+export type DocFigure = { cell?: string; caption?: string; after_paragraph?: string }
+// a unit of a document: a report's or a story's section (paragraphs), a deck's slide or a story's beat (sentences, and
+// one `figure` or a list of `figures`), as report_types.units reads them
+export type DocSection = { id?: string; heading?: string; paragraphs?: { id?: string; sentences?: DocSentence[] }[]; sentences?: DocSentence[]; figures?: DocFigure[]; figure?: DocFigure | null }
+const UNIT_KEYS = [['sections', 'section'], ['slides', 'slide'], ['beats', 'beat'], ['lines', 'line']] as const
+
+/** The document's units (report_types.units) and their word, a slide's sentences as one paragraph each bullet a line. */
+export function docUnits(doc: Obj): { units: DocSection[]; word: string } {
+  for (const [key, word] of UNIT_KEYS) {
+    const v = doc[key]
+    if (!Array.isArray(v)) continue
+    const units = (v as DocSection[]).filter(u => u && typeof u === 'object').map(u => {
+      if (Array.isArray(u.paragraphs)) return { ...u, figures: u.figures ?? (u.figure ? [u.figure] : []) }
+      const sentences = (u.sentences ?? []).map(x => ({ ...x, text: x.bullet ? `${x.bullet} ${String(x.text ?? '')}` : String(x.text ?? '') }))
+      return { ...u, paragraphs: sentences.length ? [{ id: `${u.id ?? ''}-s`, sentences }] : [], figures: u.figures ?? (u.figure ? [u.figure] : []) }
+    })
+    return { units, word }
+  }
+  return { units: [], word: 'section' }
+}

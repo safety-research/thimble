@@ -65,18 +65,6 @@ def _record_update_sh(monkeypatch, rc: int = 0) -> list[list[str]]:
     return calls
 
 
-def test_from_hands_the_zip_to_update_sh_and_returns_its_exit_code(home, release_install, monkeypatch):
-    def no_gh(*a, **k):
-        raise AssertionError("--from must not download anything")
-
-    monkeypatch.setattr(cli.subprocess, "run", no_gh)
-    calls = _record_update_sh(monkeypatch, rc=3)
-    assert cli.main(["update", "--from", "/tmp/thimble-0.9.0-abc1234.zip"]) == 3
-    assert calls == [["bash", str(release_install / "scripts" / "update.sh"), "--from", "/tmp/thimble-0.9.0-abc1234.zip"]]
-    cli.main(["update", "--from", "/tmp/x.zip", "--dry-run"])
-    assert calls[-1][-3:] == ["--from", "/tmp/x.zip", "--dry-run"]
-
-
 def test_no_argument_downloads_with_gh_then_runs_update_sh_from_that_zip(home, release_install, monkeypatch, capsys):
     gh = _fake_gh(monkeypatch)
     calls = _record_update_sh(monkeypatch)

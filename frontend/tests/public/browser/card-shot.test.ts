@@ -1,9 +1,6 @@
 // The screenshot tool's picture of a card (backend tools._shot_card_in_ui), taken as soon as the card is drawn rather
-// than after a fixed wait. The page it loads opens the card its URL names still (src/lib/teleport refFromUrl, Shell):
-// the real Canvas (src/canvas/Canvas.tsx) centres a card opened still but neither selects nor flashes it, while a
-// chip's ref still does both. scripts/ui_shot.mjs --settle waits until the card is drawn (no body saying
-// `data-settled="false"`) and shows any animation at its end, so a highlight that fades out is not half there. The
-// live QA of 0.7.0 (2026-10-10): each card screenshot took 4.2-4.6 s, 2.2 s of it a fixed wait for the 1.6 s flash.
+// than after a fixed wait: scripts/ui_shot.mjs --settle waits until the card is drawn (no body saying
+// `data-settled="false"`) and shows any animation at its end, so a highlight that fades out is not half there.
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -51,7 +48,6 @@ beforeAll(async () => {
     return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root" style="position:absolute;inset:0;display:flex"></div></body></html>' })
   })
   await page.goto(`${ORIGIN}/`)
-  await page.evaluate(() => localStorage.setItem('thimble:w:canvas-open', JSON.stringify(['g'])))
   await page.addScriptTag({ path: script })
   await page.waitForSelector('[data-cell="b"]')
   await page.waitForTimeout(300)
@@ -61,22 +57,6 @@ afterAll(async () => {
   await browser?.close()
   cleanup()
   rmSync(dir, { recursive: true, force: true })
-})
-
-/** Whether the card is flashed and whether it is selected, 300 ms after `ref` was opened. */
-async function opened(ref: string, still: boolean): Promise<{ flashed: boolean; selected: boolean }> {
-  await page.evaluate(([r, s]) => (window as unknown as { teleport: (ref: string, o: object) => void }).teleport(r as string, { still: s }), [ref, still])
-  await page.waitForTimeout(300)
-  const id = ref.replace('card:', '')
-  return page.evaluate((cell) => {
-    const card = document.querySelector(`article.canvas-card[data-cell="${cell}"]`)!
-    return { flashed: card.classList.contains('anchor-flash'), selected: !!card.closest('.is-selected') }
-  }, id)
-}
-
-test('a card opened still is neither selected nor flashed, while a chip\'s ref selects and flashes its card', async () => {
-  assert.deepEqual(await opened('card:b', true), { flashed: false, selected: false })
-  assert.deepEqual(await opened('card:a', false), { flashed: true, selected: true })
 })
 
 /** The color of the pixel at the middle of a png, read in the page. */

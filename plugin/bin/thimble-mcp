@@ -1,49 +1,75 @@
 #!/bin/sh
 ''''exec "$(dirname "$0")/thimble-python" "$0" "$@" # '''
-"""The thimble MCP shim: the stdio MCP server of the analyst's Claude Code session, and its subscription.
+"""The thimble MCP shim: the stdio MCP server of the analyst's Claude Code session.
 
 The first two lines make this file both a shell script and a Python program: `sh` runs the `exec` line, which re-runs
 the file under backend/.venv's Python through bin/thimble-python; Python reads that line as a string literal.
 
-Tools are listed from disk (app.tools.list, schemas from prompts/tools.md), so the list is the same whether the server
-is up or down. In the analyst's session in a folder that is no workspace yet (in_workspace), outside terminal mode, the
-shim lists no tools and sends no instructions, so a session that never opens thimble carries none of them; it looks
-every RETRY_S whether the folder has become one (/thimble registers it), then lists the tools and tells Claude Code once
-that the list changed (notifications/tools/list_changed; watch_workspace). A call is POST {server}/api/tools/<name> with
-{args, actor, cwd, session, session_token, tool_use_id}; calls run concurrently and report MCP progress every
-PROGRESS_S, since Claude Code aborts a call that is silent for its idle timeout. The server's address and token are read
-per call from $THIMBLE_HOME/server.json. Every request to a tool route or the subscription proves the shim holds the
-token, and an answer is believed only when it proves the server does, as the plugin's hooks do (app/hook_auth.py).
-Without server.json or a token the shim reaches no port: a call reports that no server is recorded, and the subscription
-waits.
+The shim starts with every Claude Code session that loads the plugin, and gives no instructions in any session.
+
+Before thimble is on in the session (no session marker, `<home>/up/<sid>.active`, app/activate.py), the shim lists one
+tool, load_thimble (tools.ENTRY_TOOL), which Claude Code defers and ToolSearch finds by its search hint, and does
+nothing else but look whether the marker appeared every RETRY_S (watch_session), for an activation made outside it (the
+/thimble skill, a shell). A call of load_thimble, from the model or from the terminal mod's `$.mcp.call`, is answered
+here (load_thimble): the session id read once, the session activated (activate.activate, via `tool`, idempotent), main's
+tools listed in its place with one notifications/tools/list_changed, Claude Code's tools/list that follows awaited for at
+most LIST_WAIT_S, and thimble's guidance as the answer (activate.answer, which marks it sent only when no mod runs here).
+Each tools/list the shim answers once thimble is on writes the record `<home>/up/<sid>/listed.json` (contract C4), as
+does a new session id (/clear, /resume) or a marker that appears.
+
+Placement (placement, live check LC12): plugin/.mcp.json sets no server `alwaysLoad`, so `claude` starts without
+waiting for the shim; load_thimble has no `anthropic/alwaysLoad` (deferred). In the analyst's session, each tool of
+main's but those of tools.ALWAYS_LOADED carries it false (tools.deferred_in_main: deferred, so Claude Code shows main
+its name and ToolSearch loads its schema), and every other tool carries it true (loaded, and surfaced when it is first
+listed in the middle of a session): the everyday tools, and the tools only thimble's agents call, wherever a shim lists
+them. In a session thimble starts, each tool carries it true. The fallback gives 0.8.0's form instead: load_thimble's
+alwaysLoad false, the deferred tools' false and the other tools' absent; the shim takes it when .mcp.json gives the
+server `alwaysLoad: true`, so that one switch sets both.
+
+Tools are listed from disk (app.tools.list, schemas from prompts/tools.md), with the view tools' text for the page a
+view build makes now (prompts' build target: term-page before the press, html-page after it). A call runs by the
+session's transport, read per call (activate.transport, runtime's local.transport): in this process while it is local
+(call_local, local.call, the backend loaded on the first call), else posted to the server after the press (call_server):
+POST {server}/api/tools/<name> with {args, actor, cwd, session, session_token, tool_use_id}. Calls run concurrently and
+report MCP progress every PROGRESS_S, since Claude Code aborts a call that is silent for its idle timeout. The server's
+address and token are read per call from $THIMBLE_HOME/server.json; every request proves the shim holds the token, and
+an answer is believed only when it proves the server does, as the plugin's hooks do (app/hook_auth.py). After the press
+the transport stays the server's for as long as that `claude` process runs main: when the server does not answer twice,
+STOPPED_GAP_S apart, a call answers PAGE_STOPPED and the shim posts the `page:stopped` notice, whose act in the terminal
+is `/thimble browser`. The subscription (below) posts it too, without a call, once no server has answered for
+STOPPED_NOTICE_S since the subscription it held dropped, so the terminal says the page stopped within seconds of a
+server killed or crashed, as the browser does, and a restart (`thimble server restart`, about ten seconds) posts
+nothing (bug hunt H16). A session continued in a
+new `claude` process (`claude -c` after a quit, which stopped the server with the old process) is main there on the
+local transport, as a new main starts (activate.continue_main, bug hunt H1): the shim moves launch.json to its process
+as the session watch begins, at each new session id, and before a call would answer PAGE_STOPPED, so thimble's tools
+work without the analyst doing anything, and a press moves the session to the server again.
 
 Session: a session thimble starts names itself in THIMBLE_SESSION and proves it with THIMBLE_SESSION_TOKEN, which the
-server checks (app/hook_auth.py). Claude Code's background service can hand one session's environment on to the user's
-other sessions, so THIMBLE_SESSION without a token is not believed: the shim then serves the analyst's session
-(own_session).
+server checks (app/hook_auth.py); it lists its tools from the start and calls the server. Claude Code's background
+service can hand one session's environment on to the user's other sessions, so THIMBLE_SESSION without a token is not
+believed: the shim then serves the analyst's session (own_session).
 
-Subscription: in the analyst's session, once its folder is a workspace (in_workspace), the shim subscribes to GET
-{server}/api/events (server-sent events) with its folder, its session id, its parent's pid, the session's
-CLAUDE_CONFIG_DIR and the route its session hears events by: `hook`, or `monitor` where the plugin's hooks are off
-(app.cc_plugin.route). The subscription attaches the session to its workspace and is its liveness; it carries no events,
-which the plugin's watcher takes from the server. It is renewed when the session id changes (/clear, /resume), which the
-shim checks at each keep-alive.
+Subscription: while the analyst's session runs on the server transport, the shim subscribes to GET {server}/api/events
+(server-sent events) with its folder, its session id, its parent's pid, the session's CLAUDE_CONFIG_DIR and the route
+its session hears events by: `hook`, or `monitor` where the plugin's hooks are off (app.cc_plugin.route). The
+subscription attaches the session to its workspace and is its liveness; it carries no events, which the plugin's
+watcher takes from the server. It is renewed when the session id changes, which the shim checks at each keep-alive.
+
+An agent's own shim: `thimble-mcp --private <kind>` lists only the tools that agents of that session kind alone call
+(tools.private_list: the orientation's critique, a view build's and review's view_check …), which main's shim leaves
+out. Each such agent's registration declares it (subagents.private_server), so Claude Code starts it with the agent and
+main never lists those tools. It lists them from its start, with the view tools' text for the session's transport then;
+it never lists load_thimble, never watches the session or subscribes, and writes no listed.json. A call runs by the
+session's transport as main's shim's does; on the local transport as a second process (local.call `secondary`), which
+leaves the card watch and the marks of an earlier session's running work to main's shim.
 
 Protocol: the shim serves only the initialize-handshake protocol (2025-11-25 and earlier); a 2026-07-28
-`server/discover` probe is refused, and Claude Code falls back to the handshake.
+`server/discover` probe is refused, and Claude Code falls back to the handshake. fd 1 is pointed at stderr once the MCP
+stream has its own copy of it (terminal_stdout), so a library or a child process that writes to stdout cannot corrupt
+the protocol.
 
-Terminal mode (app/local.py): when the launcher started the session in terminal mode (THIMBLE_MODE, launch_mode.ENV) and
-the workspace of the shim's folder records it (`mode` in trusted/launch.json, read once at start), no server runs. A
-plain `claude` session in a folder whose last launch was in terminal mode is in browser mode, since /thimble opens the
-folder in browser mode. A call runs `tools.call` in this process (call_local, local.call), the backend loaded on the
-first call; the card watch starts with the shim (local.begin), so a card `thimble-run` writes before the session's first
-call is checked too; the jobs a call leaves running (a prompt label's run, the card check of a card `thimble-run` wrote)
-run on this process's loop and end with it; there is no subscription; and fd 1 is pointed at stderr once the MCP stream
-has its own copy of it (terminal_stdout), so a library or a child process that writes to stdout cannot corrupt the
-protocol. A folder of no workspace stays in browser mode, whose calls reach no server here, so a process that lost its
-environment does nothing.
-
-`thimble-mcp --list` prints the tool list as JSON and `thimble-mcp --instructions` the instructions, without MCP.
+`thimble-mcp --list` prints the tool list as JSON, without MCP (with `--private <kind>`, that agent's shim's).
 """
 import hmac
 import inspect
@@ -72,7 +98,7 @@ from mcp.server.stdio import stdio_server  # noqa: E402
 from mcp.shared.jsonrpc_dispatcher import JSONRPCDispatcher  # noqa: E402
 from pydantic import Field  # noqa: E402
 
-from app import cc_plugin, hook_auth, launch_mode, local, subagent_files, tools  # noqa: E402  (imports app.config, app.prompts, app.procs and starlette only)
+from app import activate, cc_plugin, hook_auth, local, prompts, tools  # noqa: E402  (imports app.config, app.prompts, app.procs and starlette only)
 
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr, format="thimble-mcp %(levelname)s: %(message)s")
 log = logging.getLogger("thimble-mcp")
@@ -98,10 +124,37 @@ PROGRESS_S = 60.0  # how often a call in flight reports progress (with_progress)
 PROGRESS_ENV = "THIMBLE_MCP_PROGRESS_S"
 SESSION_ENV = "THIMBLE_SESSION"  # the session this shim serves: `orient`, `writer:<doc>` or `critique:<id>` for a session thimble started (agent_session.py)
 TOKEN_ENV = hook_auth.SESSION_TOKEN_ENV  # what proves SESSION_ENV (module note, session)
-RETRY_S = 2.0  # between subscriptions, and between looks whether the folder is a workspace yet (in_workspace)
+RETRY_S = 2.0  # between subscriptions, and between looks for the session marker before thimble is on (watch_session)
+LIVE_POLL_S = 1.0  # once thimble is on: between looks at the session id and the session's transport (watch_session)
+LIST_WAIT_S = 2.0  # how long load_thimble waits for Claude Code's tools/list after its list_changed
+STOPPED_GAP_S = 2.0  # between the two looks that find the server down after the press (call_server_or_stopped)
+# how long no server answers after the subscription dropped before the subscription posts PAGE_STOPPED_KEY (module note)
+STOPPED_NOTICE_S = 15.0
+STOPPED_ENV = "THIMBLE_MCP_STOPPED_S"
+# after the press, a call when the server answers neither look (module note); the shim also posts PAGE_STOPPED_KEY
+PAGE_STOPPED = "thimble's page stopped. Ask the analyst to type /thimble browser to start it again."
+PAGE_STOPPED_KEY = "page:stopped"  # notices.PAGE_STOPPED_KEY: it goes once main is followed again (notices.page_back)
+PAGE_STOPPED_NOTICE = ("thimble's page stopped, so thimble's tools wait for it. In your terminal: type /thimble "
+                       "browser to start it again.")
+# the notice's act (notices.ACTIONS `page-start`): in the terminal what /thimble browser does; the browser, whose page
+# stopped, shows no button for it
+PAGE_START = {"label": "start it again", "do": "page-start"}
+# load_thimble when Claude Code's record of this process names no session
+NO_SESSION = ("thimble could not tell which Claude Code session this is, so it did not turn on. Ask the analyst to type "
+              "/thimble in this terminal.")
 TOOL_USE_META = "claudecode/toolUseId"  # the key of Claude Code's id for a call in the request's `_meta`
 CTX_PARAM = "thimble_mcp_context"  # the generated handler's MCP context parameter (_tool), which no tool's schema lists
 _JSON_TYPES = {"string": str, "number": float, "integer": int, "boolean": bool, "array": list, "object": dict}
+PRIVATE_FLAG = "--private"  # `--private <kind>`: an agent's own shim (module note)
+
+
+def private_kind() -> str | None:
+    """The session kind whose private tools this shim lists (module note), or None for main's shim."""
+    args = sys.argv[1:]
+    if PRIVATE_FLAG in args:
+        i = args.index(PRIVATE_FLAG)
+        return args[i + 1] if i + 1 < len(args) and args[i + 1] else None
+    return None
 
 
 def own_session() -> tuple[str | None, str | None]:
@@ -148,17 +201,6 @@ def proven(resp: httpx.Response, proof: str) -> bool:
 
 def cwd() -> str:
     return os.environ.get("THIMBLE_CWD") or os.getcwd()
-
-
-def in_workspace() -> bool:
-    """Whether the shim's folder is a thimble workspace (a corpus folder the server would name): /thimble registers it.
-    The data folder is read again each time (local.settle_dirs), since the server.json that names it may come later."""
-    try:
-        local.settle_dirs()
-        return subagent_files.workspace_folder(cwd()) is not None
-    except Exception:  # noqa: BLE001 — a folder that cannot be read is none
-        log.debug("whether %s is a workspace could not be read", cwd(), exc_info=True)
-        return False
 
 
 def _result(content: list[dict[str, Any]], is_error: bool) -> mcp_types.CallToolResult:
@@ -285,37 +327,179 @@ async def call_server(name: str, args: dict[str, Any], tool_use_id: str | None =
             return _answer(name, resp, proof, base)
 
 
-_TERMINAL: list[bool] = []  # the session's mode, read once (terminal)
+# --------------------------------------------------------------------------- the session's state
 
 
-def terminal() -> bool:
-    """Whether this shim serves a terminal-mode session (module note): the launcher started it so (THIMBLE_MODE), and
-    the workspace's launch.json says so, read once."""
-    if not _TERMINAL:
-        if os.environ.get(launch_mode.ENV) != launch_mode.TERMINAL:
-            _TERMINAL.append(False)
-        else:
-            local.settle_dirs()
-            local.PLUGIN_ROOT = HERE.parents[1]  # this copy, whose bin/thimble-run the launcher's allow rule names
-            c = local.workspace(cwd())
-            _TERMINAL.append(bool(c) and local.terminal(c))
-    return _TERMINAL[0]
+class _Live:
+    """What the shim knows of its session: whether thimble is on (its tools listed), the session id and transport it
+    last saw, the build target its listing was made for, and the event a tools/list sets once thimble is on."""
+
+    def __init__(self) -> None:
+        self.on = False
+        self.sid: str | None = None
+        self.transport = activate.LOCAL
+        self.target: str | None = None
+        self.listed: anyio.Event | None = None
+        self.server: "Shim | None" = None
+        self.connection: Connection | None = None
+        self.route: str | None = None
+        self.subscribed = False
+        self.begun = False
+
+
+LIVE = _Live()
+
+
+def placement() -> str:
+    """`fallback` when plugin/.mcp.json gives the server `alwaysLoad: true` (0.8.0's placement), else `lc12` (module
+    note, placement): one switch, in .mcp.json, sets both."""
+    try:
+        conf = json.loads((HERE.parents[1] / ".mcp.json").read_text("utf-8"))
+        always = conf["mcpServers"][tools.SERVER_NAME].get("alwaysLoad")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        always = None
+    return "fallback" if always is True else "lc12"
+
+
+def tool_meta(entry: bool, name: str | None = None) -> dict[str, Any] | None:
+    """A listed tool's `_meta` by placement() (module note): load_thimble's search hint; in the analyst's session
+    alwaysLoad false on the tools tools.deferred_in_main names and true on the others, and in a session thimble starts
+    true on each (absent on load_thimble); with the fallback, alwaysLoad false on load_thimble and on the deferred tools,
+    and none on the others."""
+    fallback = placement() == "fallback"
+    if entry:
+        meta: dict[str, Any] = {tools.META_SEARCH_HINT: tools.SEARCH_HINT}
+        if fallback:
+            meta[tools.META_ALWAYS_LOAD] = False
+        return meta
+    if not own_session()[0] and tools.deferred_in_main(name):
+        return {tools.META_ALWAYS_LOAD: False}
+    return None if fallback else {tools.META_ALWAYS_LOAD: True}
+
+
+def workspace() -> str | None:
+    """The workspace of the shim's folder, with the data folders the session uses (local.settle_dirs); None when the
+    folder is no workspace."""
+    try:
+        local.settle_dirs()
+        return local.workspace(cwd())
+    except Exception:  # noqa: BLE001 — a folder that cannot be read is no workspace
+        log.debug("the workspace of %s could not be read", cwd(), exc_info=True)
+        return None
+
+
+def transport_now() -> str:
+    """This session's transport, read per call (activate.transport): `server` only after the press."""
+    c = workspace()
+    if not c:
+        return activate.LOCAL
+    try:
+        return activate.transport(c, session_id())
+    except Exception:  # noqa: BLE001 — a record that cannot be read is the local transport
+        return activate.LOCAL
+
+
+def main_transport() -> str:
+    """The transport launch.json gives main's session, whichever session that is (activate.transport with no session):
+    `server` from a press until a session continued in a new process makes it local again (continued)."""
+    c = workspace()
+    if not c:
+        return activate.LOCAL
+    try:
+        return activate.transport(c)
+    except Exception:  # noqa: BLE001 — a record that cannot be read is the local transport
+        return activate.LOCAL
+
+
+def continued() -> bool:
+    """Whether this shim's `claude` process continues main's session in a new process (`claude -c`) and launch.json now
+    names it, on the local transport (activate.continue_main, module note). Never raises."""
+    c, sid = workspace(), session_id()
+    if not c or not sid:
+        return False
+    try:
+        return activate.continue_main(c, sid)
+    except Exception:  # noqa: BLE001 — the transport stays as launch.json has it
+        log.warning("launch.json was not moved to this claude process", exc_info=True)
+        return False
+
+
+def target_of(transport: str) -> str:
+    """The view build target the listing describes: the terminal page before the press, the browser page after it."""
+    return prompts.HTML_PAGE if transport == activate.SERVER else prompts.TERM_PAGE
 
 
 async def call_local(name: str, args: dict[str, Any], tool_use_id: str | None = None) -> mcp_types.CallToolResult:
-    """Terminal mode: run the call in this process (local.call) and return its answer as call_server would."""
+    """The local transport: run the call in this process (local.call) and return its answer as call_server would."""
     session, token = own_session()
     try:
-        payload = await local.call(name, args, cwd=cwd(), session=session, session_token=token, tool_use_id=tool_use_id)
+        payload = await local.call(name, args, cwd=cwd(), session=session, session_token=token, tool_use_id=tool_use_id,
+                                   secondary=bool(private_kind()))
     except Exception as e:  # noqa: BLE001 — the shim answers every call
-        log.exception("%s failed in terminal mode", name)
+        log.exception("%s failed in this process", name)
         return _error(f"{name} failed: {type(e).__name__}: {e}")
     return _result([b for b in payload.get("content") or [] if isinstance(b, dict)], bool(payload.get("is_error")))
 
 
+async def call_server_or_stopped(name: str, args: dict[str, Any], tool_use_id: str | None = None) -> mcp_types.CallToolResult:
+    """The server transport of the analyst's session: call_server, unless the server answers neither of two looks
+    STOPPED_GAP_S apart, when the call runs locally in a session continued in this new `claude` process (continued),
+    and otherwise answers PAGE_STOPPED and the `page:stopped` notice is posted (module note). The transport stays the
+    server's while the process it names runs main."""
+    async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
+        if not await _reachable(client):
+            await anyio.sleep(STOPPED_GAP_S)
+            if not await _reachable(client):
+                if (await anyio.to_thread.run_sync(continued)
+                        or await anyio.to_thread.run_sync(transport_now) != activate.SERVER):
+                    return await call_local(name, args, tool_use_id)
+                await anyio.to_thread.run_sync(page_stopped)
+                return _error(PAGE_STOPPED)
+    return await call_server(name, args, tool_use_id)
+
+
+def page_stopped() -> bool:
+    """The `page:stopped` notice posted in the shim's workspace, with its act (PAGE_START), unless it is open already,
+    so the terminal toasts it once however many calls find the server down. True when it is open now. Never raises."""
+    c = workspace()
+    if not c:
+        return False
+    try:
+        from app import notices  # noqa: PLC0415
+
+        if any(n.get("key") == PAGE_STOPPED_KEY for n in notices.open_notices(c)):
+            return True
+        posted = notices.post(c, kind="server", text=PAGE_STOPPED_NOTICE, key=PAGE_STOPPED_KEY, action=PAGE_START)
+        return posted is not None
+    except Exception:  # noqa: BLE001 — a call still says so
+        log.warning("the page:stopped notice was not posted", exc_info=True)
+        return False
+
+
+async def _reachable(client: httpx.AsyncClient) -> bool:
+    """Whether a server answers at the address server.json records, whatever it answers; False without the file or
+    when the connection is refused or times out."""
+    found = server()
+    if found is None:
+        return False
+    try:
+        await client.get(f"{found[0]}/api/health", timeout=2.0)
+    except httpx.HTTPError:
+        return False
+    return True
+
+
+def call_for(name: str) -> Any:
+    """The call function of one call: a session thimble started calls the server; the analyst's session runs it by its
+    transport, read now."""
+    if own_session()[0]:
+        return call_server
+    return call_server_or_stopped if transport_now() == activate.SERVER else call_local
+
+
 def terminal_stdout() -> None:
-    """Terminal mode: keep fd 1 for the MCP stream alone. sys.stdout becomes a copy of fd 1 (which stdio_server wraps)
-    and fd 1 itself points at stderr, so a child process or a C library writing to stdout cannot corrupt the stream."""
+    """Keep fd 1 for the MCP stream alone. sys.stdout becomes a copy of fd 1 (which stdio_server wraps) and fd 1 itself
+    points at stderr, so a child process or a C library writing to stdout cannot corrupt the stream."""
     keep = os.dup(1)
     os.dup2(2, 1)
     sys.stdout = os.fdopen(keep, "w", encoding="utf-8", closefd=True)
@@ -346,7 +530,7 @@ async def with_progress(ctx: Any, call: Any) -> mcp_types.CallToolResult:
     return result[0]
 
 
-def _tool(entry: dict[str, Any]) -> Tool:
+def _tool(entry: dict[str, Any], meta: dict[str, Any] | None = None) -> Tool:
     """An MCPServer tool whose wire schema is the tool's JSON schema. MCPServer validates from a Python signature, so
     one is generated: an optional keyword-only parameter per property plus the tool's argument aliases
     (tools.ARG_ALIASES); the listed schema is then replaced by the one from prompts/tools.md."""
@@ -370,15 +554,16 @@ def _tool(entry: dict[str, Any]) -> Tool:
 
     async def fn(**kwargs: Any) -> mcp_types.CallToolResult:
         ctx = kwargs.pop(CTX_PARAM, None)
+        if name == tools.ENTRY_TOOL:
+            return await load_thimble()
         given = {k: v for k, v in kwargs.items() if v is not None}
-        call = (call_local if terminal() else call_server)(name, given, tool_use_id(ctx))
-        return await with_progress(ctx, call)
+        return await with_progress(ctx, call_for(name)(name, given, tool_use_id(ctx)))
 
     params.append(inspect.Parameter(CTX_PARAM, inspect.Parameter.KEYWORD_ONLY, default=None, annotation=Context))
     fn.__name__ = name
     fn.__signature__ = inspect.Signature(params, return_annotation=mcp_types.CallToolResult)  # type: ignore[attr-defined]
     fn.__annotations__ = {**annotations, CTX_PARAM: Context, "return": mcp_types.CallToolResult}
-    tool = Tool.from_function(fn, name=name, description=entry["description"])
+    tool = Tool.from_function(fn, name=name, description=entry["description"], meta=meta)
     tool.parameters = schema
     return tool
 
@@ -393,13 +578,9 @@ def tool_use_id(ctx: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def instructions() -> str:
-    """The MCP server instructions: the `## instructions` section of prompts/tools.md, read from disk."""
-    return tools.instructions()
-
-
 def session_id() -> str | None:
-    """The Claude Code session this process serves (module note)."""
+    """The Claude Code session this process serves: Claude Code's record of its parent process, else
+    CLAUDE_CODE_SESSION_ID; read fresh, since /clear and /resume give the session a new id."""
     home = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path.home() / ".claude"))
     try:
         data = json.loads((home / "sessions" / f"{os.getppid()}.json").read_text("utf-8"))
@@ -411,15 +592,135 @@ def session_id() -> str | None:
     return os.environ.get("CLAUDE_CODE_SESSION_ID") or None
 
 
+def marked(sid: str | None) -> bool:
+    """Whether the session marker of `sid` is there (app/activate.py): thimble is on in that session."""
+    return activate.active(sid)
+
+
+# --------------------------------------------------------------------------- the listing
+
+
+class Shim(MCPServer):
+    """The MCP server, which records each tools/list it answers once thimble is on (listed.json, contract C4) and
+    answers load_thimble also once it is no longer listed (a push of the terminal mod after the model's own call).
+    An agent's own shim records nothing (module note)."""
+
+    entry: Tool | None = None
+
+    async def list_tools(self) -> list[mcp_types.Tool]:
+        got = await super().list_tools()
+        if LIVE.on and not own_session()[0] and not private_kind():
+            sid = session_id()
+            if sid:
+                try:
+                    activate.write_listed(sid, [t.name for t in got])
+                except Exception:  # noqa: BLE001 — the listing stands without its record
+                    log.warning("listed.json was not written", exc_info=True)
+            if LIVE.listed is not None:
+                LIVE.listed.set()
+        return got
+
+    async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
+        if name == tools.ENTRY_TOOL and self._tool_manager.get_tool(name) is None and self.entry is not None:
+            if context is None:
+                context = Context(mcp_server=self, subscriptions=self._subscriptions)
+            return await self.entry.run(arguments, context, convert_result=True)
+        return await super().call_tool(name, arguments, context)
+
+
+def _set_tools(server: MCPServer, entries: list[dict[str, Any]], entry: bool = False) -> None:
+    """The tools `server` lists replaced by `entries`, each with its `_meta` (tool_meta)."""
+    server._tool_manager._tools = {t.name: t for t in (_tool(e, tool_meta(entry, e["name"])) for e in entries)}
+
+
+def entry_entries() -> list[dict[str, Any]]:
+    return tools.entry_listing()
+
+
+def tool_entries(transport: str | None = None) -> list[dict[str, Any]]:
+    """The tools this shim lists once thimble is on (module note): an agent's private tools, else its session kind's,
+    with the view tools' text for the build target of `transport` (default: the session's now)."""
+    kind = private_kind()
+    with prompts.rendering(prompts.DEFAULT_FLAGS | {target_of(transport or transport_now())}):
+        return tools.private_list(kind) if kind else tools.list(ROLE, session=own_session()[0])
+
+
+async def begin_local() -> None:
+    """On the local transport, once per process: the card watch from thimble's start, not its first call
+    (local.begin)."""
+    if LIVE.transport != activate.LOCAL or LIVE.begun:
+        return
+    LIVE.begun = True
+    try:
+        c = await anyio.to_thread.run_sync(local.begin, cwd())
+        if c:
+            local.watch(c)  # on this loop: the worker thread begin ran in has none
+    except Exception:  # noqa: BLE001 — the tools still serve without it
+        log.exception("the card watch did not start")
+
+
+async def go_live(wait: bool = True) -> bool:
+    """List main's tools in place of load_thimble with one list_changed, and with `wait` wait at most LIST_WAIT_S for
+    Claude Code's tools/list (whose answer writes listed.json). Starts the card watch (local.begin) on the local
+    transport. True when the tools/list came in time."""
+    server, connection = LIVE.server, LIVE.connection
+    if server is None or connection is None:
+        return False
+    LIVE.transport = await anyio.to_thread.run_sync(transport_now)
+    entries = await anyio.to_thread.run_sync(tool_entries, LIVE.transport)
+    LIVE.target = target_of(LIVE.transport)
+    LIVE.listed = anyio.Event()
+    _set_tools(server, entries)
+    first = not LIVE.on
+    LIVE.on = True
+    LIVE.sid = session_id()
+    if first:
+        await begin_local()
+    await connection.send_tool_list_changed()
+    if not wait:
+        return False
+    with anyio.move_on_after(LIST_WAIT_S):
+        await LIVE.listed.wait()
+        return True
+    return False
+
+
+async def load_thimble() -> mcp_types.CallToolResult:
+    """load_thimble (contract C5): activate the session (via `tool`; idempotent, keeping an earlier activation's `mod`
+    and `via`), list main's tools and wait for Claude Code's tools/list (go_live), and answer with thimble's guidance,
+    marked sent only without the mod (activate.answer). A refused folder answers the refusal as an error."""
+    sid = session_id()
+    if not sid:
+        return _error(NO_SESSION)
+    folder = cwd()
+    got = await anyio.to_thread.run_sync(lambda: activate.activate(folder, sid, "tool"))
+    if not got.get("ok"):
+        return _error(activate.refusal_text(got.get("error") or {}))
+    if not LIVE.on:
+        await go_live()
+    try:
+        text = await anyio.to_thread.run_sync(activate.answer, folder, sid)
+    except Exception as e:  # noqa: BLE001 — the shim answers every call
+        log.exception("load_thimble's guidance was not rendered")
+        return _error(f"load_thimble: thimble is on, but its guidance could not be rendered: {type(e).__name__}: {e}")
+    return _result([{"type": "text", "text": text}], False)
+
+
+# --------------------------------------------------------------------------- watching the session
+
+
 async def subscription(route: str) -> None:
-    """Hold the subscription for as long as the session lives (module note). Never raises: a folder that is no
-    workspace yet waits RETRY_S with no request, and looks again; a failure, a missing server.json or an answer without
-    the server's proof waits RETRY_S and subscribes again; a new session id (checked at each keep-alive) resubscribes at
-    once."""
+    """Hold the subscription for as long as the session lives on the server transport (module note). Never raises: a
+    failure, a missing server.json or an answer without the server's proof waits RETRY_S and subscribes again; a new
+    session id (checked at each keep-alive) resubscribes at once. It ends once the transport is local again (a session
+    continued in this process after a quit: continued), and the session watch starts it again at the next press. Once a
+    subscription it held dropped and no server has answered for STOPPED_NOTICE_S, it posts the `page:stopped` notice
+    (stopped_look), once until it subscribes again."""
+    down = _Down()
     while True:
-        if not in_workspace():
-            await anyio.sleep(RETRY_S)
-            continue
+        if await anyio.to_thread.run_sync(main_transport) != activate.SERVER:
+            LIVE.subscribed = False
+            return
         sid = session_id()
         moved = False  # the session id changed under a live subscription: renew it without waiting
         query = urllib.parse.urlencode({**{k: v for k, v in (("cwd", cwd()), ("session", sid), ("pid", os.getppid()),
@@ -435,6 +736,7 @@ async def subscription(route: str) -> None:
                     if resp.status_code != 200 or not proven(resp, proof):
                         await resp.aread()
                         raise ConnectionError(f"HTTP {resp.status_code}" + ("" if proven(resp, proof) else ", unproven"))
+                    down.live()
                     async for line in resp.aiter_lines():
                         if line.startswith(":") and session_id() != sid:  # the server's keep-alive
                             moved = True
@@ -444,86 +746,147 @@ async def subscription(route: str) -> None:
         except Exception:  # noqa: BLE001 — the subscription never takes the tools down with it
             log.exception("subscription failed")
         if not moved:
+            await stopped_look(down)
             await anyio.sleep(RETRY_S)
 
 
-def _set_tools(server: MCPServer, entries: list[dict[str, Any]]) -> None:
-    """The tools `server` lists replaced by `entries`."""
-    server._tool_manager._tools = {t.name: t for t in (_tool(e) for e in entries)}
+class _Down:
+    """What the subscription knows of the server going away: whether a subscription it held was live, when no server
+    answered first since then (None while one answers), and whether it posted the notice for this stop."""
+
+    def __init__(self) -> None:
+        self.was_live = False
+        self.since: float | None = None
+        self.told = False
+
+    def live(self) -> None:
+        self.was_live, self.since, self.told = True, None, False
 
 
-async def watch_workspace(server: MCPServer, connection: Connection) -> None:
-    """While the shim lists no tools (listed): once Claude Code finished the handshake, look every RETRY_S whether
-    the folder is a workspace; when it is, list the tools and tell Claude Code once that the list changed (module
-    note)."""
+async def stopped_look(down: _Down) -> None:
+    """One look after the subscription ended: when a subscription was live before and no server answers (_reachable),
+    the time since the first such look grows, and once it reaches STOPPED_NOTICE_S while this session is still main's on
+    the server transport, the `page:stopped` notice is posted (page_stopped), as a call would post it. A server that
+    answers (a refusal, an unproven answer) starts the count over."""
+    if not down.was_live or down.told:
+        return
+    async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0), trust_env=False) as client:
+        reached = await _reachable(client)
+    now = anyio.current_time()
+    if reached:
+        down.since = None
+        return
+    if down.since is None:
+        down.since = now
+    if now - down.since < _env_s(STOPPED_ENV, STOPPED_NOTICE_S):
+        return
+    if await anyio.to_thread.run_sync(continued) or await anyio.to_thread.run_sync(transport_now) != activate.SERVER:
+        return
+    down.told = await anyio.to_thread.run_sync(page_stopped)
+
+
+async def watch_session(tg: Any) -> None:
+    """Once Claude Code finished the handshake: before thimble is on, look for the session marker every RETRY_S (an
+    activation made outside the shim) and go live when it appears; once on, move launch.json to this process when it
+    continues main's session (continued: at the start and at each new session id), and every LIVE_POLL_S write
+    listed.json for a new session id, and when the transport turns to the server's (the press), list the tools again
+    for the browser's page and subscribe, or when it turns local (continued), list them again for the terminal's page
+    and start what the local transport runs here (begin_local) (module note)."""
+    connection = LIVE.connection
+    if connection is None:
+        return
     await connection.initialized.wait()
-    while not in_workspace():
+    while not LIVE.on:
+        if await anyio.to_thread.run_sync(lambda: marked(session_id())):
+            await go_live()
+            break
         await anyio.sleep(RETRY_S)
-    _set_tools(server, tool_entries())
-    await connection.send_tool_list_changed()
+    await anyio.to_thread.run_sync(continued)
+    while True:
+        sid = session_id()
+        if sid and sid != LIVE.sid:
+            LIVE.sid = sid
+            names = list(LIVE.server._tool_manager._tools) if LIVE.server is not None else []
+            await anyio.to_thread.run_sync(activate.write_listed, sid, names)
+            await anyio.to_thread.run_sync(continued)
+        now = await anyio.to_thread.run_sync(transport_now)
+        if now != LIVE.transport:
+            LIVE.transport = now
+            if target_of(now) != LIVE.target:
+                await go_live(wait=False)
+        if now == activate.LOCAL:
+            await begin_local()
+        if now == activate.SERVER and LIVE.route and not LIVE.subscribed:
+            LIVE.subscribed = True
+            tg.start_soon(subscription, LIVE.route)
+        await anyio.sleep(LIVE_POLL_S)
 
 
-async def serve(server: MCPServer) -> None:
-    """MCPServer.run_stdio_async with, in the analyst's session, the subscription held beside the MCP session, and
-    while the shim lists no tools, the look for the folder becoming a workspace (watch_workspace)."""
+# --------------------------------------------------------------------------- serving
+
+
+async def serve(server: Shim) -> None:
+    """MCPServer.run_stdio_async with the session watch beside the MCP session (watch_session), and in a session
+    thimble started from the start, its tools listed."""
     low = server._lowlevel_server
-    # the parent is the `claude` process; a session thimble starts itself hears no browser events (its main does), and
-    # in terminal mode no server sends any (module note)
-    route = None if own_session()[0] or terminal() else cc_plugin.route(cwd(), HERE.parents[1])
-    if terminal():
-        try:  # the card watch from the session's start, not its first call (local.begin)
-            local.begin(cwd())
-        except Exception:  # noqa: BLE001 — the tools still serve without it
-            log.exception("the card watch did not start")
+    # the parent is the `claude` process; a session thimble starts itself hears no browser events (its main does), nor
+    # does an agent's own shim
+    LIVE.route = None if own_session()[0] or private_kind() else cc_plugin.route(cwd(), HERE.parents[1])
     options = low.create_initialization_options(NotificationOptions(tools_changed=True))
     try:
         async with stdio_server() as (read_stream, write_stream):
             async with anyio.create_task_group() as tg:
-                if route:
-                    tg.start_soon(subscription, route)
                 # not low.run, which also serves 2026-07-28 (module note, Protocol); serve_loop's own dispatcher and
-                # connection, built here so watch_workspace can tell Claude Code the list changed
+                # connection, built here so the watch can tell Claude Code the list changed
                 dispatcher = JSONRPCDispatcher(read_stream, write_stream, inline_methods=frozenset({"initialize"}))
                 connection = Connection.for_loop(dispatcher)
-                if not server._tool_manager.list_tools():  # build_server listed none (listed)
-                    tg.start_soon(watch_workspace, server, connection)
+                LIVE.server, LIVE.connection = server, connection
+                if not own_session()[0] and not private_kind():
+                    tg.start_soon(watch_session, tg)
                 async with low.lifespan(low) as lifespan_context:
                     await serve_connection(low, dispatcher, connection=connection, lifespan_state=lifespan_context,
                                            init_options=options)
                 tg.cancel_scope.cancel()
     finally:
-        if terminal():
+        if LIVE.begun or private_kind():  # an agent's own shim stops what its calls started here (a browser, kernels)
             with anyio.CancelScope(shield=True):
                 await local.close()
 
 
-def listed() -> bool:
-    """Whether the shim lists its tools from the start (module note): in a session thimble started, in terminal mode,
-    or in a folder that is a workspace."""
-    return bool(own_session()[0]) or terminal() or in_workspace()
+def build_server() -> Shim:
+    """The MCP server, with no instructions: an agent's own shim, its private tools; in a session thimble started,
+    its tools; in the analyst's session, main's tools when the session is active already (a restart of the shim), else
+    load_thimble alone (module note)."""
+    local.PLUGIN_ROOT = HERE.parents[1]  # this copy, whose bin/thimble-run the tools' commands name (cardrun.command)
+    shim = Shim(tools.SERVER_NAME, instructions=None, tools=[])
+    if private_kind():
+        _set_tools(shim, tool_entries())
+        return shim
+    shim.entry = _tool(entry_entries()[0], tool_meta(True))
+    if own_session()[0]:
+        _set_tools(shim, tool_entries(activate.SERVER))
+        LIVE.on = True
+    elif marked(session_id()):
+        LIVE.transport = transport_now()
+        LIVE.target = target_of(LIVE.transport)
+        _set_tools(shim, tool_entries(LIVE.transport))
+        LIVE.on, LIVE.sid = True, session_id()
+    else:
+        shim._tool_manager._tools = {tools.ENTRY_TOOL: shim.entry}
+    return shim
 
 
-def tool_entries() -> list[dict[str, Any]]:
-    """The tools this shim lists (module note): its session kind's."""
-    return tools.list(ROLE, session=own_session()[0])
-
-
-def build_server() -> MCPServer:
-    """The MCP server, with the tools and the instructions, or with neither in a folder that is no workspace yet
-    (listed)."""
-    if not listed():
-        return MCPServer(tools.SERVER_NAME, instructions=None, tools=[])
-    return MCPServer(tools.SERVER_NAME, instructions=instructions() or None, tools=[_tool(e) for e in tool_entries()])
+def listing() -> list[dict[str, Any]]:
+    """`--list`: the tools build_server lists now, with each one's `_meta`."""
+    shim = build_server()
+    return [{"name": t.name, "description": t.description, "input_schema": t.parameters, "_meta": t.meta}
+            for t in shim._tool_manager.list_tools()]
 
 
 if __name__ == "__main__":
     if "--list" in sys.argv[1:]:  # a debugging aid: the tool list as JSON, no server involved
-        json.dump(tool_entries(), sys.stdout, indent=1)
+        json.dump(listing(), sys.stdout, indent=1)
         sys.stdout.write("\n")
         sys.exit(0)
-    if "--instructions" in sys.argv[1:]:  # a debugging aid: the instructions text, fetched as the server would be
-        sys.stdout.write(instructions() + "\n")
-        sys.exit(0)
-    if terminal():
-        terminal_stdout()
+    terminal_stdout()
     anyio.run(serve, build_server())

@@ -1,7 +1,9 @@
 // The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
 // what it says and what it brings; and what the welcome before them says. Every example is the tour's own
 // (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
-// analyst to act acts only on that example, so nothing reaches the server.
+// analyst to act acts only on that example, so nothing reaches the server. The steps run only in the tour's frame on
+// thimble's demo workspace (lib/tourFrame), so they speak as a demo page does; the analyst's own page shows only the
+// welcome, or a card that says the tour didn't open (offerTexts).
 import { DEMO_LINE } from '../lib/demo'
 import { setMarkup, type Api, type Example, type Step } from './engine'
 import reportFigs from './report-figs.json'
@@ -127,17 +129,17 @@ const filesExample = (api: Api): Example => {
 }
 
 // the Files panel's status strip as an example shows it, saying `meta`, over thimble's own, which names the analyst's
-// open file
-const statusExample = (api: Api, meta: string) => {
-  const real = () => api.q('[data-panel="files"] .pane-status')
+// open file; with `board`, the Canvas's status line saying it, over thimble's own, which counts the workspace's cards
+const statusExample = (api: Api, meta: string, board = false) => {
+  const real = () => api.q(board ? '[data-panel="canvas"] .board-status' : '[data-panel="files"] .pane-status')
   const wrap = document.createElement('div')
   wrap.className = 'tour-ex-status'
   wrap.dataset.ground = '1'
   const strip = document.createElement('div')
-  strip.className = 'pane-status'
-  for (const [cls, text] of [['pane-status-name', 'Files'], ['pane-status-meta', meta]]) {
+  strip.className = board ? 'board-status' : 'pane-status'
+  for (const [cls, text] of board ? [['', meta]] : [['pane-status-name', 'Files'], ['pane-status-meta', meta]]) {
     const span = document.createElement('span')
-    span.className = cls
+    if (cls) span.className = cls
     span.textContent = text
     strip.append(span)
   }
@@ -165,7 +167,7 @@ const viewsExample = (api: Api): Example => {
   body.className = 'tour-ex-viewbody'
   body.style.background = api.groundOf(realBody())
   const frame = document.createElement('iframe')
-  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=12`
+  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=13`
   frame.title = 'Timeline (example)'
   Object.assign(frame.style, { display: 'block', width: '100%', height: '100%', border: '0' })
   body.append(frame)
@@ -197,7 +199,8 @@ const viewsExample = (api: Api): Example => {
 }
 
 // ---------- the card steps: the example card (the top card of an orientation's deck, captured, in plain words), scaled
-// so it reads comfortably at the window's size. Where a card of width w0 and height h0 goes on the Canvas: as large as
+// so it reads comfortably at the window's size, over a status line that counts it (CARD_STATUS), not the workspace's
+// own cards, which the tour's example workspace may have none of (bug hunt F16: `0 cards · 0 groups` under it). Where a card of width w0 and height h0 goes on the Canvas: as large as
 // fits beside the popover, at most 1100px wide.
 const fitCard = (api: Api, w0: number, h0: number) => {
   const P = api.rectOf(api.q(canvasPanel))
@@ -208,6 +211,8 @@ const fitCard = (api: Api, w0: number, h0: number) => {
   const h = (w * h0) / w0
   return { w, h, x: P.x + Math.max(32, (P.width - (w + 14 + 280)) / 2), y: P.y + Math.max(40, (P.height - 28 - h) / 2) }
 }
+/** The Canvas's status line under the example card: the card, in its group. */
+export const CARD_STATUS = '1 card · 1 group'
 const cardExample = (api: Api): Example => {
   // placed in the layer thimble's own ⌘ pointer reaches, with the card's anchors and parts as thimble drew them, so a
   // ⌘-click picks a row, a click on text picks its line and a ⌘-drag picks the words, as on a real card. The ask box
@@ -240,7 +245,13 @@ const cardExample = (api: Api): Example => {
     key = size
     Object.assign(w.style, { left: `${f.x}px`, top: `${f.y}px`, height: `${h0}px`, transform: `scale(${f.w / 720})` })
   }
-  return { els: { card: art, wrap: w, real: false }, layout }
+  const status = statusExample(api, CARD_STATUS, true)
+  api.ex.append(status.wrap)
+  const place = () => {
+    status.layout()
+    return layout()
+  }
+  return { els: { card: art, wrap: w, real: false }, layout: place }
 }
 
 // ---------- Labels: one agent's transcript in the Transcript view with two labels on it, each in colours of its own:
@@ -257,9 +268,13 @@ const labelsExample = (api: Api): Example => {
   const lab = api.snap('txLabels', 'tour-ex-labels')
   lab.style.background = api.groundOf(api.q('.files-labels'))
   Object.assign(api.tag(lab).style, { right: '40px' })
+  // the workspace's own Labels pane, where it stands taller than the example's, is covered above it, so none of its
+  // labels show beside the example's
+  const cover = document.createElement('div')
+  cover.style.background = lab.style.background
   holdBrowser(api)
   const status = statusExample(api, 'agent-05.jsonl · Transcript')
-  api.ex.append(rd, lab, status.wrap)
+  api.ex.append(rd, cover, lab, status.wrap)
   // the transcript opens at line 22 and stays there while the panel's size changes, until anything else scrolls it
   let pinned = true,
     setTo: number | null = null
@@ -280,6 +295,8 @@ const labelsExample = (api: Api): Example => {
     if (!r) return false
     Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
     if (L) Object.assign(lab.style, { left: `${L.x}px`, width: `${L.width}px`, top: `${L.y + L.height - lab.offsetHeight}px` })
+    const over = L ? L.height - lab.offsetHeight : 0
+    Object.assign(cover.style, L && over > 0 ? { display: '', left: `${L.x}px`, top: `${L.y}px`, width: `${L.width}px`, height: `${over}px` } : { display: 'none' })
     const sc = rd.querySelector<HTMLElement>('.reader-body')
     if (!sc || !sc.clientHeight) return
     if (pinned && setTo != null && Math.abs(sc.scrollTop - setTo) > 1) pinned = false
@@ -299,7 +316,7 @@ const labelsExample = (api: Api): Example => {
       Object.assign(thumb.style, { height: `${h}px`, transform: `translateY(${span > 0 ? ((bar.clientHeight - h) * sc.scrollTop) / span : 0}px)` })
     }
   }
-  return { els: { reader: rd, labels: lab, status: status.wrap }, layout }
+  return { els: { reader: rd, labels: lab, cover, status: status.wrap }, layout }
 }
 
 // ---------- the Report and its checks: the example (a captured report with its figures and the comments of its check
@@ -472,19 +489,12 @@ const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth 
 }
 const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
 
-/** What the steps about the chat and the ⌘-click box say: on a demo page (`demo`, lib/demo), that thimble isn't
- * connected to a live Claude Code session there, so the chat takes no typing, and what the chat is in a live
- * session. */
-export function sessionTexts(demo: boolean): { chat: [string, string]; terminal: [string, string]; ask: string } {
-  if (!demo) {
-    return {
-      chat: ['Your Claude Code session', 'This chat is your Claude Code session: ask it anything about the files.'],
-      terminal: ['Your terminal', 'The session also runs in the terminal where you started thimble. It shows the same conversation, and you can type in either.'],
-      ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
-    }
-  }
+/** What the steps about the chat and the ⌘-click box say. The tour runs on thimble's demo workspace (lib/tourFrame),
+ * where thimble isn't connected to a live Claude Code session, so the chat takes no typing; each says what the chat
+ * is in a live session. */
+export function sessionTexts(): { chat: [string, string]; terminal: [string, string]; ask: string } {
   return {
-    chat: ['The chat', "This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files."],
+    chat: ['Your Claude Code session', 'This chat is your Claude Code session: ask it anything about the files.'],
     terminal: ['Your terminal', 'When you run thimble yourself, the session also runs in the terminal where you started it. It shows the same conversation, and you can type in either.'],
     ask: 'Type a question and press Enter. With Claude connected, the answer comes in a new thread in the chat.',
   }
@@ -499,11 +509,29 @@ export function welcomeTexts(demo: boolean): string[] {
   return [`${ask} The demo tour uses <b>example data</b>.`]
 }
 
+/** What the tour says when its frame on the demo workspace did not open. */
+export const FAILED_TEXTS = ["thimble's demo workspace didn't open, so the tour stopped. Your folder is as it was.", 'To try again, take the tour from Settings.']
+
+export interface OfferTexts {
+  title: string
+  says: string[]
+  /** the button that starts the tour, or null when the card only informs */
+  begin: string | null
+  skip: string
+}
+
+/** The card on the analyst's page (run offerTour): `offer`, the welcome that asks whether to take the tour
+ * (welcomeTexts); `failed`, that its frame did not open, with only Close. */
+export function offerTexts(state: 'offer' | 'failed', demo: boolean): OfferTexts {
+  if (state === 'offer') return { title: 'Welcome to thimble', says: welcomeTexts(demo), begin: 'Take the tour', skip: 'Skip' }
+  return { title: "The tour didn't open", says: FAILED_TEXTS, begin: null, skip: 'Close' }
+}
+
 /** The tour, for the ask key written `key` (⌘ or ⌥ on a Mac, Ctrl or Alt elsewhere, as Settings picks). With the chat
- * column folded (`chat` false) the steps about the chat are left out; on a demo page (`demo`) they say it is a demo
+ * column folded (`chat` false) the steps about the chat are left out; the steps about the chat say it is a demo
  * (sessionTexts). */
-export function tourSteps(key: string, chat = true, demo = false): Step[] {
-  const said = sessionTexts(demo)
+export function tourSteps(key: string, chat = true): Step[] {
+  const said = sessionTexts()
   const steps: Step[] = [
     {
       tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,

@@ -7,13 +7,12 @@ subagents.run_ended."""
 from __future__ import annotations
 
 import asyncio
-import json
+import sys
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app import agents, checks, config, investigation, read_parts, report_types, subagents, tools
-from app import subagent_files as sf
+from app import agents, checks, config, subagents, tools
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
 CORPUS = "mini"
@@ -80,7 +79,7 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     other = "judgment" if cid == "unverified" else "unverified"
     path = checks.work_dir(CORPUS, cid, "report") / checks.TASK_FILE
     assert path.is_file() and "report:report" in path.read_text()
-    assert str(path) in spawn["prompt"] and spawn["role"] == "check"
+    assert path.read_text().strip() in spawn["prompt"] and spawn["role"] == "check"
     assert spawn["values"] == {"model": "claude-opus-5-5", "effort": "high"}
     assert subagents.request(CORPUS, spawn["request"])["route"] == "follow-on"
     assert _run(other).get("waiting") == checks.WAITING_QUEUED
@@ -93,269 +92,128 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     assert _run(cid)["stale"] == 0
 
 
-async def test_a_large_workspace_s_task_is_written_in_files_a_read_call_returns_whole(doc, bridge):
-    """A task past what one Read call returns, here one with a long report, which the task never cuts, is written as
-    task.md, task-2.md… of at most read_parts.READ_UNITS code units each, under the Read tool's file-size cap, and the
-    run's prompt names every one in order."""
-    paras = "\n\n".join(f"Account a{i:04d} deleted {i % 97} files on night {i % 7} from host h{i % 13}, as line {i} of "
-                         f"the log shows." for i in range(900))
-    await _write("# A long report\n\n## Findings\n\n" + paras + "\n")
+async def test_a_module_start_gives_the_check_its_whole_task_and_a_typed_start_names_its_files(doc, bridge, monkeypatch):
+    """Bug hunt F2: in Manual mode each Read of a file outside the analyst's folder is a permission ask, and checks
+    reading their task files made 42 of one session's 87 asks. A run the module starts gets its whole task in its
+    prompt, with its work folder, so it reads no file for it: 0 Read calls, where it made one per part (six in that
+    session's workspace). Its chat keeps only the prompt's lead, and its request in subagents.json the start of it once
+    its agent started. A typed start (main's run_check), whose Agent call main types out, still names its files."""
+    from app import read_parts
+
+    monkeypatch.setattr(read_parts, "READ_UNITS", 300)  # a large workspace: the task in several parts
+    await _write()
     await _started("unverified")
     [spawn] = bridge.ops("spawn")
     work = checks.work_dir(CORPUS, "unverified", "report")
-    paths = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
-    text = "".join(p.read_text() for p in paths)
-    assert len(text) > 100_000, "one file would fail a Read call whole"
-    assert len(paths) >= 3 and all(p.is_file() for p in paths)
-    assert all(read_parts.units(p.read_text()) <= read_parts.READ_UNITS and p.stat().st_size < 256 * 1024
-               for p in paths)
-    assert "Account a0000 deleted" in text and "Account a0899 deleted" in text, "the document whole"
-    assert f"READ {len(paths)} FILES {', '.join(str(p) for p in paths)} FIRST" in spawn["prompt"]
+    files = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
+    assert len(files) > 1 and all(p.is_file() for p in files)
+    task = "".join(p.read_text() for p in files).strip()
+    prompt = spawn["prompt"]
+    assert task in prompt and str(work) in prompt
+    assert not any(str(p) in prompt for p in files), "no task file to read: before, one Read per part"
+    row = checks.prompt_row(prompt)
+    assert str(work) in row and "report:report" not in row and len(row) < 1_000
+    req = subagents.request(CORPUS, spawn["request"])
+    assert req["input"]["prompt"] == prompt[:subagents.STARTED_PROMPT_CHARS]
+    assert req["input"]["prompt_chars"] == len(prompt)
+
+    rec = await checks.start_run(CORPUS, "judgment", "report", force=True, route=checks.TYPED, call="toolu_main1")
+    typed = rec["_answer"]["input"]["prompt"]
+    jwork = checks.work_dir(CORPUS, "judgment", "report")
+    jfiles = read_parts.paths(jwork / checks.TASK_FILE, len(list(jwork.glob("task*.md"))))
+    assert len(jfiles) > 1 and typed.index(str(jfiles[0])) < typed.index(str(jfiles[-1]))
+    assert len(typed) < 2_000 and len(bridge.ops("spawn")) == 1, "main makes the typed Agent call"
 
 
-async def test_a_check_on_a_report_in_chinese_gets_task_files_one_read_call_returns_whole(doc, bridge):
-    """A report written in Chinese, as a corpus of Chinese tickets gives, runs to more than a token a character: each
-    task file is still one Read call returns whole (test_read_parts.read_returns_whole), and the prompt names each."""
-    from test_read_parts import ZH, read_returns_whole
+async def test_bug_hunt_i12_a_typed_start_keeps_the_check_s_whole_task_for_the_module_to_give_its_agent(
+        doc, bridge, monkeypatch):
+    """Bug hunt I12: a check main started with run_check still read task.md and task-2.md before its first command, a
+    permission ask each in Manual mode. Main's Agent call stays short and names the files, and the request keeps the
+    whole task, as a module start's prompt gives it, in the trusted folder, which the module's spawn hook gives the
+    agent in its place; the module's view of the request says so, and the file goes once the agent started."""
+    from app import read_parts
+    from app import subagent_files as sf
+    from subagent_fakes import real_bridge
 
-    await _write("# 报告\n\n## 发现\n\n" + "\n\n".join(f"第{i}条：{ZH}" for i in range(900)) + "\n")
-    await _started("unverified")
-    [spawn] = bridge.ops("spawn")
-    work = checks.work_dir(CORPUS, "unverified", "report")
-    paths = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
-    assert len(paths) >= 2 and all(str(p) in spawn["prompt"] for p in paths)
-    over = [(p.name, len(p.read_text("utf-8"))) for p in paths if not read_returns_whole(p.read_text("utf-8"), "zh")]
-    assert not over, f"task files past Read's token cap: {over}"
-
-
-async def test_in_a_new_workspace_a_writer_s_end_starts_important_details_alone_and_each_switch_the_analyst_sets_stays(
-        workspaces_tmp, bridge, monkeypatch):
-    """Of the built-ins only Important details is on in a workspace that stored none of them: a writer's end starts it
-    alone on its document, and Judgment calls and Unverifiable stay off. One the analyst turns on runs at the next
-    writer's end, and one they turn off is stored so and starts no run."""
-    _checks_row(monkeypatch)
+    monkeypatch.setattr(read_parts, "READ_UNITS", 300)  # the task in several parts
     await _write()
-    assert not bridge.ops("spawn"), "a save starts nothing"
-    assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == [
-        ("judgment", False), ("unverified", False), ("important-details", True)]
-    _writer_done()
-    await _until(lambda: len(bridge.ops("spawn")) == 1, "Important details never started at the writer's end")
-    await asyncio.sleep(0.05)
-    assert [s["what"] for s in bridge.ops("spawn")] == ["important-details on report"]
-    subagents.run_ended(CORPUS, _run("important-details")["agent_id"], "done", "Done.", source="handback")
-    await _until(lambda: _run("important-details")["status"] == "done", "the run never ended")
-    assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == [
-        ("judgment", False), ("unverified", False), ("important-details", True)], "a run's save keeps the defaults"
-    checks.edit(CORPUS, "judgment", shown=True)
-    checks.edit(CORPUS, "important-details", shown=False)
-    assert checks.read(CORPUS, "judgment")["shown"] is True, "the analyst's choice is stored and wins"
-    assert checks.read(CORPUS, "important-details")["shown"] is False, "the analyst's choice is stored and wins"
-    await _write(TEXT.replace("It ran at night.", "It ran in the morning."))
-    _writer_done()
-    await _until(lambda: len(bridge.ops("spawn")) == 2, "the check turned on never started")
-    await asyncio.sleep(0.05)
-    assert [s["what"] for s in bridge.ops("spawn")[1:]] == ["judgment on report"]
+    rec = await checks.start_run(CORPUS, "judgment", "report", force=True, route=checks.TYPED, call="toolu_main1")
+    rid = rec["_answer"]["request"]
+    typed = rec["_answer"]["input"]["prompt"]
+    work = checks.work_dir(CORPUS, "judgment", "report")
+    files = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
+    assert str(files[0]) in typed and len(typed) < 2_000, "main types the short prompt"
+    whole = sf.inline_path(config.workspace_dir(CORPUS), rid)
+    text = whole.read_text()
+    task = "".join(p.read_text() for p in files).strip()
+    assert text.split("\n", 1)[0] == typed.split("\n", 1)[0] and rid in text.split("\n", 1)[0], "the same request line"
+    assert task in text and not any(str(p) in text for p in files), "the whole task, no file to read"
+    assert (whole.stat().st_mode & 0o777) == 0o600
+    assert subagents.request(CORPUS, rid)["inline"] is True
+    assert real_bridge._typed(subagents.read(CORPUS))[rid]["inline"] is True
+    with subagents.update(CORPUS) as state:  # the SubagentStart hook took up the start
+        sf._take(state, "aCheck1", rid, sf.requests(state)[rid], "")
+    subagents.hook_started(CORPUS, {"agent_id": "aCheck1"})
+    assert not whole.exists(), "the whole prompt goes once the agent started"
 
 
-async def test_in_plan_mode_a_writer_s_end_holds_its_checks_which_say_so_and_start_after(doc, bridge, monkeypatch):
-    """Live check L21: the runs a writer's end starts wait while main is in plan mode; their rows said they waited for
-    a free session. Their records say `waiting: plan` meanwhile, and they start once main leaves plan mode."""
-    from app import session
+def test_a_module_request_s_prompt_goes_once_the_request_ended():
+    """On local transport a spawn's arguments wait in subagents.json, which every hook reads: once the module answered
+    or the request expired, its prompt (a check's whole task) goes, and its other arguments stay."""
+    from app import subagent_files as files
 
-    mode = {"now": "plan"}
-    monkeypatch.setattr(session, "main_mode", lambda c: mode["now"])
+    state: dict = {}
+    rid = files.add_module_request(state, "spawn", {"role": "check", "prompt": "x" * 50_000, "description": "d"}, "s", 5.0)
+    files.end_module_request(state, rid, "answered")
+    r = files.requests(state)[rid]
+    assert r["args"] == {"role": "check", "description": "d"} and r["state"] == "done"
 
-    async def out_of_plan(c, poll_s=2.0):  # subagents.out_of_plan, polled fast, with main's session there
-        while mode["now"] == "plan":
-            await asyncio.sleep(0.01)
 
-    monkeypatch.setattr(subagents, "out_of_plan", out_of_plan)
+async def test_a_hand_back_the_hook_took_ends_the_run_done_with_its_report_whichever_end_comes_first(doc, bridge):
+    """In auto mode thimble's hand-back hook keeps a check's report and refuses the call, which ends the agent's turn
+    (plugin/bin/.thimble-watch --handback). The run ends done with that report: from the hook's own call
+    (hook_handback), and also when the agent's turn end comes first, which the module reports as a hook's stop (on
+    local transport a pass reads module.json's ends before the hook's call)."""
+    from app import subagent_files as files
+
     await _write()
-    _writer_done()
-    await _until(lambda: _run("unverified").get("waiting") == checks.WAITING_PLAN, "the run did not say it waits")
-    await asyncio.sleep(0.05)
-    assert not bridge.ops("spawn"), "nothing starts in plan mode"
-    mode["now"] = "auto"
-    await _until(lambda: len(bridge.ops("spawn")) == 2, "the held checks never started")
-    assert "waiting" not in _run("unverified") or _run("unverified")["waiting"] != checks.WAITING_PLAN
+    for cid, module_first in (("unverified", False), ("judgment", True)):
+        act = await _started(cid)
+        agent = _run(cid)["agent_id"]
+        hook = {"hook_event_name": "PreToolUse", "tool_name": "SubagentHandback", "agent_id": agent,
+                "agent_type": "thimble:check", "tool_input": {"message": f"{cid}: commented on 1 of 3 passages."}}
+        with subagents.update(CORPUS) as state:
+            assert files.record_handback(state, hook) is not None
+        if module_first:
+            subagents.ended(CORPUS, agent, "", "hook_stopped")
+        assert subagents.hook_handback(CORPUS, hook) == {"ended": not module_first}
+        subagents.ended(CORPUS, agent, "", "hook_stopped")  # a later end changes nothing
+        await _until(lambda: act.ended, f"the run of {cid} never ended")
+        assert _run(cid)["status"] == "done" and _run(cid)["summary"] == f"{cid}: commented on 1 of 3 passages."
+        assert subagents.agent(CORPUS, agent)["handed_back"] is True
 
 
-async def test_the_analyst_s_edit_starts_nothing_and_marks_the_checks_stale_with_the_count(doc, bridge):
-    await _write()
-    _writer_done()
-    await _until(lambda: len(bridge.ops("spawn")) == 2, "the checks never started")
-    for cid in ("unverified", "judgment"):
-        subagents.run_ended(CORPUS, _run(cid)["agent_id"], "done", "Done.", source="handback")
-    await _until(lambda: all(_run(c)["status"] == "done" for c in ("unverified", "judgment")), "the runs never ended")
-    await _write(TEXT.replace("It ran at night.", "It ran in the morning."))
-    assert len(bridge.ops("spawn")) == 2, "an edit starts no run"
-    assert _run("unverified")["stale"] == 1 and _run("judgment")["stale"] == 1, "one paragraph changed"
+def test_the_hook_keeps_no_hand_back_of_a_check_main_started_or_of_another_role():
+    """main's run_check starts a check with main's own Agent call, and Claude Code tells main of that agent's end, so its
+    hand-back reaches main; so does every role's but the check's and the card check's."""
+    from app import subagent_files as files
 
+    state: dict = {}
+    files.registry(state).update({
+        "chk-main": {"role": "check", "plugin_started": False, "run": 0},
+        "orient": {"role": "orientation", "plugin_started": True, "run": 0},
+        "call": {"role": "call", "plugin_started": True, "run": 1}})
 
-async def test_run_is_a_click_that_starts_one_and_stop_goes_through_the_module(doc, bridge):
-    await _write()
-    act = await _started("judgment")
-    assert len(bridge.ops("spawn")) == 1
-    assert subagents.request(CORPUS, bridge.ops("spawn")[0]["request"])["route"] == "click"
-    await checks.stop(act)
-    assert bridge.ops("stop")[0]["agent"] == act.agent
-    subagents.run_ended(CORPUS, act.agent, "stopped", "", source="notification")
-    assert _run("judgment")["status"] == "stopped"
+    def hook(agent: str, agent_type: str) -> dict:
+        return {"tool_name": "SubagentHandback", "agent_id": agent, "agent_type": agent_type,
+                "tool_input": {"message": "done"}}
 
-
-async def test_main_s_run_check_gives_the_exact_agent_call(doc, bridge):
-    await _write()
-    res = await tools.call(CORPUS, "run_check", {"name": "Judgment"}, tool_use_id="toolu_main1")
-    assert not res.is_error, res.text
-    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
-    assert inp["subagent_type"] == "thimble:check" and not bridge.ops("spawn")
-    rid = sf.REQUEST_RE.search(inp["prompt"].split("\n", 1)[0]).group(0)
-    req = subagents.request(CORPUS, rid)
-    assert (req["route"], req["call"]) == ("typed", "toolu_main1")
-    with subagents.update(CORPUS) as state:
-        assert sf.check_call(state, {"tool_name": "Agent", "tool_use_id": "toolu_x", "tool_input": inp}) is None
-
-
-async def test_a_run_s_end_supersedes_its_covered_comments_and_records_what_it_saw(doc, bridge):
-    await _write()
-    first = await _started("judgment")
-    key = checks.session_key("judgment", "report")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    sid = report_types.all_sentences(d)[0]["id"]
-    tid = "toolu_c1"
-    sf.add_caller(config.workspace_dir(CORPUS), tid, first.agent, "thimble:check")
-    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
-                           session=key, tool_use_id=tid)
-    assert not res.is_error, res.text
-    subagents.run_ended(CORPUS, first.agent, "done", "Commented on 1 passage.", source="handback")
-    assert _run("judgment")["comments"] == 1 and len(_run("judgment")["seen"]) == len(first.fps)
-    second = await _started("judgment")
-    told = _commented()
-    subagents.run_ended(CORPUS, second.agent, "done", "Commented on 0 passages.", source="handback")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
-    assert cm["status"] != "open" and cm["superseded_by"] == second.run
-    assert _commented() == told + 1, "the open pages hear that the report's comments changed, and drop the replaced one"
-
-
-def _commented() -> int:
-    """How many records on the stream said that the report's comments changed (a page reads the report again)."""
-    path = investigation.inv_dir(CORPUS, investigation.MAIN) / "events.jsonl"
-    rows = investigation._read_jsonl(path) if path.exists() else []
-    return sum(1 for e in rows
-               if e.get("type") == "report" and e.get("slug") == "report" and e.get("status") == "commented")
-
-
-async def test_a_run_s_task_lists_its_check_s_open_comments_its_end_replaces(doc, bridge):
-    """Live check 0.7.0 (on the cards): a run read its check's open comments as said, left none of them again, and its
-    end superseded them. A run's task lists them as the ones it replaces; another check's comments are not listed."""
-    await _write()
-    first = await _started("judgment")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    sid = report_types.all_sentences(d)[0]["id"]
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_r1", first.agent, "thimble:check")
-    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this.",
-                                                   "details": "The log has no account field."},
-                           session=checks.session_key("judgment", "report"), tool_use_id="toolu_r1")
-    assert not res.is_error, res.text
-    subagents.run_ended(CORPUS, first.agent, "done", "Commented on 1 passage.", source="handback")
-    replaces = tools.hint("check-replaces", comments="").strip()
-    task_of = lambda cid: (checks.work_dir(CORPUS, cid, "report") / checks.TASK_FILE).read_text()  # noqa: E731
-    await _started("judgment")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
-    listed = task_of("judgment").split(replaces, 1)[1]
-    assert f"- comment {cm['id']} on report:report#{sid} · No card shows this. — The log has no account field." in listed
-    await _started("unverified")
-    assert replaces not in task_of("unverified"), "a run replaces only its own check's comments"
-
-
-async def test_a_run_main_started_that_ran_as_its_subagent_ends_with_one_line_its_hand_back(doc, bridge, monkeypatch):
-    """Live check plan-cards: main wrote two lines for each check it started, one for thimble's `checked` event and one
-    for the check's hand-back. A run that ran as main's subagent posts no `checked`, since its hand-back reaches main
-    anyway; a run with no agent of main's, such as one whose start was refused, still posts one."""
-    from app import events
-
-    posted: list[tuple[str, dict]] = []
-    monkeypatch.setattr(events, "post", lambda c, kind, payload=None, **kw: posted.append((kind, dict(payload or {}))) or {})
-    await _write()
-    rec = await checks.start_run(CORPUS, "judgment", "report", force=True, notify=True, route="click")
-    assert rec is not None and rec["notify"]
-    act = checks._active[(CORPUS, "judgment", "report")]
-    await _until(lambda: act.agent or act.ended, "the run never started")
-    assert act.agent
-    subagents.run_ended(CORPUS, act.agent, "done", "Commented on 0 of 3 passages.", source="handback")
-    await _until(lambda: _run("judgment")["status"] == "done", "the run never ended")
-    assert [k for k, _ in posted if k == checks.CHECKED_KIND] == [], "the hand-back alone tells main"
-    bridge.answers.append({"deny": "PreToolUse:Agent hook error: refused"})
-    await checks.start_run(CORPUS, "unverified", "report", force=True, notify=True, route="click")
-    await _until(lambda: _run("unverified").get("status") == "failed", "the refused run never ended")
-    checked = [p for k, p in posted if k == checks.CHECKED_KIND]
-    assert len(checked) == 1 and checked[0]["check"] == "unverified" and checked[0]["status"] == "failed"
-
-
-async def test_a_run_main_s_plan_mode_held_at_its_end_fails_saying_why_and_supersedes_nothing(doc, bridge):
-    """Main went into plan mode while a check ran, and thimble stopped nothing, as Claude Code stops no subagent then:
-    the check's agent followed main and could only read and plan, so it may not have commented where it would have.
-    Its run ends failed with the line that says why and to choose Re-run, not done, and the check's earlier comments
-    on the passages it covered stay open."""
-    await _write()
-    first = await _started("judgment")
-    key = checks.session_key("judgment", "report")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    sid = report_types.all_sentences(d)[0]["id"]
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_p1", first.agent, "thimble:check")
-    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
-                           session=key, tool_use_id="toolu_p1")
-    assert not res.is_error, res.text
-    subagents.run_ended(CORPUS, first.agent, "done", "Commented on 1 passage.", source="handback")
-    second = await _started("judgment")
-    subagents.saw_plan_mode(CORPUS, second.agent)
-    subagents.run_ended(CORPUS, second.agent, "done", "My plan is in the plan file.", source="handback")
-    line = subagents.plan_failed_line("check")
-    assert (_run("judgment")["status"], _run("judgment")["summary"]) == ("failed", line)
-    assert line.endswith(", then choose Re-run on the check.")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
-    assert (cm.get("status") or "open") == "open" and not cm.get("superseded_by")
-
-
-async def test_a_start_at_the_subagent_limit_waits_and_a_refused_one_fails_with_its_refusal(doc, bridge, monkeypatch):
-    monkeypatch.setattr(checks, "LIMIT_RETRY_S", 0.05)
-    await _write()
-    bridge.answers.append({"limit": "Claude Code runs at most 20 concurrent subagents"})
-    await checks.start_run(CORPUS, "judgment", "report", force=True, route="click")
-    await _until(lambda: len(bridge.ops("spawn")) == 2, "the start was never tried again")
-    assert _run("judgment")["status"] == "running" and _run("judgment")["agent_id"]
-    bridge.answers.append({"deny": "PreToolUse:Agent hook error: PLAN MODE"})
-    await _started("unverified")
-    assert _run("unverified")["status"] == "failed" and _run("unverified")["refused"]["kind"] == "hook"
-
-
-async def test_a_run_whose_agent_runs_on_across_a_server_restart_takes_its_place_again(doc, bridge, monkeypatch):
-    await _write()
-    agent = (await _started("judgment")).agent
-    monkeypatch.setattr(checks, "_active", {})
-    assert checks.recover() == []
-    assert checks._active[(CORPUS, "judgment", "report")].agent == agent
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)[agent]["status"] = "done"
-    monkeypatch.setattr(checks, "_active", {})
-    assert checks.recover() == [f"{CORPUS}/judgment/report"]
-    assert _run("judgment")["status"] == "stopped"
-
-
-async def test_main_s_quit_stops_a_queued_run_and_its_agent_s_end_stops_a_running_one(doc, bridge, monkeypatch):
-    monkeypatch.setattr(checks, "MAX_SESSIONS", 1)
-    await _write()
-    await _started("judgment")
-    await checks.start_run(CORPUS, "unverified", "report", force=True, route="click")
-    assert _run("unverified").get("waiting") == checks.WAITING_QUEUED
-    assert checks.stop_workspace(CORPUS) == 1
-    subagents.close_running(CORPUS)
-    assert _run("judgment")["status"] == "stopped" and _run("unverified")["status"] == "stopped"
-    await asyncio.sleep(0.05)
-    assert len(bridge.ops("spawn")) == 1, "nothing starts in a stopped run's place"
+    assert files.record_handback(state, hook("chk-main", "thimble:check")) is None
+    assert files.record_handback(state, hook("orient", "thimble:orientation")) is None
+    assert files.record_handback(state, hook("call", "thimble:call")) is not None
+    assert files.taken_handback(files.registry(state)["call"]) == "done"
+    files.registry(state)["call"]["run"] = 2  # a later run: the hand-back of run 1 ends it not
+    assert files.taken_handback(files.registry(state)["call"]) is None
 
 
 async def test_a_run_s_task_file_is_never_written_through_a_link(doc, bridge, tmp_path):
@@ -401,58 +259,47 @@ def test_every_check_click_route_refuses_the_server_s_token_without_the_analyst_
     assert not bridge.calls, "the module is never asked"
 
 
-async def test_in_terminal_mode_each_process_takes_up_a_run_from_the_check_s_file(doc, bridge, monkeypatch):
-    """Terminal mode has no server to hold a run: main's run_check starts it in the shim, a hook's process hears its
-    agent start and end, and the shim takes its comments. Each process takes the run up from the check's file, so its
-    comments land and its end is recorded, and a process that held it lets it go once another ended it (live check
-    T6: a typed check stayed `running` for good, and the next writer's end started no check)."""
-    from terminal_fakes import write_launch
+async def test_k8_a_check_due_while_thimble_is_off_waits_and_starts_once_it_is_on(doc, bridge, monkeypatch):
+    """Bug hunt round 10, K8: /plugin off while an answer's checks were due failed each with a notice "… failed:
+    thimble's agents can't start in this session: … it stopped polling. Main, its threads, cards and labels still work.
+    Try again in a few seconds", shown beside the page's line that thimble is off, and nothing ran the check once thimble
+    was on again. /plugin off is no end of the session (H19): a follow-on run waits while main's module does not answer
+    in a session that runs, its record `waiting` off, tells no failure, and starts once thimble is on again."""
+    from app import module_bridge as real_bridge
+    from app import notices
 
-    write_launch(config.workspace_dir(CORPUS))
+    monkeypatch.setattr(subagents, "MODULE_BACK_POLL_S", 0.01)
     await _write()
-    res = await tools.call(CORPUS, "run_check", {"name": "Judgment"}, tool_use_id="toolu_main1")
-    assert not res.is_error, res.text
-    shim = dict(checks._active)  # the shim's process: it started the run
-    key = checks.session_key("judgment", "report")
-    monkeypatch.setattr(checks, "_active", {})  # a hook's process: the agent starts
-    checks.subagent_started(CORPUS, subagents.Run(CORPUS, key, "check", "c0ffee00", "agentcheck1"), {})
-    assert _run("judgment")["agent_id"] == "agentcheck1"
-    monkeypatch.setattr(checks, "_active", dict(shim))  # the shim again: the agent comments
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    sid = report_types.all_sentences(d)[0]["id"]
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_c1", "agentcheck1", "thimble:check")
-    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
-                           session=key, tool_use_id="toolu_c1")
-    assert not res.is_error, res.text
-    monkeypatch.setattr(checks, "_active", {})  # another hook's process: the agent ends
-    checks.subagent_ended(CORPUS, subagents.Run(CORPUS, key, "check", "c0ffee00", "agentcheck1"), "done", "One comment.")
-    assert (_run("judgment")["status"], _run("judgment")["comments"]) == ("done", 1)
-    monkeypatch.setattr(checks, "_active", dict(shim))  # the shim lets go of the run that ended elsewhere
-    assert not checks.running(CORPUS, "judgment", "report") and checks._active == {}
-    await _write(TEXT + "\n## Later\n\nA second account joined in the second week.\n")
-    _writer_done()  # a writer's end starts the shown checks on what they have not seen, this one among them
-    await _until(lambda: _run("judgment")["status"] == "running" and _run("judgment")["run"] != shim[
-        (CORPUS, "judgment", "report")].run, "the writer's end started no run of judgment")
+    bridge.is_live, bridge.runs = False, True
+    bridge.reason = f"{real_bridge.NOT_ANSWERING}; it stopped polling"
+    await checks.start_run(CORPUS, "unverified", "report", force=True, route=subagents.FOLLOW_ON)
+    await _until(lambda: _run("unverified").get("waiting") == checks.WAITING_OFF, "the run does not wait for thimble")
+    await asyncio.sleep(0.1)
+    assert not bridge.ops("spawn") and _run("unverified")["status"] == "running"
+    key = notices.agent_key(checks.session_key("unverified", "report"))
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("key") == key], "no failure while thimble is off"
+    bridge.is_live, bridge.reason = True, ""  # /plugin on again
+    await _until(lambda: len(bridge.ops("spawn")) == 1, "the check never started once thimble was on")
+    assert _run("unverified")["status"] == "running" and "waiting" not in _run("unverified")
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("key") == key]
 
+    # a start the module did not answer as thimble went off (its request expired) waits too, with no failure either
+    key = notices.agent_key(checks.session_key("judgment", "report"))
+    real_request = bridge.request
 
-async def test_in_terminal_mode_a_run_counts_the_comments_the_shim_took(doc, bridge, monkeypatch):
-    """A writer's end starts a check in a hook's process, which holds the run until its agent ends; the agent's comments
-    go through the shim, another process. The run's end counts the comments its document holds (live check T6: a
-    check that left a comment recorded none)."""
-    from terminal_fakes import write_launch
+    async def gone(c, op, **args):
+        if op != "spawn":
+            return await real_request(c, op, **args)
+        bridge.calls.append((op, args))
+        bridge.is_live, bridge.reason = False, f"{real_bridge.NOT_ANSWERING}; it stopped polling"
+        return {"no-module": bridge.reason}
 
-    write_launch(config.workspace_dir(CORPUS))
-    await _write()
-    hook = await _started("judgment")  # the hook's process holds it
-    held = dict(checks._active)
-    key = checks.session_key("judgment", "report")
-    monkeypatch.setattr(checks, "_active", {})  # the shim takes the agent's comment
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    sid = report_types.all_sentences(d)[0]["id"]
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_c1", hook.agent, "thimble:check")
-    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
-                           session=key, tool_use_id="toolu_c1")
-    assert not res.is_error, res.text
-    monkeypatch.setattr(checks, "_active", held)  # back in the hook's process: the agent ends
-    subagents.run_ended(CORPUS, hook.agent, "done", "Commented on 1 passage.", source="handback")
-    assert (_run("judgment")["status"], _run("judgment")["comments"]) == ("done", 1)
+    fake = sys.modules["app.module_bridge"]
+    monkeypatch.setattr(fake, "request", gone)
+    await checks.start_run(CORPUS, "judgment", "report", force=True, route=subagents.FOLLOW_ON)
+    await _until(lambda: _run("judgment").get("waiting") == checks.WAITING_OFF, "the expired start does not wait")
+    assert not [n for n in notices.open_notices(CORPUS) if n.get("key") == key] and _run("judgment")["status"] == "running"
+    monkeypatch.setattr(fake, "request", real_request)
+    bridge.is_live, bridge.reason = True, ""
+    await _until(lambda: len(bridge.ops("spawn")) == 3, "the expired check never started again")
+    assert _run("judgment")["agent_id"] and not [n for n in notices.open_notices(CORPUS) if n.get("key") == key]

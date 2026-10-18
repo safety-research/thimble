@@ -717,13 +717,6 @@
   font: 400 var(--text-ui-sm) / 1.35 var(--font-body);
   color: var(--text-secondary);
 }
-.wu-card-used {
-  flex: none;
-  margin-left: auto;
-  padding-top: 3px;
-  font-size: 10px;
-  color: var(--status-positive);
-}
 
 /* the Checks pane, pinned to the sidebar's foot on the pane's paper */
 .wu-checks {
@@ -3089,4 +3082,14 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
 /* a writer's start that did not happen, under the type bar (chat/Refused) */
 .wu-refused {
   margin: 8px 16px 0;
+}
+/* over a document nothing is written in yet: the documents that are written, as chips (ReportTab blankFrame) */
+.wu-elsewhere {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 16px 0;
+  color: var(--text-secondary);
+  font: 400 var(--text-ui-sm) / 1.4 var(--font-body);
 }

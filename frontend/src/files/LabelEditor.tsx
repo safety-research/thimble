@@ -1,4 +1,5 @@
-// The label editor: a label's edit card (LabelCard), or a new label's with Label from prompt above it (LabelPrompt).
+// The label editor: a label's edit card (LabelCard), or a new label's with Label from prompt above it (LabelPrompt), whose
+// draft fills the card for the analyst to check and run.
 // Files' Labels sidebar shows it at the pane's edge (ViewSide useLabelSide); a view, or a control in Files, opens it in
 // a popover beside the control that asked (openLabelEditor), so the view stays where it is and no sidebar opens. The
 // popover is drawn by LabelEditorHost, once in the shell, over every pane and every view's frame: a view's page cannot
@@ -9,6 +10,7 @@ import { Popover, type Align, type PopoverAnchor } from '../components/Menu'
 import type { ConceptRun, LabelDraft } from '../lib/types'
 import { LabelCard, labelCardName } from './LabelCard'
 import { LabelPrompt } from './LabelPrompt'
+import { globPatterns } from './labels'
 import { useFilesLabels, type FilesLabels } from './useLabels'
 
 /** The editor's width in the popover, the card's own width at the Labels pane's edge (files.css .label-card). */
@@ -25,16 +27,18 @@ export interface LabelEditorProps {
   appliesTo: string[]
   /** another label's card, a new label's ('new'), or none (null), which closes the editor */
   onEdit: (id: string | 'new' | null) => void
-  /** Label from prompt could not make the label: its card is filled with this draft */
+  /** Label from prompt drafted a label: the new label's card is filled with this draft */
   onDraft: (draft: LabelDraft) => void
   /** an apply started for a label, with the run record the server answered */
   onRun: (id: string, run: ConceptRun) => void
+  /** the label's run as the Labels pane follows it, which may be newer than the labels' read */
+  run?: ConceptRun | null
   inPopover?: boolean
 }
 
 /** A label's edit card, or a new label's with Label from prompt as its lead: the one editor Files' sidebar and the
  * popover both show. */
-export function LabelEditor({ ws, labels, editing, drafted, appliesTo, onEdit, onDraft, onRun, inPopover }: LabelEditorProps) {
+export function LabelEditor({ ws, labels, editing, drafted, appliesTo, onEdit, onDraft, onRun, run, inPopover }: LabelEditorProps) {
   const label = editing === 'new' ? null : labels.byId.get(editing) ?? null
   return (
     <LabelCard
@@ -46,7 +50,8 @@ export function LabelEditor({ ws, labels, editing, drafted, appliesTo, onEdit, o
       inPopover={inPopover}
       onClose={() => onEdit(null)}
       onRun={onRun}
-      lead={editing === 'new' ? <LabelPrompt ws={ws} labels={labels} appliesTo={appliesTo} onRun={onRun} onManual={onDraft} onEdit={onEdit} onDone={() => onEdit(null)} /> : undefined}
+      run={run}
+      lead={editing === 'new' ? (glob) => <LabelPrompt ws={ws} labels={labels} appliesTo={globPatterns(glob)} onDraft={onDraft} /> : undefined}
     />
   )
 }

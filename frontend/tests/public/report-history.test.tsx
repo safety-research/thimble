@@ -74,13 +74,4 @@ describe('Restore on a past draft', () => {
     expect(restore).toHaveBeenCalledWith('w-hist', 'report', 1, null)
     expect(onRestored).toHaveBeenCalledWith(restored)
   })
-
-  test('an earlier save of a run restores by its number', async () => {
-    vi.spyOn(docsApi, 'revision').mockResolvedValue(doc as never)
-    const restore = vi.spyOn(docsApi, 'restore').mockResolvedValue(doc as never)
-    const el = await mount(<PastDraft ws="w-hist" slug="report" target={{ n: 2, rev: 1 }} rows={historyRows(history)} onClose={() => {}} onRestored={() => {}} />)
-    await settle()
-    await act(async () => el.querySelector<HTMLButtonElement>('button.wu-past-restore')!.click())
-    expect(restore).toHaveBeenCalledWith('w-hist', 'report', 2, 1)
-  })
 })

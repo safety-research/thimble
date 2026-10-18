@@ -237,6 +237,56 @@ function runPrefix(path: string): string {
   return f ? `${f.name}${RUN_SEP}${f.elided ? `…${RUN_SEP}` : ''}` : ''
 }
 
+// The files cited on this page, by the name a chip gives each (its run's folder and its name): two cited files that
+// would read the same (`x › notes.json` under a/x and b/x) read by the shortest end of their paths that tells them apart
+// (bug hunt B25). A chip notes its file once it is drawn (noteCitedRef), and the chips redraw (onCitedFiles).
+const citedFiles = new Map<string, Set<string>>()
+const citedListeners = new Set<() => void>()
+
+/** The name a chip gives a file when no other cited file reads the same: its run's folder and its name. */
+function shortFileName(path: string): string {
+  const { rest } = splitRun(path)
+  return `${runPrefix(path)}${rest.split('/').pop() ?? rest}`
+}
+
+/** Note the file a ref points into as cited, so a chip of another file of the same name tells them apart. */
+export function noteCitedRef(ref: string): void {
+  const p = parseRef(ref)
+  const path = p && 'path' in p ? p.path : ''
+  if (!path) return
+  const short = shortFileName(path)
+  const known = citedFiles.get(short) ?? new Set<string>()
+  if (known.has(path)) return
+  known.add(path)
+  citedFiles.set(short, known)
+  if (known.size > 1) for (const fn of [...citedListeners]) fn()
+}
+
+/** Call `fn` when a newly cited file makes another's chip read differently; returns the unsubscribe. */
+export function onCitedFiles(fn: () => void): () => void {
+  citedListeners.add(fn)
+  return () => citedListeners.delete(fn)
+}
+
+/** Forget the files cited so far (tests). */
+export function forgetCitedFiles(): void {
+  citedFiles.clear()
+}
+
+/** A file as a chip names it: its run's folder and its name (shortFileName), or, when another cited file reads the same,
+ * the shortest end of its path that no other's path ends in, its folders joined as a chip joins them. */
+export function fileChipName(path: string): string {
+  const short = shortFileName(path)
+  const twins = [...(citedFiles.get(short) ?? [])].filter((q) => q !== path)
+  if (!twins.length) return short
+  const parts = path.split('/')
+  for (let k = 1; k < parts.length; k++) {
+    const tail = parts.slice(-k).join('/')
+    if (!twins.some((q) => q === tail || q.endsWith(`/${tail}`))) return parts.slice(-k).join(RUN_SEP)
+  }
+  return parts.join(RUN_SEP)
+}
+
 /** A file ref's path when its chip leaves folders out of it (a chip names one folder at most), for the hover to show
  * whole; null otherwise. */
 export function hiddenPath(ref: string): string | null {
@@ -284,11 +334,8 @@ export function refLabel(ref: string): string {
   const p = parseRef(ref)
   if (!p) return ref
   // one folder, not every folder a file sits in, so a chip stays short where a paragraph cites several records of one
-  // run, and the one that tells same-named files apart
-  const base = (path: string) => {
-    const { rest } = splitRun(path)
-    return `${runPrefix(path)}${rest.split('/').pop() ?? rest}`
-  }
+  // run, and the one that tells same-named files apart; more of its path when that folder does not (fileChipName)
+  const base = fileChipName
   const runOf = runPrefix
   switch (p.kind) {
     case 'cell':
@@ -319,10 +366,10 @@ export function refLabel(ref: string): string {
       return `${base(p.path)} L${p.line}`
     case 'range':
       return `${base(p.path)} L${p.line}-${p.endLine}`
+    // a passage of a record by its line alone: its block (`.b0`) is the address's own part, which the hover shows
     case 'block':
-      return `${base(p.path)} L${p.line}.b${p.block}`
     case 'span':
-      return `${base(p.path)} L${p.line}.b${p.block}`
+      return `${base(p.path)} L${p.line}`
     case 'path':
       return p.locator ? `${base(p.path)} · ${locatorLabel(p.locator)}` : base(p.path)
   }
@@ -337,8 +384,7 @@ export function addressLabel(ref: string): string {
   const p = parseRef(ref)
   if (!p || !(p.kind === 'record' || p.kind === 'range' || p.kind === 'block' || p.kind === 'span' || p.kind === 'path' || p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow'))
     return refLabel(ref)
-  const { rest } = splitRun(p.path)
-  const file = `${runPrefix(p.path)}${rest.split('/').pop() ?? rest}`
+  const file = fileChipName(p.path)
   if (p.kind === 'path') return p.locator ? `${file} · ${locatorLabel(p.locator)}` : file
   if (p.kind === 'page' || p.kind === 'pointer' || p.kind === 'csvrow') return `${file} ${recordPart(p)}`
   return p.kind === 'range' ? `${file} L${p.line}-${p.endLine}` : `${file} L${p.line}`
@@ -384,6 +430,26 @@ export function splitValueRef(token: string): { value?: string; ref: string } {
   if (i < 0) return { ref: token.trim() }
   const value = token.slice(0, i).trim().replace(/\\$/, '').trim()
   return { value, ref: token.slice(i + 1).trim() }
+}
+
+// a citation written as a link whose words are in double brackets, `[[↗]](card:<id>)` or `[[31]](card:<id>#a/b)` (bug
+// hunt E2: main mixed the chat form `[↗](ref)` with the takeaway form `[[…]]`), as backend cite.mixed_links reads it;
+// words that are a ref themselves (`[[card:x]](above)`) are a citation followed by words in parentheses
+const MIXED_LINK_RE = /\[\[([^[\]|\n]*)\]\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)/g
+const REF_SHAPE_RE = /^(?:call:[A-Za-z0-9_-]+\/\d+(?:#L\d+(?:-L\d+)?)?|(?:card|cell|concept|chat):[A-Za-z0-9_-]+(?:[@#/].*)?|[^\s:#]+#\S+|[^\s:#()]+\.[A-Za-z][A-Za-z0-9]{0,7}|(?:#|@out\d)\S*)$/
+const WEB_RE = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|tel:)/i
+
+/** `text` with each citation written as a link whose words are in double brackets as the citation it means:
+ * `[[↗]](card:<id>)` reads `[[card:<id>]]` and `[[31]](card:<id>#a/b)` reads `[[31|card:<id>#a/b]]` (backend
+ * cite.mixed_links). */
+export function mixedLinks(text: string): string {
+  if (!text.includes(']](')) return text
+  return text.replace(MIXED_LINK_RE, (m, words: string, a?: string, b?: string) => {
+    const shown = words.trim()
+    const ref = (a ?? b ?? '').trim()
+    if (!ref || WEB_RE.test(ref) || REF_SHAPE_RE.test(shown) || !parseRef(ref)) return m
+    return shown === '' || shown === '↗' ? `[[${ref}]]` : `[[${shown}|${ref}]]`
+  })
 }
 
 /** A citation's text as the analyst reads it: a whole number of five digits or more, or of four outside the years 1800

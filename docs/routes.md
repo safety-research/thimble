@@ -25,7 +25,7 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-265 routes, 154 of them writes: 37 token, 1 code, 1 agent token, 121 cookie, 102 cookie or token, 1 media key, 2 none.
+277 routes, 163 of them writes: 40 token, 1 code, 1 agent token, 127 cookie, 104 cookie or token, 1 media key, 3 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -80,6 +80,7 @@ knows the key.
 | GET | `/api/feedback/download` | feedback_routes | cookie or token |
 | POST | `/api/feedback/reveal` | feedback_routes | cookie |
 | GET | `/api/health` | main | none |
+| GET | `/api/hello` | main | none |
 | GET | `/api/jobs` | jobs | cookie or token |
 | POST | `/api/module/ended` | module_bridge | token |
 | POST | `/api/module/hello` | module_bridge | token |
@@ -92,6 +93,7 @@ knows the key.
 | POST | `/api/subagents/caller` | subagents | token |
 | POST | `/api/subagents/denied` | subagents | token |
 | POST | `/api/subagents/end` | subagents | token |
+| POST | `/api/subagents/handback` | subagents | token |
 | POST | `/api/subagents/rekey` | subagents | token |
 | POST | `/api/subagents/started` | subagents | token |
 | POST | `/api/subagents/stopped` | subagents | token |
@@ -100,14 +102,20 @@ knows the key.
 | POST | `/api/tools/{name}` | tools | token |
 | GET | `/api/tour` | tour | cookie or token |
 | POST | `/api/tour/seen` | tour | cookie |
+| POST | `/api/tour/workspace` | tour | cookie |
 | POST | `/api/ui/key` | main | code |
 | POST | `/api/ui/pair` | main | token |
 | GET | `/api/ui/paired` | main | none |
+| POST | `/api/ui/press` | main | token |
 | POST | `/api/ui/shot` | main | token |
 | POST | `/api/ui/signout` | main | cookie |
 | POST | `/api/ui/unpair` | main | token |
 | GET | `/api/workspaces` | start_page | cookie or token |
 | DELETE | `/api/ws/{c}` | ledger | token |
+| POST | `/api/ws/{c}/act` | term_acts | token |
+| GET | `/api/ws/{c}/answer-comments` | checks | cookie or token |
+| POST | `/api/ws/{c}/answer-comments/{cid}/dismiss` | checks | cookie |
+| POST | `/api/ws/{c}/answer-comments/{cid}/reopen` | checks | cookie |
 | POST | `/api/ws/{c}/archive` | ledger | token |
 | GET | `/api/ws/{c}/archives` | ledger | cookie or token |
 | POST | `/api/ws/{c}/calls/ref` | calls | token |
@@ -163,6 +171,7 @@ knows the key.
 | GET | `/api/ws/{c}/concepts/{concept_id}` | concepts | cookie or token |
 | PUT | `/api/ws/{c}/concepts/{concept_id}` | concepts | cookie |
 | POST | `/api/ws/{c}/concepts/{concept_id}/apply` | concepts | cookie |
+| POST | `/api/ws/{c}/concepts/{concept_id}/apply/again` | concepts | cookie |
 | POST | `/api/ws/{c}/concepts/{concept_id}/apply/cancel` | concepts | cookie |
 | GET | `/api/ws/{c}/concepts/{concept_id}/apply/runs` | concepts | cookie or token |
 | GET | `/api/ws/{c}/concepts/{concept_id}/coverage` | concepts | cookie or token |
@@ -237,9 +246,12 @@ knows the key.
 | GET | `/api/ws/{c}/notices` | notices | cookie or token |
 | POST | `/api/ws/{c}/notices/{notice_id}/dismiss` | notices | cookie |
 | GET | `/api/ws/{c}/orientation` | orient_session | cookie or token |
+| POST | `/api/ws/{c}/orientation/again` | orient_session | cookie |
 | POST | `/api/ws/{c}/orientation/message` | orient_session | cookie |
 | POST | `/api/ws/{c}/permission` | events | cookie |
+| GET | `/api/ws/{c}/pictures/{name}` | agents | cookie or token |
 | POST | `/api/ws/{c}/precached/context` | precached | token |
+| POST | `/api/ws/{c}/press/{open_id}` | investigation | cookie |
 | POST | `/api/ws/{c}/redo` | undo | cookie |
 | POST | `/api/ws/{c}/rename` | ledger | token |
 | PUT | `/api/ws/{c}/render/theme` | render | cookie |

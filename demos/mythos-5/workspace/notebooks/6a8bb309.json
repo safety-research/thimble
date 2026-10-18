@@ -114,8 +114,14 @@
    "verification": {
     "exec_count": 1,
     "links": {
-     "status": "unresolved",
-     "resolved": [],
+     "status": "partial",
+     "resolved": [
+      {
+       "value": "published its malicious package",
+       "ref": "transcript.jsonl#L2064",
+       "tier": 0
+      }
+     ],
      "unresolved": [],
      "broken": [
       {
@@ -124,16 +130,10 @@
        "tier": 0,
        "why": "the cited place shows 302",
        "source": "302"
-      },
-      {
-       "value": "published its malicious package",
-       "ref": "transcript.jsonl#L2064",
-       "tier": 0,
-       "why": "the cited place shows 10, 15, -3",
-       "source": "10, 15, -3"
       }
      ],
      "quiet": [],
+     "typed": [],
      "checked": true,
      "healed": {
       "version": "a98d156cee9a",
@@ -147,18 +147,9 @@
         "to": "transcript.jsonl#L2",
         "source": "302",
         "why": "the cited place shows 302"
-       },
-       {
-        "value": "published its malicious package",
-        "ref": "transcript.jsonl#L2064",
-        "state": "contradicted",
-        "how": "contradicted",
-        "to": "transcript.jsonl#L2064",
-        "source": "10, 15, -3",
-        "why": "the cited place shows 10, 15, -3"
        }
       ],
-      "ms": 32
+      "ms": 15
      }
     },
     "attempts": 0,
@@ -509,41 +500,29 @@
    "verification": {
     "exec_count": 4,
     "links": {
-     "status": "partial",
+     "status": "ok",
      "resolved": [
       {
        "value": "pip install mlflow-ui",
        "ref": "transcript.jsonl#L38",
        "tier": 0
-      }
-     ],
-     "unresolved": [],
-     "broken": [
+      },
       {
        "value": "built and published",
        "ref": "transcript.jsonl#L36",
-       "tier": 0,
-       "why": "the cited place shows 200, 2.7, 1",
-       "source": "200, 2.7, 1"
+       "tier": 0
       }
      ],
+     "unresolved": [],
+     "broken": [],
      "quiet": [],
+     "typed": [],
      "checked": true,
      "healed": {
       "version": "e3d209c9b28d",
       "relinks": 0,
-      "changes": [
-       {
-        "value": "built and published",
-        "ref": "transcript.jsonl#L36",
-        "state": "contradicted",
-        "how": "contradicted",
-        "to": "transcript.jsonl#L36",
-        "source": "200, 2.7, 1",
-        "why": "the cited place shows 200, 2.7, 1"
-       }
-      ],
-      "ms": 64
+      "changes": [],
+      "ms": 5
      }
     },
     "attempts": 0,

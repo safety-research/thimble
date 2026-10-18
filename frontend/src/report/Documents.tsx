@@ -107,9 +107,9 @@ function Arranged({ ws, slug, renderer, doc, filter, client, drawer, onSaved, wr
     <div className={`wu-report wu-arranged${side.shown && !side.over ? '' : ' wu-side-hidden'}`} ref={side.row}>
       <ReadProbe probe={side.probe} />
       {side.shown && renderer === 'slides' ? (
-        <DeckSidebar ws={ws} doc={doc as DeckDoc | null} onInsert={(id) => deck.current?.insertCard(id)} onHide={side.hide} over={side.over} slug={slug} checks={checks} comments={comments} />
+        <DeckSidebar ws={ws} onInsert={(id) => deck.current?.insertCard(id)} onHide={side.hide} over={side.over} slug={slug} checks={checks} comments={comments} />
       ) : side.shown && renderer === 'story' ? (
-        <StorySidebar ws={ws} doc={doc as StoryDoc | null} onInsert={(id) => story.current?.insertCard(id)} onHide={side.hide} over={side.over} slug={slug} checks={checks} comments={comments} />
+        <StorySidebar ws={ws} onInsert={(id) => story.current?.insertCard(id)} onHide={side.hide} over={side.over} slug={slug} checks={checks} comments={comments} />
       ) : side.shown ? (
         <CommentsSidebar ws={ws} doc={slug} checks={checks} comments={comments} onHide={side.hide} over={side.over} />
       ) : (

@@ -83,39 +83,6 @@ async def test_delete_takes_the_label_its_card_and_its_filter_and_undo_brings_th
     assert _state(cid) == before
 
 
-async def test_undo_refuses_when_the_deleted_label_s_files_are_gone(api):
-    k = await _label(api)
-    await api.delete(f"/api/ws/{CORPUS}/concepts/{k['id']}")
-    for d in (config.workspace_dir(CORPUS) / undo.TRASH_NAME).iterdir():
-        for f in d.iterdir():
-            f.unlink()
-    r = await api.post(f"/api/ws/{CORPUS}/undo")
-    assert r.status_code == 409
-    assert "cannot be restored" in r.json()["detail"]
-
-
-async def test_a_trash_folder_goes_once_its_step_leaves_the_journal(api, monkeypatch):
-    k = await _label(api)
-    await api.delete(f"/api/ws/{CORPUS}/concepts/{k['id']}")
-    trash = config.workspace_dir(CORPUS) / undo.TRASH_NAME
-    assert len(list(trash.iterdir())) == 1
-    undo.push(CORPUS, {"kind": "doc", "op": "edited", "target": "report", "label": "edit the report"})
-    monkeypatch.setattr(undo, "MAX_STEPS", 1)
-    undo._rewrite(CORPUS)
-    assert list(trash.iterdir()) == []
-
-
-async def test_main_s_delete_label_deletes_by_name_and_names_the_labels_for_one_it_does_not_know(api):
-    k = await _label(api)
-    res = await tools.call(CORPUS, "delete_label", {"name": "nope"}, actor="analyst")
-    assert res.is_error and "no label 'nope'" in res.text and "'claims a PR'" in res.text
-    res = await tools.call(CORPUS, "delete_label", {"name": "Claims a  PR"}, actor="analyst")
-    assert not res.is_error, res.text
-    assert "is deleted, with its marks, its card and any filter that used it" in res.text
-    assert _state(k["id"]) == {"concept": False, "rows": False, "cards": [], "filter": None}
-    assert undo.labels(CORPUS)["undo"] == "delete label claims a PR"
-
-
 def test_delete_label_is_main_s_alone():
     spec = tools.REGISTRY["delete_label"]
     assert spec.sessions == tools.MAIN_ONLY

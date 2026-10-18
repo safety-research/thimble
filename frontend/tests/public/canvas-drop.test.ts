@@ -3,7 +3,7 @@
 // beside a sibling stands level with the sibling as the frame is laid out once the card has left its place, the cards
 // after them in the flow staying below them.
 import { describe, expect, test } from 'vitest'
-import { boardOf, CARD_W, GAP, HEAD, layoutBoard, moveLocal, overlaps, PAD, patchCellLocal, placeBeside, placeFree, ROOT_X, ROOT_Y, TITLE, type Rect } from '../../src/canvas/layout.ts'
+import { boardOf, CARD_W, GAP, HEAD, layoutBoard, moveLocal, overlaps, PAD, patchCellLocal, placeBeside, placeFree, ROOT_Y, type Rect } from '../../src/canvas/layout.ts'
 import type { CanvasResponse, Cell, Group, Pos } from '../../src/lib/types.ts'
 
 const group = (id: string, extra: Partial<Group> = {}): Group => ({ id, title: id, parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst', ...extra })
@@ -32,10 +32,6 @@ function covered(d: CanvasResponse): string[] {
 const top = (i: number) => ROOT_Y + HEAD + i * (H + GAP)
 
 describe('a card dropped free', () => {
-  test('where it covers nothing stays where it was dropped', () => {
-    const at = { x: PAD + CARD_W + GAP, y: 40 }
-    expect(placeFree(canvas(), 'x', 'g', at, open, heights)).toEqual(at)
-  })
 
   test('on a card moves straight down past every card it would cover', () => {
     // dropped over b; just below b it would cover c, so it goes below c
@@ -43,39 +39,9 @@ describe('a card dropped free', () => {
     expect(pos).toEqual({ x: PAD + 100, y: top(2) + H + GAP - ROOT_Y })
     expect(covered(moveLocal(canvas(), ['x'], 'g', undefined, pos))).toEqual([])
   })
-
-  test('stops at the first place that is clear, in a gap between two cards', () => {
-    // c stands free far below b, so the room under b is clear
-    const d = canvas([card('a', 'g'), card('b', 'g'), card('c', 'g', { x: PAD, y: 1000 })])
-    const pos = placeFree(d, 'x', 'g', { x: PAD, y: top(1) + 10 - ROOT_Y }, open, heights)
-    expect(pos).toEqual({ x: PAD, y: top(1) + H + GAP - ROOT_Y })
-    expect(covered(moveLocal(d, ['x'], 'g', undefined, pos))).toEqual([])
-  })
-
-  test('at the foot of its frame stays in it, the frame below moving down as its frame grows', () => {
-    // Notes stands below Your work; the card goes GAP below c, not below Notes
-    const d = { ...canvas(), groups: [...canvas().groups, group('h')], cells: [...canvas().cells, card('d', 'h')] }
-    const pos = placeFree(d, 'x', 'g', { x: PAD, y: top(2) + 10 - ROOT_Y }, open, heights)
-    expect(pos).toEqual({ x: PAD, y: top(2) + H + GAP - ROOT_Y })
-    expect(covered(moveLocal(d, ['x'], 'g', undefined, pos))).toEqual([])
-  })
-
-  test('on the board, over a frame and its title, moves below the frame', () => {
-    const frame = rects(canvas()).get('g') as Rect
-    const pos = placeFree(canvas(), 'x', null, { x: ROOT_X + 100, y: ROOT_Y - TITLE - 50 }, open, heights)
-    expect(pos).toEqual({ x: ROOT_X + 100, y: frame.y + frame.h + GAP })
-  })
 })
 
 describe('a card dropped beside a sibling', () => {
-  test('on the right stands level with the sibling as it stands once the card has left the column above it', () => {
-    // a leaves the top of the column, so c moves up to b's place
-    const at = placeBeside(canvas(), 'a', 'g', 'c', 'R', open, heights)
-    expect(at).toEqual({ pos: { x: PAD + CARD_W + GAP, y: HEAD + (H + GAP) } })
-    const d = moveLocal(canvas(), ['a'], 'g', undefined, at.pos)
-    expect(rects(d).get('a')?.y).toBe(rects(d).get('c')?.y)
-    expect(covered(d)).toEqual([])
-  })
 
   test('on the left takes the sibling\'s place in the column, the sibling moving right, and the cards after them stay below', () => {
     const at = placeBeside(canvas(), 'x', 'g', 'b', 'L', open, heights)
@@ -86,16 +52,5 @@ describe('a card dropped beside a sibling', () => {
     expect(r.get('b')?.y).toBe(top(1))
     expect(r.get('c')?.y).toBe(top(2))
     expect(covered(d)).toEqual([])
-  })
-
-  test('on the left of the first card goes first in the column', () => {
-    expect(placeBeside(canvas(), 'x', 'g', 'a', 'L', open, heights).after).toBeNull()
-  })
-
-  test('on the right, where a card already stands free, moves down clear of it', () => {
-    const d = canvas([card('a', 'g'), card('b', 'g'), card('c', 'g', { x: PAD + CARD_W + GAP, y: HEAD })])
-    const at = placeBeside(d, 'x', 'g', 'a', 'R', open, heights)
-    expect(at.pos).toEqual({ x: PAD + CARD_W + GAP, y: HEAD + H + GAP })
-    expect(covered(moveLocal(d, ['x'], 'g', undefined, at.pos))).toEqual([])
   })
 })

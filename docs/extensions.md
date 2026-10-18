@@ -58,13 +58,14 @@ Names are lower-case letters, digits and hyphens. A part's name is its folder's 
 The roles are `main`, `orientation`, `critic`, `writer` and `dev`. The tasks are `labels`, `label-draft`, `card-check`,
 `view-review`, `view-fit`, `file-viewer` and `checks`. A task's prompt adds to, or replaces, the part of thimble's
 prompt the task runs with; its program runs in place of thimble's own. `agent.json` or `task.json` defines one in one of
-three ways:
+two ways:
 
 | key | what thimble does |
 |---|---|
 | `"prompt": "prompt.md"` | adds the file to thimble's prompt for it, or replaces that prompt with `"replace": true` |
-| `"sdk": "critic.py"` | calls the program's `async def run(input)`, written with the Claude Agent SDK |
 | `"command": ["python", "labels.py"]` | starts the program, sends the input as JSON lines on stdin and reads the output on stdout |
+
+An Agent SDK program (`"sdk": "critic.py"`) no longer starts, since thimble starts no Claude Code session of its own.
 
 Both files take `description` (shown by `add` and Settings), `model` and `effort` (defaults your config overrides).
 `agent.json` also takes `tools` and `disallowedTools`, which can only narrow what the role has, and with `prompt`,

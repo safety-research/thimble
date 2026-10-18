@@ -3,20 +3,37 @@ looking, with an easy fix.
 
 A notice is one short line in a warning style, an optional action button, and x to dismiss it. It shows in the
 foreground: in the browser in a strip above the composer of whichever chat the analyst has open, until they dismiss it
-or the failure is fixed; in terminal mode in the band above the prompt. A notice of an agent with a chat of its own (a
+or the failure is fixed; in the terminal in the band above the prompt, with one toast. A notice of an agent with a chat of its own (a
 thread, an agent chat; `chat`) is also written into that chat as a row, for its history.
 
 The open notices are the workspace's NOTICES_FILE, oldest first, each {id, key, kind, text, agent, chat, action, ts}:
 `text` is one sentence that reads alone (it names the agent and the failure, and a fix that is a command, such as /login
 or `thimble server restart`); `agent` names the agent in a few words ("Orientation", "View build: Agent Network");
-`chat` is the agent's own chat, which the strip's Open goes to; `action` is the button, one object {label, do, slug?} or
-a list of them, `do` one of ACTIONS:
+`chat` is the agent's own chat, which the strip's Open goes to; `action` is the button, one object {label, do, slug?,
+text?} or a list of them, `do` one of ACTIONS:
 
   proposals-retry  POST /api/ws/{c}/views/propose-now (proposer.run_now)
   proposals-off    PUT /api/ws/{c}/settings {propose_views: false}
   settings         open Settings
   view-retry       the failed view's Retry (its slug in `slug`)
   sign-out         POST /api/ui/signout (the browser's id in slug)
+  ticket-open      a code ticket that passed its checks opened in the browser workbench, where the analyst allows its
+                   change (the ticket's id in `slug`)
+  label-open       the label opened (its id in `slug`): the link of a label's notice
+  label-again      POST /api/ws/{c}/concepts/{slug}/apply/again: a prompt label run again on the units its last run
+                   could not label (concepts.start_again)
+  orient-again     the orientation run again with its last request, or the focus the analyst gives
+                   (orient_session.again_route in the browser; the terminal asks main)
+  ask-again        `text`, the analyst's last message to main, put back in main's composer in the browser or in
+                   Claude Code's prompt in the terminal, to send again in other words
+  card-again       `text` sent to main as the analyst's message: it asks main to make again the card a reply the
+                   safeguards stopped did not add
+  page-start       thimble's page started again as /thimble browser starts it, in the terminal only (the `page:stopped`
+                   notice's; the browser, whose page stopped, shows no button for it)
+
+A notice addressed to one Claude Code session (`session`, such as the takeover notice of the session another took main
+from: activate.take_main) shows only in that session's terminal (local._notices): the browser, which follows main, gets
+neither its event nor its row in GET /api/ws/{c}/notices (for_browser).
 
 A notice with the same `key` replaces the earlier one in place, so a failure that repeats updates one notice. clear
 (a later success under the key) and dismiss (the analyst's x) take a notice away. A dismissal of a REMEMBERED key holds
@@ -26,19 +43,23 @@ true} for one taken away. GET /api/ws/{c}/notices gives the open ones, so a page
 
 Keys: `agent:<the agent's key>` for an agent of thimble's (agent_key: subagents.py for its runs and starts, dev.py for
 view builds and code tickets, checks.py for report checks), `proposals` for the view proposer (proposer.py),
-`safeguards:<chat>` for a reply Claude's safeguards switched to another model (session.py), `thread:<chat>` and
+`safeguards:<chat>` for a reply Claude's safeguards switched to another model and `stopped:main` for a reply of main's
+they stopped partway (session.py), `thread:<chat>` and
 `helper:<agent id>` for a side thread's or a helper's API error, `main:api` for main's own (session.py), `card-check`
-(card_check.py) and `label:<id>` (concepts.py). post and clear never raise: a failure to tell is logged.
+(card_check.py), `label:<id>` (concepts.py) and `page:stopped` (PAGE_STOPPED_KEY) for the MCP shim's word that thimble's
+page stopped and its tools wait for it (plugin/bin/thimble-mcp), which goes once main attaches to a running server or
+runs on the local transport again (page_back). post and clear never raise: a failure to tell is logged.
 
 Kinds that tell of the setup rather than a failure:
 
-  manual-mode  key `manual-mode`: main runs in Claude Code's Manual mode (modes.manual_notice; session.note_mode in
-               browser mode, local_hooks' mode-notice in terminal mode), shown in red; it goes when main reports
+  manual-mode  key `manual-mode`: main runs in Claude Code's Manual mode (modes.manual_notice; session.note_mode on
+               the server, local_hooks' mode-notice on local transport), shown in red; it goes when main reports
                another mode
   sandbox      key `no-box:<extension>`: an extension's program runs without a sandbox (harness.py)
   setup        keys `env:<NAME>` and `proxy`: what /thimble found in the shell (events.session_route), in words this
                module writes from the key (setup_text), never words from the request
-  sign-in      key `sign-in:<id>`: a browser signed in to thimble (main.signed_in), with Sign it out
+  sign-in      key `signin:new:<id>`: a browser signed in to thimble (main.signed_in), with Sign it out; the browser
+               that signed in cannot dismiss it (dismiss_route)
 
 A failure of Anthropic's API is told in plain words with its fix, and each fix says where it runs (reason, API_WORDS):
 in the browser with its button, or "In your terminal: …" for one only Claude Code's terminal can run, such as /login or
@@ -77,11 +98,13 @@ _loop: asyncio.AbstractEventLoop | None = None
 TYPE = "notice"  # the event's type on the workspace stream, and the row's type in a chat's log
 API = "api"  # the kind of a notice of main's own request that Anthropic's API failed (session.py), which main's chat
 # shows as its API error card: no row, and the foreground strip leaves it out while main is open
-ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out")
+ACTIONS = ("proposals-retry", "proposals-off", "settings", "view-retry", "sign-out", "ticket-open", "label-open",
+           "label-again", "orient-again", "ask-again", "card-again", "page-start")
 NOTICES_FILE = "notices.json"  # in the workspace folder: the open notices, oldest first
 DISMISSED_FILE = "notices-dismissed.json"  # in the workspace folder: the REMEMBERED keys the analyst dismissed
 # keys whose dismissal holds for the workspace: a key equal to one, or starting with one that ends in ":"
 REMEMBERED = ("manual-mode", "no-box:")
+PAGE_STOPPED_KEY = "page:stopped"  # the MCP shim's notice that the server stopped (plugin/bin/thimble-mcp)
 OPEN_MAX = 50  # open notices kept; the oldest go first
 TEXT_CHARS = 480  # a notice's text at most, cut at a word (long enough for a fix in the terminal and its words)
 REASON_CHARS = 280  # a failure's own words inside a notice at most
@@ -115,8 +138,9 @@ def _gist(text: Any, limit: int) -> str:
 
 def _action(a: Any) -> dict[str, str]:
     if not isinstance(a, dict) or a.get("do") not in ACTIONS or not str(a.get("label") or "").strip():
-        raise ValueError(f"a notice's action is {{label, do, slug?}} with `do` one of {', '.join(ACTIONS)}: {a!r}")
-    return {k: str(a[k]) for k in ("label", "do", "slug") if a.get(k)}
+        raise ValueError(f"a notice's action is {{label, do, slug?, text?}} with `do` one of {', '.join(ACTIONS)}: "
+                         f"{a!r}")
+    return {k: str(a[k]) for k in ("label", "do", "slug", "text") if a.get(k)}
 
 
 def _actions(action: Any) -> dict[str, str] | list[dict[str, str]] | None:
@@ -130,7 +154,7 @@ def _actions(action: Any) -> dict[str, str] | list[dict[str, str]] | None:
 
 def _emit(c: str, event: dict[str, Any]) -> None:
     """The event on the workspace stream, from the loop or scheduled onto the server's loop from a worker thread; off
-    any loop (terminal mode's passes) the notices file alone tells."""
+    any loop (the passes of local transport) the notices file alone tells."""
 
     def send() -> None:
         try:
@@ -219,12 +243,13 @@ def _row(c: str, chat: str, rec: dict[str, Any]) -> None:
 
 
 def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | None = None, action: Any = None,
-         key: str | None = None, row: bool = True) -> dict[str, Any] | None:
+         key: str | None = None, row: bool = True, session: str | None = None) -> dict[str, Any] | None:
     """Tell the analyst in the foreground that something failed (module note): an open notice, replacing the one under
     the same `key`, a row in the agent's chat `chat` when it has one (not with `row` false: the chat shows the failure
     itself, as main's API error card does), and the `notice` event. `kind` names what failed ("agent", "safeguards",
-    "view", "proposals", "card-check", "label", API for main's own request, or a setup kind of the module note). The
-    notice, or None when it was not written, as for a REMEMBERED key the analyst dismissed (dismissed)."""
+    "view", "proposals", "card-check", "label", API for main's own request, or a setup kind of the module note). With
+    `session`, the notice is that Claude Code session's alone: its terminal shows it, the browser does not (module
+    note). The notice, or None when it was not written, as for a REMEMBERED key the analyst dismissed (dismissed)."""
     text = _short(text, TEXT_CHARS)
     if not text:
         raise ValueError("a notice says something")
@@ -232,7 +257,7 @@ def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | 
         return None
     rec: dict[str, Any] = {"id": secrets.token_hex(6), "key": str(key) if key else None, "kind": str(kind or "agent"),
                            "text": text, "agent": str(agent) if agent else None, "chat": str(chat) if chat else None,
-                           "action": _actions(action), "ts": _now()}
+                           "action": _actions(action), "ts": _now(), **({"session": str(session)} if session else {})}
 
     def change(raw: Any) -> list[dict[str, Any]]:
         kept = [n for n in _rows(raw) if not (rec["key"] and n.get("key") == rec["key"])]
@@ -249,8 +274,9 @@ def post(c: str, *, kind: str, text: str, agent: str | None = None, chat: str | 
             _row(c, rec["chat"], rec)
         except (OSError, ValueError, HTTPException):
             log.debug("%s: the notice's row in %s was not written", c, rec["chat"], exc_info=True)
-    _emit(c, {"type": TYPE, **{k: rec[k] for k in ("id", "key", "kind", "text", "agent", "chat", "action")},
-              "foreground": True})
+    if not rec.get("session"):
+        _emit(c, {"type": TYPE, **{k: rec[k] for k in ("id", "key", "kind", "text", "agent", "chat", "action")},
+                  "foreground": True})
     log.info("%s: notice%s: %s", c, f" ({rec['key']})" if rec["key"] else "", text)
     return rec
 
@@ -324,6 +350,9 @@ REFUSED_RE = re.compile(r"safeguards|usage polic|can't help with this", re.I)
 AUTH_RE = re.compile(r"not logged in|invalid api key|please run /login|authentication_failed|authentication failed|"
                      r"failed to authenticate|oauth token|\b401\b", re.I)
 FORBIDDEN_RE = re.compile(r"\b403\b|forbidden|permission_error", re.I)
+# Anthropic's API refusing a request for the account's credit ("Credit balance is too low"; Claude Code's error kind
+# billing_error)
+BILLING_RE = re.compile(r"credit balance|billing_error", re.I)
 NOT_FOUND_RE = re.compile(r"\b404\b|not_found_error|model_not_found|issue with the selected model|"
                           r"model\b[^.]{0,80}(?:not found|does not exist|isn't available)", re.I)
 # the HTTP status an error line names ("Please run /login · API Error: 401 …", "API Error: 403 {…}"), which decides
@@ -333,8 +362,8 @@ STATUS_RE = re.compile(r"\b(?:API Error|Error code|HTTP|status(?: code)?):?\s*(\
 # its class before its words, which change between versions (session.api_error_class)
 STATUS_CLASS = {401: "auth", 403: "forbidden", 404: "not_found", 429: "rate_limited", 500: "server_error",
                 502: "server_error", 503: "server_error", 504: "server_error", 529: "overloaded"}
-ERROR_CLASS = {"authentication_failed": "auth", "model_not_found": "not_found", "rate_limit": "rate_limited",
-               "overloaded": "overloaded", "server_error": "server_error"}
+ERROR_CLASS = {"authentication_failed": "auth", "billing_error": "billing", "model_not_found": "not_found",
+               "rate_limit": "rate_limited", "overloaded": "overloaded", "server_error": "server_error"}
 # Claude Code 2.1.300's words for a request that got no answer from Anthropic's API, which it records with `error`
 # server_error and no apiErrorStatus: "API Error: Connection refused — a firewall or proxy may be blocking it
 # (ECONNREFUSED)", "Unable to connect to API (…)", "Can't reach the API server — check your internet or DNS (ENOTFOUND)",
@@ -354,6 +383,8 @@ API_WORDS: dict[str, tuple[str, str, str]] = {
     "refused": ("Claude's safeguards stopped its request", "rephrase or narrow the request and try again", BROWSER),
     "auth": ("Claude Code isn't signed in", "In your terminal: run /login (or `claude auth login` in a shell)",
              TERMINAL),
+    "billing": ("the credit balance of Claude Code's sign-in is too low",
+                "In your terminal: run /login to sign in another way, or add credits to that account", TERMINAL),
     "forbidden": ("your account may not make this request (403)",
                   "In your terminal: check your sign-in (/login) and your account's or organization's settings",
                   TERMINAL),
@@ -366,11 +397,50 @@ API_WORDS: dict[str, tuple[str, str, str]] = {
 # a model main's session asked for, which only Claude Code's /model changes (a side thread's fork runs on main's)
 MAIN_MODEL_FIX = "In your terminal: run /model to pick another model"
 
-# the fix of a sign-in failure of a call thimble's server makes itself (the view proposer, card checks, labels), whose
-# environment is the one the server started with
-SERVER_AUTH = ("Claude Code isn't signed in for thimble's server",
-               "In your terminal: run /login (or `claude auth login` in a shell), or if you changed your sign-in (for "
-               "example exported ANTHROPIC_API_KEY), run `thimble server restart`", TERMINAL)
+# A failure of Claude Code's sign-in (auth) or of its credit (billing) names the login Claude Code reports
+# (config.login), since a key the shell exports overrides a /login: an API key in an environment variable, which the fix
+# unsets (quit, so Claude Code starts again without it), the key apiKeyHelper prints, a Console login's key, or a Claude
+# login. Every model call of thimble's runs in the analyst's Claude Code session, on its sign-in: the agents as its
+# subagents, the other calls through the session's own API client (model_call.py), so the fix is always the session's.
+ENV_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]*")
+SIGN_IN_WORDS = {"auth": "Anthropic's API refused Claude Code's sign-in, {what}",
+                 "billing": "Claude Code signs in with {what}, and its credit balance is too low"}
+LOGIN_FIX = "In your terminal: run /login"
+
+
+def _login_words() -> tuple[str, str] | None:
+    """(the login Claude Code reports, in words; its fix) for SIGN_IN_WORDS, else None."""
+    try:
+        login = config.login() or {}
+    except Exception:  # noqa: BLE001 — a notice without the login is still a notice
+        log.debug("the login Claude Code reports was not read", exc_info=True)
+        return None
+    source, method = login.get("source", ""), login.get("method", "")
+    if source and ENV_NAME_RE.fullmatch(source):
+        return (f"the API key in {source}",
+                f"In your terminal: quit, unset {source} (in your shell's startup file too) and start claude again, or "
+                "run /login")
+    if source == "apiKeyHelper":
+        return ("the API key your apiKeyHelper setting prints",
+                "In your terminal: fix or remove apiKeyHelper in your Claude Code settings, or run /login")
+    if source == "/login managed key":
+        return "the API key of your Anthropic Console login", LOGIN_FIX
+    if source:
+        return f"the API key from {source}", LOGIN_FIX
+    if method == "claude.ai":
+        return "your Claude login (claude.ai)", LOGIN_FIX
+    return None
+
+
+def sign_in_words(cls: str) -> str:
+    """The words and the fix of a failure of class `auth` or `billing` ("…. In your terminal: …"), naming the login
+    Claude Code reports where it reports one (_login_words), else API_WORDS'."""
+    got = _login_words() if cls in SIGN_IN_WORDS else None
+    if got is None:
+        words, fix, _ = API_WORDS[cls]
+        return f"{words}. {fix}"
+    what, fix = got
+    return f"{SIGN_IN_WORDS[cls].format(what=what)}. {fix}"
 
 
 def fix_where(cls: Any) -> str:
@@ -395,6 +465,8 @@ def failure_class(text: Any, *, status: Any = None, error: Any = None) -> str | 
         return ERROR_CLASS[str(error)]
     if (m := STATUS_RE.search(t)) and int(m.group(1)) in STATUS_CLASS:
         return STATUS_CLASS[int(m.group(1))]
+    if BILLING_RE.search(t):
+        return "billing"
     if AUTH_RE.search(t):
         return "auth"
     if FORBIDDEN_RE.search(t):
@@ -404,17 +476,19 @@ def failure_class(text: Any, *, status: Any = None, error: Any = None) -> str | 
     return retry.transient_class(None, t)
 
 
-def reason(text: Any, *, server: bool = False, cls: str | None = None, main_model: bool = False) -> tuple[str, Any]:
+def reason(text: Any, *, cls: str | None = None, main_model: bool = False) -> tuple[str, Any]:
     """A failure's words for a notice and the action that fixes it: an API failure (of class `cls` when the caller read
     it from Claude Code's record, else by its words) in plain words with its fix, a fix in the terminal after "In your
     terminal:" (TERMINAL) and one in the browser with its button (Open Settings for a model the account cannot use);
-    for a sign-in failure of a call the server made itself (`server`) the server's fix, and for a model main's session
-    asked for (`main_model`, a side thread's fork) Claude Code's /model. Any other failure in its own words,
-    shortened."""
+    for a failed sign-in or a credit balance too low the login Claude Code reports with its fix (sign_in_words), and
+    for a model main's session asked for (`main_model`, a side thread's fork) Claude Code's /model. Any other failure
+    in its own words, shortened."""
     cls = cls if cls in API_WORDS else failure_class(text)
     if cls is None:
         return _gist(text, REASON_CHARS).rstrip(".") or "no reason was given", None
-    words, fix, where = SERVER_AUTH if server and cls == "auth" else API_WORDS[cls]
+    if cls in SIGN_IN_WORDS:
+        return sign_in_words(cls), None
+    words, fix, where = API_WORDS[cls]
     if cls == "not_found" and main_model:
         fix, where = MAIN_MODEL_FIX, TERMINAL
     if where == TERMINAL:
@@ -473,14 +547,21 @@ def chat_title(c: str, chat: Any) -> str:
     return ""
 
 
+# the act a failed agent's notice offers first, by its role: the run again (the 0.9.0 bug hunt C18: a failed
+# orientation's notice offered nothing but its thread)
+AGAIN_ACTS: dict[str, dict[str, str]] = {"orientation": {"label": "Run again", "do": "orient-again"}}
+
+
 def agent_failed(c: str, *, role: str, key: Any, error: Any, chat: str | None = None, title: str = "",
                  action: Any = None, cls: str | None = None) -> dict[str, Any] | None:
     """An agent of thimble's ended failed with `error` (its report or Claude Code's API error line, of class `cls` when
-    its record named one): the notice "<agent> failed: <why and fix>." under its key, with Open on its chat. Never
-    raises."""
+    its record named one): the notice "<agent> failed: <why and fix>." under its key, with Open on its chat, and the
+    role's run again (AGAIN_ACTS) before the fix. Never raises."""
     try:
         name, subject = who(role, title or chat_title(c, chat))
         why, fix = reason(error, cls=cls)
+        if action is None and role in AGAIN_ACTS:
+            action = [AGAIN_ACTS[role], *([fix] if fix else [])]
         return post(c, kind="agent", text=f"{subject} failed: {why}.", agent=name, chat=chat, key=agent_key(key),
                     action=action if action is not None else fix)
     except Exception:  # noqa: BLE001 — a failure not told is no reason to fail what reports it
@@ -503,6 +584,16 @@ def agent_refused(c: str, *, role: str, key: Any, why: Any, chat: str | None = N
         return None
 
 
+def page_back(c: str) -> None:
+    """thimble's page answers main again, or main's tools run without it (session.attach, activate.continue_main): the
+    shim's `page:stopped` notice goes (bug hunt H4). Never raises."""
+    try:
+        if any(n.get("key") == PAGE_STOPPED_KEY for n in open_notices(c)):
+            clear(c, PAGE_STOPPED_KEY)
+    except Exception:  # noqa: BLE001
+        log.exception("%s: the page:stopped notice was not cleared", c)
+
+
 def cleared(c: str, key: Any) -> None:
     """clear for an agent of thimble's that started or ended well, by the key it runs under. Never raises."""
     try:
@@ -514,19 +605,43 @@ def cleared(c: str, key: Any) -> None:
 # --------------------------------------------------------------------------- routes
 
 
+def for_browser(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The notices the browser shows: every one but those addressed to one Claude Code session (module note)."""
+    return [n for n in rows if not n.get("session")]
+
+
 @router.get("/ws/{c}/notices")
 async def list_route(c: str) -> list[dict[str, Any]]:
-    """The open notices, oldest first (module note)."""
+    """The open notices the browser shows, oldest first (module note, for_browser)."""
     config.workspace_dir(c)
-    return open_notices(c)
+    return for_browser(open_notices(c))
 
 
 @router.post("/ws/{c}/notices/{notice_id}/dismiss")
 async def dismiss_route(c: str, notice_id: str, request: Request) -> dict[str, Any]:
     """The analyst's x: {dismissed: bool}. 403 without the analyst's browser cookie: the server's token, which main's
     shim holds, does not take a notice away from the analyst (subagents.analyst_only)."""
-    from . import subagents  # noqa: PLC0415
+    from . import hook_auth, subagents  # noqa: PLC0415
 
     subagents.analyst_only(request)
     config.workspace_dir(c)
+    if _own_sign_in(c, notice_id, hook_auth.browser_id(request)):
+        raise HTTPException(403, OWN_SIGN_IN)
     return {"dismissed": dismiss(c, notice_id)}
+
+
+# a dismiss_route's 403 for the notice of the asking browser's own sign-in: the notice is how the analyst sees a sign-in
+# that was not theirs, in the browser and above the terminal's prompt, so the browser it tells of cannot hide it
+OWN_SIGN_IN = "This notice tells of this browser's own sign-in, so only another browser or the terminal can dismiss it."
+
+
+def _own_sign_in(c: str, notice_id: str, browser: str) -> bool:
+    """Whether the open notice `notice_id` is the notice of the sign-in of the browser whose id is `browser`."""
+    if not browser:
+        return False
+    for n in open_notices(c):
+        if n.get("id") != notice_id or n.get("kind") != "sign-in":
+            continue
+        acts = n.get("action") if isinstance(n.get("action"), list) else [n.get("action")]
+        return any(isinstance(a, dict) and a.get("do") == "sign-out" and a.get("slug") == browser for a in acts)
+    return False

@@ -17,8 +17,8 @@ import { docsApi } from '../lib/api'
 import { bus } from '../lib/bus'
 import { track } from '../lib/telemetry'
 import { teleport } from '../lib/teleport'
-import type { DeckDoc, DeckSlide, WriteupSentence } from '../lib/types'
-import { CARD_MIME, usedCells } from './cards'
+import type { DeckDoc, WriteupSentence } from '../lib/types'
+import { CARD_MIME } from './cards'
 import type { CheckLook, DocComment } from './checkComments'
 import { SAVE_DEBOUNCE_MS, whenShown, type DocFilter } from './Editor'
 import { EvidencePop, useEvidence } from './Evidence'
@@ -866,15 +866,9 @@ function TextField({ className, label, value, onChange, onBlur }: { className: s
   return <textarea ref={el} className={`wu-tpl ${className}${value.trim() ? '' : ' wu-tpl-empty'}`} value={value} rows={1} aria-label={label} spellCheck={false} onChange={(e) => onChange(e.target.value)} onBlur={onBlur} />
 }
 
-/** The cards a deck shows as figures, for the sidebar's ✓. */
-export function deckCells(doc: DeckDoc | null): string[] {
-  return (doc?.slides ?? []).flatMap((s: DeckSlide) => [s.figure, ...(s.figures ?? [])].filter((f): f is { id: string; cell: string; caption: string } => !!f?.cell).map((f) => f.cell))
-}
-
 /** The slides' sidebar: the canvas's cards, as the report's sidebar lists them, to drag onto a slide or place on the
  * chosen one with a double-click, then the Checks pane. */
-export function DeckSidebar({ ws, doc, slug, onInsert, onHide, over, checks, comments }: Omit<SidebarProps, 'cells' | 'groups' | 'used' | 'doc'> & { doc: DeckDoc | null; slug: string }) {
+export function DeckSidebar({ ws, slug, onInsert, onHide, over, checks, comments }: Omit<SidebarProps, 'cells' | 'groups' | 'doc'> & { slug: string }) {
   const { cells, groups } = useCanvas(ws)
-  const used = useMemo(() => usedCells(deckCells(doc)), [doc])
-  return <Sidebar ws={ws} cells={cells} groups={groups} used={used} onInsert={onInsert} onHide={onHide} over={over} doc={slug} checks={checks} comments={comments} />
+  return <Sidebar ws={ws} cells={cells} groups={groups} onInsert={onInsert} onHide={onHide} over={over} doc={slug} checks={checks} comments={comments} />
 }

@@ -65,8 +65,8 @@ def _new_id(used: set[str]) -> str:
 
 
 _MARKUP_RE = re.compile(r"\[\[([^\[\]|]*)\|[^\[\]]*\]\]|\[\[[^\[\]]*\]\]")
-# not before a period that starts a word: "their .yardopts file" and ".gov.uk" keep their space
-_BEFORE_PUNCT_RE = re.compile(r"\s+([,;:!?)]|\.(?!\w))")
+# only before punctuation that ends a word: "their .yardopts file", ".gov.uk", "port :8000" and "./x" keep their space
+_BEFORE_PUNCT_RE = re.compile(r"\s+([,;:!?).])(?![\w./\\])")
 
 
 def plain_text(text: str) -> str:
@@ -525,8 +525,10 @@ async def heal_sentences(c: str, sentences: list[dict[str, Any]], *, unwrap: boo
             if (out.get("meta") or {}).get("span_missing"):
                 external[(display, ref)] = "the cited span is gone"
                 continue
-            excerpt = str(out.get("excerpt") or "")
-            holds = _value_matches(display, excerpt) or not cite.shows_value(display)  # words that show no value name the link
+            excerpt = refs.checked_text(out)
+            # words that show no value name the link, and so do a value at a view's unit its words leave out and a
+            # line's own number (refs.place_only)
+            holds = _value_matches(display, excerpt) or not cite.shows_value(display) or refs.place_only(out, display)
             external[(display, ref)] = None if holds else {"why": "the value is not at this reference", "source": _source_numbers(excerpt)}
 
         prior = x.get("healed") if isinstance(x.get("healed"), list) else ()
@@ -589,10 +591,10 @@ async def verify_and_tag(c: str, sentences: list[dict[str, Any]]) -> dict[str, A
         if r in broken_set:
             continue
         out = outs.get(r)
-        exc = None if out is None else str(out.get("excerpt") or "")
+        exc = None if out is None else refs.checked_text(out)
         if exc is not None and not cite.is_card_ref(r) and not cite.shows_value(display):
             continue  # a file place that resolves, cited by words that show no value: they name the link (heal_sentences)
-        if exc is None or not _value_matches(display, exc):
+        if exc is None or not (_value_matches(display, exc) or refs.place_only(out, display)):
             failed.append({"sentence_id": sid, "ref": r, "value": display})
     value_pairs = {(sid, r) for sid, r, _ in values}
     spans = [r for r in distinct if r not in broken_set and cite.is_card_ref(r) and ("#" in r or "@out" in r)]

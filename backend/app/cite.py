@@ -140,6 +140,14 @@ def shown_matches(token: str, shown: str, *, negative_ok: bool = False) -> bool:
 # A clock time as prose and outputs write it: `9:38`, `09:38`, `09:38:00`, `09:38:00.5` (the seconds' fraction is
 # not compared). _NUM_RE leaves clock times alone, so a display such as `09:38` or `00:56–01:00` holds no number.
 _CLOCK_RE = re.compile(r"(?<![\d:])(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?![\d:])")
+# a clock time alone, as a value prose cites (`14:52`, `14:52:11`, `14:52:11.325`, `09:38 UTC`)
+_CLOCK_ONLY_RE = re.compile(r"\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:\s*(?:UTC|GMT|Z))?", re.I)
+
+
+def is_clock(display: str) -> bool:
+    """Whether a display is a clock time alone (`14:52`, `14:52:11 UTC`): a value its place can show, as a number is
+    (mods/thimble-term/hooks/lib.ts isClock)."""
+    return _CLOCK_ONLY_RE.fullmatch((display or "").strip()) is not None
 
 
 def clocks_in(display: str, text: str) -> bool:
@@ -291,12 +299,15 @@ def dates_shown(text: str) -> str | None:
 def value_in(display: str, excerpt: str, *, decrease: bool = False) -> bool:
     """Whether a value-ref's display is at the place it cites (verify._value_matches, report._value_matches): a number
     must cite a whole number token of the excerpt by shown_matches (a substring hit is not a receipt), or a whole number
-    the excerpt writes in words (in_words); a day and a month in words a date the excerpt writes as digits (date_in);
+    the excerpt writes in words (in_words); a day and a month in words a date the excerpt writes as digits (date_in); a
+    clock time alone a clock time of it (clocks_in: `14:52` at `2026-08-30T14:52:11`, never `4:52` at `14:52`);
     anything else is a substring of it, ignoring commas and case, the quotation marks around a quoted phrase left out."""
     if any(shown_matches(display, t, negative_ok=decrease) for t in _NUM_RE.findall(excerpt)):
         return True
     if date_in(display, excerpt):
         return True
+    if is_clock(display):
+        return clocks_in(display, excerpt)
     if _NUM_RE.fullmatch(display.strip()):
         return in_words(display, excerpt)  # `7` where the place writes "seven"
     words = display.strip()
@@ -899,27 +910,70 @@ def quote_refs(cell: dict | None, text: str) -> str:
 _LINK_RE = re.compile(r"(?<![\[!])\[([^\[\]\n]*)\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)")
 _WEB_SCHEME_RE = re.compile(r"^(?:[a-z][a-z0-9+.-]*://|mailto:|tel:)", re.I)
 BARE_LINK_TEXTS = ("", "↗")  # the link texts of a citation without a value, `[↗](card:<id>)`
+# A citation written as a link whose words are in double brackets, `[[↗]](card:<id>)` or `[[31]](card:<id>#a/b)` (bug
+# hunt E2: main mixed the chat form `[↗](ref)` with the takeaway form `[[…]]`), Markdown's link with the words `[↗]`.
+# Words that are a ref themselves (`[[card:x]](above)`) are a citation followed by words in parentheses.
+_MIXED_LINK_RE = re.compile(r"\[\[([^\[\]|\n]*)\]\]\(\s*(?:<([^<>\n]+)>|((?:[^()\s<>]|\([^()\s]*\))+))\s*\)")
+
+
+def _link_citation(m: "re.Match[str]") -> str:
+    """A link match (_LINK_RE, _MIXED_LINK_RE) as the citation it stands for, or as written when its target is no ref."""
+    from . import refs  # noqa: PLC0415 — refs imports this module
+
+    shown, target = m.group(1).strip(), (m.group(2) or m.group(3) or "").strip()
+    if not target or _WEB_SCHEME_RE.match(target) or "|" in shown:
+        return m.group()
+    try:
+        refs.parse_ref(target)
+    except ValueError:
+        return m.group()
+    return f"[[{target}]]" if shown in BARE_LINK_TEXTS else f"[[{shown}|{target}]]"
+
+
+def mixed_links(text: str) -> str:
+    """`text` with each citation written as a link whose words are in double brackets as the citation it means:
+    `[[↗]](card:<id>)` becomes `[[card:<id>]]` and `[[31]](card:<id>#a/b)` becomes `[[31|card:<id>#a/b]]`. Idempotent."""
+    if "]](" not in text:
+        return text
+    return _MIXED_LINK_RE.sub(lambda m: m.group() if _REF_SHAPE.match(m.group(1).strip()) else _link_citation(m), text)
 
 
 def from_links(text: str) -> str:
     """`text` with each Markdown link whose target is a ref of the grammar written as the citation it stands for:
-    `[31](card:<id>#a/b)` becomes `[[31|card:<id>#a/b]]` and `[↗](card:<id>)` becomes `[[card:<id>]]`. Web links and
-    targets that are no ref are left as written. Idempotent."""
+    `[31](card:<id>#a/b)` becomes `[[31|card:<id>#a/b]]` and `[↗](card:<id>)` becomes `[[card:<id>]]`, and so does such a
+    link with its words in double brackets (mixed_links). Web links and targets that are no ref are left as written.
+    Idempotent."""
     if "](" not in text:
         return text
-    from . import refs  # noqa: PLC0415 — refs imports this module
+    return _LINK_RE.sub(_link_citation, mixed_links(text))
 
-    def one(m: "re.Match[str]") -> str:
-        shown, target = m.group(1).strip(), (m.group(2) or m.group(3) or "").strip()
-        if not target or _WEB_SCHEME_RE.match(target) or "|" in shown:
-            return m.group()
-        try:
-            refs.parse_ref(target)
-        except ValueError:
-            return m.group()
-        return f"[[{target}]]" if shown in BARE_LINK_TEXTS else f"[[{shown}|{target}]]"
 
-    return _LINK_RE.sub(one, text)
+# A code fence with what it holds (to its closing fence, or the text's end), or a code span: where an answer's text is
+# left as written (chat_form).
+_CODE_RE = re.compile(r"^[ \t]*(```|~~~)[^\n]*(?:\n.*?(?:^[ \t]*\1[^\n]*$|\Z)|\Z)|(`+)[^`\n]+?\2", re.M | re.S)
+
+
+def _single(m: "re.Match[str]") -> str:
+    """A value-ref in single brackets (_SINGLE_RE) as its citation, or as written when the part after the bar is no
+    ref or the part before it is one."""
+    display, ref = m.group(1).strip(), m.group(2).strip()
+    if not display or _REF_SHAPE.match(display) or not _REF_SHAPE.match(ref):
+        return m.group()
+    return f"[[{display}|{ref}]]"
+
+
+def chat_form(text: str) -> str:
+    """An answer's text (main's, a thread's) with its citations in their chat form: each Markdown link to a ref
+    (from_links), and each value-ref in single brackets, `["Filename … is invalid"|transcript.jsonl#L2059]`, written
+    `[[…|…]]` as a takeaway's is (normalise_markup). Code spans and fences are left as written. Idempotent."""
+    text = from_links(text)
+    if "|" not in text:
+        return text
+    out, at = [], 0
+    for m in _CODE_RE.finditer(text):
+        out += [_SINGLE_RE.sub(_single, text[at:m.start()]), m.group()]
+        at = m.end()
+    return "".join([*out, _SINGLE_RE.sub(_single, text[at:])])
 
 
 def to_links(text: str) -> str:
@@ -951,12 +1005,6 @@ def normalise_markup(text: str) -> str:
             return m.group()
         return f"[[{display}|{ref}]]"
 
-    def single(m: "re.Match[str]") -> str:
-        display, ref = m.group(1).strip(), m.group(2).strip()
-        if not display or _REF_SHAPE.match(display) or not _REF_SHAPE.match(ref):
-            return m.group()
-        return f"[[{display}|{ref}]]"
-
     def bare(m: "re.Match[str]") -> str:
         shown, bar, ref = m.group(1).rpartition("|")
         return f"[[{ref.strip()}]]" if bar and shown.strip() in BARE_LINK_TEXTS and ref.strip() else m.group()
@@ -967,7 +1015,7 @@ def normalise_markup(text: str) -> str:
     # a citation without a value written with the link text as its value (`[[↗|ref]]`) is the bare ref, never a value
     # the check looks for at its place (live check term-fix7: a takeaway's `[[↗|events.jsonl#L1063]]` was red)
     text = _SPAN_RE.sub(bare, text)
-    text = _SINGLE_RE.sub(single, text)
+    text = _SINGLE_RE.sub(_single, text)
     return _BARE_NUMBER_RE.sub(lambda m: m.group(1), text)
 
 
@@ -1309,7 +1357,8 @@ class _Sources:
             if word and not clocks_in(display, hit[0]):
                 return None
             if not word and not (_norm(hit[0]) in wants or shown_matches(display, hit[0], negative_ok=negative_ok)
-                                 or date_in(display, hit[0]) or in_words(display, hit[0])):
+                                 or date_in(display, hit[0]) or in_words(display, hit[0])
+                                 or self._cell_holds(hit[0], display, negative_ok)):
                 return None
             return td_ref(self.cell_id, decode_label(m[1]), decode_label(m[2]))
         if m := self.line_span.match(ref):
@@ -1336,6 +1385,17 @@ class _Sources:
         return None
 
     @staticmethod
+    def _cell_holds(value: str, display: str, negative_ok: bool) -> bool:
+        """Whether a table cell that writes several values shows a display's numbers among them (the false × of 10-16): a
+        single number as a whole number token (value_in), a 6 at a cell that reads "2026, 6, 2026" but never at one that
+        reads "1,206" or "2026"; a display of several numbers when the cell writes each of them (numbers_held)."""
+        if len(_NUM_RE.findall(value)) < 2:
+            return False
+        if _num_parts(display) is not None:
+            return value_in(display, value, decrease=negative_ok)
+        return numbers_held(display, value, negative_ok=negative_ok)
+
+    @staticmethod
     def _line_holds(line: str, display: str, wants: set[str], negative_ok: bool) -> bool:
         """Whether a line of text output shows a value-ref's display: a number as a whole token (value_in), a day and a
         month in words as a date the line writes in digits (date_in; live check term-fix7, new quirk 4: edit_card
@@ -1344,7 +1404,19 @@ class _Sources:
             return value_in(display, line, decrease=negative_ok)
         if date_in(display, line):
             return True
-        return display.strip() in line or bool(wants & {_norm(x) for x in _NUM_RE.findall(line)})
+        return (display.strip() in line or bool(wants & {_norm(x) for x in _NUM_RE.findall(line)})
+                or numbers_held(display, line, negative_ok=negative_ok))
+
+
+def numbers_held(display: str, text: str, *, negative_ok: bool = False) -> bool:
+    """Whether a display of two or more numbers ("6 of 2026") has each of them at the place `text` as a whole number
+    token (shown_matches), as a line that prints "(2026, 6, 2026)" has (the false × of 10-16); False for a display of
+    fewer than two numbers, which value_in decides."""
+    nums = _NUM_RE.findall(display or "")
+    if len(nums) < 2:
+        return False
+    toks = _NUM_RE.findall(text or "")
+    return all(any(shown_matches(n, t, negative_ok=negative_ok) for t in toks) for n in nums)
 
 
 def _specific(tok: str) -> bool:
@@ -1422,13 +1494,14 @@ def is_label_display(display: str) -> bool:
 
 
 def shows_value(display: str) -> bool:
-    """Whether a value-ref's display shows a value its place can be checked for: a number, quoted words or a day and a
-    month in words (mods/thimble-term/hooks/cite.ts showsValue). Other words, such as `its record` or `had the answer
-    cached`, only name the place they link to (live check term-fix6: `[[its record|pages.jsonl#L2]]` was marked red
-    because the line holds no such words)."""
+    """Whether a value-ref's display shows a value its place can be checked for: a number, quoted words, a day and a
+    month in words or a clock time alone (mods/thimble-term/hooks/cite.ts showsValue; a time such as `14:52:11` was
+    found but "not checked" in the terminal). Other words, such as `its record` or `had the answer cached`, only name
+    the place they link to (live check term-fix6: `[[its record|pages.jsonl#L2]]` was marked red because the line holds
+    no such words)."""
     d = (display or "").strip()
     quoted = len(d) > 2 and d[0] in QUOTE_MARKS and d[-1] in QUOTE_MARKS
-    return bool(_NUM_RE.search(d)) or quoted or day_month(d) is not None
+    return bool(_NUM_RE.search(d)) or quoted or day_month(d) is not None or is_clock(d)
 
 
 def _canonical_token(token: str) -> str:

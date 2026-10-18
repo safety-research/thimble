@@ -11,16 +11,17 @@ import { refIcon, refTone } from '../components/RefChip'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { useTooltip } from '../components/Tooltip'
-import { classesOf, colourVar, isFilesLabel, isMultiClass, mainColour } from '../files/labels'
+import { againWords, classesOf, colourVar, isFilesLabel, isMultiClass, labelStatus, mainColour, stoppedText } from '../files/labels'
 import { ReadCutLine } from '../files/ReadCutLine'
-import { api } from '../lib/api'
+import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
+import { onCiteClick } from '../lib/citeTargets'
 import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { loadSettings, modelLabel } from '../lib/models'
 import { addressLabel, hiddenPath } from '../lib/refs'
 import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
-import type { Cell, Concept, ConceptDetail, ResolvedRef } from '../lib/types'
+import type { Cell, Concept, ConceptDetail, FilterScope, ResolvedRef } from '../lib/types'
 import { CanvasContext } from './context'
 import { CustomFrame, DatasetView } from './DataViz'
 import { conceptName, type ConceptDetailState } from './concepts'
@@ -31,9 +32,11 @@ import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { TypeCard } from './TypeCard'
-import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
+import { entryParts, exampleEntries, exampleQuotes, quotedSpan, type ExampleEntry } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
+/** Words as a sentence: the first letter capitalized and a period at the end. */
+const sentenceOf = (s: string): string => `${s.charAt(0).toUpperCase()}${s.slice(1)}.`
 
 export function CardBody({ cell, width, label, big = false }: { cell: Cell; width: number; label: ConceptDetailState; big?: boolean }) {
   const { ws, concepts } = useContext(CanvasContext)
@@ -52,11 +55,11 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
       const raw = Array.isArray(payload.refs) ? (payload.refs as unknown[]) : []
       const quotes = Array.isArray(payload.quotes) ? (payload.quotes as unknown[]) : []
       const refs = raw.filter((r): r is string => typeof r === 'string')
-      return <ExampleBody refs={refs} quotes={raw.flatMap((r, i) => (typeof r === 'string' ? [quotes[i]] : []))} ws={ws} big={big} />
+      return <ExampleBody cellId={cell.id} refs={refs} quotes={raw.flatMap((r, i) => (typeof r === 'string' ? [quotes[i]] : []))} ws={ws} big={big} question={cell.title ?? ''} takeaway={cell.takeaway ?? ''} />
     }
     case 'label': {
       const concept = typeof payload.concept === 'string' ? payload.concept : ''
-      return concept ? <LabelBody cellId={cell.id} conceptId={concept} concept={label.concept} error={label.error} /> : null
+      return concept ? <LabelBody cellId={cell.id} conceptId={concept} concept={label.concept} error={label.error} reload={label.reload} /> : null
     }
     case 'custom': {
       const html = typeof payload.html === 'string' ? payload.html : ''
@@ -76,7 +79,7 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
         )
       const output = art ? (
         <div className={`bcell-output bcell-output-${art.kind}`} data-out={outIndex(cell.outputs, art.bundle)}>
-          <Output bundle={art.bundle} maxLines={big ? 80 : 24} maxRows={big ? 40 : 12} fitWidth={width} card labels={chartLabels(cell.labels, concepts)} />
+          <Output bundle={art.bundle} maxLines={big ? 80 : 24} maxRows={big ? 40 : 12} frameRows={big ? undefined : CARD_TABLE_ROWS} fitWidth={width} card labels={chartLabels(cell.labels, concepts)} />
         </div>
       ) : null
       // a code card is its code (what the analyst asked to see), with what it printed or returned under it; a card of
@@ -162,6 +165,10 @@ function highlightTop(el: HTMLElement): number {
 /** the height of a code card's code before Show all: about twelve lines, and more in focus mode */
 const CODE_MAX = 220
 const CODE_MAX_BIG = 520
+/** the rows a table card's DataFrame shows on the board before `… n more rows`, as many as the terminal's card shows
+ * (plugin/hooks/term/draw.ts MAX_TABLE_ROWS), so a long table keeps the board's Fit readable (bug hunt D5); focus mode
+ * shows every row */
+export const CARD_TABLE_ROWS = 15
 
 /** the height a quoted record shows before Show all: one alone, one of several, and each in focus mode */
 const QUOTE_MAX = 330
@@ -185,8 +192,21 @@ function MediaExample({ ws, media }: { ws: string; media: MediaRef }) {
  * (canvas/quotes exampleEntries, entryParts). A ref to an image, recording or video shows the file itself
  * (MediaExample).
  */
-function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknown[]; ws: string; big: boolean }) {
+function ExampleBody({ cellId, refs, quotes, ws, big, question = '', takeaway = '' }: { cellId: string; refs: string[]; quotes: unknown[]; ws: string; big: boolean; question?: string; takeaway?: string }) {
   const [got, setGot] = useState<Record<string, ResolvedRef | null>>({})
+  // a citation of the takeaway that names a quoted record by its line opens it in Files at the words the card quotes
+  // there, marked, as the record's address does (lib/citeTargets)
+  useEffect(
+    () =>
+      onCiteClick(cellId, (ref) => {
+        const span = quotedSpan(refs, ref)
+        if (!span) return false
+        track('chip-teleport', { target: span, detail: { kind: 'example-takeaway' } })
+        teleport(span, { browser: true })
+        return true
+      }),
+    [cellId, refs],
+  )
   useEffect(() => {
     let alive = true
     for (const ref of new Set(refs.filter((r) => !mediaOf(r)))) void resolvedOf(ws, ref).then((r) => alive && setGot((cur) => (cur[ref] === r ? cur : { ...cur, [ref]: r })))
@@ -194,7 +214,11 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
       alive = false
     }
   }, [ws, refs])
-  const entries = useMemo(() => exampleEntries(refs, quotes), [refs, quotes])
+  // each ref's quote: the one add_card kept, else its takeaway's quote of the record (exampleQuotes)
+  const entries = useMemo(() => exampleEntries(refs, exampleQuotes(refs, quotes, takeaway)), [refs, quotes, takeaway])
+  // what the card says of each record: the values its takeaway cites there, and its question's and takeaway's words
+  const cited = useMemo(() => [...takeaway.matchAll(/\[\[([^\]|]*)\|([^\]]*)\]\]/g)].map((m) => ({ said: m[1].trim(), ref: m[2].trim() })), [takeaway])
+  const words = `${question} ${takeaway.replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')}`
   if (!entries.length) return null
   const open = (r: string) => {
     track('chip-teleport', { target: r, detail: { kind: 'example' } })
@@ -213,7 +237,7 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
   const body = (e: ExampleEntry, max: number) => {
     const media = mediaOf(e.ref)
     if (media) return <MediaExample ws={ws} media={media} />
-    const parts = entryParts(e, lookup)
+    const parts = entryParts(e, lookup, { said: cited.filter((c) => c.said && e.refs.includes(c.ref)).map((c) => c.said), words })
     if (!parts?.length) return null
     return (
       <Clamp max={max} className="bcell-q-body">
@@ -308,18 +332,23 @@ export function LabelMeta({ label: k }: { label: Pick<Concept, 'kind' | 'unit' |
 /**
  * A label card's body, drawn by a fixed template (a label card is deterministic, so no model checks it); the label row
  * above it names the label (LabelHead, CardFace CardLabels). The value table: value · units · share, each value a
- * button that sets the scope's filter, every value's share of the same total (details labelShares); the units that
- * total is of the label row states. Under it the Rule disclosure, closed, which opens the classifier's prompt, pattern
+ * button that sets the scope's filter, its tooltip saying what the click shows (ValueButton), every value's share of the same total (details labelShares); the units that
+ * total is of the label row states. One quiet line under the table says what a click on a value does, on the board and
+ * in focus mode, and while the card's own filter is on, what the scope shows now, with Show all (labelValueLine; bug
+ * hunt round 9, J7: a click changed what Files shows, and nothing on the card said so). Under it the Rule disclosure, closed, which opens the classifier's prompt, pattern
  * or code, and Definition and records, which opens the label's definition and its records under each value in the
  * card's details (DetailPanel LabelDetails); it shows only on the board and in focus mode, where those details open,
  * not in a report's figure or the card harness's picture. The card shows no record of the corpus itself.
- * While a run goes on, a line says how far it has come.
+ * While a run goes on, a line says how far it has come. A last run that was stopped (by the analyst, or by quitting
+ * Claude Code) says where it stopped, so its counts do not read as the whole scope's, with Run again on the board (bug
+ * hunt H3: a run the quit stopped at 8,447 of 14,591 records read as finished).
  */
-function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conceptId: string; concept: ConceptDetail | null; error: string | null }) {
+function LabelBody({ cellId, conceptId, concept, error, reload }: { cellId: string; conceptId: string; concept: ConceptDetail | null; error: string | null; reload?: () => Promise<void> }) {
   const ctx = useContext(CanvasContext)
   const { ws } = ctx
   const [pending, setPending] = useState<string | null>(null)
   const [ruleOpen, setRuleOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
   const known = concept ?? ctx.concepts.get(conceptId) ?? null
   const counts = known?.counts ?? {}
   const run = (known as ConceptDetail | null)?.run
@@ -347,6 +376,9 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
       setPending(null)
     }
   }
+  // the value the card's own filter keeps, while it is on
+  const onValue = scope ? values.find((v) => filterIs(ctx.filters, scope, conceptId, v)) : undefined
+  const valueLine = scope && values.length > 0 && (onValue != null || ctx.openDetail) ? labelValueLine(scope, known.unit, onValue == null ? null : { value: onValue, n: noCounts ? null : (counts[onValue] ?? 0) }) : ''
   const spec = (known.spec || known.description || '').trim()
   const files = isFilesLabel(known)
   const classes = files ? new Map(classesOf(known).map((c) => [c.name, c])) : null
@@ -357,6 +389,24 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
   const records = () => {
     track('ui-click', { target: `cell:${cellId}`, detail: { action: 'label-records' } })
     ctx.openDetail?.(cellId)
+  }
+  // where its last run stopped, when it was stopped; Run again goes on with the units that run never read while the
+  // definition stands (`resume`, bug hunt I3), else runs it as that run ran (a trial on its sample), its words saying which
+  const lastRun = known.last_run ?? (known as ConceptDetail).applications?.at(-1) ?? null
+  const status = running ? null : labelStatus({ ...known, last_run: lastRun }, run ?? null)
+  const stopped = status?.state === 'done' && status.stopped ? status.stoppedAt ?? null : null
+  const resume = known.resume ?? null
+  const again = async () => {
+    setStarting(true)
+    try {
+      track('label-apply', { target: `concept:${conceptId}`, detail: { again: 'stopped', via: 'label-card', ...(resume ? { resume: true } : {}) } })
+      await labelApi.apply(ws, conceptId, resume ? { resume: true } : lastRun?.limit ? { limit: lastRun.limit } : {})
+      await reload?.()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setStarting(false)
+    }
   }
   return (
     <div className="bcell-label" data-body="" data-settled="true">
@@ -377,10 +427,7 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
                 <tr key={v}>
                   <td>
                     {classes ? <span className={`bcell-value-square${cls?.highlight ? ' is-lit' : ''}`} style={{ '--c': colourVar(cls?.color) } as CSSProperties} title={cls?.highlight ? 'highlighted in Files' : undefined} /> : null}
-                    <button type="button" className={`bcell-value${on ? ' is-on' : ''}`} aria-pressed={on} disabled={!scope || pending != null} onClick={() => void toggle(v)} onMouseDown={(e) => e.stopPropagation()}>
-                      {pending === v ? <Spinner size={10} label="setting the filter" /> : null}
-                      {v}
-                    </button>
+                    <ValueButton value={v} on={on} cue={scope ? labelValueCue(scope, known.unit, noCounts ? null : (counts[v] ?? 0), on) : null} pending={pending === v} disabled={!scope || pending != null} onToggle={() => void toggle(v)} />
                   </td>
                   <td className="num">{noCounts ? '—' : (counts[v] ?? 0).toLocaleString()}</td>
                   <td className="num">{noCounts ? '—' : shares[v]}</td>
@@ -389,6 +436,29 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
             })}
           </tbody>
         </table>
+      )}
+      {valueLine && (
+        <p className={`bcell-label-hint${onValue != null ? ' is-on' : ''}`} role="status">
+          {valueLine}
+          {onValue != null && (
+            <>
+              {' · '}
+              <button type="button" className="bcell-label-hint-act" disabled={pending != null} onMouseDown={(e) => e.stopPropagation()} onClick={() => void toggle(onValue)}>
+                Show all
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      {stopped && (
+        <div className="bcell-label-stopped">
+          <span>{sentenceOf(stoppedText(stopped, known.unit))}</span>
+          {ctx.openDetail && (
+            <Button variant="secondary" size="sm" busy={starting} onMouseDown={(e) => e.stopPropagation()} onClick={() => void again()}>
+              {!resume && lastRun?.limit ? 'Run the sample again' : againWords(resume, stopped)}
+            </Button>
+          )}
+        </div>
       )}
       {!running && cut && <ReadCutLine cut={cut} className="bcell-label-cut" />}
       {running && (
@@ -424,6 +494,41 @@ function LabelBody({ cellId, conceptId, concept, error }: { cellId: string; conc
         </div>
       )}
     </div>
+  )
+}
+
+/** What a click on a value of a label card does, as its tooltip says it: shows only the `n` units with that value
+ * where the label's scope shows them (Files, the canvas, the report), or, while that filter is `on`, shows them all
+ * again; `n` null while a run has counted none. Pure. */
+export function labelValueCue(scope: FilterScope, unit: string | undefined, n: number | null, on: boolean): string {
+  const all = unitWord(unit, 2)
+  const these = n == null ? `the ${all} with this value` : n === 1 ? `this ${unitWord(unit, 1)}` : `these ${n.toLocaleString()} ${unitWord(unit, n)}`
+  if (scope === 'files') return on ? `Show all ${all} in Files` : `Show ${these} in Files`
+  if (scope === 'canvas') return on ? `Show all ${all}` : `Show only ${these}`
+  return on ? `Show all ${all} in the report` : `Show only ${these} in the report`
+}
+
+/** The quiet line under a label card's values (LabelBody): what a click on a value does, as where the scope shows its
+ * units, and while the card's filter keeps `on.value`, what that place shows now (`on.n` of its units, null while a run
+ * has counted none), which the card follows with Show all. Pure. */
+export function labelValueLine(scope: FilterScope, unit: string | undefined, on: { value: string; n: number | null } | null): string {
+  const all = unitWord(unit, 2)
+  if (!on) return `Click a value to show only its ${all} ${scope === 'files' ? 'in Files' : scope === 'canvas' ? 'on the canvas' : 'in the report'}`
+  const place = scope === 'files' ? 'Files' : scope === 'canvas' ? 'The canvas' : 'The report'
+  const these = on.n == null ? `the ${all}` : `the ${on.n.toLocaleString()} ${unitWord(unit, on.n)}`
+  return `${place} shows only ${these} with ${on.value}`
+}
+
+/** A value of a label card's table: a button that sets the scope's filter to it, its tooltip saying what the click does
+ * (labelValueCue), on hover and at keyboard focus. */
+function ValueButton({ value, on, cue, pending, disabled, onToggle }: { value: string; on: boolean; cue: string | null; pending: boolean; disabled: boolean; onToggle: () => void }) {
+  const { props, tip } = useTooltip(disabled ? null : cue, undefined, 'start')
+  return (
+    <button type="button" className={`bcell-value${on ? ' is-on' : ''}`} aria-pressed={on} disabled={disabled} onClick={onToggle} onMouseDown={(e) => e.stopPropagation()} {...props}>
+      {pending ? <Spinner size={10} label="setting the filter" /> : null}
+      {value}
+      {tip}
+    </button>
   )
 }
 

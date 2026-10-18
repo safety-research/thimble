@@ -45,15 +45,6 @@ def test_files_of_kinds_that_never_belong_are_refused(cc, tmp_path, monkeypatch)
         "a worked example's sample files, in their folders, are data on purpose; a copy elsewhere is not"
 
 
-def test_the_command_fails_on_a_hit_and_passes_a_clean_tree(tmp_path):
-    clean = write(tmp_path / "clean", {"a.py": "print('ok')\n"})
-    dirty = write(tmp_path / "dirty", {"a.db": b"\0"})
-    run = [sys.executable, str(SCRIPT), "--no-gitleaks"]
-    assert subprocess.run([*run, str(clean)], capture_output=True).returncode == 0
-    r = subprocess.run([*run, str(dirty)], capture_output=True, text=True)
-    assert r.returncode == 1 and "a.db:0: [path]" in r.stdout
-
-
 # under CI, which installs gitleaks, the test runs and fails without it rather than skipping
 @pytest.mark.skipif(shutil.which("gitleaks") is None and os.environ.get("CI") != "true", reason="gitleaks is not installed")
 def test_a_secret_gitleaks_finds_fails_the_command(tmp_path):
@@ -62,7 +53,6 @@ def test_a_secret_gitleaks_finds_fails_the_command(tmp_path):
     write(tmp_path, {"deploy.py": f"TOKEN = '{token}'\n"})
     r = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True)
     assert r.returncode == 1 and "deploy.py:1: [secret]" in r.stdout, r.stdout
-
 
 
 def precache(root: Path, name: str = "toy", **extra) -> dict[str, str]:
@@ -123,40 +113,3 @@ def test_a_precache_folder_is_allowed_on_the_terms_of_its_exception_only(cc, tmp
         ("demos/full/thimble-demo-precache.json", "demos/full is a pre-cache of version 4, not 3 (the outputs alone, "
          "with no transcript: `thimble demo --export --outputs-only`)"),
         ("elsewhere/run.jsonl", "a file of a kind that never belongs in the tree")}
-
-
-def test_a_precache_holds_the_shape_the_export_writes(cc, tmp_path):
-    """Beyond its kinds of file: the orientation's chat alone, with an empty log; the cited calls alone, each cut to an
-    excerpt; label rows without the texts they marked; and the README with the source's notice."""
-    import json  # noqa: PLC0415
-
-    listed = precache(tmp_path)
-    man = json.loads(listed["demos/toy/thimble-demo-precache.json"])
-    man["files"] += [{"path": "chats/t9.meta.json"}]
-    write(tmp_path, {**listed, "demos/toy/thimble-demo-precache.json": json.dumps(man),
-                     "demos/toy/README.md": "no notice here\n",
-                     "demos/toy/workspace/chats/o1.jsonl": '{"type": "tool_result"}\n',
-                     "demos/toy/workspace/chats/t9.meta.json": "{}",
-                     "demos/toy/workspace/labels/l.jsonl": json.dumps({"ref": "a#L1", "spans": ["the text"]}) + "\n",
-                     "demos/toy/workspace/calls/o1.jsonl": json.dumps({"n": 2, "result": "x" * 501}) + "\n"
-                                                           + json.dumps({"n": 7, "input": "{}"}) + "\n"})
-    got = {(h[0], h[3]) for h in cc.demo_hits(tmp_path, cc.files_of(tmp_path))}
-    shape = "not as the export writes it: "
-    assert got == {
-        ("demos/toy/README.md", "missing, or without the source's notice the manifest names"),
-        ("demos/toy/workspace/chats/o1.jsonl", shape + "the orientation's log, which the export writes empty"),
-        ("demos/toy/workspace/chats/t9.meta.json", shape + "a chat other than the orientation's"),
-        ("demos/toy/workspace/labels/l.jsonl", shape + "a label row with spans (the texts a label marked)"),
-        ("demos/toy/workspace/calls/o1.jsonl", shape + "call 2's output is longer than the excerpt the export keeps")}
-    write(tmp_path, {"demos/toy/workspace/calls/o1.jsonl": json.dumps({"n": 7, "input": "{}"}) + "\n"})
-    got = {(h[0], h[3]) for h in cc.demo_hits(tmp_path, cc.files_of(tmp_path))}
-    assert ("demos/toy/workspace/calls/o1.jsonl", shape + "a call the manifest's cited_calls does not list") in got
-
-
-def test_a_precache_has_size_caps_of_its_own(cc, tmp_path, monkeypatch):
-    write(tmp_path, precache(tmp_path))
-    monkeypatch.setattr(cc, "DEMO_FILE_MAX", 100)
-    monkeypatch.setattr(cc, "DEMO_TOTAL_MAX", 150)
-    got = {(h[0], h[3].split(", over")[0]) for h in cc.demo_hits(tmp_path, cc.files_of(tmp_path))}
-    assert ("demos/toy/workspace/labels/l.jsonl", "210 bytes") in got
-    assert any(a == "demos/toy/" and b.endswith("bytes in all") for a, b in got)

@@ -1,130 +1,56 @@
-// The permission requests waiting for the analyst, as one card pinned above the chat's composer in every chat. It holds
-// every session's requests (chat/permissions.ts pendingRequests), oldest first and those declined unanswered last, one
-// at a time with paging, whose `1 of 3` counts the requests that still wait, or on one declined unanswered those
-// declined unanswered. The card keeps showing the request it shows while others arrive, are answered or time out. Its
-// head names the requesting thread (askThread); the body says who asks, what the call does, every later call that waits
-// on the same answer (scrolled), and why it asks, then Allow, Always allow (where Claude Code offers a rule: for main's
-// request what its own "don't ask again" adds, kept where Claude Code keeps it and worded as its dialog words it; for a
-// session thimble started a rule for the session, or for a web call its site or web search in the workspace; the scope
-// in its tooltip) and Deny, in one row. A
-// request declined unanswered says so, with Dismiss, and Dismiss all when several were. When auto mode's classifier
-// could not judge a call, the request of a session thimble started offers the switch to Manual, and to Bypass unless
-// the analyst's Claude Code settings turn it off. An answer takes its request off the card at once and the next request
-// can be answered while it is sent; one that fails puts its request back, and one whose request had already ended
-// leaves it off. A request that just took the card's place, or was just declined, ignores clicks and keys for ARM_MS,
-// so a double click never answers the next request unread. Allow covers only the later calls the card listed. A long
-// command wraps and scrolls past 96px. A request too long to show whole says how much of it shows and offers no "don't
-// ask again".
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '../components/Button'
+// The permission requests waiting for the analyst, as one card pinned above the chat's composer in every chat, read-only:
+// Claude Code asks in the terminal, which is always there, and the analyst answers there (thimble 0.9.0 answers no
+// permission request from the browser). It holds every session's requests (chat/permissions.ts pendingRequests), oldest
+// first and those declined unanswered last, one at a time with paging, whose `1 of 3` counts the requests that still
+// wait, or on one declined unanswered those declined unanswered. The card keeps showing the request it shows while
+// others arrive, are answered or time out. Its head names the requesting thread (askThread); the body says who asks,
+// what the call does, every later call that waits on the same answer (scrolled), and why it asks; its foot says to
+// answer in the terminal (TERMINAL_LINE). A long command wraps and scrolls past 96px. A request too long to show whole
+// says how much of it shows.
+import { useEffect, useState } from 'react'
 import { CodeText } from '../components/Code'
 import { Icon } from '../components/Icon'
-import { TipButton, Tipped } from '../components/Tooltip'
-import { api } from '../lib/api'
-import { bus } from '../lib/bus'
-import { track } from '../lib/telemetry'
+import { TipButton } from '../components/Tooltip'
 import type { ChatMeta, PermissionRequest } from '../lib/types'
 import { askFields, askWhat, CODE_LANGS } from './Holds'
 import { ThreadChip } from './Notes'
 import { askedBy, askingAgent, asksTo, askThread, askWhy, type PendingAsk } from './permissions'
 
-/** A request's "don't ask again" choice: the button's label, and its tooltip saying what it keeps and where (for main's
- * request, as the backend words it after Claude Code's own dialog), with the curly apostrophe of Claude Code's Bash
- * rows as the backend's words have it. Pure. */
-export function alwaysChoice(p: PermissionRequest): { label: string; tip: string } | null {
-  if (p.keep) return { label: `Always allow ${p.keep}`, tip: `Allow, and don\u2019t ask again for ${p.keep === 'web search' ? 'web searches' : p.keep} in this workspace` }
-  if (p.always) return { label: p.always_label || `Always allow ${p.always}`, tip: p.always_tip || `Allow, and don\u2019t ask again for ${p.always} for the rest of this session` }
-  return null
-}
+/** How long a card that just showed ignores clicks and keys, so a double click never acts on it unread (the proposal
+ * card's Accept). */
+export const ARM_MS = 500
 
 /** The title of a request declined because nobody answered it in time. */
 export const EXPIRED_TITLE = 'Not answered in time'
 
-/** The line a request the card shows only the start of carries: how much shows, and that Allow approves all of it. */
+/** The line a request the card shows only the start of carries: how much shows. */
 export function cutLine(p: Pick<PermissionRequest, 'cut' | 'command' | 'input'>): string | null {
   if (!p.cut) return null
   const shown = (p.command || p.input || '').length
-  return `Only the first ${shown.toLocaleString('en-US')} of ${p.cut.toLocaleString('en-US')} characters are shown. Allow approves all of it.`
+  return `Only the first ${shown.toLocaleString('en-US')} of ${p.cut.toLocaleString('en-US')} characters are shown.`
 }
 
-/** Send the analyst's answer to the session that asked: main's prompt to the hook that relayed it (backend
- * events.permission_route), any other session's through its chat with how many of the later calls the card listed
- * (backend agent_session.permission_route). */
-function answer(ws: string, ask: PendingAsk, allow: boolean, always: boolean): Promise<unknown> {
-  const shown = ask.request.also?.length ?? 0
-  return ask.chat === 'main' ? api.answerPermission(ws, ask.request.id, allow, always) : api.answerSessionPermission(ws, ask.chat, ask.request.id, allow, always, shown)
-}
+/** Where every request is answered: Claude Code's own dialog in the terminal. */
+export const TERMINAL_LINE = 'Answer it in your Claude Code terminal.'
 
-/** How long a request that just took the card's place ignores clicks and keys. */
-export const ARM_MS = 500
-/** How long an answer is on its way before the card says it is still being sent. */
-export const SLOW_MS = 1000
-
-export const ENDED_TEXT = 'That request had already ended.'
-export const SENDING_TEXT = 'Sending your answer…'
-
-/** A set with `id` added or taken out. Pure. */
-const plus = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => new Set([...set, id])
-const minus = (set: ReadonlySet<string>, id: string): ReadonlySet<string> => new Set([...set].filter((x) => x !== id))
-
-export function PermissionCard({ ws, asks, metas, labels }: {
+export function PermissionCard({ asks, metas, labels }: {
   ws: string
   /** the requests waiting (pendingRequests), the one asked first first */
   asks: readonly PendingAsk[]
   metas: ReadonlyMap<string, ChatMeta>
   labels: ReadonlyMap<string, string>
 }) {
-  // answered here and not yet gone from the session's meta
-  const [answered, setAnswered] = useState<ReadonlySet<string>>(new Set())
-  // answers on their way, whose requests the card no longer shows
-  const [sending, setSending] = useState<ReadonlySet<string>>(new Set())
-  const [slow, setSlow] = useState(false)
   // the request the card shows, and where it stood, for the request that takes its place once it goes
   const [at, setAt] = useState<{ id: string | null; i: number }>({ id: null, i: 0 })
-  // the request whose buttons take clicks (ARM_MS after it took the card's place), as `face` names it
-  const [armed, setArmed] = useState<string | null>(null)
-  const root = useRef<HTMLDivElement>(null)
-  // the requests whose answer was sent, read in the same event as the click, so one request is never answered twice
-  const sent = useRef(new Set<string>())
-  const shown = useMemo(() => asks.filter((a) => !answered.has(a.request.id) && !sending.has(a.request.id)), [asks, answered, sending])
+  const shown = asks
   const found = shown.findIndex((a) => a.request.id === at.id)
   const i = found >= 0 ? found : Math.min(at.i, Math.max(0, shown.length - 1))
   const ask = shown[i] ?? null
   const id = ask?.request.id ?? null
-  // the request shown, and whether it is declined: a request that turns declined under a click ignores it as a new one
-  const face = id && `${id}${ask?.request.expired ? ':declined' : ''}`
   useEffect(() => {
     if (id !== at.id || i !== at.i) setAt({ id, i })
   }, [id, i, at])
-  useEffect(() => {
-    if (!face) return
-    const timer = window.setTimeout(() => setArmed(face), ARM_MS)
-    return () => window.clearTimeout(timer)
-  }, [face])
-  const ready = !!face && armed === face
-  useEffect(() => {
-    if (!sending.size) {
-      setSlow(false)
-      return
-    }
-    const timer = window.setTimeout(() => setSlow(true), SLOW_MS)
-    return () => window.clearTimeout(timer)
-  }, [sending.size])
-  // an answered request is forgotten once its session no longer lists it
-  useEffect(() => {
-    if (!answered.size) return
-    const live = new Set(asks.map((a) => a.request.id))
-    if (![...answered].some((x) => !live.has(x))) return
-    for (const x of [...sent.current]) if (!live.has(x) && answered.has(x)) sent.current.delete(x)
-    setAnswered((cur) => new Set([...cur].filter((x) => live.has(x))))
-  }, [asks, answered])
-  if (!ask) {
-    return slow ? (
-      <div className="chat-perm chat-perm-sending" role="status">
-        {SENDING_TEXT}
-      </div>
-    ) : null
-  }
+  if (!ask) return null
   const p = ask.request
   const who = askedBy(ask, metas, labels)
   const agent = askingAgent(p)
@@ -134,52 +60,11 @@ export function PermissionCard({ ws, asks, metas, labels }: {
   const alike = shown.filter((a) => !!a.request.expired === expired)
   const also = p.also ?? []
   const cut = cutLine(p)
-  const always = cut ? null : alwaysChoice(p)
-  // a request of one of thimble's agents: the terminal answers it (U6b), so the card has no buttons
-  const terminal = !!p.terminal
-  // the answer to one request: off the card at once, back on it if the answer could not be sent, and off for good when
-  // the request had already ended
-  const send = (a: PendingAsk, allow: boolean, always = false) => {
-    const rid = a.request.id
-    if (sent.current.has(rid)) return
-    sent.current.add(rid)
-    setSending((cur) => plus(cur, rid))
-    track('ui-click', { target: `chat:${a.chat}`, detail: { action: 'permission', tool: a.request.tool, allow, always } })
-    answer(ws, a, allow, always)
-      .then(() => setAnswered((cur) => plus(cur, rid)))
-      .catch((e: Error) => {
-        if (/^404\b/.test(e.message)) {
-          setAnswered((cur) => plus(cur, rid))
-          if (!a.request.expired) bus.emit('toast', { text: ENDED_TEXT })
-          return
-        }
-        sent.current.delete(rid)
-        setAt({ id: rid, i: 0 })
-        bus.emit('toast', { text: `Could not answer: ${e.message}`, kind: 'error' })
-      })
-      .finally(() => setSending((cur) => minus(cur, rid)))
-  }
-  // focus that was on the card stays there, where Tab reaches the next request's buttons, rather than on a button that
-  // leaves; with no request `left` it goes to the composer below the card
-  const keepFocus = (left: number) => {
-    const card = root.current
-    if (!card?.contains(document.activeElement)) return
-    const composer = left ? null : card.closest('.chat-foot')?.querySelector<HTMLTextAreaElement>('textarea:not(:disabled)')
-    ;(composer ?? card).focus({ preventScroll: true })
-  }
-  const reply = (allow: boolean, always = false) => {
-    if (!ready) return
-    keepFocus(shown.length - 1)
-    send(ask, allow, always)
-  }
-  const dismissAll = () => {
-    if (!ready) return
-    keepFocus(shown.length - alike.length)
-    for (const a of alike) send(a, false)
-  }
-  const gate = { 'aria-disabled': !ready || undefined }
+  const why = askWhy(ask, metas, labels)
+  // the agents' own lines already say where they ask (terminalAsksLine)
+  const foot = expired || /\bterminal\b/.test(why) ? null : TERMINAL_LINE
   return (
-    <div ref={root} tabIndex={-1} className={`chat-perm${shown.length > 1 ? ' chat-perm-stack' : ''}${terminal ? ' chat-perm-terminal' : ''}`} role="alertdialog" aria-label={expired ? EXPIRED_TITLE : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined} data-terminal={terminal || undefined} data-armed={ready || undefined}>
+    <div tabIndex={-1} className={`chat-perm chat-perm-terminal${shown.length > 1 ? ' chat-perm-stack' : ''}`} role="alertdialog" aria-label={expired ? EXPIRED_TITLE : 'Permission needed'} data-chat={ask.chat} data-request={p.id} data-count={shown.length} data-expired={expired || undefined} data-terminal>
       <div className="chat-perm-head">
         <Icon name="warning" size={13} className="chat-perm-ico" />
         <span className="chat-perm-title">{expired ? EXPIRED_TITLE : 'Permission needed'}</span>
@@ -234,41 +119,13 @@ export function PermissionCard({ ws, asks, metas, labels }: {
             </ul>
           </div>
         )}
-        <p className="chat-perm-why">{askWhy(ask, metas, labels)}</p>
+        <p className="chat-perm-why">{why}</p>
+        {foot && (
+          <p className="chat-perm-answer-there" role="note">
+            {foot}
+          </p>
+        )}
       </div>
-      {terminal ? null : expired ? (
-        <div className="chat-perm-acts">
-          <Button variant="secondary" size="sm" className="chat-perm-dismiss" {...gate} onClick={() => reply(false)}>
-            Dismiss
-          </Button>
-          {alike.length > 1 && (
-            <Button variant="ghost" size="sm" className="chat-perm-dismiss-all" {...gate} onClick={dismissAll}>
-              Dismiss all
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="chat-perm-acts">
-          <Button variant="primary" size="sm" className="chat-perm-allow" {...gate} onClick={() => reply(true)}>
-            Allow
-          </Button>
-          {always && (
-            <Tipped text={always.tip} className="chat-perm-always-tip">
-              <Button variant="secondary" size="sm" className="chat-perm-always" data-keep={p.keep} {...gate} onClick={() => reply(true, true)}>
-                {always.label}
-              </Button>
-            </Tipped>
-          )}
-          <Button variant="ghost" size="sm" className="chat-perm-deny" {...gate} onClick={() => reply(false)}>
-            Deny
-          </Button>
-        </div>
-      )}
-      {slow && (
-        <p className="chat-perm-sent" role="status">
-          {SENDING_TEXT}
-        </p>
-      )}
     </div>
   )
 }

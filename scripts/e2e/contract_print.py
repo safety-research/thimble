@@ -7,9 +7,11 @@ are test-only types passed with --agents.
         [--results results.jsonl] [--claude claude]
 
 Two runs, each with --setting-sources user, `ultracode: false`, thimble's plugin from <tree>/plugin (its waker and its
-hooks module; any other thimble copy Claude Code enables is turned off for the run), THIMBLE_LAUNCHED=1 so that only
-the module's own `isInteractive` check keeps it idle, and a stand-in thimble server on port N (THIMBLE_HOME in the out
-folder) that would accept the module's hello and hold its long poll, so a module that is not idle in -p would show:
+hooks module; any other thimble copy Claude Code enables is turned off for the run), thimble on in the run's session
+before it starts (--session-id, with the session's marker and a launch.json that makes its transport the server's,
+mark_on) and THIMBLE_OPEN=1, so that only the module's own `isInteractive` check keeps it idle, and a stand-in thimble
+server on port N (THIMBLE_HOME in the out folder) that would accept the module's hello and hold its long poll, so a
+module that is not idle in -p would show:
   - format: main (a `[1m]` model) starts a background contract-parent, which calls a probe MCP tool, starts a background
     contract-child and hands its report back; the child ends with plain text, so Claude Code makes it hand back;
   - cap: under CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=1 main starts two agents at once, so Claude Code refuses one.
@@ -447,8 +449,25 @@ def other_thimbles(claude: str, tree: Path, env: dict[str, str]) -> list[str]:
 def run_env(base: dict[str, str], home: Path, port: int, extra: dict[str, str] | None = None) -> dict[str, str]:
     env = {k: v for k, v in base.items() if not k.startswith("THIMBLE_") and not SESSION_VARS.match(k)}
     env.update({"THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port), "THIMBLE_UI_PORT": str(port + 1),
-                "THIMBLE_LAUNCHED": "1", "DISABLE_AUTOUPDATER": "1", **(extra or {})})
+                "THIMBLE_OPEN": "1", "DISABLE_AUTOUPDATER": "1", **(extra or {})})
     return env
+
+
+def mark_on(home: Path, folder: Path, cwd: Path) -> str:
+    """A new session id with thimble on in it before its run starts, as activation and a press leave it: the session's
+    marker (<home>/up/<sid>.active) naming a workspace folder in `folder` whose trusted/launch.json makes the session
+    main on the server's transport."""
+    import uuid  # noqa: PLC0415
+
+    sid = str(uuid.uuid4())
+    ws = folder / "workspace"
+    (ws / "trusted").mkdir(parents=True, exist_ok=True)
+    (ws / "trusted" / "launch.json").write_text(json.dumps({"session": sid, "transport": "server", "via": "press"}))
+    up = home / "up"
+    up.mkdir(parents=True, exist_ok=True)
+    (up / f"{sid}.active").write_text(json.dumps({"cwd": str(cwd), "ws": "contract", "path": str(ws), "via": "press",
+                                                  "role": "main", "mod": False, "at": time.time()}))
+    return sid
 
 
 def settings(hook_cmd: str, disable: list[str]) -> str:
@@ -487,14 +506,16 @@ CAP_PROMPT = (f"This is an automated format check. In one message, make two Agen
               f"DONE.")
 
 
-def run_args(folder: Path, model: str, prompt: str, tree: Path, disable: list[str], agent_model: str) -> list[str]:
-    """The arguments of one run, its probe MCP server's and its hook's logs in `folder`."""
+def run_args(folder: Path, model: str, prompt: str, tree: Path, disable: list[str], agent_model: str,
+             session: str) -> list[str]:
+    """The arguments of one run, its probe MCP server's and its hook's logs in `folder`, as session `session`."""
     folder.mkdir(parents=True, exist_ok=True)
     mcp = {"mcpServers": {"contract": {"type": "stdio", "command": sys.executable,
                                        "args": ["-I", str(HERE / "contract_mcp.py"), str(folder / "mcp.jsonl")]}}}
     (folder / "mcp.json").write_text(json.dumps(mcp))
     hook = f"{sys.executable} -I {HERE / 'contract_hook.py'} {folder / 'hooks.jsonl'}"
-    return ["-p", "--output-format", "stream-json", "--verbose", "--model", model, "--permission-mode", "auto",
+    return ["-p", "--session-id", session, "--output-format", "stream-json", "--verbose", "--model", model,
+            "--permission-mode", "auto",
             "--setting-sources", "user", "--settings", settings(hook, disable), "--plugin-dir", str(tree / "plugin"),
             "--mcp-config", str(folder / "mcp.json"), "--allowedTools", "mcp__contract__probe",
             "--agents", agents_json(agent_model), prompt]
@@ -577,7 +598,7 @@ def main(argv: list[str] | None = None) -> int:
                                            ("cap", CAP_PROMPT, agent_model, {"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "1"})):
             for attempt in range(1, (ATTEMPTS if name == "format" else 1) + 1):
                 folder = out / (f"run-{name}" if attempt == 1 else f"run-{name}-{attempt}")
-                r = run(claude, run_args(folder, model, prompt, tree, disable, agent_model),
+                r = run(claude, run_args(folder, model, prompt, tree, disable, agent_model, mark_on(home, folder, cwd)),
                         run_env(dict(os.environ), home, a.port, extra), cwd, folder)
                 r["events"] = hook_inputs(jsonl(folder / "hooks.jsonl"))
                 r["main"], r["agents"], r["metas"] = copy_transcripts(r["events"], folder / "transcripts")

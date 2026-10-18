@@ -81,9 +81,11 @@ export const PAUSED_LINE = 'Waiting for the critique'
 /** The line when a Stop found the agent had ended already. */
 export const STOP_DONE_LINE = 'It had already ended.'
 
+/** How to stop one of the session's agents (a side thread's fork, the orientation) in the terminal. */
+export const TERMINAL_STOP_LINE = 'Stop it in your terminal: ↓ to it in the agent tray, Enter, then Esc.'
+
 /** The line when thimble could not stop it, and how to stop it in the terminal. */
-export const stopFailedLine = (reason: string): string =>
-  `thimble could not stop it${reason ? `: ${reason.replace(/[.\s]+$/, '')}` : ''}. Stop it in your terminal: ↓ to it in the agent tray, Enter, then Esc.`
+export const stopFailedLine = (reason: string): string => `thimble could not stop it${reason ? `: ${reason.replace(/[.\s]+$/, '')}` : ''}. ${TERMINAL_STOP_LINE}`
 
 /** The Stop of main when thimble's module does not run in main's session, which alone can end main's turn. */
 export const MAIN_ESC_LINE = 'To stop main, press Esc in your Claude Code terminal.'

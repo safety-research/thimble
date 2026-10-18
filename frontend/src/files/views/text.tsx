@@ -1,18 +1,22 @@
-// The Rendered view: line-numbered text; a markdown file renders as a document unless a ref points into it, its fenced
-// code blocks syntax-coloured in the language the fence names (components/Code.tsx MarkdownCode, as in the chat). Each
-// rendered block carries `data-anchor="<path>#L<n>"` for its first source line, so the ⌘ pointer lands on the line. A
+// The Rendered view: line-numbered text; a markdown file renders as a document, its fenced code blocks syntax-coloured
+// in the language the fence names (components/Code.tsx MarkdownCode, as in the chat). Each rendered block carries
+// `data-anchor="<path>#L<n>"` for its first source line, so the ⌘ pointer lands on the line. A ref into a markdown file
+// opens the document at the block that holds its line, with an edge beside the block and the words a span ref quotes
+// highlighted (.hl), scrolled into view (bug hunt L11: the file showed its source with line numbers, as Raw does). A
 // front matter (YAML between `---` lines, TOML between `+++` lines) shows folded above the document, its fields one per
 // row when opened.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Markdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { Root } from 'hast'
+import type { Element, ElementContent, Root, Text } from 'hast'
 import { Button } from '../../components/Button'
 import { MarkdownCode } from '../../components/Code'
 import { MdImage } from '../../components/MdImage'
 import { rehypeNumericCells } from '../../lib/markdownCells'
+import { plainMd } from '../../lib/mdPlain'
+import { findQuote } from '../../lib/quoteFind'
 import type { SourceKind, SourceRecord } from '../../lib/types'
-import { BlockEl, LineRow, targetOf, useTarget, type ViewDef, type ViewProps } from './common'
+import { BlockEl, citedQuote, LineRow, useTarget, type Target, type ViewDef, type ViewProps } from './common'
 
 export const isMarkdown = (path: string) => /\.(md|markdown)$/i.test(path)
 
@@ -27,6 +31,15 @@ const MD_COMPONENTS: Components = {
   img: MdImage,
 }
 
+/** Words written in Markdown, rendered as a markdown file is (a transcript's system prompt, a reply). */
+export function MarkdownText({ text }: { text: string }) {
+  return (
+    <Markdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} rehypePlugins={[rehypeNumericCells]} components={MD_COMPONENTS}>
+      {text}
+    </Markdown>
+  )
+}
+
 /** rehype plugin: a top-level block gets `data-anchor` from the source line it starts on (`lines` maps the joined text's
  * line index to the record's line number). */
 export function rehypeBlockAnchors(path: string, lines: number[]) {
@@ -38,6 +51,56 @@ export function rehypeBlockAnchors(path: string, lines: number[]) {
       const line = lines[start - 1] ?? start
       child.properties.dataAnchor = `${path}#L${line}`
     }
+  }
+}
+
+/** The words `quote` in the hast element `el`, each text they cross cut where they start and end and the part inside
+ * wrapped in a `.hl` span; as written, else without its markdown syntax (`**P6:**` reads `P6:`). Code is not searched,
+ * since its block draws its own text. Whether the words were found. */
+export function markQuoteIn(el: Element, quote: string): boolean {
+  const texts: { parent: Element; node: Text; from: number }[] = []
+  let full = ''
+  const walk = (p: Element) => {
+    for (const c of p.children) {
+      if (c.type === 'text') {
+        texts.push({ parent: p, node: c, from: full.length })
+        full += c.value
+      } else if (c.type === 'element' && c.tagName !== 'code') walk(c)
+    }
+  }
+  walk(el)
+  const at = findQuote(full, quote) ?? findQuote(full, plainMd(quote))
+  if (!at) return false
+  for (const t of texts) {
+    const v = t.node.value
+    const i = Math.max(at[0], t.from) - t.from
+    const j = Math.min(at[1], t.from + v.length) - t.from
+    if (j <= i) continue
+    const parts: ElementContent[] = []
+    if (i > 0) parts.push({ type: 'text', value: v.slice(0, i) })
+    parts.push({ type: 'element', tagName: 'span', properties: { className: ['hl'] }, children: [{ type: 'text', value: v.slice(i, j) }] })
+    if (j < v.length) parts.push({ type: 'text', value: v.slice(j) })
+    t.parent.children.splice(t.parent.children.indexOf(t.node), 1, ...parts)
+  }
+  return true
+}
+
+/** rehype plugin: the top-level block the target's line is in (the last that starts on or before it; `lines` maps the
+ * joined text's line index to the record's line number) carries `reader-md-target`, and the words `quote` in it are
+ * highlighted (markQuoteIn). */
+export function rehypeTarget(lines: number[], target: Target | null, quote: string | null) {
+  return () => (tree: Root) => {
+    if (!target) return
+    let at: Element | null = null
+    for (const child of tree.children) {
+      if (child.type !== 'element' || !child.position) continue
+      if ((lines[child.position.start.line - 1] ?? child.position.start.line) > target.line) break
+      at = child
+    }
+    if (!at) return
+    const cls = at.properties.className
+    at.properties.className = [...(Array.isArray(cls) ? cls : cls != null ? [cls] : []), 'reader-md-target']
+    if (quote) markQuoteIn(at, quote)
   }
 }
 
@@ -131,18 +194,30 @@ function FrontMatter({ path, records }: { path: string; records: SourceRecord[] 
 export function TextView({ path, page, targetRef }: ViewProps) {
   const records = page.records
   const md = isMarkdown(path)
-  const [raw, setRaw] = useState(() => !md || targetOf(targetRef, path) != null)
   const rootRef = useRef<HTMLDivElement | null>(null)
-  const { target, hit } = useTarget(targetRef, path, rootRef, [records, raw])
-  useEffect(() => {
-    if (target) setRaw(true)
-  }, [target])
+  const { target, hit } = useTarget(targetRef, path, rootRef, [records])
   const meta = useMemo(() => (md && records[0]?.line === 1 ? frontMatterLines(records.map(lineText)) : 0), [md, records])
   const body = useMemo(() => records.slice(meta), [records, meta])
-  const rehype = useMemo(() => [rehypeBlockAnchors(path, body.map((r) => r.line)), rehypeNumericCells], [path, body])
+  const quote = useMemo(() => citedQuote(records, target), [records, target])
+  const rehype = useMemo(() => {
+    const lines = body.map((r) => r.line)
+    return [rehypeBlockAnchors(path, lines), rehypeTarget(lines, target, quote), rehypeNumericCells]
+  }, [path, body, target, quote])
+  // the block a ref names comes into view once it is drawn, its quoted words in the middle (a block taller than the view
+  // from its start); once per ref, so the analyst's scroll is kept as more lines load
+  const placed = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!md || !target || placed.current === targetRef) return
+    const el = rootRef.current?.querySelector<HTMLElement>('.reader-md-target')
+    if (!el) return
+    placed.current = targetRef
+    const hl = el.querySelector<HTMLElement>('.hl')
+    const room = rootRef.current?.closest<HTMLElement>('.reader-body')?.clientHeight ?? window.innerHeight
+    ;(hl ?? el).scrollIntoView({ block: !hl && el.getBoundingClientRect().height > room ? 'start' : 'center' })
+  }, [md, target, targetRef, records])
   return (
     <div className="reader-lines" ref={rootRef}>
-      {md && !raw ? (
+      {md ? (
         <div className="reader-md reader-md-file" data-anchor={path} data-anchor-text={path}>
           {meta > 0 && <FrontMatter path={path} records={records.slice(0, meta)} />}
           <Markdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} rehypePlugins={rehype} components={MD_COMPONENTS}>

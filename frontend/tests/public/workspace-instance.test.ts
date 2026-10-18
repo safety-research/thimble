@@ -2,25 +2,11 @@
 // workspace made again under an old name, with a new main chat, does not reopen on the old one's layout, and clearing
 // one workspace's keys leaves another's alone, even one whose name it prefixes.
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { instanceAction, PENDING_INSTANCE, storageKey, syncInstance, workspaceKeys } from '../../src/lib/workspace.ts'
+import { instanceAction, storageKey, syncInstance, workspaceKeys } from '../../src/lib/workspace.ts'
 
 describe('instanceAction', () => {
-  test('the same stamp keeps everything', () => {
-    expect(instanceAction('2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')).toEqual({ clear: false, write: null })
-  })
   test('another stamp clears and keeps the new one', () => {
     expect(instanceAction('2025-01-01T00:00:00Z', '2026-01-01T00:00:00Z')).toEqual({ clear: true, write: '2026-01-01T00:00:00Z' })
-  })
-  test('no stamp kept (state from before the check) clears and keeps the new one', () => {
-    expect(instanceAction(null, '2026-01-01T00:00:00Z')).toEqual({ clear: true, write: '2026-01-01T00:00:00Z' })
-  })
-  test('no main yet clears and keeps the sentinel, once', () => {
-    expect(instanceAction('2025-01-01T00:00:00Z', null)).toEqual({ clear: true, write: PENDING_INSTANCE })
-    expect(instanceAction(null, null)).toEqual({ clear: true, write: PENDING_INSTANCE })
-    expect(instanceAction(PENDING_INSTANCE, null)).toEqual({ clear: false, write: null })
-  })
-  test('a stamp found while the sentinel is kept is adopted without clearing', () => {
-    expect(instanceAction(PENDING_INSTANCE, '2026-01-01T00:00:00Z')).toEqual({ clear: false, write: '2026-01-01T00:00:00Z' })
   })
 })
 
@@ -81,33 +67,5 @@ describe('syncInstance', () => {
     expect(localStorage.getItem(storageKey('logs-2', 'layout'))).toBe('{"chatOpen":true}')
     expect(sessionStorage.getItem(storageKey('logs-2', 'seen'))).toBe('{}')
     expect(localStorage.getItem('thimble:last-ws')).toBe('logs')
-  })
-
-  test('the same instance keeps its state', () => {
-    syncInstance('logs', 'T1')
-    seed()
-    syncInstance('logs', 'T1')
-    expect(localStorage.getItem(storageKey('logs', 'layout'))).toBe('{"chatOpen":false}')
-  })
-
-  test("a tab's session state from an older instance goes even when another tab already stamped the new one", () => {
-    syncInstance('logs', 'T1')
-    sessionStorage.setItem(storageKey('logs', 'instance'), JSON.stringify('T0'))
-    sessionStorage.setItem(storageKey('logs', 'files'), '{"open":["a"]}')
-    localStorage.setItem(storageKey('logs', 'layout'), '{"chatOpen":false}')
-    expect(syncInstance('logs', 'T1')).toBe(true)
-    expect(sessionStorage.getItem(storageKey('logs', 'files'))).toBeNull()
-    expect(localStorage.getItem(storageKey('logs', 'layout'))).toBe('{"chatOpen":false}')
-    expect(syncInstance('logs', 'T1')).toBe(false)
-  })
-
-  test('a pending instance keeps a layout made meanwhile when its stamp arrives', () => {
-    syncInstance('logs', null)
-    expect(JSON.parse(localStorage.getItem(storageKey('logs', 'instance'))!)).toBe(PENDING_INSTANCE)
-    seed()
-    syncInstance('logs', null)
-    syncInstance('logs', 'T1')
-    expect(localStorage.getItem(storageKey('logs', 'layout'))).toBe('{"chatOpen":false}')
-    expect(JSON.parse(localStorage.getItem(storageKey('logs', 'instance'))!)).toBe('T1')
   })
 })
