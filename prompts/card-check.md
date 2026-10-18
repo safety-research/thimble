@@ -37,7 +37,7 @@ What each link resolves to
 
 Its code
 {{code}}
-{{typed}}{{kept}}
+{{chart}}{{typed}}{{kept}}
 
 The work that led to the card, most recent last
 {{context}}
@@ -45,6 +45,12 @@ The work that led to the card, most recent last
 ## none
 
 None.
+
+## chart
+
+The code draws its chart with thimble.chart. A replacement calls it only with the kinds, columns and options that its help gives:
+
+{{help}}
 
 ## typed
 

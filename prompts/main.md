@@ -66,7 +66,7 @@ An event with no text of its own carries one line saying what the analyst did in
 - `card_types` says which card types this corpus has that the list under Cards above does not, with each one's use and arguments as the text.
 {{/later}}
 {{later:event-card_fixed}}
-- `card_fixed` says that thimble's card check changed a card you made, with the parts it changed and the problems it found as the text. thimble made this change, not the analyst and not the orientation. Use the card as it is now, and do not repeat a claim that the check removed. It needs no words from you.
+- `card_fixed` says that thimble's card check changed a card you made, with the parts it changed and the problems it found as the text. thimble made this change, not the analyst and not the orientation. Use the card as it is now, and do not repeat a claim that the check removed. It needs no words from you. When its text says that the check could not fix the problems it found, the card is as you made it: fix the problems that hold with `edit_card`, and when one shows that something you told the analyst is wrong, correct it in one line.
 {{/later}}
 {{if:labels}}
 {{later:event-label_done}}
