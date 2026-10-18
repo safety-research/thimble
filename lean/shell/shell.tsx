@@ -552,6 +552,23 @@ function withoutTargets(md: string): string {
   return String(md).replace(LINK, (m, label: string, ref: string) => (/^(https?|file):/i.test(ref) || !isRef(ref) ? m : label))
 }
 
+/** What the person sees of an object Claude just saved, in a few lines for Claude: how big it is, how many parts they
+ *  can select, and what does not hold (a program that failed, the toolkit's warnings, example sets with no records,
+ *  parts that rest on no rows). */
+function drawnNote(p: Prepared, ref: ObjRef): string {
+  if (p.error || !p.grid) return `The person cannot see ${refText(ref)}: ${p.error || 'it drew nothing'}.`
+  const d = p.drawing
+  const parts = selectable(p.grid)
+  const lines = [`${refText(ref)} is drawn for the person under your reply: ${p.grid.h} rows by ${p.grid.w} columns, ${parts.length} part${parts.length === 1 ? '' : 's'} they can select.`]
+  if (d.error) lines.push(`Its program failed: ${d.error.name}: ${d.error.message}${d.error.line ? ` (line ${d.error.line})` : ''}. They see the error in its place.`)
+  for (const w of (d.warnings || []).slice(0, 5)) lines.push(`Warning: ${w}`)
+  const empty = Object.entries(d.examples || {}).filter(([, x]: [string, Any]) => !x?.records?.length).map(([id]) => id)
+  if (empty.length) lines.push(`${empty.length} example set${empty.length === 1 ? ' has' : 's have'} no records, so the person sees none for ${empty.length === 1 ? 'it' : 'them'}: ${empty.slice(0, 4).join(', ')}${empty.length > 4 ? ', …' : ''}.`)
+  const bare = parts.filter((r: Any) => !regionRefs(p.object, d, r.id).refs.length && !recordRefs(d, r.id).length)
+  if (bare.length) lines.push(`${bare.length} of ${parts.length} parts name no ref and match no data row, so selecting one shows no source rows: ${bare.slice(0, 4).map((r: Any) => r.id).join(', ')}${bare.length > 4 ? ', …' : ''}.`)
+  return lines.join('\n')
+}
+
 /** The words a /verb run leaves in the transcript and for Claude. */
 function ranText(r: Ran): string {
   if (r.error) return `${r.verb}: ${r.error}`
@@ -613,11 +630,13 @@ export const registerShell: Register = on => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const r = await next(e)
+    let notes: string[] = []
     try {
       const input = e as unknown as { command?: string; agentId?: string; tool_use_id?: string }
       const text = typeof r.text === 'string' ? r.text : typeof r.result === 'string' ? r.result : ''
       if (r.deny !== undefined || r.isError || input.agentId || !/\blean\b/.test(String(input.command)) || !text.includes('saved ')) return r
       const cdTo = /^\s*cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*&&/.exec(String(input.command))
+      notes = []
       for (const m of text.matchAll(SAVED)) {
         const id = String(m[1])
         const root = await findRoot($, id, cdTo ? [String(cdTo[1] || cdTo[2] || cdTo[3])] : [])
@@ -628,12 +647,13 @@ export const registerShell: Register = on => {
           if (input.tool_use_id) turn.calls.push(input.tool_use_id)
         }
         await $.state.set(LAST, ref)
-        $.clock.after(0, () => { void prepared($, ref, 96) })
+        notes.push(drawnNote(await prepared($, ref, 96), ref))
       }
     } catch {
       // watching never changes a call's result
     }
-    return r
+    // what the person sees of each object, for Claude alone, after the call's own output
+    return notes.length && r.deny === undefined && !r.isError ? { ...r, context: [...(r.context ?? []), notes.join('\n')] } : r
   }).catch(($, e, next) => next(e))
 
   // the first text row after a save carries its objects: they are placed before the row is stored, so the main screen

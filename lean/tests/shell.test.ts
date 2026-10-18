@@ -51,7 +51,9 @@ test('an object Claude saves is drawn under the next words of the turn, with its
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   on('tool.call', () => ({ result: 'saved 01-saves v1: thimble/objects/01-saves.json\n  /days ← q1 (exact)\n' }))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  await $.tool.call({ tool: 'Bash', command: "lean save saves <<'JSON'\n{}\nJSON" } as never)
+  const saved = await $.tool.call({ tool: 'Bash', command: "lean save saves <<'JSON'\n{}\nJSON" } as never)
+  // Claude reads what the person sees of it, after the command's own output
+  expect(String((saved as { context?: string[] }).context)).toContain('01-saves@1 is drawn for the person under your reply')
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
   const first = textOf(await reply($))
   expect(first).toContain('the reply')
