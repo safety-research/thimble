@@ -551,7 +551,9 @@ function citesIn(md: string): { ref: string; label: string }[] {
   for (const m of String(md).matchAll(LINK)) {
     const ref = String(m[2])
     if (/^(https?|file):/i.test(ref) || !isRef(ref) || out.some(c => c.ref === ref)) continue
-    out.push({ ref, label: String(m[1]) })
+    // a citation whose words are only a mark (`[↗](rows.jsonl#L12)`) is named by its place
+    const label = /[\p{L}\p{N}]/u.test(String(m[1])) ? String(m[1]) : ref.replace(/#L(\d+)/, ':$1').replace(/^obj:/, '')
+    out.push({ ref, label })
   }
   return out
 }

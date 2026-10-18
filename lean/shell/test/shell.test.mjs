@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { chainWords, forDrawing, isRef, objectRefs, recordRefs, regionRefs, rowByName } from '../object.js'
+import { runProgram } from '../../draw/sandbox-node.mjs'
 import { prep } from '../node/prep.mjs'
 import { findVerb, listVerbs, verbsFor } from '../node/registry.mjs'
 import { startServer } from '../node/serve.mjs'
@@ -167,4 +168,11 @@ test('the page server listens on 127.0.0.1 only, behind its token, and hands a s
   } finally {
     server.close()
   }
+})
+
+test('a bar keeps the examples and cite its own meta names, so selecting it shows them', () => {
+  const d = runProgram({ program: "k.examples('ex-1', { records: [{ text: 'a' }], total: 1 }); return k.bars([{ id: 'b1', label: 'one', value: 1, meta: { ref: 'q1#k=1@n', examples: 'ex-1' } }])", data: {} }, { w: 40 })
+  const r = d.regions.find(x => x.id === 'b1')
+  assert.equal(r.meta.examples, 'ex-1')
+  assert.equal(r.meta.ref, 'q1#k=1@n')
 })

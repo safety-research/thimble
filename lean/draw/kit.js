@@ -287,7 +287,8 @@
             { gap: 1 })
           const id = it.id != null ? it.id : typeof it.cite === 'string' ? it.cite : typeof it.examples === 'string' ? it.examples : null
           if (id == null && !it.cite && !it.examples && !it.meta) return row
-          return k.region(id != null ? id : slug(it.label), Object.assign({}, it.meta, { label: it.regionLabel || `${it.label == null ? '' : it.label} ${texts[i]}`.trim(), cite: it.cite, examples: it.examples }), row)
+          const meta = it.meta || {}
+          return k.region(id != null ? id : slug(it.label), Object.assign({}, meta, { label: it.regionLabel || `${it.label == null ? '' : it.label} ${texts[i]}`.trim(), cite: it.cite != null ? it.cite : meta.cite, examples: it.examples != null ? it.examples : meta.examples }), row)
         })
         return k.stack(rows, { gap: o.gap ? 1 : 0 })
       },
