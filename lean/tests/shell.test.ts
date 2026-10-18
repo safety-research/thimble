@@ -262,6 +262,17 @@ test('a view that fails to draw: no prompt and no row; Claude reads why, at once
   await ui.unmount()
 })
 
+test('an object whose file cannot be read is not drawn in silence: Claude reads why with the save', async ($, on) => {
+  const w = world(on)
+  w.files[FILE] = '{"id": "01-saves", "data": ' // a read that does not give the whole file, as one over 4 MiB
+  mock.clock(on)
+  on('tool.call', () => ({ result: 'saved 01-saves v1: thimble/objects/01-saves.json\n' }))
+  await $.turn.start({ turnId: 't1', text: 'when?' } as never)
+  const saved = await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  expect(String((saved as { context?: string[] }).context)).toContain('The person cannot see 01-saves')
+  expect(String((saved as { context?: string[] }).context)).toContain('could not be read')
+})
+
 test('a resumed session draws its objects under the same replies again', async ($, on) => {
   const w = world(on)
   w.files[SHOWN] = JSON.stringify({ under: { [AT]: [{ id: '01-saves', v: 1, root: ROOT }] } })

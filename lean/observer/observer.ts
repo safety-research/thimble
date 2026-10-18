@@ -215,7 +215,8 @@ async function questionStep($: Engine, question: string, answer: string): Promis
     .replace('{{QUESTION}}', cut(question, 4000) || '(none)')
     .replace('{{ANSWER}}', cut(answer, 16000))
   const t0 = await $.clock.now()
-  const r = await $.model.complete({ model: S.model || 'opus', prompt, maxTokens: 2000 })
+  // a comparison of two texts, not an analysis: low effort, so its thinking stays short
+  const r = await $.model.complete({ model: S.model || 'opus', prompt, maxTokens: 2000, effort: 'low' })
   const ms = (await $.clock.now()) - t0
   if (!r.isAnswered) return { ms, error: r.reason, usage: r.usage }
   const out = jsonIn(r.text)

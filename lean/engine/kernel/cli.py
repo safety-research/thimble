@@ -16,6 +16,10 @@ session's permission mode and sandbox like any other command.
                                             uses it (queries, objects, answers), and in transcripts who read a
                                             passage and who wrote it after reading it
 
+In a query: load(glob, fields=[...]) gives a DataFrame with each row's `_ref`; tally(df, by) counts and keeps each
+group's rows; use("q3") is an earlier query's output; keep(name, x) and use(name) pass a named result or a label on;
+rows(glob), sample(df, n), pd, np, re, json. The last expression is the output. `lean q --help` says more.
+
 Add --json to sources, q, list, resolve, coverage or trace for the whole record.
 """
 from __future__ import annotations
@@ -214,6 +218,9 @@ def cmd_q(a: argparse.Namespace) -> int:
             print(f"no query {a.rerun}")
             return 1
         q = Q.run(st, old.get("about") or "", old["code"], rerun_of=old["id"])
+        if a.json:
+            out_json(q)
+            return 1 if q["error"] else 0
         same = q["out_hash"] == old.get("out_hash")
         changed = Q.stale_inputs(st, old)
         print(f"{q['id']} ran {old['id']} again: its output is {'the same' if same else 'different'}"
@@ -241,13 +248,14 @@ def cmd_q(a: argparse.Namespace) -> int:
     if read:
         tail.append("read " + ", ".join(read[:6]) + (f" and {len(read) - 6} more files" if len(read) > 6 else ""))
     if q.get("uses"):
-        tail.append("uses " + ", ".join(f"{u['name']} (kept by {u['query']})" for u in q["uses"]))
+        tail.append("uses " + ", ".join(u["name"] if u["name"] == u["query"] else f"{u['name']} (kept by {u['query']})" for u in q["uses"]))
     if q.get("kept"):
         tail.append("kept " + ", ".join(q["kept"]))
     if q["external"]:
         tail.append(f"read {len(q['external'])} file(s) outside the folder ({', '.join(q['external'][:2])}), which no lineage traces")
     print(" · ".join(tail))
-    if not q["error"]:
+    if not q["error"] and q.get("table") is not None:
+        # a query that only printed has no output rows to keep: nothing to say about them
         print(_lineage_line(q))
     return 1 if q["error"] else 0
 
@@ -266,7 +274,7 @@ def _lineage_line(q: dict[str, Any]) -> str:
         "matched": f"Each output row keeps its source rows (found by {', '.join(q.get('keys') or [])} in `{q.get('frame')}`; the counts agree).",
         "key": f"Each output row keeps the rows that share its {', '.join(q.get('keys') or [])} in `{q.get('frame')}` (no count to check them by).",
         "superset": f"The rows found by {', '.join(q.get('keys') or [])} in `{q.get('frame')}` hold more than the counts: tally() keeps them exactly.",
-        "query": "No rows per output row: each value rests on every row the query read (tally() or a `_refs` column keeps them).",
+        "query": "No rows per output row: each value rests on all the rows read (tally() keeps them per row).",
     }.get(mode or "query", "")
     return say + (f" Cite a value as {ex}." if ex else "")
 
@@ -316,7 +324,8 @@ def cmd_save(a: argparse.Namespace) -> int:
     if rows:
         print("  source rows behind its values: " + ", ".join(f"{f} ({x['count']:,})" for f, x in list(rows.items())[:6]))
     t = lin["coverage"]["total"]
-    print(f"  this session has not read {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows)")
+    if t["not_read_files"]:
+        print(f"  this session has not read {t['not_read_files']:,} of {t['files']:,} source files ({t['not_read_rows']:,} rows)")
     ex = _value_example(obj)
     if ex:
         print(f"Cite or resolve one of its values as {ex}.")
@@ -544,6 +553,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-answers", action="store_true", help="skip the session transcripts (Claude's cited answers)")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_trace)
+    args = sys.argv[1:] if argv is None else argv
+    if not args or args[0] in ("-h", "--help", "help"):
+        # the commands in one screen: argparse's usage lines would only repeat them
+        print(__doc__.strip())
+        return 0
     a = ap.parse_args(argv)
     if not getattr(a, "fn", None):
         print(__doc__.strip())

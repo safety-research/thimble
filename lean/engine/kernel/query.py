@@ -17,6 +17,8 @@ from thimble-lite's query kernel and extended):
                                 A label is this: a query that gives rows a value (by a rule in code, or values Claude
                                 wrote after reading the rows) and keeps it; each keep is a new version, and every value
                                 built on it names the version it used
+    use("q3")                   an earlier query's output, as the table it showed, with `_refs` (each row's source
+                                rows) when it kept them: build on it without running it again
     pd, np, re, json, Counter, ROOT
 
 Row lineage of the output (the last expression, or `result`), by how sure it is:
@@ -48,10 +50,12 @@ from urllib.parse import quote
 
 from . import refs as R
 from . import sources as S
-from .store import Store
+from .store import Store, thimble_home
 
 CUT = 12000  # characters of a query's printed output Claude reads
+SHOW = 3000  # characters of the result (the last expression) shown when it is a long table; the query keeps it all
 TABLE_MAX = 5000  # rows of an output table kept
+RESULT_BYTES = 50_000_000  # a result table up to this size in memory is kept whole for use("q3")
 
 
 def slug(name: str) -> str:
@@ -149,14 +153,16 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
     def tally(df: "pd.DataFrame", by: Any = None, **aggs: Any) -> "pd.DataFrame":
         """Groups of rows with their count `n`, any named aggregations (words=('body_len', 'sum')), and `_refs`, the
         rows of each group, so every value of the output keeps its rows exactly. With no `by`, one row for all."""
+        # a frame of source rows has `_ref`; a used query's output has `_refs`, each row's own source rows
+        col, rows_of = ("_ref", list) if "_ref" in df.columns else ("_refs", lambda xs: [r for x in xs for r in (x or [])])
         if by is None:
             out = {"n": [len(df)]}
-            for k, (col, fn) in aggs.items():
-                out[k] = [df[col].agg(fn)]
-            out["_refs"] = [list(df["_ref"])]
+            for k, (c, fn) in aggs.items():
+                out[k] = [df[c].agg(fn)]
+            out["_refs"] = [rows_of(df[col])]
             return pd.DataFrame(out)
         g = df.groupby(by, dropna=False, sort=True)
-        return g.agg(n=("_ref", "size"), **aggs, _refs=("_ref", list)).reset_index()
+        return g.agg(n=(col, "size"), **aggs, _refs=(col, rows_of)).reset_index()
 
     kept_f = st.dir / "kept.json"
 
@@ -169,6 +175,8 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
 
     def use(name: str) -> Any:
         reg = st.read_json(kept_f) or {}
+        if name not in reg and re.fullmatch(r"q\d+", name):
+            return used_output(name)
         if name not in reg:
             raise KeyError(f"nothing kept as {name!r}; kept: {', '.join(reg) or 'nothing'}")
         info["uses"].append({"name": name, "query": reg[name]})
@@ -176,6 +184,26 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         if isinstance(obj, pd.DataFrame) and "_ref" in obj.columns:
             info["frames"].append(obj)
         return obj
+
+    def used_output(qid: str) -> Any:
+        """An earlier query's output, as the table it showed: kept whole when it ran, else rebuilt from its record."""
+        q = get(st, qid)
+        if q is None:
+            raise KeyError(f"no query {qid}")
+        if q.get("error"):
+            raise ValueError(f"{qid} failed ({q['error']}): it has no output to use")
+        info["uses"].append({"name": qid, "query": qid})
+        f = st.dir / "results" / f"{qid}.pkl"
+        if f.exists():
+            return pd.read_pickle(f)
+        if q.get("table") is None:
+            raise ValueError(f"{qid} only printed, so it has no output table: end a query with the table to use it")
+        df = pd.DataFrame(q["table"])
+        if q.get("rows") is not None and len(q["rows"]) == len(df):
+            df["_refs"] = [R.expand(x) for x in q["rows"]]
+        if q.get("truncated"):
+            print(f"use({qid!r}): its record keeps the first {len(df):,} rows of its output")
+        return df
 
     def sample(df: "pd.DataFrame", n: int = 3, seed: int = 0) -> "pd.DataFrame":
         """n rows chosen at random (not the first n), so examples stand for the group."""
@@ -217,19 +245,28 @@ def jsonable(v: Any) -> Any:
     return str(v)
 
 
-def show(v: Any) -> str:
+def show(v: Any, qid: str | None = None) -> str:
+    """The result as Claude reads it. A table of up to 60 rows shows whole when it fits in SHOW characters; a longer or
+    wider one shows as many of its first and last rows as fit, and says how many it has (the query keeps them all)."""
     try:
         import pandas as pd
-        if isinstance(v, pd.DataFrame):
-            vv = v.drop(columns=[c for c in ("_refs",) if c in v.columns])
-            s = vv.to_string(max_rows=60, max_cols=14, max_colwidth=60)
-            if len(v) > 60:
-                s += f"\n({len(v):,} rows)"
-            return s
-        if isinstance(v, pd.Series):
-            s = v.to_string(max_rows=60)
-            if len(v) > 60:
-                s += f"\n({len(v):,} rows)"
+        if isinstance(v, (pd.DataFrame, pd.Series)):
+            vv = v.drop(columns=[c for c in ("_refs",) if c in v.columns]) if isinstance(v, pd.DataFrame) else v
+
+            def render(n: int) -> str:
+                if isinstance(vv, pd.DataFrame):
+                    return vv.to_string(max_rows=n, max_cols=14, max_colwidth=60)
+                return vv.to_string(max_rows=n)
+
+            n = 60
+            s = render(n)
+            if len(s) > SHOW and len(v) > 10:
+                per_row = max(1, len(s) // (s.count("\n") + 1))
+                n = max(10, min(60, SHOW // per_row) // 2 * 2)
+                s = render(n)
+            if len(v) > n:
+                s += f"\n({len(v):,} rows, the first and last {n // 2} shown"
+                s += f"; use(\"{qid}\") reads them all in a later query)" if qid else ")"
             return s
     except ImportError:
         pass
@@ -368,17 +405,19 @@ def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
 # ------------------------------------------------------------------ running
 
 
-def run_code(st: Store, code: str) -> dict[str, Any]:
+def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
     """Run code as a notebook cell over the root folder: its printed text, then the value of its last expression."""
     info: dict[str, Any] = {"loads": [], "samples": 0, "opened": set(), "external": set(), "kept": [],
                             "uses": [], "frames": []}
     root = str(st.root) + os.sep
     rec_dir = str(st.dir) + os.sep
+    # the kernel's own files (its code, its cache of loaded frames) are no input of the query
+    own = (str(Path(__file__).resolve().parents[2]) + os.sep, str(thimble_home().resolve() / "lean") + os.sep)
 
     def audit(ev: str, args: tuple) -> None:
         if ev == "open" and args and isinstance(args[0], (str, os.PathLike)):
             p = os.path.abspath(os.fspath(args[0]))
-            if p.startswith(rec_dir):
+            if p.startswith(rec_dir) or p.startswith(own):
                 return
             if p.startswith(root):
                 info["opened"].add(os.path.relpath(p, root))
@@ -403,15 +442,19 @@ def run_code(st: Store, code: str) -> dict[str, Any]:
                     last = eval(compile(ast.Expression(tail.value), "<query>", "eval"), ns)
                 elif "result" in ns:
                     last = ns["result"]
-                if last is not None:
-                    print(show(last))
+                # a query that ends by keeping a result (keep("kind", values)) printed what it meant to show already
+                kept_last = (tail is not None and isinstance(tail.value, ast.Call)
+                             and isinstance(tail.value.func, ast.Name) and tail.value.func.id == "keep")
+                if last is not None and not kept_last:
+                    print(show(last, qid))
             except Exception as e:  # noqa: BLE001
                 err = f"{type(e).__name__}: {e}"
-                tb = traceback.format_exc().splitlines()
-                print("\n".join(tb[-6:]))
+                print(query_traceback(e, code))
     finally:
         os.chdir(old)
     lin = output_lineage(last, ns, info["frames"]) if err is None else {"table": None, "rows": None, "keys": [], "mode": "query", "frame": None}
+    if qid and err is None:
+        keep_result(st, qid, last, lin)
     loaded: dict[str, int] = defaultdict(int)
     for x in info["loads"]:
         loaded[x["path"]] += x["rows"]
@@ -428,6 +471,46 @@ def run_code(st: Store, code: str) -> dict[str, Any]:
             "kept": info["kept"], "uses": _dedupe(info["uses"]), **lin}
 
 
+def keep_result(st: Store, qid: str, last: Any, lin: dict[str, Any]) -> None:
+    """A table result kept whole (thimble/results/<qid>.pkl), shaped as the output table it showed, with each row's
+    source rows as `_refs`, so use("q3") gives a later query exactly what this one showed."""
+    try:
+        import pandas as pd
+    except ImportError:
+        return
+    if not isinstance(last, (pd.DataFrame, pd.Series)):
+        return
+    df = last.to_frame(last.name if last.name is not None else "value") if isinstance(last, pd.Series) else last
+    try:
+        if int(df.memory_usage(deep=True).sum()) > RESULT_BYTES:
+            return
+    except Exception:  # noqa: BLE001
+        return
+    if not isinstance(df.index, pd.RangeIndex):
+        df = df.reset_index()
+    if "_refs" not in df.columns and lin.get("rows") is not None and len(lin["rows"]) == len(df):
+        df = df.copy()
+        df["_refs"] = [R.expand(x) for x in lin["rows"]]
+    try:
+        df.to_pickle(st.sub("results") / f"{qid}.pkl")
+    except Exception:  # noqa: BLE001 — a result that does not pickle is still in the query's record
+        pass
+
+
+def query_traceback(e: BaseException, code: str) -> str:
+    """The error as Claude reads it: the query's own lines on the way to it, then the error (the kernel's frames and
+    the library's inner frames say nothing about the query)."""
+    lines = code.splitlines()
+    out = []
+    for fr in traceback.extract_tb(e.__traceback__):
+        if fr.filename == "<query>" and fr.lineno:
+            src = lines[fr.lineno - 1].strip() if 0 < fr.lineno <= len(lines) else ""
+            out.append(f"  line {fr.lineno}" + (f", in {fr.name}" if fr.name not in ("<module>", "<lambda>") else "") + (f": {src}" if src else ""))
+    out = out[-4:]
+    out.append("".join(traceback.format_exception_only(type(e), e)).strip())
+    return "\n".join(out)
+
+
 def _dedupe(xs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for x in xs:
@@ -438,7 +521,7 @@ def _dedupe(xs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def run(st: Store, about: str, code: str, rerun_of: str | None = None) -> dict[str, Any]:
     qid, path = next_id(st)
-    r = run_code(st, code)
+    r = run_code(st, code, qid)
     q = {"id": qid, "about": about, "code": code, "session": st.session, "t": time.time(), "rerun_of": rerun_of,
          "stdout": r["stdout"][:400000], "error": r["error"], "seconds": r["seconds"], "inputs": r["inputs"],
          "samples": r["samples"], "external": r["external"], "kept": r["kept"],
@@ -515,5 +598,6 @@ def cite_example(q: dict[str, Any]) -> str | None:
     if keys:
         # a value with a space or a bracket is percent-encoded, so the citation stays one Markdown link
         frag = "&".join(f"{k}={quote(str(r[k]), safe='-_.:~,')}" for k in keys)
-        return f"[{shown}]({q['id']}#{frag}@{col})"
+        if len(frag) <= 100:
+            return f"[{shown}]({q['id']}#{frag}@{col})"
     return f"[{shown}]({q['id']}#row=1@{col})"

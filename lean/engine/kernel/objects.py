@@ -118,6 +118,10 @@ def _bind(st: Store, ref: str, at: str, ctx: dict[str, Any]) -> Any:
     ctx["queries"].add(q["id"])
     table = q.get("table") or []
     rows = q.get("rows")
+    if q.get("truncated") and not ("row" in p or "keys" in p):
+        # the record keeps the first TABLE_MAX rows of an output: an object bound to all of it would show a part as the whole
+        ctx["problems"].append(f"{at or '/'}: {q['id']} has more rows than its record keeps ({len(table):,} kept), so this "
+                               "part shows only them: bind a smaller table (one row per thread, station or group)")
     frag = {k: p[k] for k in ("row", "keys") if k in p}
     idx = Q.find_rows(q, frag) if frag else list(range(len(table)))
     if frag and not idx:
@@ -316,12 +320,56 @@ def _collect_rows(v: Any, out: list[str]) -> None:
 KEPT = ("id", "version", "created", "updated", "session", "history", "data", "source", "lineage")
 
 
+def _bare(v: Any) -> Any:
+    """A value of data without the kernel's `_rows`, to compare what Claude passed back with what a query filled in."""
+    if isinstance(v, dict):
+        return {k: _bare(x) for k, x in v.items() if k != "_rows"}
+    if isinstance(v, list):
+        return [_bare(x) for x in v]
+    return v
+
+
+def _rebind(spec: dict[str, Any], old: dict[str, Any]) -> dict[str, Any]:
+    """A new version's spec with each part of its data that still holds what a query of the old version filled in
+    given back as that query's ref, so the binding and its lineage stay. Claude often makes a new version by loading
+    the saved object, changing a field and saving it whole; the data it passes back is the bound output, written out."""
+    data = spec.get("data")
+    if not isinstance(data, (dict, list)):
+        return spec
+    out = copy.deepcopy(spec)
+    for b in sorted((old.get("lineage") or {}).get("bindings") or [], key=lambda b: len(b.get("at") or "")):
+        at, ref = b.get("at") or "", b.get("ref")
+        if not isinstance(ref, str):
+            continue
+        try:
+            new_v, _, _ = walk(out["data"], at)
+            old_v, _, _ = walk(old.get("data"), at)
+        except R.RefError:
+            continue
+        if isinstance(new_v, str) and new_v == ref:
+            continue
+        if _bare(new_v) != _bare(old_v):
+            continue
+        if not at:
+            out["data"] = ref
+            break
+        parts = [x.replace("~1", "/").replace("~0", "~") for x in at.split("/")[1:]]
+        holder = out["data"]
+        for part in parts[:-1]:
+            holder = holder[int(part)] if isinstance(holder, list) else holder[part]
+        key = int(parts[-1]) if isinstance(holder, list) else parts[-1]
+        holder[key] = ref
+    return out
+
+
 def save(st: Store, name: str | None, spec: dict[str, Any], change: str | None = None) -> dict[str, Any]:
     """Make an object, or a new version of the one with this name."""
-    data, lineage = build(st, spec)
     oid = find_id(st, name) if name else None
     d = st.sub("objects")
     old = st.read_json(d / f"{oid}.json") if oid else None
+    if old:
+        spec = _rebind(spec, old)
+    data, lineage = build(st, spec)
     if not oid:
         nums = [int(m[1]) for i in all_ids(st) if (m := re.match(r"^(\d+)-", i))]
         oid = f"{max(nums, default=0) + 1:02d}-{slugify(name or str(spec.get('title') or 'object'))}"

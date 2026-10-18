@@ -9,7 +9,7 @@ The person must be able to trust what you show them and check it quickly. So eac
 
 ## Principles
 
-**Compute with code that is kept.** Count, group and compare in `lean q`. It keeps your code, the files it read and its output. When you count by group, each output row also keeps its source rows, so the person can open the rows behind any number. `tally(df, by)` keeps them exactly. A plain `groupby` usually works too, and the output says how sure the match is.
+**Compute with code that is kept.** Count, group and compare in `lean q`. It keeps your code, the files it read and its output, and a later query reads that output with `use("q3")`, so a result is never computed twice. When you count by group, each output row also keeps its source rows, so the person can open the rows behind any number. `tally(df, by)` keeps them exactly. A plain `groupby` usually works too, and the output says how sure the match is.
 
 **Cite what you show.** Write a number as a link to the value it came from, as in `[6,543 saves](q1#day=2026-06-18@n)`. Write a quote as a link to its row, as in `["PRECISION ALERT"](revisions.jsonl#L4410)`. A ref is a stable id, so it still works when the analysis runs again. If you are not sure where a value came from, run `lean resolve` on it before you use it.
 

@@ -7,6 +7,7 @@ In the folder under analysis (the root), the `thimble/` folder holds what the pe
     thimble/queries/q<n>.json               each query with its code, inputs, output and row lineage (query.py)
     thimble/labels/<name>.json              each label with every version of its values (labels.py)
     thimble/kept/<name>.pkl                 results a query kept with keep(), which a later query reads with use()
+    thimble/results/q<n>.pkl                each query's output table, which a later query reads with use("q<n>")
     thimble/ledger.jsonl                    one line per `lean` call that read rows (what was read and how)
 
 Outside it, under $THIMBLE_HOME/lean (default ~/.thimble/lean): seen/<session>.jsonl, where the hooks module keeps the

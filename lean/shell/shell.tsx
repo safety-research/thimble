@@ -118,7 +118,13 @@ function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unkn
   const running = pending.get(key)
   if (running) return running
   const p = (async (): Promise<Prepared> => {
-    const object = await loadObject($, ref)
+    let object: Any | null
+    try {
+      object = await loadObject($, ref)
+    } catch (err) {
+      // a file over the 4 MiB one read takes, or one that is not JSON: Claude hears it at once, so the turn fixes it
+      return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `its file could not be read (${String((err as Error)?.message || err).slice(0, 160)}); an object over 4 MiB cannot be drawn, so bind query outputs (q3) in its data rather than writing rows out` }
+    }
     if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
     const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h: 24, state: state || undefined, mode }), timeoutMs: 30000 })

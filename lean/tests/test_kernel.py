@@ -2,6 +2,7 @@
 resolving a value to its rows, and coverage. Run: LEAN_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import os
@@ -231,3 +232,65 @@ def test_the_command_runs_a_query_from_a_heredoc(root: Path) -> None:
     assert "[1](q1#passed=0@n)" in out.stdout
     res = subprocess.run([str(lean), "resolve", "q1#passed=1@n"], text=True, capture_output=True, cwd=root, env=env, timeout=60)
     assert "2 source rows: runs.csv#row=1,3" in res.stdout
+
+
+def test_a_query_prints_little_beyond_what_claude_asked_for(root: Path) -> None:
+    st = Store(root)
+    # a long result shows its first and last rows, as many as fit, and keeps them all
+    long = Q.run(st, "many rows", 'import pandas as pd\npd.DataFrame({"i": range(500), "text": ["x" * 120] * 500})')
+    assert len(long["stdout"]) < Q.SHOW + 400 and "(500 rows, the first and last" in long["stdout"]
+    assert len(long["table"]) == 500
+    # a short table shows whole
+    short = Q.run(st, "few rows", 'df = load("saves.jsonl")\ntally(df, "user")')
+    assert "rows, the first" not in short["stdout"] and "ann" in short["stdout"]
+    # a query that ends by keeping a result prints nothing more
+    kept = Q.run(st, "keep", 'df = load("saves.jsonl")\nkeep("users", df.user)')
+    assert kept["stdout"].strip() == "" and kept["kept"] == ["users"]
+    # an error shows the query's own lines, not the kernel's frames
+    bad = Q.run(st, "bad", 'df = load("saves.jsonl")\ndef f(x):\n    return x.nope\ndf.id.map(f)')
+    assert "line 3, in f: return x.nope" in bad["stdout"] and "AttributeError" in bad["stdout"]
+    assert "query.py" not in bad["stdout"]
+
+
+def test_a_later_query_uses_an_earlier_querys_output_without_running_it_again(root: Path) -> None:
+    st = Store(root)
+    by_day = Q.run(st, "saves per day", 'df = load("saves.jsonl")\ndf["day"] = df.time.str[:10]\ntally(df, "day")')
+    busy = Q.run(st, "busy days", 'd = use("%s")\nd[d.n >= 3]' % by_day["id"])
+    assert busy["error"] is None and busy["lineage"] == "exact"
+    assert [r["day"] for r in busy["table"]] == ["2026-06-01", "2026-06-02"]
+    assert busy["rows"][1] == ["saves.jsonl#L4-8"]
+    assert busy["uses"] == [{"name": by_day["id"], "query": by_day["id"]}]
+    assert [x["path"] for x in Q.all_inputs(st, busy)] == ["saves.jsonl"]
+    # a grouped count (no _refs of its own) is used with the rows its lineage found, and tally() builds on them
+    users = Q.run(st, "per user", 'df = load("saves.jsonl")\ndf.groupby("user").size().rename("n")')
+    both = Q.run(st, "all users", 'tally(use("%s"))' % users["id"])
+    assert both["table"][0]["n"] == 2 and R.count(both["rows"][0]) == 10
+    printed = Q.run(st, "printed", 'print(1)')
+    bad = Q.run(st, "use it", 'use("%s")' % printed["id"])
+    assert bad["error"] and "only printed" in bad["error"]
+
+
+def test_a_new_version_saved_from_the_object_file_keeps_its_bindings(root: Path) -> None:
+    st = Store(root)
+    q = Q.run(st, "saves per day", 'df = load("saves.jsonl")\ndf["day"] = df.time.str[:10]\ntally(df, "day")')
+    first = O.save(st, "per-day", {"title": "Saves", "data": {"days": q["id"], "peak": f"{q['id']}#day=2026-06-02@n"}})
+    # Claude loads the saved object, changes the title, and saves the data it read back, written out
+    again = {"title": "Saves per day", "data": copy.deepcopy(first["data"])}
+    second = O.save(st, "per-day", again)
+    assert second["source"]["data"] == {"days": q["id"], "peak": f"{q['id']}#day=2026-06-02@n"}
+    assert sorted(b["at"] for b in second["lineage"]["bindings"]) == ["/days", "/peak"]
+    assert second["data"] == first["data"]
+    # a part Claude changed stays as Claude wrote it
+    changed = copy.deepcopy(first["data"])
+    changed["days"][0]["n"] = 99
+    third = O.save(st, "per-day", {"title": "Saves", "data": changed})
+    assert third["source"]["data"]["days"][0]["n"] == 99 and third["source"]["data"]["peak"] == f"{q['id']}#day=2026-06-02@n"
+
+
+def test_an_object_bound_to_a_cut_table_says_so(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Q, "TABLE_MAX", 4)
+    st = Store(root)
+    q = Q.run(st, "every save", 'load("saves.jsonl")[["_ref", "user"]]')
+    assert q["truncated"] and len(q["table"]) == 4
+    obj = O.save(st, "saves", {"title": "Saves", "data": {"rows": q["id"], "first": f"{q['id']}#row=1@user"}})
+    assert len(obj["lineage"]["problems"]) == 1 and "more rows than its record keeps" in obj["lineage"]["problems"][0]
