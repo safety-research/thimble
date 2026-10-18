@@ -13,7 +13,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { activeNow, loadIndex, ROOT, textOf } from '../node.mjs'
-import { FEATURES, bodyOf, choose, featureOfSkill, fill, idOf, indexOf, listing, parseSpec, partsText, sectionOf, specOf } from '../registry.mjs'
+import { FEATURES, bodyOf, choose, chosenOf, featureOfSkill, fill, idOf, indexOf, listing, parseSpec, partsChoice, partsText, sectionOf, specOf, subsectionsOf } from '../registry.mjs'
 
 const NODE = fileURLToPath(new URL('../node.mjs', import.meta.url))
 const sha = s => createHash('sha256').update(s).digest('hex').slice(0, 16)
@@ -51,7 +51,7 @@ test('the active version: the default, then the setting, then LEAN_PROMPTS; a mi
   const m = choose(idx, { setting: 'forms:v1', env: 'forms:v9,nothing:v1' })
   assert.equal(m.active.forms.version, 'v1')
   assert.equal(m.problems.length, 2)
-  assert.match(m.problems[0], /^LEAN_PROMPTS: no version forms:v9, so forms stays at v1; its versions are runtime, v1, v2, principles$/)
+  assert.match(m.problems[0], /^LEAN_PROMPTS: no version forms:v9, so forms stays at v1; its versions are runtime, v1, v2, principles, few, many, rotate, sketches$/)
   assert.match(m.problems[1], /no prompt feature "nothing"/)
 })
 
@@ -131,7 +131,9 @@ test('every version file on disk is in the index, every default exists, and ever
 test('textOf reads the active text; a skill in place is its body', () => {
   const t = textOf('cards', ROOT, { LEAN_PROMPTS: 'forms:principles' })
   assert.equal(t.id, 'forms:principles')
-  assert.match(t.text, /^# What makes a great output/)
+  assert.match(t.text, /^## What the person sees\n[\s\S]*\n## What makes a great output\n/)
+  assert.doesNotMatch(t.text, /## Worked examples|## Sketches/)
+  assert.equal(t.chosen, null)
   const lean = textOf('lean', ROOT, {})
   assert.equal(lean.id, 'lean:skill')
   assert.doesNotMatch(lean.text, /^---/)
@@ -153,4 +155,50 @@ test('`lean guide cards` prints the card guidance with its folder, and notes the
   assert.match(m.stdout, /^\(forms:runtime ·/)
   assert.equal(m.stderr.trim().split('\n').length, 1)
   assert.match(m.stderr, /no version forms:v9, so forms stays at runtime/)
+})
+
+test('the card ablation: five versions with the same principles, which differ only in their examples', () => {
+  const env = v => ({ LEAN_PROMPTS: `forms:${v}`, LEAN_SESSION: 's-ab' })
+  const a = textOf('cards', ROOT, env('principles')).text
+  const pool = subsectionsOf(sectionOf(textOf('cards', ROOT, env('many')).text, 'Worked examples')).items
+  assert.ok(pool.length >= 1)
+  for (const v of ['few', 'many', 'rotate', 'sketches']) {
+    const t = textOf('cards', ROOT, env(v)).text
+    assert.ok(t.startsWith(a.trim()), `${v} starts with the principles of a`)
+  }
+  // few keeps the subsections it names; sketches has no programs
+  const few = textOf('cards', ROOT, env('few'))
+  const named = FEATURES.forms.versions.few.parts.at(-1).only.map(h => pool.find(x => x.heading.toLowerCase().startsWith(h.toLowerCase()))?.heading)
+  assert.ok(named.every(Boolean), 'each example few names is in the pool')
+  assert.deepEqual(few.chosen, pool.map(x => x.heading).filter(h => named.includes(h)), 'in the order of the pool')
+  assert.doesNotMatch(textOf('cards', ROOT, env('sketches')).text, /```js/)
+})
+
+test('a part that picks: the same session reads the same examples, in the order of the file; only keeps them by name', () => {
+  const md = '## Worked examples\n\nintro\n\n' + ['A one', 'B two', 'C three', 'D four', 'E five', 'F six'].map(h => `### ${h}\n\nbody ${h}\n`).join('\n')
+  const read = () => md
+  const part = [{ file: 'prompts/f/examples.md', pick: 3 }]
+  const one = partsChoice(part, read, undefined, 'session-1')
+  assert.equal(one.chosen.length, 3)
+  assert.deepEqual(partsChoice(part, read, undefined, 'session-1'), one, 'the same seed: the same text and the same examples')
+  const all = subsectionsOf(md).items.map(x => x.heading)
+  assert.deepEqual([...one.chosen].sort((x, y) => all.indexOf(x) - all.indexOf(y)), one.chosen, 'in the order of the file')
+  assert.match(one.text, /^## Worked examples\n\nintro\n\n### /)
+  for (const h of all) assert.equal(one.text.includes(`### ${h}`), one.chosen.includes(h))
+  // across sessions every example is read by some
+  const seen = new Set()
+  for (let i = 0; i < 40; i++) partsChoice(part, read, undefined, `s${i}`).chosen.forEach(h => seen.add(h))
+  assert.equal(seen.size, all.length)
+  assert.deepEqual(chosenOf({ only: ['b', 'E five'] }, subsectionsOf(md).items).map(x => x.heading), ['B two', 'E five'])
+  assert.equal(partsChoice([{ file: 'x.md' }], read).chosen, null, 'a part that keeps its whole text chooses nothing')
+})
+
+test('`lean guide cards` with a version that picks notes the examples it chose for the session', () => {
+  const home = mkdtempSync(join(tmpdir(), 'guide-'))
+  const r = spawnSync(process.execPath, [NODE, 'guide', 'cards'], { encoding: 'utf8', env: { PATH: process.env.PATH, THIMBLE_HOME: home, LEAN_SESSION: 's-rot', LEAN_PROMPTS: 'forms:rotate' } })
+  assert.equal(r.status, 0, r.stderr)
+  const ev = readFileSync(join(home, 'lean', 'events', 's-rot.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
+  assert.equal(ev[0].prompt, 'forms:rotate')
+  assert.deepEqual(ev[0].examples, textOf('cards', ROOT, { LEAN_PROMPTS: 'forms:rotate', LEAN_SESSION: 's-rot' }).chosen)
+  for (const h of ev[0].examples) assert.ok(r.stdout.includes(`### ${h}`))
 })

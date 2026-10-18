@@ -3,13 +3,15 @@
 // session's commands to the same choice (so `lean guide` and a verb's child read the same versions), names the versions
 // in use in the session's events, and says in one line when a named version does not exist (it keeps the default).
 //
-// The card guidance (feature `forms`): Claude reads the drawing toolkit (draw/TOOLKIT.md) before it writes a card's
-// program, as the lean skill says; the first such read in a session carries the guidance's active version as context
-// beside the file (the person never sees it, and it is never in the conversation at rest). When Claude saves a card
-// with no toolkit read before it, the guidance comes with that first save instead, for this card and the next. The default version,
+// The card guidance (feature `forms`) comes once per session as context beside the result of Claude's first data
+// command (`lean q`, `rows`, `resolve` or `sources`, whichever comes first): Claude queries before it draws, so the
+// guidance is there before the first card, and a session that never queries never reads it. A read of the drawing
+// toolkit (draw/TOOLKIT.md) before any data command brings it too. The person never sees it. The default version,
 // `runtime`, is the lean skill's card section (the card runtime's principles) and the worked forms: when the lean
 // skill is loaded, its section is in the conversation already, so only the worked forms come. v's request asks for
-// the guidance with `lean guide cards` when it was not read yet.
+// the guidance with `lean guide cards` when it was not read yet. The session's events name the version given, the
+// command it came with and when (a hook on turn.start would also see the observer's forks, so the step is read from
+// the time).
 //
 // Skills: Claude Code finds a skill's SKILL.md where it is, and that text is the version `skill`. When another version
 // of a skill's feature is active, the skill.prompt hook serves it in place of the file's text. The same hook makes sure
@@ -18,7 +20,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { record } from '../telemetry/telemetry'
-import { FEATURES, bodyOf, choose, featureOfSkill, idOf, indexOf, partsText, specOf } from './registry.mjs'
+import { FEATURES, bodyOf, choose, featureOfSkill, idOf, indexOf, partsChoice, specOf } from './registry.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,6 +38,9 @@ const R = {
   cardsGiven: false,
   resolving: null as Promise<void> | null,
 }
+
+/** Claude's first data command of a session brings the card guidance: `lean q`, `rows`, `resolve` or `sources`. */
+const LEAN_DATA = /(^|[\s;&|(])lean\s+(q|rows|resolve|sources)\b/
 
 /** The plugin's Prompts setting (register's options). */
 export function setPromptSetting(v: unknown): void {
@@ -81,17 +86,19 @@ export async function registry($: Engine): Promise<{ idx: Any; active: Record<st
  * The active text of a feature, as {text, version, id, off}. A version file that cannot be read falls back to the
  * default once, with one line that says so; a skill's in-place version is its body.
  */
-export async function promptText($: Engine, feature: string, o: { skip?: (part: { file: string }) => boolean } = {}): Promise<{ text: string; version: string; id: string; off: boolean }> {
+export async function promptText($: Engine, feature: string, o: { skip?: (part: { file: string }) => boolean } = {}): Promise<{ text: string; version: string; id: string; off: boolean; chosen?: string[] | null }> {
   const { idx, active } = await registry($)
   const a = active[feature]
   if (!a) throw new Error(`no prompt feature ${feature}`)
   if (a.off) return { text: '', version: a.version, id: idOf(feature, a.version), off: true }
   const key = `${feature}:${a.version}`
   if (a.parts) {
-    // a version made of parts reads them where they stand, each time (a part may be left out: `skip`)
+    // a version made of parts reads them where they stand, each time (a part may be left out: `skip`); a part that
+    // picks some of a file's examples picks them by the session, so `lean guide` in the same session reads the same
     const texts: Record<string, string> = {}
     for (const p of a.parts) if (!o.skip?.(p)) texts[p.file] = String(await $.fs.read(`${rootOf($)}/${p.file}`))
-    return { text: partsText(a.parts, (f: string) => texts[f] ?? '', o.skip), version: a.version, id: key, off: false }
+    const c = partsChoice(a.parts, (f: string) => texts[f] ?? '', o.skip, R.session)
+    return { text: c.text, version: a.version, id: key, off: false, chosen: c.chosen }
   }
   if (!R.texts.has(key)) {
     try {
@@ -169,8 +176,7 @@ export function registerPrompts(on: Any, options: Any): void {
     return r
   }).catch(($: Engine, e: Any, next: Any) => next(e))
 
-  // the toolkit read before a card (with Read, or with cat, sed or head in Bash): the card guidance comes beside it,
-  // once per session
+  // the first data command (or a toolkit read before it): the card guidance comes beside its result, once per session
   on('tool.call', { tool: /^(Read|Bash)$/ }, async ($: Engine, e: Any, next: Any) => {
     const r = await next(e)
     try {
@@ -178,10 +184,16 @@ export function registerPrompts(on: Any, options: Any): void {
       const file = String(e.file_path || '')
       const isRead = e.tool === 'Read' && /(^|\/)draw\/TOOLKIT\.md$/.test(file) && file.startsWith(rootOf($))
       const command = String(e.command || '')
+      // `lean guide cards` (v asks for it) printed the guidance itself: it is in the conversation, so no read or save
+      // after it brings it a second time
+      if (e.tool === 'Bash' && /(^|[\s;&|(])lean\s+guide\s+(cards|forms|card-forms)\b/.test(command)) {
+        await registry($)
+        R.cardsGiven = true
+        return r
+      }
       const isShell = e.tool === 'Bash' && /\bdraw\/TOOLKIT\.md\b/.test(command) && !/\blean\s/.test(command)
-      // a card saved with no toolkit read before it: the guidance comes with the save, for this card and the next
-      const isSave = e.tool === 'Bash' && !isShell && /(^|[\s;&|(])lean\s+save\b/.test(command) && /\bsaved\b/.test(String(r.text ?? ''))
-      if (!isRead && !isShell && !isSave) return r
+      const data = e.tool === 'Bash' && !isShell ? LEAN_DATA.exec(command) : null
+      if (!isRead && !isShell && !data) return r
       await registry($)
       if (R.cardsGiven) return r
       // a part the conversation holds already (the lean skill's card section, once the lean skill is loaded) is left out
@@ -189,9 +201,9 @@ export function registerPrompts(on: Any, options: Any): void {
       if (t.off || !t.text.trim()) return r
       R.cardsGiven = true
       const base = (FEATURES.forms.versions as Any)?.[t.version]?.base || FEATURES.forms.base
-      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: isSave ? 'the first lean save' : `${isRead ? 'Read' : 'Bash'} of draw/TOOLKIT.md` })
-      const head = isSave
-        ? `The card guidance (${t.id}), which thimble adds with the first card of a session when the toolkit was not read before it. It holds for this card and the next ones.`
+      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: data ? `lean ${data[2]}` : `${isRead ? 'Read' : 'Bash'} of draw/TOOLKIT.md`, ...(t.chosen ? { examples: t.chosen } : {}) })
+      const head = data
+        ? `The card guidance (${t.id}), which thimble adds once per session with your first data command, so you have it before you draw a card.`
         : `The card guidance (${t.id}), which thimble adds when you read the toolkit before a card.`
       const note = `${head} Paths in it are relative to ${rootOf($)}/${base}.\n\n${t.text}`
       return { ...r, context: [...(r.context ?? []), note] }

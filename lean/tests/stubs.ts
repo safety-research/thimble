@@ -24,6 +24,9 @@ const STUBS: Record<string, string> = {
 
 /** The stub text of a registry path (`…/prompts/<feature>/<version>.md`), or undefined for any other path. */
 export function promptStub(path: string): string | undefined {
+  // the card ablation's shared parts: the principles, and a pool of three examples
+  const part = /\/prompts\/forms\/parts\/([^/]+)\.md$/.exec(path)
+  if (part) return part[1] === 'principles' ? '## What makes a great output\n\nTHE PRINCIPLES' : `## Worked examples\n\nPOOL ${part[1]}\n\n### Alpha\n\nA\n\n### Beta\n\nB\n\n### Gamma\n\nC\n\n### Delta\n\nD\n`
   const m = /\/prompts\/([^/]+)\/([^/]+)\.md$/.exec(path)
   if (!m) return undefined
   return STUBS[`${m[1]}/${m[2]}`] ?? `PROMPT ${m[1]}:${m[2]}`

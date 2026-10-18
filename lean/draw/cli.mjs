@@ -29,15 +29,20 @@ if (has('--check')) {
   console.log(drawing.error ? `it does not draw: ${drawing.error.name}: ${drawing.error.message}` : exerciseLine(r) || `all ${r.tried} interaction${r.tried === 1 ? '' : 's'} ran (${r.ms} ms)`)
   process.exit(drawing.error || r.failed.length ? 1 : 0)
 }
-if (has('--json')) { console.log(JSON.stringify(drawing, null, 1)); process.exit(0) }
-const grid = renderTerm(drawing, { w })
-if (has('--text')) { console.log(gridText(grid)); process.exit(0) }
-console.log(toAnsi(grid, { theme: has('--light') ? 'light' : 'dark', select: flag('--select') }))
-for (const x of drawing.warnings || []) console.log('\x1b[33mwarning\x1b[0m ' + x)
-if (drawing.on) console.log('\x1b[2mtakes: ' + drawing.on.map(o => o.name + (o.label ? ` (${o.label})` : '')).join(' · ') + '\x1b[0m')
-if (drawing.handled) console.log('\x1b[2m' + drawing.handled + ' → state ' + JSON.stringify(drawing.state) + (drawing.ask ? ' · ask ' + JSON.stringify(drawing.ask).slice(0, 200) : '') + '\x1b[0m')
-if (grid.cut.length) console.log('\x1b[2mcut: ' + JSON.stringify(grid.cut) + '\x1b[0m')
-console.log(`\x1b[2m${grid.w}×${grid.h} cells · ${grid.regions.length} regions · program ${drawing.ms} ms\x1b[0m`)
+// no process.exit after a write: piped output past 64 KB would be cut
+if (has('--json')) process.stdout.write(JSON.stringify(drawing, null, 1) + '\n')
+else {
+  const grid = renderTerm(drawing, { w })
+  // --text: plain cells, then the same notes without colors (the state and ask a handler answered with included)
+  const plain = has('--text')
+  const note = s => console.log(plain ? s : '\x1b[2m' + s + '\x1b[0m')
+  console.log(plain ? gridText(grid) : toAnsi(grid, { theme: has('--light') ? 'light' : 'dark', select: flag('--select') }))
+  for (const x of drawing.warnings || []) console.log((plain ? 'warning ' : '\x1b[33mwarning\x1b[0m ') + x)
+  if (drawing.on) note('takes: ' + drawing.on.map(o => o.name + (o.label ? ` (${o.label})` : '')).join(' · '))
+  if (drawing.handled) note(drawing.handled + ' → state ' + JSON.stringify(drawing.state) + (drawing.ask ? ' · ask ' + JSON.stringify(drawing.ask).slice(0, 200) : ''))
+  if (grid.cut.length) note('cut: ' + JSON.stringify(grid.cut))
+  note(`${grid.w}×${grid.h} cells · ${grid.regions.length} regions · program ${drawing.ms} ms`)
+}
 
 function toAnsi(grid, { theme, select }) {
   const sel = new Set()

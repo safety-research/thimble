@@ -72,7 +72,9 @@ test('the first read of the toolkit in a session carries the card guidance as co
   expect(r1.context.length).toBe(1)
   expect(r1.context[0]).toContain('The card guidance (forms:principles), which thimble adds when you read the toolkit before a card.')
   expect(r1.context[0]).toContain(`Paths in it are relative to ${root}/verbs/visualize.`)
-  expect(r1.context[0]).toContain('PROMPT forms:principles')
+  expect(r1.context[0]).toContain('## What the person sees\n\nTHE CARD SECTION')
+  expect(r1.context[0]).toContain('## What makes a great output\n\nTHE PRINCIPLES')
+  expect(r1.context[0]).not.toContain('POOL')
   const r2 = await $.tool.call({ tool: 'Read', file_path: `${root}/draw/TOOLKIT.md` } as never) as Any
   expect(r2.context ?? []).toEqual([])
   const r3 = await $.tool.call({ tool: 'Read', file_path: '/data/notes/TOOLKIT.md' } as never) as Any
@@ -101,14 +103,58 @@ test('with the lean skill loaded, its card section is in the conversation alread
   expect(r.context[0]).not.toContain('THE CARD SECTION')
 })
 
-test('a card saved with no toolkit read before it: the guidance comes with that first save, once', async ($, on) => {
+test("the first data command of a session carries the card guidance, once; a save never does", async ($, on) => {
   const w = world(on)
-  const r = await $.tool.call({ tool: 'Bash', command: "lean save x <<'JSON'\n{}\nJSON" } as never) as Any
-  expect(r.context[0]).toContain('which thimble adds with the first card of a session when the toolkit was not read before it')
-  expect(r.context[0]).toContain('THE WORKED FORMS')
-  const again = await $.tool.call({ tool: 'Bash', command: 'lean save y --from y.json' } as never) as Any
-  expect(again.context ?? []).toEqual([])
+  const save = await $.tool.call({ tool: 'Bash', command: "lean save x <<'JSON'\n{}\nJSON" } as never) as Any
+  expect(save.context ?? []).toEqual([])
+  const plain = await $.tool.call({ tool: 'Bash', command: 'ls -la' } as never) as Any
+  expect(plain.context ?? []).toEqual([])
+  const q = await $.tool.call({ tool: 'Bash', command: "cd /data && lean q \"saves per day\" <<'PY'\ntally(df, 'day')\nPY" } as never) as Any
+  expect(q.context.length).toBe(1)
+  expect(q.context[0]).toContain('which thimble adds once per session with your first data command')
+  expect(q.context[0]).toContain('THE WORKED FORMS')
+  for (const command of ['lean rows revisions.jsonl -n 3', 'lean resolve q1#day=2026-06-18@n', 'lean save y --from y.json', 'cat lean/draw/TOOLKIT.md']) {
+    const again = await $.tool.call({ tool: 'Bash', command } as never) as Any
+    expect(again.context ?? []).toEqual([])
+  }
   await w.clock.advance(100)
-  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['the first lean save'])
+  const lines = w.events.filter(e => e.kind === 'prompt')
+  expect(lines.map(e => [e.prompt, e.via])).toEqual([['forms:runtime', 'lean q']])
 })
 
+test('lean sources, rows or resolve first: the guidance comes with whichever runs first', async ($, on) => {
+  const w = world(on, { LEAN_PROMPTS: 'forms:principles' })
+  const r = await $.tool.call({ tool: 'Bash', command: 'lean sources' } as never) as Any
+  expect(r.context[0]).toContain('The card guidance (forms:principles)')
+  await w.clock.advance(100)
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['lean sources'])
+})
+
+
+test("a version that picks examples: the session's own few, named in its record", async ($, on) => {
+  const w = world(on, { LEAN_PROMPTS: 'forms:rotate' })
+  const r = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
+  const text = String(r.context[0])
+  expect(text).toContain('THE PRINCIPLES')
+  expect(text).toContain('POOL examples')
+  const shown = ['Alpha', 'Beta', 'Gamma', 'Delta'].filter(h => text.includes(`### ${h}`))
+  expect(shown.length).toBe(3)
+  await w.clock.advance(100)
+  const line = w.events.find(e => e.kind === 'prompt') as Any
+  expect(line.prompt).toBe('forms:rotate')
+  expect(line.examples).toEqual(shown)
+})
+
+test('after `lean guide cards` printed the guidance, no toolkit read or save brings it a second time', async ($, on) => {
+  const w = world(on)
+  const g = await $.tool.call({ tool: 'Bash', command: 'lean guide cards' } as never) as Any
+  expect(g.context ?? []).toEqual([])
+  const save = await $.tool.call({ tool: 'Bash', command: 'lean save x --from x.json' } as never) as Any
+  expect(save.context ?? []).toEqual([])
+  const read = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
+  expect(read.context ?? []).toEqual([])
+  const q = await $.tool.call({ tool: 'Bash', command: 'lean q "x" --code "1"' } as never) as Any
+  expect(q.context ?? []).toEqual([])
+  await w.clock.advance(100)
+  expect(w.events.filter(e => e.kind === 'prompt')).toEqual([])
+})
