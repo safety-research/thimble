@@ -6,10 +6,15 @@
 //   neighbours(view, id)               the claims a claim links to: the claim it revised or that revised it, the
 //                                      claims said just before and after it in the same message, those that share a
 //                                      source; each with its kind ('revised' or 'link')
+//   cardLines(claim, width)            what the claim means, in at most five lines: ● the claim as said, precisely,
+//                                      based on (a cite; a sparkline when its source is one), judgment, not stated
 //   compose(o)                         the grid of cells: dots in their cluster's color (heavier at ×N ≥ 2, ○ for a
-//                                      revised claim), the clusters' names dim at their centres, and, only around the
-//                                      focused claim, its links as thin glyph lines and its full text; every other
-//                                      claim fades. Rows of runs {s, style, node?}.
+//                                      revised claim, a faint ? beside a claim whose denominator or window was not
+//                                      stated), the clusters' names dim at their centres, and, only around the hovered
+//                                      claim, its links as thin glyph lines and its card in a thin frame; every other
+//                                      claim fades. While a replay grows the graph, its newest claims are marked and
+//                                      their links drawn. Rows of runs {s, style, node?}.
+import { sparkChars } from './message.js'
 
 const hash = s => {
   let h = 2166136261
@@ -139,10 +144,81 @@ export function line(a, b) {
   return out
 }
 
+/** Words wrapped to lines of at most n characters (a word longer than n is cut). */
+export function wrap(text, n) {
+  const out = []
+  let cur = ''
+  for (const w of String(text || '').replace(/\s+/g, ' ').trim().split(' ')) {
+    if (!w) continue
+    const word = w.length > n ? w.slice(0, n - 1) + '…' : w
+    if (!cur) cur = word
+    else if (cur.length + 1 + word.length <= n) cur += ' ' + word
+    else { out.push(cur); cur = word }
+  }
+  if (cur) out.push(cur)
+  return out
+}
+const cut = (s, n) => (s.length <= n ? s : s.slice(0, Math.max(0, n - 1)).trimEnd() + '…')
+export const LABEL = 12
+
+/** How a claim's sources read when the fork gave no Based on: each source as a person reads its ref. */
+const sourcesWords = c => (c.sources || []).slice(0, 3).map(x => {
+  const r = String(x.ref || '')
+  const q = /^(q\d+)(?:#(.*))?$/.exec(r)
+  if (q) { let w = q[2] || ''; try { w = decodeURIComponent(w) } catch { /* as written */ } return [q[1], w.replace(/&/g, ' ').replace('@', ' · ')].filter(Boolean).join(' · ') }
+  const [path, loc] = r.split('#')
+  const line = /^L(\d+)/.exec(loc || '')
+  return `${path.split('/').pop()}${line ? ':' + line[1] : ''}`
+}).join(', ')
+
 /**
- * The grid: rows of runs {s, style, node?}. o = {w, h, claims (the view's flat list, each with cluster, n, revised_by,
- * text), clusters (with their color), lay (layout's result), visible (ids shown, the time cursor's), focus, selected,
- * matches (ids a search lights; null with no search), query, colorOf (claim → color), amber (the revision color)}.
+ * What a claim means, as the card under the pointer shows it: at most five lines, each [{s, style}]. ● and the claim as
+ * said (bold); precisely; based on (a cite; a sparkline when a source holds its values); judgment and not stated only
+ * when the fork gave them. The claim and precisely wrap to two lines while the card has room.
+ */
+export function cardLines(c, width, { cite = null, amber = null, color = null } = {}) {
+  const W = Math.max(30, width)
+  const body = W - LABEL
+  const based = c.based_on || sourcesWords(c)
+  const values = (c.sources || []).find(x => Array.isArray(x.values) && x.values.length > 1)?.values
+  const spark = values ? sparkChars(values, 16) : ''
+  const parts = [
+    { key: 'claim', lines: wrap(c.text, W - 2), style: { bold: true } },
+    c.precisely ? { key: 'precisely', label: 'precisely', lines: wrap(c.precisely, body), style: {} } : null,
+    based || spark ? { key: 'based', label: 'based on', lines: [cut(String(based || ''), body - (spark ? spark.length + 1 : 0))], style: cite ? { color: cite, underline: true } : { underline: true }, spark } : null,
+    c.judgment ? { key: 'judgment', label: 'judgment', lines: wrap(c.judgment, body), style: {} } : null,
+    c.unstated ? { key: 'unstated', label: 'not stated', lines: wrap(c.unstated, body), style: {}, labelStyle: amber ? { color: amber } : { dim: true } } : null,
+  ].filter(Boolean)
+  // one line each for the parts that come after Precisely; the claim and Precisely take two while there is room
+  for (const p of parts) if (!['claim', 'precisely'].includes(p.key) && p.lines.length > 1) p.lines = [cut(p.lines.join(' '), body)]
+  const total = () => parts.reduce((n, p) => n + Math.min(2, p.lines.length), 0)
+  for (const key of ['claim', 'precisely']) {
+    const p = parts.find(x => x.key === key)
+    if (p && p.lines.length > 2) p.lines = [p.lines[0], cut(p.lines.slice(1).join(' '), p.label ? body : W - 2)]
+  }
+  for (const key of ['claim', 'precisely']) {
+    const p = parts.find(x => x.key === key)
+    if (p && total() > 5 && p.lines.length > 1) p.lines = [cut(p.lines.join(' '), p.label ? body : W - 2)]
+  }
+  const out = []
+  for (const p of parts) {
+    p.lines.forEach((t, i) => {
+      const runs = []
+      if (p.key === 'claim') runs.push({ s: i ? '  ' : '● ', style: color ? { color } : {} })
+      if (p.label) runs.push({ s: (i ? '' : p.label).padEnd(LABEL), style: p.labelStyle || { dim: true } })
+      runs.push({ s: t, style: p.style })
+      if (p.spark && i === 0) runs.push({ s: (t ? ' ' : '') + p.spark, style: cite ? { color: cite } : {} })
+      out.push(runs)
+    })
+  }
+  return out.slice(0, 5)
+}
+
+/**
+ * The grid: rows of runs {s, style, node?}. o = {claims (the view's flat list, each with cluster, n, revised_by, text
+ * and what it means), clusters, lay (layout's result), visible (the ids shown while a replay grows the graph; null:
+ * all), newest (ids the replay just added: marked, with their links), focus (the claim hovered), colorOf (claim →
+ * color), amber (the revision color), cite (the based-on color)}.
  */
 export function compose(o) {
   const W = o.lay.w, H = o.lay.h
@@ -150,80 +226,99 @@ export function compose(o) {
   const set = (x, y, ch, style, extra = {}) => { if (y >= 0 && y < H && x >= 0 && x < W) cells[y][x] = { ch, style, ...extra } }
   const shown = o.claims.filter(c => !o.visible || o.visible.has(c.id))
   const byId = new Map(o.claims.map(c => [c.id, c]))
-  // a search lights its matches alone: the ring's links and words wait until it is cleared (or the ring is on a match)
-  const ringOn = o.focus && (!o.visible || o.visible.has(o.focus)) && (!o.matches || o.matches.has(o.focus))
+  const ringOn = !!o.focus && byId.has(o.focus) && (!o.visible || o.visible.has(o.focus))
   const near = ringOn ? neighbours(o.claims, o.focus) : new Map()
-  const lit = id => (o.matches ? o.matches.has(id) : !o.focus || id === o.focus || near.has(id))
+  const lit = id => !ringOn || id === o.focus || near.has(id)
   // the clusters' names, dim, where their claims are
   for (const n of o.lay.names) {
     if (!shown.some(c => c.cluster === n.id)) continue
-    const fade = o.focus && byId.get(o.focus)?.cluster !== n.id
-    for (let i = 0; i < n.name.length; i++) set(n.x + i, n.y, n.name[i], { dim: true, faint: !!fade || !!o.matches }, { name: true })
+    const fade = ringOn && byId.get(o.focus)?.cluster !== n.id
+    for (let i = 0; i < n.name.length; i++) set(n.x + i, n.y, n.name[i], { dim: true, faint: !!fade }, { name: true })
   }
-  // the focused claim's links, as thin lines; a revision dashed, in amber
-  if (o.focus && near.size) {
-    const a = o.lay.pos.get(o.focus)
-    for (const [id, kind] of near) {
+  // links as thin lines, a revision dashed in a faint amber: the hovered claim's, or those of a replay's newest claims
+  const newest = o.newest || new Set()
+  const drawLinks = (from, links) => {
+    const a = o.lay.pos.get(from)
+    for (const [id, kind] of links) {
       if (o.visible && !o.visible.has(id)) continue
       const b = o.lay.pos.get(id)
       if (!a || !b) continue
       line(a, b).forEach((p, i) => {
         const cur = cells[p.y]?.[p.x]
-        if (!cur || cur.name || cur.label || cur.node || (cur.ch !== ' ' && !cur.edge)) return
+        if (!cur || cur.name || cur.node || (cur.ch !== ' ' && !cur.edge)) return
         if (Math.abs(p.x - a.x) <= 1 && p.y === a.y) return
-        if (kind === 'revised') { if (i % 2) return; set(p.x, p.y, p.ch === '─' ? '╌' : p.ch === '│' ? '╎' : p.ch, { color: o.amber }, { edge: true }) }
+        if (kind === 'revised') { if (i % 2) return; set(p.x, p.y, p.ch === '─' ? '╌' : p.ch === '│' ? '╎' : p.ch, { color: o.amber, faint: true }, { edge: true }) }
         else set(p.x, p.y, p.ch, { dim: true }, { edge: true })
       })
     }
   }
-  // the claims
+  if (ringOn && near.size) drawLinks(o.focus, near)
+  else for (const id of newest) drawLinks(id, neighbours(o.claims, id))
+  // the claims; a claim whose denominator or window was not stated has a faint ? beside it
   for (const c of shown) {
     const p = o.lay.pos.get(c.id)
     if (!p) continue
     const revised = !!c.revised_by && (!o.visible || o.visible.has(c.revised_by))
-    const style = { color: o.colorOf(c), bold: c.n >= 2, faint: !lit(c.id) }
+    const style = { color: o.colorOf(c), bold: c.n >= 2 || newest.has(c.id), faint: !lit(c.id), ...(newest.has(c.id) ? { mark: true } : {}) }
     // a claim said twice or more is drawn heavier
     set(p.x, p.y, revised ? '○' : c.n >= 2 ? '◉' : '●', style, { node: c.id })
+    if (c.unstated && (cells[p.y]?.[p.x + 1]?.ch === ' ' || cells[p.y]?.[p.x + 1]?.edge)) set(p.x + 1, p.y, '?', { color: o.colorOf(c), faint: true }, { mark: true })
   }
-  // labels: the focused claim's whole text; a search's matches, the words found marked
-  const labels = []
-  const place = (id, text, style, mark = null) => {
-    const p = o.lay.pos.get(id)
-    if (!p) return
-    const room = W - 2
-    const t = text.length > room ? text.slice(0, room - 1) + '…' : text
-    const tries = [[p.x + 2, p.y], [p.x - 2 - t.length, p.y], [p.x - Math.floor(t.length / 2), p.y + 1], [p.x - Math.floor(t.length / 2), p.y - 1], [p.x - Math.floor(t.length / 2), p.y + 2], [p.x - Math.floor(t.length / 2), p.y - 2]]
-    for (const [x0, y] of tries) {
-      const x = Math.max(0, Math.min(W - t.length, x0))
-      if (y < 0 || y >= H) continue
-      let ok = true
-      for (let i = -1; i <= t.length && ok; i++) { const cell = cells[y][x + i]; if (cell && (cell.node || cell.label || cell.name)) ok = false }
-      if (!ok) continue
-      for (let i = 0; i < t.length; i++) {
-        const inMark = mark && i >= mark[0] && i < mark[1]
-        set(x + i, y, t[i], inMark ? { ...style, mark: true } : style, { label: true })
-      }
-      labels.push({ id, x, y, text: t })
-      return
-    }
-  }
+  // the hovered claim's card in a thin frame, where it covers the fewest of its links
+  let card = null
   if (ringOn) {
-    const c = byId.get(o.focus)
-    place(o.focus, c.text, { bold: true, strike: !!c.revised_by && (!o.visible || o.visible.has(c.revised_by)), sel: o.focus === o.selected })
-  }
-  if (o.matches) {
-    const q = String(o.query || '').toLowerCase()
-    for (const id of o.matches) {
-      if (id === o.focus) continue
-      const c = byId.get(id)
-      if (!c || (o.visible && !o.visible.has(id))) continue
-      const t = c.text.length > 60 ? c.text.slice(0, 59) + '…' : c.text
-      const k = q ? t.toLowerCase().indexOf(q) : -1
-      place(id, t, {}, k >= 0 ? [k, k + q.length] : null)
+    const c0 = byId.get(o.focus)
+    const lines = cardLines(c0, Math.min(W - 8, 100), { cite: o.cite, amber: o.amber, color: o.colorOf(c0) })
+    const inner = Math.max(...lines.map(l => l.reduce((n, r) => n + r.s.length, 0)))
+    const bw = inner + 4, bh = lines.length + 2
+    const p = o.lay.pos.get(o.focus)
+    const clampX = x => Math.max(0, Math.min(W - bw, x))
+    // beside it on the right (its first line level with the dot), else under or over it starting near it, else on its
+    // left: each try costs what it covers, its links most
+    const tries = [
+      [p.x + 2, p.y - 1, 0, true], [p.x + 2, p.y - bh + 2, 0.1, true], [p.x - 2, p.y + 1, 0.2], [p.x - 2, p.y - bh, 0.4],
+      [p.x - bw + 3, p.y + 1, 0.6], [p.x - bw + 3, p.y - bh, 0.8], [p.x - 1 - bw, p.y - 1, 1.5, true], [p.x - 1 - bw, p.y - bh + 2, 1.6, true],
+    ]
+    let best = null
+    for (const [x0, y0, pen, beside] of tries) {
+      const x = clampX(x0)
+      if (y0 < 0 || y0 + bh > H) continue
+      if (p.x >= x && p.x < x + bw && p.y >= y0 && p.y < y0 + bh) continue
+      if (beside && x !== x0) continue
+      let cost = pen
+      for (let y = y0; y < y0 + bh; y++) {
+        for (let xx = x; xx < x + bw; xx++) {
+          const cell = cells[y]?.[xx]
+          if (!cell) continue
+          if (cell.node) cost += near.has(cell.node) ? 20 : 0.3
+          else if (cell.edge) cost += 3
+          else if (cell.name || cell.mark) cost += 0.1
+        }
+      }
+      if (!best || cost < best.cost) best = { x, y: y0, cost }
+      if (cost === 0) break
+    }
+    if (best) {
+      // a dot under the card keeps its press, drawn as the card's character there: the presses stay the same ones in
+      // the same order whatever the card covers, so a focus ring kept by place stays on its claim
+      const put = (x, y, ch, style) => set(x, y, ch, style, { card: true, ...(cells[y]?.[x]?.node ? { node: cells[y][x].node } : {}) })
+      const frame = { dim: true }
+      for (let y = best.y; y < best.y + bh; y++) {
+        for (let xx = best.x; xx < best.x + bw; xx++) {
+          const top = y === best.y, bottom = y === best.y + bh - 1, left = xx === best.x, right = xx === best.x + bw - 1
+          const ch = top ? (left ? '┌' : right ? '┐' : '─') : bottom ? (left ? '└' : right ? '┘' : '─') : left || right ? '│' : ' '
+          put(xx, y, ch, ch === ' ' ? null : frame)
+        }
+      }
+      lines.forEach((runs, i) => {
+        let x = best.x + 2
+        for (const r of runs) for (const ch of r.s) { put(x, best.y + 1 + i, ch, r.style); x++ }
+      })
+      card = { x: best.x, y: best.y, w: bw, h: bh }
     }
   }
   // rows of runs: a claim's cell a run of its own (a press), the rest merged by style
-  return cells.map(row => {
+  const rows = cells.map(row => {
     const runs = []
     for (const cell of row) {
       const key = JSON.stringify(cell.style)
@@ -233,4 +328,6 @@ export function compose(o) {
     }
     return runs.map(({ key, ...r }) => r)
   })
+  rows.card = card
+  return rows
 }
