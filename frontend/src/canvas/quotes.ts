@@ -594,12 +594,36 @@ export function quotedWords(display: string): string {
  * a whole record, the words in quotation marks of the first takeaway link to that record (bug hunt L5: the refs named
  * lines and the quotes stood only in the takeaway); '' for none. A span names its own passage. Pure. */
 export function exampleQuotes(refs: readonly string[], quotes: readonly unknown[], takeaway: string): string[] {
-  const told = [...takeaway.matchAll(/\[\[([^\]|]*)\|([^\]]*)\]\]/g)].map((m) => ({ words: quotedWords(m[1]), record: recordOf(m[2].trim()) })).filter((c) => c.words)
+  const told = valueLinks(takeaway).map((m) => ({ words: quotedWords(m.shown), record: recordOf(m.ref) })).filter((c) => c.words)
   return refs.map((r, i) => {
     const kept = typeof quotes[i] === 'string' ? (quotes[i] as string).trim() : ''
     if (kept || SPAN_REF.test(r)) return kept
     return told.find((c) => c.record === recordOf(r))?.words ?? ''
   })
+}
+
+/** Each `[[shown|ref]]` of a text, in order. Its shown words may hold brackets, as a quoted log line does (`"a1 NO
+ * [AUTHENTICATIONFAILED] LOGIN"`): a citation ends at the first `]]` whose place, after its last bar, holds none, and
+ * none runs past a blank line. Pure. */
+export function valueLinks(text: string): { shown: string; ref: string }[] {
+  const out: { shown: string; ref: string }[] = []
+  let i = text.indexOf('[[')
+  while (i >= 0) {
+    let end = -1
+    for (let k = i + 2; k < Math.min(text.length - 1, i + 2000); k++) {
+      if (text[k] === '\n' && text[k + 1] === '\n') break
+      if (text[k] !== ']' || text[k + 1] !== ']') continue
+      const inner = text.slice(i + 2, k)
+      const bar = inner.lastIndexOf('|')
+      if (bar > 0 && !/[[\]]/.test(inner.slice(bar + 1))) {
+        out.push({ shown: inner.slice(0, bar).trim(), ref: inner.slice(bar + 1).trim() })
+        end = k + 2
+        break
+      }
+    }
+    i = text.indexOf('[[', end >= 0 ? end : i + 2)
+  }
+  return out
 }
 
 /** One entry of an example card: the record it shows once, the address that opens it, and the refs it stands for, each

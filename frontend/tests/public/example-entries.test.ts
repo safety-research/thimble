@@ -131,6 +131,8 @@ describe('an example whose refs name only lines, its quotes in its takeaway (bug
   test("a ref's quote is the takeaway's quote of its record, where add_card kept none; a span keeps its own", () => {
     expect(exampleQuotes(['shed/log.jsonl#L62', 'shed/log.jsonl#L4', 'shed/log.jsonl#L62.b0:c1-5'], ['', '', ''], takeaway)).toEqual(["ModuleNotFoundError: No module named 'gizmo'", '', ''])
     expect(exampleQuotes(['shed/log.jsonl#L62'], ['kept words'], takeaway)).toEqual(['kept words'])
+    // a quoted log line that holds brackets
+    expect(exampleQuotes(['mail/log.jsonl#L774'], [], 'IMAP said [["a1 NO [AUTHENTICATIONFAILED] LOGIN"|mail/log.jsonl#L774]].')).toEqual(['a1 NO [AUTHENTICATIONFAILED] LOGIN'])
   })
 
   test("the record's part that holds the takeaway's quote is marked there, so its fold opens at it", () => {
