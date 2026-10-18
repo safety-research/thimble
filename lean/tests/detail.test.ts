@@ -291,7 +291,7 @@ test('a card is a program: its own keys reach it in the open detail, the state i
   expect(await ($ as Any).prompt.edit(edit('j'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.preps.some(x => x.event?.type === 'key' && x.event.key === 'j' && x.event.region === 'day-2026-06-18')).toBe(true)
-  const kept = JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`])
+  const kept = JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`] ?? '{}')
   expect(kept).toMatchObject({ state: { at: 1 }, region: 'day-2026-06-18', by: 'terminal' })
   await pane($, clock)
   expect(w.preps.at(-1).state).toMatchObject({ at: 1 })

@@ -149,6 +149,8 @@ declare module 'claude-code' {
       /** the Claims pane: the message it was opened from, the claim the ring is on (its card shows), and the replay
        *  while one grows the graph (how many of the claims, in the order made, are shown) */
       claimpane: { row: string; focus: string | null; replay: { gen: number; k: number; order: string[] } | null } | null
+      /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
+      events: { file: string; n: number }
     }
   }
 }
