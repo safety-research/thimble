@@ -84,6 +84,7 @@ const TYPED_PAST_FREE = 2
 export const skipsFor = (n: number) => (n <= TYPED_PAST_FREE ? 0 : Math.min(MAX_SKIP, 2 ** (n - TYPED_PAST_FREE - 1)))
 const LONG_ANSWER = 800 // characters: a turn that ran no tool is substantial when its answer is this long
 const CONTEXT_OBJECTS = 4 // objects the fork reads: every new one, then the latest older ones up to this many
+const STEPS_BUDGET = 24000 // characters of the turn's words and tool calls the pass reads, the latest calls kept longest
 const NOTE_HEAD = 'Here is a note offered by a side agent:'
 const K = {
   seen: 'observer.seen', known: 'observer.known', typedPast: 'observer.typedPastInARow', skip: 'observer.looksToSkip', off: 'observer.off',
@@ -428,7 +429,7 @@ async function look($: Engine, t: Look): Promise<void> {
         QUESTION: cut(t.question, 4000) || '(none)',
         DECISION: decision || 'none stated',
         ROW: inRow.length ? inRow.map(v => `${v.key} ${v.name}`).join(', ') : 'v visualize, s squeeze',
-        STEPS: stepsOf(msgs, { answer }),
+        STEPS: stepsOf(msgs, { answer, budget: STEPS_BUDGET }),
         LINES: String(answer.split('\n').length),
         ANSWER: cut(answer, 16000),
         OBJECTS: digests.length ? digests.join('\n\n') : 'No objects yet.',
@@ -437,6 +438,7 @@ async function look($: Engine, t: Look): Promise<void> {
       }, parts, st)
       fork.prompt_chars = system.text.length + turn.text.length
       fork.system_chars = system.text.length
+      fork.lens_chars = Object.fromEntries(parts.map(x => [x.lens.name, (system.chars[x.lens.name] || 0) + (turn.chars[x.lens.name] || 0)]))
       extra.turn_prompt = tmpl.id
       f = await tracked($, { feature: 'observer', prompt: frame.id, model, extra }, async () => {
         const r = await $.model.complete({ model, system: [{ text: system.text, cache: true }], prompt: turn.text, maxTokens: 16000 } as Any)

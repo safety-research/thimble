@@ -8,10 +8,10 @@
 //   or the verb whose request it answers: markNextTurn), and `hook_ms`, the time thimble's own hooks took inside it;
 //   a subagent's, labelled by the module that started it (claimAgent: a side thread).
 // - The time inside a turn: for each event that runs inside a main turn (prompt.submit, turn.start, tool.call,
-//   session.append, turn.complete), one hook here reads `next.trace` after the chain beneath it ran: each of thimble's
-//   links beneath with its own wall time (Claude Code's own work taken out). The sum is what thimble's hooks added to
-//   the turn. This hook registers first, so it is the outermost of thimble's; when a trace shows a link of thimble's
-//   above it, the turn's line says the measure is partial.
+//   session.append, turn.complete), telemetry registers two hooks, one before thimble's other hooks and one after, so
+//   they bracket them. In one dispatch the first of the two to run is the outer: it times the whole span; the inner
+//   times what lies beneath it (Claude Code's own work). The span less that is what thimble's hooks added to the turn.
+//   A dispatch where the two did not both run is counted as partial on the turn's line.
 // Lines are appended by a Node child (append.mjs) a moment after they are made, batched, never inside a turn's path.
 import type { EngineInterface } from 'claude-code'
 
@@ -36,23 +36,8 @@ const T = {
   partial: false,
 }
 
-/** The time thimble's hooks took in one dispatch, from the trace of the chain beneath the outermost of them. */
-export function ownMs(trace: readonly Any[] | undefined, plugin: string): { ms: number; partial: boolean } {
-  let ms = 0
-  let partial = false
-  for (const x of trace || []) {
-    if (!x || x.plugin !== plugin) continue
-    ms += Number(x.ms) || 0
-  }
-  // the first link beneath is index 1 when this hook is the outermost link of the chain
-  const first = (trace || [])[0]
-  if (first && Number(first.index) > 1) partial = true
-  return { ms, partial }
-}
-
-function addHookMs(ms: number, partial = false): void {
-  if (!(ms > 0) && !partial) return
-  if (partial) T.partial = true
+function addHookMs(ms: number): void {
+  if (!(ms > 0)) return
   if (T.active) T.hookMs += ms
   else T.pendingMs += ms
 }
@@ -127,71 +112,85 @@ export async function tracked<R>($: Engine, o: { feature: string; prompt?: strin
   }
 }
 
-export function registerTelemetry(on: Any): void {
-  // (matchers: the shell and the kernel hold the bare hooks of these events, and the engine takes one per event)
-  on('prompt.submit', { text: /^[\s\S]*$/ }, async ($: Engine, e: Any, next: Any) => {
-    const r = await next(e)
-    const own = ownMs(next.trace, $.plugin.name)
-    addHookMs(own.ms, own.partial)
-    return r
-  }).catch(($: Engine, e: Any, next: Any) => next(e))
+// one dispatch's frame, by what tells dispatches of an event apart (a tool call's id; a row's uuid)
+const F = new Map<string, { t0: number; engine: number }>()
+const keyOf = (event: string, e: Any) => (event === 'tool.call' ? `tool:${e?.tool_use_id ?? e?.tool ?? ''}` : event === 'session.append' ? `append:${e?.uuid ?? ''}:${e?.door ?? ''}` : event)
 
-  on('tool.call', { tool: /./ }, async ($: Engine, e: Any, next: Any) => {
-    const r = await next(e)
-    if (e.agentId === undefined) {
-      const own = ownMs(next.trace, $.plugin.name)
-      addHookMs(own.ms, own.partial)
-    }
-    return r
-  }).catch(($: Engine, e: Any, next: Any) => next(e))
+/** What happens around the span of a main turn's event, by the outer hook: before it, and after with its hooks' ms. */
+async function before(event: string, e: Any): Promise<void> {
+  if (event === 'turn.start') {
+    T.active = true
+    T.feature = T.next || 'main'
+    T.next = null
+    T.hookMs = T.pendingMs
+    T.pendingMs = 0
+    T.partial = false
+  }
+}
 
-  on('session.append', { door: /./ }, async ($: Engine, e: Any, next: Any) => {
-    const r = await next(e)
-    if (e.agentId === undefined) {
-      const own = ownMs(next.trace, $.plugin.name)
-      addHookMs(own.ms, own.partial)
-    }
-    return r
-  }).catch(($: Engine, e: Any, next: Any) => next(e))
+async function after($: Engine, event: string, e: Any, r: Any, ms: number | null): Promise<void> {
+  if (ms == null) T.partial = true
+  else addHookMs(ms)
+  if (event !== 'turn.complete') return
+  const line = turnLine({ feature: T.feature, ms: e.durationMs, usage: e.usage ?? r?.usage ?? null, model: e.usage?.model ?? null, hook_ms: T.hookMs, reason: e.reason, turn: e.turnId, ...(T.partial ? { hook_partial: true } : {}) })
+  T.active = false
+  T.hookMs = 0
+  T.partial = false
+  await record($, line)
+}
 
-  on('turn.start', { turnId: /./ }, async ($: Engine, e: Any, next: Any) => {
-    const r = await next(e)
-    if (e.agentId === undefined) {
-      T.active = true
-      T.feature = T.next || 'main'
-      T.next = null
-      T.hookMs = T.pendingMs
-      T.pendingMs = 0
-      T.partial = false
-      const own = ownMs(next.trace, $.plugin.name)
-      addHookMs(own.ms, own.partial)
-    }
-    return r
-  }).catch(($: Engine, e: Any, next: Any) => next(e))
-
-  on('turn.complete', { turnId: /./ }, async ($: Engine, e: Any, next: Any) => {
-    const r = await next(e)
+/** One of the two bracketing hooks: outer when it runs first in this dispatch, inner otherwise. */
+async function bracket($: Engine, event: string, e: Any, next: Any): Promise<Any> {
+  // a subagent's events are not main's turn; its turn's end is a line of its own
+  if (e && e.agentId !== undefined) {
+    const k = `agent:${event}:${e.agentId}`
+    if (event !== 'turn.complete' || F.has(k)) return next(e)
+    F.set(k, { t0: 0, engine: 0 })
     try {
-      if (e.agentId === undefined) {
-        const own = ownMs(next.trace, $.plugin.name)
-        addHookMs(own.ms, own.partial)
-        const line = turnLine({ feature: T.feature, ms: e.durationMs, usage: e.usage ?? r?.usage ?? null, model: e.usage?.model ?? null, hook_ms: T.hookMs, reason: e.reason, turn: e.turnId, ...(T.partial ? { hook_partial: true } : {}) })
-        T.active = false
-        T.hookMs = 0
-        T.partial = false
-        await record($, line)
-      } else {
-        const who = T.agents.get(String(e.agentId))
-        await record($, turnLine({ feature: who?.feature ?? 'agent', agent: String(e.agentId), ms: e.durationMs, usage: e.usage ?? null, model: e.usage?.model ?? null, reason: e.reason, ...(who?.prompt ? { prompt: who.prompt } : {}) }))
-      }
-    } catch {
-      // the turn ends whatever the record makes of it
+      const r = await next(e)
+      const who = T.agents.get(String(e.agentId))
+      await record($, turnLine({ feature: who?.feature ?? 'agent', agent: String(e.agentId), ms: e.durationMs, usage: e.usage ?? null, model: e.usage?.model ?? null, reason: e.reason, ...(who?.prompt ? { prompt: who.prompt } : {}) }))
+      return r
+    } finally {
+      F.delete(k)
     }
+  }
+  const k = keyOf(event, e)
+  const f = F.get(k)
+  if (f) {
+    // inner: what lies beneath thimble's hooks
+    const s = Date.now()
+    try { return await next(e) } finally { f.engine = Date.now() - s }
+  }
+  const fr = { t0: Date.now(), engine: -1 }
+  F.set(k, fr)
+  let r: Any
+  try {
+    await before(event, e)
+    r = await next(e)
     return r
-  }).catch(($: Engine, e: Any, next: Any) => next(e))
+  } finally {
+    F.delete(k)
+    const span = Date.now() - fr.t0
+    try { await after($, event, e, r, fr.engine >= 0 ? Math.max(0, span - fr.engine) : null) } catch { /* the measure only */ }
+  }
+}
+
+/**
+ * Telemetry's hooks: `which` is 'first' (registered before thimble's other hooks) or 'last' (after them). Both run
+ * the same bracket; the matchers differ, since the engine takes one hook per event and matcher.
+ */
+export function registerTelemetry(on: Any, which: 'first' | 'last'): void {
+  const first = which === 'first'
+  on('prompt.submit', first ? { text: /^/ } : { text: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'prompt.submit', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
+  on('tool.call', first ? { tool: /^/ } : { tool: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'tool.call', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
+  on('session.append', first ? { door: /^/ } : { door: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'session.append', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
+  on('turn.start', first ? { turnId: /^/ } : { turnId: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'turn.start', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
+  on('turn.complete', first ? { turnId: /^/ } : { turnId: /$/ }, ($: Engine, e: Any, next: Any) => bracket($, 'turn.complete', e, next)).catch(($: Engine, e: Any, next: Any) => next(e))
 }
 
 /** For tests: the module's memory, cleared. */
 export function resetTelemetry(): void {
   Object.assign(T, { home: '', session: '', queue: [], flushing: false, active: false, feature: 'main', next: null, hookMs: 0, pendingMs: 0, agents: new Map(), partial: false })
+  F.clear()
 }

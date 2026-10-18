@@ -4,8 +4,8 @@
 // to Claude, a rare line above the prompt, and the ranking of each object's hint row), the prompt registry
 // (../prompts/prompts.ts: which version of each text a model reads) and the telemetry (../telemetry/telemetry.ts:
 // each model call and each turn in the session's events, with the time thimble's hooks took inside each main turn)
-// register side by side. The telemetry registers first, so its hooks are the outermost of thimble's and read the
-// time of the others beneath them.
+// register side by side. The telemetry registers twice, before and after the others, so its two hooks of each event
+// inside a main turn bracket thimble's other hooks and time them.
 import type { Register } from 'claude-code'
 
 import { registerObserver } from '../observer/observer'
@@ -15,9 +15,10 @@ import { registerTelemetry } from '../telemetry/telemetry'
 import { register as registerKernel } from './kernel'
 
 export const register: Register = (on, options) => {
-  registerTelemetry(on)
+  registerTelemetry(on, 'first')
   registerPrompts(on, options)
   registerKernel(on, options)
   registerShell(on, options)
   registerObserver(on, options)
+  registerTelemetry(on, 'last')
 }
