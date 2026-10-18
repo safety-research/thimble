@@ -10,7 +10,7 @@ const meta = s => ({ label: s.label || s.text, ref: s.ref, text: s.passage })
 const line = (s, lead) => k.text(lead + (s.tone ? '{' + s.tone + ':' + e(s.text) + '}' : e(s.text)) + (s.sub ? '  {dim:' + e(s.sub) + '}' : ''), { wrap: false })
 const indent = (n, part) => k.beside(k.text('', { w: n }), part, { gap: 0 })
 const parts = []
-if (data.head) parts.push(k.region(data.head.id, meta(data.head), k.text('**' + e(data.head.text) + '**' + (data.head.sub ? '  {dim:' + e(data.head.sub) + '}' : ''))))
+if (data.head) parts.push(k.region(data.head.id, meta(data.head), k.text('**' + e(data.head.text) + '**' + (data.head.sub ? '  {dim:' + e(data.head.sub) + '}' : ''), { wrap: false })))
 ;(data.back || []).forEach((s, i) => parts.push(indent(Math.min(2 + 2 * (s.depth != null ? s.depth : i), 8), k.region(s.id, meta(s), line(s, s.arrow === false ? '' : '{dim:←} ')))))
 if (data.fog && data.fog.files.length) {
   parts.push(indent(2, k.beside(k.unseen({ label: '', w: 3, h: 1 }), k.text('{dim:' + e(data.fog.label) + '}'), { gap: 1 })))

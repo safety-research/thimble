@@ -10,7 +10,7 @@ import { runProgram } from '../../../draw/sandbox-node.mjs'
 import { gridText, renderTerm } from '../../../draw/term.js'
 import { applies } from '../hint.mjs'
 import { parseReply, slimFacts } from '../prompt.mjs'
-import { run, targetOf } from '../run.mjs'
+import { run, targetOf, traceId } from '../run.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 
@@ -115,7 +115,7 @@ test('without a model, the full trace is asked of Claude in the conversation', a
 })
 
 test('what to trace: a citation, a region with a ref or a cite, a quote, or the object', () => {
-  assert.deepEqual(targetOf({ ref: 'q2#kind=links@n' }), { ref: 'q2#kind=links@n', text: undefined })
+  assert.deepEqual(targetOf({ ref: 'q2#kind=links@n', label: '4' }), { ref: 'q2#kind=links@n', text: undefined, label: '4' })
   const drawing = { regions: [{ id: 'day', meta: { cite: 'c1', label: 'Thu' } }], cites: { c1: { text: '132 saves', query: 'q3#day=2026-06-18@n' } } }
   assert.deepEqual(targetOf({ drawing, region: 'day' }), { ref: 'q3#day=2026-06-18@n', text: undefined, label: 'Thu' })
   assert.deepEqual(targetOf({ region: { id: 'x', meta: { ref: 'a.jsonl#L4.b1', quote: 'PRECISION ALERT' } } }), { ref: 'a.jsonl#L4.b1', text: 'PRECISION ALERT', label: undefined })
@@ -148,8 +148,21 @@ test('the worked examples of SKILL.md run on facts of their kind and give every 
   }
 })
 
+test('two rows of one file never share a trace id; one target keeps its id', () => {
+  const a = traceId({ ref: 'runs/sweep-one/board.jsonl#L1' })
+  assert.notEqual(a, traceId({ ref: 'runs/sweep-one/board.jsonl#L53' }))
+  assert.notEqual(a, traceId({ ref: 'runs/sweep-one/board.jsonl#L1', text: 'REVIEW WANTED' }))
+  assert.equal(a, traceId({ ref: 'runs/sweep-one/board.jsonl#L1' }))
+  assert.match(a, /^trace-board-jsonl-l1-[a-z0-9]{1,5}$/)
+})
+
 test('a reply is read for its title, its program and its judgments', () => {
   const r = parseReply('Here it is.\ntitle: spread of the note\n```javascript\nreturn k.text("x")\n```\n```json\n{"groups": []}\n```')
   assert.deepEqual(r, { title: 'spread of the note', program: 'return k.text("x")', data: { groups: [] } })
   assert.equal(parseReply('no code').program, null)
+})
+
+test("the demo plugin's copies of the verb, the renderer and the skill are current (node demo-plugin/sync.mjs)", async () => {
+  const { COPIES, copyOf } = await import('../demo-plugin/sync.mjs')
+  for (const [src, dst] of COPIES) assert.equal(readFileSync(HERE + '../demo-plugin/' + dst, 'utf8'), copyOf(src), `${dst} is stale`)
 })

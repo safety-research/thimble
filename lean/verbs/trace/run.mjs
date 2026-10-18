@@ -16,7 +16,8 @@
 //   region     the selected region: an id, or {id, meta}; meta.ref, meta.text or meta.cite lead to what it shows
 //   drawing    the object's drawing (kit.js), where a region's meta and its cite are looked up when region is an id
 //   kernel     how to run `lean`: a function (args) -> stdout text or parsed JSON, or {json(args)} or {run(args)}
-//   draw       {runProgram(object, {w}) -> drawing}, to check a program Claude wrote before it is shown
+//   draw       {runProgram(object, {w}) -> drawing, or a promise of one}, to check a program Claude wrote before it
+//              is shown
 //   model      one completion: a function (prompt) -> text, or $.model's {fork} or {complete}; absent, the full trace
 //              is asked of Claude in the conversation (note)
 //   skill      the text of this verb's SKILL.md, and toolkit the text of lean/draw/TOOLKIT.md: what Claude reads
@@ -39,7 +40,7 @@ export const isRef = s => typeof s === 'string' && REF.test(s.trim()) && !/^http
 export function targetOf(ctx) {
   const r = ctx.ref
   if (r && typeof r === 'object' && (r.ref || r.text)) return { ref: r.ref, text: r.text, label: r.label }
-  if (isRef(r)) return { ref: r.trim(), text: ctx.text }
+  if (isRef(r)) return { ref: r.trim(), text: ctx.text, label: ctx.label }
   const region = typeof ctx.region === 'string'
     ? (ctx.drawing?.regions || []).find(x => x.id === ctx.region) || { id: ctx.region }
     : ctx.region
@@ -191,8 +192,13 @@ export function shortData(f, t, w = 100) {
   if (sp) {
     const o = sp.origin
     if (!cf) {
-      head = { id: 'traced', text: `"${cut(sp.text, 60)}"`, sub: `in ${sp.files} transcripts`, ref: f.ref, passage: sp.text }
-      title = 'where these words came from'
+      const rec = f.back?.records?.[0]
+      const sourceRow = f.back && (f.back.chain || []).every(s => s.step === 'source')
+      head = sourceRow
+        ? { id: 'traced', text: `"${cut(sp.text, 40)}" in ${short(fileOf(f.ref))} ${line(f.ref)}`, sub: rec ? cut(rec.line || rec.text, Math.max(20, w - 40 - Math.min(40, sp.text.length))) : '', ref: f.ref, passage: sp.text }
+        : { id: 'traced', text: `"${cut(sp.text, 60)}"`, sub: `in ${sp.files} transcripts`, ref: f.ref, passage: sp.text }
+      if (sourceRow) back.splice(back.findIndex(s => s.id === 'source'), 1)
+      title = 'where these words came from and where they went'
       if (o) back.push({ id: 'origin', text: `${o.agent} wrote them first, ${hhmm(o.first_wrote.t)}`, sub: line(o.first_wrote.ref), ref: o.first_wrote.ref, passage: sp.text, tone: 'accent' })
       else if (sp.outside) back.push({ id: 'outside', text: `from outside these transcripts: ${sp.outside.agent} read them first, ${hhmm(sp.outside.first_read.t)}`, ref: sp.outside.first_read.ref, tone: 'dim' })
     }
@@ -215,9 +221,19 @@ export function shortData(f, t, w = 100) {
   return { title, right, head, back, fog, spread, forward, hint }
 }
 
+/** A stable id for what was traced: the readable end of its ref, and a short hash of the ref and the words, so two
+ *  rows of one file never share an id. */
+export function traceId(t) {
+  const key = `${t.ref || ''}|${t.text || ''}`
+  let h = 0x811c9dc5
+  for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 0x01000193) >>> 0
+  const tail = slug(String(t.ref || t.text || 'target').split('/').slice(-1)[0]).slice(-32)
+  return `trace-${tail}-${h.toString(36).slice(0, 5)}`
+}
+
 /** A trace object: the program, its data, and what was traced, so t on it again knows the target. */
 function traceObject(t, program, data, extra = {}) {
-  const id = 'trace-' + slug(t.ref || t.text || 'target').slice(0, 40)
+  const id = traceId(t)
   return { id, verb: 'trace', title: 'Trace · ' + (data.title || data.facts?.title || ''), program, data,
     source: { ref: t.ref, text: t.text, label: t.label }, ...extra }
 }
@@ -252,9 +268,10 @@ export async function compose(ctx, f, t) {
     const got = parseReply(reply)
     if (!got.program) { last = 'the reply held no ```js program'; prompt += `\n\nYour reply held no \`\`\`js block. Reply again with the program in one.`; continue }
     const data = { facts: slimFacts(f), claude: got.data || {} }
-    const object = traceObject(t, got.program, data, { title: 'Trace · ' + (got.title || 'full'), full: true, by: 'claude' })
+    const title = got.title && /^trace\b/i.test(got.title) ? got.title : 'Trace · ' + (got.title || 'full')
+    const object = traceObject(t, got.program, data, { title, full: true, by: 'claude' })
     if (!ctx.draw?.runProgram) return object
-    const drawing = ctx.draw.runProgram(object, { w: ctx.w || 100 })
+    const drawing = await ctx.draw.runProgram(object, { w: ctx.w || 100 })  // a sandbox in a child process is async
     if (!drawing.error) return object
     last = `${drawing.error.name}: ${drawing.error.message}${drawing.error.line ? ` (line ${drawing.error.line})` : ''}`
     prompt += `\n\nYour program failed: ${last}\nReply again with the whole program fixed.`
