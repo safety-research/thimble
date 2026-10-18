@@ -48,3 +48,20 @@ test('"Coverage" off: no facts are kept or sent, and nothing stands under the an
   expect(shown(await ui.drawn())).not.toContain('▸ ')
   await ui.unmount()
 })
+
+test('a blank row stands between Claude Code\'s working row and the thimble line while a turn runs, and none when idle', SLOW, async ($, on) => {
+  const w = world(on)
+  corpus(w, ['events.jsonl'])
+  reads(w)
+  await startSession($, w)
+  await aTurn($, w, 'r1', 'It holds events.', async () => {
+    await call($, 'Read', { file_path: `${CWD}/events.jsonl` })
+  })
+  const working = await $.ui.mount({ ...(ABOVE as object), props: { ...(ABOVE as { props: object }).props, isWorking: true } } as never)
+  const gap = '{"type":"Text","children":[" "]},{"type":"Box","props":{"key":"above-summary"'
+  expect(JSON.stringify(await working.drawn())).toContain(gap)
+  await working.unmount()
+  const idle = await $.ui.mount(ABOVE)
+  expect(JSON.stringify(await idle.drawn())).not.toContain(gap)
+  await idle.unmount()
+})
