@@ -47,7 +47,9 @@ export type CardData = {
   rows?: (BarRow | Cell[])[]
   total?: number
   columns?: string[]
-  series?: { name: string; points: [string | number, number][] }[]
+  /** a line card's lines, each by its name, with the color value whose hue it takes where that is not its name (`group`:
+   *  a chart's `detail` lines, a line per detail value, each in its color value's hue, '' for a chart with no color) */
+  series?: { name: string; points: [string | number, number][]; group?: string }[]
   /** a dots card's rows, in the order its rows' axis sorts them */
   strips?: DotRow[]
   /** a line card's x axis's own ticks, as its x values are written (Vega-Lite's `axis.values`: thimble.chart's at each
@@ -285,6 +287,9 @@ function cite(display: string, ref: string): string {
 }
 
 export const MAX_BARS = 30
+/** The hues a line card's lines take at most, the palette's (paint.ts seriesHue); past them the lines of the values
+ *  that reach highest keep one each and the others are muted (lineLayout, bug hunt K2). */
+export const MAX_HUES = 14
 export const MAX_TABLE_ROWS = 15
 
 // ---------------------------------------------------------------------------------------- labels on cards
@@ -699,7 +704,23 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10, 
     bits[cy]![cx]! |= DOT[dy & 3]![dx & 1]!
     owner[cy]![cx] = s
   }
-  if (!card.stack) series.forEach((s, si) => {
+  // the hues: by the color value each line takes (its `group`, else its name), in the key's order; past the palette's
+  // MAX_HUES, the values whose lines reach highest keep one each and the others are muted, drawn first, under them
+  const hueName = (si: number) => series[si]?.group ?? series[si]?.name ?? ''
+  const order = card.hues ?? [...new Set(series.map((_, si) => hueName(si)))]
+  let kept: string[] | null = null
+  if (order.length > MAX_HUES) {
+    const peak = new Map<string, number>()
+    series.forEach((s, si) => peak.set(hueName(si), Math.max(peak.get(hueName(si)) ?? -Infinity, ...s.points.map(p => p[1]))))
+    const top = new Set([...order].sort((a, b) => (peak.get(b) ?? -Infinity) - (peak.get(a) ?? -Infinity)).slice(0, MAX_HUES - 1))
+    kept = order.filter(n => top.has(n))
+  }
+  const muted = (si: number) => kept !== null && !kept.includes(hueName(si))
+  const nameColour = (name: string) => (kept && !kept.includes(name) ? COLORS.dim : (classColour(card, name) ?? (order.length > 1 ? seriesHue(Math.max(0, (kept ?? order).indexOf(name))) : one())))
+  const seriesColour = (si: number) => nameColour(hueName(si))
+  const drawOrder = series.map((_, si) => si).sort((a, b) => Number(muted(b)) - Number(muted(a)))
+  if (!card.stack) drawOrder.forEach(si => {
+    const s = series[si]!
     const pts = s.points.map((p, i) => [px(xOf(p, i)), py(p[1])] as const).sort((a, b) => a[0] - b[0])
     for (let i = 0; i < pts.length; i++) {
       const [ax, ay] = pts[i]!
@@ -749,8 +770,6 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10, 
     return best
   }
   const hot = hover >= 0 ? at[hover] : undefined
-  // a chart with no colour field is one series, in the first hue (rule 12); with several, each its hue
-  const seriesColour = (si: number) => (card.hues ? groupHue(card, series[si]?.name ?? '', []) : (classColour(card, series[si]?.name) ?? (series.length > 1 ? seriesHue(si) : one())))
   const lines: Line[] = []
   for (let r = 0; r < plotRows; r++) {
     const yl = yTicks.get(r)
@@ -815,9 +834,12 @@ function lineLayout(card: CardData, cols: number, hover: number, plotRows = 10, 
     }
   } else for (const t of ticks) xl += ' '.repeat(Math.max(0, t.x - width(xl))) + t.label
   lines.push([{ s: ' '.repeat(yW + 1) + xl, fg: COLORS.dim }])
-  // the key in the order of the hues; none in a panel, under whose panels one key stands
-  const keyOrder = card.hues ? card.hues.filter(n => series.some(s => s.name === n)) : series.map(s => s.name)
-  if (shared.key !== false && series.length > 1) lines.push(...flow(keyOrder.map(n => [{ s: '● ', fg: seriesColour(series.findIndex(s => s.name === n)) }, { s: n }]), cols))
+  // the key in the order of the hues, the muted ones counted after them; none in a panel, under whose panels one key
+  // stands
+  const keyOrder = (kept ?? order).filter(n => series.some((_, si) => hueName(si) === n))
+  const rest = kept ? order.length - kept.length : 0
+  const more: Line[] = rest ? [[{ s: '● ', fg: COLORS.dim }, { s: `${rest} more`, fg: COLORS.dim }]] : []
+  if (shared.key !== false && order.length > 1) lines.push(...flow([...keyOrder.map(n => [{ s: '● ', fg: nameColour(n) }, { s: n }] as Line), ...more], cols))
   return { lines, items, hit: (x, y) => nearest(x, y) }
 }
 

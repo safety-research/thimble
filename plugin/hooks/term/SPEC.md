@@ -593,6 +593,10 @@ The same reply's first row under the pointer, and a passage a thread was asked a
   Feb 1`). An axis that names its own values (Vega-Lite's `axis.values`, as thimble.chart's weekly and monthly lines
   do) ticks at those, as the browser's does, every second or third where they do not all fit. Categories stand at the
   ends and the middle. A legend row of `● series` entries; the pointer's column `┊` with its readout on the readout row.
+  A chart's `detail` field draws a line per value, each in its color value's hue, the key naming the color values. Past
+  fourteen hues the 13 values whose lines reach highest keep one each, the others dim and drawn under them, `● N more`
+  dim in the key (bug hunt K2). A card too large for its reply's room draws its rows with no pointer on them, never an
+  empty box.
 - A dots chart (thimble.chart("dots"), or dots along rows: x numbers or times, y the rows' names): a row per row of the
   chart in the order its axis sorts them, its name at the content's edge as a bar's label, then its dots on one x axis
   for all rows, a cell's glyph saying how many dots it holds (`●` the most or near it, `•` past a third, `·` fewer), in

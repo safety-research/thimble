@@ -45,7 +45,16 @@ links and checks none; Checks off draws no tint.
 **Colors** (`palette.gen.ts`). The cards' series and the label colors are the browser's tokens (light paper on a light
 Claude Code theme, Dark on any other), written by `scripts/dev/sync_palette.py`. A chart with more than seven series
 takes seven label colors after the seven series (`paint.ts` seriesHue), so up to fourteen series each have a color of
-their own.
+their own; past fourteen, a line chart's lines of the 13 values that reach highest keep one each and the others are
+muted (dim, drawn under them, `● N more` in the key). A chart's `detail` field draws a line per value in its color
+value's hue.
+
+**A reply's room** (`reply.tsx` cardRoom). Claude Code draws at most 100,000 characters of one tree (a reply with its
+cards: their words, keys and Client props) and cuts every row after them, so a card's drawing data is kept small: a line
+card keeps at most about 1,000 points (`cell.ts` thinLines: each line its first, its last and its lowest and highest of
+each run of points), and the cards of one drawing take at most 60,000 characters of Client props; a card past that
+draws its rows as they stand, with no pointer on them, so it never leaves an empty box or cuts the cards and words after
+it (bug hunt K2).
 
 ## What it draws
 

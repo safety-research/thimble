@@ -2,12 +2,13 @@
 // the drawing form of hooks/draw.ts (CardData), so its layouts draw it in the terminal. No `$`.
 //
 // The map of card kinds (the two-modes study): a table, a timeline, a diagram, an example and a label draw directly; a
-// simple bar or line chart (one Altair layer, x and y fields) draws as text, a stacked area chart as its bands, a dots
-// chart as its rows of dots with the words a text layer writes beside them, a heatmap as its grid of cells shaded on its
-// color scale with the numbers a text layer writes on them, and
-// a faceted chart as one of these per panel; any other chart draws as a table of its rows when they are few, else as a
-// short note that the browser draws it; a note is prose; a code card, a card type's card and a matplotlib figure draw as their printed text; a custom
-// HTML card draws as its text. A label card's counts and records come from the label (`thimble state label`).
+// simple bar or line chart (one Altair layer, x and y fields; a line per `detail` value) draws as text, at most
+// MAX_LINE_POINTS points of its lines, a stacked area chart as its bands, a dots chart as its rows of dots with the words
+// a text layer writes beside them, a heatmap as its grid of cells shaded on its color scale with the numbers a text
+// layer writes on them, and a faceted chart as one of these per panel; any other chart draws as a table of its rows when
+// they are few, else as a short note that the browser draws it; a note is prose; a code card, a card type's card and a
+// matplotlib figure draw as their printed text; a custom HTML card draws as its text. A label card's counts and records
+// come from the label (`thimble state label`).
 import type { TermLinks } from './types'
 import type { BarRow, CardData, CardExample, Cell, DiagramEdge, DiagramNode, DotRow, HeatScale, Panel, PlanStep } from './draw'
 import { MAX_TABLE_ROWS, amount } from './draw'
@@ -351,6 +352,64 @@ function labeledBars(spec: VegaLite): VegaLite | null {
   return same ? { ...bar, data: bar.data ?? spec.data, datasets: { ...spec.datasets, ...bar.datasets } } : null
 }
 
+/** The fields of a chart's `detail` channel, one definition or a list of them. */
+function detailFields(d: unknown): string[] {
+  return (Array.isArray(d) ? d : [d]).flatMap(e => (e && typeof e === 'object' && typeof (e as Enc).field === 'string' ? [columnOf((e as Enc).field!)] : []))
+}
+
+/** The points a line card keeps at most, over its series and its panels' series. A card's drawing data goes to Claude
+ *  Code with the card, which draws at most 100,000 characters of one reply's tree and cuts every row after them, so a
+ *  chart of 33 lines of 480 points each drew as an empty box and took the cards and words after it with it (bug hunt
+ *  K2). A thousand points draw any line the terminal's few hundred dots across can show. */
+export const MAX_LINE_POINTS = 1000
+
+/** A point's x as a number to put points in order by: a number, a time's instant; NaN for any other. */
+function xOrder(x: string | number): number {
+  return typeof x === 'number' ? x : /^\d{4}-\d{2}-\d{2}/.test(x) ? Date.parse(x) : NaN
+}
+
+/** At most `n` of a line's points, in x order, its shape kept: its first and its last, and in each of as many runs of its
+ *  points as fit, the lowest and the highest. A line whose x values are not numbers or times keeps its order. */
+function thinLine(points: [string | number, number][], n: number): [string | number, number][] {
+  if (points.length <= n) return points
+  const keys = points.map(p => xOrder(p[0]))
+  const sorted = keys.every(k => !Number.isNaN(k)) ? points.map((p, i) => ({ p, k: keys[i]! })).sort((a, b) => a.k - b.k).map(x => x.p) : points
+  const keep = new Set([0, sorted.length - 1])
+  const runs = Math.max(1, Math.floor((n - 2) / 2))
+  const inner = sorted.length - 2
+  for (let b = 0; b < runs; b++) {
+    const [i0, i1] = [1 + Math.floor((b * inner) / runs), 1 + Math.floor(((b + 1) * inner) / runs)]
+    let lo = -1
+    let hi = -1
+    for (let i = i0; i < i1; i++) {
+      if (lo < 0 || sorted[i]![1] < sorted[lo]![1]) lo = i
+      if (hi < 0 || sorted[i]![1] > sorted[hi]![1]) hi = i
+    }
+    if (lo >= 0) keep.add(lo).add(hi)
+  }
+  return sorted.filter((_, i) => keep.has(i))
+}
+
+/** A line card (or a panels card of line cards) with at most about MAX_LINE_POINTS points: each line keeps its share of
+ *  them, at least 8 (thinLine); a stack keeps the same x values in each of its bands, every so many of them and its
+ *  last, so its bands still stack. Any other card as it is. */
+export function thinLines(card: CardData, max = MAX_LINE_POINTS): CardData {
+  const lines = card.kind === 'panels' ? (card.panels ?? []).map(p => p.card) : [card]
+  const total = lines.reduce((a, c) => a + (c.kind === 'line' ? (c.series ?? []).reduce((b, s) => b + s.points.length, 0) : 0), 0)
+  if (total <= max) return card
+  const thin = (c: CardData): CardData => {
+    if (c.kind !== 'line' || !c.series) return c
+    if (c.stack) {
+      const xs = [...new Set(c.series.flatMap(s => s.points.map(p => String(p[0]))))]
+      const every = Math.ceil(total / max)
+      const kept = new Set(xs.filter((_, i) => i % every === 0 || i === xs.length - 1))
+      return { ...c, series: c.series.map(s => ({ ...s, points: s.points.filter(p => kept.has(String(p[0]))) })) }
+    }
+    return { ...c, series: c.series.map(s => ({ ...s, points: thinLine(s.points, Math.max(8, Math.floor((s.points.length * max) / total))) })) }
+  }
+  return card.kind === 'panels' ? { ...card, panels: (card.panels ?? []).map(p => ({ ...p, card: thin(p.card) })) } : thin(card)
+}
+
 /** A one-layer bar or line chart as a bar or line card, a bar chart with its values written on its bars too; null for
  *  any other chart. */
 export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
@@ -383,12 +442,28 @@ export function chartCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
     // the series in the order the color field's own list gives (its legend's), else as the rows first name them
     const by = new Map<string, [string | number, number][]>()
     const ordered = color?.field && Array.isArray(color.sort) ? sortedBars(rows, spec.encoding ?? {}, 'color', color.field) : rows
+    // a `detail` field splits the rows into a line per value, each in its color value's hue (Altair's
+    // `detail='transcript:N'` beside `color='agent:N'`; bug hunt K2: 33 lines drew as three lines zigzagging across them)
+    const details = detailFields(spec.encoding?.detail)
+    const hueOf = (r: Record<string, unknown>) => (color?.field ? String(r[color.field] ?? '') : '')
+    const lineOf = (r: Record<string, unknown>) => details.map(f => String(r[f] ?? '')).join(' ')
     for (const r of ordered) {
-      const s = color?.field ? String(r[color.field] ?? '') : y.field
+      const s = details.length ? `${hueOf(r)}\u0000${lineOf(r)}` : color?.field ? hueOf(r) : y.field
       const xv = r[x.field]
       by.set(s, [...(by.get(s) ?? []), [typeof xv === 'number' ? xv : String(xv ?? ''), Number(r[y.field] ?? 0)]])
     }
     const xTicks = axisValues(x)
+    if (details.length) {
+      // each line by its detail value, and by its color value too where one detail value has lines of two colors
+      const keys = [...by.keys()].map(k => k.split('\u0000') as [string, string])
+      const twice = new Set(keys.map(k => k[1]).filter((d, i, all) => all.indexOf(d) !== i))
+      const series = [...by].map(([k, points], i) => {
+        const [group, line] = keys[i]!
+        return { name: twice.has(line) && group ? `${group} ${line}` : line, group, points }
+      })
+      const hues = color?.field ? [...new Set(keys.map(k => k[0]))] : []
+      return { ...blank(cell, 'line'), x: x.field, y: y.field, series, ...(hues.length ? { hues } : {}), ...(xTicks.length ? { xTicks } : {}) }
+    }
     const series = [...by].map(([name, points]) => ({ name, points }))
     // an area chart of several series stacks them, as Vega-Lite does unless its y says not to: by its `order` field,
     // else by the series' names, the first lowest; `normalize` stacks each x to the whole (bug hunt J10)
@@ -618,7 +693,7 @@ export function facetCard(cell: ThimbleCell, spec: VegaLite): CardData | null {
   // the color field's values in the whole chart's order, which every panel colors by
   const hues =
     whole.hues ??
-    (whole.kind === 'line' && (whole.series ?? []).length > 1
+    (whole.kind === 'line' && (whole.series ?? []).length > 1 && !(whole.series ?? []).some(s => s.group !== undefined)
       ? (whole.series ?? []).map(s => s.name)
       : whole.kind === 'bar'
         ? [...new Set((whole.rows as BarRow[]).map(r => r.group).filter(Boolean))]
@@ -804,7 +879,7 @@ export function cardOfCell(cell: ThimbleCell, label?: ThimbleLabel | null): Draw
   if (spec && typeof spec === 'object') {
     const vl = plainFields(spec)
     const chart = facetCard(cell, vl) ?? pictureCard(cell, vl)
-    if (chart) return { card: chart, error }
+    if (chart) return { card: thinLines(chart), error }
     // a chart the terminal has no picture of: its rows' table while it is short, else a note that the browser draws it
     // (bug hunt J10: never a long table of a chart's rows)
     const rows = anyRows(vl)
