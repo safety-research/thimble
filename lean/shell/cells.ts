@@ -6,6 +6,7 @@
 //
 //   paintRegions(grid, els, {theme, selected, key, from, rows, onPress}) -> one Box of rows
 //   from, rows: the window of rows to draw (default all), so a tall object fits a pane
+//   frame: a color for the card's own frame (its outer ╭─╮ │ ╰─╯ cells), as the card the keys act on is drawn
 //   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back)
 //   a knob's dial (`label ◂ value ▸`, k.dial) is three Buttons: ◂ calls onPress(id, -1), ▸ onPress(id, 1), the rest
 //   onPress(id), so a click turns it where the person clicks
@@ -42,7 +43,7 @@ export function selectable(grid: Grid): Region[] {
   return grid.regions.filter(r => r.rects.length && !r.link).slice().sort((a, b) => (a.rects[0]!.y - b.rects[0]!.y) || (a.rects[0]!.x - b.rects[0]!.x))
 }
 
-export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'light'; selected?: string | null; key?: string; from?: number; rows?: number; onPress?: (id: string, turn?: number) => unknown }): Any {
+export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'light'; selected?: string | null; key?: string; from?: number; rows?: number; onPress?: (id: string, turn?: number) => unknown; frame?: string | null }): Any {
   const { Box, Text, Button } = els
   const theme = opts.theme || 'dark'
   const key = opts.key || 'cells'
@@ -69,19 +70,21 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
   return Box({ flexDirection: 'column', children: out })
 
   function line(y: number) {
-    type Seg = { k: string; s: string; c: Cell; region: string }
+    type Seg = { k: string; s: string; c: Cell; region: string; edge: boolean }
     const segs: Seg[] = []
     let cur: Seg | null = null
+    const framed = !!opts.frame && isFramed(grid)
     grid.rows[y]!.forEach((c, x) => {
       if (c.cont) return
       const region = owner[y * grid.w + x] || ''
-      const k = `${c.tone}|${c.b ? 1 : 0}|${c.bg || ''}|${c.ref ? 1 : 0}|${region}`
+      const edge = framed && (y === 0 || y === grid.h - 1 || x === 0 || x === grid.w - 1) && EDGE.test(c.ch)
+      const k = `${c.tone}|${c.b ? 1 : 0}|${c.bg || ''}|${c.ref ? 1 : 0}|${region}|${edge ? 1 : 0}`
       if (cur && cur.k === k) cur.s += c.ch
-      else { cur = { k, s: c.ch, c, region }; segs.push(cur) }
+      else { cur = { k, s: c.ch, c, region, edge }; segs.push(cur) }
     })
     const text = (g: Seg) => {
       const p: Any = { children: g.s }
-      const color = termColor(g.c.tone, theme)
+      const color = g.edge ? opts.frame : termColor(g.c.tone, theme)
       if (color) p.color = color
       if (g.c.b) p.bold = true
       if (g.c.ref) p.underline = true
@@ -121,6 +124,15 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       }))
     }
   }
+}
+
+// the glyphs of a card's own frame
+const EDGE = /^[╭╮╰╯─│]+$/
+
+/** Whether a grid is a card in a frame: its corners are the frame's. */
+function isFramed(grid: Grid): boolean {
+  const top = grid.rows[0]
+  return !!top && top[0]?.ch === '╭' && top[grid.w - 1]?.ch === '╮'
 }
 
 /** The region id a cell Button's key names, or null. */

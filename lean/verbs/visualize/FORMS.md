@@ -36,6 +36,12 @@ the person sees first; the zoomed view says where it is (`overview › Rerun loo
 **Keep values as values, bound to queries.** Put query refs in the card's data (`"data": {"days": "q1"}`), so each
 number keeps its rows, and draw numbers with `bar`, `plot` and `spark`, so the browser draws them exactly.
 
+**A card is its title, its chart and its takeaway.** The person reads it under your words, so it carries three things
+only: a title that states the claim, the chart, and one line under it that says what to see. Label each mark where it
+stands: a bar part's `label` is drawn inside the part when it fits, a station has its name, a line ends with its value.
+A legend is only for a color that nothing labels in place. Leave out sources and ids: the detail's from line says
+where each value comes from.
+
 **Name the card by its claim, and save it.** The title says what the card shows ("Reruns took 840 of 2,143 steps").
 Write the object as a file and run `lean save <name> --from FILE`; then say in one line what it shows. Do not repeat
 the answer.
@@ -47,8 +53,8 @@ Each program's data is in `forms/<name>.data.json` beside this file.
 ### Bars: counts by group, split by a label
 
 ```js
-// Bars: one row per day, split by what the saves were for. Each day is a part: its ref opens its rows, and its
-// examples are real saves, labelled with what they are examples of.
+// Bars: one row per day, split by what the saves were for, each part labelled inside it where it fits (no legend).
+// Each day is a part: its ref opens its rows, and its examples are real saves, labelled with what they are examples of.
 const P = [['ask', 'c1'], ['instruct', 'c3'], ['share', 'c2'], ['test', 'c5']]
 const items = data.days.map(d => ({
   id: 'day-' + d.day, label: d.day.slice(5), parts: P.map(([p, tone]) => ({ value: d[p], tone, label: p })),
@@ -56,7 +62,7 @@ const items = data.days.map(d => ({
     examples: k.examples('ex-' + d.day, { label: `saves to other agents on ${d.day}`, records: d.examples, total: d.n, fmt: '“{text}”\n{user} · {purpose}' }) },
 }))
 return k.stack(
-  k.text(`**${k.fmt(data.total)}** saves to other agents · ${P.map(([p, t]) => `{${t}:■} ${p}`).join('  ')}`),
+  k.text(`**${k.fmt(data.total)}** saves to other agents`),
   k.bars(items),
 )
 ```
@@ -78,14 +84,20 @@ if (zoom === 'overview') {
   })
   // the strip: one cell per bucket of steps, its color what the run was doing then
   const W = Math.min(k.w - 2, 100), per = data.steps / W
-  const c = k.canvas(W, 2)
+  const c = k.canvas(W, 3)
   for (let x = 0; x < W; x++) {
     const step = Math.floor(x * per) + 1
     c.put(x, 0, '▆', tone[data.stations.find(t => step >= t.from && step <= t.to).activity])
   }
-  c.text(0, 1, '1', { tone: 'dim' })
-  c.text(W - 1, 1, k.fmt(data.steps), { tone: 'dim', align: 'right' })
-  return k.stack(map, c, k.legend(Object.entries(tone)), { gap: 1 })
+  // the colors labelled in place, each activity's name under where it first starts: no legend
+  let free = 0
+  for (const s of data.stations) {
+    const x = Math.floor((s.from - 1) / per)
+    if (x >= free && x + s.activity.length < W) { c.text(x, 1, s.activity, { tone: tone[s.activity] }); free = x + s.activity.length + 1 }
+  }
+  c.text(0, 2, '1', { tone: 'dim' })
+  c.text(W - 1, 2, k.fmt(data.steps), { tone: 'dim', align: 'right' })
+  return k.stack(map, c, { gap: 1 })
 }
 // zoomed into one station: a row of ticks per 60 steps, a failing step tall and red
 const s = data.stations.find(x => x.id === zoom), t = data.ticks[zoom], W = Math.min(60, k.w - 20)

@@ -5,11 +5,11 @@
 //                       mark a press (a cite underlined, a gloss on a teal fill, a sparkline in place), and every other
 //                       run of blocks drawn by Claude Code's own Markdown, so paragraphs, lists, code and tables look
 //                       as in any reply
-//   verbRowEl(els, o)   `v visualize · s squeeze · a atlas` under a message: dim at rest, a lit verb in its color with
-//                       ● and its note
+//   verbRowEl(els, o)   `v  s  a` under the message the keys act on: the keys alone in muted ink at rest, a lit verb
+//                       in its color with ● and its note (`s ● 6 of 24 lines`)
 //   verbLineEl(els, o)  the line a verb opens under the row: v's proposals, squeeze's chips, atlas's offer
-//   trayEl(els, o)      the tray above the prompt: one card in a frame, its title and kind on the top border, its keys
-//                       on the bottom border, a fixed number of rows
+//   trayEl(els, o)      the tray above the prompt: one card in a frame, its title on the top border, a fixed number of
+//                       rows; its keys are in the hint line under the prompt, and its color says cite or explain
 import { blocks, inline, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
 import { paintRegions } from './cells'
 
@@ -196,27 +196,26 @@ export type VerbRowOpts = {
   selected: boolean
   theme: Theme
   onPress: (key: string) => unknown
-  /** presses after the verbs, each after a dim ` · ` (the browser's `o browser`) */
-  after?: Any[]
 }
 
+/** The verb row: each verb as its key alone, in muted ink, two spaces apart; a lit verb in its color with ● and its
+ *  note; the open one on its color; a running one with …. The marks and the other keys are in the hint line. */
 export function verbRowEl(els: Any, o: VerbRowOpts): Any {
   const { Box, Button, Text } = els
   const kids: Any[] = []
   if (o.selected) kids.push(Text({ color: verbColor('v', o.theme), children: '▸ ' }))
   o.verbs.forEach((v, i) => {
-    if (i) kids.push(Text({ dimColor: true, children: ' · ' }))
+    if (i) kids.push(Text({ children: '  ' }))
     const lit = o.lit[v.key]
     const color = verbColor(v.key, o.theme, v.color)
     const isOpen = o.open === v.key
-    const run = o.running === v.key
+    const run = o.running === v.key ? '…' : ''
     let children: Any[]
-    if (isOpen) children = [Text({ backgroundColor: color, color: markColors(o.theme).paper, bold: true, children: ` ${v.key} ` }), Text({ color, children: ` ${lit?.lit && lit.note ? '● ' + lit.note : v.name}${run ? '…' : ''}` })]
-    else if (lit?.lit && lit.note) children = [Text({ color, bold: true, children: v.key }), Text({ color, children: ` ● ${lit.note}${run ? '…' : ''}` })]
-    else children = [Text({ dimColor: true, bold: true, children: v.key }), Text({ dimColor: true, children: ` ${v.name}${run ? '…' : ''}` })]
+    if (isOpen) children = [Text({ backgroundColor: color, color: markColors(o.theme).paper, bold: true, children: ` ${v.key} ` }), ...(lit?.lit && lit.note ? [Text({ color, children: ` ● ${lit.note}${run}` })] : run ? [Text({ color, children: run })] : [])]
+    else if (lit?.lit && lit.note) children = [Text({ color, bold: true, children: v.key }), Text({ color, children: ` ● ${lit.note}${run}` })]
+    else children = [Text({ dimColor: true, children: `${v.key}${run}` })]
     kids.push(Button({ key: `${o.key}-verb-${v.key}`, plain: true, label: v.name, children, onPress: () => o.onPress(v.key) }))
   })
-  for (const a of o.after || []) kids.push(...(kids.length ? [Text({ dimColor: true, children: ' · ' })] : []), a)
   return Box({ flexDirection: 'row', marginLeft: 2, children: kids })
 }
 
@@ -230,7 +229,7 @@ export type VerbLineOpts = {
   onClose: () => unknown
 }
 
-/** The line a verb opens under the row: its options, each a digit and a press, then the keys. */
+/** The line a verb opens under the row: its options, each a digit and a press. */
 export function verbLineEl(els: Any, o: VerbLineOpts): Any {
   const { Box, Button, Text } = els
   const color = verbColor(o.verb.key, o.theme, o.verb.color)
@@ -244,9 +243,7 @@ export function verbLineEl(els: Any, o: VerbLineOpts): Any {
     }))
   })
   if (o.note) kids.push(Text({ dimColor: true, children: `  ${o.note}` }))
-  const n = Math.min(9, o.options.length)
-  kids.push(Text({ children: '    ' }), Text({ dimColor: true, children: n > 1 ? `1–${n} ` : '1 ' }), Text({ dimColor: true, children: 'pick · ' }))
-  kids.push(Button({ key: `${o.key}-close`, plain: true, label: 'close', children: [Text({ dimColor: true, children: '0 close' })], onPress: o.onClose }))
+  // its keys (1–n pick · 0 close) are in the hint line under the prompt
   return Box({ flexDirection: 'row', flexWrap: 'wrap', marginLeft: 2, children: kids })
 }
 
@@ -259,33 +256,29 @@ export type TrayOpts = {
   theme: Theme
   kind: 'cite' | 'gloss' | 'spark'
   title: string
-  right: string
   grids: Any[] | null
   /** rows of text in place of the card (a side thread), the newest at the bottom */
   lines?: Any[]
   problem?: string | null
   links: { id: string; ref: string; label: string }[]
-  depth: number
   onLink: (id: string) => unknown
-  keys: string
 }
 
-/** The tray: one card in a frame of `body` rows, the title on the top border, the keys on the bottom one. */
+/** The tray: one card in a frame of `body` rows, its title on the top border; a cite's frame indigo, an explain's
+ *  teal. One frame: the card inside it has none of its own, and its keys are in the hint line. */
 export function trayEl(els: Any, o: TrayOpts): Any {
   const { Box, Text } = els
   const c = markColors(o.theme)
   const tone = o.kind === 'gloss' ? c.gloss : c.cite
   const inner = o.w - 4
   const cutTo = (s: string, n: number) => ([...s].length <= n ? s : [...s].slice(0, Math.max(0, n - 1)).join('') + '…')
-  const title = cutTo(o.title, Math.max(8, inner - [...o.right].length - 8))
-  const back = o.depth > 1 ? `‹ ${o.depth - 1}  ` : ''
-  const fill = Math.max(1, o.w - 2 - 2 - [...back].length - width(title) - 1 - 1 - [...o.right].length - 2)
+  const title = cutTo(o.title, Math.max(8, inner - 6))
+  const fill = Math.max(1, o.w - 2 - 2 - width(title) - 1 - 2)
   const titleText = o.kind === 'gloss'
     ? Text({ color: c.gloss, backgroundColor: c.glossBg, bold: true, children: title })
     : Text({ color: c.cite, underline: o.kind === 'cite', bold: true, children: title })
-  const top = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╭─ ' }), Text({ dimColor: true, children: back }), titleText, Text({ color: tone, children: ' ' + '─'.repeat(fill) + ' ' }), Text({ color: tone, children: o.right }), Text({ color: tone, children: ' ─╮' })] })
-  const keysText = cutTo(o.keys, Math.max(4, o.w - 8))
-  const bottom = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╰─ ' }), Text({ dimColor: true, children: keysText }), Text({ color: tone, children: ' ' + '─'.repeat(Math.max(1, o.w - 6 - width(keysText))) + '─╯' })] })
+  const top = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╭─ ' }), titleText, Text({ color: tone, children: ' ' + '─'.repeat(fill) + '─╮' })] })
+  const bottom = Text({ wrap: 'truncate-end', children: [Text({ color: tone, children: '╰' + '─'.repeat(Math.max(1, o.w - 2)) + '╯' })] })
   const side = Text({ color: tone, children: '│ ' })
   const sideR = Text({ color: tone, children: ' │' })
   const rows: Any[] = []

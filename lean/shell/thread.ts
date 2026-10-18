@@ -18,10 +18,11 @@
 //     with the agent, the status, the card's title and the questions as asked beside them.
 //   - The part the person has selected now is kept in threads/<session>/sel/<id>.json, which the agent reads for a
 //     message typed in its own view (that message carries no part of its own).
-//   - The thimble line (the plugin's status line under the prompt) counts the session's threads.
+//   - The thimble line above the prompt (shell.tsx) counts the session's threads, again at each change.
 // The plugin's server never starts `claude`; nothing here runs unless the person asked a question.
 import type { EngineInterface, Register } from 'claude-code'
 
+import { recount } from './shell'
 import { aboutOf, firstMessage, nextMessage, ownReport, samePart, threadKey, THREAD_PROMPT, toMain, turnsOf } from './threads.js'
 
 type Engine = EngineInterface
@@ -52,6 +53,11 @@ let inFlight = 0
 let windowOpen = false
 // while a thread answers, its turns are read again every few seconds, so its steps show as they come
 let poll: { cancel: () => void } | null = null
+
+/** How many side threads this session has. */
+export function threadCount(): number {
+  return threads.size
+}
 
 /** The detail tells the module when it opens and closes: while it is open a thread can be resumed from its view. */
 export function setThreadWindow(open: boolean): void {
@@ -104,7 +110,7 @@ async function keep($: Engine, t: Thread): Promise<void> {
     // the browser misses this thread; the terminal draws it from $.state
   }
   // the thimble line counts the threads
-  $.ui.status(`${threads.size} side thread${threads.size === 1 ? '' : 's'}`)
+  $.clock.after(0, () => { void recount($) })
   $.ui.invalidate('ui.render')
 }
 
@@ -257,7 +263,7 @@ export const registerThreads: Register = on => {
     const id = ownReport(e.text, [...byAgent.keys()])
     if (!id) return next(e)
     const t = threads.get(byAgent.get(id)!)
-    return { drop: `the side thread about ${t ? aboutOf(t.scope) : 'a card'} answered there; Claude here does not see it` }
+    return { drop: `the thread of ${t ? aboutOf(t.scope) : 'a card'} answered` }
   }).catch(($, e, next) => next(e))
 
   on('turn.start', { agentId: /./ }, async ($, e, next) => {
