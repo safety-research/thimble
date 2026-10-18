@@ -331,7 +331,7 @@ test('the app\'s routes: side threads with their turns, the sources, what this s
   const dir = join(root, 'thimble', 'threads', SID)
   mkdirSync(dir, { recursive: true })
   // a thread file as the threads module writes it; a field it does not know is dropped, a bad turn is dropped
-  writeFileSync(join(dir, 'card-01-saves.json'), JSON.stringify({ key: 'card-01-saves', agentId: 'a7', title: 'Saves per day', status: 'done', scope: { object: '01-saves', v: 2, region: 'day-2026-06-18', label: 'Jun 18', secret: 'x' }, turns: [{ role: 'user', text: 'why so high?', about: 'Jun 18' }, { role: 'assistant', text: 'A bot: [6,543](q1#day=2026-06-18@n).', calls: ['lean resolve q1'] }, { role: 'system', text: 'no' }], at: '2026-01-01T00:01:00Z' }))
+  writeFileSync(join(dir, 'card-01-saves.json'), JSON.stringify({ key: 'card-01-saves', agentId: 'a7', title: 'Saves per day', card: 'Saves per day', status: 'done', scope: { object: '01-saves', v: 2, region: 'day-2026-06-18', label: 'Jun 18', secret: 'x' }, turns: [{ role: 'person', text: 'why so high?', about: 'Jun 18' }, { role: 'claude', text: 'A bot: [6,543](q1#day=2026-06-18@n).', calls: ['lean resolve q1'] }, { role: 'system', text: 'no' }], at: '2026-01-01T00:01:00Z' }))
   // the format the detail agent names: {id, session, scope, title, at, turns}
   writeFileSync(join(dir, 'mark-a1-q1.json'), JSON.stringify({ id: 'mark-a1-q1', session: SID, scope: { row: 'a1', mark: { kind: 'cite', ref: 'q1#day=2026-06-18@n', label: '2' } }, title: '', at: '2026-01-01T00:02:00Z', turns: [{ role: 'user', text: 'where from?', at: '2026-01-01T00:02:00Z' }] }))
   writeFileSync(join(dir, 'broken.json'), '{"turns": [')
@@ -349,7 +349,7 @@ test('the app\'s routes: side threads with their turns, the sources, what this s
     assert.equal(card.status, 'done')
     // a thread whose last turn is a question is still answering
     assert.equal(threads.find(t => t.id === 'mark-a1-q1').status, 'running')
-    assert.equal((await get('thread/card-01-saves')).title, 'Saves per day')
+    assert.equal((await get('thread/card-01-saves')).card, 'Saves per day')
     assert.equal((await call(port, { path: `/${token}/api/thread/..%2Fx` })).status, 404)
     // the sources and what Claude's session read of each (the session's own id, not the person's)
     assert.deepEqual((await get('sources')).sources.map(x => x.path), ['r.jsonl', 'kinds.csv'])

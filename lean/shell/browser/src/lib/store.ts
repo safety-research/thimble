@@ -68,6 +68,7 @@ export interface Thread {
   id: string
   key?: string
   title?: string
+  card?: string
   scope?: { object?: string; v?: number; region?: string; label?: string; row?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
   status?: string
   at?: string
@@ -129,6 +130,8 @@ export interface State {
   pendingThread: { row: string; ref: string; at: number } | null
   /** a row of the chat the page's link named (#row=): scrolled to and lit once */
   flashRow: string | null
+  /** words a control puts in the chat's composer (New view), to edit and send */
+  composerFill: { text: string; at: number } | null
 }
 
 let state: State = {
@@ -158,6 +161,7 @@ let state: State = {
   exampleAt: 0,
   pendingThread: null,
   flashRow: null,
+  composerFill: null,
 }
 const subs = new Set<() => void>()
 
@@ -273,4 +277,10 @@ export const shownText = (r?: MessageRecord | null): string => String(r?.shown ?
 /** The thread about a card, when there is one. */
 export function cardThread(threads: Thread[], id: string): Thread | null {
   return threads.find((t) => t.scope?.object === id || t.id === `card-${id}` || t.key === `card-${id}`) ?? null
+}
+
+/** The threads started from a message (its row) or about one of its cards. */
+export function threadsOfRow(threads: Thread[], row: string, objects: string[] = []): Thread[] {
+  const ids = new Set(objects.map((o) => parseObj(o)?.id).filter(Boolean) as string[])
+  return threads.filter((t) => t.scope?.row === row || (t.scope?.object && ids.has(t.scope.object)))
 }

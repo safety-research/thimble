@@ -11,7 +11,6 @@ import { CanvasPane } from './canvas/CanvasPane'
 import { CardDetail } from './canvas/CardDetail'
 import { FilesPane } from './files/FilesPane'
 import { ReportPane } from './report/ReportPane'
-import { Tray } from './tray/Tray'
 import { getState, setState, useStore, type Surface } from './lib/store'
 import { allMarks, pressVerb, rowVerbs, stepMark } from './lib/actions'
 import { detailKey } from './canvas/CardDetail'
@@ -118,7 +117,6 @@ export function Shell() {
                   {surface === 'files' && <FilesPane />}
                   {surface === 'canvas' && (card ? <CardDetail /> : <CanvasPane />)}
                   {surface === 'report' && <ReportPane />}
-                  <Tray />
                 </div>
               </section>
             </div>

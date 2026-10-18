@@ -2,31 +2,37 @@
 // the cards its turn saved as 0.9's step row of card chips, then the verb row (v visualize · s squeeze · c claims), dim
 // at rest and lit from the record, with "] N marks" when the message has marks. v opens its proposals, s the squeeze
 // chips (Length, Report ↔ Interpret, Familiarity, +), each press a line to the terminal session.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Chip } from '@09/components/Chip'
-import { ChipRun, ToolCard } from '@09/components/ToolCard'
 import { MarkedText, prepare, type MarkHost } from '../lib/marks'
 import { openMark, pressVerb, rowVerbs, squeeze } from '../lib/actions'
-import { isClaims, parseObj, setState, useStore, type Row } from '../lib/store'
+import { isClaims, parseObj, setState, threadsOfRow, useStore, type Row } from '../lib/store'
+import { threadName } from './ChatPanel'
 
 export const VIEW_VERBS = new Set(['map', 'trace', 'explore'])
 
 export function Message({ row }: { row: Row }) {
   const rec = row.record!
   const focus = useStore((s) => s.focus)
+  const threads = useStore((s) => s.threads)
   const p = useMemo(() => prepare(rec), [rec])
   const host: MarkHost = {
     marks: p.marks,
     focus: focus && focus.row === row.row ? focus.i : null,
     onOpen: (i) => openMark({ row: row.row, i }),
+    threadOf: (i) => {
+      const m = p.marks[i]
+      const t = threads.find((x) => x.scope?.row === row.row && !x.scope?.object && x.scope?.mark && ((m.ref && x.scope.mark.ref === m.ref) || (m.gloss && x.scope.mark.gloss === m.gloss)))
+      return t ? { id: t.id, open: () => setState({ thread: t.id }) } : null
+    },
   }
   return (
     <>
-      <Cards refs={rec.objects || []} />
       <div className="chat-msg chat-assistant lean-msg" data-row={row.row}>
         <div className="chat-text">
           <MarkedText md={p.md} host={host} />
         </div>
+        <Chips row={row} />
         <VerbRow row={row} marks={p.marks.length} />
         <Proposals row={row} />
         <Squeeze row={row} />
@@ -35,41 +41,44 @@ export function Message({ row }: { row: Row }) {
   )
 }
 
-/** The cards the turn saved, as 0.9 draws a step that made cards: a folded step row with each card's chip. */
-function Cards({ refs }: { refs: string[] }) {
+/** Under the answer: a chip per card its turn saved (it selects the card on the Canvas, a view opens its tab), and a
+ * chip per side thread started from it (it opens the thread in the chat), as 0.9 draws what a turn made. */
+function Chips({ row }: { row: Row }) {
   const objects = useStore((s) => s.objects)
-  const list = refs.map(parseObj).filter((x): x is { id: string; v: number | null } => !!x)
-  if (!list.length) return null
-  const chips: ReactNode[] = list.map((o) => {
-    const info = objects.find((x) => x.id === o.id)
-    const view = info && (VIEW_VERBS.has(String(info.verb)) || isClaims(info))
-    const name = info?.title || o.id
-    return (
-      <span key={o.id} className="chat-tool-cell" onClick={(e) => e.stopPropagation()}>
-        <Chip
-          kind="ref"
-          tone="accent"
-          face="sans"
-          icon={view ? 'view' : 'cell'}
-          className="refchip refchip-card"
-          title={info?.question || name}
-          onClick={() => {
-            if (info && isClaims(info)) setState({ surface: 'files', filesView: 'claims', card: null })
-            else if (view) setState({ surface: 'files', filesView: `view:${o.id}`, card: null })
-            else setState({ surface: 'canvas', selected: o.id, reveal: o.id, card: null })
-          }}
-        >
-          {cut(name, 34)}
+  const threads = useStore((s) => s.threads)
+  const refs = (row.record?.objects || []).map(parseObj).filter((x): x is { id: string; v: number | null } => !!x)
+  const mine = threadsOfRow(threads, row.row, row.record?.objects || [])
+  if (!refs.length && !mine.length) return null
+  return (
+    <div className="lean-chips-row">
+      {refs.map((o) => {
+        const info = objects.find((x) => x.id === o.id)
+        const view = info && (VIEW_VERBS.has(String(info.verb)) || isClaims(info))
+        return (
+          <Chip
+            key={o.id}
+            kind="ref"
+            tone="accent"
+            icon={view ? 'view' : 'cell'}
+            className="refchip refchip-card"
+            title={info?.question || info?.title || o.id}
+            onClick={() => {
+              if (info && isClaims(info)) setState({ surface: 'files', filesView: 'claims', card: null })
+              else if (view) setState({ surface: 'files', filesView: `view:${o.id}`, card: null })
+              else setState({ surface: 'canvas', selected: o.id, reveal: o.id, card: null })
+            }}
+          >
+            {cut(o.id.replace(/^\d+-/, ''), 30)}
+          </Chip>
+        )
+      })}
+      {mine.map((t) => (
+        <Chip key={t.id} kind="ref" tone="accent" icon="thread" face="sans" className="refchip lean-thread-chip" title={t.turns.find((x) => x.role === 'user')?.text || ''} onClick={() => setState({ thread: t.id })}>
+          {cut(`main/${threadName(t)}`, 30)}
         </Chip>
-      </span>
-    )
-  })
-  const views = list.filter((o) => {
-    const info = objects.find((x) => x.id === o.id)
-    return info && (VIEW_VERBS.has(String(info.verb)) || isClaims(info))
-  }).length
-  const title = views === list.length ? (views > 1 ? 'Views' : 'View') : list.length > 1 ? 'Cards' : 'Card'
-  return <ToolCard className="chat-tool lean-cards" title={<span className="chat-tool-name">{title}</span>} meta={`${list.length} saved`} state="done" chips={<ChipRun>{chips}</ChipRun>} />
+      ))}
+    </div>
+  )
 }
 
 const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)

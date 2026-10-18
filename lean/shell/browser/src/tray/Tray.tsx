@@ -66,19 +66,22 @@ export function Tray() {
         <span className="lean-tray-title">
           {m.kind === 'spark' && m.values?.length ? <Spark values={m.values} /> : <span className={m.kind === 'gloss' ? 'lean-mark lean-mark-explain' : 'lean-tray-cite'}>{m.label}</span>}
         </span>
-        {m.ref && m.kind !== 'gloss' && <span className="lean-tray-ref">{m.ref}</span>}
-        <span className="lean-tray-keys">
-          <button type="button" className="lean-key" onClick={() => setState({ trayAsk: true })}>
-            <kbd>1</kbd> ask
-          </button>
-          <span className="lean-verb-sep">·</span>
-          <button type="button" className="lean-key" onClick={backOne}>
-            <kbd>0</kbd> {tray.length > 1 ? 'back' : 'close'}
-          </button>
-        </span>
         <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" className="lean-tray-x" onClick={close} />
       </header>
+      {m.ref && m.kind !== 'gloss' && <div className="lean-tray-ref">{m.ref}</div>}
       <div className="lean-tray-body">{m.kind === 'gloss' ? <ExplainBody m={m} /> : <SourceBody m={m} />}</div>
+      <MarkThreads m={m} row={'row' in top ? top.row : null} />
+      <footer className="lean-tray-keys">
+        <button type="button" className="lean-key" onClick={() => setState({ trayAsk: true })}>
+          <kbd>1</kbd> ask
+        </button>
+        <span className="lean-verb-sep">·</span>
+        <button type="button" className="lean-key" onClick={backOne}>
+          <kbd>0</kbd> {tray.length > 1 ? 'back' : 'close'}
+        </button>
+        <span className="lean-verb-sep">·</span>
+        <span>] next mark</span>
+      </footer>
       {asking && (
         <form
           className="lean-tray-ask"
@@ -87,12 +90,30 @@ export function Tray() {
             void send()
           }}
         >
-          <span className="lean-tray-ask-about">about {m.label}</span>
-          <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Ask about ${m.label}… (a side thread; main does not see it)`} onKeyDown={(e) => e.key === 'Escape' && setState({ trayAsk: false })} />
+          <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Ask about ${m.label.length > 24 ? m.label.slice(0, 23) + '…' : m.label}…`} onKeyDown={(e) => e.key === 'Escape' && setState({ trayAsk: false })} />
           <Button variant={q.trim() ? 'primary' : 'secondary'} size="sm" icon="arrow-up" type="submit" title="Ask" aria-label="Ask" className="composer-send" disabled={!q.trim()} />
         </form>
       )}
     </section>
+  )
+}
+
+/** The side threads asked about this mark: each a line that opens it in the chat. */
+function MarkThreads({ m, row }: { m: Prepared; row: string | null }) {
+  const threads = useStore((s) => s.threads)
+  const mine = threads.filter((t) => {
+    const k = t.scope?.mark
+    return !!k && !t.scope?.object && (!row || !t.scope?.row || t.scope.row === row) && ((m.ref && k.ref === m.ref) || (m.gloss && k.gloss === m.gloss) || (m.kind === 'gloss' && k.term === m.label))
+  })
+  if (!mine.length) return null
+  return (
+    <div className="lean-tray-threads">
+      {mine.map((t) => (
+        <button key={t.id} type="button" className="lean-tray-thread" onClick={() => setState({ thread: t.id, tray: [], focus: null })}>
+          ↳ {mine.length === 1 ? '1 thread' : 'thread'}: {t.turns.find((x) => x.role === 'user')?.text || t.title || t.id}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -189,28 +210,20 @@ function SourceBody({ m }: { m: Prepared }) {
           })}
         </div>
       ) : recs.length ? (
-        <table className="lean-tray-rows">
-          <tbody>
-            {list.map((x) => (
-              <tr key={x.ref}>
-                <td className="lean-tray-rowref-cell">
-                  <button type="button" className="lean-tray-rowref" onClick={() => open(x.ref)}>
-                    {x.ref.replace(/^.*#/, '')}
-                  </button>
-                </td>
-                <td title={x.words}>
-                  <span className="lean-tray-words">{x.words}</span>
-                  {x.meta && <span className="lean-tray-meta">{x.meta}</span>}
-                </td>
-              </tr>
-            ))}
-            {c.count != null && c.count > recs.length && (
-              <tr className="lean-tray-more">
-                <td colSpan={2}>+ {fmt(c.count - recs.length)} more rows in {c.file}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <ol className="lean-tray-rows">
+          {list.map((x) => (
+            <li key={x.ref} className="lean-tray-row">
+              <button type="button" className="lean-tray-rowref" title="open in Files" onClick={() => open(x.ref)}>
+                {x.ref.replace(/^.*#/, '')}
+              </button>
+              <span className="lean-tray-words" title={x.words}>
+                {x.words}
+              </span>
+              {x.meta && <span className="lean-tray-meta">{x.meta}</span>}
+            </li>
+          ))}
+          {c.count != null && c.count > recs.length && <li className="lean-tray-more">+ {fmt(c.count - recs.length)} more rows in {c.file}</li>}
+        </ol>
       ) : null}
     </>
   )

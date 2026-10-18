@@ -8,6 +8,7 @@ import { Spinner } from '@09/components/Spinner'
 import { ThreadTree, type ThreadNode } from '@09/components/ThreadTree'
 import { UserMessage } from '@09/components/Message'
 import { Message } from './Message'
+import { Tray } from '../tray/Tray'
 import { CitedText } from '../lib/marks'
 import { ask, pushCite } from '../lib/actions'
 import { hhmm } from '../lib/api'
@@ -20,7 +21,7 @@ const aboutOf = (t: Thread) => {
 }
 /** A thread's name in the tree: a card's thread by the card, a mark's by its first question (cut), else what it is about. */
 export const threadName = (t: Thread) => {
-  if (t.scope?.object) return t.title || t.scope.object
+  if (t.scope?.object) return t.card || t.title || t.scope.object
   const q = t.turns.find((x) => x.role === 'user')?.text?.split('\n')[0]?.trim()
   return q ? (q.length > 44 ? q.slice(0, 43) + '…' : q) : aboutOf(t)
 }
@@ -36,6 +37,26 @@ export function ChatPanel() {
   const sent = useStore((s) => s.sent)
   const [collapsed, setCollapsed] = useState(true)
   const [draft, setDraft] = useState('')
+  const composer = useRef<HTMLTextAreaElement>(null)
+  const fill = useStore((s) => s.composerFill)
+  useEffect(() => {
+    if (!fill) return
+    setDraft(fill.text)
+    setState({ composerFill: null, thread: 'main' })
+    requestAnimationFrame(() => {
+      const el = composer.current
+      if (el) {
+        el.focus()
+        el.setSelectionRange(fill.text.length, fill.text.length)
+      }
+    })
+  }, [fill])
+  // the card's thread opens the tree, so the person sees where they are
+  useEffect(() => {
+    if (!card) return
+    const t = window.setTimeout(() => setCollapsed(false), 400)
+    return () => window.clearTimeout(t)
+  }, [card?.id])
 
   // the card's thread while its detail is open: its file once there is one, else a thread to start
   const cardInfo = card ? objects.find((o) => o.id === card.id) : null
@@ -63,11 +84,12 @@ export function ChatPanel() {
     for (const t of threads) {
       const name = threadName(t)
       const running = t.status === 'running' || t.status === 'asking'
-      list.push({ id: t.id, name, path: `main/${name}`, parent: 'main', running, ended: running ? undefined : t.status === 'failed' ? 'failed' : t.turns.some((x) => x.role === 'assistant') ? 'done' : undefined, time: running ? undefined : hhmm(t.updated || t.at) })
+      const msgs = t.turns.length
+      list.push({ id: t.id, name, path: `main/${name}`, parent: 'main', running, progress: t.scope?.object ? 'card' : `${msgs} ${msgs === 1 ? 'msg' : 'msgs'}`, ended: running ? undefined : t.status === 'failed' ? 'failed' : t.turns.some((x) => x.role === 'assistant') ? 'done' : undefined, time: running ? undefined : hhmm(t.updated || t.at) })
     }
     if (pseudo) {
       const name = cardInfo?.title || card!.id
-      list.push({ id: pseudo, name, path: `main/${name}`, parent: 'main' })
+      list.push({ id: pseudo, name, path: `main/${name}`, parent: 'main', progress: 'card' })
     }
     return list
   }, [threads, working, pseudo, cardInfo?.title])
@@ -125,23 +147,25 @@ export function ChatPanel() {
           {problem && <div className="chat-error">{problem}</div>}
           {loaded && isMain && <MainRows rows={rows} working={working} />}
           {loaded && thread && <ThreadRows thread={thread} />}
-          {loaded && !isMain && !thread && card && <CardThreadStart title={cardInfo?.title || card.id} />}
+          {loaded && !isMain && !thread && card && <CardThreadStart title={cardInfo?.title || card.id} id={card.id} />}
         </div>
       </div>
       <div className="chat-foot">
-        {sent && (
-          <div className="chat-foot-cards">
+        <div className="chat-foot-cards">
+          <Tray />
+          {sent && (
             <div className={`chat-row chat-note lean-sent${sent.error ? ' is-error' : ''}`} role="status">
               <span className="chat-note-text">{sent.text}</span>
             </div>
-          </div>
-        )}
+          )}
+        </div>
         <ComposerFrame
           value={draft}
           onChange={setDraft}
           onSubmit={() => void send()}
-          placeholder={`Reply in ${curPath}…`}
-          model={<span className="lean-composer-to">{isMain ? 'to the terminal session' : 'a side thread · main does not see it'}</span>}
+          placeholder={isMain ? 'Reply to main…' : current.startsWith('card:') || thread?.scope?.object ? 'Ask about this card…' : `Reply in ${curPath}…`}
+          model={<span className="lean-composer-to" title={isMain ? 'goes to the terminal session as your prompt' : 'a side thread: main does not see it'}>{curPath}</span>}
+          textRef={composer}
           rows={2}
           data-anchor="ui:composer"
         />
@@ -208,7 +232,7 @@ function MainRows({ rows, working }: { rows: Row[]; working: boolean }) {
 /** A side thread: where it was asked from, then its turns. */
 function ThreadRows({ thread }: { thread: Thread }) {
   const sc = thread.scope || {}
-  const about = sc.mark && !sc.object ? `${sc.mark.kind === 'gloss' ? 'the term' : 'the citation'} “${aboutOf(thread)}”` : sc.object ? `the card “${thread.title || sc.object}”${sc.label && sc.label !== thread.title ? ` · ${sc.label}` : ''}` : aboutOf(thread)
+  const about = sc.mark && !sc.object ? `${sc.mark.kind === 'gloss' ? 'the term' : 'the citation'} “${aboutOf(thread)}”` : sc.object ? `the card “${thread.card || thread.title || sc.object}”` : aboutOf(thread)
   const running = thread.status === 'running' || thread.status === 'asking'
   return (
     <>
@@ -267,10 +291,16 @@ function ThreadRows({ thread }: { thread: Thread }) {
   )
 }
 
-function CardThreadStart({ title }: { title: string }) {
+function CardThreadStart({ title, id }: { title: string; id: string }) {
   return (
-    <div className="chat-row chat-note chat-origin">
-      <span className="chat-note-text">The thread of the card “{title}”. Ask about the card or a part you select; the answer comes here, and main does not see it.</span>
-    </div>
+    <>
+      <div className="chat-row chat-note chat-origin lean-thread-of">
+        <span className="chat-note-text">thread of</span>
+        <span className="chip chip-ref chip-tone-accent refchip">
+          <span className="chip-text">card:{id}</span>
+        </span>
+      </div>
+      <p className="lean-thread-intro">Ask about this card, or a part you select, here. What you ask stays in its thread: main does not see it. “{title}”</p>
+    </>
   )
 }

@@ -6,7 +6,7 @@ import { hhmm, objectOf } from '../lib/api'
 import { columnsIn, drawingOf, svgOf, unframe } from '../lib/draw'
 import { CitedText } from '../lib/marks'
 import { pushCite } from '../lib/actions'
-import { setState } from '../lib/store'
+import { cardThread, setState, useStore } from '../lib/store'
 
 export interface Drawn {
   object: any
@@ -57,11 +57,26 @@ export function useDrawn(id: string, v: number | null, px: number, mode = 'inlin
 export function CardFace({ id, row, width, selected }: { id: string; row: string | null; width: number; selected: boolean }) {
   const d = useDrawn(id, null, width)
   const o = d?.object
+  const thread = useStore((s) => cardThread(s.threads, id))
+  const open = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setState({ card: { id, v: null, region: null }, selected: id })
+  }
   return (
     <article className="canvas-card" data-cell={id}>
       <div className="bcell-top">
         <span className="bcell-meta">{['main', hhmm(o?.created || o?.updated)].filter(Boolean).join(' · ')}</span>
-        {d?.versions && d.versions.length > 1 && <span className="lean-card-versions">{d.versions.map((x) => `v${x.v}`).join(' · ')}</span>}
+        <span className="lean-card-acts" onMouseDown={(e) => e.stopPropagation()}>
+          {d?.versions && d.versions.length > 1 && <span className="lean-card-versions">{d.versions.map((x) => `v${x.v}`).join(' · ')}</span>}
+          {thread && (
+            <button type="button" className="lean-card-thread" title={thread.turns.find((x) => x.role === 'user')?.text || ''} onClick={(e) => (e.stopPropagation(), setState({ thread: thread.id }))}>
+              ↳ 1 thread
+            </button>
+          )}
+          <button type="button" className="lean-card-open" onClick={open}>
+            {selected && <kbd>1</kbd>} Open
+          </button>
+        </span>
       </div>
       <div className="bcell-head">
         <span className="bcell-q">
@@ -95,19 +110,6 @@ export function CardFace({ id, row, width, selected }: { id: string; row: string
             <CitedText text={String(o.text)} onCite={(ref, label) => setTimeout(() => pushCite({ kind: 'cite', ref, label }), 0)} />
           </div>
         </div>
-      )}
-      {selected && (
-        <button
-          type="button"
-          className="lean-card-hint"
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            setState({ card: { id, v: null, region: null } })
-          }}
-        >
-          <kbd>1</kbd> open detail
-        </button>
       )}
     </article>
   )

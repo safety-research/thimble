@@ -51,6 +51,10 @@ export function FilesPane() {
     <div className="files-tab" data-panel="files">
       <div className="files-views" aria-label="Views">
         <Segmented label="Views" size="lg" value={value} onChange={(v) => setState({ filesView: v })} options={options} />
+        <button type="button" className="btn btn-ghost btn-md files-views-new lean-new-view" title="Ask Claude for a view of these records: v under an answer makes one too" onClick={() => setState({ composerFill: { text: 'Make a view of ', at: Date.now() } })}>
+          <Icon name="plus" size={14} />
+          <span>New view</span>
+        </button>
       </div>
       {value === 'browser' && <Browser />}
       {value === 'claims' && <ClaimsView claims={claims} />}
@@ -366,7 +370,7 @@ function Record({ r, raw, flash, covered }: { r: Rec; raw: boolean; flash: boole
           </button>
         )}
         <div className="lean-rec-fields">
-          {rest.slice(0, 8).map(([k, x]) => (
+          {rest.slice(0, 4).map(([k, x]) => (
             <span key={k} className="lean-rec-field">
               <span className="lean-rec-k">{k.replace(/_/g, ' ')}</span> {typeof x === 'number' ? fmt(x) : String(x).slice(0, 80)}
             </span>

@@ -130,7 +130,8 @@ const threadsDir = (root, session) => join(root, 'thimble', 'threads', String(se
 
 /**
  * A session's side threads, newest first: each thread file (thimble/threads/<session>/<id>.json, written by the
- * threads module) as {id, title, scope, status, at, updated, turns: [{role, text, at?, about?, calls?}], error?}.
+ * threads module) as {id, title, card?, scope, status, at, updated, turns: [{role: user | assistant, text, at?, about?,
+ * calls?}], error?}.
  * Loose on purpose: a field it does not know is dropped, a turn without words is dropped, a file being written is
  * skipped until it reads.
  */
@@ -147,11 +148,13 @@ export function readThreads(root, session) {
     try { updated = new Date(statSync(file).mtimeMs).toISOString() } catch { /* gone */ }
     const id = [t.id, t.key, n.slice(0, -5)].find(x => typeof x === 'string' && THREAD.test(x))
     if (!id) continue
+    // a turn's role as the threads module writes it (person, claude) or as the transcript names it (user, assistant)
+    const ROLE = { user: 'user', person: 'user', assistant: 'assistant', claude: 'assistant' }
     const turns = (Array.isArray(t.turns) ? t.turns : [])
-      .filter(x => x && (x.role === 'user' || x.role === 'assistant') && (typeof x.text === 'string' || Array.isArray(x.calls)))
-      .map(x => ({ role: x.role, text: String(x.text ?? '').slice(0, 20000), ...(x.at ? { at: String(x.at) } : {}), ...(typeof x.about === 'string' ? { about: x.about.slice(0, 200) } : {}), ...(Array.isArray(x.calls) ? { calls: x.calls.slice(0, 20).map(c => String(c).slice(0, 200)) } : {}) }))
+      .filter(x => x && ROLE[x.role] && (typeof x.text === 'string' || Array.isArray(x.calls)))
+      .map(x => ({ role: ROLE[x.role], text: String(x.text ?? '').slice(0, 20000), ...(x.at ? { at: String(x.at) } : {}), ...(typeof x.about === 'string' ? { about: x.about.slice(0, 200) } : {}), ...(Array.isArray(x.calls) ? { calls: x.calls.slice(0, 20).map(c => String(c).slice(0, 200)) } : {}) }))
     const scope = t.scope && typeof t.scope === 'object' ? scopeOf(t.scope) : {}
-    out.push({ id, title: typeof t.title === 'string' ? t.title.slice(0, 200) : '', scope, status: typeof t.status === 'string' ? t.status : (turns.at(-1)?.role === 'user' ? 'running' : 'done'), at: t.at || null, updated, turns, ...(t.error ? { error: String(t.error).slice(0, 400) } : {}) })
+    out.push({ id, title: typeof t.title === 'string' ? t.title.slice(0, 200) : '', ...(typeof t.card === 'string' ? { card: t.card.slice(0, 200) } : {}), scope, status: typeof t.status === 'string' ? t.status : (turns.at(-1)?.role === 'user' ? 'running' : 'done'), at: t.at || null, updated, turns, ...(t.error ? { error: String(t.error).slice(0, 400) } : {}) })
   }
   return out.sort((a, b) => String(b.updated || b.at || '').localeCompare(String(a.updated || a.at || '')))
 }

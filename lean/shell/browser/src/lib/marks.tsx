@@ -83,6 +83,8 @@ export interface MarkHost {
   marks: Prepared[]
   onOpen: (i: number) => void
   focus: number | null
+  /** the side thread asked about mark i, if any: a ↳ after the mark opens it */
+  threadOf?: (i: number) => { id: string; open: () => void } | null
 }
 const MarkCtx = createContext<MarkHost | null>(null)
 
@@ -105,14 +107,31 @@ function MarkLink({ i, children }: { i: number; children: ReactNode }) {
   }
   if (m.kind === 'gloss') {
     return (
-      <button type="button" className={`lean-mark lean-mark-explain${on ? ' is-focus' : ''}`} data-mark={i} onClick={open} title="explain">
-        {children}
-      </button>
+      <>
+        <button type="button" className={`lean-mark lean-mark-explain${on ? ' is-focus' : ''}`} data-mark={i} onClick={open} title="explain">
+          {children}
+        </button>
+        <ThreadArrow i={i} />
+      </>
     )
   }
   return (
-    <button type="button" className={`refchip refchip-value refchip-citation lean-mark lean-mark-cite${on ? ' is-focus' : ''}`} data-mark={i} onClick={open} title={m.ref}>
-      {children}
+    <>
+      <button type="button" className={`refchip refchip-value refchip-citation lean-mark lean-mark-cite${on ? ' is-focus' : ''}`} data-mark={i} onClick={open} title={m.ref}>
+        {children}
+      </button>
+      <ThreadArrow i={i} />
+    </>
+  )
+}
+
+function ThreadArrow({ i }: { i: number }) {
+  const host = useContext(MarkCtx)
+  const t = host?.threadOf?.(i)
+  if (!t) return null
+  return (
+    <button type="button" className="lean-mark-thread" title="a side thread about this" onClick={(e) => (e.preventDefault(), e.stopPropagation(), t.open())}>
+      ↳
     </button>
   )
 }
