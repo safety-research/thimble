@@ -314,7 +314,10 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any]) -> dict[s
     df = result
     keys: list[str] = []
     if not isinstance(df.index, pd.RangeIndex):
-        keys = [str(n) if n is not None else "index" for n in df.index.names]
+        # an unnamed whole-number index is where the rows sat before a sort or a filter, not what they stand for: it
+        # stays a column, and the keys are the output's words, as for a plain table
+        positional = list(df.index.names) == [None] and pd.api.types.is_integer_dtype(df.index)
+        keys = [] if positional else [str(n) if n is not None else "index" for n in df.index.names]
         df = df.reset_index()
         df.columns = [str(c) for c in df.columns]
     df = df.copy()
@@ -327,7 +330,7 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any]) -> dict[s
         row_refs = [[str(x)] for x in df["_ref"]]
         out["mode"] = "exact"
     if not keys:
-        keys = [c for c in df.columns if not c.startswith("_")
+        keys = [c for c in df.columns if not c.startswith("_") and c != "index"
                 and (not pd.api.types.is_numeric_dtype(df[c]) or pd.api.types.is_bool_dtype(df[c]))]
     out["keys"] = keys
     if row_refs is None and keys and len(df) <= 200000:

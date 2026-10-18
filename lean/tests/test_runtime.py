@@ -164,3 +164,13 @@ def test_a_per_group_table_with_a_computed_word_column_still_keeps_its_rows(root
     assert q["rows"][won] == ["runs.jsonl#L1-3"]
     # a citation that names both word columns still finds its row
     assert LIN.resolve(st, f"{q['id']}#outcome=won-clean-ep&first_run=ep00@n")["count"] == 3
+
+
+def test_a_sorted_wide_table_keeps_its_rows_by_its_words_not_its_old_positions(root: Path) -> None:
+    st = Store(root)
+    q = Q.run(st, "wide", 'df = load("runs.jsonl")\np = df.pivot_table(index="outcome", values="calls", aggfunc="count").reset_index()\n'
+                         'p.rename(columns={"calls": "n"}).sort_values("n", ascending=False)')
+    assert q["keys"] == ["outcome"] and q["rows"] is not None, (q["keys"], q["lineage"])
+    top = q["table"][0]
+    assert top["outcome"] == "failed/adversarial" and "index" in top, "the old position stays a column"
+    assert LIN.resolve(st, f"{q['id']}#outcome=failed-adversarial@n")["count"] == 4
