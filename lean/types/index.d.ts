@@ -43,7 +43,7 @@ declare module 'claude-code' {
       /** the latest object drawn, which /obj opens with no argument */
       last: ObjRef | null
       /** the object and region a prompt was asked about, by the prompt row's id */
-      asked: StateFamily<{ id: string; v: number | null; region: string | null; label: string; via?: 'browser' }>
+      asked: StateFamily<{ id: string; v: number | null; region: string | null; label: string }>
       /** a verb running on an object, or what it said last, by the object's id */
       said: StateFamily<Said | null>
       /** words for Claude alone, given with the next prompt */

@@ -69,8 +69,7 @@ const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
 let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[] } | null = null
 let theme: 'dark' | 'light' = 'dark'
-type About = { id: string; v: number | null; region: string | null; label: string; via?: 'browser' }
-let pendingAsk: { text: string; about: About } | null = null
+let pendingAsk: { text: string; about: { id: string; v: number | null; region: string | null; label: string } } | null = null
 let server: { base: string; root: string } | null = null
 let serverStarting: Promise<{ base: string } | { problem: string }> | null = null
 // the server's stream: leaving it (return()) ends the server
@@ -542,9 +541,8 @@ async function recordOf($: Engine, root: string, row: string): Promise<Any | nul
 type WebScope = { row?: string; object?: string; v?: number; region?: string; label?: string; mark?: { kind?: string; ref?: string; gloss?: string; label?: string; term?: string } }
 
 /** What Claude reads beside a question asked in the browser: what it was asked about, and where its rows are. */
-export async function webContext($: Engine, root: string, scope: WebScope): Promise<{ context: string; about: About | null }> {
+export async function webContext($: Engine, root: string, scope: WebScope): Promise<string> {
   const lines = ['The person asked this in the browser page of this session, not in the terminal.']
-  let about: About | null = null
   if (scope.object && ID.test(scope.object)) {
     const ref = await withVersion($, { id: scope.object, v: scope.v ?? null, root })
     const p = await prepared($, ref, 96)
@@ -554,37 +552,32 @@ export async function webContext($: Engine, root: string, scope: WebScope): Prom
     lines.push(`They asked it on the page of ${ref.id}@${o?.version ?? ref.v} "${o?.title || ''}" (${root}/thimble/objects/${ref.id}.json)${region ? `, with its part ${region} ("${label}") selected. "This" may mean that part.` : '.'}`)
     const refs = o && region ? regionRefs(o, p.drawing, region).refs : o ? objectRefs(o).map((c: Any) => c.ref) : []
     if (refs.length) lines.push(`${region ? 'That part rests' : 'Its words rest'} on ${refs.slice(0, 3).join(', ')}; \`lean resolve <ref>\` opens the rows, \`lean list ${ref.id}\` the object's lineage.`)
-    about = { id: ref.id, v: o?.version ?? ref.v, region, label, via: 'browser' }
   }
   const m = scope.mark
   if (m && m.kind === 'gloss') {
     lines.push(`They asked about the term "${m.term || m.label || ''}", which the page explains under your message.`)
-    about = about || { id: m.term || m.label || 'term', v: null, region: null, label: m.term || m.label || '', via: 'browser' }
   } else if (m && m.ref && isRef(m.ref)) {
     lines.push(`They asked about your citation "${m.label || m.ref}" (${m.ref}). \`lean resolve ${m.ref}\` shows its rows.`)
-    about = about || { id: m.label || m.ref, v: null, region: null, label: m.ref, via: 'browser' }
   }
   if (scope.row) {
     const rec = await recordOf($, root, scope.row)
     const text = rec ? String(rec.shown ?? rec.text ?? '') : ''
     if (text && !scope.object) lines.push(`It is about your message that begins: "${cut(withoutTargets(text).replace(/\s+/g, ' '), 240)}"`)
   }
-  return { context: lines.join('\n'), about: about || { id: 'the browser', v: null, region: null, label: '', via: 'browser' } }
+  return lines.join('\n')
 }
 
 /** A question asked in the browser: a turn the person started, their words as the prompt; what it was asked about
- *  goes just before it as a row the person does not see, for Claude alone (as a verb's request does), and the
- *  prompt's row says it came from the browser. */
+ *  goes just before it as a row the person does not see, for Claude alone (as a verb's request does). Claude Code
+ *  labels the prompt's row as the plugin's. */
 async function askFromBrowser($: Engine, root: string, text: string, scope: WebScope): Promise<void> {
   try {
-    const { context, about } = await webContext($, root, scope)
+    const context = await webContext($, root, scope)
     const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
     await $.state.set(NOTES, [])
-    if (about) pendingAsk = { text, about }
     await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, context].join('\n\n') }] } })
     await $.prompt.submit({ text, asUser: true })
   } catch (err) {
-    pendingAsk = null
     $.ui.toast(`A question from the browser did not reach Claude (${cut(String((err as Error)?.message || err), 120)}); type it here instead.`)
   }
 }
@@ -1131,9 +1124,7 @@ export const registerShell: Register = (on, options) => {
     try {
       if (e.agentId === undefined && stored.uuid) {
         const msg = e.message as { type?: string; content?: unknown }
-        const said = typeof msg.content === 'string' ? msg.content : Array.isArray(msg.content) ? (msg.content as { type?: string; text?: string }[]).filter(b => b.type === 'text').map(b => b.text).join('') : ''
-        // the prompt's row: typed in the composer, or a question from the browser (stored as the plugin's, as the person's words)
-        if (pendingAsk && msg.type === 'user' && (e.door === 'prompt' || (pendingAsk.about.via === 'browser' && said.trim() === pendingAsk.text.trim()))) {
+        if (pendingAsk && e.door === 'prompt' && msg.type === 'user') {
           await $.state.set({ ...ASKED, id: rowKey(stored.uuid) }, pendingAsk.about)
           pendingAsk = null
         }
@@ -1211,16 +1202,6 @@ export const registerShell: Register = (on, options) => {
     const { Box, Text } = $.ui.resolve(e) as Any
     const own = await next(e)
     return Box({ flexDirection: 'column', children: [own, Text({ dimColor: true, wrap: 'truncate-end', children: `  ▸ about ${about.id}${about.v != null ? '@' + about.v : ''}${about.region ? ' ▸ ' + about.label : ''}` })] })
-  })
-
-  // a question asked in the browser: under its row, that it came from there and what it was about
-  on('ui.render', { component: 'UserMessage', props: { origin: { kind: 'plugin' } } }, async ($, e, next) => {
-    const about = (await $.state.get({ ...ASKED, id: rowKey(e.requestId) })).value as About | undefined
-    if (!about || about.via !== 'browser') return next(e)
-    const { Box, Text } = $.ui.resolve(e) as Any
-    const own = await next(e)
-    const what = about.region ? `${about.id}${about.v != null ? '@' + about.v : ''} ▸ ${about.label}` : about.label && about.label !== about.id ? `${about.id} (${about.label})` : about.id
-    return Box({ flexDirection: 'column', children: [own, Text({ dimColor: true, wrap: 'truncate-end', children: `  ▸ from the browser${what && what !== 'the browser' ? ' · about ' + what : ''}` })] })
   })
 
   // the prompt carries what verbs said for Claude since its last reply, and the open object with its selected part
