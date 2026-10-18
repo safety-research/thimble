@@ -59,8 +59,10 @@ export async function fullRows(refs: string[]): Promise<Map<string, string>> {
   return out
 }
 
-/** Resolved records ({ref, text}) as words, each from its whole row when the row can be read. */
-export async function wordsOf(records: { ref: string; text: string }[]): Promise<Words[]> {
-  const whole = await fullRows(records.map((r) => r.ref))
-  return records.map((r) => recordWords(whole.get(r.ref) ?? r.text, r.ref))
+/** Resolved records ({ref, text, words?, meta?}) as words: the kernel's own (`lean resolve` reads a row's words and
+ *  who and when), else each from its whole row when the row can be read. */
+export async function wordsOf(records: { ref: string; text: string; words?: string; meta?: string }[]): Promise<Words[]> {
+  const rest = records.filter((r) => !r.words)
+  const whole = rest.length ? await fullRows(rest.map((r) => r.ref)) : new Map<string, string>()
+  return records.map((r) => (r.words ? { ref: r.ref, words: r.words, meta: r.meta || '' } : recordWords(whole.get(r.ref) ?? r.text, r.ref)))
 }

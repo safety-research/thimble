@@ -99,7 +99,7 @@ const parts = []
 if (items.length) parts.push(k.bars(items, { labelW: Math.min(data.labelW, Math.floor(k.w * 0.4)) }))
 else parts.push(k.text(data.value != null ? '**' + k.escape(String(data.value)) + '**' : '{dim:no value}'))
 if (data.more) parts.push(k.text('{dim:' + k.escape(data.more) + '}'))
-for (const r of data.records) parts.push(k.text('{dim:' + k.escape(r.ref) + '}  ' + k.escape(r.text), { wrap: false }))
+for (const r of data.records) parts.push(k.text('{dim:' + k.escape(r.ref) + '}  ' + k.escape(r.text) + (r.meta ? '  {dim:' + k.escape(r.meta) + '}' : ''), { wrap: false }))
 parts.push(k.text(data.from, { wrap: false }))
 return k.stack(parts)`
 
@@ -129,7 +129,7 @@ const parts = []
 const w = Math.max(...data.rows.map(r => r.ref.length), 4)
 for (const r of data.rows) parts.push(k.beside(
   k.text((r.hot ? '{accent:' : '{dim:') + k.escape(r.ref) + '}', { w, wrap: false }),
-  k.text(k.escape(r.text), { wrap: data.rows.length === 1, max: data.rows.length === 1 ? data.room : 1, bold: !!r.hot }),
+  k.text(k.escape(r.text) + (r.meta ? '  {dim:' + k.escape(r.meta) + '}' : ''), { wrap: data.rows.length === 1, max: data.rows.length === 1 ? data.room : 1, bold: !!r.hot }),
   { gap: 2 }))
 if (!data.rows.length) parts.push(k.text('{dim:' + k.escape(data.empty) + '}'))
 if (data.more) parts.push(k.text('{dim:' + k.escape(data.more) + '}'))
@@ -162,7 +162,7 @@ export function sourceCard({ ref, label, resolved, query, lines, path, room = 9 
   }
   if (kind === 'query' || kind === 'series') {
     const { table, col, hot, labelOf } = columnOf(query, ref)
-    const recs = (r.records || []).slice(0, kind === 'query' && hot >= 0 ? 1 : 0).map(x => ({ ref: short(String(x.ref).replace(/^.*\//, ''), 28), text: short(x.text, 140) }))
+    const recs = (r.records || []).slice(0, kind === 'query' && hot >= 0 ? 1 : 0).map(x => ({ ref: short(String(x.ref).replace(/^.*\//, ''), 28), text: short(x.words || x.text, 140), meta: short(x.meta || '', 48) }))
     if (kind === 'series') {
       const rows = table.map(t => ({ label: short(labelOf(t), 24), value: typeof t[col] === 'number' ? t[col] : Number(t[col]) || 0 }))
       const labelW = Math.max(4, ...rows.map(x => x.label.length))
@@ -195,7 +195,8 @@ export function sourceCard({ ref, label, resolved, query, lines, path, room = 9 
   // rows of a source, or an object's value with the rows behind it
   const recs = r.records || []
   const one = recs.length === 1
-  const rows = recs.slice(0, Math.max(1, room - 2)).map(x => ({ ref: short(String(x.ref).replace(/^.*\//, ''), 30), text: String(x.text || ''), hot: String(x.ref) === ref }))
+  // a row reads as its words and who and when (the kernel's `words` and `meta`), never as its `field: value` pairs
+  const rows = recs.slice(0, Math.max(1, room - 2)).map(x => ({ ref: short(String(x.ref).replace(/^.*\//, ''), 30), text: String(x.words || x.text || ''), meta: String(x.meta || ''), hot: String(x.ref) === ref }))
   const total = r.count != null ? r.count : recs.length
   const more = total > rows.length ? `${rows.length} of ${fmtN(total)} rows, the first in file order` : ''
   const objStep = (r.chain || []).find(c => c.step === 'object')

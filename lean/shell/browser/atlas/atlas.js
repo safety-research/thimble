@@ -661,7 +661,7 @@
     const q = (r.chain || []).find(s => s.step === 'query')
     if (q && q.value != null) return { text: `= ${q.value}`, more: q.about || '', val: true }
     const rec = (r.records || [])[0]
-    if (rec) return { text: String(rec.text || '').replace(/\s+/g, ' ').slice(0, 300) }
+    if (rec) return { text: String(rec.words || rec.text || '').replace(/\s+/g, ' ').slice(0, 300), more: rec.words ? rec.meta || '' : '' }
     return { text: (r.rows || []).slice(0, 2).join(', ') }
   }
   function select(n) {
@@ -720,7 +720,8 @@
       const q = (r.chain || []).find(s => s.step === 'query')
       const lines = []
       if (q) lines.push(`<div><span class="r">${esc(q.id)}</span>${esc(q.about || '')}${q.value != null ? ' = ' + esc(q.value) : ''} · ${esc(r.count != null ? fmt(r.count) + ' source rows' : (r.rows || []).join(', '))}</div>`)
-      for (const x of (r.records || []).slice(0, 5)) lines.push(`<div title="${esc(x.text)}"><span class="r">${esc(shortRef(x.ref))}</span>${esc(String(x.text).replace(/\s+/g, ' ').slice(0, 400))}</div>`)
+      // a row reads as its words and who and when (the kernel's `words` and `meta`), not as its `field: value` pairs
+      for (const x of (r.records || []).slice(0, 5)) lines.push(`<div title="${esc(x.text)}"><span class="r">${esc(shortRef(x.ref))}</span>${esc(String(x.words || x.text).replace(/\s+/g, ' ').slice(0, 400))}${x.words && x.meta ? ` <span class="dim">· ${esc(x.meta)}</span>` : ''}</div>`)
       for (const x of (r.notes || []).slice(0, 1)) lines.push(`<div><span class="r">note</span>${esc(x)}</div>`)
       box.innerHTML = lines.join('') || `<div>${esc(e.ref)}</div>`
     })
