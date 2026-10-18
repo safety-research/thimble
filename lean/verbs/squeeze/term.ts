@@ -314,6 +314,12 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
   const hit = isOriginal(chips) ? restore(probe, remark) : fromVersions(rec, want.at, remark)
   if (hit) { await settled($, row, hit as MsgRecord); return }
   await ensure($)
+  // a short wait before a call, so keys pressed in a row are written once, at the last level (verb.json settleMs)
+  const wait = Number(cfg.settleMs || 0)
+  if (wait > 0) {
+    await new Promise<void>(done => { $.clock.after(wait, () => done()) })
+    if (inflight.get(row)?.want) return
+  }
   revealing.delete(row)
   await setUi($, row, { running: { since: await $.clock.now() }, error: null, reveal: null })
   const ticker = tick($, row)
