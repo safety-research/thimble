@@ -75,6 +75,7 @@ let ringY = -1
 let draft = ''
 let refocus = false
 let drawnSig = ''
+let paneFocused = false
 
 /** The terminal's width, from the band's viewport (shell.tsx) while no detail is docked: then the conversation has
  *  every column. While the detail is open its own drawing measures it (the conversation's columns, the dock's and the
@@ -430,8 +431,14 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   // the ring follows the selection: after a drawing that moved the part (a scroll, a zoom, a key), it is put back on
   // the selected part's gutter cell, unless the person is typing in the ask line
   const want = selectedGutter()
-  const sig = `${parts.map((x: Any) => x.id).join(',')}|${from}`
+  // which part each gutter cell stands for: when that changes (a zoom, the bar opening, a scroll), the ring's cell may
+  // stand for another part now, so it is put back on the selected one
+  const sig = [...gutter].map(([y, ids]) => `${y}:${ids.join('/')}`).join(',')
   if (sig !== drawnSig) { drawnSig = sig; if (!isAsk(ringAt)) ringAt = null }
+  // the pane taking the keyboard back puts the ring where the person last moved it, as the engine kept it, which is
+  // another part once the page scrolled: it goes back on the selected part
+  if (e.props.isFocused && !paneFocused && !isAsk(ringAt)) ringAt = null
+  paneFocused = !!e.props.isFocused
   if (want && e.props.isFocused && !isAsk(ringAt) && ringAt !== want && !refocus) {
     refocus = true
     $.clock.after(0, () => { void focusPart($).finally(() => { refocus = false }) })
@@ -775,6 +782,8 @@ export function resetDetail(): void {
   ringAt = null
   draft = ''
   refocus = false
+  paneFocused = false
+  drawnSig = ''
   viewCols = 0
   latestSeen.clear()
   lastCard = null
