@@ -5,7 +5,7 @@
 // groups that follow each other in a column wrap into rows (gridOf), so Fit shows a frame of many groups readably. A child
 // with a `pos` is placed free inside the frame. A thread's frame that no one has placed stands right of the card it is
 // about. A collapsed frame shows its nested groups and its first card, with the edges of the others stacked under it. Root frames sit at their `pos`, or below the root before them; loose cards sit
-// at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
+// at their own `pos`. Empty thread groups and an empty orientation deck are not drawn. `View` is the plane's pan and zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
@@ -88,7 +88,8 @@ export interface Board {
 
 /**
  * The board from the canvas route: a frame per group (the loose group draws none: its cards are loose, at the root),
- * a nested group whose parent is not drawn at the root, and a thread's group only while something is in it.
+ * a nested group whose parent is not drawn at the root, and a thread's group or the orientation's (role exploration)
+ * only while something is in it, so an orientation that failed or stopped before its first card leaves no empty frame.
  */
 export function boardOf(data: CanvasResponse): Board {
   const loose = new Set(data.groups.filter((g) => g.kind === 'loose').map((g) => g.id))
@@ -97,13 +98,13 @@ export function boardOf(data: CanvasResponse): Board {
   for (const c of data.cells) cellsIn.set(c.notebook, (cellsIn.get(c.notebook) ?? 0) + 1)
   const kidsOf = new Map<string, string[]>()
   for (const g of all.values()) if (g.parent && all.has(g.parent) && g.parent !== g.id) kidsOf.set(g.parent, [...(kidsOf.get(g.parent) ?? []), g.id])
-  // a thread's frame is drawn while it or a frame in it holds a card
+  // a thread's frame, or the orientation's, is drawn while it or a frame in it holds a card
   const full = (id: string, seen = new Set<string>()): boolean => {
     if (seen.has(id)) return false
     seen.add(id)
     return (cellsIn.get(id) ?? 0) > 0 || (kidsOf.get(id) ?? []).some((k) => full(k, seen))
   }
-  const drawn = new Set([...all.values()].filter((g) => !isThreadGroup(g) || full(g.id)).map((g) => g.id))
+  const drawn = new Set([...all.values()].filter((g) => !(isThreadGroup(g) || g.role === 'exploration') || full(g.id)).map((g) => g.id))
   // a parent chain that loops, or runs through a group not drawn, ends at the root
   const parentOf = (g: Group): string | null => {
     const p = g.parent
