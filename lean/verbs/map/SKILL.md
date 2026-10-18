@@ -19,8 +19,8 @@ their own.
 - A **thread** moves through the work: one agent's run, each run of a sweep, each agent of a swarm. It has an `id`,
   `stops` (the stations it passes, in order), and any fields worth coloring by, such as `outcome` or `model`.
 - A **station** is a move or a place: "reads the board", "reruns the test with no change", "LIVE COORDINATION pages".
-  It has an `id`, a short `label`, a `note` that says what happened there or how you matched it (the map already shows
-  its steps), and a `ref` to its rows.
+  It has an `id`, a short `label` (and a `short` one of a word or two for tight spots), a `note` that says what happened
+  there or how you matched it (the map already shows its steps), and a `ref` to its rows.
 - A **link** is a relation the order of stops does not show: a revert that goes back, a note one agent wrote and
   others read.
 - **Groups** gather stations into regions, for a dataset or a report, where nothing moves.
@@ -52,7 +52,8 @@ it. When they ask a new question of the map ("which runs masked the flake?"), co
 a new version with it as the lens.
 
 **The reply says what the map means.** One or two sentences: the shape, and what is surprising. The map holds the order,
-the steps and the counts, and it sits under your reply, so do not list the stations again in words.
+the steps and the counts, and its full form lists every station with its count, so the reply needs no list or table
+of the stations.
 
 ## Saving a map
 
