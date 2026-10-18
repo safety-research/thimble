@@ -45,6 +45,18 @@ export function threadsOf(meta) {
   return Array.isArray(meta && meta.threads) ? meta.threads.map(String) : []
 }
 
+/** How many threads a map's data holds: its threads, or the threads its moves name. */
+export function threadCount(data) {
+  const ids = new Set()
+  for (const [k, v] of Object.entries(data || {})) {
+    if (THREAD_KEYS.includes(k)) (Array.isArray(v) ? v : v && typeof v === 'object' ? Object.keys(v).map(id => ({ id })) : []).forEach(t => ids.add(String(t && typeof t === 'object' ? t.id ?? t.thread ?? t.run ?? t.agent ?? t.name : t)))
+    if (MOVE_KEYS.includes(k) && Array.isArray(v)) v.forEach(m => { if (m && typeof m === 'object') ids.add(String(m.thread ?? m.run ?? m.agent ?? '')) })
+  }
+  ids.delete('')
+  ids.delete('undefined')
+  return ids.size
+}
+
 /** The map's data with only these threads (and their moves); stations and groups are kept, so names still read. */
 export function filterThreads(data, keep) {
   const set = new Set(keep)
@@ -124,9 +136,10 @@ export async function run(ctx) {
   const o = ctx.object
   if (!o) return { text: 'Map works on an object. Ask Claude to map the work in words, or open an object first.' }
   if (isMap(o)) {
-    if (ctx.region && threadsOf(ctx.regionMeta).length) return zoom(ctx, o)
+    const some = threadsOf(ctx.regionMeta).length
+    if (ctx.region && some && some < threadCount(o.data)) return zoom(ctx, o)
     if (!o.data?.full) return fullMap(ctx, o)
-    if (ctx.region) return { text: `${ctx.regionMeta?.label || ctx.region}: its rows are in the detail view. A station or a lane with threads maps on its own with m.` }
+    if (ctx.region) return { text: `${ctx.regionMeta?.label || ctx.region}: its rows are in the detail view, under the map. On a map of many threads, m on a station or a lane maps the threads through it.` }
     return { text: 'This is the full map. Select a station or a lane (tab) and press m to map only the threads through it, or ask Claude for another lens in words.' }
   }
   return {
