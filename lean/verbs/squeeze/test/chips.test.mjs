@@ -18,7 +18,7 @@ const TEXT = [
   '- The fix is one line.',
   '- The test then [passed 200 times in a row](q3#test=checkout@passes).',
 ].join('\n')
-const PROMPT = readFileSync(fileURLToPath(new URL('../prompt.md', import.meta.url)), 'utf8')
+const PROMPT = readFileSync(fileURLToPath(new URL('../../../prompts/squeeze/v3.md', import.meta.url)), 'utf8')
 
 function record() {
   const rec = newRecord({ row: 'r1', session: 's1', text: TEXT })

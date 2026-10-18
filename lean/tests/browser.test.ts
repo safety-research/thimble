@@ -4,6 +4,7 @@
 // thread (shell/thread.ts) that main does not see, a verb press runs that verb on the message.
 // `claude plugin test lean`. The page server is answered here, at process.spawn, the drawing and verbs at process.run.
 import { expect, mock, test } from 'claude-code/testing'
+import { promptStub } from './stubs'
 
 const ROOT = '/data'
 const SESSION = 's-1'
@@ -36,7 +37,7 @@ function world(on: any, serverLines: unknown[] = []) {
   })
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` }))
   on('fs.list', () => ({ value: [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => { files[e.path] = String(e.content ?? e.text ?? e.data ?? ''); return { value: undefined } })
   const runs: string[][] = []
   const inputs: unknown[] = []

@@ -11,14 +11,17 @@
 // Claude Code hands a plugin only the keys that edit the prompt, so these are the keys (tab, arrows, ↵ and esc never
 // reach a plugin). They are named once, in the hint line under the prompt (squeezeHint), not under the chips.
 //
-// A rewrite: one $.model.complete call (prompt.md, the question, the original, every chip's level); the record's
+// A rewrite: one $.model.complete call (the registry's squeeze prompt, the question, the original, every chip's level),
+// recorded in the session's events with the prompt version it used; the record's
 // `shown` holds the result and its marks are placed again on it, citations kept; a state seen before comes back from
 // the record with no call. While a call runs the old text dims and its first glyph turns; when the new text is there
 // it writes itself in from the top at a model's pace, and nothing else is drawn for it.
 import type { EngineInterface } from 'claude-code'
 
 import type { MsgRecord, SqzUi, Tray } from '../../types'
+import { promptText as registryText } from '../../prompts/prompts'
 import { remark as remarkAny } from '../../shell/message.js'
+import { tracked } from '../../telemetry/telemetry'
 import { questionBefore, recordNow, saveRecord } from '../../shell/shell'
 import { ARRIVE, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, glyph, isLong, isOriginal, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stepAt, stretchChip, withStretch } from './chips.mjs'
 
@@ -44,7 +47,6 @@ const BLANK: SqzUi = { focus: 'length', adding: false, running: null, error: nul
 const inflight = new Map<string, { want: Want | null }>()
 const revealing = new Map<string, number>()
 type Want = { at: At }
-let promptText = ''
 let cfg: Record<string, unknown> = {}
 let view = { cols: 100, rows: 48 }
 
@@ -66,7 +68,6 @@ async function setUi($: Engine, row: string, change: Partial<SqzUi>): Promise<Sq
 
 async function ensure($: Engine): Promise<void> {
   const dir = $.plugin.root.replace(/\/+$/, '')
-  if (!promptText) promptText = String(await $.fs.read(`${dir}/verbs/squeeze/prompt.md`))
   if (!Object.keys(cfg).length) {
     try { cfg = JSON.parse(String(await $.fs.read(`${dir}/verbs/squeeze/verb.json`))) } catch { cfg = {} }
   }
@@ -333,13 +334,14 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
   const ticker = tick($, row)
   try {
     const question = await questionBefore($, row).catch(() => '')
+    const sp = await registryText($, 'squeeze')
     const req = request(probe, {
-      system: promptText, question,
+      system: sp.text, question,
       model: String(cfg.model || DEFAULTS.model), effort: String(cfg.effort || DEFAULTS.effort),
       maxTokens: Number(cfg.maxTokens || DEFAULTS.maxTokens), timeoutMs: Number(cfg.timeoutMs || DEFAULTS.timeoutMs),
     })
     const t0 = await $.clock.now()
-    const r = await $.model.complete(req as Any)
+    const r = await tracked($, { feature: 'squeeze', prompt: sp.id, model: req.model, extra: { row, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(',') } }, () => $.model.complete(req as Any))
     const ms = (await $.clock.now()) - t0
     if (!r.isAnswered) {
       const why = r.reason === 'api-error' ? `the API answered ${(r as Any).status ?? ''} ${(r as Any).error ?? ''}`.trim() : r.reason
@@ -358,12 +360,12 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     const fs = ((fresh as Any).squeeze ?? {}) as Any
     const next = applyRewrite({ ...fresh, squeeze: { ...fs, own: fs.own ?? s.own } } as MsgRecord, {
       text: checked.text, at: want.at,
-      made: { ms, model: req.model, usage: (r as Any).usage, at: new Date(t0).toISOString() }, problems: checked.problems,
+      made: { ms, model: req.model, usage: (r as Any).usage, at: new Date(t0).toISOString(), prompt: sp.id }, problems: checked.problems,
     }, remark) as MsgRecord
     ticker.stop()
     await setUi($, row, { running: null })
     await settled($, row, next)
-    await log($, { row, ok: true, ms, model: req.model, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols) })
+    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols) })
   } finally {
     ticker.stop()
   }
@@ -460,7 +462,6 @@ export async function arrive($: Engine, row: string): Promise<void> {
 export function resetSqueeze(): void {
   inflight.clear()
   revealing.clear()
-  promptText = ''
   cfg = {}
   view = { cols: 100, rows: 48 }
 }

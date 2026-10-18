@@ -15,6 +15,7 @@
 // same permission mode.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { textOf } from '../../prompts/node.mjs'
 import { readStore, viewOf } from './claims.js'
 import { estimate } from './estimate.mjs'
 
@@ -41,17 +42,21 @@ export function summary(store) {
 
 /** The request main gets when the person asks for the corpus orientation. Text a model reads: changes are logged in
  *  PROMPTS.md. */
-export function askFor({ root, dir = HERE, est }) {
-  const file = `${root}/thimble/claims/orientation.json`
+export function askFor({ root, dir = HERE, est, skill = null }) {
+  // the orientation's text: the registry's active version of `claims` (its SKILL.md unless another is chosen)
+  let file = skill
+  if (!file) { try { const t = textOf('claims'); file = t.version === 'skill' ? null : t.file } catch { file = null } }
+  file = file || `${dir}/SKILL.md`
+  const out = `${root}/thimble/claims/orientation.json`
   const under = est.read ? ` under ${est.read}` : ''
   return [
     `Orient on this folder's corpus: ${est.what}${under} (${est.detail}). It takes a subagent about ${est.minutes} minutes.`,
     '',
     'Hand the reading to one subagent with the Agent tool, so the rows it reads stay out of this conversation. Give it this prompt, and add one sentence on what the person is looking into if you know:',
     '',
-    `"Orient on the folder ${root}: ${est.what}${under}. First read ${dir}/SKILL.md and follow it. Write the claims as JSON to ${file}, then run \`lean verb claims check ${file}\` and fix what it lists. Your last message is the check's last line."`,
+    `"Orient on the folder ${root}: ${est.what}${under}. First read ${file} and follow it. Write the claims as JSON to ${out}, then run \`lean verb claims check ${out}\` and fix what it lists. Your last message is the check's last line."`,
     '',
-    `When the subagent is done, run \`lean verb claims save ${file}\`. Its claims join this session's claims, which the person opens with c, so reply in one or two sentences: what the corpus holds, and the one thing in it that surprised you most.`,
+    `When the subagent is done, run \`lean verb claims save ${out}\`. Its claims join this session's claims, which the person opens with c, so reply in one or two sentences: what the corpus holds, and the one thing in it that surprised you most.`,
   ].join('\n')
 }
 
