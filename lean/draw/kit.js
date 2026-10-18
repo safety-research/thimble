@@ -683,11 +683,14 @@
   const MAP_BAD = /\b(fail(ed|s|ure)?|error|broke|broken|time[ds]? ?out|crash(ed)?|wrong|rejected|false|no)\b|✗/i
   const MAP_WARN = /\b(mask(ed|s)?|skip(ped)?|retr(y|ied)|partial|gave up|stuck|flaky|stale|abandoned|cut off|unfinished|incomplete|stopped)\b/i
 
-  // a short name for a label: the first word and the most telling other word (one with a digit or #, else the longest)
+  // a short name for a label: its first word and the next telling one (one with a digit or #, else the next word that
+  // is not a small word), as "reviews #66110" for "reviews and approves #66110" or "shares build" for "shares the build"
+  const SMALL = /^(the|a|an|of|to|in|on|for|with|and|or|its|it|at|by|from|as|is|are|be|into|then)$/i
   function shortName(label) {
-    const w = String(label || '').split(/\s+/).filter(Boolean)
+    const w = String(label || '').replace(/[,;:()]/g, ' ').split(/\s+/).filter(Boolean)
     if (w.length <= 2) return w.join(' ')
-    const tell = w.slice(1).find(x => /[\d#@./_]/.test(x)) || w.slice(1).slice().sort((a, b) => b.length - a.length)[0]
+    const rest = w.slice(1)
+    const tell = rest.find(x => /[\d#@/_]/.test(x)) || rest.find(x => !SMALL.test(x)) || rest[0]
     return w[0] + ' ' + tell
   }
   const mslug = (s, n) => (slug(s) || slug('x-' + s) || 'x').slice(0, n || 48).replace(/-+$/, '')
@@ -1063,7 +1066,7 @@
         return (lvl === 0 ? labelOf(s) : shortOf(s)) + (m ? ' ' + m : '') + rep
       }
       const lvl = stops.map(() => 0)
-      const minOf = i => k.len(token(stops[i], i, lvl[i])) + (i < n - 1 ? 3 : 0)
+      const minOf = i => k.len(token(stops[i], i, lvl[i])) + (i < n - 1 ? (lvl[i] >= 2 ? 2 : 3) : 0)
       const keyed = i => (st(stops[i]).raw && st(stops[i]).raw.key ? 1 : 0)
       const byFew = stops.map((s, i) => i).sort((a, b) => keyed(a) - keyed(b) || span(stops[a]) - span(stops[b]))
       for (let guard = 0; guard < 3 * n && stops.reduce((sum, s, i) => sum + minOf(i), 0) > W; guard++) {
@@ -1091,9 +1094,10 @@
         const lab = lvl[i] >= 2 ? '' : lvl[i] === 1 ? shortOf(s) : labelOf(s)
         let dx = 0
         if (lab) dx += g.str(x, 0, lab, 'ink')
-        if (m || !lab) { if (lab) dx++; g.set(x + dx, 0, { ch: m || '●', tone: markTone(s, m), kind: 'mark' }); dx++ }
+        if (m || !lab) { if (lab) dx++; g.set(x + dx, 0, m ? { ch: m, tone: markTone(s, m), kind: 'mark' } : { ch: '·', tone: 'dim', kind: 'mark' }); dx++ }
         if (s.repeat) { const r = lvl[i] ? ' ⟳' : ` ⟳${fmt(s.repeat)}`; g.str(x + dx, 0, r, 'c5'); dx += k.len(r) }
-        if (i < n - 1) for (let j = x + dx + 1; j < x + ws[i] - 1; j++) g.set(j, 0, { ch: '─', tone: s.tone ? T(s.tone) : 'dim', kind: 'line' })
+        const padL = lvl[i] >= 2 ? 0 : 1, padR = i < n - 1 && lvl[i + 1] < 2 ? 1 : 0
+        if (i < n - 1) for (let j = x + dx + padL; j < x + ws[i] - padR; j++) g.set(j, 0, { ch: '─', tone: s.tone ? T(s.tone) : 'dim', kind: 'line' })
         g.rect(reg[i], x, 0, ws[i], 1)
         x += ws[i]
       })
@@ -1185,8 +1189,14 @@
     const barW = f.known ? Math.max(6, Math.min(24, Math.floor(W / 5))) : 0
     const maxSpan = Math.max(1, ...stops.map(f.span))
     const nameX = 2 + numW + 2
-    const nameW = Math.max(8, W - nameX - (barW ? barW + 2 + k.len(fmt(maxSpan)) + 1 : 0))
-    const rows = stops.map((s, i) => 1 + wrapNote(notes[i], nameW).length)
+    const longest = Math.max(4, ...stops.map(s => k.len(f.labelOf(s) + (s.repeat ? ` ⟳${fmt(s.repeat)}` : ''))))
+    const labW = Math.max(8, Math.min(longest, W - nameX - (barW ? barW + 2 + k.len(fmt(maxSpan)) + 1 : 0)))
+    const nameW = Math.max(labW, W - nameX)
+    const bx = nameX + labW + 2
+    let lines = 2
+    if (stops.reduce((a, s, i) => a + 1 + wrapNote(notes[i], nameW).length, 0) > Math.max(k.h, n * 2)) lines = 1
+    const noteLines = i => wrapNote(notes[i], nameW).slice(0, lines).map((l, j, all) => (j === all.length - 1 && all.length < wrapNote(notes[i], nameW).length ? Array.from(l).slice(0, Math.max(1, nameW - 1)).join('') + '…' : l))
+    const rows = stops.map((s, i) => 1 + noteLines(i).length)
     const back = (M.links || []).filter(l => stops.some(s => s.station === l.from))
     const H = rows.reduce((a, b) => a + b, 0) + (f.known ? 1 : 0) + back.length
     const g = new MapGrid(W, Math.max(1, H))
@@ -1199,16 +1209,15 @@
       if (i < n - 1) for (let yy = y + 1; yy < y + h; yy++) g.set(0, yy, { ch: s.repeat ? '↻' : '┃', tone: s.repeat ? 'c5' : 'accent', kind: s.repeat ? 'mark' : 'line' })
       if (s.from != null) g.str(2 + numW - k.len(fmt(s.from)), y, fmt(s.from), 'dim')
       let lab = f.labelOf(s) + (s.repeat ? ` ⟳${fmt(s.repeat)}` : '')
-      if (k.len(lab) > nameW) lab = Array.from(lab).slice(0, nameW - 1).join('') + '…'
+      if (k.len(lab) > labW) lab = Array.from(lab).slice(0, labW - 1).join('') + '…'
       g.str(nameX, y, lab, s.tone ? f.T(s.tone) : 'ink', { b: true })
       if (barW) {
         const v = f.span(s)
         const len = Math.max(1, Math.round((v / maxSpan) * barW))
-        const bx = W - barW - 1 - k.len(fmt(maxSpan))
         for (let j = 0; j < len; j++) g.set(bx + j, y, { ch: '▬', tone: 'accent', kind: 'block' })
-        g.str(bx + barW + 1 + k.len(fmt(maxSpan)) - k.len(fmt(v)), y, fmt(v), 'dim')
+        g.str(bx + len + 1, y, fmt(v), 'dim')
       }
-      wrapNote(notes[i], nameW).forEach((line, j) => g.str(nameX, y + 1 + j, line, 'dim'))
+      noteLines(i).forEach((line, j) => g.str(nameX, y + 1 + j, line, 'dim', { max: nameW }))
       g.rect(reg[i], 0, y, W, h)
       y += h
     })
