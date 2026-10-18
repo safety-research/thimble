@@ -248,7 +248,7 @@ test('t is time: the claims appear in the order made, a revision only once made;
   await ($ as Any).prompt.edit(key('/'))
   await w.clock.settle()
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"key":"search"')
-  expect(textOf(await $.ui.render(HINT))).toContain('type to search · ↵ done · esc clear')
+  expect(textOf(await $.ui.render(HINT))).toContain('type to search · ↵ done · esc close')
 })
 
 test('a question asked with a claim selected carries it; 0 closes the pane; m asks Claude for the corpus orientation', async ($, on) => {

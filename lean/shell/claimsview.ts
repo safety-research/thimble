@@ -67,11 +67,11 @@ const cutTo = (s: string, n: number) => (s.length <= n ? s : s.slice(0, Math.max
 
 /** The hint line under the prompt while the pane has the keys: only the keys of what has focus. */
 export function claimsHint(o: { search: string | null; searching: boolean; time: boolean; selected: Any | null; offer: Any | null }): string {
-  if (o.searching) return 'type to search · ↵ done · esc clear'
+  if (o.searching) return 'type to search · ↵ done · esc close'
   if (o.time) return '] [ turn · t now · esc close'
   const n = o.selected ? Math.min(7, (o.selected.sources || []).length) : 0
   const offer = o.offer ? ` · m map the corpus ~${o.offer.minutes} min ~${Math.round((o.offer.tokens || 0) / 1000)}k tokens` : ''
-  return `↑ ↓ move · ↵ select${n ? ` · ${n > 1 ? `1–${n}` : '1'} source` : ''} · n cluster · / search${o.search ? ' · esc clear' : ''} · t time · esc close${offer}`
+  return `↑ ↓ move · ↵ select${n ? ` · ${n > 1 ? `1–${n}` : '1'} source` : ''} · n cluster · / search · t time · esc close${offer}`
 }
 
 export function claimsPaneEl(els: Any, o: ClaimsPaneOpts): Any {

@@ -2306,16 +2306,7 @@ export const registerShell: Register = (on, options) => {
   })
   on('ui.close', { id: CPANE }, async ($, e, next) => {
     try {
-      {
-        const cp = (await $.state.get(CLAIMPANE)).value as ClaimPane | null
-        // esc with a search: the search clears, and the pane stays
-        if (cp && cp.search != null && (e as Any).origin?.kind === 'person') {
-          await $.state.set(CLAIMPANE, { ...cp, search: null, searching: false })
-          if (cp.focus) $.clock.after(0, () => { void quietly($.ui.focus({ requestId: CPANE, key: claimKey(cp.focus!) })) })
-          return undefined as Any
-        }
-        await $.state.set(CLAIMPANE, null)
-      }
+      await $.state.set(CLAIMPANE, null)
     } catch {
       // the pane closes whatever the shell makes of it
     }
