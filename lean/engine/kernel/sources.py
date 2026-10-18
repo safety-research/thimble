@@ -1,0 +1,584 @@
+"""Sources: anything Claude can read, each kind with an adapter that gives its rows with stable ids (refs.py).
+
+    kind        files                                 a row is                          its ref
+    jsonl       .jsonl .ndjson                        one line (one record)             <path>#L<n>
+    transcript  a jsonl of chat records               one line (one message or event)   <path>#L<n>
+    csv         .csv .tsv                             one row after the header          <path>#row=<n>
+    json        .json                                 one item of its largest list      <path>#/<key>/<i>
+    sqlite      .db .sqlite .sqlite3                  one row of a table                <path>#<table>/<rowid>
+    markdown    .md .markdown .rst                    one section (a heading and text)  <path>#L<a>-<b>
+    diff        .diff .patch                          one hunk                          <path>#L<a>-<b>
+    text        code, logs, config, .txt              one line                          <path>#L<n>
+
+A ref stays the same when the analysis runs again on the same file. Each row also has a content hash (`row_hash`), so a
+citation can tell when its row changed or moved. Files under the thimble/ record folder, version control and
+dependency folders are never sources.
+"""
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+import os
+import re
+import sqlite3
+from collections import defaultdict
+from contextlib import closing
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterator
+
+from . import refs as R
+
+SKIP_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache",
+             ".thimble", "thimble", ".lite"}
+KIND_OF_EXT = {
+    ".jsonl": "jsonl", ".ndjson": "jsonl", ".csv": "csv", ".tsv": "csv", ".json": "json",
+    ".db": "sqlite", ".sqlite": "sqlite", ".sqlite3": "sqlite",
+    ".md": "markdown", ".markdown": "markdown", ".rst": "markdown",
+    ".diff": "diff", ".patch": "diff",
+}
+TEXT_EXT = {".txt", ".log", ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".sh", ".bash", ".zsh", ".yaml",
+            ".yml", ".toml", ".ini", ".cfg", ".conf", ".html", ".css", ".sql", ".rb", ".go", ".rs", ".java", ".c",
+            ".h", ".cpp", ".hpp", ".r", ".jl", ".lua", ".pl", ".php", ".swift", ".kt", ".scala", ".xml", ".srt",
+            ".vtt", ".tex", ".bib", ".ipynb", ".env.example"}
+TEXT_MAX_BYTES = 64 * 1024 * 1024
+
+
+@dataclass
+class Row:
+    ref: str
+    raw: str  # the row's text as the file holds it (a JSON value as JSON)
+    value: Any  # the row as a dict (records), or its text (lines, sections, hunks)
+
+
+def row_hash(raw: str) -> str:
+    return hashlib.sha1(raw.encode("utf-8", "surrogatepass")).hexdigest()[:12]
+
+
+def kind_of(path: Path) -> str | None:
+    ext = path.suffix.lower()
+    if ext in KIND_OF_EXT:
+        return KIND_OF_EXT[ext]
+    if ext in TEXT_EXT or (not ext and path.name in ("Makefile", "Dockerfile", "README", "LICENSE")):
+        return "text"
+    return None
+
+
+def list_sources(root: Path) -> list[str]:
+    """Every source file under root, relative, sorted."""
+    out = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS and not x.startswith("."))
+        for f in files:
+            p = Path(d) / f
+            if kind_of(p) and not p.is_symlink():
+                out.append(os.path.relpath(p, root))
+    return sorted(out)
+
+
+def fingerprint(p: Path) -> dict[str, Any]:
+    """What tells a later run that the file changed: size, mtime, and a hash of its first and last 64 KiB."""
+    st = p.stat()
+    h = hashlib.sha1()
+    with open(p, "rb") as f:
+        h.update(f.read(65536))
+        if st.st_size > 65536:
+            f.seek(max(65536, st.st_size - 65536))
+            h.update(f.read(65536))
+    return {"size": st.st_size, "mtime": st.st_mtime_ns, "head_tail": h.hexdigest()[:12]}
+
+
+def same_file(p: Path, fp: dict[str, Any] | None) -> bool:
+    if not fp:
+        return True
+    try:
+        st = p.stat()
+    except OSError:
+        return False
+    if st.st_size != fp.get("size"):
+        return False
+    if st.st_mtime_ns == fp.get("mtime"):
+        return True
+    return fingerprint(p).get("head_tail") == fp.get("head_tail")
+
+
+# ------------------------------------------------------------------ adapters
+
+
+TRANSCRIPT_TYPES = {"user", "assistant", "system", "result", "summary"}
+
+
+def looks_like_transcript(p: Path) -> bool:
+    """A jsonl file whose first records are chat records (Claude Code's transcripts and stream-json logs)."""
+    try:
+        with open(p, "r", errors="replace") as f:
+            for _, line in zip(range(5), f):
+                try:
+                    v = json.loads(line)
+                except ValueError:
+                    return False
+                if isinstance(v, dict) and v.get("type") in TRANSCRIPT_TYPES and ("message" in v or "subtype" in v or "session_id" in v or "sessionId" in v):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def kind_of_file(root: Path, rel: str) -> str | None:
+    p = root / rel
+    k = kind_of(p)
+    if k == "jsonl" and looks_like_transcript(p):
+        return "transcript"
+    return k
+
+
+def json_rows_key(v: Any) -> str | None:
+    """The key of a JSON document's rows: '' for a top-level list, else its longest top-level list (one level down,
+    `/a/b`, when the top holds none)."""
+    if isinstance(v, list):
+        return ""
+    if not isinstance(v, dict):
+        return None
+    best, n = None, 0
+    for k, x in v.items():
+        if isinstance(x, list) and len(x) > n:
+            best, n = "/" + k.replace("~", "~0").replace("/", "~1"), len(x)
+    if best is None:
+        for k, x in v.items():
+            if isinstance(x, dict):
+                for k2, y in x.items():
+                    if isinstance(y, list) and len(y) > n:
+                        best, n = f"/{k}/{k2}", len(y)
+    return best
+
+
+def _pointer_get(v: Any, pointer: str) -> Any:
+    for part in pointer.split("/")[1:]:
+        part = part.replace("~1", "/").replace("~0", "~")
+        v = v[int(part)] if isinstance(v, list) else v[part]
+    return v
+
+
+def iter_rows(root: Path, rel: str, table: str | None = None) -> Iterator[Row]:
+    """Every row of one source file, in file order."""
+    p = root / rel
+    kind = kind_of_file(root, rel)
+    if kind in ("jsonl", "transcript"):
+        with open(p, "r", errors="replace") as f:
+            for i, line in enumerate(f, 1):
+                line = line.rstrip("\n")
+                if not line.strip():
+                    continue
+                try:
+                    v = json.loads(line)
+                except ValueError:
+                    v = {"_text": line}
+                yield Row(f"{rel}#L{i}", line, v)
+    elif kind == "csv":
+        with open(p, newline="", errors="replace") as f:
+            for i, row in enumerate(csv.DictReader(f, delimiter="\t" if p.suffix.lower() == ".tsv" else ","), 1):
+                yield Row(f"{rel}#row={i}", json.dumps(row, ensure_ascii=False), row)
+    elif kind == "json":
+        v = json.loads(p.read_text(errors="replace"))
+        key = json_rows_key(v)
+        if key is None:
+            yield Row(f"{rel}#/", json.dumps(v, ensure_ascii=False), v)
+            return
+        items = _pointer_get(v, key) if key else v
+        for i, x in enumerate(items):
+            yield Row(f"{rel}#{key}/{i}", json.dumps(x, ensure_ascii=False), x)
+    elif kind == "sqlite":
+        with closing(sqlite3.connect(f"file:{p}?mode=ro", uri=True)) as con:
+            con.row_factory = sqlite3.Row
+            tables = [t for (t,) in con.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name").fetchall()]
+            for t in tables:
+                if table and t != table:
+                    continue
+                try:
+                    cur = con.execute(f'select rowid as "_rowid_", * from "{t}"')
+                except sqlite3.Error:
+                    continue
+                for row in cur:
+                    d = dict(row)
+                    rid = d.pop("_rowid_")
+                    yield Row(f"{rel}#{t}/{rid}", json.dumps(d, ensure_ascii=False, default=str), d)
+    elif kind == "markdown":
+        yield from _sections(p, rel)
+    elif kind == "diff":
+        yield from _hunks(p, rel)
+    elif kind == "text":
+        if p.stat().st_size > TEXT_MAX_BYTES:
+            return
+        with open(p, "r", errors="replace") as f:
+            for i, line in enumerate(f, 1):
+                line = line.rstrip("\n")
+                yield Row(f"{rel}#L{i}", line, line)
+
+
+_HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
+
+
+def _sections(p: Path, rel: str) -> Iterator[Row]:
+    """A Markdown file's sections: each heading with the text under it, up to the next heading (a preamble first)."""
+    lines = p.read_text(errors="replace").split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    starts = [i for i, line in enumerate(lines) if _HEADING.match(line)]
+    if not starts or starts[0] != 0:
+        starts = [0] + starts
+    for j, a in enumerate(starts):
+        b = (starts[j + 1] if j + 1 < len(starts) else len(lines)) - 1
+        if b < a:
+            continue
+        body = "\n".join(lines[a:b + 1])
+        if not body.strip():
+            continue
+        m = _HEADING.match(lines[a])
+        value = {"heading": m[2].strip() if m else "", "level": len(m[1]) if m else 0, "text": body}
+        yield Row(f"{rel}#L{a + 1}-{b + 1}" if b > a else f"{rel}#L{a + 1}", body, value)
+
+
+_HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$")
+
+
+def _hunks(p: Path, rel: str) -> Iterator[Row]:
+    """A unified diff's hunks, each with the file it changes and its added and removed lines."""
+    lines = p.read_text(errors="replace").split("\n")
+    file = ""
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("+++ "):
+            file = re.sub(r"^b/", "", line[4:].strip().split("\t")[0])
+        m = _HUNK.match(line)
+        if m:
+            a = i
+            i += 1
+            while i < len(lines) and not _HUNK.match(lines[i]) and not lines[i].startswith(("diff ", "--- ", "+++ ")):
+                i += 1
+            body = lines[a:i]
+            while body and body[-1] == "":
+                body.pop()
+            b = a + len(body) - 1
+            value = {"file": file, "header": line, "old_start": int(m[1]), "new_start": int(m[3]),
+                     "added": sum(1 for x in body[1:] if x.startswith("+")),
+                     "removed": sum(1 for x in body[1:] if x.startswith("-")), "text": "\n".join(body)}
+            yield Row(f"{rel}#L{a + 1}-{b + 1}", "\n".join(body), value)
+            continue
+        i += 1
+
+
+# ------------------------------------------------------------------ counts
+
+
+def count_lines(p: Path) -> int:
+    n, last = 0, b"\n"
+    with open(p, "rb") as f:
+        while True:
+            b = f.read(1 << 22)
+            if not b:
+                break
+            n += b.count(b"\n")
+            last = b[-1:]
+    return n + (0 if last == b"\n" else 1)
+
+
+def count_rows(root: Path, rel: str) -> int:
+    p = root / rel
+    kind = kind_of(p)
+    try:
+        if kind in ("jsonl", "text"):
+            return count_lines(p)
+        if kind == "csv":
+            return max(0, count_lines(p) - 1)
+        if kind == "json" and p.stat().st_size > 256 * 1024 * 1024:
+            return 1
+        return sum(1 for _ in iter_rows(root, rel))
+    except Exception:  # noqa: BLE001 — a file that cannot be read has no rows
+        return 0
+
+
+def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, dict[str, Any]]:
+    """{path: {rows, lines, kind}} for each file, cached by size and mtime."""
+    cache: dict[str, Any] = {}
+    if cache_file:
+        try:
+            cache = json.loads(cache_file.read_text())
+        except (OSError, ValueError):
+            cache = {}
+    out, changed = {}, False
+    for rel in rels:
+        p = root / rel
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        key = f"{st.st_size}:{st.st_mtime_ns}"
+        c = cache.get(rel)
+        if c and c.get("key") == key:
+            out[rel] = c
+            continue
+        kind = kind_of_file(root, rel)
+        rows = count_rows(root, rel)
+        lines = rows if kind in ("jsonl", "transcript", "text") else (count_lines(p) if kind in ("markdown", "diff", "csv", "json") and st.st_size < 256 * 1024 * 1024 else 0)
+        c = {"key": key, "kind": kind, "rows": rows, "lines": lines, "size": st.st_size}
+        cache[rel] = c
+        out[rel] = c
+        changed = True
+    if changed and cache_file:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache_file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cache))
+        os.replace(tmp, cache_file)
+    return out
+
+
+def group_of(files: list[str]) -> dict[str, str]:
+    """A pattern per file (from thimble-lite): a folder level with 4 or more sibling folders reads `*`, and 6 or more
+    files of one extension in one folder read `*.ext`, so runs/a/agents/x.jsonl reads runs/*/agents/*.jsonl."""
+    kids: dict[str, set[str]] = defaultdict(set)
+    files_in: dict[tuple[str, str], int] = defaultdict(int)
+    for f in files:
+        parts = f.split("/")
+        for i in range(len(parts) - 1):
+            kids["/".join(parts[:i])].add(parts[i])
+        files_in[("/".join(parts[:-1]), Path(f).suffix)] += 1
+    out = {}
+    for f in files:
+        parts = f.split("/")
+        pat = []
+        for i in range(len(parts) - 1):
+            pat.append("*" if len(kids["/".join(parts[:i])]) >= 4 else parts[i])
+        ext = Path(f).suffix
+        pat.append(f"*{ext}" if files_in[("/".join(parts[:-1]), ext)] >= 6 else parts[-1])
+        out[f] = "/".join(pat)
+    return out
+
+
+def expand_glob(root: Path, pattern: str) -> list[str]:
+    """Source files under root that a path or glob names, relative, sorted."""
+    import glob
+
+    pattern = pattern.strip()
+    if pattern.startswith("./"):
+        pattern = pattern[2:]
+    hits = sorted(glob.glob(str(root / pattern), recursive=True))
+    out = []
+    for h in hits:
+        if os.path.isfile(h):
+            rel = os.path.relpath(h, root)
+            if not any(part in SKIP_DIRS for part in Path(rel).parts[:-1]):
+                out.append(rel)
+    return out
+
+
+# ------------------------------------------------------------------ fetching rows by ref
+
+
+def _flat_text(v: Any) -> str:
+    out: list[str] = []
+
+    def walk(x: Any) -> None:
+        if isinstance(x, str):
+            out.append(x)
+        elif isinstance(x, dict):
+            for y in x.values():
+                walk(y)
+        elif isinstance(x, list):
+            for y in x:
+                walk(y)
+        elif x is not None:
+            out.append(str(x))
+
+    walk(v)
+    return "\n".join(out)
+
+
+def _content_block(b: Any) -> dict[str, str] | None:
+    """One content block of a chat message as {kind, text} (from 0.9.0's refs._content_block)."""
+    if not isinstance(b, dict):
+        return {"kind": "raw", "text": json.dumps(b, ensure_ascii=False)}
+    t = b.get("type")
+    if t == "text":
+        return {"kind": "text", "text": str(b.get("text") or "")}
+    if t == "tool_use":
+        return {"kind": "tool_use", "text": f"{b.get('name')}\n{json.dumps(b.get('input'), indent=2, ensure_ascii=False)}"}
+    if t == "tool_result":
+        c = b.get("content")
+        if isinstance(c, list):
+            text = "\n".join(str(x.get("text") or "") for x in c if isinstance(x, dict) and x.get("type") == "text")
+        else:
+            text = str(c or "")
+        return {"kind": "tool_result", "text": text}
+    if t == "thinking":
+        return {"kind": "thinking", "text": str(b.get("thinking"))} if b.get("thinking") else None
+    return {"kind": "raw", "text": json.dumps(b, ensure_ascii=False)}
+
+
+def blocks_of(record: Any) -> list[dict[str, str]]:
+    """A transcript record's content blocks, in order: its words, tool calls, tool results and reasoning."""
+    if isinstance(record, dict) and record.get("type") in ("assistant", "user"):
+        msg = record.get("message")
+        if isinstance(msg, dict):
+            c = msg.get("content")
+            if isinstance(c, str):
+                return [{"kind": "text", "text": c}]
+            if isinstance(c, list):
+                return [b for b in map(_content_block, c) if b is not None]
+    return [{"kind": "raw", "text": json.dumps(record, ensure_ascii=False) if not isinstance(record, str) else record}]
+
+
+def fetch(root: Path, rowset: str, limit: int | None = None) -> list[Row]:
+    """The rows one source ref or row set names, in file order (at most `limit`). Raises RefError when the file is
+    missing or a row is not there."""
+    p = R.parse(rowset)
+    k = p["kind"]
+    rel = p.get("path", "")
+    path = root / rel
+    if k in ("query", "object"):
+        raise R.RefError(f"{rowset} is not a source ref")
+    if not path.is_file():
+        raise R.RefError(f"no file {rel} under {root}")
+    if k == "file":
+        return [Row(rel, "", {"path": rel})]
+    if k == "block":
+        rows = fetch(root, f"{rel}#L{p['line']}")
+        bl = blocks_of(rows[0].value)
+        if p["block"] >= len(bl):
+            raise R.RefError(f"{rel}#L{p['line']} has {len(bl)} blocks, no block {p['block']}")
+        b = bl[p["block"]]
+        return [Row(rowset, b["text"], b)]
+    kind = kind_of_file(root, rel)
+    if k == "lines":
+        want = set(p["nums"])
+        if kind in ("markdown", "diff", "text") or kind is None:
+            # a section, a hunk or a run of lines reads as one row: each run of consecutive lines is one
+            lines: dict[int, str] = {}
+            top = max(want)
+            with open(path, "r", errors="replace") as f:
+                for i, line in enumerate(f, 1):
+                    if i in want:
+                        lines[i] = line.rstrip("\n")
+                    if i >= top:
+                        break
+            if len(lines) < len(want):
+                raise R.RefError(f"{rel} has no line {min(want - set(lines))}")
+            got = []
+            for run in R.format_nums(sorted(want)).split(","):
+                a, _, b = run.partition("-")
+                lo, hi = int(a), int(b or a)
+                body = "\n".join(lines[i] for i in range(lo, hi + 1))
+                got.append(Row(f"{rel}#L{lo}" + (f"-{hi}" if hi > lo else ""), body, body))
+                if limit and len(got) >= limit:
+                    break
+            return got
+        if kind in ("jsonl", "transcript"):
+            got = []
+            top = max(want)
+            with open(path, "r", errors="replace") as f:
+                for i, line in enumerate(f, 1):
+                    if i in want:
+                        line = line.rstrip("\n")
+                        try:
+                            v: Any = json.loads(line)
+                        except ValueError:
+                            v = {"_text": line}
+                        got.append(Row(f"{rel}#L{i}", line, v))
+                        if limit and len(got) >= limit:
+                            break
+                    if i >= top:
+                        break
+            if len(got) < len(want) and not (limit and len(got) >= limit):
+                missing = sorted(want - {int(r.ref.rsplit("#L", 1)[1]) for r in got})
+                raise R.RefError(f"{rel} has no line {missing[0]}")
+            return got
+    if k == "csvrows":
+        want = set(p["nums"])
+        got = []
+        with open(path, newline="", errors="replace") as f:
+            for i, row in enumerate(csv.DictReader(f, delimiter="\t" if path.suffix.lower() == ".tsv" else ","), 1):
+                if i in want:
+                    got.append(Row(f"{rel}#row={i}", json.dumps(row, ensure_ascii=False), row))
+                    if limit and len(got) >= limit:
+                        break
+        if len(got) < len(want) and not (limit and len(got) >= limit):
+            raise R.RefError(f"{rel} has fewer rows than {max(want)}")
+        return got
+    if k == "pointer":
+        doc = json.loads(path.read_text(errors="replace"))
+        ptrs = [f"{p['prefix']}{n}" for n in p["nums"]] if "nums" in p else [p["pointer"]]
+        got = []
+        for ptr in ptrs:
+            try:
+                v = _pointer_get(doc, ptr) if ptr != "/" else doc
+            except (KeyError, IndexError, ValueError, TypeError):
+                raise R.RefError(f"{rel} has no value at {ptr}")
+            got.append(Row(f"{rel}#{ptr}", json.dumps(v, ensure_ascii=False), v))
+            if limit and len(got) >= limit:
+                break
+        return got
+    if k in ("dbrows", "table"):
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as con:
+            con.row_factory = sqlite3.Row
+            t = p["table"]
+            if not con.execute("select 1 from sqlite_master where type='table' and name=?", (t,)).fetchone():
+                raise R.RefError(f"{rel} has no table {t}")
+            if k == "table":
+                n = con.execute(f'select count(*) from "{t}"').fetchone()[0]
+                return [Row(rowset, "", {"table": t, "rows": n})]
+            keys = p.get("nums") or p.get("keys") or []
+            got = []
+            for key in keys:
+                r = con.execute(f'select * from "{t}" where rowid = ?', (key,)).fetchone()
+                if r is None:
+                    raise R.RefError(f"{rel} has no row {key} in {t}")
+                d = dict(r)
+                got.append(Row(f"{rel}#{t}/{key}", json.dumps(d, ensure_ascii=False, default=str), d))
+                if limit and len(got) >= limit:
+                    break
+            return got
+    raise R.RefError(f"cannot read {rowset}")
+
+
+def text_of(row: Row) -> str:
+    """Every string of a row, joined: what a quote is looked for in."""
+    if isinstance(row.value, str):
+        return row.value
+    return _flat_text(row.value) + "\n" + row.raw
+
+
+def find_quote(text: str, quote: str) -> bool:
+    """Whether a quote is in a text: as written, as JSON escapes it, or with whitespace folded and case ignored; an
+    ellipsis splits it into parts that must all be there, in order (from 0.9.0's refs._find_quote)."""
+    q = quote.strip().strip('"').strip()
+    if not q:
+        return False
+    tr = str.maketrans({"“": '"', "”": '"', "‘": "'", "’": "'", "—": "-", "–": "-"})
+    fold = lambda s: " ".join(s.translate(tr).split()).lower()  # noqa: E731
+    parts = [x.strip(" ,;:") for x in re.split(r"\s*(?:\.\.\.|…|\[\.\.\.\]|\[…\])\s*", q) if x.strip(" ,;:")]
+    hay = fold(text)
+    at = 0
+    for part in parts:
+        if part in text or json.dumps(part, ensure_ascii=False)[1:-1] in text:
+            continue
+        i = hay.find(fold(part), at)
+        if i < 0:
+            return False
+        at = i
+    return True
+
+
+def relocate(root: Path, ref: str, h: str, window: int = 100000) -> str | None:
+    """Where a one-row ref's row went when its hash no longer matches: the ref of the row in the same file whose
+    content hash is `h`, or None."""
+    p = R.parse(ref)
+    rel = p.get("path", "")
+    if not (root / rel).is_file():
+        return None
+    for n, row in enumerate(iter_rows(root, rel)):
+        if n > window:
+            break
+        if row_hash(row.raw) == h:
+            return row.ref
+    return None

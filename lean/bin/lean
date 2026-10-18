@@ -1,0 +1,8 @@
+#!/bin/sh
+# thimble's lean kernel as one command. Claude Code puts a plugin's bin/ folder on the Bash tool's PATH, so `lean` runs
+# as a bare command, through the session's permission mode like any other. The Python it runs: LEAN_PYTHON, else the
+# plugin's own .venv, else python3 (only `lean q` needs pandas).
+here=$(cd "$(dirname "$0")/.." && pwd)
+py=${LEAN_PYTHON:-}
+if [ -z "$py" ] && [ -x "$here/.venv/bin/python" ]; then py="$here/.venv/bin/python"; fi
+exec "${py:-python3}" "$here/engine/lean.py" "$@"

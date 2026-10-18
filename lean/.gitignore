@@ -1,0 +1,3 @@
+.claude-plugin/types/
+.venv/
+__pycache__/

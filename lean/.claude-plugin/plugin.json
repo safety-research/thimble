@@ -1,0 +1,7 @@
+{
+  "name": "thimble-lean",
+  "version": "0.0.1",
+  "description": "thimble's lean kernel: the `lean` command reads and queries any files (CSV, JSONL, JSON, agent transcripts, SQLite, diffs, Markdown), keeps the code, inputs and source rows behind every value, saves objects as program + data + lineage, and resolves any value back to its rows. One watching hook keeps which files Claude read, for coverage.",
+  "author": { "name": "Matthew Joerke" },
+  "license": "Apache-2.0"
+}
