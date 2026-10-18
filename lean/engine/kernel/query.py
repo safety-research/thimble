@@ -332,6 +332,19 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any]) -> dict[s
     out["keys"] = keys
     if row_refs is None and keys and len(df) <= 200000:
         found = _by_key(df, keys, ns, frames)
+        if not found and len(keys) > 1:
+            # the key columns guessed from the output's words may hold a column the query computed per group (a top
+            # label, a note): a single key that alone tells the output rows apart is tried on its own
+            for k in keys:
+                try:
+                    if not df[k].is_unique:
+                        continue
+                except TypeError:
+                    continue
+                found = _by_key(df, [k], ns, frames)
+                if found:
+                    out["keys"] = [k]
+                    break
         if found:
             row_refs, out["mode"], out["frame"] = found
     table = df.drop(columns=[c for c in ("_refs",) if c in df.columns])

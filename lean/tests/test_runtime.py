@@ -153,3 +153,14 @@ def test_an_event_row_reads_as_what_happened_not_its_ids(root: Path) -> None:
     rec = LIN.resolve(Store(root), "events.jsonl#L1", n=1)["records"][0]
     assert rec["words"] == "request · browse-bare · ip16 10.1" and "event_id" not in rec["words"]
     assert rec["meta"] == "2026-05-17T05:46:45Z"
+
+
+def test_a_per_group_table_with_a_computed_word_column_still_keeps_its_rows(root: Path) -> None:
+    st = Store(root)
+    q = Q.run(st, "per outcome", 'df = load("runs.jsonl")\ng = df.groupby("outcome")\n'
+                                 'pd.DataFrame({"n": g.size(), "first_run": g.run.min()}).reset_index()')
+    assert q["lineage"] == "matched" and q["keys"] == ["outcome"]
+    won = next(i for i, r in enumerate(q["table"]) if r["outcome"] == "won (clean ep)")
+    assert q["rows"][won] == ["runs.jsonl#L1-3"]
+    # a citation that names both word columns still finds its row
+    assert LIN.resolve(st, f"{q['id']}#outcome=won-clean-ep&first_run=ep00@n")["count"] == 3
