@@ -1,5 +1,5 @@
 // FilesPane.tsx: 0.9's Files on lean's kernel. The views bar holds the File browser, Claims (the session's claims, drawn
-// by the Claims page) and each view (a big card: a map, a trace or an explore view), as 0.9 holds its pages. The
+// by the Claims pane, lean/panes/claims.js) and each view (a big card: a map, a trace or an explore view), as 0.9 holds its pages. The
 // File browser lists the sources (`lean sources`), each with what this session read of it (`lean coverage`: computed,
 // read, searched, named or not read), and reads a file's records through `lean rows`, the rows this session read
 // marked. Nothing here counts as Claude's reading: the page's reads go under the person's own session.
@@ -8,10 +8,11 @@ import { Icon, type IconName } from '@09/components/Icon'
 import { Segmented } from '@09/components/Button'
 import { PaneStatus } from '@09/components/PaneStatus'
 import { Spinner } from '@09/components/Spinner'
-import { api, BASE, fmt } from '../lib/api'
+import { api, fmt } from '../lib/api'
 import { setState, useStore, type ObjectInfo } from '../lib/store'
 import { VIEW_VERBS } from '../chat/Message'
 import { useDrawn } from '../canvas/CardFace'
+import { PaneView } from '../panes/PaneView'
 
 interface Source {
   path: string
@@ -382,24 +383,16 @@ function Record({ r, raw, flash, covered }: { r: Rec; raw: boolean; flash: boole
 
 // ---------------------------------------------------------------- Claims and the views
 
-/** Claims: the Claims page (shell/browser/claims/, its own page folder) in a frame, as 0.9 shows a page in Files: the
- * claims of this session from its store (thimble/claims/<session>.json), with its own empty state. Embedded
- * (?embed=1), it leaves out its header; a press on a place where a claim was said comes back as {type: 'thimble:row'},
- * which opens that message in the chat. */
+/** Claims: the Claims pane (lean/panes/claims.js), the same program the terminal's c opens, on the session's claims
+ * store (thimble/claims/<session>.json) and the same state: hover a claim for what it means, r replays the graph in
+ * the order the claims were made, a click on the claim shown opens the message where it was said. */
 function ClaimsView() {
-  useEffect(() => {
-    const on = (e: MessageEvent) => {
-      const m = e.data as { type?: string; row?: unknown } | null
-      if (!m || m.type !== 'thimble:row' || typeof m.row !== 'string') return
-      setState({ thread: 'main', flashRow: m.row })
-    }
-    addEventListener('message', on)
-    return () => removeEventListener('message', on)
-  }, [])
+  const rows = useStore((s) => s.rows)
+  const latest = [...rows].reverse().find((r) => r.kind === 'assistant' && r.record)?.row || ''
   return (
     <>
-      <div className="files-body is-view">
-        <iframe className="lean-view-frame" title="Claims" src={`${BASE}/claims/?embed=1`} />
+      <div className="files-body is-view lean-claims-pane">
+        <PaneView name="claims" args={{ row: latest }} focus onClose={() => setState({ filesView: 'browser' })} />
       </div>
       <PaneStatus name="Files" meta="view · Claims" />
     </>

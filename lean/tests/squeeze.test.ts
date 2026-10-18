@@ -103,9 +103,12 @@ test('s opens the chips under the answer, in place of its verb row: each its lab
   // nothing under the chips: their keys are in the thimble line, once
   expect(drawn).not.toContain('change')
   expect(await hintOf($)).toContain('< > change · ] next chip · + new stretch · 0 close')
-  // only the picked chip has a fill
-  const tree = JSON.stringify(await $.ui.render(view(TEXT)))
-  expect((tree.match(/"backgroundColor":"#4a3b1d"/g) || []).length).toBe(7)
+  // only the picked chip has a fill: its words, dots and level, and no other chip's
+  const filled = (t: Any): string => (Array.isArray(t) ? t.map(filled).join('') : t && typeof t === 'object' ? (t.props?.backgroundColor ? textOf(t) : filled(t.children ?? t.props?.children)) : '')
+  const fill = filled(await $.ui.render(view(TEXT)))
+  expect(fill).toContain('Length')
+  expect(fill).toContain('full')
+  expect(fill).not.toContain('Report')
   // a short answer: nothing was squeezed, no call made
   expect(w.calls.length).toBe(0)
   // s again closes them, and the thimble line has the verbs back

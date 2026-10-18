@@ -607,6 +607,12 @@ function paintCanvas(n, g, x, y, w, cx, mark, cut) {
           draws++
           break
         }
+        case 'bg': {
+          // the ground of cells already drawn
+          if (!g.dry) for (let j = 0; j < op[4]; j++) for (let i = 0; i < op[3]; i++) { const cx0 = x + op[1] + i, cy0 = y + op[2] + j; if (g.in(cx0, cy0)) g.rows[cy0][cx0] = Object.assign({}, g.rows[cy0][cx0], { bg: op[5] }) }
+          draws++
+          break
+        }
         case 'px': g.px(x + op[1], y * 2 + op[2], op[3]); draws++; break
         case 'line': g.pline(x + op[1], y * 2 + op[2], x + op[3], y * 2 + op[4], op[5]); draws++; break
         case 'bar': drawBar(g, x + op[1], y + op[2], op[3], op[4], op[5], op[6]); mark({ k: 'bar', v: op[4], max: op[5] }); break

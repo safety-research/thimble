@@ -13,6 +13,8 @@
 //                                                     a chip set to a level, the person's own chip, or the original
 //     {"back": {object, v, region, state?}}                                    a selection handed back (the old page)
 //     {"cardstate": {object, region, state}}          a card's interaction state the page's program answered with
+//     {"panestate": {pane, args, state}}              a pane's state the page's run of its program answered with
+//     {"act": {pane, args, do, ...}}                  an action a pane's program asked for (k.do) that the terminal does
 //   and {"stopped": "<why>"} when it ends on its own.
 //
 // What it serves, every path behind the token:
@@ -22,6 +24,10 @@
 //                              page, so a new page is a new folder and this file does not change
 //   /<token>/draw/...          the drawing contract's modules (draw/), which the pages import as ES modules
 //   /<token>/lib/object.js     shell/object.js, what both views say of an object
+//   /<token>/code/<path>       lean's own pure modules, as ES modules (draw/, panes/, shell/*.js, verbs/<v>/*.js|mjs):
+//                              the panes (panes/index.js) and what they import, so the page runs the terminal's files
+//   /<token>/api/pane/<key>    a pane's interaction state (thimble/panes/<session>/<key>.json): where the person left
+//                              it, on either surface
 //   /<token>/api/session       this session: its id, folder, first prompt and what it read (lean coverage)
 //   /<token>/api/messages      this session's rows (thimble/messages/<session>/index.jsonl), each of Claude's with its
 //                              record (CONTRACT 1); an ETag, so a page that polls gets 304 while nothing changed
@@ -101,6 +107,34 @@ export function fileUnder(base, rel) {
   } catch {
     return null
   }
+}
+
+/** One of lean's own pure modules a page may import (/code/<path>): a .js or .mjs file of draw/, panes/, shell/ (its
+ *  own files, not node/ or browser/) or a verb's folder (not its tests), or null. */
+export function codeFile(parts) {
+  const p = (parts || []).map(String)
+  if (!p.length || !/\.(m?js)$/.test(p[p.length - 1])) return null
+  const [top, ...rest] = p
+  const ok = top === 'draw' || top === 'panes' ? !rest.includes('test')
+    : top === 'shell' ? rest.length === 1
+      : top === 'verbs' ? rest.length === 2
+        : false
+  return ok ? fileUnder(LEAN_DIR, p.join('/')) : null
+}
+
+/** The share of the folder's rows Claude read, as the terminal's thimble line counts it: per file, the rows computed
+ *  over, else the lines read, else the rows shown, of its rows; a file searched or named counts as not read. */
+export function readShare(files) {
+  const list = Array.isArray(files) ? files : []
+  const one = f => (!f || !f.rows ? 0 : f.computed ? Math.min(1, f.computed / f.rows) : f.read_lines ? Math.min(1, f.read_lines / Math.max(1, f.lines || f.rows)) : f.shown ? Math.min(1, f.shown / f.rows) : 0)
+  const rows = list.reduce((n, f) => n + (Number(f?.rows) || 0), 0)
+  return rows > 0 ? list.reduce((n, f) => n + one(f) * (Number(f.rows) || 0), 0) / rows : 0
+}
+
+/** A pane's state file: thimble/panes/<session>/<key>.json (CONTRACT 8), or null. */
+export function paneFile(root, session, key) {
+  if (!SESSION.test(String(session || '')) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(String(key || ''))) return null
+  return join(root, 'thimble', 'panes', String(session).replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 120), `${key}.json`)
 }
 
 /** The rows of a session's messages: index.jsonl in order, each of Claude's rows with its record. */
@@ -184,7 +218,7 @@ export function rowsOf(stdout) {
 function signature(root, session) {
   const parts = []
   const dirs = [join(root, 'thimble', 'objects'), join(root, 'thimble', 'objects', '.state')]
-  if (session) dirs.unshift(join(root, 'thimble', 'messages', session), threadsDir(root, session))
+  if (session) dirs.unshift(join(root, 'thimble', 'messages', session), threadsDir(root, session), join(root, 'thimble', 'panes', String(session).replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 120)))
   // the session's claims (CONTRACT 7)
   if (session) {
     try { const s = statSync(claimsFile(root, session)); parts.push(`claims:${s.size}:${s.mtimeMs}`) } catch { parts.push('claims:-') }
@@ -236,6 +270,22 @@ export function backLine(body) {
     const st = c.state && typeof c.state === 'object' && !Array.isArray(c.state) ? JSON.parse(JSON.stringify(c.state)) : {}
     if (JSON.stringify(st).length > 20000) return { error: 'a card state over 20 KB' }
     return { cardstate: { object: c.object, region: typeof c.region === 'string' && REGION.test(c.region) ? c.region : null, state: st } }
+  }
+  if ((body.panestate || body.act) && typeof (body.panestate || body.act) === 'object' && !Array.isArray(body.panestate || body.act)) {
+    // a pane's state or an action its program asked for (k.do), from the page's run of the pane's program
+    const q = body.panestate || body.act
+    if (typeof q.pane !== 'string' || !/^[a-z][\w-]{0,40}$/.test(q.pane)) return { error: 'no pane' }
+    const args = q.args && typeof q.args === 'object' && !Array.isArray(q.args) ? JSON.parse(JSON.stringify(q.args)) : {}
+    if (JSON.stringify(args).length > 2000) return { error: 'pane args over 2 KB' }
+    if (body.panestate) {
+      const st = q.state && typeof q.state === 'object' && !Array.isArray(q.state) ? JSON.parse(JSON.stringify(q.state)) : {}
+      if (JSON.stringify(st).length > 20000) return { error: 'a pane state over 20 KB' }
+      return { panestate: { pane: q.pane, args, state: st } }
+    }
+    if (typeof q.do !== 'string' || !/^[a-z][\w.-]{0,40}$/i.test(q.do)) return { error: 'no action' }
+    const out = JSON.parse(JSON.stringify(q))
+    if (JSON.stringify(out).length > 8000) return { error: 'an action over 8 KB' }
+    return { act: { ...out, pane: q.pane, args } }
   }
   if (typeof body.verb === 'string') {
     if (!/^[a-z0-9]$/.test(body.verb)) return { error: 'a verb is one key' }
@@ -339,6 +389,7 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       if (req.method !== 'GET') return send(405, 'text/plain', 'GET only')
       // files: the drawing modules, object.js, or a page's folder
       const file = head === 'draw' ? fileUnder(join(LEAN_DIR, 'draw'), rest.join('/'))
+        : head === 'code' ? codeFile(rest)
         : head === 'lib' ? (rest.length === 1 && rest[0] === 'object.js' ? join(LEAN_DIR, 'shell', 'object.js') : null)
         : fileUnder(pages, [head, ...rest].join('/'))
       if (!file) return send(404, 'text/plain', 'not found')
@@ -388,6 +439,11 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       const store = sess ? readJson(claimsFile(root, sess)) : null
       return json({ session: sess, store: store || { v: 1, session: sess, claims: [], clusters: [], gaps: [] } }, 200, { etag: now })
     }
+    if (api === 'pane' && args.length === 1) {
+      const f = paneFile(root, sess, args[0])
+      if (!f) return json({ error: 'no pane key' }, 400)
+      return json({ key: args[0], ...(readJson(f) || { state: null }) })
+    }
     if (api === 'message' && args.length === 1) {
       if (!sess || !ROW.test(args[0])) return json({ error: 'no row' }, 404)
       const rec = readJson(join(root, 'thimble', 'messages', sess, `${args[0]}.json`))
@@ -410,7 +466,11 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       const list = names.map(n => readJson(join(root, 'thimble', 'objects', n))).filter(Boolean)
         // this session's: saved by Claude, or by a verb the person ran in it (the person's reads go as person-<id>)
         .filter(o => !sess || !o.session || o.session === sess || o.session === personEnv.LEAN_SESSION)
-        .map(o => ({ id: o.id, version: o.version, title: o.title || o.id, question: typeof o.question === 'string' ? o.question.slice(0, 300) : '', updated: o.updated || null, created: o.created || null, verb: o.verb || null, kind: o.kind || null, session: o.session || null }))
+        .map(o => {
+          // where the person left the card (either surface): its board face draws with it
+          const kept = ID.test(String(o.id)) ? readJson(join(root, 'thimble', 'objects', '.state', `${o.id}.json`)) : null
+          return { id: o.id, version: o.version, title: o.title || o.id, question: typeof o.question === 'string' ? o.question.slice(0, 300) : '', updated: o.updated || null, created: o.created || null, verb: o.verb || null, kind: o.kind || null, session: o.session || null, ...(kept && kept.state ? { state: kept.state, region: kept.region || null } : {}) }
+        })
       return json({ objects: list })
     }
     if (api === 'from' && args.length === 1) {
@@ -505,7 +565,7 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
     // what Claude's session read, as `lean coverage` counts it, once per change of the folder
     if (coverage.at !== sig) {
       const c = sess ? await leanJson(lean, root, ['coverage'], { LEAN_SESSION: sess }) : { error: 'no session' }
-      coverage = { at: sig, value: c.error ? null : { total: c.total, groups: (c.groups || []).slice(0, 4).map(g => ({ group: g.group, files: g.files, rows: g.rows, byStatus: g.by_status })) } }
+      coverage = { at: sig, value: c.error ? null : { total: c.total, share: readShare(c.files), groups: (c.groups || []).slice(0, 4).map(g => ({ group: g.group, files: g.files, rows: g.rows, byStatus: g.by_status })) } }
     }
     return { session: sess, root, folder: basename(root), title: firstPrompt ? firstPrompt.text : '', started: rows[0]?.at || null, rows: rows.length, coverage: coverage.value }
   }

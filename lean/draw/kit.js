@@ -99,6 +99,9 @@
   function toneOf(t, ctx, fallback) {
     fallback = fallback || 'ink'
     if (t == null || t === '') return fallback
+    // any tone with -faint is that tone, pale: what is not in focus keeps its color but steps back
+    const f = /^(.+)-faint$/.exec(String(t).toLowerCase().trim())
+    if (f) { const b = toneOf(f[1], ctx, fallback); return b + '-faint' }
     const k = String(t).toLowerCase().trim()
     if (TONES.indexOf(k) >= 0) return k
     if (ALIAS[k]) return ALIAS[k]
@@ -107,7 +110,7 @@
     warn(ctx, `unknown tone "${t}"; drawn as ${fallback}`)
     return fallback
   }
-  function knownTone(name) { const k = String(name).toLowerCase(); return TONES.indexOf(k) >= 0 || !!ALIAS[k] || /^c\d+$/.test(k) }
+  function knownTone(name) { const k = String(name).toLowerCase().replace(/-faint$/, ''); return TONES.indexOf(k) >= 0 || !!ALIAS[k] || /^c\d+$/.test(k) }
   function warn(ctx, msg) { if (ctx && ctx.warnings.indexOf(msg) < 0 && ctx.warnings.length < 60) ctx.warnings.push(msg) }
 
   // ---------------------------------------------------------------- inline markup -> runs
@@ -231,6 +234,59 @@
         if (ctx.phase !== 'handle') { warn(ctx, 'k.ask opens a thread only inside a k.on handler, when the person acts'); return k }
         ctx.ask = askOf(ctx, sel)
         return k
+      },
+      // k.after(ms, name, payload): an event this program gets later, {type: name, ...payload}, such as the next frame of
+      // a replay. Inside a handler. The host keeps one waiting event per name, so asking again moves it.
+      after(ms, name, payload) {
+        if (ctx.phase !== 'handle') { warn(ctx, 'k.after asks for a later event only inside a k.on handler'); return k }
+        const n = String(name == null ? '' : name).trim()
+        if (!n) { warn(ctx, 'k.after needs (ms, name): the event name its handler takes'); return k }
+        const ev = Object.assign({}, isObj(payload) ? clone(payload) : {}, { type: n })
+        ctx.after = ctx.after.filter(a => a.event.type !== n).concat([{ ms: clamp(int(ms, 100), 30, 600000), event: ev }])
+        return k
+      },
+      // k.do(action, args): ask the host for one of its actions by name, such as 'open' (a card, a row, a claim) or
+      // 'close'. Inside a handler. What a host can do is its own; an action it does not have says so in one line.
+      do(action, args) {
+        if (ctx.phase !== 'handle') { warn(ctx, 'k.do asks the host for an action only inside a k.on handler'); return k }
+        const a = String(action == null ? '' : action).trim()
+        if (!/^[a-z][\w.-]{0,40}$/i.test(a)) { warn(ctx, `k.do needs an action name, such as 'open'; "${a}" is not one`); return k }
+        if (ctx.effects.length < 20) ctx.effects.push(Object.assign({}, isObj(args) ? clone(args) : {}, { do: a }))
+        return k
+      },
+      // k.select(id): the part this program has selected, which every surface marks as it marks a selection (a fill in
+      // the terminal, an outline in the browser)
+      select(id) {
+        ctx.selected = id == null ? null : String(id)
+        return k
+      },
+      // k.status(text, tone): one short line the host shows in its bar while this program has the keys (what is
+      // going on, a problem and its fix)
+      status(text, tone) {
+        const s = clean(String(text == null ? '' : text)).replace(/\s+/g, ' ').trim().slice(0, 160)
+        ctx.status = s ? { text: s, tone: toneOf(tone, ctx) } : null
+        return k
+      },
+      // k.want(request): data the host has not given yet, such as {rows: [refs]} (the rows behind a part, read through
+      // the kernel). Returns it when the host has it (opts.got), else null; the host then reads it and runs the program
+      // again with it.
+      want(request) {
+        if (!isObj(request)) { warn(ctx, 'k.want needs a request, such as {rows: [refs]}'); return null }
+        const key = wantKey(request)
+        const got = ctx.got && Object.prototype.hasOwnProperty.call(ctx.got, key) ? ctx.got[key] : undefined
+        if (got !== undefined) return clone(got)
+        if (!ctx.wants.some(w => w.key === key) && ctx.wants.length < 20) ctx.wants.push({ key: key, request: clone(request) })
+        return null
+      },
+      // k.embed(drawing): another program's drawing, run by the host in its own sandbox (the card inside a pane), as a
+      // part of this one. Its parts, cites and examples come with it.
+      embed(drawing) {
+        if (!isObj(drawing) || !isObj(drawing.root) || typeof drawing.root.t !== 'string') { warn(ctx, 'k.embed needs a drawing, with its root'); return k.text('') }
+        const d = clone(drawing)
+        Object.keys(d.cites || {}).forEach(id => { if (!ctx.cites[id]) ctx.cites[id] = d.cites[id] })
+        Object.keys(d.examples || {}).forEach(id => { if (!ctx.examples[id]) ctx.examples[id] = d.examples[id] })
+        tick(64)
+        return d.root
       },
       // the refs of rows of the card's data (a row, a list of rows, or a value that holds rows): what a cite or an
       // ask names, so a program can say which rows a selection stands for
@@ -849,6 +905,9 @@
     if (o.title != null) op.push(inline(o.title, { bold: true }, this._ctx).filter(r => !r.br))
     return this._op(op)
   }
+  // a background under cells already drawn (a picked chip, a highlighted run): the terminal colors the cells' ground,
+  // the browser draws one rounded band behind them
+  Canvas.prototype.bg = function (x, y, w, h, tone) { return this._op(['bg', fl(x), fl(y), Math.max(0, fl(w)), Math.max(0, fl(h)), cT(this, tone, 'accent-faint')]) }
   Canvas.prototype.px = function (x, y, tone) { return this._op(['px', fl(x), fl(y), cT(this, tone, 'accent')]) }
   Canvas.prototype.line = function (x0, y0, x1, y1, tone) { return this._op(['line', +x0 || 0, +y0 || 0, +x1 || 0, +y1 || 0, cT(this, tone, 'accent')]) }
   // value marks inside a canvas keep their numbers, so the browser draws them exactly
@@ -2023,8 +2082,13 @@
     if (x) return `${x[1]} is not a function: check its name in the toolkit or the data`
     return 'fix the program and save the card again'
   }
-  function newCtx(state, event, limit) {
-    return { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: limit, handlers: [], patch: {}, phase: 'draw', ask: null, event: event || null, rowsOf: null, rowList: [] }
+  function newCtx(state, event, limit, got) {
+    return { warnings: [], cites: {}, examples: {}, ids: {}, regionOrder: [], links: [], controls: {}, state: state, seq: 0, ops: 0, nextCheck: 2000, t0: nowMs(), limit: limit, handlers: [], patch: {}, phase: 'draw', ask: null, event: event || null, rowsOf: null, rowList: [], after: [], effects: [], status: null, wants: [], selected: null, got: isObj(got) ? got : null }
+  }
+  // a want's key: its request as JSON with sorted keys, so the same request is the same key on every surface
+  function wantKey(req) {
+    const norm = v => Array.isArray(v) ? v.map(norm) : isObj(v) ? Object.keys(v).sort().reduce((o, x) => { o[x] = norm(v[x]); return o }, {}) : v
+    return JSON.stringify(norm(req))
   }
   // one run of the program: (ctx, root node) or throws
   function runOnce(program, data, opts, ctx, W, H) {
@@ -2069,8 +2133,8 @@
     const maxBytes = Math.max(10000, num(opts.maxBytes) || 2000000)
     let state = isObj(opts.state) ? (clone(opts.state) || {}) : {}
     const event = isObj(opts.event) ? clone(opts.event) : null
-    let ctx = newCtx(state, event, limit)
-    let rootNode = null, error = null, asked = null, handled = null
+    let ctx = newCtx(state, event, limit, opts.got)
+    let rootNode = null, error = null, asked = null, handled = null, effects = [], after = []
     const t0 = ctx.t0
     try {
       rootNode = runOnce(program, data, opts, ctx, W, H).root
@@ -2082,10 +2146,12 @@
           const ret = hs[0].fn(clone(event))
           if (isObj(ret)) Object.keys(ret).forEach(x => { ctx.patch[x] = clone(ret[x]) })
           asked = ctx.ask
+          effects = ctx.effects
+          after = ctx.after
           const patch = ctx.patch
           if (Object.keys(patch).length) {
             state = Object.assign({}, state, patch)
-            const again = newCtx(clone(state), null, limit)
+            const again = newCtx(clone(state), null, limit, opts.got)
             again.t0 = t0
             again.ops = ctx.ops
             again.nextCheck = ctx.ops + 2000
@@ -2121,6 +2187,13 @@
       if (!error && ctx.handlers.length) out.on = ctx.handlers.map(h => ({ name: h.name, label: h.label }))
       if (handled) out.handled = handled
       if (asked && !error) out.ask = asked
+      // what the handler asked of the host: actions (k.do), events later (k.after); and what the program wants shown
+      // in the host's bar (k.status) and has not been given yet (k.want)
+      if (effects.length && !error) out.effects = effects
+      if (after.length && !error) out.after = after
+      if (ctx.status && !error) out.status = ctx.status
+      if (ctx.wants.length && !error) out.wants = ctx.wants
+      if (ctx.selected && !error) out.selected = ctx.selected
       if (error) out.error = error
       return out
     }
@@ -2146,5 +2219,5 @@
     return kk.text(`{bad:×} ${title ? `**${escapeMarkup(title)}** ` : ''}{dim:could not draw:} ${escapeMarkup(error.name)}${escapeMarkup(what)}${where} {dim:· fix:} ${escapeMarkup(error.fix)}`)
   }
 
-  root.DrawKit = { KIT: KIT, TONES: TONES, CATS: CATS, run: run, fmt: fmt, inline: (s, o) => inline(s, o, { warnings: [], links: [] }), wide: wide, plain: plain }
+  root.DrawKit = { KIT: KIT, TONES: TONES, CATS: CATS, run: run, wantKey: wantKey, fmt: fmt, inline: (s, o) => inline(s, o, { warnings: [], links: [] }), wide: wide, plain: plain }
 })(typeof globalThis !== 'undefined' ? globalThis : this)

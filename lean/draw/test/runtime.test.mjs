@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import { runProgram } from '../sandbox-node.mjs'
 import { renderSvg } from '../svg.js'
 import { gridText, renderTerm } from '../term.js'
+import '../kit.js'
 
 // data as the kernel binds it: each row of a query's output with its own ref and its source rows
 const DATA = {
@@ -145,4 +146,57 @@ test('the browser surface: a plot or a canvas area takes a brush, which reads in
   assert.match(s.svg, /<rect class="dk-brush" data-brush="runs" data-min="1" data-max="3"/)
   // the terminal draws the same cells and no brush: there a program binds keys to the same state
   assert.equal(JSON.stringify(renderTerm(d, { w: 80 }).marks), JSON.stringify(s.marks))
+})
+
+test('a handler asks the host for later events (k.after), its actions (k.do) and nothing it does not have; the bar line (k.status)', () => {
+  const program = `
+    const n = k.state.n ?? 0
+    k.on('r', () => { k.after(120, 'tick', { from: n }); return { n: 0 } }, 'replay')
+    k.on('tick', () => { if (n < 2) k.after(120, 'tick'); return { n: n + 1 } })
+    k.on('o', () => { k.do('open', { row: 'r7' }) }, 'open')
+    k.status('step ' + n + ' of 3')
+    return k.text('step ' + n)`
+  const r = run(program, { event: { type: 'key', key: 'r' }, state: { n: 3 } })
+  assert.deepEqual(r.after, [{ ms: 120, event: { from: 3, type: 'tick' } }])
+  assert.deepEqual(r.state, { n: 0 })
+  assert.equal(r.status.text, 'step 0 of 3')
+  const t = run(program, { event: r.after[0].event, state: r.state })
+  assert.deepEqual([t.state, t.after.length], [{ n: 1 }, 1])
+  const o = run(program, { event: { type: 'key', key: 'o' } })
+  assert.deepEqual(o.effects, [{ row: 'r7', do: 'open' }])
+  assert.equal(o.state, undefined)
+  // outside a handler they do nothing and say so
+  const out = run("k.do('open'); k.after(10, 'tick'); return k.text('x')")
+  assert.equal(out.effects, undefined)
+  assert.ok(out.warnings.some(w => /k\.do asks the host/.test(w)))
+})
+
+test('k.want asks the host for data not in hand; the host runs the program again with it (opts.got)', () => {
+  const program = "const rows = k.want({ rows: ['q1#day=2026-06-18'] }); return k.text(rows ? rows.count + ' rows' : 'reading…')"
+  const first = run(program)
+  assert.equal(first.wants.length, 1)
+  assert.match(gridText(renderTerm(first, { w: 40 })), /reading…/)
+  const key = first.wants[0].key
+  const again = run(program, { got: { [key]: { count: 6543 } } })
+  assert.equal(again.wants, undefined)
+  assert.match(gridText(renderTerm(again, { w: 40 })), /6543 rows/)
+})
+
+test('k.embed draws another program\'s drawing as a part, its parts and cites with it; k.select marks a part; c.bg grounds cells', () => {
+  const card = run("k.cite('c18', { text: '6,543 saves', rows: ['revisions.jsonl#L28'] }); return k.region('day-18', { label: 'Jun 18', cite: 'c18' }, k.bar(9, { max: 9 }))")
+  const page = globalThis.DrawKit.run((k, data) => {
+    k.select('day-18')
+    const c = k.canvas(10, 1)
+    c.text(0, 0, 'picked')
+    c.bg(0, 0, 6, 1, 'warn-faint')
+    return k.stack(k.text('**the page**'), k.embed(data.card), c)
+  }, { card }, { w: 40 })
+  assert.equal(page.error, undefined)
+  assert.equal(page.selected, 'day-18')
+  assert.ok(page.regions.some(r => r.id === 'day-18'))
+  assert.ok(page.cites.c18)
+  const g = renderTerm(page, { w: 40 })
+  const row = g.rows.find(r => r.map(c => c.ch).join('').startsWith('picked'))
+  assert.equal(row[0].bg, 'warn-faint')
+  assert.match(renderSvg(page, { w: 40 }).svg, /rx="5" fill="#/)
 })

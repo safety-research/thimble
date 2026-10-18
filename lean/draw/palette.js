@@ -16,10 +16,20 @@ export const DARK = {
   select: '#26384f', hover: '#2a2a2a',
 }
 
-/** The color of `tone` in `theme` ('light' | 'dark'); unknown tones read as ink. */
+/** The color of `tone` in `theme` ('light' | 'dark'); unknown tones read as ink. A tone with `-faint` is its color a
+ *  third of the way from the paper: it keeps its hue and steps back. */
 export function hex(tone, theme = 'dark') {
   const p = theme === 'light' ? LIGHT : DARK
+  const f = /^(.+)-faint$/.exec(String(tone || ''))
+  if (f) return mix(p[f[1]] || p.ink, p.paper, 0.34)
   return p[tone] || p.ink
+}
+
+/** `a` with `share` of it kept and the rest `b`, both #rrggbb. */
+export function mix(a, b, share) {
+  const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
+  const x = rgb(a), y = rgb(b)
+  return '#' + x.map((v, i) => Math.round(v * share + y[i] * (1 - share)).toString(16).padStart(2, '0')).join('')
 }
 
 /**
@@ -29,6 +39,7 @@ export function hex(tone, theme = 'dark') {
 export function termColor(tone, theme = 'dark') {
   if (tone === 'ink' || !tone) return undefined
   if (tone === 'dim' || tone === 'unseen') return 'inactive'
+  if (/-faint$/.test(tone)) return hex(tone, theme)
   if (tone === 'rule') return 'subtle'
   return hex(tone, theme)
 }

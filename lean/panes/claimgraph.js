@@ -1,5 +1,5 @@
-// claimgraph.js: the Claims graph in terminal cells, as pure functions. No `$`, no DOM: the shell draws what it
-// returns (claimsview.ts), and the tests read it.
+// claimgraph.js: the Claims graph in cells, as pure functions. No `$`, no DOM: the Claims pane (claims.js) draws what it
+// returns as its program (on both surfaces), and the tests read it.
 //
 //   layout(claims, clusters, {w, h})   a force layout (repulsion, a pull to each cluster's anchor) computed in cells
 //                                      of about 1:2, then snapped to cells so no two claims touch: {pos, names}
@@ -14,7 +14,7 @@
 //                                      claim, its links as thin glyph lines and its card in a thin frame; every other
 //                                      claim fades. While a replay grows the graph, its newest claims are marked and
 //                                      their links drawn. Rows of runs {s, style, node?}.
-import { sparkChars } from './message.js'
+import { sparkChars } from '../shell/message.js'
 
 const hash = s => {
   let h = 2166136261

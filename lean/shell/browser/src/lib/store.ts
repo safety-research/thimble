@@ -56,6 +56,9 @@ export interface ObjectInfo {
   verb?: string | null
   kind?: string | null
   session?: string | null
+  /** where the person left the card, on either surface (thimble/objects/.state/<id>.json) */
+  state?: Record<string, unknown>
+  region?: string | null
 }
 export interface ThreadTurn {
   role: 'user' | 'assistant'
@@ -88,7 +91,7 @@ export interface SessionInfo {
   title: string
   started: string | null
   rows: number
-  coverage: { total: { files: number; rows: number; not_read_files: number; not_read_rows: number }; groups: { group: string; files: number; rows: number; byStatus: Record<string, number> }[] } | null
+  coverage: { total: { files: number; rows: number; not_read_files: number; not_read_rows: number }; share?: number; groups: { group: string; files: number; rows: number; byStatus: Record<string, number> }[] } | null
 }
 export interface Ask {
   at: string
@@ -136,6 +139,12 @@ export interface State {
   cardStates: Record<string, Record<string, unknown>>
   /** a selection a card's program asked about (k.ask): the chat's next question goes to the card's thread with it */
   cardAsk: { object: string; label: string; region?: string; refs?: string[] } | null
+  /** one more on each change the page server announces: a pane reads its stores again */
+  version: number
+  /** the keys of the pane that has the focus, in words, for the bar above the composer (panes/PaneView) */
+  keybar: { from: string; keys: string; status: string | null } | null
+  /** what a pane's program asked about (k.ask): the chat's next question carries it */
+  paneAsk: { pane: string; args: Record<string, unknown>; ask: { label?: string; region?: string; refs?: string[]; text?: string } } | null
 }
 
 let state: State = {
@@ -168,6 +177,9 @@ let state: State = {
   composerFill: null,
   cardStates: {},
   cardAsk: null,
+  version: 0,
+  keybar: null,
+  paneAsk: null,
 }
 const subs = new Set<() => void>()
 
@@ -200,6 +212,12 @@ async function refresh(): Promise<void> {
     if (!same(m.rows, state.rows)) patch.rows = m.rows || []
   }
   if (!o.error && !same(o.objects, state.objects)) patch.objects = o.objects || []
+  // every card's state as either surface left it (the terminal keeps them): the board draws each card so
+  if (!o.error) {
+    const kept: Record<string, Record<string, unknown>> = {}
+    for (const x of (o.objects || []) as ObjectInfo[]) if (x.state && !same(x.state, state.cardStates[x.id])) kept[x.id] = x.state
+    if (Object.keys(kept).length) patch.cardStates = { ...state.cardStates, ...(patch.cardStates || {}), ...kept }
+  }
   if (!t.error && !same(t.threads, state.threads)) patch.threads = t.threads || []
   if (!a.error && !same(a.asks, state.asks)) patch.asks = a.asks || []
   // the open card's interaction state, as the terminal may have changed it (thimble/objects/.state/<id>.json)
@@ -228,6 +246,7 @@ export async function start(): Promise<void> {
   await Promise.all([refresh(), refreshInfo(true)])
   follow(
     () => {
+      setState({ version: state.version + 1 })
       void refresh()
       void refreshInfo()
     },

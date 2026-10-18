@@ -104,6 +104,17 @@ Interaction:
   question (or `text`, at once) to the card's thread about that selection.
 - `k.rows(x)`: the refs of rows of the data, for an ask or a cite. `k.title`, `k.id`, `k.surface` (`'terminal'` or
   `'browser'`).
+- A key's `label` is what the person reads for it in the bar. Keys with the same label show together (`< > change`);
+  a key with no label works but is not shown.
+- In a handler: `k.after(ms, name, payload)` sends the program the event `{ type: name, ...payload }` later, such as
+  the next frame of a replay; and `k.do(action, args)` asks the host for one of its actions, such as
+  `k.do('open', { row })`. A host without that action says so to the person.
+- `k.status(text)` is one short line the bar shows while the card has the keys. `k.select(id)` marks the part the
+  program has selected, as each surface marks a selection.
+- `k.want({ rows: [refs] })` returns the rows behind those refs once the host has read them, else null; the program
+  then runs again with them. Use it for records a part shows on demand.
+- On a canvas, `c.bg(x, y, w, h, tone)` puts a ground under cells already drawn. Any tone with `-faint` (`c2-faint`)
+  is that color, stepped back.
 
 Knobs:
 
