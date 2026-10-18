@@ -11,6 +11,8 @@ export interface Mark {
   label?: string
   gloss?: string
   values?: number[] | null
+  /** an explain whose term a rewrite left out: drawn after the text */
+  loose?: boolean
 }
 export interface Chip {
   id: string
