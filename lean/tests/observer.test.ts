@@ -1,11 +1,12 @@
 // The observer's hooks (observer/observer.ts): one look after a turn of work, or a turn that states a decision; its
 // notes reach Claude beside the next prompt and never the person; its line shows above the prompt only when it names
-// a decision and no turn runs; its verbs take the hint row of each new object; a line the session settled closes.
+// a decision and no turn runs; it lights the verbs of the answer's row and places its glosses, a gloss never twice and
+// fewer when nobody opens them; a line the session settled closes.
 // `claude plugin test lean`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { slim } from '../observer/evidence.js'
-import { skipsFor } from '../observer/observer'
+import { glossSkipsFor, skipsFor } from '../observer/observer'
 
 const ROOT = '/data'
 const DIR = `${ROOT}/thimble/objects`
@@ -45,7 +46,7 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json) } = {})
   const files: Record<string, string> = { [`${DIR}/01-saves.json`]: JSON.stringify(OBJECT) }
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === DIR || e.path.endsWith('.md') }))
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: e.path === DIR ? Object.keys(files).filter(f => f.startsWith(DIR + '/')).map(f => ({ name: f.slice(DIR.length + 1), kind: 'file', size: 1, mtimeMs: 0, isLink: false })) : [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('observer.md') ? 'OBSERVER {{QUESTION}} | {{DECISION}} | {{OBJECTS}} | {{COVERAGE}} | {{NOTES}} | {{OPEN}} {{LINE_RULE}}' : e.path.endsWith('question.md') ? 'QUESTION {{QUESTION}} {{ANSWER}}' : files[e.path] ?? '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('observer.md') ? 'OBSERVER {{QUESTION}} | {{DECISION}} | {{OBJECTS}} | {{COVERAGE}} | {{NOTES}} | {{OPEN}} {{LINE_RULE}} | {{GLOSSED}}' : e.path.endsWith('question.md') ? 'QUESTION {{QUESTION}} {{ANSWER}}' : files[e.path] ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => {
     files[e.path] = String(e.content ?? e.text ?? e.data ?? '')
     return { value: undefined }
@@ -127,11 +128,12 @@ async function turn($: Any, w: { at: { tools: number } }, clock: Any, o: { id: s
 const reply = ($: Any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18.', isFirstOfReply: true }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never)
 const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
 
-test('after a turn that saved an object: one look reads its lineage; its note reaches Claude with the next prompt, and its verbs take the hint row', async ($, on) => {
+test('after a turn that saved an object: one look reads its lineage; its note reaches Claude with the next prompt, and it lights the verbs of the answer', async ($, on) => {
   const w = world(on, { fork: {
     notes: [{ note: 'The 6,543 counts every save of Jun 18, reverts too; say so.', rests_on: 'tally(df, "day")' }],
     line: null, settled: false,
-    hints: { '01-saves': [{ verb: 'trace', phrase: 'trace the 6,543 to its rows' }, { verb: 'explore', phrase: 'explore saves by day' }, { verb: 'map' }] },
+    verbs: { v: { note: '2 views ready', proposals: ['saves by day', 'saves by wiki'] }, s: { lit: false } },
+    glosses: [],
   } })
   const clock = w.clock
   await turn($, w, clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
@@ -140,19 +142,20 @@ test('after a turn that saved an object: one look reads its lineage; its note re
   expect(w.forks.length).toBe(1)
   expect(w.forks[0]).toContain('Object 01-saves v1 "Saves per day" (saved since the last look)')
   expect(w.forks[0]).toContain('"6,543" = 6,543 (q1#day=2026-06-18@n): rests on 4 rows of revisions.jsonl')
-  expect(w.forks[0]).toContain('t trace: where it came from')
+  expect(w.forks[0]).not.toContain('t trace: where it came from')
   expect(w.forks[0]).toContain('as the person sees it under the reply:\n    Jun 18 6,543')
   expect(w.forks[0]).toContain('Not read: 1 file (9 rows): events.jsonl')
   expect(w.runs.some(a => a.includes('coverage'))).toBe(true)
-  // the hint row: the observer's verbs, in its order, with its words
+  // the verb row under the answer: v lit with its note, s dim
   await clock.settle()
   const drawn = textOf(await reply($))
   await clock.settle()
   const row = textOf(await reply($))
-  expect(row).toContain('t trace the 6,543 to its rows')
-  expect(row).toContain('x explore saves by day')
-  expect(row.indexOf('trace the 6,543')).toBeLessThan(row.indexOf('explore saves by day'))
+  expect(row).toContain('● 2 views ready')
+  expect(row).toContain(' squeeze')
+  expect(row).not.toContain('● squeeze')
   expect(drawn.length).toBeGreaterThan(0)
+  expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`]!).verbs.v.proposals).toEqual(['saves by day', 'saves by wiki'])
   // the note: for Claude alone, with the next prompt, once
   await $.prompt.submit({ text: 'and the busiest month?', origin: { kind: 'composer' } } as never)
   const ctx = w.submitted.at(-1)!.context.join('\n')
@@ -162,8 +165,8 @@ test('after a turn that saved an object: one look reads its lineage; its note re
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('6,543 counts')
   // nothing showed above the prompt
   expect(textOf(await $.ui.render(BAND))).not.toContain('Heads up')
-  // the session's file keeps the ranking, for a resume
-  expect(JSON.parse(w.files[OBS]!).hints[`${ROOT}|01-saves|1`].verbs[0]).toEqual({ verb: 'trace', phrase: 'trace the 6,543 to its rows' })
+  // the session's file keeps what it lit, for measuring
+  expect(JSON.parse(w.files[OBS]!).log.find((r: { kind: string }) => r.kind === 'look').verbs_lit).toEqual(['v'])
 })
 
 test('a short turn that states a decision gets a look; its line names the decision and shows above the prompt; Send to main fills the prompt', async ($, on) => {
@@ -244,9 +247,9 @@ test('an unanswered line clears at the second prompt after it showed, and lines 
   expect([1, 2, 3, 4, 5, 9].map(skipsFor)).toEqual([0, 0, 1, 2, 4, 16])
 })
 
-test('a look that ends while a new turn runs: no line mid-turn (its finding goes to Claude), and the hint row waits for the turn to end', async ($, on) => {
+test('a look that ends while a new turn runs: no line mid-turn (its finding goes to Claude), and its verbs light the answer it looked at', async ($, on) => {
   const line = { decision: 'share it', line: 'Before you share it: the 6,543 counts reverts.', title: 'Reverts counted', explanation: '- x' }
-  const w = world(on, { question: { parts: [], drift: null, decision: 'share it' }, fork: { notes: [], settled: false, line, hints: { '01-saves': [{ verb: 'trace', phrase: 'trace the 6,543' }] } } })
+  const w = world(on, { question: { parts: [], drift: null, decision: 'share it' }, fork: { notes: [], settled: false, line, verbs: { v: { note: 'saves by day', proposals: ['saves by day'] } } } })
   const clock = w.clock
   // the turn ends; before its look runs, the person starts another turn
   await $.prompt.submit({ text: 'I will share it', origin: { kind: 'composer' } } as never)
@@ -263,13 +266,10 @@ test('a look that ends while a new turn runs: no line mid-turn (its finding goes
   await clock.settle()
   textOf(await reply($))
   await clock.settle()
-  expect(textOf(await reply($))).not.toContain('trace the 6,543')
-  // the turn ends: the row takes the observer's words; the line's finding waits for Claude's next prompt
+  expect(textOf(await reply($))).toContain('● saves by day')
+  // the line's finding waits for Claude's next prompt
   await $.turn.complete({ turnId: 't2', answer: 'More.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.advance(100)
-  textOf(await reply($))
-  await clock.settle()
-  expect(textOf(await reply($))).toContain('t trace the 6,543')
   await $.prompt.submit({ text: 'ok', origin: { kind: 'composer' } } as never)
   expect(w.submitted.at(-1)!.context.join('\n')).toContain('Before you share it: the 6,543 counts reverts.')
 })
@@ -294,4 +294,52 @@ test('a reload mid-session keeps the notes not yet delivered: they reach Claude 
   expect(w.submitted.at(-1)!.context.join('\n')).toContain('The 412 counts all months.')
   await $.prompt.submit({ text: 'ok', origin: { kind: 'composer' } } as never)
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('412')
+})
+
+// ------------------------------------------------------------------------------------------------ glosses
+
+const GLOSS = { term: 'fixture scope', body: 'How long pytest keeps one fixture object.', here: 'In run 7, [conftest.py:14](tests/conftest.py#L14) set it to "module".', program: "return k.text('**module** {dim:one cart per file}')" }
+const ANSWER = 'June 18 had the most saves, because the `fixture scope` was module.'
+const MSGPATH = `${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`
+const BAND2 = { ...(BAND as object), props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never
+const key = (k: string, text = '') => ({ origin: { kind: 'composer' }, key: { key: k }, text, cursor: 0, start: 0, end: 0, inputText: k.length === 1 ? k : '' }) as never
+
+test('a gloss is placed by its term in the answer, with a teal fill; its card says what it is and where it mattered, and a citation in it opens over it', async ($, on) => {
+  const w = world(on, { fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS, { term: 'not in the answer', body: 'x' }] } })
+  on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
+  await w.clock.settle()
+  const rec = JSON.parse(w.files[MSGPATH]!)
+  expect(Object.values(rec.glosses).map((g: Any) => g.term)).toEqual(['fixture scope'])
+  const mark = rec.marks.find((m: Any) => m.kind === 'gloss')
+  expect(ANSWER.slice(mark.start, mark.end)).toBe('`fixture scope`')
+  const drawn = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: ANSWER, isFirstOfReply: true }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never)
+  expect(JSON.stringify(drawn)).toContain('"label":"gloss fixture scope"')
+  // ] opens it in the tray; its card is drawn from the gloss
+  await ($ as Any).prompt.edit(key(']'))
+  await w.clock.settle()
+  textOf(await $.ui.render(BAND2))
+  await w.clock.settle()
+  const card = textOf(await $.ui.render(BAND2))
+  expect(card).toContain('fixture scope')
+  expect(card).toContain('gloss')
+  expect(card).toContain('1 open')
+  // 1 opens the citation in it, over it; 0 comes back
+  await ($ as Any).prompt.edit(key('1'))
+  expect(textOf(await $.ui.render(BAND2))).toContain('conftest.py:14')
+  expect(textOf(await $.ui.render(BAND2))).toContain('0 back')
+  await ($ as Any).prompt.edit(key('0'))
+  expect(textOf(await $.ui.render(BAND2))).toContain('fixture scope')
+})
+
+test('a term the person saw explained is never glossed again; glosses nobody opens back off', async ($, on) => {
+  const w = world(on, { fork: () => ({ notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS] }) })
+  await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
+  expect(Object.keys(JSON.parse(w.files[MSGPATH]!).glosses)).toEqual(['g1'])
+  // the next look is told the term, and a repeat is dropped
+  await turn($, w, w.clock, { id: 't2', prompt: 'and June 19?', answer: ANSWER, tools: 2, save: true })
+  expect(w.forks[1]).toContain('| - fixture scope')
+  expect(JSON.parse(w.files[MSGPATH]!).glosses).toEqual({})
+  // looks whose glosses nobody opened: after two, the next looks are told to give none
+  expect([1, 2, 3, 4, 5, 9].map(glossSkipsFor)).toEqual([0, 0, 1, 2, 4, 8])
 })
