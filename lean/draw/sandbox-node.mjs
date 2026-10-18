@@ -23,7 +23,9 @@ const RUN_SCRIPT = new vm.Script(
 /**
  * Run `object.program` on `object.data` in a fresh vm context.
  * @param {{program: string, data?: unknown}} object
- * @param {{w?: number, h?: number, mode?: string, limit?: number, state?: object}} [opts] state: the knobs' values (k.knob)
+ * @param {{w?: number, h?: number, mode?: string, limit?: number, state?: object, event?: object, title?: string, id?: string, surface?: string, maxBytes?: number}} [opts]
+ *   state: the card's interaction state (its knobs and what its handlers set); event: what the person did, which the
+ *   program's k.on handlers answer; title and id default to the object's
  * @returns {object} the drawing
  */
 export function runProgram(object, opts = {}) {
@@ -36,22 +38,34 @@ export function runProgram(object, opts = {}) {
   // only strings cross in
   context.__program = String(object && object.program != null ? object.program : '')
   context.__data = JSON.stringify(object && object.data !== undefined ? object.data : {})
-  context.__opts = JSON.stringify({ w: opts.w, h: opts.h, mode: opts.mode, limit, state: opts.state })
+  context.__opts = JSON.stringify({ w: opts.w, h: opts.h, mode: opts.mode, limit, state: opts.state, event: opts.event,
+    title: opts.title ?? object?.title, id: opts.id ?? object?.id, surface: opts.surface || 'terminal', maxBytes: opts.maxBytes })
   KIT_SCRIPT.runInContext(context, { timeout: 1000 })
   let text
   try {
     text = RUN_SCRIPT.runInContext(context, { timeout: limit + 500 })
   } catch (e) {
     // a vm timeout, or a program that broke the kit itself: report it as a drawing that says so
-    const name = /timed out/i.test(String(e && e.message)) ? 'TimeLimit' : 'SandboxError'
-    return {
-      kit: 1, w: opts.w || 96, h: opts.h || 24, mode: opts.mode || 'inline', regions: [], cites: {}, examples: {}, warnings: [], ms: limit,
-      error: { name, message: name === 'TimeLimit' ? `the program ran past the ${limit} ms limit` : String(e && e.message).slice(0, 300), line: null, source: '' },
-      root: { t: 'frame', title: [{ s: 'program error', tone: 'bad', b: true }], tone: 'bad', grow: 1, kid: { t: 'text', runs: [{ s: name + ': the program was stopped, so nothing was drawn', tone: 'dim' }] } },
-    }
+    return stopped(object, opts, limit, e)
   }
   if (typeof text !== 'string') throw new Error('the sandbox returned no drawing')
   return JSON.parse(text)
+}
+
+/** The drawing of a program the sandbox stopped (past its time, or one that broke the kit): one line under the card's
+ *  title that says what failed and what to fix, as kit.js draws any other error. */
+export function stopped(object, opts, limit, e) {
+  const time = /timed out/i.test(String(e && e.message))
+  const name = time ? 'TimeLimit' : 'SandboxError'
+  const message = time ? `the program ran past the ${limit} ms limit` : String(e && e.message).slice(0, 300)
+  const fix = time ? `it ran past ${limit} ms: draw fewer rows (bind a smaller table) or loop less` : 'fix the program and save the card again'
+  const title = String(opts.title ?? object?.title ?? '').trim()
+  const runs = [{ s: '× ', tone: 'bad' }, ...(title ? [{ s: title + ' ', tone: 'ink', b: true }] : []), { s: 'could not draw: ', tone: 'dim' }, { s: `${name}: ${message} `, tone: 'ink' }, { s: '· fix: ', tone: 'dim' }, { s: fix, tone: 'ink' }]
+  return {
+    kit: 1, w: opts.w || 96, h: opts.h || 24, mode: opts.mode || 'inline', title, regions: [], cites: {}, examples: {}, warnings: [], ms: limit,
+    error: { name, message, line: null, source: '', fix },
+    root: { t: 'text', runs },
+  }
 }
 
 async function main() {

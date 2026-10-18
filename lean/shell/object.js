@@ -6,7 +6,9 @@
 //   chainWords(resolved) -> {line, notes, records}: `lean resolve --json` in a few words, as both views print it.
 //
 //   regionRefs(object, drawing, regionId) -> {refs, how}
-//     1. the refs the program named: the region meta's `ref` (one or a list), else its cite's `ref`;
+//     1. the refs the program named: the region meta's `ref` (one or a list; the runtime sets it for a part drawn from
+//        a row of the card's data, or matched by its words), the row's own `_ref`, `refs`, `rows` or `_rows`, else its
+//        cite's `ref`;
 //     2. else the row of the object's data the region stands for, found by name: a row that carries `_rows` (the
 //        kernel's source rows) and whose value appears in the region's id, as day "2026-06-18" in "day-2026-06-18";
 //        the longest such value wins, and a tie finds none, so a guess never picks between two rows;
@@ -40,7 +42,12 @@ export function regionRefs(object, drawing, id) {
   if (!id) return { refs: [], how: '' }
   const meta = regionMeta(drawing, id) || {}
   const own = listOf(meta.ref)
-  if (own.length) return { refs: own, how: 'named' }
+  if (own.length) return { refs: own, how: meta.lineage === 'matched' ? 'matched by its words' : 'named' }
+  // a part drawn from a row of the card's data carries that row's own ref, or its source rows
+  for (const k of ['_ref', 'refs', 'rows', '_rows']) {
+    const got = listOf(meta[k])
+    if (got.length) return { refs: got, how: 'its row' }
+  }
   const cite = typeof meta.cite === 'string' ? drawing?.cites?.[meta.cite] : meta.cite
   const viaCite = listOf(cite?.ref)
   if (viaCite.length) return { refs: viaCite, how: 'named' }
