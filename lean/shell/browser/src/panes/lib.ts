@@ -73,3 +73,62 @@ export async function readPaneState(key: string): Promise<{ state: Record<string
   const r = await api(`pane/${encodeURIComponent(key)}`)
   return r.error ? null : r
 }
+
+// ---------------------------------------------------------------- the focus stack
+// What has the keys, top first: each pane that takes keys while it is open (the chips under a message, the Claims
+// pane, the card detail). A key goes to the top pane that takes it, then down; the bar names the top pane's keys. A
+// key no pane takes goes on to the app's own keys (Shell.tsx), as the terminal's go on to the message's verbs.
+export interface Layer {
+  id: string
+  fire: (event: Record<string, unknown>) => boolean
+  /** say its keys in the bar (it is on top now) */
+  publish?: () => void
+}
+const layers: Layer[] = []
+let listening = false
+
+export function pushLayer(layer: Layer): () => void {
+  const i = layers.findIndex((l) => l.id === layer.id)
+  if (i >= 0) layers.splice(i, 1)
+  layers.push(layer)
+  if (!listening) {
+    listening = true
+    window.addEventListener('keydown', onKey, true)
+  }
+  return () => {
+    const j = layers.indexOf(layer)
+    if (j >= 0) layers.splice(j, 1)
+    // the pane under it is on top again: its keys go back in the bar
+    if (j === layers.length) layers[layers.length - 1]?.publish?.()
+  }
+}
+
+/** The pane on top of the focus stack, or null. */
+export const topLayer = (): string | null => layers[layers.length - 1]?.id ?? null
+
+const ARROWS: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }
+
+/** A keydown as a program names keys. */
+export function keyOfEvent(e: KeyboardEvent): string {
+  if (e.ctrlKey || e.metaKey || e.altKey) return ''
+  if (ARROWS[e.key]) return ARROWS[e.key]
+  if (e.key === ' ') return 'space'
+  if (e.key === 'Enter') return 'return'
+  if (e.key === 'Escape') return 'esc'
+  if (e.key === 'Backspace') return 'backspace'
+  return e.key && e.key.length === 1 ? e.key : ''
+}
+
+function onKey(e: KeyboardEvent) {
+  const el = e.target as HTMLElement | null
+  if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)) return
+  const k = keyOfEvent(e)
+  if (!k) return
+  for (let i = layers.length - 1; i >= 0; i--) {
+    if (layers[i].fire({ type: 'key', key: k })) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+  }
+}

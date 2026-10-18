@@ -899,6 +899,9 @@
     if (o.title != null) op.push(inline(o.title, { bold: true }, this._ctx).filter(r => !r.br))
     return this._op(op)
   }
+  // a background under cells already drawn (a picked chip, a highlighted run): the terminal colors the cells' ground,
+  // the browser draws one rounded band behind them
+  Canvas.prototype.bg = function (x, y, w, h, tone) { return this._op(['bg', fl(x), fl(y), Math.max(0, fl(w)), Math.max(0, fl(h)), cT(this, tone, 'accent-faint')]) }
   Canvas.prototype.px = function (x, y, tone) { return this._op(['px', fl(x), fl(y), cT(this, tone, 'accent')]) }
   Canvas.prototype.line = function (x0, y0, x1, y1, tone) { return this._op(['line', +x0 || 0, +y0 || 0, +x1 || 0, +y1 || 0, cT(this, tone, 'accent')]) }
   // value marks inside a canvas keep their numbers, so the browser draws them exactly

@@ -45,11 +45,11 @@ import { back as trayBack, base as trayBase, open as trayOpen, order as markOrde
 import { markColors, messageEl, trayEl, verbColor, verbLineEl } from './view'
 import { markNextTurn, tracked } from '../telemetry/telemetry'
 import type { RowVerb } from './view'
-import { afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, chipFromPrompt, chipsEl, fromBrowser as sqFromBrowser, pressChip, revealedOf, seeView, setLevels as sqSetLevels, sLit, squeezeHint, squeezeKey, takeNotes as sqNotes } from '../verbs/squeeze/term'
-import { chipsOf as sqChips, isOriginal as sqIsOriginal, revealCut } from '../verbs/squeeze/chips.mjs'
+import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, takeNotes as sqNotes } from '../verbs/squeeze/term'
+import { endsOf, revealCut } from '../verbs/squeeze/chips.mjs'
 import { HEAD_ROWS } from '../panes/claims.js'
 import { barText } from '../panes/host.js'
-import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneOf, paneState, setPaneState, setTheme } from './panes'
+import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneNow, paneOf, paneState, setPaneState, setTheme } from './panes'
 import { emptyStore, readStore } from '../verbs/claims/claims.js'
 
 type Engine = EngineInterface
@@ -573,7 +573,7 @@ async function startServer($: Engine, root: string): Promise<{ base: string } | 
               void verbFromBrowser($, root, String(msg.verb), String(msg.row || ''), typeof msg.proposal === 'string' ? msg.proposal : null)
             } else if (msg.squeeze && typeof msg.squeeze === 'object') {
               // a squeeze chip pressed under a message in the browser: the same rewrite in place as a press here
-              void sqFromBrowser($, msg.squeeze).then(said => { if (said) $.ui.toast(said) }, err => failed($, 'Squeeze from the browser did not run', err, 'Press s under the message here instead'))
+              void paneActFromBrowser($, { ...msg.squeeze, pane: 'chips', args: { row: msg.squeeze.row }, do: 'squeeze', ...(msg.squeeze.custom ? { stretch: msg.squeeze.custom } : {}), ...(msg.squeeze.chip != null ? { at: { [msg.squeeze.chip]: msg.squeeze.level } } : {}) })
             } else if (msg.cardstate) {
               await stateFromBrowser($, root, msg.cardstate)
             } else if (msg.panestate && typeof msg.panestate === 'object') {
@@ -1258,20 +1258,6 @@ export async function questionBefore($: Engine, row: string): Promise<string> {
   return ''
 }
 
-/** The chips' + pressed: the prompt takes the + and the person types a stretch's two ends after it. */
-async function startOwnChip($: Engine, row: string): Promise<void> {
-  const ui = ((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null
-  await $.state.set({ ...SQZ, id: row }, { focus: ui?.focus ?? 'length', running: ui?.running ?? null, tick: ui?.tick ?? 0, reveal: ui?.reveal ?? null, error: null, adding: true, typing: '+' })
-  await $.prompt.fill({ text: '+', mode: 'replace' })
-}
-
-/** The chips' 0 pressed: the original again, or with the chips at the original, the chips close. */
-async function originalOrClose($: Engine, row: string): Promise<void> {
-  const rec = await recordNow($, row)
-  if (!rec || sqIsOriginal(sqChips(rec))) { await $.state.set(PICK, null); return }
-  await sqSetLevels($, row, {})
-}
-
 /** What the observer gave for the turn's answer: its lit verbs and glosses, in the answer's record. */
 export async function applyObserver($: Engine, row: string, out: { verbs: Record<string, unknown>; glosses: Record<string, unknown> }): Promise<MsgRecord | null> {
   const rec = await recordNow($, row)
@@ -1638,12 +1624,18 @@ async function focusKeys($: Engine): Promise<string | null> {
   const d = await detailKeys($)
   if (d) return d
   // the Claims pane's own keys, as its program names them (panes/claims.js)
-  if ((await $.state.get(CLAIMPANE)).value) return barText([paneDrawing('claims')]) || 'esc close'
+  if ((await $.state.get(CLAIMPANE)).value) return barText([paneDrawing('claims') ?? (await paneNow($, 'claims'))]) || 'esc close'
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   if (pick?.verb === 's') {
+    // the chips' own keys, as their program names them (panes/chips.js), after what it says of the message now
     const ui = ((await $.state.get({ ...SQZ, id: pick.row })).value ?? null) as SqzUi | null
-    const rec = await recordNow($, pick.row)
-    return rec ? squeezeHint(rec, ui) : null
+    if (ui?.adding) {
+      const ends = endsOf(String(ui.typing || '+'))
+      if (!ends) return 'type two ends, such as engineer and manager · ↵ makes the stretch · ⌫ cancels'
+      return ends.from === 'as written' ? 'then and, and the other end · ↵ makes the stretch' : `↵ makes ${ends.from} ↔ ${ends.to} · ⌫ the + cancels`
+    }
+    const d = await paneNow($, 'chips', { row: pick.row })
+    return [d?.status?.text, barText([d])].filter(Boolean).join(' · ') || null
   }
   const tray = (await $.state.get(TRAY)).value as Tray | null
   if (tray) {
@@ -1800,11 +1792,14 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
       return consume
     }
   }
-  // the squeeze chips open under a message: their keys first (1-9 pick, < > change, + your own chip, 0 original)
+  // the squeeze chips open under a message: their program's keys first (panes/chips.js: 1-9 pick, < > change, + a
+  // stretch, 0 original, s done); a key it asks to type with (the + of a stretch) goes into the prompt
   if (pick && pick.verb === 's' && !tray) {
-    const r = await squeezeKey($, pick.row, k)
-    if (r === 'consume') { keyOpened = null; return consume }
-    if (r === 'type') { keyOpened = null; return null }
+    typedKey = k
+    const taken = await paneFire($, 'chips', { row: pick.row }, { type: 'key', key: k })
+    const typed = typedKey === null
+    typedKey = null
+    if (taken) { keyOpened = null; return typed ? null : consume }
   }
   if (k === ']' || k === '[') {
     keyOpened = null
@@ -2001,6 +1996,8 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'claims': return claimsStore($)
     case 'index': return (await msgFilesNow($)).index.map(x => ({ row: String(x.row), kind: x.kind }))
     case 'record': return arg ? await recordNow($, arg) : null
+    // the squeeze's own state of a message (a stretch being typed, a call running, a failure): the terminal's alone
+    case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
     default: return paneStoreMore($, kind, arg)
   }
 }
@@ -2023,10 +2020,53 @@ export async function paneWant($: Engine, _name: string, _args: Record<string, u
   return { error: 'the terminal cannot read that' }
 }
 
+/** The key the chips' program is answering now, set while it runs: an input it asks for with the key's own letter
+ *  (the + of a stretch) leaves the key in the prompt (null here then). */
+let typedKey: string | null = null
+/** What the last stretch made says, for the prompt's drop line. */
+let stretchSaid: string | null = null
+
+/** What the squeeze chips' program asks for: a rewrite at levels, the original, a stretch, the prompt for a stretch's
+ *  ends, a line said, or closing the chips. */
+async function chipsAction($: Engine, row: string, a: Record<string, unknown>): Promise<string | boolean | void> {
+  const name = String(a.do || '')
+  if (!row || !(await recordNow($, row))) return '× That message is not in this session, so the chips cannot change it. Press s under a message here.'
+  if (name === 'squeeze') {
+    if (a.reset === true) { void sqSetLevels($, row, {}); return }
+    if (typeof a.stretch === 'string') {
+      const r = await sqAddStretch($, row, a.stretch)
+      stretchSaid = r.said ?? null
+      return r.problem ? `× ${r.problem}` : undefined
+    }
+    if (a.at && typeof a.at === 'object') {
+      const at: Record<string, number> = {}
+      for (const [k, v] of Object.entries(a.at as Record<string, unknown>)) if (Number.isInteger(v)) at[k] = v as number
+      void sqSetLevels($, row, at)
+      return
+    }
+    return '× The chips asked for a squeeze with no levels.'
+  }
+  if (name === 'input') {
+    await sqStartStretch($, row)
+    // pressed as the + key, the + is typed into the prompt by the key itself; pressed with the pointer, it is put there
+    if (typedKey === '+') typedKey = null
+    else await $.prompt.fill({ text: '+', mode: 'replace' })
+    return
+  }
+  if (name === 'close') {
+    await sqStopStretch($, row)
+    await $.state.set(PICK, null)
+    return
+  }
+  if (name === 'say') return typeof a.text === 'string' ? a.text : undefined
+  return false
+}
+
 /** An action a pane's program asked for (k.do). False: the terminal has none by that name. */
 export async function paneAction($: Engine, pane: string, _args: Record<string, unknown>, a: Record<string, unknown>): Promise<string | boolean | void> {
   const name = String(a.do || '')
   if (pane === 'claims' && name === 'close') { await closeClaims($); return }
+  if (pane === 'chips') return chipsAction($, String(_args.row || a.row || ''), a)
   if (name === 'open') {
     // a place a program opens: a card (its detail), a message (the keys act on it now)
     if (typeof a.object === 'string' && ID.test(a.object)) {
@@ -2284,11 +2324,9 @@ export const registerShell: Register = (on, options) => {
         ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy, lead: busy })
         : await next(e))
       if (open === 's') {
-        // the chips under the message; their keys are in the thimble line
-        parts.push(chipsEl(els, {
-          key: `vl-${at}`, rec, theme, ui: sqUi ?? { focus: 'length', adding: false, running: null, error: null, tick: 0 },
-          onPick: (id: string) => pressChip($, at, id), onAdd: () => startOwnChip($, at), onOriginal: () => originalOrClose($, at),
-        }))
+        // the chips under the message (panes/chips.js, the browser draws the same program); their keys are in the
+        // thimble line
+        parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'chips', { row: at }, { w: Math.max(30, cols - 2), h: 3 })] }))
       } else if (open) {
         const verb = (await rowVerbs($)).find(v => v.key === open)
         if (verb) {
@@ -2393,9 +2431,13 @@ export const registerShell: Register = (on, options) => {
     if (e.command) return next(e)
     try {
       const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-      if (pick?.verb === 's' && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin') {
-        const drop = await chipFromPrompt($, pick.row, e.text)
-        if (drop) return { drop }
+      if (pick?.verb === 's' && !e.isMeta && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin' && /^\s*\+/.test(String(e.text || ''))) {
+        // the two ends of a stretch, typed after the chips' +: the chips' program makes it (no prompt for Claude)
+        await paneFire($, 'chips', { row: pick.row }, { type: 'stretch', text: String(e.text) })
+        const said = stretchSaid
+        stretchSaid = null
+        $.clock.after(50, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
+        return { drop: said || 'stretch' }
       }
       // a question typed with the tray open asks the mark's side thread; it never reaches main
       const tray = (await $.state.get(TRAY)).value as Tray | null

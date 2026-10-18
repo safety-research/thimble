@@ -149,7 +149,7 @@ function useKeys() {
   const marks = useMemo(() => allMarks(rows), [rows])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.altKey || typing(e)) return
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || typing(e)) return
       const s = getState()
       const k = e.key
       if (s.card && !s.tray.length && detailKey(k)) return e.preventDefault()

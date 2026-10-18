@@ -4,6 +4,7 @@
 //
 // A pane module: {name, title, reads(args) -> store names, stateKey(args) -> where its state is kept, data(stores, args,
 // size) -> the program's data, program(k, data) -> node}. A new pane is a new file here and a line below.
+import chips from './chips.js'
 import claims from './claims.js'
 
-export default { claims }
+export default { chips, claims }

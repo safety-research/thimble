@@ -1,15 +1,11 @@
-// term.ts: Squeeze in the terminal. The chips under a message, their keys, the one call per change that rewrites the
-// message in place, the new text writing itself in from the top, and the long message that arrives squeezed. The
-// shell (shell/shell.tsx) calls it; it imports the message layer's record functions from the shell (a cycle the module
-// system resolves at call time).
+// term.ts: Squeeze in the terminal: the one call per change that rewrites the message in place, the new text writing
+// itself in from the top, the stretch typed in the prompt, and the long message that arrives squeezed. The chips
+// themselves, their keys and presses, are a pane program (panes/chips.js) that both surfaces run; what it asks for
+// (k.do('squeeze', {at | reset | stretch})) is done here. The shell (shell/shell.tsx) calls it; it imports the message
+// layer's record functions from the shell (a cycle the module system resolves at call time).
 //
-//   s            opens the chips under the message the keys act on, in place of its verb row (s again closes them)
-//   1-9, ] [     pick a chip (] the next)     < >  (or , .)  the picked chip one level down, one up
-//   +            starts a stretch: the person types its two ends after the + in the prompt ("engineer and manager")
-//                and presses ↵; the chip stands at the original until they step it
-//   0            the original again (with the chips at the original: closes them)
-// Claude Code hands a plugin only the keys that edit the prompt, so these are the keys (tab, arrows, ↵ and esc never
-// reach a plugin). They are named once, in the hint line under the prompt (squeezeHint), not under the chips.
+// While a change is on its way the record says where the chips go (squeeze.want), and a failed call says why
+// (squeeze.error), so the browser's chips show the same as the terminal's.
 //
 // A rewrite: one $.model.complete call (the registry's squeeze prompt, the question, the original, every chip's level),
 // recorded in the session's events with the prompt version it used; the record's
@@ -23,7 +19,7 @@ import { promptText as registryText } from '../../prompts/prompts'
 import { remark as remarkAny } from '../../shell/message.js'
 import { tracked } from '../../telemetry/telemetry'
 import { questionBefore, recordNow, saveRecord } from '../../shell/shell'
-import { ARRIVE, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, glyph, isLong, isOriginal, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stepAt, stretchChip, withStretch } from './chips.mjs'
+import { ARRIVE, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, isLong, isOriginal, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stretchChip, withStretch } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,138 +91,8 @@ export function revealedOf(ui: SqzUi | null): number | null {
   return ui?.reveal ? ui.reveal.n : null
 }
 
-// ------------------------------------------------------------------------------------------------ the chips
-
-/** The chips' colors, per theme: the squeeze amber, the picked chip's fill, ink and dim. */
-function colors(theme: Theme) {
-  return theme === 'light'
-    ? { sq: '#9a6412', picked: '#f5e4bf', ink: '#2b2a27', dim: '#8a857c' }
-    : { sq: '#e0a43a', picked: '#4a3b1d', ink: '#e8e4dc', dim: '#8f897f' }
-}
-
-export type ChipsOpts = {
-  key: string
-  rec: MsgRecord
-  ui: SqzUi
-  theme: Theme
-  onPick: (id: string) => unknown
-  onAdd: () => unknown
-  onOriginal: () => unknown
-}
-
-/**
- * The chips under a message, on one row: each chip as its label, its dots and its level (`Length ○●○○ short`); a
- * stretch as its two ends around its dots (`engineer ●○○○ manager`). Only the picked chip has a fill. A `+` ends the
- * row; while the person types a stretch it reads `stretch between … and …` with what they typed. The keys are named
- * in the hint line under the prompt, so nothing else is drawn here.
- */
-export function chipsEl(els: Any, o: ChipsOpts): Any {
-  const { Box, Button, Text } = els
-  const c = colors(o.theme)
-  const chips = chipsOf(o.ui.want ? { ...o.rec, squeeze: { ...((o.rec as Any).squeeze || {}), at: o.ui.want } } : o.rec)
-  const kids: Any[] = []
-  chips.forEach((chip: Any, i: number) => {
-    const picked = o.ui.focus === chip.id && !o.ui.adding
-    const bg = picked ? c.picked : undefined
-    const t = (children: string, p: Any = {}) => Text({ ...(bg ? { backgroundColor: bg } : {}), ...p, children })
-    const dots = t(glyph(chip, chip.level), { color: picked ? c.sq : c.dim })
-    const parts = chip.kind === 'stretch'
-      ? [t(' '), t(chip.from, { color: picked && chip.level === 0 ? c.sq : c.dim, bold: picked && chip.level === 0 }), t(' '), dots, t(' '), t(chip.to, { color: picked ? c.sq : c.ink, bold: picked && chip.level === chip.levels.length - 1 }), t(' ')]
-      : [t(' '), t(chip.name, { color: picked ? c.sq : c.dim, bold: picked }), t(' '), dots, t(' '), t(chip.levels[chip.level] ?? '', { color: c.ink, bold: picked }), t(' ')]
-    if (i) kids.push(Text({ children: '   ' }))
-    kids.push(Button({ key: i === 0 ? `${o.key}-opt-0` : `${o.key}-chip-${chip.id}`, plain: true, label: `${chip.name}: ${chip.levels[chip.level] ?? ''}`, onPress: () => o.onPick(chip.id), children: parts }))
-  })
-  kids.push(Text({ children: '   ' }))
-  if (o.ui.adding) {
-    // the stretch being typed, as the prompt holds it
-    const ends = endsOf(o.ui.typing || '')
-    const two = !!ends && ends.from !== 'as written'
-    const a = two ? ends!.from : (ends?.to || '…')
-    const b = two ? ends!.to : '…'
-    const f = (children: string, p: Any = {}) => Text({ backgroundColor: c.picked, ...p, children })
-    kids.push(Text({ children: [f(' stretch between ', { color: c.dim }), f(a, { color: c.ink, bold: true }), f(' and ', { color: c.dim }), f(b, { color: c.ink, bold: true }), f(' ')] }))
-  } else {
-    kids.push(Button({ key: `${o.key}-add`, plain: true, label: 'new stretch', onPress: o.onAdd, children: [Text({ color: c.dim, children: '+' })] }))
-  }
-  return Box({ flexDirection: 'row', flexWrap: 'wrap', marginLeft: 2, marginTop: 1, children: kids })
-}
-
-/**
- * The hint line under the prompt while the chips are open: the keys that work now, once; a stretch being typed says
- * how to finish it; a rewrite that failed or said something the original does not is said here, with its fix.
- */
-export function squeezeHint(rec: MsgRecord, ui: SqzUi | null): string {
-  const u = ui ?? BLANK
-  if (u.adding) {
-    const ends = endsOf(u.typing || '')
-    if (!ends) return 'type two ends, such as engineer and manager · ↵ makes the stretch · ⌫ cancels'
-    return ends.from === 'as written' ? 'then and, and the other end · ↵ makes the stretch' : `↵ makes ${ends.from} ↔ ${ends.to} · ⌫ the + cancels`
-  }
-  const chips = chipsOf(rec)
-  if (u.error) return `× ${u.error}`
-  const problems = ((rec as Any).squeeze?.problems ?? []) as string[]
-  if (problems.length && typeof rec.shown === 'string') return `! ${problems[0]} · 0 original`
-  const orig = isOriginal(chips)
-  const lit = sLit(rec, u)
-  return `${lit ? `s ● ${lit.note} · ` : ''}< > change · ] next chip · + new stretch · ${orig ? '0 close' : '0 original · s done'}`
-}
-
-// ------------------------------------------------------------------------------------------------ keys
-
-/**
- * A key with the prompt empty while the chips are open: 'consume' when it acted, 'type' when it lets the key into the
- * prompt and keeps the chips open (the + of a stretch), null for a key it leaves to the shell.
- */
-export async function squeezeKey($: Engine, row: string, k: string): Promise<'consume' | 'type' | null> {
-  const rec = await recordNow($, row)
-  if (!rec) return null
-  const chips = chipsOf(rec)
-  const ui = await uiOf($, row)
-  if (/^[1-9]$/.test(k)) {
-    const chip = chips[Number(k) - 1]
-    if (chip) await setUi($, row, { focus: chip.id, adding: false })
-    return 'consume'
-  }
-  if (k === ']' || k === '[') {
-    // the next chip (or the one before), round the row
-    const i = Math.max(0, chips.findIndex((x: Any) => x.id === ui.focus))
-    const to = chips[(i + (k === ']' ? 1 : chips.length - 1)) % chips.length]
-    if (to) await setUi($, row, { focus: to.id, adding: false })
-    return 'consume'
-  }
-  if (k === '<' || k === ',' || k === '>' || k === '.') {
-    const chip = chips.find((x: Any) => x.id === ui.focus) || chips[0]
-    // keys pressed while a change is on its way step from where it goes, so three presses are three levels
-    const at = stepAt(ui.want ? { ...rec, squeeze: { ...((rec as Any).squeeze || {}), at: ui.want } } : rec, chip.id, k === '<' || k === ',' ? -1 : 1)
-    if (at) {
-      await setUi($, row, { focus: chip.id, error: null })
-      void setLevels($, row, at)
-    }
-    return 'consume'
-  }
-  if (k === '+') {
-    await setUi($, row, { adding: true, error: null, typing: '+' })
-    return 'type'
-  }
-  if (k === '0') {
-    if (isOriginal(chips) && !inflight.has(row)) { await setUi($, row, { adding: false }); await $.state.set(PICK, null); return 'consume' }
-    void setLevels($, row, {})
-    return 'consume'
-  }
-  return null
-}
-
-/** A press on a chip: it is picked, and a press on the picked one steps it up (back to its first level after its last). */
-export async function pressChip($: Engine, row: string, id: string): Promise<void> {
-  const rec = await recordNow($, row)
-  if (!rec) return
-  const ui = await uiOf($, row)
-  if (ui.focus !== id) { await setUi($, row, { focus: id, adding: false }); return }
-  const chip = chipsOf(rec).find((x: Any) => x.id === id)
-  if (!chip || !chip.levels.length) return
-  const at = stepAt(rec, id, 1) ?? { ...((rec as Any).squeeze?.at || {}), [id]: 0 }
-  void setLevels($, row, at)
-}
+/** The squeeze amber of the stretch typed in the prompt, per theme. */
+const amber = (theme: Theme) => (theme === 'light' ? '#9a6412' : '#e0a43a')
 
 /** After an edit of the prompt while the person types a stretch: it is still being typed while the prompt starts with
  *  +. Returns the decorations that color it and show what is left to type (` between … and …`, then ` and …`). */
@@ -236,55 +102,38 @@ export async function afterEdit($: Engine, row: string | null, text: string, the
   if (!ui?.adding) return null
   if (!text.startsWith('+')) { await setUi($, row, { adding: false, typing: '' }); return null }
   await setUi($, row, { typing: text })
-  const c = colors(theme)
-  const out: Any[] = [{ start: 0, end: text.length, color: c.sq }]
+  const out: Any[] = [{ start: 0, end: text.length, color: amber(theme) }]
   const ends = endsOf(text)
   if (!ends) out.push({ start: text.length, end: text.length, virtualText: ' between … and …', dimColor: true })
   else if (ends.from === 'as written' && !/\s$/.test(text)) out.push({ start: text.length, end: text.length, virtualText: ' and …', dimColor: true })
   return out
 }
 
-/**
- * A prompt submitted while the chips are open and the prompt starts with +: its words are a stretch's two ends. The
- * chip stands at the original, picked, so the next < > rewrites the text toward an end; no call is made now. Returns
- * the reason the prompt is dropped (it is no prompt for Claude), or null for any other prompt.
- */
-export async function chipFromPrompt($: Engine, row: string | null, text: string): Promise<string | null> {
-  if (!row || !/^\s*\+/.test(text)) return null
-  const rec = await recordNow($, row)
-  if (!rec) return null
-  const chip = stretchChip(rec, text)
-  if (!chip) { await setUi($, row, { adding: false, typing: '' }); return 'a stretch needs two ends, such as "+engineer and manager"' }
-  const squeeze = withStretch(rec, chip)
-  await saveRecord($, { ...rec, squeeze } as MsgRecord)
-  await setUi($, row, { focus: chip.id, adding: false, typing: '', error: null })
-  // the prompt box keeps a dropped prompt: it is emptied once the drop is done
-  $.clock.after(50, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-  return `stretch ${chip.from} ↔ ${chip.to}`
+/** The person starts a stretch (the chips' + asked for it): the + they pressed stays in the prompt, and they type the
+ *  two ends after it; afterEdit colors it, and ↵ makes the stretch (addStretch). */
+export async function startStretch($: Engine, row: string): Promise<void> {
+  await setUi($, row, { adding: true, error: null, typing: '+' })
+}
+
+/** The person stopped typing a stretch, or closed the chips. */
+export async function stopStretch($: Engine, row: string): Promise<void> {
+  await setUi($, row, { adding: false, typing: '' })
 }
 
 /**
- * A squeeze pressed in the browser, as the page server's line names it: a chip at a level, a stretch in the person's
- * words, or the original again. It acts as the same press in the terminal does, so the message is rewritten in place
- * here and the page reads the record. Returns one plain line when it cannot act, else null.
+ * A stretch's two ends, as the person typed them after the + (in the prompt here, in a field in the browser): a chip
+ * that stands at the original, so the next < > rewrites the text toward an end; no call is made now. Returns what the
+ * prompt's drop line says, or a problem.
  */
-export async function fromBrowser($: Engine, q: { row: string; chip?: string; level?: number; custom?: string; reset?: boolean }): Promise<string | null> {
-  const rec = await recordNow($, q.row)
-  if (!rec) return 'Squeeze from the browser did nothing: that message is not in this session. Press s under it here instead.'
-  if (q.reset) { void setLevels($, q.row, {}); return null }
-  if (typeof q.custom === 'string') {
-    const chip = stretchChip(rec, q.custom)
-    if (!chip) return 'Squeeze from the browser did nothing: a stretch needs two ends, such as "engineer and manager".'
-    const squeeze = withStretch(rec, chip)
-    await saveRecord($, { ...rec, squeeze } as MsgRecord)
-    await setUi($, q.row, { focus: chip.id, adding: false, error: null })
-    return null
-  }
-  const chip = chipsOf(rec).find((x: Any) => x.id === q.chip)
-  if (!chip || !Number.isInteger(q.level)) return `Squeeze from the browser did nothing: the message has no chip "${q.chip ?? ''}". Press s under it here instead.`
-  await setUi($, q.row, { focus: chip.id, error: null })
-  void setLevels($, q.row, { ...((rec as Any).squeeze?.at || {}), [chip.id]: Number(q.level) })
-  return null
+export async function addStretch($: Engine, row: string, text: string): Promise<{ said?: string; problem?: string }> {
+  const rec = await recordNow($, row)
+  if (!rec) return { problem: 'that message is not in this session' }
+  const chip = stretchChip(rec, text)
+  if (!chip) { await stopStretch($, row); return { problem: 'a stretch needs two ends, such as "+engineer and manager"' } }
+  const squeeze = withStretch(rec, chip)
+  await saveRecord($, { ...rec, squeeze } as MsgRecord)
+  await setUi($, row, { adding: false, typing: '', error: null })
+  return { said: `stretch ${chip.from} ↔ ${chip.to}` }
 }
 
 // ------------------------------------------------------------------------------------------------ the rewrite
@@ -292,8 +141,9 @@ export async function fromBrowser($: Engine, q: { row: string; chip?: string; le
 /** Set the chips of a row to `at` and show that version: from the record when it was written before, else one call.
  *  Changes made while a call runs wait, and only the latest of them runs next. */
 export async function setLevels($: Engine, row: string, at: At): Promise<void> {
-  // the chips show where they go at once; the text follows
-  await setUi($, row, { want: at })
+  // the chips show where they go at once (here, and in the browser from the record); the text follows
+  await setUi($, row, { want: at, error: null })
+  await markRecord($, row, { want: at, error: null })
   const job = inflight.get(row)
   if (job) {
     job.want = { at }
@@ -311,7 +161,22 @@ export async function setLevels($: Engine, row: string, at: At): Promise<void> {
   } finally {
     inflight.delete(row)
     await setUi($, row, { running: null, want: null })
+    await markRecord($, row, { want: null, error: (await uiOf($, row)).error ?? null })
   }
+}
+
+/** The record's squeeze with `want` (where the chips go) and `error` (why the last call failed) set or cleared. */
+async function markRecord($: Engine, row: string, m: { want: At | null; error: string | null }): Promise<void> {
+  const rec = await recordNow($, row)
+  if (!rec) return
+  const s = { ...(((rec as Any).squeeze ?? {}) as Any) }
+  const was = JSON.stringify({ w: s.want ?? null, e: s.error ?? null })
+  if (m.want) s.want = m.want
+  else delete s.want
+  if (m.error) s.error = m.error
+  else delete s.error
+  if (JSON.stringify({ w: s.want ?? null, e: s.error ?? null }) === was) return
+  await saveRecord($, { ...rec, squeeze: s } as MsgRecord)
 }
 
 async function once($: Engine, row: string, want: Want): Promise<void> {

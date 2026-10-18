@@ -682,6 +682,7 @@ export function renderSvg(drawing, opts = {}) {
           draws++
           break
         }
+        case 'bg': if (!dry && op[3] > 0 && op[4] > 0) L.bg.push(`<rect x="${r1(X(op[1]) - 2)}" y="${r1(Y(op[2]) + 1)}" width="${r1(op[3] * cw + 4)}" height="${r1(op[4] * rh - 2)}" rx="5" fill="${C(op[5])}"/>`); draws++; break
         case 'px': if (!dry) L.mark.push(`<rect x="${r1(X(op[1]))}" y="${r1(y + op[2] * rh / 2)}" width="${r1(cw + 0.3)}" height="${r1(rh / 2 + 0.3)}" fill="${C(op[3])}"/>`); draws++; break
         case 'line': if (!dry) L.mark.push(`<line x1="${r1(X(op[1]) + cw / 2)}" y1="${r1(y + op[2] * rh / 2 + rh / 4)}" x2="${r1(X(op[3]) + cw / 2)}" y2="${r1(y + op[4] * rh / 2 + rh / 4)}" stroke="${C(op[5])}" stroke-width="2" stroke-linecap="round"/>`); draws++; break
         case 'bar': if (!dry) drawBar(X(op[1]), Y(op[2]), op[3] * cw, op[4], op[5], op[6]); mark({ k: 'bar', v: op[4], max: op[5] }); break

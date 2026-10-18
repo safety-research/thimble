@@ -11,26 +11,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { back } from '../lib/api'
 import { columnsIn, eventsLib, svgOf } from '../lib/draw'
 import { getState, setState, useStore } from '../lib/store'
-import { paneModules, readPaneState, readStore, readWant, type PaneModule } from './lib'
+import { paneModules, pushLayer, readPaneState, readStore, readWant, topLayer, type PaneModule } from './lib'
 
 const ROW_H = 20
-const ARROWS: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }
-
-/** A keydown as a program names keys. */
-export function keyOfEvent(e: KeyboardEvent): string {
-  if (e.ctrlKey || e.metaKey || e.altKey) return ''
-  if (ARROWS[e.key]) return ARROWS[e.key]
-  if (e.key === ' ') return 'space'
-  if (e.key === 'Enter') return 'return'
-  if (e.key === 'Escape') return 'esc'
-  if (e.key === 'Backspace') return 'backspace'
-  return e.key && e.key.length === 1 ? e.key : ''
-}
-
-function typing(e: KeyboardEvent): boolean {
-  const el = e.target as HTMLElement | null
-  return !!el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)
-}
 
 export interface PaneProps {
   name: string
@@ -43,12 +26,14 @@ export interface PaneProps {
   onClose?: () => void
   /** the drawing, each time it changes (a host that draws chrome around it reads its title or its keys) */
   onDrawing?: (d: any) => void
+  /** the drawing is on the page (a host that scrolls it into view) */
+  onDrawn?: () => void
   /** extra data stores the host has in hand (the card detail's card drawing), merged over the pane's own reads */
   extra?: Record<string, unknown>
   className?: string
 }
 
-export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawing, extra, className }: PaneProps) {
+export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawing, onDrawn, extra, className }: PaneProps) {
   const ver = useStore((s) => s.version)
   const msgs = useStore((s) => s.rows)
   const box = useRef<HTMLDivElement>(null)
@@ -145,20 +130,34 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
     if (!drawing) return
     let alive = true
     onDrawing?.(drawing)
-    void svgOf(drawing, { w: cols }).then((r) => alive && setSvg(r.svg))
+    void svgOf(drawing, { w: cols }).then((r) => {
+      if (!alive) return
+      setSvg(r.svg)
+      if (onDrawn) requestAnimationFrame(() => onDrawn())
+    })
     return () => {
       alive = false
     }
   }, [drawing, cols])
 
-  // its keys in the app's bar while it has the focus
+  // on the focus stack while it takes keys: a key goes to it when it is on top, or when the panes above do not take it
+  const layerId = `${name}|${argsKey}`
   useEffect(() => {
-    if (!focus || !drawing || !mods) return
-    setState({ keybar: { from: name, keys: mods.host.barText([drawing]), status: drawing.status?.text || null } })
+    if (!focus) return
+    const off = pushLayer({ id: layerId, fire: (ev) => fireRef.current(ev), publish: () => publishRef.current() })
     return () => {
-      if (getState().keybar?.from === name) setState({ keybar: null })
+      if (getState().keybar?.from === layerId) setState({ keybar: null })
+      off()
     }
-  }, [focus, drawing, mods])
+  }, [focus, layerId])
+  // its keys in the app's bar while it is on top
+  const publish = () => {
+    if (!focus || !drawing || !mods || topLayer() !== layerId) return
+    setState({ keybar: { from: layerId, keys: mods.host.barText([drawing]), status: drawing.status?.text || null } })
+  }
+  const publishRef = useRef(publish)
+  publishRef.current = publish
+  useEffect(publish, [focus, drawing, mods, layerId])
 
   /** What the person did, as the program's event. True when the program took it. */
   const fire = (event: Record<string, unknown>): boolean => {
@@ -199,19 +198,6 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
       if (r.error) setState({ sent: { text: `not sent: ${r.error}`, at: Date.now(), error: r.error } })
     })
   }
-
-  // keys, while this pane has the focus and no text field has it
-  useEffect(() => {
-    if (!focus) return
-    const onKey = (e: KeyboardEvent) => {
-      if (typing(e)) return
-      const k = keyOfEvent(e)
-      if (!k) return
-      if (fireRef.current({ type: 'key', key: k })) e.preventDefault()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [focus])
 
   // a drag across a brush area
   useEffect(() => {

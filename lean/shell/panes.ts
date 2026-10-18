@@ -144,6 +144,13 @@ export async function paneRun($: Engine, name: string, args: Record<string, unkn
   return drawing
 }
 
+/** The pane run now on its stores and state, at the size it was last drawn (for the bar: its keys and status as they
+ *  stand, even before the pane draws again). */
+export async function paneNow($: Engine, name: string, args: Record<string, unknown> = {}): Promise<Any> {
+  const inst = instance(name, args)
+  return paneRun($, name, args, inst.size ?? { w: 100, h: 30 })
+}
+
 /** The pane's drawing now, as last drawn (for the bar), or null. */
 export function paneDrawing(name: string, args: Record<string, unknown> = {}): Any | null {
   try { return insts.get(keyOf(name, args))?.drawing ?? null } catch { return null }
