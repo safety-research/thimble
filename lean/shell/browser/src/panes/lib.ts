@@ -3,6 +3,7 @@
 // so it runs here in the page, as the terminal runs it in its hooks module; a card's program (Claude's) runs only in
 // the sandbox (draw/browser/sandbox.js).
 import { api, BASE, objectOf, resolveRef, serverModule } from '../lib/api'
+import { drawingOf } from '../lib/draw'
 import { getState } from '../lib/store'
 
 export interface PaneModule {
@@ -53,13 +54,48 @@ export async function readStore(name: string): Promise<unknown> {
       const r = await objectOf(arg, null)
       return r.error ? null : r
     }
+    // the session's side threads (the tray shows a mark's)
+    case 'threads':
+      return s.threads
     default:
       return null
   }
 }
 
+/** A card a program shows inside itself (the tray's): a citation's source card from the page server (cards.js
+ *  citeCard, the terminal's own), or a term's explain card, each part drawn in the page's sandbox at `w`. */
+async function cardWant(c: any, w: number, h: number): Promise<unknown> {
+  let spec: any
+  if (c?.kind === 'gloss') spec = (await serverModule('code/shell/cards.js')).explainerCard({ gloss: c.gloss || {} })
+  else if (typeof c?.ref === 'string' && c.ref) {
+    spec = await api(`card?ref=${encodeURIComponent(c.ref)}&label=${encodeURIComponent(c.kind === 'spark' ? 'sparkline' : String(c.label || c.ref))}&room=${h}`)
+    if (spec.error) return { problem: spec.error, drawings: [], links: [] }
+  } else return { problem: 'this mark names no ref, so there are no rows to show', drawings: [], links: [] }
+  if (spec.problem) return { title: spec.title, right: spec.right, problem: spec.problem, drawings: [], links: [] }
+  const drawings: any[] = []
+  for (const part of spec.parts || []) {
+    // each part its own object, so the page's cache of drawings keeps them apart
+    const id = `card-${hashOf(String(part.program) + JSON.stringify(part.data ?? null))}`
+    try {
+      const d = await drawingOf({ id, version: 1, program: part.program, data: part.data ?? {} }, { w, mode: 'inline' })
+      if (d?.error && part.pic) continue
+      drawings.push(d)
+    } catch (err: any) {
+      if (!part.pic) return { problem: `the card could not be drawn: ${String(err?.message || err).slice(0, 160)}`, drawings: [], links: [] }
+    }
+  }
+  return { title: spec.title, right: spec.right, drawings, links: spec.links || [], ...(spec.why ? { why: spec.why } : {}) }
+}
+
+function hashOf(s: string): string {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+
 /** What a program wants that its data does not hold (k.want): {rows: [refs]} through the kernel. */
 export async function readWant(request: any): Promise<unknown> {
+  if (request?.card && typeof request.card === 'object') return cardWant(request.card, Math.max(20, Number(request.w) || 80), Math.max(3, Number(request.h) || 9))
   if (Array.isArray(request?.rows)) {
     const refs = request.rows.filter((r: unknown) => typeof r === 'string').slice(0, 200)
     if (!refs.length) return { records: [], count: 0 }

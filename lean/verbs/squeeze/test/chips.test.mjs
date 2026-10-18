@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { newRecord, remark, verbsOf, withObserver } from '../../../shell/message.js'
-import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, glyph, isLong, isOriginal, keyOf, noteFor, noteOf, readReply, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, withStretch } from '../chips.mjs'
+import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, glyph, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, withStretch } from '../chips.mjs'
 import { parseWords, run } from '../run.mjs'
 
 // a made-up report, as a long reply takes it
@@ -223,4 +223,40 @@ test('run.mjs: the same rewrite from words, through ctx.model, for /verb and too
   const x = await run({ message: back.message, args: '+engineer and manager', model })
   assert.equal(asked.length, 1)
   assert.deepEqual(x.message.squeeze.own, [{ id: 'x-engineer-manager', kind: 'stretch', from: 'engineer', to: 'manager' }])
+})
+
+test('the corrections of its own earlier answer are found in the original: a list under a lead, a paragraph, a sentence; an offer is not one', () => {
+  const list = 'The answer.\n\nTwo corrections to my last answer:\n- **AgentRelent:** 316, not 317.\n- **The split:** 5,242, not 5,181.\n\nCaveats: rough.'
+  assert.deepEqual(mustKeep(list), ['**AgentRelent:** 316, not 317.', '**The split:** 5,242, not 5,181.'])
+  const para = 'The answer.\n\n**I also need to correct something I told you.** I said it was many agents. It may be one process.'
+  assert.deepEqual(mustKeep(para), ['**I also need to correct something I told you.** I said it was many agents. It may be one process.'])
+  assert.deepEqual(mustKeep('June 18 was the peak. Earlier I said 21:25; the last save was at 22:10.'), ['Earlier I said 21:25; the last save was at 22:10.'])
+  assert.deepEqual(mustKeep('I can check whether the answers were actually wrong, if you want.'), [])
+  assert.deepEqual(mustKeep('June 18 had 6,543 saves, most of them on one page.'), [])
+})
+
+test('a claim of this message that revises one of its own earlier claims is a correction to keep; one that revises the person\'s is not', () => {
+  const claims = { claims: [
+    { id: 'c1', by: 'claude', text: 'old' },
+    { id: 'c2', by: 'claude', revises: 'c1', said: [{ row: 'r2', sentence: 'It is 316, not 317.' }] },
+    { id: 'c3', by: 'person', text: 'theirs' },
+    { id: 'c4', by: 'claude', revises: 'c3', said: [{ row: 'r2', sentence: 'Not two thirds: half.' }] },
+  ] }
+  assert.deepEqual(mustKeep('No lead here.', { claims, row: 'r2' }), ['It is 316, not 317.'])
+})
+
+test('a rewrite that leaves a correction out gets it back after it; one that kept it in other words is left as it is', () => {
+  const keep = ['**AgentRelent:** 316, not 317.', '**The split:** 5,242, not 5,181.']
+  const r = keepCorrections('The peak was June 18 (316 edits, not 317).', keep)
+  assert.deepEqual(r.back, ['**The split:** 5,242, not 5,181.'])
+  assert.ok(r.text.endsWith('\n\n**The split:** 5,242, not 5,181.'))
+  assert.deepEqual(keepCorrections('Peak June 18; earlier I said 317 and 5,181, it is 316 and 5,242.', keep).back, [])
+})
+
+test('the request names the corrections and does not count them in a level\'s length', () => {
+  const q = request({ text: 'A. Earlier I said 3; it is 4.', squeeze: { at: { length: 0 } } }, { system: 'S', keep: ['Earlier I said 3; it is 4.'] })
+  const tail = q.prompt[1].text
+  assert.match(tail, /one line, one sentence, at most 35 words, then each correction listed below in a few words/)
+  assert.match(tail, /Corrections in the original\. Each stays at every level, in as few words as it needs, next to what it corrects:\n- Earlier I said 3; it is 4\./)
+  assert.doesNotMatch(request({ text: 'A.', squeeze: { at: { length: 0 } } }, { system: 'S' }).prompt[1].text, /Corrections in the original/)
 })

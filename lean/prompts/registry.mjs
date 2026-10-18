@@ -15,11 +15,12 @@ export const FEATURES = {
   observer: {
     about: "the post-turn pass: its frame, which holds the shared principles and composes the enabled lenses",
     reads: 'observer/observer.ts, after each turn of work',
-    default: 'v2',
+    default: 'v2-low',
     versions: {
       v1: { about: 'one prompt in a fork of the whole session, as before lenses', mode: 'fork' },
       v2: { about: 'the frame for the lenses: one call over the new turn and a digest of the state', mode: 'lenses' },
       'attention-v1': { about: "v2 with the draft principles of when something is worth the person's attention", mode: 'lenses' },
+      'v2-low': { about: 'v2 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v2.md', mode: 'lenses', effort: 'low' },
     },
   },
   'observer-turn': { about: "the pass's message: the new turn, its objects and the digest of the state", reads: 'observer/observer.ts', default: 'v1' },
@@ -27,18 +28,21 @@ export const FEATURES = {
   'lens-notes': { about: 'lens: notes to Claude', reads: 'the pass', default: 'v1', optional: true },
   'lens-line': { about: 'lens: the rare line above the prompt', reads: 'the pass', default: 'v1', optional: true },
   'lens-actions': {
-    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v2', optional: true,
-    versions: { v1: { about: "observer:v1's words on lit verbs" }, v2: { about: 'v lit with a named card when a claim would be clearer seen than read' } },
+    about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v3', optional: true,
+    versions: { v1: { about: "observer:v1's words on lit verbs" }, v2: { about: 'v lit with a named card when a claim would be clearer seen than read' }, v3: { about: "v2 from the principles of what is worth the person's attention: dim by default, lit only for a claim no card shows" } },
   },
   'lens-squeeze': { about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v1', optional: true },
   'lens-explain': {
     about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v2', optional: true,
     versions: { v1: { about: "observer:v1's words on glosses" }, v2: { about: 'marks on terms of art and coined names a claim turns on' } },
   },
-  'lens-claims': { about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v1', optional: true },
+  'lens-claims': {
+    about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v2', optional: true,
+    versions: { v1: { about: 'every part of each claim from the pass' }, v2: { about: "v1, terse: the quote names the claim, \"based on\" comes from the cited rows, the digest holds the claims that bear on the turn, a turn with no claims gives none" } },
+  },
   squeeze: {
-    about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v3',
-    versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" } },
+    about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v4',
+    versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" }, v4: { about: 'v3, with the corrections in the original named in the request and put back when a rewrite leaves one out: a correction may be shortened, never dropped', keep: true } },
   },
   forms: {
     versions: {

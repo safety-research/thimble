@@ -1,6 +1,6 @@
 // prep.mjs: what the terminal needs to draw one object: its drawing at a width, and the verbs for it.
 //
-//   node --permission --allow-fs-read=<lean> prep.mjs < {object, w, h, state, mode, noVerbs, event}  ->  {drawing, verbs, problems}
+//   node --permission --allow-fs-read=<lean> prep.mjs < {object, w, h, state, mode, noVerbs, event, keys}  ->  {drawing, verbs, problems}
 //
 // `state` holds the knobs' values the person set (k.knob): the program runs with them. `mode` is where it is drawn
 // (k.mode): 'inline' under a reply, 'detail' in the detail view. `noVerbs` (a tray card) skips the verbs.
@@ -12,12 +12,15 @@ import { realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { forDrawing } from '../object.js'
+import { hostKeys } from '../../panes/host.js'
 import { verbsFor } from './registry.mjs'
 
-export async function prep({ object, w = 96, h = 24, state, mode, noVerbs, event }) {
+export async function prep({ object, w = 96, h = 24, state, mode, noVerbs, event, keys }) {
   const o = forDrawing(object || {})
-  // an event (a key, a press) runs the program's handler, which patches the state it then draws with
-  const drawing = runProgram(o, { w, h, state: state && typeof state === 'object' ? state : undefined, mode: mode === 'detail' ? 'detail' : 'inline', event: event && typeof event === 'object' ? event : undefined })
+  const m = mode === 'detail' ? 'detail' : 'inline'
+  // an event (a key, a press) runs the program's handler, which patches the state it then draws with; the program
+  // learns the keys the terminal keeps where it is drawn (k.keys), so a key it cannot get is named at its save
+  const drawing = runProgram(o, { w, h, state: state && typeof state === 'object' ? state : undefined, mode: m, event: event && typeof event === 'object' ? event : undefined, keys: keys && typeof keys === 'object' ? keys : { taken: hostKeys(m, 'terminal') } })
   if (noVerbs) return { drawing, verbs: [], problems: [] }
   const { verbs, problems } = await verbsFor(object || {}, { drawing })
   return { drawing, verbs, problems }

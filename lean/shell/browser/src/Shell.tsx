@@ -1,5 +1,5 @@
 // Shell.tsx: 0.9's shell on lean's data: the top bar (thimble, the folder, Files · Canvas · Report), the chat column on
-// the left and one pane on the right with the surface the tab picked. The bottom panel (cite and explain cards, the
+// the left and one pane on the right with the surface the tab picked, and the one bar across the foot of both (KeyBar). The bottom panel (cite and explain cards, the
 // card detail's bar) sits at the foot of the pane. Keys act while no text field has the focus (or the composer is
 // empty): ] [ step through the marks, 1 asks from the panel or opens the focused card's detail, 0 closes, v s c press
 // a verb on the latest message.
@@ -11,6 +11,7 @@ import { CanvasPane } from './canvas/CanvasPane'
 import { CardDetail } from './canvas/CardDetail'
 import { FilesPane } from './files/FilesPane'
 import { ReportPane } from './report/ReportPane'
+import { KeyBar } from './chat/KeyBar'
 import { getState, setState, useStore, type Surface } from './lib/store'
 import { allMarks, pressVerb, rowVerbs, stepMark } from './lib/actions'
 
@@ -40,7 +41,7 @@ function fromUrl() {
   const row = h.get('row')
   if (row) setState({ flashRow: row, thread: 'main' })
   const view = q.get('view')
-  if (view) setState({ surface: 'files', filesView: view })
+  if (view) setState({ surface: 'files', filesView: view, claimSeed: q.get('claim') })
 }
 
 export function Shell() {
@@ -122,6 +123,7 @@ export function Shell() {
           </main>
         </div>
       </div>
+      <KeyBar />
     </div>
   )
 }
@@ -156,20 +158,14 @@ function useKeys() {
         stepMark(marks, k === ']' ? 1 : -1)
         return
       }
+      // (the tray, v's line and the chips are programs on the focus stack: their keys reach them before these)
       if (k === '0' || k === 'Escape') {
-        if (s.propsOpen || s.squeezeOpen) return e.preventDefault(), setState({ propsOpen: null, squeezeOpen: null })
-        if (s.tray.length) return e.preventDefault(), setState({ tray: s.tray.slice(0, -1), trayAsk: false, focus: s.tray.length > 1 ? s.focus : null })
         if (s.card && s.detailBar) return e.preventDefault(), setState({ detailBar: null })
         if (s.card) return e.preventDefault(), setState({ card: null, thread: 'main' })
         if (k === 'Escape' && s.selected) return setState({ selected: null })
         return
       }
-      if (/^[1-9]$/.test(k) && s.propsOpen) {
-        const p = s.rows.find((r) => r.row === s.propsOpen)?.record?.verbs?.v?.proposals?.[Number(k) - 1]
-        if (p) return e.preventDefault(), void pressVerb(s.propsOpen, 'v', p)
-      }
       if (k === '1') {
-        if (s.tray.length && !s.trayAsk) return e.preventDefault(), setState({ trayAsk: true })
         if (!s.tray.length && s.selected && s.surface === 'canvas' && !s.card) return e.preventDefault(), setState({ card: { id: s.selected, v: null, region: null } })
         return
       }

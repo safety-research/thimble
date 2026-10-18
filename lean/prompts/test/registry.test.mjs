@@ -27,7 +27,7 @@ test('a spec reads as feature:version pairs; aliases name their feature; a word 
 
 test('the index has every feature with its default, the versions on disk, and a skill in place as `skill`', () => {
   const idx = indexOf({ observer: ['v1.md', 'v2.md', 'mine.md', 'notes.txt', '.draft.md'] })
-  assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['attention-v1', 'mine', 'v1', 'v2'])
+  assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['attention-v1', 'mine', 'v1', 'v2', 'v2-low'])
   assert.equal(idx.observer.versions.mine.file, 'prompts/observer/mine.md')
   assert.equal(idx.lean.versions.skill.file, 'skills/lean/SKILL.md')
   for (const [name, f] of Object.entries(FEATURES)) assert.ok(idx[name].versions[f.default], `${name} has its default`)
@@ -65,7 +65,7 @@ test('a lens can be turned off; a feature that is no lens cannot', () => {
 
 test('the spec of the versions in use names only those that are not the defaults', () => {
   const idx = indexOf({ forms: ['principles.md'] })
-  const c = choose(idx, { env: 'forms:principles,observer:v2,lens-claims:off' })
+  const c = choose(idx, { env: 'forms:principles,observer:v2-low,lens-claims:off' })
   assert.equal(specOf(c.active, idx), 'lens-claims:off,forms:principles')
   assert.equal(idOf('forms', 'principles'), 'forms:principles')
 })
@@ -123,8 +123,8 @@ test('every version file on disk is in the index, every default exists, and ever
   }
   const { active, problems } = activeNow(ROOT, {})
   assert.deepEqual(problems, [])
-  assert.equal(active.observer.version, 'v2')
-  assert.ok(listing(idx, active).some(l => l.startsWith('observer') && l.includes('[v2]')))
+  assert.equal(active.observer.version, 'v2-low')
+  assert.ok(listing(idx, active).some(l => l.startsWith('observer') && l.includes('[v2-low]')))
 })
 
 test('textOf reads the active text; a skill in place is its body', () => {

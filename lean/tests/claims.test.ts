@@ -158,6 +158,21 @@ test('after a turn of work its claims are in the store, each where it was said w
 })
 
 
+test('a terse claim (lens-claims v2) is named by its quote, and its "based on" comes from the rows behind the citation in its sentence', async ($, on) => {
+  const TERSE = { notes: [], line: null, settled: false, verbs: {}, glosses: [], claims: [
+    { quote: 'June 18 had 6,543 saves, the busiest day', kind: 'event', cluster: 'the June 18 burst', precisely: '6,543 saves on June 18, the most of any day in June' },
+  ] }
+  const w = world(on, [TERSE])
+  await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
+  const c1 = JSON.parse(w.files[STORE]!).claims[0]
+  expect(c1.text).toBe('June 18 had 6,543 saves, the busiest day')
+  expect(c1.sources.map((x: Any) => x.ref)).toEqual(['q1#day=2026-06-18@n'])
+  // read through `lean resolve` once the look is done: the file, the group the value is of, and its rows
+  expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
+  expect(c1.based_on).toBe('revisions.jsonl, day 2026-06-18 · 4 rows')
+  expect(c1.precisely).toBe('6,543 saves on June 18, the most of any day in June')
+})
+
 test('a later turn: a claim said again counts ×N; a correction is linked both ways, and c lights with "1 new claim"', async ($, on) => {
   const w = world(on, [FORK1, FORK2])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })

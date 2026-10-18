@@ -1,6 +1,6 @@
 // claims.js: the Claims pane, a program on the card runtime (draw/kit.js) over the session's claims store
-// (thimble/claims/<session>.json). The terminal and the browser run this same program on the same store and keep the
-// same state, so the graph, its hover and its replay are one thing on both surfaces.
+// (thimble/claims/<session>.json). The terminal and the browser run this same program on the same store. The hover and
+// the replay are each surface's own (k.local): a pointer in the browser never moves the terminal's ring.
 //
 // At rest: one island of dots per cluster, its name dim at its centre, no lines. The claim the pointer or the ring is
 // on shows a card of what it means beside it (the claim as said, Precisely, Based on, Judgment, Not stated), keeps its
@@ -53,6 +53,8 @@ const slim = c => ({
 export default {
   name: 'claims',
   title: 'Claims',
+  /** The hover and the replay belong to the surface where they happen: a pointer on one surface never moves the other. */
+  local: ['hover', 'replay'],
   /** The stores it reads: the claims, the message it was opened from (its new claims), the order of the messages. */
   reads: args => ['claims', 'index', ...(args && args.row ? [`record:${args.row}`] : [])],
   /** One file of state per session. */
@@ -78,6 +80,7 @@ export default {
 
 /** The program: the graph as a canvas of cells (a claim a part of its own), with its keys. */
 export function program(k, data) {
+  k.local('hover', 'replay')
   const st = k.state || {}
   const replay = st.replay && typeof st.replay === 'object' ? st.replay : null
   const claims = data.claims || []

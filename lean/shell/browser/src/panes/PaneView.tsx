@@ -40,10 +40,14 @@ export interface PaneProps {
   actions?: Record<string, (e: Record<string, unknown>) => void>
   /** the state the program answered with, each time it changes */
   onState?: (state: Record<string, unknown>) => void
+  /** the state the host sets (the tray's cards a mark opened): drawn, and sent to the terminal as the pane's state */
+  state?: Record<string, unknown> | null
+  /** this surface's own state to start from (its local keys, such as the claim a link opened the graph on) */
+  seed?: Record<string, unknown> | null
   className?: string
 }
 
-export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawing, onDrawn, extra, columns, before, keysFirst, actions, onState, className }: PaneProps) {
+export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawing, onDrawn, extra, columns, before, keysFirst, actions, onState, state: given, seed, className }: PaneProps) {
   const ver = useStore((s) => s.version)
   const msgs = useStore((s) => s.rows)
   const box = useRef<HTMLDivElement>(null)
@@ -52,7 +56,7 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
   const [mods, setMods] = useState<Awaited<ReturnType<typeof paneModules>> | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const [stores, setStores] = useState<Record<string, unknown> | null>(null)
-  const [state, setLocal] = useState<Record<string, unknown>>({})
+  const [state, setLocal] = useState<Record<string, unknown>>(() => ({ ...(seed || {}), ...(given || {}) }))
   const [loaded, setLoaded] = useState(false)
   const [got, setGot] = useState<Record<string, unknown>>({})
   const [svg, setSvg] = useState<string>('')
@@ -94,24 +98,39 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
     }
   }, [pane, argsKey, ver, msgs])
 
-  // its state: where either surface left it, at first and whenever the terminal changes it
+  // the keys of its state this surface keeps for itself (a hover, a replay): never sent, never taken from the other
+  const localRef = useRef<string[]>(Array.isArray((pane as any)?.local) ? (pane as any).local : [])
+  const sharedOf = (st: Record<string, unknown>) => (mods ? mods.host.shared(st, localRef.current) : st)
+  // its state: where either surface left it, at first and whenever the terminal changes it; this surface's own keys
+  // stay as they are
   useEffect(() => {
-    if (!key) return
+    if (!key || !mods) return
     let alive = true
     void readPaneState(key).then((r) => {
       if (!alive) return
       const st = r?.state && typeof r.state === 'object' ? r.state : null
-      if (st && (!loaded || r?.by !== 'browser') && JSON.stringify(st) !== JSON.stringify(stateRef.current)) {
-        stateRef.current = st
-        setLocal(st)
-        onState?.(st)
+      const next = st ? mods.host.joinShared(stateRef.current, st, localRef.current) : null
+      if (next && (!loaded || r?.by !== 'browser') && JSON.stringify(next) !== JSON.stringify(stateRef.current)) {
+        stateRef.current = next
+        setLocal(next)
+        onState?.(next)
       }
       setLoaded(true)
     })
     return () => {
       alive = false
     }
-  }, [key, ver])
+  }, [key, ver, mods])
+  // a state the host set (a mark opened in the tray): drawn here and kept for the terminal
+  const givenKey = given ? JSON.stringify(given) : ''
+  useEffect(() => {
+    if (!given || !mods) return
+    const next = { ...stateRef.current, ...given }
+    if (JSON.stringify(next) === JSON.stringify(stateRef.current)) return
+    stateRef.current = next
+    setLocal(next)
+    void back({ panestate: { pane: name, args, state: sharedOf(next) } } as never)
+  }, [givenKey, mods])
 
   const cols = columns ?? columnsIn(px.w)
   const lines = rows ?? Math.max(6, Math.floor(px.h / ROW_H))
@@ -128,6 +147,7 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
   const run = (st: Record<string, unknown>, event: Record<string, unknown> | null, g = got) =>
     mods!.kit.run(pane!.program, data, { w: cols, h: lines, state: st, event, mode: 'pane', surface: 'browser', got: g, title: pane!.title, id: name })
   const drawing = useMemo(() => (mods && pane && data ? run(state, null) : null), [mods, pane, data, state, got])
+  if (drawing && mods) localRef.current = mods.host.localKeys(drawing, pane)
 
   // what it wants that it does not hold: read once, then drawn again with it
   useEffect(() => {
@@ -185,10 +205,13 @@ export function PaneView({ name, args = {}, focus = true, rows, onClose, onDrawi
     }
     const next = mods.host.nextState(stateRef.current, d)
     if (!mods.host.same(next, stateRef.current)) {
+      const keys = mods.host.localKeys(d, pane)
+      // only what every surface shares goes to the terminal: a hover or a replay stays on this page
+      const sharedChanged = !mods.host.same(mods.host.shared(next, keys), mods.host.shared(stateRef.current, keys))
       stateRef.current = next
       setLocal(next)
       onState?.(next)
-      void back({ panestate: { pane: name, args, state: next } } as never)
+      if (sharedChanged) void back({ panestate: { pane: name, args, state: mods.host.shared(next, keys) } } as never)
     }
     for (const a of (d.after || []) as { ms: number; event: Record<string, unknown> }[]) {
       const n = String(a.event.type)

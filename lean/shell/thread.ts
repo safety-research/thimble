@@ -57,6 +57,11 @@ let windowOpen = false
 // while a thread answers, its turns are read again every few seconds, so its steps show as they come
 let poll: { cancel: () => void } | null = null
 
+/** This session's side threads, as a pane reads them (the tray shows a mark's): key, scope, status, turns, error. */
+export function threadList(): { key: string; scope: Scope; status: string; turns: { role: string; text: string }[]; error?: string }[] {
+  return [...threads.values()].map(t => ({ key: t.key, scope: t.scope, status: t.status, turns: t.turns.map(x => ({ role: x.role, text: x.text })), ...(t.error ? { error: t.error } : {}) }))
+}
+
 /** How many side threads this session has. */
 export function threadCount(): number {
   return threads.size

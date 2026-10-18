@@ -1,15 +1,18 @@
-// KeyBar.tsx: the browser's one bar, above the composer, as the terminal's thimble line is above its prompt. At its
-// left, what the keys do now, in words: the keys of the pane on top of the focus stack (the chips, Claims, a card's
-// detail), as its program names them; the bottom panel's while a cite or explain card is open; else the verbs of the
-// message the keys act on (a lit verb with its note), `] cite & explain` when it has marks, `1 open detail` when a card
-// is picked on the canvas. At its right, the session's counts that are not zero. Each verb is a press too.
-import { useEffect, useMemo, useState } from 'react'
+// KeyBar.tsx: the browser's one bar, across the foot of the page under both columns: it is the page's, not the chat's,
+// as the terminal's thimble line is above its prompt. At its left, what the keys do now, in words: the keys of the pane
+// on top of the focus stack (the tray, v's line, the chips, Claims, a card's detail), as its program names them; else
+// the verbs of the message the keys act on (a lit verb with its note), `] cite & explain` when it has marks, `1 open
+// detail` when a card is picked on the canvas. At its right, the session's counts that are not zero. Each verb is a
+// press too. It is always one line: with less room it drops the counts (coverage last), then says each key by its first
+// word, then drops its label (panes/host.js fitBar, the terminal's own rule).
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
+import { paneModules } from '../panes/lib'
 import { allMarks, pressVerb, rowVerbs, stepMark } from '../lib/actions'
 import { prepare } from '../lib/marks'
 import { setState, useStore } from '../lib/store'
 
-type Seg = { key: string; words: string; lit?: boolean; verb?: string; act?: () => void }
+type Seg = { key: string; words: string; short?: string; lit?: boolean; verb?: string; act?: () => void }
 
 /** Keys as the bar says them, `r replay · esc close`, cut into each key and its words. */
 export function segments(keys: string): Seg[] {
@@ -31,8 +34,6 @@ const pct = (part: number) => (!(part > 0) ? '0%' : part >= 1 ? '100%' : part * 
 
 export function KeyBar() {
   const keybar = useStore((s) => s.keybar)
-  const tray = useStore((s) => s.tray)
-  const trayAsk = useStore((s) => s.trayAsk)
   const rows = useStore((s) => s.rows)
   const verbs = useStore((s) => s.verbs)
   const focus = useStore((s) => s.focus)
@@ -55,19 +56,11 @@ export function KeyBar() {
   if (keybar) {
     // what the pane says of itself now (k.status: `s ● 6 of 24 lines`, a problem), then its keys
     left = [...(keybar.status ? segments(keybar.status).map((x) => ({ ...x, lit: true })) : []), ...segments(keybar.keys)]
-  } else if (tray.length) {
-    // the bottom panel's keys, each a press too (the panel itself names none: they are here, once)
-    const acts: Record<string, () => void> = {
-      '1': () => setState({ trayAsk: true }),
-      '0': () => setState((s) => (s.trayAsk ? { trayAsk: false } : { tray: s.tray.slice(0, -1), focus: s.tray.length > 1 ? s.focus : null })),
-      ']': () => stepMark(marks, 1),
-    }
-    left = segments(trayAsk ? 'type to ask · ↵ asks this thread · 0 back' : `1 ask · ${tray.length > 1 ? '0 back' : '0 close'} · ] next`).map((g) => (acts[g.key] ? { ...g, act: acts[g.key] } : g))
   } else if (!card && rec) {
     left = rowVerbs(verbs).map((v) => {
       const st = rec.verbs?.[v.key] || rec.verbs?.[v.send] || {}
       const lit = st.lit === true && !!st.note
-      return { key: v.key, words: lit ? `● ${st.note}` : v.name, lit, verb: v.key, act: () => void pressVerb(acting!, v.key) }
+      return { key: v.key, words: lit ? `● ${st.note}` : v.name, short: lit ? `● ${v.name}` : undefined, lit, verb: v.key, act: () => void pressVerb(acting!, v.key) }
     })
     if (prepare(rec).marks.length) left.push({ key: ']', words: 'cite & explain', act: () => stepMark(marks, 1) })
     if (selected) left.push({ key: '1', words: 'open detail', act: () => setState({ card: { id: selected, v: null, region: null } }) })
@@ -75,19 +68,20 @@ export function KeyBar() {
   const cites = useMemo(() => rows.reduce((n, r) => n + (r.record ? prepare(r.record).marks.filter((m) => m.kind === 'cite').length : 0), 0), [rows])
   // the share of the folder's rows Claude read, as the terminal's line counts it
   const cov = typeof info?.coverage?.share === 'number' ? info.coverage.share : 0
-  const counts = [
-    [objects.length, objects.length === 1 ? '1 card' : `${objects.length} cards`],
-    [threads.length, threads.length === 1 ? '1 thread' : `${threads.length} threads`],
-    [cites, cites === 1 ? '1 cite' : `${cites} cites`],
-    [claims, claims === 1 ? '1 claim' : `${claims} claims`],
-    [cov, `coverage ${pct(cov)}`],
-  ].filter(([n]) => (n as number) > 0).map(([, w]) => w as string)
+  const counts = ([
+    ['cards', objects.length, objects.length === 1 ? '1 card' : `${objects.length} cards`],
+    ['threads', threads.length, threads.length === 1 ? '1 thread' : `${threads.length} threads`],
+    ['cites', cites, cites === 1 ? '1 cite' : `${cites} cites`],
+    ['claims', claims, claims === 1 ? '1 claim' : `${claims} claims`],
+    ['cov', cov, `coverage ${pct(cov)}`],
+  ] as [string, number, string][]).filter(([, n]) => n > 0).map(([id, , text]) => ({ id, text }))
+  const fitted = useFit({ label: 'thimble', left, counts })
   if (!left.length && !counts.length) return null
   return (
-    <div className="lean-keybar" role="status" aria-label="What the keys do now">
+    <div className="lean-keybar lean-keybar-global" role="status" aria-label="What the keys do now" ref={fitted.ref}>
       <span className="lean-keybar-left">
-        <span className="lean-keybar-name">thimble</span>
-        {left.map((g, i) => {
+        {fitted.bar.label && <span className="lean-keybar-name">{fitted.bar.label}</span>}
+        {(fitted.bar.left as Seg[]).map((g, i) => {
           const body = (
             <>
               {g.key && <b>{g.key}</b>}
@@ -108,7 +102,39 @@ export function KeyBar() {
           )
         })}
       </span>
-      {counts.length > 0 && <span className="lean-keybar-counts">{counts.join(' · ')}</span>}
+      {fitted.bar.counts.length > 0 && <span className="lean-keybar-counts">{fitted.bar.counts.map((c: { text: string }) => c.text).join(' · ')}</span>}
     </div>
   )
+}
+
+type Bar = { label: string; left: Seg[]; counts: { id: string; text: string }[] }
+
+/** The bar as it fits the page's width: the shared ladder (panes/host.js), measured in the bar's own font. */
+function useFit(bar: Bar): { bar: Bar & { cut?: boolean }; ref: React.RefObject<HTMLDivElement | null> } {
+  const ref = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  const [host, setHost] = useState<any>(null)
+  useEffect(() => {
+    void paneModules().then((m) => setHost(m.host), () => setHost(null))
+  }, [])
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const fit = () => setWidth(el.clientWidth)
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [!!host])
+  const measure = useMemo(() => {
+    const ctx = document.createElement('canvas').getContext('2d')
+    const el = ref.current
+    if (ctx && el) ctx.font = getComputedStyle(el).font
+    // the keys are a little heavier than the words: 4% to spare
+    return (s: string) => (ctx ? ctx.measureText(s).width * 1.04 : s.length * 7.4)
+  }, [width])
+  if (!host || !width) return { bar, ref }
+  // the room inside the bar's padding
+  const room = width - 28
+  return { bar: host.fitBar(bar, room, measure), ref }
 }

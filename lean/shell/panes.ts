@@ -21,9 +21,9 @@ import type { EngineInterface } from 'claude-code'
 import '../draw/kit.js'
 import { renderTerm } from '../draw/term.js'
 import PANES from '../panes/index.js'
-import { nextState, same, takes, wantsOpen } from '../panes/host.js'
+import { joinShared, localKeys, nextState, same, shared, takes, wantsOpen } from '../panes/host.js'
 import { paintRegions, regionOfKey } from './cells'
-import { paneAction, paneStore, paneWant, paneWhere } from './shell'
+import { paneAction, paneStateChanged, paneStore, paneWant, paneWhere } from './shell'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,12 +39,15 @@ export type Inst = {
   size: Size | null
   got: Record<string, unknown>
   asked: Map<string, number>
+  tries: Map<string, number>
   gen: Record<string, number>
   ask: Any | null
   data: { key: string; value: Any } | null
 }
 const VER = { plugin: 'thimble-lean', key: 'panever' } as const
 const insts = new Map<string, Inst>()
+/** A want with no answer after this long is asked again. */
+const WANT_AGAIN_MS = 5000
 let theme: () => 'dark' | 'light' = () => 'dark'
 
 const kit = (): Any => (globalThis as Any).DrawKit
@@ -66,7 +69,7 @@ export function instance(name: string, args: Record<string, unknown> = {}): Inst
   const id = keyOf(name, args)
   let i = insts.get(id)
   if (!i) {
-    i = { id, name, args: { ...args }, state: {}, loaded: false, drawing: null, size: null, got: {}, asked: new Map(), gen: {}, ask: null, data: null }
+    i = { id, name, args: { ...args }, state: {}, loaded: false, drawing: null, size: null, got: {}, asked: new Map(), tries: new Map(), gen: {}, ask: null, data: null }
     insts.set(id, i)
   } else i.args = { ...i.args, ...args }
   return i
@@ -86,18 +89,22 @@ async function load($: Engine, inst: Inst): Promise<void> {
     const f = await stateFile($, inst)
     if (f && (await $.fs.exists(f))) {
       const v = JSON.parse(String(await $.fs.read(f)))
-      if (v && typeof v.state === 'object' && v.state) inst.state = v.state
+      if (v && typeof v.state === 'object' && v.state) inst.state = shared(v.state, localOf(inst))
     }
   } catch {
     // no state kept yet: the pane opens at rest
   }
 }
 
+/** The state keys this pane keeps on this surface alone (a hover, a replay's frame): its module's and its program's. */
+const localOf = (inst: Inst): string[] => localKeys(inst.drawing, paneOf(inst.name))
+
 async function keep($: Engine, inst: Inst, by: string): Promise<void> {
   const f = await stateFile($, inst)
   if (!f) return
   try {
-    await $.fs.write(f, JSON.stringify({ pane: inst.name, args: inst.args, state: inst.state, at: new Date().toISOString(), by }, null, 1))
+    // only what every surface shares: a hover or a replay stays where it was made
+    await $.fs.write(f, JSON.stringify({ pane: inst.name, args: inst.args, state: shared(inst.state, localOf(inst)), at: new Date().toISOString(), by }, null, 1))
   } catch {
     // the other surface opens the pane where it was; this one keeps its own
   }
@@ -131,16 +138,32 @@ export async function paneRun($: Engine, name: string, args: Record<string, unkn
   const drawing = kit().run(pane.program, inst.data.value, { w: size.w, h: size.h, state: inst.state, event, mode: 'pane', surface: 'terminal', got: inst.got, title: pane.title, id: name })
   if (!drawing?.error) inst.drawing = drawing
   // what the program wants that is not in hand: read once, outside the drawing, and drawn again with it
-  for (const w of wantsOpen(drawing, inst.got)) {
-    // asked once; asked again only when no answer came for a while (a read that died with a reload of the module)
+  const open = wantsOpen(drawing, inst.got)
+  const now = open.length ? await $.clock.now() : 0
+  for (const w of open) {
+    // asked once; asked again when no answer came for a while (a read lost with an abandoned drawing or a reload of
+    // the module), and after three asks with no answer the program gets the failure, which it says in one line
     const at = inst.asked.get(w.key)
-    if (at != null && Date.now() - at < 15000) continue
-    inst.asked.set(w.key, Date.now())
+    if (at != null && now - at < WANT_AGAIN_MS) continue
+    const tries = (inst.tries.get(w.key) ?? 0) + 1
+    inst.tries.set(w.key, tries)
+    inst.asked.set(w.key, now)
+    if (tries > 3) {
+      inst.got = { ...inst.got, [w.key]: { error: 'no answer came after three tries; close this and open it again', problem: 'no answer came after three tries; close this and open it again' } }
+      $.clock.after(0, () => { void redraw($, inst) })
+      continue
+    }
     $.clock.after(0, () => {
       void (async () => {
-        try { inst.got = { ...inst.got, [w.key]: await paneWant($, inst.name, inst.args, w.request) } } catch (err) { inst.got = { ...inst.got, [w.key]: { error: String((err as Error)?.message || err).slice(0, 200) } } }
+        let v: unknown
+        try { v = await paneWant($, inst.name, inst.args, w.request) } catch (err) { v = { error: String((err as Error)?.message || err).slice(0, 200) } }
+        inst.got = { ...inst.got, [w.key]: v === undefined ? { error: 'the host gave no answer' } : v }
         await redraw($, inst)
       })()
+    })
+    // a drawing again a while later if no answer came, so the want is asked again even when nothing else redraws
+    $.clock.after(WANT_AGAIN_MS + 200, () => {
+      if (!Object.prototype.hasOwnProperty.call(inst.got, w.key)) void redraw($, inst)
     })
   }
   return drawing
@@ -175,13 +198,19 @@ export async function paneFire($: Engine, name: string, args: Record<string, unk
 /** What a program answered with: its state kept, its actions run, its later events set, its ask kept. */
 async function answered($: Engine, inst: Inst, d: Any, by: string): Promise<void> {
   const next = nextState(inst.state, d)
+  const keys = localKeys(d, paneOf(inst.name))
   const changed = !same(next, inst.state)
+  // a change of what every surface shares is kept for the other surface; a change of this surface's own keys is not
+  const sharedChanged = !same(shared(next, keys), shared(inst.state, keys))
   inst.state = next
   if (d.ask) inst.ask = d.ask
   for (const a of (d.after || []) as { ms: number; event: Record<string, unknown> }[]) later($, inst, a.ms, a.event)
   if (changed) {
     await redraw($, inst)
-    $.clock.after(0, () => { void keep($, inst, by) })
+    if (sharedChanged) {
+      $.clock.after(0, () => { void keep($, inst, by) })
+      await paneStateChanged($, inst.name, inst.args, inst.state)
+    }
   }
   for (const eff of (d.effects || []) as Record<string, unknown>[]) await act($, inst, eff)
 }
@@ -212,10 +241,14 @@ export async function act($: Engine, inst: Inst, eff: Record<string, unknown>): 
 export async function setPaneState($: Engine, name: string, args: Record<string, unknown>, state: Record<string, unknown>, by = 'browser'): Promise<void> {
   const inst = instance(name, args)
   await load($, inst)
-  if (same(state, inst.state)) return
-  inst.state = state
+  // what the other surface shares, with this surface's own hover and replay kept
+  const keys = localOf(inst)
+  const next = joinShared(inst.state, state, keys)
+  if (same(next, inst.state)) return
+  inst.state = next
   await redraw($, inst)
   await keep($, inst, by)
+  await paneStateChanged($, name, args, inst.state)
 }
 
 /** A state set by the host itself (opening a pane on a part): kept and drawn. */

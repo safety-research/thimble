@@ -56,7 +56,7 @@ export function makeSandbox(kitSource, { limit = 2000 } = {}) {
       return new Promise(res => {
         waiting.set(id, res)
         const plainOf = v => (v == null ? undefined : JSON.parse(JSON.stringify(v)))
-        iframe.contentWindow.postMessage({ id, program: String(object.program || ''), data: JSON.parse(JSON.stringify(object.data ?? {})), opts: { w: opts.w, h: opts.h, mode: opts.mode, limit: opts.limit || limit, state: plainOf(opts.state), event: plainOf(opts.event), title: opts.title ?? object.title, id: opts.id ?? object.id, surface: 'browser', maxBytes: opts.maxBytes, got: plainOf(opts.got) } }, '*')
+        iframe.contentWindow.postMessage({ id, program: String(object.program || ''), data: JSON.parse(JSON.stringify(object.data ?? {})), opts: { w: opts.w, h: opts.h, mode: opts.mode, limit: opts.limit || limit, state: plainOf(opts.state), event: plainOf(opts.event), title: opts.title ?? object.title, id: opts.id ?? object.id, surface: 'browser', maxBytes: opts.maxBytes, got: plainOf(opts.got), keys: plainOf(opts.keys) } }, '*')
       })
     },
   }

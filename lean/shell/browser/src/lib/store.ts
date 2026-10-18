@@ -100,8 +100,9 @@ export interface Ask {
 }
 
 export type Surface = 'files' | 'canvas' | 'report'
-/** a card in the tray: a mark of a message ({row, i}), or a mark inside a card (a nested citation) */
-export type TrayEntry = { row: string; i: number } | { kind: 'cite' | 'spark'; ref: string; label: string; values?: number[] | null }
+/** a card in the tray (panes/tray.js): a mark of a message ({row, i: the record's own index, and what it shows}), or a
+ *  citation inside a card ({kind: 'cite', ref, label}) */
+export type TrayEntry = { row?: string; i?: number; kind?: 'cite' | 'spark' | 'gloss'; ref?: string; label?: string; gloss?: Record<string, unknown> }
 
 export interface State {
   live: boolean
@@ -133,6 +134,8 @@ export interface State {
   pendingThread: { row: string; ref: string; at: number } | null
   /** a row of the chat the page's link named (#row=): scrolled to and lit once */
   flashRow: string | null
+  /** the claim the terminal's ring was on when it opened this page (?claim=): the graph starts there, on this page */
+  claimSeed: string | null
   /** words a control puts in the chat's composer (New view), to edit and send */
   composerFill: { text: string; at: number } | null
   /** each card's interaction state (its program's k.on handlers set it; the terminal keeps the same, by card id) */
@@ -180,6 +183,7 @@ let state: State = {
   version: 0,
   keybar: null,
   paneAsk: null,
+  claimSeed: null,
 }
 const subs = new Set<() => void>()
 

@@ -230,9 +230,14 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(file.turns[1].role).toBe('claude')
   expect(typeof file.turns[1].at).toBe('string')
   // the thimble line above the prompt counts the threads, and names the thread the prompt goes to
+  const wideBand = textOf(await $.ui.render({ ...(BAND as Any), props: { ...(BAND as Any).props, bodyColumns: 200 } } as never))
+  expect(wideBand).toContain('1 thread')
+  expect(wideBand).toContain('thimble:main/01-saves')
+  // beside the docked detail the band is narrow: one line, the counts dropped first, the keys kept as words
   const line = textOf(await $.ui.render(BAND))
-  expect(line).toContain('1 thread')
-  expect(line).toContain('thimble:main/01-saves')
+  expect(line).not.toContain('1 thread')
+  expect(line.length).toBeLessThanOrEqual(99)
+  expect(line).toContain('↑↓ part')
   expect(w.status.length).toBe(0)
   expect(file.turns[1].calls).toEqual(['lean resolve "q1#day=2026-06-18@n"'])
   expect(file.turns[1].text).toContain('Links peaked that day')

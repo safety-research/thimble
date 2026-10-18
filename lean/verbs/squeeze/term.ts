@@ -18,8 +18,9 @@ import type { MsgRecord, SqzUi, Tray } from '../../types'
 import { promptText as registryText } from '../../prompts/prompts'
 import { remark as remarkAny } from '../../shell/message.js'
 import { tracked } from '../../telemetry/telemetry'
-import { questionBefore, recordNow, saveRecord } from '../../shell/shell'
-import { ARRIVE, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, isLong, isOriginal, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stretchChip, withStretch } from './chips.mjs'
+import { FEATURES } from '../../prompts/registry.mjs'
+import { claimsStore, questionBefore, recordNow, saveRecord } from '../../shell/shell'
+import { ARRIVE, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, isLong, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stretchChip, withStretch } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -200,8 +201,12 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
   try {
     const question = await questionBefore($, row).catch(() => '')
     const sp = await registryText($, 'squeeze')
+    // a version that keeps corrections (squeeze:v4): the corrections in the original are named in the request, and one
+    // the rewrite left out is put back after it
+    const keeps = !!(FEATURES.squeeze.versions as Any)?.[sp.version]?.keep
+    const keep: string[] = keeps ? mustKeep(rec.text, { claims: await claimsStore($).catch(() => null), row }) : []
     const req = request(probe, {
-      system: sp.text, question,
+      system: sp.text, question, keep,
       model: String(cfg.model || DEFAULTS.model), effort: String(cfg.effort || DEFAULTS.effort),
       maxTokens: Number(cfg.maxTokens || DEFAULTS.maxTokens), timeoutMs: Number(cfg.timeoutMs || DEFAULTS.timeoutMs),
     })
@@ -219,7 +224,8 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
       await setUi($, row, { error: 'the rewrite came back empty · press the key again to retry · 0 original' })
       return
     }
-    const checked = checkRewrite(rec.text, reply.text)
+    const back = keeps ? keepCorrections(reply.text, keep) : { text: reply.text, back: [] }
+    const checked = checkRewrite(rec.text, back.text)
     // the record as it is now (the observer may have written its verbs and glosses meanwhile)
     const fresh = (await recordNow($, row)) || rec
     const fs = ((fresh as Any).squeeze ?? {}) as Any
@@ -230,7 +236,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     ticker.stop()
     await setUi($, row, { running: null })
     await settled($, row, next)
-    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols) })
+    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}) })
   } finally {
     ticker.stop()
   }

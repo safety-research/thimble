@@ -45,7 +45,17 @@ rows, with real examples spread across them. A part with none is matched to the 
 **Answer what the person does.** `k.on(name, fn, label)` takes a key (`'j'`, `'space'`), a press on a part
 (`'press:<id>'`, or `onPress` in a region's meta) or a drag in the browser (`'brush'`, from `k.plot(…, { brush:
 'id' })` or `c.brush`). `fn(event)` returns the new state; the program runs again and reads it in `k.state`. The
-terminal and the browser keep the same state. A knob is the same thing with ◂ ▸ built in.
+terminal and the browser keep the same state. A knob is the same thing with ◂ ▸ built in. A hover or the frame of
+an animation belongs to the surface where it happens: name such keys with `k.local('hover')`, and each surface
+keeps its own.
+
+**The bar names a card's keys, so the card does not.** A card takes its keys while it has the focus: when the person
+steps onto it with `]` under a reply, or opens its detail. Then its keys come before thimble's own letters, and the
+bar shows each one with the label you gave it, such as `c flip · ← → year`. So give every key a label, and do not
+print key hints inside the card: a hint drawn in the card stays there where the key does not work. A few keys stay
+with the host wherever the card is drawn, to move between things and to go back. `k.keys.free(key)` says whether a
+key reaches the card where it is drawn now, and a key it cannot get is named when you save. For example, a flip on
+`c` works once the card has the focus; a flip on `0` never does, because `0` goes back.
 
 **Cite what you state.** A number the person reads should say where it came from:
 `k.cite(id, { text, source, query, rows, more, note })`. Give the query you ran and a few of the real rows. When
@@ -111,6 +121,8 @@ Interaction:
   `k.do('open', { row })`. A host without that action says so to the person.
 - `k.status(text)` is one short line the bar shows while the card has the keys. `k.select(id)` marks the part the
   program has selected, as each surface marks a selection.
+- `k.keys.free(key)` is true for a key that reaches the card where it is drawn now; `k.keys.taken` lists the host's.
+  `k.local(...keys)` names state keys each surface keeps for itself (a hover, a replay's frame).
 - `k.want({ rows: [refs] })` returns the rows behind those refs once the host has read them, else null; the program
   then runs again with them. Use it for records a part shows on demand.
 - On a canvas, `c.bg(x, y, w, h, tone)` puts a ground under cells already drawn. Any tone with `-faint` (`c2-faint`)

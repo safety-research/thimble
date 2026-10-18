@@ -200,3 +200,21 @@ test('k.embed draws another program\'s drawing as a part, its parts and cites wi
   assert.equal(row[0].bg, 'warn-faint')
   assert.match(renderSvg(page, { w: 40 }).svg, /rx="5" fill="#/)
 })
+
+test('k.keys tells a program the keys that reach it where it is drawn; a key the host keeps is named at once (a warning)', () => {
+  const prog = `k.on('c', () => ({ flip: !k.state.flip }), 'flip'); k.on('0', () => null, 'reset'); return k.text(k.keys.free('c') + ' ' + k.keys.free('0') + ' ' + k.keys.taken.join(''))`
+  const d = DrawKit.run(prog, {}, { keys: { taken: { 0: 'goes back', ']': 'moves to the next thing' } } })
+  assert.match(gridText(renderTerm(d, { w: 40 })), /true false 0\]/)
+  assert.equal(d.warnings.length, 1)
+  assert.match(d.warnings[0], /the key "0" does not reach this card where it is drawn now \(goes back\)/)
+  // with no keys given (a pane of thimble's own), every key is free
+  assert.deepEqual(DrawKit.run(prog, {}, {}).warnings, [])
+  // the sandbox passes them on
+  assert.equal(runProgram({ id: 'x', program: prog, data: {} }, { keys: { taken: ['c'] } }).warnings.length, 1)
+})
+
+test('k.local names the state keys each surface keeps for itself (a hover, a replay); the drawing lists them', () => {
+  const d = DrawKit.run(`k.local('hover', 'replay'); k.on('hover', e => ({ hover: e.region })); return k.text(String(k.state.hover))`, {}, { state: { zoom: 2 }, event: { type: 'hover', region: 'r1' } })
+  assert.deepEqual(d.local, ['hover', 'replay'])
+  assert.deepEqual(d.state, { zoom: 2, hover: 'r1' })
+})

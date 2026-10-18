@@ -409,13 +409,18 @@ export function parseClaims(list) {
     const quote = str(x.quote, 400)
     const by = String(x.by || '').toLowerCase().startsWith('person') || String(x.by || '').toLowerCase() === 'you' ? 'person' : 'claude'
     const same = str(String(x.same ?? ''), 20)
-    const text = str(x.claim ?? x.text, MAX_TEXT)
+    // a new claim with no "claim" of its own is named by the words that said it (lens-claims v2 gives "claim" only when
+    // the quote does not say the claim by itself)
+    const own = str(x.claim ?? x.text, MAX_TEXT)
+    const text = own || (same ? '' : capital(plainOf(quote).plain.replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)))
     if (!quote || (!same && !text)) continue
     // `at`: its place in the fork's list (1 for the first), which a later claim of the same turn revises as "#1"
     out.push({ at: i + 1, text, quote, by, kind: kindOf(x.kind), cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises: str(String(x.revises ?? ''), 20) || null, meaning: meaningOf(x) })
   }
   return out.slice(0, 40)
 }
+
+const capital = t => (t ? t[0].toUpperCase() + t.slice(1) : t)
 
 const samePlace = (a, b) => a.row === b.row && a.start < b.end && b.start < a.end
 const liveClaim = c => !c.revised_by
@@ -526,6 +531,65 @@ export function promptLines(store, max = 120) {
     claims: lines.length ? (store.claims.length > claims.length ? `(${store.claims.length - claims.length} older claims not shown)\n` : '') + lines.join('\n') : '(none yet)',
     clusters: clusters.length ? clusters.join('\n') : '(none yet)',
   }
+}
+
+/**
+ * The claims so far that bear on this turn, as the fork reads them: every claim while the store is small; once it is
+ * long, the claims that share at least two words with the turn's words (a number counts twice) and the latest few, so
+ * the digest stays about the same size as a session grows. Returns {claims, clusters, left}: `left` is how many were
+ * left out.
+ */
+export function nearLines(store, text, { all = 24, latest = 8, max = 40 } = {}) {
+  const list = store.claims
+  if (list.length <= all) return { ...promptLines(store, max + all), left: 0 }
+  const turn = new Set(wordsOf(text))
+  const score = c => {
+    let n = 0
+    for (const w of new Set(wordsOf(c.text))) if (turn.has(w)) n += /\d/.test(w) ? 2 : 1
+    return n
+  }
+  const recent = new Set(list.slice(-latest).map(c => c.id))
+  const near = list.map(c => ({ c, n: score(c) })).filter(x => recent.has(x.c.id) || x.n >= 2)
+  const keep = new Set(near.sort((a, b) => b.n - a.n).slice(0, max).map(x => x.c.id))
+  const sub = { ...store, claims: list.filter(c => keep.has(c.id)) }
+  const lines = promptLines(sub, max)
+  return { claims: lines.claims, clusters: promptLines(store).clusters, left: list.length - sub.claims.length }
+}
+
+/**
+ * A claim's "based on", in words, from the rows behind the citation in its sentence (`lean resolve <ref> --json`): the
+ * files, the group the value is of (the ref's key, as words) and how many rows stand behind it, such as
+ * "revisions.jsonl, phase 3 Jun18 · 6,543 rows". Null when the rows say nothing a person can read.
+ */
+export function basedOnFrom(ref, resolved) {
+  if (!resolved || typeof resolved !== 'object') return null
+  const files = []
+  for (const r of Array.isArray(resolved.rows) ? resolved.rows : []) {
+    const f = String(r).split('#')[0].split('/').pop()
+    if (f && !files.includes(f)) files.push(f)
+  }
+  if (!files.length) return null
+  const m = /^q\d+(?:#([^@]*))?(?:@.*)?$/.exec(String(ref || ''))
+  let key = ''
+  if (m && m[1]) {
+    try { key = decodeURIComponent(m[1]) } catch { key = m[1] }
+    key = key.split('&').map(kv => kv.replace('=', ' ')).join(', ')
+  } else if (!m) {
+    const line = /#L(\d+)/.exec(String(ref || ''))
+    if (line) key = `line ${line[1]}`
+  }
+  const n = Number(resolved.count)
+  const count = Number.isFinite(n) && n > 0 ? `${n.toLocaleString('en-US')} row${n === 1 ? '' : 's'}` : ''
+  const head = files.length > 2 ? `${files.slice(0, 2).join(', ')} and ${files.length - 2} more` : files.join(', ')
+  return str([[head, key].filter(Boolean).join(', '), count].filter(Boolean).join(' · '), MEANING.based_on) || null
+}
+
+const CLAIMY = /\d|\]\(|\b(all|every|most|none|never|always|only|no one|nobody|more|less|fewer|than|because|caused?|due to|led to|drove|drives|so that|therefore|biased?|typical|usually|rarely|often|increase[ds]?|decrease[ds]?|rose|fell|grew|dropped|same|different|wrong|right|true|false|correct)\b/i
+
+/** Whether a turn's words state nothing that could be true or false: no number, no citation, no cause, no comparison and
+ *  no "all" or "most" (a turn of greetings, questions or plans). The claims lens is told to give none then. */
+export function claimless(text) {
+  return !CLAIMY.test(String(text || ''))
 }
 
 /** The grown clusters, as the fork reads them: what to do with each, or '' with none. */

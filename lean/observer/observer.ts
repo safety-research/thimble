@@ -45,16 +45,16 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, ObserverLine, Ranking } from '../types'
-import { answerRow, applyObserver, claimsStore, drawnTextOf, messageRecord, saveClaims, setVerb, turnPlaces } from '../shell/shell'
+import { answerRow, applyObserver, claimsStore, drawnTextOf, leanEnv, messageRecord, saveClaims, setVerb, turnPlaces } from '../shell/shell'
 import { glossesOf } from '../shell/message.js'
-import { applyTurn, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
-import { promptText } from '../prompts/prompts'
+import { applyTurn, basedOnFrom, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
+import { promptText, promptTextAt, shadowVersions } from '../prompts/prompts'
 import { FEATURES, fill } from '../prompts/registry.mjs'
-import { tracked } from '../telemetry/telemetry'
+import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf } from './compose.mjs'
 import { digest, isRepeat, jsonIn, parseAnswer } from './evidence.js'
 import { LENSES } from './lenses/index.mjs'
-import { stepsOf } from './turn.mjs'
+import { stepsOf, turnWords } from './turn.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -365,7 +365,11 @@ async function look($: Engine, t: Look): Promise<void> {
     // the session's claims so far, which the claims lens adds this turn's to (CONTRACT 7)
     const store = await claimsStore($)
     const grown = grownClusters(store)
-    const st = { seen, known, notesGiven: S.notesGiven, open, skips, glossed, glossSkip, store, grown }
+    const msgs = (await $.session.messages().catch(() => [])) as Any[]
+    // the turn's words (the person's message and Claude's words, no tool output): what the claims lens's digest and its
+    // quiet rule read
+    const turnText = turnWords(msgs, t.question)
+    const st = { seen, known, notesGiven: S.notesGiven, open, skips, glossed, glossSkip, store, grown, turnText }
     const qText = q.out
       ? drift
         ? `A part is missing or replaced: ${drift}`
@@ -379,6 +383,8 @@ async function look($: Engine, t: Look): Promise<void> {
       if (!pt.off) parts.push({ lens, text: pt.text, id: pt.id })
     }
     const model = S.model || 'opus'
+    let passVals: Record<string, unknown> | null = null
+    let passTmpl: { text: string; id: string } | null = null
     const fork: Record<string, unknown> = { mode, prompt: frame.id, lenses: Object.fromEntries(parts.map(x => [x.lens.name, x.id])) }
     row.fork = fork
     const extra: Record<string, unknown> = { turn: t.turnNo, mode, lens_prompts: fork.lenses }
@@ -421,14 +427,12 @@ async function look($: Engine, t: Look): Promise<void> {
     } else {
       // the pass over the new turn and a digest of the state: the frame and the lenses' fragments are the system
       // prompt (cached), the turn is the message
-      const system = composeSystem(frame.text, parts)
       const tmpl = await promptText($, 'observer-turn')
       // a long answer arrives squeezed: the person reads the squeezed text, which the pass reads beside the original
       const atRow = await answerRow($)
       const before = atRow ? await messageRecord($, atRow) : null
       const squeezed = before && typeof before.shown === 'string' && before.shown.trim() && before.shown !== before.text ? before.shown : ''
-      const msgs = (await $.session.messages().catch(() => [])) as Any[]
-      const turn = composeTurn(tmpl.text, {
+      passVals = {
         QUESTION_STEP: qText,
         QUESTION: cut(t.question, 4000) || '(none)',
         DECISION: decision || 'none stated',
@@ -440,16 +444,9 @@ async function look($: Engine, t: Look): Promise<void> {
         OBJECTS: digests.length ? digests.join('\n\n') : 'No objects yet.',
         COVERAGE: coverage,
         EARLIER: bullets(S.questions.slice(0, -1).slice(-6).map(x => cut(x, 300))),
-      }, parts, st)
-      fork.prompt_chars = system.text.length + turn.text.length
-      fork.system_chars = system.text.length
-      fork.lens_chars = Object.fromEntries(parts.map(x => [x.lens.name, (system.chars[x.lens.name] || 0) + (turn.chars[x.lens.name] || 0)]))
-      extra.turn_prompt = tmpl.id
-      f = await tracked($, { feature: 'observer', prompt: frame.id, model, extra }, async () => {
-        const r = await $.model.complete({ model, system: [{ text: system.text, cache: true }], prompt: turn.text, maxTokens: 16000 } as Any)
-        if (r && (r as Any).isAnswered) Object.assign(extra, sharesOf({ system, turn, lenses: parts.map(x => x.lens), raw: jsonIn((r as Any).text), rawText: (r as Any).text }))
-        return r
-      })
+      }
+      passTmpl = tmpl
+      f = await lensPass($, { frame, parts, tmpl, vals: passVals, st, model, extra, fork })
     }
     fork.ms = (await $.clock.now()) - t0
     const out: Answer | null = f.isAnswered ? parseAnswer(f.text) : null
@@ -512,6 +509,8 @@ async function look($: Engine, t: Look): Promise<void> {
           const places = tp.places.length ? tp.places : here ? [{ row: here, by: 'claude' as const, turn: null, text: answer }] : []
           const when = new Date(await $.clock.now()).toISOString()
           const res = applyTurn(store, { places, out: value, turn: tp.turn ?? t.turnNo, at: when, grown })
+          // a claim whose sentence cites a value and that the pass gave no "based on": the rows behind the citation say it
+          if (root) row.based_on_filled = await fillBasedOn($, root, store, res.added)
           await saveClaims($, store)
           row.claims = { turn: tp.turn ?? t.turnNo, given: value.claims.length, added: res.added, restated: res.restated, revised: res.revised, dropped: res.dropped, clusters: res.clusters }
           const note = noteFor(res)
@@ -557,6 +556,8 @@ async function look($: Engine, t: Look): Promise<void> {
       const rec = await applyObserver($, at, { verbs, glosses })
       const placed = rec ? Object.entries(rec.glosses || {}).filter(([id]) => rec.marks.some(m => m.gloss === id)).map(([, g]) => g.term) : []
       row.verbs_lit = Object.keys(verbs)
+      const v = verbs.v as { note?: string; proposals?: string[] } | undefined
+      row.v_lit = v ? { note: v.note ?? '', proposals: v.proposals ?? [] } : null
       row.glosses = placed
       if (placed.length) {
         await $.store.set(K.glossed, [...glossed, ...placed].slice(-GLOSSED_KEEP))
@@ -568,6 +569,9 @@ async function look($: Engine, t: Look): Promise<void> {
     // a turn whose answer is another row than the one the verbs light (a new turn ended while it looked)
     if (lit && lit.row !== at && inRow.some(v => v.key === 'c')) await setVerb($, lit.row, 'c', { lit: true, note: lit.note, claims: lit.claims })
     if (skips > 0) await $.store.set(K.skip, skips - 1)
+
+    // the shadow A/B (LEAN_PROMPTS_SHADOW): the same turn again with other versions, recorded and never merged
+    if (mode === 'lenses' && passVals && passTmpl) await shadowPass($, { t, row, frame, parts, tmpl: passTmpl, vals: passVals, st, model })
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
   } finally {
@@ -575,10 +579,88 @@ async function look($: Engine, t: Look): Promise<void> {
     S.since = S.turnId !== t.turnId ? S.turnStart : 0
     S.looking = false
     await logRow($, row)
+    // one line per look in the session's events: what it lit, so `lean stats` counts how often v lights
+    await record($, { kind: 'look', turn: t.turnNo, ...(row.skip ? { skip: row.skip } : {}), lit: Array.isArray(row.verbs_lit) ? row.verbs_lit : [], v: row.v_lit ?? null, observer: (row.fork as Any)?.prompt ?? null, prompts: (row.fork as Any)?.lenses ?? null })
     const next = S.again
     S.again = null
     if (next) $.clock.after(50, () => { void look($, next) })
   }
+}
+
+/** The pass in lenses mode: the frame and the lenses' fragments as the system prompt (cached), the turn and the lenses'
+ *  digests as the message, at the effort the frame's version names (the model's own when it names none). */
+async function lensPass($: Engine, o: { frame: { text: string; id: string; version: string }; parts: { lens: Any; text: string; id: string }[]; tmpl: { text: string; id: string }; vals: Record<string, unknown>; st: Any; model: string; extra: Record<string, unknown>; fork: Record<string, unknown> }): Promise<Any> {
+  const system = composeSystem(o.frame.text, o.parts)
+  const turn = composeTurn(o.tmpl.text, o.vals, o.parts, o.st)
+  o.fork.prompt_chars = system.text.length + turn.text.length
+  o.fork.system_chars = system.text.length
+  o.fork.lens_chars = Object.fromEntries(o.parts.map(x => [x.lens.name, (system.chars[x.lens.name] || 0) + (turn.chars[x.lens.name] || 0)]))
+  o.extra.turn_prompt = o.tmpl.id
+  const effort = (FEATURES.observer.versions as Any)?.[o.frame.version]?.effort as string | undefined
+  if (effort) o.extra.effort = effort
+  return tracked($, { feature: 'observer', prompt: o.frame.id, model: o.model, extra: o.extra }, async () => {
+    const r = await $.model.complete({ model: o.model, system: [{ text: system.text, cache: true }], prompt: turn.text, maxTokens: 16000, ...(effort ? { effort } : {}) } as Any)
+    if (r && (r as Any).isAnswered) Object.assign(o.extra, sharesOf({ system, turn, lenses: o.parts.map(x => x.lens), raw: jsonIn((r as Any).text), rawText: (r as Any).text }))
+    return r
+  })
+}
+
+/** The shadow A/B: the turn's pass again with the versions LEAN_PROMPTS_SHADOW names, on the same turn and state. Its
+ *  call is in the session's events with `shadow` (lean stats shows it on its own row), and a look line with `shadow`
+ *  says what it would have lit; nothing of it is shown or merged. */
+async function shadowPass($: Engine, o: { t: Look; row: Record<string, unknown>; frame: { text: string; id: string; version: string }; parts: { lens: Any; text: string; id: string }[]; tmpl: { text: string; id: string }; vals: Record<string, unknown>; st: Any; model: string }): Promise<void> {
+  try {
+    const sh = await shadowVersions($)
+    if (!sh || !Object.keys(sh.versions).length) return
+    const sv = sh.versions
+    const frame = sv.observer ? await promptTextAt($, 'observer', sv.observer) : o.frame
+    if ((FEATURES.observer.versions as Any)?.[frame.version]?.mode === 'fork') { o.row.shadow = { spec: sh.spec, skipped: 'the shadow frame is a fork, which cannot run beside the lenses' }; return }
+    const parts: { lens: Any; text: string; id: string }[] = []
+    for (const lens of LENSES as Any[]) {
+      const want = sv[lens.feature]
+      const mine = o.parts.find(x => x.lens === lens)
+      if (!want && mine) { parts.push(mine); continue }
+      const pt = want ? await promptTextAt($, lens.feature, want) : await promptText($, lens.feature)
+      if (!pt.off) parts.push({ lens, text: pt.text, id: pt.id })
+    }
+    const tmpl = sv['observer-turn'] ? await promptTextAt($, 'observer-turn', sv['observer-turn']) : o.tmpl
+    const fork: Record<string, unknown> = {}
+    const extra: Record<string, unknown> = { turn: o.t.turnNo, mode: 'lenses', shadow: sh.spec, lens_prompts: Object.fromEntries(parts.map(x => [x.lens.name, x.id])) }
+    const t0 = await $.clock.now()
+    const f = await lensPass($, { frame, parts, tmpl, vals: o.vals, st: o.st, model: o.model, extra, fork })
+    const out = f?.isAnswered ? parseAnswer(f.text) : null
+    const v = out ? ((LENSES as Any[]).find(l => l.name === 'actions')?.read(out) as { note?: string; proposals?: string[] } | null) : null
+    const claims = out && Array.isArray(out.claims) ? out.claims.length : 0
+    o.row.shadow = { spec: sh.spec, ms: (await $.clock.now()) - t0, usage: f?.usage ?? null, ok: !!out, v: v ?? null, claims, out }
+    await record($, { kind: 'look', turn: o.t.turnNo, shadow: sh.spec, lit: v ? ['v'] : [], v: v ? { note: v.note ?? '', proposals: v.proposals ?? [] } : null, observer: frame.id, prompts: extra.lens_prompts })
+  } catch (err) {
+    o.row.shadow_error = cut(String((err as Error)?.message || err), 300)
+  }
+}
+
+/** "Based on" for the turn's new claims that cite a value and that the pass gave none: the rows behind the claim's first
+ *  citation (`lean resolve`), as words. Returns how many it filled. */
+async function fillBasedOn($: Engine, root: string, store: Any, added: string[]): Promise<number> {
+  const want = (added || []).map(id => store.claims.find((c: Any) => c.id === id)).filter((c: Any) => c && !c.based_on && c.sources?.length)
+  if (!want.length) return 0
+  const refs = [...new Set(want.map((c: Any) => String(c.sources[0].ref)))].slice(0, 12)
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  const env = await leanEnv($, root)
+  const got = new Map<string, Any>()
+  await Promise.all(refs.map(async ref => {
+    try {
+      const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '--json', '-n', '0'], { cwd: root, env, timeoutMs: 60000 })
+      if (r.exitCode === 0) got.set(ref, JSON.parse(r.stdout))
+    } catch {
+      // a ref that does not resolve keeps its claim's cite as its "based on"
+    }
+  }))
+  let n = 0
+  for (const c of want) {
+    const w = basedOnFrom(String(c.sources[0].ref), got.get(String(c.sources[0].ref)))
+    if (w) { c.based_on = w; n++ }
+  }
+  return n
 }
 
 // ------------------------------------------------------------------------------------------------ the band

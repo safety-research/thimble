@@ -32,7 +32,7 @@ const RECORD = { v: 1, row: AT, session: SESSION, text: 'June 18 had the most sa
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-function world(on: Any, serverLines: unknown[] = []) {
+function world(on: Any, serverLines: unknown[] = [], draw: (input: Any) => unknown = drawingFor) {
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.focus', () => ({}))
   on('ui.panes', () => ({ value: [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble-lean' }] }))
@@ -62,7 +62,7 @@ function world(on: Any, serverLines: unknown[] = []) {
     if (e.argv.some(a => a.endsWith('prep.mjs'))) {
       const input = JSON.parse(String(e.init?.stdin || '{}'))
       preps.push(input)
-      out = { drawing: drawingFor(input), verbs: [], problems: [] }
+      out = { drawing: draw(input), verbs: [], problems: [] }
     } else if (e.argv.some(a => a.endsWith('verb.mjs')) && e.argv.includes('list')) out = { verbs: [{ key: 'v', name: 'visualize', row: true, order: 0 }, { key: 's', name: 'squeeze', row: true, order: 1 }] }
     else if (e.argv.includes('coverage')) out = { feeding: [{ path: 'revisions.jsonl' }], not_feeding: [] }
     else if (e.argv.includes('resolve')) out = { ref: e.argv[2], chain: [], rows: [], count: 3, records: [{ text: 'Hello agents' }], notes: [] }
@@ -105,14 +105,16 @@ async function savedTurn($: Any, clock: { settle: () => Promise<void> }) {
   await clock.settle()
 }
 
-test('a card under a reply is drawn as it was left (its state, its part) and takes its own keys from the empty prompt; the bar names them from its first drawing', async ($, on) => {
+test('a card under a reply is drawn as it was left (its state, its part); at rest the verbs keep their keys, and ] gives the card the focus: its own keys win, the bar names them, 0 gives them back', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await savedTurn($, clock)
-  // the bar, before the card was drawn under the reply: its keys come with its first drawing
+  // at rest the bar names the verbs, ] to reach the card and 1 for its detail, never the card's own keys
   await $.ui.render(HINT)
   await clock.settle()
-  expect(textOf(await $.ui.render(HINT))).toContain('j next day · 1 open detail')
+  const rest = textOf(await $.ui.render(HINT))
+  expect(rest).toContain('v visualize · s squeeze · ] card · 1 open detail')
+  expect(rest).not.toContain('next day')
   // under the reply: the state and the part the person left it at (here, in the browser)
   await reply($)
   await clock.settle()
@@ -120,7 +122,15 @@ test('a card under a reply is drawn as it was left (its state, its part) and tak
   expect(w.preps.some(p => p.mode === 'inline' && p.state?.at === 2)).toBe(true)
   expect(filled(tree)).toContain('Jun 18')
   expect(filled(tree)).not.toContain('Jun 17')
-  // j from the empty prompt is the card's: its program answers, and the state is kept for every surface
+  // the card's program learns the keys the terminal keeps under a reply (k.keys)
+  expect(Object.keys(w.preps.find(p => p.mode === 'inline')?.keys?.taken ?? {})).toEqual([])
+  // j at rest is not the card's: it types
+  expect(await ($ as Any).prompt.edit(edit('j'))).toEqual({ text: 'j', cursor: 1 })
+  // ] gives the card the focus: the bar names its keys, then the host's
+  expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  expect(textOf(await $.ui.render(HINT))).toContain('j next day · 1 open detail · ] next · 0 back')
+  // j now is the card's: its program answers, and the state is kept for every surface
   expect(await ($ as Any).prompt.edit(edit('j'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.preps.some(p => p.event?.key === 'j' && p.mode === 'inline')).toBe(true)
@@ -128,6 +138,40 @@ test('a card under a reply is drawn as it was left (its state, its part) and tak
   // a letter straight after it: j began a word, and the card goes back to where it was
   expect(await ($ as Any).prompt.edit(edit('u'))).toEqual({ text: 'ju', cursor: 2 })
   expect(JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`]!).state).toEqual({ at: 2 })
+})
+
+test('a card whose key is a verb\'s letter: at rest the verb takes it, with the focus the card does', async ($, on) => {
+  const clock = mock.clock(on)
+  // the card's flip is on v, the visualize verb's letter
+  const run = (input: Any) => {
+    const d = drawingFor(input)
+    const flipped = !!input.state?.flip
+    const on = [{ name: 'v', label: 'flip' }]
+    if (input.event?.key === 'v') return { ...d, on, state: { ...input.state, flip: !flipped }, handled: 'v' }
+    return { ...d, on, state: input.state || {} }
+  }
+  const w = world(on, [], run)
+  await savedTurn($, clock)
+  await reply($)
+  await clock.settle()
+  // at rest v opens the views line under the message, and the card's state is as it was
+  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  expect(textOf(await reply($))).toContain('▸ 1 another view of this answer')
+  expect(w.preps.some(p => p.event?.key === 'v')).toBe(false)
+  // 0 closes the line; ] gives the card the focus, and v is its flip now, named in the bar
+  await ($ as Any).prompt.edit(edit('0'))
+  await ($ as Any).prompt.edit(edit(']'))
+  await clock.settle()
+  expect(textOf(await $.ui.render(HINT))).toContain('v flip · 1 open detail · ] next · 0 back')
+  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
+  await clock.settle()
+  expect(w.preps.some(p => p.event?.key === 'v' && p.mode === 'inline')).toBe(true)
+  expect(JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`]!).state.flip).toBe(true)
+  // 0 gives the keys back: v is the verb's again
+  await ($ as Any).prompt.edit(edit('0'))
+  await clock.settle()
+  expect(textOf(await $.ui.render(HINT))).toContain('v visualize')
 })
 
 test('the detail is one program for both surfaces: the browser\'s state draws here, and the terminal\'s is kept where the page reads it', { options: { browser: true } }, async ($, on) => {
