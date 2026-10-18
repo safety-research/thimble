@@ -572,6 +572,24 @@ function paintPlot(n, g, x, y, w, cx, mark) {
 }
 
 // ---------------------------------------------------------------- canvas: the program's own cells
+/** The cells a straight link from (x0, y0) to (x1, y1) passes through, its ends left out, each with its glyph. */
+export function linkCells(x0, y0, x1, y1) {
+  const out = []
+  let x = x0, y = y0, guard = 4000
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1
+  let err = dx - dy
+  while (guard--) {
+    if (x === x1 && y === y1) break
+    const e2 = 2 * err
+    let mx = 0, my = 0
+    if (e2 > -dy) { err -= dy; x += sx; mx = sx }
+    if (e2 < dx) { err += dx; y += sy; my = sy }
+    if (x === x1 && y === y1) break
+    out.push({ x, y, ch: my === 0 ? '─' : mx === 0 ? '│' : mx === my ? '╲' : '╱' })
+  }
+  return out
+}
+
 function paintCanvas(n, g, x, y, w, cx, mark, cut) {
   const cw = Math.min(n.w, w)
   if (n.w > w) cut({ k: 'canvas', w: n.w, room: w })
@@ -597,8 +615,9 @@ function paintCanvas(n, g, x, y, w, cx, mark, cut) {
         case 'hline': g.fill(x + op[1], y + op[2], op[3], 1, op[4], op[5]); draws++; break
         case 'vline': g.fill(x + op[1], y + op[2], 1, op[3], op[4], op[5]); draws++; break
         case 'box': {
-          const [, bx, by, bw, bh, tone, title] = op
+          const [, bx, by, bw, bh, tone, title, f] = op
           if (bw < 2 || bh < 2) break
+          if (f && f.fill && bw > 2 && bh > 2) g.fill(x + bx + 1, y + by + 1, bw - 2, bh - 2, ' ', 'ink')
           g.put(x + bx, y + by, '╭', tone); g.put(x + bx + bw - 1, y + by, '╮', tone)
           g.put(x + bx, y + by + bh - 1, '╰', tone); g.put(x + bx + bw - 1, y + by + bh - 1, '╯', tone)
           g.fill(x + bx + 1, y + by, bw - 2, 1, '─', tone); g.fill(x + bx + 1, y + by + bh - 1, bw - 2, 1, '─', tone)
@@ -615,6 +634,35 @@ function paintCanvas(n, g, x, y, w, cx, mark, cut) {
         }
         case 'px': g.px(x + op[1], y * 2 + op[2], op[3]); draws++; break
         case 'line': g.pline(x + op[1], y * 2 + op[2], x + op[3], y * 2 + op[4], op[5]); draws++; break
+        case 'dot': {
+          // the nearest cell's glyph; a dot that is a part is that one cell
+          const [, dx0, dy0, tone, f] = op
+          const cx0 = Math.round(dx0), cy0 = Math.round(dy0)
+          g.put(x + cx0, y + cy0, f.glyph || (f.hollow ? '○' : f.size >= 2 ? '◉' : '●'), tone, { b: !!f.bold, bg: f.bg })
+          if (f.label) {
+            // its words from the cell after the next, on blank cells only
+            if (!g.dry) Array.from(f.label).forEach((ch, i) => { const gx = x + cx0 + 2 + i, gy = y + cy0; if (g.in(gx, gy) && g.rows[gy][gx].ch === ' ') g.put(gx, gy, ch, f.labelTone) })
+            mark({ k: 'text', s: f.label })
+          }
+          if (f.region) {
+            mark({ k: 'region', id: f.region })
+            if (!g.dry && cx0 >= 0 && cy0 >= 0 && cx0 < cw && cy0 < n.h) addRect(cx, f.region, f.meta, { x: x + cx0, y: y + cy0, w: 1, h: 1 })
+          }
+          draws++
+          break
+        }
+        case 'link': {
+          // glyphs on the blank cells strictly between its ends (what is drawn there already stays), dashed every
+          // other cell
+          if (!g.dry) linkCells(Math.round(op[1]), Math.round(op[2]), Math.round(op[3]), Math.round(op[4])).forEach((p, i) => {
+            if (op[6].dash && i % 2) return
+            const gx = x + p.x, gy = y + p.y
+            if (!g.in(gx, gy) || g.rows[gy][gx].ch !== ' ' || g.rows[gy][gx].bg) return
+            g.put(gx, gy, op[6].dash ? (p.ch === '─' ? '╌' : p.ch === '│' ? '╎' : p.ch) : p.ch, op[5])
+          })
+          draws++
+          break
+        }
         case 'bar': drawBar(g, x + op[1], y + op[2], op[3], op[4], op[5], op[6]); mark({ k: 'bar', v: op[4], max: op[5] }); break
         case 'spark': drawSpark(g, x + op[1], y + op[2], Math.max(1, op[3]), op[4], op[5], op[6], op[7]); mark({ k: 'spark', values: op[4] }); break
         case 'region': {

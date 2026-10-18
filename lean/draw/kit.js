@@ -919,6 +919,8 @@
     o = o || {}
     const op = ['box', fl(x), fl(y), Math.max(0, fl(w)), Math.max(0, fl(h)), cT(this, o.tone, 'dim')]
     if (o.title != null) op.push(inline(o.title, { bold: true }, this._ctx).filter(r => !r.br))
+    // fill: an opaque box (a callout over what was drawn before it): its inside is cleared on both surfaces
+    if (o.fill) { if (op.length < 7) op.push(null); op.push({ fill: true }) }
     return this._op(op)
   }
   // a background under cells already drawn (a picked chip, a highlighted run): the terminal colors the cells' ground,
@@ -950,6 +952,33 @@
     const bid = ID_RE.test(String(id)) ? String(id) : (slug(id) || 'brush')
     const W = Math.max(1, fl(w))
     return this._op(['brush', bid, fl(x), fl(y), W, Math.max(1, fl(h)), isFinite(num(o.min)) ? num(o.min) : 0, isFinite(num(o.max)) ? num(o.max) : W, !!o.log])
+  }
+  // a node-link drawing at the surface's own resolution: positions in cells, fractions allowed. The browser draws a dot
+  // as a circle exactly there and a link as a thin stroke between two points; the terminal draws the nearest cell's
+  // glyph (● ◉ ○) and a link as glyphs (─ │ ╱ ╲) on the blank cells between its ends. o: {size: 1–3, hollow, bold,
+  // bg, glyph, label, labelTone, part, meta}: with `part` the dot is a part of its own, its hit area the dot itself
+  const fx = v => { const n = Number(v); return isFinite(n) ? Math.round(n * 100) / 100 : 0 }
+  Canvas.prototype.dot = function (x, y, tone, o) {
+    o = isObj(o) ? o : {}
+    const f = { size: clamp(int(o.size, 1), 1, 3) }
+    if (o.hollow) f.hollow = true
+    if (o.bold) f.bold = true
+    if (o.bg) f.bg = cT(this, o.bg)
+    if (o.glyph != null) f.glyph = Array.from(clean(String(o.glyph)).replace(/\n/g, ''))[0] || '●'
+    // a few words beside the dot (×3, a name), set where the dot is
+    if (o.label != null && String(o.label).trim()) { f.label = Array.from(clean(String(o.label)).replace(/\n/g, ' ')).slice(0, 40).join(''); f.labelTone = cT(this, o.labelTone, 'dim') }
+    if (o.part != null) {
+      const m = this._metaOf(o.meta, 'dot')
+      f.region = regionId(this._ctx, o.part, 'dot', m)
+      if (!m.label) m.label = f.region
+      f.meta = m
+    }
+    return this._op(['dot', fx(x), fx(y), cT(this, tone, 'accent'), f])
+  }
+  // o: {dash}: a dashed link (a revision, a weak tie)
+  Canvas.prototype.link = function (x0, y0, x1, y1, tone, o) {
+    o = isObj(o) ? o : {}
+    return this._op(['link', fx(x0), fx(y0), fx(x1), fx(y1), cT(this, tone, 'dim'), o.dash ? { dash: true } : {}])
   }
   Canvas.prototype.node = function () { return { t: 'canvas', w: this.w, h: this.h, ops: this._ops.slice() } }
 
@@ -2074,7 +2103,7 @@
       if (n.t === 'region') out.push({ id: n.id, meta: n.meta })
       if (n.t === 'table') n.rows.forEach(r => { if (r.region) out.push({ id: r.region, meta: r.meta }) })
       if (n.t === 'plot') n.series.forEach(s => { if (s.region) out.push({ id: s.region, meta: s.meta }) })
-      if (n.t === 'canvas') n.ops.forEach(op => { if (op[0] === 'region') out.push({ id: op[1], meta: op[6] }) })
+      if (n.t === 'canvas') n.ops.forEach(op => { if (op[0] === 'region') out.push({ id: op[1], meta: op[6] }); if (op[0] === 'dot' && op[4].region) out.push({ id: op[4].region, meta: op[4].meta }) })
       if (n.kids) n.kids.forEach(walk)
       if (n.kid) walk(n.kid)
     }

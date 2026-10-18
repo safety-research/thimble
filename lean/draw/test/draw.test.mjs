@@ -210,3 +210,42 @@ test('a knob that is badly made still draws, and says why', () => {
   assert.ok(d.warnings.some(w => /starts at "none"/.test(w)) && d.warnings.some(w => /k.dial\("nope"\)/.test(w)))
   assert.ok(!d.warnings.some(w => /link points at "#ok"/.test(w)), 'a link to a knob is a known id')
 })
+
+test('a node-link drawing: the browser puts dots and links between cells, the terminal on the nearest cells; both mean the same', () => {
+  const program = `const c = k.canvas(30, 8)
+    c.link(2, 1, 20.4, 6.3, 'dim')
+    c.link(2, 1, 12, 1, 'warn', { dash: true })
+    c.dot(2, 1, 'c1', { part: 'a', meta: { label: 'claim a', claim: 'a' } })
+    c.dot(20.4, 6.3, 'c2', { size: 2, part: 'b', label: '×3' })
+    c.dot(12, 1, 'c3', { hollow: true })
+    c.box(14, 2, 10, 4, { fill: true })
+    c.text(15, 3, 'over it')
+    return c`
+  const d = runProgram({ program, data: {} }, { w: 30, h: 8 })
+  assert.equal(d.error, undefined)
+  assert.deepEqual(d.warnings, [])
+  assert.deepEqual(d.regions.map(r => r.id), ['a', 'b'], 'a dot with a part is a region')
+  const t = renderTerm(d, { w: 30 }), s = renderSvg(d, { w: 30, cw: 8, lh: 20 })
+  assert.equal(json(t.marks), json(s.marks), 'the renderers disagree')
+  assert.deepEqual(t.regions.map(r => r.id), s.regions.map(r => r.id))
+  // the terminal: each dot's glyph on its nearest cell, a link on the blank cells between its ends, dashed every other
+  // cell, and the filled box clears what is under it
+  const rows = gridText(t).split('\n')
+  assert.equal(rows[1][2], '●')
+  assert.equal(rows[6][20], '◉')
+  assert.equal(rows[1][12], '○')
+  assert.match(rows[1].slice(3, 12), /^─ ╌ ╌ ╌ ╌$/)
+  assert.ok([...rows.slice(2, 6).join('')].some(ch => '╲─'.includes(ch)), 'the long link is drawn')
+  assert.equal(rows[3].slice(15, 22), 'over it')
+  assert.ok(!/[╲─]/.test(rows[4].slice(15, 23)), 'nothing of the link shows inside the filled box')
+  assert.deepEqual(t.regions.find(r => r.id === 'b').rects, [{ x: 20, y: 6, w: 1, h: 1 }])
+  // the browser: a circle exactly where the dot is, its hit area around it; strokes for links; an opaque box
+  const cx = 20.4 * 8 + 4, cy = 6.3 * 20 + 10
+  assert.match(s.svg, new RegExp(`<circle cx="${cx}" cy="${cy}" r="6.4"`))
+  const hit = s.regions.find(r => r.id === 'b').rects[0]
+  assert.ok(Math.abs(hit.x + hit.w / 2 - cx) < 0.01 && Math.abs(hit.y + hit.h / 2 - cy) < 0.01, 'the hit area is the dot')
+  assert.match(s.svg, /<g class="dk-frames"><line [^>]*\/><line [^>]*stroke-dasharray="4 3"/)
+  assert.match(s.svg, /<text [^>]*>×3<\/text>/)
+  assert.match(s.svg, /<g class="dk-marks">.*<rect [^>]*fill="#ffffff" stroke=/)
+  assert.ok(!/>[╲╱─]</.test(s.svg), 'no link drawn as glyphs')
+})
