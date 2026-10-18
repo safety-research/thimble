@@ -44,6 +44,27 @@ test('claims: the ring in the terminal and the pointer in the browser are one ho
   assert.equal(barText([run(PANES.claims, data)]), 'r replay · esc close')
 })
 
+test('claims in the browser: the same program draws dots and links between cells and the card as an opaque box; the terminal keeps its cells', () => {
+  const data = claimsData()
+  const opsOf = d => { const out = []; const walk = n => { if (!n || typeof n !== 'object') return; if (n.t === 'canvas') out.push(...n.ops); (n.kids || []).forEach(walk); if (n.kid) walk(n.kid) }; walk(d.root); return out }
+  const rest = opsOf(run(PANES.claims, data, { surface: 'browser' }))
+  assert.equal(rest.filter(o => o[0] === 'dot').length, 3, 'a dot per claim')
+  assert.ok(rest.filter(o => o[0] === 'dot').every(o => /^cl-/.test(o[4].region)), 'each dot is its claim\'s part')
+  assert.equal(rest.filter(o => o[0] === 'link').length, 0, 'no line at rest')
+  assert.ok(!rest.some(o => o[0] === 'put' && /[●◉○]/.test(o[3])), 'no dot as a glyph')
+  const hov = run(PANES.claims, data, { surface: 'browser', state: { hover: 'c2' } })
+  const ops = opsOf(hov)
+  assert.ok(ops.some(o => o[0] === 'link'), 'the hovered claim\'s links')
+  assert.ok(ops.some(o => o[0] === 'box' && o[7] && o[7].fill), 'its card is an opaque box')
+  const s = renderSvg(hov, { w: 90 })
+  assert.ok(s.marks.some(m => m.k === 'text' && /Kestrel made 41% of June edits/.test(m.s)), 'the card says the claim')
+  assert.ok(s.regions.some(r => r.id === 'cl-c1'))
+  // the terminal draws the same program in cells, as before
+  const t = run(PANES.claims, data, { surface: 'terminal', state: { hover: 'c2' } })
+  assert.ok(!opsOf(t).some(o => o[0] === 'dot' || o[0] === 'link'))
+  assert.match(gridText(renderTerm(t, { w: 90 })), /┌─+┐/)
+})
+
 test('claims: r replays the graph by later events (k.after) in the order made; any key stops it', () => {
   const data = claimsData()
   let { d, state } = act(PANES.claims, data, { hover: 'c1' }, keyEvent('r'), 'terminal')
