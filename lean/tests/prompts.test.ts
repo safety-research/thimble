@@ -21,7 +21,7 @@ function world(on: Any, env: Record<string, string> = {}) {
   // the engine's own expansion: the text as the skill computed it
   on('skill.prompt', (_$: unknown, e: { text: string }) => ({ text: e.text }))
   // a Read answered as core does: the file's text, as the model reads it
-  on('tool.call', (_$: unknown, e: { tool: string; file_path?: string }) => ({ result: { type: 'text' }, text: `the file ${e.file_path}` }))
+  on('tool.call', (_$: unknown, e: { tool: string; file_path?: string; command?: string }) => ({ result: { type: 'text' }, text: /lean save/.test(String(e.command)) ? 'saved 01-x v1: thimble/objects/01-x.json' : `the file ${e.file_path}` }))
   const events: Json[] = []
   on('process.run', (_$: unknown, e: { argv: string[]; init?: { stdin?: string } }) => {
     if (e.argv.some(a => a.endsWith('telemetry/append.mjs'))) for (const l of String(e.init?.stdin ?? '').split('\n').filter(Boolean)) events.push(JSON.parse(l))
@@ -99,5 +99,16 @@ test('with the lean skill loaded, its card section is in the conversation alread
   const r = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
   expect(r.context[0]).toContain('THE WORKED FORMS')
   expect(r.context[0]).not.toContain('THE CARD SECTION')
+})
+
+test('a card saved with no toolkit read before it: the guidance comes with that first save, once', async ($, on) => {
+  const w = world(on)
+  const r = await $.tool.call({ tool: 'Bash', command: "lean save x <<'JSON'\n{}\nJSON" } as never) as Any
+  expect(r.context[0]).toContain('which thimble adds with the first card of a session when the toolkit was not read before it')
+  expect(r.context[0]).toContain('THE WORKED FORMS')
+  const again = await $.tool.call({ tool: 'Bash', command: 'lean save y --from y.json' } as never) as Any
+  expect(again.context ?? []).toEqual([])
+  await w.clock.advance(100)
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['the first lean save'])
 })
 

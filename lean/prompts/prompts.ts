@@ -5,7 +5,8 @@
 //
 // The card guidance (feature `forms`): Claude reads the drawing toolkit (draw/TOOLKIT.md) before it writes a card's
 // program, as the lean skill says; the first such read in a session carries the guidance's active version as context
-// beside the file (the person never sees it, and it is never in the conversation at rest). The default version,
+// beside the file (the person never sees it, and it is never in the conversation at rest). When Claude saves a card
+// with no toolkit read before it, the guidance comes with that first save instead, for this card and the next. The default version,
 // `runtime`, is the lean skill's card section (the card runtime's principles) and the worked forms: when the lean
 // skill is loaded, its section is in the conversation already, so only the worked forms come. v's request asks for
 // the guidance with `lean guide cards` when it was not read yet.
@@ -144,8 +145,11 @@ export function registerPrompts(on: Any, options: Any): void {
       if (!r || r.deny !== undefined || r.isError || e.agentId !== undefined) return r
       const file = String(e.file_path || '')
       const isRead = e.tool === 'Read' && /(^|\/)draw\/TOOLKIT\.md$/.test(file) && file.startsWith(rootOf($))
-      const isShell = e.tool === 'Bash' && /\bdraw\/TOOLKIT\.md\b/.test(String(e.command || '')) && !/\blean\s/.test(String(e.command || ''))
-      if (!isRead && !isShell) return r
+      const command = String(e.command || '')
+      const isShell = e.tool === 'Bash' && /\bdraw\/TOOLKIT\.md\b/.test(command) && !/\blean\s/.test(command)
+      // a card saved with no toolkit read before it: the guidance comes with the save, for this card and the next
+      const isSave = e.tool === 'Bash' && !isShell && /(^|[\s;&|(])lean\s+save\b/.test(command) && /\bsaved\b/.test(String(r.text ?? ''))
+      if (!isRead && !isShell && !isSave) return r
       await registry($)
       if (R.cardsGiven) return r
       // a part the conversation holds already (the lean skill's card section, once the lean skill is loaded) is left out
@@ -153,8 +157,11 @@ export function registerPrompts(on: Any, options: Any): void {
       if (t.off || !t.text.trim()) return r
       R.cardsGiven = true
       const base = (FEATURES.forms.versions as Any)?.[t.version]?.base || FEATURES.forms.base
-      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: `${isRead ? 'Read' : 'Bash'} of draw/TOOLKIT.md` })
-      const note = `The card guidance (${t.id}), which thimble adds when you read the toolkit before a card. Paths in it are relative to ${rootOf($)}/${base}.\n\n${t.text}`
+      await record($, { kind: 'prompt', feature: 'forms', prompt: t.id, via: isSave ? 'the first lean save' : `${isRead ? 'Read' : 'Bash'} of draw/TOOLKIT.md` })
+      const head = isSave
+        ? `The card guidance (${t.id}), which thimble adds with the first card of a session when the toolkit was not read before it. It holds for this card and the next ones.`
+        : `The card guidance (${t.id}), which thimble adds when you read the toolkit before a card.`
+      const note = `${head} Paths in it are relative to ${rootOf($)}/${base}.\n\n${t.text}`
       return { ...r, context: [...(r.context ?? []), note] }
     } catch {
       return r
