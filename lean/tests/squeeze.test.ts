@@ -1,7 +1,8 @@
-// Squeeze in the terminal (verbs/squeeze/term.ts through shell/shell.tsx): s opens the chips under the answer with
-// the keys that work named under them; a chip's change rewrites the message in place with one model call, its marks
-// placed again; the person's own chip is typed after a + and combines with the others; 0 restores the original; a
-// level seen before comes back with no call; a long answer arrives squeezed. `claude plugin test lean`.
+// Squeeze in the terminal (verbs/squeeze/term.ts through shell/shell.tsx): s opens the chips under the answer, each
+// as its label, its dots and its level, with their keys in the hint line under the prompt; a chip's change rewrites
+// the message in place with one model call, its marks placed again, and the new text writes itself in from the top; a
+// stretch is typed after a + as two ends and combines with the others; 0 restores the original; a state seen before
+// comes back with no call; a long answer arrives squeezed. `claude plugin test lean`.
 import { expect, mock, test } from 'claude-code/testing'
 
 const ROOT = '/data'
@@ -44,6 +45,8 @@ function world(on: any, replies: string[] = []) {
   on('prompt.fill', (_$: unknown, e: { text: string }) => { fills.push(e.text); return { isFilled: true } })
   on('ui.toast', () => ({ value: undefined }))
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  // Claude Code's hint line under the prompt, as a hook leaves it
+  on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
   // the model: each call answers with the next reply given, and is kept for the test to read
   const calls: Any[] = []
   on('model.complete', (_$: unknown, e: Any) => {
@@ -60,11 +63,16 @@ function textOf(n: any): string {
   if (n == null || n === false) return ''
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textOf).join('')
-  return textOf(n.props?.children) + textOf(n.children)
+  return (n.type === 'Markdown' ? String(n.props?.text ?? '') : '') + textOf(n.props?.children) + textOf(n.children)
 }
 const view = (text: string) => ({ plugin: 'thimble-lean', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text, isFirstOfReply: true }, viewport: { columns: 100, rows: 48, isFullscreen: true } }) as never
 const edit = (key: string, text = '') => ({ origin: { kind: 'composer' }, key: { key }, text, cursor: text.length, start: text.length, end: text.length, inputText: key.length === 1 ? key : '' }) as never
 const record = (w: { files: Record<string, string> }) => JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${AT}.json`]!)
+// the new text writing itself in, tick by tick, until it is whole
+const writtenIn = async (clock: Any) => { for (let i = 0; i < 120; i++) await clock.advance(50) }
+const HINT = { plugin: 'thimble-lean', component: 'PromptHint', surface: 'terminal', requestId: 'hint', props: { isDraft: false, isWorking: false, hint: '? for shortcuts' }, viewport: { columns: 100, rows: 48, isFullscreen: true } } as never
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const hintOf = async ($: any, draft = false) => textOf(await $.ui.render({ ...(HINT as object), props: { isDraft: draft, isWorking: false, hint: '? for shortcuts' } } as never))
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function answered($: any, on: any, clock: { settle: () => Promise<void> }, text = TEXT) {
@@ -78,26 +86,30 @@ async function answered($: any, on: any, clock: { settle: () => Promise<void> },
   await clock.settle()
 }
 
-test('s opens the chips under the answer, in place of its verb row, with the keys that work named under them', async ($, on) => {
+test('s opens the chips under the answer, in place of its verb row: each its label, dots and level, the keys in the hint line', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await answered($, on, clock)
-  expect(textOf(await $.ui.render(view(TEXT)))).toContain('v visualize · s squeeze')
+  // the verb row: the keys alone
+  expect(textOf(await $.ui.render(view(TEXT)))).toContain('v  s')
   expect(await ($ as Any).prompt.edit(edit('s'))).toEqual({ text: '', cursor: 0 })
   const drawn = textOf(await $.ui.render(view(TEXT)))
-  expect(drawn).not.toContain('v visualize')
-  expect(drawn).toContain('1 Length')
-  expect(drawn).toContain('●●●● full')
-  expect(drawn).toContain('2 Report ↔ Interpret')
-  expect(drawn).toContain('3 Familiarity')
-  expect(drawn).toContain('add')
-  // the footer: every key that works, as the person reads it
-  expect(drawn).toContain('1–3 chip · < > change · + add · 0 close')
+  expect(drawn).not.toContain('v  s')
+  expect(drawn).toContain(' Length ○○○● full ')
+  expect(drawn).toContain(' Report ↔ Interpret ○●○ balanced ')
+  expect(drawn).toContain(' Familiarity ○○●○○ working ')
+  expect(drawn).toContain('+')
+  // nothing under the chips: their keys are in the hint line, once
+  expect(drawn).not.toContain('change')
+  expect(await hintOf($)).toBe('1–3 chip · < > change · + stretch · 0 close')
+  // only the picked chip has a fill
+  const tree = JSON.stringify(await $.ui.render(view(TEXT)))
+  expect((tree.match(/"backgroundColor":"#4a3b1d"/g) || []).length).toBe(7)
   // a short answer: nothing was squeezed, no call made
   expect(w.calls.length).toBe(0)
   // s again closes them
   await ($ as Any).prompt.edit(edit('s'))
-  expect(textOf(await $.ui.render(view(TEXT)))).toContain('v visualize · s squeeze')
+  expect(textOf(await $.ui.render(view(TEXT)))).toContain('v  s')
 })
 
 test('a chip change rewrites the message in place with one call; the citations are placed again on the new text; 0 restores the original', async ($, on) => {
@@ -117,18 +129,21 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(call.prompt).toContain(TEXT)
   expect(call.prompt).toContain('- Length: medium, at most 14 words (levels one line · short · medium · full; the original is at full, 18 words)')
   expect(call.prompt).toContain('- Report ↔ Interpret: as the original')
+  expect(call.prompt).toContain('- Familiarity: as the original (levels new to the field · beginner · working · fluent · expert)')
   const rec = record(w)
   expect(rec.text).toBe(TEXT)
   expect(rec.shown).toBe(SHORT)
   expect(rec.marks.map((m: Any) => SHORT.slice(m.start, m.end))).toEqual(['[6,543 saves](q1#day=2026-06-18@n)'])
   expect(rec.squeeze.at).toEqual({ length: 2 })
-  // the message is drawn from the new text, its citation a press; the chip reads medium; the footer offers the original
+  await writtenIn(clock)
+  // the message is drawn from the new text, its citation a press; the chip reads medium; the hint offers the original
   const ui = await $.ui.mount(view(TEXT))
   const drawn = textOf(await ui.drawn())
-  expect(drawn).toContain('June 18: ')
+  expect(drawn).toContain('June 18: 6,543 saves.')
   expect(drawn).not.toContain('from this one')
-  expect(drawn).toContain('●●●○ medium')
-  expect(drawn).toContain('0 original · s close')
+  expect(drawn).toContain('Length ○○●○ medium')
+  expect(drawn).not.toContain('rewriting')
+  expect(await hintOf($)).toBe('1–3 chip · < > change · + stretch · 0 original · s done')
   await ui.unmount()
   await ($ as Any).prompt.edit(edit('0'))
   await clock.settle()
@@ -136,8 +151,8 @@ test('a chip change rewrites the message in place with one call; the citations a
   const back = record(w)
   expect(back.shown).toBe(null)
   expect(back.marks.filter((m: Any) => m.kind === 'cite').map((m: Any) => TEXT.slice(m.start, m.end))).toEqual(['[6,543 saves](q1#day=2026-06-18@n)', '[this one](revisions.jsonl#L28)'])
-  expect(textOf(await $.ui.render(view(TEXT)))).toContain('0 close')
-  // a level seen before comes back from the record, with no call
+  expect(await hintOf($)).toContain('0 close')
+  // a state seen before comes back from the record, with no call
   await ($ as Any).prompt.edit(edit('<'))
   await clock.settle()
   expect(w.calls.length).toBe(1)
@@ -146,40 +161,95 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(w.submitted.at(-1)!.context.join('\n')).toContain('rewritten by the squeeze chips (Length: medium)')
 })
 
-test("the person's own chip: + then its words and ↵ make it, the prompt never reaches Claude, and one call sizes it and writes the message with every chip's level", async ($, on) => {
-  const w = world(on, ['<text>\nJune 18: [6,543 saves](q1#day=2026-06-18@n).\n</text>', '<chip levels="off | plain | status" pick="status"/>\n<text>\n**Status:** most saves on June 18, [6,543](q1#day=2026-06-18@n).\n</text>'])
+test('the new text writes itself in from the top: the old text dims while the call runs, then the new one grows from its first words until it is whole', async ($, on) => {
+  const NEW = 'June 18 had the most saves: [6,543](q1#day=2026-06-18@n). ' + 'The agents saved again and again that day, page after page, until the evening run ended. '.repeat(4)
+  const w = world(on, [`<text>${NEW}</text>`])
+  const clock = mock.clock(on)
+  await answered($, on, clock)
+  await ($ as Any).prompt.edit(edit('s'))
+  await ($ as Any).prompt.edit(edit('3'))
+  await ($ as Any).prompt.edit(edit('>'))
+  await clock.settle()
+  expect(w.calls[0].prompt).toContain('- Familiarity: fluent (levels new to the field · beginner · working · fluent · expert; the original is at a level not yet known)')
+  // the first piece only: whole words, the citation whole
+  const first = textOf(await $.ui.render(view(TEXT)))
+  expect(first).toContain('June 18 had the most')
+  expect(first).not.toContain('evening run ended')
+  expect(first).not.toContain('from this one')
+  await clock.advance(200)
+  const more = textOf(await $.ui.render(view(TEXT)))
+  expect(more.length).toBeGreaterThan(first.length)
+  await writtenIn(clock)
+  // (the words wrap into lines, so they are read without their spaces)
+  const whole = textOf(await $.ui.render(view(TEXT))).replace(/\s+/g, '')
+  expect(whole).toContain('untiltheeveningrunended.Theagents')
+  expect(whole.match(/eveningrunended/g)!.length).toBe(4)
+  // a state seen before writes itself in too, with no call
+  await ($ as Any).prompt.edit(edit('<'))
+  await clock.settle()
+  await ($ as Any).prompt.edit(edit('>'))
+  await clock.settle()
+  expect(w.calls.length).toBe(1)
+  expect((textOf(await $.ui.render(view(TEXT))).replace(/\s+/g, '').match(/eveningrunended/g) || []).length).toBeLessThan(4)
+  await writtenIn(clock)
+  expect(textOf(await $.ui.render(view(TEXT))).replace(/\s+/g, '').match(/eveningrunended/g)!.length).toBe(4)
+})
+
+test('a stretch: + then two ends and ↵ make a chip that stands at the original; a step toward an end is one call that names the stretch beside the other chips', async ($, on) => {
+  const MGR = '**Status:** most saves on June 18, [6,543](q1#day=2026-06-18@n).'
+  const w = world(on, ['<text>\nJune 18: [6,543 saves](q1#day=2026-06-18@n).\n</text>', `<text>\n${MGR}\n</text>`])
   const clock = mock.clock(on)
   await answered($, on, clock)
   await ($ as Any).prompt.edit(edit('s'))
   await ($ as Any).prompt.edit(edit('<'))
   await clock.settle()
-  // + is typed into the prompt, the chips stay open, and the footer says where the words go
+  // + is typed into the prompt, and what is left to type shows after it, as the chip row and the hint line say
   const plus = await ($ as Any).prompt.edit(edit('+'))
   expect(plus.text).toBe('+')
-  expect(plus.decorations.some((d: Any) => /your chip/.test(d.virtualText || ''))).toBe(true)
-  expect(textOf(await $.ui.render(view(TEXT)))).toContain('type your chip after the +, then ↵')
-  const typed = await ($ as Any).prompt.edit(edit('f', '+'))
-  expect(typed.text).toBe('+f')
-  const r = await $.prompt.submit({ text: '+ for my manager', origin: { kind: 'composer' } } as never)
-  expect((r as Any).drop).toContain('For my manager')
+  expect(plus.decorations.some((d: Any) => d.virtualText === ' between … and …')).toBe(true)
+  expect(textOf(await $.ui.render(view(TEXT)))).toContain('stretch between … and …')
+  expect(await hintOf($)).toBe('type two ends, such as engineer and manager · ↵ makes the stretch · ⌫ cancels')
+  const typed = await ($ as Any).prompt.edit(edit('e', '+'))
+  expect(typed.text).toBe('+e')
+  expect(typed.decorations.some((d: Any) => d.virtualText === ' and …')).toBe(true)
+  const both = await ($ as Any).prompt.edit({ origin: { kind: 'composer' }, key: { key: 'r' }, text: '+engineer and manage', cursor: 20, start: 20, end: 20, inputText: 'r' } as never)
+  expect(both.text).toBe('+engineer and manager')
+  expect(textOf(await $.ui.render(view(TEXT)))).toContain('stretch between engineer and manager')
+  expect(await hintOf($, true)).toBe('↵ makes engineer ↔ manager · ⌫ the + cancels')
+  const r = await $.prompt.submit({ text: '+engineer and manager', origin: { kind: 'composer' } } as never)
+  expect((r as Any).drop).toBe('stretch engineer ↔ manager')
   expect(w.submitted.length).toBe(0)
   await clock.settle()
-  // the prompt box, which keeps a dropped prompt, is emptied
+  // the prompt box, which keeps a dropped prompt, is emptied; the new chip stands at the original: no call
   await (clock as Any).advance(100)
   expect(w.fills.at(-1)).toBe('')
+  expect(w.calls.length).toBe(1)
+  let rec = record(w)
+  expect(rec.squeeze.own).toEqual([{ id: 'x-engineer-manager', kind: 'stretch', from: 'engineer', to: 'manager' }])
+  let drawn = textOf(await $.ui.render(view(TEXT)))
+  expect(drawn).toContain(' engineer ●○○○ manager ')
+  expect(drawn).toContain('Length ○○●○ medium')
+  expect(await hintOf($)).toBe('1–4 chip · < > change · + stretch · 0 original · s done')
+  // > steps it toward manager: one call, with Length still at medium
+  await ($ as Any).prompt.edit(edit('>'))
+  await clock.settle()
   expect(w.calls.length).toBe(2)
-  const call = w.calls[1]
-  expect(call.prompt).toContain('- Length: medium')
-  expect(call.prompt).toContain('The person added a chip in their own words: "for my manager"')
-  const rec = record(w)
-  expect(rec.squeeze.own).toEqual([{ id: 'my-for-my-manager', name: 'For my manager', words: 'for my manager', levels: ['off', 'plain', 'status'], level0: 0 }])
-  expect(rec.squeeze.at).toEqual({ length: 2, 'my-for-my-manager': 2 })
-  expect(rec.shown).toContain('**Status:**')
+  const call = w.calls[1].prompt
+  expect(call).toContain('- Length: medium')
+  expect(call).toContain('- A stretch the person made, from "engineer" to "manager": 1 of 3 steps toward "manager" (the original stands at "engineer", step 0)')
+  rec = record(w)
+  expect(rec.squeeze.at).toEqual({ length: 2, 'x-engineer-manager': 1 })
+  expect(rec.shown).toBe(MGR)
   expect(rec.marks[0].ref).toBe('q1#day=2026-06-18@n')
-  const drawn = textOf(await $.ui.render(view(TEXT)))
-  expect(drawn).toContain('4 For my manager')
-  expect(drawn).toContain('●● status')
-  expect(drawn).toContain('1–4 chip')
+  await writtenIn(clock)
+  drawn = textOf(await $.ui.render(view(TEXT)))
+  expect(drawn).toContain(' engineer ○●○○ manager ')
+  expect(drawn).toContain('Status:')
+  // 0: the original, every chip back, the stretch kept
+  await ($ as Any).prompt.edit(edit('0'))
+  await clock.settle()
+  expect(record(w).shown).toBe(null)
+  expect(textOf(await $.ui.render(view(TEXT)))).toContain(' engineer ●○○○ manager ')
 })
 
 test('a long answer arrives squeezed: one call at Length short, the verb row says how much of it shows, and the original is one key away', async ($, on) => {
@@ -194,18 +264,19 @@ test('a long answer arrives squeezed: one call at Length short, the verb row say
   expect(rec.shown).toBe(SHORT)
   expect(rec.squeeze.auto).toBe(true)
   expect(rec.marks.map((m: Any) => m.ref)).toEqual(['q2#run=1@n'])
+  await writtenIn(clock)
   const drawn = textOf(await $.ui.render(view(LONG)))
   expect(drawn).toContain('s ● 1 of 44 lines')
   expect(drawn).not.toContain('Run 30 landed')
   await ($ as Any).prompt.edit(edit('s'))
-  expect(textOf(await $.ui.render(view(LONG)))).toContain('●●○○ short')
+  expect(textOf(await $.ui.render(view(LONG)))).toContain('Length ○●○○ short')
   await ($ as Any).prompt.edit(edit('0'))
   await clock.settle()
   expect(record(w).shown).toBe(null)
-  expect(textOf(await $.ui.render(view(LONG)))).toContain('0 close')
+  expect(await hintOf($)).toContain('0 close')
 })
 
-test('a rewrite that cites a ref the original never cited shows it as plain words, and says so under the chips', async ($, on) => {
+test('a rewrite that cites a ref the original never cited shows it as plain words, and the hint line says so', async ($, on) => {
   const w = world(on, ['<text>June 18 had [6,543 saves](q1#day=2026-06-18@n), [12% more](q9#x@n).</text>'])
   const clock = mock.clock(on)
   await answered($, on, clock)
@@ -213,9 +284,12 @@ test('a rewrite that cites a ref the original never cited shows it as plain word
   await ($ as Any).prompt.edit(edit('3'))
   await ($ as Any).prompt.edit(edit('<'))
   await clock.settle()
-  expect(w.calls[0].prompt).toContain('- Familiarity: new')
+  expect(w.calls[0].prompt).toContain('- Familiarity: beginner')
   const rec = record(w)
   expect(rec.shown).toBe('June 18 had [6,543 saves](q1#day=2026-06-18@n), 12% more.')
   expect(rec.marks.map((m: Any) => m.ref)).toEqual(['q1#day=2026-06-18@n'])
-  expect(textOf(await $.ui.render(view(TEXT)))).toContain('! a citation to q9#x@n is not in the original')
+  expect(await hintOf($)).toContain('! a citation to q9#x@n is not in the original')
+  // nothing but the chips under the message
+  await writtenIn(clock)
+  expect(textOf(await $.ui.render(view(TEXT)))).not.toContain('not in the original')
 })

@@ -3,19 +3,21 @@
 //
 // The chips are the same for every message; only where the original stands on each differs:
 //   Length              one line · short · medium · full. The original is always at full.
-//   Report ↔ Interpret  report · both · interpret: just the facts, listed, or the story of what they mean.
-//   Familiarity         new · familiar · expert: how much of the field and the work the text assumes.
-//   the person's own    a chip in their own words ("for my manager"), sized by the same call that writes it: its levels
-//                       go from "off" (it changes nothing) to its strongest.
+//   Report ↔ Interpret  report · balanced · interpret: the facts and counts alone, or the story of what they mean
+//                       with its judgment calls. The two ends share almost no sentences.
+//   Familiarity         new to the field · beginner · working · fluent · expert: how much of the field the text
+//                       assumes. New explains each term where it stands; expert reads like a commit message.
+//   a stretch           between two ends the person types after +, such as "engineer and manager": the original
+//                       stands at the first end (0), and each of 3 steps moves the text toward the second.
 // The observer says where the original stands on Report ↔ Interpret and Familiarity (record.verbs.s.at); until it
 // has, each stands in its middle. Every chip counts in every rewrite: one $.model.complete call writes the message at
-// all the chips' levels at once.
+// all the chips' levels at once, and each version written is kept, so a state seen before comes back with no call.
 //
 // The record keeps it (CONTRACT 1, beside `shown`):
 //   squeeze: {
 //     at:       {chipId: level}       the levels set now; a chip not named stands where the original does
-//     own:      [{id, name, words, levels}]   the person's chips (levels [] until the call sized them)
-//     versions: {key: text}           every version written, by its levels, so a level seen before comes back at once
+//     own:      [{id, kind: 'stretch', from, to, name, levels}]   the person's stretches
+//     versions: {key: text}           every version written, by its levels, so a state seen before comes back at once
 //     orig:     {marks}               the original's marks, so a sparkline's values outlive a version that dropped it
 //     auto:     true                  it arrived squeezed (a long message)
 //     problems: ['...']              what a rewrite said that the original does not (a number, a ref): shown, not hidden
@@ -25,46 +27,58 @@
 
 /** The chips every message has, in the order drawn. `level0` is where the original stands until the observer says. */
 export const CHIPS = Object.freeze([
-  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['one line', 'short', 'medium', 'full']), level0: 3, style: 'dots', kind: 'fixed' }),
-  Object.freeze({ id: 'interpret', name: 'Report ↔ Interpret', levels: Object.freeze(['report', 'both', 'interpret']), level0: 1, style: 'pos', kind: 'fixed' }),
-  Object.freeze({ id: 'familiarity', name: 'Familiarity', levels: Object.freeze(['new', 'familiar', 'expert']), level0: 1, style: 'dots', kind: 'fixed' }),
+  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['one line', 'short', 'medium', 'full']), level0: 3, kind: 'fixed' }),
+  Object.freeze({ id: 'interpret', name: 'Report ↔ Interpret', levels: Object.freeze(['report', 'balanced', 'interpret']), level0: 1, kind: 'fixed' }),
+  Object.freeze({ id: 'familiarity', name: 'Familiarity', levels: Object.freeze(['new to the field', 'beginner', 'working', 'fluent', 'expert']), level0: 2, kind: 'fixed' }),
 ])
 export const LENGTH = CHIPS[0]
 /** The level of Length a long message arrives at: short. */
 export const ARRIVE = 1
+/** The steps of a stretch: 0 is the original, at its first end; 3 is all the way to its second end. */
+export const STRETCH_STEPS = 3
 const MAX_OWN = 3
+// the names an observer or an older record may give a level, as the levels are named now
+const ALIAS = { interpret: { both: 1, story: 2, facts: 0 }, familiarity: { new: 0, newcomer: 0, novice: 0, familiar: 2, intermediate: 2, 'new to testing': 0 } }
 
 const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
 const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24)
-const cap = s => (s ? s[0].toUpperCase() + s.slice(1) : s)
 const sq = rec => (rec && rec.squeeze && typeof rec.squeeze === 'object' ? rec.squeeze : {})
 
-/** The dots of a chip at level v: ●●○○ counts up for Length and Familiarity, ○●○ marks a place between two ends,
- *  and a chip of the person's fills from none (○○ off, ●○ plain, ●● status). */
+/** The dots of a chip at level v: one ● at its place among ○, as `○●○○` for Length short. */
 export function glyph(chip, v) {
-  const n = chip.levels.length
+  const n = Math.max(1, chip.levels.length)
   const lv = Math.max(0, Math.min(n - 1, v))
-  const style = chip.kind === 'own' ? 'fill' : chip.style
-  if (style === 'pos') return Array.from({ length: n }, (_, i) => (i === lv ? '●' : '○')).join('')
-  if (style === 'fill') return '●'.repeat(lv) + '○'.repeat(n - 1 - lv)
-  return '●'.repeat(lv + 1) + '○'.repeat(n - 1 - lv)
+  return Array.from({ length: n }, (_, i) => (i === lv ? '●' : '○')).join('')
+}
+
+/** A level's index from its name (or an alias, or an index), or null. */
+function levelOf(chip, v) {
+  if (Number.isInteger(v) && v >= 0 && v < chip.levels.length) return v
+  if (typeof v !== 'string') return null
+  const w = v.trim().toLowerCase()
+  const i = chip.levels.indexOf(w)
+  if (i >= 0) return i
+  const a = (ALIAS[chip.id] || {})[w]
+  return Number.isInteger(a) ? a : null
 }
 
 /** Where the observer says the original stands on a fixed chip (record.verbs.s.at: a level's name or index), or null. */
 function observed(rec, chip) {
   const at = rec?.verbs?.s?.at
   if (!at || typeof at !== 'object' || chip.id === LENGTH.id) return null
-  const v = at[chip.id]
-  if (Number.isInteger(v) && v >= 0 && v < chip.levels.length) return v
-  if (typeof v === 'string') {
-    const i = chip.levels.indexOf(v.trim().toLowerCase())
-    if (i >= 0) return i
-  }
-  return null
+  return levelOf(chip, at[chip.id])
 }
 
-/** Every chip of the message, in the order drawn: the fixed three, then the person's. Each with `level0`, where the
- *  original stands (`known` once the observer said so), and `level`, where it is now. */
+/** A stretch as a chip: its levels are its steps, the first end at 0 (the original) and the second at the last. */
+function stretchOf(c) {
+  const from = str(c.from, 40) || 'as written'
+  const to = str(c.to, 40) || str(c.words, 40) || 'other end'
+  const levels = Array.from({ length: STRETCH_STEPS + 1 }, (_, i) => (i === 0 ? from : i === STRETCH_STEPS ? to : `${i} of ${STRETCH_STEPS} toward ${to}`))
+  return { id: c.id, kind: 'stretch', from, to, name: `${from} ↔ ${to}`, levels, level0: 0, known: true }
+}
+
+/** Every chip of the message, in the order drawn: the fixed three, then the person's stretches. Each with `level0`,
+ *  where the original stands (`known` once the observer said so), and `level`, where it is now. */
 export function chipsOf(rec) {
   const s = sq(rec)
   const at = s.at && typeof s.at === 'object' ? s.at : {}
@@ -72,7 +86,7 @@ export function chipsOf(rec) {
     const o = observed(rec, c)
     return { ...c, levels: [...c.levels], level0: o ?? c.level0, known: c.id === LENGTH.id || o != null }
   })
-  const own = (Array.isArray(s.own) ? s.own : []).map(c => ({ id: c.id, name: c.name, words: c.words, levels: Array.isArray(c.levels) ? c.levels : [], level0: 0, kind: 'own', known: true }))
+  const own = (Array.isArray(s.own) ? s.own : []).filter(c => c && c.id).map(stretchOf)
   return [...fixed, ...own].map(c => {
     const want = at[c.id]
     const level = Number.isInteger(want) && want >= 0 && want < Math.max(1, c.levels.length) ? want : c.level0
@@ -98,18 +112,34 @@ export function stepAt(rec, id, dir) {
   return { ...(sq(rec).at || {}), [id]: to }
 }
 
-/** A chip of the person's, from their words: its name is their words, its levels come with the call that writes it. */
-export function ownChip(rec, words) {
-  const w = str(String(words || '').replace(/^\+\s*/, ''), 60)
+/**
+ * The two ends the person typed after the +: "engineer and manager", "engineer ↔ manager", "engineer to manager",
+ * "between novice and expert". One phrase alone ("for my manager") is a stretch from the text as written to it.
+ * Returns {from, to} or null when nothing was typed.
+ */
+export function endsOf(words) {
+  let w = String(words || '').replace(/^\s*\+\s*/, '').replace(/\s+/g, ' ').trim()
+  w = w.replace(/^(stretch\s+)?(between|from)\s+/i, '')
   if (!w) return null
-  const used = new Set(chipsOf(rec).map(c => c.id))
-  let id = `my-${slug(w) || 'chip'}`.slice(0, 24)
-  for (let i = 2; used.has(id); i++) id = `${id.slice(0, 20)}-${i}`
-  return { id, name: cap(w.length > 22 ? w.slice(0, 21).replace(/\s+\S*$/, '') + '…' : w), words: w, levels: [], level0: 0 }
+  const m = /^(.+?)\s*(?:↔|<->|<>|\/|\s(?:and|to|vs\.?|versus|-|–|—)\s)\s*(.+)$/i.exec(w)
+  const cut = s => str(s, 40).replace(/[.,;:]+$/, '')
+  if (m && cut(m[1]) && cut(m[2])) return { from: cut(m[1]), to: cut(m[2]) }
+  return { from: 'as written', to: cut(w) }
 }
 
-/** The record's squeeze with a chip of the person's added (the oldest of more than three goes). */
-export function withOwn(rec, chip) {
+/** A stretch of the person's, from what they typed after the +: no call is needed to make it, since it stands at the
+ *  original until they step it. */
+export function stretchChip(rec, words) {
+  const ends = endsOf(words)
+  if (!ends) return null
+  const used = new Set(chipsOf(rec).map(c => c.id))
+  let id = `x-${slug(`${ends.from === 'as written' ? '' : ends.from + '-'}${ends.to}`) || 'stretch'}`.slice(0, 24)
+  for (let i = 2; used.has(id); i++) id = `${id.slice(0, 20)}-${i}`
+  return { id, kind: 'stretch', from: ends.from, to: ends.to }
+}
+
+/** The record's squeeze with a stretch added (the oldest of more than three goes). */
+export function withStretch(rec, chip) {
   const s = sq(rec)
   const own = [...(Array.isArray(s.own) ? s.own : []).filter(c => c.id !== chip.id), chip]
   const gone = own.length > MAX_OWN ? own.shift() : null
@@ -165,24 +195,25 @@ export function lengthTarget(level, words) {
 }
 
 /** One chip as the request names it. */
-function chipLine(c, newOwn, words = 0) {
-  if (newOwn && c.id === newOwn.id) return null
+function chipLine(c, words = 0) {
   const levels = c.levels.join(' · ')
   if (c.id === 'length' && words) return `- ${c.name}: ${c.levels[c.level]}, ${lengthTarget(c.level, words)} (levels ${levels}; the original is at full, ${words} words)`
-  if (c.kind === 'own') return `- ${c.name}: ${c.levels[c.level]} (the person's own chip, "${c.words}"; levels ${levels}; "${c.levels[0]}" changes nothing)`
+  if (c.kind === 'stretch') {
+    const where = c.level === 0 ? `0 of ${STRETCH_STEPS}, as the original` : c.level === STRETCH_STEPS ? `${STRETCH_STEPS} of ${STRETCH_STEPS}, all the way to "${c.to}"` : `${c.level} of ${STRETCH_STEPS} steps toward "${c.to}"`
+    return `- A stretch the person made, from "${c.from}" to "${c.to}": ${where} (the original stands at "${c.from}", step 0)`
+  }
   // where nobody has said where the original stands, a chip the person left alone keeps the original as it is
   if (!c.known && c.level === c.level0) return `- ${c.name}: as the original (levels ${levels})`
   return `- ${c.name}: ${c.levels[c.level]} (levels ${levels}; the original is at ${c.known ? c.levels[c.level0] : 'a level not yet known'})`
 }
 
 /**
- * The $.model.complete request that writes the message at its chips' levels. `system` is prompt.md's text. With
- * `newOwn` (a chip the person just typed), the call also gives that chip its levels and picks one.
+ * The $.model.complete request that writes the message at its chips' levels. `system` is prompt.md's text.
  * The fixed text goes first and is marked for the prompt cache: prompt.md, then the question and the original, so a
  * second change of the same message reads them from the cache.
  */
-/** @param {any} rec @param {{system?: string, question?: string, chips?: any[], newOwn?: any, model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
-export function request(rec, { system, question = '', chips = chipsOf(rec), newOwn = null, model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
+/** @param {any} rec @param {{system?: string, question?: string, chips?: any[], model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
+export function request(rec, { system, question = '', chips = chipsOf(rec), model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
   const head = [
     question ? `The person asked: ${question.trim().slice(0, 2000)}` : 'The person\'s question is not known.',
     '',
@@ -192,10 +223,8 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), newO
     '</original>',
   ].join('\n')
   const words = wordsOf(rec?.text)
-  const lines = chips.map(c => chipLine(c, newOwn, words)).filter(Boolean)
-  const tail = ['', 'The chips, each at the level to write now:', ...lines]
-  if (newOwn) tail.push('', `The person added a chip in their own words: "${newOwn.words}". Give it its levels, pick the level their words ask for, and write the message at it, with the other chips as set.`)
-  tail.push('', 'Write the message at these levels.')
+  const lines = chips.map(c => chipLine(c, words)).filter(Boolean)
+  const tail = ['', 'The chips, each at the level to write now:', ...lines, '', 'Write the message at these levels.']
   return {
     model, effort, maxTokens, timeoutMs,
     system: [{ text: String(system || ''), cache: true }],
@@ -203,33 +232,12 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), newO
   }
 }
 
-/** A level's name as a tile shows it: at most 20 characters, cut after a whole word. */
-function shortName(x) {
-  const t = str(x, 80)
-  if (t.length <= 20) return t
-  const cut = t.slice(0, 21).replace(/\s+\S*$/, '')
-  return cut || t.slice(0, 20)
-}
-
-/** The reply: the text in <text> tags, and a new chip's levels and pick when it gave them. */
+/** The reply: the text in <text> tags, or the whole reply when it gave none (a code fence around it dropped). */
 export function readReply(raw) {
   const s = String(raw || '')
   const t = /<text>\s*\n?([\s\S]*?)\n?\s*<\/text>/i.exec(s)
-  let text = t ? t[1] : s.replace(/<chip\b[^>]*\/?>/gi, '')
-  text = text.replace(/^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i, '$1').trim()
-  let chip = null
-  const c = /<chip\b([^>]*)\/?>/i.exec(s)
-  if (c) {
-    const attr = name => (new RegExp(`${name}\\s*=\\s*"([^"]*)"`, 'i').exec(c[1]) || [])[1] || ''
-    const levels = attr('levels').split(/\s*[|·]\s*/).map(x => shortName(x)).filter(Boolean).slice(0, 4)
-    if (levels.length >= 2) {
-      const pick = attr('pick').trim().toLowerCase()
-      let level = levels.findIndex(l => l.toLowerCase() === pick)
-      if (level < 0) level = Number.isInteger(Number(pick)) && Number(pick) > 0 && Number(pick) < levels.length ? Number(pick) : levels.length - 1
-      chip = { levels, level: Math.max(1, level) }
-    }
-  }
-  return { text, chip }
+  const text = (t ? t[1] : s).replace(/^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i, '$1').trim()
+  return { text }
 }
 
 const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
@@ -254,21 +262,58 @@ export function checkRewrite(original, text) {
   return { text: out, problems }
 }
 
+// ------------------------------------------------------------------------------------------------ the text writing in
+
+/**
+ * The first part of a text as it writes itself in from the top: at least `n` characters, cut where the markdown
+ * still reads whole. The cut ends a word, never falls inside a link, inline code or bold, and takes a table's row or
+ * a code fence whole. `n` past the end gives the whole text.
+ */
+export function revealCut(text, n) {
+  const s = String(text || '')
+  if (n >= s.length) return s
+  let i = Math.max(0, Math.floor(n))
+  // to the end of the word
+  while (i < s.length && !/\s/.test(s[i])) i++
+  const line0 = s.lastIndexOf('\n', i - 1) + 1
+  const lineEnd = (k) => { const e = s.indexOf('\n', k); return e < 0 ? s.length : e }
+  // a table's row, whole
+  if (/^\s*\|/.test(s.slice(line0, lineEnd(line0)))) i = Math.max(i, lineEnd(line0))
+  // a code fence, whole
+  const fences = [...s.slice(0, i).matchAll(/^\s*```/gm)].length
+  if (fences % 2) { const close = s.indexOf('```', i); i = close < 0 ? s.length : lineEnd(close) }
+  // a link, inline code or bold left open on this line: on to where it closes
+  for (let guard = 0; guard < 8 && i < s.length; guard++) {
+    const line = s.slice(s.lastIndexOf('\n', i - 1) + 1, i)
+    const ticks = (line.match(/`/g) || []).length
+    const stars = (line.match(/\*\*/g) || []).length
+    const openLink = /\[[^\]\n]*$|\]\([^)\n]*$/.test(line)
+    if (ticks % 2) { const e = s.indexOf('`', i); i = e < 0 ? s.length : e + 1; continue }
+    if (stars % 2) { const e = s.indexOf('**', i); i = e < 0 ? s.length : e + 2; continue }
+    if (openLink) { const e = s.indexOf(')', i); i = e < 0 ? s.length : e + 1; continue }
+    break
+  }
+  return s.slice(0, Math.min(s.length, i)).replace(/\s+$/, '')
+}
+
+/** How many characters to show at each tick of a text writing itself in: about 400 a second, the pace a model's
+ *  stream reads at, and never more than about 2.5 s for the whole text. */
+export function revealStep(total, tickMs = 50) {
+  const perSec = Math.max(400, total / 2.5)
+  return Math.max(8, Math.round(perSec * tickMs / 1000))
+}
+
 // ------------------------------------------------------------------------------------------------ the record
 
 /**
- * The record after a rewrite came back: `shown` is the new text, the squeeze state is at `at`, a chip of the person's
- * gets the levels the call gave it, and the version is kept. `remark` (shell/message.js) places the marks again; it is
- * passed in so this file needs no import. `made` is the call's {ms, model, usage}.
+ * The record after a rewrite came back: `shown` is the new text, the squeeze state is at `at`, and the version is kept.
+ * `remark` (shell/message.js) places the marks again; it is passed in so this file needs no import. `made` is the
+ * call's {ms, model, usage}.
  */
-/** @param {any} rec @param {{text: string, at: Record<string, number>, newOwn?: any, chip?: any, made?: any, problems?: string[]}} change @param {(r: any) => any} remark */
-export function applyRewrite(rec, { text, at, newOwn = null, chip = null, made = null, problems = [] }, remark) {
+/** @param {any} rec @param {{text: string, at: Record<string, number>, made?: any, problems?: string[]}} change @param {(r: any) => any} remark */
+export function applyRewrite(rec, { text, at, made = null, problems = [] }, remark) {
   const s0 = sq(rec)
-  let s = { ...s0, at: { ...at }, versions: { ...(s0.versions || {}) }, orig: s0.orig || { marks: (rec.shown == null ? rec.marks : []) || [] } }
-  if (newOwn) {
-    const own = (s.own || []).map(c => (c.id === newOwn.id ? { ...c, levels: chip ? chip.levels : ['off', 'on'] } : c))
-    s = { ...s, own, at: { ...s.at, [newOwn.id]: chip ? chip.level : 1 } }
-  }
+  const s = { ...s0, at: { ...at }, versions: { ...(s0.versions || {}) }, orig: s0.orig || { marks: (rec.shown == null ? rec.marks : []) || [] } }
   const probe = { ...rec, squeeze: s }
   const chips = chipsOf(probe)
   const key = keyOf(chips)

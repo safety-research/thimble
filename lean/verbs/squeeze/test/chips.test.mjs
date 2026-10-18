@@ -1,12 +1,12 @@
-// The squeeze chips' pure parts (verbs/squeeze/chips.mjs): chip state, a chip of the person's combined with the fixed
-// ones in one request, the reply read and held to the original, the marks placed again after a rewrite, and the
-// original restored. node --test lean/verbs/squeeze/test
+// The squeeze chips' pure parts (verbs/squeeze/chips.mjs): chip state with its levels, a stretch of the person's
+// combined with the fixed chips in one request, the reply read and held to the original, the marks placed again after a
+// rewrite, the text cut as it writes itself in, and the original restored. node --test lean/verbs/squeeze/test
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { newRecord, remark, verbsOf, withObserver } from '../../../shell/message.js'
-import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, fromVersions, glyph, isLong, isOriginal, keyOf, noteFor, noteOf, ownChip, readReply, request, restore, rowsOf, stepAt, withOwn } from '../chips.mjs'
+import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, glyph, isLong, isOriginal, keyOf, noteFor, noteOf, readReply, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, withStretch } from '../chips.mjs'
 import { parseWords, run } from '../run.mjs'
 
 // a made-up report, as a long reply takes it
@@ -26,70 +26,90 @@ function record() {
   return withObserver(rec, { verbs: {}, glosses: { g1: { term: 'fixture' }, g2: { term: 'coupon test' } } })
 }
 
-test('every message has the same chips: Length, Report ↔ Interpret, Familiarity; the observer only says where the original stands', () => {
+test('every message has the same chips: Length (4), Report ↔ Interpret (3), Familiarity (5); the observer only says where the original stands', () => {
   const rec = record()
   const chips = chipsOf(rec)
   assert.deepEqual(chips.map(c => c.name), ['Length', 'Report ↔ Interpret', 'Familiarity'])
-  assert.deepEqual(chips.map(c => c.levels[c.level]), ['full', 'both', 'familiar'])
+  assert.deepEqual(chips.map(c => c.levels), [['one line', 'short', 'medium', 'full'], ['report', 'balanced', 'interpret'], ['new to the field', 'beginner', 'working', 'fluent', 'expert']])
+  assert.deepEqual(chips.map(c => c.levels[c.level]), ['full', 'balanced', 'working'])
   assert.deepEqual(chips.map(c => c.known), [true, false, false])
   assert.ok(isOriginal(chips))
   assert.equal(keyOf(chips), '')
-  // the observer's levels, by name or index; a proposed new dimension is ignored
-  const seen = withObserver(rec, { verbs: { s: { at: { interpret: 'report', familiarity: 2 }, chips: [{ name: 'Story', levels: ['hidden', 'full'] }] } }, glosses: rec.glosses })
+  // the observer's levels, by name, by index, or by an older name; a proposed new dimension is ignored
+  const seen = withObserver(rec, { verbs: { s: { at: { interpret: 'report', familiarity: 4 }, chips: [{ name: 'Story', levels: ['hidden', 'full'] }] } }, glosses: rec.glosses })
   const c2 = chipsOf(seen)
   assert.deepEqual(c2.map(c => c.name), ['Length', 'Report ↔ Interpret', 'Familiarity'])
   assert.deepEqual(c2.map(c => c.levels[c.level]), ['full', 'report', 'expert'])
   assert.ok(c2.every(c => c.known))
   assert.equal(CHIPS.length, 3)
+  const older = withObserver(rec, { verbs: { s: { at: { interpret: 'both', familiarity: 'familiar' } } }, glosses: rec.glosses })
+  assert.deepEqual(chipsOf(older).map(c => c.levels[c.level]), ['full', 'balanced', 'working'])
   // the observer's s may carry only where the answer stands: the record keeps it, unlit
-  const kept = verbsOf({ s: { at: { interpret: 'Interpret', familiarity: 'new' } } })
-  assert.deepEqual(kept.s, { lit: false, note: '', at: { interpret: 'interpret', familiarity: 'new' }, chips: [] })
-  assert.deepEqual(chipsOf({ ...rec, verbs: kept }).map(c => c.levels[c.level]), ['full', 'interpret', 'new'])
+  const kept = verbsOf({ s: { at: { interpret: 'Interpret', familiarity: 'new to the field' } } })
+  assert.deepEqual(kept.s, { lit: false, note: '', at: { interpret: 'interpret', familiarity: 'new to the field' }, chips: [] })
+  assert.deepEqual(chipsOf({ ...rec, verbs: kept }).map(c => c.levels[c.level]), ['full', 'interpret', 'new to the field'])
 })
 
-test('a chip steps one level at a time and stops at its ends; the dots show where it is', () => {
+test('a chip steps one level at a time and stops at its ends; its dots show one ● at its place', () => {
   const rec = record()
   assert.deepEqual(stepAt(rec, 'length', -1), { length: 2 })
   assert.equal(stepAt(rec, 'length', 1), null)
   const at = { length: 0 }
   assert.equal(stepAt({ ...rec, squeeze: { at } }, 'length', -1), null)
+  assert.deepEqual(stepAt(rec, 'familiarity', 1), { familiarity: 3 })
   const [len, interp, fam] = chipsOf(rec)
-  assert.equal(glyph(len, 1), '●●○○')
+  assert.equal(glyph(len, 1), '○●○○')
+  assert.equal(glyph(len, 3), '○○○●')
   assert.equal(glyph(interp, 0), '●○○')
   assert.equal(glyph(interp, 2), '○○●')
-  assert.equal(glyph(fam, 2), '●●●')
+  assert.equal(glyph(fam, 0), '●○○○○')
+  assert.equal(glyph(fam, 4), '○○○○●')
   // the version's key names only the levels that differ from the original
   assert.equal(keyOf(chipsOf({ ...rec, squeeze: { at: { length: ARRIVE, interpret: 1 } } })), 'length=1')
 })
 
-test("the person's own chip combines with the fixed ones: one request carries every chip's level, and asks for the new chip's levels", () => {
+test('a stretch is two ends the person types: it stands at the original, its first end, and each of 3 steps moves toward the second', () => {
+  assert.deepEqual(endsOf('+engineer and manager'), { from: 'engineer', to: 'manager' })
+  assert.deepEqual(endsOf('+ between novice and expert'), { from: 'novice', to: 'expert' })
+  assert.deepEqual(endsOf('+engineer ↔ manager'), { from: 'engineer', to: 'manager' })
+  assert.deepEqual(endsOf('+ data scientist / product lead'), { from: 'data scientist', to: 'product lead' })
+  assert.deepEqual(endsOf('+ for my manager'), { from: 'as written', to: 'for my manager' })
+  assert.equal(endsOf('+'), null)
   let rec = record()
   rec = { ...rec, squeeze: { at: { length: 1, familiarity: 0 } } }
-  const own = ownChip(rec, '+ for my manager')
-  assert.equal(own.name, 'For my manager')
-  assert.equal(own.words, 'for my manager')
-  rec = { ...rec, squeeze: withOwn(rec, own) }
+  const x = stretchChip(rec, '+engineer and manager')
+  assert.deepEqual(x, { id: 'x-engineer-manager', kind: 'stretch', from: 'engineer', to: 'manager' })
+  rec = { ...rec, squeeze: withStretch(rec, x) }
   const chips = chipsOf(rec)
-  assert.deepEqual(chips.map(c => c.name), ['Length', 'Report ↔ Interpret', 'Familiarity', 'For my manager'])
-  const req = request(rec, { system: PROMPT, question: 'Why does it fail?', newOwn: own })
+  assert.deepEqual(chips.map(c => c.name), ['Length', 'Report ↔ Interpret', 'Familiarity', 'engineer ↔ manager'])
+  const st = chips[3]
+  assert.equal(st.levels.length, 4)
+  assert.equal(st.level, 0)
+  assert.equal(glyph(st, st.level), '●○○○')
+  // a new stretch changes nothing yet: the key is the other chips' alone
+  assert.equal(keyOf(chips), 'length=1&familiarity=0')
+  // one request carries every chip's level, the stretch by its two ends and its step
+  rec = { ...rec, squeeze: { ...rec.squeeze, at: { ...rec.squeeze.at, [x.id]: 2 } } }
+  const req = request(rec, { system: PROMPT, question: 'Why does it fail?' })
   const tail = req.prompt[1].text
   assert.match(tail, /- Length: short, at most \d+ words \(levels one line · short · medium · full; the original is at full, \d+ words\)/)
-  assert.match(tail, /- Familiarity: new /)
+  assert.match(tail, /- Familiarity: new to the field /)
   assert.match(tail, /- Report ↔ Interpret: as the original/)
-  assert.match(tail, /The person added a chip in their own words: "for my manager"/)
-  assert.ok(!/- For my manager:/.test(tail), 'the chip being sized is named once, as new')
+  assert.match(tail, /- A stretch the person made, from "engineer" to "manager": 2 of 3 steps toward "manager" \(the original stands at "engineer", step 0\)/)
+  const end = request({ ...rec, squeeze: { ...rec.squeeze, at: { [x.id]: 3 } } }, { system: PROMPT })
+  assert.match(end.prompt[1].text, /3 of 3, all the way to "manager"/)
   // the fixed text is first and marked for the cache: the prompt, then the question and the original
   assert.equal(req.system[0].cache, true)
   assert.equal(req.prompt[0].cache, true)
   assert.match(req.prompt[0].text, /The person asked: Why does it fail\?/)
   assert.ok(req.prompt[0].text.includes(TEXT))
-  // once sized, a later change names it with its level beside the others
-  const reply = readReply('<chip levels="off | plain | status" pick="status"/>\n<text>\n**Status:** fixed.\n</text>')
-  assert.deepEqual(reply.chip, { levels: ['off', 'plain', 'status'], level: 2 })
-  const after = applyRewrite(rec, { text: reply.text, at: rec.squeeze.at, newOwn: own, chip: reply.chip }, remark)
-  const later = request({ ...after, squeeze: { ...after.squeeze, at: { ...after.squeeze.at, length: 0 } } }, { system: PROMPT })
-  assert.match(later.prompt[1].text, /- For my manager: status \(the person's own chip, "for my manager"; levels off · plain · status; "off" changes nothing\)/)
-  assert.match(later.prompt[1].text, /- Length: one line/)
+  // a version with the stretch is kept by its levels; a fourth stretch pushes the oldest out
+  const after = applyRewrite(rec, { text: '**Status:** fixed.', at: rec.squeeze.at }, remark)
+  assert.equal(after.squeeze.versions['length=1&familiarity=0&x-engineer-manager=2'], '**Status:** fixed.')
+  let many = after
+  for (const w of ['+a and b', '+c and d', '+e and f']) many = { ...many, squeeze: withStretch(many, stretchChip(many, w)) }
+  assert.deepEqual(many.squeeze.own.map(c => c.id), ['x-a-b', 'x-c-d', 'x-e-f'])
+  assert.ok(!('x-engineer-manager' in many.squeeze.at))
 })
 
 test('a rewrite is held to the original: a ref it never cited loses its link, and a number it never states is named', () => {
@@ -147,16 +167,37 @@ test('a message taller than half the screen arrives squeezed; the rows count as 
 })
 
 test('readReply takes the text from its tags, or the whole reply when it gave none', () => {
-  assert.deepEqual(readReply('<text>\nA.\n</text>'), { text: 'A.', chip: null })
-  assert.deepEqual(readReply('A plain reply.'), { text: 'A plain reply.', chip: null })
-  assert.equal(readReply('<chip levels="off | on" pick="on"/><text>B</text>').chip.level, 1)
-  // a long level name is cut after a whole word, so a tile never shows half a word
-  assert.deepEqual(readReply('<chip levels="off | plain outcome | outcome and decision for you" pick="plain outcome"/><text>C</text>').chip, { levels: ['off', 'plain outcome', 'outcome and decision'], level: 1 })
+  assert.deepEqual(readReply('<text>\nA.\n</text>'), { text: 'A.' })
+  assert.deepEqual(readReply('A plain reply.'), { text: 'A plain reply.' })
+  assert.deepEqual(readReply('```markdown\nB.\n```'), { text: 'B.' })
+})
+
+test('the new text writes itself in from the top: each cut ends a word and never splits a link, code, bold or a table row', () => {
+  const t = '**Status:** fixed. The [cart fixture](q1#x@n) is `scope="module"`, shared.\n\n| run | steps |\n|---|---|\n| r17 | 2,143 |'
+  assert.equal(revealCut(t, 0), '**Status:**')
+  assert.equal(revealCut(t, 3), '**Status:**')
+  assert.equal(revealCut(t, 14), '**Status:** fixed.')
+  assert.equal(revealCut(t, 26), '**Status:** fixed. The [cart fixture](q1#x@n)')
+  assert.equal(revealCut(t, 52), '**Status:** fixed. The [cart fixture](q1#x@n) is `scope="module"`,')
+  assert.ok(revealCut(t, 80).endsWith('| run | steps |'))
+  assert.equal(revealCut(t, 1000), t)
+  // every cut is a prefix of the text, and they grow
+  let last = ''
+  for (let n = 0; n <= t.length; n += 7) {
+    const c = revealCut(t, n)
+    assert.ok(t.startsWith(c))
+    assert.ok(c.length >= last.length)
+    last = c
+  }
+  // the pace: about 400 characters a second, never more than about 2.5 s for the whole
+  assert.equal(revealStep(300, 50), 20)
+  assert.equal(revealStep(5000, 50), 100)
 })
 
 test('run.mjs: the same rewrite from words, through ctx.model, for /verb and tools that hold a record', async () => {
   const rec = record()
-  assert.deepEqual(parseWords(rec, 'length=short familiarity=new').at, { length: 1, familiarity: 0 })
+  assert.deepEqual(parseWords(rec, 'length=short familiarity=new to the field').at, { length: 1, familiarity: 0 })
+  assert.deepEqual(parseWords(rec, '+engineer and manager'), { at: {}, own: '+engineer and manager' })
   assert.deepEqual(parseWords(rec, '').at, { length: ARRIVE })
   assert.throws(() => parseWords(rec, 'story=full'), /no chip "story"/)
   const asked = []
@@ -168,4 +209,8 @@ test('run.mjs: the same rewrite from words, through ctx.model, for /verb and too
   const back = await run({ message: r.message, args: 'original', model })
   assert.equal(back.message.shown, null)
   assert.equal(asked.length, 1)
+  // a stretch from words: kept on the record, standing at the original, with no call
+  const x = await run({ message: back.message, args: '+engineer and manager', model })
+  assert.equal(asked.length, 1)
+  assert.deepEqual(x.message.squeeze.own, [{ id: 'x-engineer-manager', kind: 'stretch', from: 'engineer', to: 'manager' }])
 })
