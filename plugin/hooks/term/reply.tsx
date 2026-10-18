@@ -40,7 +40,7 @@ import { linesEl } from './lines'
 import type { Block, Citation, Run } from './lib'
 import { COLORS, FLAG, labelHex, paintLines, passageTint } from './paint'
 import { examplePassages, labelLinkStale, labelsOf, turnWords } from './model'
-import { loadCards, queueCitations, rt } from './term'
+import { queueCitations, rt } from './term'
 import type { AnswerComment } from './contracts'
 import { openInBrowser } from './offramp'
 import { featureOn } from './settings'
@@ -733,8 +733,9 @@ export async function cardBlock(cx: Ctx, e: ResolveInput, id: string, w: number,
   const arrow = fullscreen && !opts.pane ? <Button key={`open-${key}-${id}`} label=" ↗ " plain onPress={() => openInBrowser(cx, `card:${id}`)} /> : null
   const tc: TermCard | undefined = await cx.card(id)
   if (!tc) {
-    // a card a reply embeds that no turn of this session made: read it now
-    if (!rt.shown.has(id)) void loadCards(cx, [id])
+    // a card a reply embeds that no turn of this session made: the card lane reads it within a moment (a drawing starts
+    // no read of its own: Claude Code cuts it when it abandons the drawing, bug hunt L7)
+    if (!rt.shown.has(id)) rt.unread.add(id)
     return <Text dimColor>{'◌ reading the card'}</Text>
   }
   if (!tc.data) {
