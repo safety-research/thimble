@@ -32,7 +32,6 @@ const tick = { plugin: 'lean-squeeze-demo', key: 'tick' } as const
 const replies = new Map<string, Entry>() // by the reply's text
 const drawn = new Map<string, Drawn>() // by `${id}@${v}${show}:${w}`
 const shown = new Map<string, { object: Obj; region?: string; moved?: boolean }>() // what a /squeeze row draws, by its marker
-let last = '' // the key of the last long reply
 let question = ''
 let theme: 'dark' | 'light' = 'dark'
 let verb: Any = {}
@@ -83,14 +82,12 @@ async function reload($: Any) {
   try {
     const dir = `${home}/lean/squeeze/replies`
     if (!(await $.fs.exists(dir))) return
-    let newest = 0
     for (const f of await $.fs.list(dir)) {
       if (!String(f.name).endsWith('.json')) continue
       const r = JSON.parse(String(await $.fs.read(`${dir}/${f.name}`)))
       const object = JSON.parse(String(await $.fs.read(`${home}/lean/squeeze/objects/${r.object}.json`)))
       if (object.data) delete object.data.focus
       replies.set(r.key, { key: r.key, text: '', object })
-      if (r.at > newest) { newest = r.at; last = r.key }
     }
   } catch {
     // nothing kept, or a copy that does not read: those replies show as written
@@ -131,7 +128,7 @@ function hints(o: Obj): string {
   const parts: string[] = []
   if (at > 0) parts.push('shorter')
   if (at < first.levels.length - 1) parts.push('fuller')
-  for (const x of d.dims.slice(1)) parts.push(`${x.id} ▸ ${x.levels[((v.at[x.id] ?? 0) + 1) % x.levels.length]}`)
+  for (const x of d.dims.slice(1)) parts.push(`${x.name} ▸ ${x.levels[((v.at[x.id] ?? 0) + 1) % x.levels.length]}`)
   if (v.lines.length > 1) parts.push('why 2')
   parts.push(d.show === 'original' ? 'back' : 'original', 'full', 'open')
   return '/squeeze  ' + parts.join(' · ')
@@ -185,6 +182,7 @@ export const register: Register = on => {
     try { skill = String(await $.fs.read(`${verbDir}/SKILL.md`)) } catch { skill = '' }
     home = ((await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`).replace(/\/+$/, '')
     await reload($)
+    $.ui.status(undefined) // a squeeze an earlier load of this module left running is gone with it
     return next(e)
   })
 
@@ -205,7 +203,6 @@ export const register: Register = on => {
       if (replies.has(key)) return r
       const entry: Entry = { key, text, question, turn: e.turnId, pending: true }
       replies.set(key, entry)
-      last = key
       $.ui.status('squeezing the reply…')
       $.clock.after(1, () => { void squeezeReply($, entry) })
     } catch {
@@ -245,17 +242,18 @@ export const register: Register = on => {
         const r = await run(ctxFor($, { id: 'session', title: 'this session', units, question: 'What happened in this session, turn by turn?' }))
         return r.object ? answer(r.object as Obj, undefined, r.text, r.note) : { text: r.text || 'Nothing came back.' }
       }
-      let entry = replies.get(last)
-      if (!entry) {
-        // no reply squeezed in this run of the module: the conversation's last long reply
-        const msgs = await $.session.messages()
-        for (let i = msgs.length - 1; i >= 0 && !entry; i--) {
-          const m = msgs[i]
-          if (m.role !== 'assistant' || !isLong(m.text, verb.auto || {})) continue
+      // the conversation's last long reply, squeezed already or not
+      let entry: Entry | undefined
+      const msgs = await $.session.messages()
+      for (let i = msgs.length - 1; i >= 0 && !entry; i--) {
+        const m = msgs[i]
+        if (m.role !== 'assistant' || !isLong(m.text, verb.auto || {})) continue
+        const key = keyOf(m.text)
+        entry = replies.get(key)
+        if (!entry) {
           const asked = msgs.slice(0, i).reverse().find((x: Any) => x.role === 'user' && x.text && !(x.toolResults || []).length)
-          entry = { key: keyOf(m.text), text: m.text, question: asked?.text }
-          replies.set(entry.key, entry)
-          last = entry.key
+          entry = { key, text: m.text, question: asked?.text }
+          replies.set(key, entry)
         }
       }
       if (!entry) return { text: 'There is no long reply to squeeze yet.' }
