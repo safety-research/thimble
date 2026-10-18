@@ -368,7 +368,7 @@ class _Records:
         deadline = time.time() + 3.0
         for i, k in enumerate(places):
             held = reg["at"].get(k) or set()
-            own = [s for s in held if not many or seen[s] == 1] or sorted(held)
+            own = sorted(s for s in held if not many or seen[s] == 1) or sorted(held)
             if time.time() > deadline:
                 return None
             keep = _narrowest(own, self.refs)
@@ -1164,10 +1164,11 @@ def _count(rowsets: list[str]) -> int:
         return 0
 
 
-def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = False) -> str | None:
+def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = False, col: str | None = None) -> str | None:
     """One plain line for the person: why a value of the query has no source rows of its own, or why the rows it opens
-    are all the rows the query read. None when a value's rows are its own. `i` is the output row the value is in;
-    `whole` says the query as a whole is cited, which opens every row it read."""
+    are all the rows the query read, or all the rows its loop held for its output row. None when a value's rows are its
+    own. `i` is the output row the value is in, `col` its column; `whole` says the query as a whole is cited, which
+    opens every row it read."""
     if q.get("error"):
         return None
     qid = q.get("id") or "the query"
@@ -1180,6 +1181,11 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
             sums = [u.get("query") for u in q.get("uses") or [] if (get(st, u.get("query") or "") or {}).get("lineage") == "summary"]
             if empty and sums:
                 return f"{qid} builds on {', '.join(sums)}, a summary whose values keep no rows of their own"
+            if (q.get("lineage") == "loop" and col is not None and i is not None and i < len(rows) and rows[i]
+                    and value_rows(q, i, col) is rows[i]):
+                return (f"{qid} made this output row in a loop from these {_count(rows[i]):,} rows "
+                        f"({_files_text(rows[i])}), the frames it loaded and filtered for it, and it does not keep "
+                        "which of them the value used")
             return None
         mine = rows[i] if i is not None and i < len(rows) else rows[0]
         return (f"{qid} computed this value over all {_count(mine):,} rows it read ({_files_text(mine)}), "

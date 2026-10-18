@@ -235,7 +235,15 @@ def test_records_appended_in_a_loop_keep_each_iterations_rows(runs_root: Path) -
     # any other value opens what its own iteration loaded and filtered, and says so; never another run's rows
     h = LIN.resolve(st, f"{q['id']}#run=beta@hours")
     assert set(h["rows"]) == {"runs/beta/tickets.jsonl#L2", "runs/beta/steps.jsonl#L1-3"}
-    assert any("what " + q["id"] + "'s loop held when it made this output row" in n for n in h["notes"])
+    assert h["why"] == (f"{q['id']} made this output row in a loop from these 4 rows (runs/beta/steps.jsonl, "
+                        "runs/beta/tickets.jsonl), the frames it loaded and filtered for it, and it does not keep which of them the value used")
+    # a card bound to the table: its values open the same rows
+    from kernel import objects as O
+
+    obj = O.save(st, "runs", {"title": "Closed per run", "data": {"runs": q["id"]}})
+    c = LIN.resolve(st, f"obj:{obj['id']}#/runs/0/closed")
+    assert c["rows"] == ["runs/alpha/tickets.jsonl#L1,3-4"] and "why" not in c
+    assert LIN.resolve(st, f"obj:{obj['id']}#/runs/1/hours")["why"].startswith(f"{q['id']} made this output row in a loop")
     # a later query that uses the table keeps each row's rows
     u = Q.run(st, "on it", f'use("{q["id"]}").sort_values("hours")')
     assert u["lineage"] == "exact" and LIN.resolve(st, f"{u['id']}#run=beta@hours")["count"] == 4

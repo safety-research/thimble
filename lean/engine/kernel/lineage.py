@@ -398,25 +398,19 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
         if not frag and q.get("read"):
             return list(q["read"])
         return [x["path"] for x in Q.all_inputs(st, q)]
-    why = Q.why_of(st, q, i=idx[0] if frag and len(idx) == 1 else None)
+    why = Q.why_of(st, q, i=idx[0] if frag and len(idx) == 1 else None, col=vcol)
     if why:
         step["why"] = why
     pick = idx if frag else range(len(q["rows"]))
     rowsets: list[str] = []
-    own = False
     for i in pick:
         if i < len(q["rows"]):
-            got = Q.value_rows(q, i, vcol) or []
-            own = own or got is not q["rows"][i]
-            rowsets.extend(got)
+            rowsets.extend(Q.value_rows(q, i, vcol) or [])
     rowsets = _merge(rowsets)
     mode = q.get("lineage")
     n = R.count(rowsets)
     v = step.get("value")
-    if mode == "loop" and not own:
-        notes.append(f"these {n:,} rows are what {q['id']}'s loop held when it made this output row (the frames it loaded "
-                     "and filtered for it); which of them this value used is not kept")
-    elif mode == "superset":
+    if mode == "superset":
         notes.append(f"these {n:,} rows share the output row's key, but a count column of {q['id']} disagrees: they hold "
                      "more rows than the value counts")
     elif mode == "key":
@@ -472,6 +466,18 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
                     notes.append(f"{', '.join(stale)} changed since {q['id']} ran")
                 if q.get("lineage") in ("superset", "key"):
                     notes.append(f"{q['id']}'s rows were found by key ({q['lineage']}), not kept exactly")
+                if q.get("lineage") == "loop" and isinstance(holder.get("_ref"), str):
+                    # a value of a row a loop made: its own rows when the query kept them (a count of one frame), else
+                    # the row's, which says why
+                    col = ptr.rsplit("/", 1)[-1].replace("~1", "/").replace("~0", "~")
+                    rp = R.parse(holder["_ref"]) if holder["_ref"].startswith(q["id"] + "#") else {}
+                    frag = {k: rp[k] for k in ("row", "keys") if k in rp}
+                    idx = Q.find_rows(q, frag) if frag else []
+                    if len(idx) == 1 and col in holder:
+                        rowsets = list(Q.value_rows(q, idx[0], col) or rowsets)
+                        why = Q.why_of(st, q, i=idx[0], col=col)
+                        if why:
+                            chain[-1]["why"] = why
                 if q.get("why_rows"):
                     # a value of a summary: the card's value rests on all the rows the query read
                     bp = R.parse(b["ref"])
