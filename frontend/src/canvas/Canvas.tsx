@@ -410,7 +410,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const cells = board.cells.map((c) => (c.id === sizing.id ? { ...c, w: sizing.w, h: sizing.h, pos: sizing.pos } : c))
     return { ...board, cells, cellById: new Map(cells.map((c) => [c.id, c] as const)) }
   }, [board, sizing])
-  const lay = useMemo(() => (shownBoard ? layoutBoard(shownBoard, open, heights) : null), [shownBoard, open, heights])
+  // the cards with comments beside them while their check is on (CommentLayer), whatever the filters keep: the column
+  // of their outermost frame keeps room for the comments
+  const notedCards = useMemo(() => new Set(shownCanvasComments(notes.comments, checks.on, () => true, null).map((c) => c.card)), [notes.comments, checks.on])
+  const lay = useMemo(() => (shownBoard ? layoutBoard(shownBoard, open, heights, notedCards) : null), [shownBoard, open, heights, notedCards])
   // a plan card main just added, such as the next phase's plan after a finished one, opens the frames it is in, so it
   // shows below the cards before it rather than under the first card of a collapsed frame
   const drawnCells = useRef<Set<string> | null>(null)
@@ -496,8 +499,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   }, [ws, workFrame])
 
   // the latest of everything, for the window listeners a press installs
-  const live = useRef({ data, board, lay, view, sel, open, heights })
-  live.current = { data, board, lay, view, sel, open, heights }
+  const live = useRef({ data, board, lay, view, sel, open, heights, notedCards })
+  live.current = { data, board, lay, view, sel, open, heights, notedCards }
 
   // the board does not move under the analyst: when the layout changes while they move nothing (a card above the view
   // grew or shrank as its chart, takeaway or status changed, or a card was added), the view pans by the move of the first
@@ -759,7 +762,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
 
   // a card dropped free, or beside a sibling, stands where it covers no other card (layout.ts placeFree, placeBeside)
   const dropCard = (d: Drag) => {
-    const { data: d0, board: b, lay: l, open: o, heights: hs } = live.current
+    const { data: d0, board: b, lay: l, open: o, heights: hs, notedCards: ns } = live.current
     if (!d0 || !b || !l) return
     const me = b.cellById.get(d.id)
     if (!me) return
@@ -775,7 +778,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (target && frame && d.ins?.side && d.ins.ref) {
       // beside a sibling: on the right the card is placed free at the sibling's side; on the left it takes the
       // sibling's place and the sibling moves right
-      const at = placeBeside(d0, d.id, target, d.ins.ref, d.ins.side, o, hs)
+      const at = placeBeside(d0, d.id, target, d.ins.ref, d.ins.side, o, hs, ns)
       if (d.ins.side === 'R' || !at.ref) {
         const pos = at.pos
         void change((x) => moveLocal(x, [d.id], target, undefined, pos), () => canvasApi.move(ws, { cells: [d.id], group: target, pos }))
@@ -801,7 +804,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const own = l.rects.get(d.id)
     if (target && target === me.parent && !me.pos && own && contains(own, { x: d.x + own.w / 2, y: d.y + own.h / 2 })) return
     const at = frame ? { x: Math.round(d.x - frame.x), y: Math.round(d.y - frame.y) } : { x: Math.round(d.x), y: Math.round(d.y) }
-    const pos = placeFree(d0, d.id, target, at, o, hs)
+    const pos = placeFree(d0, d.id, target, at, o, hs, ns)
     void change((x) => moveLocal(x, [d.id], target, undefined, pos), () => canvasApi.move(ws, { cells: [d.id], group: target, pos }))
   }
 
