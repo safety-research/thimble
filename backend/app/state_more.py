@@ -14,6 +14,9 @@ local.py's (`thimble state` and `thimble act`), which registers them:
   thimble act coverage {session, turn, facts, cwd?}     a turn's facts (the terminal UI passes them on stdin)
   thimble act coverage-retry {}                        the index job started again (the coverage:count notice's act)
   thimble act answer-comment-resolve {comment, reopen?} a comment on an answer dismissed, or opened again
+  thimble act cite-failed {cites: [{shown, ref, why, card?}]}
+        the citations of Claude's whose place does not hold what they show, as the terminal UI's check found them: one
+        quiet `cite_failed` event for the session, which rides with its next prompt (events.QUIET_KINDS)
 
 A failure is an HTTPException or a ValueError, which local.state and local.act turn into `{error}`."""
 from __future__ import annotations
@@ -110,9 +113,46 @@ async def _act_answer_comment_resolve(c: str, payload: dict[str, Any]) -> dict[s
     return {"comment": cid, "status": got["status"]}
 
 
+CITE_FAILED = "cite_failed"  # the quiet event that tells Claude of its failed citations (prompts/main.md)
+CITES_MAX = 8  # the citations one such event names
+SHOWN_MAX = 120  # characters of a citation's shown value it keeps
+
+
+def cite_failed_text(cites: list[Any]) -> str:
+    """A `cite_failed` event's text: each citation as `"<shown>" at <ref> (card:<id>, or your answer): <why>`, on one
+    line, as a held event is read (events.held_line). '' for none."""
+    out = []
+    for x in cites[:CITES_MAX]:
+        if not isinstance(x, dict):
+            continue
+        ref = " ".join(str(x.get("ref") or "").split())
+        if not ref:
+            continue
+        shown = " ".join(str(x.get("shown") or "").split())
+        if len(shown) > SHOWN_MAX:
+            shown = shown[: SHOWN_MAX - 1].rstrip() + "…"
+        card = " ".join(str(x.get("card") or "").split())
+        why = " ".join(str(x.get("why") or "").split())
+        out.append(f"{shown + ' at ' if shown else ''}{ref} ({f'card:{card}' if card else 'your answer'})"
+                   f"{': ' + why if why else ''}")
+    return "; ".join(out)
+
+
+async def _act_cite_failed(c: str, payload: dict[str, Any]) -> dict[str, Any]:
+    from . import events  # noqa: PLC0415
+
+    cites = payload.get("cites")
+    text = cite_failed_text(cites) if isinstance(cites, list) else ""
+    if not text:
+        raise HTTPException(400, "`cites` must be a list of {shown, ref, why, card?}")
+    got = await asyncio.to_thread(events.post, c, CITE_FAILED, {"text": text}, line="")
+    return {"held": bool(got.get("held"))}
+
+
 SURFACES = {"coverage": _coverage, "label-unsure": _label_unsure, "answer-comments": _answer_comments}
 ACTS = {"coverage": _act_coverage, "coverage-retry": _act_coverage_retry,
-        "answer-comment-resolve": _act_answer_comment_resolve}
+        "answer-comment-resolve": _act_answer_comment_resolve, "cite-failed": _act_cite_failed}
 STATE_USAGE = ", coverage --session SID [--folder REL] [--match GROUP] [--summary], label-unsure [--label ID] [--n N] [--offset K] " \
               "[--counts], answer-comments [--session SID] [--status open|all]"
-ACT_USAGE = ", coverage {session, turn, facts, cwd?}, coverage-retry {}, answer-comment-resolve {comment, reopen?}"
+ACT_USAGE = ", coverage {session, turn, facts, cwd?}, coverage-retry {}, answer-comment-resolve {comment, reopen?}, " \
+            "cite-failed {cites}"

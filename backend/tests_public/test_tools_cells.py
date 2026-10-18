@@ -184,3 +184,19 @@ async def test_read_ref_of_a_card_with_long_code_or_a_long_payload_stays_under_c
                                   notebook.new_cell("custom", "analyst", "The page", payload={"html": html}))
     text = (await call("read_ref", group, ref=f"card:{custom['id']}")).text
     assert read_parts.units(text) <= read_parts.READ_UNITS and cut_at(text.split("\nhtml:\n", 1)[1], html) > 20_000
+
+
+async def test_a_takeaway_s_quote_that_its_record_does_not_hold_is_told_as_it_is_stored(group):
+    """Bug hunt L4: main cited three records that held none of the errors it quoted, and the result said only that the
+    takeaway was long, so main answered with them. A quote of a file's record that the record does not hold is named in
+    the result, before the answer; a quote the record holds is not."""
+    cid = _cid(await call("add_card", group, kind="example", question="What did agent-01 report?",
+                          refs=["agents/agent-01.jsonl#L10"]))
+    res = await call("edit_card", group, cell=cid, takeaway='Agent-01 said [["The build compiles now"|agents/agent-01.jsonl#L10]] '
+                     'and [["the kettle is cold"|agents/agent-01.jsonl#L11]].')
+    assert not res.is_error, res.text
+    told = res.text.split("takeaway noted", 1)[1]
+    assert '"the kettle is cold" at agents/agent-01.jsonl#L11' in told
+    assert "The build compiles now" not in told
+    fine = await call("edit_card", group, cell=cid, takeaway='Agent-01 said [["The build compiles now"|agents/agent-01.jsonl#L10]].')
+    assert "not in the records" not in fine.text

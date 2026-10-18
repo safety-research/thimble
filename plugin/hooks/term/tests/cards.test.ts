@@ -364,3 +364,35 @@ test("an example whose ref names only a line draws the passage its takeaway quot
   expect(text.join('\n')).not.toContain('<counter>42</counter>')
   await ui.unmount()
 })
+
+test("a failed check of a citation in a card main made is told to main once, as a note for its next reply; a fork's card's is not (bug hunt L4)", { timeoutMs: 30_000 }, async ($, on) => {
+  // thimble marked main's three quotes × and told main nothing, so main's answer kept claims none of the records held
+  const w = world(on)
+  const rec = (n: number, text: string) => ({ ref: `shed/log.jsonl#L${n}`, kind: 'record', path: 'shed/log.jsonl', line: n, record: { text }, blocks: [{ kind: 'text', text }], excerpt: text, meta: {} })
+  w.resolve['shed/log.jsonl#L85'] = rec(85, 'A picture of the shed door.')
+  w.resolve['shed/log.jsonl#L4'] = rec(4, 'Error: the gate is locked for port 8443')
+  const card = (id: string, by: string) => ({
+    id, notebook: 'g1', kind: 'example', title: 'Which commands failed?', labels: [], created_by: by, ts: '2026-10-06T10:00:00+00:00',
+    takeaway: 'The gate said [["Error: the gate is locked for port 8443"|shed/log.jsonl#L85]] and again [["Error: the gate is locked for port 8443"|shed/log.jsonl#L4]].',
+    payload: { refs: ['shed/log.jsonl#L85', 'shed/log.jsonl#L4'] },
+  })
+  w.cells.x0fail00 = card('x0fail00', 'main')
+  await start($, w)
+  await turn($, w, 'x0fail00')
+  await w.clock.advance(300)
+  const told = w.acts.filter(a => a.kind === 'cite-failed')
+  expect(told).toHaveLength(1)
+  expect(told[0]!.payload.cites).toEqual([{ shown: '"Error: the gate is locked for port 8443"', ref: 'shed/log.jsonl#L85', why: 'the value is not at its place', card: 'x0fail00' }])
+  // told once, also when the card is read again
+  await w.clock.advance(5000)
+  expect(w.acts.filter(a => a.kind === 'cite-failed')).toHaveLength(1)
+  // a card a fork made: its failed citation is not main's
+  w.resolve['shed/log.jsonl#L86'] = rec(86, 'Another picture.')
+  w.cells.x0fork00 = { ...card('x0fork00', 'thread'), takeaway: 'It said [["the kettle is cold"|shed/log.jsonl#L86]].' }
+  w.toolText = 'card:x0fork00\n[out0: table]'
+  await $.turn.start({ text: 'And?', turnId: 't2' } as never)
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u2', agentId: 'a0fork' } as never)
+  await $.turn.complete({ turnId: 't2', answer: '', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(5300)
+  expect(w.acts.filter(a => a.kind === 'cite-failed')).toHaveLength(1)
+})

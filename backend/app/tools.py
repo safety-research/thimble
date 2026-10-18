@@ -2040,7 +2040,46 @@ def _attach_takeaway(c: str, cid: str, raw: Any, cell: dict | None, *, author: s
     if author == TAKEAWAY_AUTHOR and (first := _uncited_example_ref(cell, text)):
         # an example's takeaway rests on its records, and the rule to cite them is read here as it applies, like the limit
         note += "\n" + hint("takeaway-uncited-example", ref=first)
+    if author == TAKEAWAY_AUTHOR and (missing := [(w, r) for w, r, at in _takeaway_quotes(c, text) if at is None]):
+        # a quote its record does not hold is told as the takeaway is stored, before the answer that rests on it
+        note += "\n" + hint("takeaway-quote-missing", quotes="; ".join(f'"{_cut(" ".join(w.split()), 80)}" at {r}' for w, r in missing))
     return True, f"takeaway noted on card:{cid}{note}"
+
+
+# the kinds of ref a takeaway's quote is looked up in as the takeaway is stored: a file's record or lines, never a whole
+# file (a scan), a view's unit (read off the loop) or a card
+QUOTED_KINDS = ("record", "range", "block", "pointer", "row", "csvrow", "page")
+TAKEAWAY_QUOTES_MAX = 8  # the quotes of one takeaway looked up
+
+
+def _takeaway_quotes(c: str, text: str) -> builtins.list[tuple[str, str, str | None]]:
+    """Each citation of a takeaway whose shown value is a quote of a file's record (`[["…"|<path>#L62]]`, QUOTED_KINDS),
+    at most TAKEAWAY_QUOTES_MAX: (the words, the ref, the span of those words in the record by refs.span_of_quote, or
+    None when the record does not hold them or does not exist)."""
+    from . import cite, refs as refs_mod
+
+    out: builtins.list[tuple[str, str, str | None]] = []
+    for m in cite._SPAN_RE.finditer(text):
+        display, bar, ref = m.group(1).rpartition("|")
+        display, ref = display.strip(), ref.strip()
+        if not bar or len(display) <= 2 or display[0] not in cite.QUOTE_MARKS or display[-1] not in cite.QUOTE_MARKS:
+            continue
+        try:
+            if refs_mod.parse_ref(ref)["kind"] not in QUOTED_KINDS:
+                continue
+        except ValueError:
+            continue
+        words = display[1:-1].strip()
+        try:
+            at: str | None = refs_mod.span_of_quote(config.corpus_dir(c), ref, words)
+        except refs_mod.RefError as e:
+            if e.status != 404 or e.retry:
+                continue
+            at = None
+        out.append((words, ref, at))
+        if len(out) >= TAKEAWAY_QUOTES_MAX:
+            break
+    return out
 
 
 def _uncited_example_ref(cell: dict | None, text: str) -> str:

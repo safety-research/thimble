@@ -270,3 +270,24 @@ def test_f4_a_signed_in_browser_moves_main_to_the_server_so_main_s_permission_re
         assert asked.status_code == 200, asked.text
         held = agents.meta_or_none(CORPUS, agents.MAIN_ID)["permissions"]
         assert [(p["what"], p.get("terminal")) for p in held] == [("Run the new card", True)]
+
+
+async def test_main_s_failed_citations_reach_main_as_one_quiet_note_with_its_next_prompt(ws, monkeypatch):
+    """Bug hunt L4: thimble marked main's three quotes failed and told main nothing. The terminal's check hands main's
+    failed citations to `thimble act cite-failed`, which holds one quiet `cite_failed` event: it starts no turn, prints
+    nothing in the terminal, and rides with main's next prompt, with the bullet that says what to do with it."""
+    monkeypatch.setattr(local, "session_here", lambda: MAIN)
+    cites = [{"shown": '"Error: the gate is locked"', "ref": "logs/run.jsonl#L85", "why": "the value is not at its place",
+              "card": "c0ffee01"},
+             {"shown": "42", "ref": "card:c0ffee02#n/all", "why": "the place shows 41"}]
+    got = await local.act(CORPUS, "cite-failed", {"cites": cites}, session=MAIN)
+    assert got["ok"] and got["held"]
+    assert event_files.waiting(ws) == [], "it starts no turn"
+    notes = event_files.held(ws)
+    assert [n["meta"]["kind"] for n in notes] == ["cite_failed"]
+    line = events.meanwhile(notes)
+    assert ('"Error: the gate is locked" at logs/run.jsonl#L85 (card:c0ffee01): the value is not at its place; '
+            '42 at card:c0ffee02#n/all (your answer): the place shows 41') in line, line
+    assert "`cite_failed` lists citations of yours" in line, "its bullet comes with the first one"
+    riders = event_files.pop_held(ws, None)
+    assert len(riders) == 1 and event_files.said(riders) == "" and event_files.held(ws) == []

@@ -125,6 +125,13 @@ export const rt = {
   labelOf: new Map<string, string>(),
   // the cards main deleted in this session (delete_card), which no answer draws or counts (bug hunt C16)
   deleted: new Set<string>(),
+  // main's citations by their check's id: '' for one in main's answer, else the card main made whose takeaway holds it;
+  // the cards main made or changed in this session; and the failed checks of main's citations, each told to main once,
+  // as a note that rides with its next prompt (tellFailed)
+  mainCites: new Map<string, string>(),
+  mainCards: new Set<string>(),
+  failedHeld: new Map<string, { c: Citation; card: string; why: string }>(),
+  failedTold: new Set<string>(),
   // the last ui.jsonl record followed (-1 until the first read, which follows none of the earlier ones)
   uiN: -1,
   // where the latest gesture came from: inside the panel or not; the way a press on back or a crumb chose
@@ -325,7 +332,7 @@ async function putCard(cx: Ctx, cell: ThimbleCell): Promise<void> {
   // its question, which names it where a reply cites it without words
   noteQuestion(cell.id, (next.data as CardData | null)?.question ?? cell.title)
   noteName(cell.id, cell.slug)
-  queueCitations(citations(next.takeaway))
+  queueCitations(citations(next.takeaway), rt.mainCards.has(cell.id) ? cell.id : undefined)
   if (cell.kind === 'example') queueCitations(((cell.payload?.refs as unknown[]) ?? []).map(r => ({ raw: `[[${String(r)}]]`, ref: String(r), display: null })))
 }
 
@@ -412,13 +419,16 @@ async function refreshCards(cx: Ctx, labels: boolean): Promise<void> {
 // ------------------------------------------------------------------------------------------------ citations
 
 /** Ask for these citations' checks: each is checked once, in a batch the session's timer sends (checkQueued), or
- *  again while its place may resolve soon (resolveCitations). A drawing may call it: it only notes them. */
-export function queueCitations(cs: readonly Citation[]): void {
+ *  again while its place may resolve soon (resolveCitations). A drawing may call it: it only notes them. `main`: they
+ *  are main's, in its answer ('') or in the takeaway of a card it made (the card's id), so a failed check is told to
+ *  main (tellFailed). */
+export function queueCitations(cs: readonly Citation[], main?: string): void {
   // "Citation marks" off: citations are plain links, and nothing checks them
   if (!featureOn('citationMarks')) return
   for (const c of cs) {
     if (labelRef(c.ref)) continue // a label's link names no place to check
     const id = cid(c.raw)
+    if (main !== undefined) rt.mainCites.set(id, main)
     if (!rt.queue.has(id)) rt.queue.set(id, c)
     const card = /^(?:card|cell):([A-Za-z0-9_-]+)/.exec(c.ref)?.[1]
     if (card) {
@@ -473,9 +483,33 @@ export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promis
       const n = (rt.retries.get(id)?.n ?? 0) + 1
       rt.retries.set(id, { c, n, due: at + RETRY_MS[Math.min(n, RETRY_MS.length) - 1]! })
     } else rt.retries.delete(id)
-    await cx.setVerdict(id, verdictOf(c, res, at))
+    const v = verdictOf(c, res, at)
+    await cx.setVerdict(id, v)
+    if (FAILED.has(v.status) && rt.mainCites.has(id) && !rt.failedTold.has(id)) rt.failedHeld.set(id, { c, card: rt.mainCites.get(id)!, why: v.why })
   }
+  await tellFailed(cx)
   return true
+}
+
+/** The statuses of a citation whose place does not hold what it shows, or does not exist (model.ts verdictOf). */
+const FAILED = new Set(['missing', 'differs'])
+
+/** The failed checks of main's citations, told to main once each as one note (`thimble act cite-failed`), which rides
+ *  with main's next prompt and starts no turn, so main corrects its answer or its card in its next reply. Held while
+ *  main's turn runs, and left out once the citation no longer stands where main wrote it (a card's takeaway rewritten)
+ *  or its check passed since. */
+export async function tellFailed(cx: Ctx): Promise<void> {
+  if (!rt.sc || rt.turn || !rt.failedHeld.size) return
+  const cites: Record<string, string>[] = []
+  for (const [id, f] of [...rt.failedHeld]) {
+    rt.failedHeld.delete(id)
+    const v = await cx.verdict(id)
+    if (!v || !FAILED.has(v.status)) continue
+    if (f.card && !citations((await cx.card(f.card))?.takeaway ?? '').some(x => cid(x.raw) === id)) continue
+    rt.failedTold.add(id)
+    cites.push({ shown: f.c.display ?? '', ref: f.c.ref, why: f.why, ...(f.card ? { card: f.card } : {}) })
+  }
+  if (cites.length) await act(cx, rt.sc, 'cite-failed', { cites })
 }
 
 /** The citations whose place may resolve soon checked again at the next pass of the citation queue: a view was
