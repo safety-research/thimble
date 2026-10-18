@@ -21,6 +21,9 @@
 //        a second pass with other versions would have lit; its call line carries the same `shadow`.
 //   {kind: 'press', verb, row, lit}                                       the person pressed a verb under a message,
 //        `lit`: whether it was lit then
+//   {kind: 'check', id, v, tried, total, failed, cut, ms, chars}          a save's card had its interactions tried once
+//        (draw/exercise.mjs): how many, how many failed, the milliseconds it added to the save, and the characters of
+//        the line Claude read about it (0 when all ran)
 
 /** Price weights of a model call's tokens: input 1, cache write 1.25, cache read 0.1, output 5. */
 export const PRICE = { input_tokens: 1, cache_creation_input_tokens: 1.25, cache_read_input_tokens: 0.1, output_tokens: 5 }
@@ -82,12 +85,14 @@ export function summarize(events) {
   const reads = []
   const looks = []
   const presses = []
+  const checks = []
   const row = name => (features[name] ??= { feature: name, calls: 0, w: 0, w_in: 0, w_out: 0, ms: 0, blocked: 0, failed: 0, usage: {}, prompts: new Set(), lenses: null })
   for (const e of events) {
     if (e.kind === 'prompts') prompts = e
     else if (e.kind === 'prompt') reads.push(e)
     else if (e.kind === 'look') looks.push(e)
     else if (e.kind === 'press') presses.push(e)
+    else if (e.kind === 'check') checks.push(e)
     else if (e.kind === 'call') {
       // a shadow pass (the same turn with other versions, measured only) is a row of its own
       const r = row(e.shadow ? `${e.feature || 'other'} (shadow)` : e.feature || 'other')
@@ -138,7 +143,23 @@ export function summarize(events) {
     if (!t.agent) r.hook_ms = (r.hook_ms || 0) + (t.hook_ms || 0)
     add(r.usage, t.usage)
   }
-  return { features, turns, prompts, reads, looks: looksOf(looks, presses) }
+  return { features, turns, prompts, reads, looks: looksOf(looks, presses), checks: checksOf(checks) }
+}
+
+/** The saves whose interactions were tried: how many, the tries, the failures, the median and largest milliseconds
+ *  added to a save, and the characters Claude read about failures. Null with none. */
+export function checksOf(list) {
+  if (!list.length) return null
+  const ms = list.map(c => Number(c.ms) || 0).sort((a, b) => a - b)
+  return {
+    saves: list.length,
+    tried: list.reduce((n, c) => n + (c.tried || 0), 0),
+    failed: list.filter(c => c.failed).length,
+    cut: list.filter(c => c.cut).length,
+    median_ms: ms[Math.floor((ms.length - 1) / 2)],
+    max_ms: ms[ms.length - 1],
+    chars: list.reduce((n, c) => n + (c.chars || 0), 0),
+  }
 }
 
 /**
