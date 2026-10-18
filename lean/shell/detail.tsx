@@ -20,7 +20,7 @@ import type { Sel } from '../types'
 import { knobOf, turn as turnKnob } from '../draw/handoff.js'
 import { renderTerm } from '../draw/term.js'
 import { paintRegions } from './cells'
-import { beganWord, examplesView, exampleSet, fromLine, keyOf, linkRuns, partOfLink, partsOf, partTop, programLines, stepPart, stepVersion, versionsOf } from './carddetail.js'
+import { barAfter, beganWord, cycleKnob, examplesView, exampleSet, fromLine, keyOf, linkRuns, namedKnob, partOfLink, partsOf, partTop, programLines, stepPart, stepVersion, versionsOf } from './carddetail.js'
 import { chainWords, fromFacts, objectRefs, regionMeta, regionRefs } from './object.js'
 import { ask, browserOn, citeLabels, currentTheme, leanEnv, loadObject, openBrowser, openDetail, prepared, preparedNow, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
@@ -31,7 +31,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Prepared = { object: Any; drawing: Any; grid: Any; verbs: Any[]; problems: string[]; error?: string }
-type Detail = Sel & { prog?: boolean; bar?: boolean }
+type Detail = Sel & { prog?: boolean; bar?: 'details' | 'examples' | null }
 
 export const PANE = 'object'
 export const COLUMNS = 400
@@ -49,7 +49,7 @@ const fmtN = (x: unknown) => (typeof x === 'number' ? x.toLocaleString('en-US') 
 // the module's memory of the detail: whether it is open, what it drew last (for the ring and the keys), the key that
 // acted last (for a word it began), the agent in the main view, and the latest version seen of each card
 let isOpen = false
-let drawn: { id: string; parts: Any[]; from: number; rows: number; pixel: Set<number>; w: number; h: number } | null = null
+let drawn: { id: string; parts: Any[]; from: number; rows: number; pixel: Set<number>; w: number; h: number; zoom: boolean; filter: boolean } | null = null
 let lastKey: { key: string; at: number; undo: Sel | null } | null = null
 let viewing: string | null = null
 let ringY = -1
@@ -100,20 +100,25 @@ async function focusPart($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ what the keys do
 
+/** The open card as the pane last drew it. Keys never wait on a drawing (a key's hook has little time): with none ready
+ *  the key does nothing, and the pane is asked to draw again. */
 async function current($: Engine): Promise<{ sel: Detail; p: Prepared } | null> {
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return null
-  const p = await prepared($, sel, drawn?.w ?? COLUMNS - 2, sel.state, 'detail', drawn?.h ?? 24)
-  return p.object ? { sel, p } : null
+  if (!drawn) { $.ui.invalidate('ui.render'); return null }
+  const p = await preparedNow($, sel, drawn.w, sel.state, 'detail', drawn.h)
+  return p?.object ? { sel, p } : null
 }
 
 async function keyCtx($: Engine): Promise<Any> {
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return null
+  if (!drawn) { $.ui.invalidate('ui.render'); return null }
   const latest = await loadObject($, { id: sel.id, v: null, root: sel.root })
   const part = drawn?.parts.find((x: Any) => x.id === sel.region)
   return {
-    composer: '', versions: versionsOf(latest).length, knob: !!part?.knob, overlay: !!sel.prog, bar: !!sel.bar,
+    composer: '', versions: versionsOf(latest).length, knob: !!part?.knob, overlay: !!sel.prog, bar: sel.bar ?? null,
+    zoom: drawn.zoom, filter: drawn.filter,
     thread: !!threadFor({ object: sel.id }), browser: browserOn(),
   }
 }
@@ -130,23 +135,31 @@ async function act($: Engine, a: { act: string; dir?: number }): Promise<void> {
       if (id) await selectPart($, sel, id)
       return
     }
-    case 'examples':
-      await $.state.set(SEL, { ...sel, bar: !sel.bar, ex: 0 } as Sel)
+    case 'details': case 'examples':
+      await $.state.set(SEL, { ...sel, bar: barAfter(sel.bar ?? null, a.act), ex: 0 } as Sel)
       return
     case 'example':
-      // [ ] flip the examples, and open the bar when it is empty
-      await $.state.set(SEL, { ...sel, bar: true, ex: sel.bar ? (sel.ex || 0) + (a.dir || 1) : 0 } as Sel)
+      // [ ] flip the examples, and show them when they are not shown
+      await $.state.set(SEL, { ...sel, bar: 'examples', ex: sel.bar === 'examples' ? (sel.ex || 0) + (a.dir || 1) : 0 } as Sel)
       return
+    case 'zoom': case 'filter': {
+      // a card's own zoom and filter are knobs inside it: + and − turn the zoom, f cycles the filter
+      const c = namedKnob(p.drawing, a.act)
+      if (!c) return
+      const state = a.act === 'zoom' ? turnKnob(p.drawing, sel.state || {}, c.id, a.dir || 1) : cycleKnob(c, sel.state || {})
+      await $.state.set(SEL, { ...sel, state, region: null, ex: 0 } as Sel)
+      return
+    }
     case 'program':
       await $.state.set(SEL, { ...sel, prog: !sel.prog } as Sel)
       return
     case 'back':
-      await $.state.set(SEL, (sel.prog ? { ...sel, prog: false } : { ...sel, bar: false }) as Sel)
+      await $.state.set(SEL, (sel.prog ? { ...sel, prog: false } : { ...sel, bar: barAfter(sel.bar ?? null, 'back') }) as Sel)
       return
     case 'version': {
       const latest = await loadObject($, { id: sel.id, v: null, root: sel.root })
       const v = stepVersion(versionsOf(latest), sel.v ?? latest?.version)
-      if (v !== sel.v) await select($, { ...sel, v, ex: 0, all: false })
+      if (v !== sel.v) await selectSoon($, { ...sel, v, ex: 0, all: false })
       return
     }
     case 'knob': {
@@ -180,7 +193,7 @@ async function act($: Engine, a: { act: string; dir?: number }): Promise<void> {
  *  person has selected now (a question typed in the thread's own view carries no part of its own). */
 async function selectPart($: Engine, sel: Detail, id: string): Promise<void> {
   if (id === sel.region) return
-  await select($, { ...sel, region: id, ex: 0, all: false })
+  await selectSoon($, { ...sel, region: id, ex: 0, all: false })
   const t = threadFor({ object: sel.id })
   if (t) {
     const cur = await current($)
@@ -188,6 +201,12 @@ async function selectPart($: Engine, sel: Detail, id: string): Promise<void> {
     const refs = cur ? regionRefs(cur.p.object, cur.p.drawing, id).refs : []
     await noteSelection($, t.key, { region: id, label, refs })
   }
+}
+
+/** The selection now, and its rows read after: `lean resolve` runs outside the key's hook, which has little time. */
+async function selectSoon($: Engine, sel: Sel): Promise<void> {
+  await $.state.set(SEL, sel)
+  $.clock.after(0, () => { void select($, sel).catch(() => undefined) })
 }
 
 // ------------------------------------------------------------------------------------------------ the from line's facts
@@ -285,7 +304,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
 
   // ---- the bar's rows: one empty rule, or the examples of the part
   const head = 1 + (take ? 2 : 0) + 1
-  const barRows = sel.bar && !sel.prog ? 3 + EXR : 1
+  const barRows = sel.prog ? 1 : sel.bar === 'examples' ? 4 + EXR : 4
   const threadRow = thread && !TW ? 1 : 0
   const room = R - head - barRows - threadRow - 1
   if (sel.prog) {
@@ -301,18 +320,19 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     rows = Math.min(rows, grid.h - from)
     const pixel = new Set<number>()
     for (let y = 0; y < grid.h; y++) if (grid.rows[y].some((c: Any) => c.px) && !grid.rows[y].some((c: Any) => c.b || c.ref || c.w2)) pixel.add(y)
-    drawn = { id: sel.id, parts, from, rows, pixel, w: W, h: H }
+    drawn = { id: sel.id, parts, from, rows, pixel, w: W, h: H, zoom: !!namedKnob(p.drawing, 'zoom'), filter: !!namedKnob(p.drawing, 'filter') }
     const top = partTop(part)
     const gutter = Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: Array.from({ length: rows }, (_, i) => Text({ color: ind, bold: true, children: top && top.y === from + i ? '▸' : ' ' })) })
+    // a click selects a part; ↵ on the selected part (the ring's press) fills the bar with its details
     const onPress = (id: string, dir?: number) => {
       if (dir) return $.state.set(SEL, { ...sel, region: id, state: turnKnob(p.drawing, sel.state || {}, id, dir), knob: id })
+      if (id === sel.region) return $.state.set(SEL, { ...sel, bar: barAfter(sel.bar ?? null, 'details') } as Sel)
       return selectPart($, sel, id)
     }
     kids.push(Box({ flexDirection: 'row', children: [gutter, paintRegions(grid, els, { theme, selected: part?.id ?? null, key: 'pane', from, rows, onPress })] }))
     for (let i = rows; i < room; i++) kids.push(Text({ children: ' ' }))
     // ---- the bar: empty until asked
-    if (sel.bar) kids.push(...(await barEls($, els, sel, o, p, part, meta, C, ind)))
-    else kids.push(Text({ dimColor: true, wrap: 'truncate-end', children: `${'╌'.repeat(Math.max(0, C - 1))}` }))
+    kids.push(...(await barEls($, els, sel, o, p, part, meta, C, ind)))
   }
 
   // ---- the thread (as one line when there is no room for its column) and the keys
@@ -341,8 +361,12 @@ function threadColumn(els: Any, o: Any, thread: Any, part: Any, TW: number, R: n
     lines.push(Text({ children: ' ' }))
   }
   if (o.question) {
-    person(String(o.question))
-    say([{ s: 'made this card', dim: true }], Text({ children: '⏺ ' }))
+    say([{ s: String(o.question) }], Text({ color: ind, children: '▏ ' }), '▏ ')
+    lines.push(Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: '▏ ' }), Text({ color: ind, underline: true, children: `card:${cut(String(o.id), w - 10)}` })] }))
+    lines.push(Text({ children: ' ' }))
+  }
+  if (!thread?.turns?.length) {
+    say([{ s: "This chat is the card's own thread. Ask about the card, or about the part you select. Claude in the main chat does not see it.", dim: true }], Text({ children: '' }), '')
     lines.push(Text({ children: ' ' }))
   }
   for (const t of thread?.turns || []) {
@@ -357,8 +381,7 @@ function threadColumn(els: Any, o: Any, thread: Any, part: Any, TW: number, R: n
   }
   if (thread?.status === 'running') lines.push(Text({ color: 'warning', children: '✻ answering…' }))
   if (thread?.status === 'failed') lines.push(Text({ color: 'error', wrap: 'wrap', children: `× ${cut(String(thread.error || 'the thread stopped'), w * 2)}` }))
-  if (!thread) lines.push(Text({ dimColor: true, wrap: 'wrap', children: `Type below to ask about ${cut(String(part?.label || 'this card'), 30)}. Claude here does not see it.` }))
-  const head = [Text({ dimColor: true, children: 'thread · this card' }), Text({ dimColor: true, children: '─'.repeat(w) })]
+  const head = [Text({ children: [Text({ color: ind, bold: true, children: 'Thread' }), Text({ dimColor: true, children: ` · card:${cut(String(o.id), w - 16)}` })] }), Text({ dimColor: true, children: '─'.repeat(w) })]
   const room = R - head.length - 1
   const body = lines.length > room ? lines.slice(lines.length - room) : lines
   return [...head, ...body]
@@ -408,15 +431,16 @@ function cutRuns(runs: Any[], n: number): Any[] {
   return out
 }
 
-/** The bar, filled on demand: what the examples are examples of, their "from" line, and the records themselves. */
+/** The bar under the card, filled on demand: empty, then (↵) the selected part's details, then (e) its examples,
+ *  labelled with what they are examples of. */
 async function barEls($: Engine, els: Any, sel: Detail, o: Any, p: Prepared, part: Any, meta: Any, C: number, ind: string): Promise<Any[]> {
   const { Box, Text } = els
-  const out: Any[] = []
-  const rule = Text({ dimColor: true, wrap: 'truncate-end', children: `${'─'.repeat(Math.max(0, C - 1))}` })
-  if (!part) {
-    out.push(rule, Text({ dimColor: true, children: ' This card has no parts to select.' }))
-    for (let i = 2; i < 3 + EXR; i++) out.push(Text({ children: ' ' }))
-    return out
+  const bar = sel.bar ?? null
+  const rule = (label: string, on: boolean) => Text({ wrap: 'truncate-end', children: [Text({ color: on ? ind : undefined, dimColor: !on || undefined, children: `─ ${label} ` }), Text({ dimColor: true, children: '─'.repeat(Math.max(0, C - label.length - 4)) })] })
+  const pad = (out: Any[], n: number) => { while (out.length < n) out.push(Text({ children: ' ' })); return out.slice(0, n) }
+  const rows = bar === 'examples' ? 4 + EXR : 4
+  if (!bar || !part) {
+    return pad([rule('details', false), Text({ dimColor: true, children: part ? '  select a part and press ↵ to see its details' : '  this card has no parts to select' })], rows)
   }
   const cite = typeof meta.cite === 'string' ? p.drawing.cites?.[meta.cite] : null
   const set = exampleSet(p.drawing, meta)
@@ -425,35 +449,47 @@ async function barEls($: Engine, els: Any, sel: Detail, o: Any, p: Prepared, par
   const chain = resolved ? chainWords(resolved) : null
   const records = set ? set.records : chain && !chain.error ? chain.records : []
   const total = set ? (set.total ?? set.records.length) : resolved?.count ?? records.length
+  // the part's claim, where it comes from, and the filter the card has on
+  const claim = String(cite?.text || meta.label || part.label || part.id).replace(/\*\*/g, '')
+  const facts = await factsNow($, sel)
+  const nrows = resolved?.count ?? (set ? set.total ?? set.records.length : cite ? (cite.rows?.length || 0) + (cite.more || 0) : null)
+  const segs = fromLine(facts || { sources: cite?.source ? [{ path: cite.source }] : [] }, { rows: nrows, ...(cite?.source && !facts ? { source: cite.source } : {}) })
+  const filter = namedKnob(p.drawing, 'filter')
+  const out: Any[] = [rule('details', true)]
+  out.push(Text({ wrap: 'truncate-end', children: [Text({ bold: true, children: claim })] }))
+  out.push(Text({ wrap: 'truncate-end', children: [
+    ...segs.map((x: Any) => Text({ bold: x.bold || undefined, dimColor: x.tone === 'dim' || x.tone === 'unseen' || undefined, color: x.tone === 'warn' ? 'warning' : undefined, children: x.t })),
+    ...(filter && filter.i > 0 ? [Text({ dimColor: true, children: ' · ' }), Text({ color: ind, children: `filter on: ${filter.shown[filter.i]}` })] : []),
+  ] }))
+  // what the examples are examples of: the examples' own label, else the part's claim
+  const of = String(set?.label || claim)
+  if (bar !== 'examples') {
+    out.push(Text({ dimColor: true, wrap: 'truncate-end', children: `  e examples of ${of}${total ? ` (${fmtN(total)})` : ''} · 0 clear` }))
+    return pad(out, rows)
+  }
   const n = records.length
   const ex = n ? ((((sel.ex || 0) % n) + n) % n) : 0
-  // what they are examples of: the part's claim, else its examples' own label, else the part's label
-  const of = String(cite?.text || set?.label || meta.label || part.label || part.id).replace(/\*\*/g, '')
   const pos = n ? `[ ] ${ex + 1} of ${fmtN(total)}` : ''
   out.push(Box({ flexDirection: 'row', justifyContent: 'space-between', children: [
-    Text({ wrap: 'truncate-end', children: [Text({ dimColor: true, children: 'examples of: ' }), Text({ bold: true, children: cut(of, C - pos.length - 16) })] }),
+    Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: 'examples of: ' }), Text({ color: ind, bold: true, children: cut(of, C - pos.length - 16) })] }),
     Text({ bold: true, children: pos ? ` ${pos}` : '' }),
   ] }))
-  const facts = await factsNow($, sel)
-  const rows = resolved?.count ?? (set ? set.total ?? set.records.length : cite ? (cite.rows?.length || 0) + (cite.more || 0) : null)
-  const segs = fromLine(facts || { sources: cite?.source ? [{ path: cite.source }] : [] }, { rows, ...(cite?.source && !facts ? { source: cite.source } : {}) })
-  out.push(Text({ wrap: 'truncate-end', children: segs.map((s: Any) => Text({ bold: s.bold || undefined, dimColor: s.tone === 'dim' || s.tone === 'unseen' || undefined, color: s.tone === 'warn' ? 'warning' : undefined, children: s.t })) }))
   const body: Any[] = []
   if (!n) {
     if (refs[0] && resolved === undefined) body.push(Text({ dimColor: true, children: '   reading the rows behind it…' }))
     else if (chain?.error) body.push(Text({ color: 'error', wrap: 'wrap', children: `   ${chain.notes[0]}` }))
     else body.push(Text({ dimColor: true, children: '   ░ no records behind this part' }))
   } else {
-    const view = examplesView(records, { at: ex, fit: EXR, fmt: set?.fmt, fields: meta.fields ?? set?.fields })
+    const view = examplesView(records, { at: ex, fit: EXR - 1, fmt: set?.fmt, fields: meta.fields ?? set?.fields })
     if (view.kind === 'table') {
       const cols: string[] = view.cols
       const val = (r: Any, k: string) => (r?.[k] == null ? '' : typeof r[k] === 'number' && !/(^|_)(id|step|epoch|run|rev|line|seq)$/i.test(k) ? fmtN(r[k]) : String(r[k]))
       const widths = cols.map((k, i) => (i === cols.length - 1 ? 0 : Math.min(18, Math.max(k.length, ...view.rows.map((x: Any) => val(x.rec, k).length)))))
-      const line = (cells: string[]) => cells.map((s, i) => (i === cells.length - 1 ? s : (s + ' '.repeat(widths[i] ?? 0)).slice(0, widths[i] ?? 0) + '  ')).join('')
+      const line = (cells: string[]) => cells.map((v, i) => (i === cells.length - 1 ? v : (v + ' '.repeat(widths[i] ?? 0)).slice(0, widths[i] ?? 0) + '  ')).join('')
       body.push(Text({ dimColor: true, wrap: 'truncate-end', children: `    ${line(cols)}` }))
       for (const r of view.rows) {
-        const s = cut(line(cols.map(k => val(r.rec, k))), C - 6)
-        body.push(Text({ wrap: 'truncate-end', children: [Text({ color: ind, bold: true, children: r.on ? '  ▸ ' : '    ' }), Text({ bold: r.on || undefined, backgroundColor: r.on ? 'selectionBg' : undefined, children: r.on ? s.padEnd(C - 6) : s })] }))
+        const t = cut(line(cols.map(k => val(r.rec, k))), C - 6)
+        body.push(Text({ wrap: 'truncate-end', children: [Text({ color: ind, bold: true, children: r.on ? '  ▸ ' : '    ' }), Text({ bold: r.on || undefined, backgroundColor: r.on ? 'selectionBg' : undefined, children: r.on ? t.padEnd(C - 6) : t })] }))
       }
     } else {
       for (const r of view.rows) {
@@ -462,10 +498,9 @@ async function barEls($: Engine, els: Any, sel: Detail, o: Any, p: Prepared, par
       }
     }
   }
-  out.unshift(rule)
-  out.push(...body.slice(0, EXR))
-  for (let i = Math.min(body.length, EXR); i < EXR; i++) out.push(Text({ children: ' ' }))
-  return out
+  out.push(...pad(body, EXR - 1))
+  out.push(Text({ dimColor: true, children: '  e hide examples · [ ] flip · 0 clear' }))
+  return pad(out, rows)
 }
 
 /** p: how Claude drew this. The program's lines, the ones that drew the selected part lit, and the rows behind it. */
@@ -511,12 +546,13 @@ function keysRow($: Engine, els: Any, sel: Detail, part: Any, nv: number, hasThr
   if (sel.prog) {
     kids.push(press('p', 'close the program', { act: 'program' }), sep(), ...key('↑↓', 'part'))
   } else {
-    kids.push(...key('↑↓', 'part'), sep())
-    if (sel.bar) kids.push(...key('[ ]', 'flip'), sep(), ...key('0', 'empty the bar'))
-    else kids.push(press('e', 'examples', { act: 'examples' }))
+    kids.push(...key('↑↓', 'part'))
+    if (drawn?.filter) kids.push(sep(), press('f', 'filter', { act: 'filter' }))
+    kids.push(sep(), ...key('↵', 'details'), sep(), press('e', 'examples', { act: 'examples' }))
+    if (drawn?.zoom) kids.push(sep(), ...key('+ −', 'zoom'))
+    if (part?.knob) kids.push(sep(), ...key(', .', 'turn'))
     kids.push(sep(), press('p', 'program', { act: 'program' }))
     if (nv > 1) kids.push(sep(), press('h', 'v1 · v2', { act: 'version' }))
-    if (part?.knob) kids.push(sep(), ...key(', .', 'turn'))
     if (hasThread) kids.push(sep(), press('t', 'thread', { act: 'thread' }), sep(), press('m', 'send to main', { act: 'main' }))
     if (browserOn()) kids.push(sep(), press('o', 'browser', { act: 'browser' }))
   }
@@ -528,7 +564,7 @@ function keysRow($: Engine, els: Any, sel: Detail, part: Any, nv: number, hasThr
 async function keyPressed($: Engine, k: string, a: { act: string; dir?: number }): Promise<void> {
   const before = (await $.state.get(SEL)).value as Sel | null
   await act($, a)
-  lastKey = { key: k, at: Date.now(), undo: ['program', 'version', 'examples'].includes(a.act) ? before : null }
+  lastKey = { key: k, at: Date.now(), undo: ['program', 'version', 'examples', 'filter'].includes(a.act) ? before : null }
 }
 
 // ------------------------------------------------------------------------------------------------ citations (a reply's)
@@ -602,7 +638,9 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       }
       const ctx = await keyCtx($)
       const a = ctx ? keyOf(k, ctx) : null
-      if (!a || a.act === 'part' || a.act === 'close') { lastKey = null; return null }
+      // ↑ with the keys in the prompt would recall an earlier prompt into it: here it moves the part, and the keys go
+      // back to the card
+      if (!a || a.act === 'close') { lastKey = null; return null }
       await keyPressed($, k, a)
       regrab($)
       return { text: '', cursor: 0 }
@@ -620,7 +658,8 @@ export function registerDetail(on: Parameters<Register>[0]): void {
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
     try {
       const el = String(e.element || '')
-      const m = /^r\|pane\|(\d+)\|(.+)$/.exec(el)
+      // a part's cells (r|…), or a dial's ◂ ▸ (t|…|down, t|…|up): the dial is its knob's part
+      const m = /^[rt]\|pane\|(\d+)\|([^|]+)(?:\|(?:down|at|up))?$/.exec(el)
       if (!m || !drawn || (e.origin as { kind?: string }).kind !== 'person') return next(e)
       const sel = (await $.state.get(SEL)).value as Detail | null
       if (!sel) return next(e)
@@ -641,7 +680,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const sel = (await $.state.get(SEL)).value as Detail | null
     if (sel && (sel.prog || sel.bar) && (e.origin as { kind?: string }).kind === 'person') {
-      await $.state.set(SEL, (sel.prog ? { ...sel, prog: false } : { ...sel, bar: false }) as Sel)
+      await $.state.set(SEL, (sel.prog ? { ...sel, prog: false } : { ...sel, bar: barAfter(sel.bar ?? null, 'back') }) as Sel)
       return undefined as Any
     }
     await closed($)
@@ -675,7 +714,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     const r = await askThread($, { text: e.text, scope, refs, root: sel.root, card: { id: o.id, v: o.version, title: o.title, file: `${sel.root}/thimble/objects/${o.id}.json` } })
     if (r.problem) return { drop: `${r.problem}. Your words are back in the prompt; esc closes the card, and the prompt then goes to Claude here.` }
     $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
-    return { drop: `asked the card's thread about ${aboutOf(scope)}; Claude here does not see it` }
+    return { drop: `asked the card's thread about ${cut(aboutOf(scope), 40)}; Claude here does not see it` }
   }).catch(($, e, next) => next(e))
 }
 

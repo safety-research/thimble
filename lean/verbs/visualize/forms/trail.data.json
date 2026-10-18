@@ -1,23 +1,95 @@
 {
-  "run": "r17", "steps": 2143,
-  "stations": [
-    {"id": "orient", "label": "Orient", "from": 1, "to": 213, "activity": "read"},
-    {"id": "timezone-detour", "label": "Timezone detour", "from": 214, "to": 640, "activity": "edit", "note": "512 breaks 3 tests"},
-    {"id": "revert", "label": "Revert", "from": 641, "to": 700, "activity": "revert"},
-    {"id": "edits-no-theory", "label": "Edits, no stated theory", "from": 701, "to": 880, "activity": "edit"},
-    {"id": "rerun-loop", "label": "Rerun loop", "from": 881, "to": 1720, "activity": "rerun", "note": "fails 1 in 9 from 1240"},
-    {"id": "read-the-fixture", "label": "Read the fixture", "from": 1721, "to": 1830, "activity": "read"},
-    {"id": "fix-and-verify", "label": "Fix and verify", "from": 1831, "to": 2143, "activity": "test", "note": "200 passes"}
-  ],
-  "examples": {
-    "rerun-loop": [
-      {"step": 881, "activity": "rerun", "summary": "Starts rerunning the checkout test to reproduce the failure"},
-      {"step": 1240, "activity": "rerun", "summary": "Still rerunning: the test fails 1 time in 9, with no change to code"},
-      {"step": 1720, "activity": "rerun", "summary": "Stops rerunning after 840 steps; reads the test fixture instead"}
-    ],
-    "fix-and-verify": [
-      {"step": 1831, "activity": "edit", "summary": "Gives each test its own cart"},
-      {"step": 2143, "activity": "test", "summary": "200 runs in a row pass"}
-    ]
+ "run": "r17",
+ "steps": 2143,
+ "stations": [
+  {
+   "id": "orient",
+   "label": "Orient",
+   "from": 1,
+   "to": 213,
+   "activity": "read"
+  },
+  {
+   "id": "timezone-detour",
+   "label": "Timezone detour",
+   "from": 214,
+   "to": 640,
+   "activity": "edit",
+   "note": "512 breaks 3 tests"
+  },
+  {
+   "id": "revert",
+   "label": "Revert",
+   "from": 641,
+   "to": 700,
+   "activity": "revert"
+  },
+  {
+   "id": "edits-no-theory",
+   "label": "Edits, no stated theory",
+   "from": 701,
+   "to": 880,
+   "activity": "edit"
+  },
+  {
+   "id": "rerun-loop",
+   "label": "Rerun loop",
+   "from": 881,
+   "to": 1720,
+   "activity": "rerun",
+   "note": "fails 1 in 9 from 1240"
+  },
+  {
+   "id": "read-the-fixture",
+   "label": "Read the fixture",
+   "from": 1721,
+   "to": 1830,
+   "activity": "read"
+  },
+  {
+   "id": "fix-and-verify",
+   "label": "Fix and verify",
+   "from": 1831,
+   "to": 2143,
+   "activity": "test",
+   "note": "200 passes"
   }
+ ],
+ "examples": {
+  "rerun-loop": [
+   {
+    "step": 881,
+    "activity": "rerun",
+    "summary": "Starts rerunning the checkout test to reproduce the failure"
+   },
+   {
+    "step": 1240,
+    "activity": "rerun",
+    "summary": "Still rerunning: the test fails 1 time in 9, with no change to code"
+   },
+   {
+    "step": 1720,
+    "activity": "rerun",
+    "summary": "Stops rerunning after 840 steps; reads the test fixture instead"
+   }
+  ],
+  "fix-and-verify": [
+   {
+    "step": 1831,
+    "activity": "edit",
+    "summary": "Gives each test its own cart"
+   },
+   {
+    "step": 2143,
+    "activity": "test",
+    "summary": "200 runs in a row pass"
+   }
+  ]
+ },
+ "ticks": {
+  "rerun-loop": {
+   "from": 881,
+   "fails": "000000011000000000100100000000100010001010000000000000100010000000100000001001000000010110000001010000110000100000000000000100000000000000000000000000100000000010000100100000001000000000100001000000000000000000000000000000000000000000000010000000100000000001000000000001000010100000000000000000000000000000000000000000001000100100000000100000000010000001000000010100001000110000011100000001000000010100000010010000000000000001000000001100001001000000000000001100001100000000000000011000000010000010100000001010000000110000100000000000000000000000000100100000000000000000000010000000000000010001010000000000000000000000000100000000001000000010000000000000100000010000010000010001000110000000000000000000100000000000000000000000000000100000000000000000000000000000000001000000000001000000010000000110010001100000000000000000000000000000001001"
+  }
+ }
 }

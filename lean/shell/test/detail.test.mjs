@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { asTable, beganWord, examplesView, exampleSet, fmtWords, fromLine, keyOf, linkRuns, partOfLink, partsOf, programLines, recordWords, stepPart, stepVersion, versionsOf } from '../carddetail.js'
+import { asTable, barAfter, beganWord, cycleKnob, examplesView, exampleSet, fmtWords, fromLine, keyOf, linkRuns, namedKnob, partOfLink, partsOf, programLines, recordWords, stepPart, stepVersion, versionsOf } from '../carddetail.js'
 import { aboutOf, answerOf, firstMessage, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from '../threads.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { renderTerm } from '../../draw/term.js'
@@ -72,6 +72,21 @@ test('keys act only while the composer is empty, so a question that starts with 
   assert.equal(keyOf('.', { ...ctx, knob: false }), null, 'no knob selected: . types')
   assert.equal(keyOf('m', { ...ctx, thread: false }), null, 'no thread yet: m types')
   assert.equal(keyOf('w', ctx), null, 'any other letter types')
+  // ↵ the part's details, e its examples; + − zoom and f filters a card that has those knobs
+  assert.deepEqual(keyOf('return', ctx), { act: 'details' })
+  assert.equal(keyOf('+', ctx), null, 'no zoom knob: + types')
+  assert.deepEqual(keyOf('+', { ...ctx, zoom: true }), { act: 'zoom', dir: 1 })
+  assert.deepEqual(keyOf('-', { ...ctx, zoom: true }), { act: 'zoom', dir: -1 })
+  assert.deepEqual(keyOf('f', { ...ctx, filter: true }), { act: 'filter' })
+  assert.equal(keyOf('f', ctx), null)
+  assert.equal(barAfter(null, 'details'), 'details')
+  assert.equal(barAfter('details', 'details'), null)
+  assert.equal(barAfter(null, 'examples'), 'examples')
+  assert.equal(barAfter('examples', 'back'), 'details')
+  assert.equal(barAfter('details', 'back'), null)
+  const drawing = { controls: [{ id: 'zoom', label: 'zoom', values: ['overview', 'rerun-loop'], i: 0 }, { id: 'filter', label: 'filter', values: ['all', 'failures only'], i: 1 }] }
+  assert.equal(namedKnob(drawing, 'zoom').id, 'zoom')
+  assert.deepEqual(cycleKnob(namedKnob(drawing, 'filter'), { zoom: 'rerun-loop' }), { zoom: 'rerun-loop', filter: 'all' }, 'f cycles back to all')
   // the bar and the program close before the detail does
   assert.equal(keyOf('0', ctx), null, 'nothing to close: 0 is left alone')
   assert.deepEqual(keyOf('0', { ...ctx, bar: true }), { act: 'back' })

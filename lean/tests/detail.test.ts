@@ -121,7 +121,16 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   expect(t).not.toContain('Hello agents')
   expect(t).not.toContain('[ ]')
   expect(t).not.toContain('from revisions.jsonl')
-  expect(t).toContain('examples')
+  expect(t).toContain('select a part and press ↵ to see its details')
+  // ↵ on the selected part (the ring's press) fills the bar with its details: where it comes from, and its examples one key away
+  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
+  await clock.settle()
+  await ui.press({ key: 'r|pane|1|day-2026-06-18' })
+  await clock.settle()
+  const d = textOf(await ui.drawn())
+  expect(d).toContain('from revisions.jsonl')
+  expect(d).toContain('e examples of saves on Jun 18 (6,543)')
+  expect(d).not.toContain('Hello agents')
   // e: the examples of the selected part, labelled, with their from line; each reads as its words, never as field: value
   expect(await ($ as Any).prompt.edit(edit('e'))).toEqual({ text: '', cursor: 0 })
   const b = await pane($, clock)
@@ -209,7 +218,8 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   await $.ui.render(WIDE)
   await clock.settle()
   const wide = textOf(await $.ui.render(WIDE))
-  expect(wide).toContain('thread · this card')
+  expect(wide).toContain('Thread · card:01-saves')
+
   expect(wide).toContain('❯ why so many links?')
   expect(wide).toContain('about Jun 18')
   expect(wide).toContain('lean resolve "q1#day=2026-06-18@n"')

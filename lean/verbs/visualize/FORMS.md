@@ -25,6 +25,11 @@ steps 881–1720"). The person asks for them; the card does not list them.
 **Put the choice inside the card.** When the claim rests on a choice, make it a knob (`k.knob`) and draw it with
 `k.dial` where it acts. The words that state the result read the knob, so they change as the person turns it.
 
+**Let the person zoom and filter inside the card.** When a part holds more than the overview can show (a long
+station of a run, a busy day), give the card a `zoom` knob whose first value is `'overview'`, and a `filter` knob
+(`'all'`, then a narrower set, such as failures only). The detail turns them with + − and f. The overview stays what
+the person sees first; the zoomed view says where it is (`overview › Rerun loop`).
+
 **Use the room you are given.** Under a reply a card has a few rows. In the detail it has the whole panel:
 `k.mode === 'detail'` and `k.h` say so, so show more there (more stations, a taller plot), never something else.
 
@@ -56,28 +61,48 @@ return k.stack(
 )
 ```
 
-### The trail of a run: stations on one line, the run as a strip under it
+### The trail of a run: stations on one line, zoom into a station, filter to its failures
 
 ```js
-// The trail of one run: its stations in order on one line, the long ones wide, and the run's steps as a strip under it.
+// The trail of one run: its stations in order on one line, and the run as a strip under it. Two knobs inside the card
+// let the person go further: zoom (+ −) into a long station, one tick per step, and filter (f) to its failures.
 const tone = { read: 'c4', search: 'c3', edit: 'c2', test: 'c1', revert: 'bad', rerun: 'c5' }
-const map = k.map({
-  title: `run ${data.run}`, unit: 'steps',
-  threads: [{ id: data.run, stops: data.stations.map(s => ({ station: s.id, from: s.from, to: s.to })) }],
-  stations: data.stations.map(s => ({ id: s.id, label: s.label, note: s.note || `${s.from}–${s.to}`, ref: `q3#station=${s.id}@n`,
-    examples: data.examples[s.id] && k.examples('ex-' + s.id, { label: `${s.label.toLowerCase()}, steps ${s.from}–${s.to}`, records: data.examples[s.id], total: s.to - s.from + 1 }) })),
-})
-// the strip: one cell per bucket of steps, its color what the run was doing then
-const W = Math.min(k.w - 2, 100), per = data.steps / W
-const c = k.canvas(W, 2)
-for (let x = 0; x < W; x++) {
-  const step = Math.floor(x * per) + 1
-  const s = data.stations.find(t => step >= t.from && step <= t.to)
-  c.put(x, 0, '▆', tone[s.activity])
+const zoom = k.knob('zoom', { values: ['overview', ...Object.keys(data.ticks)], at: 'overview', label: 'zoom' })
+const filter = k.knob('filter', { values: ['all', 'failures only'], at: 'all', label: 'filter' })
+if (zoom === 'overview') {
+  const map = k.map({
+    title: `run ${data.run}`, unit: 'steps',
+    threads: [{ id: data.run, stops: data.stations.map(s => ({ station: s.id, from: s.from, to: s.to })) }],
+    stations: data.stations.map(s => ({ id: s.id, label: s.label, note: s.note || `${s.from}–${s.to}`, ref: `q3#station=${s.id}@n`,
+      examples: data.examples[s.id] && k.examples('ex-' + s.id, { label: `${s.label.toLowerCase()}, steps ${s.from}–${s.to}`, records: data.examples[s.id], total: s.to - s.from + 1 }) })),
+  })
+  // the strip: one cell per bucket of steps, its color what the run was doing then
+  const W = Math.min(k.w - 2, 100), per = data.steps / W
+  const c = k.canvas(W, 2)
+  for (let x = 0; x < W; x++) {
+    const step = Math.floor(x * per) + 1
+    c.put(x, 0, '▆', tone[data.stations.find(t => step >= t.from && step <= t.to).activity])
+  }
+  c.text(0, 1, '1', { tone: 'dim' })
+  c.text(W - 1, 1, k.fmt(data.steps), { tone: 'dim', align: 'right' })
+  return k.stack(map, c, k.legend(Object.entries(tone)), { gap: 1 })
 }
-c.text(0, 1, '1', { tone: 'dim' })
-c.text(W - 1, 1, k.fmt(data.steps), { tone: 'dim', align: 'right' })
-return k.stack(map, c, k.legend(Object.entries(tone).map(([a, t]) => [a, t])), { gap: 1 })
+// zoomed into one station: a row of ticks per 60 steps, a failing step tall and red
+const s = data.stations.find(x => x.id === zoom), t = data.ticks[zoom], W = Math.min(60, k.w - 20)
+const rows = []
+for (let i = 0; i < t.fails.length; i += W) {
+  const from = t.from + i, bits = t.fails.slice(i, i + W), to = from + bits.length - 1
+  const c = k.canvas(W, 1)
+  ;[...bits].forEach((b, x) => { if (b === '1' || filter === 'all') c.put(x, 0, b === '1' ? '┃' : '│', b === '1' ? 'bad' : 'unseen') })
+  const n = [...bits].filter(b => b === '1').length
+  rows.push(k.region(`${zoom}-${from}`, { label: `steps ${from}–${to}: ${n} failures`, ref: `q3#step=${from}-${to}&failed=1@n` },
+    k.beside(k.text(k.fmt(from), { w: 6, align: 'right', tone: 'dim' }), c, k.text(`1 in ${n ? Math.round(bits.length / n) : '–'}`, { w: 8, tone: 'dim' }), { gap: 1 })))
+}
+const all = [...t.fails].filter(b => b === '1').length
+return k.stack(
+  k.text(`{dim:overview ›} **${s.label}** · steps ${s.from}–${s.to} · one tick per step · ${all} failures${filter === 'all' ? '' : ' · {accent:failures only}'}`),
+  ...rows,
+)
 ```
 
 ### Curves with a knob: the claim rests on a choice

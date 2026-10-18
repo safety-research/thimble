@@ -62,4 +62,9 @@ test('a knob inside a card changes its words: the curves meet at ×8, and the nu
   assert.match(text(runProgram(load('curves'), { w: 96 })), /◂ ×8 ▸ +max gap 1\.0 pts/)
   assert.match(text(runProgram(load('curves'), { w: 96, state: { scale: 1 } })), /◂ ×1 ▸ +max gap 26\.6 pts/)
   assert.match(text(runProgram(load('unfold'), { w: 96, state: { by: 'day' } })), /1,662 \+ 861 \+ 559 \+ 497 \+ 459 = 4,038/)
+  // the trail zooms into a station, one tick per step, and filters to its failures
+  const zoomed = runProgram(load('trail'), { w: 96, mode: 'detail', state: { zoom: 'rerun-loop', filter: 'failures only' } })
+  assert.match(text(zoomed), /overview › Rerun loop · steps 881–1720 · one tick per step · 101 failures · failures only/)
+  assert.deepEqual(zoomed.controls.map(c => c.id), ['zoom', 'filter'])
+  assert.equal(renderTerm(zoomed, { w: 96 }).regions.filter(r => r.rects.length && !r.link).length, 14)
 })

@@ -70,19 +70,25 @@ export function stepVersion(versions, v) {
 /**
  * What one key does in the detail, or null for a key the detail leaves alone (it types, or Claude Code has it).
  * Keys act only while the composer is empty, so a question that has begun types every letter it holds. Details come on
- * demand: the bar under the card starts empty, `e` (or [ ]) fills it with the examples of the selected part, and `0` or
- * `esc` empties it again.
- *   ctx: {composer: the prompt's text, bar: whether the bar shows examples, overlay: whether the program is shown,
- *         knob: whether the selected part is a knob, versions: how many, thread: whether the card has a thread}
+ * demand: the bar under the card starts empty; ↵ on a part fills it with the part's details, `e` adds its examples
+ * (labelled with what they are examples of), and `0` or `esc` empties it again. A card that has a `zoom` knob zooms
+ * with + and −, and one with a `filter` knob filters with f.
+ *   ctx: {composer: the prompt's text, bar: what the bar shows (null, 'details' or 'examples'), overlay: whether the
+ *         program is shown, knob: whether the selected part is a knob, zoom, filter: whether the card has those knobs,
+ *         versions: how many, thread: whether the card has a thread}
  */
 export function keyOf(key, ctx = {}) {
   if (ctx.composer) return null
   switch (key) {
     case 'down': case 'tab': return { act: 'part', dir: 1 }
     case 'up': case 'shift+tab': return { act: 'part', dir: -1 }
+    case 'return': case 'enter': return { act: 'details' }
     case 'e': return { act: 'examples' }
     case ']': return { act: 'example', dir: 1 }
     case '[': return { act: 'example', dir: -1 }
+    case '+': case '=': return ctx.zoom ? { act: 'zoom', dir: 1 } : null
+    case '-': return ctx.zoom ? { act: 'zoom', dir: -1 } : null
+    case 'f': return ctx.filter ? { act: 'filter' } : null
     case 'p': return { act: 'program' }
     case 'h': return ctx.versions > 1 ? { act: 'version' } : null
     case '.': case '>': return ctx.knob ? { act: 'knob', dir: 1 } : null
@@ -94,6 +100,28 @@ export function keyOf(key, ctx = {}) {
     case 'esc': return ctx.bar || ctx.overlay ? { act: 'back' } : { act: 'close' }
     default: return null
   }
+}
+
+/** The bar after a key: ↵ toggles the details, e the examples (which come with their details), back empties it. */
+export function barAfter(bar, act) {
+  if (act === 'details') return bar ? null : 'details'
+  if (act === 'examples') return bar === 'examples' ? 'details' : 'examples'
+  if (act === 'example') return 'examples'
+  if (act === 'back') return bar === 'examples' ? 'details' : null
+  return bar ?? null
+}
+
+/** The knob a key turns: `zoom` (or one whose label says zoom) for + and −, `filter` for f. */
+export function namedKnob(drawing, name) {
+  const cs = (drawing && drawing.controls) || []
+  return cs.find(c => c.id === name) || cs.find(c => String(c.label || '').toLowerCase().includes(name)) || null
+}
+
+/** The next value of a filter: it cycles, so f goes all → failures only → all. */
+export function cycleKnob(control, state) {
+  if (!control) return state
+  const i = (control.i + 1) % control.values.length
+  return { ...(state || {}), [control.id]: control.values[i] }
 }
 
 /** A key that acted, then a letter typed straight after it: the key began a word. The letters go back to the prompt
