@@ -1021,6 +1021,10 @@ The dev agent built the view {view}, so {claims} now open in it. In it {forms}.
 
 The checks passed, and the view is built: the analyst sees it now. Change nothing more, and end with one line saying what you built.
 
+## finish-view-pass-next
+
+The checks passed, and the view's page for {place} is built: the analyst sees it now. Do not end your run yet: thimble's next step for this view follows. Do it now, in this run.
+
 ## finish-view-fail
 
 The checks failed, attempt {n} of {of}:
