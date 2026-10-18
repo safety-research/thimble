@@ -447,15 +447,15 @@ export async function checkQueued(cx: Ctx): Promise<void> {
   }
 }
 
-/** How long a citation whose place may resolve soon waits for each check again: a view's key that main cites as the
- *  view's build ends, before any process wrote the key's answer from the view's index (bug hunt D3: the index took
- *  15 s to 4 minutes). Past the last it is missing, and checked again only when the views' answers change
- *  (retryViewCites). */
+/** How long a citation whose place may resolve soon waits for each check again: a view's key that main cites while
+ *  its view is being built (bug hunt D3; K7: a build of both pages took 22 minutes). Past the last, each check again
+ *  waits as long as the last, and one comes at once when the views or their answers change (retryViewCites). */
 export const RETRY_MS = [5_000, 10_000, 20_000, 40_000, 60_000, 120_000, 240_000, 300_000]
 
 /** Check citations against `thimble state resolve` and keep each one's verdict; false when the call failed, so none
  *  was kept. A place that may resolve soon (`retry`) stays pending, its next check due after RETRY_MS, until it
- *  resolves or its checks again are spent, when it is missing (a red × is for a place that does not resolve for good). */
+ *  resolves or thimble says it will not: a red × is only for a place that does not resolve (bug hunt K7: a view's key
+ *  marked failed once its checks again were spent stayed red after its view resolved it). */
 export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promise<boolean> {
   if (!rt.sc || !cs.length) return true
   const refs = [...new Set(cs.map(c => c.ref))]
@@ -469,25 +469,20 @@ export async function resolveCitations(cx: Ctx, cs: readonly Citation[]): Promis
     if (res?.kind === 'concept') noteLabelName(String(res.concept_id ?? labelRef(c.ref)?.id ?? ''), typeof meta.name === 'string' ? meta.name : undefined)
     if (res?.kind === 'report') noteDocPlace(c.ref, typeof meta.title === 'string' ? meta.title : undefined, typeof res.excerpt === 'string' ? res.excerpt : '')
     const id = cid(c.raw)
-    let final = false
     if (res?.error !== undefined && res.retry === true) {
       const n = (rt.retries.get(id)?.n ?? 0) + 1
-      final = n > RETRY_MS.length
-      rt.retries.set(id, { c, n, due: final ? Infinity : at + RETRY_MS[n - 1]! })
+      rt.retries.set(id, { c, n, due: at + RETRY_MS[Math.min(n, RETRY_MS.length) - 1]! })
     } else rt.retries.delete(id)
-    await cx.setVerdict(id, verdictOf(c, res, at, final))
+    await cx.setVerdict(id, verdictOf(c, res, at))
   }
   return true
 }
 
-/** The citations whose place may resolve soon checked again at the next pass of the citation queue: the views'
- *  answers changed (a process wrote a key's answer from a view's index, views/key-refs.json), so a key that did not
- *  resolve may now; one whose checks again are spent gets one more. */
+/** The citations whose place may resolve soon checked again at the next pass of the citation queue: a view was
+ *  built or its build ended (the views' folders, proposals.json), or the views' answers changed (a process wrote a
+ *  key's answer, views/key-refs.json), so a key that did not resolve may now. */
 export function retryViewCites(): void {
-  for (const r of rt.retries.values()) {
-    if (r.n > RETRY_MS.length) r.n = RETRY_MS.length
-    r.due = 0
-  }
+  for (const r of rt.retries.values()) r.due = 0
 }
 
 /** The verdicts of the cards' takeaways checked again, and of every citation of a card's value seen anywhere (main's
@@ -1410,8 +1405,9 @@ export async function tick(cx: Ctx, ui: UiApply): Promise<void> {
         // them at once, not the list as it was when home last showed
         if (areas.has('cards') && !first && panel?.view !== 'home' && panel?.view !== 'label' && (await cx.surface('canvas'))) await readSurface(cx, 'canvas', 'cards', ['--since', iso(0)])
       }
-      // a key's answer written from a view's index: the citations of views' keys that did not resolve are checked again
-      if (areas.has('viewKeys') && !first) retryViewCites()
+      // a view built, a build's end, or a key's answer written: the citations of views' keys that did not resolve are
+      // checked again
+      if ((areas.has('viewKeys') || areas.has('views')) && !first) retryViewCites()
       if (areas.has('chats') || areas.has('agents')) {
         await refreshAgents(cx)
         if (await followRerun(cx)) panel = await cx.panel()

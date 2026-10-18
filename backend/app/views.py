@@ -145,6 +145,9 @@ SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 RESERVED_SLUGS = {"proposals", "forge", "raw", "records", "table", "text", "transcript", "lib", "frame", "resolve",
                   "suggestions", "suggest", "propose-now"}
 RESOLVE_WAIT_S = 180.0  # how long a synchronous caller (resolve_sync) waits for a reader's answer, which runs on after it
+# how long `thimble state resolve` waits for the readers of the view keys it resolves itself (resolve_keys_here), within
+# the terminal's wait for its answer (plugin/hooks/term/data.ts STATE_TIMEOUT_MS)
+KEYS_HERE_S = 30.0
 # a reader call names the claimed files only when they are this many or fewer, or when its kernel must build the index
 # (view_host `need_paths`), so a view of a million files sends their paths only to build
 PATHS_SENT = 2000
@@ -2427,6 +2430,55 @@ def resolve_view_ref(corpus_dir: Path, p: dict[str, Any], ref: str) -> dict[str,
             raise refs.RefError(f"the view {prop.get('name') or slug!r} is still being built", 404, retry=True)
         raise refs.RefError(f"no view {slug!r}", 404)
     raise refs.RefError(f"the view {view['name']!r} could not resolve {key!r} now", 404, retry=True)
+
+
+async def resolve_keys_here(c: str, wanted: list[str], wait: float = KEYS_HERE_S) -> dict[str, str]:
+    """The `view:<slug>/<key>` refs of `wanted` that resolve_view_ref said may resolve soon, resolved in this process,
+    which otherwise runs no views kernel (`thimble state resolve`, local._resolve): each key of a view that passed its
+    checks is resolved by the view's reader, in kernels this process starts and stops (term_views.own_kernels), within
+    `wait` seconds in all. An answer is kept in key-refs.json (resolve_locator), from which refs.resolve then answers
+    its ref (bug hunt round 10, K7: a key main cited as its view's first page passed was kept by no process, so the
+    terminal marked it failed for good, though the view resolved it). {ref: why} for a key the view does not have or
+    its reader raised on, which will not resolve; a ref left out may still resolve later: its view is not built yet,
+    or its reader did not answer in time."""
+    from . import term_views  # noqa: PLC0415
+
+    todo: list[tuple[str, dict[str, Any], str]] = []
+    for ref in dict.fromkeys(wanted):
+        try:
+            p = refs.parse_ref(ref)
+        except (ValueError, refs.RefError):
+            continue
+        if p.get("kind") != "view" or not p.get("key"):
+            continue
+        view = await asyncio.to_thread(read_built, c, p["slug"])
+        if view is not None and view["ok"] and view.get("origin") == "workspace":
+            todo.append((ref, view, str(p["key"])))
+    if not todo:
+        return {}
+    out: dict[str, str] = {}
+
+    async def one(ref: str, view: dict[str, Any], key: str) -> None:
+        try:
+            got = await resolve_locator(c, view["slug"], {"key": key})
+        except ReaderError as e:
+            if not e.message.startswith("the views kernel did not start"):
+                out[ref] = f"the view {view['name']!r} could not resolve {key!r}: {e.message}"
+            return
+        if got is None:
+            out[ref] = f"the view {view['name']!r} has no {key!r}"
+
+    global _loop
+    bound = _loop  # a reader call binds this loop (_call); unbound again, resolve_sync answers from key-refs.json here
+    with term_views.own_kernels():
+        try:
+            await asyncio.wait_for(asyncio.gather(*(one(*t) for t in todo)), wait)
+        except asyncio.TimeoutError:
+            log.info("%s: the view keys %s did not resolve within %.0f s", c, [t[0] for t in todo], wait)
+        finally:
+            await term_views.stop_kernels(c)
+            _loop = bound
+    return out
 
 
 # ----------------------------------------------------------------------------------------------------------

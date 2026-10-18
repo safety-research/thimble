@@ -142,6 +142,34 @@ test("a view's key that does not resolve yet, as its view is indexed, is checked
   await ui.unmount()
 })
 
+test("a view's key cited while its view is still being built stays ◌ however long the build takes, never a red ×, and is found once the build ends (bug hunt K7)", { timeoutMs: 120_000 }, async ($, on) => {
+  const w = world(on)
+  const ref = 'view:run-lanes/r03'
+  w.resolve[ref] = { ref, error: "the view 'Run Lanes' is still being built", status: 404, retry: true }
+  await start($, w)
+  const text = 'Run Lanes shows r03 as three lanes [↗](view:run-lanes/r03).'
+  let ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  await w.clock.advance(300)
+  await ui.unmount()
+  // 20 minutes: past every check again D3 allowed (13 minutes), the build of the other place's page still going
+  for (let i = 0; i < 20; i++) await w.clock.advance(60_000)
+  await w.clock.settle()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  let [chip] = await chipsOf(ui, 'para-1')
+  expect(chip).toMatchObject({ state: 'link', mark: '', spin: true })
+  await ui.unmount()
+  // the build ends (proposals.json changes): the key is checked again at once, and found
+  w.resolve[ref] = { ref, kind: 'view', slug: 'run-lanes', key: 'r03', excerpt: 'r03 · 214 events', refs: ['runs/r03.jsonl#L2'], meta: { name: 'Run Lanes' } }
+  w.stamps.set(`${WS}/views/proposals.json`, 1_790_000_100_000)
+  await w.clock.advance(1_300)
+  await w.clock.settle()
+  ui = (await $.ui.mount(MESSAGE('m1', text))) as unknown as M
+  ;[chip] = await chipsOf(ui, 'para-1')
+  expect(chip).toMatchObject({ state: 'link', mark: '', spin: false })
+  expect(chip!.tip).toBe('view run-lanes · r03 · found')
+  await ui.unmount()
+})
+
 test("the footer says `◌ checking N` while its citations are checked, no `failed` when none failed; a press on `N failed` opens the panel's Citations view", async ($, on) => {
   const w = world(on)
   await start($, w)
