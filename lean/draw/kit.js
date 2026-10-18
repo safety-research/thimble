@@ -1017,14 +1017,14 @@
       // the mini form of many threads: the stations that tell the story, the rest folded into the lanes between them
       const R = mapReduce(M, lineThreads, unit)
       if (R) {
-        const r = mapMetro(k, R.M, R.threads, W, false, unit, o.lens ? lens : null, valueOf, stationRegion, ctx, T, o)
+        const r = mapMetro(k, R.M, R.threads, W, false, unit, o.lens ? lens : null, valueOf, stationRegion, ctx, T, o, lens)
         grid = r.g
       }
     }
     if (grid) { /* drawn */ } else if (form === 'line') grid = mapLine(k, M, lineThreads[0], W, full, unit, stationRegion, toneOfThread, ctx, T)
     else if (form === 'metro') {
       const F = mapFold(M, lineThreads, o.fold != null ? num(o.fold) : Math.max(2, Math.ceil(lineThreads.length * 0.05)))
-      const r = mapMetro(k, F.M, F.threads, W, full, unit, full || o.lens ? lens : null, valueOf, stationRegion, ctx, T, o)
+      const r = mapMetro(k, F.M, F.threads, W, full, unit, full || o.lens ? lens : null, valueOf, stationRegion, ctx, T, o, lens)
       grid = r.g
       key = r.key
       if (F.folded.length) key.push(`{dim:folded into the lanes, under ${fmt(F.min)} ${escapeMarkup(unit || 'threads')} each:} ` + F.folded.slice(0, 8).map(x => `${escapeMarkup(x.label)} {dim:${fmt(x.threads.length)}}`).join(', ') + (F.folded.length > 8 ? ` {dim:+${F.folded.length - 8}}` : ''))
@@ -1286,7 +1286,7 @@
   }
 
   // ---- many threads: a metro map of bundles between stations in columns
-  function mapMetro(k, M, threads, W, full, unit, lens, valueOf, stationRegion, ctx, T, o) {
+  function mapMetro(k, M, threads, W, full, unit, lens, valueOf, stationRegion, ctx, T, o, lensAll) {
     const ST = M.stations
     const unitWord = (n, u) => (u ? `${fmt(n)} ${n === 1 ? u.replace(/s$/, '') : u}` : fmt(n))
     // edges: consecutive stops of each thread; links with a count where no thread runs
@@ -1524,7 +1524,8 @@
       const rid = stationRegion(g, S)
       regs[id] = rid
       const glyph = S.mark || '●'
-      for (let row = top; row < top + h; row++) g.set(x, row, { ch: h > 1 && row > top && row < top + h - 1 ? '┃' : glyph, tone: S.tone ? T(S.tone) : 'ink', kind: 'bead' })
+      const beadTone = S.tone ? T(S.tone) : (lensAll && (lensAll.tone[S.id] || lensAll.tone[S.label])) || 'ink'
+      for (let row = top; row < top + h; row++) g.set(x, row, { ch: h > 1 && row > top && row < top + h - 1 ? '┃' : glyph, tone: beadTone, kind: 'bead' })
       g.rect(rid, x, top, 1, h)
       P[id] = { x, top, h, S, end: N[id].rank === maxR && maxR > 0 }
     }
@@ -1534,7 +1535,9 @@
     for (const id of order) {
       const p = P[id], S = p.S
       const cnt = fmt(N[id].n)
-      const toneOfLabel = S.tone ? T(S.tone) : p.end ? (MAP_GOOD.test(S.label) ? 'good' : MAP_WARN.test(S.label) ? 'warn' : MAP_BAD.test(S.label) ? 'bad' : 'ink') : 'ink'
+      // an ending named like a value of the lens takes that value's tone, so the endings read with the lanes into them
+      const lensTone = lensAll && (lensAll.tone[S.id] || lensAll.tone[S.label])
+      const toneOfLabel = S.tone ? T(S.tone) : lensTone ? lensTone : p.end ? (MAP_GOOD.test(S.label) ? 'good' : MAP_WARN.test(S.label) ? 'warn' : MAP_BAD.test(S.label) ? 'bad' : 'ink') : 'ink'
       const short = S.short || shortName(S.label)
       // an ending's words run to the right edge, so a long one is cut there rather than shortened to two words
       const roomEnd = W - (p.x + 2) - k.len(cnt) - 1
