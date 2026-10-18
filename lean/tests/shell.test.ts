@@ -102,7 +102,7 @@ test('an object Claude saves is drawn under the next words of the turn, with its
   expect(drawn).toContain('t trace')
   expect(drawn).not.toContain('s squeeze')
   expect(drawn).toContain('? all')
-  expect(drawn).toContain('open ›')
+  expect(drawn).toContain('1 open detail')
   expect(drawn).not.toContain('browser')
 })
 

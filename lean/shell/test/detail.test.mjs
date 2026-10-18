@@ -57,21 +57,25 @@ test('versions: v1 · v2 from the history; h steps back, and from v1 to the late
   assert.equal(stepVersion([{ v: 1 }], 1), 1)
 })
 
-test('keys act only while the composer is empty, so a question that starts with p or h types normally', () => {
+test('keys act only while the composer is empty, so a question that starts with p or h types normally; details come on demand', () => {
   const ctx = { composer: '', versions: 2, knob: true, thread: true }
   assert.deepEqual(keyOf('p', ctx), { act: 'program' })
   assert.deepEqual(keyOf('h', ctx), { act: 'version' })
+  assert.deepEqual(keyOf('e', ctx), { act: 'examples' })
   assert.deepEqual(keyOf(']', ctx), { act: 'example', dir: 1 })
   assert.deepEqual(keyOf('[', ctx), { act: 'example', dir: -1 })
   assert.deepEqual(keyOf('down', ctx), { act: 'part', dir: 1 })
   assert.deepEqual(keyOf('.', ctx), { act: 'knob', dir: 1 })
   assert.deepEqual(keyOf('m', ctx), { act: 'main' })
-  for (const k of ['p', 'h', ']', '[', 'down', '.', 'm', 't']) assert.equal(keyOf(k, { ...ctx, composer: 'w' }), null, `${k} types once a question has begun`)
+  for (const k of ['p', 'h', 'e', ']', '[', 'down', '.', 'm', 't', '0']) assert.equal(keyOf(k, { ...ctx, composer: 'w', bar: true }), null, `${k} types once a question has begun`)
   assert.equal(keyOf('h', { ...ctx, versions: 1 }), null, 'one version: h types')
   assert.equal(keyOf('.', { ...ctx, knob: false }), null, 'no knob selected: . types')
   assert.equal(keyOf('m', { ...ctx, thread: false }), null, 'no thread yet: m types')
   assert.equal(keyOf('w', ctx), null, 'any other letter types')
-  assert.deepEqual(keyOf('esc', { ...ctx, overlay: true }), { act: 'program' }, 'esc closes the program first')
+  // the bar and the program close before the detail does
+  assert.equal(keyOf('0', ctx), null, 'nothing to close: 0 is left alone')
+  assert.deepEqual(keyOf('0', { ...ctx, bar: true }), { act: 'back' })
+  assert.deepEqual(keyOf('esc', { ...ctx, overlay: true }), { act: 'back' })
   assert.deepEqual(keyOf('esc', ctx), { act: 'close' })
   // a key that began a word gives its letter back
   assert.equal(beganWord('p', 300, 'l'), true)
@@ -157,6 +161,7 @@ test('a thread is scoped to a card (each question to its part) or to a mark', ()
   const first = firstMessage({ text: 'Where did the time go?', scope: part, card: { id: 'r17-trail', v: 1, title: 'Run r17' }, refs: ['q3#station=rerun-loop@n'], root: '/data/run' })
   assert.match(first, /^Where did the time go\?\n\nAbout: the part "Rerun loop" \(rerun-loop\) of the card "Run r17" \(r17-trail@1/)
   assert.match(first, /Its rows: q3#station=rerun-loop@n/)
+  assert.match(firstMessage({ text: 'q', scope: part, selFile: '/data/run/thimble/threads/s/sel/card-r17-trail.json' }), /selected now, for a later message that names none: \/data\/run\/thimble\/threads\/s\/sel\/card-r17-trail\.json/)
   assert.equal(nextMessage({ text: 'and after 1240?', scope: part, last: part }), 'and after 1240?', 'the same part needs no "about"')
   assert.match(nextMessage({ text: 'and this?', scope: { ...part, region: 'revert', label: 'Revert 641' }, last: part }), /About the part "Revert 641" \(revert\) now/)
   assert.equal(samePart(part, { ...part, label: 'other words' }), true)
@@ -172,7 +177,7 @@ test("a thread's turns come from its subagent's transcript; its answer is its la
     { role: 'assistant', content: [{ type: 'tool_use', name: 'SubagentHandback', input: { message: '480 came after.' } }] },
   ]
   const turns = turnsOf(msgs)
-  assert.deepEqual(turns.map(t => t.role), ['user', 'assistant', 'user', 'assistant'])
+  assert.deepEqual(turns.map(t => t.role), ['person', 'claude', 'person', 'claude'])
   assert.equal(turns[0].text, 'Where did the time go?')
   assert.deepEqual(turns[1].calls, ['lean resolve "q3#n"'])
   assert.equal(turns[1].text, '840 steps were reruns.')
@@ -180,8 +185,8 @@ test("a thread's turns come from its subagent's transcript; its answer is its la
   assert.equal(ownReport('<agent-message from="a1b2">\n[Subagent hand-back] …', ['a1b2']), 'a1b2')
   assert.equal(ownReport('<task-notification>\n<task-id>a1b2</task-id>', ['a1b2']), 'a1b2')
   assert.equal(ownReport('<task-id>zzz</task-id>', ['a1b2']), null, "another agent's report is main's")
-  const sent = toMain({ scope: { object: 'r17', region: 'rerun-loop', label: 'Rerun loop' }, title: 'Run r17', turns })
+  const sent = toMain({ scope: { object: 'r17', region: 'rerun-loop', label: 'Rerun loop' }, card: 'Run r17', turns })
   assert.match(sent, /side thread about Rerun loop on the card "Run r17"/)
   assert.match(sent, /The thread answered: 480 came after\./)
-  assert.equal(toMain({ scope: {}, turns: [{ role: 'user', text: 'q' }] }), '')
+  assert.equal(toMain({ scope: {}, turns: [{ role: 'person', text: 'q' }] }), '')
 })

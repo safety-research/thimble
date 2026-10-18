@@ -115,14 +115,14 @@ export async function loadObject($: Engine, ref: ObjRef): Promise<Any | null> {
   return o
 }
 
-const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline') => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}`
+const prepKey = (ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24) => `${ref.root}|${ref.id}|${ref.v ?? ''}|${w}|${stateKey(state)}|${mode}${h === 24 ? '' : '|' + h}`
 
 /** The object drawn at `w` columns (with the knobs at `state`), with its verbs: the program runs in a Node child, in the
  *  contract's sandbox. `mode` is where it is drawn (k.mode): 'inline' under a reply, 'detail' in the detail view, where
- *  a program may show more. Kept per object version, width, state and mode; a failed one stays failed until the module
- *  reloads. */
-export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline'): Promise<Prepared> {
-  const key = prepKey(ref, w, state, mode)
+ *  a program may show more, in the `h` rows the detail gives it (k.h). Kept per object version, width, state, mode and
+ *  rows; a failed one stays failed until the module reloads. */
+export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24): Promise<Prepared> {
+  const key = prepKey(ref, w, state, mode, h)
   const hit = preps.get(key)
   if (hit) return Promise.resolve(hit)
   const running = pending.get(key)
@@ -137,7 +137,7 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
     }
     if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
-    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h: 24, state: state || undefined, mode }), timeoutMs: 30000 })
+    const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], { stdin: JSON.stringify({ object, w, h, state: state || undefined, mode }), timeoutMs: 30000 })
     if (r.exitCode !== 0) return { object, drawing: null, grid: null, verbs: [], problems: [], error: (r.stderr || r.stdout).trim().split('\n')[0]?.slice(0, 300) || `exit ${r.exitCode}` }
     const out = JSON.parse(r.stdout)
     return { object, drawing: out.drawing, grid: renderTerm(out.drawing, { w }), verbs: out.verbs || [], problems: out.problems || [] }
@@ -149,12 +149,12 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
 
 /** For a drawing hook: the object if it is ready; else null, with the work started outside the drawing (a render's
  *  dispatch may be abandoned, which would stop the child) and the drawing subscribed to its end. */
-export async function preparedNow($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline'): Promise<Prepared | null> {
-  const key = prepKey(ref, w, state, mode)
+export async function preparedNow($: Engine, ref: ObjRef, w: number, state?: Record<string, unknown> | null, mode = 'inline', h = 24): Promise<Prepared | null> {
+  const key = prepKey(ref, w, state, mode, h)
   const hit = preps.get(key)
   if (hit) return hit
   await $.state.get({ ...READY, id: key })
-  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state, mode).then(() => $.state.set({ ...READY, id: key }, Date.now())) })
+  if (!pending.has(key)) $.clock.after(0, () => { void prepared($, ref, w, state, mode, h).then(() => $.state.set({ ...READY, id: key }, Date.now())) })
   return null
 }
 
@@ -299,7 +299,7 @@ export async function select($: Engine, sel: Sel): Promise<void> {
   await resolveRefs($, sel.root, refs)
 }
 
-async function openDetail($: Engine, at: ObjRef, region: string | null = null): Promise<void> {
+export async function openDetail($: Engine, at: ObjRef, region: string | null = null): Promise<void> {
   const ref = await withVersion($, at)
   const cur = (await $.state.get(SEL)).value
   // the knobs stay where the person turned them while it is the same object
@@ -699,7 +699,7 @@ function hintWords(ref: ObjRef, verbs: Verb[], o: { fullscreen: boolean; more: n
 
 /** The one quiet row under an object: the picked verbs, `? all`, and `open` (with how many rows wait there). With
  *  `words`, a verb the observer ranked reads as its few words for this object (`t trace 2,327 to its rows`). */
-function hintRow($: Engine, els: Any, ref: ObjRef, verbs: Verb[], key: string, o: { fullscreen: boolean; at: string; more: number; said: Said | null; words: string[] }) {
+function hintRow($: Engine, els: Any, ref: ObjRef, verbs: Verb[], key: string, o: { fullscreen: boolean; at: string; more: number; said: Said | null; words: string[]; focused?: boolean }) {
   const { Box, Button, Text } = els
   const picked = verbs.filter(v => v.picked).slice(0, 3)
   const running = o.said?.running ? o.said.verb : null
@@ -711,8 +711,11 @@ function hintRow($: Engine, els: Any, ref: ObjRef, verbs: Verb[], key: string, o
   if (running && !picked.some(v => v.name === running)) kids.push(...(picked.length ? [sep(els)] : []), Text({ dimColor: true, children: `${running}…` }))
   if (kids.length) kids.push(sep(els))
   kids.push(Button({ key: `${key}:all`, plain: true, label: 'all verbs', children: [Text({ color: 'suggestion', children: '?' }), Text({ dimColor: true, children: ' all' })], onPress: () => openAll($, ref) }))
+  // the latest card is the focused one: 1 on an empty prompt opens its detail (detail.tsx)
   const right: Any[] = o.fullscreen
-    ? [Button({ key: `${key}:open`, plain: true, label: 'open', children: [Text({ dimColor: true, children: o.more ? `${o.more} more rows · open ` : 'open ' }), Text({ color: 'suggestion', children: '›' })], onPress: () => openDetail($, ref) })]
+    ? [Button({ key: `${key}:open`, plain: true, label: 'open detail', children: o.focused
+        ? [Text({ dimColor: true, children: o.more ? `${o.more} more rows · ` : '' }), Text({ color: 'suggestion', children: '1' }), Text({ dimColor: true, children: ' open detail' })]
+        : [Text({ dimColor: true, children: o.more ? `${o.more} more rows · open detail ` : 'open detail ' }), Text({ color: 'suggestion', children: '›' })], onPress: () => openDetail($, ref) })]
     : [Text({ dimColor: true, children: `/obj ${refText(ref)} opens it` })]
   if (browserFlag) right.unshift(browserChip(els, `${key}:web`, async () => $.ui.toast(await openBrowser($, { id: ref.id, v: ref.v, row: o.at, root: ref.root }))), sep(els))
   return Box({ flexDirection: 'row', justifyContent: 'space-between', children: [Box({ flexDirection: 'row', children: kids }), Box({ flexDirection: 'row', children: right })] })
@@ -747,7 +750,7 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string)
     flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40, words.length ? width : 0),
     children: [
       paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress }),
-      hintRow($, els, ref, verbs, `${key}-${ref.id}`, { fullscreen, at, more, said, words }),
+      hintRow($, els, ref, verbs, `${key}-${ref.id}`, { fullscreen, at, more, said, words, focused: (await $.state.get(LAST)).value?.id === ref.id }),
     ],
   })
 }

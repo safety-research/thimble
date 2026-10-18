@@ -38,7 +38,7 @@ export function samePart(a = {}, b = {}) {
  * at, so "this" and "here" resolve. The subagent's own instructions (THREAD_PROMPT) say how to answer.
  *   card: {id, v, title, file}   refs: the kernel refs the part rests on   root: the folder of the data
  */
-export function firstMessage({ text, scope = {}, card = null, refs = [], root = '' }) {
+export function firstMessage({ text, scope = {}, card = null, refs = [], root = '', selFile = '' }) {
   const lines = [String(text || '').trim(), '']
   if (card) {
     const part = scope.region ? `the part "${aboutOf(scope)}" (${scope.region}) of ` : ''
@@ -49,6 +49,7 @@ export function firstMessage({ text, scope = {}, card = null, refs = [], root = 
   }
   if (refs.length) lines.push(`Its rows: ${refs.slice(0, 3).join(', ')} (\`lean resolve <ref>\` opens them).`)
   if (root) lines.push(`The data: ${root}`)
+  if (selFile) lines.push(`The part the person has selected now, for a later message that names none: ${selFile}`)
   return lines.join('\n').trim()
 }
 
@@ -76,8 +77,8 @@ export function callWords(b) {
 }
 
 /**
- * The turns of a thread from its subagent's transcript: [{role: 'user', text}] for each prompt the person sent (the
- * environment block Claude Code puts first is left out), [{role: 'assistant', text, calls}] for each answer, its tool
+ * The turns of a thread from its subagent's transcript: [{role: 'person', text}] for each prompt the person sent (the
+ * environment block Claude Code puts first is left out), [{role: 'claude', text, calls}] for each answer, its tool
  * calls in a few words. Tool results are left out.
  */
 export function turnsOf(messages) {
@@ -86,12 +87,12 @@ export function turnsOf(messages) {
     const c = m?.content
     if (m?.role === 'user') {
       const t = textOf(c).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim()
-      if (t && !(Array.isArray(c) && c.some(b => b && b.type === 'tool_result'))) out.push({ role: 'user', text: t })
+      if (t && !(Array.isArray(c) && c.some(b => b && b.type === 'tool_result'))) out.push({ role: 'person', text: t })
       continue
     }
     if (m?.role !== 'assistant') continue
     let last = out[out.length - 1]
-    if (!last || last.role !== 'assistant') { last = { role: 'assistant', text: '', calls: [] }; out.push(last) }
+    if (!last || last.role !== 'claude') { last = { role: 'claude', text: '', calls: [] }; out.push(last) }
     for (const b of Array.isArray(c) ? c : []) {
       if (b?.type === 'text' && String(b.text || '').trim()) last.text = last.text ? `${last.text}\n\n${b.text.trim()}` : b.text.trim()
       else if (b?.type === 'tool_use' && HANDBACK.test(String(b.name))) last.text = last.text ? `${last.text}\n\n${handback([b])}` : handback([b])
@@ -103,7 +104,7 @@ export function turnsOf(messages) {
 
 export function answerOf(messages) {
   const turns = turnsOf(messages)
-  for (let i = turns.length - 1; i >= 0; i--) if (turns[i].role === 'assistant' && turns[i].text) return turns[i].text
+  for (let i = turns.length - 1; i >= 0; i--) if (turns[i].role === 'claude' && turns[i].text) return turns[i].text
   return ''
 }
 
@@ -118,11 +119,11 @@ export function ownReport(text, ids) {
 /** What main reads when the person sends a thread's result there: the question, the part, and the answer. */
 export function toMain(thread) {
   const turns = thread?.turns || []
-  const lastQ = [...turns].reverse().find(t => t.role === 'user')
-  const lastA = [...turns].reverse().find(t => t.role === 'assistant' && t.text)
+  const lastQ = [...turns].reverse().find(t => t.role === 'person')
+  const lastA = [...turns].reverse().find(t => t.role === 'claude' && t.text)
   if (!lastA) return ''
   const q = lastQ ? String(lastQ.text).split('\n\n')[0] : ''
-  return [`The person sends you the result of a side thread about ${aboutOf(thread.scope)}${thread.title ? ` on the card "${thread.title}"` : ''}.`, q ? `They asked: ${q}` : '', `The thread answered: ${lastA.text}`].filter(Boolean).join('\n')
+  return [`The person sends you the result of a side thread about ${aboutOf(thread.scope)}${thread.card ? ` on the card "${thread.card}"` : ''}.`, q ? `They asked: ${q}` : '', `The thread answered: ${lastA.text}`].filter(Boolean).join('\n')
 }
 
 /** The thread subagent's own instructions (its system prompt). */
@@ -130,7 +131,7 @@ export const THREAD_PROMPT = `You answer one person's questions about one part o
 
 Principles
 
-Answer the question about the part they selected. Their first message says which card and which part, and the refs of its rows. "This" and "here" mean that part.
+Answer the question about the part they selected. Their first message says which card and which part, and the refs of its rows. "This" and "here" mean that part. They may select another part while the thread is open: a later message that names no part is about the part in the selection file their first message names, so read that file first.
 
 Check before you answer. Use the \`lean\` command with Bash, in the folder of the data: \`lean resolve <ref>\` opens the rows behind a value, \`lean q "<about>" <<'PY' ... PY\` computes a new value and keeps its rows, \`lean rows <ref> -n 5\` reads rows, \`lean list <card>\` shows the card's lineage. \`lean\` alone lists the commands. Run one query for a new number rather than guessing it.
 

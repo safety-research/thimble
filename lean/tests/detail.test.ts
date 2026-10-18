@@ -75,6 +75,8 @@ function world(on: any) {
     { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'rows' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'Links peaked that day: [2,994](q2#n) of the saves.' }] },
   ] }))
+  const status: string[] = []
+  on('ui.status', (_$: unknown, e: { text?: string }) => { status.push(String(e.text ?? '')); return { value: undefined } })
   const toasts: string[] = []
   on('ui.toast', (_$: unknown, e: { text?: string }) => { toasts.push(String(e.text ?? '')); return { value: undefined } })
   on('config.list', () => ({ value: [] }))
@@ -82,7 +84,7 @@ function world(on: any) {
   on('turn.complete', () => ({ text: '' }))
   on('command.register', (_$: unknown, e: { name: string }) => ({ value: { command: e.name } }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: [''] }) as never)
-  return { files, opened, views, fills, submitted, spawns, sent, toasts }
+  return { files, opened, views, fills, submitted, spawns, sent, toasts, status }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -102,7 +104,7 @@ async function pane($: any, clock: { settle: () => Promise<void> }): Promise<str
   return textOf(await $.ui.render(PANE))
 }
 
-test('the detail is one pattern: title and v1 · v2, the takeaway, the card with its part, the claim with [ ] n of m, the from line, the words of each example', async ($, on) => {
+test('overview first: the card enlarged under its title, takeaway and v1 · v2; the bar under it starts empty, and e fills it with examples labelled with what they are examples of', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
@@ -113,16 +115,29 @@ test('the detail is one pattern: title and v1 · v2, the takeaway, the card with
   expect(t).toContain('Saves per day')
   expect(t).toContain('v1 · v2')
   expect(t).toContain('June 18 had 6,543 saves.')
-  expect(t).toContain('▸ Jun 18')
-  expect(t).toContain('[ ] 1 of 6,543')
-  expect(t).toContain('from revisions.jsonl')
-  expect(t).toContain('label purpose')
-  expect(t).toContain('1 of 2 files read')
-  // an example reads as its words, never as field: value
-  expect(t).toContain('Hello agents, sign below.')
-  expect(t).not.toContain('rev_id')
-  expect(t).not.toContain('page_id:')
-  expect(t).not.toContain('Tue')
+  expect(t).toContain('▸Jun 17')
+  expect(t).toContain('Jun 18 ▆▆▆')
+  // no details up front: no examples, no rows, no from line
+  expect(t).not.toContain('Hello agents')
+  expect(t).not.toContain('[ ]')
+  expect(t).not.toContain('from revisions.jsonl')
+  expect(t).toContain('examples')
+  // e: the examples of the selected part, labelled, with their from line; each reads as its words, never as field: value
+  expect(await ($ as Any).prompt.edit(edit('e'))).toEqual({ text: '', cursor: 0 })
+  const b = await pane($, clock)
+  expect(b).toContain('examples of: saves on Jun 18')
+  expect(b).toContain('[ ] 1 of 6,543')
+  expect(b).toContain('from revisions.jsonl')
+  expect(b).toContain('label purpose')
+  expect(b).toContain('1 of 2 files read')
+  expect(b).toContain('Hello agents, sign below.')
+  expect(b).toContain('Lexicon · Scout')
+  expect(b).not.toContain('rev_id')
+  expect(b).not.toContain('page_id:')
+  // 0 empties the bar again
+  await clock.advance(1000)
+  expect(await ($ as Any).prompt.edit(edit('0'))).toEqual({ text: '', cursor: 0 })
+  expect(await pane($, clock)).not.toContain('Hello agents')
 })
 
 test('keys act only while the composer is empty; a key that began a word gives its letter back; h steps to v1', async ($, on) => {
@@ -130,7 +145,9 @@ test('keys act only while the composer is empty; a key that began a word gives i
   const clock = mock.clock(on)
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
-  // ] flips to the next example
+  // ] opens the bar on the first example, and flips to the next
+  expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
+  expect(await pane($, clock)).toContain('[ ] 1 of 6,543')
   expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(await pane($, clock)).toContain('[ ] 2 of 6,543')
   // p lays the program over the card; a letter straight after it was the start of a word
@@ -155,11 +172,11 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   await pane($, clock)
   const r = await $.prompt.submit({ text: 'why so many links?', origin: { kind: 'composer' } } as never)
   await clock.advance(100)
-  // dropped from main, with where it went; the prompt box is cleared, the thread takes the view
-  expect(String((r as Any).drop)).toContain('asked the side thread about Jun 18')
+  // dropped from main, with where it went; the prompt box is cleared; the main view stays (the pane draws the thread)
+  expect(String((r as Any).drop)).toContain("asked the card's thread about Jun 18")
   expect(w.submitted).not.toContain('why so many links?')
   expect(w.fills).toContain('')
-  expect(w.views.at(-1)).toMatchObject({ agentId: 'agent-1' })
+  expect(w.views.length).toBe(0)
   // its agent: the question, the part and the card, and the folder of the data
   expect(w.spawns.length).toBe(1)
   expect(w.spawns[0].subagent_type).toBe('thimble-lean:thread')
@@ -176,14 +193,32 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   await $.turn.complete({ turnId: 'x', agentId: 'agent-1', answer: '', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.settle()
   const file = JSON.parse(w.files[`${ROOT}/thimble/threads/${SESSION}/card-01-saves.json`]!)
-  expect(file.status).toBe('done')
-  expect(file.turns[0]).toMatchObject({ role: 'user', text: 'why so many links?', about: 'Jun 18' })
+  // the shared form: id, session, scope, title (the first question), turns of the person and claude
+  expect(file).toMatchObject({ id: 'card-01-saves', session: SESSION, title: 'why so many links?', status: 'done' })
+  expect(file.scope).toMatchObject({ object: '01-saves', region: 'day-2026-06-18' })
+  expect(file.turns[0]).toMatchObject({ role: 'person', text: 'why so many links?', about: 'Jun 18' })
+  expect(file.turns[1].role).toBe('claude')
+  expect(typeof file.turns[1].at).toBe('string')
+  // the thimble line counts the threads
+  expect(w.status.at(-1)).toBe('1 side thread')
   expect(file.turns[1].calls).toEqual(['lean resolve "q1#day=2026-06-18@n"'])
   expect(file.turns[1].text).toContain('Links peaked that day')
   expect(await pane($, clock)).toContain('1 question · answered')
+  // a wide pane: the card's thread is its left column, the question with its part, then the answer
+  const WIDE = { ...(PANE as Any), props: { ...(PANE as Any).props, bodyColumns: 140 } } as never
+  await $.ui.render(WIDE)
+  await clock.settle()
+  const wide = textOf(await $.ui.render(WIDE))
+  expect(wide).toContain('thread · this card')
+  expect(wide).toContain('❯ why so many links?')
+  expect(wide).toContain('about Jun 18')
+  expect(wide).toContain('lean resolve "q1#day=2026-06-18@n"')
+  expect(wide).toContain('Links peaked that day: 2,994 of the')
   // another part: the next question resumes the same agent and names the new part
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-17' } as never)
   await pane($, clock)
+  // the thread's agent can read the part selected now (a message typed in its own view names none)
+  expect(w.spawns[0].prompt).toContain(`${ROOT}/thimble/threads/${SESSION}/sel/card-01-saves.json`)
   await $.prompt.submit({ text: 'and here?', origin: { kind: 'composer' } } as never)
   expect(w.spawns.length).toBe(1)
   expect(w.sent.at(-1).text).toContain('and here?')

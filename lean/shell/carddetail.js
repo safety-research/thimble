@@ -1,8 +1,10 @@
 // carddetail.js: the card detail's state, as pure functions. No `$`, no Node, no DOM: the terminal (detail.tsx) and the
 // browser page (browser/card/card.js) both use it, so the two say the same thing.
 //
-// The detail has one pattern for every card: a header (title, takeaway, v1 · v2), the card large with its parts, one
-// "from" line, the examples of the selected part, a side thread, and the program behind `p`.
+// The detail has one pattern for every card ("overview first, zoom and filter, details on demand"): a header (title,
+// takeaway, v1 · v2), the card enlarged with its parts, and a bar under it that starts empty and fills on demand with
+// the examples of the selected part, labelled with what they are examples of, and their "from" line. The card's
+// thread is the chat beside it, and the program is behind `p`.
 //
 //   partsOf(grid)                 the parts a person selects, in reading order: [{id, label, rects, knob?}]
 //   stepPart(parts, at, dir)      the part after `at` (dir 1) or before it (dir -1), wrapping
@@ -67,15 +69,18 @@ export function stepVersion(versions, v) {
 
 /**
  * What one key does in the detail, or null for a key the detail leaves alone (it types, or Claude Code has it).
- * Keys act only while the composer is empty, so a question that has begun types every letter it holds.
- *   ctx: {composer: the prompt's text, knob: whether the selected part is a knob, versions: how many, thread: whether a
- *         thread exists for this card}
+ * Keys act only while the composer is empty, so a question that has begun types every letter it holds. Details come on
+ * demand: the bar under the card starts empty, `e` (or [ ]) fills it with the examples of the selected part, and `0` or
+ * `esc` empties it again.
+ *   ctx: {composer: the prompt's text, bar: whether the bar shows examples, overlay: whether the program is shown,
+ *         knob: whether the selected part is a knob, versions: how many, thread: whether the card has a thread}
  */
 export function keyOf(key, ctx = {}) {
   if (ctx.composer) return null
   switch (key) {
     case 'down': case 'tab': return { act: 'part', dir: 1 }
     case 'up': case 'shift+tab': return { act: 'part', dir: -1 }
+    case 'e': return { act: 'examples' }
     case ']': return { act: 'example', dir: 1 }
     case '[': return { act: 'example', dir: -1 }
     case 'p': return { act: 'program' }
@@ -85,7 +90,8 @@ export function keyOf(key, ctx = {}) {
     case 'm': return ctx.thread ? { act: 'main' } : null
     case 't': return ctx.thread ? { act: 'thread' } : null
     case 'o': return ctx.browser ? { act: 'browser' } : null
-    case 'esc': return ctx.overlay ? { act: 'program' } : { act: 'close' }
+    case '0': return ctx.bar || ctx.overlay ? { act: 'back' } : null
+    case 'esc': return ctx.bar || ctx.overlay ? { act: 'back' } : { act: 'close' }
     default: return null
   }
 }
@@ -93,7 +99,7 @@ export function keyOf(key, ctx = {}) {
 /** A key that acted, then a letter typed straight after it: the key began a word. The letters go back to the prompt
  *  and the key's act is undone. `ms` since the key acted. */
 export function beganWord(lastKey, ms, typed) {
-  return !!lastKey && /^[a-z]$/.test(lastKey) && ms < 700 && typeof typed === 'string' && /^[\p{L}\p{N}' ]$/u.test(typed)
+  return !!lastKey && /^[a-z]$/.test(lastKey) && ms < 700 && typeof typed === 'string' && /^[\p{L}' ]$/u.test(typed)
 }
 
 // ---------------------------------------------------------------------------------------------- examples
