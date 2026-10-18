@@ -32,7 +32,7 @@ import { FACT_KINDS, recordFacts } from './facts'
 import { filterIs, kindOf, scopeForUnit } from './layout'
 import { QuoteParts, RecordFacts } from './Quote'
 import { TypeCard } from './TypeCard'
-import { entryParts, exampleEntries, quotedSpan, type ExampleEntry } from './quotes'
+import { entryParts, exampleEntries, exampleQuotes, quotedSpan, type ExampleEntry } from './quotes'
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 /** Words as a sentence: the first letter capitalized and a period at the end. */
@@ -214,7 +214,8 @@ function ExampleBody({ cellId, refs, quotes, ws, big, question = '', takeaway = 
       alive = false
     }
   }, [ws, refs])
-  const entries = useMemo(() => exampleEntries(refs, quotes), [refs, quotes])
+  // each ref's quote: the one add_card kept, else its takeaway's quote of the record (exampleQuotes)
+  const entries = useMemo(() => exampleEntries(refs, exampleQuotes(refs, quotes, takeaway)), [refs, quotes, takeaway])
   // what the card says of each record: the values its takeaway cites there, and its question's and takeaway's words
   const cited = useMemo(() => [...takeaway.matchAll(/\[\[([^\]|]*)\|([^\]]*)\]\]/g)].map((m) => ({ said: m[1].trim(), ref: m[2].trim() })), [takeaway])
   const words = `${question} ${takeaway.replace(/\[\[([^\]|]*)\|[^\]]*\]\]/g, '$1')}`

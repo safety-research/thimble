@@ -101,6 +101,17 @@ async def test_a_takeaway_keeps_the_space_before_a_word_that_starts_with_punctua
     assert notebook.get_cell(CORPUS, cid)["takeaway"] == "Both relays bind one port, :9100, and the cache dir .quill stays; it lives on :9100."
 
 
+async def test_a_takeaway_keeps_the_space_before_a_relative_path(group):
+    """A period followed by a slash or another period starts a path, so "loads ./warble.rb" keeps its space, inside a
+    citation too, and the same in a report's plain text."""
+    from app import report
+
+    cid = _cid(await call("add_card", group, kind="note", question="What does it load?", text="One file."))
+    await call("edit_card", group, cell=cid, takeaway="Plinth [[loads ./warble.rb|data.jsonl#L3]] and then ../up/x.rb .")
+    assert notebook.get_cell(CORPUS, cid)["takeaway"] == "Plinth [[loads ./warble.rb|data.jsonl#L3]] and then ../up/x.rb."
+    assert report.plain_text("it loads ./warble.rb , then .\\win.rb .") == "it loads ./warble.rb, then .\\win.rb."
+
+
 async def test_an_agent_s_card_code_may_not_install(group, tmp_path, monkeypatch):
     """Card code runs in the kernel, where neither a prompt nor Claude Code's permission mode reaches it, so an agent's
     card that installs or downloads is refused, also where an earlier config set `installs` to "allow" (read and
@@ -173,3 +184,19 @@ async def test_read_ref_of_a_card_with_long_code_or_a_long_payload_stays_under_c
                                   notebook.new_cell("custom", "analyst", "The page", payload={"html": html}))
     text = (await call("read_ref", group, ref=f"card:{custom['id']}")).text
     assert read_parts.units(text) <= read_parts.READ_UNITS and cut_at(text.split("\nhtml:\n", 1)[1], html) > 20_000
+
+
+async def test_a_takeaway_s_quote_that_its_record_does_not_hold_is_told_as_it_is_stored(group):
+    """Bug hunt L4: main cited three records that held none of the errors it quoted, and the result said only that the
+    takeaway was long, so main answered with them. A quote of a file's record that the record does not hold is named in
+    the result, before the answer; a quote the record holds is not."""
+    cid = _cid(await call("add_card", group, kind="example", question="What did agent-01 report?",
+                          refs=["agents/agent-01.jsonl#L10"]))
+    res = await call("edit_card", group, cell=cid, takeaway='Agent-01 said [["The build compiles now"|agents/agent-01.jsonl#L10]] '
+                     'and [["the kettle is cold"|agents/agent-01.jsonl#L11]].')
+    assert not res.is_error, res.text
+    told = res.text.split("takeaway noted", 1)[1]
+    assert '"the kettle is cold" at agents/agent-01.jsonl#L11' in told
+    assert "The build compiles now" not in told
+    fine = await call("edit_card", group, cell=cid, takeaway='Agent-01 said [["The build compiles now"|agents/agent-01.jsonl#L10]].')
+    assert "not in the records" not in fine.text

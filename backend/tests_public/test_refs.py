@@ -96,3 +96,67 @@ def test_bug_hunt_e2_a_link_whose_words_are_in_double_brackets_cites_its_target(
     # a citation followed by words in parentheses, and a web link, stay as written
     assert cite.from_links("[[card:tally-ends]](above)") == "[[card:tally-ends]](above)"
     assert cite.from_links("[[↗]](https://example.org/a)") == "[[↗]](https://example.org/a)"
+
+
+def test_an_answer_s_quote_in_single_brackets_is_a_citation(workspaces_tmp):
+    """Bug hunt L9: a thread's answer quoted records as `["…"|transcript.jsonl#L2059]`, which a takeaway reads as a
+    citation (normalise_markup) but the thread showed as raw markup and never checked. An answer's text, main's or a
+    thread's, writes it as `[["…"|ref]]`; code is left as written, and so are brackets whose part after the bar is no
+    ref."""
+    from app import agents, cite, session, threads
+
+    said = ('It looped on ["Filename \'wren-ui-2.7.1.tar.gz\' is invalid…"|logs/run.jsonl#L2059]; then '
+            '["200 OK"|logs/run.jsonl#L2061] and [3 retries|logs/run.jsonl#L12-L14]. '
+            'Code `x = a[i|j.k]` and [left|right] stay.\n\n```\nm = [tag|notes.md]\n```')
+    chat = ('It looped on [["Filename \'wren-ui-2.7.1.tar.gz\' is invalid…"|logs/run.jsonl#L2059]]; then '
+            '[["200 OK"|logs/run.jsonl#L2061]] and [[3 retries|logs/run.jsonl#L12-L14]]. '
+            'Code `x = a[i|j.k]` and [left|right] stay.\n\n```\nm = [tag|notes.md]\n```')
+    assert cite.chat_form(said) == chat and cite.chat_form(chat) == chat
+    assert session.visible(said) == chat
+    meta = agents.new_agent("mini", agents.KIND_THREAD, "Why did it loop?", announce=False)
+    threads.reply("mini", meta["id"], said, by="fork")
+    texts = [r.get("delta") for r in agents.read_events(agents.paths("mini", meta["id"])[1]) if r.get("type") == "text"]
+    assert texts == [chat]
+
+
+async def test_a_value_cited_at_a_view_s_unit_is_never_failed_for_want_of_it_in_the_unit_s_words(workspaces_tmp, monkeypatch):
+    """Bug hunt L19: `89` linked to a view's run was checked against the run's prompt, which the view's reader gives as
+    the unit's excerpt, and failed, though the view shows 89 for the run. A view's unit gives no values to check against:
+    a value its label or excerpt holds is found there, and any other has only its place checked. A key the view does not
+    have still fails."""
+    from app import local, verify
+
+    unit = {"ref": "view:lattice-grid/owl-quiz", "kind": "view", "slug": "lattice-grid", "key": "owl-quiz", "record": None,
+            "label": "owl-quiz · specified", "excerpt": "TASK. Train a small model, up to 24 GPU-hours.", "refs": [],
+            "meta": {"slug": "lattice-grid"}}
+
+    def resolve(corpus_dir, ref):
+        if ref.endswith("/nope"):
+            raise refs.RefError("the view 'Lattice Grid' has no 'nope'", 404)
+        return dict(unit, ref=ref)
+
+    monkeypatch.setattr(refs, "resolve", resolve)
+    assert refs.place_only(unit) and "owl-quiz · specified" in refs.checked_text(unit)
+    root = config.corpus_dir("mini")
+    assert await verify._ref_check(root, "view:lattice-grid/owl-quiz", "89") is None
+    assert await verify._ref_check(root, "view:lattice-grid/nope", "89") is not None
+    got = await local._resolve("mini", [], [json.dumps([{"ref": "view:lattice-grid/owl-quiz", "value": "89"},
+                                                        {"ref": "view:lattice-grid/owl-quiz", "value": "24"},
+                                                        {"ref": "view:lattice-grid/nope", "value": "7"}])])
+    assert [g["state"] for g in got] == ["ok", "ok", "missing"]
+
+
+async def test_a_number_that_is_its_place_s_own_names_the_place(monkeypatch):
+    """`lines [4](a.jsonl#L4) and [62](a.jsonl#L62)`: a whole number that is the cited line's (a range's, a page's, a
+    row's) own number names the place, so a check that does not find it there checks only the place; any other number
+    not there still fails."""
+    from app import verify
+
+    rec = lambda ref: {"ref": ref, "kind": "record", "path": "a.jsonl", "excerpt": "The gate is locked."}  # noqa: E731
+    assert refs.place_only(rec("a.jsonl#L62"), "62") and refs.place_only(rec("a.jsonl#L5-L9"), "7")
+    assert refs.place_only(rec("a.jsonl#L62.b0:c3-9"), "62") and refs.place_only(rec("doc.pdf#p3"), "3")
+    assert not refs.place_only(rec("a.jsonl#L62"), "63") and not refs.place_only(rec("a.jsonl#L62"), "6.2")
+    monkeypatch.setattr(refs, "resolve", lambda corpus_dir, ref: rec(ref))
+    root = config.corpus_dir("mini")
+    assert await verify._ref_check(root, "a.jsonl#L62", "62") is None
+    assert await verify._ref_check(root, "a.jsonl#L62", "63") == verify.WHY_VALUE

@@ -361,7 +361,7 @@ def ui_records(c: str, after: int = 0) -> list[dict[str, Any]]:
 
 STATE_USAGE = ("thimble state <surface> --cwd <dir> [args]; surfaces: home, cards [--since <iso>], card <id>, labels, "
                "label <id> [--rows <json>], docs, doc <slug>, threads, thread <id> [--after <n>], agents [--tail <n>], "
-               "files [path] [--start <n>], turns <path> [--start <n>] [--line <n>], opens <paths json>, "
+               "files [path] [--start <n>], turns <path> [--start <n>] [--line <n>] [--ref <ref>], opens <paths json>, "
                "find <text>, grep <text>, findin <path> <text> [--after <n>], marks <path> [--lines <a-b>], "
                "tables <path>, rows <path> --table <name> [--start <n>] [--order <column>], resolve <refs json>, "
                "ui [--after <n>]")
@@ -941,8 +941,9 @@ async def _files(c: str, args: list[str], pos: list[str]) -> Any:
 
 async def _turns(c: str, args: list[str], pos: list[str]) -> Any:
     """A page of the turns of a whole-file JSON transcript (GET /source/turns, TURNS_PAGE turns) from turn `--start`,
-    or around the first turn on `--line`, which the renderer's file view shows as the Transcript tab. A file whose parse
-    finds no turns gives none, with `none` saying so, and the view opens its other tab, as the browser does."""
+    or around the first turn on `--line`, or around the turn that is the record `--ref` cites by its pointer, which the
+    renderer's file view shows as the Transcript tab. A file whose parse finds no turns gives none, with `none` saying
+    so, and the view opens its other tab, as the browser does."""
     from fastapi import HTTPException  # noqa: PLC0415
 
     from . import corpus, transcripts  # noqa: PLC0415
@@ -956,7 +957,8 @@ async def _turns(c: str, args: list[str], pos: list[str]) -> Any:
     line = _flag(args, "--line")
     try:
         return await asyncio.to_thread(transcripts.turns_page, p, rel, start, TURNS_PAGE,
-                                       _int(line, 1, "--line") if line is not None else None)
+                                       _int(line, 1, "--line") if line is not None else None, None,
+                                       _flag(args, "--ref") or None)
     except HTTPException as e:
         if e.status_code != 415:
             raise
@@ -1106,7 +1108,8 @@ async def _resolve(c: str, args: list[str], pos: list[str]) -> Any:
         got.update(ref=ref, **given)
         if (got.get("meta") or {}).get("span_missing"):
             return {**got, "state": "missing", "why": verify.WHY_SPAN_MISSING}
-        if value is not None and not verify._value_matches(str(value), refs.checked_text(got)):
+        if value is not None and not verify._value_matches(str(value), refs.checked_text(got)) \
+                and not refs.place_only(got, str(value)):
             return {**got, "state": "differs", "why": verify.WHY_VALUE}
         return {**got, "state": "ok"}
 

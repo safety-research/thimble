@@ -144,7 +144,7 @@ describe('a whole-file JSON transcript', () => {
     try {
       const el = await mount(<View workspace="w" path="m.json" kind="text" page={page} targetRef="m.json#L1.b0:c120-137" loadMore={() => undefined} transcript={{ format: 'json', score: 0.95 }} />)
       await settle()
-      expect(turns).toHaveBeenCalledWith('w', 'm.json', 0, expect.any(Number), 1, { block: 0, start: 120, end: 137 })
+      expect(turns).toHaveBeenCalledWith('w', 'm.json', 0, expect.any(Number), 1, { block: 0, start: 120, end: 137 }, undefined)
       const [first, second] = [...el.querySelectorAll('.reader-card')]
       expect(second.classList.contains('reader-target')).toBe(true)
       expect(second.querySelector('.hl')?.textContent).toBe('drops the NaN key')
@@ -154,6 +154,54 @@ describe('a whole-file JSON transcript', () => {
     } finally {
       delete (Element.prototype as Partial<Element>).scrollIntoView
     }
+  })
+})
+
+describe('a citation of a whole JSON document\'s message by its pointer', () => {
+  test('opens at the turn the server finds that message is, though every record of the one-line document starts on line 1', async () => {
+    const turns = vi.spyOn(api, 'sourceTurns').mockResolvedValue({
+      path: 'chats/u7.json',
+      total: 3,
+      start: 0,
+      n_groups: 1,
+      groups: { '0': { title: 'c1', first: 0 } },
+      turns: [
+        { i: 0, line: 1, speaker: 'system', role: 'system', text: 'You maintain the ledger.' },
+        { i: 1, line: 1, speaker: 'assistant', role: 'assistant', text: 'VOTE: lottery', group: 0, ref: 'chats/u7.json#/messages/9a1f' },
+        { i: 2, line: 1, speaker: 'user', role: 'user', text: 'pushed', group: 0, ref: 'chats/u7.json#/messages/9a20' },
+      ],
+      target: 1,
+    })
+    const page: SourcePage = { path: 'chats/u7.json', kind: 'text', total_lines: 1, start: 1, records: [] }
+    const View = transcript.component
+    const scrolled: string[] = []
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.textContent ?? '')
+    }
+    try {
+      const el = await mount(<View workspace="w" path="chats/u7.json" kind="text" page={page} targetRef="chats/u7.json#/messages/9a1f" loadMore={() => undefined} transcript={{ format: 'json', score: 0.95 }} />)
+      await settle()
+      expect(turns.mock.calls[0]?.[6]).toBe('chats/u7.json#/messages/9a1f')
+      const cards = [...el.querySelectorAll('.reader-card')]
+      expect(cards.map((c) => c.classList.contains('reader-target'))).toEqual([false, true, false])
+      expect(scrolled[0]).toContain('VOTE: lottery')
+    } finally {
+      delete (Element.prototype as Partial<Element>).scrollIntoView
+    }
+  })
+
+  test('the reader gives its Transcript mode the pointer itself, not the line the server placed the record on', async () => {
+    const text = '{"system": "You maintain the ledger.", "messages": {"9a1f": {"role": "assistant", "content": "VOTE: lottery"}}}'
+    const page: SourcePage = { path: 'chats/u7.json', kind: 'text', total_lines: 1, start: 1, records: [line(1, text)], transcript: { format: 'json', score: 0.95 } }
+    vi.spyOn(api, 'source').mockResolvedValue(page)
+    vi.spyOn(api, 'resolveRef').mockResolvedValue({ ref: 'chats/u7.json#/messages/9a1f', kind: 'pointer', meta: { line: 1, end_line: 1 } } as never)
+    const turns = vi.spyOn(api, 'sourceTurns').mockResolvedValue({ path: 'chats/u7.json', total: 0, start: 0, n_groups: 0, groups: {}, turns: [] })
+    localStorage.setItem(pickKey('w', 'chats/u7.json'), JSON.stringify('transcript'))
+    await mount(<Reader workspace="w" path="chats/u7.json" kind="text" labels={NO_LABELS} lead={<span />} targetRef="chats/u7.json#/messages/9a1f" />)
+    await settle()
+    await settle()
+    expect(turns).toHaveBeenCalled()
+    expect(turns.mock.calls.every((c) => c[6] === 'chats/u7.json#/messages/9a1f' && c[4] === undefined)).toBe(true)
   })
 })
 

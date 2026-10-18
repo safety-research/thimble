@@ -27,7 +27,7 @@
 import type { RenderElement, ResolveInput } from 'claude-code'
 
 import type { TermCard, TermLinks, TermVerdict } from './types'
-import { SPIN, blockClaims, blockLayout, chipLook, citeLabel, isNumber, passageIn, plainCites, richMarkdown, showsValue, streamLink, tintCells } from './cite'
+import { SPIN, blockClaims, blockLayout, chipLook, citeLabel, isNumber, passageIn, plainCites, quotedWords, richMarkdown, showsValue, streamLink, tintCells } from './cite'
 import type { ChipView, Tint } from './cite'
 import { LINK } from './chrome'
 import { cardLayout, labelHead, placeWords, titleLines, wrapRows } from './draw'
@@ -210,10 +210,10 @@ export async function citeStatus(cx: Ctx, c: Citation, v: TermVerdict | undefine
         ? `not found: ${await placeName(cx, c.ref)} does not exist`
         : status === 'differs'
           ? `not found ${where}`
-          : c.display !== null && !valued
+          : c.display !== null && (!valued || v.placeOnly)
             ? `found ${where}; only its place is checked`
             : `found ${where}`
-  if (check.state === 'verified') return valued ? `${place}, and a script got the same ${isNumber(c.display!) ? 'number' : 'value'}` : place
+  if (check.state === 'verified') return valued && !v?.placeOnly ? `${place}, and a script got the same ${isNumber(c.display!) ? 'number' : 'value'}` : place
   if (check.state === 'refuted') return `${place}, but a script got ${check.source || 'another value'}`
   if (check.state === 'typed') return `${place}, but ${check.why || 'typed in the code, not computed'}`
   if (check.state === 'running') return `${place}; ◌ being checked`
@@ -631,8 +631,10 @@ async function withQuotes(cx: Ctx, data: CardData, takeaway = ''): Promise<CardD
   const words = `${data.question} ${plainCites(takeaway)}`
   const all = data.examples
   const verdicts = await Promise.all(all.map(x => cx.verdict(cid(`[[${x.ref}]]`))))
-  // what each example quotes in its record: the quote add_card kept beside the ref, or a span's own words
-  const wants = all.map((x, n) => x.kept || (verdicts[n]?.kind === 'span' ? (verdicts[n]?.passage ?? '') : ''))
+  // what each example quotes in its record: the quote add_card kept beside the ref, a span's own words, or the words in
+  // quotation marks of a takeaway link to the record, where the card's ref names only its line (bug hunt L5)
+  const told = (ref: string) => cited.map(c => (recordRef(c.ref) === recordRef(ref) ? quotedWords(c.display) : '')).find(Boolean) ?? ''
+  const wants = all.map((x, n) => x.kept || (verdicts[n]?.kind === 'span' ? (verdicts[n]?.passage ?? '') : '') || told(x.ref))
   const done = new Set<number>()
   for (const [n, x] of all.entries()) {
     if (done.has(n)) continue
@@ -649,7 +651,9 @@ async function withQuotes(cx: Ctx, data: CardData, takeaway = ''): Promise<CardD
     if (got) {
       const merged = got.found.map(i => same[i]!)
       for (const j of merged) done.add(j)
-      examples.push({ ...x, ...(merged.length > 1 ? { ref: recordRef(x.ref) } : {}), quote: got.text, marks: got.marks, ...(got.key ? { key: got.key } : {}), ...head })
+      // a passage of a field the record's words leave out (a tool's result) is that field, not drawn again before it
+      const rest = v?.fields?.filter(([k]) => k !== got.key) ?? []
+      examples.push({ ...x, ...(merged.length > 1 ? { ref: recordRef(x.ref) } : {}), quote: got.text, marks: got.marks, ...(got.key ? { key: got.key } : {}), ...(rest.length ? { head: rest } : {}) })
       continue
     }
     if (row) {

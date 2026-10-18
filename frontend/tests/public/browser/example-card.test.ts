@@ -45,7 +45,10 @@ const CARDS: Record<string, unknown> = {
   three: { refs: ['plan.json#/steps/0', 'plan.json#/steps/0', 'plan.json#/steps/0'], quotes: THREE },
   deep: { refs: ['plan.json#/steps/0'], quotes: ['start packing up at half past five'] },
   two: { refs: ['plan.json#/steps/0', 'plan.json#/steps/1'] },
+  told: { refs: ['plan.json#/steps/0'] },
 }
+/** each card's takeaway, by name: `told` quotes its record only there (bug hunt L5) */
+const TAKEAWAYS: Record<string, string> = { told: 'The plan says to [["start packing up at half past five"|plan.json#/steps/0]].' }
 
 beforeAll(async () => {
   const script = await bundle(
@@ -57,9 +60,9 @@ beforeAll(async () => {
       `import { CardFace } from '${src('canvas/CardFace.tsx')}'`,
       `import { CanvasContext } from '${src('canvas/context.ts')}'`,
       `const ctx = { ws: 'w', filters: null, keep: null, concepts: new Map(), threadOf: () => ({ chatId: null, name: '', writable: false }), unread: new Set(), refresh: () => undefined, openThread: () => undefined }`,
-      `window.__t = { card: (name, payload) => {`,
+      `window.__t = { card: (name, payload, takeaway) => {`,
       `  const el = document.createElement('div'); el.className = 'canvas-card-box'; el.dataset.state = name; el.style.width = '480px'; el.style.margin = '16px'; document.body.appendChild(el)`,
-      `  const cell = { id: 'ex' + name, notebook: 'nb', kind: 'example', title: 'What did the picnic plan settle?', created_by: 'chat:main', ts: '', takeaway: '', payload }`,
+      `  const cell = { id: 'ex' + name, notebook: 'nb', kind: 'example', title: 'What did the picnic plan settle?', created_by: 'chat:main', ts: '', takeaway: takeaway || '', payload }`,
       `  flushSync(() => createRoot(el).render(<CanvasContext.Provider value={ctx}><CardFace cell={cell} width={440} label={{ concept: null, error: null }} /></CanvasContext.Provider>))`,
       `} }`,
     ],
@@ -80,7 +83,7 @@ beforeAll(async () => {
   })
   await page.goto(`${ORIGIN}/`)
   await page.addScriptTag({ path: script })
-  for (const [name, payload] of Object.entries(CARDS)) await page.evaluate(([n, p]) => (window as any).__t.card(n, p), [name, payload] as const)
+  for (const [name, payload] of Object.entries(CARDS)) await page.evaluate(([n, p, t]) => (window as any).__t.card(n, p, t), [name, payload, TAKEAWAYS[name] ?? ''] as const)
   for (const name of Object.keys(CARDS)) await page.waitForSelector(`[data-state="${name}"] [data-settled="true"] .bcell-q-body`)
   // a picture of the cards, for a reader who wants to look (not compared)
   const out = process.env.THIMBLE_EXAMPLE_SHOT
@@ -130,4 +133,10 @@ test('a quote deep in a long record opens the fold at the quote; Show all shows 
   await page.click('[data-state="deep"] .bcell-more')
   const [again] = await cardOf(page, 'deep')
   assert.ok(again.scrollTop > 0 && again.markShows, `Show less opens it at the quote again ${JSON.stringify(again)}`)
+})
+
+test("a quote that stands only in the takeaway, of a record the card's ref names whole, is marked and its fold opens at it (bug hunt L5)", async () => {
+  const [e] = await cardOf(page, 'told')
+  assert.deepEqual(e.marks, ['start packing up at half past five'])
+  assert.ok(e.scrollTop > 0 && e.markShows, `the fold opens at the quoted passage ${JSON.stringify(e)}`)
 })

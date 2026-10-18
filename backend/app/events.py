@@ -260,7 +260,7 @@ def build_note(kind: str, event_id: str, text: str, fields: dict[str, Any], *,
 
 # the kinds that say something ended and ask main for nothing: each waits and rides along with the next event, under
 # MEANWHILE (prompts/main.md)
-QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types", "card_fixed"})
+QUIET_KINDS = frozenset({"orient", "written", "labeled", "view", "card_types", "card_fixed", "cite_failed"})
 MEANWHILE = "meanwhile:"
 HELD_FILE = "held-events.json"  # in the workspace: the quiet events waiting, as notes, across restarts (event_files.HELD)
 

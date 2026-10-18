@@ -63,9 +63,11 @@ export function wholeJson(page: Record<string, unknown>): boolean {
 /** The page of turns a file's panel reads of a whole-file JSON transcript: from its turn `from`, else around the
  *  first turn on its `line` (a citation's), else from the first; the surface's key and `thimble state turns`'s
  *  arguments. */
-export function turnsRead(p: { path?: string; from?: number; line?: number }): { key: string; args: string[] } {
+export function turnsRead(p: { path?: string; from?: number; line?: number; record?: string }): { key: string; args: string[] } {
   const path = p.path ?? ''
   if (p.from !== undefined) return { key: `turns:${path}:${p.from}`, args: [path, '--start', String(p.from)] }
+  // a record cited by its pointer: its turn, else (a record of many turns) the turn on its first line
+  if (p.record) return { key: `turns:${path}:${p.record}`, args: [path, '--ref', p.record, ...(p.line ? ['--line', String(p.line)] : [])] }
   if (p.line) return { key: `turns:${path}:L${p.line}`, args: [path, '--line', String(p.line)] }
   return { key: `turns:${path}:0`, args: [path] }
 }

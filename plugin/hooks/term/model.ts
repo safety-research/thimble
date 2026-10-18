@@ -411,15 +411,21 @@ function passageIn(flat: string, want: string): [number, number] | null {
 
 const PASSAGES_SPAN = 600 // characters apart the passages of one record may stand to be drawn as one example
 
+// a field the record's words leave out that is no longer than this and on one line is drawn whole on a row of its own
+// before the words (draw.ts exampleLayout `head`), so no passage of it is looked for
+const HEAD_FIELD = 120
+
 /** The passages an example card quotes in its record's words (bug hunt round 10, K3: a transcript's message showed its
  *  start, never the vote the card quoted from its tool call; a record cited twice drew twice the same): the first part of
- *  the record (the verdict's `words`, wordsOf) that holds the first of `wants` (the quotes add_card kept, or spans' own
- *  passages), on one line with the words around them (PASSAGE_BEFORE, PASSAGE_AFTER), `marks` where each of `wants` that
- *  stands in that part within PASSAGES_SPAN of the first stands in it, `found` which of `wants` those are (the first
- *  among them), and the part's key (a tool's name, a record's field). Null when no part holds the first. Pure. */
+ *  the record (the verdict's `words`, wordsOf, then the long fields its words leave out, such as a tool's result) that
+ *  holds the first of `wants` (the quotes add_card kept, spans' own passages, or the takeaway's quotes of the record), on
+ *  one line with the words around them (PASSAGE_BEFORE, PASSAGE_AFTER), `marks` where each of `wants` that stands in that
+ *  part within PASSAGES_SPAN of the first stands in it, `found` which of `wants` those are (the first among them), and
+ *  the part's key (a tool's name, a record's field). Null when no part holds the first. Pure. */
 export function examplePassages(v: TermVerdict, wants: readonly string[]): { key: string; text: string; marks: [number, number][]; found: number[] } | null {
-  if (!v.words?.length || !wants.some(w => w.trim())) return null
-  for (const [key, text] of v.words) {
+  const parts = [...(v.words ?? []), ...(v.fields ?? []).filter(([, t]) => t.trim().length > HEAD_FIELD || t.trim().includes('\n'))]
+  if (!parts.length || !wants.some(w => w.trim())) return null
+  for (const [key, text] of parts) {
     const flat = text.replace(/\s+/g, ' ').trim()
     const at = wants.map(w => passageIn(flat, w))
     if (!at[0]) continue
@@ -584,9 +590,26 @@ export function verdictOf(c: Citation, res: Resolution | null, at = 0): TermVerd
     if (turn && typeof turn.speaker === 'string' && typeof turn.at === 'number') out.turn = { speaker: turn.speaker, at: turn.at }
   }
   if (!showsValue(c.display)) return { ...out, why: 'the place resolves; the citation shows no value' }
+  // a view's unit: its reader says what the unit is (its label, an excerpt such as a run's prompt), not the values the
+  // view shows for it, so a value those words leave out has only its place checked, never failed (bug hunt L19)
+  if (kind === 'view' && !valueIn(c.display!, `${str(res.label)}\n${str(res.excerpt)}`)) return { ...out, placeOnly: 'its view gives no values to check the cited one against', why: 'the place resolves; only its place is checked' }
   const where = span && 'value' in span ? str(span.value) : span && 'text' in span ? str(span.text) : kind === 'cell' ? str(res.excerpt) : out.lines.filter(l => l.hit).map(l => l.text).join('\n') || str(res.excerpt)
   const holds = span && 'value' in span ? shownMatches(str(span.value), c.display!) || valueIn(c.display!, where) : valueIn(c.display!, where)
+  // a number that is its place's own (`lines [4](…#L4) and [62](…#L62)`) names the place, not a value it shows
+  if (!holds && ownNumber(c.ref, c.display!)) return { ...out, placeOnly: "the number is its place's own", why: 'the place resolves; only its place is checked' }
   return holds ? { ...out, why: 'the value is at its place' } : { ...out, status: 'differs', why: span && 'value' in span ? `the place shows ${str(span.value)}` : 'the value is not at its place' }
+}
+
+/** Whether `display` is a whole number that is the cited place's own number: a line of the cited lines (`#L62`,
+ *  `#L5-L9`, a span of a line), a page (`#p3`) or a row (`#row=12`). Pure. */
+export function ownNumber(ref: string, display: string): boolean {
+  const n = /^\d{1,3}(?:,\d{3})*$|^\d+$/.test(display.trim()) ? Number(display.trim().replaceAll(',', '')) : NaN
+  if (!Number.isInteger(n)) return false
+  const frag = ref.split('#').slice(1).join('#')
+  const lines = /^L(\d+)(?:-L?(\d+))?(?:\.b\d+(?::c\d+-\d+)?)?$/.exec(frag)
+  if (lines) return n >= Number(lines[1]) && n <= Number(lines[2] ?? lines[1])
+  const one = /^(?:p|page=|row=)(\d+)$/.exec(frag)
+  return one ? n === Number(one[1]) : false
 }
 
 const MD_FILE = /\.(?:md|markdown|mdx)$/i

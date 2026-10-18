@@ -1555,6 +1555,8 @@ export interface SourceTurns {
   n_groups: number
   /** the turn holding the words a cited span quotes, and those words as its text holds them */
   cited?: { i: number; quote: string }
+  /** the index of the turn that is the record a citation names by its pointer (`…json#/messages/<id>`) */
+  target?: number
 }
 
 export interface SourcePage {

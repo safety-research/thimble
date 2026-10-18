@@ -119,6 +119,9 @@ export type TermVerdict = {
   /** the line of its file the cited place starts on, where its file opens: its line, or a record's first line (a JSON
    *  document's record cited by its pointer, `…json#/messages/<id>`, whose resolution has no line of its own) */
   fileLine?: number
+  /** why only its place is checked, though its words show a value: its view gives no values to check the cited one
+   *  against (a view's unit), or the number is its place's own (a line's number) */
+  placeOnly?: string
   /** `field`: a row of a field the record's words leave out (`fields`), under the record's lines */
   lines: { n: number; text: string; hit: boolean; spans?: number[][]; field?: boolean }[]
   /** a line's record's fields of words its blocks leave out, as the server resolved them (`fields`: a wiki save's
@@ -167,6 +170,9 @@ export type TermPanel = {
    *  that share a line, as in a file of one line, are told apart by it) */
   from?: number
   turn?: number
+  /** a whole JSON document's record a citation names by its pointer (`…json#/messages/<id>`): the Transcript tab opens
+   *  at the turn that is that record, lit, wherever its lines are (a document on one line starts each record on line 1) */
+  record?: string
   agent?: string
   target?: ChatTarget | null
   about?: string

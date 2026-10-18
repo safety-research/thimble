@@ -492,8 +492,8 @@ export async function openThread(cx: Ctx, id: string, question = '', opts: { rep
 }
 
 /** A file in the panel from line `start`, `line` the record a citation or a click chose, lit there. */
-export async function openFile(cx: Ctx, path: string, start = 1, line?: number): Promise<void> {
-  await openPanel(cx, { view: 'file', title: path.split('/').at(-1) ?? path, path, start, ...(line ? { line } : {}) })
+export async function openFile(cx: Ctx, path: string, start = 1, line?: number, record?: string): Promise<void> {
+  await openPanel(cx, { view: 'file', title: path.split('/').at(-1) ?? path, path, start, ...(line ? { line } : {}), ...(record ? { record } : {}) })
 }
 
 /** A label's panel, as it opens: what a save or a run said there before is gone. With `value`, its counts and examples
@@ -2086,9 +2086,10 @@ async function scriptThreadOf(cx: Ctx, ref: string): Promise<TermThreadRow | und
 function howWords(c: Citation, v: TermVerdict | undefined, check: { state?: string; source?: string }): string {
   if (!v || v.status === 'pending') return `${SPIN} thimble is reading its place`
   if (v.status === 'missing') return 'thimble looked for its place and found none'
-  const shows = c.display !== null && showsValue(c.display)
-  // words that show no value only name their place: the check reads that the place is there
-  const noValue = c.display === null ? '' : '; its words show no value, so only its place is checked'
+  const shows = c.display !== null && showsValue(c.display) && !v.placeOnly
+  // words that show no value only name their place: the check reads that the place is there; so does a value whose
+  // place gives nothing to check it against (placeOnly)
+  const noValue = c.display === null ? '' : v.placeOnly ? `; ${v.placeOnly}, so only its place is checked` : '; its words show no value, so only its place is checked'
   const found = v.status === 'differs' ? 'did not find it' : 'found it'
   let words: string
   if (v.kind === 'cell') {
@@ -2159,7 +2160,8 @@ async function drawCite(cx: Ctx, e: PaneEvent, p: TermPanel): Promise<RenderElem
   // its file opens at the cited line, or at the record a pointer cites (`…json#/messages/<id>`), lit there (bug hunt B29:
   // a transcript's message opened its file at the first turn, the message neither shown nor marked)
   const at = f?.line ?? v?.fileLine
-  const opens = f ? () => openFile(cx, f.path, Math.max(1, (at ?? 1) - 5), at) : cardId ? () => openCard(cx, cardId) : null
+  const record = v?.kind === 'pointer' ? c.ref : undefined
+  const opens = f ? () => openFile(cx, f.path, Math.max(1, (at ?? 1) - 5), at, record) : cardId ? () => openCard(cx, cardId) : null
   const body: RenderElement[] = []
   // the title row's current step: the value as its link, a click on it opening its place
   setHead({ line: titleSegs, key: 'cite-title', ...(opens ? { press: () => void opens() } : {}) })

@@ -309,9 +309,10 @@ export const api = {
   /** `GET /corpora/{c}/source/lines`: a file's line count, an estimate while a big file's line index is being built. */
   sourceLines: (c: string, path: string) => j<SourceLines>(`${apiBase()}/corpora/${enc(c)}/source/lines${q({ path })}`),
   /** `GET /corpora/{c}/source/turns`: `count` turns of a JSON transcript from turn `start`, or around `line`; with
-   * `span`, a span of that line (block and UTF-16 offsets), around the turn holding the words it quotes. */
-  sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number, span?: { block: number; start: number; end: number }) =>
-    j<SourceTurns>(`${apiBase()}/corpora/${enc(c)}/source/turns${q({ path, start, count, line, block: span?.block, char_start: span?.start, char_end: span?.end })}`),
+   * `span`, a span of that line (block and UTF-16 offsets), around the turn holding the words it quotes; with `ref`, a
+   * citation of a record by its pointer, around the turn that is that record (`target`). */
+  sourceTurns: (c: string, path: string, start = 0, count = 200, line?: number, span?: { block: number; start: number; end: number }, ref?: string) =>
+    j<SourceTurns>(`${apiBase()}/corpora/${enc(c)}/source/turns${q({ path, start, count, line, block: span?.block, char_start: span?.start, char_end: span?.end, ref })}`),
   /** `GET /corpora/{c}/source/speakers`: the names the corpus gives speaker ids (`ids`, joined by commas) that a file
    * keeps under `key` (an agents.jsonl beside it, whose records carry an id and a name). */
   speakerNames: (c: string, path: string, key: string, ids: string) => j<{ names: Record<string, string> }>(`${apiBase()}/corpora/${enc(c)}/source/speakers${q({ path, key, ids })}`),

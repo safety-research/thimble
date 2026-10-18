@@ -335,3 +335,64 @@ test("an example of a JSON lines record of no known shape draws its fields, not 
   expect(text.join('\n')).toContain('shed/log.jsonl line 7')
   await ui.unmount()
 })
+
+test("an example whose ref names only a line draws the passage its takeaway quotes from that record, marked, in a field the record's words leave out too (bug hunt L5)", { timeoutMs: 30_000 }, async ($, on) => {
+  // the card's refs named lines, its quotes stood only in its takeaway: each record drew from its start, the quoted
+  // error of the second unseen and nothing marked
+  const w = world(on)
+  const result = '\n<counter>42</counter> wren@shed:/tmp/pkg$ \n' + '/usr/bin/kettle\n'.repeat(12) + "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\nModuleNotFoundError: No module named 'gizmo'\n<counter>43</counter> wren@shed:/tmp/pkg$ "
+  const rec = { record: 'message', index: 61, role: 'Assistant', type: 'ToolMessage', tool_name: 'terminal', tool_call: { session_name: 'main', text: 'which kettle; python3 -c "import gizmo"' }, tool_result: result }
+  w.resolve['shed/log.jsonl#L62'] = { ref: 'shed/log.jsonl#L62', kind: 'record', path: 'shed/log.jsonl', line: 62, record: rec, blocks: [{ kind: 'text', text: rec.tool_call.text }], fields: [{ key: 'tool_result', text: result.trim() }], excerpt: rec.tool_call.text, meta: {} }
+  const words = 'Hello from the shed. '.repeat(30) + 'Error: the gate is locked for port 8443. Bye.'
+  w.resolve['shed/log.jsonl#L4'] = { ref: 'shed/log.jsonl#L4', kind: 'record', path: 'shed/log.jsonl', line: 4, record: { text: words }, blocks: [{ kind: 'text', text: words }], excerpt: words, meta: {} }
+  w.cells.x0line00 = {
+    id: 'x0line00', notebook: 'g1', kind: 'example', title: 'Which commands failed?', labels: [], created_by: 'main', ts: '2026-10-06T10:00:00+00:00',
+    takeaway: `The gate said [["Error: the gate is locked for port 8443"|shed/log.jsonl#L4]] and Python gave [["ModuleNotFoundError: No module named 'gizmo'"|shed/log.jsonl#L62]].`,
+    payload: { refs: ['shed/log.jsonl#L4', 'shed/log.jsonl#L62'] },
+  }
+  await start($, w)
+  await turn($, w, 'x0line00')
+  const ui = (await $.ui.mount(MESSAGE('r1', 'Here.'))) as unknown as M
+  const client = (await ui.find({ type: 'Client', key: 'card-t0-x0line00' })) as unknown as { props: { props: { card: Parameters<typeof cardLayout>[0] } } }
+  const lay = cardLayout(client.props.props.card, 120, -1).lines
+  const text = lay.map(l => l.map(x => x.s).join(''))
+  const lit = lay.flatMap(l => l.filter(x => x.bg).map(x => x.s)).join('|')
+  expect(lit).toContain('Error: the gate is locked for port 8443')
+  expect(lit).toContain("ModuleNotFoundError: No module named 'gizmo'")
+  // the second record at its tool's result, where the error stands, not its command or the result's first lines
+  expect(text.find(t => t.startsWith('●') && t.includes('tool_result'))).toBeDefined()
+  expect(text.join('\n')).not.toContain('<counter>42</counter>')
+  await ui.unmount()
+})
+
+test("a failed check of a citation in a card main made is told to main once, as a note for its next reply; a fork's card's is not (bug hunt L4)", { timeoutMs: 30_000 }, async ($, on) => {
+  // thimble marked main's three quotes × and told main nothing, so main's answer kept claims none of the records held
+  const w = world(on)
+  const rec = (n: number, text: string) => ({ ref: `shed/log.jsonl#L${n}`, kind: 'record', path: 'shed/log.jsonl', line: n, record: { text }, blocks: [{ kind: 'text', text }], excerpt: text, meta: {} })
+  w.resolve['shed/log.jsonl#L85'] = rec(85, 'A picture of the shed door.')
+  w.resolve['shed/log.jsonl#L4'] = rec(4, 'Error: the gate is locked for port 8443')
+  const card = (id: string, by: string) => ({
+    id, notebook: 'g1', kind: 'example', title: 'Which commands failed?', labels: [], created_by: by, ts: '2026-10-06T10:00:00+00:00',
+    takeaway: 'The gate said [["Error: the gate is locked for port 8443"|shed/log.jsonl#L85]] and again [["Error: the gate is locked for port 8443"|shed/log.jsonl#L4]].',
+    payload: { refs: ['shed/log.jsonl#L85', 'shed/log.jsonl#L4'] },
+  })
+  w.cells.x0fail00 = card('x0fail00', 'main')
+  await start($, w)
+  await turn($, w, 'x0fail00')
+  await w.clock.advance(300)
+  const told = w.acts.filter(a => a.kind === 'cite-failed')
+  expect(told).toHaveLength(1)
+  expect(told[0]!.payload.cites).toEqual([{ shown: '"Error: the gate is locked for port 8443"', ref: 'shed/log.jsonl#L85', why: 'the value is not at its place', card: 'x0fail00' }])
+  // told once, also when the card is read again
+  await w.clock.advance(5000)
+  expect(w.acts.filter(a => a.kind === 'cite-failed')).toHaveLength(1)
+  // a card a fork made: its failed citation is not main's
+  w.resolve['shed/log.jsonl#L86'] = rec(86, 'Another picture.')
+  w.cells.x0fork00 = { ...card('x0fork00', 'thread'), takeaway: 'It said [["the kettle is cold"|shed/log.jsonl#L86]].' }
+  w.toolText = 'card:x0fork00\n[out0: table]'
+  await $.turn.start({ text: 'And?', turnId: 't2' } as never)
+  await $.tool.call({ tool: 'mcp__plugin_thimble_thimble__add_card', tool_use_id: 'u2', agentId: 'a0fork' } as never)
+  await $.turn.complete({ turnId: 't2', answer: '', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.advance(5300)
+  expect(w.acts.filter(a => a.kind === 'cite-failed')).toHaveLength(1)
+})

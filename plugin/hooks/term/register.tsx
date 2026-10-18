@@ -46,7 +46,7 @@ import { MARGIN, chipOf, drawCards, drawReply, placeUrl, toolWords } from './rep
 import { COLORS } from './paint'
 import { isAnchor, signalEnd, signalQuestion } from './signal'
 import type { AppendedRow } from './signal'
-import { PANEL, cardDeleted, cardMade, classicScreen, keepKeys, keysBack, liveCards, loadCards, navOrigin, noteScreen, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rowAs, rowSeen, rt, surfaceValue, takeKeys, threadsNow } from './term'
+import { PANEL, cardDeleted, cardMade, classicScreen, keepKeys, keysBack, liveCards, loadCards, navOrigin, noteScreen, openHome, openPanel, paneTitle, panelColumns, placedLater, queueCitations, readSurface, rowAs, rowSeen, rt, surfaceValue, takeKeys, tellFailed, threadsNow } from './term'
 import { turns } from './turns'
 import { openSection, registerBand } from './band'
 import { registerPanelViews } from './views'
@@ -767,7 +767,10 @@ export const register: Register = (on, options) => {
       }
       const ids = cardsOfCall(String(e.tool), e, String(ran.text ?? ''))
       if (ids.length) {
-        for (const id of ids) cardMade(id)
+        for (const id of ids) {
+          cardMade(id)
+          rt.mainCards.add(id)
+        }
         if (rt.turn) for (const id of ids) if (!rt.turn.cards.includes(id)) rt.turn.cards.push(id)
         void loadCards(cxOf($), ids)
       }
@@ -812,8 +815,8 @@ export const register: Register = (on, options) => {
         try {
           const cs = citations(ahead)
           // each citation checked as soon as it has streamed whole (the next 250 ms batch), not when its block is drawn,
-          // so most checks end while the answer is still on screen
-          queueCitations(cs)
+          // so most checks end while the answer is still on screen; main's own, so a failed one is told to main
+          queueCitations(cs, '')
           for (const c of cs) if (!urls.has(c.ref)) urls.set(c.ref, await placeUrl(cx, c.ref))
           for (const m of ahead.matchAll(/\[\[card:([A-Za-z0-9_-]+)\]\]/g)) if (!questions.has(m[1]!)) questions.set(m[1]!, ((await cx.card(m[1]!))?.data as CardData | null | undefined)?.question ?? '')
         } catch {
@@ -906,6 +909,8 @@ export const register: Register = (on, options) => {
       lineRow = vrow
       // the chat citations the answer drew, for the panel's Citations view (C13 citeIndex)
       if (featureOn('citationMarks') && all.trim() && !t.own) await indexCitations(cx, all, last || row)
+      // the failed checks of main's citations found while the turn ran, told to main for its next reply
+      await tellFailed(cx)
     }
     // what the turn's calls saw of the data, sent once: the session's summary, which the thimble line's coverage and the
     // Coverage view read (no line under the answer: coverage lives in the thimble line, the owner's live test, 10-17)

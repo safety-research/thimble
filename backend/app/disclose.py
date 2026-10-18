@@ -62,7 +62,7 @@ SECTIONS = {
     "event-quiet": "Events from thimble: the events that ride along under `meanwhile:`",
     **{f"event-{k}": f"Events from thimble: the `{k}` bullet" for k in (
         "main", "thread", "start_agent", "orient", "card", "written", "checked", "labeled", "view", "card_types",
-        "card_fixed", "label_done", "rerun")},
+        "card_fixed", "cite_failed", "label_done", "rerun")},
 }
 # The parts the first call of each tool gives, in the guide's order.
 TOOL_SECTIONS: dict[str, tuple[str, ...]] = {
@@ -92,6 +92,7 @@ EVENT_SECTIONS: dict[str, tuple[str, ...]] = {
     "view": ("events", "event-view", "event-quiet", "views"),
     "card_types": ("events", "event-card_types", "event-quiet"),
     "card_fixed": ("events", "event-card_fixed", "event-quiet"),
+    "cite_failed": ("events", "event-cite_failed", "event-quiet"),
     "label_done": ("events", "event-label_done", "labels"),
     "rerun": ("events", "event-rerun", "labels"),
 }

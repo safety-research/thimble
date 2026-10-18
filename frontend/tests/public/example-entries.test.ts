@@ -2,7 +2,7 @@
 // are one entry, which shows that record once with every quoted passage highlighted; refs of different records stay
 // one entry each, as they were.
 import { describe, expect, test } from 'vitest'
-import { entryParts, exampleEntries, type QuotePart } from '../../src/canvas/quotes.ts'
+import { entryParts, exampleEntries, exampleQuotes, type QuotePart } from '../../src/canvas/quotes.ts'
 import type { ResolvedRef } from '../../src/lib/types.ts'
 
 const LONG =
@@ -108,5 +108,38 @@ describe("a quote inside a JSON record's list or object (bug hunt round 10, K3)"
     expect(parts[0]).toMatchObject({ kind: 'span', key: 'command', text: QUOTE })
     expect((parts[0] as { before: string }).before).not.toContain('\\n')
     expect(parts.at(-1)?.kind).toBe('fields')
+  })
+})
+
+describe('an example whose refs name only lines, its quotes in its takeaway (bug hunt L5)', () => {
+  // each record drew from its start: the quoted error of a tool's output sat behind Show all, nothing marked
+  const result =
+    '<counter>42</counter> wren@shed:/tmp/pkg$\n' + '/usr/bin/kettle\n'.repeat(14) + 'Traceback (most recent call last):\n  File "<string>", line 1, in <module>\nModuleNotFoundError: No module named \'gizmo\'\n<counter>43</counter> wren@shed:/tmp/pkg$'
+  const command = 'which kettle; python3 -c "import gizmo"'
+  const REC = {
+    ref: 'shed/log.jsonl#L62',
+    kind: 'record',
+    path: 'shed/log.jsonl',
+    line: 62,
+    record: { record: 'message', tool_name: 'terminal', tool_call: { text: command }, tool_result: result },
+    blocks: [{ kind: 'text', text: command }],
+    fields: [{ key: 'tool_result', text: result }],
+    excerpt: command,
+  } as unknown as ResolvedRef
+  const takeaway = 'Python gave [["ModuleNotFoundError: No module named \'gizmo\'"|shed/log.jsonl#L62]], and [[the gate|shed/log.jsonl#L4]] stayed shut.'
+
+  test("a ref's quote is the takeaway's quote of its record, where add_card kept none; a span keeps its own", () => {
+    expect(exampleQuotes(['shed/log.jsonl#L62', 'shed/log.jsonl#L4', 'shed/log.jsonl#L62.b0:c1-5'], ['', '', ''], takeaway)).toEqual(["ModuleNotFoundError: No module named 'gizmo'", '', ''])
+    expect(exampleQuotes(['shed/log.jsonl#L62'], ['kept words'], takeaway)).toEqual(['kept words'])
+    // a quoted log line that holds brackets
+    expect(exampleQuotes(['mail/log.jsonl#L774'], [], 'IMAP said [["a1 NO [AUTHENTICATIONFAILED] LOGIN"|mail/log.jsonl#L774]].')).toEqual(['a1 NO [AUTHENTICATIONFAILED] LOGIN'])
+  })
+
+  test("the record's part that holds the takeaway's quote is marked there, so its fold opens at it", () => {
+    const [e] = exampleEntries([REC.ref], exampleQuotes([REC.ref], [], takeaway))
+    const parts = entryParts(e, () => REC)!
+    expect(marked(parts)).toEqual(["ModuleNotFoundError: No module named 'gizmo'"])
+    const field = parts.find((p) => p.kind === 'field' && p.key === 'tool_result') as Extract<QuotePart, { kind: 'field' }>
+    expect(field.marks).toHaveLength(1)
   })
 })
