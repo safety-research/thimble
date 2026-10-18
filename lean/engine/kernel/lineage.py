@@ -75,17 +75,32 @@ def words_of(row: S.Row) -> tuple[str, str]:
         return "", ""
     words, key = "", None
     if v.get("type") in ("assistant", "user") and isinstance(v.get("message"), dict):
-        for b in S.blocks_of(v):
-            if b["kind"] in ("text", "tool_use", "tool_result") and str(b["text"]).strip():
+        content = v["message"].get("content")
+        for b in (content if isinstance(content, list) else [{"type": "text", "text": content}]):
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "text" and str(b.get("text") or "").strip():
                 words = one(b["text"])
+            elif b.get("type") == "tool_use":
+                i = b.get("input") if isinstance(b.get("input"), dict) else {}
+                arg = next((i[k] for k in ("command", "file_path", "pattern", "path", "description", "query") if i.get(k)), "")
+                words = one(f"{b.get('name')}: {arg}" if arg else f"{b.get('name')}: {json.dumps(i, ensure_ascii=False)}")
+            elif b.get("type") == "tool_result":
+                c = b.get("content")
+                words = one(c if isinstance(c, str) else " ".join(str(x.get("text") or "") for x in c or [] if isinstance(x, dict)))
+            if words:
                 break
+        if words:
+            t = str(v.get("timestamp") or "")
+            return (words if len(words) <= 240 else words[:239] + "…"), " · ".join(x for x in (v["type"], t[11:16]) if x)
+        return "", ""
     if not words:
         key = next((k for k in WORD_KEYS if isinstance(v.get(k), str) and v[k].strip()), None)
         if key:
             words = one(v[key])
     if not words:
-        long = [(k, x) for k, x in v.items() if isinstance(x, str) and len(x.strip()) >= 16
-                and not re.search(r"(^|_)(id|ref|hash|key|url|path)$", k, re.I)]
+        long = [(k, x) for k, x in v.items() if isinstance(x, str) and len(x.strip()) >= 16 and " " in x.strip()
+                and not re.search(r"(id|uuid|ref|hash|key|url|path)$", k, re.I)]
         if long:
             key, x = max(long, key=lambda kv: len(kv[1]))
             words = one(x)

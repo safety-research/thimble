@@ -59,6 +59,7 @@ export function nextMessage({ text, scope = {}, last = null }) {
   return `${q}\n\n(About ${scope.region ? `the part "${aboutOf(scope)}" (${scope.region})` : `"${aboutOf(scope)}"`} now.)`
 }
 
+const oneLine = s => String(s).replace(/\s+/g, ' ').trim().slice(0, 160)
 const textOf = c => (typeof c === 'string' ? c : Array.isArray(c) ? c.filter(b => b && b.type === 'text').map(b => b.text).join('\n') : '')
 const HANDBACK = /^(SubagentHandback|SendUserMessage)$/
 
@@ -93,10 +94,11 @@ export function turnsOf(messages) {
     if (m?.role !== 'assistant') continue
     let last = out[out.length - 1]
     if (!last || last.role !== 'claude') { last = { role: 'claude', text: '', calls: [] }; out.push(last) }
+    // the answer is the turn's last words (or the report it handed back); words between its tool calls are steps
     for (const b of Array.isArray(c) ? c : []) {
-      if (b?.type === 'text' && String(b.text || '').trim()) last.text = last.text ? `${last.text}\n\n${b.text.trim()}` : b.text.trim()
-      else if (b?.type === 'tool_use' && HANDBACK.test(String(b.name))) last.text = last.text ? `${last.text}\n\n${handback([b])}` : handback([b])
-      else if (b?.type === 'tool_use') last.calls.push(callWords(b))
+      if (b?.type === 'text' && String(b.text || '').trim()) { if (last.text) last.calls.push(oneLine(last.text)); last.text = b.text.trim() }
+      else if (b?.type === 'tool_use' && HANDBACK.test(String(b.name))) last.text = handback([b]) || last.text
+      else if (b?.type === 'tool_use') { if (last.text) { last.calls.push(oneLine(last.text)); last.text = '' } last.calls.push(callWords(b)) }
     }
   }
   return out

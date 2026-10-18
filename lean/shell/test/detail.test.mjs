@@ -94,7 +94,7 @@ test('examples show the meaningful words of a record, never a dump of field: val
   // the field the card is about wins
   assert.equal(recordWords({ user: 'ScoutBot', text: 'test test', title: 'Lexicon' }, { fields: ['title'] }).words, 'Lexicon')
   // a row the kernel read back carries its words and meta
-  assert.deepEqual(recordWords({ ref: 'revisions.jsonl#L12', text: 'rev_id: a, body: b', words: 'b', meta: 'PageX · ScoutBot' }), { words: 'b', meta: 'PageX · ScoutBot' })
+  assert.deepEqual(recordWords({ ref: 'data/revisions.jsonl#L12', text: 'rev_id: a, body: b', words: 'b', meta: 'PageX · ScoutBot' }), { words: 'b', meta: 'PageX · ScoutBot · revisions.jsonl#L12' })
   assert.deepEqual(recordWords({ ref: 'revisions.jsonl#L12', text: 'plain words' }), { words: 'plain words', meta: 'revisions.jsonl#L12' })
   // a transcript row: its words, else its tool call
   assert.equal(recordWords({ type: 'assistant', message: { content: [{ type: 'text', text: 'Reading the fixture now.' }] } }).words, 'Reading the fixture now.')
@@ -172,6 +172,8 @@ test("a thread's turns come from its subagent's transcript; its answer is its la
     { role: 'user', content: [{ type: 'text', text: '<system-reminder>env</system-reminder>' }, { type: 'text', text: 'Where did the time go?' }] },
     { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'lean resolve "q3#n"\nmore' } }] },
     { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'rows' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'I will count the reruns.' }, { type: 'tool_use', name: 'Bash', input: { command: 'lean q "reruns"' } }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'u', content: 'rows' }] },
     { role: 'assistant', content: [{ type: 'text', text: '840 steps were reruns.' }] },
     { role: 'user', content: [{ type: 'text', text: 'and after 1240?' }] },
     { role: 'assistant', content: [{ type: 'tool_use', name: 'SubagentHandback', input: { message: '480 came after.' } }] },
@@ -179,7 +181,8 @@ test("a thread's turns come from its subagent's transcript; its answer is its la
   const turns = turnsOf(msgs)
   assert.deepEqual(turns.map(t => t.role), ['person', 'claude', 'person', 'claude'])
   assert.equal(turns[0].text, 'Where did the time go?')
-  assert.deepEqual(turns[1].calls, ['lean resolve "q3#n"'])
+  // the answer is the last words; the words between tool calls are steps
+  assert.deepEqual(turns[1].calls, ['lean resolve "q3#n"', 'I will count the reruns.', 'lean q "reruns"'])
   assert.equal(turns[1].text, '840 steps were reruns.')
   assert.equal(answerOf(msgs), '480 came after.')
   assert.equal(ownReport('<agent-message from="a1b2">\n[Subagent hand-back] …', ['a1b2']), 'a1b2')

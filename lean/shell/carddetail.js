@@ -141,7 +141,8 @@ export function recordWords(rec, o = {}) {
   if (typeof rec !== 'object') return { words: oneLine(rec), meta: '' }
   // a row the kernel read back: {ref, text, words?, meta?, value?}
   if (typeof rec.ref === 'string' && (rec.words != null || rec.text != null) && rec.value === undefined) {
-    return { words: oneLine(rec.words ?? rec.text ?? ''), meta: oneLine(rec.meta ?? '') || rec.ref }
+    const where = rec.ref.replace(/^.*\//, '')
+    return { words: oneLine(rec.words ?? rec.text ?? ''), meta: [oneLine(rec.meta ?? ''), where].filter(Boolean).join(' · ') }
   }
   const v = rec.value !== undefined && rec.value && typeof rec.value === 'object' ? rec.value : rec
   const where = typeof rec.ref === 'string' && rec.value !== undefined ? rec.ref : ''
@@ -161,7 +162,7 @@ export function recordWords(rec, o = {}) {
   }
   if (!words) {
     // no field by those names: the longest words in it, when they read as words
-    const long = Object.entries(v).filter(([k, x]) => typeof x === 'string' && x.trim().length >= 16 && !/(^|_)(id|ref|hash|key|url|path)$/i.test(k))
+    const long = Object.entries(v).filter(([k, x]) => typeof x === 'string' && x.trim().length >= 16 && /\s/.test(x.trim()) && !/(id|uuid|ref|hash|key|url|path)$/i.test(k))
     if (long.length) { const [k, x] = long.reduce((a, b) => (b[1].length > a[1].length ? b : a)); wordKey = k; words = oneLine(x) }
   }
   const metaKeys = [...fields.filter(f => f !== wordKey), ...META_KEYS.filter(k => !fields.includes(k))]

@@ -348,9 +348,11 @@ function threadColumn(els: Any, o: Any, thread: Any, part: Any, TW: number, R: n
   for (const t of thread?.turns || []) {
     if (t.role === 'person') { person(String(t.text), t.about); continue }
     const calls: string[] = t.calls || []
+    if (calls.length > 2) lines.push(Text({ dimColor: true, children: `  ${calls.length - 2} earlier step${calls.length - 2 === 1 ? '' : 's'}` }))
     for (const c of calls.slice(-2)) lines.push(Text({ dimColor: true, wrap: 'truncate-end', children: `⏺ ${cut(c, w - 2)}` }))
-    if (calls.length > 2) lines.push(Text({ dimColor: true, children: `  + ${calls.length - 2} more steps` }))
-    if (t.text) say(linkRuns(String(t.text).replace(/\s+/g, ' ')), Text({ children: '⏺ ' }))
+    // the answer keeps its lines (a list stays a list); code marks are dropped, citations read as their words
+    String(t.text || '').replace(/`/g, '').split(/\n+/).map(x => x.trim()).filter(Boolean).forEach((para, i) =>
+      say(linkRuns(para), Text({ children: i ? '  ' : '⏺ ' })))
     lines.push(Text({ children: ' ' }))
   }
   if (thread?.status === 'running') lines.push(Text({ color: 'warning', children: '✻ answering…' }))

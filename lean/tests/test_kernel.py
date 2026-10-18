@@ -184,7 +184,7 @@ def test_a_resolved_row_carries_its_words_not_a_dump_of_its_fields(root: Path) -
     assert "id:" not in rec["words"]
     assert rec["text"].startswith("id: 3"), "the CLI's excerpt is unchanged"
     run = LIN.resolve(st, "agent.jsonl#L2", n=1)["records"][0]
-    assert run["words"] == "I will run the tests"
+    assert run["words"] == "I will run the tests" and run["meta"] == "assistant"
     assert "words" not in LIN.resolve(st, "runs.csv#row=1", n=1)["records"][0], "a row with no words has none"
 
 
