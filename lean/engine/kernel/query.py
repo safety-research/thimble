@@ -324,32 +324,57 @@ _DBROWNUM = re.compile(r"^(?P<path>[^#]+\.(?:db|sqlite|sqlite3))#(?P<unit>[A-Za-
 
 
 def rowsets_of(frames: list[Any]) -> list[str]:
-    """Every source row the frames hold, as few row-set strings: one per file and unit, the rows sorted."""
+    """Every source row the frames hold, as few row-set strings: one per file and unit, the rows sorted. A frame from
+    load() is read by its `_file` column, a file at a time, so a frame of millions of rows takes a moment, not many."""
+    import numpy as np
     import pandas as pd
 
-    parts = []
+    nums: dict[tuple[str, str], list[Any]] = {}
+    other: dict[str, None] = {}
+
+    def add(s: Any) -> None:
+        s = s.dropna().astype(str).drop_duplicates()
+        for rx in (_ROWNUM, _DBROWNUM):
+            if s.empty:
+                return
+            m = s.str.extract(rx)
+            ok = m["n"].notna()
+            if ok.any():
+                g = m[ok]
+                for (path, unit), part in g.groupby(["path", "unit"], sort=False)["n"]:
+                    nums.setdefault((path, unit), []).append(part.astype(np.int64).to_numpy())
+            s = s[~ok]
+        for x in s.tolist():
+            other[x] = None
+
     for f in frames:
         one, many = ref_columns(f)
         for c in one:
-            parts.append(f[c].dropna().astype(str))
+            if c == "_ref" and "_file" in f.columns:
+                # the rows of one file share the ref's start (`revisions.jsonl#L`), so the numbers are what follows it
+                for rel, refs in f.groupby("_file", sort=False)["_ref"]:
+                    refs = refs.dropna().astype(str)
+                    if refs.empty:
+                        continue
+                    first = R._unit(refs.iloc[0])
+                    if first and first[0] == str(rel):
+                        pre = f"{first[0]}#{first[1]}"
+                        tail = refs.str.slice(len(pre))
+                        if bool(refs.str.startswith(pre).all()) and bool(tail.str.isdigit().all()):
+                            nums.setdefault((first[0], first[1]), []).append(tail.astype(np.int64).to_numpy())
+                            continue
+                    add(refs)
+            else:
+                add(f[c])
         for c in many:
-            s = f[c].explode().dropna()
-            parts.append(s.astype(str))
-    if not parts:
-        return []
-    s = pd.concat(parts, ignore_index=True).drop_duplicates()
+            add(f[c].explode())
     out: list[str] = []
-    for rx in (_ROWNUM, _DBROWNUM):
-        if s.empty:
-            break
-        m = s.str.extract(rx)
-        ok = m["n"].notna()
-        if ok.any():
-            g = m[ok].assign(n=m.loc[ok, "n"].astype(int))
-            for (path, unit), nums in g.groupby(["path", "unit"], sort=False)["n"]:
-                out.append(f"{path}#{unit}{R.format_nums(nums.tolist())}")
-        s = s[~ok]
-    out.extend(s.tolist())
+    for (path, unit), arrs in nums.items():
+        a = np.unique(np.concatenate(arrs))
+        cut = np.where(np.diff(a) != 1)[0]
+        starts, ends = a[np.r_[0, cut + 1]], a[np.r_[cut, len(a) - 1]]
+        out.append(f"{path}#{unit}" + ",".join(str(x) if x == y else f"{x}-{y}" for x, y in zip(starts.tolist(), ends.tolist())))
+    out.extend(other)
     return out
 
 
@@ -466,7 +491,10 @@ def _summary(out: dict[str, Any], values: list[Any], ns: dict[str, Any], frames:
             names.add(hits[0][0])
             continue
         if whole is None:
-            whole = rowsets_of([f for _, f in _named_frames(ns, frames, lambda f: True, lists=True)])
+            # the rows the query read: the frames it loaded or used (every frame it made is cut from those)
+            whole = rowsets_of([f for f in frames if ref_columns(f)[0] or ref_columns(f)[1]])
+            if not whole:
+                whole = rowsets_of([f for _, f in _named_frames(ns, frames, lambda f: True, lists=True)])
         rows.append(whole)
         marks.append("summary")
     if not any(rows):
