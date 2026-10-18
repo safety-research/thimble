@@ -19,7 +19,31 @@ The person must be able to trust what you show them and check it quickly. So eac
 
 **Fix what does not hold.** `lean save` checks each citation and each binding. It saves the object anyway and lists each problem in its output. Fix the problem and save again. The object keeps each version.
 
-The kernel shows the person nothing by itself. They see only what you write and what you choose to draw.
+## What the person sees
+
+An object you save is drawn for the person under your reply, in the terminal, from its `program`. So the reply does
+not need to repeat what the object shows: say what it means and what to look at.
+
+**Keep it to about one screen.** Under a reply the person sees about half a screen of it; the rest waits in the
+detail view. Real records belong in `k.examples` on the part they explain: the person sees them there one at a time
+when they select the part, so the object need not list them.
+
+**Write the program against the drawing toolkit.** It is in `draw/TOOLKIT.md` of this plugin (from this skill's base
+folder, `../../draw/TOOLKIT.md`). Read it before your first object. The same program draws in the browser.
+
+**Name the parts the person may ask about, and give each the ref of its value.** Wrap a bar, a row or a point in
+`k.region(id, { label, ref }, part)`, where `ref` is the kernel ref of the value it shows, such as
+`q1#day=2026-06-18@n`. In `k.bars`, a bar's meta goes in its item: `{ id, label, value, meta: { ref } }`. When the
+person selects that part, the terminal opens its source rows with `lean resolve`. A part with no `ref` is matched to a
+data row by its id when it can be, as `day-2026-06-18` to the row whose day is `2026-06-18`.
+
+**Suggest the verbs that help, if any.** Under the object the person sees a row of 2–3 verbs and `? all`. An object
+may name them itself: `"hints": ["squeeze", "trace"]`. Leave it out when you have no reason to choose.
+
+When the person asks while an object is open, your context says which object and which part they had selected, with
+its refs. "This" usually means that part.
+
+The kernel shows the person nothing else by itself. They see only what you write and the objects you save.
 
 ## Example: a count and the rows behind it (a wiki's edit log)
 
