@@ -236,7 +236,8 @@ def test_coverage_merges_queries_rows_and_what_the_hook_saw(root: Path, tmp_path
 
 def test_the_command_runs_a_query_from_a_heredoc(root: Path) -> None:
     lean = Path(__file__).resolve().parents[1] / "bin" / "lean"
-    env = {**os.environ, "LEAN_PYTHON": sys.executable}
+    # the root is pinned: a thimble/ store in a folder above the test's (as /tmp can hold) must not take it
+    env = {**os.environ, "LEAN_PYTHON": sys.executable, "LEAN_ROOT": str(root)}
     out = subprocess.run([str(lean), "q", "runs by result"], input='tally(load("runs.csv"), "passed")', text=True,
                          capture_output=True, cwd=root, env=env, timeout=120)
     assert out.returncode == 0, out.stderr
