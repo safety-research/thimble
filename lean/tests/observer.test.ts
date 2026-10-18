@@ -281,3 +281,14 @@ test('/observe off: no look, no note; /observe says what it did', async ($, on) 
   expect(w.forks.length).toBe(1)
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('a note')
 })
+
+test('a reload mid-session keeps the notes not yet delivered: they reach Claude with the next prompt', async ($, on) => {
+  const w = world(on)
+  w.files[OBS] = JSON.stringify({ hints: {}, notesGiven: ['The 412 counts all months.'], log: [
+    { kind: 'look', question: 'which region?', notes_added: [{ from: 'observer', note: 'The 412 counts all months.' }] },
+  ] })
+  await $.prompt.submit({ text: 'and March?', origin: { kind: 'composer' } } as never)
+  expect(w.submitted.at(-1)!.context.join('\n')).toContain('The 412 counts all months.')
+  await $.prompt.submit({ text: 'ok', origin: { kind: 'composer' } } as never)
+  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('412')
+})

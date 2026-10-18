@@ -512,24 +512,34 @@ function verbChip(els: Any, key: string, v: Verb, onPress: () => unknown, o: { h
 
 const sep = (els: Any) => els.Text({ dimColor: true, children: ' · ' })
 
-/** The columns the hint row takes: its picked verbs (each by the observer's few words, when it gave some), `? all`, and
- *  `open` at its right. */
-function hintWidth(ref: ObjRef, verbs: Verb[], o: { fullscreen: boolean; more: number }, words: boolean): number {
+/** Which picked verbs read as the observer's few words, best first, while the row fits in `room` columns (the rest
+ *  read as their names), and the columns the row then takes: its verbs, `? all`, and `open` at its right. */
+function hintWords(ref: ObjRef, verbs: Verb[], o: { fullscreen: boolean; more: number }, room: number): { words: string[]; width: number } {
   const tail = o.fullscreen ? (o.more ? `${o.more} more rows · open ›` : 'open ›') : `/obj ${refText(ref)} opens it`
-  return verbs.filter(v => v.picked).slice(0, 3).reduce((n, v) => n + 2 + [...((words && v.hint) || v.name)].length + 3, 6) + tail.length + 2
+  const picked = verbs.filter(v => v.picked).slice(0, 3)
+  const len = (s: string) => 2 + [...s].length + 3
+  let width = picked.reduce((n, v) => n + len(v.name), 6) + tail.length + 2
+  const words: string[] = []
+  for (const v of picked) {
+    if (!v.hint) continue
+    const more = len(v.hint) - len(v.name)
+    if (width + more > room) break
+    width += more
+    words.push(v.name)
+  }
+  return { words, width }
 }
 
 /** The one quiet row under an object: the picked verbs, `? all`, and `open` (with how many rows wait there). With
  *  `words`, a verb the observer ranked reads as its few words for this object (`t trace 2,327 to its rows`). */
-function hintRow($: Engine, els: Any, ref: ObjRef, verbs: Verb[], key: string, o: { fullscreen: boolean; at: string; more: number; said: Said | null; words: boolean }) {
+function hintRow($: Engine, els: Any, ref: ObjRef, verbs: Verb[], key: string, o: { fullscreen: boolean; at: string; more: number; said: Said | null; words: string[] }) {
   const { Box, Button, Text } = els
   const picked = verbs.filter(v => v.picked).slice(0, 3)
   const running = o.said?.running ? o.said.verb : null
-  const words = o.words
   const kids: Any[] = []
   picked.forEach((v, i) => {
     if (i) kids.push(sep(els))
-    kids.push(verbChip(els, `${key}:v:${v.name}`, words && v.hint ? { ...v, name: v.hint } : v, () => pressVerb($, v.name, ref, null, o.at, false), { running: running === v.name }))
+    kids.push(verbChip(els, `${key}:v:${v.name}`, v.hint && o.words.includes(v.name) ? { ...v, name: v.hint } : v, () => pressVerb($, v.name, ref, null, o.at, false), { running: running === v.name }))
   })
   if (running && !picked.some(v => v.name === running)) kids.push(...(picked.length ? [sep(els)] : []), Text({ dimColor: true, children: `${running}…` }))
   if (kids.length) kids.push(sep(els))
@@ -562,12 +572,11 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string)
   const more = p.grid.h - rows
   // a click on a part opens the detail view on it; on a knob's ◂ ▸, opens it and turns the knob there
   const onPress = fullscreen ? (id: string, dir?: number) => (dir ? openTurned($, ref, id, dir) : openDetail($, ref, knobOf(p.drawing, id) ? null : id)) : undefined
-  // the row's few words when they fit the screen, which may widen it past the drawing; else the verbs' names
+  // the row's few words as far as they fit the screen, which may widen it past the drawing; else the verbs' names
   const verbs = await rankedVerbs($, ref, p.verbs)
-  const need = hintWidth(ref, verbs, { fullscreen, more }, true)
-  const words = need <= cols
+  const { words, width } = hintWords(ref, verbs, { fullscreen, more }, Math.max(40, (e.viewport?.columns ?? 100) - 4))
   return Box({
-    flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40, words ? need : 0),
+    flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40, words.length ? width : 0),
     children: [
       paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress }),
       hintRow($, els, ref, verbs, `${key}-${ref.id}`, { fullscreen, at, more, said, words }),

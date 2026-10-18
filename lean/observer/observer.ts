@@ -112,6 +112,11 @@ async function ensure($: Engine): Promise<void> {
         S.hints = kept.hints && typeof kept.hints === 'object' ? kept.hints : {}
         S.log = Array.isArray(kept.log) ? kept.log : []
         S.notesGiven = strs(kept.notesGiven)
+        // a reload mid-session: the notes not yet delivered wait again, and the person's questions come back
+        const delivered = new Set(S.log.filter(r => r.kind === 'notes_delivered').flatMap(r => strs(r.notes)))
+        const added = S.log.filter(r => r.kind === 'look').flatMap(r => (Array.isArray(r.notes_added) ? (r.notes_added as Note[]) : []))
+        S.pending = added.filter(n => n && typeof n.note === 'string' && !delivered.has(n.note))
+        S.questions = S.log.filter(r => r.kind === 'look' && typeof r.question === 'string').map(r => String(r.question)).slice(-20)
       }
     } catch {
       // a file it cannot read: the observer starts this session's memory again
@@ -555,6 +560,7 @@ export const registerObserver: Register = (on, options) => {
     if (e.command || e.isMeta) return next(e)
     let context: string | null = null
     try {
+      await ensure($)
       S.question = e.text
       S.questions = [...S.questions, e.text].slice(-20)
       const pending = (await isOn($)) ? S.pending : []
