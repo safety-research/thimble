@@ -51,6 +51,8 @@ const cut = (s: string, k: number) => ([...s].length <= k ? s : [...s].slice(0, 
 // acted last (for a word it began), the agent in the main view, and the latest version seen of each card
 let isOpen = false
 let drawn: { id: string; parts: Any[]; from: number; rows: number; pixel: Set<number>; w: number; h: number; on?: Any[]; card: Any } | null = null
+// the card's last drawing, shown while it draws again
+let lastCard: { key: string; p: Any } | null = null
 // the room the card is drawn in: the page's width and rows, as the pane last had them
 let room = { w: 98, h: 32 }
 // the card states this open detail has kept (by card), and the cards it has opened where the other surface left them
@@ -120,7 +122,10 @@ export async function cardStore($: Engine, id: string): Promise<Any> {
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.id !== id || sel.cite || sel.cites) return null
   const latest = await loadObject($, { id: sel.id, v: null, root: sel.root })
-  const p = await preparedNow($, sel, room.w, sel.state, 'detail', room.h)
+  // while the card draws again (a knob turned, its state from the browser), the page keeps its last drawing
+  const fresh = await preparedNow($, sel, room.w, sel.state, 'detail', room.h)
+  if (fresh?.drawing && !fresh.error) lastCard = { key: `${sel.root}|${sel.id}|${sel.v ?? ''}`, p: fresh }
+  const p = fresh ?? (lastCard && lastCard.key === `${sel.root}|${sel.id}|${sel.v ?? ''}` ? lastCard.p : null)
   const object = p?.object ?? latest
   if (!object) return null
   return {
@@ -301,7 +306,7 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const threadRow = thread && !TW ? 1 : 0
   const d = await paneRun($, 'detail', { id: sel.id }, { w: C, h: R - threadRow })
   const grid = renderTerm(d, { w: C })
-  const card = await preparedNow($, sel, room.w, sel.state, 'detail', room.h)
+  const card = (await preparedNow($, sel, room.w, sel.state, 'detail', room.h)) ?? (lastCard && lastCard.key === `${sel.root}|${sel.id}|${sel.v ?? ''}` ? lastCard.p : null)
   const parts = partsOf({ ...grid, regions: grid.regions.filter((r: Any) => !/^ver-\d+$/.test(r.id)) })
   const region = typeof d.selected === 'string' ? d.selected : null
   const part = parts.find((x: Any) => x.id === region) ?? null
@@ -595,5 +600,6 @@ export function resetDetail(): void {
   viewing = null
   ringY = -1
   latestSeen.clear()
+  lastCard = null
   keyChain = Promise.resolve()
 }

@@ -39,7 +39,7 @@ import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf
 import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadOf } from './thread'
 import type { Scope as ThreadScope } from './thread'
-import { writeCardState } from './runtime'
+import { cardEvent, cardKey as cardTakesKey, cardStateNow, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { markColors, messageEl, trayEl, verbColor, verbLineEl } from './view'
@@ -48,7 +48,7 @@ import type { RowVerb } from './view'
 import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { endsOf, revealCut } from '../verbs/squeeze/chips.mjs'
 import { HEAD_ROWS } from '../panes/claims.js'
-import { barText } from '../panes/host.js'
+import { barText, keysOf } from '../panes/host.js'
 import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneNow, paneOf, paneState, setPaneState, setTheme } from './panes'
 import { emptyStore, readStore } from '../verbs/claims/claims.js'
 
@@ -121,6 +121,8 @@ let msgFiles: { session: string; dir: string | null; index: Any[]; pending: Set<
 const cards = new Map<string, CardDrawn>()
 const cardPending = new Map<string, Promise<CardDrawn>>()
 let keyOpened: { key: string; at: number } | null = null
+// the card key pressed last from the empty prompt, with the card's state before it (a word it began gives it back)
+let cardKeyed: { key: string; at: number; ref: ObjRef; undo: { state: Record<string, unknown>; region: string | null } | null } | null = null
 let keyChain: Promise<unknown> = Promise.resolve()
 type CardDrawn = { title: string; right: string; kind: 'cite' | 'gloss' | 'spark'; grids: Any[] | null; links: { id: string; ref: string; label: string }[]; problem?: string | null }
 
@@ -641,7 +643,13 @@ async function paneFromBrowser($: Engine, q: { pane: string; args?: Record<strin
     return
   }
   await setPaneState($, q.pane, q.args || {}, q.state || {}, 'browser')
-  if (q.pane === 'detail' && typeof q.args?.id === 'string') await followDetail($, q.args.id)
+  if (q.pane === 'detail' && typeof q.args?.id === 'string' && ID.test(q.args.id)) {
+    // the part selected in the browser's detail is the card's selection everywhere: its card under the reply marks it
+    const root = await webRoot($)
+    const kept = await readCardState($, root, q.args.id)
+    if (typeof q.state?.region === 'string') await writeCardState($, root, q.args.id, { state: kept?.state ?? {}, region: q.state.region }, 'browser')
+    await followDetail($, q.args.id)
+  }
 }
 
 /** An action a pane's program asked for in the browser (k.do), done as the terminal's run would do it. */
@@ -1710,7 +1718,12 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       }
       if (rec.marks.length) item('marks', 'cite & explain', ']', markColors(theme).cite, 'cite & explain', null, () => stepMark($, 1))
       const ref = await focusedCard($)
-      if (ref) item('detail', 'open detail', '1', FOCUS[theme], 'open detail', null, () => openDetail($, ref))
+      if (ref) {
+        // the focused card's own keys, from its first drawing (its program's k.on): each a press too
+        const d = await inlineDrawing($, ref)
+        for (const g of keysOf(d)) item(`card-${g.key}`, g.words, g.key, FOCUS[theme], g.words, null, () => inlineCardAct($, ref, { type: 'key', key: g.key.split(' ')[0] === 'space' ? 'space' : g.key.split(' ')[0] }))
+        item('detail', 'open detail', '1', FOCUS[theme], 'open detail', null, () => openDetail($, ref))
+      }
       if (browserFlag) item('web', 'browser', 'o', FOCUS[theme], 'browser', null, async () => $.ui.toast(await openBrowser($, { row })))
     }
   }
@@ -1775,6 +1788,13 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   const verbs = await rowVerbs($)
   const consume = { text: e.text, cursor: e.cursor }
+  // a letter typed straight after a card's own key: that key began a word; the card goes back to where it was
+  const keyed = cardKeyed
+  cardKeyed = null
+  if (keyed && now - keyed.at < 700 && /^\p{L}$/u.test(k)) {
+    await writeCardState($, keyed.ref.root, keyed.ref.id, { state: keyed.undo?.state ?? {}, region: keyed.undo?.region ?? null }, 'terminal')
+    return { text: `${keyed.key}${e.inputText}`, cursor: keyed.key.length + e.inputText.length }
+  }
   // the Claims pane open: the keys a focused pane does not take come through here (its own are the arrow keys, ↵ and
   // esc): r replays the graph, and any key stops a replay; c (the verb key, below) closes the pane
   // the Claims pane open: the keys a focused pane does not take come through here (its own are the arrow keys, ↵ and
@@ -1843,6 +1863,18 @@ async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; 
       return consume
     }
   }
+  // the focused card's own keys (its program's k.on), after the verbs: a letter typed straight after one gives it back
+  if (!tray && !pick && k.length === 1 && !/^[0-9\]\[]$/.test(k)) {
+    const ref = await focusedCard($)
+    const d = ref ? await inlineDrawing($, ref) : null
+    const own = d ? cardTakesKey(d, k) : null
+    if (ref && own) {
+      const before = await readCardState($, ref.root, ref.id)
+      await inlineCardAct($, ref, { type: 'key', key: own })
+      cardKeyed = { key: k, at: now, ref, undo: before }
+      return consume
+    }
+  }
   // o: this session in the browser, at the message the keys act on (browser mode only; `o browser` on the verb row)
   if (k === 'o' && browserFlag && !tray && !(pick && keyOpened && now - keyOpened.at < 700)) {
     keyOpened = null
@@ -1876,20 +1908,60 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const els = $.ui.resolve(e)
   const { Box, Text } = els as Any
   const cols = Math.max(40, Math.min(120, (e.viewport?.columns ?? 100) - 4))
-  const p = await preparedNow($, ref, cols)
+  inlineCols = cols
+  // the card as the person left it, here or in the browser: its state (a flip, a zoom) and the part selected
+  const kept = await cardStateNow($, ref.root, ref.id)
+  const p = await preparedNow($, ref, cols, keptState(kept))
   if (!p) return Box({ marginTop: 1, marginLeft: 2, children: [Text({ dimColor: true, children: `drawing ${refText(ref)}…` })] })
   if (p.error || !p.grid) return Text({ color: 'error', children: `× ${refText(ref)} cannot be drawn: ${p.error || 'no drawing'}` })
   const fullscreen = e.viewport?.isFullscreen !== false
   const said = ((await $.state.get({ ...SAID, id: ref.id })).value ?? null) as Said | null
   // calm: under a reply an object takes at most about half a screen; the rest waits in the detail view
   const rows = Math.min(p.grid.h, inlineRows(e.viewport?.rows ?? 48))
-  // a click on a part opens the detail view on it; on a knob's ◂ ▸, opens it and turns the knob there
-  const onPress = fullscreen ? (id: string, dir?: number) => (dir ? openTurned($, ref, id, dir) : openDetail($, ref, knobOf(p.drawing, id) ? null : id)) : undefined
+  // a click on a part its program answers is the program's (k.on('press:<id>')), here as in the detail; on any other
+  // part it opens the detail view on it; on a knob's ◂ ▸, opens it and turns the knob there
+  const onPress = fullscreen ? (id: string, dir?: number) => (dir ? openTurned($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id)) : undefined
   const run = runningRow(els, said)
+  const selected = kept?.region && (p.drawing?.regions || []).some((r: Any) => r.id === kept.region) ? kept.region : null
   return Box({
     flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40),
-    children: [paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, frame: focus ? FOCUS[theme] : null }), ...(run ? [run] : [])],
+    children: [paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, selected, frame: focus ? FOCUS[theme] : null }), ...(run ? [run] : [])],
   })
+}
+
+/** The width cards under a reply were drawn at last: the bar reads a focused card's keys from the same drawing. */
+let inlineCols = 96
+const keptState = (kept: { state?: Record<string, unknown> } | null) => (kept?.state && Object.keys(kept.state).length ? kept.state : undefined)
+
+/** A card under a reply, drawn as it stands now (with its kept state), for the bar's keys; null while it draws. */
+async function inlineDrawing($: Engine, ref: ObjRef): Promise<Any | null> {
+  const kept = await cardStateNow($, ref.root, ref.id)
+  return (await preparedNow($, ref, inlineCols, keptState(kept)))?.drawing ?? null
+}
+
+/** What the person did on a card under a reply, as its program's event: its new state is kept for every surface (the
+ *  detail and the browser open it so); an ask(selection) opens the card's detail with the question pointed there. */
+async function inlineCardAct($: Engine, ref: ObjRef, event: Record<string, unknown>): Promise<void> {
+  const o = await loadObject($, ref)
+  if (!o) return
+  const kept = await readCardState($, ref.root, ref.id)
+  const region = typeof event.region === 'string' ? event.region : kept?.region ?? null
+  const got = await cardEvent($, o, { ...ref, region, ex: 0, all: false, state: kept?.state || {} } as Sel, { ...event, ...(region && !event.region ? { region } : {}) }, { w: inlineCols, h: 24, browser: browserFlag }, 'inline')
+  if (!got || got.drawing?.error) {
+    $.ui.toast(`× ${o.title || ref.id} could not answer ${event.type === 'key' ? `the key ${event.key}` : 'that'}: ${got?.drawing?.error ? `${got.drawing.error.name} · fix: ${got.drawing.error.fix || 'its program'}` : 'its program did not run'}`)
+    return
+  }
+  await writeCardState($, ref.root, ref.id, { state: got.state, region }, 'terminal')
+  if (got.ask?.text) {
+    const refs = got.ask.refs?.length ? got.ask.refs : got.ask.region ? regionRefs(o, got.drawing, got.ask.region).refs : []
+    const r = await askThread($, { text: got.ask.text, scope: { object: ref.id, v: o.version ?? ref.v, ...(got.ask.region ? { region: got.ask.region } : {}), label: got.ask.label }, refs, root: ref.root, card: { id: o.id, v: o.version, title: o.title, file: `${ref.root}/thimble/objects/${o.id}.json` } })
+    if (r.problem) $.ui.toast(`× ${r.problem}`)
+  } else if (got.ask) {
+    // a selection to ask about: the card's detail opens on it, and the next question goes to its thread with it
+    await openDetail($, { ...ref, v: o.version ?? ref.v }, got.ask.region ?? region)
+    const sel = (await $.state.get(SEL)).value as Sel | null
+    if (sel) await $.state.set(SEL, { ...sel, ask: got.ask } as Sel)
+  }
 }
 
 /** The rows a card takes under a reply: about half a screen, the rest in its detail view. */

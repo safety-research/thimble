@@ -60,10 +60,10 @@ export function ownState(state: Record<string, unknown> | null | undefined): Rec
 
 /** The program run once more with an event: it learns its handlers, the one the event reaches patches the state, and
  *  it draws again with it. */
-export async function cardEvent($: Engine, object: Any, sel: Sel, event: Record<string, unknown>, size: { w: number; h: number; browser?: boolean }): Promise<{ drawing: Any; state: Record<string, unknown>; ask: CardAsk | null } | null> {
+export async function cardEvent($: Engine, object: Any, sel: Sel, event: Record<string, unknown>, size: { w: number; h: number; browser?: boolean }, mode = 'detail'): Promise<{ drawing: Any; state: Record<string, unknown>; ask: CardAsk | null } | null> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   const r = await $.process.run(['node', '--permission', `--allow-fs-read=${dir}`, `${dir}/shell/node/prep.mjs`], {
-    stdin: JSON.stringify({ object, w: size.w, h: size.h, state: { ...(sel.state || {}), browser: !!size.browser }, mode: 'detail', event, noVerbs: true }),
+    stdin: JSON.stringify({ object, w: size.w, h: size.h, state: { ...(sel.state || {}), browser: !!size.browser }, mode, event, noVerbs: true }),
     timeoutMs: 30000,
   })
   if (r.exitCode !== 0) return null
@@ -73,6 +73,13 @@ export async function cardEvent($: Engine, object: Any, sel: Sel, event: Record<
 }
 
 export const stateFile = (root: string, id: string) => `${root.replace(/\/+$/, '')}/thimble/objects/.state/${id}.json`
+const CARDVER = { plugin: 'thimble-lean', key: 'cardver' } as const
+
+/** A card's state as a drawing reads it: the drawing draws again when either surface changes it. */
+export async function cardStateNow($: Engine, root: string, id: string): Promise<CardState | null> {
+  await $.state.get({ ...CARDVER, id: `${root}|${id}` })
+  return readCardState($, root, id)
+}
 
 export async function readCardState($: Engine, root: string, id: string): Promise<CardState | null> {
   if (!ID.test(id)) return null
@@ -94,6 +101,7 @@ export async function writeCardState($: Engine, root: string, id: string, st: { 
   if (was && JSON.stringify({ state: was.state, region: was.region }) === JSON.stringify(want)) return
   try {
     await $.fs.write(stateFile(root, id), JSON.stringify({ ...want, at: new Date().toISOString(), by }, null, 1))
+    await $.state.set({ ...CARDVER, id: `${root}|${id}` }, Date.now())
   } catch {
     // the other surface opens the card where it was; this one keeps its own
   }
