@@ -61,6 +61,7 @@ function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
   const opened: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
   on('ui.focus', () => ({}))
+  on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble-lean' }] : [] }))
   const views: Any[] = []
   on('ui.view', (_$: unknown, e: Any) => { views.push(e); return { value: {} } })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
@@ -307,4 +308,16 @@ test('a card is a program: its own keys reach it in the open detail, the state i
   expect(String(w.spawns[0]?.prompt)).toContain('q1#day=2026-06-17, q1#day=2026-06-18')
   // the selection was for that question: the next one is about the part again
   expect(await hintOf($)).toContain('type to ask this card')
+})
+
+test('a prompt after the pane has gone goes to Claude, even when the module still marks the detail open', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await pane($, clock)
+  // the pane went without a close the module heard: Claude Code lists it no more
+  w.opened.length = 0
+  await $.prompt.submit({ text: 'and across all the runs?', origin: { kind: 'composer' } } as never)
+  expect(w.submitted).toContain('and across all the runs?')
+  expect(w.spawns.length).toBe(0)
 })

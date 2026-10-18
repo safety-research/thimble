@@ -741,6 +741,9 @@ export function registerDetail(on: Parameters<Register>[0]): void {
   // Claude Code shows it as dropped, with where it went, and the thread's column shows the question and its answer.
   on('prompt.submit', { origin: { kind: 'composer' } }, async ($, e, next) => {
     if (!isOpen || e.command || e.isMeta || !String(e.text || '').trim()) return next(e)
+    // the pane may have gone without its close reaching this module (a re-render marked it open again): a prompt goes
+    // to the card's thread only while the pane is really there, else to Claude as always
+    if (!(await paneShown($))) { await closed($); return next(e) }
     const sel = (await $.state.get(SEL)).value as Sel | null
     if (!sel || sel.cite || sel.cites) return next(e)
     const p = await prepared($, sel, drawn?.w ?? COLUMNS - 2, sel.state, 'detail', drawn?.h ?? 24)
@@ -761,6 +764,16 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     $.clock.after(30, () => { void $.prompt.fill({ text: '', mode: 'replace' }).catch(() => undefined) })
     return { drop: `asked the card's thread about ${cut(aboutOf(scope), 40)}` }
   }).catch(($, e, next) => next(e))
+}
+
+/** Whether Claude Code shows the detail's pane now (a failed check counts as shown: the module's own state stands). */
+async function paneShown($: Engine): Promise<boolean> {
+  try {
+    const panes = await $.ui.panes()
+    return Array.isArray(panes) ? panes.some(x => x.id === PANE && x.isPlaced && (x as Any).isShown !== false) : true
+  } catch {
+    return true
+  }
 }
 
 /** Whether the detail is open (for the shell and the tests). */
