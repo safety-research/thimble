@@ -291,6 +291,8 @@ def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | 
     else:
         rowsets = [R.format_source(p)] if p["kind"] not in ("file", "table") else [ref]
         chain.append({"step": "source", "ref": ref, "kind": S.kind_of_file(st.root, p["path"])})
+        if p["kind"] in ("file", "table"):
+            chain[-1]["why"] = f"{ref} names a whole {'table' if p['kind'] == 'table' else 'file'}, not rows of it"
     if got:
         notes.insert(0, f"{wrote} names more than one value; {got[1]}, so its rows are {ref}'s")
     out: dict[str, Any] = {"ref": ref, "chain": chain, "rows": rowsets, "notes": notes}
@@ -307,6 +309,12 @@ def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | 
     except R.RefError as e:
         out["error"] = str(e)
         out["records"] = []
+    # why the value has no rows of its own, or why its rows are all the query read: one plain line for the person
+    why = next((c["why"] for c in reversed(chain) if c.get("why")), None)
+    if why:
+        out["why"] = why
+    elif not out.get("count") and not out.get("error"):
+        out["why"] = "no rows stand behind this value"
     st.log({"kind": "resolve", "ref": ref, "shown": [r["ref"] for r in out.get("records") or []]})
     return out
 
@@ -319,6 +327,7 @@ def resolve_many(st: Store, refs: list[str], n: int = 5, pick: str = "spread") -
     rowsets: list[str] = []
     notes: list[str] = []
     queries: list[str] = []
+    whys: list[str] = []
     bad = 0
     for ref in refs[:2000]:
         try:
@@ -328,6 +337,8 @@ def resolve_many(st: Store, refs: list[str], n: int = 5, pick: str = "spread") -
             if len(notes) < 3:
                 notes.append(f"{ref}: {e}")
             continue
+        if r.get("why") and r["why"] not in whys:
+            whys.append(r["why"])
         rowsets.extend(r.get("rows") or [])
         for c in r.get("chain") or []:
             if c.get("step") == "query" and c.get("id") not in queries:
@@ -345,6 +356,8 @@ def resolve_many(st: Store, refs: list[str], n: int = 5, pick: str = "spread") -
     except R.RefError as e:
         out["error"] = str(e)
         out["records"] = []
+    if whys:
+        out["why"] = whys[0] if len(whys) == 1 else f"{whys[0]} (and {len(whys) - 1} more reasons)"
     return out
 
 
@@ -378,7 +391,14 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
     if not q.get("rows"):
         notes.append(f"{q['id']} keeps no rows per output row (lineage: query), so each of its values rests on every "
                      "row it read; tally() or a `_refs` column keeps them")
+        step["why"] = Q.why_of(st, q, whole=not frag)
+        # the query as a whole opens every row it read; one of its output rows has none of its own
+        if not frag and q.get("read"):
+            return list(q["read"])
         return [x["path"] for x in Q.all_inputs(st, q)]
+    why = Q.why_of(st, q, i=idx[0] if frag and len(idx) == 1 else None)
+    if why:
+        step["why"] = why
     pick = idx if frag else range(len(q["rows"]))
     rowsets: list[str] = []
     for i in pick:
@@ -388,7 +408,10 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
     mode = q.get("lineage")
     n = R.count(rowsets)
     v = step.get("value")
-    if mode == "superset":
+    if mode == "summary" and why:
+        notes.append(f"these are all {n:,} rows {q['id']} read: its output is a summary of them, and which rows each "
+                     "value used is not kept")
+    elif mode == "superset":
         notes.append(f"these {n:,} rows share the output row's key, but a count column of {q['id']} disagrees: they hold "
                      "more rows than the value counts")
     elif mode == "key":
@@ -444,6 +467,14 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
                     notes.append(f"{', '.join(stale)} changed since {q['id']} ran")
                 if q.get("lineage") in ("superset", "key"):
                     notes.append(f"{q['id']}'s rows were found by key ({q['lineage']}), not kept exactly")
+                if q.get("why_rows"):
+                    # a value of a summary: the card's value rests on all the rows the query read
+                    bp = R.parse(b["ref"])
+                    frag = {k: bp[k] for k in ("row", "keys") if k in bp}
+                    idx = Q.find_rows(q, frag) if frag else []
+                    why = Q.why_of(st, q, i=idx[0] if len(idx) == 1 else None)
+                    if why:
+                        chain[-1]["why"] = why
         n = R.count(rowsets)
         if isinstance(value, int) and not isinstance(value, bool):
             chain[-1]["check"] = "the value equals the number of rows" if value == n else f"the value is {value:,}, the rows are {n:,}"
@@ -467,6 +498,7 @@ def _resolve_object(st: Store, p: dict[str, Any], chain: list, notes: list) -> l
     if b and R.parse(b["ref"])["kind"] == "query":
         return _resolve_query(st, R.parse(b["ref"]), chain, notes)
     notes.append("Claude wrote this value into the object; no query or row stands behind it")
+    step["why"] = "Claude wrote this value into the card, and no query or row stands behind it"
     return []
 
 
