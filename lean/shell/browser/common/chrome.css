@@ -1,0 +1,106 @@
+/* chrome.css: what every page shares: the tokens, the sidebar, the header, the composer, the marks, kbd. */
+:root {
+  --ink: #1f1e1c; --ink2: #4a4945; --ink3: #5f5d57; --mut: #85837c; --faint: #b3b1aa; --line: #ebe9e4; --line2: #e2e0da;
+  --bg: #ffffff; --side: #f7f6f3; --chip: #f2f1ed; --paper: #fbfaf7; --soft: #f4f2ed;
+  --ind: #4f46e5; --ind50: #f1f2fe; --ind100: #e3e5fc; --ind200: #c9cdf8; --ind400: #8b86ef; --ind700: #4338ca; --ind900: #2e2a7a;
+  --teal: #1f8a85; --teal50: #e3f2f0; --teal100: #c9e7e3; --teal200: #a3d4ce; --teal700: #17706c;
+  --amber: #b7791f; --amber50: #fbf1e0; --orange: #d97757; --good: #3f8a3e; --bad: #c94f4a; --code: #7d4fb0; --accent: #2a78c4; --c1: #1f8a84;
+  --sans: 'Instrument Sans', -apple-system, 'Segoe UI', sans-serif; --mono: 'JetBrains Mono', Menlo, monospace;
+  --r-sm: 4px; --r-md: 8px; --r-lg: 12px;
+  color-scheme: light;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
+body { font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+kbd { font-family: var(--mono); font-size: 10.5px; font-weight: 500; color: var(--ink2); border: 1px solid var(--line2); border-bottom-width: 1.5px; border-radius: var(--r-sm); padding: 0 4px; line-height: 15px; display: inline-block; background: #fff; white-space: nowrap; }
+.mono, code, kbd, .chip { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
+.mono { font-family: var(--mono); }
+
+#app { position: absolute; inset: 0; display: flex; }
+
+/* ───────── sidebar: this session and its cards, nothing made up ───────── */
+#side { flex: none; width: 200px; height: 100%; background: var(--side); border-right: 1px solid var(--line); padding: 0 10px; position: relative; overflow: hidden; }
+.brand { display: flex; align-items: center; gap: 8px; padding: 18px 6px 14px; font-weight: 600; font-size: 15px; }
+.brand svg { width: 20px; height: 20px; flex: none; }
+.brand small { margin-left: auto; font-size: 10.5px; font-weight: 500; color: var(--mut); font-family: var(--mono); }
+.slabel { font-size: 11px; font-weight: 600; color: var(--mut); letter-spacing: .02em; padding: 12px 8px 6px; }
+a.sess { text-decoration: none; color: inherit; }
+.sess { display: block; width: 100%; text-align: left; padding: 7px 8px; border-radius: var(--r-md); margin-bottom: 1px; }
+.sess b { display: block; font-size: 13px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess small { display: block; font-size: 11px; color: var(--mut); margin-top: 1px; font-family: var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sess.on { background: #e9e7e1; } .sess.on b { font-weight: 600; }
+.sess:not(.on):hover { background: #efede8; }
+.sess .live { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--good); margin-right: 5px; vertical-align: 1px; }
+.sess .live.off { background: var(--faint); }
+.cardlist { max-height: calc(100% - 260px); overflow-y: auto; scrollbar-width: none; }
+.sidefoot { position: absolute; left: 10px; right: 10px; bottom: 12px; padding: 6px 8px; font-size: 11px; color: var(--mut); font-family: var(--mono); line-height: 1.5; }
+.sidefoot .down { color: var(--bad); }
+
+/* ───────── main ───────── */
+#main { flex: 1; min-width: 0; height: 100%; position: relative; background: #fff; overflow: hidden; }
+#mhead { height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 22px; border-bottom: 1px solid var(--line); white-space: nowrap; position: relative; z-index: 2; background: #fff; }
+.mt { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.mt b { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.chip { font-size: 11px; color: var(--ink2); background: var(--chip); border-radius: 6px; padding: 2px 7px; white-space: nowrap; font-family: var(--mono); }
+.modchip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--orange); background: #fbf0eb; border-radius: 6px; padding: 2px 7px; flex: none; }
+.modchip i { width: 6px; height: 6px; border-radius: 2px; background: var(--orange); display: inline-block; }
+.cov { font-size: 11.5px; color: var(--mut); display: flex; gap: 6px; align-items: center; overflow: hidden; }
+.cov b { font-weight: 600; color: var(--ink2); }
+.cov .sep { color: var(--faint); }
+
+/* ───────── the two marks, and sparklines ───────── */
+.mk { cursor: pointer; border-radius: 3px; transition: background .18s, color .18s, box-shadow .18s; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.cite { color: var(--ind); text-decoration: underline solid var(--ind); text-decoration-thickness: 1.5px; text-underline-offset: 3.5px; }
+.cite:hover { background: var(--ind50); }
+.gloss { color: var(--teal700); background: var(--teal50); text-decoration: underline dotted var(--teal); text-decoration-thickness: 2px; text-underline-offset: 3.5px; padding: 0 2px; }
+.gloss:hover { background: var(--teal100); }
+.cite.on { background: var(--ind); color: #fff; text-decoration-color: rgba(255,255,255,.7); box-shadow: 0 0 0 2px var(--ind); }
+.gloss.on { background: var(--teal); color: #fff; text-decoration-color: rgba(255,255,255,.7); box-shadow: 0 0 0 1px var(--teal); }
+.mk.spark { display: inline-block; vertical-align: -2px; margin: 0 2px; padding: 0 1px; }
+.mk.spark.on { background: var(--ind100); box-shadow: 0 0 0 2px var(--ind100); }
+.spk { display: inline-block; vertical-align: -2px; }
+.spk rect { fill: #a8a49b; } .spk rect.z { fill: #dedbd3; }
+
+/* ───────── composer ───────── */
+.composer { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 22px 12px; z-index: 4; background: linear-gradient(rgba(255,255,255,0), #fff 18%); }
+.composer .box { max-width: 780px; margin: 0 auto; border: 1px solid var(--line2); border-radius: 14px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 4px 14px rgba(0,0,0,.04); padding: 8px 12px 8px 14px; transition: border-color .2s, box-shadow .2s; }
+.composer .box.focus { border-color: var(--ind200); box-shadow: 0 0 0 3px rgba(79,70,229,.08); }
+.composer .box.k-gloss.focus { border-color: var(--teal200); box-shadow: 0 0 0 3px rgba(31,138,133,.10); }
+.irow { display: flex; align-items: center; gap: 8px; }
+.scope { display: none; align-items: center; gap: 5px; font-size: 12.5px; white-space: nowrap; flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.scope.on { display: inline-flex; }
+.scope .ar { color: var(--mut); }
+.prompt { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; font: 14px/1.45 var(--sans); color: var(--ink); height: 22px; background: transparent; }
+.prompt::placeholder { color: var(--faint); }
+.brow { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 12px; color: var(--mut); white-space: nowrap; }
+.brow .ckeys { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; }
+.brow .ckeys kbd { margin: 0 3px 0 0; }
+.brow .sent { color: var(--good); }
+.brow .err { color: var(--bad); }
+.send { width: 28px; height: 28px; border-radius: var(--r-md); background: var(--ind); color: #fff; font-size: 14px; font-weight: 700; flex: none; display: grid; place-items: center; }
+.send:disabled { background: var(--faint); cursor: default; }
+
+/* ───────── a card under a reply ───────── */
+.card { margin-top: 10px; border: 1px solid var(--line2); border-radius: var(--r-lg); background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.03), 0 6px 20px rgba(40,36,20,.05); overflow: hidden; transition: box-shadow .25s, border-color .25s; }
+.card.focus { border-color: var(--ind200); box-shadow: 0 0 0 3px rgba(79,70,229,.08), 0 6px 20px rgba(40,36,20,.05); }
+.card .ch { display: flex; align-items: baseline; gap: 10px; padding: 10px 16px 0; }
+.card .ch b { font-size: 13.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .ch .meta { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--mut); white-space: nowrap; }
+.card .cb { padding: 6px 12px 6px; position: relative; overflow-x: auto; scrollbar-width: none; }
+.card .cb svg { display: block; overflow: visible; }
+.card .cf { display: flex; gap: 16px; align-items: center; padding: 7px 16px 8px; border-top: 1px solid #f1efea; font-family: var(--mono); font-size: 11.5px; color: var(--mut); }
+.card .cf button { display: inline-flex; gap: 5px; align-items: center; color: var(--mut); padding: 1px 4px; margin: 0 -4px; border-radius: 5px; }
+.card .cf button:hover { background: var(--chip); color: var(--ink); }
+.card .cf .sp { flex: 1; }
+.card .err { padding: 8px 16px 12px; color: var(--bad); font-size: 13px; }
+.card .wait { padding: 14px 16px; color: var(--faint); font-size: 12.5px; font-family: var(--mono); }
+svg .dk-hits rect { cursor: pointer; }
+svg .selbox { fill: rgba(79,70,229,.07); stroke: var(--ind); stroke-width: 1.5; pointer-events: none; }
+svg .hovbox { fill: none; stroke: rgba(79,70,229,.35); stroke-width: 1; pointer-events: none; }
+
+.thinking { color: var(--mut); font-size: 13px; display: flex; align-items: center; gap: 7px; margin: 6px 0 2px; }
+.thinking .s7 { color: var(--orange); font-size: 14px; display: inline-block; animation: spin 1.6s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.notice { font-size: 12.5px; color: var(--mut); padding: 10px 0; }
+.notice.bad { color: var(--bad); }

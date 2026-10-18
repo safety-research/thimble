@@ -29,8 +29,9 @@ export type ObserverLine = {
   prompts: number
 }
 
-/** The browser page's server: its base URL (token included), or why there is none. */
-export type Web = { base?: string; root?: string; problem?: string; opened?: string }
+/** Browser mode (`on`, the `browser` setting) and its page server: its base URL (token included), the page opened
+ *  last, why there is none, or why it stopped on its own (no page open). */
+export type Web = { on?: boolean; base?: string; root?: string; problem?: string; opened?: string; stopped?: string }
 
 declare module 'claude-code' {
   interface PluginState {
