@@ -243,7 +243,10 @@ export function parseAnswer(text) {
   // the message row: the verbs it lights and its glosses, read as given (shell/message.js verbsOf and glossesOf check them)
   const verbs = d.verbs && typeof d.verbs === 'object' && !Array.isArray(d.verbs) ? d.verbs : {}
   const glosses = Array.isArray(d.glosses) ? d.glosses : []
-  return { notes, line, settled: d.settled === true, hints, verbs, glosses }
+  // the turn's claims and the clusters' renames, read as given (verbs/claims/claims.js applyTurn checks them)
+  const claims = Array.isArray(d.claims) ? d.claims : []
+  const clusters = Array.isArray(d.clusters) ? d.clusters : []
+  return { notes, line, settled: d.settled === true, hints, verbs, glosses, claims, clusters }
 }
 
 /** The observer's choice for one object, kept only where it names a verb that exists: at most three, each with its

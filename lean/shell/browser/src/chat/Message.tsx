@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Chip } from '@09/components/Chip'
 import { MarkedText, prepare, type MarkHost } from '../lib/marks'
 import { openMark, pressVerb, rowVerbs, squeeze } from '../lib/actions'
-import { isClaims, parseObj, setState, threadsOfRow, useStore, type Row } from '../lib/store'
+import { parseObj, setState, threadsOfRow, useStore, type Row } from '../lib/store'
 import { threadName } from './ChatPanel'
 
 export const VIEW_VERBS = new Set(['map', 'trace', 'explore'])
@@ -53,7 +53,7 @@ function Chips({ row }: { row: Row }) {
     <div className="lean-chips-row">
       {refs.map((o) => {
         const info = objects.find((x) => x.id === o.id)
-        const view = info && (VIEW_VERBS.has(String(info.verb)) || isClaims(info))
+        const view = info && VIEW_VERBS.has(String(info.verb))
         return (
           <Chip
             key={o.id}
@@ -63,8 +63,7 @@ function Chips({ row }: { row: Row }) {
             className="refchip refchip-card"
             title={info?.question || info?.title || o.id}
             onClick={() => {
-              if (info && isClaims(info)) setState({ surface: 'files', filesView: 'claims', card: null })
-              else if (view) setState({ surface: 'files', filesView: `view:${o.id}`, card: null })
+              if (view) setState({ surface: 'files', filesView: `view:${o.id}`, card: null })
               else setState({ surface: 'canvas', selected: o.id, reveal: o.id, card: null })
             }}
           >

@@ -669,7 +669,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     const sel = (await $.state.get(SEL)).value as Detail | null
     if (sel && (sel.prog || sel.bar) && (e.origin as { kind?: string }).kind === 'person') {
       await $.state.set(SEL, (sel.prog ? { ...sel, prog: false } : { ...sel, bar: barAfter(sel.bar ?? null, 'back') }) as Sel)
-      return undefined as Any
+      return { value: undefined }
     }
     await closed($)
     return next(e)
@@ -677,12 +677,17 @@ export function registerDetail(on: Parameters<Register>[0]): void {
 
   // the hint under the prompt says where a question goes while the detail is open
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
-    if (!isOpen) return next(e)
-    const sel = (await $.state.get(SEL)).value as Sel | null
-    if (!sel || sel.cite || sel.cites) return next(e)
-    const label = drawn?.parts.find((x: Any) => x.id === sel.region)?.label || 'this card'
-    if (e.props.isDraft) return next({ ...e, props: { ...e.props, hint: `↵ asks the card's thread about ${cut(String(label), 40)} · Claude here does not see it` } })
-    return next({ ...e, props: { ...e.props, hint: `↑↓ part · e examples · p program · type to ask the card's thread · esc back` } })
+    try {
+      if (!isOpen) return next(e)
+      const sel = (await $.state.get(SEL)).value as Sel | null
+      if (!sel || sel.cite || sel.cites) return next(e)
+      const label = drawn?.parts.find((x: Any) => x.id === sel.region)?.label || 'this card'
+      if (e.props.isDraft) return next({ ...e, props: { ...e.props, hint: `↵ asks the card's thread about ${cut(String(label), 40)} · Claude here does not see it` } })
+      return next({ ...e, props: { ...e.props, hint: `↑↓ part · e examples · p program · type to ask the card's thread · esc back` } })
+    } catch (err) {
+      // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
+      return next(e)
+    }
   })
 
   // a prompt typed while the detail is open (the main view in front) asks the card's thread. It never reaches main:

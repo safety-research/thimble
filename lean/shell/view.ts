@@ -5,9 +5,10 @@
 //                       mark a press (a cite underlined, a gloss on a teal fill, a sparkline in place), and every other
 //                       run of blocks drawn by Claude Code's own Markdown, so paragraphs, lists, code and tables look
 //                       as in any reply
-//   verbRowEl(els, o)   `v visualize · s squeeze · a atlas` under a message: dim at rest, a lit verb in its color with
+//   verbRowEl(els, o)   `v visualize · s squeeze · c claims` under a message: dim at rest, a lit verb in its color with
 //                       ● and its note
-//   verbLineEl(els, o)  the line a verb opens under the row: v's proposals, squeeze's chips, atlas's offer
+//   verbLineEl(els, o)  the line a verb opens under the row: v's proposals, squeeze's chips (c opens the claims list,
+//                       claimsview.ts)
 //   trayEl(els, o)      the tray above the prompt: one card in a frame, its title and kind on the top border, its keys
 //                       on the bottom border, a fixed number of rows
 import { blocks, inline, marksIn, runsText, shownOf, tableOf, width, wrapRuns } from './message.js'
@@ -32,7 +33,7 @@ export function verbColor(key: string, theme: Theme, color?: unknown): string {
     const c = (color as Record<string, unknown>)[theme]
     if (typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c)) return c
   }
-  const own: Record<string, [string, string]> = { v: ['#4f46e5', '#9a93ff'], s: ['#b7791f', '#e0a43a'], a: ['#8a4fb5', '#c792ea'] }
+  const own: Record<string, [string, string]> = { v: ['#4f46e5', '#9a93ff'], s: ['#b7791f', '#e0a43a'], c: ['#8a4fb5', '#c792ea'] }
   const pair = own[key] || ['#2a78c4', '#5aa2e6']
   return theme === 'light' ? pair[0] : pair[1]
 }

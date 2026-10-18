@@ -232,8 +232,6 @@ export interface CardGroup {
   cards: { id: string; v: number | null; row: string | null }[]
 }
 
-const ATLAS = (o: ObjectInfo) => o.verb === 'atlas' || /(^|-)atlas$/.test(o.id)
-export const isClaims = ATLAS
 export const isDocument = (o: ObjectInfo) => o.kind === 'document' || o.verb === 'document'
 
 export function parseObj(s: string): { id: string; v: number | null } | null {
@@ -256,7 +254,7 @@ export function cardGroups(rows: Row[], objects: ObjectInfo[]): CardGroup[] {
       const o = parseObj(ref)
       if (!o || placed.has(o.id)) continue
       const info = known.get(o.id)
-      if (info && (ATLAS(info) || isDocument(info))) continue
+      if (info && isDocument(info)) continue
       placed.add(o.id)
       if (!cur) {
         cur = { id: 'g-work', title: 'Your work', cards: [] }
@@ -266,7 +264,7 @@ export function cardGroups(rows: Row[], objects: ObjectInfo[]): CardGroup[] {
     }
   }
   // cards of this session no message names (a verb the person ran, a card saved by a thread): one group of their own
-  const rest = objects.filter((o) => !placed.has(o.id) && !ATLAS(o) && !isDocument(o))
+  const rest = objects.filter((o) => !placed.has(o.id) && !isDocument(o))
   if (rest.length) groups.push({ id: 'g-more', title: 'More cards', cards: rest.map((o) => ({ id: o.id, v: null, row: null })) })
   return groups.filter((g) => g.cards.length)
 }

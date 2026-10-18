@@ -25,6 +25,7 @@
 //   /<token>/api/messages      this session's rows (thimble/messages/<session>/index.jsonl), each of Claude's with its
 //                              record (CONTRACT 1); an ETag, so a page that polls gets 304 while nothing changed
 //   /<token>/api/message/<row> one record
+//   /<token>/api/claims        this session's claims (thimble/claims/<session>.json, CONTRACT 7), with an ETag
 //   /<token>/api/object/<id>   an object (?v=<k> for a version) and the list of its versions
 //   /<token>/api/objects       the objects this session saved
 //   /<token>/api/from/<id>     where an object's values come from: sources, rows, coverage and labels
@@ -54,7 +55,6 @@ import { fromFacts, isRef } from '../object.js'
 
 export { fromFacts }
 import { listVerbs } from './registry.mjs'
-import { atlasRoute } from '../browser/atlas/route.mjs'
 
 const LEAN_DIR = fileURLToPath(new URL('../../', import.meta.url))
 const PAGES = join(LEAN_DIR, 'shell', 'browser')
@@ -64,7 +64,7 @@ const ROW = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/
 const SESSION = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/
 const TYPES = { '.woff': 'font/woff', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8' }
 // the row a page shows when no verb carries `row: true` yet (CONTRACT 3)
-const ROW_VERBS = [{ key: 'v', name: 'visualize', order: 0 }, { key: 's', name: 'squeeze', order: 1 }, { key: 'a', name: 'atlas', order: 2 }]
+const ROW_VERBS = [{ key: 'v', name: 'visualize', order: 0 }, { key: 's', name: 'squeeze', order: 1 }, { key: 'c', name: 'claims', order: 2 }]
 const THREAD = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/
 // pages: the sandbox runs programs in a srcdoc iframe and a blob worker (draw/browser/sandbox.js), which this allows;
 // nothing on a page can connect anywhere but this server (and the fonts)
@@ -184,6 +184,10 @@ function signature(root, session) {
   const parts = []
   const dirs = [join(root, 'thimble', 'objects')]
   if (session) dirs.unshift(join(root, 'thimble', 'messages', session), threadsDir(root, session))
+  // the session's claims (CONTRACT 7)
+  if (session) {
+    try { const s = statSync(claimsFile(root, session)); parts.push(`claims:${s.size}:${s.mtimeMs}`) } catch { parts.push('claims:-') }
+  }
   for (const dir of dirs) {
     let names = []
     try { names = readdirSync(dir) } catch { parts.push('-'); continue }
@@ -196,6 +200,11 @@ function signature(root, session) {
   const s = parts.join('|')
   for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0
   return `"${(h >>> 0).toString(36)}-${parts.length}"`
+}
+
+/** The session's claims file (CONTRACT 7): thimble/claims/<session>.json. */
+export function claimsFile(root, session) {
+  return join(root, 'thimble', 'claims', `${String(session).replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120)}.json`)
 }
 
 /** What a page posted, checked and reduced to one line of CONTRACT 5 (or the old selection), or {error}. */
@@ -244,6 +253,7 @@ export function scopeOf(s) {
   }
   if (typeof s.label === 'string' && s.label.trim()) out.label = s.label.trim().slice(0, 200)
   if (typeof s.thread === 'string' && THREAD.test(s.thread)) out.thread = s.thread
+  if (typeof s.claim === 'string' && /^c\d{1,6}$/.test(s.claim)) out.claim = s.claim
   const m = s.mark
   if (m && typeof m === 'object' && ['cite', 'gloss', 'spark'].includes(m.kind)) {
     const mark = { kind: m.kind }
@@ -306,9 +316,6 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
         if (head === 'card') for (const [k, to] of [['o', 'card'], ['v', 'v'], ['from', 'from']]) { const x = url.searchParams.get(k); if (x) q.set(to, x) }
         return send(302, 'text/plain', '', { location: `${base}/app/${q.toString() ? '?' + q : ''}` })
       }
-      // objects as JSON, and an atlas object's link to its page (shell/browser/atlas/route.mjs); the Atlas page itself
-      // is a page folder like any other, served below
-      if (head === 'o' && atlasRoute(req, url, parts, { root, token, objectFile, send })) return
       // the old handoff link: an object's page is now its card detail
       if (head === 'o' && rest.length === 1 && req.method === 'GET') {
         if (!objectFile(root, rest[0], url.searchParams.get('v'))) return send(404, 'text/plain', `no object ${rest[0]}`)
@@ -362,6 +369,13 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       if (req.headers['if-none-match'] === now) { res.writeHead(304, { etag: now, 'cache-control': 'no-store' }); return res.end() }
       const { rows } = sess ? readMessages(root, sess) : { rows: [] }
       return json({ session: sess, rows }, 200, { etag: now })
+    }
+    if (api === 'claims') {
+      // this session's claims (CONTRACT 7), with an ETag like the messages
+      const now = signature(root, sess)
+      if (req.headers['if-none-match'] === now) { res.writeHead(304, { etag: now, 'cache-control': 'no-store' }); return res.end() }
+      const store = sess ? readJson(claimsFile(root, sess)) : null
+      return json({ session: sess, store: store || { v: 1, session: sess, claims: [], clusters: [], gaps: [] } }, 200, { etag: now })
     }
     if (api === 'message' && args.length === 1) {
       if (!sess || !ROW.test(args[0])) return json({ error: 'no row' }, 404)

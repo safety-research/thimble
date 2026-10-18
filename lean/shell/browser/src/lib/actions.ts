@@ -43,7 +43,7 @@ export function pushCite(entry: TrayEntry): void {
 }
 
 /** The verbs of the row under each message, as 0.9's browser names them: v visualize · s squeeze · c claims. The key
- * sent is the registry's own (atlas is on `a` until it becomes Claims). */
+ * sent is the registry's own. */
 export interface RowVerb {
   key: string
   name: string
@@ -52,16 +52,16 @@ export interface RowVerb {
 }
 export function rowVerbs(verbs: Verb[]): RowVerb[] {
   const by = (names: string[]) => verbs.find((v) => names.includes(v.name))
-  const claims = by(['claims', 'atlas'])
+  const claims = by(['claims'])
   return [
     { key: 'v', name: 'visualize', send: by(['visualize'])?.key || 'v', line: by(['visualize'])?.line || 'make a card of this message' },
     { key: 's', name: 'squeeze', send: by(['squeeze'])?.key || 's', line: by(['squeeze'])?.line || 'rewrite this message: shorter, more or less narrative' },
-    { key: 'c', name: 'claims', send: claims?.key || 'a', line: claims?.line || 'extract the claims of the work so far' },
+    { key: 'c', name: 'claims', send: claims?.key || 'c', line: claims?.line || 'the claims made in this session, with where each was said and its sources' },
   ]
 }
 
-/** Press a verb under a message: v opens its proposals when it has some, s opens the squeeze chips, c opens Claims when
- * they exist; otherwise the press goes to the terminal. */
+/** Press a verb under a message: v opens its proposals when it has some, s opens the squeeze chips, c opens Claims (the
+ * session's claims, kept as the turns go); otherwise the press goes to the terminal. */
 export async function pressVerb(row: string, key: string, proposal?: string): Promise<void> {
   const s = getState()
   const rec = s.rows.find((r) => r.row === row)?.record
@@ -75,8 +75,8 @@ export async function pressVerb(row: string, key: string, proposal?: string): Pr
     setState({ squeezeOpen: s.squeezeOpen === row ? null : row, propsOpen: null })
     return
   }
-  if (key === 'c' && s.objects.some((o) => o.verb === 'atlas' || /(^|-)atlas$/.test(o.id)) && !rec?.verbs?.[v.send]?.lit && !rec?.verbs?.c?.lit) {
-    setState({ surface: 'files', filesView: 'claims', card: null })
+  if (key === 'c') {
+    setState({ surface: 'files', filesView: 'claims', card: null, propsOpen: null, squeezeOpen: null })
     return
   }
   setState({ propsOpen: null })

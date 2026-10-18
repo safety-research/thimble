@@ -1,20 +1,21 @@
 ---
-name: atlas
-description: Use when the person presses a (atlas) or asks for an atlas or an orientation of a folder's work. You read the work and write its claims, facts, findings, judgment calls and events, each with evidence refs, their relations and named clusters, as one JSON file that `lean verb atlas save` saves.
+name: claims
+description: Use when the person asks for the corpus orientation (offered in the claims list, c) or for an orientation of a folder's work. You read the work and write its claims, facts, findings, judgment calls and events, each with evidence refs, their relations and named clusters, as one JSON file that `lean verb claims save` adds to the session's claims.
 ---
 
-# Atlas: what the work holds, claim by claim
+# The corpus orientation: what the work holds, claim by claim
 
-An atlas helps a person find their way in work they did not do: many agent runs, one long run, a wiki, a set of
-records. It lists what the work holds as short claims. Each claim has a kind, the rows that show it, and its relations
-to other claims. Clusters group the claims by what happened. Under a reply the person sees the clusters as a list. In
-the browser they see the claims as a graph, and a click on a claim shows its evidence.
+The orientation helps a person find their way in work they did not do: many agent runs, one long run, a wiki, a set
+of records. It lists what the work holds as short claims. Each claim has a kind, the rows that show it, and its
+relations to other claims. Clusters group the claims by what happened. The claims join the session's own claims (the
+ones Claude and the person made in the conversation), marked as the orientation's: the person opens them with c, as a
+list of clusters in the terminal and as a graph in the browser, and a claim shows its evidence.
 
 ## Who does the work
 
 The main conversation gives this work to one subagent with the Agent tool. Reading the work takes many rows, and in a
-subagent those rows do not stay in the conversation. When the subagent is done, main saves the atlas with
-`lean verb atlas save FILE` and replies in one or two sentences. The `a` key writes the brief for main.
+subagent those rows do not stay in the conversation. When the subagent is done, main adds the claims with
+`lean verb claims save FILE` and replies in one or two sentences. The claims list's offer writes the brief for main.
 
 The subagent does the work below. Its last message is the last line of the check.
 
@@ -57,7 +58,7 @@ your effort into the claims that explain the outcome, the disagreements and the 
 
 ## The file
 
-Write the atlas with the Write tool to the file the brief names. Every field is optional except the claims, and you
+Write the claims with the Write tool to the file the brief names. Every field is optional except the claims, and you
 can add any field you need:
 
 ```json
@@ -74,12 +75,12 @@ can add any field you need:
 Then check it, fix what the check lists, and check again:
 
 ```bash
-lean verb atlas check /work/shop-api/thimble/atlas/atlas.json
+lean verb claims check /work/shop-api/thimble/claims/orientation.json
 ```
 
 ## Example: 40 runs of one task
 
-The brief says: "Build the atlas of the folder /work/shop-api: map 40 runs under runs/." Each run is one transcript.
+The brief says: "Orient on the folder /work/shop-api: map 40 runs under runs/." Each run is one transcript.
 
 First count across all 40 runs: how each run ended, and its first theory. Each output row keeps its runs' rows, so
 the claims about them can cite the counts:
@@ -115,7 +116,7 @@ The check finds one quote that is not in its row:
 
 ```
 citation: /claims/7/evidence/0: the quote 'reran the test 200 times' is not in runs/r22.jsonl#L880.b0
-atlas.json: 1 problem (above). 140 of 141 citations hold. Fix them in the file and run the check again.
+orientation.json: 1 problem (above). 140 of 141 citations hold. Fix them in the file and run the check again.
 ```
 
 `lean rows "runs/r22.jsonl#L880"` shows that the words were "ran it 200 more times". Fix the quote and check again,
