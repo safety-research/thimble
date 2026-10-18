@@ -5,6 +5,7 @@
 // after a part change names the new part, and the thread's turns come from its agent's transcript.
 // `claude plugin test lean`. The drawing, `lean coverage` and `lean resolve` are answered here, at process.run.
 import { expect, mock, test } from 'claude-code/testing'
+import { promptStub } from './stubs'
 
 const ROOT = '/data'
 const SESSION = 's-1'
@@ -44,7 +45,7 @@ function world(on: any) {
   }
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` }))
   on('fs.list', () => ({ value: [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => { files[e.path] = String(e.content ?? e.text ?? e.data ?? ''); return { value: undefined } })
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
     let out: unknown = {}

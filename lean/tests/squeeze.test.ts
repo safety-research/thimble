@@ -24,7 +24,7 @@ function world(on: any, replies: string[] = []) {
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/queries` }))
   on('fs.list', () => ({ value: [] }))
   on('fs.read', (_$: unknown, e: { path: string }) => {
-    if (e.path.endsWith('/verbs/squeeze/prompt.md')) return { value: 'THE PROMPT' }
+    if (e.path.endsWith('/prompts/squeeze/v2.md')) return { value: 'THE PROMPT' }
     if (e.path.endsWith('/verbs/squeeze/verb.json')) return { value: '{"model": "sonnet", "effort": "low"}' }
     return { value: files[e.path] ?? '' }
   })

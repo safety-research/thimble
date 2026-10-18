@@ -8,6 +8,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { plainWhy } from '../shell/shell'
+import { promptStub } from './stubs'
 
 const ROOT = '/data'
 const FILE = `${ROOT}/thimble/objects/01-saves.json`
@@ -39,7 +40,7 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
   const files: Record<string, string> = { [FILE]: JSON.stringify(OBJECT), [`${ROOT}/thimble/objects/02-trace.json`]: JSON.stringify(TRACE) }
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` }))
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: e.path === `${ROOT}/thimble/objects` ? [{ name: '01-saves.json', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] : [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => {
     files[e.path] = String(e.content ?? e.text ?? e.data ?? '')
     return { value: undefined }

@@ -35,7 +35,7 @@ export function samePart(a = {}, b = {}) {
 
 /**
  * The thread's first prompt: the person's question as they wrote it, then two or three lines on what they were looking
- * at, so "this" and "here" resolve. The subagent's own instructions (THREAD_PROMPT) say how to answer.
+ * at, so "this" and "here" resolve. The subagent's own instructions (the registry's thread prompt) say how to answer.
  *   card: {id, v, title, file}   refs: the kernel refs the part rests on   root: the folder of the data
  */
 export function firstMessage({ text, scope = {}, card = null, refs = [], root = '', selFile = '' }) {
@@ -138,17 +138,4 @@ export function toMain(thread) {
   return [`The person sends you the result of a side thread about ${aboutOf(thread.scope)}${thread.card ? ` on the card "${thread.card}"` : ''}.`, q ? `They asked: ${q}` : '', `The thread answered: ${lastA.text}`].filter(Boolean).join('\n')
 }
 
-/** The thread subagent's own instructions (its system prompt). */
-export const THREAD_PROMPT = `You answer one person's questions about one part of a card, in a side thread of their Claude Code session. A card is an object the main conversation saved for them: a program, its data and its lineage, in thimble/objects/. The person reads your answers beside the card. The main conversation does not see this thread.
-
-Principles
-
-Answer the question about the part they selected. Their first message says which card and which part, and the refs of its rows. "This" and "here" mean that part. They may select another part while the thread is open: a later message that names no part is about the part in the selection file their first message names, so read that file first.
-
-Check before you answer. Use the \`lean\` command with Bash, in the folder of the data: \`lean resolve <ref>\` opens the rows behind a value, \`lean q "<about>" <<'PY' ... PY\` computes a new value and keeps its rows, \`lean rows <ref> -n 5\` reads rows, \`lean list <card>\` shows the card's lineage. \`lean\` alone lists the commands. Run one query for a new number rather than guessing it.
-
-Cite what you state, as the card does: a number as a link to its ref, as in [480](q7#n). Keep each answer short: two to four sentences, numbers first.
-
-Change the card only when the person asks for it. Then read its file, change its program or data, and save it under the same name with \`lean save <name> --from FILE\`. The person sees the new version in the card's header (v1 · v2).
-
-Example. The person asks "Where did the time go?" about the part "Rerun loop" (steps 881–1720) of a run's trail. You run \`lean resolve "q3#station=rerun-loop@n"\`, then one query for the reruns after the failure rate was known. You answer: "[840](q3#station=rerun-loop@n) steps were reruns with no code change. The rate was known at step 1240 (1 in 9); the [480](q8#n) reruns after it could not change it."`
+// The thread subagent's own instructions (its system prompt) are the registry's thread prompt: prompts/thread/.

@@ -23,7 +23,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { recount } from './shell'
-import { aboutOf, firstMessage, nextMessage, ownReport, samePart, threadKey, THREAD_PROMPT, toMain, turnsOf } from './threads.js'
+import { promptText } from '../prompts/prompts'
+import { claimAgent } from '../telemetry/telemetry'
+import { aboutOf, firstMessage, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from './threads.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,6 +50,7 @@ const EARLIER_CHARS = 3000
 const threads = new Map<string, Thread>()
 const byAgent = new Map<string, string>()
 let registered = false
+let promptId: string | null = null
 // how many asks are in flight, and whether the detail is open: the type is offered only then
 let inFlight = 0
 let windowOpen = false
@@ -142,10 +145,13 @@ function display(t: Thread, turns: { role: 'person' | 'claude'; text: string; ca
 async function ensureType($: Engine): Promise<string | null> {
   if (registered) return null
   try {
+    // its instructions: the registry's thread prompt (prompts/thread/)
+    const p = await promptText($, 'thread')
+    promptId = p.id
     await $.agent.register({
       name: 'thread',
       description: "Answers the person's questions about one part of a card, in a side thread of the thimble-lean plugin. Only the plugin starts it.",
-      prompt: THREAD_PROMPT,
+      prompt: p.text,
       tools: ['Bash', 'Read', 'Grep', 'Glob'],
       omitClaudeMd: true,
     })
@@ -202,6 +208,8 @@ export async function askThread($: Engine, ask: Ask, o: { view?: boolean } = {})
       let id = (r as Any).agentId ? String((r as Any).agentId) : null
       if (!id) id = (await $.agent.list().catch(() => [] as Any[])).filter((x: Any) => x.type === TYPE && !byAgent.has(x.id)).at(-1)?.id ?? null
       t = { ...t, agentId: id }
+      // its turns are filed under the thread in the session's events
+      if (id) claimAgent(id, 'thread', promptId)
     }
     t = { ...t, scope, status: 'running', error: undefined, asks: [...t.asks, { text, scope, sent, at: now }], turns: [...t.turns, { role: 'person', text, about: aboutOf(scope), at: now }] }
     await keep($, t)
@@ -297,6 +305,7 @@ export function resetThreads(): void {
   byAgent.clear()
   restored.clear()
   registered = false
+  promptId = null
   inFlight = 0
   windowOpen = false
   poll?.cancel()

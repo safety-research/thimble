@@ -7,6 +7,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { slim } from '../observer/evidence.js'
 import { glossSkipsFor, skipsFor } from '../observer/observer'
+import { promptStub } from './stubs'
 
 const ROOT = '/data'
 const DIR = `${ROOT}/thimble/objects`
@@ -46,7 +47,7 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json) } = {})
   const files: Record<string, string> = { [`${DIR}/01-saves.json`]: JSON.stringify(OBJECT) }
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === DIR || e.path.endsWith('.md') }))
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: e.path === DIR ? Object.keys(files).filter(f => f.startsWith(DIR + '/')).map(f => ({ name: f.slice(DIR.length + 1), kind: 'file', size: 1, mtimeMs: 0, isLink: false })) : [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('observer.md') ? 'OBSERVER {{QUESTION}} | {{DECISION}} | {{OBJECTS}} | {{COVERAGE}} | {{NOTES}} | {{OPEN}} {{LINE_RULE}} | {{GLOSSED}}' : e.path.endsWith('question.md') ? 'QUESTION {{QUESTION}} {{ANSWER}}' : files[e.path] ?? '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content?: string; text?: string; data?: string }) => {
     files[e.path] = String(e.content ?? e.text ?? e.data ?? '')
     return { value: undefined }
@@ -62,15 +63,19 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json) } = {})
   })
   const forks: string[] = []
   const questions: string[] = []
-  on('model.complete', (_$: unknown, e: { prompt: string }) => {
+  // the question step is a completion with no system prompt; the pass is one with the frame and its lenses as the
+  // system prompt (observer:v2), or a fork of the session (observer:v1)
+  const pass = (prompt: string) => {
+    forks.push(prompt)
+    const out = typeof o.fork === 'function' ? o.fork() : o.fork ?? { notes: [], line: null, settled: false, hints: {} }
+    return { value: { isAnswered: true, text: JSON.stringify(out), usage: USAGE } }
+  }
+  on('model.complete', (_$: unknown, e: { prompt: string; system?: string }) => {
+    if (e.system) return pass(`${e.system}\n${e.prompt}`)
     questions.push(String(e.prompt))
     return { value: { isAnswered: true, text: JSON.stringify(o.question ?? { parts: [], drift: null, decision: null }), usage: USAGE } }
   })
-  on('model.fork', (_$: unknown, e: { prompt: string }) => {
-    forks.push(String(e.prompt))
-    const out = typeof o.fork === 'function' ? o.fork() : o.fork ?? { notes: [], line: null, settled: false, hints: {} }
-    return { value: { isAnswered: true, text: JSON.stringify(out), usage: USAGE } }
-  })
+  on('model.fork', (_$: unknown, e: { prompt: string }) => pass(String(e.prompt)))
   const submitted: { text: string; context: readonly string[] }[] = []
   on('prompt.submit', (_$: unknown, e: { text: string; context?: readonly string[] }) => {
     submitted.push({ text: e.text, context: e.context ?? [] })

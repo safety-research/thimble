@@ -42,6 +42,7 @@ import type { Scope as ThreadScope } from './thread'
 import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { markColors, messageEl, trayEl, verbColor, verbLineEl } from './view'
+import { markNextTurn, tracked } from '../telemetry/telemetry'
 import type { RowVerb } from './view'
 import { afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, chipFromPrompt, chipsEl, fromBrowser as sqFromBrowser, pressChip, revealedOf, seeView, setLevels as sqSetLevels, sLit, squeezeHint, squeezeKey, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { chipsOf as sqChips, isOriginal as sqIsOriginal, revealCut } from '../verbs/squeeze/chips.mjs'
@@ -323,7 +324,9 @@ async function restoreShown($: Engine): Promise<void> {
 
 /** The env of the shell's own `lean` calls: the person's, never counted as what Claude read (coverage). */
 export async function leanEnv($: Engine, root: string): Promise<Record<string, string>> {
-  return { LEAN_ROOT: root, LEAN_SESSION: `person-${String(await $.session.id()).slice(0, 8)}` }
+  // the prompt versions in use (prompts/prompts.ts set LEAN_PROMPTS), so a verb's child reads the same ones
+  const prompts = String((await $.env.get('LEAN_PROMPTS')) || '')
+  return { LEAN_ROOT: root, LEAN_SESSION: `person-${String(await $.session.id()).slice(0, 8)}`, ...(prompts ? { LEAN_PROMPTS: prompts } : {}) }
 }
 
 async function resolveRefs($: Engine, root: string, refs: string[]): Promise<void> {
@@ -377,11 +380,13 @@ async function rootHere($: Engine): Promise<string | null> {
   return null
 }
 
-/** One call a verb made to the model, made here: the verb's Node child has no $. */
-async function modelCall($: Engine, need: { kind: string; request: Any }): Promise<unknown> {
-  const req = need.request && typeof need.request === 'object' ? need.request : {}
+/** One call a verb made to the model, made here: the verb's Node child has no $. It is a line in the session's events,
+ *  under the feature and prompt version the verb named (`request.telemetry`), else under the verb. */
+async function modelCall($: Engine, need: { kind: string; request: Any }, word = 'verb'): Promise<unknown> {
+  const { telemetry: tag, ...req } = (need.request && typeof need.request === 'object' ? need.request : {}) as Any
   try {
-    const r = need.kind === 'fork' ? await $.model.fork({ prompt: String(req.prompt ?? '') }) : await $.model.complete(req)
+    const r = await tracked($, { feature: String(tag?.feature || word), prompt: tag?.prompt ?? null, model: need.kind === 'fork' ? 'fork' : String(req.model ?? '') }, () =>
+      need.kind === 'fork' ? $.model.fork({ prompt: String(req.prompt ?? '') }) : $.model.complete(req))
     return r ?? { isAnswered: false, reason: 'empty-reply' }
   } catch (err) {
     return { isAnswered: false, reason: 'refused', error: String((err as Error)?.message || err).slice(0, 300) }
@@ -406,7 +411,7 @@ async function execVerb($: Engine, word: string, ref: ObjRef, region: string | n
     const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'run', word], { stdin: JSON.stringify({ ...input, answers }), cwd: ref.root, env: await leanEnv($, ref.root), timeoutMs: 600000 })
     try { out = JSON.parse(r.stdout) } catch { out = { verb: word, error: (r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400) || `exit ${r.exitCode}` } }
     if (!out.need) break
-    answers[String(out.need.key)] = await modelCall($, out.need)
+    answers[String(out.need.key)] = await modelCall($, out.need, word)
   }
   if (out?.need) out = { verb: out.verb || word, error: 'it asked the model more than eight times' }
   const ran: Ran = { verb: String(out.verb || word), text: out.text, note: out.note, ask: out.ask, error: out.error, on, saved: out.saved ? { id: out.saved.id, v: out.saved.v ?? null, root: ref.root } : null }
@@ -431,6 +436,8 @@ async function noteForClaude($: Engine, text: string): Promise<void> {
  *  01-saves`), as they would type it; the request itself (with what verbs said since Claude's last reply) goes just
  *  before it as a row the person does not see, for Claude alone. */
 export async function ask($: Engine, request: string, verb: string, on: string): Promise<void> {
+  // the turn it starts is filed under the verb in the session's events (v's card is a turn of main's)
+  markNextTurn(verb)
   const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
   await $.state.set(NOTES, [])
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, request].join('\n\n') }] } })
@@ -1139,7 +1146,7 @@ async function runOnMessage($: Engine, word: string, key: string, rec: MsgRecord
       const r = await $.process.run(['node', `${dir}/shell/node/verb.mjs`, 'run', word], { stdin: JSON.stringify({ ...input, answers }), cwd: root, env: await leanEnv($, root), timeoutMs: 600000 })
       try { out = JSON.parse(r.stdout) } catch { out = { verb: word, error: (r.stderr || r.stdout).trim().split('\n').slice(-3).join(' ').slice(0, 400) || `exit ${r.exitCode}` } }
       if (!out.need) break
-      answers[String(out.need.key)] = await modelCall($, out.need)
+      answers[String(out.need.key)] = await modelCall($, out.need, word)
     }
     if (out?.need) out = { verb: word, error: 'it asked the model more than eight times' }
     const on = `the message ${messageObject(rec).title ? `"${messageObject(rec).title}"` : rec.row}`
