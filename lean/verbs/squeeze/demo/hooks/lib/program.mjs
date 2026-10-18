@@ -69,7 +69,7 @@ export function squeezeProgram(k, data) {
     const lvl = Math.max(0, Math.min((d.levels || []).length - 1, (v.at || {})[d.id] || 0))
     const name = d.name || d.id
     return k.region('dim-' + d.id, { label: `${name}: ${(d.levels || [])[lvl] || ''}`, note: d.why, levels: d.levels, at: lvl },
-      k.text(`{dim:${k.escape(name)}} ${k.escape((d.levels || [])[lvl] || '')} ${dot(d, lvl)}`, { wrap: false }))
+      k.text(`{dim:${k.escape(name)}:} ${k.escape((d.levels || [])[lvl] || '')} ${dot(d, lvl)}`, { wrap: false }))
   })
   const count = k.text(`{dim:${kept}${n ? ` of ${k.fmt(n)}` : ''} ${(n || kept) === 1 ? 'line' : 'lines'}}`, { wrap: false })
   const dimLine = k.beside([count].concat(dimParts), { gap: 3 })

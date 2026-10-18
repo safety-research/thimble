@@ -130,7 +130,7 @@ function hints(o: Obj): string {
   if (at < first.levels.length - 1) parts.push('fuller')
   for (const x of d.dims.slice(1)) parts.push(`${x.name} ▸ ${x.levels[((v.at[x.id] ?? 0) + 1) % x.levels.length]}`)
   if (v.lines.length > 1) parts.push('why 2')
-  parts.push(d.show === 'original' ? 'back' : 'original', 'full', 'open')
+  parts.push(d.show === 'original' ? 'back' : 'original', 'open')
   return '/squeeze  ' + parts.join(' · ')
 }
 
