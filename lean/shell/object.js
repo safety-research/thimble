@@ -19,7 +19,7 @@
 //   fromFacts(object, coverage) -> where an object's values come from, as the detail's "from" line reads it: its
 //     sources, rows, labels and coverage (`lean coverage <id> --json`).
 
-const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
+const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|@|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
 
 /** Whether a string reads as a kernel ref (a query's value, an object's value, or a source row). */
 export function isRef(s) {

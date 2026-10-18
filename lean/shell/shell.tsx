@@ -365,7 +365,8 @@ async function resolveRefs($: Engine, root: string, refs: string[]): Promise<voi
   for (const ref of refs.slice(0, 3)) {
     const at = { ...ROWS, id: `${root}|${ref}` }
     if ((await $.state.get(at)).value !== undefined) continue
-    const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', '3', '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+    // a few rows spread across the part's rows (the kernel's default), enough to flip through as its examples
+    const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', '8', '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
     let v: unknown
     try { v = JSON.parse(r.stdout) } catch { v = { ref, error: (r.stdout + r.stderr).trim().slice(0, 400) || 'lean resolve gave nothing' } }
     await $.state.set(at, v)
@@ -1023,9 +1024,11 @@ async function cardNow($: Engine, frame: TrayFrame, w: number): Promise<CardDraw
 }
 
 /** `lean resolve <ref> --json`, as the person's own read (never counted as Claude's coverage). */
-async function resolveJson($: Engine, root: string, ref: string, n = 6): Promise<Any> {
+async function resolveJson($: Engine, root: string, ref: string, n = 6, label?: string): Promise<Any> {
   const dir = $.plugin.root.replace(/\/+$/, '')
-  const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', String(n), '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+  // with the citation's words, a citation of a whole query opens the row that holds the value it shows
+  const words = label && label !== ref ? ['--label', label] : []
+  const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
   try { return JSON.parse(r.stdout) } catch { return { ref, error: (r.stdout + r.stderr).trim().slice(0, 300) || 'lean resolve gave nothing' } }
 }
 
@@ -1075,7 +1078,7 @@ async function sourceSpec($: Engine, ref: string, label: string, room: number): 
   const root = await rootHere($)
   if (!root) return { title: label, right: 'cite', problem: `no thimble/ folder here to read ${ref} from; run lean in the data folder first` }
   const series = seriesRef(ref)
-  const resolved = await resolveJson($, root, series ? series.query : ref)
+  const resolved = await resolveJson($, root, series ? series.query : ref, 6, series ? undefined : label)
   let query: Any = null
   const q = /^(q\d+)(?:[#@]|$)/.exec(ref)
   if (q) {
