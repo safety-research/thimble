@@ -267,7 +267,9 @@ def test_a_sorted_or_filtered_table_of_records_finds_each_records_rows(runs_root
     fn = Q.run(st, "by a function", 'def per(run):\n    t = load(f"runs/{run}/tickets.jsonl")\n'
                '    return {"run": run, "closed": int((t.state == "closed").sum())}\nout = []\n'
                'for run in ["alpha", "beta"]:\n    out.append(per(run))\npd.DataFrame(out)')
-    assert fn["lineage"] == "loop" and LIN.resolve(st, f"{fn['id']}#run=beta@closed")["rows"] == ["runs/beta/tickets.jsonl#L1-2"]
+    assert fn["lineage"] == "loop" and fn["rows"][1] == ["runs/beta/tickets.jsonl#L1-2"]
+    # its count named by a value (state "closed") still opens the rows that hold it
+    assert LIN.resolve(st, f"{fn['id']}#run=beta@closed")["rows"] == ["runs/beta/tickets.jsonl#L2"]
 
 
 def test_a_loop_whose_records_hold_the_same_rows_keeps_none_per_row(root: Path) -> None:
@@ -282,3 +284,28 @@ def test_a_loop_whose_records_hold_the_same_rows_keeps_none_per_row(root: Path) 
     # appends that are not records (names, frames) are only appends
     n = Q.run(st, "names", 'names = []\nfor u in ["a", "b"]:\n    names.append(u)\nlen(names)')
     assert n["table"] == [{"value": 2}]
+
+
+def test_counts_of_a_groupby_loop_keep_their_own_rows_beside_the_rows_found_by_key(runs_root: Path) -> None:
+    st = Store(runs_root)
+    s = Q.run(st, "steps per run", 's = load("runs/*/steps.jsonl")\ns["run"] = s._file.str.extract(r"runs/([^/]+)/", expand=False)\n'
+              'tally(s, "run")')
+    code = ('t = load("runs/*/tickets.jsonl")\nt["run"] = t._file.str.extract(r"runs/([^/]+)/", expand=False)\n'
+            f'steps = use("{s["id"]}").set_index("run")["n"]\nout = []\n'
+            'for run, g in t.groupby("run"):\n'
+            '    out.append({"run": run, "steps": int(steps[run]), "tickets": len(g), "closed": int((g.state == "closed").sum()),\n'
+            '                "open": int((g.state == "open").sum()), "kim": int((g.closer == "kim").sum()),\n'
+            '                "share": round(float((g.state == "closed").mean()), 2)})\npd.DataFrame(out)')
+    q = Q.run(st, "per run", code)
+    # the rows of each output row were found another way (here the used table's, by place); the counts still keep
+    # their own rows from the pass that made the row: a frame of that many rows, or the rows holding a value they name
+    assert q["lineage"] != "loop" and q.get("cells") and q.get("loop") == "out"
+    assert LIN.resolve(st, f"{q['id']}#run=alpha@closed")["rows"] == ["runs/alpha/tickets.jsonl#L1,3-4"]
+    assert LIN.resolve(st, f"{q['id']}#run=alpha@open")["rows"] == ["runs/alpha/tickets.jsonl#L2"]
+    assert LIN.resolve(st, f"{q['id']}#run=alpha@kim")["rows"] == ["runs/alpha/tickets.jsonl#L1,4"]
+    assert LIN.resolve(st, f"{q['id']}#run=beta@tickets")["rows"] == ["runs/beta/tickets.jsonl#L1-2"]
+    # a value that keeps no rows of its own opens its row's and says so in one line; a count of the row's rows does not
+    sh = LIN.resolve(st, f"{q['id']}#run=alpha@share")
+    assert sh["why"].startswith(f"{q['id']} does not keep which rows this value used: these are the")
+    st_ = LIN.resolve(st, f"{q['id']}#run=alpha@steps")
+    assert st_["count"] == 5 and "why" not in st_

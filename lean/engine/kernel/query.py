@@ -236,6 +236,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
 
 APPEND = "__lean_append__"
 LOOP_REFS_MAX = 20_000_000  # source rows the loop's records may hold in all; past it they keep none
+GROUPS_MAX_ROWS = 200_000  # a frame up to this size has its few-valued columns grouped, for counts named by a value
 
 
 class _AppendCalls(ast.NodeTransformer):
@@ -263,6 +264,8 @@ class _Records:
         self.lists: dict[int, dict[str, Any]] = {}
         self.live: dict[int, tuple[Any, int]] = {}
         self.refs: dict[int, tuple[int, Any]] = {}
+        # per frame, the rows each value of a column with few values holds ({("state", "merged"): row positions})
+        self.groups: dict[int, dict[tuple[str, str], Any]] = {}
         self.total = 0
         self.full = False
         info["records"] = self
@@ -297,6 +300,11 @@ class _Records:
             return None
         self.live[id(f)] = (weakref.ref(f), n)
         self.refs[n] = (len(f), refs)
+        if one == ["_ref"] and not many and len(refs) == len(f) and len(f) <= GROUPS_MAX_ROWS:
+            try:
+                self.groups[n] = _value_groups(f)
+            except Exception:  # noqa: BLE001 — columns that do not group
+                pass
         return n
 
     def _note(self, obj: list, x: Any, frame: Any) -> None:
@@ -347,7 +355,8 @@ class _Records:
 
     def lineage(self, result: Any, df: Any, index: list[Any], ns: dict[str, Any]):
         """(rows per output row, cells, the list's name) when the output is a table of one list's records, each found
-        by its place in the list (its index, kept through a sort or a filter) or by its values; else None."""
+        by its place in the list (its index, kept through a sort or a filter) or by its values; else None. A cell is
+        every count of a row whose own rows the pass held, as the caller keeps only those that differ from the row's."""
         if self.full or not self.lists or not len(df):
             return None
         for reg in sorted(self.lists.values(), key=lambda r: -len(r["at"])):
@@ -383,14 +392,16 @@ class _Records:
                 v = _count_of(r[c])
                 if v is None:
                     continue
+                # the rows a count rests on: a frame the pass held of that many rows, the rows a yes/no Series it held
+                # marks or leaves, or the rows of a pass frame that hold a value the count is named by (`merged` for
+                # state == "merged")
                 fits = [list(self.refs[s][1]) for s in own if self.refs[s][0] == v]
-                if not fits:
-                    fits = [refs for n, refs in (reg.get("marked") or {}).get(k, []) if n == v]
-                sets = {tuple(sorted(str(x) for x in refs)) for refs in fits}
-                if len(sets) == 1:
-                    one = R.compress(list(dict.fromkeys(str(x) for x in fits[0])))
-                    if one != rows[-1]:
-                        cell[c] = one
+                fits += [refs for n, refs in (reg.get("marked") or {}).get(k, []) if n == v]
+                named = [self.refs[s][1][pos].tolist() for s in own for (col, val), pos in (self.groups.get(s) or {}).items()
+                         if len(pos) == v and _names_value(c, val)]
+                got = _one_set(fits + named) or _one_set(named)
+                if got is not None:
+                    cell[c] = R.compress(list(dict.fromkeys(str(x) for x in got)))
             cells.append(cell)
         if len(rows) > 1 and all(x == rows[0] for x in rows):
             # every record holds the same rows (a loop over a frame's rows one at a time): nothing per row is known
@@ -398,6 +409,45 @@ class _Records:
         if not any(rows):
             return None
         return rows, cells
+
+
+def _value_groups(f: Any) -> dict[tuple[str, str], Any]:
+    """The row positions of each value of a frame's columns that hold few values (a state, a verdict, a kind)."""
+    import numpy as np
+    import pandas as pd
+
+    out: dict[tuple[str, str], Any] = {}
+    cols = [c for c in f.columns if isinstance(c, str) and not c.startswith("_")
+            and (pd.api.types.is_object_dtype(f[c]) or pd.api.types.is_string_dtype(f[c])
+                 or isinstance(f[c].dtype, pd.CategoricalDtype))][:8]
+    for c in cols:
+        codes, uniques = pd.factorize(f[c], use_na_sentinel=True)
+        if len(uniques) > 12:
+            continue
+        for j, u in enumerate(uniques):
+            if isinstance(u, str) and u:
+                out[(c, u)] = np.flatnonzero(codes == j)
+    return out
+
+
+def _names_value(col: str, value: str) -> bool:
+    """Whether an output column is named by a value (`merged`, `n_closed` for "merged", "closed"; `approved` for
+    "approve"): a word of the name is the value, or one begins the other and both have five letters or more."""
+    v = R.value_slug(value).replace("-", "_")
+    if not v:
+        return False
+    for t in re.split(r"[^a-z0-9]+", col.lower()):
+        if t == v or (min(len(t), len(v)) >= 5 and (t.startswith(v) or v.startswith(t))):
+            return True
+    return False
+
+
+def _one_set(cands: list[list[Any]]) -> list[Any] | None:
+    """The one set of rows all candidates name, or None when there are none or they disagree."""
+    if not cands:
+        return None
+    sets = {tuple(sorted(str(x) for x in c)) for c in cands}
+    return cands[0] if len(sets) == 1 else None
 
 
 def _count_of(v: Any) -> int | None:
@@ -755,8 +805,9 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
                 out["keys"] = [k]
                 break
     loop = None
-    if row_refs is None and records is not None and len(df) <= TABLE_MAX:
-        # records appended in a loop: each output row rests on what its own iteration held
+    if records is not None and len(df) <= TABLE_MAX:
+        # records appended in a loop: each output row rests on what its own pass held; a count of one of its frames
+        # (or of a value it names) opens that frame's rows, whichever way the row's own rows were found
         try:
             loop = records.lineage(made_from, df, index, ns)
         except Exception:  # noqa: BLE001
@@ -767,13 +818,17 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
     if row_refs is not None:
         out["rows"] = [R.compress(x) for x in row_refs[:TABLE_MAX]]
     elif loop is not None:
-        out["rows"], cells, out["frame"] = loop[0], loop[1], loop[2]
+        out["rows"], out["frame"] = loop[0], loop[2]
         out["mode"] = "loop"
-        if any(cells):
-            out["cells"] = cells
     elif len(df) == 1:
         # one row of values computed over the rows the query read (sums, shares, counts side by side)
         _summary(out, [None], ns, frames)
+    if loop is not None and out.get("rows") and out.get("mode") != "summary":
+        cells = [{c: x for c, x in cell.items() if x != (out["rows"][i] if i < len(out["rows"]) else None)}
+                 for i, cell in enumerate(loop[1][:len(out["rows"])])]
+        if any(cells):
+            out["cells"] = cells
+            out["loop"] = loop[2]
     return out
 
 
@@ -1119,7 +1174,7 @@ def run(st: Store, about: str, code: str, rerun_of: str | None = None) -> dict[s
          "uses": r["uses"], "table": r["table"], "truncated": r.get("truncated", False), "rows": r["rows"],
          "keys": r["keys"], "lineage": r["mode"], "frame": r["frame"],
          "out_hash": hashlib.sha1(r["stdout"].encode()).hexdigest()[:16]}
-    for k in ("why_rows", "read", "via", "cells"):
+    for k in ("why_rows", "read", "via", "cells", "loop"):
         if r.get(k):
             q[k] = r[k]
     st.write_json(path, q)
@@ -1179,14 +1234,21 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
         mark = marks[i] if i is not None and i < len(marks) else (marks[0] if marks and all(marks) else None)
         if mark != "summary":
             empty = i is not None and i < len(rows) and not rows[i]
+            v = ((q.get("table") or [{}])[i] if i is not None and i < len(q.get("table") or []) else {}).get(col) if col else None
+            counted = isinstance(v, int) and not isinstance(v, bool) and i is not None and i < len(rows) and v == _count(rows[i])
             sums = [u.get("query") for u in q.get("uses") or [] if (get(st, u.get("query") or "") or {}).get("lineage") == "summary"]
             if empty and sums:
                 return f"{qid} builds on {', '.join(sums)}, a summary whose values keep no rows of their own"
             if (q.get("lineage") == "loop" and col is not None and i is not None and i < len(rows) and rows[i]
-                    and value_rows(q, i, col) is rows[i]):
+                    and value_rows(q, i, col) is rows[i] and not counted):
                 return (f"{qid} made this output row in a loop from these {_count(rows[i]):,} rows "
                         f"({_files_text(rows[i])}), the frames it loaded and filtered for it, and it does not keep "
                         "which of them the value used")
+            if (q.get("cells") and col is not None and i is not None and i < len(rows) and rows[i]
+                    and value_rows(q, i, col) is rows[i] and not counted):
+                # beside counts of the row that keep their own rows, a value that keeps none says so
+                return (f"{qid} does not keep which rows this value used: these are the {_count(rows[i]):,} rows "
+                        f"behind its whole output row ({_files_text(rows[i])})")
             return None
         mine = rows[i] if i is not None and i < len(rows) else rows[0]
         return (f"{qid} computed this value over all {_count(mine):,} rows it read ({_files_text(mine)}), "
