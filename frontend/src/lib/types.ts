@@ -1815,6 +1815,11 @@ export interface ConceptApplication {
   stopped_by?: 'quit' | string | null
   /** the units with no words, which need no label (a prompt label's) */
   skipped?: number
+  /** a Run again on the units this run could not label (backend concepts._record_application `merge`): when it ran and
+   * what it labeled, which this record takes in; `status` error for one that failed and changed nothing */
+  again?: { ts?: string; total?: number | null; labeled?: number; failed?: number; status?: string; message?: string | null } | null
+  /** a Run again after a stop that failed: when it ran, which this record does not take in */
+  resumed?: { ts?: string; status?: string; message?: string | null } | null
 }
 
 /** The whole files or runs a prompt label's run read only in part, since they were longer than its model's context
