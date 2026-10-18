@@ -1021,6 +1021,18 @@
         grid = r.g
       }
     }
+    if (form === 'metro' && !full && !lineThreads.length && M.links.length > 8) {
+      // the calm form of flows with no threads: the biggest flows, about three quarters of the whole, the rest named in
+      // one line under them
+      const all = M.links.slice().sort((a, b) => (b.n || 0) - (a.n || 0))
+      const sum = all.reduce((a, l) => a + (l.n || 0), 0)
+      const kept = []
+      let got = 0
+      for (const l of all) { if (kept.length >= 4 && (got >= sum * 0.75 || kept.length >= 10)) break; kept.push(l); got += l.n || 0 }
+      const r = mapMetro(k, Object.assign({}, M, { links: kept }), [], W, false, unit, null, valueOf, stationRegion, ctx, T, o, lens)
+      grid = r.g
+      if (kept.length < all.length) key.push(`{dim:${fmt(all.length - kept.length)} smaller flows not drawn (${fmt(sum - got)}${unit ? ' ' + escapeMarkup(unit) : ''} of ${fmt(sum)}); the full map has them all}`)
+    }
     if (grid) { /* drawn */ } else if (form === 'line') grid = mapLine(k, M, lineThreads[0], W, full, unit, stationRegion, toneOfThread, ctx, T)
     else if (form === 'metro') {
       const F = mapFold(M, lineThreads, o.fold != null ? num(o.fold) : Math.max(2, Math.ceil(lineThreads.length * 0.05)))
@@ -1032,7 +1044,7 @@
     const node = grid.toCanvas(n => { ctx.ops += n })
     node.map = { form: form, full: full, threads: lineThreads.length, stations: M.stations.size, lens: lens ? lens.by : null }
     const parts = [node]
-    if (full && key.length) key.forEach(line => parts.push(k.text(line)))
+    if (key.length && (full || form === 'metro')) key.forEach(line => parts.push(k.text(line)))
     return parts.length === 1 ? node : k.stack(parts)
   }
 
@@ -1606,7 +1618,7 @@
       }
       const parts = L.mixed ? L.parts : [{ n: L.n, tone: L.tone }]
       const cells = [{ ch: ' ' }]
-      parts.forEach((pt, i) => { if (i) cells.push({ ch: '·', tone: 'dim' }); Array.from(String(pt.n)).forEach(ch => cells.push({ ch, tone: pt.tone, b: true })) })
+      parts.forEach((pt, i) => { if (i) cells.push({ ch: '·', tone: 'dim' }); Array.from(fmt(pt.n)).forEach(ch => cells.push({ ch, tone: pt.tone, b: true })) })
       cells.push({ ch: ' ' })
       const rid = laneRegion(L)
       if (best && best.e - best.x + 1 >= cells.length + 2) {
