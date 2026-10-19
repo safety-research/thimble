@@ -29,7 +29,7 @@ import { barText } from '../panes/host.js'
 import { paintRegions } from './cells'
 import { beganWord, examplesView, linkRuns, partsOf, versionsOf } from './carddetail.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
-import { browserOn, citeLabels, currentTheme, loadObject, openBrowser, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
+import { browserOn, citeLabels, currentTheme, keysMoved, loadObject, openBrowser, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
 import { cardEvent, cardKey, ownState, pressTaken, readCardState, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
@@ -705,6 +705,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
   // (the program's esc), then the detail; closing gives the main view back
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const person = (e.origin as { kind?: string }).kind === 'person'
+    if (person) keysMoved(await $.clock.now())
     if (person && isOpen && (isAsk(ringAt) || draft)) {
       draft = ''
       ringAt = null

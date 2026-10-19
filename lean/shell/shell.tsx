@@ -2021,6 +2021,13 @@ async function keyTurn($: Engine, e: KeyEdit): Promise<KeyTurn> {
 /** When the key before this one was decided (keyTurn): a line drawn before it is not what this key answers. */
 let keyDecided = 0
 
+/** The person moved the keys without a key in the prompt (closed a pane with esc or a click): no line drawn before
+ *  that is what their next key answers, so a word they start typing then is typed. */
+export function keysMoved(at: number): void {
+  keyDecided = Math.max(keyDecided, at)
+  barSeen.length = 0
+}
+
 /** A key pressed while the prompt is empty: the box as it should stand when the shell takes the key (null: it types),
  *  and what the key does. */
 async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Promise<KeyTurn> {
@@ -2930,6 +2937,7 @@ export const registerShell: Register = (on, options) => {
   })
   on('ui.close', { id: CPANE }, async ($, e, next) => {
     try {
+      if ((e.origin as { kind?: string }).kind === 'person') keysMoved(await $.clock.now())
       await $.state.set(CLAIMPANE, null)
       await popFocus($, 'claims')
       paneClosed('claims')
