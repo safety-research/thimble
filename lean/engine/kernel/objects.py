@@ -16,7 +16,8 @@ An object is a program + data + lineage:
 
 Any other field Claude gives (title, question, notes, anything) is kept as given. Nothing is required.
 
-Earlier versions are kept in thimble/objects/.versions/<id>/v<k>.json.
+Earlier versions are kept in thimble/objects/.versions/<id>/v<k>.json. When the lineage's rows are long (thousands of
+transcript blocks), the file keeps them packed in lineage.packed (store.pack_object); load() puts them back.
 """
 from __future__ import annotations
 
@@ -25,12 +26,13 @@ import datetime as dt
 import json
 import re
 import shutil
+import zlib
 from typing import Any
 
 from . import query as Q
 from . import refs as R
 from . import sources as S
-from .store import Store
+from .store import Store, pack_object, unpack_object
 
 CONTRACT = "lean/draw"
 
@@ -61,8 +63,24 @@ def find_id(st: Store, name: str) -> str | None:
 
 
 def load(st: Store, name: str) -> dict[str, Any] | None:
+    """An object, its lineage's packed rows (store.pack_object) back in place."""
     i = find_id(st, name)
-    return st.read_json(st.dir / "objects" / f"{i}.json") if i else None
+    return read(st, st.dir / "objects" / f"{i}.json") if i else None
+
+
+def read(st: Store, p: Any) -> dict[str, Any] | None:
+    try:
+        return unpack_object(st.read_json(p))
+    except (KeyError, IndexError, TypeError, ValueError, zlib.error) as e:
+        # packed rows that do not read: the object as written, which still draws, and its parts still resolve from their
+        # data's `_rows`; its problems say what is missing and how to get it back
+        obj = st.read_json(p)
+        lin = obj.get("lineage") if isinstance(obj, dict) else None
+        if isinstance(lin, dict):
+            lin.pop("packed", None)
+            lin["problems"] = list(lin.get("problems") or []) + [
+                f"its lineage's packed rows did not read ({type(e).__name__}): `lean save {obj.get('id')} --rerun` binds them again"]
+        return obj
 
 
 def walk(data: Any, pointer: str) -> tuple[Any, Any, str]:
@@ -383,7 +401,7 @@ def save(st: Store, name: str | None, spec: dict[str, Any], change: str | None =
     """Make an object, or a new version of the one with this name."""
     oid = find_id(st, name) if name else None
     d = st.sub("objects")
-    old = st.read_json(d / f"{oid}.json") if oid else None
+    old = read(st, d / f"{oid}.json") if oid else None
     if old:
         spec = _rebind(spec, old)
     data, lineage = build(st, spec)
@@ -413,7 +431,8 @@ def save(st: Store, name: str | None, spec: dict[str, Any], change: str | None =
         vd = d / ".versions" / oid
         vd.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(d / f"{oid}.json", vd / f"v{old.get('version') or 1}.json")
-    st.write_json(d / f"{oid}.json", obj)
+    # long lineage rows are written packed; the object in hand, which the command prints from, stays whole
+    st.write_json(d / f"{oid}.json", pack_object(obj))
     st.log({"kind": "save", "object": oid, "version": version, "queries": sorted(lineage["queries"]),
             "problems": len(lineage["problems"])})
     # the session's change feed: a surface (the terminal under a reply, the browser) learns of the save from here,
