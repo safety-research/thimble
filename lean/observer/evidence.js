@@ -19,13 +19,26 @@ const cut = (s, n) => {
   return t.length <= n ? t : t.slice(0, n - 1) + '…'
 }
 
-/** How many rows a row set names: `f.jsonl#L4-9,12` is 7, `f.jsonl#L12.b1` is 1, `db#prs/1-12` is 12. */
+// a set of blocks of transcript records: each part lines then blocks (kernel/refs.py)
+const BLOCKSET = /^L\d+(?:-\d+)?\.b\d+(?:-\d+)?(?:,\d+(?:-\d+)?\.b\d+(?:-\d+)?)*$/
+
+/** How many rows a row set names: `f.jsonl#L4-9,12` is 7, `f.jsonl#L12.b1` is 1, `f.jsonl#L12.b0-1,14-15.b0` is 4
+ *  (each part's lines times its blocks), `db#prs/1-12` is 12. */
 export function rowsIn(rowset) {
   const s = String(rowset || '')
   const hash = s.indexOf('#')
   if (hash < 0) return null
   const frag = s.slice(hash + 1)
   if (/^L\d+\.b\d+$/.test(frag)) return 1
+  if (BLOCKSET.test(frag)) {
+    let n = 0
+    for (const part of frag.slice(1).split(',')) {
+      const [lines, blocks] = part.split('.b')
+      const [a, b] = lines.split('-').map(Number), [c, d] = blocks.split('-').map(Number)
+      n += (Math.abs((b ?? a) - a) + 1) * (Math.abs((d ?? c) - c) + 1)
+    }
+    return n
+  }
   const two = /^L(\d+)-L(\d+)$/.exec(frag)
   if (two) return Math.max(0, Number(two[2]) - Number(two[1]) + 1)
   const m = /(\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)$/.exec(frag)

@@ -310,8 +310,9 @@ def test_an_object_bound_to_a_cut_table_says_so(root: Path, monkeypatch: pytest.
 
 
 def test_row_sets_of_many_block_refs_compress_and_expand_fast_and_the_same(root: Path) -> None:
-    """An output row may rest on a hundred thousand block refs (each tool call of a swarm): compress keeps each once in
-    first-seen order without a quadratic scan, and expand gives back what parse() reads, in a few seconds at most."""
+    """An output row may rest on a hundred thousand block refs (each tool call of a swarm): compress keeps them as one
+    block set per file (`f#L12.b0-1,14-15.b0`), in first-seen order of the files, without a quadratic scan, and expand
+    gives back what parse() reads, every ref once, in a few seconds at most."""
     import random
     import time
 
@@ -323,10 +324,10 @@ def test_row_sets_of_many_block_refs_compress_and_expand_fast_and_the_same(root:
     sets = R.compress(mixed)
     back = R.expand(sets)
     assert time.time() - t0 < 10
-    # every ref once, the numbered rows as row sets first, then the rest in first-seen order
-    want_other = list(dict.fromkeys(b for b in mixed if R._unit(b) is None))
+    # every ref once: the numbered rows as row sets first, then a block set per file, in first-seen order of the files
     assert sets[:4] == ["a.jsonl#L3-4,9", "t.csv#row=2", "d.db#t/5", "f.json#/x/3"]
-    assert sets[4:] == want_other
+    assert [x.split("#")[0] for x in sets[4:]] == list(dict.fromkeys(b.split("#")[0] for b in blocks))
+    assert sorted(back) == sorted(set(mixed)) and R.count(sets) == len(set(mixed))
     # expand reads each row set as parse() does, the block refs included (a leading zero is read as a number)
     slow = [x for s in sets for x in R.single_refs(R.parse(s))]
     assert back == slow

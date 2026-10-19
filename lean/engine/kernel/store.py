@@ -8,6 +8,8 @@ In the folder under analysis (the root), the `thimble/` folder holds what the pe
                                             large row lineage is kept packed (pack_record)
     thimble/labels/<name>.json              each label with every version of its values (labels.py)
     thimble/kept/<name>.pkl.gz              results a query kept with keep(), which a later query reads with use()
+    thimble/kept/<name>.rows.json           beside a kept table with no `_ref`, the rows behind each of its rows, when
+                                            the query that kept it knew them (query._keep_rows)
     thimble/results/q<n>.pkl.gz             each query's output table, which a later query reads with use("q<n>")
     thimble/ledger.jsonl                    one line per `lean` call that read rows (what was read and how)
 
@@ -322,6 +324,15 @@ def _rows_in(rowset: str) -> int | None:
     frag = rowset[hash_ + 1:]
     if re.fullmatch(r"L\d+\.b\d+", frag):
         return 1
+    if re.fullmatch(r"L\d+(?:-\d+)?\.b\d+(?:-\d+)?(?:,\d+(?:-\d+)?\.b\d+(?:-\d+)?)*", frag):
+        # a block set: each part's lines times its blocks
+        n = 0
+        for part in frag[1:].split(","):
+            lines, _, blocks = part.partition(".b")
+            a, _, b = lines.partition("-")
+            c, _, d = blocks.partition("-")
+            n += (abs(int(b or a) - int(a)) + 1) * (abs(int(d or c) - int(c)) + 1)
+        return n
     m = re.fullmatch(r"L(\d+)-L(\d+)", frag)
     if m:
         return max(0, int(m[2]) - int(m[1]) + 1)

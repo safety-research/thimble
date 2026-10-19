@@ -271,8 +271,16 @@ function looksLikeRef(s) {
 
 /** How many rows a row set names (`f.jsonl#L4-9,12`, `x.csv#row=1-3`, `x.db#t/1-4`, `x.json#/a/1-3`); null for others. */
 export function countRows(ref) {
+  const blocks = /#L(\d+(?:-\d+)?\.b\d+(?:-\d+)?(?:,\d+(?:-\d+)?\.b\d+(?:-\d+)?)*)$/.exec(ref)
+  if (blocks) {
+    // blocks of transcript records: each part's lines times its blocks
+    return blocks[1].split(',').reduce((n, part) => {
+      const [[a, b], [c, d]] = part.split('.b').map(x => x.split('-').map(Number))
+      return n + (Math.abs((b ?? a) - a) + 1) * (Math.abs((d ?? c) - c) + 1)
+    }, 0)
+  }
   const m = /#(?:L|row=|[A-Za-z_][A-Za-z0-9_]*\/|(?:\/[^/]*)*\/)(\d+(?:-L?\d+)?(?:,\d+(?:-\d+)?)*)$/.exec(ref)
-  if (!m || /\.b\d+$/.test(ref)) return /#L\d+\.b\d+$/.test(ref) ? 1 : null
+  if (!m || /\.b\d+$/.test(ref)) return null
   return m[1].split(',').reduce((n, part) => {
     const [a, b] = part.replace(/L/g, '').split('-').map(Number)
     return n + (b == null ? 1 : Math.abs(b - a) + 1)

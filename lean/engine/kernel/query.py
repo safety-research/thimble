@@ -24,14 +24,19 @@ from thimble-lite's query kernel and extended):
 Row lineage of the output (the last expression, or `result`), by how sure it is:
 
     exact      the output has `_ref` (one source row per output row) or `_refs` (a list); tally() gives `_refs`
-    matched    found by key: the output's key columns (its index, or its text columns) select rows of a frame the
+    matched    found by key: the output's key columns (its index, or its text columns, and its number columns that a
+               frame of the query has too when the words alone do not tell its rows apart) select rows of a frame the
                query made, and a count column of the output equals the number of rows for every output row
     key        found by key, but no column of the output counts rows, so the match could not be checked
     superset   found by key, and a count column disagrees: the rows hold more than the value counted
-    loop       records built in a loop (`out.append({...})`, then a table of them): each output row rests on the rows
-               its own iteration held when it appended the record (what it loaded and filtered for it); a count that
-               equals the rows of one of those frames opens that frame's rows (`cells`)
+    loop       records built in a loop (`out.append({...})`, then a table of them, grouped or not, here or in a later
+               query through keep() and use()): each output row rests on the rows its records' iterations held (what
+               they loaded and filtered, else the files they opened, a JSON document as one row); a count that equals
+               the rows of one of those frames opens that frame's rows (`cells`)
     query      no row lineage: each value rests on every row the query read
+
+A count column named by a value of the frame its rows were found in (a pivot: `read` beside the slice, for
+kind == "read") opens the rows of its group that hold that value (`cells`).
 """
 from __future__ import annotations
 
@@ -240,6 +245,8 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
     pd.set_option("display.max_columns", 14)
     pd.set_option("display.max_colwidth", 60)
     pd.set_option("display.max_rows", 60)
+    info.setdefault("opened_log", [])
+    info.setdefault("row_files", set())
 
     def load(pattern: str, fields: list[str] | None = None, table: str | None = None) -> "pd.DataFrame":
         """Every row of the files a path or glob names, with `_ref` (cite it) and `_file`. `x.db#table` (or
@@ -277,6 +284,8 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         """(ref, row) for each row of the files a path or glob names, one at a time."""
         for rel in S.expand_glob(st.root, pattern):
             n = 0
+            # read by rows(), not opened by the code: a record a loop appends rests on it only by what the loop held
+            info["row_files"].add(rel)
             for row in S.iter_rows(st.root, rel):
                 n += 1
                 yield row.ref, row.value
@@ -310,6 +319,10 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         """Keep a result for a later query (use(name)), with this query as its source."""
         write_pickle(st.sub("kept"), slug(name), obj)
         info["kept"].append(name)
+        try:
+            _keep_rows(st, name, obj, info, sys._getframe(1).f_globals)
+        except Exception:  # noqa: BLE001 — a kept table whose rows are not found keeps none, as before
+            pass
         return obj
 
     def use(name: str) -> Any:
@@ -325,6 +338,16 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         obj = read_pickle(f)
         if isinstance(obj, pd.DataFrame) and "_ref" in obj.columns:
             info["frames"].append(obj)
+        elif isinstance(obj, pd.DataFrame) and not any(ref_columns(obj)):
+            # a table kept with no `_ref` of its own, whose rows the keeping query found (_keep_rows): a frame this
+            # query makes from it finds them by its index
+            side = st.read_json(st.dir / "kept" / f"{slug(name)}.rows.json")
+            try:
+                rows = unpack_record(side).get("rows") if isinstance(side, dict) else None
+            except Exception:  # noqa: BLE001
+                rows = None
+            if rows and len(rows) == len(obj):
+                info.setdefault("kept_rows", []).append((name, obj, rows))
         return obj
 
     def used_output(qid: str) -> Any:
@@ -359,7 +382,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         info["samples"] += 1
         return df.sample(min(n, len(df)), random_state=seed)
 
-    loop = _Records(info)
+    loop = _Records(info, st)
     return {"pd": pd, "np": np, "json": json, "re": re, "Counter": Counter, "defaultdict": defaultdict,
             "ROOT": st.root, "load": load, "rows": rows, "tally": tally,
             "sample": sample, "keep": keep, "use": use, APPEND: loop.append, "__name__": "__lean_query__"}
@@ -392,8 +415,11 @@ class _Records:
     while it lives, so one held across the whole loop (the table the loop filters) tells apart from one made for a
     single record."""
 
-    def __init__(self, info: dict[str, Any]) -> None:
+    def __init__(self, info: dict[str, Any], st: Store | None = None) -> None:
         self.info = info
+        self.st = st
+        # each opened file's rows as one row set (_file_rows)
+        self.whole: dict[str, str | None] = {}
         self.lists: dict[int, dict[str, Any]] = {}
         self.live: dict[int, tuple[Any, int]] = {}
         self.refs: dict[int, tuple[int, Any]] = {}
@@ -445,7 +471,17 @@ class _Records:
 
         if not isinstance(x, (dict, tuple, list, pd.Series)):
             return
-        reg = self.lists.setdefault(id(obj), {"obj": obj, "at": {}, "loads": 0})
+        reg = self.lists.setdefault(id(obj), {"obj": obj, "at": {}, "loads": 0, "opens": 0, "files": {}})
+        # the source files the code opened since the list's previous record (json.load(open(f)) in the loop), else the
+        # ones the previous record rests on (records appended in an inner loop over one file): what a record rests on
+        # when it held no frame of source rows of its own
+        log = self.info.get("opened_log") or []
+        if len(log) > reg["opens"]:
+            loaded = {x["path"] for x in self.info["loads"]} | set(self.info.get("row_files") or ())
+            new = [f for f in log[reg["opens"]:] if f not in loaded]
+            if new:
+                reg["now"] = tuple(dict.fromkeys(new))
+            reg["opens"] = len(log)
         held: set[int] = set()
         frames = self.info["frames"]
         for f in frames[reg["loads"]:]:
@@ -472,6 +508,8 @@ class _Records:
             return
         k = len(obj) - 1
         reg["at"][k] = held
+        if reg.get("now"):
+            reg["files"][k] = reg["now"]
         # a yes/no per row of a frame held here (`ok` beside `m`): the rows it marks and the rows it leaves are what a
         # count of either side rests on
         marked: list[tuple[int, list[str]]] = []
@@ -503,6 +541,72 @@ class _Records:
             return got[0], got[1], name or "a list"
         return None
 
+    def _record_rows(self, reg: dict[str, Any], k: int, seen: Counter, many: bool) -> tuple[list[int], list[str]]:
+        """(the frames record k rests on, its rows as row sets): the frames only this record held; with none, the
+        files its pass opened (nothing finer is known), else the frames every record held."""
+        held = reg["at"].get(k) or set()
+        files = reg["files"].get(k)
+        own = sorted(s for s in held if not many or seen[s] == 1) or ([] if files else sorted(held))
+        keep = _narrowest(own, self.refs)
+        refs = list(dict.fromkeys(str(r) for s in keep for r in self.refs[s][1]))
+        return own, (R.compress(refs) if refs or not files else self._file_rows(files))
+
+    def frames_with_rows(self, ns: dict[str, Any], only: dict[str, Any] | None = None) -> dict[str, tuple[Any, str]]:
+        """{name: (the frame with `_refs`, the list it was built from)} for each frame of the namespace (or of `only`)
+        that holds no source rows but shows one list's records (pd.DataFrame(out), sorted, filtered or given new
+        columns), each row's `_refs` its record's rows; or that is a table a query kept, used here (use()), found by
+        its index. What a groupby of such a frame finds its rows in."""
+        import pandas as pd
+
+        out: dict[str, tuple[Any, str]] = {}
+        kept = self.info.get("kept_rows") or []
+        if self.full or not (self.lists or kept):
+            return out
+        deadline = time.time() + 5.0
+        for name, f in list((only if only is not None else ns).items()):
+            if (name.startswith("_") or not isinstance(f, pd.DataFrame) or not len(f) or len(f) > TABLE_MAX
+                    or any(ref_columns(f))):
+                continue
+            if time.time() > deadline:
+                break
+            try:
+                got = None
+                idx = list(f.index) if isinstance(f.index, pd.RangeIndex) or pd.api.types.is_integer_dtype(f.index) else []
+                for reg in sorted(self.lists.values(), key=lambda r: -len(r["at"])):
+                    places = _record_places(reg["obj"], reg["at"], f, f, idx)
+                    if places is None:
+                        continue
+                    seen = Counter(s for held in reg["at"].values() for s in held)
+                    rows = [self._record_rows(reg, k, seen, len(reg["at"]) > 1)[1] for k in places]
+                    if any(rows) and not (len(rows) > 1 and all(x == rows[0] for x in rows)):
+                        lname = next((k for k, v in ns.items() if v is reg["obj"] and not k.startswith("_")), None)
+                        got = (rows, lname or "a list")
+                        break
+                if got is None:
+                    for kname, kf, krows in kept:
+                        rows = _aligned_rows(f, kf, krows)
+                        if rows is not None:
+                            got = (rows, kname)
+                            break
+                if got is not None:
+                    g = f.copy(deep=False)
+                    g["_refs"] = got[0]
+                    out[name] = (g, got[1])
+            except Exception:  # noqa: BLE001 — a frame whose rows do not line up keeps none
+                continue
+        if only is None:
+            # the kept tables this query used, as they were used (`use("calls").groupby(...)` binds no name)
+            mine = {id(f) for f in ns.values() if isinstance(f, pd.DataFrame)}
+            for kname, kf, krows in kept:
+                if id(kf) not in mine and f"kept:{kname}" not in out:
+                    try:
+                        g = kf.copy(deep=False)
+                        g["_refs"] = [list(x) for x in krows]
+                        out[f"kept:{kname}"] = (g, kname)
+                    except Exception:  # noqa: BLE001
+                        continue
+        return out
+
     def _rows(self, reg: dict[str, Any], places: list[int], df: Any):
         seen = Counter(s for held in reg["at"].values() for s in held)
         many = len(reg["at"]) > 1
@@ -510,13 +614,10 @@ class _Records:
         cells: list[dict[str, list[str]]] = []
         deadline = time.time() + 3.0
         for i, k in enumerate(places):
-            held = reg["at"].get(k) or set()
-            own = sorted(s for s in held if not many or seen[s] == 1) or sorted(held)
             if time.time() > deadline:
                 return None
-            keep = _narrowest(own, self.refs)
-            refs = list(dict.fromkeys(str(r) for s in keep for r in self.refs[s][1]))
-            rows.append(R.compress(refs))
+            own, rs = self._record_rows(reg, k, seen, many)
+            rows.append(rs)
             cell: dict[str, list[str]] = {}
             r = df.iloc[i]
             for c in df.columns:
@@ -542,6 +643,79 @@ class _Records:
         if not any(rows):
             return None
         return rows, cells
+
+    def _file_rows(self, files: tuple[str, ...]) -> list[str]:
+        """The rows of files a loop's pass opened, as row sets: a JSON document is its root row (`x.json#/`), a file of
+        lines or records all of them (`x.jsonl#L1-480`, `x.csv#row=1-30`)."""
+        out: list[str] = []
+        for rel in files:
+            if rel not in self.whole:
+                self.whole[rel] = self._whole(rel)
+            if self.whole[rel]:
+                out.append(self.whole[rel])
+        return out
+
+    def _whole(self, rel: str) -> str | None:
+        st = self.st
+        if st is None:
+            return None
+        try:
+            kind = S.kind_of_file(st.root, rel)
+            if kind == "json":
+                ref = S.document_ref(st.root, rel)
+                return ref if ref != rel else None
+            if kind not in ("jsonl", "transcript", "text", "csv", "markdown", "diff"):
+                return None
+            c = S.counts(st.root, [rel], st.cache / "counts.json").get(rel) or {}
+            n = int(c.get("rows" if kind == "csv" else "lines") or 0)
+        except (OSError, ValueError):
+            return None
+        if n <= 0:
+            return None
+        nums = "1" if n == 1 else f"1-{n}"
+        return f"{rel}#row={nums}" if kind == "csv" else f"{rel}#L{nums}"
+
+
+def _aligned_rows(f: Any, kf: Any, krows: list[list[str]]) -> list[list[str]] | None:
+    """Each row's rows of a frame made from a kept table (a copy of it, a filter, a sort, new columns), found by its
+    index labels when the columns both have hold the same values there; None when it is no such frame."""
+    if f is not kf:
+        if len(krows) != len(kf) or not kf.index.is_unique or not bool(f.index.isin(kf.index).all()):
+            return None
+        shared = [c for c in f.columns if isinstance(c, str) and not c.startswith("_") and c in kf.columns]
+        if not shared:
+            return None
+        probe = f.index[:50]
+        a = f.loc[probe, shared].astype(object)
+        b = kf.loc[probe, shared].astype(object)
+        if not bool(((a == b) | (a.isna() & b.isna())).all().all()):
+            return None
+    pos = kf.index.get_indexer(f.index)
+    return [list(krows[p]) for p in pos]
+
+
+def _keep_rows(st: Store, name: str, obj: Any, info: dict[str, Any], ns: dict[str, Any]) -> None:
+    """Beside a kept table with no `_ref` of its own, the rows behind each of its rows, when this query knows them: the
+    records a loop built it from, or the rows of a frame it was cut from (thimble/kept/<name>.rows.json). A later
+    query that groups it finds its rows there (use()). Keeping one without them removes an older file."""
+    import pandas as pd
+
+    p = st.sub("kept") / f"{slug(name)}.rows.json"
+    rows = None
+    if isinstance(obj, pd.DataFrame) and len(obj) and not any(ref_columns(obj)) and len(obj) <= 200000:
+        rec = info.get("records")
+        if rec is not None and len(obj) <= TABLE_MAX:
+            got = rec.frames_with_rows(ns, {"kept": obj})
+            if got:
+                rows = [list(x) for x in got["kept"][0]["_refs"].tolist()]
+        if rows is None:
+            al = _by_index(obj, ns, info["frames"])
+            if al:
+                rows = [R.compress(x) for x in al[0]]
+    if rows and any(rows):
+        st.write_json(p, pack_record({"rows": rows}))
+    elif p.exists():
+        p.unlink()
 
 
 def _value_groups(f: Any) -> dict[tuple[str, str], Any]:
@@ -772,6 +946,7 @@ def row_ref_lists(f: Any) -> list[list[str]]:
 
 _ROWNUM = re.compile(r"^(?P<path>[^#]+)#(?P<unit>L|row=|/(?:[^/]*/)*)(?P<n>\d+)$")
 _DBROWNUM = re.compile(r"^(?P<path>[^#]+\.(?:db|sqlite|sqlite3))#(?P<unit>[A-Za-z_][A-Za-z0-9_]*/)(?P<n>\d+)$", re.I)
+_BLOCKNUM = re.compile(r"^(?P<path>[^#]+)#L(?P<line>\d+)\.b(?P<block>\d+)$")
 
 
 def rowsets_of(frames: list[Any]) -> list[str]:
@@ -781,6 +956,7 @@ def rowsets_of(frames: list[Any]) -> list[str]:
     import pandas as pd
 
     nums: dict[tuple[str, str], list[Any]] = {}
+    blocks: dict[str, list[Any]] = {}
     other: dict[str, None] = {}
 
     def add(s: Any) -> None:
@@ -794,6 +970,19 @@ def rowsets_of(frames: list[Any]) -> list[str]:
                 g = m[ok]
                 for (path, unit), part in g.groupby(["path", "unit"], sort=False)["n"]:
                     nums.setdefault((path, unit), []).append(part.astype(np.int64).to_numpy())
+            s = s[~ok]
+        if not s.empty and not s.str.contains(".b", regex=False).any():
+            for x in s.tolist():
+                other[x] = None
+            return
+        if not s.empty:
+            # blocks of transcript records (`a.jsonl#L44.b0`): one block set per file
+            m = s.str.extract(_BLOCKNUM)
+            ok = m["line"].notna()
+            if ok.any():
+                for path, part in m[ok].groupby("path", sort=False):
+                    blocks.setdefault(path, []).append(np.stack([part["line"].astype(np.int64).to_numpy(),
+                                                                 part["block"].astype(np.int64).to_numpy()], axis=1))
             s = s[~ok]
         for x in s.tolist():
             other[x] = None
@@ -825,6 +1014,9 @@ def rowsets_of(frames: list[Any]) -> list[str]:
         cut = np.where(np.diff(a) != 1)[0]
         starts, ends = a[np.r_[0, cut + 1]], a[np.r_[cut, len(a) - 1]]
         out.append(f"{path}#{unit}" + ",".join(str(x) if x == y else f"{x}-{y}" for x, y in zip(starts.tolist(), ends.tolist())))
+    for path, arrs in blocks.items():
+        pairs = np.unique(np.concatenate(arrs), axis=0)
+        out.append(f"{path}#L{R.format_blocks(pairs.tolist())}")
     out.extend(other)
     return out
 
@@ -894,9 +1086,14 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
         # an unnamed whole-number index is where the rows sat before a sort or a filter, not what they stand for: it
         # stays a column, and the keys are the output's words, as for a plain table
         positional = list(df.index.names) == [None] and pd.api.types.is_integer_dtype(df.index)
-        keys = [] if positional else [str(n) if n is not None else "index" for n in df.index.names]
-        df = df.reset_index()
-        df.columns = [str(c) for c in df.columns]
+        levels = df.index.nlevels
+        df = _reset_index(df)
+        # columns of two levels are named as a table of them with no index is (`n_mean`), and the index levels beside
+        # them, which come back as (name, ""), by their name alone
+        df.columns = ["_".join(str(x) for x in c if x != "") if isinstance(c, tuple) else str(c) for c in df.columns]
+        # the index levels are the first columns now, under the names reset_index gave them (`index`, `level_0` for
+        # unnamed levels, a new name when a column already had the level's name)
+        keys = [] if positional else list(df.columns[:levels])
     df = df.copy()
     df.columns = [str(c) if not isinstance(c, tuple) else "_".join(str(x) for x in c if x != "") for c in df.columns]
     row_refs: list[list[str]] | None = None
@@ -909,34 +1106,10 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
     out["keys"] = keys
     if row_refs is None and aligned is not None:
         row_refs, out["mode"], out["frame"] = aligned
-    if row_refs is None and keys and len(df) <= 200000:
-        found = _by_key(df, keys, ns, frames)
-        if not found and len(keys) > 1:
-            # the key columns guessed from the output's words may hold a column the query computed per group (a top
-            # label, a note): a single key that alone tells the output rows apart is tried on its own
-            for k in keys:
-                try:
-                    if not df[k].is_unique:
-                        continue
-                except TypeError:
-                    continue
-                found = _by_key(df, [k], ns, frames)
-                if found:
-                    out["keys"] = [k]
-                    break
+    if row_refs is None:
+        found = _by_keys(df, out, ns, frames)
         if found:
             row_refs, out["mode"], out["frame"] = found
-    if row_refs is None and len(df) > 1 and len(df) <= 200000:
-        # a key under another name: its values are a column (or the index) of a frame the query made
-        for k in [c for c in out["keys"] if c in df.columns][:3]:
-            try:
-                found = _by_values(df, k, ns, frames)
-            except Exception:  # noqa: BLE001
-                found = None
-            if found:
-                row_refs, out["mode"], out["frame"] = found
-                out["keys"] = [k]
-                break
     loop = None
     if records is not None and len(df) <= TABLE_MAX:
         # records appended in a loop: each output row rests on what its own pass held; a count of one of its frames
@@ -945,11 +1118,29 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
             loop = records.lineage(made_from, df, index, ns)
         except Exception:  # noqa: BLE001
             loop = None
+    if row_refs is None and loop is None and records is not None:
+        # a table built from records (pd.DataFrame(out), or a kept one a later query uses), grouped: each record rests
+        # on what its loop pass held, so each group rests on its records' rows
+        try:
+            built = records.frames_with_rows(ns)
+            ns2 = {n: f for n, (f, _) in built.items()}
+            found = None
+            if built and not own_one and not own_many:
+                # rows of such a table, sorted or filtered: each its record's rows
+                found = _by_index(result, ns2, [])
+            if built and not found:
+                found = _by_keys(df, out, ns2, [])
+        except Exception:  # noqa: BLE001
+            found = None
+        if found:
+            row_refs, out["frame"] = found[0], built[str(found[2]).split(".")[0]][1]
+            out["mode"] = "loop"
     table = df.drop(columns=ref_columns(df)[1])
     out["table"] = [{k: jsonable(v) for k, v in r.items()} for r in table.head(TABLE_MAX).to_dict(orient="records")]
     out["truncated"] = len(df) > TABLE_MAX
     if row_refs is not None:
-        out["rows"] = [R.compress(x) for x in row_refs[:TABLE_MAX]]
+        docs = Documents(ns.get("ROOT"))
+        out["rows"] = [R.compress(docs(x)) for x in row_refs[:TABLE_MAX]]
     elif loop is not None:
         out["rows"], out["frame"] = loop[0], loop[2]
         out["mode"] = "loop"
@@ -962,6 +1153,148 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
         if any(cells):
             out["cells"] = cells
             out["loop"] = loop[2]
+    if (not out.get("cells") and out.get("rows") and out.get("mode") in ("matched", "superset", "key")
+            and out.get("frame") and len(df) <= TABLE_MAX):
+        # a count named by a value (a pivot or an unstack: `read`, `write` beside the slice) rests on the rows of its
+        # row's group that hold the value
+        try:
+            named = _named_cells(df, out, ns, frames)
+        except Exception:  # noqa: BLE001
+            named = None
+        if named:
+            out["cells"], out["cells_by"] = named
+    return out
+
+
+def _named_cells(df: Any, out: dict[str, Any], ns: dict[str, Any], frames: list[Any]):
+    """(cells, the frame column whose values name them) for an output whose rows were found by key in a frame of source
+    rows: each count column named by a value of one of the frame's few-valued columns (`write/run` for kind ==
+    "write/run"), per output row the rows of its group that hold that value, kept where the count equals them. None
+    when no count column is named so."""
+    import numpy as np
+    import pandas as pd
+
+    keys = [k for k in out.get("keys") or [] if k in df.columns]
+    hit = [f for n, f in _named_frames(ns, frames, lambda f: True, lists=True) if n == out["frame"]]
+    if not keys or not hit or not all(k in hit[0].columns for k in keys):
+        return None
+    f = hit[0]
+    # a frame of source rows (`_ref`) names one row each; any other (a used query's `_refs`) a list per row
+    lists = None if ref_columns(f) == (["_ref"], []) else row_ref_lists(f)
+    counts = [c for c in df.columns if c not in keys and not c.startswith("_") and _is_count_col(df[c])]
+    named: dict[str, tuple[str, Any]] = {}
+    for x in f.columns:
+        if not isinstance(x, str) or x.startswith("_") or x in keys:
+            continue
+        col = f[x]
+        if not (pd.api.types.is_object_dtype(col) or pd.api.types.is_string_dtype(col) or isinstance(col.dtype, pd.CategoricalDtype)):
+            continue
+        try:
+            vals = col.dropna().unique()
+        except TypeError:
+            continue
+        if len(vals) > 50:
+            continue
+        for u in vals:
+            for c in counts:
+                if c not in named and (str(u) == c or (R.value_slug(u) and R.value_slug(u) == R.value_slug(c))):
+                    named[c] = (x, u)
+    if not named:
+        return None
+    by = f.groupby(keys if len(keys) > 1 else keys[0], dropna=False, sort=False).indices
+    refs = f["_ref"].to_numpy(dtype=object) if lists is None else None
+    cells: list[dict[str, list[str]]] = []
+    cols = {c: df[c].tolist() for c in set(keys) | set(named)}  # each column as itself: a row of mixed types is all floats
+    for i in range(len(df)):
+        k = tuple(cols[c][i] for c in keys) if len(keys) > 1 else cols[keys[0]][i]
+        pos = by.get(k)
+        cell: dict[str, list[str]] = {}
+        if pos is not None:
+            for c, (x, u) in named.items():
+                v = _count_of(cols[c][i])
+                if v is None:
+                    continue
+                sel = pos[np.asarray(f[x].to_numpy()[pos] == u, dtype=bool)]
+                if len(sel) == v:
+                    got = [str(y) for y in refs[sel]] if lists is None else [r for j in sel for r in lists[j]]
+                    cell[c] = R.compress(list(dict.fromkeys(got)))
+        cells.append(cell)
+    if not any(cells):
+        return None
+    xs = sorted({x for x, _ in named.values()})
+    return cells, ", ".join(xs)
+
+
+class Documents:
+    """Refs with each whole-file ref of a JSON document as its root row (`x.json` as `x.json#/`, S.document_ref), each
+    file looked at once."""
+
+    def __init__(self, root: Any) -> None:
+        self.root = Path(root) if root else None
+        self.seen: dict[str, str] = {}
+
+    def __call__(self, refs: list[str]) -> list[str]:
+        if self.root is None:
+            return refs
+        out = None
+        for i, r in enumerate(refs):
+            if "#" in r or not r.lower().endswith(".json"):
+                continue
+            d = self.seen.get(r)
+            if d is None:
+                d = self.seen[r] = S.document_ref(self.root, r)
+            if d != r:
+                if out is None:
+                    out = list(refs)
+                out[i] = d
+        return refs if out is None else list(dict.fromkeys(out))
+
+
+def _reset_index(df: Any) -> Any:
+    """The frame with its index levels as its first columns. A level whose name a column has already (an unnamed index
+    beside a column `index`) takes a name of its own, `index_`, so the reset never fails."""
+    try:
+        return df.reset_index()
+    except ValueError:
+        taken = {str(c) for c in df.columns}
+        names: list[str] = []
+        for i, n in enumerate(df.index.names):
+            name = str(n) if n is not None else ("index" if df.index.nlevels == 1 else f"level_{i}")
+            while name in taken or name in names:
+                name += "_"
+            names.append(name)
+        return df.reset_index(names=names)
+
+
+def table_only(result: Any) -> dict[str, Any]:
+    """The output as a table with no row lineage: what a query keeps when finding its rows failed, so its output still
+    shows and use() still reads it."""
+    import pandas as pd
+
+    out: dict[str, Any] = {"table": None, "rows": None, "keys": [], "mode": "query", "frame": None}
+    if result is None:
+        return out
+    if isinstance(result, (int, float)) or (hasattr(result, "dtype") and getattr(result, "shape", None) == ()):
+        out["table"] = [{"value": jsonable(result)}]
+        return out
+    if isinstance(result, dict) and all(not isinstance(x, (dict, list)) for x in result.values()):
+        out["table"] = [{"key": str(k), "value": jsonable(x)} for k, x in result.items()]
+        out["keys"] = ["key"]
+        return out
+    try:
+        if isinstance(result, pd.Series):
+            result = result.to_frame(result.name if result.name is not None else "value")
+        if isinstance(result, (list, tuple)) and result and all(isinstance(x, dict) for x in result):
+            result = pd.DataFrame(list(result))
+        if not isinstance(result, pd.DataFrame):
+            return out
+        df = result if isinstance(result.index, pd.RangeIndex) else _reset_index(result)
+        df = df.drop(columns=ref_columns(df)[1])
+        df.columns = [str(c) for c in df.columns]
+        out["table"] = [{k: jsonable(v) for k, v in r.items()} for r in df.head(TABLE_MAX).to_dict(orient="records")]
+        out["truncated"] = len(df) > TABLE_MAX
+    except Exception:  # noqa: BLE001 — an output that is no table keeps none
+        out["table"] = None
     return out
 
 
@@ -1122,6 +1455,88 @@ def _by_values(df: Any, key: str, ns: dict[str, Any], frames: list[Any], budget:
     return best[1], best[2], best[3]
 
 
+def _unique(df: Any, keys: list[str]) -> bool:
+    """Whether the key columns tell every output row from the others."""
+    if not keys:
+        return len(df) <= 1
+    try:
+        return not bool(df.duplicated(subset=keys).any())
+    except (TypeError, KeyError):
+        return False
+
+
+def _number_keys(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]) -> list[str]:
+    """The output's number columns that a frame the query made has too, by name, left to right: a bin, a slice, a
+    step the query grouped by (`tm.groupby("bucket")...reset_index()`), which the output's words do not name."""
+    import pandas as pd
+
+    cands = [c for c in df.columns if isinstance(c, str) and not c.startswith("_") and c not in keys and c != "index"
+             and pd.api.types.is_numeric_dtype(df[c]) and not pd.api.types.is_bool_dtype(df[c])]
+    if not cands:
+        return []
+    names: set[str] = set()
+    for _, f in _named_frames(ns, frames, lambda f: True, lists=True):
+        names.update(c for c in f.columns if isinstance(c, str))
+    return [c for c in cands if c in names]
+
+
+def _by_keys(df: Any, out: dict[str, Any], ns: dict[str, Any], frames: list[Any]):
+    """Row lineage found by the output's key columns (out["keys"], which it narrows to the columns that found them):
+    its words; with number columns the frame has too, when the words alone do not tell the rows apart (a bin per
+    agent); one word column alone; or a key under another name (_by_values). (row sets, mode, frame) or None."""
+    keys = out["keys"]
+    if len(df) > 200000:
+        return None
+    found = None
+    nums = _number_keys(df, keys, ns, frames) if not _unique(df, keys) else []
+    if nums:
+        ext = list(keys)
+        for c in nums:
+            ext.append(c)
+            if _unique(df, ext):
+                break
+        if _unique(df, ext):
+            found = _by_key(df, ext, ns, frames)
+            if found:
+                out["keys"] = ext
+                return found
+    if keys:
+        found = _by_key(df, keys, ns, frames)
+        if not found and len(keys) > 1:
+            # the key columns guessed from the output's words may hold a column the query computed per group (a top
+            # label, the last type): the first of them that tell the output rows apart (the groupby's keys, which a
+            # reset puts first) are tried, then a single key that alone tells them apart
+            for j in range(2, len(keys)):
+                if _unique(df, keys[:j]):
+                    found = _by_key(df, keys[:j], ns, frames)
+                    if found:
+                        out["keys"] = keys[:j]
+                        return found
+            for k in keys:
+                try:
+                    if not df[k].is_unique:
+                        continue
+                except TypeError:
+                    continue
+                found = _by_key(df, [k], ns, frames)
+                if found:
+                    out["keys"] = [k]
+                    break
+        if found:
+            return found
+    if len(df) > 1:
+        # a key under another name: its values are a column (or the index) of a frame the query made
+        for k in [c for c in out["keys"] if c in df.columns][:3]:
+            try:
+                found = _by_values(df, k, ns, frames)
+            except Exception:  # noqa: BLE001
+                found = None
+            if found:
+                out["keys"] = [k]
+                return found
+    return None
+
+
 def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
     """Row lineage found by key: each frame the query made that has source rows and every key column groups its rows
     by the keys; the frame whose groups hold every output row wins, one whose group sizes equal a count column first,
@@ -1161,7 +1576,11 @@ def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
             continue
         agree = [c for c in count_cols if all(int(v) == s for v, s in zip(df[c].tolist(), sizes) if v == v)]
         mode = "matched" if agree else ("superset" if count_cols else "key")
-        score = (2 if agree else 1 if not count_cols else 0, -len(f))
+        # among frames whose groups no count equals, the one whose groups hold at least as many rows as the counts
+        # (the frame they were counted in) before a smaller one whose groups hold fewer
+        cells = [(v, s) for c in count_cols for v, s in zip(df[c].tolist(), sizes) if v == v]
+        holds = sum(1 for v, s in cells if int(v) <= s) / len(cells) if cells and not agree else 0
+        score = (2 if agree else 1 if not count_cols else 0, holds, -len(f))
         if best is None or score > best[0]:
             best = (score, got, mode, name)
     if best is None:
@@ -1175,7 +1594,7 @@ def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
 def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
     """Run code as a notebook cell over the root folder: its printed text, then the value of its last expression."""
     info: dict[str, Any] = {"loads": [], "samples": 0, "opened": set(), "external": set(), "kept": [],
-                            "uses": [], "frames": []}
+                            "uses": [], "frames": [], "opened_log": [], "row_files": set()}
     root = str(st.root) + os.sep
     rec_dir = str(st.dir) + os.sep
     # the kernel's own files (its code, its cache of loaded frames) are no input of the query
@@ -1187,7 +1606,15 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
             if p.startswith(rec_dir) or p.startswith(own):
                 return
             if p.startswith(root):
-                info["opened"].add(os.path.relpath(p, root))
+                rel = os.path.relpath(p, root)
+                info["opened"].add(rel)
+                # the source files the code opened to read, in order: a record a loop appends rests on the ones its
+                # pass opened (_Records)
+                mode = args[1] if len(args) > 1 else None
+                flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
+                reads = (not any(c in mode for c in "wax+")) if isinstance(mode, str) else not (flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT))
+                if reads and S.kind_of(Path(rel)) and (not info["opened_log"] or info["opened_log"][-1] != rel):
+                    info["opened_log"].append(rel)
             elif not p.startswith((sys.prefix, sys.base_prefix, "/usr/", "/proc/", "/dev/", "/etc/", "/sys/", "/tmp/")) and "site-packages" not in p:
                 info["external"].add(p)
 
@@ -1220,11 +1647,17 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
                 print(query_traceback(e, code))
     finally:
         os.chdir(old)
-    lin = output_lineage(last, ns, info["frames"], info.get("records")) if err is None else {"table": None, "rows": None, "keys": [], "mode": "query", "frame": None}
+    lin: dict[str, Any] = {"table": None, "rows": None, "keys": [], "mode": "query", "frame": None}
+    if err is None:
+        try:
+            lin = output_lineage(last, ns, info["frames"], info.get("records"))
+        except Exception as e:  # noqa: BLE001 — the query ran: its output is kept, without rows, and says why
+            lin = table_only(last)
+            lin["lineage_error"] = f"{type(e).__name__}: {e}"[:200]
     if err is None and lin.get("rows") is None:
         # no rows per output row: the rows the query read (loaded or used) stand behind the query as a whole
         try:
-            lin["read"] = rowsets_of(info["frames"])
+            lin["read"] = Documents(st.root)(rowsets_of(info["frames"]))
         except Exception:  # noqa: BLE001 — refs that do not parse: the query still resolves to its files
             lin["read"] = []
     if info["loads"] and all(x.get("via") == "rows" for x in info["loads"]):
@@ -1328,7 +1761,7 @@ def run(st: Store, about: str, code: str, rerun_of: str | None = None) -> dict[s
          "uses": r["uses"], "table": r["table"], "truncated": r.get("truncated", False), "rows": r["rows"],
          "keys": r["keys"], "lineage": r["mode"], "frame": r["frame"],
          "out_hash": hashlib.sha1(r["stdout"].encode()).hexdigest()[:16]}
-    for k in ("why_rows", "read", "via", "cells", "loop"):
+    for k in ("why_rows", "read", "via", "cells", "loop", "cells_by", "lineage_error"):
         if r.get(k):
             q[k] = r[k]
     # a long row lineage is written packed; the record in hand, which `lean q --json` prints, stays whole
@@ -1398,6 +1831,15 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
                 return f"{qid} builds on {', '.join(sums)}, a summary whose values keep no rows of their own"
             if (q.get("lineage") == "loop" and col is not None and i is not None and i < len(rows) and rows[i]
                     and value_rows(q, i, col) is rows[i] and not counted):
+                how = loop_source(q)
+                if how == "kept":
+                    by = next((u.get("query") for u in q.get("uses") or [] if u.get("name") == q.get("frame")), None)
+                    return (f"{qid} grouped rows of `{q.get('frame')}`" + (f" (kept by {by})" if by else "")
+                            + f", which rest on these {_count(rows[i]):,} rows ({_files_text(rows[i])}), and it does not "
+                            "keep which of them the value used")
+                if how == "opened":
+                    return (f"{qid} built this output row in a loop over the files it opened ({_files_text(rows[i])}), "
+                            "and it does not keep which part of them the value used")
                 return (f"{qid} made this output row in a loop from these {_count(rows[i]):,} rows "
                         f"({_files_text(rows[i])}), the frames it loaded and filtered for it, and it does not keep "
                         "which of them the value used")
@@ -1414,15 +1856,25 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
     inputs = q.get("inputs") or []
     uses = [u.get("query") for u in q.get("uses") or [] if u.get("query")]
     bare = [u for u in uses if not ((get(st, u) or {}).get("rows"))]
-    if q.get("table") is None:
+    if q.get("lineage_error"):
+        why = (f"lean could not find the rows behind {qid}'s output ({q['lineage_error']}), so its values keep no rows: "
+               "tally() in the query keeps them per row")
+    elif q.get("table") is None:
         why = f"{qid} only printed its output, so a number in it has no rows of its own"
     elif q.get("external") and not inputs:
         why = f"{qid} read files outside the folder, so its values keep no rows"
     elif q.get("via") == "rows":
         why = f"{qid} built its output in a loop over rows() of {_files_text([x['path'] for x in inputs])}, so its values keep no rows"
     elif inputs and all(x.get("how") == "opened" for x in inputs) and not uses:
-        why = (f"{qid} built its output in code from files it opened ({_files_text([x['path'] for x in inputs])}), "
-               "not with load(), so its values keep no rows")
+        paths = [x["path"] for x in inputs]
+        if all(S.document_ref(st.root, p) != p for p in paths):
+            # a JSON document is one row: the value opens the documents, and a pointer per row would keep its part
+            why = (f"{qid} built its output in code from JSON documents it opened ({_files_text(paths)}), so a value "
+                   f"opens the whole document: a `_ref` column of JSON pointers ({paths[0]}#/<key>/<n>) keeps each "
+                   "row's own part")
+        else:
+            why = (f"{qid} built its output in code from files it opened ({_files_text(paths)}), "
+                   "not with load(), so its values keep no rows")
     elif not inputs and not uses:
         why = f"{qid} computed its output in code from no source rows"
     elif bare and len(bare) == len(uses) and not any(x.get("how") == "load" for x in inputs):
@@ -1435,6 +1887,17 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
     if whole and read:
         why += f"; these are all {_count(read):,} rows it read ({_files_text(read)})"
     return why
+
+
+def loop_source(q: dict[str, Any]) -> str:
+    """What a query of loop lineage found its rows in: "kept", a table a query kept and this one grouped (its frame is
+    the name it used); "opened", the files its loop opened for its records; else "frames", the frames each pass held."""
+    if q.get("frame") and any(u.get("name") == q["frame"] for u in q.get("uses") or []):
+        return "kept"
+    opened = {x["path"] for x in q.get("inputs") or [] if x.get("how") == "opened"}
+    if opened and all(str(x).split("#")[0] in opened for rs in q.get("rows") or [] for x in rs or []):
+        return "opened"
+    return "frames"
 
 
 def value_rows(q: dict[str, Any], i: int, col: str | None = None) -> list[str] | None:

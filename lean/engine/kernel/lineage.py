@@ -153,8 +153,7 @@ def spread_refs(rowsets: list[str], n: int) -> list[str]:
         except R.RefError:
             sizes.append((rs, None, 1))
             continue
-        k = len(p["nums"]) if "nums" in p else len(p.get("keys") or [1])
-        sizes.append((rs, p, k))
+        sizes.append((rs, p, R.size(p)))
     total = sum(k for _, _, k in sizes)
     if total <= 0:
         return []
@@ -168,6 +167,8 @@ def spread_refs(rowsets: list[str], n: int) -> list[str]:
             at = picks[j] - base
             if p is None or p["kind"] in ("file", "table", "block"):
                 out.append(rs)
+            elif p["kind"] == "blocks":
+                out.append(_block_at(p, at))
             else:
                 one = dict(p)
                 if "nums" in p:
@@ -178,6 +179,16 @@ def spread_refs(rowsets: list[str], n: int) -> list[str]:
             j += 1
         base += k
     return list(dict.fromkeys(out))
+
+
+def _block_at(p: dict[str, Any], at: int) -> str:
+    """The ref of the at-th block (0-based) of a block set, in its parts' order."""
+    for a, b, c, d in p["parts"]:
+        k = (b - a + 1) * (d - c + 1)
+        if at < k:
+            return f"{p['path']}#L{a + at // (d - c + 1)}.b{c + at % (d - c + 1)}"
+        at -= k
+    raise R.RefError(f"{R.format_source(p)} has no block {at}")
 
 
 def records(st: Store, rowsets: list[str], n: int = 5, pick: str = "spread", seed: int = 0) -> list[dict[str, Any]]:
@@ -291,8 +302,9 @@ def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | 
     else:
         rowsets = [R.format_source(p)] if p["kind"] not in ("file", "table") else [ref]
         chain.append({"step": "source", "ref": ref, "kind": S.kind_of_file(st.root, p["path"])})
-        if p["kind"] in ("file", "table"):
+        if p["kind"] in ("file", "table") and documents(st, rowsets) == rowsets:
             chain[-1]["why"] = f"{ref} names a whole {'table' if p['kind'] == 'table' else 'file'}, not rows of it"
+    rowsets = documents(st, rowsets)
     if got:
         notes.insert(0, f"{wrote} names more than one value; {got[1]}, so its rows are {ref}'s")
     out: dict[str, Any] = {"ref": ref, "chain": chain, "rows": rowsets, "notes": notes}
@@ -343,7 +355,7 @@ def resolve_many(st: Store, refs: list[str], n: int = 5, pick: str = "spread") -
         for c in r.get("chain") or []:
             if c.get("step") == "query" and c.get("id") not in queries:
                 queries.append(c["id"])
-    rowsets = _merge(rowsets)
+    rowsets = documents(st, _merge(rowsets))
     if bad:
         notes.insert(0, f"{bad} of the {len(refs)} refs name nothing")
     out: dict[str, Any] = {"ref": " ".join(refs[:3]) + (f" … ({len(refs)} refs)" if len(refs) > 3 else ""), "refs": len(refs),
@@ -410,6 +422,11 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
     mode = q.get("lineage")
     n = R.count(rowsets)
     v = step.get("value")
+    cells = q.get("cells") or []
+    if vcol and len(idx) == 1 and idx[0] < len(cells) and isinstance(cells[idx[0]], dict) and cells[idx[0]].get(vcol):
+        # a value that keeps rows of its own (a count named by a value, or one its loop kept): what was found by key
+        # for its row says nothing about them
+        mode = "cell"
     if mode == "superset":
         notes.append(f"these {n:,} rows share the output row's key, but a count column of {q['id']} disagrees: they hold "
                      "more rows than the value counts")
@@ -421,6 +438,17 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
     return rowsets
 
 
+def documents(st: Store, rowsets: list[str]) -> list[str]:
+    """The row sets with each whole JSON document as its root row (`x.json` as `x.json#/`), so a value that rests on
+    a document opens it: a file that is one JSON document is one row. Beside other whole files (a query that loaded
+    jsonl files and opened a manifest), the files stay whole files, as before: a count of rows and whole files
+    together would count each file as one row."""
+    out = [S.document_ref(st.root, x) for x in rowsets]
+    if out == rowsets or any("#" not in x for x in out):
+        return rowsets
+    return list(dict.fromkeys(out))
+
+
 def _frag_text(p: dict[str, Any]) -> str:
     if "row" in p:
         return f"row={p['row']}"
@@ -429,7 +457,7 @@ def _frag_text(p: dict[str, Any]) -> str:
 
 def _merge(rowsets: list[str]) -> list[str]:
     try:
-        return R.compress(R.expand(rowsets)) if len(rowsets) > 1 else rowsets
+        return R.merge(rowsets) if len(rowsets) > 1 else rowsets
     except R.RefError:
         return rowsets
 

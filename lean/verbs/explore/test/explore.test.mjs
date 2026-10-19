@@ -131,6 +131,7 @@ test('rows: refs come from the part\'s meta or its cite; row sets count without 
   assert.equal(countRows('runs.csv#row=1-30'), 30)
   assert.equal(countRows('forge.db#prs/1-12'), 12)
   assert.equal(countRows('a.jsonl#L4.b1'), 1)
+  assert.equal(countRows('a.jsonl#L4.b0-2,5-9.b1'), 8)
   assert.equal(countRows('q3#day=2026-06-18@n'), null)
   const d = runProgram({ program: `k.cite('c', { text: 'x', query: 'q3#day=2026-06-18@n', rows: [{ a: 1 }] })
     return k.stack(k.region('a', { cite: 'c' }, k.text('a')), k.region('b', { ref: 'obj:01-x#/days/2' }, k.text('b')), k.region('c2', 'no rows', k.text('c')))` }, { w: 60 })
