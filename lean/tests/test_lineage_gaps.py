@@ -254,6 +254,12 @@ def test_a_count_named_by_a_value_opens_the_rows_that_hold_it(root: Path) -> Non
     # an unstack of counts per agent names its columns the same way
     u = Q.run(st, "kinds per agent", 'df = load("events.jsonl")\ndf.groupby(["agent", "act"]).size().unstack(fill_value=0)')
     assert u["cells_by"] == "act" and LIN.resolve(st, f"{u['id']}#agent=a2@test")["rows"] == ["events.jsonl#L3,15,27,39"]
+    # the same over a table an earlier query showed (its rows as `_refs`), binned by a number
+    t = Q.run(st, "events", 'load("events.jsonl")[["step", "act", "_ref"]]')
+    b = Q.run(st, "kinds per bin", f'a = use("{t["id"]}")\na["bin"] = a.step // 20 * 0.5\n'
+              'a.groupby(["bin", "act"]).size().unstack(fill_value=0).reset_index()')
+    assert b["keys"] == ["bin"] and b["cells_by"] == "act"
+    assert LIN.resolve(st, f"{b['id']}#bin=0.5@read")["rows"] == ["events.jsonl#L22,25,28,31,34,37,40"]
 
 
 # ------------------------------------------------------------------ row sets of transcript blocks

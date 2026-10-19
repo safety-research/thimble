@@ -1175,10 +1175,12 @@ def _named_cells(df: Any, out: dict[str, Any], ns: dict[str, Any], frames: list[
     import pandas as pd
 
     keys = [k for k in out.get("keys") or [] if k in df.columns]
-    hit = [f for n, f in _named_frames(ns, frames, lambda f: True) if n == out["frame"]]
-    if not keys or not hit or ref_columns(hit[0]) != (["_ref"], []) or not all(k in hit[0].columns for k in keys):
+    hit = [f for n, f in _named_frames(ns, frames, lambda f: True, lists=True) if n == out["frame"]]
+    if not keys or not hit or not all(k in hit[0].columns for k in keys):
         return None
     f = hit[0]
+    # a frame of source rows (`_ref`) names one row each; any other (a used query's `_refs`) a list per row
+    lists = None if ref_columns(f) == (["_ref"], []) else row_ref_lists(f)
     counts = [c for c in df.columns if c not in keys and not c.startswith("_") and _is_count_col(df[c])]
     named: dict[str, tuple[str, Any]] = {}
     for x in f.columns:
@@ -1200,21 +1202,22 @@ def _named_cells(df: Any, out: dict[str, Any], ns: dict[str, Any], frames: list[
     if not named:
         return None
     by = f.groupby(keys if len(keys) > 1 else keys[0], dropna=False, sort=False).indices
-    refs = f["_ref"].to_numpy(dtype=object)
+    refs = f["_ref"].to_numpy(dtype=object) if lists is None else None
     cells: list[dict[str, list[str]]] = []
+    cols = {c: df[c].tolist() for c in set(keys) | set(named)}  # each column as itself: a row of mixed types is all floats
     for i in range(len(df)):
-        r = df.iloc[i]
-        k = tuple(r[c] for c in keys) if len(keys) > 1 else r[keys[0]]
+        k = tuple(cols[c][i] for c in keys) if len(keys) > 1 else cols[keys[0]][i]
         pos = by.get(k)
         cell: dict[str, list[str]] = {}
         if pos is not None:
             for c, (x, u) in named.items():
-                v = _count_of(r[c])
+                v = _count_of(cols[c][i])
                 if v is None:
                     continue
                 sel = pos[np.asarray(f[x].to_numpy()[pos] == u, dtype=bool)]
                 if len(sel) == v:
-                    cell[c] = R.compress([str(y) for y in refs[sel]])
+                    got = [str(y) for y in refs[sel]] if lists is None else [r for j in sel for r in lists[j]]
+                    cell[c] = R.compress(list(dict.fromkeys(got)))
         cells.append(cell)
     if not any(cells):
         return None
