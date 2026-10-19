@@ -16,7 +16,7 @@ const LONG = Array.from({ length: 44 }, (_, i) => `Run ${i + 1} landed [${i + 3}
 type Any = any
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function world(on: any, replies: string[] = []) {
+function world(on: any, replies: string[] = [], hold: Promise<void> | null = null) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble' })
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -51,8 +51,10 @@ function world(on: any, replies: string[] = []) {
   on('ui.render', { component: 'PromptHint' }, (_$: unknown, e: { props: { hint: string } }) => ({ type: 'Text', props: {}, children: [String(e.props.hint)] }) as never)
   // the model: each call answers with the next reply given, and is kept for the test to read
   const calls: Any[] = []
-  on('model.complete', (_$: unknown, e: Any) => {
+  on('model.complete', async (_$: unknown, e: Any) => {
     calls.push(e)
+    // a reply on its way until the test lets it come
+    if (hold) await hold
     const text = replies[calls.length - 1] ?? '<text>(no reply left)</text>'
     return { value: { isAnswered: true, text, usage: { input_tokens: 2000, output_tokens: 120, cache_creation_input_tokens: 0, cache_read_input_tokens: 1500 } } }
   })
@@ -281,6 +283,29 @@ test('a long answer arrives squeezed: one call at Length short, the verb row say
   await clock.settle()
   expect(record(w).shown).toBe(null)
   expect(await hintOf($)).toContain('0 close')
+})
+
+test('a key the thimble line named a moment ago is taken, never typed, when what it named has gone meanwhile: a long answer arriving squeezed closes the tray the person is closing', async ($, on) => {
+  let release = () => {}
+  const held = new Promise<void>(r => { release = r })
+  const SHORT = 'Most runs landed changes: run 1 landed [4 changes](q2#run=1@n).'
+  const w = world(on, [`<text>${SHORT}</text>`], held)
+  const clock = mock.clock(on)
+  await answered($, on, clock, LONG)
+  // the squeeze is on its way; ] opens the tray on the answer's first mark, and the line says 0 closes it
+  await press($, clock, edit(']'))
+  expect(await hintOf($)).toContain('0 close')
+  // the squeezed text arrives: its marks moved, so the tray closes, and the line no longer names 0
+  release()
+  await clock.settle()
+  expect(record(w).shown).toBe(SHORT)
+  expect(await hintOf($)).not.toContain('0 close')
+  // the 0 the person pressed as the line said: it does nothing, and never lands in the prompt
+  expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
+  // a 0 pressed when the line has said otherwise for a while is typed
+  await clock.advance(1500)
+  await hintOf($)
+  expect(await press($, clock, edit('0'))).toEqual({ text: '0', cursor: 1 })
 })
 
 test('a rewrite that cites a ref the original never cited shows it as plain words, and the hint line says so', async ($, on) => {

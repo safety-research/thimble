@@ -1837,6 +1837,46 @@ function keySegments(keys: string): { key: string; words: string; color?: string
 /** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
 type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown }
 
+/** The keys each thimble line named, oldest first, with when it first showed them. A key the line named a moment ago
+ *  is taken, never typed, even when what it named has gone meanwhile (a squeeze that arrived closed the tray the
+ *  person was closing): the person pressed what the line said. */
+const barSeen: { at: number; keys: Set<string> }[] = []
+/** How long a key stays the line's after the line stopped naming it: about the time to see that it changed. */
+const BAR_SEEN_MS = 1000
+
+/** The keys a line names, as keys come to prompt.edit: `1–4` is 1 to 4, `< >` is two keys, ⌫ is backspace. */
+function namedKeys(left: BarSeg[]): Set<string> {
+  const out = new Set<string>()
+  for (const g of left) {
+    for (const k of g.key.split(' ')) {
+      const range = /^(\d)–(\d)$/.exec(k)
+      if (range) for (let d = Number(range[1]); d <= Number(range[2]); d++) out.add(String(d))
+      else if (k === '⌫') out.add('backspace')
+      else if ([...k].length === 1) out.add(k)
+    }
+  }
+  return out
+}
+
+function noteBar(at: number, left: BarSeg[]): void {
+  const keys = namedKeys(left)
+  const last = barSeen[barSeen.length - 1]
+  if (last && last.keys.size === keys.size && [...keys].every(k => last.keys.has(k))) return
+  barSeen.push({ at, keys })
+  if (barSeen.length > 8) barSeen.shift()
+}
+
+/** Whether the line named key `k` a moment ago: one drawn after the key before this one was decided (`since`), on
+ *  screen now or until less than BAR_SEEN_MS ago. */
+function barNamed(k: string, now: number, since: number): boolean {
+  for (let i = barSeen.length - 1; i >= 0; i--) {
+    const until = barSeen[i + 1]?.at ?? now
+    if (until < since || now - until > BAR_SEEN_MS) break
+    if (barSeen[i]!.keys.has(k)) return true
+  }
+  return false
+}
+
 /** The thimble line: its label, what the keys do now at its left, the counts at its right. Null with nothing to say.
  *  It is always one line: with less room it drops the counts (coverage last), then says each key's words by their
  *  first word, then drops its label, then cuts its end (panes/host.js fitBar). Beside a docked pane Claude Code gives
@@ -1881,6 +1921,7 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   }
   const c = ((await $.state.get(COUNTS)).value ?? null) as LineCounts | null
   const now = await $.clock.now()
+  noteBar(now, left)
   const items: [string, number, string][] = c ? [
     ['cards', c.cards, c.cards === 1 ? '1 card' : `${fmtN(c.cards)} cards`],
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`],
@@ -1966,15 +2007,23 @@ async function keyTurn($: Engine, e: KeyEdit): Promise<KeyTurn> {
     } }
   }
   if (d) return d
-  const t = await emptyPromptKey($, key.key, e)
+  const now = await $.clock.now()
+  const since = keyDecided
+  keyDecided = now
+  const t = await emptyPromptKey($, key.key, e, now)
+  // a key the thimble line named a moment ago is the line's, even when what it named has gone meanwhile: it does
+  // nothing then, and never lands in the prompt
+  if (!t.box && barNamed(key.key, now, since)) return { box: { text: e.text, cursor: e.cursor }, work: () => { keyOpened = null; cardKeyed = null } }
   // a key from the empty prompt ends what the key before it began (a word after v, or after a card's key)
   return { ...t, work: async () => { keyOpened = null; cardKeyed = null; await t.work?.() } }
 }
 
+/** When the key before this one was decided (keyTurn): a line drawn before it is not what this key answers. */
+let keyDecided = 0
+
 /** A key pressed while the prompt is empty: the box as it should stand when the shell takes the key (null: it types),
  *  and what the key does. */
-async function emptyPromptKey($: Engine, k: string, e: KeyEdit): Promise<KeyTurn> {
-  const now = await $.clock.now()
+async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Promise<KeyTurn> {
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
   const consume = { text: e.text, cursor: e.cursor }
@@ -2921,6 +2970,8 @@ export function resetShell(): void {
   msgFiles = null
   keyOpened = null
   cardKeyed = null
+  keyDecided = 0
+  barSeen.length = 0
   resetKeys()
   graphLayout = null
 }
