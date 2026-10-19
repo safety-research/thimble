@@ -13,7 +13,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { activeNow, loadIndex, ROOT, textOf } from '../node.mjs'
-import { FEATURES, bodyOf, choose, chosenOf, featureOfSkill, fill, idOf, indexOf, listing, parseSpec, partsChoice, partsText, sectionOf, specOf, subsectionsOf } from '../registry.mjs'
+import { FEATURES, bodyOf, choose, chosenOf, featureOfSkill, fill, fillBlocks, idOf, indexOf, listing, parseSpec, partsChoice, partsText, sectionOf, specOf, subsectionsOf } from '../registry.mjs'
 
 const NODE = fileURLToPath(new URL('../node.mjs', import.meta.url))
 const sha = s => createHash('sha256').update(s).digest('hex').slice(0, 16)
@@ -97,6 +97,27 @@ test('skills, bodies and placeholders', () => {
   assert.equal(fill('a {{X}} b {{Y}} c {{Z}}', { X: 1, Y: () => 'two' }), 'a 1 b two c {{Z}}')
   // $& and $1 in a value are kept as written
   assert.equal(fill('{{X}}', { X: '$& $1' }), '$& $1')
+})
+
+test("a template as prompt blocks: the words before its first placeholder are a block marked for the cache, and the blocks join to fill's text", () => {
+  const vals = { A: 'the answer', Q: () => 'the question' }
+  const t = 'Rules that stay the same.\n\nQuestion:\n{{Q}}\n\nAnswer:\n{{A}}\n\nReply with JSON.'
+  const b = fillBlocks(t, vals)
+  assert.deepEqual(b, [{ text: 'Rules that stay the same.\n\nQuestion:\n', cache: true }, { text: 'the question\n\nAnswer:\nthe answer\n\nReply with JSON.' }])
+  assert.equal(b.map(x => x.text).join(''), fill(t, vals))
+  // a text that opens with a placeholder, or has none, is one block with no mark
+  assert.deepEqual(fillBlocks('{{Q}} then rules', vals), [{ text: 'the question then rules' }])
+  assert.deepEqual(fillBlocks('no placeholder', vals), [{ text: 'no placeholder' }])
+  // no empty block: the API refuses one
+  assert.deepEqual(fillBlocks('Rules.\n{{E}}', { E: '' }), [{ text: 'Rules.\n' }])
+  // the question step's own text: same words, its instructions first and marked
+  const q = readFileSync(join(ROOT, 'prompts', 'question', 'v1.md'), 'utf8')
+  const qv = { EARLIER: '- earlier', QUESTION: 'why?', ANSWER: 'because' }
+  const qb = fillBlocks(q, qv)
+  assert.equal(qb.length, 2)
+  assert.equal(qb[0].cache, true)
+  assert.ok(!qb[0].text.includes('why?') && qb[0].text.length > 1500, 'the fixed instructions, long enough to cache (512 tokens on current models)')
+  assert.equal(qb.map(x => x.text).join(''), fill(q, qv))
 })
 
 test('a version made of parts reads each section where it stands, and can leave a part out', () => {

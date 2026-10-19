@@ -53,7 +53,7 @@ import { answerRow, applyObserver, cardSettled, claimsStore, drawnTextOf, leanEn
 import { glossesOf } from '../shell/message.js'
 import { applyTurn, basedOnFrom, grownClusters, grownLines, noteFor, noteGap, promptLines } from '../verbs/claims/claims.js'
 import { promptText, promptTextAt, shadowVersions } from '../prompts/prompts'
-import { FEATURES, fill } from '../prompts/registry.mjs'
+import { FEATURES, fillBlocks } from '../prompts/registry.mjs'
 import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf } from './compose.mjs'
 import { digest, isRepeat, jsonIn, parseAnswer } from './evidence.js'
@@ -249,7 +249,8 @@ async function answerOf($: Engine, fallback: string): Promise<string> {
 
 async function questionStep($: Engine, question: string, answer: string, turn: number, earlier: string[]): Promise<Record<string, unknown>> {
   const q = await promptText($, 'question')
-  const prompt = fill(q.text, {
+  // the step's instructions come before the turn's words, so the next turn's step reads them from the prompt cache
+  const prompt = fillBlocks(q.text, {
     EARLIER: () => bullets(earlier.slice(-6).map(x => cut(x, 600))),
     QUESTION: () => cut(question, 4000) || '(none)',
     ANSWER: () => cut(answer, 16000),

@@ -71,6 +71,8 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
   })
   const forks: string[] = []
   const questions: string[] = []
+  // the question step's prompt as blocks, where its cache marks are
+  const qblocks: { text: string; cache?: true }[][] = []
   // the question step is a completion with no system prompt; the pass is one with the frame and its lenses as the
   // system prompt (observer:v2), or a fork of the session (observer:v1)
   const pass = (prompt: string) => {
@@ -79,9 +81,10 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
     return { value: { isAnswered: true, text: JSON.stringify(out), usage: USAGE } }
   }
   const efforts: (string | null)[] = []
-  on('model.complete', (_$: unknown, e: { prompt: string; system?: string; effort?: string }) => {
+  on('model.complete', (_$: unknown, e: { prompt: string; system?: string; effort?: string; promptBlocks?: { text: string; cache?: true }[] }) => {
     if (e.system) { efforts.push(e.effort ?? null); return pass(`${e.system}\n${e.prompt}`) }
     questions.push(String(e.prompt))
+    qblocks.push([...(e.promptBlocks ?? [])])
     return { value: { isAnswered: true, text: JSON.stringify(o.question ?? { parts: [], drift: null, decision: null }), usage: USAGE } }
   })
   on('model.fork', (_$: unknown, e: { prompt: string }) => pass(String(e.prompt)))
@@ -113,7 +116,7 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
   })
   const toasts: string[] = []
   on('ui.toast', (_$: unknown, e: unknown) => { toasts.push(typeof e === 'string' ? e : String((e as { text?: string; message?: string })?.text ?? (e as { message?: string })?.message ?? JSON.stringify(e))); return { value: undefined } })
-  return { files, runs, forks, questions, submitted, filled, at, clock, events, toasts, efforts }
+  return { files, runs, forks, questions, qblocks, submitted, filled, at, clock, events, toasts, efforts }
 }
 
 // every string a drawn tree holds, in order
@@ -443,6 +446,10 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   const q = w.events.find(e => e.kind === 'call' && e.feature === 'question')!
   expect(q.prompt).toBe('question:v1')
   expect(q.blocked).toBe(false)
+  // the question step's instructions, which come before the turn's words, are a block marked for the prompt cache; the
+  // words it reads are the template filled, in order
+  expect(w.qblocks[0]).toEqual([{ text: 'QUESTION ', cache: true }, { text: 'when did they edit most? June 18 had the most saves.' }])
+  expect(w.questions[0]).toBe('QUESTION when did they edit most? June 18 had the most saves.')
   const pass = w.events.find(e => e.kind === 'call' && e.feature === 'observer')!
   expect(pass.prompt).toBe('observer:v2-low')
   // the default pass runs at low effort: the same frame, less thinking (measured offline on 17 recorded looks: -28%)

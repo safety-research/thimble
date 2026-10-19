@@ -272,6 +272,21 @@ export function fill(text, vals) {
   return String(text).replace(/\{\{([A-Z_]+)\}\}/g, (all, k) => (k in vals ? String(typeof vals[k] === 'function' ? vals[k]() : vals[k] ?? '') : all))
 }
 
+/**
+ * `fill` as the blocks of a $.model.complete prompt: the words before the first placeholder, which are the same on
+ * every call, in a block of their own marked for the prompt cache, then the rest filled. The next call within five
+ * minutes reads that first block from the cache. Joined, the blocks are `fill(text, vals)` to the character: the model
+ * reads the same words in the same order. A text that opens with a placeholder is one block, with no mark.
+ * @returns {{text: string, cache?: true}[]}
+ */
+export function fillBlocks(text, vals) {
+  const s = String(text)
+  const at = s.search(/\{\{[A-Z_]+\}\}/)
+  if (at <= 0) return [{ text: fill(s, vals) }]
+  const rest = fill(s.slice(at), vals)
+  return rest ? [{ text: s.slice(0, at), cache: true }, { text: rest }] : [{ text: s.slice(0, at) }]
+}
+
 /** The registry in lines, for `lean prompts` and /observe: each feature, its versions, the active one marked. */
 export function listing(idx, active) {
   const lines = []
