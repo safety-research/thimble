@@ -275,6 +275,12 @@ def test_a_count_named_by_a_value_opens_the_rows_that_hold_it(root: Path) -> Non
     # an unstack of counts per agent names its columns the same way
     u = Q.run(st, "kinds per agent", 'df = load("events.jsonl")\ndf.groupby(["agent", "act"]).size().unstack(fill_value=0)')
     assert u["cells_by"] == "act" and LIN.resolve(st, f"{u['id']}#agent=a2@test")["rows"] == ["events.jsonl#L3,15,27,39"]
+    # a crosstab beside a smaller frame that has the key too: its rows are found in the frame the counts were counted
+    # in, whose groups hold them, not in the smaller one
+    x = Q.run(st, "agents per kind", 'df = load("events.jsonl")\nfirst = df[df.step < 3]\n'
+              'pd.crosstab(df.act, df.agent).reset_index()')
+    assert x["frame"] == "df" and x["cells_by"] == "agent"
+    assert LIN.resolve(st, f"{x['id']}#act=edit@a1")["rows"] == ["events.jsonl#L2,14,26,38"]
     # the same over a table an earlier query showed (its rows as `_refs`), binned by a number
     t = Q.run(st, "events", 'load("events.jsonl")[["step", "act", "_ref"]]')
     b = Q.run(st, "kinds per bin", f'a = use("{t["id"]}")\na["bin"] = a.step // 20 * 0.5\n'

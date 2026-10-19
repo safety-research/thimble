@@ -1576,7 +1576,11 @@ def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
             continue
         agree = [c for c in count_cols if all(int(v) == s for v, s in zip(df[c].tolist(), sizes) if v == v)]
         mode = "matched" if agree else ("superset" if count_cols else "key")
-        score = (2 if agree else 1 if not count_cols else 0, -len(f))
+        # among frames whose groups no count equals, the one whose groups hold at least as many rows as the counts
+        # (the frame they were counted in) before a smaller one whose groups hold fewer
+        cells = [(v, s) for c in count_cols for v, s in zip(df[c].tolist(), sizes) if v == v]
+        holds = sum(1 for v, s in cells if int(v) <= s) / len(cells) if cells and not agree else 0
+        score = (2 if agree else 1 if not count_cols else 0, holds, -len(f))
         if best is None or score > best[0]:
             best = (score, got, mode, name)
     if best is None:
