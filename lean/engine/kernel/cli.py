@@ -279,6 +279,9 @@ def _lineage_line(q: dict[str, Any]) -> str:
         "summary": "A summary of the rows it read: each value rests on all of them, except a count that equals one frame's rows (tally() keeps the rows per value).",
         "query": "No rows per output row: each value rests on all the rows read (tally() keeps them per row).",
     }.get(mode or "query", "")
+    if q.get("lineage_error"):
+        say = (f"No rows per output row: lean could not find them ({q['lineage_error']}), so each value rests on all the "
+               "rows read (tally() keeps them per row).")
     if q.get("cells") and mode != "loop":
         say += f" A count its loop kept rows for (in `{q.get('loop')}`) opens those rows."
     return say + (f" Cite a value as {ex}." if ex else "")

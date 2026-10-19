@@ -894,9 +894,12 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
         # an unnamed whole-number index is where the rows sat before a sort or a filter, not what they stand for: it
         # stays a column, and the keys are the output's words, as for a plain table
         positional = list(df.index.names) == [None] and pd.api.types.is_integer_dtype(df.index)
-        keys = [] if positional else [str(n) if n is not None else "index" for n in df.index.names]
-        df = df.reset_index()
+        levels = df.index.nlevels
+        df = _reset_index(df)
         df.columns = [str(c) for c in df.columns]
+        # the index levels are the first columns now, under the names reset_index gave them (`index`, `level_0` for
+        # unnamed levels, a new name when a column already had the level's name)
+        keys = [] if positional else list(df.columns[:levels])
     df = df.copy()
     df.columns = [str(c) if not isinstance(c, tuple) else "_".join(str(x) for x in c if x != "") for c in df.columns]
     row_refs: list[list[str]] | None = None
@@ -962,6 +965,54 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
         if any(cells):
             out["cells"] = cells
             out["loop"] = loop[2]
+    return out
+
+
+def _reset_index(df: Any) -> Any:
+    """The frame with its index levels as its first columns. A level whose name a column has already (an unnamed index
+    beside a column `index`) takes a name of its own, `index_`, so the reset never fails."""
+    try:
+        return df.reset_index()
+    except ValueError:
+        taken = {str(c) for c in df.columns}
+        names: list[str] = []
+        for i, n in enumerate(df.index.names):
+            name = str(n) if n is not None else ("index" if df.index.nlevels == 1 else f"level_{i}")
+            while name in taken or name in names:
+                name += "_"
+            names.append(name)
+        return df.reset_index(names=names)
+
+
+def table_only(result: Any) -> dict[str, Any]:
+    """The output as a table with no row lineage: what a query keeps when finding its rows failed, so its output still
+    shows and use() still reads it."""
+    import pandas as pd
+
+    out: dict[str, Any] = {"table": None, "rows": None, "keys": [], "mode": "query", "frame": None}
+    if result is None:
+        return out
+    if isinstance(result, (int, float)) or (hasattr(result, "dtype") and getattr(result, "shape", None) == ()):
+        out["table"] = [{"value": jsonable(result)}]
+        return out
+    if isinstance(result, dict) and all(not isinstance(x, (dict, list)) for x in result.values()):
+        out["table"] = [{"key": str(k), "value": jsonable(x)} for k, x in result.items()]
+        out["keys"] = ["key"]
+        return out
+    try:
+        if isinstance(result, pd.Series):
+            result = result.to_frame(result.name if result.name is not None else "value")
+        if isinstance(result, (list, tuple)) and result and all(isinstance(x, dict) for x in result):
+            result = pd.DataFrame(list(result))
+        if not isinstance(result, pd.DataFrame):
+            return out
+        df = result if isinstance(result.index, pd.RangeIndex) else _reset_index(result)
+        df = df.drop(columns=ref_columns(df)[1])
+        df.columns = [str(c) for c in df.columns]
+        out["table"] = [{k: jsonable(v) for k, v in r.items()} for r in df.head(TABLE_MAX).to_dict(orient="records")]
+        out["truncated"] = len(df) > TABLE_MAX
+    except Exception:  # noqa: BLE001 — an output that is no table keeps none
+        out["table"] = None
     return out
 
 
@@ -1220,7 +1271,13 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
                 print(query_traceback(e, code))
     finally:
         os.chdir(old)
-    lin = output_lineage(last, ns, info["frames"], info.get("records")) if err is None else {"table": None, "rows": None, "keys": [], "mode": "query", "frame": None}
+    lin: dict[str, Any] = {"table": None, "rows": None, "keys": [], "mode": "query", "frame": None}
+    if err is None:
+        try:
+            lin = output_lineage(last, ns, info["frames"], info.get("records"))
+        except Exception as e:  # noqa: BLE001 — the query ran: its output is kept, without rows, and says why
+            lin = table_only(last)
+            lin["lineage_error"] = f"{type(e).__name__}: {e}"[:200]
     if err is None and lin.get("rows") is None:
         # no rows per output row: the rows the query read (loaded or used) stand behind the query as a whole
         try:
@@ -1328,7 +1385,7 @@ def run(st: Store, about: str, code: str, rerun_of: str | None = None) -> dict[s
          "uses": r["uses"], "table": r["table"], "truncated": r.get("truncated", False), "rows": r["rows"],
          "keys": r["keys"], "lineage": r["mode"], "frame": r["frame"],
          "out_hash": hashlib.sha1(r["stdout"].encode()).hexdigest()[:16]}
-    for k in ("why_rows", "read", "via", "cells", "loop"):
+    for k in ("why_rows", "read", "via", "cells", "loop", "lineage_error"):
         if r.get(k):
             q[k] = r[k]
     # a long row lineage is written packed; the record in hand, which `lean q --json` prints, stays whole
@@ -1414,7 +1471,10 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
     inputs = q.get("inputs") or []
     uses = [u.get("query") for u in q.get("uses") or [] if u.get("query")]
     bare = [u for u in uses if not ((get(st, u) or {}).get("rows"))]
-    if q.get("table") is None:
+    if q.get("lineage_error"):
+        why = (f"lean could not find the rows behind {qid}'s output ({q['lineage_error']}), so its values keep no rows: "
+               "tally() in the query keeps them per row")
+    elif q.get("table") is None:
         why = f"{qid} only printed its output, so a number in it has no rows of its own"
     elif q.get("external") and not inputs:
         why = f"{qid} read files outside the folder, so its values keep no rows"
