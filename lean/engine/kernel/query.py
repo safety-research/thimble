@@ -392,7 +392,13 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
 
 APPEND = "__lean_append__"
 LOOP_REFS_MAX = 20_000_000  # source rows the loop's records may hold in all; past it they keep none
+RECORDS_MAX = 200_000  # records of one list noted (a table grouped from them finds its rows through them)
 GROUPS_MAX_ROWS = 200_000  # a frame up to this size has its few-valued columns grouped, for counts named by a value
+
+
+# types of values that are never a frame or a Series, which a record's scan of the names in scope passes at once
+_PLAIN = frozenset({str, int, float, bool, bytes, type(None), dict, list, tuple, set, type, type(sys), type(len),
+                    type(lambda: 0), type(print), type("".join)})
 
 
 class _AppendCalls(ast.NodeTransformer):
@@ -431,8 +437,8 @@ class _Records:
 
     def append(self, obj: Any, x: Any) -> Any:
         r = obj.append(x)
-        # a list longer than an output table keeps (TABLE_MAX) is not noted further: its table keeps no rows per row
-        if type(obj) is list and not self.full and len(obj) <= TABLE_MAX:
+        # a list longer than RECORDS_MAX is not noted further: a table of it keeps no rows per row
+        if type(obj) is list and not self.full and len(obj) <= RECORDS_MAX:
             try:
                 self._note(obj, x, sys._getframe(1))
             except Exception:  # noqa: BLE001 — a record the kernel cannot note keeps no rows of its own
@@ -497,6 +503,9 @@ class _Records:
         flags: list[Any] = []
         for scope in scopes:
             for v in list(scope.values()):
+                # most names hold no frame (modules, functions, words, numbers): one look at the type passes them
+                if type(v) in _PLAIN:
+                    continue
                 if isinstance(v, pd.DataFrame):
                     s = self._serial(v)
                     if s:
@@ -507,7 +516,11 @@ class _Records:
         if self.full:
             return
         k = len(obj) - 1
-        reg["at"][k] = held
+        # records that hold the same frames share one set: a long list keeps one per run of them, not one per record
+        same = reg.get("held")
+        if same is None or same != held:
+            reg["held"] = same = frozenset(held)
+        reg["at"][k] = same
         if reg.get("now"):
             reg["files"][k] = reg["now"]
         # a yes/no per row of a frame held here (`ok` beside `m`): the rows it marks and the rows it leaves are what a
@@ -564,7 +577,7 @@ class _Records:
             return out
         deadline = time.time() + 5.0
         for name, f in list((only if only is not None else ns).items()):
-            if (name.startswith("_") or not isinstance(f, pd.DataFrame) or not len(f) or len(f) > TABLE_MAX
+            if (name.startswith("_") or not isinstance(f, pd.DataFrame) or not len(f) or len(f) > RECORDS_MAX
                     or any(ref_columns(f))):
                 continue
             if time.time() > deadline:
@@ -704,7 +717,7 @@ def _keep_rows(st: Store, name: str, obj: Any, info: dict[str, Any], ns: dict[st
     rows = None
     if isinstance(obj, pd.DataFrame) and len(obj) and not any(ref_columns(obj)) and len(obj) <= 200000:
         rec = info.get("records")
-        if rec is not None and len(obj) <= TABLE_MAX:
+        if rec is not None and len(obj) <= RECORDS_MAX:
             got = rec.frames_with_rows(ns, {"kept": obj})
             if got:
                 rows = [list(x) for x in got["kept"][0]["_refs"].tolist()]
@@ -808,6 +821,9 @@ def _record_places(obj: list, at: dict[int, set[int]], result: Any, df: Any, ind
     if result is obj:
         return list(range(len(df))) if len(df) == len(obj) and all(k in at for k in range(len(df))) else None
 
+    # each column's values in row order, read once: a row of a long frame is not built as a Series of its own
+    vals = {c: df[c].tolist() for c in cols}
+
     def same(i: int, k: int) -> bool:
         if not (0 <= k < len(obj)) or k not in at:
             return False
@@ -817,12 +833,15 @@ def _record_places(obj: list, at: dict[int, set[int]], result: Any, df: Any, ind
         shared = [c for c in cols if c in rec]
         if not shared:
             return False
-        row = df.iloc[i]
-        return all(_norm(row[c]) == _norm(rec[c]) for c in shared)
+        return all(_norm(vals[c][i]) == _norm(rec[c]) for c in shared)
 
-    # by place: the output's index is where each record sat in the list (a sort or a filter keeps it)
+    # by place: the output's index is where each record sat in the list (a sort or a filter keeps it); in a frame
+    # longer than an output table, every row's place is a noted record and a spread of TABLE_MAX rows holds its values
     if len(index) == len(df) and all(isinstance(k, int) and not isinstance(k, bool) for k in index):
-        if all(same(i, int(k)) for i, k in enumerate(index)):
+        step = max(1, -(-len(df) // TABLE_MAX))
+        probe = sorted({*range(0, len(df), step), len(df) - 1})
+        if (all(0 <= int(k) < len(obj) and int(k) in at for k in index)
+                and all(same(i, int(index[i])) for i in probe)):
             return [int(k) for k in index]
     # by values: each output row's values pick one record (records of the same fields are looked up together)
     try:
@@ -836,10 +855,9 @@ def _record_places(obj: list, at: dict[int, set[int]], result: Any, df: Any, ind
                 groups[shared][tuple(_norm(rec[c]) for c in shared)].append(k)
         out = []
         for i in range(len(df)):
-            row = df.iloc[i]
             hit = None
             for shared, by in groups.items():
-                ks = by.get(tuple(_norm(row[c]) for c in shared))
+                ks = by.get(tuple(_norm(vals[c][i]) for c in shared))
                 if ks and len(ks) == 1:
                     hit = ks[0]
                     break

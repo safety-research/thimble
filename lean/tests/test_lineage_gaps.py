@@ -251,6 +251,27 @@ def test_a_table_built_from_records_finds_its_rows_through_them(docs_root: Path)
     assert v["stdout"].strip() == "'run,agent,cmd'"
 
 
+def test_a_table_of_more_records_than_an_output_table_keeps_finds_its_rows_through_them(root: Path) -> None:
+    # made-up chat logs long enough that the loop appends more records than an output table keeps (TABLE_MAX)
+    per = Q.TABLE_MAX // 2 + 1
+    for rel, agent in (("ep1/u1.json", "u1"), ("ep1/u2.json", "u2"), ("ep2/u1.json", "u1")):
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        msgs = {f"m{i}": {"role": "assistant", "content": [{"type": "tool_use", "input": {"command": f"c{i % 7}"}}]} for i in range(per)}
+        p.write_text(json.dumps({"agent": agent, "messages": msgs}))
+    st = Store(root)
+    code = ('import glob\nrows = []\nfor f in sorted(glob.glob("ep*/u*.json")):\n    d = json.load(open(f))\n'
+            '    for m in d["messages"].values():\n        rows.append(dict(run=f.split("/")[0], agent=d["agent"], cmd=m["content"][0]["input"]["command"]))\n'
+            'o = pd.DataFrame(rows).sort_values("cmd")\nkeep("calls", o)\no.groupby(["run", "agent"]).size()')
+    q = Q.run(st, "calls per run", code)
+    assert len(q["rows"]) == 3 and 3 * per > Q.TABLE_MAX
+    assert q["lineage"] == "loop" and q["rows"] == [["ep1/u1.json#/"], ["ep1/u2.json#/"], ["ep2/u1.json#/"]]
+    # the kept table keeps them too: a later query that groups it finds the same rows
+    u = Q.run(st, "on it", 'use("calls").groupby("agent").size().reset_index(name="n")')
+    assert u["lineage"] == "loop" and u["frame"] == "calls"
+    assert set(LIN.resolve(st, f"{u['id']}#agent=u1@n")["rows"]) == {"ep1/u1.json#/", "ep2/u1.json#/"}
+
+
 def test_a_table_cut_from_a_loaded_frame_keeps_its_rows_for_a_later_query(root: Path) -> None:
     st = Store(root)
     k = Q.run(st, "cut", 'df = load("events.jsonl")\nt = df[df.act == "edit"][["agent", "act"]]\nkeep("edits", t)\nlen(t)')
