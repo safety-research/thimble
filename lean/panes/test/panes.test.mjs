@@ -157,6 +157,15 @@ test('detail: what the card does is the host\'s (k.do): a version, the thread, c
   const open = act(PANES.detail, data, { bar: 'details' }, keyEvent('esc'), 'terminal')
   assert.equal(open.d.effects, undefined)
   assert.equal(open.state.bar, null)
+  // one esc closes what was opened last: the examples (with the details over them) in one press, then the detail
+  const ex = act(PANES.detail, data, { bar: 'examples', ex: 2 }, keyEvent('esc'), 'terminal')
+  assert.equal(ex.d.effects, undefined)
+  assert.equal(ex.state.bar, null)
+  assert.deepEqual(act(PANES.detail, data, ex.state, keyEvent('esc'), 'terminal').d.effects, [{ do: 'close' }])
+  // the program over the card closes first, the bar under it after
+  const both = act(PANES.detail, data, { bar: 'examples', prog: true }, keyEvent('esc'), 'terminal')
+  assert.equal(both.state.prog, false)
+  assert.equal(both.state.bar, 'examples')
   const d = run(PANES.detail, data, { state: { region: 'day-2026-06-17', bar: 'details' } })
   assert.ok(d.wants.some(w => w.request.facts === '01-saves'))
 })

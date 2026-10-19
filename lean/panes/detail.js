@@ -141,9 +141,10 @@ export function program(k, data) {
     k.on('m', () => { k.do('main') }, 'send to main')
   }
   if (data.browser && k.surface === 'terminal') k.on('o', () => { k.do('browser', { region }) }, 'browser')
+  // esc closes what was opened last (the program over the card, else the bar with all it shows), then the detail
   k.on('esc', () => {
     if (prog) return { prog: false }
-    if (bar) return { bar: barAfter(bar, 'back') }
+    if (bar) return { bar: null }
     k.do('close')
     return null
   }, 'back')
