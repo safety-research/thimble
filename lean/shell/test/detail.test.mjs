@@ -5,7 +5,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { asTable, barAfter, beganWord, cycleKnob, examplesView, exampleSet, fmtWords, fromLine, keyOf, linkRuns, namedKnob, partOfLink, partsOf, programLines, recordWords, stepPart, stepVersion, versionsOf } from '../carddetail.js'
+import { askMerge, asTable, barAfter, beganWord, cycleKnob, examplesView, exampleSet, fmtWords, fromLine, keyOf, linkRuns, namedKnob, partOfLink, partsOf, programLines, recordWords, stepPart, stepVersion, versionsOf } from '../carddetail.js'
 import { aboutOf, answerOf, firstMessage, nextMessage, ownReport, samePart, threadKey, toMain, turnsOf } from '../threads.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
 import { renderTerm } from '../../draw/term.js'
@@ -98,6 +98,16 @@ test('keys act only while the composer is empty, so a question that starts with 
   assert.equal(beganWord('p', 900, 'l'), false)
   assert.equal(beganWord(']', 100, 'l'), false)
   assert.equal(beganWord('p', 100, '['), false)
+})
+
+test('the ask line: the field drawn last holds the question; a letter an older field took joins its end, once', () => {
+  assert.deepEqual(askMerge('wh', 'wh', 'whi', true), { draft: 'whi', seen: 'whi', added: '' })
+  // the older field held "w" when drawn; the question went on to "wh" at the prompt; the older field took an "i"
+  assert.deepEqual(askMerge('wh', 'w', 'wi', false), { draft: 'whi', seen: 'wi', added: 'i' })
+  // the same report again adds nothing
+  assert.deepEqual(askMerge('whi', 'wi', 'wi', false), { draft: 'whi', seen: 'wi', added: '' })
+  // a report that is not the field's text grown (a field emptied) changes nothing
+  assert.deepEqual(askMerge('whi', 'wi', 'x', false), { draft: 'whi', seen: 'wi', added: '' })
 })
 
 test('examples show the meaningful words of a record, never a dump of field: value', () => {

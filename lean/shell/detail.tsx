@@ -27,7 +27,7 @@ import type { Sel } from '../types'
 import { renderTerm } from '../draw/term.js'
 import { barText } from '../panes/host.js'
 import { paintRegions } from './cells'
-import { beganWord, examplesView, linkRuns, partsOf, versionsOf } from './carddetail.js'
+import { askMerge, beganWord, examplesView, linkRuns, partsOf, versionsOf } from './carddetail.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
 import { browserOn, citeLabels, currentTheme, keysMoved, loadObject, openBrowser, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
@@ -136,11 +136,12 @@ async function closed($: Engine): Promise<void> {
   if (viewing) { viewing = null; await $.ui.view({}).catch(() => undefined) }
 }
 
-/** The keys back to the card: the pane takes the keyboard (granted only over an empty composer), the ring on the part. */
+/** The keys back to the card: the pane takes the keyboard (granted only over an empty composer), the ring on the part.
+ *  A question begun since it was asked keeps the keys: the person is typing in the ask line. */
 function regrab($: Engine): void {
   $.clock.after(0, () => {
     void (async () => {
-      if (!isOpen) return
+      if (!isOpen || isAsk(ringAt)) return
       await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch(() => undefined)
       // taking the keyboard again starts the ring afresh: put it on the selected part, wherever it was
       ringAt = null
@@ -152,9 +153,11 @@ function regrab($: Engine): void {
 /** The ring onto the selected part: the gutter cell of the part's first row (its ▸), when that row is drawn. */
 async function focusPart($: Engine): Promise<void> {
   const key = selectedGutter()
-  if (!key || ringAt === key) return
+  // never while the person types in the ask line: a drawing asked for before the first letter would take it back
+  if (!key || ringAt === key || isAsk(ringAt)) return
   const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'failed' }))
-  if (!(r as Any)?.deny) { ringAt = key; ringY = Number(key.split('|')[2]) }
+  // a question begun while the ring moved keeps the ask line's claim: its own focus follows
+  if (!(r as Any)?.deny && !isAsk(ringAt)) { ringAt = key; ringY = Number(key.split('|')[2]) }
 }
 
 /** The gutter key of the selected part's first row in the last drawing, or null when it is not drawn. */
@@ -164,20 +167,35 @@ function selectedGutter(): string | null {
   return null
 }
 
-/** The ask line takes the keys, holding what the person has typed so far. */
+/** The ask line takes the keys, holding what the person has typed so far. The ring belongs to the ask line from this
+ *  moment, before the focus lands: a drawing in between must not put it back on the card, or the next letters go to
+ *  the prompt and the field is drawn again without them. Letters that come faster than the focus join the question,
+ *  and the last of them moves the ring onto the field drawn last. */
 function toAsk($: Engine, text: string): void {
   draft = text
   askGen++
+  ringAt = askKey()
   $.ui.invalidate('ui.render')
+  const gen = askGen
   $.clock.after(0, () => {
     void (async () => {
-      if (!isOpen) return
+      if (!isOpen || gen !== askGen) return
       await $.ui.open({ id: PANE, focus: true, closeOnEscape: true, columns: detailColumns(viewCols) }).catch(() => undefined)
-      const key = askKey()
-      const r = await $.ui.focus({ requestId: PANE, key }).catch(() => ({ deny: 'failed' }))
-      if (!(r as Any)?.deny) ringAt = key
+      // a letter that came meanwhile drew another field: its own call moves the ring there
+      if (gen !== askGen || !isAsk(ringAt)) return
+      await $.ui.focus({ requestId: PANE, key: askKey() }).catch(() => undefined)
     })()
   })
+}
+
+/** What a field of the ask line reports as typed: the field drawn last holds the whole question. One drawn before it
+ *  (it still had the ring while the newer one was on its way) reports the letters it took, which join the question. */
+function askTyped($: Engine, key: string, base: { seen: string }, v: string): void {
+  const current = key === askKey()
+  const m = askMerge(draft, base.seen, v, current)
+  base.seen = m.seen
+  if (current) draft = m.draft
+  else if (m.added) toAsk($, m.draft)
 }
 
 // ------------------------------------------------------------------------------------------------ the card and its program
@@ -428,8 +446,9 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
     if (!ids) return Text({ key: `gt${y}`, color: ind, bold: true, children: mark })
     const at = ids.includes(region ?? '') ? region! : ids[0]!
     const label = String(parts.find((x: Any) => x.id === at)?.label || at)
-    // the selected part's cell takes the ring whenever the pane takes the keyboard (an open, a key that gave it back)
-    return Button({ key: GUTTER(y), plain: true, label, onPress: () => onPress(at), children: mark, ...(ids.includes(region ?? '') ? { autoFocus: true } : {}) })
+    // the selected part's cell takes the ring whenever the pane takes the keyboard (an open, a key that gave it back),
+    // except while a question is being typed: then the ask line takes it
+    return Button({ key: GUTTER(y), plain: true, label, onPress: () => onPress(at), children: mark, ...(ids.includes(region ?? '') && !isAsk(ringAt) ? { autoFocus: true } : {}) })
   })
   const kids: Any[] = [Box({ flexDirection: 'row', children: [
     Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: gcells }),
@@ -460,9 +479,13 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
 function askLine($: Engine, els: Any, sel: Detail, part: Any, ind: string): Any {
   const { Input } = els
   const about = sel.ask ? String(sel.ask.label) : part ? String(part.label || part.id) : ''
+  const key = askKey()
+  const base = { seen: draft }
   return Input({
-    key: askKey(), placeholder: about ? `ask about ${cut(about, 40)}…` : 'ask this card…', value: draft, submitLabel: 'ask',
-    onInput: (v: string) => { draft = v },
+    key, placeholder: about ? `ask about ${cut(about, 40)}…` : 'ask this card…', value: draft, submitLabel: 'ask',
+    // while a question is being typed, the field takes the ring when the pane takes the keyboard
+    ...(isAsk(ringAt) ? { autoFocus: true } : {}),
+    onInput: (v: string) => askTyped($, key, base, v),
     onSubmit: (v: string) => { void askHere($, v) },
   })
 }
@@ -473,7 +496,9 @@ async function askHere($: Engine, text: string): Promise<void> {
   if (!String(text || '').trim()) return
   const problem = await askCard($, text)
   if (problem) { $.ui.toast(`× ${problem}`); return }
+  // the line empties: a field drawn afresh, so no word of the question stays in it
   draft = ''
+  askGen++
   ringAt = null
   $.ui.invalidate('ui.render')
   regrab($)
@@ -600,7 +625,8 @@ export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
   const none = { text: '', cursor: 0 }
   if (paste) { const text = draft + String(e.inputText); return { box: none, work: () => toAsk($, text) } }
   const k = e.key!.key
-  const now = Date.now()
+  // the session clock (a test moves it), so a key and the letter after it are timed alike everywhere
+  const now = Number(await $.clock.now())
   const typed = String(e.inputText || '')
   const sel = (await $.state.get(SEL)).value as Detail | null
   if (!sel || sel.cite || sel.cites) return { box: null }
@@ -654,6 +680,9 @@ export function registerDetail(on: Parameters<Register>[0]): void {
       const el = String(e.element || '')
       const person = (e.origin as { kind?: string }).kind === 'person'
       if (!person || !drawn) {
+        // while a question is being typed, a drawing from before it (its autoFocus on the card) never takes the ring
+        // from the ask line
+        if (!person && isAsk(ringAt) && el.startsWith('g|')) return next({ ...e, element: askKey() })
         const r = await next(e)
         if (!r.deny) { ringAt = el || null; if (el.startsWith('g|')) ringY = Number(el.split('|')[2]) }
         return r
@@ -708,6 +737,7 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     if (person) keysMoved(await $.clock.now())
     if (person && isOpen && (isAsk(ringAt) || draft)) {
       draft = ''
+      askGen++
       ringAt = null
       $.ui.invalidate('ui.render')
       regrab($)

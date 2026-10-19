@@ -302,6 +302,59 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(JSON.stringify(session.appended())).toContain('The thread answered: Links peaked that day')
 })
 
+test('typing in the ask line is never interrupted: the ask line keeps the ring while the question is typed, every letter reaches the thread, and the line empties after the send', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
+  await pane($, clock)
+  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
+  await clock.settle()
+  // ↵ on the selected part, then e: the bar shows its details and examples; the part's cell takes the ring
+  await ui.press({ key: 'r|pane|1|day-2026-06-18' })
+  await clock.settle()
+  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
+  // which element takes the ring when the pane takes the keyboard (its autoFocus)
+  const ringer = async () => ((await ui.findAll({})) as Any[]).find(x => x.props?.autoFocus)?.key as string | undefined
+  await ui.redraw()
+  expect(await ringer()).toMatch(/^g\|pane\|\d+$/)
+  // the first letter reaches the prompt (the ring was on the part), and the pane draws again before the ask line has
+  // the ring: from that drawing on, the ask line takes the ring, never the part's cell
+  const UNFOCUSED = { ...(PANE as Any), props: { ...(PANE as Any).props, isFocused: false } } as never
+  await clock.advance(1000)
+  await $.ui.render(UNFOCUSED)
+  expect(await $.prompt.edit(edit('w'))).toEqual({ text: '', cursor: 0 })
+  await ui.redraw()
+  expect(await ringer()).toMatch(/^ask-\d+$/)
+  await clock.settle()
+  await ui.redraw()
+  expect(await ringer()).toBe(await askKeyOf($))
+  expect(await hintOf($)).toContain('↵ ask · esc back to the card')
+  // letters that come faster than the ring (a burst, each drawn at once) join the question in order
+  for (const c of 'hich') { await $.prompt.edit(edit(c)); await ui.redraw() }
+  await clock.settle()
+  await ui.redraw()
+  const last = await askKeyOf($)
+  expect(await ringer()).toBe(last)
+  expect(JSON.stringify(await ui.drawn())).toContain('"value":"which"')
+  // the rest is typed in the field itself: drawings in between keep every letter and the ring on the field
+  await ui.input({ key: last, text: 'which models', kind: 'change' })
+  await clock.settle()
+  await pane($, clock)
+  await ui.redraw()
+  expect(await ringer()).toBe(last)
+  expect(JSON.stringify(await ui.drawn())).toContain('"value":"which models"')
+  // ↵ asks the thread with the whole question; the line empties (a field drawn afresh) and the ring goes back to the part
+  await ui.input({ key: last, text: 'which models are these?' })
+  await clock.settle()
+  expect(w.spawns.length).toBe(1)
+  expect(w.spawns[0].prompt).toContain('which models are these?\n\nAbout: the part "Jun 18"')
+  await ui.redraw()
+  expect(JSON.stringify(await ui.drawn())).not.toContain('"value":"which')
+  expect(await askKeyOf($)).not.toBe(last)
+  expect(await ringer()).toMatch(/^g\|pane\|\d+$/)
+  expect(await hintOf($)).toContain('type to ask this card')
+})
+
 test('with no detail open, a prompt goes to Claude as always', async ($, on) => {
   const w = world(on)
   await $.prompt.submit({ text: 'what next?', origin: { kind: 'composer' } } as never)
