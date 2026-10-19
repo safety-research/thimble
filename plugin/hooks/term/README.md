@@ -9,6 +9,9 @@ fetches and draws nothing.
 **Turning on** (`activate.ts`). thimble is a regular Claude Code plugin: it turns on at the start of every session
 with a person at the terminal (register.tsx, `session.start`), quietly staying off in a folder `thimble activate`
 refuses; also at `/thimble` (which asks a refused folder again) and with the `thimble` command (`THIMBLE_OPEN=1`).
+A session Claude Code's background service runs (`CLAUDE_CODE_SESSION_KIND`: a pre-warmed spare, a background job)
+shows on no person's terminal at its start, so there it turns on at the person's first prompt, and an idle one
+starts nothing.
 Reading data turns nothing on. Activation runs `thimble activate --mod --json` once (parallel calls share it
 within their hook budget; a refused folder is asked once per session), pushes `load_thimble` to the shim with
 `$.mcp.call` so thimble's tools are listed, tells `thimble.ts` (`bridgeActivated`) and hands thimble's guide to Claude

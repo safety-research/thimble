@@ -298,6 +298,8 @@ export function cxOf($: Dollar): Ctx {
           return $.env.get('HOME')
         case 'CLAUDE_CONFIG_DIR':
           return $.env.get('CLAUDE_CONFIG_DIR')
+        case 'CLAUDE_CODE_SESSION_KIND':
+          return $.env.get('CLAUDE_CODE_SESSION_KIND')
         default:
           return undefined
       }

@@ -2,7 +2,7 @@
   "name": "thimble",
   "displayName": "thimble",
   "description": "thimble beside a Claude Code session for making sense of a corpus of files. In every session the plugin loads with about 21 tokens (one deferred tool, load_thimble) and starts no server; thimble turns on at the first data-file read, /thimble or a call of load_thimble, and then draws its cards, citations, coverage and checks in the terminal and keeps its panel there. /thimble browser, or a press in the panel, opens the browser workbench (chat, files, a canvas of cards and a report) on the same session, signed in. One MCP server (the thimble tools), one hooks module (hooks/register.ts: the agent bridge and file guard, then the terminal UI), the /thimble skill and the skills of thimble's commands. The orientation, its critic, a writer, the builder and the reviewer of a view, each run of a check and the agent of a code ticket are subagents of the session, of the types the hooks module registers.",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "author": {
     "name": "Matthew Joerke"
   },

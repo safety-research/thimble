@@ -133,8 +133,9 @@ export const AREAS = {
   docs: [{ dir: 'investigations/main' }, { dir: 'checks' }],
   chats: [{ dir: 'chats' }],
   // thimble's agents, and their failures: the open notices (notices.json), which home's state gives the rows above the
-  // prompt
-  agents: [{ dir: 'trusted', names: ['subagents.json', 'module.json'] }, { dir: 'orient', names: ['run.json'] }, { dir: '', names: ['notices.json'] }],
+  // prompt. Not the hooks module's module.json or its heartbeat (module-beat.json): no surface reads them, and what the
+  // module says of an agent reaches its chat and subagents.json
+  agents: [{ dir: 'trusted', names: ['subagents.json'] }, { dir: 'orient', names: ['run.json'] }, { dir: '', names: ['notices.json'] }],
   // a view built (its folder in the local extension) or proposed (proposals.json)
   views: [{ dir: 'extension/views' }, { dir: 'views', names: ['proposals.json'] }],
   // the answers of views' keys a process read from a view's index (views/key-refs.json), from which `thimble state

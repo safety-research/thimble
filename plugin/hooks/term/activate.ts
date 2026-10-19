@@ -129,6 +129,8 @@ export const act = {
   /** session.start's word: a person at the prompt, on the terminal */
   interactive: false,
   surface: '' as string,
+  /** session.start found no terminal of a person's (backgroundKind): thimble turns on at the person's first prompt */
+  untilPerson: false,
   /** the session id activation ran for (a /clear or /resume changes $.session.id()) */
   sid: '',
   pre: null as Pre | null,
@@ -153,6 +155,7 @@ export const act = {
 export function resetActivation(e: { isInteractive?: boolean; surface?: string | null }): void {
   act.interactive = e.isInteractive === true
   act.surface = e.surface ?? ''
+  act.untilPerson = false
   act.sid = ''
   act.pre = null
   act.refused = new Set()
@@ -171,6 +174,14 @@ function trail(cx: Ctx, step: string): void {
   act.trail.push(step)
   if (act.trail.length > 50) act.trail.shift()
   cx.debug(`thimble: activation ${step}`)
+}
+
+/** Claude Code's word for a session its background service runs (CLAUDE_CODE_SESSION_KIND: bg, daemon or
+ *  daemon-worker), '' for any other: a pre-warmed spare that the next new session claims, a background job. Such a
+ *  session is interactive and draws on a terminal, but on one of the service's own, which no person's terminal shows
+ *  at its start. */
+export async function backgroundKind(cx: Ctx): Promise<string> {
+  return ((await cx.env('CLAUDE_CODE_SESSION_KIND').catch(() => undefined)) ?? '').trim()
 }
 
 /** Whether thimble is on in this session (C13). */

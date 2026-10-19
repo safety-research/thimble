@@ -88,11 +88,13 @@ everything it says to module.json, both in the trusted folder (subagent_files.py
     requests    entries of subagents.json's `requests` of kind `module`, {op, args, module: pending, session,
                 asked_at, expires_at} (subagent_files.add_module_request): the module takes those of main's session
                 that are pending and not past `expires_at`, one at a time in the order they were asked
-    module.json {session, version, load, beat, plan, plan_at, problem, taken: [id], answers: {id: Answer}, ended:
-                [{n, agentId, answer, reason, refusal?, at}], gone}, times in milliseconds: its heartbeat every
-                FILE_BEAT_MS (live while the last is under FILE_LIVE_S old and its session is main's), its answers, the
-                ends of the runs it started (new_ended hands each to the end rules once, by `load` and `n`), and main's
-                plan mode as its poll saw it
+    module.json {session, version, load, plan, plan_at, problem, taken: [id], answers: {id: Answer}, ended:
+                [{n, agentId, answer, reason, refusal?, at}], gone}, times in milliseconds: its answers, the ends of
+                the runs it started (new_ended hands each to the end rules once, by `load` and `n`), and main's plan
+                mode as its poll saw it, written only when one of them changes
+    module-beat.json {session, load, beat}: its heartbeat every FILE_BEAT_MS, in a file of its own so that a beat is
+                no change of module.json (live while the last is under FILE_LIVE_S old, its session is main's and
+                module.json does not say `gone`)
 request() writes the entry and reads module.json for the answer, up to REQUEST_TIMEOUT_S; an entry that expires is
 marked so (the module no longer takes it), and a late answer of a spawn gets its agent stopped (reconcile). Only
 thimble's own processes ask (the MCP shim, the hooks' backend calls, the renderer's acts).
@@ -498,11 +500,26 @@ def read_out(c: str) -> dict[str, Any]:
 
 def _file_live(c: str, out: dict[str, Any] | None = None) -> bool:
     out = read_out(c) if out is None else out
-    beat = out.get("beat")
-    if out.get("gone") or isinstance(beat, bool) or not isinstance(beat, (int, float)):
+    if out.get("gone"):
         return False
+    session, beat = _last_beat(c, out)
     main = main_session(c)
-    return bool(main) and out.get("session") == main and time.time() - float(beat) / 1000 < FILE_LIVE_S
+    return bool(main) and session == main and time.time() - beat / 1000 < FILE_LIVE_S
+
+
+def _last_beat(c: str, out: dict[str, Any]) -> tuple[str, float]:
+    """The module's newest heartbeat on local transport, (its session, its time in milliseconds), ('', 0) for none: from
+    module-beat.json, or from module.json where a module loaded before the heartbeat had a file of its own wrote it."""
+    try:
+        recs = [sf.read_beat(_ws(c)), out]
+    except ValueError:
+        recs = [out]
+    best = ("", 0.0)
+    for rec in recs:
+        beat = rec.get("beat")
+        if not isinstance(beat, bool) and isinstance(beat, (int, float)) and float(beat) > best[1]:
+            best = (str(rec.get("session") or ""), float(beat))
+    return best
 
 
 def live(c: str) -> bool:
