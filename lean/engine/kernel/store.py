@@ -8,6 +8,8 @@ In the folder under analysis (the root), the `thimble/` folder holds what the pe
                                             large row lineage is kept packed (pack_record)
     thimble/labels/<name>.json              each label with every version of its values (labels.py)
     thimble/kept/<name>.pkl.gz              results a query kept with keep(), which a later query reads with use()
+    thimble/kept/<name>.rows.json           beside a kept table with no `_ref`, the rows behind each of its rows, when
+                                            the query that kept it knew them (query._keep_rows)
     thimble/results/q<n>.pkl.gz             each query's output table, which a later query reads with use("q<n>")
     thimble/ledger.jsonl                    one line per `lean` call that read rows (what was read and how)
 

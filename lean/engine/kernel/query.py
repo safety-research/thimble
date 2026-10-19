@@ -24,14 +24,19 @@ from thimble-lite's query kernel and extended):
 Row lineage of the output (the last expression, or `result`), by how sure it is:
 
     exact      the output has `_ref` (one source row per output row) or `_refs` (a list); tally() gives `_refs`
-    matched    found by key: the output's key columns (its index, or its text columns) select rows of a frame the
+    matched    found by key: the output's key columns (its index, or its text columns, and its number columns that a
+               frame of the query has too when the words alone do not tell its rows apart) select rows of a frame the
                query made, and a count column of the output equals the number of rows for every output row
     key        found by key, but no column of the output counts rows, so the match could not be checked
     superset   found by key, and a count column disagrees: the rows hold more than the value counted
-    loop       records built in a loop (`out.append({...})`, then a table of them): each output row rests on the rows
-               its own iteration held when it appended the record (what it loaded and filtered for it); a count that
-               equals the rows of one of those frames opens that frame's rows (`cells`)
+    loop       records built in a loop (`out.append({...})`, then a table of them, grouped or not, here or in a later
+               query through keep() and use()): each output row rests on the rows its records' iterations held (what
+               they loaded and filtered, else the files they opened, a JSON document as one row); a count that equals
+               the rows of one of those frames opens that frame's rows (`cells`)
     query      no row lineage: each value rests on every row the query read
+
+A count column named by a value of the frame its rows were found in (a pivot: `read` beside the slice, for
+kind == "read") opens the rows of its group that hold that value (`cells`).
 """
 from __future__ import annotations
 
