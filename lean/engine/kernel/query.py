@@ -941,6 +941,7 @@ def row_ref_lists(f: Any) -> list[list[str]]:
 
 _ROWNUM = re.compile(r"^(?P<path>[^#]+)#(?P<unit>L|row=|/(?:[^/]*/)*)(?P<n>\d+)$")
 _DBROWNUM = re.compile(r"^(?P<path>[^#]+\.(?:db|sqlite|sqlite3))#(?P<unit>[A-Za-z_][A-Za-z0-9_]*/)(?P<n>\d+)$", re.I)
+_BLOCKNUM = re.compile(r"^(?P<path>[^#]+)#L(?P<line>\d+)\.b(?P<block>\d+)$")
 
 
 def rowsets_of(frames: list[Any]) -> list[str]:
@@ -950,6 +951,7 @@ def rowsets_of(frames: list[Any]) -> list[str]:
     import pandas as pd
 
     nums: dict[tuple[str, str], list[Any]] = {}
+    blocks: dict[str, list[Any]] = {}
     other: dict[str, None] = {}
 
     def add(s: Any) -> None:
@@ -963,6 +965,19 @@ def rowsets_of(frames: list[Any]) -> list[str]:
                 g = m[ok]
                 for (path, unit), part in g.groupby(["path", "unit"], sort=False)["n"]:
                     nums.setdefault((path, unit), []).append(part.astype(np.int64).to_numpy())
+            s = s[~ok]
+        if not s.empty and not s.str.contains(".b", regex=False).any():
+            for x in s.tolist():
+                other[x] = None
+            return
+        if not s.empty:
+            # blocks of transcript records (`a.jsonl#L44.b0`): one block set per file
+            m = s.str.extract(_BLOCKNUM)
+            ok = m["line"].notna()
+            if ok.any():
+                for path, part in m[ok].groupby("path", sort=False):
+                    blocks.setdefault(path, []).append(np.stack([part["line"].astype(np.int64).to_numpy(),
+                                                                 part["block"].astype(np.int64).to_numpy()], axis=1))
             s = s[~ok]
         for x in s.tolist():
             other[x] = None
@@ -994,6 +1009,9 @@ def rowsets_of(frames: list[Any]) -> list[str]:
         cut = np.where(np.diff(a) != 1)[0]
         starts, ends = a[np.r_[0, cut + 1]], a[np.r_[cut, len(a) - 1]]
         out.append(f"{path}#{unit}" + ",".join(str(x) if x == y else f"{x}-{y}" for x, y in zip(starts.tolist(), ends.tolist())))
+    for path, arrs in blocks.items():
+        pairs = np.unique(np.concatenate(arrs), axis=0)
+        out.append(f"{path}#L{R.format_blocks(pairs.tolist())}")
     out.extend(other)
     return out
 

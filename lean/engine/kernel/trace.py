@@ -37,6 +37,7 @@ from .store import Store
 # ------------------------------------------------------------------ row sets as intervals
 
 _SET = re.compile(r"^(?P<path>[^#]+)#(?P<unit>L|row=|/(?:[^/]*/)*|[A-Za-z_][A-Za-z0-9_]*/)(?P<nums>\d+(?:-L?\d+)?(?:,\d+(?:-\d+)?)*)(?:\.b\d+)?$")
+_BLOCKSET = re.compile(r"^(?P<path>[^#]+)#L(?P<parts>\d+(?:-\d+)?\.b\d+(?:-\d+)?(?:,\d+(?:-\d+)?\.b\d+(?:-\d+)?)*)$")
 
 
 def intervals(rowsets: Iterable[str]) -> dict[tuple[str, str], list[tuple[int, int]]]:
@@ -46,6 +47,14 @@ def intervals(rowsets: Iterable[str]) -> dict[tuple[str, str], list[tuple[int, i
     for s in rowsets:
         m = _SET.match(str(s))
         if not m:
+            b = _BLOCKSET.match(str(s))
+            if b:
+                # a block set: each part's lines
+                runs = out.setdefault((b["path"], "L"), [])
+                for part in b["parts"].split(","):
+                    lines = part.partition(".b")[0]
+                    a, _, c = lines.partition("-")
+                    runs.append((min(int(a), int(c or a)), max(int(a), int(c or a))))
             continue
         runs = out.setdefault((m["path"], m["unit"]), [])
         for part in m["nums"].split(","):

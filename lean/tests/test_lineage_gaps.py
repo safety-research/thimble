@@ -244,3 +244,74 @@ def test_a_count_named_by_a_value_opens_the_rows_that_hold_it(root: Path) -> Non
     # an unstack of counts per agent names its columns the same way
     u = Q.run(st, "kinds per agent", 'df = load("events.jsonl")\ndf.groupby(["agent", "act"]).size().unstack(fill_value=0)')
     assert u["cells_by"] == "act" and LIN.resolve(st, f"{u['id']}#agent=a2@test")["rows"] == ["events.jsonl#L3,15,27,39"]
+
+
+# ------------------------------------------------------------------ row sets of transcript blocks
+
+from kernel import refs as R  # noqa: E402
+from kernel import sources as S  # noqa: E402
+
+
+def test_a_block_set_parses_counts_formats_and_expands_like_a_line_set() -> None:
+    p = R.parse("a.jsonl#L44.b0-2,45-47.b0")
+    assert p["kind"] == "blocks" and p["n"] == 6 and R.count(["a.jsonl#L44.b0-2,45-47.b0"]) == 6
+    assert R.single_refs(p) == ["a.jsonl#L44.b0", "a.jsonl#L44.b1", "a.jsonl#L44.b2", "a.jsonl#L45.b0", "a.jsonl#L46.b0",
+                                "a.jsonl#L47.b0"]
+    assert R.format_source(p) == "a.jsonl#L44.b0-2,45-47.b0"
+    # lines that hold the same blocks join; blocks with a gap are two parts
+    assert R.format_blocks([(5, 0), (5, 2), (6, 0), (6, 2), (9, 1)]) == "5-6.b0,5-6.b2,9.b1"
+    assert R.compress(["a.jsonl#L5.b2", "a.jsonl#L5.b0", "b.jsonl#L1.b0", "a.jsonl#L6.b0", "a.jsonl#L6.b2", "a.jsonl#L2"]) == [
+        "a.jsonl#L2", "a.jsonl#L5-6.b0,5-6.b2", "b.jsonl#L1.b0"]
+    # one block stays the ref it was
+    assert R.parse("a.jsonl#L44.b0")["kind"] == "block" and R.compress(["a.jsonl#L44.b0"]) == ["a.jsonl#L44.b0"]
+
+
+def _transcript(root: Path, lines: int) -> None:
+    with open(root / "t.jsonl", "w") as f:
+        for i in range(lines):
+            content = [{"type": "text", "text": f"step {i}"}] + [
+                {"type": "tool_use", "name": ["Bash", "Read"][(i + j) % 2], "input": {"command": f"ls {i}-{j}"}} for j in range(i % 3 + 1)]
+            f.write(json.dumps({"type": "assistant", "message": {"role": "assistant", "content": content}}) + "\n")
+
+
+CALLS = ('df = load("t.jsonl")\nout = []\nfor ref, msg in zip(df._ref, df.message):\n'
+         '    for j, b in enumerate(msg["content"]):\n        if b["type"] == "tool_use":\n'
+         '            out.append({"_ref": f"{ref}.b{j}", "name": b["name"]})\ncalls = pd.DataFrame(out)\n')
+
+
+def test_a_query_resting_on_many_blocks_keeps_block_sets_and_resolves_fast(root: Path) -> None:
+    import time
+
+    _transcript(root, 3000)
+    st = Store(root)
+    q = Q.run(st, "calls by tool", CALLS + 'tally(calls, "name")')
+    assert q["lineage"] == "exact" and all(len(r) == 1 for r in q["rows"])
+    assert q["rows"][0][0].startswith("t.jsonl#L1.b1,2.b2,3.b1,3.b3,")
+    t0 = time.time()
+    r = LIN.resolve(st, q["id"])
+    assert time.time() - t0 < 5
+    # one row set for the file, not 6,000 refs, and a spread of five of its blocks
+    assert r["count"] == 6000 and len(r["rows"]) == 1 and R.parse(r["rows"][0])["kind"] == "blocks"
+    assert len(r["records"]) == 5 and all(R.parse(x["ref"])["kind"] == "block" for x in r["records"])
+    assert all(x["text"].startswith(("Bash", "Read")) for x in r["records"])
+    # one tool's row, a block of it, and the rows of the whole query as one summary the model reads
+    bash = LIN.resolve(st, f"{q['id']}#name=Bash@n")
+    assert bash["count"] == 3000 and bash["chain"][0]["check"] == "the value equals the number of rows"
+    one = R.expand(bash["rows"])[7]
+    assert LIN.resolve(st, one)["records"][0]["ref"] == one
+    # a frame of blocks used by a later query: its rows read as one block set
+    u = Q.run(st, "calls again", CALLS + 'keep("calls", calls)\nlen(calls)')
+    v = Q.run(st, "share of Bash", 'c = use("calls")\nround((c.name == "Bash").mean(), 2)')
+    assert u["error"] is None and v["lineage"] == "summary" and len(v["rows"][0]) == 1 and R.count(v["rows"][0]) == 6000
+
+
+def test_a_block_set_reads_its_blocks_and_counts_like_the_observer(root: Path) -> None:
+    _transcript(root, 5)
+    rows = S.fetch(root, "t.jsonl#L2-3.b1,3.b3", limit=None)
+    assert [r.ref for r in rows] == ["t.jsonl#L2.b1", "t.jsonl#L3.b1", "t.jsonl#L3.b3"]
+    assert rows[2].value["kind"] == "tool_use" and "ls 2-2" in rows[2].value["text"]
+    with pytest.raises(R.RefError):
+        S.fetch(root, "t.jsonl#L1.b0-3")
+    from kernel.store import _rows_in
+
+    assert _rows_in("t.jsonl#L2-3.b1,3.b3") == 3 and _rows_in("t.jsonl#L4.b0") == 1

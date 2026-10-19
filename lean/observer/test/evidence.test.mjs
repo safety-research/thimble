@@ -34,6 +34,7 @@ test('row sets count their rows, and a whole file counts as unknown', () => {
   assert.equal(rowsIn('revisions.jsonl#L4-9,12,40-41'), 9)
   assert.equal(rowsIn('a.jsonl#L4-L9'), 6)
   assert.equal(rowsIn('run.jsonl#L12.b1'), 1)
+  assert.equal(rowsIn('run.jsonl#L12.b0-1,14-15.b0'), 4) // a block set: each part's lines times its blocks
   assert.equal(rowsIn('forge.db#prs/1-12'), 12)
   assert.equal(rowsIn('orders.csv#row=2-300,410-522'), 412)
   assert.equal(rowCount(['a.jsonl#L1-3', 'b.jsonl#L7']), 4)

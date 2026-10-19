@@ -153,8 +153,7 @@ def spread_refs(rowsets: list[str], n: int) -> list[str]:
         except R.RefError:
             sizes.append((rs, None, 1))
             continue
-        k = len(p["nums"]) if "nums" in p else len(p.get("keys") or [1])
-        sizes.append((rs, p, k))
+        sizes.append((rs, p, R.size(p)))
     total = sum(k for _, _, k in sizes)
     if total <= 0:
         return []
@@ -168,6 +167,8 @@ def spread_refs(rowsets: list[str], n: int) -> list[str]:
             at = picks[j] - base
             if p is None or p["kind"] in ("file", "table", "block"):
                 out.append(rs)
+            elif p["kind"] == "blocks":
+                out.append(_block_at(p, at))
             else:
                 one = dict(p)
                 if "nums" in p:
@@ -178,6 +179,16 @@ def spread_refs(rowsets: list[str], n: int) -> list[str]:
             j += 1
         base += k
     return list(dict.fromkeys(out))
+
+
+def _block_at(p: dict[str, Any], at: int) -> str:
+    """The ref of the at-th block (0-based) of a block set, in its parts' order."""
+    for a, b, c, d in p["parts"]:
+        k = (b - a + 1) * (d - c + 1)
+        if at < k:
+            return f"{p['path']}#L{a + at // (d - c + 1)}.b{c + at % (d - c + 1)}"
+        at -= k
+    raise R.RefError(f"{R.format_source(p)} has no block {at}")
 
 
 def records(st: Store, rowsets: list[str], n: int = 5, pick: str = "spread", seed: int = 0) -> list[dict[str, Any]]:
@@ -442,7 +453,7 @@ def _frag_text(p: dict[str, Any]) -> str:
 
 def _merge(rowsets: list[str]) -> list[str]:
     try:
-        return R.compress(R.expand(rowsets)) if len(rowsets) > 1 else rowsets
+        return R.merge(rowsets) if len(rowsets) > 1 else rowsets
     except R.RefError:
         return rowsets
 

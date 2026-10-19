@@ -526,6 +526,21 @@ def fetch(root: Path, rowset: str, limit: int | None = None) -> list[Row]:
             raise R.RefError(f"{rel}#L{p['line']} has {len(bl)} blocks, no block {p['block']}")
         b = bl[p["block"]]
         return [Row(rowset, b["text"], b)]
+    if k == "blocks":
+        # each record read once, for as many of its blocks as the set names (up to `limit` blocks in all)
+        want: list[tuple[int, int]] = []
+        for pair in R.block_pairs(p):
+            want.append(pair)
+            if limit and len(want) >= limit:
+                break
+        recs = {r.ref: r for r in fetch(root, f"{rel}#L{R.format_nums([x for x, _ in want])}")}
+        got = []
+        for line, block in want:
+            bl = blocks_of(recs[f"{rel}#L{line}"].value)
+            if block >= len(bl):
+                raise R.RefError(f"{rel}#L{line} has {len(bl)} blocks, no block {block}")
+            got.append(Row(f"{rel}#L{line}.b{block}", bl[block]["text"], bl[block]))
+        return got
     kind = kind_of_file(root, rel)
     if k == "lines":
         want = set(p["nums"])

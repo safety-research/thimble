@@ -260,7 +260,7 @@ def _cite(st: Store, ref: str, where: str, ctx: dict[str, Any], quote: str | Non
 def _merge_rows(lists: list[list[str]]) -> list[str]:
     flat = [x for xs in lists for x in xs]
     try:
-        return R.compress(R.expand(flat))
+        return R.merge(flat)
     except R.RefError:
         return flat
 

@@ -5,8 +5,9 @@
 // It reads only what the object already holds (its lineage, citations, data and source), so it is cheap enough to
 // ask of every object on screen. The phrase says what t would do for THIS object, not what Trace is.
 
-// a block of a record (#L12.b1) exists only in transcripts: words an agent read or wrote
-const BLOCK = /#L\d+\.b\d+$/
+// a block of a record (#L12.b1), or a set of them (#L12.b0-1,14.b0), exists only in transcripts: words an agent read
+// or wrote
+const BLOCK = /#L\d+(?:-\d+)?\.b\d+(?:-\d+)?(?:,\d+(?:-\d+)?\.b\d+(?:-\d+)?)*$/
 
 function refsIn(v, out = [], depth = 0) {
   if (depth > 6 || out.length > 40) return out

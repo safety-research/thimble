@@ -135,6 +135,7 @@ test('what to trace: a citation, a region with a ref or a cite, a quote, or the 
 test('the hint says what t would do for this object, or nothing', () => {
   assert.equal(applies({ lineage: { bindings: [{ at: '/days', ref: 'q3' }] } }), 'where these numbers come from')
   assert.equal(applies({ text: 'a07 said [this](agents/a07.jsonl#L3.b0)' }), 'who read and copied this')
+  assert.equal(applies({ data: { calls: { _rows: ['agents/a07.jsonl#L3-9.b1,12.b0-2'] } } }), 'who read and copied this')
   assert.equal(applies({ data: { example: { ref: 'runs.csv#row=3' } } }), 'where this came from')
   assert.equal(applies({ verb: 'trace', program: 'x' }), 'full trace')
   assert.equal(applies({ program: 'return k.text("hi")', data: {} }), null)
