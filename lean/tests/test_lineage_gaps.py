@@ -206,6 +206,27 @@ def test_a_groupby_on_a_number_column_finds_its_rows_by_that_column(root: Path) 
     assert p["keys"] == ["slice"] and LIN.resolve(st, f"{p['id']}#slice=1")["count"] == 10
 
 
+def test_a_word_the_query_computed_per_group_does_not_hide_the_groupby_keys(root: Path) -> None:
+    st = Store(root)
+    # the last role per act and agent is a word column, but no key: the first two columns tell the rows apart
+    q = Q.run(st, "last role", 'df = load("events.jsonl")\ndf["role"] = np.where(df.step < 20, "early", "late")\n'
+              'df.groupby(["act", "agent"]).agg(n=("step", "size"), last_role=("role", "last")).reset_index()')
+    assert q["lineage"] == "matched" and q["keys"] == ["act", "agent"]
+    assert LIN.resolve(st, f"{q['id']}#act=test&agent=a1@n")["rows"] == ["events.jsonl#L6,18,30"]
+
+
+def test_documents_beside_other_whole_files_stay_whole_files(docs_root: Path) -> None:
+    st = Store(docs_root)
+    (docs_root / "steps.jsonl").write_text('{"x": 1}\n{"x": 2}\n')
+    # rows loaded from a jsonl file and a JSON document opened beside it, and no rows per output row: a row of the
+    # output opens the files it read as before, never a whole file counted as one row
+    q = Q.run(st, "steps", 'm = json.load(open("ep1/u1.json"))\ns = load("steps.jsonl")\n'
+              'pd.DataFrame({"who": [m["agent"], "other"], "n": [len(s), 0]})')
+    assert q["rows"] is None
+    r = LIN.resolve(st, f"{q['id']}#who=u1@n")
+    assert set(r["rows"]) == {"ep1/u1.json", "steps.jsonl"} and r["count"] is None and not r["records"]
+
+
 def test_a_table_built_from_records_finds_its_rows_through_them(docs_root: Path) -> None:
     st = Store(docs_root)
     # one record per call, each resting on the document its pass opened; the output groups the table of them

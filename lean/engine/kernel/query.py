@@ -1504,7 +1504,14 @@ def _by_keys(df: Any, out: dict[str, Any], ns: dict[str, Any], frames: list[Any]
         found = _by_key(df, keys, ns, frames)
         if not found and len(keys) > 1:
             # the key columns guessed from the output's words may hold a column the query computed per group (a top
-            # label, a note): a single key that alone tells the output rows apart is tried on its own
+            # label, the last type): the first of them that tell the output rows apart (the groupby's keys, which a
+            # reset puts first) are tried, then a single key that alone tells them apart
+            for j in range(2, len(keys)):
+                if _unique(df, keys[:j]):
+                    found = _by_key(df, keys[:j], ns, frames)
+                    if found:
+                        out["keys"] = keys[:j]
+                        return found
             for k in keys:
                 try:
                     if not df[k].is_unique:

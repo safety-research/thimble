@@ -440,9 +440,13 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
 
 def documents(st: Store, rowsets: list[str]) -> list[str]:
     """The row sets with each whole JSON document as its root row (`x.json` as `x.json#/`), so a value that rests on
-    a document opens it: a file that is one JSON document is one row."""
+    a document opens it: a file that is one JSON document is one row. Beside other whole files (a query that loaded
+    jsonl files and opened a manifest), the files stay whole files, as before: a count of rows and whole files
+    together would count each file as one row."""
     out = [S.document_ref(st.root, x) for x in rowsets]
-    return list(dict.fromkeys(out)) if out != rowsets else rowsets
+    if out == rowsets or any("#" not in x for x in out):
+        return rowsets
+    return list(dict.fromkeys(out))
 
 
 def _frag_text(p: dict[str, Any]) -> str:
