@@ -107,6 +107,32 @@ test('a stacked bar\'s label stays inside its own part in both renderers, and a 
   }
 })
 
+test('every text the browser draws is drawn in the size it was measured in, whatever the stylesheet says', () => {
+  // axis labels, a dot's label and a bar part's label each have a size of their own; the drawing's stylesheet sets every
+  // text's size, so a size of its own must be an inline style, and the size measured must be the size drawn
+  const d = run(`
+    const c = k.canvas(30, 3)
+    c.dot(2, 1, 'accent', { label: 'reviewer ×3' })
+    return k.stack(
+      k.plot([{ name: 'a', points: [[1, 40], [10, 71], [100, 88]] }, { name: 'b', points: [[1, 22], [10, 55], [100, 81]] }],
+        { h: 8, x: { label: 'learning rate', log: true }, y: { label: 'val acc', min: 0, max: 100 } }),
+      c,
+      k.bars([{ label: 'saves', parts: [{ label: 'overwrote', value: 304, tone: 'accent' }, { label: 'kept', value: 10, tone: 'good' }] }]))`)
+  const measured = new Map()
+  const measure = (t, o = {}) => {
+    const size = o.size || 13
+    if (!measured.has(String(t))) measured.set(String(t), new Set())
+    measured.get(String(t)).add(size)
+    return [...String(t)].length * size * 0.55
+  }
+  const svg = renderSvg(d, { w: 90, fs: 13, measure }).svg
+  const texts = [...svg.matchAll(/<text ([^>]*)>(.*?)<\/text>/g)].map(m => ({ attrs: m[1], s: m[2].replace(/<[^>]+>/g, ''), size: +(/style="[^"]*font-size:([\d.]+)px/.exec(m[1]) || [0, 13])[1] }))
+  assert.ok(texts.length > 8, svg)
+  for (const t of texts) assert.doesNotMatch(t.attrs, /font-size=/, `"${t.s}" sets its size by an attribute, which the stylesheet overrides`)
+  for (const s of ['100', '0', 'val acc', 'reviewer ×3']) assert.ok(texts.find(t => t.s === s && t.size < 13), `"${s}" is drawn in a size of its own`)
+  for (const t of texts) if (measured.has(t.s)) assert.ok(measured.get(t.s).has(t.size), `"${t.s}" drawn at ${t.size}px, measured at ${[...measured.get(t.s)]}`)
+})
+
 test('a part the program drew from values alone is matched to the rows whose words it shows', () => {
   const d = run(`
     const rust = data.runs.filter(r => r.lang === 'Rust')

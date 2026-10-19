@@ -35,6 +35,12 @@ function inPlace(label, value, room, measure, pad) {
   return ''
 }
 const xml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+// a text's own type as an inline style: the drawing's stylesheet sets every text's size and face, which a font-size or
+// font-family attribute does not override, so a text measured in a size of its own is drawn in that size
+const typeStyle = o => {
+  const s = [o.size ? `font-size:${r1(o.size)}px` : '', o.mono ? `font-family:${MONO.replace(/"/g, "'")}` : ''].filter(Boolean).join(';')
+  return s ? ` style="${s}"` : ''
+}
 const fmtTick = v => !isFinite(v) ? '' : Math.abs(v) >= 1000 ? Math.round(v).toLocaleString('en-US') : String(+v.toPrecision(3))
 
 // ---------------------------------------------------------------- measuring type
@@ -184,7 +190,7 @@ export function renderSvg(drawing, opts = {}) {
       if (p.ref) attrs.push('text-decoration="underline"')
       spans += `<tspan ${attrs.join(' ')}>${xml(p.s)}</tspan>`
     }
-    return `<text x="${r1(x)}" y="${r1(base(y, size))}"${anchor !== 'start' ? ` text-anchor="${anchor}"` : ''}${o.size ? ` font-size="${o.size}"` : ''}${o.mono ? ' font-family=\'' + MONO + '\'' : ''} xml:space="preserve">${spans}</text>`
+    return `<text x="${r1(x)}" y="${r1(base(y, size))}"${anchor !== 'start' ? ` text-anchor="${anchor}"` : ''}${typeStyle(o)} xml:space="preserve">${spans}</text>`
   }
   function linkRects(ps, x, y, dry) {
     if (dry) return
@@ -491,11 +497,10 @@ export function renderSvg(drawing, opts = {}) {
           ? `<rect x="${r1(x + a)}" y="${r1(y + by)}" width="${r1(Math.max(0.5, b - a - seam))}" height="${bh}" fill="url(#${id}-hatch)"/>`
           : `<rect x="${r1(x + a)}" y="${r1(y + by)}" width="${r1(Math.max(0.5, b - a - seam))}" height="${bh}" fill="${C(p.tone)}"/>`)
         // a labelled part with room says what it is in place, as the terminal does, so the card needs no legend; its
-        // words are measured in their own size and stay inside the part. The size is an inline style: the drawing's
-        // stylesheet sets every text's size, which a font-size attribute does not override
+        // words are measured in their own size and drawn in it, so they stay inside the part
         const size = Math.max(9, bh - 2)
         const words = p.label != null && p.tone !== 'unseen' ? inPlace(p.label, p.value, b - a - seam, t => mw(t, { size }), cw) : ''
-        if (words) L.text.push(`<text x="${r1(x + a + cw)}" y="${r1(y + by + bh - 2)}" style="font-size:${size}px" fill="${C('paper')}" xml:space="preserve">${xml(words)}</text>`)
+        if (words) L.text.push(`<text x="${r1(x + a + cw)}" y="${r1(y + by + bh - 2)}"${typeStyle({ size })} fill="${C('paper')}" xml:space="preserve">${xml(words)}</text>`)
       })
       return
     }
@@ -546,7 +551,7 @@ export function renderSvg(drawing, opts = {}) {
     if (ymax === ymin) ymax = ymin + 1
     const legend = n.legend !== false && (S.length > 1 || S.some(s => s.name)) ? 1 : 0
     const yl = [fmtTick(ymax), fmtTick(ymin)]
-    const yw = Math.max(mw(yl[0]), mw(yl[1])) + 6
+    const yw = Math.max(mw(yl[0], { size: fs - 1 }), mw(yl[1], { size: fs - 1 })) + 6
     const ox = x + yw, oy = y + (ys.label ? lh : 0) + 6
     const ph = Math.max(lh, h - (ys.label ? lh : 0) - 6 - lh - legend * lh - 4)
     const pw = Math.max(2 * cw, w - yw - 4)
@@ -718,7 +723,7 @@ export function renderSvg(drawing, opts = {}) {
             if (f.glyph && !'●◉○'.includes(f.glyph)) glyph(Math.round(dx0), Math.round(dy0), f.glyph, tone, { b: !!f.bold })
             else if (f.hollow) L.mark.push(`<circle cx="${r1(pcx)}" cy="${r1(pcy)}" r="${r1(rad)}" fill="${C('paper')}" stroke="${C(tone)}" stroke-width="1.4"/>`)
             else L.mark.push(`<circle cx="${r1(pcx)}" cy="${r1(pcy)}" r="${r1(rad + (f.bold ? 0.6 : 0))}" fill="${C(tone)}"/>`)
-            if (f.label) L.text.push(`<text x="${r1(pcx + rad + 3)}" y="${r1(pcy - 1)}" font-size="${r1(fs * 0.85)}" fill="${C(f.labelTone)}">${xml(f.label)}</text>`)
+            if (f.label) L.text.push(`<text x="${r1(pcx + rad + 3)}" y="${r1(pcy - 1)}"${typeStyle({ size: fs * 0.85 })} fill="${C(f.labelTone)}">${xml(f.label)}</text>`)
           }
           if (f.label) mark({ k: 'text', s: f.label })
           if (f.region) {
