@@ -34,6 +34,8 @@
   const MAX_RECORDS = 200
   const MAX_SERIES_POINTS = 2000
   const MAX_KNOB = 2000
+  // the refs one part of a map carries (the rows of every thread through it), as many as a selection resolves
+  const MAX_PART_REFS = 500
   const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/
 
   // ---------------------------------------------------------------- small utilities
@@ -1064,7 +1066,7 @@
   const scalar = v => typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
 
   // the loose spec, read into {title, unit, stations, threads, links, groups, lens}
-  function mapSpec(spec, o) {
+  function mapSpec(spec, o, ctx) {
     spec = isObj(spec) ? spec : {}
     const from = names => { for (const n of names) if (spec[n] != null) return mapList(spec[n]); return [] }
     const stations = new Map()
@@ -1114,6 +1116,9 @@
         const ref = refList(firstOf(raw, ['ref', 'refs', 'file', 'rows']))
         if (ref.length) t.ref = ref
         else if (Array.isArray(raw._rows) && raw._rows.length) t.ref = refList(raw._rows)
+        // a thread that is a row of the card's data (a query's output): that row, which opens the thread's own rows
+        const row = ctx ? lineageOf(ctx, raw) : null
+        if (row) t.row = row
         if (raw.tone != null) t.tone = raw.tone
         Object.keys(raw).forEach(kk => {
           if (kk[0] !== '_' && scalar(raw[kk]) && ['id', 'label', 'name', 'title', 'ref', 'file', 'tone'].indexOf(kk) < 0) t.fields[kk] = raw[kk]
@@ -1305,9 +1310,23 @@
     return { t: 'canvas', w: this.w, h: H, ops: ops }
   }
 
+  // The rows of the threads through a part of a map, each once: per thread its stop's rows there, else the thread's own
+  // row of the card's data, else its rows. pairs: [stop or null, thread or null].
+  function mapRows(pairs) {
+    const out = []
+    const seen = new Set()
+    const add = r => { if (typeof r === 'string' && r && !seen.has(r) && out.length < MAX_PART_REFS) { seen.add(r); out.push(r) } }
+    for (const [st, t] of pairs) {
+      if (st && st.ref && st.ref.length) st.ref.forEach(add)
+      else if (t && t.row) add(t.row)
+      else if (t && t.ref) t.ref.forEach(add)
+    }
+    return out
+  }
+
   function makeMap(k, ctx, T, spec, o) {
     o = isObj(o) ? o : {}
-    const M = mapSpec(spec, o)
+    const M = mapSpec(spec, o, ctx)
     // inside a frame by default, as k.bars is: the frame takes four columns
     const W = clamp(int(o.w, k.w - 4), 16, MAX_SIDE)
     const full = o.full != null ? !!o.full : isObj(spec) && spec.full != null ? !!spec.full : k.mode === 'detail'
@@ -1343,6 +1362,8 @@
 
     // regions: one per station, group and lane, with the station's rows and its moves as examples
     const regOf = new Map()
+    const byId = new Map(M.threads.map(t => [t.id, t]))
+    const threadOf = id => byId.get(id) || null
     const unitWord = (n, u) => (u ? `${fmt(n)} ${n === 1 ? u.replace(/s$/, '') : u}` : fmt(n))
     const stationRegion = (g, s, extra) => {
       if (regOf.has('s:' + s.id)) return regOf.get('s:' + s.id)
@@ -1359,7 +1380,8 @@
         const span = st.from != null ? ` · ${st.to != null && st.to !== st.from ? `${fmt(st.from)}–${fmt(st.to)}` : fmt(st.from)}` : ''
         recs.push({ ref: st.ref[0], text: `${st.thread}${span}${st.note ? ': ' + st.note : ''}` })
       })
-      if (!meta.ref && recs.length) { const r = recs.slice(0, 3).map(x => x.ref).filter(Boolean); if (r.length) meta.ref = r.length === 1 ? r[0] : r }
+      // with no ref of its own: the rows of every thread through it
+      if (!meta.ref) { const r = mapRows(s.stops.map(st => [st, threadOf(st.thread)])); if (r.length) meta.ref = r.length === 1 ? r[0] : r }
       if (s.threads.length && s.threads.length <= 400) meta.threads = s.threads.slice()
       if (recs.length) meta.examples = registerExamples(ctx, 'ex-' + mslug(s.id, 40), { label: `${s.label}: ${s.threads.length > 1 ? 'the ' + unit + ' through it' : 'its rows'}`, records: recs.slice(0, 200), total: recs.length, fmt: '{text}' })
       const id = regionId(ctx, 'st-' + mslug(s.id, 56), 'map station', meta)
@@ -1944,15 +1966,18 @@
       if (L.v && !L.mixed) meta.value = L.v
       if (L.tids.length) meta.threads = L.tids.slice(0, 400)
       const recs = []
+      const pairs = []
       L.tids.forEach(tid => {
         const t = threads.find(x => x.id === tid)
         if (!t) return
         const st = t.stops.find(s => s.station === e.b)
-        const ref = (st && st.ref && st.ref[0]) || (t.ref && t.ref[0])
+        pairs.push([st || null, t])
+        const ref = (st && st.ref && st.ref[0]) || t.row || (t.ref && t.ref[0])
         recs.push({ ref, text: `${t.label}${lens ? ' · ' + valueOf(t) : ''}${st && st.from != null ? ' · reaches ' + B.label + ' at ' + fmt(st.from) : ''}` })
       })
+      // the link's own ref, else the rows of every thread through it, as a station's
       if (e.ref) meta.ref = e.ref.length === 1 ? e.ref[0] : e.ref
-      else if (recs.some(r => r.ref)) { const r = recs.filter(x => x.ref).slice(0, 3).map(x => x.ref); meta.ref = r.length === 1 ? r[0] : r }
+      else { const r = mapRows(pairs); if (r.length) meta.ref = r.length === 1 ? r[0] : r }
       if (recs.length) meta.examples = registerExamples(ctx, 'ex-ln-' + mslug(A.id, 18) + '-' + mslug(B.id, 18) + (L.v ? '-' + mslug(L.v, 12) : ''), { label: meta.label, records: recs.slice(0, 200), total: recs.length, fmt: '{text}' })
       const id = regionId(ctx, 'ln-' + mslug(A.id, 20) + '-' + mslug(B.id, 20) + (L.v && !L.mixed ? '-' + mslug(L.v, 16) : ''), 'map lane', meta)
       g.regs.set(id, { meta, rects: [] })
@@ -2017,7 +2042,7 @@
       delete meta.id
       if (G.note) meta.note = G.note
       if (G.ref) meta.ref = G.ref.length === 1 ? G.ref[0] : G.ref
-      else { const r = G.items.filter(s => s.ref).slice(0, 3).map(s => s.ref[0]); if (r.length) meta.ref = r }
+      else { const r = mapRows(G.items.filter(s => s.ref).map(s => [{ ref: s.ref }, null])); if (r.length) meta.ref = r.length === 1 ? r[0] : r }
       const id = regionId(ctx, G.rest ? 'grp-other' : 'grp-' + mslug(G.id, 56), 'map group', meta)
       g.regs.set(id, { meta, rects: [] })
       return id

@@ -112,6 +112,30 @@ test('many threads, calm: an origin forking into the stations that split them, t
   assert.ok(/ 8 /.test(t), 'the lane prints its count')
 })
 
+test('a link carries the rows of every thread through it, as a station does: a part of 43 threads opens 43 threads\' rows', () => {
+  // the stops bound from a query: the lane's rows are each thread's stop where it ends
+  const g = draw(many(24), { w: 100 })
+  const lane = g.grid.regions.find(r => r.id.startsWith('ln-all-timezone'))
+  assert.equal(lane.meta.threads.length, 8)
+  assert.equal(lane.meta.ref.length, 8, JSON.stringify(lane.meta.ref))
+  for (const t of lane.meta.threads) assert.ok(lane.meta.ref.some(r => r.startsWith(`runs/${t}.jsonl#`)), t)
+  // a station with no ref of its own: every thread's rows there (24 threads read the test)
+  const read = region(draw({ ...many(24), full: true }, { w: 110 }), 'st-read')
+  assert.equal(read.meta.ref.length, 24, JSON.stringify(read.meta))
+  // threads that are rows of a query's output (each with its own ref) and stops with none: the link opens the threads
+  const data = many(24)
+  data.threads = data.threads.map(t => ({ ...t, _ref: `q4#id=${t.id}`, _rows: [`runs/${t.id}.jsonl#L1-100`] }))
+  data.moves = data.moves.map(({ _rows, ...m }) => m)
+  const h = draw({ ...data, full: true }, { w: 110 })
+  const links = h.grid.regions.filter(r => r.id.startsWith('ln-'))
+  assert.ok(links.length > 3)
+  for (const l of links) {
+    const refs = Array.isArray(l.meta.ref) ? l.meta.ref : [l.meta.ref]
+    assert.equal(refs.length, l.meta.threads.length, `${l.id}: ${JSON.stringify(l.meta)}`)
+    assert.deepEqual([...refs].sort(), l.meta.threads.map(t => `q4#id=${t}`).sort())
+  }
+})
+
 test('many threads, full: every station, one lane per lens value with its count, distinct tones, back links named', () => {
   const data = many(24)
   // a run that goes back: fixture -> search
