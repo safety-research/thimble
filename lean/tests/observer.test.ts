@@ -38,7 +38,7 @@ type Any = any
 
 /** The session around the observer: one object on disk, the Node children, the model's two calls (answered by
  *  `question` and `fork`), the prompt and the band. */
-function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: Record<string, string>; verb?: () => Json } = {}) {
+function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: Record<string, string>; verb?: () => Json; squeeze?: string; holdPass?: Promise<void> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...(o.env ?? {}) })
   mock.store(on)
   on('session.cwd', () => ({ value: ROOT }))
@@ -75,13 +75,20 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
   const qblocks: { text: string; cache?: true }[][] = []
   // the question step is a completion with no system prompt; the pass is one with the frame and its lenses as the
   // system prompt (observer:v2), or a fork of the session (observer:v1)
-  const pass = (prompt: string) => {
+  const pass = async (prompt: string) => {
+    if (o.holdPass) await o.holdPass
     forks.push(prompt)
     const out = typeof o.fork === 'function' ? o.fork() : o.fork ?? { notes: [], line: null, settled: false, hints: {} }
     return { value: { isAnswered: true, text: JSON.stringify(out), usage: USAGE } }
   }
   const efforts: (string | null)[] = []
-  on('model.complete', (_$: unknown, e: { prompt: string; system?: string; effort?: string; promptBlocks?: { text: string; cache?: true }[] }) => {
+  // squeeze's rewrites (its prompt's stub is THE PROMPT), each answered with `squeeze`
+  const squeezes: string[] = []
+  on('model.complete', async (_$: unknown, e: { prompt: string; system?: string; effort?: string; promptBlocks?: { text: string; cache?: true }[] }) => {
+    if (e.system === 'THE PROMPT') {
+      squeezes.push(String(e.prompt))
+      return { value: { isAnswered: true, text: `<text>${o.squeeze ?? 'Squeezed.'}</text>`, usage: USAGE } }
+    }
     if (e.system) { efforts.push(e.effort ?? null); return pass(`${e.system}\n${e.prompt}`) }
     questions.push(String(e.prompt))
     qblocks.push([...(e.promptBlocks ?? [])])
@@ -116,7 +123,7 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
   })
   const toasts: string[] = []
   on('ui.toast', (_$: unknown, e: unknown) => { toasts.push(typeof e === 'string' ? e : String((e as { text?: string; message?: string })?.text ?? (e as { message?: string })?.message ?? JSON.stringify(e))); return { value: undefined } })
-  return { files, runs, forks, questions, qblocks, submitted, filled, at, clock, events, toasts, efforts }
+  return { files, runs, forks, questions, qblocks, squeezes, submitted, filled, at, clock, events, toasts, efforts }
 }
 
 // every string a drawn tree holds, in order
@@ -534,3 +541,53 @@ test('a version that does not exist: the default is read, and one line says so',
   expect((w.events.find(e => e.kind === 'prompts')!.problems as string[]).length).toBe(1)
 })
 
+
+// ------------------------------------------------------------------------------------------------ the order with squeeze
+
+test("a step on Report ↔ Interpret made while the look runs waits for it, then counts from the level the look gave: one step toward report from interpret is balanced", async ($, on) => {
+  let release = () => {}
+  const held = new Promise<void>(r => { release = r })
+  const w = world(on, { holdPass: held, squeeze: 'June 18, in a few words.', fork: { notes: [], line: null, settled: false, verbs: { s: { at: { interpret: 'interpret', familiarity: 'working' } } }, glosses: [] } })
+  on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: 'June 18 had the most saves, because the fixture scope leaked between tests.', tools: 2, save: true })
+  await w.clock.settle()
+  // the chips open with Report ↔ Interpret in its middle; < asks for one step toward report before the look has said
+  await press($, w.clock, key('s'))
+  await press($, w.clock, key('2'))
+  await press($, w.clock, key('<'))
+  await w.clock.settle()
+  expect(w.squeezes.length).toBe(0)
+  // the look's pass comes back: the original is at interpret, so the step lands on balanced
+  release()
+  await w.clock.settle()
+  await w.clock.advance(100)
+  await w.clock.settle()
+  expect(w.squeezes.length).toBe(1)
+  expect(w.squeezes[0]).toContain('- Report ↔ Interpret: balanced (levels report · balanced · interpret; the original is at interpret)')
+  const rec = JSON.parse(w.files[MSGPATH]!)
+  expect(rec.squeeze.at).toEqual({ interpret: 1 })
+  expect(rec.shown).toBe('June 18, in a few words.')
+})
+
+test('a step on Length, whose original level is always known, goes at once while the look runs', async ($, on) => {
+  let release = () => {}
+  const held = new Promise<void>(r => { release = r })
+  const w = world(on, { holdPass: held, squeeze: 'June 18.', fork: { notes: [], line: null, settled: false, verbs: { s: { at: { interpret: 'report', familiarity: 'fluent' } } }, glosses: [] } })
+  on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: 'June 18 had the most saves, because the fixture scope leaked between tests.', tools: 2, save: true })
+  await w.clock.settle()
+  await press($, w.clock, key('s'))
+  await press($, w.clock, key('<'))
+  await w.clock.settle()
+  expect(w.forks.length).toBe(0)
+  expect(w.squeezes.length).toBe(1)
+  expect(w.squeezes[0]).toContain('- Length: medium')
+  expect(w.squeezes[0]).toContain('- Report ↔ Interpret: as the original')
+  release()
+  await w.clock.settle()
+  // the look's levels came after: the version written stays the one the chips show
+  const rec = JSON.parse(w.files[MSGPATH]!)
+  expect(rec.squeeze.at).toEqual({ length: 2 })
+  expect(Object.keys(rec.squeeze.versions)).toEqual(['length=2'])
+  expect(rec.shown).toBe('June 18.')
+})

@@ -10,7 +10,9 @@
 //   a stretch           between two ends the person types after +, such as "engineer and manager": the original
 //                       stands at the first end (0), and each of 3 steps moves the text toward the second.
 // The observer says where the original stands on Report ↔ Interpret and Familiarity (record.verbs.s.at); until it
-// has, each stands in its middle. Every chip counts in every rewrite: one $.model.complete call writes the message at
+// has, each stands in its middle. A long answer arrives squeezed at Length short before the observer's look ends, and
+// the other chips "as the original", which stays true whatever level the look gives them. A step on one of them made
+// while that look runs waits for it, and then counts from the level it gives (rebaseAt; term.ts). Every chip counts in every rewrite: one $.model.complete call writes the message at
 // all the chips' levels at once, and each version written is kept, so a state seen before comes back with no call.
 //
 // The record keeps it (CONTRACT 1, beside `shown`):
@@ -110,6 +112,31 @@ export function stepAt(rec, id, dir) {
   const to = chip.level + dir
   if (to < 0 || to >= chip.levels.length) return null
   return { ...(sq(rec).at || {}), [id]: to }
+}
+
+/** The fixed chips other than Length that `at` moves while nobody has said where the original stands on them: such a
+ *  step counts from the chip's middle until the observer gives the original's level. */
+export function unplacedMoves(rec, at) {
+  return chipsOf({ ...rec, squeeze: { ...sq(rec), at } }).filter(c => c.kind === 'fixed' && c.id !== LENGTH.id && !c.known && c.level !== c.level0).map(c => c.id)
+}
+
+/**
+ * `at`, set on the record as it was before the observer said where the original stands (`before`), counted again from
+ * where it says (`after`): each such chip keeps the steps the person made, now from the original's level, within the
+ * chip's levels. A step from "balanced" (the middle) to "report" is one step toward report; when the original is at
+ * "interpret", it becomes "balanced". A chip that comes back to the original's level is left out, as the original.
+ */
+export function rebaseAt(before, after, at) {
+  const was = new Map(chipsOf({ ...before, squeeze: { ...sq(before), at: {} } }).map(c => [c.id, c]))
+  const out = { ...(at || {}) }
+  for (const c of chipsOf({ ...after, squeeze: { ...sq(after), at: {} } })) {
+    const b = was.get(c.id)
+    if (!b || c.kind !== 'fixed' || c.id === LENGTH.id || b.known || !c.known || !Number.isInteger(out[c.id])) continue
+    const to = Math.max(0, Math.min(c.levels.length - 1, c.level0 + (out[c.id] - b.level0)))
+    if (to === c.level0) delete out[c.id]
+    else out[c.id] = to
+  }
+  return out
 }
 
 /**

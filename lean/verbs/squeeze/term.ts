@@ -19,8 +19,9 @@ import { promptText as registryText } from '../../prompts/prompts'
 import { remark as remarkAny } from '../../shell/message.js'
 import { tracked } from '../../telemetry/telemetry'
 import { FEATURES } from '../../prompts/registry.mjs'
-import { claimsStore, questionBefore, recordNow, saveRecord } from '../../shell/shell'
-import { ARRIVE, applyRewrite, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, isLong, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stretchChip, termsOf, withStretch } from './chips.mjs'
+import { lookPending } from '../../observer/observer'
+import { answerRow, claimsStore, questionBefore, recordNow, saveRecord } from '../../shell/shell'
+import { ARRIVE, applyRewrite, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, isLong, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, stretchChip, termsOf, unplacedMoves, withStretch } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -37,6 +38,8 @@ const remark = (rec: MsgRecord) => remarkAny(rec) as MsgRecord
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 4000, timeoutMs: 90000 }
 const TICK = 50
+// the longest a step on Report ↔ Interpret or Familiarity waits for the observer's look to say where the original stands
+const LEVELS_WAIT_MS = 30000
 const BLANK: SqzUi = { focus: 'length', adding: false, running: null, error: null, tick: 0 }
 
 // the module's memory: the call running per row and the one wanted after it; the text writing in per row; the
@@ -159,6 +162,7 @@ export async function setLevels($: Engine, row: string, at: At): Promise<void> {
   try {
     let next: Want | null = { at }
     while (next) {
+      next = { at: await fromObserved($, row, next.at) }
       await once($, row, next)
       const j = inflight.get(row)!
       next = j.want
@@ -169,6 +173,29 @@ export async function setLevels($: Engine, row: string, at: At): Promise<void> {
     await setUi($, row, { running: null, want: null })
     await markRecord($, row, { want: null, error: (await uiOf($, row)).error ?? null })
   }
+}
+
+/**
+ * A step on Report ↔ Interpret or Familiarity of the latest answer, made before the observer said where the original
+ * stands on it, while its look still runs: it waits for that look (at most LEVELS_WAIT_MS) and then counts from the
+ * level the look gave, so a change never starts from the chip's middle when the look is about to say otherwise. A
+ * change of Length alone, or of a chip already placed, goes at once. Returns the levels to write.
+ */
+async function fromObserved($: Engine, row: string, at: At): Promise<At> {
+  const rec = await recordNow($, row)
+  if (!rec || !unplacedMoves(rec, at).length) return at
+  const look = row === (await answerRow($)) ? lookPending() : null
+  if (!look) return at
+  await Promise.race([look, new Promise<void>(done => { $.clock.after(LEVELS_WAIT_MS, () => done()) })])
+  const now = (await recordNow($, row)) || rec
+  const to = rebaseAt(rec, now, at) as At
+  // a change pressed while this one waited counted from the middle too; the chips show the latest, as counted now
+  const j = inflight.get(row)
+  if (j?.want) j.want = { at: rebaseAt(rec, now, j.want.at) as At }
+  const shows = j?.want?.at ?? to
+  await setUi($, row, { want: shows })
+  await markRecord($, row, { want: shows, error: null })
+  return to
 }
 
 /** The record's squeeze with `want` (where the chips go) and `error` (why the last call failed) set or cleared. */
@@ -332,7 +359,11 @@ async function log($: Engine, row: Record<string, unknown>): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ arriving squeezed
 
-/** The turn's answer, once the turn has ended: a message taller than half the screen arrives squeezed, at Length short. */
+/**
+ * The turn's answer, once the turn has ended: a message taller than half the screen arrives squeezed, at Length short,
+ * at once, beside the observer's look and never waiting for it. Its other chips are "as the original", which holds
+ * whatever level the look then gives them, so the version stays the same version.
+ */
 export async function arrive($: Engine, row: string): Promise<void> {
   const rec = await recordNow($, row)
   if (!rec || rec.shown != null || (rec as Any).squeeze) return

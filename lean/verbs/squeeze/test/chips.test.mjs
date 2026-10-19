@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { newRecord, remark, verbsOf, withObserver } from '../../../shell/message.js'
-import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, glyph, isHeading, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, termsOf, withStretch } from '../chips.mjs'
+import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, glyph, isHeading, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, termsOf, unplacedMoves, withStretch } from '../chips.mjs'
 import { parseWords, run } from '../run.mjs'
 
 // a made-up report, as a long reply takes it
@@ -67,6 +67,28 @@ test('a chip steps one level at a time and stops at its ends; its dots show one 
   assert.equal(glyph(fam, 4), '○○○○●')
   // the version's key names only the levels that differ from the original
   assert.equal(keyOf(chipsOf({ ...rec, squeeze: { at: { length: ARRIVE, interpret: 1 } } })), 'length=1')
+})
+
+test("a step made before the observer placed the original counts again from the level it gives; Length and placed chips are left as they are", () => {
+  const rec = record()
+  const placed = withObserver(rec, { verbs: { s: { at: { interpret: 'interpret', familiarity: 'fluent' } } }, glosses: {} })
+  // one step toward report from the middle (balanced) moves Report ↔ Interpret before anyone said where the original is
+  assert.deepEqual(unplacedMoves(rec, { length: 1, interpret: 0 }), ['interpret'])
+  assert.deepEqual(unplacedMoves(rec, { length: 1 }), [])
+  assert.deepEqual(unplacedMoves(placed, { interpret: 0 }), [])
+  // the original stands at interpret: one step toward report is balanced; Length stays as set
+  assert.deepEqual(rebaseAt(rec, placed, { length: 1, interpret: 0 }), { length: 1, interpret: 1 })
+  // two steps up from working toward expert, the original at fluent: the last level, expert
+  assert.deepEqual(rebaseAt(rec, placed, { familiarity: 4 }), { familiarity: 4 })
+  assert.deepEqual(rebaseAt(rec, placed, { familiarity: 3 }), { familiarity: 4 })
+  // a step that lands on the original's level, or past an end, is the original on that chip
+  const atReport = withObserver(rec, { verbs: { s: { at: { interpret: 'report' } } }, glosses: {} })
+  assert.deepEqual(rebaseAt(rec, atReport, { length: 2, interpret: 0 }), { length: 2 })
+  // nothing to count again when the observer has said nothing, or had placed the chip already
+  assert.deepEqual(rebaseAt(rec, rec, { interpret: 0 }), { interpret: 0 })
+  assert.deepEqual(rebaseAt(placed, placed, { interpret: 1 }), { interpret: 1 })
+  // the arrival's version stays the same version whatever level the observer gives: its other chips are as the original
+  assert.equal(keyOf(chipsOf({ ...placed, squeeze: { at: { length: ARRIVE } } })), keyOf(chipsOf({ ...rec, squeeze: { at: { length: ARRIVE } } })))
 })
 
 test('a stretch is two ends the person types: it stands at the original, its first end, and each of 3 steps moves toward the second', () => {

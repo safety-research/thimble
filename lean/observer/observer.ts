@@ -25,6 +25,10 @@
 //    person's prompt, Claude's words and tool calls cut to fit, the answer), its objects, and each lens's digest. It
 //    never reads the session before the turn. `observer:v1` is the earlier pass: one prompt in a fork of the session.
 //    Every call is a line in the session's events (telemetry), with each lens's share of the pass.
+//    Order with squeeze: a long answer arrives squeezed when the turn ends, beside this look, and never waits for it;
+//    its other chips stay as the original, true whatever level the pass gives. A step the person makes on Report ↔
+//    Interpret or Familiarity before the pass has said where the answer stands waits for the look (lookPending) and
+//    counts from the level it gives.
 // A lens turned off (LEAN_PROMPTS=lens-explain:off) is neither asked nor merged.
 //
 // Where its output goes:
@@ -125,6 +129,25 @@ const S = {
   deferred: [] as { id: string; ranking: Ranking }[],
   hints: {} as Record<string, Ranking>,
   log: [] as Record<string, unknown>[],
+}
+
+// the looks to come and the one running: a promise that settles when the last of them has ended, so a squeeze step
+// that needs the levels a look gives can wait for them (verbs/squeeze/term.ts)
+let pendingLook: { promise: Promise<void>; settle: () => void } | null = null
+function lookAhead(): void {
+  if (pendingLook) return
+  let settle = () => {}
+  const promise = new Promise<void>(done => { settle = done })
+  pendingLook = { promise, settle }
+}
+function lookEnded(): void {
+  const p = pendingLook
+  pendingLook = null
+  p?.settle()
+}
+/** While a look is on its way or running: a promise that settles when it has merged its lenses (or ended); else null. */
+export function lookPending(): Promise<void> | null {
+  return pendingLook?.promise ?? null
 }
 
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : [])
@@ -451,6 +474,7 @@ async function look($: Engine, t: Look): Promise<void> {
       // prompt (cached), the turn is the message
       const tmpl = await promptText($, 'observer-turn')
       // a long answer arrives squeezed: the person reads the squeezed text, which the pass reads beside the original
+      // when that rewrite (which starts as the turn ends, beside this look) is back by now
       const atRow = await answerRow($)
       const before = atRow ? await messageRecord($, atRow) : null
       const squeezed = before && typeof before.shown === 'string' && before.shown.trim() && before.shown !== before.text ? before.shown : ''
@@ -606,6 +630,7 @@ async function look($: Engine, t: Look): Promise<void> {
     const next = S.again
     S.again = null
     if (next) $.clock.after(50, () => { void look($, next) })
+    else lookEnded()
   }
 }
 
@@ -836,6 +861,7 @@ export const registerObserver: Register = (on, options) => {
       const p = S.prompt
       const earlier = p.typed && S.questions.at(-1) === p.text ? S.questions.slice(0, -1) : S.questions.slice()
       const t: Look = { turnId: e.turnId, turnNo: S.turnNo, steps: S.steps, tools: S.tools, answer: e.answer || '', question: p.text, typed: p.typed, verb: p.verb, earlier, since: S.since }
+      lookAhead()
       $.clock.after(50, () => { void look($, t) })
     } catch {
       // the turn ends whatever the observer makes of it
@@ -948,4 +974,5 @@ export function resetObserver(): void {
   })
   sending = false
   carrying = []
+  lookEnded()
 }
