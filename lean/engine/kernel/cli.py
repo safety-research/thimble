@@ -282,6 +282,11 @@ def _lineage_line(q: dict[str, Any]) -> str:
     if q.get("lineage_error"):
         say = (f"No rows per output row: lean could not find them ({q['lineage_error']}), so each value rests on all the "
                "rows read (tally() keeps them per row).")
+    opened = {x["path"] for x in q.get("inputs") or [] if x.get("how") == "opened"}
+    if mode == "loop" and opened and all(str(x).split("#")[0] in opened for rs in q.get("rows") or [] for x in rs):
+        # the records rest on the files each pass opened, not on frames it loaded
+        say = (f"Each output row keeps the rows of the files its loop iteration opened before it appended the record to "
+               f"`{q.get('frame')}` (a JSON document is one row); a `_ref` column keeps finer rows.")
     if q.get("cells") and mode != "loop":
         say += f" A count its loop kept rows for (in `{q.get('loop')}`) opens those rows."
     return say + (f" Cite a value as {ex}." if ex else "")

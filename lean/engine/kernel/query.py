@@ -240,6 +240,8 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
     pd.set_option("display.max_columns", 14)
     pd.set_option("display.max_colwidth", 60)
     pd.set_option("display.max_rows", 60)
+    info.setdefault("opened_log", [])
+    info.setdefault("row_files", set())
 
     def load(pattern: str, fields: list[str] | None = None, table: str | None = None) -> "pd.DataFrame":
         """Every row of the files a path or glob names, with `_ref` (cite it) and `_file`. `x.db#table` (or
@@ -277,6 +279,8 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         """(ref, row) for each row of the files a path or glob names, one at a time."""
         for rel in S.expand_glob(st.root, pattern):
             n = 0
+            # read by rows(), not opened by the code: a record a loop appends rests on it only by what the loop held
+            info["row_files"].add(rel)
             for row in S.iter_rows(st.root, rel):
                 n += 1
                 yield row.ref, row.value
@@ -359,7 +363,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         info["samples"] += 1
         return df.sample(min(n, len(df)), random_state=seed)
 
-    loop = _Records(info)
+    loop = _Records(info, st)
     return {"pd": pd, "np": np, "json": json, "re": re, "Counter": Counter, "defaultdict": defaultdict,
             "ROOT": st.root, "load": load, "rows": rows, "tally": tally,
             "sample": sample, "keep": keep, "use": use, APPEND: loop.append, "__name__": "__lean_query__"}
@@ -392,8 +396,11 @@ class _Records:
     while it lives, so one held across the whole loop (the table the loop filters) tells apart from one made for a
     single record."""
 
-    def __init__(self, info: dict[str, Any]) -> None:
+    def __init__(self, info: dict[str, Any], st: Store | None = None) -> None:
         self.info = info
+        self.st = st
+        # each opened file's rows as one row set (_file_rows)
+        self.whole: dict[str, str | None] = {}
         self.lists: dict[int, dict[str, Any]] = {}
         self.live: dict[int, tuple[Any, int]] = {}
         self.refs: dict[int, tuple[int, Any]] = {}
@@ -445,7 +452,17 @@ class _Records:
 
         if not isinstance(x, (dict, tuple, list, pd.Series)):
             return
-        reg = self.lists.setdefault(id(obj), {"obj": obj, "at": {}, "loads": 0})
+        reg = self.lists.setdefault(id(obj), {"obj": obj, "at": {}, "loads": 0, "opens": 0, "files": {}})
+        # the source files the code opened since the list's previous record (json.load(open(f)) in the loop), else the
+        # ones the previous record rests on (records appended in an inner loop over one file): what a record rests on
+        # when it held no frame of source rows of its own
+        log = self.info.get("opened_log") or []
+        if len(log) > reg["opens"]:
+            loaded = {x["path"] for x in self.info["loads"]} | set(self.info.get("row_files") or ())
+            new = [f for f in log[reg["opens"]:] if f not in loaded]
+            if new:
+                reg["now"] = tuple(dict.fromkeys(new))
+            reg["opens"] = len(log)
         held: set[int] = set()
         frames = self.info["frames"]
         for f in frames[reg["loads"]:]:
@@ -472,6 +489,8 @@ class _Records:
             return
         k = len(obj) - 1
         reg["at"][k] = held
+        if reg.get("now"):
+            reg["files"][k] = reg["now"]
         # a yes/no per row of a frame held here (`ok` beside `m`): the rows it marks and the rows it leaves are what a
         # count of either side rests on
         marked: list[tuple[int, list[str]]] = []
@@ -511,12 +530,15 @@ class _Records:
         deadline = time.time() + 3.0
         for i, k in enumerate(places):
             held = reg["at"].get(k) or set()
-            own = sorted(s for s in held if not many or seen[s] == 1) or sorted(held)
+            files = reg["files"].get(k)
+            # the frames only this record held; with none, the files its pass opened (nothing finer is known), else the
+            # frames every record held
+            own = sorted(s for s in held if not many or seen[s] == 1) or ([] if files else sorted(held))
             if time.time() > deadline:
                 return None
             keep = _narrowest(own, self.refs)
             refs = list(dict.fromkeys(str(r) for s in keep for r in self.refs[s][1]))
-            rows.append(R.compress(refs))
+            rows.append(R.compress(refs) if refs or not files else self._file_rows(files))
             cell: dict[str, list[str]] = {}
             r = df.iloc[i]
             for c in df.columns:
@@ -542,6 +564,37 @@ class _Records:
         if not any(rows):
             return None
         return rows, cells
+
+    def _file_rows(self, files: tuple[str, ...]) -> list[str]:
+        """The rows of files a loop's pass opened, as row sets: a JSON document is its root row (`x.json#/`), a file of
+        lines or records all of them (`x.jsonl#L1-480`, `x.csv#row=1-30`)."""
+        out: list[str] = []
+        for rel in files:
+            if rel not in self.whole:
+                self.whole[rel] = self._whole(rel)
+            if self.whole[rel]:
+                out.append(self.whole[rel])
+        return out
+
+    def _whole(self, rel: str) -> str | None:
+        st = self.st
+        if st is None:
+            return None
+        try:
+            kind = S.kind_of_file(st.root, rel)
+            if kind == "json":
+                ref = S.document_ref(st.root, rel)
+                return ref if ref != rel else None
+            if kind not in ("jsonl", "transcript", "text", "csv", "markdown", "diff"):
+                return None
+            c = S.counts(st.root, [rel], st.cache / "counts.json").get(rel) or {}
+            n = int(c.get("rows" if kind == "csv" else "lines") or 0)
+        except (OSError, ValueError):
+            return None
+        if n <= 0:
+            return None
+        nums = "1" if n == 1 else f"1-{n}"
+        return f"{rel}#row={nums}" if kind == "csv" else f"{rel}#L{nums}"
 
 
 def _value_groups(f: Any) -> dict[tuple[str, str], Any]:
@@ -952,7 +1005,8 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
     out["table"] = [{k: jsonable(v) for k, v in r.items()} for r in table.head(TABLE_MAX).to_dict(orient="records")]
     out["truncated"] = len(df) > TABLE_MAX
     if row_refs is not None:
-        out["rows"] = [R.compress(x) for x in row_refs[:TABLE_MAX]]
+        docs = Documents(ns.get("ROOT"))
+        out["rows"] = [R.compress(docs(x)) for x in row_refs[:TABLE_MAX]]
     elif loop is not None:
         out["rows"], out["frame"] = loop[0], loop[2]
         out["mode"] = "loop"
@@ -966,6 +1020,31 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
             out["cells"] = cells
             out["loop"] = loop[2]
     return out
+
+
+class Documents:
+    """Refs with each whole-file ref of a JSON document as its root row (`x.json` as `x.json#/`, S.document_ref), each
+    file looked at once."""
+
+    def __init__(self, root: Any) -> None:
+        self.root = Path(root) if root else None
+        self.seen: dict[str, str] = {}
+
+    def __call__(self, refs: list[str]) -> list[str]:
+        if self.root is None:
+            return refs
+        out = None
+        for i, r in enumerate(refs):
+            if "#" in r or not r.lower().endswith(".json"):
+                continue
+            d = self.seen.get(r)
+            if d is None:
+                d = self.seen[r] = S.document_ref(self.root, r)
+            if d != r:
+                if out is None:
+                    out = list(refs)
+                out[i] = d
+        return refs if out is None else list(dict.fromkeys(out))
 
 
 def _reset_index(df: Any) -> Any:
@@ -1226,7 +1305,7 @@ def _by_key(df: Any, keys: list[str], ns: dict[str, Any], frames: list[Any]):
 def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
     """Run code as a notebook cell over the root folder: its printed text, then the value of its last expression."""
     info: dict[str, Any] = {"loads": [], "samples": 0, "opened": set(), "external": set(), "kept": [],
-                            "uses": [], "frames": []}
+                            "uses": [], "frames": [], "opened_log": [], "row_files": set()}
     root = str(st.root) + os.sep
     rec_dir = str(st.dir) + os.sep
     # the kernel's own files (its code, its cache of loaded frames) are no input of the query
@@ -1238,7 +1317,15 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
             if p.startswith(rec_dir) or p.startswith(own):
                 return
             if p.startswith(root):
-                info["opened"].add(os.path.relpath(p, root))
+                rel = os.path.relpath(p, root)
+                info["opened"].add(rel)
+                # the source files the code opened to read, in order: a record a loop appends rests on the ones its
+                # pass opened (_Records)
+                mode = args[1] if len(args) > 1 else None
+                flags = args[2] if len(args) > 2 and isinstance(args[2], int) else 0
+                reads = (not any(c in mode for c in "wax+")) if isinstance(mode, str) else not (flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT))
+                if reads and S.kind_of(Path(rel)) and (not info["opened_log"] or info["opened_log"][-1] != rel):
+                    info["opened_log"].append(rel)
             elif not p.startswith((sys.prefix, sys.base_prefix, "/usr/", "/proc/", "/dev/", "/etc/", "/sys/", "/tmp/")) and "site-packages" not in p:
                 info["external"].add(p)
 
@@ -1281,7 +1368,7 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
     if err is None and lin.get("rows") is None:
         # no rows per output row: the rows the query read (loaded or used) stand behind the query as a whole
         try:
-            lin["read"] = rowsets_of(info["frames"])
+            lin["read"] = Documents(st.root)(rowsets_of(info["frames"]))
         except Exception:  # noqa: BLE001 — refs that do not parse: the query still resolves to its files
             lin["read"] = []
     if info["loads"] and all(x.get("via") == "rows" for x in info["loads"]):
@@ -1455,6 +1542,10 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
                 return f"{qid} builds on {', '.join(sums)}, a summary whose values keep no rows of their own"
             if (q.get("lineage") == "loop" and col is not None and i is not None and i < len(rows) and rows[i]
                     and value_rows(q, i, col) is rows[i] and not counted):
+                opened = {x["path"] for x in q.get("inputs") or [] if x.get("how") == "opened"}
+                if all(str(x).split("#")[0] in opened for x in rows[i]):
+                    return (f"{qid} made this output row in a loop from the files it opened for it "
+                            f"({_files_text(rows[i])}), and it does not keep which part of them the value used")
                 return (f"{qid} made this output row in a loop from these {_count(rows[i]):,} rows "
                         f"({_files_text(rows[i])}), the frames it loaded and filtered for it, and it does not keep "
                         "which of them the value used")
@@ -1481,8 +1572,15 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
     elif q.get("via") == "rows":
         why = f"{qid} built its output in a loop over rows() of {_files_text([x['path'] for x in inputs])}, so its values keep no rows"
     elif inputs and all(x.get("how") == "opened" for x in inputs) and not uses:
-        why = (f"{qid} built its output in code from files it opened ({_files_text([x['path'] for x in inputs])}), "
-               "not with load(), so its values keep no rows")
+        paths = [x["path"] for x in inputs]
+        if all(S.document_ref(st.root, p) != p for p in paths):
+            # a JSON document is one row: the value opens the documents, and a pointer per row would keep its part
+            why = (f"{qid} built its output in code from JSON documents it opened ({_files_text(paths)}), so a value "
+                   f"opens the whole document: a `_ref` column of JSON pointers ({paths[0]}#/<key>/<n>) keeps each "
+                   "row's own part")
+        else:
+            why = (f"{qid} built its output in code from files it opened ({_files_text(paths)}), "
+                   "not with load(), so its values keep no rows")
     elif not inputs and not uses:
         why = f"{qid} computed its output in code from no source rows"
     elif bare and len(bare) == len(uses) and not any(x.get("how") == "load" for x in inputs):

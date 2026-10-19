@@ -291,8 +291,9 @@ def resolve(st: Store, ref: str, n: int = 5, pick: str = "spread", label: str | 
     else:
         rowsets = [R.format_source(p)] if p["kind"] not in ("file", "table") else [ref]
         chain.append({"step": "source", "ref": ref, "kind": S.kind_of_file(st.root, p["path"])})
-        if p["kind"] in ("file", "table"):
+        if p["kind"] in ("file", "table") and documents(st, rowsets) == rowsets:
             chain[-1]["why"] = f"{ref} names a whole {'table' if p['kind'] == 'table' else 'file'}, not rows of it"
+    rowsets = documents(st, rowsets)
     if got:
         notes.insert(0, f"{wrote} names more than one value; {got[1]}, so its rows are {ref}'s")
     out: dict[str, Any] = {"ref": ref, "chain": chain, "rows": rowsets, "notes": notes}
@@ -343,7 +344,7 @@ def resolve_many(st: Store, refs: list[str], n: int = 5, pick: str = "spread") -
         for c in r.get("chain") or []:
             if c.get("step") == "query" and c.get("id") not in queries:
                 queries.append(c["id"])
-    rowsets = _merge(rowsets)
+    rowsets = documents(st, _merge(rowsets))
     if bad:
         notes.insert(0, f"{bad} of the {len(refs)} refs name nothing")
     out: dict[str, Any] = {"ref": " ".join(refs[:3]) + (f" … ({len(refs)} refs)" if len(refs) > 3 else ""), "refs": len(refs),
@@ -419,6 +420,13 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
     if isinstance(v, int) and not isinstance(v, bool) and frag and len(idx) == 1:
         step["check"] = "the value equals the number of rows" if v == n else f"the value is {v:,}, the rows are {n:,}"
     return rowsets
+
+
+def documents(st: Store, rowsets: list[str]) -> list[str]:
+    """The row sets with each whole JSON document as its root row (`x.json` as `x.json#/`), so a value that rests on
+    a document opens it: a file that is one JSON document is one row."""
+    out = [S.document_ref(st.root, x) for x in rowsets]
+    return list(dict.fromkeys(out)) if out != rowsets else rowsets
 
 
 def _frag_text(p: dict[str, Any]) -> str:

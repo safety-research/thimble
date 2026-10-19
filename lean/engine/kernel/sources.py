@@ -154,6 +154,33 @@ def json_rows_key(v: Any) -> str | None:
     return best
 
 
+def one_document(p: Path) -> bool:
+    """Whether a .json file holds one JSON value (a document), not one value per line. Read from its first 64 KiB: a
+    file whose first line is a whole value and goes on after it holds one value per line."""
+    try:
+        with open(p, "rb") as f:
+            head = f.read(65536)
+    except OSError:
+        return False
+    first, _, rest = head.lstrip().partition(b"\n")
+    if not rest.strip():
+        return True
+    try:
+        json.loads(first)
+    except ValueError:
+        return True
+    return False
+
+
+def document_ref(root: Path, ref: str) -> str:
+    """A whole-file ref of a JSON document as its root row (`x.json` is `x.json#/`): a file that is one JSON document is
+    one row. Any other ref as it is."""
+    if "#" in ref or not ref.lower().endswith(".json"):
+        return ref
+    p = root / ref
+    return f"{ref}#/" if p.is_file() and one_document(p) else ref
+
+
 def _pointer_get(v: Any, pointer: str) -> Any:
     for part in pointer.split("/")[1:]:
         part = part.replace("~1", "/").replace("~0", "~")
@@ -523,7 +550,9 @@ def fetch(root: Path, rowset: str, limit: int | None = None) -> list[Row]:
                 if limit and len(got) >= limit:
                     break
             return got
-        if kind in ("jsonl", "transcript"):
+        if kind in ("jsonl", "transcript", "json"):
+            # a line of a JSON document is a line of its text: one that holds a whole value (a document on one line,
+            # a .json file of one record per line) reads as that value
             got = []
             top = max(want)
             with open(path, "r", errors="replace") as f:
@@ -556,7 +585,10 @@ def fetch(root: Path, rowset: str, limit: int | None = None) -> list[Row]:
             raise R.RefError(f"{rel} has fewer rows than {max(want)}")
         return got
     if k == "pointer":
-        doc = json.loads(path.read_text(errors="replace"))
+        try:
+            doc = json.loads(path.read_text(errors="replace"))
+        except ValueError as e:
+            raise R.RefError(f"{rel} is not one JSON document ({e}): its rows are lines, as {rel}#L1") from e
         ptrs = [f"{p['prefix']}{n}" for n in p["nums"]] if "nums" in p else [p["pointer"]]
         got = []
         for ptr in ptrs:

@@ -324,6 +324,8 @@ def build(st: Store, spec: dict[str, Any]) -> tuple[dict[str, Any], dict[str, An
     _collect_rows(data, every)
     for c in ctx["cites"]:
         every.extend(c.get("rows") or [])
+    # a whole JSON document is its root row, whether a record names it as the file or as `x.json#/`
+    every = Q.Documents(st.root)(every)
     per_file: dict[str, list[str]] = {}
     for rs in every:
         per_file.setdefault(rs.split("#")[0], []).append(rs)
