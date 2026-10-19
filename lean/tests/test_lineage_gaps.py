@@ -1,6 +1,6 @@
 """Lineage gaps closed: outputs whose index the kernel could not read back (a described frame turned on its side),
 whole JSON documents and the files a loop opened, groupbys on a number column, and row sets of transcript blocks.
-Run: LEAN_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
+Run: THIMBLE_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
 from __future__ import annotations
 
 import json
@@ -28,8 +28,8 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         for e in EVENTS:
             f.write(json.dumps(e) + "\n")
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("LEAN_SESSION", "s-gaps")
-    monkeypatch.delenv("LEAN_ROOT", raising=False)
+    monkeypatch.setenv("THIMBLE_SESSION", "s-gaps")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
     return d
 
 
@@ -77,7 +77,7 @@ def test_a_lineage_that_fails_keeps_the_output_and_says_why(root: Path, monkeypa
     assert q["table"][0] == {"agent": "a0", "value": 10}
     assert q["read"] == ["events.jsonl#L1-40"]
     r = LIN.resolve(st, f"{q['id']}#agent=a1@value")
-    assert r["why"] == (f"lean could not find the rows behind {q['id']}'s output (KeyError: 'index'), so its values keep "
+    assert r["why"] == (f"thimble could not find the rows behind {q['id']}'s output (KeyError: 'index'), so its values keep "
                         "no rows: tally() in the query keeps them per row")
     # the query as a whole still opens every row it read
     assert LIN.resolve(st, q["id"])["count"] == 40

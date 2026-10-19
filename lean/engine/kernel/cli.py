@@ -1,25 +1,25 @@
-"""lean: thimble's kernel as one command, which Claude runs with the Bash tool, so every call goes through the
+"""thimble: thimble's kernel as one command, which Claude runs with the Bash tool, so every call goes through the
 session's permission mode and sandbox like any other command.
 
-    lean sources [GLOB]                     the source files here: kind, rows, size
-    lean rows TARGET [--where EXPR] [--search RE] [-n 5] [--first] [--fields a,b]
-                                            rows with their refs: one ref, or a random sample of a file or glob
-    lean q "what it answers" <<'PY' ... PY  run Python over the sources; keeps the code, inputs, output and the rows
-                                            behind each output row (lean q --rerun q3 runs a query again)
-    lean save [NAME] [--rerun] <<'JSON' ... JSON   (or --from FILE)
-                                            save an object (program + data + lineage) or a new version of one
-    lean list [NAME]                        the objects, or one object with its lineage
-    lean resolve REF [-n 5] [--label WORDS] where a value came from, down to its source rows (a few of them, spread
-                                            across the rows)
-    lean coverage [NAME] [--all]            what was read and what was not (of this session, or of an object)
-    lean trace [REF] [--text PASSAGE] [--in GLOB]
-                                            where it came from and where it went: the path back to its rows, what
-                                            uses it (queries, objects, answers), and in transcripts who read a
-                                            passage and who wrote it after reading it
+    thimble sources [GLOB]                     the source files here: kind, rows, size
+    thimble rows TARGET [--where EXPR] [--search RE] [-n 5] [--first] [--fields a,b]
+                                               rows with their refs: one ref, or a random sample of a file or glob
+    thimble q "what it answers" <<'PY' ... PY  run Python over the sources; keeps the code, inputs, output and the rows
+                                               behind each output row (thimble q --rerun q3 runs a query again)
+    thimble save [NAME] [--rerun] <<'JSON' ... JSON   (or --from FILE)
+                                               save an object (program + data + lineage) or a new version of one
+    thimble list [NAME]                        the objects, or one object with its lineage
+    thimble resolve REF [-n 5] [--label WORDS] where a value came from, down to its source rows (a few of them, spread
+                                               across the rows)
+    thimble coverage [NAME] [--all]            what was read and what was not (of this session, or of an object)
+    thimble trace [REF] [--text PASSAGE] [--in GLOB]
+                                               where it came from and where it went: the path back to its rows, what
+                                               uses it (queries, objects, answers), and in transcripts who read a
+                                               passage and who wrote it after reading it
 
 In a query: load(glob, fields=[...]) gives a DataFrame with each row's `_ref`; tally(df, by) counts and keeps each
 group's rows; use("q3") is an earlier query's output; keep(name, x) and use(name) pass a named result or a label on;
-rows(glob), sample(df, n), pd, np, re, json. The last expression is the output. `lean q --help` says more.
+rows(glob), sample(df, n), pd, np, re, json. The last expression is the output. `thimble q --help` says more.
 
 Add --json to sources, q, list, resolve, coverage or trace for the whole record.
 """
@@ -95,7 +95,7 @@ def cmd_sources(a: argparse.Namespace) -> int:
         for t, fs in sorted(by_top.items(), key=lambda kv: -len(kv[1])):
             kinds = sorted({str(cnt.get(f, {}).get("kind")) for f in fs})
             rows = sum(cnt.get(f, {}).get("rows", 0) for f in fs)
-            print(f"{t}…  {len(fs)} more files  {'/'.join(kinds)}  {fmt(rows)} rows  (lean sources '{t}**' lists them)")
+            print(f"{t}…  {len(fs)} more files  {'/'.join(kinds)}  {fmt(rows)} rows  (thimble sources '{t}**' lists them)")
     total = sum(c.get("rows", 0) for c in cnt.values())
     print(f"\n{len(files):,} source files, {total:,} rows under {st.root}. A row's ref is its stable id: cite it as [↗](<ref>).")
     return 0
@@ -137,7 +137,7 @@ def cmd_rows(a: argparse.Namespace) -> int:
         try:
             p = R.parse(a.target)
             if p["kind"] in ("query", "object"):
-                print(f"{a.target} is a value, not a source row: `lean resolve {a.target}` shows its rows")
+                print(f"{a.target} is a value, not a source row: `thimble resolve {a.target}` shows its rows")
                 return 1
             if p["kind"] != "file" or not p.get("locator"):
                 rows = S.fetch(st.root, a.target, limit=a.n if p["kind"] not in ("block",) else None)
@@ -211,7 +211,7 @@ def cmd_q(a: argparse.Namespace) -> int:
     try:
         import pandas  # noqa: F401
     except ImportError:
-        print("lean q needs pandas: set LEAN_PYTHON to a Python that has it, or install it (pip install pandas)")
+        print("thimble q needs pandas: set THIMBLE_PYTHON to a Python that has it, or install it (pip install pandas)")
         return 2
     if a.rerun:
         old = Q.get(st, a.rerun)
@@ -231,7 +231,7 @@ def cmd_q(a: argparse.Namespace) -> int:
         return 1 if q["error"] else 0
     code = a.code if a.code else stdin_text()
     if not code.strip():
-        print("no code: pass it on stdin, as in lean q \"what it answers\" <<'PY' ... PY")
+        print("no code: pass it on stdin, as in thimble q \"what it answers\" <<'PY' ... PY")
         return 2
     q = Q.run(st, a.about, code)
     if a.json:
@@ -280,7 +280,7 @@ def _lineage_line(q: dict[str, Any]) -> str:
         "query": "No rows per output row: each value rests on all the rows read (tally() keeps them per row).",
     }.get(mode or "query", "")
     if q.get("lineage_error"):
-        say = (f"No rows per output row: lean could not find them ({q['lineage_error']}), so each value rests on all the "
+        say = (f"No rows per output row: thimble could not find them ({q['lineage_error']}), so each value rests on all the "
                "rows read (tally() keeps them per row).")
     how = Q.loop_source(q) if mode == "loop" else None
     if how == "opened":
@@ -310,10 +310,10 @@ def cmd_save(a: argparse.Namespace) -> int:
         try:
             spec = json.loads(raw)
         except ValueError as e:
-            print(f"lean save reads one JSON object on stdin: {e}")
+            print(f"thimble save reads one JSON object on stdin: {e}")
             return 2
         if not isinstance(spec, dict):
-            print("lean save reads one JSON object on stdin")
+            print("thimble save reads one JSON object on stdin")
             return 2
     if a.program:
         spec["program"] = Path(a.program).read_text()
@@ -387,7 +387,7 @@ def cmd_list(a: argparse.Namespace) -> int:
             out_json([{k: o.get(k) for k in ("id", "version", "title", "updated")} for o in objs if o])
             return 0
         if not objs:
-            print("no objects yet: lean save makes one")
+            print("no objects yet: thimble save makes one")
         for o in objs:
             if o:
                 print(O.summary_line(o))
@@ -516,7 +516,7 @@ def cmd_trace(a: argparse.Namespace) -> int:
 
     st = Store()
     if not a.ref and not a.text:
-        print("lean trace needs a ref (a value, a row, a transcript block) or --text with the words to follow")
+        print("thimble trace needs a ref (a value, a row, a transcript block) or --text with the words to follow")
         return 2
     try:
         r = T.trace(st, a.ref, a.text, a.within, answers=not a.no_answers, n=a.n)
@@ -531,7 +531,7 @@ def cmd_trace(a: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="lean", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd")
     p = sub.add_parser("sources", help="the source files here")
     p.add_argument("glob", nargs="?")

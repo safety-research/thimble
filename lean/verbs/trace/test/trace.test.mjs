@@ -15,7 +15,7 @@ import { run, targetOf, traceId } from '../run.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 
-// facts as `lean trace --json` gives them, for made-up data: a count over a labeled log, and a note in a swarm
+// facts as `thimble trace --json` gives them, for made-up data: a count over a labeled log, and a note in a swarm
 const VALUE = {
   ref: 'obj:uses#/kinds/1/n', text: null, label: 'message',
   back: {
@@ -113,7 +113,7 @@ test('without a model, the full trace is asked of Claude in the conversation (as
   const out = await run({ object: first.object, kernel: kernelFor({ [VALUE.ref]: VALUE }), draw, args: 'which rows are links?' })
   assert.equal(out.object, undefined)
   assert.match(out.ask, /full trace of obj:uses#\/kinds\/1\/n: "which rows are links\?"/)
-  assert.match(out.ask, /lean trace obj:uses#\/kinds\/1\/n --json/)
+  assert.match(out.ask, /thimble trace obj:uses#\/kinds\/1\/n --json/)
 })
 
 test('in the shell: the refs it found behind the selected part are what t follows', () => {

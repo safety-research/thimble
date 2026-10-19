@@ -47,7 +47,7 @@ export type Inst = {
   ask: Any | null
   data: { key: string; value: Any } | null
 }
-const VER = { plugin: 'thimble-lean', key: 'panever' } as const
+const VER = { plugin: 'thimble', key: 'panever' } as const
 const insts = new Map<string, Inst>()
 /** A want with no answer after this long is asked again. */
 const WANT_AGAIN_MS = 5000

@@ -14,7 +14,7 @@
 //   region     the selected region's id; regionMeta its meta (meta.ref, meta.text or meta.cite lead to what it shows)
 //   refs       the kernel refs behind the selected region, as the shell found them
 //   drawing    the object's drawing (kit.js), where a region's cite is looked up
-//   kernel     how to run `lean`: {run(args) -> {stdout}}, or a function (args) -> stdout text or parsed JSON
+//   kernel     how to run `thimble`: {run(args) -> {stdout}}, or a function (args) -> stdout text or parsed JSON
 //   draw       {runProgram(object, {w}) -> drawing, or a promise of one}, to check a program Claude wrote before it
 //              is shown
 //   model      the session's model: $.model's {fork} or {complete} (through the shell), or a function (prompt) ->
@@ -73,16 +73,16 @@ export function targetOf(ctx) {
 async function kernelJson(kernel, args) {
   if (!kernel) throw new Error('no kernel to ask')
   const call = typeof kernel === 'function' ? kernel : kernel.run || kernel.lean || kernel.json
-  if (typeof call !== 'function') throw new Error('the kernel has no way to run `lean`')
+  if (typeof call !== 'function') throw new Error('the kernel has no way to run `thimble`')
   let out = await call.call(kernel, [...args, '--json'])
   if (out && typeof out === 'object' && 'stdout' in out) out = out.stdout
   if (typeof out === 'string') {
-    try { return JSON.parse(out) } catch { throw new Error(out.trim().split('\n').slice(-1)[0] || 'lean trace said nothing') }
+    try { return JSON.parse(out) } catch { throw new Error(out.trim().split('\n').slice(-1)[0] || 'thimble trace said nothing') }
   }
   return out
 }
 
-/** The facts `lean trace` gives for a target. */
+/** The facts `thimble trace` gives for a target. */
 export async function facts(ctx, t) {
   const args = ['trace']
   if (t.ref) args.push(t.ref)
@@ -250,7 +250,7 @@ export function noteFor(f, t, d) {
   const fw = d.forward.map(s => s.text).join('; ')
   const sp = d.spread ? ` "${cut(d.spread.text, 40)}": ${d.spread.copied} wrote it after reading it, ${d.spread.held} read it and held out.` : ''
   return `The person traced ${t.ref || JSON.stringify(t.text)} (t). It showed: ${cut(steps, 400)}.${sp}${fw ? ' Used by: ' + cut(fw, 200) + '.' : ''}` +
-    ` \`lean trace ${t.ref || ''}${t.text ? ` --text ${JSON.stringify(t.text)}` : ''} --json\` has the facts; the trace skill says how to draw a fuller one.`
+    ` \`thimble trace ${t.ref || ''}${t.text ? ` --text ${JSON.stringify(t.text)}` : ''} --json\` has the facts; the trace skill says how to draw a fuller one.`
 }
 
 // ------------------------------------------------------------------ the full trace, by Claude
@@ -309,7 +309,7 @@ export async function run(ctx) {
     return {
       text: 'Asked Claude for the full trace.',
       ask: `The person asked for the full trace of ${t.ref || JSON.stringify(t.text)}${words ? `: "${words}"` : ''}. ` +
-        `Run \`lean trace ${t.ref || ''}${t.text ? ` --text ${JSON.stringify(t.text)}` : ''} --json\`, decide how deep to go for what they asked, ` +
+        `Run \`thimble trace ${t.ref || ''}${t.text ? ` --text ${JSON.stringify(t.text)}` : ''} --json\`, decide how deep to go for what they asked, ` +
         'and draw it as an object (the trace skill has the principles and examples).',
     }
   }

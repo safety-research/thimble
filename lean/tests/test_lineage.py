@@ -1,8 +1,8 @@
 """Values of queries that keep no rows per output row: a summary (a number, a dict of numbers, one row of values) rests
 on the rows the query read, a count that equals one frame's rows on that frame's, a merge keeps both sides' rows,
 records built in code find their rows by key, and every value with no rows of its own says in one line why (`why` in
-`lean resolve --json`). Old query records, which have none of the new fields, still resolve.
-Run: LEAN_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
+`thimble resolve --json`). Old query records, which have none of the new fields, still resolve.
+Run: THIMBLE_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
 from __future__ import annotations
 
 import json
@@ -38,8 +38,8 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             f.write(json.dumps({"page": p, "topic": topic}) + "\n")
     (d / "notes.md").write_text("# notes\nfirst\nsecond\n")
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("LEAN_SESSION", "s-lin")
-    monkeypatch.delenv("LEAN_ROOT", raising=False)
+    monkeypatch.setenv("THIMBLE_SESSION", "s-lin")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
     return d
 
 
@@ -142,7 +142,7 @@ def test_an_old_query_record_without_the_new_fields_still_resolves_and_says_why(
 def test_resolve_json_carries_why(root: Path) -> None:
     st = Store(root)
     q = Q.run(st, "share", 'df = load("edits.jsonl")\n{"share": 0.5}')
-    env = {**os.environ, "LEAN_ROOT": str(root)}
+    env = {**os.environ, "THIMBLE_ROOT": str(root)}
     out = subprocess.run([sys.executable, str(ENGINE / "lean.py"), "resolve", f"{q['id']}#key=share@value", "--json"],
                          capture_output=True, text=True, env=env, check=True).stdout
     r = json.loads(out)

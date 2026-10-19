@@ -1,10 +1,10 @@
-// node.mjs: the prompt registry from Node (a verb's child, `lean prompts`, `lean guide`). The hooks module sets
-// LEAN_PROMPTS for the session's commands to the versions in use (the setting and the environment together), so a
+// node.mjs: the prompt registry from Node (a verb's child, `thimble prompts`, `thimble guide`). The hooks module sets
+// THIMBLE_PROMPTS for the session's commands to the versions in use (the setting and the environment together), so a
 // child reads the same versions as the hooks.
 //
-//   lean prompts                 every feature, its versions, the active one in brackets
-//   lean guide <feature>         the active version's text (`lean guide cards`: the card guidance), which Claude reads
-//                                right before it draws a card; it notes the read in the session's events
+//   thimble prompts                 every feature, its versions, the active one in brackets
+//   thimble guide <feature>         the active version's text (`thimble guide cards`: the card guidance), which Claude reads
+//                                   right before it draws a card; it notes the read in the session's events
 import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,11 +24,11 @@ export function loadIndex(root = ROOT) {
 /** The active versions as this process sees them. */
 export function activeNow(root = ROOT, env = process.env) {
   const idx = loadIndex(root)
-  return { idx, ...choose(idx, { env: env.LEAN_PROMPTS || '' }) }
+  return { idx, ...choose(idx, { env: env.THIMBLE_PROMPTS || '' }) }
 }
 
 /** The active text of a feature: {feature, version, id, text, file, problems, chosen?}. A skill's in-place version is its
- *  body; `chosen` names the examples a version that picks them chose for this session (LEAN_SESSION). */
+ *  body; `chosen` names the examples a version that picks them chose for this session (THIMBLE_SESSION). */
 export function textOf(feature, root = ROOT, env = process.env) {
   const name = ALIASES[feature] || feature
   const { idx, active, problems } = activeNow(root, env)
@@ -37,7 +37,7 @@ export function textOf(feature, root = ROOT, env = process.env) {
   if (a.off) return { feature: name, version: a.version, id: idOf(name, a.version), text: '', file: null, problems }
   if (a.parts) {
     // a part that picks some of a file's examples picks them by the session, as the hooks do
-    const c = partsChoice(a.parts, f => readFileSync(join(root, f), 'utf8'), undefined, env.LEAN_SESSION || '')
+    const c = partsChoice(a.parts, f => readFileSync(join(root, f), 'utf8'), undefined, env.THIMBLE_SESSION || '')
     return { feature: name, version: a.version, id: idOf(name, a.version), text: c.text, file: null, problems, chosen: c.chosen }
   }
   const raw = readFileSync(join(root, a.file), 'utf8')
@@ -46,7 +46,7 @@ export function textOf(feature, root = ROOT, env = process.env) {
 
 /** One line in the session's events ($THIMBLE_HOME/lean/events/<session>.jsonl), appended in one write. */
 export function emit(row, env = process.env) {
-  const session = env.LEAN_SESSION
+  const session = env.THIMBLE_SESSION
   if (!session) return
   try {
     const home = env.THIMBLE_HOME || join(env.HOME || '.', '.thimble')
@@ -63,24 +63,24 @@ function main(argv) {
   const [cmd, arg] = argv
   if (cmd === 'prompts') {
     const { idx, active, problems } = activeNow()
-    console.log(['Prompt versions ([active]); choose with LEAN_PROMPTS=feature:version,… or the Prompts setting:', ...listing(idx, active), ...problems.map(p => `! ${p}`)].join('\n'))
+    console.log(['Prompt versions ([active]); choose with THIMBLE_PROMPTS=feature:version,… or the Prompts setting:', ...listing(idx, active), ...problems.map(p => `! ${p}`)].join('\n'))
     return 0
   }
   if (cmd === 'guide') {
-    if (!arg) { console.error('lean guide <feature>: lean guide cards prints the card guidance. `lean prompts` lists the features.'); return 2 }
+    if (!arg) { console.error('thimble guide <feature>: thimble guide cards prints the card guidance. `thimble prompts` lists the features.'); return 2 }
     const t = textOf(arg)
     for (const p of t.problems) console.error(`! ${p}`)
     const base = FEATURES[t.feature]?.versions?.[t.version]?.base || FEATURES[t.feature]?.base
     const head = base ? `(${t.id} · its folder: ${join(ROOT, base)}; paths below are relative to it)\n\n` : `(${t.id})\n\n`
     process.stdout.write(head + t.text + (t.text.endsWith('\n') ? '' : '\n'))
-    emit({ kind: 'prompt', feature: t.feature, prompt: t.id, via: `lean guide ${arg}`, chars: t.text.length, ...(t.chosen ? { examples: t.chosen } : {}) })
+    emit({ kind: 'prompt', feature: t.feature, prompt: t.id, via: `thimble guide ${arg}`, chars: t.text.length, ...(t.chosen ? { examples: t.chosen } : {}) })
     return 0
   }
-  console.error('usage: lean prompts | lean guide <feature>')
+  console.error('usage: thimble prompts | thimble guide <feature>')
   return 2
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  try { process.exitCode = main(process.argv.slice(2)) } catch (err) { console.error(`lean: ${err.message}`); process.exitCode = 1 }
+  try { process.exitCode = main(process.argv.slice(2)) } catch (err) { console.error(`thimble: ${err.message}`); process.exitCode = 1 }
 }
 

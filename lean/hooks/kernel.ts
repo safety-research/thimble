@@ -1,13 +1,13 @@
-// thimble's lean kernel: its one hooks module. It only watches. After each Read, Grep or Bash call of the session (or
-// of a subagent) it keeps which file was touched and which lines, so `lean coverage` can say what Claude read and what
+// thimble's kernel: its one hooks module. It only watches. After each Read, Grep or Bash call of the session (or
+// of a subagent) it keeps which file was touched and which lines, so `thimble coverage` can say what Claude read and what
 // it did not. It never answers, allows or refuses a call, never shows anything, and starts no process. What it keeps:
 // one JSON line per call in $THIMBLE_HOME/lean/seen/<session>.jsonl (default ~/.thimble), never the file's content:
 //
 //   Read  {tool, file, from, to}        the first and last line the result showed (none for a picture or a PDF)
 //   Grep  {tool, path, glob, files, lines}  the search's scope, the files it matched, and the lines it showed
-//   Bash  {tool, command}               the command (the `lean` command keeps its own record)
+//   Bash  {tool, command}               the command (the `thimble` command keeps its own record)
 //
-// It also sets LEAN_SESSION for the session's commands, so `lean` files its records under the same session.
+// It also sets THIMBLE_SESSION for the session's commands, so `thimble` files its records under the same session.
 import type { EngineInterface, Register } from 'claude-code'
 
 type Row = Record<string, unknown>
@@ -62,7 +62,7 @@ async function bind($: Engine): Promise<void> {
   S.loaded = false
   if (!S.home) S.home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
   S.file = `${S.home}/lean/seen/${safe(id)}.jsonl`
-  await $.env.set('LEAN_SESSION', id)
+  await $.env.set('THIMBLE_SESSION', id)
 }
 
 async function keep($: Engine, row: Row): Promise<void> {

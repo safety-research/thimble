@@ -25,8 +25,8 @@ test('v asks Claude for another view of the answer, with the proposal the person
   assert.match(ask, /another view of it: a card in the form that shows what it says, as "failures by test order"/)
   assert.match(ask, /It has the card r17-trail already: make a different view, not a copy\./)
   assert.match(ask, /Also proposed for it: trail of the run\./)
-  assert.match(ask, /Run `lean guide cards` first, unless you read it earlier in this session: the card guidance\./)
-  assert.match(ask, /lean save <name> --from FILE/)
+  assert.match(ask, /Run `thimble guide cards` first, unless you read it earlier in this session: the card guidance\./)
+  assert.match(ask, /thimble save <name> --from FILE/)
   // no proposals and no card: the plain request
   const plain = request({ message: { text: 'Done.' }, verb: { dir: '/v' } })
   assert.doesNotMatch(plain, /Proposed|already/)
@@ -35,12 +35,12 @@ test('v asks Claude for another view of the answer, with the proposal the person
   assert.match(r.ask, /Proposed for it: trail of the run; failures by test order\./)
 })
 
-test('the card guidance is not a skill at rest: no SKILL.md lists it; `lean guide cards` reads it when a card is drawn', () => {
+test('the card guidance is not a skill at rest: no SKILL.md lists it; `thimble guide cards` reads it when a card is drawn', () => {
   assert.throws(() => readFileSync(join(DIR, 'SKILL.md')))
   const verb = JSON.parse(readFileSync(join(DIR, 'verb.json'), 'utf8'))
   assert.equal(verb.key, 'v')
   assert.equal(verb.row, true)
-  assert.equal(verb.skill, 'lean guide cards')
+  assert.equal(verb.skill, 'thimble guide cards')
 })
 
 for (const name of FORMS) {

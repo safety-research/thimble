@@ -67,7 +67,7 @@ function world(on: any, serverLines: unknown[] = []) {
   on('command.register', (_$: unknown, e: { name: string }) => { commands.push(e.name); return { value: { command: e.name } } })
   // a side thread's agent: its type registered once, then started with the question
   const spawns: { subagent_type: string; prompt: string; description: string; cwd: string }[] = []
-  on('agent.register', () => ({ value: { agent: 'thimble-lean:thread' } }))
+  on('agent.register', () => ({ value: { agent: 'thimble:thread' } }))
   on('agent.spawn', (_$: unknown, e: { subagent_type: string; prompt: string; description: string; cwd: string }) => { spawns.push(e); return { model: 'claude-test' } as never })
   on('config.list', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
@@ -86,7 +86,7 @@ function textOf(n: any): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
+const HINT = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hintOf = async ($: any) => textOf(await $.ui.render(HINT))
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -100,7 +100,7 @@ const hidden = (session: any) => (session.appended() as { message: { type: strin
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function savedTurn($: any, on: any, clock: { settle: () => Promise<void> }) {
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
   await $.turn.complete({ turnId: 't1', answer: 'June 18 had the most saves.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.settle()
@@ -174,7 +174,7 @@ test('an ask about a card from the browser is a side thread: its own agent gets 
   expect(w.submitted.filter(s => s.text === 'why is this day so high?').length).toBe(0)
   expect(hidden(session)).not.toContain('why is this day so high?')
   expect(w.spawns.length).toBe(1)
-  expect(w.spawns[0]!.subagent_type).toBe('thimble-lean:thread')
+  expect(w.spawns[0]!.subagent_type).toBe('thimble:thread')
   expect(w.spawns[0]!.prompt).toContain('why is this day so high?')
   expect(w.spawns[0]!.prompt).toContain('the part "Jun 18 6,543" (day-2026-06-18) of the card "Saves per day" (01-saves@2')
   expect(w.spawns[0]!.prompt).toContain('q1#day=2026-06-18@n')
@@ -213,7 +213,7 @@ test('browser mode turned off in /config ends the server and hides o again', { o
   textOf(await reply($))
   await clock.settle()
   expect(await hintOf($)).toContain('o browser')
-  await $.config.set({ key: 'thimble-lean.browser', value: false } as never)
+  await $.config.set({ key: 'thimble.browser', value: false } as never)
   await clock.settle()
   expect(textOf(await reply($))).not.toContain('browser')
   expect(await hintOf($)).not.toContain('browser')

@@ -127,7 +127,7 @@ async function turn($: Any, w: Any, o: { id: string; user: string; prompt: strin
 }
 
 const reply = ($: Any, row: string, text: string) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: row, props: { text, isFirstOfReply: true }, viewport: { columns: 120, rows: 50, isFullscreen: true } } as never)
-const TRAY = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 50, isFullscreen: true } } as never
+const TRAY = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 50, isFullscreen: true } } as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k.length === 1 ? k : '' }) as never
 
 test('after a turn of work its claims are in the store, each where it was said with the citations near it and what it means; c lights with what they leave open', async ($, on) => {
@@ -167,7 +167,7 @@ test('a terse claim (lens-claims v2) is named by its quote, and its "based on" c
   const c1 = JSON.parse(w.files[STORE]!).claims[0]
   expect(c1.text).toBe('June 18 had 6,543 saves, the busiest day')
   expect(c1.sources.map((x: Any) => x.ref)).toEqual(['q1#day=2026-06-18@n'])
-  // read through `lean resolve` once the look is done: the file, the group the value is of, and its rows
+  // read through `thimble resolve` once the look is done: the file, the group the value is of, and its rows
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q1#day=2026-06-18@n'))).toBe(true)
   expect(c1.based_on).toBe('revisions.jsonl, day 2026-06-18 · 4 rows')
   expect(c1.precisely).toBe('6,543 saves on June 18, the most of any day in June')
@@ -193,8 +193,8 @@ test('a later turn: a claim said again counts ×N; a correction is linked both w
   expect(textOf(await $.ui.render(HINT))).toContain('c ● 1 new claim')
 })
 
-const PANE = { plugin: 'thimble-lean', component: 'Pane', surface: 'terminal', requestId: 'claims', props: { bodyColumns: 110, scroll: { bodyRows: 30 }, isFocused: true, title: 'Claims' }, viewport: { columns: 200, rows: 50, isFullscreen: true } } as never
-const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
+const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'claims', props: { bodyColumns: 110, scroll: { bodyRows: 30 }, isFocused: true, title: 'Claims' }, viewport: { columns: 200, rows: 50, isFullscreen: true } } as never
+const HINT = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 const focus = (el: string) => ({ requestId: 'claims', element: el, origin: { kind: 'person' } }) as never
 // a claim's dot is a part of the pane's drawing: its press's key is the cells' (r|<pane>|<row>|cl-<id>)
 async function dotKey($: Any, id: string): Promise<string> {

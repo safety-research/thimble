@@ -4,7 +4,7 @@
   "line": "turn it into a view you can explore, with the real rows one key below",
   "order": 2,
   "absorbs": ["the Explore button", "sparkline prose", "concept explorables", "what-if knobs"],
-  "writer": "Claude, in the main conversation, guided by SKILL.md, saving the view with `lean save`",
+  "writer": "Claude, in the main conversation, guided by SKILL.md, saving the view with `thimble save`",
   "skill": "SKILL.md",
   "run": "run.mjs",
   "hint": "hint.mjs",

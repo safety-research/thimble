@@ -1,5 +1,5 @@
 // cards.js: the tray's cards, each an object the drawing contract draws (program + data), so the terminal and the
-// browser draw the same card. No `$`, no Node, no DOM: the shell gathers what a card reads through the kernel (`lean
+// browser draw the same card. No `$`, no Node, no DOM: the shell gathers what a card reads through the kernel (`thimble
 // resolve --json`, the query's record, the lines of a code file) and hands it in.
 //
 //   cardKind(ref)                                   -> 'query' | 'series' | 'code' | 'rows' | 'object'
@@ -7,7 +7,7 @@
 //       a citation's card, whichever fits its ref: the query's output as bars around the cited row, a series as a
 //       small plot, a code hunk with the cited lines lit, or a table of the cited rows; with one `from` line
 //   citeCard({ref, label, root, room}, io)          -> the source card of a citation, its inputs read through `io`:
-//       {resolve(ref, n, label) -> lean resolve's JSON, read(path) -> text}. Both surfaces use it (the terminal with
+//       {resolve(ref, n, label) -> thimble resolve's JSON, read(path) -> text}. Both surfaces use it (the terminal with
 //       its own reads, the page server with Node's), so a citation's card is the same everywhere
 //   explainerCard({gloss})                          -> {title, right, parts, links}
 //       a gloss's card: what the term is, a tiny drawing when the observer gave a program, where it mattered here
@@ -151,7 +151,7 @@ return k.text(data.text)`
 // ------------------------------------------------------------------------------------------------ cards
 
 /**
- * A citation's card. `resolved` is `lean resolve <ref> --json`; `query` the query's record (thimble/queries/q<n>.json)
+ * A citation's card. `resolved` is `thimble resolve <ref> --json`; `query` the query's record (thimble/queries/q<n>.json)
  * for a query ref; `lines` the file's lines around the cited ones, for a code ref ({n, text}); `room` the card's rows.
  */
 export function sourceCard({ ref: wrote, label, resolved, query, lines, path, room = 9 }) {
@@ -168,7 +168,7 @@ export function sourceCard({ ref: wrote, label, resolved, query, lines, path, ro
   const from = `{dim:from} ${fromParts.map(p => p.replace(/[{}[\]\\*]/g, '')).join(' {dim:·} ')}`
   const right = `cite · ${short(files || ref, 40)}`
   if (r.error && kind !== 'code') {
-    return { title: label, right, parts: [{ program: ROWS_PROGRAM, data: { rows: [], empty: `${ref} does not resolve: ${short(r.error, 200)}`, more: '', from: '{dim:lean resolve gave no rows}', room } }], links: [] }
+    return { title: label, right, parts: [{ program: ROWS_PROGRAM, data: { rows: [], empty: `${ref} does not resolve: ${short(r.error, 200)}`, more: '', from: '{dim:thimble resolve gave no rows}', room } }], links: [] }
   }
   if (kind === 'query' || kind === 'series') {
     const { table, col, hot, labelOf } = columnOf(query, ref)

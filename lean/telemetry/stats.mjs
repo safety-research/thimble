@@ -1,11 +1,11 @@
-// stats.mjs: `lean stats`, a session's cost and time per feature, from its events (events.mjs), and against a plain
+// stats.mjs: `thimble stats`, a session's cost and time per feature, from its events (events.mjs), and against a plain
 // Claude Code transcript when given one. Cost is price-weighted tokens: input 1, cache write 1.25, cache read 0.1,
 // output 5.
 //
-//   lean stats                         the newest session under $THIMBLE_HOME/lean/events
-//   lean stats SESSION|FILE            that session (an id, or its events file)
-//   lean stats ... --against PLAIN     beside a plain Claude Code transcript (.jsonl) of the same questions
-//   lean stats ... --json              the numbers as JSON
+//   thimble stats                         the newest session under $THIMBLE_HOME/lean/events
+//   thimble stats SESSION|FILE            that session (an id, or its events file)
+//   thimble stats ... --against PLAIN     beside a plain Claude Code transcript (.jsonl) of the same questions
+//   thimble stats ... --json              the numbers as JSON
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -133,5 +133,5 @@ function main(argv) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  try { process.exitCode = main(process.argv.slice(2)) } catch (err) { console.error(`lean stats: ${err.message}`); process.exitCode = 1 }
+  try { process.exitCode = main(process.argv.slice(2)) } catch (err) { console.error(`thimble stats: ${err.message}`); process.exitCode = 1 }
 }

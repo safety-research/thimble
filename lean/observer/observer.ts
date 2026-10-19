@@ -1,4 +1,4 @@
-// The observer: lean thimble's always-on, quiet part. It reads each answer and the objects behind it once, after the
+// The observer: thimble's always-on, quiet part. It reads each answer and the objects behind it once, after the
 // turn, and most of what it finds goes to Claude, not to the person. Modeled on Claude Code's "you should know" (YSK),
 // with Claude Code's own UI only: the band above the prompt, and the hint row the shell draws under each object.
 //
@@ -16,7 +16,7 @@
 // 2. The evidence (evidence.js): the objects Claude saved since the last look (and, for context, its latest ones),
 //    each with its lineage in a few lines and, for the new ones, the object as the person sees it (how many rows stand
 //    behind each cited value, how sure each query's row lineage is, the files the session never read, what Claude
-//    declared, the problems `lean save` found) and the verbs that can act on it; and `lean coverage` for the session.
+//    declared, the problems `thimble save` found) and the verbs that can act on it; and `thimble coverage` for the session.
 // 3. The pass: one call that composes the enabled lenses (lenses/index.mjs; compose.mjs). Each lens is a folder with
 //    its output shape, its digest of the state and its merge into the store, and its prompt fragment in the registry
 //    (prompts/lens-<name>/): notes to Claude, the rare line, the lit actions, where the answer stands on squeeze's
@@ -29,7 +29,7 @@
 //    its other chips stay as the original, true whatever level the pass gives. A step the person makes on Report ↔
 //    Interpret or Familiarity before the pass has said where the answer stands waits for the look (lookPending) and
 //    counts from the level it gives.
-// A lens turned off (LEAN_PROMPTS=lens-explain:off) is neither asked nor merged.
+// A lens turned off (THIMBLE_PROMPTS=lens-explain:off) is neither asked nor merged.
 //
 // Where its output goes:
 // - notes: beside the next prompt of main, whatever sent it (the person, a verb's ask, a notification), as context the
@@ -49,7 +49,7 @@
 // to the fork; code drops a repeat. After more than two lines typed past in a row, the next 2^(n-3) looks (at most
 // 16) give notes but no line.
 // Off: /observe off, or the Observer row in /config. /observe says what it did; /observe demo shows a sample line.
-// It registers no model tool, answers no permission request, starts no `claude` and runs only `lean coverage`.
+// It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { ObjRef, ObserverLine, Ranking } from '../types'
@@ -83,10 +83,10 @@ type Answer = {
 type Look = { turnId: string; turnNo: number; steps: number; tools: number; answer: string; question: string; typed: boolean; verb: string; earlier: string[]; since: number }
 type TurnPrompt = { text: string; typed: boolean; verb: string }
 
-const LINE = { plugin: 'thimble-lean', key: 'line' } as const
-const RANKED = { plugin: 'thimble-lean', key: 'ranked' } as const
-const LAST = { plugin: 'thimble-lean', key: 'last' } as const
-const TRAY = { plugin: 'thimble-lean', key: 'tray' } as const
+const LINE = { plugin: 'thimble', key: 'line' } as const
+const RANKED = { plugin: 'thimble', key: 'ranked' } as const
+const LAST = { plugin: 'thimble', key: 'last' } as const
+const TRAY = { plugin: 'thimble', key: 'tray' } as const
 
 const KEEP = 50 // lines shown and known, remembered, as YSK
 const CLEAR_AFTER_PROMPTS = 2 // an unanswered line clears at the second next prompt, as YSK
@@ -105,7 +105,7 @@ const K = {
 const GLOSSED_KEEP = 100
 const GLOSS_FREE = 2 // looks whose glosses nobody opened before glosses back off
 export const glossSkipsFor = (n: number) => (n <= GLOSS_FREE ? 0 : Math.min(8, 2 ** (n - GLOSS_FREE - 1)))
-const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
+const ROWVERBS = { plugin: 'thimble', key: 'rowverbs' } as const
 
 const S = {
   session: '',
@@ -288,12 +288,12 @@ async function questionStep($: Engine, question: string, answer: string, turn: n
   return { ms, usage: r.usage, out, prompt: q.id, ...(out ? {} : { raw: cut(r.text, 2000) }) }
 }
 
-/** The folder under analysis: where the latest object is, else LEAN_ROOT, else the nearest folder at or above the
+/** The folder under analysis: where the latest object is, else THIMBLE_ROOT, else the nearest folder at or above the
  *  session's that holds thimble/objects. */
 async function rootNow($: Engine): Promise<string | null> {
   const last = (await $.state.get(LAST)).value as ObjRef | null | undefined
   if (last?.root) return last.root
-  const env = await $.env.get('LEAN_ROOT')
+  const env = await $.env.get('THIMBLE_ROOT')
   if (env) return env
   let d = String(await $.session.cwd()).replace(/\/+$/, '')
   while (d) {
@@ -326,10 +326,10 @@ async function objectsNow($: Engine, root: string, since: number): Promise<Seen[
 async function coverageNow($: Engine, root: string): Promise<string> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   try {
-    const r = await $.process.run([`${dir}/bin/lean`, 'coverage'], { cwd: root, env: { LEAN_ROOT: root, LEAN_SESSION: S.session }, timeoutMs: 90000 })
-    return r.exitCode === 0 ? cut(r.stdout.trim(), 2400) : `(lean coverage failed: ${cut((r.stderr || r.stdout).trim(), 200)})`
+    const r = await $.process.run([`${dir}/bin/thimble`, 'coverage'], { cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: S.session }, timeoutMs: 90000 })
+    return r.exitCode === 0 ? cut(r.stdout.trim(), 2400) : `(thimble coverage failed: ${cut((r.stderr || r.stdout).trim(), 200)})`
   } catch (err) {
-    return `(lean coverage failed: ${cut(String((err as Error)?.message || err), 200)})`
+    return `(thimble coverage failed: ${cut(String((err as Error)?.message || err), 200)})`
   }
 }
 
@@ -393,7 +393,7 @@ async function look($: Engine, t: Look): Promise<void> {
       const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(err => `(the person cannot see it: it does not draw: ${cut(String((err as Error)?.message || err), 160)})`) : ''
       digests.push(digest(x.object, { isNew: x.isNew, drawn }))
     }
-    const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through lean)'
+    const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through thimble)'
 
     // 3. the pass: the state each lens needs, the lenses enabled, one call
     const seen = strs(await $.store.get(K.seen))
@@ -616,7 +616,7 @@ async function look($: Engine, t: Look): Promise<void> {
     if (lit && lit.row !== at && inRow.some(v => v.key === 'c')) await setVerb($, lit.row, 'c', { lit: true, note: lit.note, claims: lit.claims })
     if (skips > 0) await $.store.set(K.skip, skips - 1)
 
-    // the shadow A/B (LEAN_PROMPTS_SHADOW): the same turn again with other versions, recorded and never merged
+    // the shadow A/B (THIMBLE_PROMPTS_SHADOW): the same turn again with other versions, recorded and never merged
     if (mode === 'lenses' && passVals && passTmpl) await shadowPass($, { t, row, frame, parts, tmpl: passTmpl, vals: passVals, st, model })
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
@@ -625,7 +625,7 @@ async function look($: Engine, t: Look): Promise<void> {
     S.since = S.turnId !== t.turnId ? S.turnStart : 0
     S.looking = false
     await logRow($, row)
-    // one line per look in the session's events: what it lit, so `lean stats` counts how often v lights
+    // one line per look in the session's events: what it lit, so `thimble stats` counts how often v lights
     await record($, { kind: 'look', turn: t.turnNo, ...(row.skip ? { skip: row.skip } : {}), lit: Array.isArray(row.verbs_lit) ? row.verbs_lit : [], v: row.v_lit ?? null, observer: (row.fork as Any)?.prompt ?? null, prompts: (row.fork as Any)?.lenses ?? null })
     const next = S.again
     S.again = null
@@ -652,8 +652,8 @@ async function lensPass($: Engine, o: { frame: { text: string; id: string; versi
   })
 }
 
-/** The shadow A/B: the turn's pass again with the versions LEAN_PROMPTS_SHADOW names, on the same turn and state. Its
- *  call is in the session's events with `shadow` (lean stats shows it on its own row), and a look line with `shadow`
+/** The shadow A/B: the turn's pass again with the versions THIMBLE_PROMPTS_SHADOW names, on the same turn and state. Its
+ *  call is in the session's events with `shadow` (thimble stats shows it on its own row), and a look line with `shadow`
  *  says what it would have lit; nothing of it is shown or merged. */
 async function shadowPass($: Engine, o: { t: Look; row: Record<string, unknown>; frame: { text: string; id: string; version: string }; parts: { lens: Any; text: string; id: string }[]; tmpl: { text: string; id: string }; vals: Record<string, unknown>; st: Any; model: string }): Promise<void> {
   try {
@@ -686,7 +686,7 @@ async function shadowPass($: Engine, o: { t: Look; row: Record<string, unknown>;
 }
 
 /** "Based on" for the turn's new claims that cite a value and that the pass gave none: the rows behind the claim's first
- *  citation (`lean resolve`), as words. Returns how many it filled. */
+ *  citation (`thimble resolve`), as words. Returns how many it filled. */
 async function fillBasedOn($: Engine, root: string, store: Any, added: string[]): Promise<number> {
   const want = (added || []).map(id => store.claims.find((c: Any) => c.id === id)).filter((c: Any) => c && !c.based_on && c.sources?.length)
   if (!want.length) return 0
@@ -696,7 +696,7 @@ async function fillBasedOn($: Engine, root: string, store: Any, added: string[])
   const got = new Map<string, Any>()
   await Promise.all(refs.map(async ref => {
     try {
-      const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '--json', '-n', '0'], { cwd: root, env, timeoutMs: 60000 })
+      const r = await $.process.run([`${dir}/bin/thimble`, 'resolve', ref, '--json', '-n', '0'], { cwd: root, env, timeoutMs: 60000 })
       if (r.exitCode === 0) got.set(ref, JSON.parse(r.stdout))
     } catch {
       // a ref that does not resolve keeps its claim's cite as its "based on"

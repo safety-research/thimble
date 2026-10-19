@@ -83,7 +83,7 @@ export function objectOf(id: string, v?: number | null): Promise<any> {
 }
 
 const resolved = new Map<string, Promise<any>>()
-/** `lean resolve <ref>` through the server: where a value came from, down to its rows. Several refs (a selection, a
+/** `thimble resolve <ref>` through the server: where a value came from, down to its rows. Several refs (a selection, a
  *  group of rows) resolve as one set. */
 export function resolveRef(ref: string | string[], n = 8): Promise<any> {
   const refs = (Array.isArray(ref) ? ref : [ref]).filter(Boolean).slice(0, 500)

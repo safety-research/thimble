@@ -90,7 +90,7 @@ export type Web = { on?: boolean; base?: string; root?: string; problem?: string
 
 declare module 'claude-code' {
   interface PluginState {
-    'thimble-lean': {
+    'thimble': {
       /** the objects drawn under a row of the transcript, by the row's id (its first 24 characters) */
       under: StateFamily<ObjRef[]>
       /** the detail view's selection */
@@ -105,7 +105,7 @@ declare module 'claude-code' {
       notes: string[]
       /** the row an object is drawn under, by the object's id: a verb's object is drawn under the same row */
       where: StateFamily<string>
-      /** `lean resolve --json` of a ref, by root and ref */
+      /** `thimble resolve --json` of a ref, by root and ref */
       rows: StateFamily<unknown>
       web: Web
       /** when an object's drawing at a width became ready, by root, id, version and width: a drawing waiting on it redraws */

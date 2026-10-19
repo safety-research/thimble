@@ -1,5 +1,5 @@
 // telemetry.ts: every model call thimble makes, and every turn, as one line in the session's events
-// ($THIMBLE_HOME/lean/events/<session>.jsonl, events.mjs says the lines). `lean stats` reads them back.
+// ($THIMBLE_HOME/lean/events/<session>.jsonl, events.mjs says the lines). `thimble stats` reads them back.
 //
 // - A call: `tracked($, {feature, prompt, model}, () => $.model.complete(...))` times it and writes its line: the
 //   feature (observer, question, squeeze, a verb), the prompt version it used, the model, the four token counts, the

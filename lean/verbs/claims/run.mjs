@@ -7,11 +7,11 @@
 //
 // ---------------------------------------------------------------------------------------------- the corpus orientation
 // Its time and tokens come from estimate.mjs (fitted to three live builds), and only the person's /verb claims orient
-// runs it. That asks main (`ask`) to start one subagent with a brief; the subagent reads with `lean sources`,
-// `lean rows` and `lean q`, writes its claims as JSON and checks them with `lean verb claims check`; main then runs
-// `lean verb claims save`, which puts them in the session's Claims marked as the orientation's. Why a subagent and not
+// runs it. That asks main (`ask`) to start one subagent with a brief; the subagent reads with `thimble sources`,
+// `thimble rows` and `thimble q`, writes its claims as JSON and checks them with `thimble verb claims check`; main then runs
+// `thimble verb claims save`, which puts them in the session's Claims marked as the orientation's. Why a subagent and not
 // main: building it reads tens of thousands of tokens of rows; in main they would ride along with every later request,
-// in a subagent they end with it. Manual mode stays manual: the subagent's lean calls and its one Write go through the
+// in a subagent they end with it. Manual mode stays manual: the subagent's thimble calls and its one Write go through the
 // same permission mode.
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -54,9 +54,9 @@ export function askFor({ root, dir = HERE, est, skill = null }) {
     '',
     'Hand the reading to one subagent with the Agent tool, so the rows it reads stay out of this conversation. Give it this prompt, and add one sentence on what the person is looking into if you know:',
     '',
-    `"Orient on the folder ${root}: ${est.what}${under}. First read ${file} and follow it. Write the claims as JSON to ${out}, then run \`lean verb claims check ${out}\` and fix what it lists. Your last message is the check's last line."`,
+    `"Orient on the folder ${root}: ${est.what}${under}. First read ${file} and follow it. Write the claims as JSON to ${out}, then run \`thimble verb claims check ${out}\` and fix what it lists. Your last message is the check's last line."`,
     '',
-    `When the subagent is done, run \`lean verb claims save ${out}\`. Its claims join this session's claims, which the person opens with c, so reply in one or two sentences: what the corpus holds, and the one thing in it that surprised you most.`,
+    `When the subagent is done, run \`thimble verb claims save ${out}\`. Its claims join this session's claims, which the person opens with c, so reply in one or two sentences: what the corpus holds, and the one thing in it that surprised you most.`,
   ].join('\n')
 }
 

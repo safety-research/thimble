@@ -300,7 +300,7 @@ test('the orientation\'s claims join the session\'s, marked as the orientation\'
   assert.deepEqual(viewOf(store).groups.map(g => g.name), ['the belt', 'belt slips', 'scale theory', 'between clusters'])
 })
 
-test('lean verb claims save puts the orientation\'s claims in this session\'s store, and says how many', () => {
+test('thimble verb claims save puts the orientation\'s claims in this session\'s store, and says how many', () => {
   const root = runsFolder(3)
   mkdirSync(join(root, 'thimble', 'claims'), { recursive: true })
   const file = join(root, 'thimble', 'claims', 'orientation.json')
@@ -327,8 +327,8 @@ test('the verb answers with the claims so far, and the orientation asks main to 
   assert.match(out.text, /^Asked Claude to orient on the corpus: map 2 trials \(about \d+ min\)/)
   assert.match(out.ask, /one subagent with the Agent tool/)
   assert.ok(out.ask.includes('/plugin/verbs/claims/SKILL.md'))
-  assert.ok(out.ask.includes(`lean verb claims check ${root}/thimble/claims/orientation.json`))
-  assert.ok(out.ask.includes(`lean verb claims save ${root}/thimble/claims/orientation.json`))
+  assert.ok(out.ask.includes(`thimble verb claims check ${root}/thimble/claims/orientation.json`))
+  assert.ok(out.ask.includes(`thimble verb claims save ${root}/thimble/claims/orientation.json`))
   assert.equal(askFor({ root: '/w', dir: '/d', est: { what: 'map 1 run', detail: 'x', minutes: 2, read: '' } }).split('\n')[0], "Orient on this folder's corpus: map 1 run (x). It takes a subagent about 2 minutes.")
 })
 
@@ -400,7 +400,7 @@ test('the orientation\'s file is checked for what the store needs: evidence, a k
   assert.deepEqual(s.data.claims[1].evidence, [{ ref: 'trials/t3.jsonl#L2' }])
 })
 
-test('lean verb claims check holds a good file and names a quote that is not in its row', { skip: !process.env.LEAN_PYTHON && 'LEAN_PYTHON (a Python for the kernel) is not set' }, () => {
+test('thimble verb claims check holds a good file and names a quote that is not in its row', { skip: !process.env.THIMBLE_PYTHON && 'THIMBLE_PYTHON (a Python for the kernel) is not set' }, () => {
   const root = runsFolder(3)
   mkdirSync(join(root, 'thimble', 'claims'), { recursive: true })
   const file = join(root, 'thimble', 'claims', 'orientation.json')

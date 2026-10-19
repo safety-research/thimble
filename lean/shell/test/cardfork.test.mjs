@@ -1,6 +1,6 @@
 // The card after the answer's helpers (shell/cardfork.mjs): the fork's request and fix composed from the version's
 // sections, its reply read, query names bound to the ids thimble ran them under, the problems that ask for a fix, and
-// the lean skill with its card parts replaced. `node --test lean/shell/test/cardfork.test.mjs`.
+// the thimble skill with its card parts replaced. `node --test lean/shell/test/cardfork.test.mjs`.
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -13,7 +13,7 @@ import { bindQueries, fixText, jsonOf, problemsOf, queryIdOf, readReply, request
 const LEAN = join(fileURLToPath(import.meta.url), '..', '..', '..')
 const V1 = readFileSync(join(LEAN, 'prompts', 'card', 'v1.md'), 'utf8')
 const V2 = readFileSync(join(LEAN, 'prompts', 'card', 'v2.md'), 'utf8')
-const SKILL = readFileSync(join(LEAN, 'skills', 'lean', 'SKILL.md'), 'utf8')
+const SKILL = readFileSync(join(LEAN, 'skills', 'thimble', 'SKILL.md'), 'utf8')
 
 test('the request holds the question, the answer, the cards so far, the guidance and the toolkit, and no other section', () => {
   const t = requestText(V1, { question: 'when did they edit most?', answer: 'June 18 had the most saves.', cards: ['01-saves'], guidance: 'THE GUIDANCE', toolkit: 'THE TOOLKIT' })
@@ -66,10 +66,10 @@ test('what asks for a fix: problem lines, citations that do not hold, a program 
   assert.equal(problemsOf('', 'Its program failed: ReferenceError: y (line 2).').length, 1)
 })
 
-test("the lean skill while the card comes after the answer: its saving principle and card section are the version's, the rest as it was", () => {
+test("the thimble skill while the card comes after the answer: its saving principle and card section are the version's, the rest as it was", () => {
   const s = skillWithCards(SKILL, V1)
   assert.ok(s.includes('thimble draws the card for an answer after you write the answer'))
-  assert.ok(s.includes('run `lean guide cards` first'))
+  assert.ok(s.includes('run `thimble guide cards` first'))
   assert.ok(!s.includes('Make a card its title, its chart and its takeaway'), 'the card section is replaced')
   assert.ok(!s.includes('When a result is worth more than one reply'), 'the saving principle is replaced')
   assert.ok(s.includes('An object is a program, its data and its lineage'), 'the rest of the saving principle stays')

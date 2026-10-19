@@ -55,7 +55,7 @@ export function composePrompt(f, t, opts = {}) {
     String(opts.toolkit || FALLBACK_TOOLKIT),
     '',
     '## The facts (the program reads them as data.facts)',
-    'From `lean trace --json`, cut to what a drawing can use. Every count you draw must come from these lists.',
+    'From `thimble trace --json`, cut to what a drawing can use. Every count you draw must come from these lists.',
     '```json',
     facts,
     '```',

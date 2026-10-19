@@ -11,7 +11,7 @@ and the lineage of text that moves between agents:
                              it. The first to write it is the origin; one that wrote it after reading it copied it
     copied_from(st, ref)     the passages a transcript's block shares with what that transcript read before it, each
                              with the block it read, longest first: where the words of a line came from
-    trace(st, ref, text)     all of it for one target, as `lean trace` prints it
+    trace(st, ref, text)     all of it for one target, as `thimble trace` prints it
 
 Nothing here judges what a passage means. It finds where the same words appear, in which direction and when, and
 leaves the reading (is this a copy of the idea, a variant, a mention?) to Claude.
@@ -772,7 +772,7 @@ def _upstream(st: Store, q: dict[str, Any], seen: set[str] | None = None) -> lis
 
 def trace(st: Store, ref: str | None = None, text: str | None = None, within: str | None = None,
           answers: bool = True, n: int = 3) -> dict[str, Any]:
-    """Backward and forward for a ref, a passage, or both (`lean trace`)."""
+    """Backward and forward for a ref, a passage, or both (`thimble trace`)."""
     out: dict[str, Any] = {"ref": ref, "text": text}
     kind = None
     if ref:
@@ -859,7 +859,7 @@ def _hhmm(t: str | None) -> str:
 
 
 def text_of(r: dict[str, Any], width: int = 150) -> str:
-    """`lean trace` as Claude reads it: the path back, then what uses it, then the spread."""
+    """`thimble trace` as Claude reads it: the path back, then what uses it, then the spread."""
     cut = lambda s, w=width: s if len(s) <= w else s[: w - 1] + "…"  # noqa: E731
     L: list[str] = []
     back = r.get("back")

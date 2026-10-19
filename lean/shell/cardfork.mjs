@@ -1,10 +1,10 @@
 // cardfork.mjs: the card after the answer (registry feature `card`), the parts with no engine in them. After a turn that
-// ran `lean`, the shell asks a fork of the session (it shares main's prompt cache) whether a card would help and, if so,
+// ran `thimble`, the shell asks a fork of the session (it shares main's prompt cache) whether a card would help and, if so,
 // for the card; thimble runs the queries the card asks for, saves it and draws it under the answer. Main never reads
 // the card guidance or writes the program inside its turn, so its answer reaches the person sooner and its context
 // stays smaller. These helpers compose the fork's messages from the version's text (prompts/card/<version>.md), read
 // its reply, put the ids of the queries thimble ran in place of their names, find what does not hold after a save, and
-// serve the lean skill with its card parts replaced (main does not draw the card itself).
+// serve the thimble skill with its card parts replaced (main does not draw the card itself).
 import { fill, sectionOf } from '../prompts/registry.mjs'
 
 const body = (raw, heading) => {
@@ -90,7 +90,7 @@ export function readReply(text) {
   return { kind: 'card', name, queries, object }
 }
 
-/** The query id `lean q` printed first (`q12 · edits per day`), or null. */
+/** The query id `thimble q` printed first (`q12 · edits per day`), or null. */
 export function queryIdOf(stdout) {
   const m = /^(q\d+)\s+·/m.exec(String(stdout ?? ''))
   return m ? m[1] : null
@@ -105,7 +105,7 @@ export function bindQueries(object, ids) {
 }
 
 /**
- * What does not hold after a save, in lines for the fix round (empty: nothing to fix). From `lean save`'s output: its
+ * What does not hold after a save, in lines for the fix round (empty: nothing to fix). From `thimble save`'s output: its
  * problem lines and citations that do not hold. From the drawing (the shell's note on what the person sees): a program
  * that failed, an object that cannot be drawn, an interaction that failed when tried. Warnings alone ask for no fix.
  */
@@ -125,7 +125,7 @@ export function problemsOf(saveOut, drawn) {
 }
 
 /**
- * The lean skill as main reads it while the card comes after the answer: the start of its principle on saving and its
+ * The thimble skill as main reads it while the card comes after the answer: the start of its principle on saving and its
  * card section ("What the person sees") replaced by the version's "Saving" and "What the person sees" sections. A part
  * the skill no longer has is added at its end, so main always reads that the card comes after the answer.
  */
@@ -134,8 +134,8 @@ export function skillWithCards(skill, raw) {
   const saving = body(raw, 'Saving')
   const sees = sectionOf(raw, 'What the person sees')
   const start = s.indexOf('**Save what the person will keep as an object.**')
-  const stop = start >= 0 ? s.indexOf('`lean save`.', start) : -1
-  if (saving && start >= 0 && stop > start) s = s.slice(0, start) + saving + s.slice(stop + '`lean save`.'.length)
+  const stop = start >= 0 ? s.indexOf('`thimble save`.', start) : -1
+  if (saving && start >= 0 && stop > start) s = s.slice(0, start) + saving + s.slice(stop + '`thimble save`.'.length)
   else if (saving) s = `${s.trimEnd()}\n\n${saving}\n`
   const old = sectionOf(s, 'What the person sees')
   if (sees && old) s = s.replace(old, sees)

@@ -60,7 +60,7 @@ test('the real fragments compose: every lens of the registry has instructions, a
   assert.match(turn.text, /"an open line" \(shown 1 prompt ago\)/)
   assert.match(turn.text, /A line is open above the prompt now\. Give no new line this time/)
   // the attention version of the frame holds the draft principles in place of the default-none paragraph
-  const att = textOf('observer', ROOT, { LEAN_PROMPTS: 'observer:attention-v1' }).text
+  const att = textOf('observer', ROOT, { THIMBLE_PROMPTS: 'observer:attention-v1' }).text
   assert.match(att, /## When something is worth the person's time and attention/)
   assert.match(att, /\*\*Unasked output costs attention, even when it is ignored\.\*\*/)
   assert.ok(att.includes('{{LENSES}}'))
@@ -150,9 +150,9 @@ const MSGS = [
   { role: 'user', text: 'an earlier question', toolUses: [] },
   { role: 'assistant', text: 'an earlier answer', toolUses: [] },
   { role: 'user', text: 'when did they edit most?', toolUses: [] },
-  { role: 'assistant', text: 'Counting saves per day.', toolUses: [{ tool: 'Bash', input: { command: 'lean q "saves per day" <<PY\n...\nPY' }, text: 'day n\n2026-06-18 6543\n' + 'x'.repeat(5000) }] },
+  { role: 'assistant', text: 'Counting saves per day.', toolUses: [{ tool: 'Bash', input: { command: 'thimble q "saves per day" <<PY\n...\nPY' }, text: 'day n\n2026-06-18 6543\n' + 'x'.repeat(5000) }] },
   { role: 'user', text: '', toolResults: [{ tool_use_id: 'u1', text: '...' }], toolUses: [] },
-  { role: 'assistant', text: '', toolUses: [{ tool: 'Read', input: { file_path: '/d/rev.jsonl', offset: 10, limit: 5 }, text: 'rows' }, { tool: 'Skill', input: { skill: 'lean' }, text: 'the whole skill' }] },
+  { role: 'assistant', text: '', toolUses: [{ tool: 'Read', input: { file_path: '/d/rev.jsonl', offset: 10, limit: 5 }, text: 'rows' }, { tool: 'Skill', input: { skill: 'thimble' }, text: 'the whole skill' }] },
   { role: 'assistant', text: 'June 18 had the most saves.', toolUses: [] },
 ]
 
@@ -160,9 +160,9 @@ test('the turn the pass reads: from the last prompt, words and calls in order, r
   assert.equal(turnMessages(MSGS).length, 4)
   const s = stepsOf(MSGS, { answer: 'June 18 had the most saves.', budget: 2000 })
   assert.doesNotMatch(s, /earlier/)
-  assert.match(s, /^Claude: Counting saves per day\.\nClaude ran Bash: lean q "saves per day" <<PY \.\.\. PY\n {2}→ day n\n {4}2026-06-18 6543/)
+  assert.match(s, /^Claude: Counting saves per day\.\nClaude ran Bash: thimble q "saves per day" <<PY \.\.\. PY\n {2}→ day n\n {4}2026-06-18 6543/)
   assert.match(s, /Claude ran Read: \/d\/rev\.jsonl from line 10 \(5 lines\)\n {2}→ rows/)
-  assert.match(s, /Claude ran Skill: lean$/m)
+  assert.match(s, /Claude ran Skill: thimble$/m)
   assert.doesNotMatch(s, /the whole skill/)
   assert.doesNotMatch(s, /June 18 had the most saves/)
   assert.ok(s.length < 3000)

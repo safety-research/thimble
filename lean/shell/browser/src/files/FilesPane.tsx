@@ -1,7 +1,7 @@
 // FilesPane.tsx: 0.9's Files on lean's kernel. The views bar holds the File browser, Claims (the session's claims, drawn
 // by the Claims pane, lean/panes/claims.js) and each view (a big card: a map, a trace or an explore view), as 0.9 holds its pages. The
-// File browser lists the sources (`lean sources`), each with what this session read of it (`lean coverage`: computed,
-// read, searched, named or not read), and reads a file's records through `lean rows`, the rows this session read
+// File browser lists the sources (`thimble sources`), each with what this session read of it (`thimble coverage`: computed,
+// read, searched, named or not read), and reads a file's records through `thimble rows`, the rows this session read
 // marked. Nothing here counts as Claude's reading: the page's reads go under the person's own session.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon, type IconName } from '@09/components/Icon'

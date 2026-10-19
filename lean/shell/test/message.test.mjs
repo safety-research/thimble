@@ -147,7 +147,7 @@ test('a code citation opens its hunk with the cited line lit; a row citation ope
   assert.match(code, /tests\/conftest\.py {2}line 14/)
   const row = gridText(draw(sourceCard({ ref: 'notes.jsonl#L4410', label: '"ALERT"', resolved: { count: 1, rows: ['notes.jsonl#L4410'], records: [{ ref: 'notes.jsonl#L4410', text: 'user: watcher, title: ALERT, text: the totals do not match the source' }] } }).parts[0]))
   assert.match(row, /notes\.jsonl#L4410 {2}user: watcher, title: ALERT/)
-  // with the kernel's words for it (lean resolve --json): the row reads as its words and who, never as field: value
+  // with the kernel's words for it (thimble resolve --json): the row reads as its words and who, never as field: value
   const words = gridText(draw(sourceCard({ ref: 'notes.jsonl#L4410', label: '"ALERT"', resolved: { count: 1, rows: ['notes.jsonl#L4410'], records: [{ ref: 'notes.jsonl#L4410', text: 'user: watcher, title: ALERT, text: the totals do not match the source', words: 'the totals do not match the source', meta: 'watcher · ALERT' }] } }).parts[0]))
   assert.match(words, /notes\.jsonl#L4410 {2}the totals do not match the source {2}watcher · ALERT/)
   assert.doesNotMatch(words, /user: watcher/)

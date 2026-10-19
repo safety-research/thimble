@@ -1,12 +1,12 @@
 """Lineage read back: resolve any ref (a source row, a query's value, an object's value) to the rows it came from, and
 coverage, what was read and what was not.
 
-Coverage comes from three records: the queries' inputs and the rows `lean rows` showed (thimble/ledger.jsonl), and the
+Coverage comes from three records: the queries' inputs and the rows `thimble rows` showed (thimble/ledger.jsonl), and the
 Read, Grep and Bash calls the hooks module kept (store.seen). A file's coverage is the strongest of:
 
     computed   a query loaded its rows (how many of how many)
     read       Claude read some of its lines or rows (which)
-    searched   a search ran over it (Grep, `lean rows --search`), which shows only what matched
+    searched   a search ran over it (Grep, `thimble rows --search`), which shows only what matched
     named      a shell command named it (cat, head, jq, python...); what the command read is not known
     not read   nothing touched it
 """
@@ -383,7 +383,7 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
                             "inputs": [{"path": x["path"], "rows_read": x.get("rows_read")} for x in q.get("inputs") or []]}
     if stale:
         step["stale"] = stale
-        notes.append(f"{', '.join(stale)} changed since {q['id']} ran; `lean rerun {q['id']}` runs it again")
+        notes.append(f"{', '.join(stale)} changed since {q['id']} ran; `thimble rerun {q['id']}` runs it again")
     if q.get("uses"):
         step["uses"] = q["uses"]
     chain.append(step)
@@ -633,7 +633,7 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                         per[f]["lines"].append((int(n), int(n)))
         elif tool == "Bash":
             cmd = str(s.get("command") or "")
-            if re.match(r"^\s*lean(\s|$)", cmd):
+            if re.match(r"^\s*thimble(\s|$)", cmd):
                 continue
             for f in files_named_in(cmd, list(known), root):
                 per[f]["named"] = True

@@ -23,7 +23,7 @@ the shell makes the call and runs the verb again with the answer. Call the model
 
 `run` returns any of these, and any other field is kept:
 
-- `object`: an object to show. A spec (`{name, title, program, data, ...}`) is saved with `lean save`, so its lineage
+- `object`: an object to show. A spec (`{name, title, program, data, ...}`) is saved with `thimble save`, so its lineage
   is the kernel's (a `lineage` of the verb's own is kept under `declared`); an object the verb saved itself, or one
   that is already saved, is given as `{id, version}`. It is drawn under the reply where the person pressed, after the
   object it came from; pressed in the detail view, it opens there. A new version of the same object takes its place.

@@ -3,7 +3,7 @@
 //
 //   forDrawing(object) -> {id, v, title, program, data}: a kernel object as the drawing contract takes it; one saved
 //     with no program draws its title and words.
-//   chainWords(resolved) -> {line, notes, records}: `lean resolve --json` in a few words, as both views print it.
+//   chainWords(resolved) -> {line, notes, records}: `thimble resolve --json` in a few words, as both views print it.
 //
 //   regionRefs(object, drawing, regionId) -> {refs, how}
 //     1. the refs the program named: the region meta's `ref` (one or a list; the runtime sets it for a part drawn from
@@ -17,7 +17,7 @@
 //   recordRefs(drawing, regionId) -> the rows its examples name themselves (`ref` on a record), which need no resolve.
 //   rankRow(verbs, ranking) -> the hint row as the observer ranked it, with its few words per verb.
 //   fromFacts(object, coverage) -> where an object's values come from, as the detail's "from" line reads it: its
-//     sources, rows, labels and coverage (`lean coverage <id> --json`).
+//     sources, rows, labels and coverage (`thimble coverage <id> --json`).
 
 const KERNEL_REF = /^(?:obj:[A-Za-z0-9][\w.-]*#|q\d+(?:#|@|$)|[^\s#]+#(?:L\d|r\d|\/|[A-Za-z_]))/
 
@@ -130,7 +130,7 @@ export function rankRow(verbs, ranking) {
 
 const n = x => (typeof x === 'number' ? x.toLocaleString('en-US') : String(x))
 
-/** `lean resolve --json` in words: "q1 · saves per day ← 6,543 rows of revisions.jsonl", its notes and its records. */
+/** `thimble resolve --json` in words: "q1 · saves per day ← 6,543 rows of revisions.jsonl", its notes and its records. */
 export function chainWords(r) {
   if (!r) return { line: '', notes: [], records: [] }
   if (r.error) return { line: '', notes: [String(r.error)], records: [], error: true }
@@ -149,7 +149,7 @@ export function chainWords(r) {
   return { line: steps.join(' ← '), notes, records: r.records || [] }
 }
 
-/** Where an object's values come from, in the few facts the "from" line shows. `cov` is `lean coverage <id> --json`. */
+/** Where an object's values come from, in the few facts the "from" line shows. `cov` is `thimble coverage <id> --json`. */
 export function fromFacts(object, cov) {
   const lin = object?.lineage || {}
   const rows = lin.rows || {}

@@ -29,11 +29,11 @@ type Any = any
 type Theme = 'dark' | 'light'
 type At = Record<string, number>
 
-const PICK = { plugin: 'thimble-lean', key: 'pick' } as const
-const TRAY = { plugin: 'thimble-lean', key: 'tray' } as const
+const PICK = { plugin: 'thimble', key: 'pick' } as const
+const TRAY = { plugin: 'thimble', key: 'tray' } as const
 
-const SQZ = { plugin: 'thimble-lean', key: 'sqz' } as const
-const SQZNOTE = { plugin: 'thimble-lean', key: 'sqznote' } as const
+const SQZ = { plugin: 'thimble', key: 'sqz' } as const
+const SQZNOTE = { plugin: 'thimble', key: 'sqznote' } as const
 const remark = (rec: MsgRecord) => remarkAny(rec) as MsgRecord
 const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
 const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 4000, timeoutMs: 90000 }

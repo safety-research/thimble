@@ -1,7 +1,7 @@
 """Queries: Python that Claude runs over the sources like a notebook cell, kept with its code, inputs and output, and
 with the source rows behind each row of its output.
 
-    lean q "what it answers" <<'PY'
+    thimble q "what it answers" <<'PY'
     ...
     PY
 
@@ -100,7 +100,7 @@ def get(st: Store, qid: str) -> dict[str, Any] | None:
         # it has no rows and how to get them back
         out = {k: v for k, v in q.items() if k != "packed"}
         out["unreadable"] = (f"{qid}'s record keeps its rows packed, and they did not read ({type(e).__name__}): "
-                             f"`lean q --rerun {qid}` runs it again and keeps them")
+                             f"`thimble q --rerun {qid}` runs it again and keeps them")
         return out
 
 
@@ -334,7 +334,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         info["uses"].append({"name": name, "query": reg[name]})
         f = pickle_path(st.dir / "kept", slug(name))
         if f is None:
-            raise KeyError(f"{name!r} was kept by {reg[name]}, but its file is gone from thimble/kept: `lean q --rerun {reg[name]}` keeps it again")
+            raise KeyError(f"{name!r} was kept by {reg[name]}, but its file is gone from thimble/kept: `thimble q --rerun {reg[name]}` keeps it again")
         obj = read_pickle(f)
         if isinstance(obj, pd.DataFrame) and "_ref" in obj.columns:
             info["frames"].append(obj)
@@ -1782,7 +1782,7 @@ def run(st: Store, about: str, code: str, rerun_of: str | None = None) -> dict[s
     for k in ("why_rows", "read", "via", "cells", "loop", "cells_by", "lineage_error"):
         if r.get(k):
             q[k] = r[k]
-    # a long row lineage is written packed; the record in hand, which `lean q --json` prints, stays whole
+    # a long row lineage is written packed; the record in hand, which `thimble q --json` prints, stays whole
     st.write_json(path, pack_record(q))
     if r["kept"]:
         reg = st.read_json(st.dir / "kept.json") or {}
@@ -1875,7 +1875,7 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
     uses = [u.get("query") for u in q.get("uses") or [] if u.get("query")]
     bare = [u for u in uses if not ((get(st, u) or {}).get("rows"))]
     if q.get("lineage_error"):
-        why = (f"lean could not find the rows behind {qid}'s output ({q['lineage_error']}), so its values keep no rows: "
+        why = (f"thimble could not find the rows behind {qid}'s output ({q['lineage_error']}), so its values keep no rows: "
                "tally() in the query keeps them per row")
     elif q.get("table") is None:
         why = f"{qid} only printed its output, so a number in it has no rows of its own"

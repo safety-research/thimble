@@ -54,5 +54,5 @@ test('a Read, a Grep and a Bash call are kept under the session; the results rea
   expect(rows[2]).toMatchObject({ command: 'head -3 events.jsonl' })
   expect(String(rows[0].cwd)).toBe('/data')
   expect(kept![0]).toBe('/th/lean/seen/s-1.jsonl')
-  expect(env.LEAN_SESSION).toBe('s-1')
+  expect(env.THIMBLE_SESSION).toBe('s-1')
 })

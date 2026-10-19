@@ -1,6 +1,6 @@
-// The shell of lean thimble: it puts the kernel's objects in front of the person, in the terminal and the browser.
+// The shell of thimble: it puts the kernel's objects in front of the person, in the terminal and the browser.
 //
-//   inline     when Claude saves an object (`lean save` in Bash), the object is drawn under the turn's last reply, in
+//   inline     when Claude saves an object (`thimble save` in Bash), the object is drawn under the turn's last reply, in
 //              cells (draw/term.js, draw/paint.js), with one quiet row under it: the 2-3 verbs picked for it, `? all`,
 //              and `open`. A click on a verb runs it, and what it makes is drawn under the same reply.
 //   detail     one pane, the card detail (detail.tsx): header, the card with its parts, one "from" line, the
@@ -67,37 +67,37 @@ type Prepared = { object: Any; drawing: Any; grid: Any; verbs: Verb[]; problems:
 type Placed = ObjRef & { from?: string }
 
 export const PANE = 'object'
-const UNDER = { plugin: 'thimble-lean', key: 'under' } as const
-const SEL = { plugin: 'thimble-lean', key: 'sel' } as const
-const LAST = { plugin: 'thimble-lean', key: 'last' } as const
-const ASKED = { plugin: 'thimble-lean', key: 'asked' } as const
-const ROWS = { plugin: 'thimble-lean', key: 'rows' } as const
-const WEB = { plugin: 'thimble-lean', key: 'web' } as const
-const READY = { plugin: 'thimble-lean', key: 'ready' } as const
-const SAID = { plugin: 'thimble-lean', key: 'said' } as const
-const NOTES = { plugin: 'thimble-lean', key: 'notes' } as const
-const WHERE = { plugin: 'thimble-lean', key: 'where' } as const
-const RANKED = { plugin: 'thimble-lean', key: 'ranked' } as const
-const MSG = { plugin: 'thimble-lean', key: 'msg' } as const
-const MSGROWS = { plugin: 'thimble-lean', key: 'msgrows' } as const
-const TRAY = { plugin: 'thimble-lean', key: 'tray' } as const
-const PICK = { plugin: 'thimble-lean', key: 'pick' } as const
-const SELROW = { plugin: 'thimble-lean', key: 'selrow' } as const
-const ANSWER = { plugin: 'thimble-lean', key: 'answer' } as const
-const CARDFOCUS = { plugin: 'thimble-lean', key: 'cardfocus' } as const
-const RUNNING = { plugin: 'thimble-lean', key: 'running' } as const
-const ROWVERBS = { plugin: 'thimble-lean', key: 'rowverbs' } as const
-const SQZ = { plugin: 'thimble-lean', key: 'sqz' } as const
-const LINE = { plugin: 'thimble-lean', key: 'line' } as const
-const COUNTS = { plugin: 'thimble-lean', key: 'counts' } as const
-const CLAIMS = { plugin: 'thimble-lean', key: 'claims' } as const
-const TURNS = { plugin: 'thimble-lean', key: 'turns' } as const
-const CLAIMPANE = { plugin: 'thimble-lean', key: 'claimpane' } as const
+const UNDER = { plugin: 'thimble', key: 'under' } as const
+const SEL = { plugin: 'thimble', key: 'sel' } as const
+const LAST = { plugin: 'thimble', key: 'last' } as const
+const ASKED = { plugin: 'thimble', key: 'asked' } as const
+const ROWS = { plugin: 'thimble', key: 'rows' } as const
+const WEB = { plugin: 'thimble', key: 'web' } as const
+const READY = { plugin: 'thimble', key: 'ready' } as const
+const SAID = { plugin: 'thimble', key: 'said' } as const
+const NOTES = { plugin: 'thimble', key: 'notes' } as const
+const WHERE = { plugin: 'thimble', key: 'where' } as const
+const RANKED = { plugin: 'thimble', key: 'ranked' } as const
+const MSG = { plugin: 'thimble', key: 'msg' } as const
+const MSGROWS = { plugin: 'thimble', key: 'msgrows' } as const
+const TRAY = { plugin: 'thimble', key: 'tray' } as const
+const PICK = { plugin: 'thimble', key: 'pick' } as const
+const SELROW = { plugin: 'thimble', key: 'selrow' } as const
+const ANSWER = { plugin: 'thimble', key: 'answer' } as const
+const CARDFOCUS = { plugin: 'thimble', key: 'cardfocus' } as const
+const RUNNING = { plugin: 'thimble', key: 'running' } as const
+const ROWVERBS = { plugin: 'thimble', key: 'rowverbs' } as const
+const SQZ = { plugin: 'thimble', key: 'sqz' } as const
+const LINE = { plugin: 'thimble', key: 'line' } as const
+const COUNTS = { plugin: 'thimble', key: 'counts' } as const
+const CLAIMS = { plugin: 'thimble', key: 'claims' } as const
+const TURNS = { plugin: 'thimble', key: 'turns' } as const
+const CLAIMPANE = { plugin: 'thimble', key: 'claimpane' } as const
 export const CPANE = 'claims'
 
 const ID =/^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 const REGION = /^[A-Za-z0-9][A-Za-z0-9_.:~-]{0,95}$/
-const EVENTS = { plugin: 'thimble-lean', key: 'events' } as const
+const EVENTS = { plugin: 'thimble', key: 'events' } as const
 // when this module loaded, in the kernel's seconds: the change feed's saves before it were placed by an earlier load
 const LOADED = Date.now() / 1000
 const rowKey = (id: string) => String(id).slice(0, 24)
@@ -136,10 +136,10 @@ let cardKeyed: { key: string; at: number; ref: ObjRef; undo: { state: Record<str
 
 // ------------------------------------------------------------------------------------------------ objects
 
-/** The folder under analysis that holds object `id`: LEAN_ROOT, a `cd` the command made, the session's folder or a
+/** The folder under analysis that holds object `id`: THIMBLE_ROOT, a `cd` the command made, the session's folder or a
  *  folder above it. */
 async function findRoot($: Engine, id: string, hints: string[] = []): Promise<string | null> {
-  const env = await $.env.get('LEAN_ROOT')
+  const env = await $.env.get('THIMBLE_ROOT')
   const cwd = String(await $.session.cwd())
   const tries: string[] = []
   for (const h of [env, ...hints, cwd]) {
@@ -292,7 +292,7 @@ async function setUnder($: Engine, at: string, list: Placed[]): Promise<void> {
 
 /** The saves the kernel wrote to this session's change feed since the feed was last read: one JSON line per save in
  *  $THIMBLE_HOME/lean/events/<session>.jsonl, each naming its object, version and folder. Read from the feed, a save
- *  is seen however the command was written (`lean save … | tail -3`, a script that saves, a `cd` first). */
+ *  is seen however the command was written (`thimble save … | tail -3`, a script that saves, a `cd` first). */
 async function newSaves($: Engine): Promise<ObjRef[]> {
   const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
   const file = `${home.replace(/\/+$/, '')}/lean/events/${safe(String(await $.session.id()))}.jsonl`
@@ -405,11 +405,11 @@ async function restoreShown($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ running things
 
-/** The env of the shell's own `lean` calls: the person's, never counted as what Claude read (coverage). */
+/** The env of the shell's own `thimble` calls: the person's, never counted as what Claude read (coverage). */
 export async function leanEnv($: Engine, root: string): Promise<Record<string, string>> {
-  // the prompt versions in use (prompts/prompts.ts set LEAN_PROMPTS), so a verb's child reads the same ones
-  const prompts = String((await $.env.get('LEAN_PROMPTS')) || '')
-  return { LEAN_ROOT: root, LEAN_SESSION: `person-${String(await $.session.id()).slice(0, 8)}`, ...(prompts ? { LEAN_PROMPTS: prompts } : {}) }
+  // the prompt versions in use (prompts/prompts.ts set THIMBLE_PROMPTS), so a verb's child reads the same ones
+  const prompts = String((await $.env.get('THIMBLE_PROMPTS')) || '')
+  return { THIMBLE_ROOT: root, THIMBLE_SESSION: `person-${String(await $.session.id()).slice(0, 8)}`, ...(prompts ? { THIMBLE_PROMPTS: prompts } : {}) }
 }
 
 async function resolveRefs($: Engine, root: string, refs: string[]): Promise<void> {
@@ -421,9 +421,9 @@ async function resolveRefs($: Engine, root: string, refs: string[]): Promise<voi
     const at = { ...ROWS, id: `${root}|${ref}` }
     if ((await $.state.get(at)).value !== undefined) continue
     // a few rows spread across the part's rows (the kernel's default), enough to flip through as its examples
-    const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ...set, '-n', '8', '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+    const r = await $.process.run([`${dir}/bin/thimble`, 'resolve', ...set, '-n', '8', '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
     let v: unknown
-    try { v = JSON.parse(r.stdout) } catch { v = { ref, error: (r.stdout + r.stderr).trim().slice(0, 400) || 'lean resolve gave nothing' } }
+    try { v = JSON.parse(r.stdout) } catch { v = { ref, error: (r.stdout + r.stderr).trim().slice(0, 400) || 'thimble resolve gave nothing' } }
     await $.state.set(at, v)
   }
 }
@@ -457,7 +457,7 @@ export async function openDetail($: Engine, at: ObjRef, region: string | null = 
 async function rootHere($: Engine): Promise<string | null> {
   const last = (await $.state.get(LAST)).value
   if (last) return last.root
-  const env = await $.env.get('LEAN_ROOT')
+  const env = await $.env.get('THIMBLE_ROOT')
   if (env) return env
   let d = String(await $.session.cwd()).replace(/\/+$/, '')
   while (d) {
@@ -540,8 +540,8 @@ export async function ask($: Engine, request: string, verb: string, on: string):
 
 // ------------------------------------------------------------------------------------------------ the card after the answer
 
-/** Whether `lean` ran a data command or a save (what a card after the answer could draw from). */
-const LEAN_WORK = /(^|[\s;&|(])lean\s+(q|rows|resolve|sources|save)\b/
+/** Whether `thimble` ran a data command or a save (what a card after the answer could draw from). */
+const LEAN_WORK = /(^|[\s;&|(])thimble\s+(q|rows|resolve|sources|save)\b/
 
 /** The card after the answer while one is being made (else null): the observer's look waits for it, so its pass reads
  *  the card. */
@@ -549,18 +549,18 @@ export function cardSettled(): Promise<void> | null {
   return cardWork
 }
 
-/** One `lean` command of the card after the answer, filed under the session (it is Claude's work, in a fork). */
+/** One `thimble` command of the card after the answer, filed under the session (it is Claude's work, in a fork). */
 async function leanRun($: Engine, root: string, args: string[], stdin?: string): Promise<{ ok: boolean; out: string }> {
   const dir = $.plugin.root.replace(/\/+$/, '')
-  const prompts = String((await $.env.get('LEAN_PROMPTS')) || '')
-  const py = String((await $.env.get('LEAN_PYTHON')) || '')
-  const env: Record<string, string> = { LEAN_ROOT: root, LEAN_SESSION: String(await $.session.id()), ...(prompts ? { LEAN_PROMPTS: prompts } : {}), ...(py ? { LEAN_PYTHON: py } : {}) }
-  const r = await $.process.run([`${dir}/bin/lean`, ...args], { cwd: root, env, timeoutMs: 300000, ...(stdin != null ? { stdin } : {}) })
+  const prompts = String((await $.env.get('THIMBLE_PROMPTS')) || '')
+  const py = String((await $.env.get('THIMBLE_PYTHON')) || '')
+  const env: Record<string, string> = { THIMBLE_ROOT: root, THIMBLE_SESSION: String(await $.session.id()), ...(prompts ? { THIMBLE_PROMPTS: prompts } : {}), ...(py ? { THIMBLE_PYTHON: py } : {}) }
+  const r = await $.process.run([`${dir}/bin/thimble`, ...args], { cwd: root, env, timeoutMs: 300000, ...(stdin != null ? { stdin } : {}) })
   return { ok: r.exitCode === 0, out: `${r.stdout || ''}${r.stderr ? `\n${r.stderr}` : ''}`.trim() }
 }
 
 /**
- * A card from a fork of the session (it shares main's prompt cache): after a turn that ran `lean` and saved nothing, the
+ * A card from a fork of the session (it shares main's prompt cache): after a turn that ran `thimble` and saved nothing, the
  * fork decides whether a card would help the person see why the answer holds, and writes it (`after`); when the person
  * presses v and the version says so, it writes v's card (`v`). thimble runs the queries the card asks for, saves it
  * under the session, draws it once as a save does (its interactions tried), and asks the fork once more when something
@@ -605,7 +605,7 @@ async function forkCard($: Engine, o: { row: string; version: { text: string; id
       const saved = await leanRun($, root, ['save', reply.name, '--from', file])
       const m = /^saved (\S+) v(\d+)/m.exec(saved.out)
       if (!m) {
-        problems.push(`lean save did not save it: ${cut(saved.out.split('\n').filter(Boolean).slice(-3).join(' '), 400)}`)
+        problems.push(`thimble save did not save it: ${cut(saved.out.split('\n').filter(Boolean).slice(-3).join(' '), 400)}`)
         made = { problems, reply, p: null }
       } else {
         ref = { id: m[1]!, v: Number(m[2]), root }
@@ -736,7 +736,7 @@ async function startServer($: Engine, root: string): Promise<{ base: string } | 
       let ready = false
       let why = ''
       try {
-        const child = $.process.spawn({ argv: ['node', `${dir}/shell/node/serve.mjs`, '--root', root, '--session', session, '--lean', `${dir}/bin/lean`], env: await leanEnv($, root) })
+        const child = $.process.spawn({ argv: ['node', `${dir}/shell/node/serve.mjs`, '--root', root, '--session', session, '--lean', `${dir}/bin/thimble`], env: await leanEnv($, root) })
         serverStream = child as unknown as { return?: (v?: unknown) => unknown }
         for await (const piece of child) {
           if (piece.stream !== 'stdout') continue
@@ -867,7 +867,7 @@ export async function webContext($: Engine, root: string, scope: WebScope): Prom
     const label = region ? String(regionMeta(p.drawing, region)?.label || scope.label || region) : ''
     lines.push(`They asked it on the page of ${ref.id}@${o?.version ?? ref.v} "${o?.title || ''}" (${root}/thimble/objects/${ref.id}.json)${region ? `, with its part ${region} ("${label}") selected. "This" may mean that part.` : '.'}`)
     const refs = o && region ? regionRefs(o, p.drawing, region).refs : o ? objectRefs(o).map((c: Any) => c.ref) : []
-    if (refs.length) lines.push(`${region ? 'That part rests' : 'Its words rest'} on ${refs.slice(0, 3).join(', ')}; \`lean resolve <ref>\` opens the rows, \`lean list ${ref.id}\` the object's lineage.`)
+    if (refs.length) lines.push(`${region ? 'That part rests' : 'Its words rest'} on ${refs.slice(0, 3).join(', ')}; \`thimble resolve <ref>\` opens the rows, \`thimble list ${ref.id}\` the object's lineage.`)
   }
   if (scope.claim && /^c\d{1,6}$/.test(scope.claim)) {
     const store = await claimsStore($)
@@ -882,7 +882,7 @@ export async function webContext($: Engine, root: string, scope: WebScope): Prom
   if (m && m.kind === 'gloss') {
     lines.push(`They asked about the term "${m.term || m.label || ''}", which the page explains under your message.`)
   } else if (m && m.ref && isRef(m.ref)) {
-    lines.push(`They asked about your citation "${m.label || m.ref}" (${m.ref}). \`lean resolve ${m.ref}\` shows its rows.`)
+    lines.push(`They asked about your citation "${m.label || m.ref}" (${m.ref}). \`thimble resolve ${m.ref}\` shows its rows.`)
   }
   if (scope.row) {
     const rec = await recordOf($, root, scope.row)
@@ -946,7 +946,7 @@ async function verbFromBrowser($: Engine, root: string, key: string, row: string
 
 /** Open a page of this session in the browser: the mirror (at a row), or a card's detail (on a part). */
 export async function openBrowser($: Engine, at: { id?: string; v?: number | null; region?: string | null; row?: string | null; root?: string; view?: string; claim?: string | null } = {}): Promise<string> {
-  if (!browserFlag) return 'Browser mode is off. Turn on Browser in /config (thimble-lean), then press o or type /browser.'
+  if (!browserFlag) return 'Browser mode is off. Turn on Browser in /config (thimble), then press o or type /browser.'
   const root = at.root || (await webRoot($))
   const s = await startServer($, root)
   if ('problem' in s) {
@@ -999,7 +999,7 @@ function browserChip(els: Any, key: string, onPress: () => unknown) {
 // Every row the shell draws has a line in thimble/messages/<session>/index.jsonl, and each of Claude's messages a
 // record, <row>.json (CONTRACT 1): its words, the marks in them, the verbs the observer lit and the objects drawn under
 // it. The records live in the folder under analysis, so the browser's page server reads the same; a session whose
-// folder has no thimble/ yet keeps them in memory and writes them once lean has made one.
+// folder has no thimble/ yet keeps them in memory and writes them once thimble has made one.
 
 /** The records' folder of this session: <root>/thimble/messages/<session>, or null while there is no root. */
 async function messagesDir($: Engine): Promise<{ session: string; dir: string | null }> {
@@ -1009,7 +1009,7 @@ async function messagesDir($: Engine): Promise<{ session: string; dir: string | 
 }
 
 /** The index and folder of this session, read once per load of the module (a resumed session finds its own). A
- *  folder that appears later (lean made thimble/, or the session's root became known) is read then, and what was kept
+ *  folder that appears later (thimble made thimble/, or the session's root became known) is read then, and what was kept
  *  in memory meanwhile is written there. */
 async function msgFilesNow($: Engine): Promise<NonNullable<typeof msgFiles>> {
   const { session, dir } = await messagesDir($)
@@ -1289,13 +1289,13 @@ async function trayCard($: Engine, req: Any, w: number, h: number): Promise<Any>
   return { title: spec.title, right: spec.right, drawings, links: spec.links || [], ...(spec.why ? { why: spec.why } : {}) }
 }
 
-/** `lean resolve <ref> --json`, as the person's own read (never counted as Claude's coverage). */
+/** `thimble resolve <ref> --json`, as the person's own read (never counted as Claude's coverage). */
 async function resolveJson($: Engine, root: string, ref: string, n = 6, label?: string): Promise<Any> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   // with the citation's words, a citation of a whole query opens the row that holds the value it shows
   const words = label && label !== ref ? ['--label', label] : []
-  const r = await $.process.run([`${dir}/bin/lean`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
-  try { return JSON.parse(r.stdout) } catch { return { ref, error: (r.stdout + r.stderr).trim().slice(0, 300) || 'lean resolve gave nothing' } }
+  const r = await $.process.run([`${dir}/bin/thimble`, 'resolve', ref, '-n', String(n), ...words, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+  try { return JSON.parse(r.stdout) } catch { return { ref, error: (r.stdout + r.stderr).trim().slice(0, 300) || 'thimble resolve gave nothing' } }
 }
 
 /** One part of a card drawn: its program in the drawing contract's sandbox, then as terminal cells. */
@@ -1311,7 +1311,7 @@ async function drawPart($: Engine, part: { program: string; data: unknown }, w: 
  *  the person's own reads. */
 async function sourceSpec($: Engine, ref: string, label: string, room: number): Promise<Any> {
   const root = await rootHere($)
-  if (!root) return { title: label, right: 'cite', problem: `no thimble/ folder here to read ${ref} from; run lean in the data folder first` }
+  if (!root) return { title: label, right: 'cite', problem: `no thimble/ folder here to read ${ref} from; run thimble in the data folder first` }
   return citeCard({ ref, label, root, room }, { resolve: (r: string, n: number, l?: string) => resolveJson($, root, r, n, l), read: (p: string) => $.fs.read(p) })
 }
 
@@ -1327,7 +1327,7 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
   const cur = (await $.state.get(PICK)).value as Any
   if (cur && cur.row === row && cur.verb === key) { await setPick($, null); return }
   // c: the Claims pane, read again (the orientation may have added claims), opened or closed
-  // what the person pressed, with whether the post-turn pass had lit it (lean stats: how often a lit verb is used)
+  // what the person pressed, with whether the post-turn pass had lit it (thimble stats: how often a lit verb is used)
   const lit = !!((await recordNow($, row))?.verbs as Record<string, Any> | undefined)?.[key]?.lit
   void recordEvent($, { kind: 'press', verb: key, row, lit })
   if (key === 'c') { await toggleClaims($, row); return }
@@ -1432,7 +1432,7 @@ async function trayBand($: Engine, e: Any, tray: Tray): Promise<Any | null> {
   const w = Math.max(40, Math.min(104, (e.props.bodyColumns ?? 100) - 3))
   // the mark's thread, as it answers, draws again
   const t = await trayScope($)
-  if (t) await $.state.get({ plugin: 'thimble-lean', key: 'thread', id: threadKeyOf(t.scope) })
+  if (t) await $.state.get({ plugin: 'thimble', key: 'thread', id: threadKeyOf(t.scope) })
   const { Box } = $.ui.resolve(e) as Any
   return Box({ marginLeft: 2, children: [await paneEl($, e, 'tray', {}, { w, h: 14 })] })
 }
@@ -1454,7 +1454,7 @@ async function askTrayThread($: Engine, text: string): Promise<string | null> {
 // ------------------------------------------------------------------------------------------------ claims
 //
 // The session's claims (CONTRACT 7) are kept in <root>/thimble/claims/<session>.json, beside its messages, so the
-// browser's page server reads the same. The observer's one look adds each turn's claims (observer.ts); `lean verb
+// browser's page server reads the same. The observer's one look adds each turn's claims (observer.ts); `thimble verb
 // claims save` adds the corpus orientation's. c under a message opens the list there; a claim opens in the tray.
 
 type ClaimsStore = ReturnType<typeof emptyStore> & Record<string, Any>
@@ -1593,7 +1593,7 @@ async function claimScope($: Engine): Promise<{ context: string; label: string; 
   const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
   return {
     label: `claim: ${c.text}`, scope: { claim: c.id, ...(first?.row ? { row: first.row } : {}) },
-    context: `The person asked this with the ring on a claim of this session in the Claims pane: ${c.id} "${c.text}"${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}, ${where}.${refs.length ? ` It rests on ${refs.join(', ')}; \`lean resolve <ref>\` shows the rows.` : ''} "This" or "it" may mean that claim.`,
+    context: `The person asked this with the ring on a claim of this session in the Claims pane: ${c.id} "${c.text}"${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}, ${where}.${refs.length ? ` It rests on ${refs.join(', ')}; \`thimble resolve <ref>\` shows the rows.` : ''} "This" or "it" may mean that claim.`,
   }
 }
 
@@ -1605,7 +1605,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   if (frame.row == null) {
     return {
       label: frame.label || frame.ref!, scope: { mark: { kind: 'cite', ref: frame.ref, label: frame.label } }, refs: [frame.ref!],
-      context: `The person asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`lean resolve ${frame.ref}\` shows its rows.`,
+      context: `The person asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`thimble resolve ${frame.ref}\` shows its rows.`,
     }
   }
   const rec = await recordNow($, frame.row)
@@ -1622,7 +1622,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   const label = m.kind === 'spark' ? `the sparkline of ${m.ref}` : String(m.label)
   return {
     label, scope: { row: rec.row, mark: { kind: m.kind, ref: m.ref, label } }, refs: [seriesRef(m.ref!)?.query ?? m.ref!],
-    context: `The person asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`lean resolve ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
+    context: `The person asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`thimble resolve ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
   }
 }
 
@@ -1641,7 +1641,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 
 const BRIGHT_MS = 1600
 
-/** The read share of a file as `lean coverage` reports it: rows computed over, or lines read, or rows shown, of its
+/** The read share of a file as `thimble coverage` reports it: rows computed over, or lines read, or rows shown, of its
  *  rows; a file searched or named counts as not read. */
 function readShare(f: Any): number {
   if (!f || !f.rows) return 0
@@ -1686,7 +1686,7 @@ export async function recount($: Engine, o: { coverage?: boolean } = {}): Promis
     if (o.coverage && root) {
       const dir = $.plugin.root.replace(/\/+$/, '')
       try {
-        const r = await $.process.run([`${dir}/bin/lean`, 'coverage', '--json'], { cwd: root, env: { LEAN_ROOT: root, LEAN_SESSION: String(await $.session.id()) }, timeoutMs: 60000 })
+        const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', '--json'], { cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: String(await $.session.id()) }, timeoutMs: 60000 })
         const files = (JSON.parse(r.stdout).files || []) as Any[]
         const rows = files.reduce((n, f) => n + (Number(f.rows) || 0), 0)
         if (rows > 0) cov = files.reduce((n, f) => n + readShare(f) * (Number(f.rows) || 0), 0) / rows
@@ -1726,7 +1726,7 @@ async function threadInFront($: Engine): Promise<string | null> {
  *  Claims pane, the squeeze chips, v's proposals, the tray, a card under a reply). The thimble line says the keys of
  *  the top one alone, read from this one state, so it redraws whenever the stack changes. */
 type FocusKind = 'detail' | 'claims' | 'chips' | 'proposals' | 'tray' | 'card'
-const FSTACK = { plugin: 'thimble-lean', key: 'focus' } as const
+const FSTACK = { plugin: 'thimble', key: 'focus' } as const
 const FOCUS_ORDER: FocusKind[] = ['card', 'proposals', 'tray', 'chips', 'claims', 'detail']
 
 export async function pushFocus($: Engine, kind: FocusKind): Promise<void> {
@@ -2347,7 +2347,7 @@ export async function paneWant($: Engine, _name: string, _args: Record<string, u
     const dir = $.plugin.root.replace(/\/+$/, '')
     let cov: Any = null
     try {
-      const r = await $.process.run([`${dir}/bin/lean`, 'coverage', request.facts, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
+      const r = await $.process.run([`${dir}/bin/thimble`, 'coverage', request.facts, '--json'], { cwd: root, env: await leanEnv($, root), timeoutMs: 60000 })
       cov = JSON.parse(r.stdout)
     } catch {
       cov = null
@@ -2451,7 +2451,7 @@ export const registerShell: Register = (on, options) => {
   registerDetail(on)
 
   // /config turns browser mode on or off: on, /browser is there and `o` shows; off, the server ends
-  on('config.set', { key: /^thimble-lean(@[\w.-]+)?\.browser$/ }, async ($, e, next) => {
+  on('config.set', { key: /^thimble(@[\w.-]+)?\.browser$/ }, async ($, e, next) => {
     const r = await next(e)
     try {
       if (!(r as Any)?.deny) await setBrowser($, (r as Any)?.value === true || ((r as Any)?.value === undefined && e.value === true))
@@ -2514,7 +2514,7 @@ export const registerShell: Register = (on, options) => {
       const input = e as unknown as { command?: string; agentId?: string; tool_use_id?: string }
       const text = typeof r.text === 'string' ? r.text : typeof r.result === 'string' ? r.result : ''
       // the corpus orientation's claims went into the store: the list reads it again, and c lights under the answer
-      if (r.deny === undefined && !r.isError && !input.agentId && /\blean\s+verb\s+claims\s+save\b/.test(String(input.command))) {
+      if (r.deny === undefined && !r.isError && !input.agentId && /\bthimble\s+verb\s+claims\s+save\b/.test(String(input.command))) {
         const m = /(\d+) new claims? from the corpus/.exec(text)
         if (m && turn) turn.oriented += Number(m[1])
         await reloadClaims($)
@@ -2634,7 +2634,7 @@ export const registerShell: Register = (on, options) => {
         $.clock.after(0, () => { void recount($, { coverage: true }) })
         // claims the corpus orientation saved in this turn light c under its answer
         if (turn.oriented) await setVerb($, row, 'c', { lit: true, note: `${turn.oriented} claims from the corpus` })
-        // the card after the answer: a turn of the person's that ran lean and saved nothing (a verb's turn draws its own)
+        // the card after the answer: a turn of the person's that ran thimble and saved nothing (a verb's turn draws its own)
         const card = turn.leaned && !turn.saved && !turn.unplaced.length && !turn.placed.length && turnFeature() === 'main' ? await cardVersion($) : null
         if (card) {
           const q = question
@@ -2835,7 +2835,7 @@ export const registerShell: Register = (on, options) => {
         await closeTray($)
       } else if (sel && open && sel.cite) {
         pendingAsk = { text: e.text, about: { id: sel.cite, v: null, region: null, label: citeLabels.get(sel.cite) || sel.cite } }
-        context.push(`The person asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`lean resolve ${sel.cite}\` shows its rows.`)
+        context.push(`The person asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`thimble resolve ${sel.cite}\` shows its rows.`)
       } else if (sel && open && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin') {
         const p = await prepared($, sel, 96, sel.state)
         const meta = sel.region ? regionMeta(p.drawing, sel.region) : null
@@ -2845,7 +2845,7 @@ export const registerShell: Register = (on, options) => {
         context.push([
           `The person asked this with an object open in the detail view: ${p.object?.id}@${p.object?.version} "${p.object?.title || ''}" (${sel.root}/thimble/objects/${sel.id}.json).${knobs}`,
           sel.region ? `They had selected its part ${sel.region} ("${label}"). "This", "here" or "it" may mean that part.` : 'No part of it was selected.',
-          refs.length ? `${sel.region ? 'That part' : 'Its words'} rest${sel.region ? 's' : ''} on ${refs.slice(0, 3).join(', ')}; \`lean resolve <ref>\` opens the rows, \`lean list ${sel.id}\` the object's lineage.` : `\`lean list ${sel.id}\` shows the object's lineage.`,
+          refs.length ? `${sel.region ? 'That part' : 'Its words'} rest${sel.region ? 's' : ''} on ${refs.slice(0, 3).join(', ')}; \`thimble resolve <ref>\` opens the rows, \`thimble list ${sel.id}\` the object's lineage.` : `\`thimble list ${sel.id}\` shows the object's lineage.`,
         ].join('\n'))
         pendingAsk = { text: e.text, about: { id: sel.id, v: p.object?.version ?? sel.v, region: sel.region, label } }
       }
@@ -2860,7 +2860,7 @@ export const registerShell: Register = (on, options) => {
     const words = e.args.trim().split(/\s+/).filter(Boolean)
     const toWeb = words[0] === 'browser'
     const t = await parseTarget($, toWeb ? words.slice(1) : words)
-    if (!t.ref) return { text: `Nothing to open: ${t.problem}. An object Claude saves with \`lean save\` shows under its reply.` }
+    if (!t.ref) return { text: `Nothing to open: ${t.problem}. An object Claude saves with \`thimble save\` shows under its reply.` }
     if (toWeb) {
       const cur = (await $.state.get(SEL)).value
       const sel: Sel = cur && cur.id === t.ref.id && !words[2] ? cur : { ...t.ref, region: t.region, ex: 0, all: false }

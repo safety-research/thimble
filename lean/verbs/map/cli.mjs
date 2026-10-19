@@ -2,7 +2,7 @@
 //
 //   node cli.mjs SPEC.json [--w 100] [--full] [--both] [--program FILE.js] [--plain] [--light] [--select REGION] [--regions]
 //
-// SPEC.json is an object as `lean save` keeps it ({title, program, data, ...}) or a bare map spec (its data). With no
+// SPEC.json is an object as `thimble save` keeps it ({title, program, data, ...}) or a bare map spec (its data). With no
 // program, the map verb's own (PROGRAM in run.mjs) draws it. --both draws the mini form, then the full one.
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'

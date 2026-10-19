@@ -1,5 +1,5 @@
 """Focused tests of the lean kernel: stable row ids per source kind, row sets, query lineage, objects with lineage,
-resolving a value to its rows, and coverage. Run: LEAN_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
+resolving a value to its rows, and coverage. Run: THIMBLE_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
 from __future__ import annotations
 
 import copy
@@ -50,8 +50,8 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         f.write(json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "I will run the tests"},
                                                                          {"type": "tool_use", "name": "Bash", "input": {"command": "pytest"}}]}}) + "\n")
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("LEAN_SESSION", "s-test")
-    monkeypatch.delenv("LEAN_ROOT", raising=False)
+    monkeypatch.setenv("THIMBLE_SESSION", "s-test")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
     return d
 
 
@@ -235,9 +235,9 @@ def test_coverage_merges_queries_rows_and_what_the_hook_saw(root: Path, tmp_path
 
 
 def test_the_command_runs_a_query_from_a_heredoc(root: Path) -> None:
-    lean = Path(__file__).resolve().parents[1] / "bin" / "lean"
+    lean = Path(__file__).resolve().parents[1] / "bin" / "thimble"
     # the root is pinned: a thimble/ store in a folder above the test's (as /tmp can hold) must not take it
-    env = {**os.environ, "LEAN_PYTHON": sys.executable, "LEAN_ROOT": str(root)}
+    env = {**os.environ, "THIMBLE_PYTHON": sys.executable, "THIMBLE_ROOT": str(root)}
     out = subprocess.run([str(lean), "q", "runs by result"], input='tally(load("runs.csv"), "passed")', text=True,
                          capture_output=True, cwd=root, env=env, timeout=120)
     assert out.returncode == 0, out.stderr
@@ -361,7 +361,7 @@ def test_big_files_are_parsed_once_in_workers_and_a_load_with_fields_reads_only_
 
 
 def test_rows_are_counted_as_iter_rows_gives_them_in_workers_and_by_the_database(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """`lean sources` counts each file's rows: a database's by its own count (a table its rows cannot be read from by
+    """`thimble sources` counts each file's rows: a database's by its own count (a table its rows cannot be read from by
     rowid gives none, as iter_rows gives none), and many big files in worker processes, with the same counts."""
     con = sqlite3.connect(root / "two.db")
     con.execute("create table a (x text)")

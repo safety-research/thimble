@@ -190,15 +190,15 @@ function browserRoot() {
     { row: '../x', kind: 'user', text: 'a row key that is no key' },
   ].map(r => JSON.stringify(r)).join('\n') + '\nnot json\n')
   writeFileSync(join(msgs, 'a1.json'), JSON.stringify({ v: 1, row: 'a1', session: SID, text: 'June 18: [2](q1#day=2026-06-18@n).', marks: [{ kind: 'cite', start: 9, end: 34, ref: 'q1#day=2026-06-18@n', label: '2' }], verbs: { v: { lit: true, note: '1 view' } }, objects: ['01-saves'] }))
-  // a stand-in for the lean command: what `lean coverage [<id>]`, `lean resolve`, `lean sources` and `lean rows` print
+  // a stand-in for the thimble command: what `thimble coverage [<id>]`, `thimble resolve`, `thimble sources` and `thimble rows` print
   const lean = join(root, 'fake-lean')
   writeFileSync(lean, [
     '#!/bin/sh',
     'case "$1" in',
-    ` coverage) if [ "$2" = "--json" ]; then echo '{"files": [{"path": "r.jsonl", "status": "computed", "rows": 9, "computed": 9}, {"path": "kinds.csv", "status": "not read", "rows": 3}], "groups": [], "total": {"files": 2, "rows": 12, "not_read_files": 1, "not_read_rows": 3}, "session": "'"$LEAN_SESSION"'"}'; else echo '{"object": "01-saves", "feeding": [{"path": "r.jsonl", "rows": 5, "of": 9}], "not_feeding": ["kinds.csv", "notes.md"], "session": null, "total": {"files": 3, "rows": 9, "not_read_files": 1, "not_read_rows": 4}, "groups": []}'; fi ;;`,
-    ' resolve) echo "{\\"ref\\": \\"$2\\", \\"chain\\": [{\\"step\\": \\"query\\", \\"id\\": \\"q1\\"}], \\"count\\": 2, \\"rows\\": [\\"r.jsonl#L4-5\\"], \\"records\\": [], \\"session\\": \\"$LEAN_SESSION\\"}" ;;',
+    ` coverage) if [ "$2" = "--json" ]; then echo '{"files": [{"path": "r.jsonl", "status": "computed", "rows": 9, "computed": 9}, {"path": "kinds.csv", "status": "not read", "rows": 3}], "groups": [], "total": {"files": 2, "rows": 12, "not_read_files": 1, "not_read_rows": 3}, "session": "'"$THIMBLE_SESSION"'"}'; else echo '{"object": "01-saves", "feeding": [{"path": "r.jsonl", "rows": 5, "of": 9}], "not_feeding": ["kinds.csv", "notes.md"], "session": null, "total": {"files": 3, "rows": 9, "not_read_files": 1, "not_read_rows": 4}, "groups": []}'; fi ;;`,
+    ' resolve) echo "{\\"ref\\": \\"$2\\", \\"chain\\": [{\\"step\\": \\"query\\", \\"id\\": \\"q1\\"}], \\"count\\": 2, \\"rows\\": [\\"r.jsonl#L4-5\\"], \\"records\\": [], \\"session\\": \\"$THIMBLE_SESSION\\"}" ;;',
     ` sources) echo '[{"path": "r.jsonl", "kind": "jsonl", "rows": 9, "lines": 9, "size": 900}, {"path": "kinds.csv", "kind": "csv", "rows": 3, "lines": 4, "size": 40}]' ;;`,
-    ' rows) echo "args $*" >> "$LEAN_ROOT/rows.log"; printf \'r.jsonl#L4  {"text": "four"}\\nr.jsonl#L5  {"text": "five"}\\n\\nthe rows 4 to 5 of 9 in r.jsonl.\\n\' ;;',
+    ' rows) echo "args $*" >> "$THIMBLE_ROOT/rows.log"; printf \'r.jsonl#L4  {"text": "four"}\\nr.jsonl#L5  {"text": "five"}\\n\\nthe rows 4 to 5 of 9 in r.jsonl.\\n\' ;;',
     'esac',
   ].join('\n') + '\n', { mode: 0o755 })
   return { root, lean }
@@ -339,7 +339,7 @@ test('the app\'s routes: side threads with their turns, the sources, what this s
   const dir = join(root, 'thimble', 'threads', SID)
   mkdirSync(dir, { recursive: true })
   // a thread file as the threads module writes it; a field it does not know is dropped, a bad turn is dropped
-  writeFileSync(join(dir, 'card-01-saves.json'), JSON.stringify({ key: 'card-01-saves', agentId: 'a7', title: 'Saves per day', card: 'Saves per day', status: 'done', scope: { object: '01-saves', v: 2, region: 'day-2026-06-18', label: 'Jun 18', secret: 'x' }, turns: [{ role: 'person', text: 'why so high?', about: 'Jun 18' }, { role: 'claude', text: 'A bot: [6,543](q1#day=2026-06-18@n).', calls: ['lean resolve q1'] }, { role: 'system', text: 'no' }], at: '2026-01-01T00:01:00Z' }))
+  writeFileSync(join(dir, 'card-01-saves.json'), JSON.stringify({ key: 'card-01-saves', agentId: 'a7', title: 'Saves per day', card: 'Saves per day', status: 'done', scope: { object: '01-saves', v: 2, region: 'day-2026-06-18', label: 'Jun 18', secret: 'x' }, turns: [{ role: 'person', text: 'why so high?', about: 'Jun 18' }, { role: 'claude', text: 'A bot: [6,543](q1#day=2026-06-18@n).', calls: ['thimble resolve q1'] }, { role: 'system', text: 'no' }], at: '2026-01-01T00:01:00Z' }))
   // the format the detail agent names: {id, session, scope, title, at, turns}
   writeFileSync(join(dir, 'mark-a1-q1.json'), JSON.stringify({ id: 'mark-a1-q1', session: SID, scope: { row: 'a1', mark: { kind: 'cite', ref: 'q1#day=2026-06-18@n', label: '2' } }, title: '', at: '2026-01-01T00:02:00Z', turns: [{ role: 'user', text: 'where from?', at: '2026-01-01T00:02:00Z' }] }))
   writeFileSync(join(dir, 'broken.json'), '{"turns": [')
@@ -353,7 +353,7 @@ test('the app\'s routes: side threads with their turns, the sources, what this s
     const card = threads.find(t => t.id === 'card-01-saves')
     assert.deepEqual(card.scope, { object: '01-saves', v: 2, region: 'day-2026-06-18', label: 'Jun 18' })
     assert.deepEqual(card.turns.map(t => t.role), ['user', 'assistant'])
-    assert.deepEqual(card.turns[1].calls, ['lean resolve q1'])
+    assert.deepEqual(card.turns[1].calls, ['thimble resolve q1'])
     assert.equal(card.status, 'done')
     // a thread whose last turn is a question is still answering
     assert.equal(threads.find(t => t.id === 'mark-a1-q1').status, 'running')
@@ -473,14 +473,14 @@ test('a bar keeps the examples and cite its own meta names, so selecting it show
 
 test('every state key the plugin keeps is named in its types contract', () => {
   const here = new URL('../../', import.meta.url).pathname
-  const declared = new Set([...readFileSync(join(here, 'types', 'index.d.ts'), 'utf8').split("'thimble-lean': {")[1].matchAll(/^ {6}(\w+):/gm)].map(m => m[1]))
+  const declared = new Set([...readFileSync(join(here, 'types', 'index.d.ts'), 'utf8').split("'thimble': {")[1].matchAll(/^ {6}(\w+):/gm)].map(m => m[1]))
   const used = new Set()
   const walk = dir => {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       if (e.name === 'node_modules' || e.name === 'app' || e.name.startsWith('.')) continue
       const p = join(dir, e.name)
       if (e.isDirectory()) walk(p)
-      else if (/\.(ts|tsx)$/.test(e.name) && !/\.test\.ts$/.test(e.name)) for (const m of readFileSync(p, 'utf8').matchAll(/plugin: 'thimble-lean', key: '(\w+)'/g)) used.add(m[1])
+      else if (/\.(ts|tsx)$/.test(e.name) && !/\.test\.ts$/.test(e.name)) for (const m of readFileSync(p, 'utf8').matchAll(/plugin: 'thimble', key: '(\w+)'/g)) used.add(m[1])
     }
   }
   walk(here)

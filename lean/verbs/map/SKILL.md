@@ -1,6 +1,6 @@
 ---
 name: map
-description: Use when the person asks to map, lay out or see the shape of some work - one long agent run, many runs of a task, a sweep or a swarm, a dataset, a report or a code change - or presses m. You find the threads, stations and links in the rows, count them with `lean q`, and save the map with `lean save`; `k.map` draws it, and every station keeps its rows.
+description: Use when the person asks to map, lay out or see the shape of some work - one long agent run, many runs of a task, a sweep or a swarm, a dataset, a report or a code change - or presses m. You find the threads, stations and links in the rows, count them with `thimble q`, and save the map with `thimble save`; `k.map` draws it, and every station keeps its rows.
 ---
 
 # Map: lay the work out by its own structure
@@ -35,7 +35,7 @@ moves and split at a few of them. A dataset falls into kinds. Name stations by w
 not by tool names.
 
 **Few stations, each one you can check.** Five to twelve stations read well. Write each as a rule in code ("runs pytest
-after an edit", "posts REVIEW WANTED") or as step ranges you chose after reading, and apply it with `lean q`. Fold
+after an edit", "posts REVIEW WANTED") or as step ranges you chose after reading, and apply it with `thimble q`. Fold
 rare moves into a neighbor. Mark the stations that tell the story `"key": true`: the calm form shows those and the
 endings.
 
@@ -58,7 +58,7 @@ of the stations.
 ## Saving a map
 
 ```bash
-lean save NAME <<'JSON'
+thimble save NAME <<'JSON'
 {"title": "...", "question": "the person's question",
  "program": "return k.frame(k.map(data), { title: data.title })",
  "data": {"title": "...", "unit": "runs", "threads": "q4", "moves": "q5", "stations": [...], "lens": "outcome"}}
@@ -69,11 +69,11 @@ The program is one line. Write your own around `k.map(data, o)` when the map nee
 
 ## Example: one long run (an agent's transcript)
 
-The person asks: "What did agent-05 do, start to finish?" You read the run with `lean rows`, then give its tool calls
+The person asks: "What did agent-05 do, start to finish?" You read the run with `thimble rows`, then give its tool calls
 phases as step ranges you chose after reading:
 
 ```bash
-lean q "agent-05's tool calls in phases" <<'PY'
+thimble q "agent-05's tool calls in phases" <<'PY'
 df = load("agents/agent-05.jsonl", fields=["type", "message"])
 calls = df[df.type == "assistant"].copy()
 calls["tools"] = calls.message.map(lambda m: [b for b in (m or {}).get("content", []) if isinstance(b, dict) and b.get("type") == "tool_use"])
@@ -85,7 +85,7 @@ moves = calls.groupby("station", sort=False).agg(start=("step", "min"), end=("st
 moves["thread"] = "agent-05"
 moves
 PY
-lean save agent-05-map <<'JSON'
+thimble save agent-05-map <<'JSON'
 {"title": "agent-05 · 143 tool calls", "program": "return k.frame(k.map(data), { title: data.title })",
  "data": {"title": "agent-05 · 143 tool calls", "unit": "calls", "threads": [{"id": "agent-05", "steps": 143}], "moves": "q1",
   "stations": [{"id": "orient", "label": "reads the board"}, {"id": "fix-a", "label": "fixes PR #66708", "note": "edits, runs pytest 6 times"},
@@ -103,12 +103,12 @@ The person asks: "How did the 40 runs of this task go?" One query gives each run
 40 transcripts; another gives each run its outcome:
 
 ```bash
-lean q "the moves of every run" <<'PY'
+thimble q "the moves of every run" <<'PY'
 df = load("runs/*.jsonl", fields=["type", "message"])
 ...                                    # one row per (run, station, start, end), with _refs
 moves
 PY
-lean save runs-map <<'JSON'
+thimble save runs-map <<'JSON'
 {"title": "fix the flaky test · 40 runs", "program": "return k.frame(k.map(data), { title: data.title })",
  "data": {"title": "fix the flaky test · 40 runs", "unit": "runs", "lens": "outcome", "threads": "q2", "moves": "q1",
   "stations": [{"id": "tz", "label": "theory: timezone", "key": true, "note": "first theory mentions dates or timezones"},
@@ -126,12 +126,12 @@ outcome. A swarm is the same with agents as threads; a note one agent wrote and 
 Nothing moves here, so there are no threads: stations are the kinds of things it holds, in groups.
 
 ```bash
-lean q "saves per kind of page" <<'PY'
+thimble q "saves per kind of page" <<'PY'
 df = load("revisions.jsonl", fields=["page", "label"])
 df["kind"] = df.page.map(kind_of)       # your rule, written after reading pages
 tally(df, "kind")
 PY
-lean save wiki-map <<'JSON'
+thimble save wiki-map <<'JSON'
 {"title": "what the wiki holds · 14,591 saves", "program": "return k.frame(k.map(data), { title: data.title })",
  "data": {"title": "what the wiki holds · 14,591 saves", "unit": "saves",
   "groups": [{"id": "coord", "label": "coordination pages"}, {"id": "links", "label": "link-reference pages"}],

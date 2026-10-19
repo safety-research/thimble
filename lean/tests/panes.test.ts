@@ -35,7 +35,7 @@ type Any = any
 function world(on: Any, serverLines: unknown[] = [], draw: (input: Any) => unknown = drawingFor) {
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.focus', () => ({}))
-  on('ui.panes', () => ({ value: [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble-lean' }] }))
+  on('ui.panes', () => ({ value: [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble' }] }))
   on('config.set', (_$: unknown, e: { value: unknown }) => ({ value: e.value }))
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', BROWSER: '/usr/bin/open-page' })
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
@@ -77,7 +77,7 @@ function world(on: Any, serverLines: unknown[] = [], draw: (input: Any) => unkno
   const toasts: string[] = []
   on('ui.toast', (_$: unknown, e: { text?: string }) => { toasts.push(String(e.text ?? '')); return { value: undefined } })
   on('command.register', (_$: unknown, e: { name: string }) => ({ value: { command: e.name } }))
-  on('agent.register', () => ({ value: { agent: 'thimble-lean:thread' } }))
+  on('agent.register', () => ({ value: { agent: 'thimble:thread' } }))
   on('config.list', () => ({ value: [] }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
@@ -90,16 +90,16 @@ function textOf(n: Any): string {
   if (Array.isArray(n)) return n.map(textOf).join('')
   return textOf(n.props?.children) + textOf(n.children)
 }
-const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
-const PANE = { plugin: 'thimble-lean', component: 'Pane', surface: 'terminal', requestId: 'object', props: { bodyColumns: 100, scroll: { bodyRows: 40, offset: 0 }, isFocused: true, placement: 'dock', title: 'Saves per day', view: {} } } as never
+const HINT = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
+const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'object', props: { bodyColumns: 100, scroll: { bodyRows: 40, offset: 0 }, isFocused: true, placement: 'dock', title: 'Saves per day', view: {} } } as never
 const edit = (key: string, text = '') => ({ origin: { kind: 'composer' }, key: { key }, text, cursor: text.length, start: text.length, end: text.length, inputText: key.length === 1 ? key : '' }) as never
-const reply = ($: Any) => $.ui.render({ plugin: 'thimble-lean', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
+const reply = ($: Any) => $.ui.render({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
 // the Text runs drawn with a fill, and their words
 const filled = (n: Any): string => (Array.isArray(n) ? n.map(filled).join('') : n && typeof n === 'object' ? (n.props?.backgroundColor === 'selectionBg' ? textOf(n) : filled(n.children ?? n.props?.children)) : '')
 
 async function savedTurn($: Any, clock: { settle: () => Promise<void> }) {
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
   await $.turn.complete({ turnId: 't1', answer: 'June 18 had the most saves.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.settle()

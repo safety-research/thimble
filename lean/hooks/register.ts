@@ -1,5 +1,5 @@
-// thimble's lean plugin: its one hooks module. The kernel's watching hook (kernel.ts: which files Claude's own calls
-// read, for `lean coverage`), the shell (../shell/shell.tsx: objects drawn under replies, the detail view, verb
+// thimble's plugin: its one hooks module. The kernel's watching hook (kernel.ts: which files Claude's own calls
+// read, for `thimble coverage`), the shell (../shell/shell.tsx: objects drawn under replies, the detail view, verb
 // hints, the browser handoff), the observer (../observer/observer.ts: one quiet look after each turn of work, notes
 // to Claude, a rare line above the prompt, and the ranking of each object's hint row), the prompt registry
 // (../prompts/prompts.ts: which version of each text a model reads) and the telemetry (../telemetry/telemetry.ts:

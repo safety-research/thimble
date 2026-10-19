@@ -5,7 +5,7 @@
   "order": 1.5,
   "row": true,
   "store": "thimble/claims/<session>.json (CONTRACT 7), written by claims.js",
-  "writer": "the observer's one fork after each turn of work gives the turn's claims, each with what it means (precisely, based_on, judgment, unstated), and claims.js applyTurn places, dedupes, links and clusters them; the corpus orientation (a subagent of main, guided by SKILL.md) adds the corpus's claims with `lean verb claims save`",
+  "writer": "the observer's one fork after each turn of work gives the turn's claims, each with what it means (precisely, based_on, judgment, unstated), and claims.js applyTurn places, dedupes, links and clusters them; the corpus orientation (a subagent of main, guided by SKILL.md) adds the corpus's claims with `thimble verb claims save`",
   "offer": "estimate.mjs: the time and tokens of the corpus orientation, which /verb claims orient asks Claude to start",
   "forms": {
     "terminal": "c: the claims pane (panes/claims.js), an island of dots per cluster; the claim the ring is on shows a card of what it means and its links; r replays the graph in the order the claims were made",

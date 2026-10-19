@@ -8,7 +8,7 @@ An object is a program + data + lineage:
     text         words for the person, in Markdown; each [label](ref) is a citation
     data         the values the program draws: a query ref (q3, q3#day=2026-06-16, q3#day=2026-06-16@n) is replaced by
                  its value, each row keeping `_rows`, its source rows; a {"ref": ..., "quote": ...} is a cited row
-    source       the spec as Claude gave it, query refs unbound, so `lean save --rerun` can bind it again
+    source       the spec as Claude gave it, query refs unbound, so `thimble save --rerun` can bind it again
     lineage      queries (code, inputs, what they kept and used), bindings (which query fills which part of data),
                  cites (each citation, with the row's hash), rows (per file, every source row behind the values),
                  coverage (what the session had read and had not, at save), declared (anything Claude says it read
@@ -79,7 +79,7 @@ def read(st: Store, p: Any) -> dict[str, Any] | None:
         if isinstance(lin, dict):
             lin.pop("packed", None)
             lin["problems"] = list(lin.get("problems") or []) + [
-                f"its lineage's packed rows did not read ({type(e).__name__}): `lean save {obj.get('id')} --rerun` binds them again"]
+                f"its lineage's packed rows did not read ({type(e).__name__}): `thimble save {obj.get('id')} --rerun` binds them again"]
         return obj
 
 

@@ -2,7 +2,7 @@
 // page both use it.
 //
 // A side thread is a question the person asks about one part of a card (or one mark of a message, from the tray),
-// answered by a subagent of the session that can query the data with `lean`. It has its own turns. Main's
+// answered by a subagent of the session that can query the data with `thimble`. It has its own turns. Main's
 // conversation gets nothing of it unless the person sends the result there.
 //
 //   scope        {object?, v?, region?, label?, row?, mark?: {kind, ref?, gloss?, label?, term?}}
@@ -48,7 +48,7 @@ export function firstMessage({ text, scope = {}, card = null, refs = [], root = 
     const m = scope.mark
     lines.push(m.kind === 'gloss' ? `About: the term "${m.term || m.label}" in Claude's message.` : `About: Claude's citation "${m.label || m.ref}" (${m.ref}).`)
   }
-  if (refs.length) lines.push(`Its rows: ${refs.slice(0, 6).join(', ')}${refs.length > 6 ? ` and ${refs.length - 6} more` : ''} (\`lean resolve <ref>\` opens them).`)
+  if (refs.length) lines.push(`Its rows: ${refs.slice(0, 6).join(', ')}${refs.length > 6 ? ` and ${refs.length - 6} more` : ''} (\`thimble resolve <ref>\` opens them).`)
   if (root) lines.push(`The data: ${root}`)
   if (selFile) lines.push(`The part the person has selected now, for a later message that names none: ${selFile}`)
   return lines.join('\n').trim()
@@ -74,7 +74,7 @@ function handback(content) {
   return b ? String(b.input?.message ?? b.input?.text ?? b.input?.report ?? '') : ''
 }
 
-/** A tool call in a thread, in a few words: `lean q "reruns after 1240"`, `Read conftest.py`. */
+/** A tool call in a thread, in a few words: `thimble q "reruns after 1240"`, `Read conftest.py`. */
 export function callWords(b) {
   const i = b?.input || {}
   if (b?.name === 'Bash') return String(i.command || '').split('\n')[0].slice(0, 120)

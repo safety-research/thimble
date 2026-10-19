@@ -172,7 +172,7 @@ function messageWords(v) {
 /**
  * One record as the person reads it: its meaningful words (the field the card is about when `fields` names it, else its
  * text, title, summary, message and the like, else its longest words) and a short meta line of whose and where it is.
- * A record from `lean resolve` carries `words` and `meta` from the kernel; one with only `text` reads as that.
+ * A record from `thimble resolve` carries `words` and `meta` from the kernel; one with only `text` reads as that.
  *   o: {fields: the fields the card is about, as a region's meta or an examples set names them}
  */
 export function recordWords(rec, o = {}) {

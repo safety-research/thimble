@@ -1,10 +1,10 @@
 // evidence.js: what the observer reads of the objects Claude saved, in a few lines each, and how it reads the
 // observer's answer back. No `$`, no Node, no DOM: the hooks module imports it, and the tests run it under Node.
 //
-// The fork already has the conversation (every `lean q` and `lean save` call and its output). What it does not have
+// The fork already has the conversation (every `thimble q` and `thimble save` call and its output). What it does not have
 // in a few words is what the kernel knows about each object: how many rows stand behind each value it cites, how sure
 // each query's row lineage is, which files fed it and which the session never read, what Claude said it read or
-// judged by hand, the problems `lean save` found, and the verbs that could act on it. That is what this writes.
+// judged by hand, the problems `thimble save` found, and the verbs that could act on it. That is what this writes.
 //
 //   rowCount(rowsets)          -> how many source rows a list of row sets names (null when one names a whole file)
 //   slim(object)               -> the object with only what digest reads: no data, no program, row sets as counts
@@ -155,7 +155,7 @@ export function digest(object, o = {}) {
   if (dec && typeof dec === 'object' && Object.keys(dec).length) L.push(`  Claude declared: ${Object.entries(dec).map(([k, v]) => `${k}: ${cut(typeof v === 'string' ? v : JSON.stringify(v), 220)}`).join('; ')}`)
   else L.push('  Claude declared nothing it read or judged by hand')
   const probs = lin.problems || []
-  if (probs.length) L.push(`  problems lean save found: ${probs.slice(0, 5).map(p => cut(p, 140)).join('; ')}`)
+  if (probs.length) L.push(`  problems thimble save found: ${probs.slice(0, 5).map(p => cut(p, 140)).join('; ')}`)
   if (typeof o.drawn === 'string' && o.drawn.trim()) {
     const lines = o.drawn.split('\n').filter(l => l.trim())
     const shown = lines.slice(0, 30).map(l => `    ${cut(l, 130)}`)

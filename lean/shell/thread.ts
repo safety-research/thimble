@@ -1,12 +1,12 @@
 // thread.ts: side threads (CONTRACT 6). A thread answers the person's questions about one part of a card, or one mark
-// of a message, with turns of its own, and can query the data with `lean`. Main's conversation learns nothing of it
+// of a message, with turns of its own, and can query the data with `thimble`. Main's conversation learns nothing of it
 // unless the person sends the result there (`m` in the detail).
 //
 // The mechanism: one subagent of the session per thread, started by this module with $.agent.spawn, no turn of main.
 //   - It is the lightest thing that can query the data. $.model.complete and $.model.fork have no tools; a loop of our
 //     own around them would run Bash on the model's behalf, outside Claude Code's permission checks. A subagent's Bash
 //     calls go through the same checks as main's: Manual mode asks, auto mode classifies.
-//   - Its type is registered once, on the first question (`thimble-lean:thread`: a short system prompt, Bash, Read,
+//   - Its type is registered once, on the first question (`thimble:thread`: a short system prompt, Bash, Read,
 //     Grep and Glob, no CLAUDE.md), and is offered to no model except while a thread is asked or the detail is open,
 //     since Claude Code checks the offer again when it resumes an agent. So main's agent listing does not name it.
 //   - A later question resumes the same agent ($.session.send), so a thread keeps its context; asked in the terminal,
@@ -42,8 +42,8 @@ export type Thread = {
   error?: string; at: string
 }
 
-export const TYPE = 'thimble-lean:thread'
-const THREAD = { plugin: 'thimble-lean', key: 'thread' } as const
+export const TYPE = 'thimble:thread'
+const THREAD = { plugin: 'thimble', key: 'thread' } as const
 const EARLIER_CHARS = 3000
 
 // the module's memory: the threads of this session by key, and which agent is whose
@@ -155,7 +155,7 @@ async function ensureType($: Engine): Promise<string | null> {
     promptId = p.id
     await $.agent.register({
       name: 'thread',
-      description: "Answers the person's questions about one part of a card, in a side thread of the thimble-lean plugin. Only the plugin starts it.",
+      description: "Answers the person's questions about one part of a card, in a side thread of the thimble plugin. Only the plugin starts it.",
       prompt: p.text,
       tools: ['Bash', 'Read', 'Grep', 'Glob'],
       omitClaudeMd: true,

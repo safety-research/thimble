@@ -1,6 +1,6 @@
 // Explore (x): turn an object or a reply into a view the person can explore, with the real rows one key below.
 //
-// Who writes the view: Claude, in the main conversation, guided by SKILL.md, saving it with `lean save`. This module
+// Who writes the view: Claude, in the main conversation, guided by SKILL.md, saving it with `thimble save`. This module
 // writes no program and calls no model. When the person presses x on something that has no explorable view yet,
 // run() answers with an `ask` that asks Claude to write one; the shell submits it as a turn, drawn as one line. When
 // the object already is explorable (it has a knob, or parts that lead to rows), run() opens it at once. A view that
@@ -8,7 +8,7 @@
 //
 // Why Claude in the main conversation and not a quiet model call:
 //   - every mark must lead to real rows, and a view often needs a grain the reply never computed (per day and wiki,
-//     per step); Claude can run `lean q`, which keeps the rows behind each value, and a tool-less call cannot;
+//     per step); Claude can run `thimble q`, which keeps the rows behind each value, and a tool-less call cannot;
 //   - follow-ups ("only links", "split by wiki") need the model in the loop: Claude changes the program and saves a
 //     new version, so no follow-up is a scripted phrase;
 //   - the queries and the save are Bash calls, so Manual mode stays manual and the person sees what ran;
@@ -23,13 +23,13 @@
 //     region,   the selected region id, or null
 //     state,    the knobs' values the person set, { id: value }
 //     w, h,     the room the view has, in cells
-//     kernel,   { resolve(ref, n) -> `lean resolve REF --json`, objects() -> [object],
-//                 rows(ref, { n, fields }) -> [{ ref, value }] as `lean rows REF --fields` reads them (optional) }
+//     kernel,   { resolve(ref, n) -> `thimble resolve REF --json`, objects() -> [object],
+//                 rows(ref, { n, fields }) -> [{ ref, value }] as `thimble rows REF --fields` reads them (optional) }
 //     draw,     { runProgram(object, { w, h, state }) -> drawing (sandboxed) }
 //     verb,     this verb's verb.json with `dir`, its folder: the request names its SKILL.md there
 //     open,     true: open any object that has a program as it is, even one that is not an explore view
 //     check,    a command that draws a saved view as text, for Claude to check what it made (default
-//               `lean verb explore --text`)
+//               `thimble verb explore --text`)
 //   }
 //   run(ctx) -> { object?, view?, text?, note?, ask? }
 //     object  the object to show, as {id, version}: an explore object Claude wrote earlier
@@ -120,9 +120,9 @@ export function request(ctx, existing) {
   const name = obj ? `explore-${bare(obj.id)}` : 'explore-<a short name>'
   return [
     `The person pressed x (Explore) on ${what}. Make it a view they can explore: read ${skill} first.`,
-    `Reuse the queries you already ran; run a new \`lean q\` only where a mark needs rows you have not kept.`,
-    `Save it with \`lean save ${name} --from FILE\`, with "verb": "explore"${obj ? ` and "of": "${obj.id}"` : ''} in the JSON.`,
-    `Check that it draws, as the person will see it, with \`${ctx.check || 'lean verb explore --text'} ${name}\`.`,
+    `Reuse the queries you already ran; run a new \`thimble q\` only where a mark needs rows you have not kept.`,
+    `Save it with \`thimble save ${name} --from FILE\`, with "verb": "explore"${obj ? ` and "of": "${obj.id}"` : ''} in the JSON.`,
+    `Check that it draws, as the person will see it, with \`${ctx.check || 'thimble verb explore --text'} ${name}\`.`,
     `Then say in one line what the person can turn or open. Do not repeat the answer.`,
   ].filter(Boolean).join(' ')
 }

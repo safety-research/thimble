@@ -3,7 +3,7 @@
 // act only while the composer is empty (and give their letter back when they began a word), a question typed while the
 // detail is open goes to the card's side thread and never to main, the thread's reports never enter main, a question
 // after a part change names the new part, and the thread's turns come from its agent's transcript.
-// `claude plugin test lean`. The drawing, `lean coverage` and `lean resolve` are answered here, at process.run.
+// `claude plugin test lean`. The drawing, `thimble coverage` and `thimble resolve` are answered here, at process.run.
 import { expect, mock, test } from 'claude-code/testing'
 import { press, promptStub } from './stubs'
 
@@ -63,7 +63,7 @@ function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
   on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
   const focused: string[] = []
   on('ui.focus', (_$: unknown, e: Any) => { focused.push(String(e.element ?? e.key)); return { value: {} } })
-  on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble-lean' }] : [] }))
+  on('ui.panes', () => ({ value: opened.length ? [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: true, isPlaced: true, plugin: 'thimble' }] : [] }))
   const views: Any[] = []
   on('ui.view', (_$: unknown, e: Any) => { views.push(e); return { value: {} } })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
@@ -72,14 +72,14 @@ function world(on: any, prep: (input: Any) => Any = () => DRAWING) {
   const submitted: string[] = []
   on('prompt.submit', (_$: unknown, e: { text: string }) => { submitted.push(e.text); return { text: e.text } })
   const spawns: Any[] = []
-  on('agent.register', () => ({ value: { agent: 'thimble-lean:thread' } }))
+  on('agent.register', () => ({ value: { agent: 'thimble:thread' } }))
   on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-test' } as never })
-  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `agent-${i + 1}`, type: 'thimble-lean:thread', description: 'thread', status: 'running' })) }))
+  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `agent-${i + 1}`, type: 'thimble:thread', description: 'thread', status: 'running' })) }))
   const sent: Any[] = []
   on('session.send', (_$: unknown, e: Any) => { sent.push(e); return { isDelivered: true } })
   on('session.messages', () => ({ value: [
     { role: 'user', content: [{ type: 'text', text: '<system-reminder>env</system-reminder>' }, { type: 'text', text: spawns[0]?.prompt ?? '' }] },
-    { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'lean resolve "q1#day=2026-06-18@n"' } }] },
+    { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'thimble resolve "q1#day=2026-06-18@n"' } }] },
     { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'rows' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'Links peaked that day: [2,994](q2#n) of the saves.' }] },
   ] }))
@@ -117,8 +117,8 @@ function textsWith(n: any, part: string, color?: string): { color?: string; back
   return [...here, ...textsWith(kids, part, own)]
 }
 
-const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
-const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 140, rows: 40, isFullscreen: true } } as never
+const HINT = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
+const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 140, rows: 40, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hintOf = async ($: any) => textOf(await $.ui.render(HINT))
 // the ask line's key in the pane as drawn now
@@ -159,7 +159,7 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   expect(t).not.toContain('esc back')
   expect(await hintOf($)).toContain('↑↓ part · ↵ details · e examples · p program · h versions · type to ask this card · esc back')
   // ↵ on the selected part (the ring's press) fills the bar with its details: where it comes from, and its examples one key away
-  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await clock.settle()
   await ui.press({ key: 'r|pane|1|day-2026-06-18' })
   await clock.settle()
@@ -214,7 +214,7 @@ test('keys act only while the composer is empty; a key that began a word gives i
   expect(await press($, clock, edit('p', 'what about '))).toEqual({ text: 'what about p', cursor: 12 })
   expect(await press($, clock, edit(']', 'x'))).toEqual({ text: 'x]', cursor: 2 })
   // ↵ in the ask line asks the card's thread, and the keys go back to the card
-  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await ui.input({ key: await askKeyOf($), text: 'plants?' })
   await clock.settle()
   expect(JSON.stringify(await $.ui.render(PANE))).not.toContain('"value":"plants here?"')
@@ -231,14 +231,14 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   // the question is typed in the pane's ask line: it never passes through the prompt, so main's transcript gets no row
-  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await ui.input({ key: await askKeyOf($), text: 'why so many links?' })
   await clock.advance(100)
   expect(w.submitted).not.toContain('why so many links?')
   expect(w.views.length).toBe(0)
   // its agent: the question, the part and the card, and the folder of the data
   expect(w.spawns.length).toBe(1)
-  expect(w.spawns[0].subagent_type).toBe('thimble-lean:thread')
+  expect(w.spawns[0].subagent_type).toBe('thimble:thread')
   expect(w.spawns[0].prompt).toContain('why so many links?\n\nAbout: the part "Jun 18" (day-2026-06-18) of the card "Saves per day" (01-saves@2')
   expect(w.spawns[0].cwd).toBe(ROOT)
   // the thread's hand-back and its task notification are dropped; another agent's notification is main's
@@ -268,14 +268,14 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(line.length).toBeLessThanOrEqual(99)
   expect(line).toContain('↑↓ part')
   expect(w.status.length).toBe(0)
-  expect(file.turns[1].calls).toEqual(['lean resolve "q1#day=2026-06-18@n"'])
+  expect(file.turns[1].calls).toEqual(['thimble resolve "q1#day=2026-06-18@n"'])
   expect(file.turns[1].text).toContain('Links peaked that day')
   // under the card, the thread's latest exchange: the question with its part, its last step, then the answer
   const t = await pane($, clock)
   expect(t).not.toContain("card's own thread")
   expect(t).toContain('❯ why so many links?')
   expect(t).toContain('about Jun 18')
-  expect(t).toContain('lean resolve "q1#day=2026-06-18@n"')
+  expect(t).toContain('thimble resolve "q1#day=2026-06-18@n"')
   expect(t).toContain('Links peaked that day: 2,994 of the')
   // on the pane's background the answer's words and the selected part's name read in the theme's text color, never
   // the terminal's own (which may be light on a light pane); a colored mark in the part keeps its color
@@ -307,7 +307,7 @@ test('typing in the ask line is never interrupted: the ask line keeps the ring w
   const clock = mock.clock(on)
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
-  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await clock.settle()
   // ↵ on the selected part, then e: the bar shows its details and examples; the part's cell takes the ring
   await ui.press({ key: 'r|pane|1|day-2026-06-18' })
@@ -441,7 +441,7 @@ test('one selection, one highlight: the ring stands on the selected part, and st
   const clock = mock.clock(on)
   const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 14, offset: 0 } } } as never
   await $.command.run({ command: 'obj', args: '01-saves step-0' } as never)
-  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(SMALL as Any) } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(SMALL as Any) } as never)
   const draw = async () => { for (let i = 0; i < 3; i++) { await ui.redraw(); await clock.settle() } }
   // the gutter cells the ring can stand on, in document order, and the one marked ▸ (the selected part's)
   const gutters = async () => ((await ui.findAll({ type: 'Button' })) as Any[]).filter(b => String(b.key).startsWith('g|'))
@@ -482,7 +482,7 @@ test('on a tall card, e shows what it opens: the window moves to the bar under t
   const clock = mock.clock(on)
   const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 14, offset: 0 } } } as never
   await $.command.run({ command: 'obj', args: '01-saves step-0' } as never)
-  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(SMALL as Any) } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(SMALL as Any) } as never)
   const draw = async () => { for (let i = 0; i < 3; i++) { await ui.redraw(); await clock.settle() } }
   await draw()
   expect(textOf(await ui.drawn())).toContain('Step 0 ')

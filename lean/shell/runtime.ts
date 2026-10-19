@@ -73,7 +73,7 @@ export async function cardEvent($: Engine, object: Any, sel: Sel, event: Record<
 }
 
 export const stateFile = (root: string, id: string) => `${root.replace(/\/+$/, '')}/thimble/objects/.state/${id}.json`
-const CARDVER = { plugin: 'thimble-lean', key: 'cardver' } as const
+const CARDVER = { plugin: 'thimble', key: 'cardver' } as const
 
 /** A card's state as a drawing reads it: the drawing draws again when either surface changes it. */
 export async function cardStateNow($: Engine, root: string, id: string): Promise<CardState | null> {

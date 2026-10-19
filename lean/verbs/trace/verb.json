@@ -6,5 +6,5 @@
   "run": "run.mjs",
   "hint": "hint.mjs",
   "skill": "SKILL.md",
-  "uses": ["kernel: lean trace", "draw: runProgram", "model (optional): the full trace"]
+  "uses": ["kernel: thimble trace", "draw: runProgram", "model (optional): the full trace"]
 }

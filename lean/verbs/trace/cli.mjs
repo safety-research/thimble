@@ -1,12 +1,12 @@
 // cli.mjs: the Trace verb in a plain terminal, until the shell's t key lands. It runs run.mjs with a ctx built here:
-// the kernel is the `lean` command, programs run in the drawing sandbox, and the result is drawn by the terminal
+// the kernel is the `thimble` command, programs run in the drawing sandbox, and the result is drawn by the terminal
 // renderer.
 //
 //   node cli.mjs REF [--text WORDS] [--in GLOB] [--step REGION] [--w 100] [--light] [--plain] [--json]
 //   node cli.mjs REF --program FILE.js [--claude FILE.json]    draw a full trace program Claude wrote, on the facts
 //
 // --step traces on from one step of the short path (as t on a selected step does). Run it in the folder under
-// analysis; LEAN_PYTHON names a Python with pandas, as for `lean` itself.
+// analysis; THIMBLE_PYTHON names a Python with pandas, as for `thimble` itself.
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -17,11 +17,11 @@ import { gridText, renderTerm } from '../../draw/term.js'
 import { facts, run } from './run.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
-const LEAN = HERE + '../../bin/lean'
+const LEAN = HERE + '../../bin/thimble'
 
 export function kernel(args) {
   const r = spawnSync(LEAN, args, { encoding: 'utf8', maxBuffer: 64 << 20 })
-  if (r.status !== 0) throw new Error((r.stdout || r.stderr || `lean exited ${r.status}`).trim())
+  if (r.status !== 0) throw new Error((r.stdout || r.stderr || `thimble exited ${r.status}`).trim())
   return r.stdout
 }
 

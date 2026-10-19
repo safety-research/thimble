@@ -1,4 +1,4 @@
-"""The `lean` command's entry: bin/lean runs this file with a Python that has pandas."""
+"""The `thimble` command's entry: bin/thimble runs this file with a Python that has pandas."""
 import sys
 from pathlib import Path
 

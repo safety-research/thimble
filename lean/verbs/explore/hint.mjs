@@ -31,7 +31,7 @@ function replyHint(reply) {
   return nums.length >= 2 ? 'explore' : null
 }
 
-// arrays of objects in the data whose rows keep `_rows` (bound from `lean q`), with the key that holds them
+// arrays of objects in the data whose rows keep `_rows` (bound from `thimble q`), with the key that holds them
 function rowLists(data, key = 'rows', out = []) {
   if (Array.isArray(data)) {
     if (data.length && data.every(x => x && typeof x === 'object' && !Array.isArray(x)) && data.some(x => Array.isArray(x._rows) || typeof x._ref === 'string')) out.push({ key, n: data.length })

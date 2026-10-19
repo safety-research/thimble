@@ -148,7 +148,7 @@ async function turn($: Any, w: { at: { tools: number } }, clock: Any, o: { id: s
   await $.turn.start({ turnId: o.id, text: o.prompt } as never)
   await step($, w, o.id, 0, o.tools)
   if (o.save) {
-    await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+    await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
     await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: o.answer }] } } as never)
   }
   await $.turn.complete({ turnId: o.id, answer: o.answer, durationMs: 5, reason: 'answer', isAborted: false } as never)
@@ -156,7 +156,7 @@ async function turn($: Any, w: { at: { tools: number } }, clock: Any, o: { id: s
 }
 
 const reply = ($: Any) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18.', isFirstOfReply: true }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never)
-const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
+const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
 
 test('after a turn that saved an object: one look reads its lineage; its note reaches Claude with the next prompt, and it lights the verbs of the answer', async ($, on) => {
   const w = world(on, { fork: {
@@ -285,7 +285,7 @@ test('a look that ends while a new turn runs: no line mid-turn (its finding goes
   await $.prompt.submit({ text: 'I will share it', origin: { kind: 'composer' } } as never)
   await $.turn.start({ turnId: 't1', text: 'I will share it' } as never)
   await step($, w, 't1', 0, 1)
-  await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Here.' }] } } as never)
   await $.turn.complete({ turnId: 't1', answer: 'Here.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await $.prompt.submit({ text: 'and more', origin: { kind: 'composer' } } as never)
@@ -340,7 +340,7 @@ test("a turn a verb's ask started: the notes ride on its prompt, once; no questi
   expect(w.questions.length).toBe(1)
   // v pressed and its proposal picked: the verb's ask is the next prompt of main, and the note rides with it, in the
   // row for Claude alone before the prompt
-  const ui = await $.ui.mount({ plugin: 'thimble-lean', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'Fix two things.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'Fix two things.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
   await clock.settle()
   await press($, w.clock, { origin: { kind: 'composer' }, key: { key: 'v' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'v' })
   await ui.press({ key: 'r|p-proposals|0|opt-0' })
@@ -386,7 +386,7 @@ test('a prompt a hook drops gives its notes back: they ride on the next prompt t
 const GLOSS = { term: 'fixture scope', body: 'How long pytest keeps one fixture object.', here: 'In run 7, [conftest.py:14](tests/conftest.py#L14) set it to "module".', program: "return k.text('**module** {dim:one cart per file}')" }
 const ANSWER = 'June 18 had the most saves, because the `fixture scope` was module.'
 const MSGPATH = `${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`
-const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
+const HINT = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 const BAND2 = { ...(BAND as object), props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never
 const key = (k: string, text = '') => ({ origin: { kind: 'composer' }, key: { key: k }, text, cursor: 0, start: 0, end: 0, inputText: k.length === 1 ? k : '' }) as never
 
@@ -483,8 +483,8 @@ test('the pass composes the lenses over the new turn; each call and the turn are
   expect(JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${ROW.slice(0, 24)}.json`]!).verbs.v.proposals).toEqual(['saves per day, June 18 marked'])
 })
 
-test('the shadow A/B: LEAN_PROMPTS_SHADOW runs the same turn again with other versions, recorded apart and never merged', async ($, on) => {
-  const w = world(on, { env: { LEAN_PROMPTS_SHADOW: 'observer:v2,lens-actions:v2' }, fork: { notes: [{ note: 'Say the 6,543 counts reverts.' }], line: null, settled: false, verbs: { v: { note: 'saves by day', proposals: ['saves per day, June 18 marked'] } }, glosses: [], claims: [] } })
+test('the shadow A/B: THIMBLE_PROMPTS_SHADOW runs the same turn again with other versions, recorded apart and never merged', async ($, on) => {
+  const w = world(on, { env: { THIMBLE_PROMPTS_SHADOW: 'observer:v2,lens-actions:v2' }, fork: { notes: [{ note: 'Say the 6,543 counts reverts.' }], line: null, settled: false, verbs: { v: { note: 'saves by day', proposals: ['saves per day, June 18 marked'] } }, glosses: [], claims: [] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'when did they edit most?', answer: 'June 18 had the most saves.', tools: 2, save: true })
   await w.clock.settle()
   await w.clock.advance(100)
@@ -502,7 +502,7 @@ test('the shadow A/B: LEAN_PROMPTS_SHADOW runs the same turn again with other ve
 })
 
 test('a lens turned off is neither asked nor merged; another frame version is read in its place', async ($, on) => {
-  const w = world(on, { env: { LEAN_PROMPTS: 'lens-explain:off,observer:attention-v1' }, fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS] } })
+  const w = world(on, { env: { THIMBLE_PROMPTS: 'lens-explain:off,observer:attention-v1' }, fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [GLOSS] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
   await w.clock.settle()
   await w.clock.advance(100)
@@ -518,7 +518,7 @@ test('a lens turned off is neither asked nor merged; another frame version is re
 })
 
 test('observer:v1 is the earlier pass, one prompt in a fork of the session; its reply merges through the same lenses', async ($, on) => {
-  const w = world(on, { env: { LEAN_PROMPTS: 'observer:v1' }, fork: { notes: [], line: null, settled: false, verbs: { v: { note: '2 views ready', proposals: ['a', 'b'] } }, glosses: [GLOSS] } })
+  const w = world(on, { env: { THIMBLE_PROMPTS: 'observer:v1' }, fork: { notes: [], line: null, settled: false, verbs: { v: { note: '2 views ready', proposals: ['a', 'b'] } }, glosses: [GLOSS] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'why June 18?', answer: ANSWER, tools: 2, save: true })
   await w.clock.settle()
   await w.clock.advance(100)
@@ -531,7 +531,7 @@ test('observer:v1 is the earlier pass, one prompt in a fork of the session; its 
 })
 
 test('a version that does not exist: the default is read, and one line says so', async ($, on) => {
-  const w = world(on, { env: { LEAN_PROMPTS: 'observer:v9' }, fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [] } })
+  const w = world(on, { env: { THIMBLE_PROMPTS: 'observer:v9' }, fork: { notes: [], line: null, settled: false, verbs: {}, glosses: [] } })
   await turn($, w, w.clock, { id: 't1', prompt: 'when?', answer: 'June 18.', tools: 1 })
   await w.clock.settle()
   await w.clock.advance(100)

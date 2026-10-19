@@ -2,7 +2,7 @@
 // prompts/<feature>/<version>.md (a skill's current text stays in its SKILL.md, where Claude Code finds it, and is the
 // version `skill`). The table below names each feature, its default and what reads it; a file dropped into a feature's
 // folder is a new version with no change here. Which version is active, per feature, comes from the plugin's Prompts
-// setting and the LEAN_PROMPTS environment variable (the variable wins), each a list such as
+// setting and the THIMBLE_PROMPTS environment variable (the variable wins), each a list such as
 // "forms:principles, observer:attention-v1". A lens can be turned off with the version `off`.
 //
 // Pure: no file system. The hooks module reads the files with $.fs (prompts.ts), Node with node:fs (node.mjs).
@@ -10,14 +10,14 @@
 /** @typedef {{about: string, default: string, reads: string, skill?: string, optional?: boolean, base?: string,
  *    versions?: Record<string, {about?: string, file?: string, mode?: string, base?: string}>}} Feature */
 
-/** The principles every variant of the card ablation shares: the lean skill's card section (the card runtime's
+/** The principles every variant of the card ablation shares: the thimble skill's card section (the card runtime's
  *  principles, read where it stands) and the principles of a great output. A part may keep only some of a file's ###
  *  subsections: `only` names them by the start of their headings, `pick: n` takes n of them, chosen by the session. */
-const ABLATION = [{ file: 'skills/lean/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/parts/principles.md' }]
+const ABLATION = [{ file: 'skills/thimble/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/parts/principles.md' }]
 /** The same, with the principles' second version: parts are labelled with what they stand for, each part is drawn from
  *  its row (a stacked bar's parts too), and when interaction earns its place (a part that stands for many things; a
  *  case the person asks to see). */
-const ABLATION_V2 = [{ file: 'skills/lean/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/parts/principles-v2.md' }]
+const ABLATION_V2 = [{ file: 'skills/thimble/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/parts/principles-v2.md' }]
 
 /** @type {Record<string, Feature>} */
 export const FEATURES = {
@@ -56,13 +56,13 @@ export const FEATURES = {
   forms: {
     versions: {
       runtime: {
-        about: "the card runtime's principles (the lean skill's card section, read where it stands) and the worked forms (forms:v2's examples)",
-        parts: [{ file: 'skills/lean/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/v2.md', section: 'Worked examples' }],
+        about: "the card runtime's principles (the thimble skill's card section, read where it stands) and the worked forms (forms:v2's examples)",
+        parts: [{ file: 'skills/thimble/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/v2.md', section: 'Worked examples' }],
       },
       v1: { about: 'FORMS.md as v read it: the card forms, for another view' },
       v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' },
       // the card ablation: the same principles in all five, which differ only in what steers quality
-      principles: { about: "ablation a: the runtime's principles (the lean skill's card section) and the principles of a great output, no examples", parts: ABLATION },
+      principles: { about: "ablation a: the runtime's principles (the thimble skill's card section) and the principles of a great output, no examples", parts: ABLATION },
       few: { about: 'ablation b: a, and 3 worked examples from the pool', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', only: ['Heat strips', 'Brushable timeline', 'Curves with a knob'] }] },
       many: { about: 'ablation c: a, and the whole pool of worked examples', parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md' }] },
       rotate: { about: "ablation d: a, and 3 worked examples from the pool, a different 3 per session (the session's id picks them)", parts: [...ABLATION, { file: 'prompts/forms/parts/examples.md', pick: 3 }] },
@@ -72,19 +72,19 @@ export const FEATURES = {
       'sketches-v2': { about: 'e with the principles v2', parts: [...ABLATION_V2, { file: 'prompts/forms/parts/sketches.md' }] },
     },
     about: 'the card guidance: what makes a card good',
-    reads: 'beside the toolkit when Claude reads it before a card, and `lean guide cards` (v asks for it)', default: 'runtime',
+    reads: 'beside the toolkit when Claude reads it before a card, and `thimble guide cards` (v asks for it)', default: 'runtime',
     base: 'verbs/visualize',
   },
   card: {
     about: "the card after the answer: a fork of the session that shares main's prompt cache draws the answer's card after its text, so main neither reads the card guidance nor writes the program inside its turn",
-    reads: 'shell/shell.tsx after a turn that ran lean, and the lean skill in place of its card section (prompts.ts)', default: 'off', optional: true,
+    reads: 'shell/shell.tsx after a turn that ran thimble, and the thimble skill in place of its card section (prompts.ts)', default: 'off', optional: true,
     versions: {
       v1: { about: 'the fork decides whether a card helps and writes it, with queries for thimble to run first; one fix round when the save or the drawing finds a problem' },
       v2: { about: "v1, and v's card from a fork too: a press of v asks the fork for the card, not main, so main never reads the card guidance unless the person asks for a card in words" },
     },
   },
   thread: { about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v1' },
-  lean: { about: 'the lean skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'lean', versions: { skill: { file: 'skills/lean/SKILL.md', about: 'as SKILL.md says now' } } },
+  thimble: { about: 'the thimble skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'thimble', versions: { skill: { file: 'skills/thimble/SKILL.md', about: 'as SKILL.md says now' } } },
   claims: { about: 'the corpus orientation (a subagent reads it)', reads: 'verbs/claims/run.mjs, /verb claims orient', default: 'skill', skill: 'claims', versions: { skill: { file: 'verbs/claims/SKILL.md' } } },
   map: { about: 'the map skill', reads: 'the skill', default: 'skill', skill: 'map', versions: { skill: { file: 'verbs/map/SKILL.md' } } },
   explore: { about: 'the explore skill', reads: 'the skill', default: 'skill', skill: 'explore', versions: { skill: { file: 'verbs/explore/SKILL.md' } } },
@@ -141,7 +141,7 @@ export function choose(idx, { setting = '', env = '' } = {}) {
   // a feature that is off by default (an optional one whose default is `off`) is off until a setting names a version
   for (const [name, f] of Object.entries(idx)) active[name] = f.default === OFF ? { version: OFF, file: null, source: 'default', off: true } : { version: f.default, file: f.versions[f.default]?.file ?? null, ...(f.versions[f.default]?.parts ? { parts: f.versions[f.default].parts } : {}), source: 'default' }
   const problems = []
-  for (const [source, spec] of [['setting', setting], ['LEAN_PROMPTS', env]]) {
+  for (const [source, spec] of [['setting', setting], ['THIMBLE_PROMPTS', env]]) {
     const p = parseSpec(spec)
     for (const x of p.problems) problems.push(`${source}: ${x}; write it as feature:version, such as forms:principles`)
     for (const [name, v] of Object.entries(p.pairs)) {
@@ -162,12 +162,12 @@ export function choose(idx, { setting = '', env = '' } = {}) {
 export const idOf = (feature, version) => `${feature}:${version}`
 
 /** The versions in use that are not the defaults, as one spec ("forms:principles,observer:attention-v1"), so a child
- *  process (a verb, `lean guide`) picks the same ones. */
+ *  process (a verb, `thimble guide`) picks the same ones. */
 export function specOf(active, idx) {
   return Object.entries(active).filter(([n, a]) => idx[n] && a.version !== idx[n].default).map(([n, a]) => idOf(n, a.version)).join(',')
 }
 
-/** The feature whose text a skill serves (`lean` -> lean, `cards` -> forms), or null. */
+/** The feature whose text a skill serves (`thimble` -> thimble, `cards` -> forms), or null. */
 export function featureOfSkill(skill) {
   const name = String(skill || '').split(':').pop()
   for (const [n, f] of Object.entries(FEATURES)) if (f.skill === name) return n
@@ -184,7 +184,7 @@ export function bodyOf(text) {
 /**
  * One section of a markdown text, by its heading's words: from that heading to the next heading of the same level or
  * higher, the heading kept. '' when the text has no such heading. A version made of parts reads other texts where
- * they stand (the lean skill's card section), so nothing has a second copy.
+ * they stand (the thimble skill's card section), so nothing has a second copy.
  */
 export function sectionOf(text, heading) {
   const lines = String(text ?? '').split('\n')
@@ -213,7 +213,7 @@ export function subsectionsOf(text) {
 }
 
 /** A number from 0 to 1, the same for the same seed each time (a session's id picks the same examples in the hooks
- *  and in `lean guide`). */
+ *  and in `thimble guide`). */
 function seeded(seed) {
   let a = 2166136261 >>> 0
   for (const ch of String(seed)) { a ^= ch.codePointAt(0); a = Math.imul(a, 16777619) >>> 0 }
@@ -287,7 +287,7 @@ export function fillBlocks(text, vals) {
   return rest ? [{ text: s.slice(0, at), cache: true }, { text: rest }] : [{ text: s.slice(0, at) }]
 }
 
-/** The registry in lines, for `lean prompts` and /observe: each feature, its versions, the active one marked. */
+/** The registry in lines, for `thimble prompts` and /observe: each feature, its versions, the active one marked. */
 export function listing(idx, active) {
   const lines = []
   for (const [name, f] of Object.entries(idx)) {

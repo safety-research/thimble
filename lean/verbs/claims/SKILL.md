@@ -1,6 +1,6 @@
 ---
 name: claims
-description: Use when the person asks for the corpus orientation (/verb claims orient) or for an orientation of a folder's work. You read the work and write its claims, facts, findings, judgment calls and events, each with evidence refs, their relations and named clusters, as one JSON file that `lean verb claims save` adds to the session's claims.
+description: Use when the person asks for the corpus orientation (/verb claims orient) or for an orientation of a folder's work. You read the work and write its claims, facts, findings, judgment calls and events, each with evidence refs, their relations and named clusters, as one JSON file that `thimble verb claims save` adds to the session's claims.
 ---
 
 # The corpus orientation: what the work holds, claim by claim
@@ -15,14 +15,14 @@ graph of clusters in the terminal and in the browser, and a claim shows its evid
 
 The main conversation gives this work to one subagent with the Agent tool. Reading the work takes many rows, and in a
 subagent those rows do not stay in the conversation. When the subagent is done, main adds the claims with
-`lean verb claims save FILE` and replies in one or two sentences. `/verb claims orient` writes the brief for main.
+`thimble verb claims save FILE` and replies in one or two sentences. `/verb claims orient` writes the brief for main.
 
 The subagent does the work below. Its last message is the last line of the check.
 
 ## Principles
 
-**Read before you name.** Start with `lean sources`. Count across all of the work with `lean q`: the runs, how each
-one ended, the main moves, the events. Then read a few runs or records closely with `lean rows`, one for each kind of
+**Read before you name.** Start with `thimble sources`. Count across all of the work with `thimble q`: the runs, how each
+one ended, the main moves, the events. Then read a few runs or records closely with `thimble rows`, one for each kind of
 outcome. Name a claim only after you have seen the rows that show it.
 
 **A claim is one statement that a person can check.** Write it as a short sentence in plain words, under 80
@@ -75,7 +75,7 @@ can add any field you need:
 Then check it, fix what the check lists, and check again:
 
 ```bash
-lean verb claims check /work/shop-api/thimble/claims/orientation.json
+thimble verb claims check /work/shop-api/thimble/claims/orientation.json
 ```
 
 ## Example: 40 runs of one task
@@ -86,8 +86,8 @@ First count across all 40 runs: how each run ended, and its first theory. Each o
 the claims about them can cite the counts:
 
 ```bash
-lean sources
-lean q "how each run ended" <<'PY'
+thimble sources
+thimble q "how each run ended" <<'PY'
 df = load("runs/*.jsonl", fields=["type", "message"])
 df["run"] = df._file.str.extract(r"(r\d+)", expand=False)
 df["text"] = df.message.map(lambda m: " ".join(b.get("text", "") for b in m.get("content", []) if isinstance(b, dict)) if isinstance(m, dict) else "")
@@ -96,7 +96,7 @@ word = last.text.str.extract(r"(fixed|retry|skip|giving up)", expand=False)
 last["ended"] = word.map({"fixed": "fixed", "retry": "masked", "skip": "masked", "giving up": "gave up"}).fillna("timed out")
 tally(last, "ended")
 PY
-lean q "first theory per run" <<'PY'
+thimble q "first theory per run" <<'PY'
 df = load("runs/*.jsonl", fields=["type", "message"])
 df["run"] = df._file.str.extract(r"(r\d+)", expand=False)
 df["text"] = df.message.map(lambda m: " ".join(b.get("text", "") for b in m.get("content", []) if isinstance(b, dict)) if isinstance(m, dict) else "")
@@ -106,7 +106,7 @@ tally(first, "theory")
 PY
 ```
 
-Then read one run of each ending, where its moves change: `lean rows "runs/r17.jsonl" --search "timezone|fixture|retry" -n 8 --first`.
+Then read one run of each ending, where its moves change: `thimble rows "runs/r17.jsonl" --search "timezone|fixture|retry" -n 8 --first`.
 r17 reads the fixture at step 1720 and gives each test its own cart, so "Each test gets its own cart" is a finding
 in the "shared fixture" cluster, cited with r17's row and its words. The timezone theory in 14 runs is a claim, and
 "cart fixture is scope=module" contradicts it. "Added @retry(3) instead of finding the cause" is a judgment call that
@@ -119,5 +119,5 @@ citation: /claims/7/evidence/0: the quote 'reran the test 200 times' is not in r
 orientation.json: 1 problem (above). 140 of 141 citations hold. Fix them in the file and run the check again.
 ```
 
-`lean rows "runs/r22.jsonl#L880"` shows that the words were "ran it 200 more times". Fix the quote and check again,
+`thimble rows "runs/r22.jsonl#L880"` shows that the words were "ran it 200 more times". Fix the quote and check again,
 until the last line says that the file holds. That line is your last message.

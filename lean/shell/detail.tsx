@@ -46,10 +46,10 @@ type Any = any
 type Detail = Sel & { prog?: boolean; bar?: 'details' | 'examples' | null; ask?: CardAsk | null }
 
 export const PANE = 'object'
-const SEL = { plugin: 'thimble-lean', key: 'sel' } as const
-const ROWS = { plugin: 'thimble-lean', key: 'rows' } as const
-const WHERE = { plugin: 'thimble-lean', key: 'where' } as const
-const THREAD = { plugin: 'thimble-lean', key: 'thread' } as const
+const SEL = { plugin: 'thimble', key: 'sel' } as const
+const ROWS = { plugin: 'thimble', key: 'rows' } as const
+const WHERE = { plugin: 'thimble', key: 'where' } as const
+const THREAD = { plugin: 'thimble', key: 'thread' } as const
 const IND = { dark: '#9a93ff', light: '#4f46e5' }
 const cut = (s: string, k: number) => ([...s].length <= k ? s : [...s].slice(0, Math.max(0, k - 1)).join('') + '…')
 
@@ -369,7 +369,7 @@ function syncCardState($: Engine, sel: Detail): void {
   $.clock.after(0, () => { void writeCardState($, sel.root, sel.id, { state: sel.state, region: sel.region }, 'terminal').catch(() => undefined) })
 }
 
-/** The selection now, and its rows read after: `lean resolve` runs outside the key's hook, which has little time. */
+/** The selection now, and its rows read after: `thimble resolve` runs outside the key's hook, which has little time. */
 async function selectSoon($: Engine, sel: Sel): Promise<void> {
   await $.state.set(SEL, sel)
   $.clock.after(0, () => { void select($, sel).catch(() => undefined) })

@@ -21,7 +21,7 @@ const TABS: { id: Surface; label: string }[] = [
   { id: 'canvas', label: 'Canvas' },
   { id: 'report', label: 'Report' },
 ]
-const WIDTH_KEY = 'thimble-lean:chat-width'
+const WIDTH_KEY = 'thimble:chat-width'
 
 function readWidth(): number {
   try {

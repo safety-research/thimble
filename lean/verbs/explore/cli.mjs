@@ -6,7 +6,7 @@
 // OBJECT is an object's id or name in DIR/thimble/objects (default: the newest). It prints what Explore does: the
 // view with its hint row, after pressing each key in --keys, or the note it would send Claude.
 // nodeCtx(root) is the ctx run() takes, for Node, as the shell builds it (shell/node/verb.mjs): the kernel through the
-// `lean` command, programs in the vm sandbox.
+// `thimble` command, programs in the vm sandbox.
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,13 +17,13 @@ import { press, run } from './run.mjs'
 import { viewLines } from './view.mjs'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
-const LEAN = join(HERE, '..', '..', 'bin', 'lean')
+const LEAN = join(HERE, '..', '..', 'bin', 'thimble')
 
 /** The ctx for run() and press() in Node, over the folder `root`. */
 export function nodeCtx(root, o = {}) {
   const kernel = {
     ...kernelFor(root, o.lean || LEAN),
-    // the fields a part names, read row by row (`lean rows REF --fields`): what a person needs to read one row
+    // the fields a part names, read row by row (`thimble rows REF --fields`): what a person needs to read one row
     rows: async (ref, { n = 5, fields = [] } = {}) => execFileSync(o.lean || LEAN, ['rows', ref, '-n', String(n), '--first', '--width', '200', ...(fields.length ? ['--fields', fields.join(',')] : [])], { cwd: root, encoding: 'utf8', maxBuffer: 64 << 20 })
       .split('\n').map(l => /^(\S+#\S+) {2}(.*)$/.exec(l)).filter(Boolean).map(m => { let value = m[2]; try { value = JSON.parse(m[2]) } catch (e) { /* a text row */ } return { ref: m[1], value } }),
   }

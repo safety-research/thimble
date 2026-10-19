@@ -2,7 +2,7 @@
 // only while browser mode is on and a page is asked for; it stops on its own once no page has been open for a while,
 // and the hooks module ends it with the session.
 //
-//   node serve.mjs --root <folder> --session <id> [--lean <bin/lean>] [--idle <seconds>] [--first <seconds>]
+//   node serve.mjs --root <folder> --session <id> [--lean <bin/thimble>] [--idle <seconds>] [--first <seconds>]
 //
 //   prints {"ready": {"port", "token"}} once listening, then one line for each thing the person does on a page:
 //     {"ask": "<text>", "scope": {row?, object?, v?, region?, label?, mark?, thread?}}
@@ -28,7 +28,7 @@
 //                              the panes (panes/index.js) and what they import, so the page runs the terminal's files
 //   /<token>/api/pane/<key>    a pane's interaction state (thimble/panes/<session>/<key>.json): where the person left
 //                              it, on either surface
-//   /<token>/api/session       this session: its id, folder, first prompt and what it read (lean coverage)
+//   /<token>/api/session       this session: its id, folder, first prompt and what it read (thimble coverage)
 //   /<token>/api/messages      this session's rows (thimble/messages/<session>/index.jsonl), each of Claude's with its
 //                              record (CONTRACT 1); an ETag, so a page that polls gets 304 while nothing changed
 //   /<token>/api/message/<row> one record
@@ -36,14 +36,14 @@
 //   /<token>/api/object/<id>   an object (?v=<k> for a version) and the list of its versions
 //   /<token>/api/objects       the objects this session saved
 //   /<token>/api/from/<id>     where an object's values come from: sources, rows, coverage and labels
-//   /<token>/api/resolve?ref=  `lean resolve <ref> --json`: where a value came from, down to its rows
+//   /<token>/api/resolve?ref=  `thimble resolve <ref> --json`: where a value came from, down to its rows
 //   /<token>/api/verbs         the verbs of the row under each message (verb.json `row: true`)
 //   /<token>/api/asks          what pages of this session asked (for a card's thread)
 //   /<token>/api/threads       this session's side threads (thimble/threads/<session>/<id>.json), each with its turns
-//   /<token>/api/sources       `lean sources --json`: the source files, with their kind and rows
-//   /<token>/api/coverage      `lean coverage --json` for this session: what Claude read of each file
-//   /<token>/api/rows?path=&from=&n=   a file's rows from row `from` (`lean rows <path>#L<from>-L<to>`), or with
-//                              &search=<regex> the first rows that match (`lean rows <path> --search`); ?ref=<source
+//   /<token>/api/sources       `thimble sources --json`: the source files, with their kind and rows
+//   /<token>/api/coverage      `thimble coverage --json` for this session: what Claude read of each file
+//   /<token>/api/rows?path=&from=&n=   a file's rows from row `from` (`thimble rows <path>#L<from>-L<to>`), or with
+//                              &search=<regex> the first rows that match (`thimble rows <path> --search`); ?ref=<source
 //                              ref> the rows a ref or row set names, whole
 //   /<token>/api/events        server-sent events: `change` when the messages or objects change. An open stream is
 //                              an open page: the server lives while one is open, and a while after the last closes
@@ -205,7 +205,7 @@ export function sourcePath(p) {
   return s
 }
 
-/** `lean rows` output as rows: "<path>#L<n>  <text>" (or #row=<n> for a table) per line; the summary lines dropped. */
+/** `thimble rows` output as rows: "<path>#L<n>  <text>" (or #row=<n> for a table) per line; the summary lines dropped. */
 export function rowsOf(stdout) {
   const out = []
   for (const line of String(stdout || '').split('\n')) {
@@ -336,8 +336,8 @@ function run(cmd, args, { cwd, env, timeout = 60000 } = {}) {
 }
 
 async function leanJson(lean, root, args, env) {
-  const r = await run(lean, [...args, '--json'], { cwd: root, env: { LEAN_ROOT: root, ...env } })
-  try { return JSON.parse(r.stdout) } catch { return { error: (r.stdout + r.stderr).trim().slice(0, 600) || `lean ${args[0]} gave nothing` } }
+  const r = await run(lean, [...args, '--json'], { cwd: root, env: { THIMBLE_ROOT: root, ...env } })
+  try { return JSON.parse(r.stdout) } catch { return { error: (r.stdout + r.stderr).trim().slice(0, 600) || `thimble ${args[0]} gave nothing` } }
 }
 
 /**
@@ -345,13 +345,13 @@ async function leanJson(lean, root, args, env) {
  * terminal (`onBack(selection)`, the old name, gets the selections); `onStop(why)` once, when it stops on its own:
  * no page connected within `first` seconds of starting, or none open for `idle` seconds.
  */
-export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lean'), pages = PAGES, port = 0, token = randomBytes(18).toString('base64url'), onLine, onBack, onStop = () => {}, idle = 20, first = 180, poll = 700 } = {}) {
+export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/thimble'), pages = PAGES, port = 0, token = randomBytes(18).toString('base64url'), onLine, onBack, onStop = () => {}, idle = 20, first = 180, poll = 700 } = {}) {
   const emit = onLine || (line => { if (line.back && onBack) onBack(line.back) })
   const sess = SESSION.test(session) ? session : ''
   const hosts = new Set()
   const clients = new Set()
   // the person's own reads (a resolve from a page) are never counted as what Claude read
-  const personEnv = { LEAN_SESSION: `person-${(sess || 'page').slice(0, 8)}` }
+  const personEnv = { THIMBLE_SESSION: `person-${(sess || 'page').slice(0, 8)}` }
   let sig = signature(root, sess)
   let stopTimer = null
   let coverage = { at: '', value: null }
@@ -466,7 +466,7 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       try { names = readdirSync(join(root, 'thimble', 'objects')).filter(n => n.endsWith('.json')).sort() } catch { names = [] }
       const list = names.map(n => readJson(join(root, 'thimble', 'objects', n))).filter(Boolean)
         // this session's: saved by Claude, or by a verb the person ran in it (the person's reads go as person-<id>)
-        .filter(o => !sess || !o.session || o.session === sess || o.session === personEnv.LEAN_SESSION)
+        .filter(o => !sess || !o.session || o.session === sess || o.session === personEnv.THIMBLE_SESSION)
         .map(o => {
           // where the person left the card (either surface): its board face draws with it
           const kept = ID.test(String(o.id)) ? readJson(join(root, 'thimble', 'objects', '.state', `${o.id}.json`)) : null
@@ -521,7 +521,7 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
     if (api === 'sources') {
       if (sources.at > Date.now() - 30000 && sources.value) return json({ sources: sources.value })
       return leanJson(lean, root, ['sources'], personEnv).then(r => {
-        if (!Array.isArray(r)) return json({ error: r.error || 'lean sources gave no list' }, 500)
+        if (!Array.isArray(r)) return json({ error: r.error || 'thimble sources gave no list' }, 500)
         sources = { at: Date.now(), value: r.map(x => ({ path: x.path, kind: x.kind, rows: x.rows, lines: x.lines, size: x.size })) }
         return json({ sources: sources.value })
       })
@@ -530,7 +530,7 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       if (!sess) return json({ error: 'no session' }, 404)
       if (fullCoverage.at === sig && fullCoverage.value) return json(fullCoverage.value)
       const at = sig
-      return leanJson(lean, root, ['coverage'], { LEAN_SESSION: sess }).then(r => {
+      return leanJson(lean, root, ['coverage'], { THIMBLE_SESSION: sess }).then(r => {
         if (r.error) return json(r, 500)
         fullCoverage = { at, value: r }
         return json(r)
@@ -542,9 +542,9 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
       const [p, loc] = ref.split('#')
       if (!sourcePath(p) || !/^(L\d+(-L?\d+)?(,\d+(-\d+)?)*|row=\d+(-\d+)?(,\d+(-\d+)?)*)$/.test(loc || '')) return json({ error: 'not a source ref' }, 400)
       const n = Math.max(1, Math.min(50, Number(url.searchParams.get('n')) || 12))
-      return run(lean, ['rows', ref, '-n', String(n), '--width', '4000'], { cwd: root, env: { LEAN_ROOT: root, ...personEnv } }).then(r => {
+      return run(lean, ['rows', ref, '-n', String(n), '--width', '4000'], { cwd: root, env: { THIMBLE_ROOT: root, ...personEnv } }).then(r => {
         const rows = rowsOf(r.stdout)
-        if (!rows.length && r.code) return json({ error: (r.stdout + r.stderr).trim().slice(0, 400) || `lean rows ${ref} failed` }, 500)
+        if (!rows.length && r.code) return json({ error: (r.stdout + r.stderr).trim().slice(0, 400) || `thimble rows ${ref} failed` }, 500)
         return json({ ref, rows })
       })
     }
@@ -562,9 +562,9 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
         const from = Math.max(1, Math.floor(Number(url.searchParams.get('from')) || 1))
         argv = ['rows', `${path}#${table ? 'row=' : 'L'}${from}-${from + n - 1}`, '-n', String(n), '--width', '100000']
       }
-      return run(lean, argv, { cwd: root, env: { LEAN_ROOT: root, ...personEnv } }).then(r => {
+      return run(lean, argv, { cwd: root, env: { THIMBLE_ROOT: root, ...personEnv } }).then(r => {
         const rows = rowsOf(r.stdout)
-        if (!rows.length && r.code) return json({ error: (r.stdout + r.stderr).trim().slice(0, 400) || `lean rows ${path} failed` }, 500)
+        if (!rows.length && r.code) return json({ error: (r.stdout + r.stderr).trim().slice(0, 400) || `thimble rows ${path} failed` }, 500)
         return json({ path, rows })
       })
     }
@@ -581,9 +581,9 @@ export function startServer({ root, session = '', lean = join(LEAN_DIR, 'bin/lea
   async function sessionInfo() {
     const { rows } = sess ? readMessages(root, sess) : { rows: [] }
     const firstPrompt = rows.find(r => r.kind === 'user' && r.text)
-    // what Claude's session read, as `lean coverage` counts it, once per change of the folder
+    // what Claude's session read, as `thimble coverage` counts it, once per change of the folder
     if (coverage.at !== sig) {
-      const c = sess ? await leanJson(lean, root, ['coverage'], { LEAN_SESSION: sess }) : { error: 'no session' }
+      const c = sess ? await leanJson(lean, root, ['coverage'], { THIMBLE_SESSION: sess }) : { error: 'no session' }
       coverage = { at: sig, value: c.error ? null : { total: c.total, share: readShare(c.files), groups: (c.groups || []).slice(0, 4).map(g => ({ group: g.group, files: g.files, rows: g.rows, byStatus: g.by_status })) } }
     }
     return { session: sess, root, folder: basename(root), title: firstPrompt ? firstPrompt.text : '', started: rows[0]?.at || null, rows: rows.length, coverage: coverage.value }

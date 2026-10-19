@@ -1,7 +1,7 @@
 {
-  "name": "thimble-lean",
+  "name": "thimble",
   "version": "0.0.1",
-  "description": "thimble's lean kernel and shell: the `lean` command reads and queries any files, keeps the code, inputs and source rows behind every value, and saves objects as program + data + lineage; each object Claude saves is drawn under its reply with the verbs that fit it, opens in a detail view that keeps the chat going, and, with browser mode on, opens in a browser page that mirrors the session. Verbs are folders in verbs/. An observer reads each answer and the objects behind it once after the turn: it leaves notes for Claude, ranks each object's hint row, and, rarely, shows one line above the prompt when a decision of the person's is in view.",
+  "description": "thimble's kernel and shell: the `thimble` command reads and queries any files, keeps the code, inputs and source rows behind every value, and saves objects as program + data + lineage; each object Claude saves is drawn under its reply with the verbs that fit it, opens in a detail view that keeps the chat going, and, with browser mode on, opens in a browser page that mirrors the session. Verbs are folders in verbs/. An observer reads each answer and the objects behind it once after the turn: it leaves notes for Claude, ranks each object's hint row, and, rarely, shows one line above the prompt when a decision of the person's is in view.",
   "author": {
     "name": "Matthew Joerke"
   },
@@ -27,7 +27,7 @@
     "prompts": {
       "type": "string",
       "title": "Prompts",
-      "description": "Versions of the texts thimble's models read, in place of the defaults: feature:version pairs separated by commas, such as forms:principles. `lean prompts` lists them. The LEAN_PROMPTS environment variable, when set, wins. Empty: the defaults.",
+      "description": "Versions of the texts thimble's models read, in place of the defaults: feature:version pairs separated by commas, such as forms:principles. `thimble prompts` lists them. The THIMBLE_PROMPTS environment variable, when set, wins. Empty: the defaults.",
       "default": ""
     }
   }

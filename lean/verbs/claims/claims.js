@@ -1,5 +1,5 @@
 // claims.js: the session's Claims store, as pure functions. No `$`, no Node, no DOM: the observer (in the hooks
-// module), the `lean verb claims` CLI, the browser page and the tests all import it.
+// module), the `thimble verb claims` CLI, the browser page and the tests all import it.
 //
 // The store is one JSON file per session, thimble/claims/<session>.json (CONTRACT 7):
 //
@@ -557,7 +557,7 @@ export function nearLines(store, text, { all = 24, latest = 8, max = 40 } = {}) 
 }
 
 /**
- * A claim's "based on", in words, from the rows behind the citation in its sentence (`lean resolve <ref> --json`): the
+ * A claim's "based on", in words, from the rows behind the citation in its sentence (`thimble resolve <ref> --json`): the
  * files, the group the value is of (the ref's key, as words) and how many rows stand behind it, such as
  * "revisions.jsonl, phase 3 Jun18 · 6,543 rows". Null when the rows say nothing a person can read.
  */

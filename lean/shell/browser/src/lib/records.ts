@@ -1,5 +1,5 @@
 // records.ts: a source row as the person reads it: its words (a body, a text, a message) and a short line of who and
-// when, never a dump of `field: value`. Rows are read whole through the page server (`lean rows <ref>`), a file's refs
+// when, never a dump of `field: value`. Rows are read whole through the page server (`thimble rows <ref>`), a file's refs
 // in one row set.
 import { api } from './api'
 
@@ -59,7 +59,7 @@ export async function fullRows(refs: string[]): Promise<Map<string, string>> {
   return out
 }
 
-/** Resolved records ({ref, text, words?, meta?}) as words: the kernel's own (`lean resolve` reads a row's words and
+/** Resolved records ({ref, text, words?, meta?}) as words: the kernel's own (`thimble resolve` reads a row's words and
  *  who and when), else each from its whole row when the row can be read. */
 export async function wordsOf(records: { ref: string; text: string; words?: string; meta?: string }[]): Promise<Words[]> {
   const rest = records.filter((r) => !r.words)

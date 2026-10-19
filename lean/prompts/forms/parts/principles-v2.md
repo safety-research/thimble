@@ -8,7 +8,7 @@ You make cards, text and views for a person who wants to understand their data a
 
 **Overview first, then zoom and filter, then details on demand.** The whole should read at a glance. The finer views and the real rows should be one step away, never in the way. Put the parts a person is likely to ask about where they can select them. A part the person selects shows the rows behind it as its examples, under the part's label. So label each part with what it stands for ("48 Fable agents cut off at 1 h"), not only with its number.
 
-**Every value is traceable.** Bind the query's output in the card's data, and draw each part from the row it stands for: the row, a copy of it, or `row: d` in a region's meta, a bar item or a part of a stacked bar. Then the part opens its rows, with no ref written. A number that the program adds up from several rows has no rows of its own. A number written into the program or the data by hand has none either. So count in the query, with `tally()`, and draw each part from its output row. When `lean q` says that its output keeps no rows per output row, a card drawn from it cannot show examples: count again with `tally()`. When a value has no rows behind it (an estimate, a judgment), say so on the card.
+**Every value is traceable.** Bind the query's output in the card's data, and draw each part from the row it stands for: the row, a copy of it, or `row: d` in a region's meta, a bar item or a part of a stacked bar. Then the part opens its rows, with no ref written. A number that the program adds up from several rows has no rows of its own. A number written into the program or the data by hand has none either. So count in the query, with `tally()`, and draw each part from its output row. When `thimble q` says that its output keeps no rows per output row, a card drawn from it cannot show examples: count again with `tally()`. When a value has no rows behind it (an estimate, a judgment), say so on the card.
 
 **Words over legends, and no decoration.** Label things where they are. A title that states the finding is better than one that names the chart. Remove anything that does not help the person see the claim.
 
@@ -24,4 +24,4 @@ Example: a card shows tool calls per tenth of a long run, and the reads stop in 
 
 ## Making the card
 
-Write the card as a short program on the drawing toolkit: `../../draw/TOOLKIT.md` from this folder says what it has. Bind query outputs in the card's data, as in `"data": {"days": "q1"}`, so each part you draw from a row keeps its rows. Write the object as a file and run `lean save <name> --from FILE`. Then say in one line what it shows.
+Write the card as a short program on the drawing toolkit: `../../draw/TOOLKIT.md` from this folder says what it has. Bind query outputs in the card's data, as in `"data": {"days": "q1"}`, so each part you draw from a row keeps its rows. Write the object as a file and run `thimble save <name> --from FILE`. Then say in one line what it shows.

@@ -15,8 +15,8 @@
 //   ctx.root       the folder under analysis (where thimble/ is)
 //   ctx.verb       the verb's own verb.json, every field kept, with `dir`, its folder
 //   ctx.skill      the text of the verb's SKILL.md ('' when it has none)
-//   ctx.kernel     the `lean` command: run(args, {input}) -> {code, stdout, stderr}; json(args) parses its --json;
-//                  resolve(ref, n) and list(id) as `lean resolve`/`lean list`; objects() every object as saved;
+//   ctx.kernel     the `thimble` command: run(args, {input}) -> {code, stdout, stderr}; json(args) parses its --json;
+//                  resolve(ref, n) and list(id) as `thimble resolve`/`thimble list`; objects() every object as saved;
 //                  save(name, spec) saves an object and returns {id, v, out}
 //   ctx.draw       {runProgram, renderTerm, renderSvg, gridText}: the drawing contract, to draw or check an object
 //   ctx.model      {complete(request), fork(request)}: one quiet call to the session's own model, as $.model.complete
@@ -27,7 +27,7 @@
 //   ctx.row, ctx.session   the message's row key and the session's id
 //
 // run(ctx) returns any of:
-//   object  an object to show: a spec this runner saves with `lean save` ({name?, title, program, data, ...}; a
+//   object  an object to show: a spec this runner saves with `thimble save` ({name?, title, program, data, ...}; a
 //           `lineage` of the verb's own rides along under `declared`), or one the verb saved itself ({id, version})
 //   text    words for the person; Claude reads them too
 //   note    words for Claude alone, before its next reply
@@ -49,11 +49,11 @@ import { renderSvg } from '../../draw/svg.js'
 import { gridText, renderTerm } from '../../draw/term.js'
 import { findVerb, listVerbs } from './registry.mjs'
 
-const LEAN = fileURLToPath(new URL('../../bin/lean', import.meta.url))
+const LEAN = fileURLToPath(new URL('../../bin/thimble', import.meta.url))
 
 export function kernelFor(root, lean = LEAN) {
   const run = (args, { input } = {}) => {
-    const r = spawnSync(lean, args, { cwd: root, input: input ?? '', encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, LEAN_ROOT: root } })
+    const r = spawnSync(lean, args, { cwd: root, input: input ?? '', encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, THIMBLE_ROOT: root } })
     return { code: r.status ?? 1, stdout: r.stdout || '', stderr: r.stderr || String(r.error || '') }
   }
   const json = (args) => {
@@ -95,7 +95,7 @@ function modelFor(answers, need) {
   return { complete: call('complete'), fork: call('fork') }
 }
 
-/** The spec a verb's object becomes for `lean save`: the kernel keeps its own lineage, so a verb's rides along as
+/** The spec a verb's object becomes for `thimble save`: the kernel keeps its own lineage, so a verb's rides along as
  *  declared, and the kernel's own fields (id, version) are left to it. */
 export function specOf(o, verbName) {
   const { name, id, version, v, lineage, ...spec } = o

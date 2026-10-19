@@ -1,7 +1,7 @@
 """The kernel's side of the card runtime: every row bound into a card carries its own ref, a group key with spaces or
 brackets round-trips through a citation, a citation of a whole query opens the one row behind the value it shows,
 examples are spread across a group's rows, a save is an event of the session's change feed, and every card has a
-title. Run: LEAN_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
+title. Run: THIMBLE_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
 from __future__ import annotations
 
 import json
@@ -31,8 +31,8 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         for i, o in enumerate(OUTCOMES):
             f.write(json.dumps({"run": f"ep{i:02d}", "outcome": o, "calls": 100 + 10 * i, "summary": f"episode {i} ended {o}"}) + "\n")
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("LEAN_SESSION", "s-run")
-    monkeypatch.delenv("LEAN_ROOT", raising=False)
+    monkeypatch.setenv("THIMBLE_SESSION", "s-run")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
     return d
 
 
@@ -56,7 +56,7 @@ def test_a_group_key_with_spaces_and_brackets_round_trips_through_a_citation(roo
     # a citation written with the words in it is still one link, and nothing of it leaks into the prose
     text = f"Clean wins took a median of [110](q{q['id'][1:]}#outcome=won (clean ep)@median) calls."
     assert R.links(text) == [("110", f"{q['id']}#outcome=won (clean ep)@median")]
-    # the example citation `lean q` prints is already the safe form
+    # the example citation `thimble q` prints is already the safe form
     assert "(clean" not in (Q.cite_example(q) or "")
 
 
@@ -126,9 +126,9 @@ def test_a_save_is_an_event_of_the_sessions_change_feed(root: Path, tmp_path: Pa
 def test_the_command_writes_the_event_even_when_its_output_is_cut(root: Path, tmp_path: Path) -> None:
     st = Store(root)
     q = by_outcome(st)
-    env = {"PATH": "/usr/bin:/bin", "THIMBLE_HOME": str(tmp_path / "th"), "LEAN_SESSION": "s-pipe", "LEAN_ROOT": str(root),
-           "LEAN_PYTHON": sys.executable}
-    lean = str(Path(__file__).resolve().parents[1] / "bin" / "lean")
+    env = {"PATH": "/usr/bin:/bin", "THIMBLE_HOME": str(tmp_path / "th"), "THIMBLE_SESSION": "s-pipe", "THIMBLE_ROOT": str(root),
+           "THIMBLE_PYTHON": sys.executable}
+    lean = str(Path(__file__).resolve().parents[1] / "bin" / "thimble")
     spec = json.dumps({"title": "Cut", "data": {"by": q["id"]}})
     out = subprocess.run(["sh", "-c", f"{lean} save cut | tail -1"], input=spec, text=True, capture_output=True, env=env, cwd=root)
     assert "saved" not in out.stdout, "the pipe cut the line that says saved"
@@ -207,8 +207,8 @@ def test_a_selection_of_several_rows_opens_as_one_set(root: Path) -> None:
     assert r["count"] == 4 and r["rows"] == ["runs.jsonl#L1-3,10"]
     assert [x["ref"] for x in r["records"]] == ["runs.jsonl#L1", "runs.jsonl#L3", "runs.jsonl#L10"]
     assert r["about"] == f"2 rows of {q['id']}"
-    env = {"PATH": "/usr/bin:/bin", "THIMBLE_HOME": str(root.parent / "th"), "LEAN_SESSION": "s-cli", "LEAN_ROOT": str(root),
-           "LEAN_PYTHON": sys.executable}
-    lean = str(Path(__file__).resolve().parents[1] / "bin" / "lean")
+    env = {"PATH": "/usr/bin:/bin", "THIMBLE_HOME": str(root.parent / "th"), "THIMBLE_SESSION": "s-cli", "THIMBLE_ROOT": str(root),
+           "THIMBLE_PYTHON": sys.executable}
+    lean = str(Path(__file__).resolve().parents[1] / "bin" / "thimble")
     out = subprocess.run([lean, "resolve", *refs, "--json"], capture_output=True, text=True, env=env, cwd=root)
     assert json.loads(out.stdout)["count"] == 4

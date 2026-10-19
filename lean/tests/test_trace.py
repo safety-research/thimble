@@ -1,6 +1,6 @@
 """Focused tests of tracing forward (kernel/trace.py): what uses a row or a value (queries, objects, cited answers), who
 read and who copied a passage across transcripts, and where a transcript's line came from.
-Run: LEAN_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
+Run: THIMBLE_PYTHON-or-any-python-with-pandas -m pytest lean/tests"""
 from __future__ import annotations
 
 import json
@@ -29,9 +29,9 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             f.write(json.dumps({"id": i, "kind": p, "body": f"save {i}"}) + "\n")
     (d / "pages.jsonl").write_text(json.dumps({"page": "a"}) + "\n")
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("LEAN_SESSION", "sess-0001")
+    monkeypatch.setenv("THIMBLE_SESSION", "sess-0001")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
-    monkeypatch.delenv("LEAN_ROOT", raising=False)
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
     return d
 
 
@@ -135,9 +135,9 @@ def swarm(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                       ("2026-01-01T10:20:00Z", "said", "I will fix the types properly instead.")])
     _agent(a, "a40", [("2026-01-01T10:06:00Z", "said", "Reading the code first.")])
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("LEAN_SESSION", "sess-0002")
+    monkeypatch.setenv("THIMBLE_SESSION", "sess-0002")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc"))
-    monkeypatch.delenv("LEAN_ROOT", raising=False)
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
     return d
 
 

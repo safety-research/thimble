@@ -1,4 +1,4 @@
-// Telemetry's lines and `lean stats` (telemetry/events.mjs, stats.mjs): a call's and a turn's line, the price weights,
+// Telemetry's lines and `thimble stats` (telemetry/events.mjs, stats.mjs): a call's and a turn's line, the price weights,
 // the sums per feature and per lens of the pass, a plain Claude Code transcript per prompt, and the report beside it.
 //   node --test lean/telemetry/test
 import '../../test-home.mjs'
@@ -41,7 +41,7 @@ const EVENTS = [
   callLine({ feature: 'squeeze', prompt: 'squeeze:v2', usage: U(3000, 0, 0, 400), ms: 3000 }),
   turnLine({ feature: 'visualize', ms: 25000, usage: U(1000, 5000, 60000, 2000), hook_ms: 30 }),
   turnLine({ feature: 'thread', agent: 'a1', ms: 9000, usage: U(500, 0, 0, 200) }),
-  { kind: 'prompt', feature: 'forms', prompt: 'forms:principles', via: 'lean guide cards' },
+  { kind: 'prompt', feature: 'forms', prompt: 'forms:principles', via: 'thimble guide cards' },
 ]
 
 test('the sums per feature, the main turns with the time thimble added, and each lens with its share of the pass', () => {
@@ -81,7 +81,7 @@ test('a plain Claude Code transcript, per prompt typed: its time and its tokens,
   assert.deepEqual(t.map(x => x.ms), [30000, 10000])
 })
 
-test('`lean stats`: per feature and per lens, and against a plain transcript the main turns, the whole and the hooks', () => {
+test('`thimble stats`: per feature and per lens, and against a plain transcript the main turns, the whole and the hooks', () => {
   const plain = [
     { type: 'user', timestamp: '2026-01-01T00:00:00Z', message: { content: 'q' } },
     { type: 'assistant', timestamp: '2026-01-01T00:00:01Z', message: { id: 'p1', usage: U(2000, 10000, 40000, 3000) } },
@@ -97,7 +97,7 @@ test('`lean stats`: per feature and per lens, and against a plain transcript the
   assert.match(text, /\nsqueeze\s+1\s/)
   assert.match(text, /against plain Claude Code \(1 turns in the transcript, 2 main turns here\)/)
   assert.match(text, /thimble's hooks took 0\.1s of the main turns' time/)
-  assert.match(text, /read on demand: forms:principles \(lean guide cards\)/)
+  assert.match(text, /read on demand: forms:principles \(thimble guide cards\)/)
   assert.equal(r.out.plain.hook_ms, 150)
 })
 
@@ -106,7 +106,7 @@ test('the command finds the newest session in THIMBLE_HOME, or one by id, and sa
   const env = { PATH: process.env.PATH, THIMBLE_HOME: home }
   const none = spawnSync(process.execPath, [STATS], { encoding: 'utf8', env })
   assert.equal(none.status, 1)
-  assert.match(none.stderr, /^lean stats: no events yet/)
+  assert.match(none.stderr, /^thimble stats: no events yet/)
   mkdirSync(join(home, 'lean', 'events'), { recursive: true })
   writeFileSync(join(home, 'lean', 'events', 's-1.jsonl'), EVENTS.map(e => JSON.stringify({ session: 's-1', ...e })).join('\n') + '\n')
   assert.equal(findEvents('s-1', env), join(home, 'lean', 'events', 's-1.jsonl'))
@@ -118,7 +118,7 @@ test('the command finds the newest session in THIMBLE_HOME, or one by id, and sa
   assert.deepEqual(parseLines('{"a":1}\n{bad\n\n{"b":2}'), [{ a: 1 }, { b: 2 }])
 })
 
-test('lean stats counts the looks: how often v lit and how often the person pressed it; a shadow pass is its own row, outside all', () => {
+test('thimble stats counts the looks: how often v lit and how often the person pressed it; a shadow pass is its own row, outside all', () => {
   const U2 = { input_tokens: 1000, output_tokens: 200, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
   const events = [
     turnLine({ feature: 'main', ms: 10000, usage: U2 }), turnLine({ feature: 'main', ms: 10000, usage: U2 }),
@@ -143,7 +143,7 @@ test('lean stats counts the looks: how often v lit and how often the person pres
   assert.match(text, /\nlooks \(shadow\)\s+v lit on 2 of 2 · observer:v2/)
 })
 
-test("a save's check is a line of its own: lean stats counts the saves checked, the tries, the failures, the milliseconds and the characters Claude read", () => {
+test("a save's check is a line of its own: thimble stats counts the saves checked, the tries, the failures, the milliseconds and the characters Claude read", () => {
   const events = [
     { kind: 'check', id: '01-a', v: 1, tried: 0, total: 0, failed: 0, cut: 0, ms: 3, chars: 0 },
     { kind: 'check', id: '02-b', v: 1, tried: 10, total: 10, failed: 10, cut: 0, ms: 21, chars: 260 },

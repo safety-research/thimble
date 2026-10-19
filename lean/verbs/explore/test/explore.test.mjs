@@ -52,9 +52,9 @@ test('x on something with no explore view asks Claude to write one (ask), which 
   assert.equal(r.view, undefined)
   assert.equal(r.note, undefined)
   assert.match(r.ask, /read \/x\/lean\/verbs\/explore\/SKILL\.md/)
-  assert.match(r.ask, /lean save explore-saves-per-day --from FILE/)
+  assert.match(r.ask, /thimble save explore-saves-per-day --from FILE/)
   assert.match(r.ask, /"of": "02-saves-per-day"/)
-  assert.match(r.ask, /Check that it draws, as the person will see it, with `lean verb explore --text explore-saves-per-day`/)
+  assert.match(r.ask, /Check that it draws, as the person will see it, with `thimble verb explore --text explore-saves-per-day`/)
   assert.match((await run(ctxOf(plain, fakeKernel([plain]), { check: 'node cli.mjs --text' }))).ask, /with `node cli\.mjs --text explore-saves-per-day`/)
   const reply = await run(ctxOf(null, fakeKernel(), { reply: { text: 'Jun 18 had the most saves: 6,543 of 14,591.\nMore.' } }))
   assert.match(reply.ask, /your reply that begins "Jun 18 had the most saves: 6,543 of 14,591\."/)
@@ -160,12 +160,12 @@ test('the hint says what x would do for this object, or nothing', () => {
 })
 
 test('end to end with the real kernel: a query, a saved explore view, rows read back by ↵', async t => {
-  const py = process.env.LEAN_PYTHON || 'python3'
-  try { execFileSync(py, ['-c', 'import pandas'], { stdio: 'ignore' }) } catch (e) { t.skip('no Python with pandas (set LEAN_PYTHON)'); return }
+  const py = process.env.THIMBLE_PYTHON || 'python3'
+  try { execFileSync(py, ['-c', 'import pandas'], { stdio: 'ignore' }) } catch (e) { t.skip('no Python with pandas (set THIMBLE_PYTHON)'); return }
   const dir = mkdtempSync(join(tmpdir(), 'explore-'))
   writeFileSync(join(dir, 'log.jsonl'), Array.from({ length: 30 }, (_, i) => JSON.stringify({ day: `2026-03-0${1 + (i % 3)}`, user: ['red-fox', 'blue-jay'][i % 2], text: `save ${i + 1}` })).join('\n') + '\n')
-  const env = { ...process.env, LEAN_PYTHON: py, THIMBLE_HOME: join(dir, '.home'), LEAN_SESSION: 'test' }
-  const lean = (args, input) => execFileSync(join(HERE, '..', '..', 'bin', 'lean'), args, { cwd: dir, env, input, encoding: 'utf8' })
+  const env = { ...process.env, THIMBLE_PYTHON: py, THIMBLE_HOME: join(dir, '.home'), THIMBLE_SESSION: 'test' }
+  const lean = (args, input) => execFileSync(join(HERE, '..', '..', 'bin', 'thimble'), args, { cwd: dir, env, input, encoding: 'utf8' })
   lean(['q', 'saves per day'], 'df = load("log.jsonl", fields=["day", "user", "text"])\ntally(df, "day")\n')
   writeFileSync(join(dir, 'view.js'), `const k2 = k.knob('min', { values: [0, 10], at: 0, label: 'at least' })
     return k.stack(data.days.filter(d => d.n >= k2).map(d => k.region('day-' + d.day, { label: d.day, rows: d._rows, fields: ['user', 'text'] }, k.beside(k.text(d.day), k.bar(d.n, { max: 10 })))))`)
@@ -173,8 +173,8 @@ test('end to end with the real kernel: a query, a saved explore view, rows read 
   assert.match(lean(['save', 'explore-days', '--from', 'spec.json', '--program', 'view.js']), /saved 01-explore-days v1/)
   const ctx = nodeCtx(dir, { w: 80 })
   const saved = await ctx.kernel.load('explore-days')
-  const prev = { LEAN_PYTHON: process.env.LEAN_PYTHON, LEAN_SESSION: process.env.LEAN_SESSION, THIMBLE_HOME: process.env.THIMBLE_HOME }
-  Object.assign(process.env, { LEAN_PYTHON: py, LEAN_SESSION: 'test', THIMBLE_HOME: env.THIMBLE_HOME })
+  const prev = { THIMBLE_PYTHON: process.env.THIMBLE_PYTHON, THIMBLE_SESSION: process.env.THIMBLE_SESSION, THIMBLE_HOME: process.env.THIMBLE_HOME }
+  Object.assign(process.env, { THIMBLE_PYTHON: py, THIMBLE_SESSION: 'test', THIMBLE_HOME: env.THIMBLE_HOME })
   try {
     let { view } = await run(Object.assign(ctx, { object: saved }))
     view = await press(view, 'enter', ctx)

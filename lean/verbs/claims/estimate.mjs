@@ -173,5 +173,5 @@ function mb(bytes) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  process.stdout.write(JSON.stringify(estimate(process.argv[2] || process.env.LEAN_ROOT || process.cwd())) + '\n')
+  process.stdout.write(JSON.stringify(estimate(process.argv[2] || process.env.THIMBLE_ROOT || process.cwd())) + '\n')
 }

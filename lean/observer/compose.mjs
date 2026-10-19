@@ -84,7 +84,7 @@ export function composeTurn(template, vals, parts, st) {
 
 /**
  * Each lens's share of the pass, in characters: what it put in (its fragment, its digest and rules) and what came out
- * for it (its raw part of the reply). `lean stats` prices the shares.
+ * for it (its raw part of the reply). `thimble stats` prices the shares.
  */
 export function sharesOf({ system, turn, lenses, raw, rawText = '' }) {
   const out = {}

@@ -196,9 +196,9 @@ test('a thread is scoped to a card (each question to its part) or to a mark', ()
 test("a thread's turns come from its subagent's transcript; its answer is its last words or its hand-back", () => {
   const msgs = [
     { role: 'user', content: [{ type: 'text', text: '<system-reminder>env</system-reminder>' }, { type: 'text', text: 'Where did the time go?' }] },
-    { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'lean resolve "q3#n"\nmore' } }] },
+    { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'thimble resolve "q3#n"\nmore' } }] },
     { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'rows' }] },
-    { role: 'assistant', content: [{ type: 'text', text: 'I will count the reruns.' }, { type: 'tool_use', name: 'Bash', input: { command: 'lean q "reruns"' } }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'I will count the reruns.' }, { type: 'tool_use', name: 'Bash', input: { command: 'thimble q "reruns"' } }] },
     { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'u', content: 'rows' }] },
     { role: 'assistant', content: [{ type: 'text', text: '840 steps were reruns.' }] },
     { role: 'user', content: [{ type: 'text', text: 'and after 1240?' }] },
@@ -208,7 +208,7 @@ test("a thread's turns come from its subagent's transcript; its answer is its la
   assert.deepEqual(turns.map(t => t.role), ['person', 'claude', 'person', 'claude'])
   assert.equal(turns[0].text, 'Where did the time go?')
   // the answer is the last words; the words between tool calls are steps
-  assert.deepEqual(turns[1].calls, ['lean resolve "q3#n"', 'I will count the reruns.', 'lean q "reruns"'])
+  assert.deepEqual(turns[1].calls, ['thimble resolve "q3#n"', 'I will count the reruns.', 'thimble q "reruns"'])
   assert.equal(turns[1].text, '840 steps were reruns.')
   assert.equal(answerOf(msgs), '480 came after.')
   assert.equal(ownReport('<agent-message from="a1b2">\n[Subagent hand-back] …', ['a1b2']), 'a1b2')
@@ -225,7 +225,7 @@ test("a thread's turns come from its subagent's transcript; its answer is its la
     { role: 'user', content: [{ type: 'text', text: '<system-reminder>\nSomeone sent a message while you were working:\nand on one wiki alone?\n\nAddress this before completing your current task.\n</system-reminder>' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'About 17%.' }] },
     { role: 'user', content: 'Someone sent a message while you were working:\nand per day?\n\nAddress this before completing your current task.' },
-    { role: 'assistant', content: [{ type: 'text', text: 'One day.' }, { type: 'tool_use', name: 'Bash', input: { command: 'lean q "days"' } }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'One day.' }, { type: 'tool_use', name: 'Bash', input: { command: 'thimble q "days"' } }] },
     { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'd', content: 'rows' }, { type: 'text', text: '<system-reminder>\nSomeone sent a message while you were working:\nand by hour?\n</system-reminder>' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'Mostly 20:00.' }] },
   ])

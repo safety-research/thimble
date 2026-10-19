@@ -4,7 +4,7 @@
 // what a verb says for Claude goes with the next prompt, a verb's request to Claude reads as one line, and a resumed
 // session draws its objects again. The message layer: each message's record on disk, its marks drawn inline, the verb
 // row under the answer, the keys of an empty prompt, the tray and a question asked from it. `claude plugin test lean`.
-// The Node children (the drawing, a verb's run, `lean resolve`) are answered here, at process.run.
+// The Node children (the drawing, a verb's run, `thimble resolve`) are answered here, at process.run.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { plainWhy } from '../shell/shell'
@@ -69,7 +69,7 @@ function world(on: any, verb: Verb = () => ({ verb: 'trace', text: 'ok' }), draw
     if (e.argv[0] === 'tail') return { value: { exitCode: 0, stdout: (files[e.argv[3]!] ?? '').slice(Number(e.argv[2]!.slice(1)) - 1), stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     let out: unknown = {}
     // a save the shell makes itself (a card from a fork): the kernel writes it to the change feed and says it saved
-    if (e.argv[0]!.endsWith('/bin/lean') && e.argv[1] === 'save') {
+    if (e.argv[0]!.endsWith('/bin/thimble') && e.argv[1] === 'save') {
       const id = `03-${e.argv[2]}`
       files[`${ROOT}/thimble/objects/${id}.json`] = JSON.stringify({ ...OBJECT, id, ...JSON.parse(files[e.argv[4]!] || '{}') })
       files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: id, version: 1 }) + '\n'
@@ -112,10 +112,10 @@ function textOf(n: any): string {
 
 const ROW = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 const AT = ROW.slice(0, 24)
-const MOUNT = { plugin: 'thimble-lean', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
-const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never
+const MOUNT = { plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'June 18 had the most saves.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
+const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 110, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never
 const verbKey = (k: string) => `vr-${AT}-verb-${k}`
-const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
+const HINT = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const hintOf = async ($: any) => textOf(await $.ui.render(HINT))
 
@@ -144,7 +144,7 @@ test('an object Claude saves is drawn under the next words of the turn; its verb
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  const saved = await $.tool.call({ tool: 'Bash', command: "lean save saves <<'JSON'\n{}\nJSON" } as never)
+  const saved = await $.tool.call({ tool: 'Bash', command: "thimble save saves <<'JSON'\n{}\nJSON" } as never)
   // Claude reads what the person sees of it, after the command's own output
   expect(String((saved as { context?: string[] }).context)).toContain('01-saves@1 is drawn for the person under your reply')
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
@@ -172,12 +172,12 @@ test('a save is seen from the kernel\'s change feed, not from what the call prin
   const w = world(on)
   const clock = mock.clock(on)
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
-  // `lean save saves --from card.json | tail -1`: the line that says saved is gone, the feed has the save; then a
+  // `thimble save saves --from card.json | tail -1`: the line that says saved is gone, the feed has the save; then a
   // call that only prints the words
   let call = 0
   on('tool.call', () => (++call === 1 ? (saving(w.files)(), { result: '  this session has not read 3 of 4 source files\n' }) : { result: 'saved 09-other v1: thimble/objects/09-other.json\n' }))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  const saved = await $.tool.call({ tool: 'Bash', command: 'lean save saves --from card.json | tail -1' } as never)
+  const saved = await $.tool.call({ tool: 'Bash', command: 'thimble save saves --from card.json | tail -1' } as never)
   expect(String((saved as { context?: string[] }).context)).toContain('01-saves@1 is drawn for the person under your reply')
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
   await $.turn.complete({ turnId: 't1', answer: 'June 18 had the most saves.', durationMs: 5, reason: 'answer', isAborted: false } as never)
@@ -195,7 +195,7 @@ test("a save tries the card's interactions once in the same child: a failure is 
   let n = 0
   on('tool.call', () => saving(w.files, '01-saves', ++n)())
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  const ok = String(((await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)) as { context?: string[] }).context)
+  const ok = String(((await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)) as { context?: string[] }).context)
   // the save's own drawing asked for the check, in the one child that drew it
   const preps = w.runs.map((r, i) => (r.some(a => a.endsWith('prep.mjs')) ? JSON.parse(w.stdins[i]!) : null)).filter(Boolean)
   expect(preps.length).toBe(1)
@@ -206,7 +206,7 @@ test("a save tries the card's interactions once in the same child: a failure is 
   checked = { line, tried: 10, total: 10, failed: 10, cut: 0, ms: 21 }
   try {
     w.files[FILE] = JSON.stringify({ ...OBJECT, version: 2 })
-    const bad = String(((await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)) as { context?: string[] }).context)
+    const bad = String(((await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)) as { context?: string[] }).context)
     expect(bad).toContain(line)
     await clock.advance(100)
     await clock.settle()
@@ -228,7 +228,7 @@ test('the change feed is read from where the last read stopped: a call that save
   on('tool.call', () => (++call === 1 || call === 3 ? saving(w.files, call === 1 ? '01-saves' : '02-trace')() : { result: 'ok' }))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   // the first read since the module loaded: the whole feed, once
-  const first = await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  const first = await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
   expect(String((first as { context?: string[] }).context)).toContain('01-saves@1 is drawn')
   expect(w.reads.filter(p => p === EVENTS).length).toBe(1)
   // a call that saved nothing: the feed's size is the same, so nothing of it is read
@@ -237,7 +237,7 @@ test('the change feed is read from where the last read stopped: a call that save
   expect(w.reads.filter(p => p === EVENTS).length).toBe(1)
   expect(w.runs.filter(r => r[0] === 'tail').length).toBe(0)
   // a later save: only the bytes after the last read, through tail
-  const later = await $.tool.call({ tool: 'Bash', command: 'lean save trace' } as never)
+  const later = await $.tool.call({ tool: 'Bash', command: 'thimble save trace' } as never)
   expect(String((later as { context?: string[] }).context)).toContain('02-trace@1 is drawn')
   expect(String((later as { context?: string[] }).context)).not.toContain('01-saves@1')
   expect(w.reads.filter(p => p === EVENTS).length).toBe(1)
@@ -259,7 +259,7 @@ test('while the detail view is open, a prompt carries the object and its selecte
   const w = world(on)
   const { runs } = w
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.panes', () => ({ value: [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: false, isPlaced: true, plugin: 'thimble-lean' }] }))
+  on('ui.panes', () => ({ value: [{ id: 'object', title: 'Saves per day', isShown: true, isFocused: false, isPlaced: true, plugin: 'thimble' }] }))
   await $.command.run({ command: 'obj', args: 'saves day-2026-06-18' } as never)
   // the region's rows were resolved for the view, as the person's, not as what Claude read
   const resolve = runs.find(a => a.includes('resolve'))
@@ -277,7 +277,7 @@ test('/verb ? lists every verb for the object, the picked ones marked', async ($
   const w = world(on)
   on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
   const r = await $.command.run({ command: 'verb', args: '?' } as never)
   expect(String(r.text)).toContain('● x  explore')
   expect(String(r.text)).toContain('where these numbers come from')
@@ -322,7 +322,7 @@ async function savedTurn($: any, on: any, clock: { settle: () => Promise<void> }
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   on('tool.call', saving(files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves.' }] } } as never)
   await $.turn.complete({ turnId: 't1', answer: 'June 18 had the most saves.', durationMs: 5, reason: 'answer', isAborted: false } as never)
   await clock.settle()
@@ -380,7 +380,7 @@ test('a verb that needs the model: the module makes the call, and the verb runs 
 })
 
 test("with the card from a fork (card:v2), v asks main nothing: a fork writes the card, it is drawn under the same message, and Claude reads which card it is", async ($, on) => {
-  const w = world(on, () => ({ verb: 'visualize', text: 'never run', ask: 'never asked' }), DRAWING, { LEAN_PROMPTS: 'card:v2' })
+  const w = world(on, () => ({ verb: 'visualize', text: 'never run', ask: 'never asked' }), DRAWING, { THIMBLE_PROMPTS: 'card:v2' })
   const forks: string[] = []
   on('model.fork', (_$: unknown, e: { prompt: string }) => {
     forks.push(String(e.prompt))
@@ -435,7 +435,7 @@ test('a view that fails to draw: no prompt and no row; Claude reads why, at once
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  const saved = await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  const saved = await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
   expect(String((saved as { context?: string[] }).context)).toContain('Fix the program and save it again under the same name now')
   await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Here.' }] } } as never)
   await clock.settle()
@@ -451,7 +451,7 @@ test('an object whose file cannot be read is not drawn in silence: Claude reads 
   mock.clock(on)
   on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
-  const saved = await $.tool.call({ tool: 'Bash', command: 'lean save saves' } as never)
+  const saved = await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
   expect(String((saved as { context?: string[] }).context)).toContain('The person cannot see 01-saves')
   expect(String((saved as { context?: string[] }).context)).toContain('could not be read')
 })
@@ -637,9 +637,9 @@ test('a letter typed straight after v is a word however long v\'s work takes: th
 test('a question asked with the tray open goes to the side thread of its mark: main never sees it, and the panel shows the thread', async ($, on) => {
   const w = world(on)
   const spawns: Any[] = []
-  on('agent.register', () => ({ value: { agent: 'thimble-lean:thread' } }))
+  on('agent.register', () => ({ value: { agent: 'thimble:thread' } }))
   on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-test' } as never })
-  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `agent-${i + 1}`, type: 'thimble-lean:thread', description: 'thread', status: 'running' })) }))
+  on('agent.list', () => ({ value: spawns.map((_, i) => ({ id: `agent-${i + 1}`, type: 'thimble:thread', description: 'thread', status: 'running' })) }))
   on('session.messages', () => ({ value: [] }))
   on('ui.status', () => ({ value: undefined }))
   on('prompt.fill', () => ({ isFilled: true }))
@@ -651,7 +651,7 @@ test('a question asked with the tray open goes to the side thread of its mark: m
   // dropped from main, with where it went; the thread's agent got the question and what it is about
   expect(String((r as Any).drop)).toBe('asked the thread of 6,543 saves')
   expect(w.submitted.length).toBe(before)
-  expect(spawns[0].subagent_type).toBe('thimble-lean:thread')
+  expect(spawns[0].subagent_type).toBe('thimble:thread')
   expect(spawns[0].prompt).toContain('why so high?')
   expect(spawns[0].prompt).toContain('About: Claude\'s citation "6,543 saves" (q1#day=2026-06-18@n).')
   // the panel shows the thread: the question, and that it is being answered
@@ -687,9 +687,9 @@ test('a failure reads as plain words, never JSON; a refusal that needs nothing f
   // the engine refuses a scroll that a key asked for, or one to a mark not drawn now: the tray shows the mark anyway
   expect(plainWhy({ deny: 'not person-initiated' })).toBeNull()
   expect(plainWhy('scroll: {"deny":"no element of its own is drawn under that key"}')).toBeNull()
-  expect(plainWhy(new Error('thimble-lean: $.ui.scroll: not person-initiated'))).toBeNull()
+  expect(plainWhy(new Error('thimble: $.ui.scroll: not person-initiated'))).toBeNull()
   // a real failure keeps its own words
-  expect(plainWhy(new Error('thimble-lean: $.model.complete: the model is busy'))).toBe('the model is busy')
+  expect(plainWhy(new Error('thimble: $.model.complete: the model is busy'))).toBe('the model is busy')
   expect(plainWhy('{"error":"q9 has no column n"}')).toBe('q9 has no column n')
   expect(plainWhy('Traceback (most recent call last):\n  File "x"')).toBe('Traceback (most recent call last):')
 })

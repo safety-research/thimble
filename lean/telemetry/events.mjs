@@ -1,9 +1,9 @@
-// events.mjs: the lines thimble's telemetry writes to the session's events, and how `lean stats` reads them. Pure.
+// events.mjs: the lines thimble's telemetry writes to the session's events, and how `thimble stats` reads them. Pure.
 //
 // The session's events are one file, $THIMBLE_HOME/lean/events/<session>.jsonl: the one append-only log of the session,
-// which the kernel writes its saves to (`lean save`, the change feed the shell reads saves from) and telemetry writes
+// which the kernel writes its saves to (`thimble save`, the change feed the shell reads saves from) and telemetry writes
 // its lines to. It is under THIMBLE_HOME, not the data folder's thimble/, because a session's log starts before any
-// data folder is known (the first turn, the prompt versions in use, the observer's first look come before `lean` has
+// data folder is known (the first turn, the prompt versions in use, the observer's first look come before `thimble` has
 // found a root, and the hooks learn the root only from the first object), and because the kernel writes nothing into a
 // folder that holds no data (a coding session gets no thimble/ folder). Readers skip the kinds they do not know.
 // Telemetry adds:
@@ -15,9 +15,9 @@
 //        whose request started it, such as 'visualize'), or a subagent's (feature 'thread' for a side thread).
 //        `hook_ms`: the time thimble's own hooks took inside a main turn, which is the latency thimble adds to it.
 //   {kind: 'prompts', active: {feature: version}, problems}              the versions in use, once per session
-//   {kind: 'prompt', feature, prompt, via}                               a text read on demand (`lean guide cards`)
+//   {kind: 'prompt', feature, prompt, via}                               a text read on demand (`thimble guide cards`)
 //   {kind: 'look', turn, lit, v, observer, prompts, skip?, shadow?}      one look of the observer after a turn: the verbs
-//        it lit (`v`: its note and proposals, or null), or why it skipped. With `shadow` (LEAN_PROMPTS_SHADOW), what
+//        it lit (`v`: its note and proposals, or null), or why it skipped. With `shadow` (THIMBLE_PROMPTS_SHADOW), what
 //        a second pass with other versions would have lit; its call line carries the same `shadow`.
 //   {kind: 'press', verb, row, lit}                                       the person pressed a verb under a message,
 //        `lit`: whether it was lit then

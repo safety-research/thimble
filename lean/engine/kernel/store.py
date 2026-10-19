@@ -11,7 +11,7 @@ In the folder under analysis (the root), the `thimble/` folder holds what the pe
     thimble/kept/<name>.rows.json           beside a kept table with no `_ref`, the rows behind each of its rows, when
                                             the query that kept it knew them (query._keep_rows)
     thimble/results/q<n>.pkl.gz             each query's output table, which a later query reads with use("q<n>")
-    thimble/ledger.jsonl                    one line per `lean` call that read rows (what was read and how)
+    thimble/ledger.jsonl                    one line per `thimble` call that read rows (what was read and how)
 
 The pickles are compressed (gzip): a table whose rows each keep thousands of refs takes a twentieth of the space, and
 pandas reads them as it reads any .pkl.gz. Earlier kernels wrote <name>.pkl, which is still read.
@@ -45,9 +45,9 @@ def thimble_home() -> Path:
 
 
 def find_root(start: str | Path | None = None) -> Path:
-    """The folder under analysis: LEAN_ROOT, else the nearest folder at or above `start` (the working folder) that
+    """The folder under analysis: THIMBLE_ROOT, else the nearest folder at or above `start` (the working folder) that
     holds a thimble/ record folder, else `start` itself."""
-    env = os.environ.get("LEAN_ROOT")
+    env = os.environ.get("THIMBLE_ROOT")
     if env:
         return Path(env).resolve()
     here = Path(start or os.getcwd()).resolve()
@@ -62,7 +62,7 @@ def find_root(start: str | Path | None = None) -> Path:
 
 
 def session_id() -> str:
-    return os.environ.get("LEAN_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "cli"
+    return os.environ.get("THIMBLE_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID") or "cli"
 
 
 class Store:
@@ -471,7 +471,7 @@ def read_pickle(p: Path) -> Any:
 # ------------------------------------------------------------------ the cache: bounded
 
 
-CACHE_MAX = int(float(os.environ.get("LEAN_CACHE_MAX_GB") or 8) * 1e9)  # bytes of cached frames in all
+CACHE_MAX = int(float(os.environ.get("THIMBLE_CACHE_MAX_GB") or 8) * 1e9)  # bytes of cached frames in all
 CACHE_SHARE = 0.25  # and at most this share of the space the cache could have (the disk's free space and its own)
 CACHE_DAYS = 14  # a frame no load read for this long goes
 PRUNE_EVERY = 86400  # seconds: the cache is looked over at most this often, and after a query that added to it

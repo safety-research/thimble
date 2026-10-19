@@ -5,7 +5,7 @@
   "order": 0,
   "row": true,
   "color": { "light": "#4f46e5", "dark": "#9a93ff" },
-  "writer": "Claude, in the main conversation: the run asks Claude for the card, with the observer's proposals and the card guidance (`lean guide cards`, the registry's forms)",
-  "skill": "lean guide cards",
+  "writer": "Claude, in the main conversation: the run asks Claude for the card, with the observer's proposals and the card guidance (`thimble guide cards`, the registry's forms)",
+  "skill": "thimble guide cards",
   "run": "run.mjs"
 }

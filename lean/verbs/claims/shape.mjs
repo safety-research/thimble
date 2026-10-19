@@ -9,7 +9,7 @@
 //     added?: {claims: [ids], row?, at?}                the claims one message added (that version only)
 //   }
 //
-// Any other field is kept. Nothing here judges whether a claim is true: `lean verb claims check` runs the kernel's own
+// Any other field is kept. Nothing here judges whether a claim is true: `thimble verb claims check` runs the kernel's own
 // check of each evidence ref and quote (check.py).
 
 export const KINDS = [

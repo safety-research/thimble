@@ -1,14 +1,14 @@
-// cli.mjs: `lean verb claims`, the commands the orientation's subagent and main run with the Bash tool (so Manual mode
+// cli.mjs: `thimble verb claims`, the commands the orientation's subagent and main run with the Bash tool (so Manual mode
 // asks first), and a way to read a session's claims in a terminal.
 //
-//   lean verb claims check FILE      the orientation's claims JSON, checked: what the store needs (shape.mjs) and every
-//                                    evidence ref and quote, by the kernel's own citation check (check.py). Saves nothing.
-//   lean verb claims save FILE       puts them in this session's claims (thimble/claims/<LEAN_SESSION>.json), each
-//                                    marked as the orientation's; main runs this, so c lights under its reply
-//   lean verb claims show [--session ID] [--json]
-//                                    the session's claims as the list shows them: clusters, claims, ×N, revisions
-//   lean verb claims estimate [ROOT] [--json]
-//                                    what the corpus orientation would map here, with its time and tokens
+//   thimble verb claims check FILE      the orientation's claims JSON, checked: what the store needs (shape.mjs) and every
+//                                       evidence ref and quote, by the kernel's own citation check (check.py). Saves nothing.
+//   thimble verb claims save FILE       puts them in this session's claims (thimble/claims/<THIMBLE_SESSION>.json), each
+//                                       marked as the orientation's; main runs this, so c lights under its reply
+//   thimble verb claims show [--session ID] [--json]
+//                                       the session's claims as the list shows them: clusters, claims, ×N, revisions
+//   thimble verb claims estimate [ROOT] [--json]
+//                                       what the corpus orientation would map here, with its time and tokens
 //
 // FILE is {title, data: {scope, clusters, claims, relations}} or the data alone (SKILL.md).
 import { spawnSync } from 'node:child_process'
@@ -23,12 +23,12 @@ import { check, specFor } from './shape.mjs'
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const VALUED = ['--session']
 
-/** The folder under analysis for a file: the folder that holds its thimble/ folder, else LEAN_ROOT, else here. */
+/** The folder under analysis for a file: the folder that holds its thimble/ folder, else THIMBLE_ROOT, else here. */
 export function rootFor(file) {
   const abs = resolve(file)
   const i = abs.split(sep).lastIndexOf('thimble')
   if (i > 0) return abs.split(sep).slice(0, i).join(sep) || sep
-  return resolve(process.env.LEAN_ROOT || process.cwd())
+  return resolve(process.env.THIMBLE_ROOT || process.cwd())
 }
 
 function readSpec(file) {
@@ -42,14 +42,14 @@ function readSpec(file) {
 }
 
 function python() {
-  if (process.env.LEAN_PYTHON) return process.env.LEAN_PYTHON
+  if (process.env.THIMBLE_PYTHON) return process.env.THIMBLE_PYTHON
   const venv = join(HERE, '..', '..', '.venv', 'bin', 'python')
   return existsSync(venv) ? venv : 'python3'
 }
 
 /** The kernel's citation check of a spec, run in the folder `root`: {cites, hold, problems, other} or {error}. */
 export function citations(spec, root) {
-  const r = spawnSync(python(), [join(HERE, 'check.py'), '-'], { input: JSON.stringify(spec), cwd: root, encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, LEAN_ROOT: root }, timeout: 600000 })
+  const r = spawnSync(python(), [join(HERE, 'check.py'), '-'], { input: JSON.stringify(spec), cwd: root, encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, THIMBLE_ROOT: root }, timeout: 600000 })
   try { return JSON.parse(r.stdout) } catch { return { error: (r.stderr || r.stdout || String(r.error || '')).trim().split('\n').slice(-3).join(' ').slice(0, 400) || 'the check gave nothing' } }
 }
 
@@ -77,15 +77,15 @@ export function cmdCheck(file, out = console.log) {
   return n ? 1 : 0
 }
 
-/** The orientation's claims into this session's claims (LEAN_SESSION, which the plugin sets for the session's
+/** The orientation's claims into this session's claims (THIMBLE_SESSION, which the plugin sets for the session's
  *  commands), each marked as the orientation's; a claim the session already holds word for word is said again. */
-export function cmdSave(file, { session = process.env.LEAN_SESSION || '', out = console.log, now = new Date().toISOString() } = {}) {
+export function cmdSave(file, { session = process.env.THIMBLE_SESSION || '', out = console.log, now = new Date().toISOString() } = {}) {
   const got = readSpec(file)
   if (got.error) { out(got.error); return 1 }
   const spec = specFor(got.json)
   const shape = check(spec)
   if (!shape.counts.claims) { out(`nothing to save: ${shape.problems[0] || 'the file has no claims'}`); return 1 }
-  if (!session) { out('No session to save into: run this in the Claude Code session (the plugin sets LEAN_SESSION for its commands), or pass --session ID.'); return 1 }
+  if (!session) { out('No session to save into: run this in the Claude Code session (the plugin sets THIMBLE_SESSION for its commands), or pass --session ID.'); return 1 }
   const root = rootFor(file)
   const store = loadStore(root, session)
   const turns = store.claims.map(c => c.turn).filter(t => typeof t === 'number')
@@ -123,8 +123,8 @@ export function showLines(store) {
 }
 
 function cmdShow(session, json, out = console.log) {
-  const root = resolve(process.env.LEAN_ROOT || process.cwd())
-  const id = session || process.env.LEAN_SESSION || newestSession(root)
+  const root = resolve(process.env.THIMBLE_ROOT || process.cwd())
+  const id = session || process.env.THIMBLE_SESSION || newestSession(root)
   if (!id) { out(`no claims here yet (${root}/thimble/claims/)`); return 1 }
   const store = loadStore(root, id)
   if (json) { out(JSON.stringify(store)); return 0 }
@@ -133,7 +133,7 @@ function cmdShow(session, json, out = console.log) {
 }
 
 function cmdEstimate(root, json, out = console.log) {
-  const e = estimate(resolve(root || process.env.LEAN_ROOT || process.cwd()))
+  const e = estimate(resolve(root || process.env.THIMBLE_ROOT || process.cwd()))
   if (json) { out(JSON.stringify(e)); return 0 }
   out(`${e.note} · ~${Math.round(e.tokens / 1000)}k tokens (price-weighted)`)
   out(e.detail)
@@ -146,7 +146,7 @@ function main(argv) {
   const words = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && VALUED.includes(argv[i - 1])))
   const [cmd, arg] = words
   if (cmd === 'check' && arg) return cmdCheck(arg)
-  if (cmd === 'save' && arg) return cmdSave(arg, { session: flag('--session') || process.env.LEAN_SESSION || '' })
+  if (cmd === 'save' && arg) return cmdSave(arg, { session: flag('--session') || process.env.THIMBLE_SESSION || '' })
   if (cmd === 'show') return cmdShow(flag('--session'), has('--json'))
   if (cmd === 'estimate') return cmdEstimate(arg, has('--json'))
   console.log(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(2, 12).map(l => l.replace(/^\/\/ ?/, '')).join('\n'))

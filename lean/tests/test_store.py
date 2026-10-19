@@ -64,8 +64,8 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         for i in range(400):
             f.write(json.dumps({"agent": f"a{i % 7}", "action": ["claim", "push", "review"][i % 3], "n": i}) + "\n")
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("LEAN_SESSION", "s-test")
-    monkeypatch.delenv("LEAN_ROOT", raising=False)
+    monkeypatch.setenv("THIMBLE_SESSION", "s-test")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
     # small enough that these tables' lineage is packed
     monkeypatch.setattr(STORE, "PACK_MIN", 2_000)
     return d
@@ -222,7 +222,7 @@ def test_kept_values_are_compressed_and_an_old_plain_one_still_reads(root: Path)
     Q.run(st, "keep again", 'keep("calls", use("calls"))')
     assert gz.exists() and not plain.exists()
     gone = Q.run(st, "gone", 'import os\nos.remove("thimble/kept/calls.pkl.gz")\nuse("calls")')
-    assert gone["error"] and "lean q --rerun" in gone["error"]
+    assert gone["error"] and "thimble q --rerun" in gone["error"]
 
 
 def test_a_packed_lineage_that_does_not_read_says_why_and_how_to_fix_it(root: Path) -> None:
@@ -235,7 +235,7 @@ def test_a_packed_lineage_that_does_not_read_says_why_and_how_to_fix_it(root: Pa
     got = Q.get(st, q["id"])
     assert got["table"] == q["table"] and got.get("rows") is None
     r = LIN.resolve(st, Q.row_refs(q)[0])
-    assert "lean q --rerun" in r["why"]
+    assert "thimble q --rerun" in r["why"]
 
 
 # ------------------------------------------------------------------ the cache
