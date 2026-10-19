@@ -1244,7 +1244,8 @@ async function focusCard($: Engine, row: string, card: ObjRef): Promise<void> {
   await quietly($.ui.scroll({ to: { key: `row-${row}-card-${card.id}` }, block: 'nearest' }))
 }
 
-async function closeTray($: Engine): Promise<void> {
+/** The tray closes as esc closes it: it leaves the focus stack, and the browser's tray closes with it. */
+export async function closeTray($: Engine): Promise<void> {
   await setTray($, null)
 }
 

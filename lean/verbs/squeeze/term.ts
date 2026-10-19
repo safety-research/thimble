@@ -20,7 +20,7 @@ import { remark as remarkAny } from '../../shell/message.js'
 import { tracked } from '../../telemetry/telemetry'
 import { FEATURES } from '../../prompts/registry.mjs'
 import { lookPending } from '../../observer/observer'
-import { answerRow, claimsStore, questionBefore, recordNow, saveRecord } from '../../shell/shell'
+import { answerRow, claimsStore, closeTray, questionBefore, recordNow, saveRecord } from '../../shell/shell'
 import { ARRIVE, applyRewrite, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, isLong, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, rebaseAt, request, restore, revealStep, rowsOf, stretchChip, termsOf, unplacedMoves, withStretch } from './chips.mjs'
 
 type Engine = EngineInterface
@@ -320,11 +320,12 @@ async function writeIn($: Engine, row: string, total: number): Promise<void> {
   $.clock.after(TICK, next)
 }
 
-/** The tray closes when it stands on a mark of this row: the marks moved. */
+/** The tray closes when it stands on a mark of this row: the marks moved. It closes as esc closes it, so the focus
+ *  stack and the browser's tray follow. */
 async function closeTrayOn($: Engine, row: string): Promise<void> {
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const b = tray?.stack?.[0]
-  if (b && b.row === row) await $.state.set(TRAY, null)
+  if (b && b.row === row) await closeTray($)
 }
 
 /** The glyph that turns while a call runs: the row redraws a few times a second, and only while it runs. */

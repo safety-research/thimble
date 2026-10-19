@@ -304,6 +304,8 @@ test('a key the thimble line named a moment ago is taken, never typed, when what
   await clock.settle()
   expect(record(w).shown).toBe(SHORT)
   expect(await hintOf($)).not.toContain('0 close')
+  // it closes as esc closes it: the browser's tray, which reads the tray's shared state, closes too
+  expect(JSON.parse(w.files[`${ROOT}/thimble/panes/s-1/tray.json`]!).state.stack).toEqual([])
   // the 0 the person pressed as the line said: it does nothing, and never lands in the prompt
   expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
   // a 0 pressed when the line has said otherwise for a while is typed
