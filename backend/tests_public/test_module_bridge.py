@@ -14,6 +14,8 @@ import httpx
 import pytest
 
 from app import cc_plugin, config, hook_auth, module_bridge, session, tools
+from app import subagent_files as sf
+from terminal_fakes import write_launch
 
 
 CORPUS = "mini"
@@ -326,3 +328,25 @@ async def test_without_a_live_module_a_request_answers_no_module_with_the_reason
     assert module_bridge.live(CORPUS)
     await asyncio.sleep(0.1)
     assert not module_bridge.live(CORPUS) and "stopped polling" in module_bridge.why_not(CORPUS)
+
+
+def test_on_local_transport_the_module_is_live_by_its_heartbeat_file_and_module_json_holds_no_beat():
+    """The module beats in module-beat.json, apart from module.json, which changes only when it has something new to
+    say; a beat in module.json (a module loaded before the beat had a file of its own) counts too; an old beat, and a
+    module.json that says `gone`, do not."""
+    ws = config.workspace_dir(CORPUS)
+    write_launch(ws, session=MAIN, transport="local")
+    now = int(time.time() * 1000)
+    out = {"session": MAIN, "version": "0.9.0", "load": "l0ad", "plan": None, "plan_at": 0, "problem": "", "taken": [],
+           "answers": {}, "ended": [], "gone": False}
+    sf.module_path(ws).write_text(json.dumps(out), "utf-8")
+    beat = sf.trusted_dir(ws) / sf.MODULE_BEAT
+    beat.write_text(json.dumps({"session": MAIN, "load": "l0ad", "beat": now}), "utf-8")
+    assert module_bridge.live(CORPUS)
+    beat.write_text(json.dumps({"session": MAIN, "load": "l0ad", "beat": now - 60_000}), "utf-8")
+    assert not module_bridge.live(CORPUS) and "stopped writing its heartbeat" in module_bridge.why_not(CORPUS)
+    beat.unlink()
+    sf.module_path(ws).write_text(json.dumps({**out, "beat": now}), "utf-8")
+    assert module_bridge.live(CORPUS)
+    sf.module_path(ws).write_text(json.dumps({**out, "beat": now, "gone": True}), "utf-8")
+    assert not module_bridge.live(CORPUS)

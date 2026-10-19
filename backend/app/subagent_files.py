@@ -17,10 +17,12 @@ always for a peer) two more files are in the folder, and subagents.json holds mo
 
   roles.json      the roles the module registers ({at, digest, roles: {name: spec}}), as GET /api/module/roles serves
                   them once the transport is server (module_bridge.roles_file writes it)
-  module.json     what the module writes, and only the module: {session, version, load, beat, plan, plan_at, problem,
+  module.json     what the module writes, and only the module: {session, version, load, plan, plan_at, problem,
                   taken, answers, ended, gone}, its times in milliseconds since the epoch (module_bridge has the
                   design); a reader retries a read that a write cut short (read_module), since the module can only
                   write a file whole in place
+  module-beat.json  the module's heartbeat, {session, load, beat}, every 2 s, in a file of its own so module.json
+                  changes only when the module has something new to say (read_beat)
   subagents.json  the module's requests, entries of `requests` of kind `module` ({op, args, module: pending | answered
                   | expired, session, asked_at, expires_at}, add_module_request), main's permission mode (`main`:
                   record_mode), the notes for a new main after /clear (`module.notes`: rekey) and the forks of threads
@@ -62,6 +64,7 @@ LAUNCH = "launch.json"
 FILES = (STATE, CALLERS, LAUNCH)  # in DIR
 ROLES_FILE = "roles.json"  # in DIR, local transport: the roles the module registers (module note)
 MODULE_OUT = "module.json"  # in DIR, local transport: what the module writes, and only the module (module note)
+MODULE_BEAT = "module-beat.json"  # in DIR, local transport: the module's heartbeat, apart from what it says (module note)
 # in DIR: a typed start's whole prompt, <request id>.md, which the module's spawn hook gives its agent in place of the
 # short prompt main typed (subagents.start_job's `inline`); it goes when the agent takes up its start (subagents.bind)
 INLINE = "inline"
@@ -1131,9 +1134,19 @@ MODULE_READ_GAP_S = 0.01
 
 
 def read_module(ws: Path) -> dict[str, Any]:
-    """module.json of the workspace folder `ws` (module note): what the module wrote, {} when there is none. The module
-    can write a file only whole and in place, so a read that finds half a file reads again."""
-    path = module_path(ws)
+    """module.json of the workspace folder `ws` (module note): what the module wrote, {} when there is none."""
+    return _read_written(module_path(ws))
+
+
+def read_beat(ws: Path) -> dict[str, Any]:
+    """module-beat.json of the workspace folder `ws`: the module's last heartbeat, {session, load, beat}, {} when there is
+    none (a module loaded before the heartbeat had a file of its own beat in module.json)."""
+    return _read_written(trusted_dir(ws) / MODULE_BEAT)
+
+
+def _read_written(path: Path) -> dict[str, Any]:
+    """A JSON object the module wrote, {} when there is none. The module can write a file only whole and in place, so a
+    read that finds half a file reads again."""
     for i in range(MODULE_READS):
         try:
             raw = path.read_bytes()

@@ -51,7 +51,7 @@ import { turns } from './turns'
 import { openSection, registerBand } from './band'
 import { registerPanelViews } from './views'
 import { closeView, openViewState, sendEvent, viewFault, viewMessage } from './viewhost'
-import { LOAD_TOOL, act, activateNow, appendGuide, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble, takeMain } from './activate'
+import { LOAD_TOOL, act, activateNow, appendGuide, backgroundKind, bounded, conversationEnded, deliverStarts, deliveryLost, followConversation, guideAfterCompact, isActive, owedGuide, preScope, resetActivation, restoreFromMarker, rowStored, sawLoadThimble, takeMain } from './activate'
 import { onFlip, pushChange, resetSettings, setOptions, syncSoon } from './settings'
 import { POINTER_NOTE, callDone, checkName, ownNotice, typedCheck } from '../thimble'
 import { factsHeld, factsOf, flushFacts, keepFacts, resetTracker } from './tracker'
@@ -520,6 +520,19 @@ async function indexCitations(cx: Ctx, text: string, row: string): Promise<void>
   if (add.length) await cx.setCiteIndex([...have, ...add].slice(-2000))
 }
 
+/** The origins of a prompt that a person sent: Enter at the terminal, or a message through Remote Control. */
+const PERSON = new Set(['composer', 'bridge'])
+
+/** thimble on as at a session's start (`start`, no push; the first prompt carries the guide), where a person is at the
+ *  terminal: at session.start, or at the person's first prompt in a session whose start found none. A refused folder
+ *  stays off without a notice. */
+async function startForPerson(cx: ReturnType<typeof cxOf>): Promise<void> {
+  act.untilPerson = false
+  act.refusedSaid = true
+  await activateNow(cx, 'start', false)
+  act.refusedSaid = false
+}
+
 export const register: Register = (on, options) => {
   // the /config values of the seven switches (settings.ts): a /config change reloads the module with new ones; a flip of
   // labels or checks changes the guide, which is then owed if thimble says so
@@ -570,11 +583,16 @@ export const register: Register = (on, options) => {
     // as a regular Claude Code plugin: on from the start of every interactive session where the plugin is enabled; a
     // folder thimble refuses (the home folder, `/`) stays off without a notice. Beside a
     // live main it is a peer (`start` takes no main): only an explicit /thimble, `thimble` or a press does (bug hunt 7,
-    // H13: a second plain `claude` in the folder took main, though the browser kept following the first)
+    // H13: a second plain `claude` in the folder took main, though the browser kept following the first). A session
+    // Claude Code's background service runs (a pre-warmed spare, a background job) has no terminal of a person's at its
+    // start: thimble turns on there at the person's first prompt or /thimble, so a session no one uses starts nothing
+    // (no activation, no refresh loop, no heartbeat)
     if (act.interactive && act.surface === 'terminal') {
-      act.refusedSaid = true
-      await activateNow(cx, 'start', false)
-      act.refusedSaid = false
+      const kind = await backgroundKind(cx)
+      if (kind) {
+        act.untilPerson = true
+        cx.debug(`thimble: a session of Claude Code's background service (${kind}) has no terminal of a person's at its start; thimble turns on at the first prompt`)
+      } else await startForPerson(cx)
     }
     return started
   })
@@ -649,6 +667,8 @@ export const register: Register = (on, options) => {
     if (from !== undefined && check !== undefined) return { drop: await checkDone(cxOf($), from, check) }
     // the report of a check main started with run_check, which main answers in one line (backend/app/checks.py)
     const sent = from !== undefined && e.origin.kind === 'peer' && typedCheck(from) ? { ...e, context: [...(e.context ?? []), CHECK_REPORT] } : e
+    // the person's first prompt in a session whose start found no terminal of a person's (session.start)
+    if (!isActive() && act.untilPerson && PERSON.has(e.origin.kind)) await startForPerson(cxOf($))
     if (!isActive()) return next(sent)
     const cx = cxOf($)
     await followConversation(cx)

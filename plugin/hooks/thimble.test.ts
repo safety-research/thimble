@@ -10,7 +10,7 @@
 // (`expect`), and the HMAC-SHA256 the fake server signs with (hmacSha256).
 import { describe, expect as check, test as it } from 'claude-code/testing'
 
-import { ABORT_WAIT_MS, CALL_DONE, POINTER_NOTE, PRIVATE_FALLBACK, callDone, checkName, hmac, ownNotice, register, typedCheck } from './thimble'
+import { ABORT_WAIT_MS, BEAT_FILE, CALL_DONE, FILE_BEAT_MS, POINTER_NOTE, PRIVATE_FALLBACK, callDone, checkName, hmac, ownNotice, register, typedCheck } from './thimble'
 
 type Json = Record<string, any>
 
@@ -999,9 +999,23 @@ describe('local transport', () => {
     const o = out(e)
     expect(o).toMatchObject({ session: MAIN, version: '0.6.0', problem: '', taken: [], answers: {}, ended: [], gone: false })
     expect(o.load).toMatch(/^[0-9a-f]{16}$/)
-    expect(Math.abs(o.beat - Date.now())).toBeLessThan(2000)
+    expect(o.beat).toBeUndefined() // the heartbeat has a file of its own
+    const beat = JSON.parse(e.files[`${T}/${BEAT_FILE}`])
+    expect(beat).toMatchObject({ session: MAIN, load: o.load })
+    expect(Math.abs(beat.beat - Date.now())).toBeLessThan(2000)
     await new Promise(r => setTimeout(r, 40))
     expect(e.$.http.fetch).not.toHaveBeenCalled()
+  })
+
+  it('beats in its own file and leaves module.json as it was, so a beat is no change to a watcher of module.json', async () => {
+    const e = await begun()
+    await until(() => out(e).plan === false) // the plan poll's first look, which module.json says once
+    const before = e.files[`${T}/module.json`]
+    const first = JSON.parse(e.files[`${T}/${BEAT_FILE}`]).beat
+    const stat = await e.$.fs.stat(`${T}/module.json`)
+    await until(() => JSON.parse(e.files[`${T}/${BEAT_FILE}`]).beat > first, FILE_BEAT_MS + 1500)
+    expect(e.files[`${T}/module.json`]).toBe(before)
+    expect((await e.$.fs.stat(`${T}/module.json`)).mtimeMs).toBe(stat.mtimeMs)
   })
 
   it('reads a 0.8.0 record’s mode as its transport: terminal through the files', async () => {
