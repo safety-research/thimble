@@ -4,8 +4,9 @@
 // to Claude, a rare line above the prompt, and the ranking of each object's hint row), the prompt registry
 // (../prompts/prompts.ts: which version of each text a model reads) and the telemetry (../telemetry/telemetry.ts:
 // each model call and each turn in the session's events, with the time thimble's hooks took inside each main turn)
-// register side by side. The telemetry registers twice, before and after the others, so its two hooks of each event
-// inside a main turn bracket thimble's other hooks and time them.
+// register side by side, with path.ts, which puts the plugin's bin/ first on the PATH of the session's commands. The
+// telemetry registers twice, before and after the others, so its two hooks of each event inside a main turn bracket
+// thimble's other hooks and time them.
 import type { Register } from 'claude-code'
 
 import { registerObserver } from '../observer/observer'
@@ -13,9 +14,11 @@ import { registerPrompts } from '../prompts/prompts'
 import { registerShell } from '../shell/shell'
 import { registerTelemetry } from '../telemetry/telemetry'
 import { register as registerKernel } from './kernel'
+import { registerPath } from './path'
 
 export const register: Register = (on, options) => {
   registerTelemetry(on, 'first')
+  registerPath(on, options)
   registerPrompts(on, options)
   registerKernel(on, options)
   registerShell(on, options)
