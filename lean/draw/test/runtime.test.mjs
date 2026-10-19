@@ -66,6 +66,45 @@ test('a stacked bar\'s part drawn from a row is a part by itself: it opens that 
   assert.deepEqual(plain.regions, [])
 })
 
+test('a stacked bar\'s label stays inside its own part in both renderers, and a total beside the total is drawn once', async () => {
+  const { hex } = await import('../palette.js')
+  // a narrow part whose label is wide characters, a part labelled with a number, and a note that repeats the total
+  const parts = [{ value: 9, label: '数据集', tone: 'c1' }, { value: 30, label: 'names 11–50', tone: 'c2' }, { value: 61, label: '1,119 other names', tone: 'c4' }]
+  const program = `return k.bars([{ id: 'answers', label: 'answers', parts: data.parts, note: k.fmt(100) }, { id: 'proxy', label: 'proxy', parts: data.parts.slice(1), note: 'two kinds' }])`
+  for (const w of [40, 60, 90, 120, 150]) {
+    const d = runProgram({ program, data: { parts } }, { w, h: 12 })
+    assert.equal(d.error, undefined, d.error && d.error.message)
+    // the terminal: the cells on a part's fill hold that part's words only, whole, and nothing on a fill strays
+    const g = renderTerm(d, { w })
+    for (const row of g.rows.slice(0, 2)) {
+      for (const p of parts) {
+        const on = row.filter(c => c.bg === p.tone)
+        const words = on.map(c => c.ch).join('').trim()
+        const value = p.value.toLocaleString('en-US')
+        assert.ok(!words || words === p.label || words === `${p.label} ${value}`, `${w}: "${words}" on the part ${p.label}`)
+      }
+      assert.ok(row.every(c => c.tone !== 'paper' || c.bg || c.cont), `${w}: words off their part's fill`)
+    }
+    // a total beside the same total is drawn once; another note is kept
+    const text = gridText(g)
+    assert.equal(text.split('\n')[0].split('100').length - 1, 1, `${w}: ${text}`)
+    if (w >= 90) assert.ok(text.includes('two kinds'), text)
+    // the browser: each label measured in its own size ends inside its part's span, in a face wider than the cells
+    // (a CJK face, where each character is about 1 em)
+    const wide = (t, o = {}) => [...String(t)].length * (o.size || 13)
+    const svg = renderSvg(d, { w, measure: wide }).svg
+    const fills = parts.map(p => hex(p.tone, 'light'))
+    const rects = [...svg.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" fill="([^"]+)"/g)].filter(m => fills.includes(m[5])).map(m => ({ x: +m[1], y: +m[2], w: +m[3], h: +m[4] }))
+    const texts = [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" font-size="(\d+)" fill="[^"]+" xml:space="preserve">([^<]*)</g)].map(m => [m[0], m[1], m[3], m[4], +m[2]])
+    for (const t of texts) {
+      const x = +t[1]
+      const r = rects.find(q => q.x <= x && x < q.x + q.w && q.y <= t[4] && t[4] <= q.y + q.h)
+      assert.ok(r, `${w}: a label outside every part: ${t[3]}`)
+      assert.ok(x + wide(t[3], { size: +t[2] }) <= r.x + r.w, `${w}: "${t[3]}" runs past its part`)
+    }
+  }
+})
+
 test('a part the program drew from values alone is matched to the rows whose words it shows', () => {
   const d = run(`
     const rust = data.runs.filter(r => r.lang === 'Rust')

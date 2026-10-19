@@ -25,10 +25,13 @@ const plain = runs => (runs || []).map(r => r.br ? '\n' : r.s).join('')
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
 const r1 = v => Math.round(v * 100) / 100
 // a bar part's words in place, as term.js says them: its label and value, else its label, when they fit
-function inPlace(label, value, cells) {
+/** The words a stacked bar's part shows in place: its label with its value, else its label, else none. They are
+ *  measured in the type they are drawn in and fit the part's width with `pad` at each side, so they never run into
+ *  the next part. */
+function inPlace(label, value, room, measure, pad) {
   const l = String(label).trim()
   const v = isFinite(value) ? (Math.abs(value) >= 1000 ? Math.round(value).toLocaleString('en-US') : String(Math.round(value * 100) / 100)) : ''
-  for (const s of [v ? `${l} ${v}` : l, l]) if (s && [...s].length + 2 <= cells) return s
+  for (const s of [v ? `${l} ${v}` : l, l]) if (s && measure(s) + 2 * pad <= room) return s
   return ''
 }
 const xml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -487,9 +490,11 @@ export function renderSvg(drawing, opts = {}) {
         L.mark.push(p.tone === 'unseen'
           ? `<rect x="${r1(x + a)}" y="${r1(y + by)}" width="${r1(Math.max(0.5, b - a - seam))}" height="${bh}" fill="url(#${id}-hatch)"/>`
           : `<rect x="${r1(x + a)}" y="${r1(y + by)}" width="${r1(Math.max(0.5, b - a - seam))}" height="${bh}" fill="${C(p.tone)}"/>`)
-        // a labelled part with room says what it is in place, as the terminal does, so the card needs no legend
-        const words = p.label != null && p.tone !== 'unseen' ? inPlace(p.label, p.value, Math.floor((b - a) / cw)) : ''
-        if (words) L.text.push(`<text x="${r1(x + a + cw)}" y="${r1(y + by + bh - 2)}" font-size="${Math.max(9, bh - 2)}" fill="${C('paper')}" xml:space="preserve">${xml(words)}</text>`)
+        // a labelled part with room says what it is in place, as the terminal does, so the card needs no legend; its
+        // words are measured in their own size and stay inside the part
+        const size = Math.max(9, bh - 2)
+        const words = p.label != null && p.tone !== 'unseen' ? inPlace(p.label, p.value, b - a - seam, t => mw(t, { size }), cw) : ''
+        if (words) L.text.push(`<text x="${r1(x + a + cw)}" y="${r1(y + by + bh - 2)}" font-size="${size}" fill="${C('paper')}" xml:space="preserve">${xml(words)}</text>`)
       })
       return
     }

@@ -396,14 +396,17 @@
         const width = o.w != null ? int(o.w, W) : W - 4
         const labelW = o.labelW != null ? int(o.labelW, 12) : Math.min(Math.max(1, ...items.map(it => k.len(it.label == null ? '' : it.label))), Math.max(6, Math.floor(width * 0.4)))
         const valW = Math.max(1, ...texts.map(t => k.len(t)))
-        const noteW = Math.max(0, ...items.map(it => it.note != null ? k.len(plain(inline(it.note, {}, ctx))) : 0))
+        // a note that only says the row's value again (a total beside the total) is not drawn a second time
+        const bare = t => String(t).replace(/[,\s]/g, '')
+        const noteOf = (it, i) => it.note == null || bare(plain(inline(it.note, {}, ctx))) === bare(texts[i]) ? null : it.note
+        const noteW = Math.max(0, ...items.map((it, i) => noteOf(it, i) != null ? k.len(plain(inline(noteOf(it, i), {}, ctx))) : 0))
         const notes = noteW > 0 && width - labelW - valW - noteW - 4 >= 12
         const rows = items.map((it, i) => {
           const row = k.beside(
             k.text(it.label == null ? '' : it.label, { w: labelW, tone: it.labelTone || o.labelTone || 'ink', raw: !o.markup, wrap: false }),
             Array.isArray(it.parts) ? k.bar(it.parts, { max: max }) : isFinite(vals[i]) ? k.bar(vals[i], { max: max, tone: it.tone || o.tone }) : k.unseen(),
             k.text(texts[i], { w: valW, align: 'right', bold: !!(it.bold || o.bold), tone: isFinite(vals[i]) ? 'ink' : 'unseen', raw: true }),
-            notes && k.text(' ' + (it.note == null ? '' : it.note), { w: noteW + 1, tone: 'dim', wrap: false }),
+            notes && k.text(' ' + (noteOf(it, i) == null ? '' : noteOf(it, i)), { w: noteW + 1, tone: 'dim', wrap: false }),
             { gap: 1 })
           // an item made from a row of the card's data (the row itself, a spread of it, or {row}) is a part by itself:
           // its rows open with no ref written

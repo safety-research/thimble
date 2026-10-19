@@ -438,10 +438,12 @@ function linkRects(line, x, y, cx) {
 
 // ---------------------------------------------------------------- marks drawn with cells
 /** A bar part's words in place: its label and value, else its label, when they fit with a cell on each side. */
+/** The words a stacked bar's part shows in place: its label with its value, else its label, else none. They fit the
+ *  part's cells with one blank at each side (a wide character takes two), so they never run into the next part. */
 export function inPlace(label, value, cells) {
   const l = String(label).trim()
   const v = isFinite(value) ? (Math.abs(value) >= 1000 ? Math.round(value).toLocaleString('en-US') : String(Math.round(value * 100) / 100)) : ''
-  for (const s of [v ? `${l} ${v}` : l, l]) if (s && [...s].length + 2 <= cells) return s
+  for (const s of [v ? `${l} ${v}` : l, l]) if (s && len(s) + 2 <= cells) return s
   return ''
 }
 
@@ -458,7 +460,9 @@ function drawBar(g, x, y, w, value, max, tone, parts, track) {
       const words = p.label != null && p.tone !== 'unseen' ? inPlace(p.label, p.value, to - from) : ''
       if (words) {
         g.fill(x + from, y, to - from, 1, ' ', 'paper', { bg: p.tone })
-        ;[...words].forEach((c, i) => g.put(x + from + 1 + i, y, c, 'paper', { bg: p.tone }))
+        // each character at the cell after the last one's (a wide one takes two), inside the part's own cells
+        let cx = x + from + 1
+        for (const c of words) { if (cx + cwOf(c) > x + to - 1) break; cx += g.put(cx, y, c, 'paper', { bg: p.tone }) }
       } else g.fill(x + from, y, to - from, 1, p.tone === 'unseen' ? '▒' : BAR, p.tone)
       from = to
     }
