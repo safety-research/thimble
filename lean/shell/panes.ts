@@ -4,6 +4,8 @@
 // the same renderer as a card. The browser runs the same program file (shell/browser/src/panes/) on the same stores.
 //
 //   paneDraw($, name, args, size)        the program run on its stores and state now: its drawing
+//   paneTakes($, name, args, event)       whether the program takes the event, with nothing run (a key's answer)
+//   paneTry($, name, args, event)         what the program would answer to the event, nothing of it kept
 //   paneFire($, name, args, event)        what the person did, as the program's event: true when the program took it.
 //                                         The state it answers with is kept (thimble/panes/<session>/<key>.json), its
 //                                         actions run (k.do), its later events wait (k.after), its asks are kept
@@ -126,8 +128,9 @@ async function stores($: Engine, inst: Inst): Promise<Record<string, unknown>> {
   return out
 }
 
-/** The program run on its stores and state now (with an event, the program answers it). */
-export async function paneRun($: Engine, name: string, args: Record<string, unknown>, size: Size, event: Record<string, unknown> | null = null): Promise<Any> {
+/** The program run on its stores and state now (with an event, the program answers it). `keep` false: the drawing is
+ *  only read (paneTry), never kept as the pane's last, and its wants are not asked. */
+export async function paneRun($: Engine, name: string, args: Record<string, unknown>, size: Size, event: Record<string, unknown> | null = null, keep = true): Promise<Any> {
   const inst = instance(name, args)
   await load($, inst)
   await $.state.get({ ...VER, id: inst.id })
@@ -137,6 +140,7 @@ export async function paneRun($: Engine, name: string, args: Record<string, unkn
   if (!inst.data || inst.data.key !== key) inst.data = { key, value: pane.data(st, inst.args, size) }
   inst.size = size
   const drawing = kit().run(pane.program, inst.data.value, { w: size.w, h: size.h, state: inst.state, event, mode: 'pane', surface: 'terminal', got: inst.got, title: pane.title, id: name })
+  if (!keep) return drawing
   if (!drawing?.error) inst.drawing = drawing
   // what the program wants that is not in hand: read once, outside the drawing, and drawn again with it
   const open = wantsOpen(drawing, inst.got)
@@ -180,6 +184,22 @@ export async function paneNow($: Engine, name: string, args: Record<string, unkn
 /** The pane's drawing now, as last drawn (for the bar), or null. */
 export function paneDrawing(name: string, args: Record<string, unknown> = {}): Any | null {
   try { return insts.get(keyOf(name, args))?.drawing ?? null } catch { return null }
+}
+
+/** Whether the program takes the event now, as paneFire decides it (the handlers of its last drawing), with nothing
+ *  run for it: a key's answer is decided from reads alone (keys.ts). */
+export async function paneTakes($: Engine, name: string, args: Record<string, unknown>, event: Record<string, unknown>): Promise<boolean> {
+  const inst = instance(name, args)
+  await load($, inst)
+  const known = inst.drawing ?? (await paneRun($, name, args, inst.size ?? { w: 100, h: 30 }))
+  return takes(known, event)
+}
+
+/** What the program would answer to the event now, nothing of it kept (its state, actions and later events are
+ *  paneFire's to apply): null when it does not take the event. */
+export async function paneTry($: Engine, name: string, args: Record<string, unknown>, event: Record<string, unknown>): Promise<Any | null> {
+  if (!(await paneTakes($, name, args, event))) return null
+  return paneRun($, name, args, instance(name, args).size ?? { w: 100, h: 30 }, event, false)
 }
 
 /** What the person did, as the program's event. True when the program took it. */

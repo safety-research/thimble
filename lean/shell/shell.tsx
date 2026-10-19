@@ -34,7 +34,7 @@ import { knobOf, toHash, turn as turnKnob } from '../draw/handoff.js'
 import { gridText, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
 import { citeCard, explainerCard } from './cards.js'
-import { cardStore, detailAction, detailIsOpen, detailKeys, detailPane, followDetail, markOpen, noteDock, noteViewport, openDetailPane, paneColumns, registerDetail } from './detail'
+import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, followDetail, markOpen, noteDock, noteViewport, openDetailPane, paneColumns, registerDetail } from './detail'
 import { linkMarks, newRecord, placeMarks, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, rankRow, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, registerThreads, restoreThreads, threadCount, threadFor, threadList, threadOf } from './thread'
@@ -48,11 +48,12 @@ import { ownTurn } from '../observer/observer'
 import { cardAfter as cardVersion, promptText } from '../prompts/prompts'
 import { bindQueries, fixText, problemsOf, queryIdOf, readReply, requestText, viewText } from './cardfork.mjs'
 import type { RowVerb } from './view'
-import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, takeNotes as sqNotes } from '../verbs/squeeze/term'
+import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, stretchMarks, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { endsOf, revealCut } from '../verbs/squeeze/chips.mjs'
 import { HEAD_ROWS } from '../panes/claims.js'
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
-import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneNow, paneOf, paneState, patchPaneState, setPaneState, setTheme } from './panes'
+import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
+import { act, instance, paneClosed, paneDrawing, paneEl, paneFire, paneFocus, paneNow, paneOf, paneState, paneTakes, paneTry, patchPaneState, setPaneState, setTheme } from './panes'
 import { frameOf as trayFrameOf } from '../panes/tray.js'
 import { ANOTHER_VIEW } from '../panes/proposals.js'
 import { mix } from '../draw/palette.js'
@@ -132,7 +133,6 @@ let msgFiles: { session: string; dir: string | null; index: Any[]; pending: Set<
 let keyOpened: { key: string; at: number } | null = null
 // the card key pressed last from the empty prompt, with the card's state before it (a word it began gives it back)
 let cardKeyed: { key: string; at: number; ref: ObjRef; undo: { state: Record<string, unknown>; region: string | null } | null } | null = null
-let keyChain: Promise<unknown> = Promise.resolve()
 
 // ------------------------------------------------------------------------------------------------ objects
 
@@ -1915,141 +1915,166 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   ] })
 }
 
-/** A key pressed while the prompt is empty: the box as it should stand when the shell took the key, or null to let
- *  it through. */
-async function emptyPromptKey($: Engine, e: { key?: { key: string; ctrl?: true; meta?: true }; text: string; cursor: number; inputText: string }): Promise<{ text: string; cursor: number } | null> {
-  const key = e.key
-  if (!key || key.ctrl || key.meta || e.text !== '') {
-    keyOpened = null
-    // typing while a replay runs: the whole graph at once (the program's any-key), and the key types
-    if (key && !key.ctrl && !key.meta && (await $.state.get(CLAIMPANE)).value && (await paneState($, 'claims')).replay) await paneFire($, 'claims', {}, { type: 'key', key: key.key })
-    return null
+/** A key that types whatever the shell holds: one with ctrl or meta, an edit with no one key (a paste, keys sent
+ *  faster than one by one), and any key in a prompt with words in it. */
+const typesAnyway = (e: KeyEdit) => !e.key || !!e.key.ctrl || !!e.key.meta || e.text !== ''
+
+/** A key that types: the edit as Claude Code made it, with the squeeze chips' colors on a stretch being typed (the
+ *  key that begins one carries them, as its work starts the stretch after the answer). */
+async function keyTyped($: Engine, e: Any, next: (e: Any) => Promise<Any>, begun?: unknown[]): Promise<Any> {
+  const out = await next(e)
+  if (detailIsOpen()) { detailTyped($, e, out); return out }
+  if (begun?.length) return { ...out, decorations: [...(out.decorations ?? []), ...begun] }
+  try {
+    const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+    const dec = await sqAfterEdit($, pick?.verb === 's' ? pick.row : null, out.text, theme)
+    if (dec) return { ...out, decorations: [...(out.decorations ?? []), ...dec] }
+  } catch {
+    // the edit lands whatever the chips make of it
   }
-  // the open detail takes its own keys (detail.tsx), and a letter there types the question for the card's thread
-  if (detailIsOpen()) return null
-  const k = key.key
+  return out
+}
+
+/** The key the message layer holds (keys.ts). */
+const shellKey = keySlot()
+
+/** One key pressed in the prompt, answered: by the prompt.edit hook (`fresh`), or past its budget by its .catch, with
+ *  the decision the hook began. A key taken is answered at once, and its work runs after (keys.ts). */
+async function answerKey($: Engine, e: Any, next: Any, fresh: boolean): Promise<Any> {
+  // a paste while the detail is open begins a question there, so it waits its turn like a key
+  const now = typesAnyway(e) && !(detailIsOpen() && !e.key && !!e.inputText)
+  const k = keyTake(shellKey, e, fresh, now, () => keyTurn($, e))
+  const t = await k.turn
+  const inTime = !next.signal.aborted
+  keyAnswered(k, t, inTime)
+  if (t.box || !inTime) return t.box ?? { text: e.text, cursor: e.cursor }
+  return keyTyped($, e, next, t.decorations)
+}
+
+/** What a key pressed in the prompt comes to (keys.ts): decided from reads alone, its work run after the answer. */
+async function keyTurn($: Engine, e: KeyEdit): Promise<KeyTurn> {
+  const key = e.key
+  // the open detail takes its own keys first (detail.tsx), and a letter there begins the question for the card's thread
+  const d = detailIsOpen() ? await detailKey($, e) : null
+  if (d?.box) return d
+  if (!key || typesAnyway(e)) {
+    return { box: null, work: async () => {
+      await d?.work?.()
+      keyOpened = null
+      // typing while a replay runs: the whole graph at once (the program's any-key), and the key types
+      if (key && !key.ctrl && !key.meta && (await $.state.get(CLAIMPANE)).value && (await paneState($, 'claims')).replay) await paneFire($, 'claims', {}, { type: 'key', key: key.key })
+    } }
+  }
+  if (d) return d
+  const t = await emptyPromptKey($, key.key, e)
+  // a key from the empty prompt ends what the key before it began (a word after v, or after a card's key)
+  return { ...t, work: async () => { keyOpened = null; cardKeyed = null; await t.work?.() } }
+}
+
+/** A key pressed while the prompt is empty: the box as it should stand when the shell takes the key (null: it types),
+ *  and what the key does. */
+async function emptyPromptKey($: Engine, k: string, e: KeyEdit): Promise<KeyTurn> {
   const now = await $.clock.now()
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-  const verbs = await rowVerbs($)
   const consume = { text: e.text, cursor: e.cursor }
-  // a letter typed straight after a card's own key: that key began a word; the card goes back to where it was
+  // the verb key or card key pressed just before, as this key reads it
+  let opened = keyOpened
   const keyed = cardKeyed
-  cardKeyed = null
+  // a letter typed straight after a card's own key: that key began a word; the card goes back to where it was
   if (keyed && now - keyed.at < 700 && /^\p{L}$/u.test(k)) {
-    await writeCardState($, keyed.ref.root, keyed.ref.id, { state: keyed.undo?.state ?? {}, region: keyed.undo?.region ?? null }, 'terminal')
-    return { text: `${keyed.key}${e.inputText}`, cursor: keyed.key.length + e.inputText.length }
+    return { box: { text: `${keyed.key}${e.inputText}`, cursor: keyed.key.length + e.inputText.length }, work: () => writeCardState($, keyed.ref.root, keyed.ref.id, { state: keyed.undo?.state ?? {}, region: keyed.undo?.region ?? null }, 'terminal') }
   }
-  // the Claims pane open: the keys a focused pane does not take come through here (its own are the arrow keys, ↵ and
-  // esc): r replays the graph, and any key stops a replay; c (the verb key, below) closes the pane
   // the Claims pane open: the keys a focused pane does not take come through here (its own are the arrow keys, ↵ and
   // esc) and go to its program (r replays, any key stops a replay); c (the verb key, below) closes the pane
   if ((await $.state.get(CLAIMPANE)).value) {
-    const opened = keyOpened
-    keyOpened = null
+    const was = opened
+    opened = null
     const replaying = !!(await paneState($, 'claims')).replay
     // a letter typed straight after r: the r was the start of a word (a question about the claim the ring is on)
-    if (replaying && opened?.key === 'r' && now - opened.at < 700 && /^\S$/.test(k)) {
-      await paneFire($, 'claims', {}, { type: 'key', key: k })
-      return { text: `r${e.inputText}`, cursor: 1 + e.inputText.length }
+    if (replaying && was?.key === 'r' && now - was.at < 700 && /^\S$/.test(k)) {
+      return { box: { text: `r${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => paneFire($, 'claims', {}, { type: 'key', key: k }) }
     }
-    if (k !== 'c' && (await paneFire($, 'claims', {}, { type: 'key', key: k }))) {
-      if (k === 'r' && !replaying) keyOpened = { key: 'r', at: now }
-      return consume
+    if (k !== 'c' && (await paneTakes($, 'claims', {}, { type: 'key', key: k }))) {
+      return { box: consume, work: async () => {
+        await paneFire($, 'claims', {}, { type: 'key', key: k })
+        if (k === 'r' && !replaying) keyOpened = { key: 'r', at: now }
+      } }
     }
   }
   // the squeeze chips open under a message: their program's keys first (panes/chips.js: 1-9 pick, < > change, + a
-  // stretch, 0 original, s done); a key it asks to type with (the + of a stretch) goes into the prompt
+  // stretch, 0 original, s done); the + of a stretch, which asks for the prompt, types into it
   if (pick && pick.verb === 's' && !tray) {
-    typedKey = k
-    const taken = await paneFire($, 'chips', { row: pick.row }, { type: 'key', key: k })
-    const typed = typedKey === null
-    typedKey = null
-    if (taken) { keyOpened = null; return typed ? null : consume }
+    const d = await paneTry($, 'chips', { row: pick.row }, { type: 'key', key: k })
+    if (d) {
+      const types = k === '+' && ((d.effects || []) as { do?: string }[]).some(x => x.do === 'input')
+      return { box: types ? null : consume, ...(types ? { decorations: stretchMarks(`${e.text}${e.inputText}`, theme) } : {}), work: async () => {
+        typedKey = k
+        try { await paneFire($, 'chips', { row: pick.row }, { type: 'key', key: k }) } finally { typedKey = null }
+      } }
+    }
   }
   // the tray open: its program's keys (panes/tray.js: 1 ask, 2–9 open a citation in it, 0 back, ] [ step); a letter
   // types the question for the mark's thread
   if (tray) {
-    keyOpened = null
-    if (k === 'backspace' && !tray.asking) return (await paneFire($, 'tray', {}, keyEvent('0'))) ? consume : null
-    if (k.length === 1 && (await paneFire($, 'tray', {}, keyEvent(k)))) return consume
-    return null
+    const ev = k === 'backspace' ? (tray.asking ? null : keyEvent('0')) : k.length === 1 ? keyEvent(k) : null
+    if (ev && (await paneTakes($, 'tray', {}, ev))) return { box: consume, work: () => paneFire($, 'tray', {}, ev) }
+    return { box: null }
   }
   // v's line open under a message: the proposals program's keys (1–9 pick, 0 close)
-  if (pick && pick.verb !== 's') {
-    if (k === 'backspace' || /^[0-9]$/.test(k)) {
-      keyOpened = null
-      if (await paneFire($, 'proposals', { row: pick.row, verb: pick.verb }, keyEvent(k === 'backspace' ? '0' : k))) return consume
-      if (/^[0-9]$/.test(k)) return null
-    }
+  if (pick && pick.verb !== 's' && (k === 'backspace' || /^[0-9]$/.test(k))) {
+    opened = null
+    const ev = keyEvent(k === 'backspace' ? '0' : k)
+    const args = { row: pick.row, verb: pick.verb }
+    if (await paneTakes($, 'proposals', args, ev)) return { box: consume, work: () => paneFire($, 'proposals', args, ev) }
+    if (/^[0-9]$/.test(k)) return { box: null }
   }
   // a card with the focus: its own keys win over the verbs (the bar names them); 1 opens its detail, ] [ step on, 0 and
   // ⌫ give the keys back; a key it does not take gives the keys back and types
   const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
   if (cf && !pick) {
-    keyOpened = null
-    if (k === '0' || k === 'backspace') { await setCardFocus($, null); return consume }
-    if (k === '1') { await setCardFocus($, null); await openDetail($, cf); return consume }
-    if (k === ']' || k === '[') { await stepMark($, k === ']' ? 1 : -1); return consume }
+    if (k === '0' || k === 'backspace') return { box: consume, work: () => setCardFocus($, null) }
+    if (k === '1') return { box: consume, work: async () => { await setCardFocus($, null); await openDetail($, cf) } }
+    if (k === ']' || k === '[') return { box: consume, work: () => stepMark($, k === ']' ? 1 : -1) }
     const d = await inlineDrawing($, cf)
     const own = d ? cardTakesKey(d, k) : null
     if (own && !(own in hostKeys('inline', 'terminal'))) {
-      const before = await readCardState($, cf.root, cf.id)
-      await inlineCardAct($, cf, { type: 'key', key: own })
-      cardKeyed = { key: k, at: now, ref: cf, undo: before }
-      return consume
+      return { box: consume, work: async () => {
+        const before = await readCardState($, cf.root, cf.id)
+        await inlineCardAct($, cf, { type: 'key', key: own })
+        cardKeyed = { key: k, at: now, ref: cf, undo: before }
+      } }
     }
-    await setCardFocus($, null)
-    return null
+    return { box: null, work: () => setCardFocus($, null) }
   }
-  if (k === ']' || k === '[') {
-    keyOpened = null
-    await setPick($, null)
-    await stepMark($, k === ']' ? 1 : -1)
-    return consume
-  }
-  if (k === '0' || k === 'backspace') {
-    keyOpened = null
-    if (pick) { await setPick($, null); return consume }
-    return null
-  }
+  if (k === ']' || k === '[') return { box: consume, work: async () => { await setPick($, null); await stepMark($, k === ']' ? 1 : -1) } }
+  if (k === '0' || k === 'backspace') return pick ? { box: consume, work: () => setPick($, null) } : { box: null }
   if (/^[1-9]$/.test(k)) {
-    keyOpened = null
     // 1 under a card: its detail view (the bar says `1 open detail`)
-    if (k === '1') {
-      const ref = await focusedCard($)
-      if (ref) { await openDetail($, ref); return consume }
-    }
-    return null
+    const ref = k === '1' ? await focusedCard($) : null
+    return ref ? { box: consume, work: () => openDetail($, ref) } : { box: null }
   }
   // at rest the verbs win: a card's own keys reach it once it has the focus (] or its detail)
-  if (k.length === 1 && verbs.some(v => v.key === k)) {
+  if (k.length === 1 && (await rowVerbs($)).some(v => v.key === k)) {
     const row = await actingRow($)
-    if (row) {
-      await pressRowVerb($, row, k)
-      keyOpened = { key: k, at: now }
-      return consume
-    }
+    if (row) return { box: consume, work: async () => { await pressRowVerb($, row, k); keyOpened = { key: k, at: now } } }
   }
   // o: this session in the browser, at the message the keys act on (browser mode only; `o browser` on the verb row)
-  if (k === 'o' && browserFlag && !(pick && keyOpened && now - keyOpened.at < 700)) {
-    keyOpened = null
-    if (pick) await setPick($, null)
-    const row = await actingRow($)
-    // from the Claims pane: the graph in the browser, on the claim the ring is on here
-    const claims = (await $.state.get(CLAIMPANE)).value ? { view: 'claims', claim: String((await paneState($, 'claims')).hover || '') || null } : {}
-    $.clock.after(0, () => { void openBrowser($, { row, ...claims }).then(said => $.ui.toast(said)) })
-    return consume
+  if (k === 'o' && browserFlag && !(pick && opened && now - opened.at < 700)) {
+    return { box: consume, work: async () => {
+      if (pick) await setPick($, null)
+      const row = await actingRow($)
+      // from the Claims pane: the graph in the browser, on the claim the ring is on here
+      const claims = (await $.state.get(CLAIMPANE)).value ? { view: 'claims', claim: String((await paneState($, 'claims')).hover || '') || null } : {}
+      $.clock.after(0, () => { void openBrowser($, { row, ...claims }).then(said => $.ui.toast(said)) })
+    } }
   }
   if (pick && k.length === 1) {
-    await setPick($, null)
-    const opened = keyOpened
-    keyOpened = null
-    // typed straight after the verb key: the letter was the start of a word
-    if (opened && now - opened.at < 700) return { text: `${opened.key}${e.inputText}`, cursor: opened.key.length + e.inputText.length }
+    // typed straight after the verb key: the letter was the start of a word, and the line closes
+    const word = opened && now - opened.at < 700 ? { text: `${opened.key}${e.inputText}`, cursor: opened.key.length + e.inputText.length } : null
+    return { box: word, work: () => setPick($, null) }
   }
-  keyOpened = null
-  return null
+  return { box: null }
 }
 
 // ------------------------------------------------------------------------------------------------ drawing
@@ -2664,22 +2689,12 @@ export const registerShell: Register = (on, options) => {
   // picks in the open line, opens a cluster of the list, or opens a mark or a source inside the card; 0 closes the
   // card, then the line or list. Claude Code hands a plugin only the keys that edit the prompt (tab, ↵, esc and a ⌫ with nothing
   // to delete stay its own), so these are the keys. A verb key that began a word being typed (`visualize …`, `so …`)
-  // gives its letter back to the prompt. Keys are read one at a time, in the order pressed.
-  on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
-    const mine = keyChain.then(() => emptyPromptKey($, e)).catch(() => null)
-    keyChain = mine
-    const r = await mine
-    if (r) return r
-    const out = await next(e)
-    try {
-      const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
-      const dec = await sqAfterEdit($, pick?.verb === 's' ? pick.row : null, out.text, theme)
-      if (dec) return { ...out, decorations: [...(out.decorations ?? []), ...dec] }
-    } catch {
-      // the edit lands whatever the chips make of it
-    }
-    return out
-  }).catch(($, e, next) => next(e))
+  // gives its letter back to the prompt. While the detail is open its keys come first (detail.tsx detailKey). Keys are
+  // read one at a time, in the order pressed. Each is answered from reads alone and its work runs after the answer
+  // (keys.ts): the hook has 50 ms of its own time, and a late answer left the key in the prompt while its work ran.
+  on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => answerKey($, e, next, true))
+    // past the hook's budget (the hooks worker busy drawing), the same decision answers within the .catch's grace
+    .catch(async ($, e, next) => answerKey($, e, next, false))
 
   // a turn whose last word was a tool call: its objects under that call's row
   on('ui.render', { component: 'ToolResult' }, async ($, e, next) => {
@@ -2905,7 +2920,8 @@ export function resetShell(): void {
   shown = null
   msgFiles = null
   keyOpened = null
-  keyChain = Promise.resolve()
+  cardKeyed = null
+  resetKeys()
   graphLayout = null
 }
 

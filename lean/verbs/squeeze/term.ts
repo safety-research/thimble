@@ -103,6 +103,11 @@ export async function afterEdit($: Engine, row: string | null, text: string, the
   if (!ui?.adding) return null
   if (!text.startsWith('+')) { await setUi($, row, { adding: false, typing: '' }); return null }
   await setUi($, row, { typing: text })
+  return stretchMarks(text, theme)
+}
+
+/** The decorations of a stretch being typed in the prompt: its text in amber, then what is left to type. */
+export function stretchMarks(text: string, theme: Theme = 'dark'): Any[] {
   const out: Any[] = [{ start: 0, end: text.length, color: amber(theme) }]
   const ends = endsOf(text)
   if (!ends) out.push({ start: text.length, end: text.length, virtualText: ' between … and …', dimColor: true })

@@ -33,7 +33,8 @@ import { browserOn, citeLabels, currentTheme, loadObject, openBrowser, popFocus,
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadFor } from './thread'
 import { cardEvent, cardKey, ownState, pressTaken, readCardState, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
-import { paneFire, paneNow, paneRun, paneState, patchPaneState, setPaneState } from './panes'
+import { type KeyEdit, type KeyTurn } from './keys'
+import { paneFire, paneNow, paneRun, paneState, paneTakes, patchPaneState, setPaneState } from './panes'
 import type { Scope } from './thread'
 import { aboutOf } from './threads.js'
 
@@ -65,7 +66,6 @@ const askedRegion = new Map<string, string>()
 let lastKey: { key: string; at: number; undo: Record<string, unknown> | null } | null = null
 let viewing: string | null = null
 const latestSeen = new Map<string, number>()
-let keyChain: Promise<unknown> = Promise.resolve()
 // the terminal's columns, as the last drawing measured them: the detail leaves the chat its share of them
 let viewCols = 0
 // the ring: the element it stands on (as the last move or focus left it), its gutter row, and the question being typed
@@ -585,64 +585,66 @@ async function citeView($: Engine, els: Any, sel: Sel, C: number): Promise<Any> 
   return Box({ flexDirection: 'column', children: kids })
 }
 
+// ------------------------------------------------------------------------------------------------ keys
+
+/** What a key pressed in the prompt comes to while the detail is open (keys.ts; shell.tsx's one prompt.edit hook asks
+ *  it first): the card's own keys (its program's k.on), then the detail's program's. A letter that is no key starts a
+ *  question in the ask line (it never types into the prompt), and a letter typed straight after a key that acted
+ *  gives the key's letter back there (it began a word). Letters that arrive before the ask line has the keys join the
+ *  question. It types while the detail is closed. */
+export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
+  if (!isOpen) return { box: null }
+  // a paste (or keys typed faster than the terminal sends them one by one) with no key: a question too
+  const paste = !e.key && !!e.inputText
+  if ((!e.key && !paste) || e.key?.ctrl || e.key?.meta || e.text !== '') return { box: null }
+  const none = { text: '', cursor: 0 }
+  if (paste) { const text = draft + String(e.inputText); return { box: none, work: () => toAsk($, text) } }
+  const k = e.key!.key
+  const now = Date.now()
+  const typed = String(e.inputText || '')
+  const sel = (await $.state.get(SEL)).value as Detail | null
+  if (!sel || sel.cite || sel.cites) return { box: null }
+  // a question already begun: the letter joins it
+  if (isAsk(ringAt) || (draft && typed)) { const text = draft + typed; return { box: none, work: () => toAsk($, text) } }
+  // a letter typed straight after a key that acted: that key began a word, and what it changed goes back
+  const back = lastKey
+  if (back && beganWord(back.key, now - back.at, typed)) {
+    return { box: none, work: async () => {
+      lastKey = null
+      if (back.undo) { await setPaneState($, 'detail', { id: sel.id }, back.undo, 'terminal'); await mirror($) }
+      toAsk($, `${back.key}${typed}`)
+    } }
+  }
+  // the card's own keys (its program's k.on) come before the detail's
+  const cur = await current($)
+  const own = cur ? cardKey(cur.p.drawing, k) : null
+  if (own) {
+    const region = cur!.sel.region
+    return { box: none, work: async () => { lastKey = null; await cardAct($, { type: 'key', key: own, ...(region ? { region } : {}) }); regrab($) } }
+  }
+  // esc, ↑ and the like never reach here: Claude Code keeps them (the pane's close and ring do them)
+  const ev = { type: 'key', key: k === 'enter' ? 'return' : k }
+  if (await paneTakes($, 'detail', { id: sel.id }, ev)) {
+    return { box: none, work: async () => {
+      const before = { ...(await paneState($, 'detail', { id: sel.id })) }
+      lastKey = (await detailFire($, ev)) ? { key: k, at: now, undo: /^[a-z]$/.test(k) ? before : null } : null
+      regrab($)
+    } }
+  }
+  // a letter (or a paste) that is no key begins a question in the ask line
+  if (typed.trim()) return { box: none, work: () => { lastKey = null; toAsk($, typed) } }
+  return { box: null, work: () => { lastKey = null } }
+}
+
+/** A key typed while the detail is open, as it landed: a prompt emptied gives the keys back to the card. */
+export function detailTyped($: Engine, e: KeyEdit, out: { text: string }): void {
+  const plain = e.key ? !e.key.ctrl && !e.key.meta : !!e.inputText
+  if (isOpen && plain && out.text === '' && e.text !== '') regrab($)
+}
+
 // ------------------------------------------------------------------------------------------------ hooks
 
 export function registerDetail(on: Parameters<Register>[0]): void {
-  // keys while the composer is empty: the card's own keys (its program's k.on) first, then the detail's program's. A
-  // letter that is no key starts a question in the ask line (it never types into the prompt), and a letter typed
-  // straight after a key that acted gives the key's letter back there (it began a word). Letters that arrive before
-  // the ask line has the keys join the question. With the detail closed the message layer's keys act (shell.tsx).
-  on('prompt.edit', async ($, e, next) => {
-    if (!isOpen) return next(e)
-    // a paste (or keys typed faster than the terminal sends them one by one) with no key: a question too
-    const paste = !e.key && !!e.inputText
-    if ((!e.key && !paste) || e.key?.ctrl || e.key?.meta) return next(e)
-    const mine = keyChain.then(async () => {
-      if (e.text !== '') return null
-      if (paste) { toAsk($, draft + String(e.inputText)); return { text: '', cursor: 0 } }
-      const k = e.key!.key
-      const now = Date.now()
-      const typed = String(e.inputText || '')
-      const sel = (await $.state.get(SEL)).value as Detail | null
-      if (!sel || sel.cite || sel.cites) return null
-      // a question already begun: the letter joins it
-      if (isAsk(ringAt) || (draft && typed)) { toAsk($, draft + typed); return { text: '', cursor: 0 } }
-      if (lastKey && beganWord(lastKey.key, now - lastKey.at, typed)) {
-        const back = lastKey
-        lastKey = null
-        if (back.undo) { await setPaneState($, 'detail', { id: sel.id }, back.undo, 'terminal'); await mirror($) }
-        toAsk($, `${back.key}${typed}`)
-        return { text: '', cursor: 0 }
-      }
-      // the card's own keys (its program's k.on) come before the detail's
-      const cur = await current($)
-      const own = cur ? cardKey(cur.p.drawing, k) : null
-      if (own) {
-        lastKey = null
-        await cardAct($, { type: 'key', key: own, ...(cur!.sel.region ? { region: cur!.sel.region } : {}) })
-        regrab($)
-        return { text: '', cursor: 0 }
-      }
-      const before = { ...(await paneState($, 'detail', { id: sel.id })) }
-      // esc, ↑ and the like never reach here: Claude Code keeps them (the pane's close and ring do them)
-      if (!(await detailFire($, { type: 'key', key: k === 'enter' ? 'return' : k }))) {
-        lastKey = null
-        // a letter (or a paste) that is no key begins a question in the ask line
-        if (typed.trim()) { toAsk($, typed); return { text: '', cursor: 0 } }
-        return null
-      }
-      lastKey = { key: k, at: now, undo: /^[a-z]$/.test(k) ? before : null }
-      regrab($)
-      return { text: '', cursor: 0 }
-    }).catch(() => null)
-    keyChain = mine
-    const r = await mine
-    if (r) return r
-    const out = await next(e)
-    if (out.text === '' && e.text !== '') regrab($)
-    return out
-  }).catch(($, e, next) => next(e))
-
   // ↑↓ walk the parts. The ring stands in the gutter on the selected part's first row; the person's move (an arrow,
   // Tab, a click on a part) is turned into the program's focus event on the part before or after (or the part
   // clicked), and the ring is put on that part's gutter cell, now when it is drawn, else after the drawing that
@@ -801,5 +803,4 @@ export function resetDetail(): void {
   viewCols = 0
   latestSeen.clear()
   lastCard = null
-  keyChain = Promise.resolve()
 }

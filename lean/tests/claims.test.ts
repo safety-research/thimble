@@ -10,7 +10,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import '../draw/kit.js'
 import claimsPane from '../panes/claims.js'
-import { promptStub } from './stubs'
+import { press, promptStub } from './stubs'
 
 const ROOT = '/data'
 const STORE = `${ROOT}/thimble/claims/s-1.json`
@@ -209,7 +209,7 @@ async function twoTurns($: Any, on: Any) {
   const w = world(on, [FORK1, FORK2])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   await turn($, w, { id: 't2', user: U2, prompt: Q2, row: R2, answer: A2 })
-  await ($ as Any).prompt.edit(key('c'))
+  await press($, w.clock, key('c'))
   await w.clock.settle()
   return w
 }
@@ -258,7 +258,7 @@ test('the ring on a claim: its card says what it means, its links are thin lines
 test('r replays the graph in the order the claims were made, "turn N of M" in the head; any key stops it; / t n are not its keys', async ($, on) => {
   const w = await twoTurns($, on)
   await ringOn($, 'c2')
-  await ($ as Any).prompt.edit(key('r'))
+  await press($, w.clock, key('r'))
   await w.clock.settle()
   // it starts from nothing, with the ring off, so no card covers the growth
   let t = textOf(await $.ui.render(PANE))
@@ -287,17 +287,17 @@ test('r replays the graph in the order the claims were made, "turn N of M" in th
   expect(dots).toEqual([...dots].sort((a, b) => a - b))
   expect(t).toContain('Claims   4 · 3 clusters')
   // again, then any key stops it: the whole graph at once
-  await ($ as Any).prompt.edit(key('r'))
+  await press($, w.clock, key('r'))
   await w.clock.settle()
   await w.clock.advance(900)
   await w.clock.settle()
   expect(textOf(await $.ui.render(PANE))).toContain('turn 1 of 2')
-  await ($ as Any).prompt.edit(key('x'))
+  await press($, w.clock, key('x'))
   await w.clock.settle()
   expect(textOf(await $.ui.render(PANE))).toContain('Claims   4 · 3 clusters')
   // / t n ] are not keys of the pane: nothing in it changes, and the hint stays
   for (const k of ['/', 't', 'n']) {
-    const r = await ($ as Any).prompt.edit(key(k))
+    const r = await press($, w.clock, key(k))
     expect(r.text).toBe(k)
   }
   expect(textOf(await $.ui.render(PANE))).toContain('Claims   4 · 3 clusters')
@@ -308,14 +308,14 @@ test('r replays the graph in the order the claims were made, "turn N of M" in th
 test('a question asked with the ring on a claim carries it; c closes the pane', async ($, on) => {
   const w = world(on, [FORK1])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
-  await ($ as Any).prompt.edit(key('c'))
+  await press($, w.clock, key('c'))
   await w.clock.settle()
   await ringOn($, 'c2')
   await $.prompt.submit({ text: 'is 41% of all June edits or of the relay edits?', origin: { kind: 'composer' } } as never)
   const ctx = w.submitted.at(-1)!.context.join('\n')
   expect(ctx).toContain('the ring on a claim of this session in the Claims pane: c2 "Kestrel made 41% of June\'s edits, 212 of them reverts"')
   expect(ctx).toContain('q4#user=Kestrel@share')
-  await ($ as Any).prompt.edit(key('c'))
+  await press($, w.clock, key('c'))
   await w.clock.settle()
   expect(textOf(await $.ui.render(HINT))).not.toContain('r replay')
 })

@@ -8,7 +8,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { plainWhy } from '../shell/shell'
-import { promptStub } from './stubs'
+import { press, promptStub } from './stubs'
 
 const ROOT = '/data'
 const FILE = `${ROOT}/thimble/objects/01-saves.json`
@@ -163,8 +163,9 @@ test('an object Claude saves is drawn under the next words of the turn; its verb
   expect(await hintOf($)).toContain('thimble  v visualize · s squeeze · ] card · 1 open detail')
   expect(drawn).not.toContain('x explore')
   expect(drawn).not.toContain('? all')
-  expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
-  expect(opened).toEqual(['object'])
+  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
+  // the detail opens (and, once the key is gone from the prompt, opens again to take the keys)
+  expect([...new Set(opened)]).toEqual(['object'])
 })
 
 test('a save is seen from the kernel\'s change feed, not from what the call printed: a pipe that cut "saved" still draws it', async ($, on) => {
@@ -335,7 +336,7 @@ test('a verb of the message row: v opens its line, a pick runs it on the message
   await clock.settle()
   expect(textOf(await ui.drawn()).match(/Jun 18/g)?.length).toBe(1)
   // v on an empty prompt, as the thimble line names it
-  await ($ as Any).prompt.edit(edit('v'))
+  await press($, clock, edit('v'))
   expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
   await ui.press({ key: 'r|p-proposals|0|opt-0' })
   await clock.settle()
@@ -389,7 +390,7 @@ test("with the card from a fork (card:v2), v asks main nothing: a fork writes th
   await savedTurn($, on, clock, w.files)
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
-  await ($ as Any).prompt.edit(edit('v'))
+  await press($, clock, edit('v'))
   await ui.press({ key: 'r|p-proposals|0|opt-0' })
   await clock.settle()
   // the verb's child never ran, and no prompt went to main
@@ -413,7 +414,7 @@ test("v asks Claude for a card of the message: the row reads as the person's pic
   const ui = await $.ui.mount(MOUNT)
   await clock.settle()
   // v on an empty prompt, as the thimble line names it
-  await ($ as Any).prompt.edit(edit('v'))
+  await press($, clock, edit('v'))
   expect(textOf(await ui.drawn())).toContain('▸ 1 another view of this answer')
   await ui.press({ key: 'r|p-proposals|0|opt-0' })
   await clock.settle()
@@ -519,32 +520,81 @@ test('keys of an empty prompt: ] opens the tray on the next mark and 0 goes back
   expect(textOf(await $.ui.render(BAND))).toContain('2 cites')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
   // ] : the first mark of the latest message, in the tray; the key never reaches the prompt
-  expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
   expect(await hintOf($)).toContain('thimble  1 ask · 0 close · ] next')
   // 1 asks: the panel turns to the mark's side thread, and the hint line says how to ask it
-  expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('ask about 6,543 saves…')
   expect(await hintOf($)).toContain('type to ask · ↵ asks this thread · 0 back')
   // the thimble line names the thread the prompt goes to
   expect(textOf(await $.ui.render(BAND))).toContain('thimble:main/6,543 saves')
-  await ($ as Any).prompt.edit(edit(']'))
+  await press($, clock, edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('this one')
-  await ($ as Any).prompt.edit(edit('['))
+  await press($, clock, edit('['))
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
   // with the tray open the prompt is its question: letters are typed
-  expect(await ($ as Any).prompt.edit(edit('w'))).toEqual({ text: 'w', cursor: 1 })
+  expect(await press($, clock, edit('w'))).toEqual({ text: 'w', cursor: 1 })
   // 0 on an empty prompt closes the tray
-  expect(await ($ as Any).prompt.edit(edit('0'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(BAND))).toContain('2 cites')
   expect(textOf(await $.ui.render(BAND))).not.toContain('6,543 saves')
   // v opens its line under the answer; i typed straight after was the start of a word
-  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('v'))).toEqual({ text: '', cursor: 0 })
   expect(textOf(await $.ui.render(MOUNT))).toContain('▸ 1 another view of this answer')
-  expect(await ($ as Any).prompt.edit(edit('i'))).toEqual({ text: 'vi', cursor: 2 })
+  expect(await press($, clock, edit('i'))).toEqual({ text: 'vi', cursor: 2 })
   expect(textOf(await $.ui.render(MOUNT))).not.toContain('▸ 1 another view')
   // a key in a prompt with words in it is typed
-  expect(await ($ as Any).prompt.edit(edit('s', 'so'))).toEqual({ text: 'sos', cursor: 3 })
+  expect(await press($, clock, edit('s', 'so'))).toEqual({ text: 'sos', cursor: 3 })
+})
+
+// Claude Code gives a prompt.edit hook 50 ms of its own time: a `$` call in flight is free, but a wait for anything else
+// counts (the hooks worker busy drawing, the work of the key before). Past it the hook's .catch answers, and past the
+// .catch's grace (a second) the key types. A key's work runs after its answer, so it never counts against that time.
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+/** The shell's next write of its state takes `ms` when asked, as slow work does (a key's work writes, its answer
+ *  never does). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function slowWrites(on: any) {
+  let ms = 0
+  on('state.set', async (_$: unknown, e: unknown, next: (e: unknown) => Promise<unknown>) => {
+    const wait = ms
+    ms = 0
+    if (wait) await sleep(wait)
+    return next(e)
+  })
+  return { next: (n: number) => { ms = n } }
+}
+const lineOpen = async ($: Any) => textOf(await $.ui.render(MOUNT)).includes('▸ 1 another view of this answer')
+
+test('a key is answered before its work runs; a key pressed while that work runs waits for it, past the hook\'s 50 ms, and is still taken: the .catch gives what the hook decided', async ($, on) => {
+  const w = world(on)
+  const writes = slowWrites(on)
+  const clock = mock.clock(on)
+  await markedTurn($, on, clock)
+  writes.next(300)
+  // v answers at once, while its work (the line it opens) still runs
+  expect(await Promise.race([($ as Any).prompt.edit(edit('v')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
+  // 1 straight after: decided once v's work is done, so it picks in v's line; it never lands in the prompt
+  expect(await press($, clock, edit('1'))).toEqual({ text: '', cursor: 0 })
+  expect(w.inputs.length).toBe(1)
+  expect(await lineOpen($)).toBe(false)
+})
+
+test('a key whose answer misses even the .catch\'s grace types, and its work never runs: a key is taken or typed, never both', async ($, on) => {
+  const w = world(on)
+  const writes = slowWrites(on)
+  const clock = mock.clock(on)
+  await markedTurn($, on, clock)
+  writes.next(1400)
+  expect(await Promise.race([($ as Any).prompt.edit(edit('v')), sleep(150).then(() => 'no answer yet')])).toEqual({ text: '', cursor: 0 })
+  // 1 waits for v's work longer than the hook's budget and the .catch's grace together: Claude Code types it
+  expect(await ($ as Any).prompt.edit(edit('1'))).toEqual({ text: '1', cursor: 1 })
+  // v's work ends; the 1 that typed picks nothing, and v's line stays open
+  await sleep(500)
+  await clock.settle()
+  expect(w.inputs.length).toBe(0)
+  expect(await lineOpen($)).toBe(true)
 })
 
 test('a question asked with the tray open goes to the side thread of its mark: main never sees it, and the panel shows the thread', async ($, on) => {
@@ -558,7 +608,7 @@ test('a question asked with the tray open goes to the side thread of its mark: m
   on('prompt.fill', () => ({ isFilled: true }))
   const clock = mock.clock(on)
   await markedTurn($, on, clock)
-  await ($ as Any).prompt.edit(edit(']'))
+  await press($, clock, edit(']'))
   const before = w.submitted.length
   const r = await $.prompt.submit({ text: 'why so high?', origin: { kind: 'composer' } } as never)
   // dropped from main, with where it went; the thread's agent got the question and what it is about
@@ -580,7 +630,7 @@ test('a question asked with the tray open goes to the side thread of its mark: m
 
 test("a resumed session finds its messages on disk: their marks open from the keys, and the keys act on its latest answer", async ($, on) => {
   const w = world(on)
-  mock.clock(on)
+  const clock = mock.clock(on)
   const dir = `${ROOT}/thimble/messages/s-1`
   const rec = { v: 1, row: AT, session: 's-1', text: MARKED, shown: null, marks: [{ kind: 'cite', start: 7, end: 42, ref: 'q1#day=2026-06-18@n', label: '6,543 saves' }], glosses: {}, verbs: { s: { lit: true, note: '24 lines' } }, objects: [], final: true }
   w.files[`${dir}/index.jsonl`] = `${JSON.stringify({ row: 'pppppppp-0000-0000-0000-', kind: 'user', text: 'when?' })}\n${JSON.stringify({ row: AT, kind: 'assistant' })}\n`
@@ -588,10 +638,10 @@ test("a resumed session finds its messages on disk: their marks open from the ke
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the reply'] }) as never)
   const RESUMED = { ...(MOUNT as object), props: { text: MARKED, isFirstOfReply: true } } as never
   expect(textOf(await $.ui.render(HINT))).toContain('s ● 24 lines')
-  await ($ as Any).prompt.edit(edit(']'))
+  await press($, clock, edit(']'))
   expect(textOf(await $.ui.render(BAND))).toContain('6,543 saves')
-  await ($ as Any).prompt.edit(edit('0'))
-  await ($ as Any).prompt.edit(edit('s'))
+  await press($, clock, edit('0'))
+  await press($, clock, edit('s'))
   // s opens the squeeze chips under it, in place of its verb row
   expect(textOf(await $.ui.render(RESUMED))).toContain('Report ↔ Interpret')
 })
@@ -629,8 +679,8 @@ test('the thimble line is the one bar: the verbs in words at its left, a lit one
   const working = await $.ui.render({ ...(BAND as object), props: { ...(BAND as Any).props, isWorking: true } } as never) as Any
   expect(textOf(working).startsWith(' thimble')).toBe(true)
   // inside a thread the bar's label names it, and its left side is that thread's keys
-  await ($ as Any).prompt.edit(edit(']'))
-  await ($ as Any).prompt.edit(edit('1'))
+  await press($, clock, edit(']'))
+  await press($, clock, edit('1'))
   const inThread = textOf(await $.ui.render(HINT))
   expect(inThread).toContain('thimble:main/6,543 saves')
   expect(inThread).toContain('type to ask · ↵ asks this thread · 0 back')

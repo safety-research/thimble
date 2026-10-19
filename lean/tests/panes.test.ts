@@ -3,7 +3,7 @@
 // from its first drawing; the detail is a program whose state is one for both surfaces: a state the browser's run
 // answers with draws here, and the terminal's is kept where the page reads it. `claude plugin test lean`.
 import { expect, mock, test } from 'claude-code/testing'
-import { promptStub } from './stubs'
+import { press, promptStub } from './stubs'
 
 const ROOT = '/data'
 const SESSION = 's-1'
@@ -125,18 +125,18 @@ test('a card under a reply is drawn as it was left (its state, its part); at res
   // the card's program learns the keys the terminal keeps under a reply (k.keys)
   expect(Object.keys(w.preps.find(p => p.mode === 'inline')?.keys?.taken ?? {})).toEqual([])
   // j at rest is not the card's: it types
-  expect(await ($ as Any).prompt.edit(edit('j'))).toEqual({ text: 'j', cursor: 1 })
+  expect(await press($, clock, edit('j'))).toEqual({ text: 'j', cursor: 1 })
   // ] gives the card the focus: the bar names its keys, then the host's
-  expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(textOf(await $.ui.render(HINT))).toContain('j next day · 1 open detail · ] next · 0 back')
   // j now is the card's: its program answers, and the state is kept for every surface
-  expect(await ($ as Any).prompt.edit(edit('j'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('j'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.preps.some(p => p.event?.key === 'j' && p.mode === 'inline')).toBe(true)
   expect(JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`]!)).toMatchObject({ state: { at: 3 }, region: 'day-2026-06-18', by: 'terminal' })
   // a letter straight after it: j began a word, and the card goes back to where it was
-  expect(await ($ as Any).prompt.edit(edit('u'))).toEqual({ text: 'ju', cursor: 2 })
+  expect(await press($, clock, edit('u'))).toEqual({ text: 'ju', cursor: 2 })
   expect(JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`]!).state).toEqual({ at: 2 })
 })
 
@@ -155,21 +155,21 @@ test('a card whose key is a verb\'s letter: at rest the verb takes it, with the 
   await reply($)
   await clock.settle()
   // at rest v opens the views line under the message, and the card's state is as it was
-  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('v'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(textOf(await reply($))).toContain('▸ 1 another view of this answer')
   expect(w.preps.some(p => p.event?.key === 'v')).toBe(false)
   // 0 closes the line; ] gives the card the focus, and v is its flip now, named in the bar
-  await ($ as Any).prompt.edit(edit('0'))
-  await ($ as Any).prompt.edit(edit(']'))
+  await press($, clock, edit('0'))
+  await press($, clock, edit(']'))
   await clock.settle()
   expect(textOf(await $.ui.render(HINT))).toContain('v flip · 1 open detail · ] next · 0 back')
-  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('v'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.preps.some(p => p.event?.key === 'v' && p.mode === 'inline')).toBe(true)
   expect(JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`]!).state.flip).toBe(true)
   // 0 gives the keys back: v is the verb's again
-  await ($ as Any).prompt.edit(edit('0'))
+  await press($, clock, edit('0'))
   await clock.settle()
   expect(textOf(await $.ui.render(HINT))).toContain('v visualize')
 })
@@ -186,7 +186,7 @@ test('the detail is one program for both surfaces: the browser\'s state draws he
     await clock.settle()
   }
   // the terminal's e: the examples of the part, kept in the pane's state file for the page
-  expect(await ($ as Any).prompt.edit(edit('e'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   const kept = JSON.parse(w.files[`${ROOT}/thimble/panes/${SESSION}/detail-01-saves.json`]!)
   expect(kept).toMatchObject({ pane: 'detail', state: { bar: 'examples' }, by: 'terminal' })

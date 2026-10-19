@@ -5,7 +5,7 @@
 // after a part change names the new part, and the thread's turns come from its agent's transcript.
 // `claude plugin test lean`. The drawing, `lean coverage` and `lean resolve` are answered here, at process.run.
 import { expect, mock, test } from 'claude-code/testing'
-import { promptStub } from './stubs'
+import { press, promptStub } from './stubs'
 
 const ROOT = '/data'
 const SESSION = 's-1'
@@ -169,7 +169,7 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   expect(await hintOf($)).toContain('↑↓ part · e examples · 0 clear')
   expect(d).not.toContain('Hello agents')
   // e: the examples of the selected part, labelled, with their from line; each reads as its words, never as field: value
-  expect(await ($ as Any).prompt.edit(edit('e'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
   const b = await pane($, clock)
   expect(b).toContain('examples of saves on Jun 18 · 1 of 6,543')
   expect(await hintOf($)).toContain('[ ] flip · e hide examples · 0 clear')
@@ -182,7 +182,7 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   expect(b).not.toContain('page_id:')
   // 0 empties the bar again
   await clock.advance(1000)
-  expect(await ($ as Any).prompt.edit(edit('0'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('0'))).toEqual({ text: '', cursor: 0 })
   expect(await pane($, clock)).not.toContain('Hello agents')
 })
 
@@ -192,27 +192,27 @@ test('keys act only while the composer is empty; a key that began a word gives i
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)
   // ] opens the bar on the first example, and flips to the next
-  expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(await pane($, clock)).toContain('· 1 of 6,543')
-  expect(await ($ as Any).prompt.edit(edit(']'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit(']'))).toEqual({ text: '', cursor: 0 })
   expect(await pane($, clock)).toContain('· 2 of 6,543')
   // p lays the program over the card; a letter straight after it was the start of a word: both go to the ask line,
   // never into the prompt
-  expect(await ($ as Any).prompt.edit(edit('p'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('p'))).toEqual({ text: '', cursor: 0 })
   expect(await pane($, clock)).toContain('how Claude drew this')
-  expect(await ($ as Any).prompt.edit(edit('l'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('l'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(await pane($, clock)).not.toContain('how Claude drew this')
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"pl"')
   expect(await hintOf($)).toContain('↵ ask · esc back to the card')
   // a letter that arrives before the ask line has the keys joins the question, and so does a paste (no key)
-  expect(await ($ as Any).prompt.edit(edit('a'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"pla"')
-  expect(await ($ as Any).prompt.edit({ origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'nts here?' } as never)).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, { origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'nts here?' } as never)).toEqual({ text: '', cursor: 0 })
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"plants here?"')
   // with words in the composer (typed there before the detail opened), every key types there
-  expect(await ($ as Any).prompt.edit(edit('p', 'what about '))).toEqual({ text: 'what about p', cursor: 12 })
-  expect(await ($ as Any).prompt.edit(edit(']', 'x'))).toEqual({ text: 'x]', cursor: 2 })
+  expect(await press($, clock, edit('p', 'what about '))).toEqual({ text: 'what about p', cursor: 12 })
+  expect(await press($, clock, edit(']', 'x'))).toEqual({ text: 'x]', cursor: 2 })
   // ↵ in the ask line asks the card's thread, and the keys go back to the card
   const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(PANE as Any) } as never)
   await ui.input({ key: await askKeyOf($), text: 'plants?' })
@@ -220,7 +220,7 @@ test('keys act only while the composer is empty; a key that began a word gives i
   expect(JSON.stringify(await $.ui.render(PANE))).not.toContain('"value":"plants here?"')
   // h steps back to v1 (the history lives in the header)
   await clock.advance(1000)
-  expect(await ($ as Any).prompt.edit(edit('h'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('h'))).toEqual({ text: '', cursor: 0 })
   expect(await pane($, clock)).toContain('Saves per day (first)')
 })
 
@@ -297,7 +297,7 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(w.sent.at(-1).text).toContain('and here?')
   expect(w.sent.at(-1).text).toContain('About the part "Jun 17" (day-2026-06-17) now.')
   // m sends the thread's answer to main, as a row Claude reads with the next prompt
-  expect(await ($ as Any).prompt.edit(edit('m'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('m'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(JSON.stringify(session.appended())).toContain('The thread answered: Links peaked that day')
 })
@@ -328,7 +328,7 @@ test('a card is a program: its own keys reach it in the open detail, the state i
   // the bar names the card's own keys beside the detail's
   expect(await hintOf($)).toContain('j next day · a ask about these')
   // j is the card's: the program runs with the key, and its new state is what the detail draws and the browser opens
-  expect(await ($ as Any).prompt.edit(edit('j'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('j'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(w.preps.some(x => x.event?.type === 'key' && x.event.key === 'j' && x.event.region === 'day-2026-06-18')).toBe(true)
   const kept = JSON.parse(w.files[`${ROOT}/thimble/objects/.state/01-saves.json`] ?? '{}')
@@ -337,7 +337,7 @@ test('a card is a program: its own keys reach it in the open detail, the state i
   expect(w.preps.at(-1).state).toMatchObject({ at: 1 })
   // a: the program asks about its own selection; the next question goes to the card's thread with those rows
   await clock.advance(1000)
-  expect(await ($ as Any).prompt.edit(edit('a'))).toEqual({ text: '', cursor: 0 })
+  expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
   await clock.settle()
   expect(await hintOf($)).toContain('type to ask about 2 days from Jun 17')
   const r = await $.prompt.submit({ text: 'what changed between them?', origin: { kind: 'composer' } } as never)
@@ -425,7 +425,7 @@ test('the thimble line says the keys of what is on top of the focus stack: the d
   const w = world(on)
   const clock = mock.clock(on)
   // the Claims pane first, then the detail on top of it: the detail's keys
-  await ($ as Any).prompt.edit(edit('c'))
+  await press($, clock, edit('c'))
   await clock.settle()
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-18' } as never)
   await pane($, clock)

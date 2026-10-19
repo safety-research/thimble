@@ -7,7 +7,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { slim } from '../observer/evidence.js'
 import { glossSkipsFor, skipsFor } from '../observer/observer'
-import { promptStub } from './stubs'
+import { press, promptStub } from './stubs'
 
 const ROOT = '/data'
 const DIR = `${ROOT}/thimble/objects`
@@ -331,7 +331,7 @@ test("a turn a verb's ask started: the notes ride on its prompt, once; no questi
   // row for Claude alone before the prompt
   const ui = await $.ui.mount({ plugin: 'thimble-lean', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'Fix two things.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
   await clock.settle()
-  await ($ as Any).prompt.edit({ origin: { kind: 'composer' }, key: { key: 'v' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'v' })
+  await press($, w.clock, { origin: { kind: 'composer' }, key: { key: 'v' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'v' })
   await ui.press({ key: 'r|p-proposals|0|opt-0' })
   await clock.settle()
   await ui.unmount()
@@ -391,7 +391,7 @@ test('a gloss is placed by its term in the answer, with a teal fill; its card sa
   const drawn = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: ANSWER, isFirstOfReply: true }, viewport: { columns: 120, rows: 40, isFullscreen: true } } as never)
   expect(JSON.stringify(drawn)).toContain('"label":"explain fixture scope"')
   // ] opens it in the tray; its card is drawn from the gloss
-  await ($ as Any).prompt.edit(key(']'))
+  await press($, w.clock, key(']'))
   await w.clock.settle()
   textOf(await $.ui.render(BAND2))
   await w.clock.settle()
@@ -403,10 +403,10 @@ test('a gloss is placed by its term in the answer, with a teal fill; its card sa
   expect(JSON.stringify(await $.ui.render(BAND2))).toContain('"color":"#62d2c6"')
   expect(textOf(await $.ui.render(HINT))).toContain('1 ask · 2 open · 0 close · ] next')
   // 2 opens the citation in it, over it; 0 comes back
-  await ($ as Any).prompt.edit(key('2'))
+  await press($, w.clock, key('2'))
   expect(textOf(await $.ui.render(BAND2))).toContain('conftest.py:14')
   expect(textOf(await $.ui.render(HINT))).toContain('0 back')
-  await ($ as Any).prompt.edit(key('0'))
+  await press($, w.clock, key('0'))
   expect(textOf(await $.ui.render(BAND2))).toContain('fixture scope')
 })
 
