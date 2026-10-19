@@ -38,7 +38,7 @@ type Any = any
 
 /** The session around the observer: one object on disk, the Node children, the model's two calls (answered by
  *  `question` and `fork`), the prompt and the band. */
-function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: Record<string, string> } = {}) {
+function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: Record<string, string>; verb?: () => Json } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...(o.env ?? {}) })
   mock.store(on)
   on('session.cwd', () => ({ value: ROOT }))
@@ -63,6 +63,8 @@ function world(on: Any, o: { question?: Json; fork?: Json | (() => Json); env?: 
     }
     let out = '{}'
     if (e.argv.some(a => a.endsWith('prep.mjs'))) out = JSON.stringify({ drawing: DRAWING, verbs: VERBS, problems: [] })
+    // a verb of the message row, run when the person picks it (verb.mjs run), and the row's verbs (verb.mjs list)
+    else if (o.verb && e.argv.some(a => a.endsWith('verb.mjs'))) out = JSON.stringify(e.argv.includes('list') ? { verbs: [{ key: 'v', name: 'visualize', row: true, order: 0 }, { key: 's', name: 'squeeze', row: true, order: 1 }] } : o.verb())
     else if (e.argv.includes('coverage')) out = 'Coverage of this session · 4 source files\nNot read: 1 file (9 rows): events.jsonl'
     else if (e.argv.some(a => a.endsWith('objects.mjs'))) out = JSON.stringify(Object.entries(files).filter(([k]) => k.startsWith(DIR + '/')).map(([, v]) => slim(JSON.parse(v))).filter(o => o && o.session === e.argv.at(-1)))
     return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -311,6 +313,61 @@ test('a reload mid-session keeps the notes not yet delivered: they reach Claude 
   expect(w.submitted.at(-1)!.context.join('\n')).toContain('The 412 counts all months.')
   await $.prompt.submit({ text: 'ok', origin: { kind: 'composer' } } as never)
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('412')
+})
+
+test("a turn a verb's ask started: the notes ride on its prompt, once; no question step; the pass reads the verb's prompt, and the decision stated before stays in view", async ($, on) => {
+  let n = 0
+  const w = world(on, {
+    question: { parts: [], drift: null, decision: 'tell my team the cap cut them off' },
+    fork: () => (++n === 1 ? { notes: [{ note: 'The agents add up to 194, not 196: fix the title of 01-saves.' }], line: null, settled: false, hints: {} } : { notes: [], line: null, settled: false, hints: {} }),
+    verb: () => ({ verb: 'visualize', text: 'Claude is making another view of this answer.', ask: 'The person pressed v (visualize) on your answer. Make a card of it.' }),
+  })
+  on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  const session = mock.session(on)
+  const clock = w.clock
+  await turn($, w, clock, { id: 't1', prompt: 'I will tell my team the cap cut them off. Anything to fix first?', answer: 'Fix two things.', tools: 1, save: true })
+  expect(w.questions.length).toBe(1)
+  // v pressed and its proposal picked: the verb's ask is the next prompt of main, and the note rides with it, in the
+  // row for Claude alone before the prompt
+  const ui = await $.ui.mount({ plugin: 'thimble-lean', component: 'AssistantMessage', surface: 'terminal', requestId: ROW, props: { text: 'Fix two things.', isFirstOfReply: true }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never)
+  await clock.settle()
+  await ($ as Any).prompt.edit({ origin: { kind: 'composer' }, key: { key: 'v' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'v' })
+  await ui.press({ key: 'r|p-proposals|0|opt-0' })
+  await clock.settle()
+  await ui.unmount()
+  expect(w.submitted.at(-1)!.text).toBe('visualize another view of this answer')
+  const hidden = (session.appended() as Any[]).filter(r => r.message?.type === 'user').map(r => String(r.message.content?.[0]?.text ?? '')).at(-1)!
+  expect(hidden).toContain('The person pressed v (visualize) on your answer. Make a card of it.')
+  expect(hidden).toContain('Notes from a side agent that read your last answer')
+  expect(hidden).toContain('- The agents add up to 194, not 196: fix the title of 01-saves.')
+  await $.turn.start({ turnId: 't2', text: 'visualize another view of this answer' } as never)
+  await step($, w, 't2', 0, 2)
+  await $.turn.complete({ turnId: 't2', answer: 'This timeline shows when each agent stopped.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await clock.advance(100)
+  // no question step for a prompt the person did not type; the pass reads the turn's own prompt, says why there is
+  // no comparison, keeps the decision the person stated, and lists their question among the earlier ones
+  expect(w.questions.length).toBe(1)
+  expect(w.forks.length).toBe(2)
+  expect(w.forks[1]).toContain('TURN (no comparison this turn: the person pressed the verb visualize, and thimble sent the prompt below for them) | visualize another view of this answer | tell my team the cap cut them off |')
+  expect(w.forks[1]).toContain('EARLIER - I will tell my team the cap cut them off. Anything to fix first?')
+  const look = JSON.parse(w.files[OBS]!).log.filter((r: Json) => r.kind === 'look').at(-1)
+  expect(look).toMatchObject({ question: 'visualize another view of this answer', typed: false, verb: 'visualize', question_step: { skipped: 'the verb visualize sent the prompt' } })
+  // the note went once: the next typed prompt does not carry it again
+  await $.prompt.submit({ text: 'and the Sonnet runs?', origin: { kind: 'composer' } } as never)
+  expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('194, not 196')
+  expect(JSON.parse(w.files[OBS]!).log.filter((r: Json) => r.kind === 'notes_delivered').map((r: Json) => r.with)).toEqual(['verb visualize'])
+})
+
+test('a prompt a hook drops gives its notes back: they ride on the next prompt that enters', async ($, on) => {
+  // beneath the plugin, a notification that never enters (Claude Code drops it)
+  on('prompt.submit', { origin: { kind: 'task-notification' } }, () => ({ drop: 'the thread answered' }))
+  const w = world(on, { fork: { notes: [{ note: 'The 412 counts all months.' }], line: null, settled: false, hints: {} } })
+  await turn($, w, w.clock, { id: 't1', prompt: 'which region?', answer: 'North.', tools: 1 })
+  expect(await $.prompt.submit({ text: 'a task finished', origin: { kind: 'task-notification' } } as never)).toEqual({ drop: 'the thread answered' })
+  await $.prompt.submit({ text: 'and March?', origin: { kind: 'composer' } } as never)
+  expect(w.submitted.at(-1)!.text).toBe('and March?')
+  expect(w.submitted.at(-1)!.context.join('\n')).toContain('The 412 counts all months.')
+  expect(JSON.parse(w.files[OBS]!).log.filter((r: Json) => r.kind === 'notes_delivered').map((r: Json) => r.with)).toEqual(['composer'])
 })
 
 // ------------------------------------------------------------------------------------------------ glosses

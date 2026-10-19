@@ -10,6 +10,9 @@
 // One look, in order:
 // 1. The question step (registry feature `question`): one small completion, with no transcript, compares the answer
 //    with the person's literal question and says whether their message states a decision. Its result is evidence.
+//    A turn the person did not type (a verb's ask such as v's, a notification) has no question of theirs to drift
+//    from and states no decision: the step does not run, the pass reads that turn's own prompt, and the decision
+//    the person stated last stays in view.
 // 2. The evidence (evidence.js): the objects Claude saved since the last look (and, for context, its latest ones),
 //    each with its lineage in a few lines and, for the new ones, the object as the person sees it (how many rows stand
 //    behind each cited value, how sure each query's row lineage is, the files the session never read, what Claude
@@ -25,7 +28,8 @@
 // A lens turned off (LEAN_PROMPTS=lens-explain:off) is neither asked nor merged.
 //
 // Where its output goes:
-// - notes: beside the person's next prompt, as context the person never sees. Deduplicated across the session.
+// - notes: beside the next prompt of main, whatever sent it (the person, a verb's ask, a notification), as context the
+//   person never sees. Once each: a prompt that never entered gives them back. Deduplicated across the session.
 // - a line: the band above the prompt, only when the line names a decision in view, no line is open, the backoff
 //   allows it, it repeats nothing the person saw or knows, and no new turn began. Otherwise its finding goes to
 //   Claude as a note (a repeat goes nowhere). Keys, as YSK's: 1 Learn more (the explanation, written already),
@@ -70,7 +74,10 @@ type Answer = {
   claims: unknown[]
   clusters: unknown[]
 }
-type Look = { turnId: string; turnNo: number; steps: number; tools: number; answer: string; question: string; since: number }
+// question: the turn's own prompt; typed: whether the person wrote it (else a verb, named in `verb`, or a notification
+// sent it); earlier: the person's questions before it
+type Look = { turnId: string; turnNo: number; steps: number; tools: number; answer: string; question: string; typed: boolean; verb: string; earlier: string[]; since: number }
+type TurnPrompt = { text: string; typed: boolean; verb: string }
 
 const LINE = { plugin: 'thimble-lean', key: 'line' } as const
 const RANKED = { plugin: 'thimble-lean', key: 'ranked' } as const
@@ -108,8 +115,9 @@ const S = {
   turnStart: 0,
   running: false,
   since: 0, // when the first turn the observer has not looked at began: objects saved after it are new
-  question: '',
-  questions: [] as string[],
+  prompt: { text: '', typed: true, verb: '' } as TurnPrompt, // the prompt of the turn that runs or ran last
+  questions: [] as string[], // the person's own questions, in order
+  decision: '', // the decision the person stated last, which a turn they did not type keeps in view
   notesGiven: [] as string[],
   pending: [] as Note[],
   looking: false,
@@ -143,7 +151,10 @@ async function ensure($: Engine): Promise<void> {
         const delivered = new Set(S.log.filter(r => r.kind === 'notes_delivered').flatMap(r => strs(r.notes)))
         const added = S.log.filter(r => r.kind === 'look').flatMap(r => (Array.isArray(r.notes_added) ? (r.notes_added as Note[]) : []))
         S.pending = added.filter(n => n && typeof n.note === 'string' && !delivered.has(n.note))
-        S.questions = S.log.filter(r => r.kind === 'look' && typeof r.question === 'string').map(r => String(r.question)).slice(-20)
+        const typed = S.log.filter(r => r.kind === 'look' && typeof r.question === 'string' && r.typed !== false)
+        S.questions = typed.map(r => String(r.question)).slice(-20)
+        const said = (typed.at(-1)?.question_step as Any)?.out?.decision
+        S.decision = typeof said === 'string' ? said.trim() : ''
       }
     } catch {
       // a file it cannot read: the observer starts this session's memory again
@@ -236,10 +247,10 @@ async function answerOf($: Engine, fallback: string): Promise<string> {
   return texts.join('\n\n')
 }
 
-async function questionStep($: Engine, question: string, answer: string, turn: number): Promise<Record<string, unknown>> {
+async function questionStep($: Engine, question: string, answer: string, turn: number, earlier: string[]): Promise<Record<string, unknown>> {
   const q = await promptText($, 'question')
   const prompt = fill(q.text, {
-    EARLIER: () => bullets(S.questions.slice(0, -1).slice(-6).map(x => cut(x, 600))),
+    EARLIER: () => bullets(earlier.slice(-6).map(x => cut(x, 600))),
     QUESTION: () => cut(question, 4000) || '(none)',
     ANSWER: () => cut(answer, 16000),
   })
@@ -328,13 +339,17 @@ async function look($: Engine, t: Look): Promise<void> {
       return
     }
     row.question = cut(t.question, 400)
+    if (!t.typed) Object.assign(row, { typed: false, ...(t.verb ? { verb: t.verb } : {}) })
 
-    // 1. the question step: drift and a decision in view
-    const q = await questionStep($, t.question, answer, t.turnNo)
+    // 1. the question step: drift and a decision in view. A prompt the person did not type is no question of theirs:
+    // no step, and the decision they stated last stays in view
+    const q: Record<string, unknown> = t.typed ? await questionStep($, t.question, answer, t.turnNo, t.earlier) : { skipped: t.verb ? `the verb ${t.verb} sent the prompt` : 'the person did not type the prompt' }
     row.question_step = q
     const qo = (q.out ?? null) as Any
     const drift = qo && typeof qo.drift === 'string' && qo.drift.trim() ? qo.drift.trim() : ''
-    const decision = qo && typeof qo.decision === 'string' && qo.decision.trim() ? qo.decision.trim() : ''
+    const stated = qo && typeof qo.decision === 'string' && qo.decision.trim() ? qo.decision.trim() : ''
+    if (t.typed) S.decision = stated
+    const decision = t.typed ? stated : S.decision
 
     // 2. the objects and their lineage
     const root = await rootNow($)
@@ -342,11 +357,11 @@ async function look($: Engine, t: Look): Promise<void> {
     const fresh = objs.filter(x => x.isNew)
     row.objects = objs.map(x => `${x.ref.id}@${x.ref.v}${x.isNew ? ' new' : ''}`)
     const substantial = t.tools > 0 || answer.length >= LONG_ANSWER || fresh.length > 0
-    if (!substantial && !decision && !drift) {
+    if (!substantial && !stated && !drift) {
       row.skip = 'no work, no decision, no drift'
       return
     }
-    row.why = [substantial ? 'work' : '', decision ? 'decision' : '', drift ? 'drift' : ''].filter(Boolean).join(', ')
+    row.why = [substantial ? 'work' : '', stated ? 'decision' : '', drift ? 'drift' : ''].filter(Boolean).join(', ')
     const digests: string[] = []
     for (const x of objs) {
       const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(err => `(the person cannot see it: it does not draw: ${cut(String((err as Error)?.message || err), 160)})`) : ''
@@ -370,11 +385,15 @@ async function look($: Engine, t: Look): Promise<void> {
     // quiet rule read
     const turnText = turnWords(msgs, t.question)
     const st = { seen, known, notesGiven: S.notesGiven, open, skips, glossed, glossSkip, store, grown, turnText }
-    const qText = q.out
-      ? drift
-        ? `A part is missing or replaced: ${drift}`
-        : 'The answer gives every part of the question.'
-      : '(the step gave no result)'
+    const qText = !t.typed
+      ? t.verb
+        ? `(no comparison this turn: the person pressed the verb ${t.verb}, and thimble sent the prompt below for them)`
+        : '(no comparison this turn: the person did not type the prompt below)'
+      : q.out
+        ? drift
+          ? `A part is missing or replaced: ${drift}`
+          : 'The answer gives every part of the question.'
+        : '(the step gave no result)'
     const frame = await promptText($, 'observer')
     const mode = FEATURES.observer.versions?.[frame.version]?.mode === 'fork' ? 'fork' : 'lenses'
     const parts: { lens: Any; text: string; id: string }[] = []
@@ -443,7 +462,7 @@ async function look($: Engine, t: Look): Promise<void> {
         SHOWN: squeezed ? `\nThe person reads it squeezed (${squeezed.split('\n').length} lines); this is what shows:\n${cut(squeezed, 6000)}\n` : '',
         OBJECTS: digests.length ? digests.join('\n\n') : 'No objects yet.',
         COVERAGE: coverage,
-        EARLIER: bullets(S.questions.slice(0, -1).slice(-6).map(x => cut(x, 300))),
+        EARLIER: bullets(t.earlier.slice(-6).map(x => cut(x, 300))),
       }
       passTmpl = tmpl
       f = await lensPass($, { frame, parts, tmpl, vals: passVals, st, model, extra, fork })
@@ -713,6 +732,60 @@ function band($: Engine, e: Any, v: ObserverLine): Any {
   ] })
 }
 
+// ------------------------------------------------------------------------------------------------ the next prompt
+
+// the notes on the prompt in flight, until it entered (or a drop gave them back)
+let carrying: Note[] = []
+
+/** The notes as Claude reads them with a prompt, or null when there are none. */
+function notesText(pending: Note[]): string | null {
+  if (!pending.length) return null
+  return [
+    'Notes from a side agent that read your last answer, the objects you saved and their lineage. The person does not see these notes.',
+    'Act on them in this reply: if a note shows an error in what you told the person, correct it plainly; otherwise check it or keep it in mind. Do not mention the side agent or the notes.',
+    ...pending.map(n => `- ${n.note}${n.rests_on ? ` (It rests on: "${cut(n.rests_on, 300)}")` : ''}`),
+  ].join('\n')
+}
+
+/** A prompt in the person's own words: the turn's question, one of their questions, and a prompt typed past an open
+ *  line, which clears at the second. */
+async function typedPrompt($: Engine, text: string): Promise<void> {
+  S.prompt = { text, typed: true, verb: '' }
+  S.questions = [...S.questions, text].slice(-20)
+  const v = await openLine($)
+  if (!v) return
+  const n = v.prompts + 1
+  if (n >= CLEAR_AFTER_PROMPTS) {
+    await closeLine($)
+    const past = num(await $.store.get(K.typedPast)) + 1
+    await $.store.set(K.typedPast, past)
+    await $.store.set(K.skip, skipsFor(past))
+    await logRow($, { kind: 'key', key: 'typed_past', line: v.line, typed_past_in_a_row: past })
+  } else {
+    await $.state.set(LINE, { ...v, prompts: n })
+  }
+}
+
+/** A turn this plugin starts itself, as its prompt row shows it: the person's words (`typed`: a question asked in the
+ *  browser) or a verb's press (`verb`: v's ask). */
+export type OwnTurn = { text: string; typed: boolean; verb: string }
+
+/**
+ * The shell starts a turn of its own (shell.tsx startTurn), which this module's prompt.submit hook may never see: the
+ * turn's prompt is kept for its look (a verb's press is no question of the person's), and the notes waiting for
+ * Claude are taken, once, as the text Claude reads in the row before that prompt; null when there are none.
+ */
+export async function ownTurn($: Engine, t: OwnTurn): Promise<string | null> {
+  await ensure($)
+  if (t.typed) await typedPrompt($, t.text)
+  else S.prompt = { text: t.text, typed: false, verb: t.verb }
+  const pending = (await isOn($)) ? S.pending : []
+  S.pending = []
+  if (!pending.length) return null
+  await logRow($, { kind: 'notes_delivered', notes: pending.map(n => n.note), with: t.verb ? `verb ${t.verb}` : 'plugin' })
+  return notesText(pending)
+}
+
 // ------------------------------------------------------------------------------------------------ hooks
 
 export const registerObserver: Register = (on, options) => {
@@ -757,7 +830,9 @@ export const registerObserver: Register = (on, options) => {
     try {
       await flushDeferred($)
       if (!(await isOn($))) return r
-      const t: Look = { turnId: e.turnId, turnNo: S.turnNo, steps: S.steps, tools: S.tools, answer: e.answer || '', question: S.question, since: S.since }
+      const p = S.prompt
+      const earlier = p.typed && S.questions.at(-1) === p.text ? S.questions.slice(0, -1) : S.questions.slice()
+      const t: Look = { turnId: e.turnId, turnNo: S.turnNo, steps: S.steps, tools: S.tools, answer: e.answer || '', question: p.text, typed: p.typed, verb: p.verb, earlier, since: S.since }
       $.clock.after(50, () => { void look($, t) })
     } catch {
       // the turn ends whatever the observer makes of it
@@ -779,42 +854,43 @@ export const registerObserver: Register = (on, options) => {
     return r
   })
 
-  // notes reach Claude beside the person's next prompt; an open line counts the prompts it survives
-  on('prompt.submit', { origin: { kind: /^(composer|bridge)$/ } }, async ($, e, next) => {
-    if (e.command || e.isMeta) return next(e)
+  // notes reach Claude beside the next prompt of main, whatever sent it: the person's, a notification, another
+  // plugin's. A turn this plugin starts itself (a verb's ask, a question from the browser) takes them through the
+  // shell (ownTurn), as this hook may never see it. The turn's prompt is kept for its look.
+  on('prompt.submit', { origin: { kind: /./ } }, async ($, e, next) => {
+    if (e.command) return next(e)
+    const o = (e.origin ?? {}) as { kind?: string; name?: string; asUser?: boolean }
+    if (o.kind === 'plugin' && o.name === $.plugin.name) return next(e)
+    // the person's own words: typed here or through the bridge, or another plugin's prompt sent as theirs
+    const typed = !e.isMeta && (/^(composer|bridge|sdk)$/.test(String(o.kind)) || (o.kind === 'plugin' && o.asUser === true))
     let context: string | null = null
     try {
       await ensure($)
-      S.question = e.text
-      S.questions = [...S.questions, e.text].slice(-20)
-      const pending = (await isOn($)) ? S.pending : []
+      carrying = (await isOn($)) ? S.pending : []
       S.pending = []
-      const v = await openLine($)
-      if (v) {
-        const n = v.prompts + 1
-        if (n >= CLEAR_AFTER_PROMPTS) {
-          await closeLine($)
-          const past = num(await $.store.get(K.typedPast)) + 1
-          await $.store.set(K.typedPast, past)
-          await $.store.set(K.skip, skipsFor(past))
-          await logRow($, { kind: 'key', key: 'typed_past', line: v.line, typed_past_in_a_row: past })
-        } else {
-          await $.state.set(LINE, { ...v, prompts: n })
-        }
-      }
-      if (pending.length) {
-        context = [
-          'Notes from a side agent that read your last answer, the objects you saved and their lineage. The person does not see these notes.',
-          'Act on them in this reply: if a note shows an error in what you told the person, correct it plainly; otherwise check it or keep it in mind. Do not mention the side agent or the notes.',
-          ...pending.map(n => `- ${n.note}${n.rests_on ? ` (It rests on: "${cut(n.rests_on, 300)}")` : ''}`),
-        ].join('\n')
-        await logRow($, { kind: 'notes_delivered', notes: pending.map(n => n.note) })
-      }
+      context = notesText(carrying)
     } catch {
-      // a prompt goes in as typed when the observer cannot add to it
+      // a prompt goes in as sent when the observer cannot add to it
     }
-    return context ? next({ ...e, context: [...(e.context ?? []), context] }) : next(e)
-  }).catch(($, e, next) => next(e))
+    const r = context ? await next({ ...e, context: [...(e.context ?? []), context] }) : await next(e)
+    const went = carrying
+    carrying = []
+    // a prompt that never entered (a hook dropped it, the engine refused it) gave Claude nothing: its notes wait
+    if ((r as Any)?.drop) { S.pending = [...went, ...S.pending]; return r }
+    try {
+      if (typed) await typedPrompt($, e.text)
+      else if (!e.turnId) S.prompt = { text: e.text, typed: false, verb: '' }
+      if (went.length) await logRow($, { kind: 'notes_delivered', notes: went.map(n => n.note), with: o.kind === 'plugin' ? `plugin ${o.name ?? ''}`.trim() : String(o.kind || 'unknown') })
+    } catch {
+      // the prompt went in; only the observer's record of it is missing
+    }
+    return r
+  }).catch(($, e, next) => {
+    // a drop beneath, after the notes went down with the prompt, fails this hook: the notes wait for the next prompt
+    if (carrying.length) S.pending = [...carrying, ...S.pending]
+    carrying = []
+    return next(e)
+  })
 
   on('command.run', { command: 'observe' }, async ($, e) => {
     await ensure($)
@@ -864,8 +940,9 @@ export const registerObserver: Register = (on, options) => {
 export function resetObserver(): void {
   Object.assign(S, {
     session: '', file: '', enabled: true, model: '', turnId: '', turnNo: 0, steps: 0, tools: 0,
-    turnStart: 0, running: false, since: 0, question: '', questions: [], notesGiven: [], pending: [], looking: false, again: null,
+    turnStart: 0, running: false, since: 0, prompt: { text: '', typed: true, verb: '' }, questions: [], decision: '', notesGiven: [], pending: [], looking: false, again: null,
     deferred: [], hints: {}, log: [],
   })
   sending = false
+  carrying = []
 }

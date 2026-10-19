@@ -44,6 +44,7 @@ import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
 import { markColors, messageEl, verbColor } from './view'
 import { markNextTurn, record as recordEvent, tracked } from '../telemetry/telemetry'
+import { ownTurn } from '../observer/observer'
 import type { RowVerb } from './view'
 import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, takeNotes as sqNotes } from '../verbs/squeeze/term'
 import { endsOf, revealCut } from '../verbs/squeeze/chips.mjs'
@@ -508,17 +509,24 @@ async function noteForClaude($: Engine, text: string): Promise<void> {
   await $.state.set(NOTES, [...cur, text].slice(-12))
 }
 
+/** A turn this plugin starts: `rows` (what verbs said since Claude's last reply, the request, what the observer has for
+ *  Claude) go just before it as a row the person does not see, for Claude alone; the prompt is `t.text`, as the person
+ *  would type it. Claude Code labels its row as the plugin's. */
+async function startTurn($: Engine, rows: string[], t: { text: string; typed: boolean; verb: string }): Promise<void> {
+  const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
+  await $.state.set(NOTES, [])
+  // the observer hears of the turn (its own prompt.submit hook may never see this plugin's prompt): its notes come back
+  const heard = await ownTurn($, t).catch(() => null)
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, ...rows, ...(heard ? [heard] : [])].join('\n\n') }] } })
+  await $.prompt.submit({ text: t.text, asUser: true })
+}
 
 /** A verb's request to Claude, as a turn the person started: its row is the person's press in a few words (`explore
- *  01-saves`), as they would type it; the request itself (with what verbs said since Claude's last reply) goes just
- *  before it as a row the person does not see, for Claude alone. */
+ *  01-saves`), as they would type it; the request itself goes just before it, for Claude alone (startTurn). */
 export async function ask($: Engine, request: string, verb: string, on: string): Promise<void> {
   // the turn it starts is filed under the verb in the session's events (v's card is a turn of main's)
   markNextTurn(verb)
-  const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
-  await $.state.set(NOTES, [])
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, request].join('\n\n') }] } })
-  await $.prompt.submit({ text: `${verb} ${on}`, asUser: true })
+  await startTurn($, [request], { text: `${verb} ${on}`, typed: false, verb })
 }
 
 // ------------------------------------------------------------------------------------------------ failures, in words
@@ -775,11 +783,8 @@ async function askFromBrowser($: Engine, root: string, text: string, scope: WebS
       if (r.problem) $.ui.toast(`A question from the browser: ${r.problem}.`)
       return
     }
-    const context = await webContext($, root, scope)
-    const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
-    await $.state.set(NOTES, [])
-    await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, context].join('\n\n') }] } })
-    await $.prompt.submit({ text, asUser: true })
+    // the person's own question, typed in the page
+    await startTurn($, [await webContext($, root, scope)], { text, typed: true, verb: '' })
   } catch (err) {
     $.ui.toast(`A question from the browser did not reach Claude${plainWhy(err) ? ` (${plainWhy(err)})` : ''}. Type it here instead.`)
   }
