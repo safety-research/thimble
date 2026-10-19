@@ -1983,18 +1983,21 @@ const shellKey = keySlot()
 /** One key pressed in the prompt, answered: by the prompt.edit hook (`fresh`), or past its budget by its .catch, with
  *  the decision the hook began. A key taken is answered at once, and its work runs after (keys.ts). */
 async function answerKey($: Engine, e: Any, next: Any, fresh: boolean): Promise<Any> {
+  // when the key came: a letter typed straight after a verb key counts from here, however long the verb's work takes
+  const at = await $.clock.now()
   // a paste while the detail is open begins a question there, so it waits its turn like a key
-  const now = typesAnyway(e) && !(detailIsOpen() && !e.key && !!e.inputText)
-  const k = keyTake(shellKey, e, fresh, now, () => keyTurn($, e))
+  const now = (on: KeyEdit) => typesAnyway(on) && !(detailIsOpen() && !on.key && !!on.inputText)
+  const k = keyTake(shellKey, e, fresh, now, on => keyTurn($, on, at))
   const t = await k.turn
   const inTime = !next.signal.aborted
-  keyAnswered(k, t, inTime)
+  keyAnswered(shellKey, k, t, inTime)
   if (t.box || !inTime) return t.box ?? { text: e.text, cursor: e.cursor }
   return keyTyped($, e, next, t.decorations)
 }
 
-/** What a key pressed in the prompt comes to (keys.ts): decided from reads alone, its work run after the answer. */
-async function keyTurn($: Engine, e: KeyEdit): Promise<KeyTurn> {
+/** What a key pressed in the prompt comes to (keys.ts): decided from reads alone, its work run after the answer. `at`:
+ *  when the key came. */
+async function keyTurn($: Engine, e: KeyEdit, at: number): Promise<KeyTurn> {
   const key = e.key
   // the open detail takes its own keys first (detail.tsx), and a letter there begins the question for the card's thread
   const d = detailIsOpen() ? await detailKey($, e) : null
@@ -2011,7 +2014,7 @@ async function keyTurn($: Engine, e: KeyEdit): Promise<KeyTurn> {
   const now = await $.clock.now()
   const since = keyDecided
   keyDecided = now
-  const t = await emptyPromptKey($, key.key, e, now)
+  const t = await emptyPromptKey($, key.key, e, at)
   // a key the thimble line named a moment ago is the line's, even when what it named has gone meanwhile: it does
   // nothing then, and never lands in the prompt
   if (!t.box && barNamed(key.key, now, since)) return { box: { text: e.text, cursor: e.cursor }, work: () => { keyOpened = null; cardKeyed = null } }
@@ -2030,7 +2033,7 @@ export function keysMoved(at: number): void {
 }
 
 /** A key pressed while the prompt is empty: the box as it should stand when the shell takes the key (null: it types),
- *  and what the key does. */
+ *  and what the key does. `now` is when the key came, which a key typed straight after another counts from. */
 async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Promise<KeyTurn> {
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
@@ -2114,7 +2117,9 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   // at rest the verbs win: a card's own keys reach it once it has the focus (] or its detail)
   if (k.length === 1 && (await rowVerbs($)).some(v => v.key === k)) {
     const row = await actingRow($)
-    if (row) return { box: consume, work: async () => { await pressRowVerb($, row, k); keyOpened = { key: k, at: now } } }
+    // a letter typed at once after it (before its answer came) makes it the start of a word: its line closes again
+    const word = k === 'c' ? {} : { word: async () => { keyOpened = null; await setPick($, null) } }
+    if (row) return { box: consume, work: async () => { await pressRowVerb($, row, k); keyOpened = { key: k, at: now } }, ...word }
   }
   // o: this session in the browser, at the message the keys act on (browser mode only; `o browser` on the verb row)
   if (k === 'o' && browserFlag && !(pick && opened && now - opened.at < 700)) {
@@ -2984,7 +2989,7 @@ export function resetShell(): void {
   cardKeyed = null
   keyDecided = 0
   barSeen.length = 0
-  resetKeys()
+  resetKeys(shellKey)
   graphLayout = null
 }
 

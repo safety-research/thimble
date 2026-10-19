@@ -597,6 +597,43 @@ test('a key whose answer misses even the .catch\'s grace types, and its work nev
   expect(await lineOpen($)).toBe(true)
 })
 
+// A key typed before the answer to the key before it came is raised on the box as the person saw it (v, then i: an
+// edit of "v" to "vi"), while the editor has taken the v out since and shows "i". The answer is laid over that box as a
+// change from the edit's own "vi": what the editor shows then is the answer with the taken v out of it too.
+const shows = (answer: { text: string; cursor: number }, taken: string) => answer.text.slice(taken.length)
+
+test('a letter typed before v\'s answer came, on the box with the v still in it, is the start of a word: the v comes back and its line closes', async ($, on) => {
+  const w = world(on)
+  const clock = mock.clock(on)
+  await markedTurn($, on, clock)
+  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
+  // i, typed while the editor still showed the v: answered at once, so the editor shows "vi"
+  const i = await ($ as Any).prompt.edit(edit('i', 'v'))
+  expect(shows(i, 'v')).toBe('vi')
+  await clock.settle()
+  expect(await lineOpen($)).toBe(false)
+  // a key so typed that v's line takes is decided on the empty box, once v's line is open: 1 picks, no letter lands
+  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
+  expect(shows(await press($, clock, edit('1', 'v')), 'v')).toBe('')
+  expect(w.inputs.length).toBe(1)
+})
+
+test('a letter typed straight after v is a word however long v\'s work takes: the time counts from when each key came', async ($, on) => {
+  world(on)
+  const writes = slowWrites(on)
+  const clock = mock.clock(on)
+  await markedTurn($, on, clock)
+  writes.next(300)
+  expect(await ($ as Any).prompt.edit(edit('v'))).toEqual({ text: '', cursor: 0 })
+  // i comes at once, and waits for v's work, which takes longer than the gap a word allows
+  const i = ($ as Any).prompt.edit(edit('i'))
+  await sleep(20)
+  await clock.advance(1000)
+  expect(await i).toEqual({ text: 'vi', cursor: 2 })
+  await clock.settle()
+  expect(await lineOpen($)).toBe(false)
+})
+
 test('a question asked with the tray open goes to the side thread of its mark: main never sees it, and the panel shows the thread', async ($, on) => {
   const w = world(on)
   const spawns: Any[] = []
