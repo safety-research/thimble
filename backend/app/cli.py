@@ -2644,19 +2644,27 @@ def module_line(cwd: Path) -> str:
 
 
 MODULE_OUT = "trusted/module.json"  # in the workspace: what the hooks module writes on local transport
+MODULE_BEAT = "trusted/module-beat.json"  # in the workspace: the hooks module's heartbeat on local transport
 ROLES_FILE = "trusted/roles.json"  # in the workspace: the roles the module registers on local transport (write_roles)
 
 
 def local_module_notes(ws: Path) -> list[str]:
     """The module line's notes for a workspace folder `ws` whose main runs on local transport, where the module reads
-    its roles from ROLES_FILE and writes its heartbeat to MODULE_OUT, and no server hears from it: its last heartbeat,
-    with its version and the problem it reported, else that no session ran it; and a missing roles file."""
+    its roles from ROLES_FILE, writes what it says to MODULE_OUT and its heartbeat to MODULE_BEAT, and no server hears
+    from it: its last heartbeat, with its version and the problem it reported, else that no session ran it; and a
+    missing roles file."""
     try:
         out = _read_json(ws / MODULE_OUT)
     except (OSError, ValueError):
         out = None
+    try:
+        beat_rec = _read_json(ws / MODULE_BEAT)
+    except (OSError, ValueError):
+        beat_rec = None
     if isinstance(out, dict) and out.get("session"):
-        beat = out.get("beat")
+        beat = out.get("beat")  # a module loaded before the heartbeat had a file of its own beat here
+        if isinstance(beat_rec, dict) and beat_rec.get("session") == out.get("session"):
+            beat = beat_rec.get("beat", beat)
         if isinstance(beat, (int, float)) and not isinstance(beat, bool) and beat > 0:  # the module's milliseconds
             beat = datetime.fromtimestamp(beat / 1000, timezone.utc).isoformat(timespec="seconds")
         note = (f"it ran in the last session (heartbeat from {str(out['session'])[:8]} at {beat or '?'}"

@@ -47,17 +47,17 @@ def terminal_ws(workspaces_tmp) -> Path:
 
 
 class FileModule:
-    """The hooks module in terminal mode: a heartbeat in module.json, and an answer there to each pending request of
-    kind module for its session (`answer(op, args)`, by default a new agent for a spawn and {agentId} for a send or a
-    stop, {ok} for a note or a register); a model call's arguments are read from its file and its answer written to
-    its own file, as the module does. `ended` adds a run's end as the module writes it. Start with start(), end with
-    stop()."""
+    """The hooks module in terminal mode: a heartbeat in module-beat.json, and an answer in module.json to each pending
+    request of kind module for its session (`answer(op, args)`, by default a new agent for a spawn and {agentId} for a
+    send or a stop, {ok} for a note or a register); a model call's arguments are read from its file and its answer
+    written to its own file, as the module does. `ended` adds a run's end as the module writes it. Start with start(),
+    end with stop()."""
 
     def __init__(self, ws: Path, session: str = MAIN, answer: Callable[[str, dict], dict | None] | None = None,
                  delay_s: float = 0.0) -> None:
         self.ws, self.session, self.delay_s = ws, session, delay_s
         self.answer = answer or self._default
-        self.out: dict[str, Any] = {"session": session, "version": "0.6.0", "load": "l0ad", "beat": 0, "plan": None,
+        self.out: dict[str, Any] = {"session": session, "version": "0.6.0", "load": "l0ad", "plan": None,
                                     "plan_at": 0, "problem": "", "taken": [], "answers": {}, "ended": [], "gone": False}
         self.seen: list[tuple[str, str, dict]] = []  # (id, op, args) of each request taken
         self.n = 0
@@ -74,9 +74,9 @@ class FileModule:
         return {"ok": True}
 
     def write(self) -> None:
-        self.out["beat"] = int(time.time() * 1000)
-        path = sf.module_path(self.ws)
-        path.write_text(json.dumps(self.out), "utf-8")
+        sf.module_path(self.ws).write_text(json.dumps(self.out), "utf-8")
+        beat = {"session": self.out["session"], "load": self.out["load"], "beat": int(time.time() * 1000)}
+        (sf.trusted_dir(self.ws) / sf.MODULE_BEAT).write_text(json.dumps(beat), "utf-8")
 
     def ended(self, agent_id: str, answer: str = "", reason: str = "answer", **more: Any) -> None:
         self.n += 1

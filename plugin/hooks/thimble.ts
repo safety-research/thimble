@@ -103,10 +103,11 @@
 // whenever that file changes; as main it takes the requests addressed to it from subagents.json (entries of `requests`
 // of kind `module` whose `module` is pending, for its session, not past `expires_at`), polling every FILE_POLL_MS, and
 // handles them one at a time as it handles the long poll's; and it writes everything it says to trusted/module.json,
-// which only main's module writes: its heartbeat every FILE_BEAT_MS, the requests it took, its answers, the ends of the
-// runs it started, main's plan mode as its poll sees it, and what it could not register (backend/app/module_bridge.py
-// has the file's form). After /clear it appends the notes --rekey left for the new main in subagents.json
-// (`module.notes`).
+// which only main's module writes: the requests it took, its answers, the ends of the runs it started, main's plan mode
+// as its poll sees it, and what it could not register (backend/app/module_bridge.py has the file's form). Its heartbeat,
+// every FILE_BEAT_MS, goes to a file of its own, trusted/module-beat.json, so module.json changes only when the module
+// has something new to say, and nothing that watches the trusted folder (the terminal UI's refresh loop) takes a beat
+// for a change. After /clear it appends the notes --rekey left for the new main in subagents.json (`module.notes`).
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Activated } from './term/types'
@@ -164,7 +165,8 @@ const PLAN_REASON = /\bplan mode\b/i
 
 // local transport (module note)
 export const FILE_POLL_MS = 500 // how often subagents.json and roles.json are looked at
-export const FILE_BEAT_MS = 2000 // the heartbeat in module.json; module_bridge counts a module live while it is fresh
+export const FILE_BEAT_MS = 2000 // the heartbeat in BEAT_FILE; module_bridge counts a module live while it is fresh
+export const BEAT_FILE = 'module-beat.json' // in the trusted folder: {session, load, beat}, apart from module.json
 const KEPT = 64 // the requests taken, the answers and the ends module.json keeps, the newest
 const TYPED_LIVE = new Set(['', 'pending', 'claimed']) // module_bridge.TYPED_LIVE
 // an agent of subagents.json with one of these statuses has ended (module_bridge.ENDED_STATES)
@@ -247,7 +249,7 @@ async function findServer($: Engine): Promise<Server | null> {
 
 type Ended = { n: number; agentId: string; answer: string; reason: string; refusal?: Json; at: number }
 type Out = {
-  session: string; version: string; load: string; beat: number; plan: boolean | null; plan_at: number; problem: string
+  session: string; version: string; load: string; plan: boolean | null; plan_at: number; problem: string
   taken: string[]; answers: Record<string, Answer>; ended: Ended[]; gone?: boolean
 }
 
@@ -297,7 +299,7 @@ function fresh(): State {
     requests: {}, started: new Set(), checks: new Map(), ours: new Set(), calls: new Map(), completions: new Map(), queue: Promise.resolve(), helloing: null, leaving: '', plan: null, turn: '', turnEnded: [],
     dispatching: new Map(), used: new Set(),
     file: false, peer: false, rechecking: null, ws: '', writing: Promise.resolve(), stamps: {}, n: 0,
-    out: { session: '', version: '', load: '', beat: 0, plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
+    out: { session: '', version: '', load: '', plan: null, plan_at: 0, problem: '', taken: [], answers: {}, ended: [] },
   }
 }
 
@@ -905,16 +907,27 @@ function movedTo(state: Json, sid: string): string {
   return sid
 }
 
-/** module.json written whole, one write at a time, with a fresh heartbeat (module note); never by a peer. */
+/** module.json written whole, then a fresh heartbeat, one write at a time (module note); never by a peer. */
 function writeOut($: Engine, m: State): Promise<void> {
   if (m.peer) return m.writing
   m.writing = m.writing
     .then(async () => {
-      m.out.beat = Date.now()
       await $.fs.write(trusted(m, 'module.json'), JSON.stringify(m.out))
+      await beatNow($, m)
     })
     .catch(() => undefined)
   return m.writing
+}
+
+/** The heartbeat alone (module note), in its own file, so that module.json stays as it was; never by a peer. */
+function writeBeat($: Engine, m: State): Promise<void> {
+  if (m.peer) return m.writing
+  m.writing = m.writing.then(() => beatNow($, m)).catch(() => undefined)
+  return m.writing
+}
+
+function beatNow($: Engine, m: State): Promise<void> {
+  return $.fs.write(trusted(m, BEAT_FILE), JSON.stringify({ session: m.out.session, load: m.out.load, beat: Date.now() }))
 }
 
 async function readRoles($: Engine, m: State): Promise<boolean> {
@@ -1093,7 +1106,7 @@ async function pollFiles($: Engine, m: State, gen: number): Promise<void> {
       }
       if (Date.now() - beat >= FILE_BEAT_MS) {
         beat = Date.now()
-        await writeOut($, m)
+        await writeBeat($, m)
       }
     } catch {
       // the next look tries again
