@@ -47,6 +47,7 @@ import sys
 import time
 import traceback
 import weakref
+import zlib
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,7 @@ from urllib.parse import quote
 
 from . import refs as R
 from . import sources as S
-from .store import Store, thimble_home
+from .store import Store, pack_record, pickle_path, prune_cache, read_pickle, thimble_home, unpack_record, write_pickle
 
 CUT = 12000  # characters of a query's printed output Claude reads
 SHOW = 3000  # characters of the result (the last expression) shown when it is a long table; the query keeps it all
@@ -83,8 +84,19 @@ def next_id(st: Store) -> tuple[str, Path]:
 
 
 def get(st: Store, qid: str) -> dict[str, Any] | None:
+    """A query's record, its row lineage unpacked (store.pack_record)."""
     q = st.read_json(st.dir / "queries" / f"{qid}.json")
-    return q if q and not q.get("running") else None
+    if not q or q.get("running"):
+        return None
+    try:
+        return unpack_record(q)
+    except (KeyError, IndexError, TypeError, ValueError, zlib.error) as e:
+        # a packed lineage that does not read: the record without it, so its output still shows, and a resolve says why
+        # it has no rows and how to get them back
+        out = {k: v for k, v in q.items() if k != "packed"}
+        out["unreadable"] = (f"{qid}'s record keeps its rows packed, and they did not read ({type(e).__name__}): "
+                             f"`lean q --rerun {qid}` runs it again and keeps them")
+        return out
 
 
 # ------------------------------------------------------------------ the namespace
@@ -147,9 +159,16 @@ def _load_frame(cp: Path, fields: list[str] | None):
                 f.seek(c["at"])
                 parts[c["name"]] = pickle.loads(f.read(c["len"]))
         df = pd.DataFrame(parts) if parts else pd.DataFrame(index=pd.RangeIndex(meta["rows"]))
-        return df if len(df) == meta["rows"] else None
+        if len(df) != meta["rows"]:
+            return None
     except Exception:  # noqa: BLE001 — a cache that does not read is parsed again
         return None
+    try:
+        # read now: the cache keeps the frames read most recently (store.prune_cache)
+        os.utime(idx)
+    except OSError:
+        pass
+    return df
 
 
 def _parse_frame(root: Path, rel: str, table: str | None):
@@ -178,7 +197,7 @@ def _cache_frame(args: tuple[str, str, str]) -> str | None:
         return f"{type(e).__name__}: {e}"
 
 
-def _warm_cache(st: Store, files: list[str]) -> None:
+def _warm_cache(st: Store, files: list[str], info: dict[str, Any] | None = None) -> None:
     """Before a load reads many big files that are not in the cache yet, parse them in worker processes, a few at a
     time, so a corpus of gigabytes is read once in a fraction of the time. Only where processes fork cheaply (Linux); a
     file a worker could not parse is parsed by the load itself, as before."""
@@ -195,6 +214,7 @@ def _warm_cache(st: Store, files: list[str]) -> None:
             todo.append((size, rel, cp))
     if len(todo) < 2 or sum(x[0] for x in todo) < PARALLEL_MIN:
         return
+    st.cache_dir()
     import multiprocessing as mp
     from concurrent.futures import ProcessPoolExecutor
 
@@ -206,6 +226,8 @@ def _warm_cache(st: Store, files: list[str]) -> None:
     try:
         with ProcessPoolExecutor(max_workers=n, mp_context=mp.get_context("fork")) as ex:
             list(ex.map(_cache_frame, [(str(st.root), rel, str(cp)) for _, rel, cp in todo], chunksize=1))
+        if info is not None:
+            info["cached"] = info.get("cached", 0) + len(todo)
     except Exception:  # noqa: BLE001 — the load parses what is missing itself
         pass
 
@@ -228,7 +250,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         if not files:
             raise FileNotFoundError(f"no source file matches {pattern!r} under {st.root}")
         if not table:
-            _warm_cache(st, files)
+            _warm_cache(st, files, info)
         frames = []
         for rel in files:
             cp = _frame_cache(st, rel) if not table else None
@@ -238,7 +260,9 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
                 df = _parse_frame(st.root, rel, table)
                 if cp is not None and (st.root / rel).stat().st_size > CACHE_MIN:
                     try:
+                        st.cache_dir()
                         _save_frame(cp, df)
+                        info["cached"] = info.get("cached", 0) + 1
                     except Exception:  # noqa: BLE001
                         pass
             if fields:
@@ -284,8 +308,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
 
     def keep(name: str, obj: Any) -> Any:
         """Keep a result for a later query (use(name)), with this query as its source."""
-        d = st.sub("kept")
-        pd.to_pickle(obj, d / f"{slug(name)}.pkl")
+        write_pickle(st.sub("kept"), slug(name), obj)
         info["kept"].append(name)
         return obj
 
@@ -296,7 +319,10 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         if name not in reg:
             raise KeyError(f"nothing kept as {name!r}; kept: {', '.join(reg) or 'nothing'}")
         info["uses"].append({"name": name, "query": reg[name]})
-        obj = pd.read_pickle(st.dir / "kept" / f"{slug(name)}.pkl")
+        f = pickle_path(st.dir / "kept", slug(name))
+        if f is None:
+            raise KeyError(f"{name!r} was kept by {reg[name]}, but its file is gone from thimble/kept: `lean q --rerun {reg[name]}` keeps it again")
+        obj = read_pickle(f)
         if isinstance(obj, pd.DataFrame) and "_ref" in obj.columns:
             info["frames"].append(obj)
         return obj
@@ -309,9 +335,13 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         if q.get("error"):
             raise ValueError(f"{qid} failed ({q['error']}): it has no output to use")
         info["uses"].append({"name": qid, "query": qid})
-        f = st.dir / "results" / f"{qid}.pkl"
-        if f.exists():
-            df = pd.read_pickle(f)
+        f = pickle_path(st.dir / "results", qid)
+        if f is not None:
+            df = read_pickle(f)
+            if isinstance(df, pd.DataFrame) and df.attrs.get(REFS_FROM_RECORD):
+                # the result keeps a note that each row's `_refs` are its rows in the record: expanded here again
+                df.attrs = {k: v for k, v in df.attrs.items() if k != REFS_FROM_RECORD}
+                df["_refs"] = record_refs(q, len(df))
             info["frames"].append(df)
             return df
         if q.get("table") is None:
@@ -1212,13 +1242,35 @@ def run_code(st: Store, code: str, qid: str | None = None) -> dict[str, Any]:
         except OSError:
             continue
         inputs.append({"path": f, "rows_read": loaded.get(f, 0), "how": "load" if f in loaded else "opened", **fp})
-    return {"stdout": buf.getvalue(), "error": err, "seconds": round(time.time() - t0, 2), "inputs": inputs,
-            "samples": info["samples"], "external": sorted(info["external"])[:20],
-            "kept": info["kept"], "uses": _dedupe(info["uses"]), **lin}
+    out = {"stdout": buf.getvalue(), "error": err, "seconds": round(time.time() - t0, 2), "inputs": inputs,
+           "samples": info["samples"], "external": sorted(info["external"])[:20],
+           "kept": info["kept"], "uses": _dedupe(info["uses"]), **lin}
+    try:
+        # the cache stays bounded: looked over after a query that added frames to it, else at most once a day
+        prune_cache(force=bool(info.get("cached")))
+    except OSError:
+        pass
+    return out
+
+
+REFS_FROM_RECORD = "lean_refs_from_record"
+
+
+def record_refs(q: dict[str, Any], n: int) -> list[list[str]]:
+    """Each output row's source rows as `_refs`, one ref each, from the query's record. A summary's row rests on every
+    row the query read: a later query keeps no rows of it (the record still opens them), so millions of refs are not
+    copied into each row."""
+    rows = q.get("rows")
+    if rows is None or len(rows) != n:
+        print(f"use({q.get('id')!r}): its record keeps no rows for its {n:,} output rows, so `_refs` is empty"
+              + (f" ({q['unreadable']})" if q.get("unreadable") else ""))
+        return [[] for _ in range(n)]
+    marks = q.get("why_rows") or []
+    return [[] if i < len(marks) and marks[i] else R.expand(x) for i, x in enumerate(rows)]
 
 
 def keep_result(st: Store, qid: str, last: Any, lin: dict[str, Any]) -> None:
-    """A table result kept whole (thimble/results/<qid>.pkl), shaped as the output table it showed, with each row's
+    """A table result kept whole (thimble/results/<qid>.pkl.gz), shaped as the output table it showed, with each row's
     source rows as `_refs`, so use("q3") gives a later query exactly what this one showed."""
     try:
         import pandas as pd
@@ -1235,13 +1287,12 @@ def keep_result(st: Store, qid: str, last: Any, lin: dict[str, Any]) -> None:
     if not isinstance(df.index, pd.RangeIndex):
         df = df.reset_index()
     if "_refs" not in df.columns and lin.get("rows") is not None and len(lin["rows"]) == len(df):
-        df = df.copy()
-        # a summary's row rests on every row the query read: a later query keeps no rows of it (the record still opens
-        # them), so millions of refs are not copied into each row
-        marks = lin.get("why_rows") or []
-        df["_refs"] = [[] if i < len(marks) and marks[i] else R.expand(x) for i, x in enumerate(lin["rows"])]
+        # each row's `_refs` are its rows in the record, one ref each (record_refs): the result keeps a note of that,
+        # not the refs, which a row of a million lines would make 50 MB here and a few characters there
+        df = df.copy(deep=False)
+        df.attrs = {**df.attrs, REFS_FROM_RECORD: True}
     try:
-        df.to_pickle(st.sub("results") / f"{qid}.pkl")
+        write_pickle(st.sub("results"), qid, df)
     except Exception:  # noqa: BLE001 — a result that does not pickle is still in the query's record
         pass
 
@@ -1280,7 +1331,8 @@ def run(st: Store, about: str, code: str, rerun_of: str | None = None) -> dict[s
     for k in ("why_rows", "read", "via", "cells", "loop"):
         if r.get(k):
             q[k] = r[k]
-    st.write_json(path, q)
+    # a long row lineage is written packed; the record in hand, which `lean q --json` prints, stays whole
+    st.write_json(path, pack_record(q))
     if r["kept"]:
         reg = st.read_json(st.dir / "kept.json") or {}
         reg.update({k: qid for k in r["kept"]})
@@ -1330,6 +1382,8 @@ def why_of(st: Store, q: dict[str, Any], i: int | None = None, whole: bool = Fal
     opens every row it read."""
     if q.get("error"):
         return None
+    if q.get("unreadable"):
+        return str(q["unreadable"])
     qid = q.get("id") or "the query"
     rows = q.get("rows")
     if rows:

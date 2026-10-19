@@ -186,7 +186,9 @@ export function slim(o) {
   const lin = o.lineage || {}
   const cites = (lin.cites || []).slice(0, 40).map(c => {
     const { rows, quote, ...rest } = c
-    return { ...rest, ...(quote != null ? { quote: cut(quote, 120) } : {}), rows_n: rowCount(rows), rows_files: filesOf(rows) }
+    // a citation whose rows the kernel packed (store.pack_object) keeps their count and files beside it
+    const counted = rows === undefined && rest.rows_n !== undefined
+    return { ...rest, ...(quote != null ? { quote: cut(quote, 120) } : {}), rows_n: counted ? rest.rows_n : rowCount(rows), rows_files: counted ? rest.rows_files || [] : filesOf(rows) }
   })
   const queries = {}
   for (const [k, q] of Object.entries(lin.queries || {}).slice(0, 12)) {
