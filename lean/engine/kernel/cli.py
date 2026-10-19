@@ -282,13 +282,20 @@ def _lineage_line(q: dict[str, Any]) -> str:
     if q.get("lineage_error"):
         say = (f"No rows per output row: lean could not find them ({q['lineage_error']}), so each value rests on all the "
                "rows read (tally() keeps them per row).")
-    opened = {x["path"] for x in q.get("inputs") or [] if x.get("how") == "opened"}
-    if mode == "loop" and opened and all(str(x).split("#")[0] in opened for rs in q.get("rows") or [] for x in rs):
+    how = Q.loop_source(q) if mode == "loop" else None
+    if how == "opened":
         # the records rest on the files each pass opened, not on frames it loaded
-        say = (f"Each output row keeps the rows of the files its loop iteration opened before it appended the record to "
-               f"`{q.get('frame')}` (a JSON document is one row); a `_ref` column keeps finer rows.")
-    if q.get("cells") and mode != "loop":
+        say = (f"Each output row keeps the rows of the files its loop opened for its records in `{q.get('frame')}` (a JSON "
+               "document is one row); a `_ref` column keeps finer rows.")
+    elif how == "kept":
+        # rows of a table an earlier query kept, grouped: each rests on what that query found for it
+        by = next((u.get("query") for u in q.get("uses") or [] if u.get("name") == q.get("frame")), None)
+        say = (f"Each output row keeps the rows behind the rows of `{q.get('frame')}` it groups (found by "
+               f"{', '.join(q.get('keys') or [])}" + (f", as {by} kept them" if by else "") + ").")
+    if q.get("cells") and mode != "loop" and q.get("loop"):
         say += f" A count its loop kept rows for (in `{q.get('loop')}`) opens those rows."
+    elif q.get("cells") and q.get("cells_by"):
+        say += f" A count named by a value of `{q['cells_by']}` opens the rows of its group that hold that value."
     return say + (f" Cite a value as {ex}." if ex else "")
 
 

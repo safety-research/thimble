@@ -411,6 +411,11 @@ def _resolve_query(st: Store, p: dict[str, Any], chain: list, notes: list) -> li
     mode = q.get("lineage")
     n = R.count(rowsets)
     v = step.get("value")
+    cells = q.get("cells") or []
+    if vcol and len(idx) == 1 and idx[0] < len(cells) and isinstance(cells[idx[0]], dict) and cells[idx[0]].get(vcol):
+        # a value that keeps rows of its own (a count named by a value, or one its loop kept): what was found by key
+        # for its row says nothing about them
+        mode = "cell"
     if mode == "superset":
         notes.append(f"these {n:,} rows share the output row's key, but a count column of {q['id']} disagrees: they hold "
                      "more rows than the value counts")

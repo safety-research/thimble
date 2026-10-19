@@ -134,8 +134,8 @@ def test_records_built_from_documents_opened_in_a_loop_rest_on_them(docs_root: P
     assert q["lineage"] == "loop" and q["rows"] == [["ep1/u1.json#/"], ["ep1/u2.json#/"], ["ep2/u1.json#/"]]
     r = LIN.resolve(st, f"{q['id']}#run=ep2&agent=u1@calls")
     assert r["rows"] == ["ep2/u1.json#/"] and r["records"]
-    assert r["why"] == (f"{q['id']} made this output row in a loop from the files it opened for it (ep2/u1.json), and "
-                        "it does not keep which part of them the value used")
+    assert r["why"] == (f"{q['id']} built this output row in a loop over the files it opened (ep2/u1.json), and it "
+                        "does not keep which part of them the value used")
     # records of an inner loop rest on the document the outer loop opened
     inner = ('import glob\nout = []\nfor f in sorted(glob.glob("ep*/u*.json")):\n    d = json.load(open(f))\n'
              '    for mid, m in d["messages"].items():\n        out.append(dict(file=f, mid=mid, cmd=m["content"][0]["input"]["command"]))\n'
@@ -167,3 +167,80 @@ def test_records_built_from_line_files_opened_in_a_loop_rest_on_their_lines(root
     # files read with rows() or load() are not files the code opened: their records keep what the loop held
     r = Q.run(st, "by rows", 'out = []\nfor ref, row in rows("logs/*.jsonl"):\n    out.append({"x": row["x"]})\npd.DataFrame(out)')
     assert r["rows"] is None
+
+
+# ------------------------------------------------------------------ outputs whose key is a number, or a table of records
+
+
+def test_a_groupby_on_a_number_column_finds_its_rows_by_that_column(root: Path) -> None:
+    st = Store(root)
+    # a bin the query made, grouped, then reset: the output's only key is a number
+    q = Q.run(st, "per tenth", 'df = load("events.jsonl")\ndf["tenth"] = df.step * 10 // len(df)\n'
+              't = df[df.act != "test"].copy()\ndef mk(g):\n    return pd.Series({"n": len(g), "reads": int((g.act == "read").sum())})\n'
+              't.groupby("tenth").apply(mk).reset_index()')
+    assert q["lineage"] == "matched" and q["keys"] == ["tenth"] and q["frame"] == "t"
+    r = LIN.resolve(st, f"{q['id']}#tenth=0@n")
+    assert r["rows"] == ["events.jsonl#L1-2,4"] and r["count"] == 3 and "why" not in r
+    # sums per slice: found by the slice, the sums are no counts of rows
+    s = Q.run(st, "hours per slice", 'df = load("events.jsonl")\ndf["slice"] = df.step // 10\n'
+              'df.groupby("slice")[["hours"]].sum().reset_index()')
+    assert s["keys"] == ["slice"] and s["rows"][3] == ["events.jsonl#L31-40"]
+    # a count per slice and agent: the agent alone does not tell the rows apart, the slice beside it does
+    a = Q.run(st, "per agent and slice", 'df = load("events.jsonl")\ndf["slice"] = df.step // 10\n'
+              'df.groupby(["agent", "slice"]).size().reset_index(name="n")')
+    assert a["lineage"] == "matched" and a["keys"] == ["agent", "slice"]
+    assert LIN.resolve(st, f"{a['id']}#agent=a1&slice=2@n")["rows"] == ["events.jsonl#L22,26,30"]
+    # a pivot of kinds per slice: each row opens its slice
+    p = Q.run(st, "kinds per slice", 'df = load("events.jsonl")\ndf["slice"] = df.step // 10\n'
+              'df.pivot_table(index="slice", columns="act", aggfunc="size", fill_value=0).reset_index()')
+    assert p["keys"] == ["slice"] and LIN.resolve(st, f"{p['id']}#slice=1")["count"] == 10
+
+
+def test_a_table_built_from_records_finds_its_rows_through_them(docs_root: Path) -> None:
+    st = Store(docs_root)
+    # one record per call, each resting on the document its pass opened; the output groups the table of them
+    code = ('import glob\nrows = []\nfor f in sorted(glob.glob("ep*/u*.json")):\n    d = json.load(open(f))\n'
+            '    for m in d["messages"].values():\n        rows.append(dict(run=f.split("/")[0], agent=d["agent"], cmd=m["content"][0]["input"]["command"]))\n'
+            'o = pd.DataFrame(rows).sort_values("cmd")\nkeep("calls", o)\no.groupby(["run", "agent"]).size()')
+    q = Q.run(st, "calls per run", code)
+    assert q["lineage"] == "loop" and q["frame"] == "rows" and q["keys"] == ["run", "agent"]
+    r = LIN.resolve(st, f"{q['id']}#run=ep1&agent=u1@value")
+    assert r["rows"] == ["ep1/u1.json#/"] and r["chain"][0]["check"] == "the value is 3, the rows are 1"
+    assert r["why"].startswith(f"{q['id']} built this output row in a loop over the files it opened (ep1/u1.json)")
+    # a later query that groups the kept table finds the same rows, by its index
+    u = Q.run(st, "on it", 'o = use("calls").copy()\no["long"] = o.cmd.str.len() > 4\no.groupby(["agent", "long"]).size().reset_index(name="n")')
+    assert u["lineage"] == "loop" and u["frame"] == "calls"
+    assert LIN.resolve(st, f"{u['id']}#agent=u2&long=true@n")["rows"] == ["ep1/u2.json#/"]
+    w = LIN.resolve(st, f"{u['id']}#agent=u1&long=false@n")
+    assert set(w["rows"]) == {"ep1/u1.json#/", "ep2/u1.json#/"}
+    assert w["why"] == (f"{u['id']} grouped rows of `calls` (kept by {q['id']}), which rest on these 2 rows (ep1/u1.json, "
+                        "ep2/u1.json), and it does not keep which of them the value used")
+    # what use() gives the later query is the table as kept, with no column of lean's
+    v = Q.run(st, "columns", '",".join(use("calls").columns)')
+    assert v["stdout"].strip() == "'run,agent,cmd'"
+
+
+def test_a_table_cut_from_a_loaded_frame_keeps_its_rows_for_a_later_query(root: Path) -> None:
+    st = Store(root)
+    k = Q.run(st, "cut", 'df = load("events.jsonl")\nt = df[df.act == "edit"][["agent", "act"]]\nkeep("edits", t)\nlen(t)')
+    assert k["error"] is None
+    u = Q.run(st, "per agent", 'use("edits").groupby("agent").size().reset_index(name="n")')
+    assert u["lineage"] == "loop" and u["frame"] == "edits"
+    r = LIN.resolve(st, f"{u['id']}#agent=a1@n")
+    assert r["rows"] == ["events.jsonl#L2,14,26,38"] and r["count"] == 4
+
+
+def test_a_count_named_by_a_value_opens_the_rows_that_hold_it(root: Path) -> None:
+    st = Store(root)
+    # a pivot of kinds per slice: the slice's rows behind the row, each kind's count behind its own cell
+    p = Q.run(st, "kinds per slice", 'df = load("events.jsonl")\ndf["slice"] = df.step // 10\n'
+              'df.pivot_table(index="slice", columns="act", aggfunc="size", fill_value=0).reset_index()')
+    assert p["lineage"] == "superset" and p["cells_by"] == "act"
+    r = LIN.resolve(st, f"{p['id']}#slice=1@edit")
+    assert r["rows"] == ["events.jsonl#L11,14,17,20"] and r["count"] == 4 and not r["notes"] and "why" not in r
+    # the row as a whole still opens its slice, and says what was found
+    w = LIN.resolve(st, f"{p['id']}#slice=1")
+    assert w["count"] == 10 and w["notes"][0].startswith("these 10 rows share the output row's key")
+    # an unstack of counts per agent names its columns the same way
+    u = Q.run(st, "kinds per agent", 'df = load("events.jsonl")\ndf.groupby(["agent", "act"]).size().unstack(fill_value=0)')
+    assert u["cells_by"] == "act" and LIN.resolve(st, f"{u['id']}#agent=a2@test")["rows"] == ["events.jsonl#L3,15,27,39"]
