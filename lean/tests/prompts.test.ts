@@ -122,6 +122,29 @@ test("the first data command of a session carries the card guidance, once; a sav
   expect(lines.map(e => [e.prompt, e.via])).toEqual([['forms:runtime', 'lean q']])
 })
 
+test('the card after the answer: the lean skill comes with its card parts replaced, a data command brings no guidance, and a toolkit read still does', async ($, on) => {
+  const w = world(on, { LEAN_PROMPTS: 'card:v1' })
+  const body = 'LEAN BODY\n\n**Save what the person will keep as an object.** When a result is worth more than one reply, save it with `lean save`. An object is a program.\n\n## What the person sees\n\nTHE CARD SECTION\n\n## Example: one\n\nx\n'
+  const lean = String((await load($, 'lean', body)).text)
+  expect(lean.startsWith('Base directory for this skill: /p/lean\n\nLEAN BODY')).toBe(true)
+  expect(lean).toContain('**Save what the person will keep as an object.** CARDS COME AFTER. An object is a program.')
+  expect(lean).toContain('## What the person sees\n\nTHE CARD COMES AFTER THE ANSWER')
+  expect(lean).not.toContain('THE CARD SECTION')
+  expect(lean).not.toContain('worth more than one reply')
+  expect(lean).toContain('## Example: one')
+  const q = await $.tool.call({ tool: 'Bash', command: "lean q \"saves per day\" <<'PY'\ntally(df, 'day')\nPY" } as never) as Any
+  expect(q.context ?? []).toEqual([])
+  const root = new URL('..', import.meta.url).pathname.replace(/\/+$/, '')
+  const read = await $.tool.call({ tool: 'Read', file_path: `${root}/draw/TOOLKIT.md` } as never) as Any
+  expect(read.context.length).toBe(1)
+  expect(read.context[0]).toContain('which thimble adds when you read the toolkit before a card')
+  // the skill main read has no card section, so the guidance brings it
+  expect(read.context[0]).toContain('THE CARD SECTION')
+  await w.clock.advance(100)
+  const lines = w.events.filter(e => e.kind === 'prompt')
+  expect(lines.map(e => [e.prompt, e.via, e.card ?? null])).toEqual([['lean:skill', 'skill lean', 'card:v1'], ['forms:runtime', 'Read of draw/TOOLKIT.md', null]])
+})
+
 test('lean sources, rows or resolve first: the guidance comes with whichever runs first', async ($, on) => {
   const w = world(on, { LEAN_PROMPTS: 'forms:principles' })
   const r = await $.tool.call({ tool: 'Bash', command: 'lean sources' } as never) as Any

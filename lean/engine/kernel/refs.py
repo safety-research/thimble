@@ -50,6 +50,13 @@ _BLOCK = re.compile(r"^L(\d+)\.b(\d+)$")
 _CSVROW = re.compile(r"^row=(" + _NUMS + r")$")
 _DBROW = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:/(.+))?$")
 _POINTER_SET = re.compile(r"^(/(?:[^/]*/)*)(" + _NUMS + r")$")
+_FP_RE = re.compile(_FP)
+# compiled once: compress, expand and parse run over every row a query's output rests on, millions at a time
+_U_LINE = re.compile(r"L(\d+)")
+_U_ROW = re.compile(r"row=(\d+)")
+_U_POINTER = re.compile(r"(/(?:[^/]*/)*)(\d+)")
+_U_DBROW = re.compile(r"([A-Za-z_][A-Za-z0-9_]*/)(\d+)")
+_BLOCK_REF = re.compile(r"(" + _FP + r")#L(\d+)\.b(\d+)")
 
 
 class RefError(ValueError):
@@ -96,7 +103,7 @@ def parse(ref: str) -> dict[str, Any]:
     if m := _OBJ.match(ref):
         return {"kind": "object", "object": m[1], "pointer": m[2] or ""}
     path, hash_, frag = ref.partition("#")
-    if not re.fullmatch(_FP, path):
+    if not _FP_RE.fullmatch(path):
         raise RefError(f"not a ref: {ref!r}")
     if not hash_:
         return {"kind": "file", "path": path}
@@ -195,13 +202,17 @@ def format_source(p: dict[str, Any]) -> str:
 def _unit(ref: str) -> tuple[str, str, int] | None:
     """(path, unit, number) of a one-row ref whose row is a number, so many can share one row-set string."""
     path, _, frag = ref.partition("#")
-    if m := re.fullmatch(r"L(\d+)", frag):
+    if frag[:1] == "L" and not path.lower().endswith(DB_SUFFIXES):
+        # a line (L12) or a block (L12.b1, which names no numbered row): only the line pattern can match
+        m = _U_LINE.fullmatch(frag)
+        return (path, "L", int(m[1])) if m else None
+    if m := _U_LINE.fullmatch(frag):
         return path, "L", int(m[1])
-    if m := re.fullmatch(r"row=(\d+)", frag):
+    if m := _U_ROW.fullmatch(frag):
         return path, "row=", int(m[1])
-    if m := re.fullmatch(r"(/(?:[^/]*/)*)(\d+)", frag):
+    if m := _U_POINTER.fullmatch(frag):
         return path, m[1], int(m[2])
-    if path.lower().endswith(DB_SUFFIXES) and (m := re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*/)(\d+)", frag)):
+    if path.lower().endswith(DB_SUFFIXES) and (m := _U_DBROW.fullmatch(frag)):
         return path, m[1], int(m[2])
     return None
 
@@ -210,21 +221,39 @@ def compress(refs: list[str]) -> list[str]:
     """Many one-row refs as few row-set strings, one per file and unit, in first-seen order; refs that name no numbered
     row are kept as they are."""
     groups: dict[tuple[str, str], list[int]] = {}
-    other: list[str] = []
+    # the other refs once each, in first-seen order (a dict, so a row with 100,000 block refs is not a quadratic scan)
+    other: dict[str, None] = {}
+    is_db: dict[str, bool] = {}
     for r in refs:
+        # a line ref (f#L12), the most common: read here as _unit reads it (isdecimal is what \d matches)
+        path, _, frag = r.partition("#")
+        if frag[:1] == "L" and frag[1:].isdecimal():
+            db = is_db.get(path)
+            if db is None:
+                db = is_db[path] = path.lower().endswith(DB_SUFFIXES)
+            if not db:
+                groups.setdefault((path, "L"), []).append(int(frag[1:]))
+                continue
         u = _unit(r)
         if u is None:
-            if r not in other:
-                other.append(r)
+            other.setdefault(r, None)
             continue
         groups.setdefault((u[0], u[1]), []).append(u[2])
-    return [f"{path}#{unit}{format_nums(nums)}" for (path, unit), nums in groups.items()] + other
+    return [f"{path}#{unit}{format_nums(nums)}" for (path, unit), nums in groups.items()] + list(other)
 
 
 def expand(rowsets: list[str]) -> list[str]:
     """Row-set strings back to one-row refs."""
     out: list[str] = []
     for s in rowsets:
+        # a block ref (one record's block, `f#L12.b1`), the common one-row ref that names no numbered row: read as
+        # parse() reads it, without its chain of patterns
+        t = s.strip()
+        if (m := _BLOCK_REF.fullmatch(t)) and not _QUERY.match(t):
+            line, block = m[2], m[3]
+            canonical = (line[0] != "0" or line == "0") and (block[0] != "0" or block == "0")
+            out.append(t if canonical else f"{m[1]}#L{int(line)}.b{int(block)}")
+            continue
         out.extend(single_refs(parse(s)))
     return out
 

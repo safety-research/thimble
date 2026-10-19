@@ -307,3 +307,74 @@ def test_an_object_bound_to_a_cut_table_says_so(root: Path, monkeypatch: pytest.
     assert q["truncated"] and len(q["table"]) == 4
     obj = O.save(st, "saves", {"title": "Saves", "data": {"rows": q["id"], "first": f"{q['id']}#row=1@user"}})
     assert len(obj["lineage"]["problems"]) == 1 and "more rows than its record keeps" in obj["lineage"]["problems"][0]
+
+
+def test_row_sets_of_many_block_refs_compress_and_expand_fast_and_the_same(root: Path) -> None:
+    """An output row may rest on a hundred thousand block refs (each tool call of a swarm): compress keeps each once in
+    first-seen order without a quadratic scan, and expand gives back what parse() reads, in a few seconds at most."""
+    import random
+    import time
+
+    rnd = random.Random(7)
+    files = [f"runs/r{i}/agents/agent-{j:02d}.jsonl" for i in range(3) for j in range(4)]
+    blocks = [f"{rnd.choice(files)}#L{rnd.randint(1, 4000)}.b{rnd.randint(0, 3)}" for _ in range(120_000)]
+    mixed = blocks + ["a.jsonl#L3", "a.jsonl#L4", "a.jsonl#L9", "t.csv#row=2", "d.db#t/5", "f.json#/x/3", blocks[0]]
+    t0 = time.time()
+    sets = R.compress(mixed)
+    back = R.expand(sets)
+    assert time.time() - t0 < 10
+    # every ref once, the numbered rows as row sets first, then the rest in first-seen order
+    want_other = list(dict.fromkeys(b for b in mixed if R._unit(b) is None))
+    assert sets[:4] == ["a.jsonl#L3-4,9", "t.csv#row=2", "d.db#t/5", "f.json#/x/3"]
+    assert sets[4:] == want_other
+    # expand reads each row set as parse() does, the block refs included (a leading zero is read as a number)
+    slow = [x for s in sets for x in R.single_refs(R.parse(s))]
+    assert back == slow
+    assert R.expand(["a b/c.jsonl#L007.b02 "]) == ["a b/c.jsonl#L7.b2"]
+    with pytest.raises(R.RefError):
+        R.expand(["q12#L3.b1"])
+
+
+def test_big_files_are_parsed_once_in_workers_and_a_load_with_fields_reads_only_those_columns(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A load over many big files not yet in the cache parses them in worker processes and keeps each frame by columns;
+    a later load reads them from the cache, only the columns it names, and gives the same frame as a parse would."""
+    for k in range(4):
+        with open(root / f"run{k}.jsonl", "w") as f:
+            for i in range(300):
+                f.write(json.dumps({"type": "assistant" if i % 2 else "user", "n": i, "run": k, "message": {"content": "x" * 50}}) + "\n")
+    monkeypatch.setattr(Q, "CACHE_MIN", 1_000)
+    monkeypatch.setattr(Q, "PARALLEL_MIN", 10_000)
+    st = Store(root)
+    files = [f"run{k}.jsonl" for k in range(4)]
+    Q._warm_cache(st, files)
+    for rel in files:
+        cp = Q._frame_cache(st, rel)
+        assert cp.exists() and cp.with_suffix(".json").exists()
+        whole = Q._parse_frame(st.root, rel, None)
+        assert Q._load_frame(cp, None).equals(whole)
+        part = Q._load_frame(cp, ["n", "nothing"])
+        assert list(part.columns) == ["_ref", "_file", "n"] and part.equals(whole[["_ref", "_file", "n"]])
+    out = Q.run(st, "assistant rows per run", 'df = load("run*.jsonl", fields=["type", "run"])\ntally(df[df.type == "assistant"], "run")')
+    assert out.get("error") is None
+    assert [r["n"] for r in out["table"]] == [150, 150, 150, 150]
+
+
+def test_rows_are_counted_as_iter_rows_gives_them_in_workers_and_by_the_database(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`lean sources` counts each file's rows: a database's by its own count (a table its rows cannot be read from by
+    rowid gives none, as iter_rows gives none), and many big files in worker processes, with the same counts."""
+    con = sqlite3.connect(root / "two.db")
+    con.execute("create table a (x text)")
+    con.executemany("insert into a values (?)", [("p",), ("q",)])
+    con.execute("create table w (k text primary key, v text) without rowid")
+    con.execute("insert into w values ('k1', 'v1')")
+    con.commit()
+    con.close()
+    assert S.count_rows(root, "two.db") == sum(1 for _ in S.iter_rows(root, "two.db")) == 2
+    assert S.count_rows(root, "forge.db") == 3
+    for k in range(3):
+        with open(root / f"many{k}.jsonl", "w") as f:
+            f.write("".join(json.dumps({"i": i}) + "\n" for i in range(50 + k)))
+    rels = ["many0.jsonl", "many1.jsonl", "many2.jsonl", "two.db", "runs.csv"]
+    monkeypatch.setattr(S, "PARALLEL_MIN", 1)
+    sizes = {r: (root / r).stat().st_size for r in rels}
+    assert S._count_many(root, rels, sizes) == {r: S.count_rows(root, r) for r in rels} == {"many0.jsonl": 50, "many1.jsonl": 51, "many2.jsonl": 52, "two.db": 2, "runs.csv": 3}

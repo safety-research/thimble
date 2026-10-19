@@ -90,11 +90,124 @@ def get(st: Store, qid: str) -> dict[str, Any] | None:
 # ------------------------------------------------------------------ the namespace
 
 
+CACHE_MIN = 200_000  # bytes: a source file bigger than this keeps its parsed frame in the cache
+PARALLEL_MIN = 64_000_000  # bytes of files not yet in the cache: a load over this parses them in worker processes
+PARALLEL_MAX = 8  # worker processes at most
+
+
 def _frame_cache(st: Store, rel: str):
+    """Where one source file's parsed frame is kept: its columns one after another in one file (frames2/<key>.cols),
+    with an index of where each starts, so a load that names its fields reads only those columns."""
     p = st.root / rel
     s = p.stat()
     key = hashlib.sha1(f"{rel}:{s.st_size}:{s.st_mtime_ns}".encode()).hexdigest()[:16]
-    return st.cache / "frames" / f"{key}.pkl"
+    return st.cache / "frames2" / f"{key}.cols"
+
+
+def _save_frame(cp: Path | str, df) -> None:
+    """A frame into the cache by columns: each column pickled after the one before, then the index of their places
+    (`<file>.json`) written last, so a frame without its index is never read. Both written whole, then renamed."""
+    import pickle
+
+    cp = Path(cp)
+    cp.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cp.with_name(f"{cp.name}.{os.getpid()}.tmp")
+    cols, at = [], 0
+    with open(tmp, "wb") as f:
+        for c in df.columns:
+            b = pickle.dumps(df[c], protocol=pickle.HIGHEST_PROTOCOL)
+            f.write(b)
+            cols.append({"name": c, "at": at, "len": len(b)})
+            at += len(b)
+    os.replace(tmp, cp)
+    idx = cp.with_suffix(".json")
+    tmpi = idx.with_name(f"{idx.name}.{os.getpid()}.tmp")
+    tmpi.write_text(json.dumps({"rows": int(len(df)), "cols": cols}))
+    os.replace(tmpi, idx)
+
+
+def _load_frame(cp: Path, fields: list[str] | None):
+    """A cached frame: every column, or with `fields` only `_ref`, `_file` and those, in the frame's own order. None
+    when it is not in the cache (or cannot be read)."""
+    import pickle
+
+    import pandas as pd
+
+    idx = cp.with_suffix(".json")
+    if not idx.exists() or not cp.exists():
+        return None
+    try:
+        meta = json.loads(idx.read_text())
+        want = None if fields is None else {"_ref", "_file", *fields}
+        parts = {}
+        with open(cp, "rb") as f:
+            for c in meta["cols"]:
+                if want is not None and c["name"] not in want:
+                    continue
+                f.seek(c["at"])
+                parts[c["name"]] = pickle.loads(f.read(c["len"]))
+        df = pd.DataFrame(parts) if parts else pd.DataFrame(index=pd.RangeIndex(meta["rows"]))
+        return df if len(df) == meta["rows"] else None
+    except Exception:  # noqa: BLE001 — a cache that does not read is parsed again
+        return None
+
+
+def _parse_frame(root: Path, rel: str, table: str | None):
+    """One source file as a frame: each row's value (a record's fields, else its text), with `_ref` and `_file`."""
+    import pandas as pd
+
+    recs, refs = [], []
+    for row in S.iter_rows(root, rel, table=table):
+        v = row.value
+        recs.append(v if isinstance(v, dict) else {"text": v})
+        refs.append(row.ref)
+    df = pd.DataFrame.from_records(recs) if recs else pd.DataFrame()
+    df.insert(0, "_ref", refs)
+    df.insert(1, "_file", rel)
+    return df
+
+
+def _cache_frame(args: tuple[str, str, str]) -> str | None:
+    """A worker's part of a parallel load: one file parsed and its frame written to the cache (written whole, then
+    renamed, so no reader sees half of it). Returns an error in words, or None."""
+    root, rel, cp = args
+    try:
+        _save_frame(cp, _parse_frame(Path(root), rel, None))
+        return None
+    except Exception as e:  # noqa: BLE001 — the parent parses the file itself then
+        return f"{type(e).__name__}: {e}"
+
+
+def _warm_cache(st: Store, files: list[str]) -> None:
+    """Before a load reads many big files that are not in the cache yet, parse them in worker processes, a few at a
+    time, so a corpus of gigabytes is read once in a fraction of the time. Only where processes fork cheaply (Linux); a
+    file a worker could not parse is parsed by the load itself, as before."""
+    if not sys.platform.startswith("linux"):
+        return
+    todo = []
+    for rel in files:
+        try:
+            size = (st.root / rel).stat().st_size
+            cp = _frame_cache(st, rel)
+        except OSError:
+            continue
+        if size > CACHE_MIN and not cp.with_suffix(".json").exists():
+            todo.append((size, rel, cp))
+    if len(todo) < 2 or sum(x[0] for x in todo) < PARALLEL_MIN:
+        return
+    import multiprocessing as mp
+    from concurrent.futures import ProcessPoolExecutor
+
+    n = max(1, min(PARALLEL_MAX, (os.cpu_count() or 2) - 1, len(todo)))
+    if n < 2:
+        return
+    # the biggest first, so the last worker does not start on a big file at the end
+    todo.sort(key=lambda x: -x[0])
+    try:
+        with ProcessPoolExecutor(max_workers=n, mp_context=mp.get_context("fork")) as ex:
+            list(ex.map(_cache_frame, [(str(st.root), rel, str(cp)) for _, rel, cp in todo], chunksize=1))
+    except Exception:  # noqa: BLE001 — the load parses what is missing itself
+        pass
 
 
 def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
@@ -114,28 +227,18 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         files = S.expand_glob(st.root, pattern)
         if not files:
             raise FileNotFoundError(f"no source file matches {pattern!r} under {st.root}")
+        if not table:
+            _warm_cache(st, files)
         frames = []
         for rel in files:
             cp = _frame_cache(st, rel) if not table else None
-            df = None
-            if cp is not None and cp.exists():
-                try:
-                    df = pd.read_pickle(cp)
-                except Exception:  # noqa: BLE001
-                    df = None
+            # a load that names its fields reads only those columns of a cached frame
+            df = _load_frame(cp, list(fields) if fields else None) if cp is not None else None
             if df is None:
-                recs, refs = [], []
-                for row in S.iter_rows(st.root, rel, table=table):
-                    v = row.value
-                    recs.append(v if isinstance(v, dict) else {"text": v})
-                    refs.append(row.ref)
-                df = pd.DataFrame.from_records(recs) if recs else pd.DataFrame()
-                df.insert(0, "_ref", refs)
-                df.insert(1, "_file", rel)
-                if cp is not None and (st.root / rel).stat().st_size > 2_000_000:
+                df = _parse_frame(st.root, rel, table)
+                if cp is not None and (st.root / rel).stat().st_size > CACHE_MIN:
                     try:
-                        cp.parent.mkdir(parents=True, exist_ok=True)
-                        df.to_pickle(cp)
+                        _save_frame(cp, df)
                     except Exception:  # noqa: BLE001
                         pass
             if fields:

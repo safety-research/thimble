@@ -20,6 +20,8 @@ const STUBS: Record<string, string> = {
   'squeeze/v5': 'THE PROMPT',
   'thread/v1': 'THE THREAD PROMPT',
   'forms/v2': '# Card forms\n\n## Principles\n\nOLD PRINCIPLES\n\n## Worked examples\n\nTHE WORKED FORMS',
+  'card/v2': '# Card after, and v\'s card\n\n## The request\n\nREQUEST {{QUESTION}} | {{ANSWER}}\n\n## The view the person asked for\n\nVIEW {{WHAT}}{{CHOICE}} | {{HAS}}{{PROPOSALS}}| {{ANSWER}} | {{GUIDANCE}} | {{TOOLKIT}}\n\n## The fix\n\nFIX {{PROBLEMS}} | {{CARD}}\n\n## Saving\n\nSAVING\n\n## What the person sees\n\nTHE CARD COMES AFTER THE ANSWER',
+  'card/v1': '# Card after\n\n## The request\n\nREQUEST {{QUESTION}} | {{ANSWER}} | {{CARDS}} | {{GUIDANCE}} | {{TOOLKIT}}\n\n## The fix\n\nFIX {{PROBLEMS}} | {{CARD}} | {{TOOLKIT}}\n\n## Saving\n\n**Save what the person will keep as an object.** CARDS COME AFTER.\n\n## What the person sees\n\nTHE CARD COMES AFTER THE ANSWER',
 }
 
 /** The stub text of a registry path (`…/prompts/<feature>/<version>.md`), or undefined for any other path. */

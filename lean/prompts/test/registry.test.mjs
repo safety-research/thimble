@@ -31,7 +31,8 @@ test('the index has every feature with its default, the versions on disk, and a 
   assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['attention-v1', 'mine', 'v1', 'v2', 'v2-low'])
   assert.equal(idx.observer.versions.mine.file, 'prompts/observer/mine.md')
   assert.equal(idx.lean.versions.skill.file, 'skills/lean/SKILL.md')
-  for (const [name, f] of Object.entries(FEATURES)) assert.ok(idx[name].versions[f.default], `${name} has its default`)
+  // a feature that is off by default has no version named off
+  for (const [name, f] of Object.entries(FEATURES)) assert.ok(f.default === 'off' ? f.optional && !idx[name].versions.off : idx[name].versions[f.default], `${name} has its default`)
 })
 
 test('the active version: the default, then the setting, then LEAN_PROMPTS; a missing version keeps the one before with one line', () => {
@@ -62,6 +63,22 @@ test('a lens can be turned off; a feature that is no lens cannot', () => {
   assert.equal(c.active['lens-explain'].file, null)
   assert.equal(c.active.squeeze.version, FEATURES.squeeze.default)
   assert.match(c.problems[0], /no version squeeze:off/)
+})
+
+test('a feature that is off by default (the card after the answer) is off until a setting names a version, and the spec names it then', () => {
+  const idx = indexOf({ card: ['v1.md'] })
+  assert.deepEqual(Object.keys(idx.card.versions), ['v1', 'v2'])
+  const d = choose(idx, {})
+  assert.equal(d.active.card.off, true)
+  assert.equal(d.active.card.version, 'off')
+  assert.equal(d.active.card.file, null)
+  assert.equal(specOf(d.active, idx), '')
+  const on = choose(idx, { env: 'card:v1' })
+  assert.equal(on.active.card.off, undefined)
+  assert.equal(on.active.card.file, 'prompts/card/v1.md')
+  assert.equal(specOf(on.active, idx), 'card:v1')
+  assert.equal(choose(idx, { setting: 'card:v1', env: 'card:off' }).active.card.off, true)
+  assert.ok(listing(idx, d.active).some(l => l.startsWith('card') && l.includes('v1 v2 [off]')))
 })
 
 test('the spec of the versions in use names only those that are not the defaults', () => {

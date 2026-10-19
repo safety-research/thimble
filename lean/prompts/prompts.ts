@@ -17,8 +17,14 @@
 // of a skill's feature is active, the skill.prompt hook serves it in place of the file's text. The same hook makes sure
 // a verb's skill never replaces the lean skill: when Claude loads one of thimble's other skills (map, explore, trace,
 // claims) before the lean skill in a session, the lean skill's text comes first in what it reads.
+//
+// The card after the answer (feature `card`, off by default): while it is on, main does not draw the answer's card in
+// its turn (a fork draws it after the answer, shell.tsx), so the lean skill comes with its card parts replaced by the
+// version's own (shell/cardfork.mjs skillWithCards), and the first data command brings no card guidance. A toolkit
+// read and `lean guide cards` (the person asked for a card, or pressed v) still bring it.
 import type { EngineInterface } from 'claude-code'
 
+import { skillWithCards } from '../shell/cardfork.mjs'
 import { record } from '../telemetry/telemetry'
 import { FEATURES, bodyOf, choose, featureOfSkill, idOf, indexOf, partsChoice, specOf } from './registry.mjs'
 
@@ -147,6 +153,16 @@ export async function promptTextAt($: Engine, feature: string, version: string):
   return { text: R.texts.get(key)!, version, id, off: false }
 }
 
+/** The card after the answer: its version's text when it is on, else null. */
+export async function cardAfter($: Engine): Promise<{ text: string; id: string } | null> {
+  try {
+    const t = await promptText($, 'card')
+    return t.off || !t.text.trim() ? null : { text: t.text, id: t.id }
+  } catch {
+    return null
+  }
+}
+
 /** The ids of the versions in use for some features: {feature: 'feature:version'}. */
 export async function promptIds($: Engine, features: string[]): Promise<Record<string, string>> {
   const { active } = await registry($)
@@ -196,8 +212,12 @@ export function registerPrompts(on: Any, options: Any): void {
       if (!isRead && !isShell && !data) return r
       await registry($)
       if (R.cardsGiven) return r
-      // a part the conversation holds already (the lean skill's card section, once the lean skill is loaded) is left out
-      const t = await promptText($, 'forms', { skip: p => R.leanLoaded && p.file === 'skills/lean/SKILL.md' })
+      // the card comes after the answer, from a fork: a data command brings no guidance (a toolkit read still does)
+      const after = await cardAfter($)
+      if (data && after) return r
+      // a part the conversation holds already (the lean skill's card section, once the lean skill is loaded, unless the
+      // card after the answer took its place) is left out
+      const t = await promptText($, 'forms', { skip: p => R.leanLoaded && !after && p.file === 'skills/lean/SKILL.md' })
       if (t.off || !t.text.trim()) return r
       R.cardsGiven = true
       const base = (FEATURES.forms.versions as Any)?.[t.version]?.base || FEATURES.forms.base
@@ -229,15 +249,20 @@ export function registerPrompts(on: Any, options: Any): void {
         if (a.file !== idx[feature].versions.skill?.file) text = withBody(text, (await promptText($, feature)).text)
       }
       let leanFirst = false
-      if (name === 'lean') R.leanLoaded = true
-      else if (!R.leanLoaded) {
+      // the card after the answer: the lean skill's card parts are the card version's
+      const card = name === 'lean' || !R.leanLoaded ? await cardAfter($) : null
+      if (name === 'lean') {
+        R.leanLoaded = true
+        if (card) text = withBody(text, skillWithCards(bodyOf(text.replace(/^Base directory for this skill:[^\n]*\n+/, '')), card.text))
+      } else if (!R.leanLoaded) {
         // a verb's skill loaded before the lean skill: the lean skill's text first, so citing and saving still hold
         const lean = await promptText($, 'lean')
-        text = `${lean.text.trim()}\n\n(The lean skill's base folder: ${rootOf($)}/skills/lean.)\n\n---\n\nThe ${name} skill, which builds on the lean skill above:\n\n${text}`
+        const leanText = card ? skillWithCards(lean.text, card.text) : lean.text
+        text = `${leanText.trim()}\n\n(The lean skill's base folder: ${rootOf($)}/skills/lean.)\n\n---\n\nThe ${name} skill, which builds on the lean skill above:\n\n${text}`
         R.leanLoaded = true
         leanFirst = true
       }
-      await record($, { kind: 'prompt', feature: feature ?? name, prompt: id, via: `skill ${name}`, ...(leanFirst ? { with_lean: true } : {}) })
+      await record($, { kind: 'prompt', feature: feature ?? name, prompt: id, via: `skill ${name}`, ...(leanFirst ? { with_lean: true } : {}), ...(card ? { card: card.id } : {}) })
       return { text }
     } catch {
       return r
