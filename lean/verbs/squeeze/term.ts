@@ -167,6 +167,12 @@ export async function setLevels($: Engine, row: string, at: At): Promise<void> {
       const j = inflight.get(row)!
       next = j.want
       j.want = null
+      // a change pressed while that call ran: the chips show where it goes again, since the call may have read the
+      // record before the press and saved it without
+      if (next) {
+        await setUi($, row, { want: next.at })
+        await markRecord($, row, { want: next.at, error: null })
+      }
     }
   } finally {
     inflight.delete(row)
