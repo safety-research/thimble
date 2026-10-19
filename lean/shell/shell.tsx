@@ -1434,7 +1434,7 @@ async function claimsPaneNow($: Engine, e: Any): Promise<Any> {
   const st = ((await $.state.get(CLAIMPANE)).value as ClaimPane | null) ?? { row: '' }
   const w = Math.max(30, (e.props.bodyColumns ?? 120) - 1)
   const h = Math.max(6 + HEAD_ROWS, e.props.scroll?.bodyRows ?? 40)
-  return paneEl($, e, 'claims', { row: st.row || '' }, { w, h })
+  return paneEl($, e, 'claims', { row: st.row || '' }, { w, h }, { painted: true })
 }
 
 /** A question asked with the ring on a claim of the Claims pane: what it carries for Claude, and the row's few words. */

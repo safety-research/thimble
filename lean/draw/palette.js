@@ -34,12 +34,33 @@ export function mix(a, b, share) {
 
 /**
  * The terminal's color for a tone in a `Text` element: Claude Code's own theme keys where one fits, so text follows
- * the theme a person picked (ink is the default text color, so it is left out); the palette's hex elsewhere.
+ * the theme a person picked; the palette's hex elsewhere. Ink is the terminal's own text color (left out) where the
+ * text stands on the terminal's background, as in the transcript; on a background Claude Code paints from the theme
+ * (`painted`: a pane), it is the theme's text color, `text`, which the theme sets to read on that background.
  */
-export function termColor(tone, theme = 'dark') {
-  if (tone === 'ink' || !tone) return undefined
+export function termColor(tone, theme = 'dark', { painted = false } = {}) {
+  if (tone === 'ink' || !tone) return painted ? 'text' : undefined
   if (tone === 'dim' || tone === 'unseen') return 'inactive'
   if (/-faint$/.test(tone)) return hex(tone, theme)
   if (tone === 'rule') return 'subtle'
+  return hex(tone, theme)
+}
+
+// the tones that carry no color of their own: on the selection they read as the theme's text
+const NEUTRAL = /^(ink|paper|dim|unseen|rule)(-faint)?$/
+
+/**
+ * The color of a selected cell's text, on Claude Code's selection background (`selectionBg`): the theme's text color
+ * for text in a neutral tone and for text drawn on a fill of its own (a bar's label in `paper`, whose fill the
+ * selection replaces), so it reads on the light and the dark theme alike; a colored tone keeps its color.
+ */
+export function selectedColor(tone, theme = 'dark', onFill = false) {
+  if (onFill || !tone || NEUTRAL.test(tone)) return 'text'
+  return termColor(tone, theme, { painted: true })
+}
+
+/** The same for a cell drawn as pixels (a Raster), on the palette's `select`: the palette's ink, or the tone's hex. */
+export function selectedHex(tone, theme = 'dark', onFill = false) {
+  if (onFill || !tone || NEUTRAL.test(tone)) return hex('ink', theme)
   return hex(tone, theme)
 }

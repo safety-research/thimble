@@ -105,6 +105,18 @@ function textOf(n: any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
+// the props of each Text whose own words hold `part`, with the color it inherits from a Text around it
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function textsWith(n: any, part: string, color?: string): { color?: string; backgroundColor?: string }[] {
+  if (n == null || typeof n !== 'object') return []
+  if (Array.isArray(n)) return n.flatMap(x => textsWith(x, part, color))
+  const kids = n.props?.children ?? n.children
+  const own = n.type === 'Text' ? (n.props?.color ?? color) : color
+  const words = (Array.isArray(kids) ? kids : [kids]).filter((k: unknown) => typeof k === 'string').join('')
+  const here = n.type === 'Text' && words && words.includes(part) ? [{ color: own, backgroundColor: n.props?.backgroundColor }] : []
+  return [...here, ...textsWith(kids, part, own)]
+}
+
 const HINT = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 16, bodyColumns: 200, scroll: { offset: 0, bodyRows: 16 }, view: {} }, viewport: { columns: 200, rows: 48, isFullscreen: true } } as never
 const BAND = { plugin: 'thimble-lean', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 140, rows: 40, isFullscreen: true } } as never
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -265,6 +277,13 @@ test('a question typed while the detail is open goes to the card\'s side thread,
   expect(t).toContain('about Jun 18')
   expect(t).toContain('lean resolve "q1#day=2026-06-18@n"')
   expect(t).toContain('Links peaked that day: 2,994 of the')
+  // on the pane's background the answer's words and the selected part's name read in the theme's text color, never
+  // the terminal's own (which may be light on a light pane); a colored mark in the part keeps its color
+  const drawnPane = await $.ui.render(PANE)
+  expect(textsWith(drawnPane, 'peaked').map(x => x.color)).toEqual(['text'])
+  const picked = textsWith(drawnPane, 'Jun 18').filter(x => x.backgroundColor === 'selectionBg')
+  expect(picked.length).toBeGreaterThan(0)
+  expect([...new Set(picked.map(x => x.color))]).toEqual(['text'])
   // another part: the next question resumes the same agent and names the new part
   await $.command.run({ command: 'obj', args: '01-saves day-2026-06-17' } as never)
   await pane($, clock)

@@ -4,14 +4,16 @@
 // inverse), and `onFocus` hears each one the ring reaches. Rows of pixels (a plot) stay one Raster, as paint.js draws
 // them; their regions are reached by the regions around them or not at all.
 //
-//   paintRegions(grid, els, {theme, selected, key, from, rows, onPress}) -> one Box of rows
+//   paintRegions(grid, els, {theme, selected, key, from, rows, onPress, painted}) -> one Box of rows
 //   from, rows: the window of rows to draw (default all), so a tall object fits a pane
+//   painted: the grid stands on a background Claude Code paints from the theme (a pane), so ink is the theme's text
+//   color; in the transcript it is the terminal's own. The selected region's text reads in the theme's text color.
 //   frame: a color for the card's own frame (its outer ╭─╮ │ ╰─╯ cells), as the card the keys act on is drawn
 //   each region's Button has the key `r|<key>|<row>|<region id>` (regionOfKey reads it back)
 //   a knob's dial (`label ◂ value ▸`, k.dial) is three Buttons: ◂ calls onPress(id, -1), ▸ onPress(id, 1), the rest
 //   onPress(id), so a click turns it where the person clicks
 import { paintGrid } from '../draw/paint.js'
-import { hex, termColor } from '../draw/palette.js'
+import { hex, selectedColor, termColor } from '../draw/palette.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -43,7 +45,7 @@ export function selectable(grid: Grid): Region[] {
   return grid.regions.filter(r => r.rects.length && !r.link).slice().sort((a, b) => (a.rects[0]!.y - b.rects[0]!.y) || (a.rects[0]!.x - b.rects[0]!.x))
 }
 
-export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'light'; selected?: string | null; key?: string; from?: number; rows?: number; onPress?: (id: string, turn?: number) => unknown; frame?: string | null }): Any {
+export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'light'; selected?: string | null; key?: string; from?: number; rows?: number; onPress?: (id: string, turn?: number) => unknown; frame?: string | null; painted?: boolean }): Any {
   const { Box, Text, Button } = els
   const theme = opts.theme || 'dark'
   const key = opts.key || 'cells'
@@ -60,7 +62,7 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
       let y1 = y
       while (y1 < to && pixelRow(y1)) y1++
       const band = { ...grid, h: y1 - y, rows: grid.rows.slice(y, y1), regions: grid.regions.map(r => ({ ...r, rects: r.rects.map(q => ({ ...q, y: q.y - y })) })) }
-      out.push(paintGrid(band, els, { theme, selected: sel, key: `${key}-${y}` }))
+      out.push(paintGrid(band, els, { theme, selected: sel, key: `${key}-${y}`, painted: !!opts.painted }))
       y = y1
       continue
     }
@@ -84,11 +86,12 @@ export function paintRegions(grid: Grid, els: Any, opts: { theme?: 'dark' | 'lig
     })
     const text = (g: Seg) => {
       const p: Any = { children: g.s }
-      const color = g.edge ? opts.frame : termColor(g.c.tone, theme)
+      const on = !!g.region && g.region === sel
+      const color = g.edge ? opts.frame : on ? selectedColor(g.c.tone, theme, !!g.c.bg) : termColor(g.c.tone, theme, { painted: !!opts.painted })
       if (color) p.color = color
       if (g.c.b) p.bold = true
       if (g.c.ref) p.underline = true
-      if (g.region && g.region === sel) p.backgroundColor = 'selectionBg'
+      if (on) p.backgroundColor = 'selectionBg'
       else if (g.c.bg) p.backgroundColor = hex(g.c.bg, theme)
       return Text(p)
     }

@@ -161,6 +161,38 @@ test('paint.js draws text rows as Text and pixel rows as one Raster', async () =
   assert.ok(tinted > 0 || textTinted, 'the selected region is tinted')
 })
 
+test('selected text reads on the selection in either theme, and ink on a pane takes the theme\'s text color', async () => {
+  const { paintGrid } = await import('../paint.js')
+  const { selectedColor, selectedHex, termColor, hex } = await import('../palette.js')
+  const el = type => props => ({ type, props })
+  const els = { Box: el('Box'), Text: el('Text'), Raster: el('Raster') }
+  // one row: a name in ink, then a stacked bar's segment with its label in paper on its fill, then a dim total
+  const cells = (s, tone, bg) => [...s].map(ch => ({ ch, tone, ...(bg ? { bg } : {}) }))
+  const row = [...cells('north ', 'ink'), ...cells(' done 179 ', 'paper', 'c3'), ...cells(' 49', 'dim')]
+  const g = { w: row.length, h: 1, rows: [row], regions: [{ id: 'north', rects: [{ x: 0, y: 0, w: row.length, h: 1 }] }] }
+  const runs = tree => tree.props.children[0].props.children
+  for (const theme of ['light', 'dark']) {
+    // selected: every neutral text and the label on its fill in the theme's text color, on the selection background
+    const on = runs(paintGrid(g, els, { theme, selected: 'north', raster: false }))
+    for (const r of on) assert.deepEqual([r.props.color, r.props.backgroundColor], ['text', 'selectionBg'], `${theme}: "${r.props.children}"`)
+    // not selected, in the transcript: ink is the terminal's own color, the label keeps its paper on its fill
+    const off = runs(paintGrid(g, els, { theme, raster: false }))
+    assert.equal(off[0].props.color, undefined)
+    assert.deepEqual([off[1].props.color, off[1].props.backgroundColor], [hex('paper', theme), hex('c3', theme)])
+    // on a pane: ink takes the theme's text color
+    assert.equal(runs(paintGrid(g, els, { theme, raster: false, painted: true }))[0].props.color, 'text')
+  }
+  assert.equal(termColor('ink', 'light'), undefined)
+  assert.equal(termColor('ink', 'light', { painted: true }), 'text')
+  // a colored tone keeps its color on the selection; a neutral one, or text on a fill, reads as text
+  assert.equal(selectedColor('accent', 'light'), hex('accent', 'light'))
+  assert.equal(selectedColor('c2', 'dark', true), 'text')
+  assert.equal(selectedColor('dim', 'dark'), 'text')
+  // as pixels: the label on the palette's select reads in its ink
+  assert.equal(selectedHex('paper', 'light', true), hex('ink', 'light'))
+  assert.equal(selectedHex('c1', 'light'), hex('c1', 'light'))
+})
+
 test('a knob keeps its value across runs: the host turns it, the program runs again, words and marks follow', () => {
   const program = `
     const s = k.knob('scale', { values: [1, 2, 4, 8, 16], at: 2, label: 'lr scale', fmt: v => '×' + v })

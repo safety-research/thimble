@@ -76,7 +76,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   } else if (m.kind === 'gloss') {
     if (on) { p.backgroundColor = c.focusGloss; p.color = c.paper } else { p.color = c.gloss; p.backgroundColor = c.glossBg }
   } else {
-    p.color = 'inactive'
+    p.color = on ? 'text' : 'inactive'
     if (on) p.backgroundColor = 'selectionBg'
   }
   const label = m.kind === 'gloss' ? `explain ${r.s}` : m.kind === 'spark' ? `cite sparkline ${m.ref}` : `cite ${m.label}`

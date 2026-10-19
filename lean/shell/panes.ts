@@ -8,6 +8,7 @@
 //                                         The state it answers with is kept (thimble/panes/<session>/<key>.json), its
 //                                         actions run (k.do), its later events wait (k.after), its asks are kept
 //   paneEl($, e, name, args, o)          the drawing as Claude Code elements: each part a press, the ring a focus event
+//                                         (o.painted: drawn in a pane of Claude Code's, on the theme's background)
 //   paneKeys(name, args)                 its last drawing, for the bar (panes/host.js keysOf)
 //   setPaneState($, name, args, state)   a state another surface answered with (the browser): kept, and drawn here
 //   shell.tsx gives what a pane reads and may ask for, by name: paneStore (each store), paneAction (what k.do asks),
@@ -273,12 +274,12 @@ export function takeAsk(name: string, args: Record<string, unknown> = {}): Any |
 }
 
 /** The drawing as Claude Code elements: each part a press (a click), and the ring's place a focus event. */
-export async function paneEl($: Engine, e: Any, name: string, args: Record<string, unknown>, size: Size, o: { frame?: string | null } = {}): Promise<Any> {
+export async function paneEl($: Engine, e: Any, name: string, args: Record<string, unknown>, size: Size, o: { frame?: string | null; painted?: boolean } = {}): Promise<Any> {
   const els = $.ui.resolve(e) as Any
   const d = await paneRun($, name, args, size)
   const grid = renderTerm(d, { w: size.w })
   return paintRegions(grid, els, {
-    theme: theme(), key: `p-${name}`, frame: o.frame ?? null,
+    theme: theme(), key: `p-${name}`, frame: o.frame ?? null, painted: !!o.painted,
     onPress: (id: string, dir?: number) => { void paneFire($, name, args, { type: 'press', region: id, ...(dir ? { dir } : {}) }) },
   })
 }

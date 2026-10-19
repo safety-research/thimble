@@ -433,7 +433,8 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   })
   const kids: Any[] = [Box({ flexDirection: 'row', children: [
     Box({ flexDirection: 'column', width: 1, flexShrink: 0, children: gcells }),
-    paintRegions(grid, els, { theme, selected: region, key: 'pane', from, rows, onPress }),
+    // the pane's background is the theme's: its ink is the theme's text color
+    paintRegions(grid, els, { theme, selected: region, key: 'pane', from, rows, onPress, painted: true }),
   ] })]
   if (T) kids.push(Text({ children: ' ' }), ...tlines.slice(tlines.length - T))
   kids.push(Text({ children: ' ' }), askLine($, els, sel, part, ind))
@@ -479,20 +480,21 @@ async function askHere($: Engine, text: string): Promise<void> {
 }
 
 /** The card's thread, under the card: its latest exchange (the question with its part, the steps, the answer with its
- *  citations), cut from the top to the rows it has. */
+ *  citations), cut from the top to the rows it has. Its words are in the theme's text color (`text`), which reads on
+ *  the pane's background, as the terminal's own text color may not. */
 function threadSection(els: Any, thread: Any, C: number, ind: string): Any[] {
   const { Text } = els
   const w = C - 1
   const lines: Any[] = []
-  const say = (runs: Any[], first: Any, rest = '  ') => wrapRuns(runs, w - 2).forEach((l, i) => lines.push(Text({ wrap: 'truncate-end', children: [i ? Text({ children: rest }) : first, ...l.map(styled)] })))
-  const styled = (r: Any) => (r.link ? Text({ color: ind, underline: true, children: r.s }) : Text({ bold: r.bold || undefined, dimColor: r.dim || undefined, children: r.s }))
+  const say = (runs: Any[], first: Any, rest = '  ') => wrapRuns(runs, w - 2).forEach((l, i) => lines.push(Text({ wrap: 'truncate-end', color: 'text', children: [i ? Text({ children: rest }) : first, ...l.map(styled)] })))
+  const styled = (r: Any) => (r.link ? Text({ color: ind, underline: true, children: r.s }) : Text({ color: 'text', bold: r.bold || undefined, dimColor: r.dim || undefined, children: r.s }))
   const turns: Any[] = thread?.turns || []
   const last = turns.map((t: Any) => t.role).lastIndexOf('person')
   const asked = thread?.asks?.length || 0
   if (asked > 1) lines.push(Text({ dimColor: true, children: `thread · ${asked} questions` }))
   for (const t of last >= 0 ? turns.slice(last) : []) {
     if (t.role === 'person') {
-      lines.push(Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: '❯ ' }), Text({ bold: true, children: cut(String(t.text), w - 4) }), ...(t.about ? [Text({ dimColor: true, children: `  about ${cut(String(t.about), 40)}` })] : [])] }))
+      lines.push(Text({ wrap: 'truncate-end', children: [Text({ color: ind, children: '❯ ' }), Text({ color: 'text', bold: true, children: cut(String(t.text), w - 4) }), ...(t.about ? [Text({ dimColor: true, children: `  about ${cut(String(t.about), 40)}` })] : [])] }))
       continue
     }
     const calls: string[] = t.calls || []
@@ -500,7 +502,7 @@ function threadSection(els: Any, thread: Any, C: number, ind: string): Any[] {
     for (const c of calls.slice(-1)) lines.push(Text({ dimColor: true, wrap: 'truncate-end', children: `⏺ ${cut(c, w - 2)}` }))
     // the answer keeps its lines (a list stays a list); code marks are dropped, citations read as their words
     String(t.text || '').replace(/`/g, '').split(/\n+/).map(x => x.trim()).filter(Boolean).forEach((para, i) =>
-      say(linkRuns(para), Text({ children: i ? '  ' : '⏺ ' })))
+      say(linkRuns(para), Text({ color: 'text', children: i ? '  ' : '⏺ ' })))
   }
   if (thread?.status === 'running') lines.push(Text({ color: 'warning', children: '✻ answering…' }))
   if (thread?.status === 'failed') lines.push(Text({ color: 'error', wrap: 'truncate-end', children: `× ${cut(String(thread.error || 'the thread stopped'), w - 2)}` }))
@@ -557,8 +559,8 @@ function citesList(els: Any, sel: Sel, C: number, R: number): Any {
   const list = sel.cites || []
   const shown = list.slice(0, Math.max(5, R - 4))
   return Box({ flexDirection: 'column', children: [
-    Text({ bold: true, children: `${list.length} values cited in the reply` }),
-    Box({ flexDirection: 'column', marginTop: 1, children: shown.map(c => Text({ wrap: 'truncate-end', children: [Text({ children: cut(c.label, Math.floor(C / 2)) }), Text({ dimColor: true, children: `  ${c.ref}` })] })) }),
+    Text({ color: 'text', bold: true, children: `${list.length} values cited in the reply` }),
+    Box({ flexDirection: 'column', marginTop: 1, children: shown.map(c => Text({ wrap: 'truncate-end', children: [Text({ color: 'text', children: cut(c.label, Math.floor(C / 2)) }), Text({ dimColor: true, children: `  ${c.ref}` })] })) }),
   ] })
 }
 
@@ -566,7 +568,7 @@ async function citeView($: Engine, els: Any, sel: Sel, C: number): Promise<Any> 
   const { Box, Text } = els
   const label = citeLabels.get(sel.cite!) || sel.cite!
   const r = (await $.state.get({ ...ROWS, id: `${sel.root}|${sel.cite}` })).value as Any
-  const kids: Any[] = [Text({ bold: true, wrap: 'truncate-end', children: `where ${label} comes from` })]
+  const kids: Any[] = [Text({ color: 'text', bold: true, wrap: 'truncate-end', children: `where ${label} comes from` })]
   if (r === undefined) kids.push(Text({ dimColor: true, children: '  reading its rows…' }))
   else {
     const c = chainWords(r)
@@ -575,7 +577,7 @@ async function citeView($: Engine, els: Any, sel: Sel, C: number): Promise<Any> 
       kids.push(Text({ dimColor: true, wrap: 'truncate-end', children: `  ← ${c.line}` }))
       const view = examplesView(c.records, { at: sel.ex || 0, fit: 10 })
       for (const x of view.rows as Any[]) {
-        kids.push(Text({ wrap: 'truncate-end', children: `  ${cut(x.words || '', C - 4)}` }))
+        kids.push(Text({ color: 'text', wrap: 'truncate-end', children: `  ${cut(x.words || '', C - 4)}` }))
         kids.push(Text({ dimColor: true, wrap: 'truncate-end', children: `    ${x.meta || ''}` }))
       }
     }
