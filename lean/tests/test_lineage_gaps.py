@@ -55,6 +55,16 @@ def test_an_unnamed_index_beside_a_column_named_index_keeps_its_output(root: Pat
     assert q["table"][0] == {"level_0": "xa0", "index": 10}
 
 
+def test_columns_of_two_levels_beside_a_named_index_keep_their_output(root: Path) -> None:
+    st = Store(root)
+    # agg(["mean", "max"]) gives columns of two levels: the index levels come back as (name, ""), named by their name
+    q = Q.run(st, "per agent", 'df = load("events.jsonl")\ndf["role"] = np.where(df.agent == "a0", "lead", "worker")\n'
+              'df.groupby(["role", "agent"])[["step", "hours"]].agg(["mean", "max"])')
+    assert q["error"] is None and q["keys"] == ["role", "agent"]
+    assert list(q["table"][0]) == ["role", "agent", "step_mean", "step_max", "hours_mean", "hours_max"]
+    assert LIN.resolve(st, f"{q['id']}#role=worker&agent=a2@step_max")["rows"] == ["events.jsonl#L3,7,11,15,19,23,27,31,35,39"]
+
+
 def test_a_lineage_that_fails_keeps_the_output_and_says_why(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     st = Store(root)
 

@@ -1088,7 +1088,9 @@ def output_lineage(result: Any, ns: dict[str, Any], frames: list[Any], records: 
         positional = list(df.index.names) == [None] and pd.api.types.is_integer_dtype(df.index)
         levels = df.index.nlevels
         df = _reset_index(df)
-        df.columns = [str(c) for c in df.columns]
+        # columns of two levels are named as a table of them with no index is (`n_mean`), and the index levels beside
+        # them, which come back as (name, ""), by their name alone
+        df.columns = ["_".join(str(x) for x in c if x != "") if isinstance(c, tuple) else str(c) for c in df.columns]
         # the index levels are the first columns now, under the names reset_index gave them (`index`, `level_0` for
         # unnamed levels, a new name when a column already had the level's name)
         keys = [] if positional else list(df.columns[:levels])
