@@ -24,6 +24,8 @@ type Any = any
 
 function world(on: Any, o: { env?: Record<string, string>; replies?: Json[]; save?: (n: number) => string } = {}) {
   mock.env(on, { THIMBLE_HOME: '/home/t/.thimble', ...(o.env ?? {}) })
+  mock.store(on)
+  on('session.messages', () => ({ value: [] }))
   on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.cwd', () => ({ value: ROOT }))
@@ -45,6 +47,8 @@ function world(on: Any, o: { env?: Record<string, string>; replies?: Json[]; sav
       files[e.argv.at(-1)!] = (files[e.argv.at(-1)!] ?? '') + String(e.init?.stdin ?? '')
       return ok('')
     }
+    // the observer's read of the session's objects (observer/node/objects.mjs)
+    if (e.argv.some(a => a.endsWith('objects.mjs'))) return ok(JSON.stringify(Object.entries(files).filter(([k]) => k.startsWith(`${ROOT}/thimble/objects/`)).map(([, v]) => JSON.parse(v)).filter(o => o.session === 's-1').map(o => ({ id: o.id, version: o.version, session: o.session, updated: o.updated, title: o.title, lineage: {} }))))
     if (e.argv.some(a => a.endsWith('prep.mjs'))) return ok(JSON.stringify({ drawing: DRAWING, verbs: [], problems: [], ...(JSON.parse(String(e.init?.stdin || '{}')).check ? { check: { line: null, tried: 0, total: 0, failed: 0, cut: 0, ms: 1 } } : {}) }))
     if (e.argv.some(a => a.endsWith('/bin/lean'))) {
       const args = e.argv.slice(1)
@@ -53,7 +57,7 @@ function world(on: Any, o: { env?: Record<string, string>; replies?: Json[]; sav
       if (args[0] === 'save') {
         saves += 1
         const object = JSON.parse(files[args[3]!] ?? '{}')
-        files[`${ROOT}/thimble/objects/02-${args[1]}.json`] = JSON.stringify({ id: `02-${args[1]}`, version: saves, ...object })
+        files[`${ROOT}/thimble/objects/02-${args[1]}.json`] = JSON.stringify({ id: `02-${args[1]}`, version: saves, session: 's-1', updated: new Date(Date.now()).toISOString(), lineage: {}, ...object })
         files[EVENTS] = (files[EVENTS] || '') + JSON.stringify({ t: Date.now() / 1000, kind: 'save', session: 's-1', root: ROOT, object: `02-${args[1]}`, version: saves }) + '\n'
         return ok(o.save ? o.save(saves) : `saved 02-${args[1]} v${saves}: thimble/objects/02-${args[1]}.json\n  /days ← q7 (exact)\n  1 of 1 citations hold`)
       }
@@ -62,7 +66,14 @@ function world(on: Any, o: { env?: Record<string, string>; replies?: Json[]; sav
     return ok('{}')
   })
   const forks: string[] = []
+  // every model call in order: the fork's card, the observer's question step and its pass
+  const calls: string[] = []
+  on('model.complete', (_$: unknown, e: { prompt: string; system?: unknown }) => {
+    calls.push(e.system ? `pass ${String(e.prompt)}` : 'question')
+    return { value: { isAnswered: true, text: e.system ? JSON.stringify({ notes: [], line: null, settled: false, hints: {}, claims: [] }) : JSON.stringify({ parts: [], drift: null, decision: null }), usage: USAGE } }
+  })
   on('model.fork', (_$: unknown, e: { prompt: string }) => {
+    calls.push('fork')
     forks.push(String(e.prompt))
     const reply = o.replies?.[forks.length - 1] ?? { card: null, why: 'no reply set' }
     return { value: { isAnswered: true, text: JSON.stringify(reply), usage: USAGE } }
@@ -86,7 +97,7 @@ function world(on: Any, o: { env?: Record<string, string>; replies?: Json[]; sav
     return { result: /lean q/.test(String(e.command)) ? 'q1 · saves per day\n...' : 'ok' }
   })
   const clock = mock.clock(on)
-  return { files, lean, forks, submitted, toasts, clock }
+  return { files, lean, forks, submitted, toasts, clock, calls }
 }
 
 /** A turn of the person's: the question, a `lean q` (or another command), the answer, its end. */
@@ -181,4 +192,24 @@ test('a turn that ran no lean, or saved its own card, asks no fork; a fork that 
   await w.clock.advance(100)
   const events = (w.files[EVENTS] ?? '').split('\n').filter(Boolean).map(l => JSON.parse(l))
   expect(events.filter(e => e.kind === 'card')).toEqual([expect.objectContaining({ drawn: false, why: 'one number' })])
+})
+
+test("the observer's look waits for the card after the answer, so its pass reads the card", async ($, on) => {
+  const w = world(on, { env: { LEAN_PROMPTS: 'card:v1' }, replies: [CARD] })
+  // one request of main's turn with one tool call, so the look counts it as a turn of work
+  on('turn.step', async function* (_$: unknown, e: Any) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [{ id: 'u0', name: 'Bash', input: {} }] } })
+  await $.prompt.submit({ text: 'when did they edit most?', origin: { kind: 'composer' } } as never)
+  await $.turn.start({ turnId: 't1', text: 'when did they edit most?' } as never)
+  const s = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 3 })
+  for (let r = await s.next(); !r.done; r = await s.next()) { /* no chunks */ }
+  await $.tool.call({ tool: 'Bash', command: "lean q \"saves per day\" <<'PY'\ntally(df, 'day')\nPY" } as never)
+  await $.session.append({ door: 'response', uuid: ROW, origin: { kind: 'model', model: 'm' }, message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'June 18 had the most saves: 6,543.' }] } } as never)
+  await $.turn.complete({ turnId: 't1', answer: 'June 18 had the most saves: 6,543.', durationMs: 5, reason: 'answer', isAborted: false } as never)
+  await w.clock.settle()
+  await w.clock.advance(1000)
+  await w.clock.settle()
+  const pass = w.calls.findIndex(c => c.startsWith("pass"))
+  expect(w.calls.indexOf('fork')).toBeGreaterThanOrEqual(0)
+  expect(pass).toBeGreaterThan(w.calls.indexOf('fork'))
+  expect(w.calls[pass]).toContain('02-edits-per-day')
 })
