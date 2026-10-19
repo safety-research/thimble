@@ -491,10 +491,11 @@ export function renderSvg(drawing, opts = {}) {
           ? `<rect x="${r1(x + a)}" y="${r1(y + by)}" width="${r1(Math.max(0.5, b - a - seam))}" height="${bh}" fill="url(#${id}-hatch)"/>`
           : `<rect x="${r1(x + a)}" y="${r1(y + by)}" width="${r1(Math.max(0.5, b - a - seam))}" height="${bh}" fill="${C(p.tone)}"/>`)
         // a labelled part with room says what it is in place, as the terminal does, so the card needs no legend; its
-        // words are measured in their own size and stay inside the part
+        // words are measured in their own size and stay inside the part. The size is an inline style: the drawing's
+        // stylesheet sets every text's size, which a font-size attribute does not override
         const size = Math.max(9, bh - 2)
         const words = p.label != null && p.tone !== 'unseen' ? inPlace(p.label, p.value, b - a - seam, t => mw(t, { size }), cw) : ''
-        if (words) L.text.push(`<text x="${r1(x + a + cw)}" y="${r1(y + by + bh - 2)}" font-size="${size}" fill="${C('paper')}" xml:space="preserve">${xml(words)}</text>`)
+        if (words) L.text.push(`<text x="${r1(x + a + cw)}" y="${r1(y + by + bh - 2)}" style="font-size:${size}px" fill="${C('paper')}" xml:space="preserve">${xml(words)}</text>`)
       })
       return
     }

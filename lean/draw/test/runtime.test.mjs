@@ -95,7 +95,9 @@ test('a stacked bar\'s label stays inside its own part in both renderers, and a 
     const svg = renderSvg(d, { w, measure: wide }).svg
     const fills = parts.map(p => hex(p.tone, 'light'))
     const rects = [...svg.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)" fill="([^"]+)"/g)].filter(m => fills.includes(m[5])).map(m => ({ x: +m[1], y: +m[2], w: +m[3], h: +m[4] }))
-    const texts = [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" font-size="(\d+)" fill="[^"]+" xml:space="preserve">([^<]*)</g)].map(m => [m[0], m[1], m[3], m[4], +m[2]])
+    // the size each label is drawn in: its own inline style (the drawing's stylesheet sets every other text's size)
+    const texts = [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" style="font-size:(\d+)px" fill="[^"]+" xml:space="preserve">([^<]*)</g)].map(m => [m[0], m[1], m[3], m[4], +m[2]])
+    if (w >= 90) assert.ok(texts.length > 0, `${w}: no label in place`)
     for (const t of texts) {
       const x = +t[1]
       const r = rects.find(q => q.x <= x && x < q.x + q.w && q.y <= t[4] && t[4] <= q.y + q.h)
