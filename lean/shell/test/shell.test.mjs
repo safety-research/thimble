@@ -3,7 +3,7 @@
 //   node --test lean/shell/test/shell.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { request } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -469,4 +469,21 @@ test('a bar keeps the examples and cite its own meta names, so selecting it show
   const r = d.regions.find(x => x.id === 'b1')
   assert.equal(r.meta.examples, 'ex-1')
   assert.equal(r.meta.ref, 'q1#k=1@n')
+})
+
+test('every state key the plugin keeps is named in its types contract', () => {
+  const here = new URL('../../', import.meta.url).pathname
+  const declared = new Set([...readFileSync(join(here, 'types', 'index.d.ts'), 'utf8').split("'thimble-lean': {")[1].matchAll(/^ {6}(\w+):/gm)].map(m => m[1]))
+  const used = new Set()
+  const walk = dir => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === 'app' || e.name.startsWith('.')) continue
+      const p = join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (/\.(ts|tsx)$/.test(e.name) && !/\.test\.ts$/.test(e.name)) for (const m of readFileSync(p, 'utf8').matchAll(/plugin: 'thimble-lean', key: '(\w+)'/g)) used.add(m[1])
+    }
+  }
+  walk(here)
+  assert.ok(used.size > 20)
+  assert.deepEqual([...used].filter(k => !declared.has(k)), [])
 })

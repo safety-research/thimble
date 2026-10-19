@@ -152,6 +152,12 @@ declare module 'claude-code' {
       claimpane: { row: string; focus: string | null; replay: { gen: number; k: number; order: string[] } | null } | null
       /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
       events: { file: string; n: number; bytes?: number }
+      /** what takes the keys, newest last (the shell's focus stack): the thimble line says the keys of the top one */
+      focus: ('detail' | 'claims' | 'chips' | 'proposals' | 'tray' | 'card')[]
+      /** when a card's state file last changed, by root and id: a drawing that reads the card's state draws again */
+      cardver: StateFamily<number>
+      /** how many times a pane was asked to draw again, by the pane's instance: its drawings read it */
+      panever: StateFamily<number>
     }
   }
 }
