@@ -18,6 +18,8 @@
 //              event, and after each drawing the ring is put back on the selected part, so the two never drift apart
 //              when the card scrolls. `0` and `esc` empty the bar and close the program, then `esc` closes the detail.
 //              Claude Code keeps ← and →, so knobs turn on , and .
+//   window     a page taller than the pane shows the rows around the selected part; once the person opens the bar
+//              under the card (↵ details, e examples, a flip) it shows the bar, and the wheel moves it from there
 //   card       the card's drawing, run in its own sandbox with its state (thimble/objects/.state/<id>.json), which the
 //              detail's program embeds; a knob turned, a zoom or a filter is a change of the card's state
 // A card under a reply shows `1 open detail`; 1 on an empty prompt opens the latest card's detail.
@@ -76,6 +78,9 @@ let draft = ''
 let refocus = false
 let drawnSig = ''
 let paneFocused = false
+// the page's window when the page is taller than the pane: what it follows (the selected part, or the bar under the
+// card once the person opened it), the bar and part it last saw, and the rows the wheel moved it by since
+const win = { follow: 'part' as 'part' | 'bar', bar: '', region: null as string | null, by: 0 }
 
 /** The terminal's width, from the band's viewport (shell.tsx) while no pane of ours is docked: then the conversation
  *  has every column. While one is docked its own drawing measures it (noteDock). */
@@ -414,13 +419,22 @@ export async function detailPane($: Engine, e: Any): Promise<Any> {
   const parts = partsOf({ ...grid, regions: grid.regions.filter((r: Any) => !/^ver-\d+$/.test(r.id)) })
   const region = typeof d.selected === 'string' ? d.selected : null
   const part = parts.find((x: Any) => x.id === region) ?? null
-  // a page taller than its rows: the rows around the selected part
+  // a page taller than its rows: the rows around the selected part, or, once the person opened the bar under the card
+  // (↵ details, e examples, a flip), the bar with as much of the card above it as fits; the wheel moves the window
+  // from there until the selection or the bar changes
+  const barNow = `${sel.bar ?? ''}|${sel.bar === 'examples' ? sel.ex ?? 0 : ''}`
+  if (barNow !== win.bar) { win.bar = barNow; win.by = 0; if (sel.bar) win.follow = 'bar' }
+  if (region !== win.region) { win.region = region; win.by = 0; win.follow = 'part' }
   let rows = Math.min(grid.h, pageRows)
   let from = 0
   if (grid.h > rows) {
     const top = bodyTop(part)
-    from = Math.max(0, Math.min(grid.h - rows, (top ? top.y : 0) - Math.floor(rows / 3)))
-  }
+    const end = grid.h - rows
+    // the bar is the page's last rows
+    const at = sel.bar && win.follow === 'bar' ? end : Math.max(0, Math.min(end, (top ? top.y : 0) - Math.floor(rows / 3)))
+    from = Math.max(0, Math.min(end, at + win.by))
+    win.by = from - at
+  } else win.by = 0
   rows = Math.min(rows, grid.h - from)
   const pixel = new Set<number>()
   for (let y = 0; y < grid.h; y++) if (grid.rows[y].some((c: Any) => c.px) && !grid.rows[y].some((c: Any) => c.b || c.ref || c.w2)) pixel.add(y)
@@ -730,6 +744,15 @@ export function registerDetail(on: Parameters<Register>[0]): void {
     }
   }).catch(($, e, next) => next(e))
 
+  // the wheel over the pane (or its scroll keys) moves the page's window: the pane draws its own rows of the page, so
+  // the engine has none to move
+  on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
+    if ((e.origin as { kind?: string }).kind !== 'person' || !drawn || !isOpen) return next(e)
+    win.by += Number(e.by) || 0
+    $.ui.invalidate('ui.render')
+    return {}
+  }).catch(($, e, next) => next(e))
+
   // esc in the ask line empties it and gives the keys back to the card; then esc empties the bar and closes the program
   // (the program's esc), then the detail; closing gives the main view back
   on('ui.close', { id: PANE }, async ($, e, next) => {
@@ -831,6 +854,7 @@ export function resetDetail(): void {
   refocus = false
   paneFocused = false
   drawnSig = ''
+  win.follow = 'part'; win.bar = ''; win.region = null; win.by = 0
   viewCols = 0
   latestSeen.clear()
   lastCard = null

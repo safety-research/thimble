@@ -474,6 +474,41 @@ test('one selection, one highlight: the ring stands on the selected part, and st
   expect(textOf(await ui.drawn())).not.toContain('Step 0 ')
 })
 
+test('on a tall card, e shows what it opens: the window moves to the bar under the card, and the wheel moves the window', async ($, on) => {
+  // a tall card: 30 steps, one row each, in a pane of 14 rows; the first step has examples
+  const steps = Array.from({ length: 30 }, (_, i) => region(`step-${i}`, `Step ${i}`, i, i === 0 ? 'ex-18' : undefined))
+  const TALL = { ...DRAWING, root: { t: 'stack', kids: steps }, regions: steps.map(x => ({ id: x.id, meta: x.meta })) }
+  world(on, () => TALL)
+  const clock = mock.clock(on)
+  const SMALL = { ...(PANE as Any), props: { ...(PANE as Any).props, scroll: { bodyRows: 14, offset: 0 } } } as never
+  await $.command.run({ command: 'obj', args: '01-saves step-0' } as never)
+  const ui = await $.ui.mount({ plugin: 'thimble-lean', ...(SMALL as Any) } as never)
+  const draw = async () => { for (let i = 0; i < 3; i++) { await ui.redraw(); await clock.settle() } }
+  await draw()
+  expect(textOf(await ui.drawn())).toContain('Step 0 ')
+  // e: the examples open under the card, and the window shows them
+  expect(await press($, clock, edit('e'))).toEqual({ text: '', cursor: 0 })
+  await draw()
+  const shown = textOf(await ui.drawn())
+  expect(shown).toContain('examples of saves on Jun 18')
+  expect(shown).toContain('Hello agents, sign below.')
+  expect(shown).toContain('Step 29')
+  // the wheel up over the pane: the window moves up, rows of the card come back into view
+  const wheel = (by: number) => $.ui.scroll({ component: 'Pane', requestId: 'object', offset: 0, by, bodyRows: 14, contentRows: 14, origin: { kind: 'person' } } as never)
+  expect(shown).not.toContain('Step 20')
+  for (let i = 0; i < 8; i++) await wheel(-1)
+  await draw()
+  expect(textOf(await ui.drawn())).toContain('Step 20')
+  expect(textOf(await ui.drawn())).not.toContain('Hello agents')
+  // past the top it stops at the top: the next tick down moves it at once
+  for (let i = 0; i < 60; i++) await wheel(-1)
+  await draw()
+  expect(textOf(await ui.drawn())).toContain('Step 0 ')
+  for (let i = 0; i < 5; i++) await wheel(1)
+  await draw()
+  expect(textOf(await ui.drawn())).not.toContain('Step 0 ')
+})
+
 test('the thimble line says the keys of what is on top of the focus stack: the detail gone, they are gone', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
