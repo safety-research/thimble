@@ -20,7 +20,7 @@ import { remark as remarkAny } from '../../shell/message.js'
 import { tracked } from '../../telemetry/telemetry'
 import { FEATURES } from '../../prompts/registry.mjs'
 import { claimsStore, questionBefore, recordNow, saveRecord } from '../../shell/shell'
-import { ARRIVE, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, isLong, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stretchChip, termsOf, withStretch } from './chips.mjs'
+import { ARRIVE, applyRewrite, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, isLong, isOriginal, keepCorrections, mustKeep, noteFor, noteOf, readReply, request, restore, revealStep, rowsOf, stretchChip, termsOf, withStretch } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -226,8 +226,13 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
       await setUi($, row, { error: 'the rewrite came back empty · press the key again to retry · 0 original' })
       return
     }
-    const back = keeps ? keepCorrections(reply.text, keep) : { text: reply.text, back: [] }
-    const checked = checkRewrite(rec.text, back.text)
+    // a heading the rewrite ends on, with nothing under it, promises what the text does not give: dropped before a
+    // correction is put back after it, and after
+    const bare = dropOrphanHeads(reply.text)
+    const back = keeps ? keepCorrections(bare.text, keep, rec.text) : { text: bare.text, back: [] }
+    const whole = dropOrphanHeads(back.text)
+    whole.dropped.unshift(...bare.dropped)
+    const checked = checkRewrite(rec.text, whole.text)
     // the record as it is now (the observer may have written its verbs and glosses meanwhile)
     const fresh = (await recordNow($, row)) || rec
     const fs = ((fresh as Any).squeeze ?? {}) as Any
@@ -238,7 +243,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     ticker.stop()
     await setUi($, row, { running: null })
     await settled($, row, next)
-    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(terms.length ? { terms: terms.length } : {}) })
+    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}) })
   } finally {
     ticker.stop()
   }

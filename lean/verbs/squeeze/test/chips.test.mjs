@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { newRecord, remark, verbsOf, withObserver } from '../../../shell/message.js'
-import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, endsOf, fromVersions, glyph, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, termsOf, withStretch } from '../chips.mjs'
+import { ARRIVE, CHIPS, applyRewrite, checkRewrite, chipsOf, dropOrphanHeads, endsOf, fromVersions, glyph, isHeading, isLong, isOriginal, keepCorrections, keyOf, mustKeep, noteFor, noteOf, readReply, request, restore, revealCut, revealStep, rowsOf, stepAt, stretchChip, termsOf, withStretch } from '../chips.mjs'
 import { parseWords, run } from '../run.mjs'
 
 // a made-up report, as a long reply takes it
@@ -255,6 +255,47 @@ test('a rewrite that leaves a correction out gets it back after it; one that kep
   assert.deepEqual(r.back, ['**The split:** 5,242, not 5,181.'])
   assert.ok(r.text.endsWith('\n\n**The split:** 5,242, not 5,181.'))
   assert.deepEqual(keepCorrections('Peak June 18; earlier I said 317 and 5,181, it is 316 and 5,242.', keep).back, [])
+})
+
+// a correction section whose second item is a heading over a list of its own, as Claude writes one
+const NESTED = [
+  'First, two corrections to my last answer:',
+  '- **The 70% leaves out round 1.** Reading is 70% of calls only in rounds 2 and 3; in round 1 building takes [55%](q4#row=3@build).',
+  '- **The numbers I did not cite before:**',
+  '  - Mid-run, Tern spends [37%](q4#row=24@test) of calls testing.',
+  '  - 81 of the 86 idle helpers are in round 1 ([13](q2#run=r1-a@idle) + [68](q2#run=r1-b@idle)).',
+  '',
+  'Helper-44 then ran for 6 hours, from 07:30 to 13:30, and made 2 merges.',
+].join('\n')
+
+test('a correction that heads a list keeps the list: its sub-items are part of it, in the request as in the original', () => {
+  const keep = mustKeep(NESTED)
+  assert.equal(keep.length, 2)
+  assert.equal(keep[1], '**The numbers I did not cite before:**\n  - Mid-run, Tern spends [37%](q4#row=24@test) of calls testing.\n  - 81 of the 86 idle helpers are in round 1 ([13](q2#run=r1-a@idle) + [68](q2#run=r1-b@idle)).')
+  const tail = request({ text: NESTED, squeeze: { at: { length: 1 } } }, { system: 'S', keep }).prompt[1].text
+  // the sub-items stand under their heading, one level in
+  assert.match(tail, /\n- \*\*The numbers I did not cite before:\*\*\n {2}- Mid-run, Tern spends \[37%\]\(q4#row=24@test\) of calls testing\.\n {2}- 81 of the 86 idle helpers/)
+})
+
+test('a sub-item the rewrite left out comes back under its heading; a heading never comes back alone; a number said elsewhere in the original is not the correction\'s', () => {
+  const keep = mustKeep(NESTED)
+  // the rewrite keeps the 70% correction and the 37%, and drops the idle helpers; "13" of 13:30 is no sign they stayed
+  const rewrite = 'Round 1 differs: building takes [55%](q4#row=3@build) there, and Tern tests [37%](q4#row=24@test) of calls. Helper-44 ran 6 hours, to 13:30.'
+  const r = keepCorrections(rewrite, keep, NESTED)
+  assert.deepEqual(r.back, ['**The numbers I did not cite before:**\n- 81 of the 86 idle helpers are in round 1 ([13](q2#run=r1-a@idle) + [68](q2#run=r1-b@idle)).'])
+  assert.ok(r.text.endsWith('\n\n**The numbers I did not cite before:**\n- 81 of the 86 idle helpers are in round 1 ([13](q2#run=r1-a@idle) + [68](q2#run=r1-b@idle)).'))
+  // without the original, the 13 of 13:30 would pass for the [13] of the idle helpers
+  assert.deepEqual(keepCorrections(rewrite, keep).back, [])
+  // every sub-item kept: nothing comes back, not even the heading
+  assert.deepEqual(keepCorrections(`${rewrite} 81 of 86 idle helpers are round 1.`, keep, NESTED).back, [])
+})
+
+test('a rewrite that ends on a heading with nothing under it loses the heading; a bold sentence at the end stays', () => {
+  assert.deepEqual(dropOrphanHeads('Helper-44 made 2 merges.\n\n**The numbers I did not cite before:**'), { text: 'Helper-44 made 2 merges.', dropped: ['**The numbers I did not cite before:**'] })
+  assert.deepEqual(dropOrphanHeads('Two things.\n\n## Caveats\n\n- **Next:**').dropped, ['## Caveats', '- **Next:**'])
+  assert.equal(dropOrphanHeads('Helper-44 made 2 merges.\n\n**Fix it before you send it.**').text, 'Helper-44 made 2 merges.\n\n**Fix it before you send it.**')
+  assert.equal(dropOrphanHeads('**Only a heading:**').text, '**Only a heading:**')
+  assert.ok(isHeading('- **Caveats**') && isHeading('Two corrections to my last answer:') && !isHeading('**It is 316.**') && !isHeading('It ran to 13:30.'))
 })
 
 test('the request names the corrections and does not count them in a level\'s length', () => {

@@ -338,6 +338,20 @@ test('a correction of its own earlier answer stays at every length: the request 
   expect(rec.shown).toContain('**The split:** 5,242 link edits, not 5,181.')
 })
 
+test('a correction that heads a list keeps it: the request nests the list under its heading, and a rewrite ending on the bare heading shows the left-out item under it', async ($, on) => {
+  const NESTED = 'Two corrections to my last answer:\n- **The share:** 5,242 link edits, not 5,181.\n- **The numbers I did not cite before:**\n  - [6,543 saves](q1#day=2026-06-18@n) on June 18.\n  - 93 of the 94 idle editors were bots.\n\nThe edits peaked at 22:10.'
+  // the rewrite keeps the share and June 18, leaves out the idle editors, and ends on the bare heading
+  const w = world(on, Array(3).fill('<text>\n5,242 link edits, not 5,181; [6,543 saves](q1#day=2026-06-18@n) on June 18.\n\n**The numbers I did not cite before:**\n</text>'))
+  const clock = mock.clock(on)
+  await answered($, on, clock, NESTED)
+  await ($ as Any).prompt.edit(edit('s'))
+  for (const k of ['<', '<', '<']) await ($ as Any).prompt.edit(edit(k))
+  await clock.settle()
+  expect(w.calls.at(-1).prompt).toContain('- **The numbers I did not cite before:**\n  - [6,543 saves](q1#day=2026-06-18@n) on June 18.\n  - 93 of the 94 idle editors were bots.')
+  // the bare heading is gone, and the item the rewrite left out is back under it
+  expect(record(w).shown).toBe('5,242 link edits, not 5,181; [6,543 saves](q1#day=2026-06-18@n) on June 18.\n\n**The numbers I did not cite before:**\n- 93 of the 94 idle editors were bots.')
+})
+
 test('an explain mark stays on a squeezed text: the request names its term, a term said in another form keeps its mark, and a term left out shows after the text', async ($, on) => {
   const FORM = 'Mostly [6,543 saves](q1#day=2026-06-18@n) on June 18; the fixture scoped them.'
   const GONE = 'Mostly [6,543 saves](q1#day=2026-06-18@n) on June 18.'

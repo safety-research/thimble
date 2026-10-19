@@ -267,27 +267,62 @@ const ITEM = /^\s*([-*+]|\d+[.)])\s+/
 const OFFER = /^\s*(\*\*)?(I can|I could|Want me|Do you want|If you (want|like)|Should I|Shall I)\b/i
 const plainLine = t => String(t).replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').replace(/[*_`]/g, '')
 
+/** The indent of a line, in columns. */
+const indentOf = l => /^[ \t]*/.exec(l)[0].replace(/\t/g, '    ').length
+
+/**
+ * The items of a list, each with what stands under it: an item at the list's own indent starts one, and the lines
+ * indented more (its sub-items, its wrapped lines) stay with it. Each comes back as markdown: the item's own words on
+ * the first line (its marker dropped), then the lines under it, indented as they stand under the item.
+ */
+export function listItems(lines) {
+  const at = lines.findIndex(l => ITEM.test(l))
+  if (at < 0) return []
+  const base = indentOf(lines[at])
+  const out = []
+  for (const l of lines.slice(at)) {
+    if (!l.trim()) continue
+    if (ITEM.test(l) && indentOf(l) <= base) out.push([l.replace(ITEM, '')])
+    else if (out.length) out[out.length - 1].push(' '.repeat(Math.max(0, indentOf(l) - base)) + l.trimStart())
+  }
+  return out.map(x => x.join('\n'))
+}
+
+/** A correction as the request and a put-back carry it: whole lines, at most `max` characters, at most 600 a line. */
+function clipLines(x, max = 2000) {
+  const out = []
+  let n = 0
+  for (const line of x.split('\n')) {
+    const l = line.length > 600 ? `${line.slice(0, 599)}…` : line
+    if (out.length && n + l.length + 1 > max) { out.push('…'); break }
+    out.push(l)
+    n += l.length + 1
+  }
+  return out.join('\n')
+}
+
 /**
  * The corrections of Claude's own earlier answer in a message, as the original writes them (markdown, links kept): a
- * list under a lead that says it corrects ("Two corrections to my last answer:") gives each item; a paragraph that
+ * list under a lead that says it corrects ("Two corrections to my last answer:") gives each item with the sub-items
+ * under it, so a heading item ("**The numbers I didn't cite before:**") keeps the list it heads; a paragraph that
  * opens with such a lead is one; a sentence that sets an earlier statement right is one. `claims`: the session's claims
  * store, when the observer has read the message: a claim said in this message that revises one of Claude's earlier
- * claims adds the sentence that says it. At most `max`, each at most 600 characters.
+ * claims adds the sentence that says it. At most `max`, each cut at a line to at most 2,000 characters.
  */
 export function mustKeep(text, { claims = null, row = null, max = 4 } = {}) {
   const out = []
   const add = t => {
     const x = String(t || '').trim()
     if (!x || out.some(y => y === x || y.includes(x) || x.includes(y))) return
-    out.push(x.length > 600 ? `${x.slice(0, 599)}…` : x)
+    out.push(clipLines(x))
   }
   const paras = String(text || '').split(/\n\s*\n/)
   for (const para of paras) {
     const lines = para.split('\n')
     const lead = lines.findIndex(l => !ITEM.test(l) && !OFFER.test(plainLine(l)) && OWN.test(plainLine(l).split(/(?<=[.!?])\s/)[0] || ''))
     if (lead >= 0 && /:\s*$/.test(plainLine(lines[lead]).trim())) {
-      // a list under the lead: each item a correction
-      const items = lines.slice(lead + 1).filter(l => ITEM.test(l)).map(l => l.replace(ITEM, ''))
+      // a list under the lead: each item a correction, with its sub-items
+      const items = listItems(lines.slice(lead + 1))
       if (items.length) { items.forEach(add); continue }
     }
     if (lead === 0 && !ITEM.test(lines[0])) { add(para); continue }
@@ -308,20 +343,57 @@ export function mustKeep(text, { claims = null, row = null, max = 4 } = {}) {
 
 /**
  * The corrections a rewrite left out, put back: one whose numbers (or, with none, most of its words) are not in the
- * rewrite is added after it, as the original says it. A correction may be shortened, never dropped. Returns the text
- * and the corrections put back.
+ * rewrite is added after it, as the original says it. With the `original`, a number it states outside the correction
+ * too (a time, an agent's number) does not count as the correction's. A correction with sub-items is checked item by
+ * item, and the items left out come back under its first line, so a heading never comes back without what it heads.
+ * A correction may be shortened, never dropped. Returns the text and the corrections put back.
  */
-export function keepCorrections(text, keep) {
+export function keepCorrections(text, keep, original = '') {
   const have = plainLine(text).toLowerCase()
   const nums = new Set(numbersIn(plainLine(text)))
+  const kept = k => {
+    const n = numbersIn(plainLine(k)).filter(x => x.length > 1)
+    const rest = original && String(original).includes(k) ? new Set(numbersIn(plainLine(String(original).split(k).join(' ')))) : null
+    const own = rest ? n.filter(x => !rest.has(x)) : []
+    const words = plainLine(k).toLowerCase().match(/[a-z][a-z'-]{3,}/g) || []
+    return n.length ? (own.length ? own : n).some(x => nums.has(x)) : words.filter(w => have.includes(w)).length >= Math.ceil(words.length * 0.5)
+  }
   const back = []
   for (const k of keep || []) {
-    const n = numbersIn(plainLine(k)).filter(x => x.length > 1)
-    const words = plainLine(k).toLowerCase().match(/[a-z][a-z'-]{3,}/g) || []
-    const kept = n.length ? n.some(x => nums.has(x)) : words.filter(w => have.includes(w)).length >= Math.ceil(words.length * 0.5)
-    if (!kept) back.push(k)
+    const [head = '', ...under] = String(k).split('\n')
+    const subs = listItems(under)
+    if (!subs.length) { if (!kept(k)) back.push(k); continue }
+    // a heading item says nothing of its own: what it heads is what must stay
+    const left = subs.filter(s => !kept(s))
+    if (!left.length && (isHeading(head) || kept(head))) continue
+    back.push([head, ...left.map(s => `- ${s.replace(/\n/g, '\n  ')}`)].join('\n'))
   }
   return { text: back.length ? `${String(text).trimEnd()}\n\n${back.join('\n\n')}` : text, back }
+}
+
+/** A line that only heads what comes under it: a markdown heading, a bold lead that is no sentence, or a line that
+ *  ends in a colon. */
+export function isHeading(line) {
+  const l = String(line || '').trim().replace(ITEM, '')
+  if (!l) return false
+  if (/^#{1,6}\s+\S/.test(l)) return true
+  if (/:\s*$/.test(plainLine(l))) return true
+  const bold = /^(\*\*|__)([^*\n]+?)\1$/.exec(l)
+  return !!bold && !/[.!?]["')\]]*$/.test(bold[2].trim())
+}
+
+/**
+ * A rewrite that ends on a heading with nothing under it (its last line "**The numbers I didn't cite before:**")
+ * loses that heading: it promises what the text does not give. Returns the text and the headings dropped.
+ */
+export function dropOrphanHeads(text) {
+  const lines = String(text || '').replace(/\s+$/, '').split('\n')
+  const dropped = []
+  while (lines.length > 1 && isHeading(lines[lines.length - 1])) {
+    dropped.unshift(lines.pop().trim())
+    while (lines.length > 1 && !lines[lines.length - 1].trim()) lines.pop()
+  }
+  return { text: dropped.length ? lines.join('\n') : String(text || ''), dropped }
 }
 
 const LINK = /\[([^\]\n]+)\]\(([^)\n]+)\)/g
