@@ -2722,6 +2722,9 @@ export const registerShell: Register = (on, options) => {
       const els = $.ui.resolve(e) as Any
       const { Box, Text } = els
       if (!(await $.state.get(CLAIMPANE)).value) noteViewport(e.viewport)
+      // the conversation's width now, which a long message is measured against (Squeeze's `6 of 24 lines`): the band
+      // draws first when a docked pane closes, so the verb row never counts at the width the pane left
+      if (e.viewport?.columns) seeView(e.viewport.columns, e.viewport.rows ?? 48)
       const bw = Math.max(20, (e.props.bodyColumns ?? 100) - 1)
       const line = await barEl($, els, bw, !!e.props.isWorking)
       const tray = (await $.state.get(TRAY)).value as Tray | null

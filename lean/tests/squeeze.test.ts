@@ -277,6 +277,10 @@ test('a long answer arrives squeezed: one call at Length short, the verb row say
   const drawn = textOf(await $.ui.render(view(LONG)))
   expect(await hintOf($)).toContain('s ● 1 of 44 lines')
   expect(drawn).not.toContain('Run 30 landed')
+  // the message drawn narrow beside a docked pane, then the pane closes: the band, drawn first at the whole width,
+  // counts at that width, never at the width the pane left
+  await $.ui.render({ ...(view(LONG) as Any), viewport: { columns: 40, rows: 48, isFullscreen: true } } as never)
+  expect(await hintOf($)).toContain('s ● 1 of 44 lines')
   await press($, clock, edit('s'))
   expect(textOf(await $.ui.render(view(LONG)))).toContain('Length ○●○○ short')
   await press($, clock, edit('0'))
