@@ -382,6 +382,8 @@ export default {
   name: 'claims',
   title: 'Claims',
   titleOf: args => (args && args.source ? 'Where it was said' : 'Claims'),
+  // the ring starts on the selected dot, so the first ↑ or ↓ walks the claims from it (the source view has no part)
+  ringStart: args => (args && args.source ? null : 'part'),
   reads: args => (args && args.source ? ['claims', ...(args.row ? [`record:${args.row}`] : [])] : ['claims', 'threads']),
   stateKey: args => (args && args.source ? `claims-source-${String(args.source).replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 40)}` : 'claims'),
   data(stores, args) {

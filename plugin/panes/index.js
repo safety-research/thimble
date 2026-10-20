@@ -6,11 +6,13 @@
 // size) -> the program's data, program(k, data) -> node}. A new pane is a new file here and a line below.
 //
 // A pane opened in the side panel (shell/side.ts openSide) is a thread: the host draws its side thread's conversation
-// under it and an input bar at the bottom, with no code of its own. Two optional fields say more:
+// under it and an input bar at the bottom, with no code of its own. Optional fields say more:
 //   titleOf(args) -> the panel's title in Claude Code's chrome (default: title)
 //   thread(args, state, data) -> what its thread is about now: null (no thread, no input bar), or {scope?, label?,
 //     refs?, about?, key?}. Without it, one thread per pane (its state key), each question about the part the program
 //     selected (k.select), named by the part's label and carrying its refs (its region's meta ref or refs).
+//   ringStart (or ringStart(args)) -> 'part': the ring starts on the part the program selected when the panel takes the
+//     keys, not on the input bar (a pane whose parts are walked first, the Claims graph); a letter still asks
 import chips from './chips.js'
 import claims from '../claims/graph.js'
 import coverage from './coverage.js'
