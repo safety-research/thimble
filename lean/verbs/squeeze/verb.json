@@ -5,10 +5,10 @@
   "order": 1,
   "row": true,
   "chips": ["Length", "Report ↔ Interpret", "Familiarity", "+ a stretch"],
-  "arrive": {
+  "catchup": {
     "length": "short",
-    "when": "the message takes more than half the screen's rows, as an object under a reply does before the rest waits in its detail view",
-    "why": "a long message arrives squeezed; the original is one key away"
+    "when": "two or more of Claude's replies (turns it ended with words) came since the person's last prompt and since the newest catch-up of them the person read",
+    "why": "one message of every message since that prompt, under the newest reply; the replies stay as written above it"
   },
   "model": "sonnet",
   "effort": "low",

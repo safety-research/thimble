@@ -44,14 +44,14 @@ import type { Scope as ThreadScope } from './thread'
 import { cardEvent, cardKey as cardTakesKey, cardStateNow, pressTaken, readCardState, writeCardState } from './runtime'
 import { threadKey as threadKeyOf } from './threads.js'
 import { back as trayBack, base as trayBase, open as trayOpen, order as markOrder, push as trayPush, step as trayStep, top as trayTop } from './tray.js'
-import { markColors, messageEl, verbColor } from './view'
+import { catchUpEl, markColors, messageEl, verbColor } from './view'
 import { markNextTurn, record as recordEvent, tracked, turnFeature } from '../telemetry/telemetry'
 import { ownTurn, readAgain } from '../observer/observer'
 import { cardAfter as cardVersion, promptText } from '../prompts/prompts'
 import { bindQueries, fixText, problemsOf, queryIdOf, readReply, requestText, viewText } from './cardfork.mjs'
 import type { RowVerb } from './view'
-import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, arrive as sqArrive, busyGlyph, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, stretchMarks, takeNotes as sqNotes } from '../verbs/squeeze/term'
-import { endsOf, revealCut } from '../verbs/squeeze/chips.mjs'
+import { addStretch as sqAddStretch, afterEdit as sqAfterEdit, busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, setLevels as sqSetLevels, sLit, startStretch as sqStartStretch, stopStretch as sqStopStretch, stretchMarks, takeNotes as sqNotes } from '../verbs/squeeze/term'
+import { catchUpStands, endsOf, isCatchUp, revealCut } from '../verbs/squeeze/chips.mjs'
 import { HEAD_ROWS } from '../panes/claims.js'
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
@@ -118,7 +118,7 @@ const objects = new Map<string, Any>()
 export const citeLabels = new Map<string, string>()
 const preps = new Map<string, Prepared>()
 const pending = new Map<string, Promise<Prepared>>()
-let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; rows: string[]; oriented: number; leaned: boolean; saved: number } | null = null
+let turn: { unplaced: ObjRef[]; lastRow: string; calls: string[]; placed: string[]; rows: string[]; oriented: number; leaned: boolean; saved: number; at?: string | null } | null = null
 // the person's latest question (the card after the answer reads it), and the card after the answer while it is made:
 // the observer's look waits for it, so the pass reads the card; the saves it made, which the feed never places again
 let question = ''
@@ -136,9 +136,12 @@ let browserFlag = false
 let shown: { file: string; under: Record<string, Placed[]> } | null = null
 // the message layer's memory: the records' folder and index, the tray's drawn cards, the verb key that opened a line
 let msgFiles: { session: string; dir: string | null; index: Any[]; pending: Set<string>; loaded: boolean } | null = null
-let keyOpened: { key: string; at: number } | null = null
+let keyOpened: { key: string; at: number; undo?: () => unknown } | null = null
 // the card key pressed last from the empty prompt, with the card's state before it (a word it began gives it back)
 let cardKeyed: { key: string; at: number; ref: ObjRef; undo: { state: Record<string, unknown>; region: string | null } | null } | null = null
+// the row the next turn's cards are drawn under, when a verb's ask was about a catch-up (v on it): under the catch-up,
+// not under the turn's own last words
+let placeNext: string | null = null
 
 // ------------------------------------------------------------------------------------------------ objects
 
@@ -528,7 +531,8 @@ async function noteForClaude($: Engine, text: string): Promise<void> {
  *  Claude) go just before it as a row the person does not see, for Claude alone; the prompt is `t.text`, as the person
  *  would type it. Claude Code labels its row as the plugin's. */
 async function startTurn($: Engine, rows: string[], t: { text: string; typed: boolean; verb: string }): Promise<void> {
-  const notes = ((await $.state.get(NOTES)).value ?? []) as string[]
+  // with what the person reads now (a squeeze's version, a catch-up), as a prompt of theirs carries it
+  const notes = [...(await sqNotes($)), ...(((await $.state.get(NOTES)).value ?? []) as string[])]
   await $.state.set(NOTES, [])
   // the observer hears of the turn (its own prompt.submit hook may never see this plugin's prompt): its notes come back
   const heard = await ownTurn($, t).catch(() => null)
@@ -1186,8 +1190,89 @@ async function restoreAnswers($: Engine): Promise<void> {
 }
 
 /** Whether an index row is a prompt the person sent (not a task's notification or another agent's message, which
- *  start a turn of their own). A row an older index kept with no sender is told by its words. */
-const personPrompt = (x: Any) => x.kind === 'user' && (x.by ? /^(composer|bridge|sdk)$/.test(String(x.by)) : !/^\s*(<task-notification>|<agent-message|Another Claude session sent a message)/.test(String(x.text || '')))
+ *  start a turn of their own): typed, sent from a phone or the SDK, or a key of theirs that asked Claude (a verb's
+ *  ask, this plugin's prompt). A row an older index kept with no sender is told by its words. */
+const personPrompt = (x: Any) => x.kind === 'user' && (x.by ? /^(composer|bridge|sdk|plugin|auto-continuation)$/.test(String(x.by)) : !/^\s*(<task-notification>|<agent-message|Another Claude session sent a message)/.test(String(x.text || '')))
+
+/** Since the person's last prompt: that prompt, Claude's messages after it in order (`rows`), and those of them that
+ *  ended a turn (`replies`): the answer to the prompt, and each answer to an agent's hand-back, a task's notification
+ *  or another session's message. A turn that ended in an error answered nothing. */
+async function sinceLastPrompt($: Engine): Promise<{ prompt: { row: string; text: string } | null; rows: string[]; replies: string[] }> {
+  const idx = (await msgFilesNow($)).index
+  let last = -1
+  for (let i = idx.length - 1; i >= 0; i--) if (personPrompt(idx[i])) { last = i; break }
+  const rows = idx.slice(last + 1).filter(x => x.kind === 'assistant').map(x => String(x.row))
+  const replies = (await answerRows($)).filter(r => rows.includes(r))
+  return { prompt: last >= 0 ? { row: String(idx[last].row), text: String(idx[last].text || '') } : null, rows, replies }
+}
+
+/**
+ * Replies piled up: two or more of Claude's replies (turns it ended with words) came since the person's last prompt
+ * and since the newest catch-up of them the person read. Then s offers to catch up on all the replies since that
+ * prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not.
+ */
+async function pileUp($: Engine): Promise<{ n: number; prompt: { row: string; text: string } | null; rows: string[]; replies: string[] } | null> {
+  const since = await sinceLastPrompt($)
+  let from = 0
+  for (let i = since.replies.length - 1; i >= 0; i--) {
+    if ((await recordNow($, since.replies[i]!))?.caughtUp) { from = i + 1; break }
+  }
+  return since.replies.length - from >= 2 ? { n: since.replies.length, ...since } : null
+}
+
+/** The catch-up under a reply, while it stands (not dismissed), or null. */
+async function catchUpUnder($: Engine, row: string): Promise<MsgRecord | null> {
+  const cu = (await recordNow($, row))?.caughtUp
+  const rec = cu ? await recordNow($, cu) : null
+  return rec && catchUpStands(rec) ? rec : null
+}
+
+/** The message the keys act on when the person picked none: the catch-up under the newest answer while it stands,
+ *  else the newest answer. */
+async function restRow($: Engine): Promise<string | null> {
+  const answer = ((await $.state.get(ANSWER)).value as string | null | undefined) ?? null
+  if (!answer) return null
+  return (await catchUpUnder($, answer))?.row ?? answer
+}
+
+/** What { and } step through, oldest first: the answers, each standing catch-up right after the reply it is under. */
+async function keyRows($: Engine): Promise<string[]> {
+  const out: string[] = []
+  for (const r of await answerRows($)) {
+    out.push(r)
+    const cu = await catchUpUnder($, r)
+    if (cu) out.push(cu.row)
+  }
+  return out
+}
+
+/** s with replies piled up: one catch-up of every message since the person's last prompt, under the newest reply, with
+ *  the chips open on it while its first version is written; a catch-up of the same replies written before goes. The
+ *  keys act on it. Returns its row. */
+async function catchUpNow($: Engine): Promise<string | null> {
+  const pile = await pileUp($)
+  if (!pile) return null
+  for (const r of pile.replies) {
+    const old = (await recordNow($, r))?.caughtUp
+    if (old) await sqDismiss($, old, { quiet: true })
+  }
+  const row = await sqCatchUp($, { host: pile.replies[pile.replies.length - 1]!, rows: pile.rows, replies: pile.n, question: pile.prompt?.text ?? '', prompt: pile.prompt?.row ?? null })
+  if (!row) return null
+  await setTray($, null)
+  await setCardFocus($, null)
+  await $.state.set(SELROW, null)
+  await setPick($, { row, verb: 's' })
+  await quietly($.ui.scroll({ to: { key: `cu-${row}` }, block: 'nearest' }))
+  return row
+}
+
+/** A catch-up dismissed (its chips' 0): the chips close, and the keys go back to the newest reply. */
+async function dismissNow($: Engine, row: string, undo = false): Promise<void> {
+  await sqDismiss($, row, { undo })
+  const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+  if (pick?.row === row) await setPick($, null)
+  if ((await $.state.get(SELROW)).value === row) await $.state.set(SELROW, null)
+}
 
 /** The answers since the person's last prompt, and where the message the keys act on stands among all answers. */
 async function answerPlace($: Engine, row: string): Promise<{ all: string[]; at: number; since: number }> {
@@ -1202,18 +1287,19 @@ async function answerPlace($: Engine, row: string): Promise<{ all: string[]; at:
 /** { and }: the keys act on the answer before or after the one they act on now; the newest gives the keys back to the
  *  latest turn. Returns false when there is none that way. */
 async function stepAnswer($: Engine, dir: number): Promise<boolean> {
-  const all = await answerRows($)
+  const all = await keyRows($)
   const row = await actingRow($)
   const i = row ? all.indexOf(row) : -1
   const to = i < 0 ? (dir < 0 ? all.length - 1 : -1) : i + dir
   const next = to >= 0 && to < all.length ? all[to]! : null
   if (!next) return false
-  const answer = (await $.state.get(ANSWER)).value as string | null | undefined
+  const rest = await restRow($)
   await setTray($, null)
   await setCardFocus($, null)
-  await $.state.set(SELROW, next === (answer ?? all[all.length - 1]) ? null : next)
+  await $.state.set(SELROW, next === (rest ?? all[all.length - 1]) ? null : next)
   // the answer in view, where the transcript draws it now
-  await quietly($.ui.scroll({ to: { key: `msg-${next}-b0` }, block: 'nearest' }))
+  const cu = isCatchUp(await recordNow($, next))
+  await quietly($.ui.scroll({ to: { key: cu ? `cu-${next}` : `msg-${next}-b0` }, block: 'nearest' }))
   return true
 }
 
@@ -1221,8 +1307,8 @@ async function stepAnswer($: Engine, dir: number): Promise<boolean> {
 async function actingRow($: Engine): Promise<string | null> {
   const sel = (await $.state.get(SELROW)).value as string | null | undefined
   if (sel) return sel
-  const answer = (await $.state.get(ANSWER)).value as string | null | undefined
-  if (answer) return answer
+  const rest = await restRow($)
+  if (rest) return rest
   // a resumed session: the latest answer its records name
   const rows = await messageRows($)
   for (const row of [...rows].reverse()) if ((await recordNow($, row))?.final) return row
@@ -1275,8 +1361,7 @@ async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): P
   await setPick($, null)
   await setCardFocus($, null)
   await setTray($, trayOpen(trayFrameOf(rec, i)) as Tray)
-  const answer = (await $.state.get(ANSWER)).value
-  await $.state.set(SELROW, row === answer ? null : row)
+  await $.state.set(SELROW, row === (await restRow($)) ? null : row)
   // a gloss opened: the observer's backoff for glosses starts over
   if (m.kind === 'gloss') await $.store.set('observer.glossUnopened', 0)
   // the mark in view, when a key opened it (it may be in a message above the screen)
@@ -1292,10 +1377,14 @@ async function revealMark($: Engine, rec: MsgRecord, i: number): Promise<void> {
 /** What ] and [ move through, in reading order: each message's marks, then the cards drawn under it. */
 async function focusOrder($: Engine): Promise<{ row: string; i?: number; card?: ObjRef }[]> {
   const out: { row: string; i?: number; card?: ObjRef }[] = []
-  for (const row of await messageRows($)) {
-    const rec = await recordNow($, row)
-    ;(rec?.marks || []).forEach((_, i) => out.push({ row, i }))
-    for (const card of ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]) out.push({ row, card })
+  for (const host of await messageRows($)) {
+    // a reply, then the catch-up under it
+    const cu = await catchUpUnder($, host)
+    for (const row of cu ? [host, cu.row] : [host]) {
+      const rec = await recordNow($, row)
+      ;(rec?.marks || []).forEach((_, i) => out.push({ row, i }))
+      for (const card of ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]) out.push({ row, card })
+    }
   }
   return out
 }
@@ -1326,8 +1415,7 @@ async function focusCard($: Engine, row: string, card: ObjRef): Promise<void> {
   await setTray($, null)
   await setPick($, null)
   await setCardFocus($, { id: card.id, v: card.v, root: card.root, row })
-  const answer = (await $.state.get(ANSWER)).value
-  await $.state.set(SELROW, row === answer ? null : row)
+  await $.state.set(SELROW, row === (await restRow($)) ? null : row)
   await quietly($.ui.scroll({ to: { key: `row-${row}-card-${card.id}` }, block: 'nearest' }))
 }
 
@@ -1421,8 +1509,7 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
   await setTray($, null)
   await setCardFocus($, null)
   await setPick($, { row, verb: key })
-  const answer = (await $.state.get(ANSWER)).value
-  await $.state.set(SELROW, row === answer ? null : row)
+  await $.state.set(SELROW, row === (await restRow($)) ? null : row)
   // the line in view, when a key opened it under a message above the screen
   await quietly($.ui.scroll({ to: { key: `vl-${row}-opt-0` }, block: 'nearest' }))
 }
@@ -1472,7 +1559,11 @@ async function runOnMessage($: Engine, word: string, key: string, rec: MsgRecord
       if (!cur.objects.includes(saved.id)) await saveRecord($, { ...cur, objects: [...cur.objects, saved.id] })
     }
     if (out.error) failed($, `${word} did not run`, out.error, `Press ${key} under the message again, or ask Claude`)
-    else if (out.ask) void ask($, String(out.ask), word, choice || on)
+    else if (out.ask) {
+      // what Claude makes for a catch-up is drawn under the catch-up, not under the words of the turn it asks for
+      placeNext = isCatchUp(rec) ? rec.row : null
+      void ask($, String(out.ask), word, choice || on)
+    }
     else if (out.text && !out.saved) $.ui.toast(cut(String(out.text).split('\n')[0] || '', 200))
     if (!out.ask && !out.error) await noteForClaude($, `The person ran the verb ${word} on ${on}.${out.saved ? ` It shows them ${out.saved.id}.` : ''}${out.text ? ` It said: ${cut(String(out.text), 600)}` : ''}${out.note ? ' ' + out.note : ''}`)
     else if (out.note) await noteForClaude($, String(out.note))
@@ -1926,7 +2017,7 @@ function keySegments(keys: string): { key: string; words: string; color?: string
 }
 
 /** One key of the bar: its key, its words (and their first word, `short`, for a narrow bar), its colors, and a press. */
-type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown }
+type BarSeg = { key: string; words: string; short?: string; color?: string; wordsColor?: string | null; bold?: boolean; tone?: 'error' | 'warning'; status?: boolean; label?: string; onPress?: () => unknown }
 
 /** The keys each thimble line named, oldest first, with when it first showed them. A key the line named a moment ago
  *  is taken, never typed, even when what it named has gone meanwhile (a squeeze that arrived closed the tray the
@@ -1994,11 +2085,14 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       const sv = sLit(rec, sqUi)
       if (sv) lit.s = sv
       else delete lit.s
+      // replies piled up since the person's last prompt, and the keys on the newest: s catches up on them, lit and bold
+      const pile = !(await $.state.get(SELROW)).value ? await pileUp($) : null
       for (const v of verbs) {
         const color = verbColor(v.key, theme, v.color)
         const on = lit[v.key]
         const more = running === v.key ? '…' : ''
-        if (on?.lit && on.note) left.push({ key: v.key, words: `● ${on.note}${more}`, short: `● ${v.name}`, color, wordsColor: color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
+        if (v.key === 's' && pile) left.push({ key: 's', words: `catch up on ${pile.n} replies`, short: 'catch up', color, wordsColor: color, bold: true, label: 'catch up', onPress: () => catchUpNow($) })
+        else if (on?.lit && on.note) left.push({ key: v.key, words: `● ${on.note}${more}`, short: `● ${v.name}`, color, wordsColor: color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
         else left.push({ key: v.key, words: `${v.name}${more}`, color, label: v.name, onPress: () => pressRowVerb($, row, v.key) })
       }
       // ] steps through what the answer holds: its marks, then its cards (a card focused takes its own keys)
@@ -2011,7 +2105,10 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
       // which reply the keys act on, once more than one came since the person's last prompt or an earlier one is
       // picked: { and } pick another (as ] and [ step through the marks; never < >, which read as the arrow keys)
       const place = await answerPlace($, row)
-      if (place.all.length > 1 && place.at >= 0 && (place.at < place.all.length - 1 || place.since > 1)) {
+      if (isCatchUp(rec)) {
+        const n = Number(rec.catchup!.replies) || 0
+        left.push({ key: '{ }', words: `catch-up of ${n} replies`, short: 'catch-up', color: FOCUS[theme], label: 'another reply', onPress: async () => { if (!(await stepAnswer($, -1))) await $.state.set(SELROW, null) } })
+      } else if (place.all.length > 1 && place.at >= 0 && (place.at < place.all.length - 1 || place.since > 1)) {
         // an earlier reply picked: its first words too, since a key cannot scroll the transcript to it
         const which = `reply ${place.at + 1} of ${place.all.length}`
         const begins = place.at < place.all.length - 1 ? cut(shownOf(rec).replace(/\[([^\]\n]+)\]\([^)\n]+\)/g, '$1').replace(/[#*_`>]/g, '').replace(/\s+/g, ' ').trim(), 36) : ''
@@ -2039,8 +2136,8 @@ async function barEl($: Engine, els: Any, w: number, working = false): Promise<A
   const segText = (g: BarSeg, i: number) => [
     ...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []),
     ...(g.tone ? [Text({ key: `kt${i}`, color: g.tone, children: g.words })] : [
-      ...(g.key ? [Text({ key: `kk${i}`, ...(g.color && g.wordsColor ? { color: g.color } : {}), children: g.key })] : []),
-      ...(g.words ? [Text({ key: `kw${i}`, ...(g.wordsColor ? { color: g.wordsColor } : { dimColor: true }), children: `${g.key ? ' ' : ''}${g.words}` })] : []),
+      ...(g.key ? [Text({ key: `kk${i}`, ...(g.color && g.wordsColor ? { color: g.color } : {}), ...(g.bold ? { bold: true } : {}), children: g.key })] : []),
+      ...(g.words ? [Text({ key: `kw${i}`, ...(g.wordsColor ? { color: g.wordsColor } : { dimColor: true }), ...(g.bold ? { bold: true } : {}), children: `${g.key ? ' ' : ''}${g.words}` })] : []),
     ]),
   ]
   const countEls = fit.counts.flatMap((x, i) => [...(i ? [Text({ key: `csep-${x.id}`, dimColor: true, children: ' · ' })] : []), Text({ key: `count-${x.id}`, ...(x.bright ? { bold: true } : { dimColor: true }), children: x.text })])
@@ -2210,7 +2307,7 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   }
   if (k === ']' || k === '[') return { box: consume, work: async () => { await setPick($, null); await stepMark($, k === ']' ? 1 : -1) } }
   // { and } at rest: the answer before or after the one the keys act on (a letter typed at once after it: a word)
-  if ((k === '{' || k === '}') && !pick && !(await $.state.get(CLAIMPANE)).value && (await answerRows($)).length > 1) {
+  if ((k === '{' || k === '}') && !pick && !(await $.state.get(CLAIMPANE)).value && (await keyRows($)).length > 1) {
     const was = (await $.state.get(SELROW)).value as string | null | undefined
     return { box: consume, work: () => stepAnswer($, k === '{' ? -1 : 1), word: () => $.state.set(SELROW, was ?? null) }
   }
@@ -2219,6 +2316,13 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     // 1 under a card: its detail view (the bar says `1 open detail`)
     const ref = k === '1' ? await focusedCard($) : null
     return ref ? { box: consume, work: () => openDetail($, ref) } : { box: null }
+  }
+  // s with replies piled up (the bar says `s catch up on N replies`): the catch-up, its chips open; a letter typed at once
+  // after it makes s the start of a word, and the catch-up is undone
+  if (k === 's' && !pick && !(await $.state.get(SELROW)).value && !(await $.state.get(CLAIMPANE)).value && (await pileUp($))) {
+    let made: string | null = null
+    const undo = async () => { keyOpened = null; if (made) await dismissNow($, made, true) }
+    return { box: consume, work: async () => { made = await catchUpNow($); keyOpened = { key: k, at: now, undo } }, word: undo }
   }
   // at rest the verbs win: a card's own keys reach it once it has the focus (] or its detail)
   if (k.length === 1 && (await rowVerbs($)).some(v => v.key === k)) {
@@ -2238,9 +2342,10 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     } }
   }
   if (pick && k.length === 1) {
-    // typed straight after the verb key: the letter was the start of a word, and the line closes
+    // typed straight after the verb key: the letter was the start of a word, and the line closes (a catch-up s began is
+    // undone)
     const word = opened && now - opened.at < 700 ? { text: `${opened.key}${e.inputText}`, cursor: opened.key.length + e.inputText.length } : null
-    return { box: word, work: () => setPick($, null) }
+    return { box: word, work: () => (word && opened?.undo ? opened.undo() : setPick($, null)) }
   }
   return { box: null }
 }
@@ -2278,6 +2383,46 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
     flexDirection: 'column', marginTop: 1, marginLeft: 2, width: Math.max(p.grid.w, 40),
     children: [paintRegions(p.grid, els, { theme, key: `${key}-${ref.id}`, rows, onPress, selected, frame: focus === 'rest' ? mix(FOCUS[theme], theme === 'light' ? '#ffffff' : '#1e1e1e', 0.45) : focus ? FOCUS[theme] : null }), ...(run ? [run] : [])],
   })
+}
+
+/**
+ * The catch-up under a reply (the reply's record names it), while it stands: a rule down its left side beside its head
+ * line and its text (its first characters while a version writes itself in, dim while one is written), then the chips
+ * or v's line when open on it, then the cards made for it. Its marks open the tray as any reply's do. Nothing for a
+ * reply with none.
+ */
+async function catchUpParts($: Engine, e: Any, at: string, cols: number): Promise<Any[]> {
+  const cu = await catchUpUnder($, at)
+  if (!cu) return []
+  const row = cu.row
+  const els = $.ui.resolve(e) as Any
+  const { Box } = els
+  const sqUi = ((await $.state.get({ ...SQZ, id: row })).value ?? null) as SqzUi | null
+  const busy = busyGlyph(sqUi)
+  const n = revealedOf(sqUi)
+  const pick = (await $.state.get(PICK)).value as { row: string; verb: string } | null
+  const open = pick && pick.row === row ? pick.verb : null
+  const tray = (await $.state.get(TRAY)).value as Tray | null
+  const base = trayBase(tray) as TrayFrame | null
+  const replies = Number(cu.catchup!.replies) || 0
+  const head = `catch-up of ${replies} replies since your last message`
+  // its first version on its way, or why it failed
+  const why = sqUi?.error || ((cu.squeeze ?? {}) as Any).error || null
+  const note = typeof cu.shown === 'string' ? null : why ? { text: `× ${why}`, error: true } : { text: `${busy ?? '…'} writing it from the messages above` }
+  const shown = n == null || note ? cu : (() => {
+    const part = revealCut(cu.shown, n) as string
+    return { ...cu, shown: part, marks: cu.marks.filter(m => m.end <= part.length) } as MsgRecord
+  })()
+  const parts: Any[] = [catchUpEl(els, { rec: shown, key: `cu-${row}`, cols, first: false, theme, head, note, focus: base && base.row === row ? base.i ?? null : null, onMark: (i: number) => openMark($, row, i, cu), dim: !!busy })]
+  if (open === 's') parts.push(Box({ marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'chips', { row }, { w: Math.max(30, cols - 2), h: 3 })] }))
+  else if (open) parts.push(Box({ key: `vl-${row}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
+  const list = ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]
+  if (list.length) {
+    const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
+    const rest = !tray && !pick && !cf && (await actingRow($)) === row
+    parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${row}-${i}`, row, cf && cf.row === row && cf.id === ref.id && cf.root === ref.root ? 'focus' : rest && i === list.length - 1 ? 'rest' : null)))))
+  }
+  return parts
 }
 
 /** The width cards under a reply were drawn at last: the bar reads a focused card's keys from the same drawing. */
@@ -2502,6 +2647,11 @@ async function chipsAction($: Engine, row: string, a: Record<string, unknown>): 
     await setPick($, null)
     return
   }
+  if (name === 'dismiss') {
+    await sqStopStretch($, row)
+    await dismissNow($, row)
+    return
+  }
   if (name === 'say') return typeof a.text === 'string' ? a.text : undefined
   return false
 }
@@ -2601,7 +2751,8 @@ export const registerShell: Register = (on, options) => {
   // a turn of main's: the objects it saved, and its last text row, under which they are drawn
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
-      turn = { unplaced: [], lastRow: '', calls: [], placed: [], rows: [], oriented: 0, leaned: false, saved: 0 }
+      turn = { unplaced: [], lastRow: '', calls: [], placed: [], rows: [], oriented: 0, leaned: false, saved: 0, at: placeNext }
+      placeNext = null
       // a new turn: the keys act on its answer again, and a verb's open line closes
       try {
         await $.state.set(SELROW, null)
@@ -2670,7 +2821,7 @@ export const registerShell: Register = (on, options) => {
       const blocks = Array.isArray(msg.content) ? (msg.content as { type?: string; text?: string }[]) : []
       if (e.agentId === undefined && turn && e.door === 'response' && e.uuid && blocks.some(b => b.type === 'text' && String(b.text || '').trim())) {
         turn.lastRow = e.uuid
-        if (turn.unplaced.length) await placeTurn($, rowKey(e.uuid))
+        if (turn.unplaced.length) await placeTurn($, turn.at || rowKey(e.uuid))
       }
     } catch {
       // the row is stored whatever the shell makes of it
@@ -2726,7 +2877,7 @@ export const registerShell: Register = (on, options) => {
     try {
       // objects saved after the turn's last words: under those words (or the save's own row, with none)
       if (e.agentId === undefined && turn && turn.unplaced.length) {
-        const at = turn.lastRow ? rowKey(turn.lastRow) : turn.calls.at(-1)
+        const at = turn.at || (turn.lastRow ? rowKey(turn.lastRow) : turn.calls.at(-1))
         if (at) await placeTurn($, at)
       }
     } catch {
@@ -2742,8 +2893,6 @@ export const registerShell: Register = (on, options) => {
         await $.state.set(ANSWER, row)
         const answers = await answerRows($)
         if (!answers.includes(row)) await $.state.set(ANSWERS, [...answers, row])
-        // a message taller than the screen arrives squeezed (one call, outside the turn's end), where a person reads it
-        if (person === 'now') $.clock.after(0, () => { void sqArrive($, row).catch(() => undefined) })
         // the thimble line: what this turn read, saved and cited
         $.clock.after(0, () => { void recount($, { coverage: true }) })
         // claims the corpus orientation saved in this turn light c under its answer
@@ -2802,11 +2951,13 @@ export const registerShell: Register = (on, options) => {
       const open = pick && pick.row === at ? pick.verb : null
       // a message the person picked for the keys ({ }, a mark of it) other than the latest answer: ▸ in place of its ●
       const picked = (await $.state.get(SELROW)).value === at
-      if (!picked && !rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null) return next(e)
+      const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
+      // the catch-up under it, when replies piled up and the person caught up on them here
+      const caught = await catchUpParts($, e, at, cols)
+      if (!picked && !rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null && !caught.length) return next(e)
       const tray = (await $.state.get(TRAY)).value as Tray | null
       await $.state.get(CARDFOCUS)
       const base = trayBase(tray) as TrayFrame | null
-      const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
       const parts: Any[] = []
       parts.push(rec.marks.length || rec.shown != null || busy || n != null || picked
         ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy, lead: busy ?? (picked ? '▸' : null), leadColor: busy ? null : FOCUS[theme] })
@@ -2826,6 +2977,7 @@ export const registerShell: Register = (on, options) => {
         const rest = !tray && !pick && !cf && (await actingRow($)) === at
         parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at, cf && cf.row === at && cf.id === ref.id && cf.root === ref.root ? 'focus' : rest && i === list.length - 1 ? 'rest' : null)))))
       }
+      parts.push(...caught)
       return parts.length === 1 ? parts[0] : Box({ flexDirection: 'column', children: parts })
     } catch {
       // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
@@ -3108,6 +3260,7 @@ export function resetShell(): void {
   person = 'now'
   keyOpened = null
   cardKeyed = null
+  placeNext = null
   keyDecided = 0
   barSeen.length = 0
   resetKeys(shellKey)

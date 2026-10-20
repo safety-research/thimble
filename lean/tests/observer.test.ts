@@ -593,40 +593,36 @@ test('a step on Length, whose original level is always known, goes at once while
   expect(rec.shown).toBe('June 18.')
 })
 
-test('a long answer arrives squeezed at once, beside the look; a step on Report ↔ Interpret pressed while it arrives shows where it goes, waits for the look, and runs from the level it gave', async ($, on) => {
-  let squeezed = () => {}
+test('a long answer arrives as Claude wrote it, beside the look; a step on Report ↔ Interpret pressed while the look runs shows where it goes, waits for it, and runs from the level it gave', async ($, on) => {
   let looked = () => {}
   const LONG = Array.from({ length: 44 }, (_, i) => `Run ${i + 1} landed ${i + 3} changes in the swarm.`).join('\n')
   const w = world(on, {
-    holdSqueeze: new Promise<void>(r => { squeezed = r }), holdPass: new Promise<void>(r => { looked = r }), squeeze: 'Most runs landed changes.',
+    holdPass: new Promise<void>(r => { looked = r }), squeeze: 'Most runs landed changes.',
     fork: { notes: [], line: null, settled: false, verbs: { s: { at: { interpret: 'interpret', familiarity: 'working' } } }, glosses: [] },
   })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   await turn($, w, w.clock, { id: 't1', prompt: 'which runs landed changes?', answer: LONG, tools: 2, save: true })
   await w.clock.settle()
-  // the arrival's rewrite went out as the turn ended, at Length short, the other chips as the original
-  expect(w.squeezes.length).toBe(1)
-  expect(w.squeezes[0]).toContain('- Length: short')
-  expect(w.squeezes[0]).toContain('- Report ↔ Interpret: as the original')
+  // no rewrite went out as the turn ended
+  expect(w.squeezes.length).toBe(0)
   await press($, w.clock, key('s'))
   await press($, w.clock, key('2'))
   await press($, w.clock, key('<'))
-  squeezed()
   await w.clock.settle()
-  // the squeezed text shows; the step waits for the look, and the chips show where it goes
+  // the step waits for the look, and the chips show where it goes
   const mid = JSON.parse(w.files[MSGPATH]!)
-  expect(mid.shown).toBe('Most runs landed changes.')
-  expect(mid.squeeze.want).toEqual({ length: 1, interpret: 0 })
-  expect(w.squeezes.length).toBe(1)
+  expect(mid.shown).toBe(null)
+  expect(mid.squeeze.want).toEqual({ interpret: 0 })
+  expect(w.squeezes.length).toBe(0)
   looked()
   await w.clock.settle()
-  await w.clock.advance(100)
+  await w.clock.advance(400)
   await w.clock.settle()
-  expect(w.squeezes.length).toBe(2)
-  expect(w.squeezes[1]).toContain('- Report ↔ Interpret: balanced (levels report · balanced · interpret; the original is at interpret)')
+  expect(w.squeezes.length).toBe(1)
+  expect(w.squeezes[0]).toContain('- Report ↔ Interpret: balanced (levels report · balanced · interpret; the original is at interpret)')
   const rec = JSON.parse(w.files[MSGPATH]!)
-  expect(rec.squeeze.at).toEqual({ length: 1, interpret: 1 })
-  expect(Object.keys(rec.squeeze.versions)).toEqual(['length=1', 'length=1&interpret=1'])
+  expect(rec.squeeze.at).toEqual({ interpret: 1 })
+  expect(Object.keys(rec.squeeze.versions)).toEqual(['interpret=1'])
 })
 
 test('a -p run gets no look: no model call and no thimble coverage after its turns', async ($, on) => {
