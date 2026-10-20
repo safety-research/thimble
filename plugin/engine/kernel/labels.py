@@ -535,6 +535,56 @@ def of_refs(st: Store, refs: list[str]) -> dict[str, dict[str, Any]]:
     return out
 
 
+def used_by(st: Store, refs: list[str]) -> dict[str, list[str]]:
+    """The labels each ref rests on, for the refs that rest on one: {ref: [label names]}. A query rests on the labels its
+    code read (use() or label_rows()), the label whose counts it is, and those of the queries it used; an object (a
+    card) on the label it draws and those of every query in its lineage; a citation on those of what it cites."""
+    from . import objects as O
+    from . import query as Q
+
+    labs = [x for x in (load(st, n) for n in names(st)) if x]
+    known = {lab["name"] for lab in labs}
+    counts_of = {lab["query"]: lab["name"] for lab in labs if lab.get("query")}
+    memo: dict[str, set[str]] = {}
+
+    def of_query(qid: str, q: dict[str, Any] | None = None, seen: frozenset[str] = frozenset()) -> set[str]:
+        if qid in memo:
+            return memo[qid]
+        if qid in seen:
+            return set()
+        q = q if q is not None else (Q.get(st, qid) or {})
+        out = set(q.get("labels") or [])
+        if qid in counts_of:
+            out.add(counts_of[qid])
+        for u in q.get("uses") or []:
+            if u.get("label"):
+                out.add(str(u["label"]))
+            used = u.get("query")
+            if used and used != qid:
+                out |= of_query(str(used), None, seen | {qid})
+        memo[qid] = out
+        return out
+
+    result: dict[str, list[str]] = {}
+    for ref in refs:
+        stem = str(ref).split("#")[0].split("@")[0]
+        found: set[str] = set()
+        if re.fullmatch(R.QUERY_ID, stem):
+            found = of_query(stem)
+        else:
+            oid = O.find_id(st, stem)
+            obj = O.load(st, oid) if oid else None
+            if obj:
+                if isinstance(obj.get("label"), str):
+                    found.add(obj["label"])
+                for qid, q in ((obj.get("lineage") or {}).get("queries") or {}).items():
+                    found |= of_query(qid, q if isinstance(q, dict) else None)
+        found_names = sorted(n for n in found if n in known)
+        if found_names:
+            result[ref] = found_names
+    return result
+
+
 def head(lab: dict[str, Any]) -> dict[str, Any]:
     """What the label viewer says of a label above its records: its definition, where it applies, its counts."""
     return {"name": lab["name"], "kind": lab.get("kind"), "rule": str(lab.get("rule") or ""), "values": list(lab["values"]),

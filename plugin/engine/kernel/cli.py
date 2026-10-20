@@ -687,6 +687,13 @@ def _label(st: Store, a: argparse.Namespace) -> int:
     if a.of:
         out_json(LB.of_refs(st, a.of))
         return 0
+    if a.used_by:
+        # the labels a card or a citation rests on, for the shell to show beside it
+        by = LB.used_by(st, a.used_by)
+        used = sorted({n for ns in by.values() for n in ns})
+        labs = [LB.load(st, n) for n in used]
+        out_json({"by": by, "labels": [{**LB.head(x), "query": x.get("query")} for x in labs if x]})
+        return 0
     if a.records is not None and a.name:
         # the label viewer's page of records (shell/side.ts): the person's read
         out_json(LB.page(st, a.name, None if a.records == "*" else a.records, a.at or 0, a.count or LB.PAGE))
@@ -941,6 +948,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--answers", metavar="FILE", help="the model's answers for waiting records (the shell writes them)")
     p.add_argument("--waiting", action="store_true", help="the records that wait for the model, with their text, as JSON")
     p.add_argument("--of", nargs="+", metavar="REF", help="the labels of these records, as JSON")
+    # the shell's read: the labels each card or citation rests on (labels.used_by), as JSON
+    p.add_argument("--used-by", dest="used_by", nargs="+", metavar="REF", help=argparse.SUPPRESS)
     p.add_argument("--delete", action="store_true")
     p.add_argument("--json", action="store_true")
     # the label viewer's reads (the person's, in the terminal): a page of records, all (*), of one value, or with none (-)
