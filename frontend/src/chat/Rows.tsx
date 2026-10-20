@@ -166,7 +166,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             return (
               <div key={r.index} className={`chat-msg chat-assistant${nested ? ' chat-nested' : ''}`}>
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
-                  <ChatMarkdown text={r.text} streaming={r === lastText} />
+                  <ChatMarkdown text={r.text} streaming={r === lastText} glosses={r.glosses} />
                 </div>
               </div>
             )

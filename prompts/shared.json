@@ -1,0 +1,64 @@
+{
+  "about": "The parts of the terminal plugin's texts that thimble browser uses (server/thimble_browser/prompts.py). Each part is a file under prompts/terminal/, a section of it and, when given, some of its bullets (counted from 1). `replace` and `drop` are the only changes, exact strings; tests/test_prompt_parity.py fails when the terminal's text no longer holds one of them.",
+  "parts": {
+    "communicating": {
+      "file": "terminal/SKILL.md",
+      "section": "Communicating",
+      "heading": "Communicating",
+      "replace": [
+        [
+          "[290](r2#product=X200@n)",
+          "[290](card:<id>#product/X200)"
+        ],
+        [
+          "[↗](r1)",
+          "[↗](card:<id>)"
+        ]
+      ]
+    },
+    "citing": {
+      "file": "terminal/SKILL.md",
+      "section": "Computing and citing",
+      "heading": "Citing",
+      "bullets": [
+        2,
+        4
+      ],
+      "replace": [
+        [
+          "never sees your shell output",
+          "never sees your tools' output"
+        ],
+        [
+          "`[31](r3#outcome=merged@n)` makes the number the link",
+          "`[31](card:<id>#outcome/merged)` makes the number the link"
+        ],
+        [
+          "run `thimble resolve` on it before you use it",
+          "read it with `read_ref` before you use it"
+        ]
+      ],
+      "drop": [
+        "`thimble coverage` shows what this session computed over, read, searched and did not touch."
+      ]
+    },
+    "explain": {
+      "file": "terminal/lens-explain/v3.md",
+      "replace": [
+        [
+          "When the person reads the answer squeezed, mark words that stand in the squeezed text, since that is what they read.",
+          ""
+        ],
+        [
+          " in thimble's drawing toolkit, at most six lines, such as `return k.beside(k.text('**scope=\"module\"** {dim:one cart per file}'), k.text('**default** {dim:a fresh cart per test}'), { gap: 4 })`",
+          " in thimble's drawing toolkit; thimble browser does not draw it yet, so leave it out"
+        ],
+        [
+          "[6 of 9 hosts](r2#over=800ms@hosts)",
+          "[6 of 9 hosts](card:<id>#over/800ms)"
+        ]
+      ],
+      "until": "<!-- digest -->"
+    }
+  }
+}

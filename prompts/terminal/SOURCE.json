@@ -1,0 +1,15 @@
+{
+  "about": "The terminal plugin's texts thimble browser shares, copied by scripts/sync-terminal-prompts. Do not edit them here.",
+  "ref": "origin/coh-prompts",
+  "commit": "9b126d74cda309c15782bfcd98adee5a158294d1",
+  "files": {
+    "SKILL.md": {
+      "source": "lean/skills/thimble/SKILL.md",
+      "sha256": "2c96f0a048087fe0a750e654787b3cd7d1a47a288be40cefb9dfdf3676b3cc05"
+    },
+    "lens-explain/v3.md": {
+      "source": "lean/prompts/lens-explain/v3.md",
+      "sha256": "9061f6a29b1649a73c170ac7d01171109b26db76b612c5c21d0203d7bacf6065"
+    }
+  }
+}

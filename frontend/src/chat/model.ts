@@ -21,10 +21,19 @@ export interface UserRow {
   /** with `by` extension: the extension whose orientation instructions the message is */
   extension?: string
 }
+/** An explain mark: words of a reply and what they mean, from the explain pass after the turn (server explain.py). */
+export interface Gloss {
+  term: string
+  body: string
+  /** where the term mattered in this work, with citations */
+  here?: string
+}
 export interface TextRow {
   kind: 'text'
   index: number
   text: string
+  /** the explain marks on this row's words */
+  glosses?: Gloss[]
   /** Claude Code's API error line, as the server read it from its record (backend session.api_error_class): the
    * failure's class, so the row is an error card whatever its words (withApiErrors) */
   apiError?: string
@@ -242,6 +251,18 @@ export function foldRecords(records: readonly ChatRecord[], skip?: ReadonlySet<n
       case 'error':
         rows.push({ kind: 'error', index, message: e.message, errorKind: e.kind, detail: e.detail })
         return
+      case 'glosses': {
+        // each mark goes to the first text row of the turn that holds its words
+        let from = rows.length
+        while (from > 0 && rows[from - 1].kind !== 'user') from--
+        const texts = rows.slice(from).filter((r): r is TextRow => r.kind === 'text')
+        for (const g of e.glosses ?? []) {
+          if (!g || typeof g.term !== 'string' || !g.term) continue
+          const row = texts.find((r) => r.text.includes(g.term))
+          if (row) row.glosses = [...(row.glosses ?? []), g]
+        }
+        return
+      }
       case 'shot':
         rows.push({ kind: 'shot', index, phase: e.phase, ticket: e.ticket, name: e.name, note: e.note })
         return

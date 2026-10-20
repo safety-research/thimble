@@ -59,6 +59,7 @@ export type ChatRecord =
   | { type: 'refs'; ts?: string; resolved: string[]; broken: string[]; why?: Record<string, string>; links?: unknown[]; unlinked?: unknown[] }
   | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null }
   | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
+  | { type: 'glosses'; ts?: string; glosses: { term: string; body: string; here?: string }[] }
   | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }

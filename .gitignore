@@ -19,3 +19,4 @@ release/
 .DS_Store
 *.log
 !plugin/viewers/*/sample/**/*.log
+server/.venv

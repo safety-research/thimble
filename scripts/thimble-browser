@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# thimble browser from a checkout: builds the page the first time, then starts the server on a folder of files.
+#
+#   scripts/thimble-browser [FOLDER] [--port N] [--no-open]
+#
+# Needs uv (https://docs.astral.sh/uv/), Node 20+, and Claude Code signed in (run `claude` once).
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [ ! -f "$root/frontend/dist/index.html" ]; then
+  echo "thimble browser: building the page (once)..."
+  [ -d "$root/frontend/node_modules" ] || npm --prefix "$root/frontend" ci --no-audit --no-fund
+  npm --prefix "$root/frontend" run build >/dev/null
+fi
+exec uv run --quiet --project "$root/server" thimble-browser "$@"
