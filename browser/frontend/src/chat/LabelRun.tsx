@@ -1,7 +1,7 @@
 // A label run in the chat that started it (backend labels/asks.py), one row that changes with the run. Before a model
 // reads many records it is the run's size in one line, "Read 14,591 records of revisions.jsonl with Claude: about 860
 // calls, about 6 min, about $25.", and the analyst's three choices: Run all, Run on a sample, Cancel. While the run goes
-// it says how far it is ("2,340 of 14,591 records · 1 min"), read again on each `concepts` event of its label, with Stop.
+// it says how far it is ("2,340 done · 1 min 20 s"), read again on each `concepts` event of its label, with Stop.
 // Once it ended, the counts it found, or the failure in one line with its fix. The label's chip opens it.
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
@@ -15,13 +15,13 @@ import { LabelChip, openLabel } from './SurfaceChips'
 
 const LIVE_MS = 1000 // the row reads the run's state at most this often
 
-/** How far a run is, as its row says it: "2,340 of 14,591 records · 1 min 20 s"; '' before the run's total is known.
- * Pure. */
-export function runProgress(live: Pick<LabelRunLive, 'done' | 'total' | 'seconds'> | null, unit = 'records'): string {
+/** How far a run is, after its row's line ("Reading 14,591 records with Claude"): "2,340 done · 1 min 20 s"; '' before
+ * the run's total is known. Pure. */
+export function runProgress(live: Pick<LabelRunLive, 'done' | 'total' | 'seconds'> | null): string {
   if (!live || !live.total) return ''
   const s = Math.round(live.seconds ?? 0)
   const took = s < 60 ? `${s} s` : `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}`
-  return `${(live.done ?? 0).toLocaleString()} of ${live.total.toLocaleString()} ${unit} · ${took}`
+  return `${(live.done ?? 0).toLocaleString()} done · ${took}`
 }
 
 /** The run's live state while its row shows it running: read now, then again on its label's `concepts` events. */
@@ -98,7 +98,7 @@ export function LabelRunRow({ item, ws }: { item: LabelRunRowT; ws: string }) {
       <div className="chat-labelrun-body">
         <span className="chat-labelrun-text">
           {item.text}
-          {progress && <span className="chat-labelrun-progress">{` ${progress}`}</span>}{' '}
+          {progress && <span className="chat-labelrun-progress">{` · ${progress}`}</span>}{' '}
           <LabelChip name={item.name} onClick={(e) => (e.stopPropagation(), openLabel(ws, item.name))} />
         </span>
         {state === 'asked' && (
