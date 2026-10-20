@@ -93,7 +93,7 @@ The bad answer misses the tickets that ask for money back without the word "refu
 - `thimble rows` lists the files and the saved cards. With a file it shows rows, which `--where`, `--search`, `--label NAME=VALUE` and `-n` narrow. With a ref it shows that row, or a value's chain down to its records. Use it when you are not sure where a value came from.
 - `thimble save NAME --from FILE` saves a card. The card guide describes the file.
 - `thimble label NAME --in GLOB` defines a label and applies it, with one of `--regex RE`, `--code FILE` (a Python `label(unit)` that returns a value, or a value and a confidence) or `--prompt "DEFINITION"`. `--values` gives the values, the positive first. `--limit N` tries it on N records, and the same command without `--limit` labels the rest. A prompt label makes a model call for each 50 records, so try it with `--limit` first, and use `thimble label NAME --wait` to wait for its calls. When the analyst corrects a record, their value counts in place of the label's.
-- `thimble coverage` lists the files whose lines you saw and the files you only computed over, searched or never touched. Words such as "all", "only" and "never" claim something about every record, so when a file you did not see could change such an answer, say so.
+- `thimble coverage` lists the files whose lines you saw and the files you only computed over, searched or never touched.
 
 ```bash
 thimble rows
