@@ -383,6 +383,11 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
       timer.current = null
     }
     if (!dirty.current) return
+    // a draft streaming in is Claude's, not the analyst's: the page never saves it
+    if (docRef.current?.drafting) {
+      dirty.current = false
+      return
+    }
     if (inflight.current) {
       queued.current = true
       return
@@ -566,6 +571,9 @@ export function ReportEditor({ ws, slug, doc, flags, marks, filter, client, onSa
     // Claude's write as it streams in: shown as it grows, its growing block kept in view unless the analyst scrolls,
     // and never saved from here; the saved document that ends it comes through the paths below
     if (doc.drafting) {
+      dirty.current = false
+      lastSaved.current = wire
+      orig.current = origTexts(wire)
       if (sameWire(wire, current)) return
       const grows = lastChanged(current, wire)
       showStored(wire)
