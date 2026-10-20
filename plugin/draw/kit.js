@@ -653,7 +653,10 @@
       },
 
       // ---------------- a map of work: threads passing stations, links, groups (makeMap below); a canvas with regions
-      map(spec, o) { return makeMap(k, ctx, T, spec, o) }
+      map(spec, o) { return makeMap(k, ctx, T, spec, o) },
+
+      // ---------------- a diagram: nodes as boxes, edges as arrows, laid out in layers (makeGraph below); a canvas
+      graph(spec, o) { return makeGraph(k, ctx, T, spec, o) }
     }
     k.vstack = k.stack; k.hstack = k.beside; k.hatch = k.unseen
     return k
@@ -2152,6 +2155,354 @@
       if (G.items.length > p.shown.length) g.str(p.x + 4, p.y + p.h - 2, `+ ${G.items.length - p.shown.length} more`, 'dim')
     })
     return g
+  }
+
+  // ---------------------------------------------------------------- graph: boxes joined by arrows, laid out in layers
+  // k.graph(spec, o) draws nodes as boxes and edges as arrows, with no position to compute. The nodes go in layers along
+  // the arrows (an edge that closes a cycle is laid out turned back, its arrow still pointing at its own target), the
+  // order in each layer keeps crossings few, and each edge runs in straight lines with rounded turns, its label on it.
+  // spec: {nodes, edges} (also read: stations, links); a node is {id, label, note, tone, bold, layer, ref, cite,
+  // examples, meta} or a word, an edge {from, to, label, tone, dash, weight, id, ref, cite, examples, meta}; an edge
+  // names its own nodes when the list has not. An edge from a node to itself is noted in its box (↻). o: {dir: 'right' or
+  // 'down' (by default right when it fits the width, else down), w, nodeW (the widest line in a box)}. A node or an
+  // edge with a ref, cite, examples or a row of the card's data is a part. An edge whose weight is at least half the
+  // largest weight is drawn heavy.
+  const G_ARM = { N: 1, E: 2, S: 4, W: 8 }
+  const G_GLYPH = {
+    light: { 2: '─', 8: '─', 10: '─', 1: '│', 4: '│', 5: '│', 6: '╭', 12: '╮', 3: '╰', 9: '╯', 7: '├', 13: '┤', 14: '┬', 11: '┴', 15: '┼' },
+    heavy: { 2: '━', 8: '━', 10: '━', 1: '┃', 4: '┃', 5: '┃', 6: '┏', 12: '┓', 3: '┗', 9: '┛', 7: '┣', 13: '┫', 14: '┳', 11: '┻', 15: '╋' },
+    dash: { 2: '╌', 8: '╌', 10: '╌', 1: '╎', 4: '╎', 5: '╎' },
+  }
+  const MAX_GRAPH_NODES = 80
+  const MAX_GRAPH_EDGES = 200
+
+  function graphSpec(spec, ctx) {
+    spec = isObj(spec) ? spec : {}
+    const list = names => { for (const n of names) if (spec[n] != null) return mapList(spec[n]); return [] }
+    const nodes = new Map()
+    const add = raw => {
+      const r = isObj(raw) ? raw : { id: raw }
+      const v = firstOf(r, ['id', 'name', 'key', 'label'])
+      const id = v == null ? '' : clean(String(v)).trim()
+      if (!id) return null
+      if (nodes.has(id)) { if (isObj(raw)) Object.assign(nodes.get(id).raw, raw); return nodes.get(id) }
+      if (nodes.size >= MAX_GRAPH_NODES) { warn(ctx, `k.graph draws ${MAX_GRAPH_NODES} nodes at most; the rest are left out`); return null }
+      const n = { id, raw: isObj(raw) ? Object.assign({}, raw) : {}, loops: [] }
+      nodes.set(id, n)
+      return n
+    }
+    list(['nodes', 'stations', 'boxes']).forEach(add)
+    const edges = []
+    const seen = new Map()
+    list(['edges', 'links', 'arrows']).forEach(r => {
+      if (!isObj(r)) return
+      const a = add(firstOf(r, ['from', 'source'])), b = add(firstOf(r, ['to', 'target']))
+      if (!a || !b) { warn(ctx, 'k.graph: an edge needs from and to'); return }
+      const label = r.label != null ? clean(String(r.label)).replace(/\n/g, ' ').trim() : ''
+      if (a === b) { a.loops.push(label); return }
+      const key = a.id + '\u0000' + b.id
+      if (seen.has(key)) { const e = seen.get(key); if (label) e.label = e.label ? e.label + ', ' + label : label; return }
+      if (edges.length >= MAX_GRAPH_EDGES) { warn(ctx, `k.graph draws ${MAX_GRAPH_EDGES} edges at most; the rest are left out`); return }
+      const e = { a, b, label, raw: r, weight: num(r.weight) }
+      seen.set(key, e)
+      edges.push(e)
+    })
+    return { nodes: Array.from(nodes.values()), edges }
+  }
+
+  function makeGraph(k, ctx, T, spec, o) {
+    o = isObj(o) ? o : {}
+    const G = graphSpec(spec, ctx)
+    if (!G.nodes.length) { warn(ctx, 'k.graph has no nodes'); return k.text('') }
+    const W = clamp(int(o.w, k.w), 16, MAX_SIDE)
+    const maxWeight = Math.max(0, ...G.edges.map(e => isFinite(e.weight) ? e.weight : 0))
+    const outOf = new Map(G.nodes.map(n => [n, []]))
+    G.edges.forEach(e => outOf.get(e.a).push(e))
+    // cycles: walk from the nodes in their order; an edge back to a node still on the walk is laid out turned back
+    const state = new Map()
+    const walk = n => {
+      state.set(n, 1)
+      for (const e of outOf.get(n)) { const s = state.get(e.b); if (s === 1) e.rev = true; else if (!s) walk(e.b) }
+      state.set(n, 2)
+    }
+    G.nodes.forEach(n => { if (!state.get(n)) walk(n) })
+    const src = e => (e.rev ? e.b : e.a), dst = e => (e.rev ? e.a : e.b)
+    // layers: the longest path from a node with no edge in, or later when the node names its own layer
+    const layer = new Map()
+    const depth = n => {
+      if (layer.has(n)) return layer.get(n)
+      layer.set(n, 0)
+      let d = isFinite(num(n.raw.layer)) ? clamp(int(n.raw.layer, 0), 0, MAX_GRAPH_NODES) : 0
+      for (const e of G.edges) if (dst(e) === n) d = Math.max(d, depth(src(e)) + 1)
+      layer.set(n, d)
+      return d
+    }
+    G.nodes.forEach(depth)
+    const L = Math.max(...G.nodes.map(n => layer.get(n))) + 1
+    // vertices: the nodes, and one pass-through in each layer a long edge crosses; segments join neighbors
+    const V = G.nodes.map(n => ({ node: n, layer: layer.get(n), up: [], down: [] }))
+    const vOf = new Map(V.map(v => [v.node, v]))
+    const segs = []
+    G.edges.forEach(e => {
+      let prev = vOf.get(src(e))
+      const end = vOf.get(dst(e))
+      e.segs = []
+      for (let l = prev.layer + 1; l <= end.layer; l++) {
+        const next = l === end.layer ? end : { edge: e, layer: l, up: [], down: [] }
+        if (next !== end) V.push(next)
+        const s = { from: prev, to: next, edge: e }
+        prev.down.push(s); next.up.push(s)
+        segs.push(s); e.segs.push(s)
+        prev = next
+      }
+    })
+    const isBox = v => !!v.node
+    const layers = Array.from({ length: L }, () => [])
+    V.forEach(v => layers[v.layer].push(v))
+    // the order in each layer: sweeps by the mean place of each vertex's neighbors; the order with fewest crossings wins
+    const index = () => layers.forEach(ly => ly.forEach((v, i) => { v.i = i }))
+    const byLayer = layers.map((_, l) => segs.filter(s => s.from.layer === l))
+    const crossings = () => {
+      let c = 0
+      byLayer.forEach(ss => { for (let i = 0; i < ss.length; i++) for (let j = i + 1; j < ss.length; j++) if ((ss[i].from.i - ss[j].from.i) * (ss[i].to.i - ss[j].to.i) < 0) c++ })
+      ctx.ops += segs.length
+      return c
+    }
+    index()
+    let best = layers.map(ly => ly.slice()), bestC = crossings()
+    for (let it = 0; it < 8 && bestC > 0; it++) {
+      const down = it % 2 === 0
+      const order = down ? layers.map((_, l) => l).slice(1) : layers.map((_, l) => l).slice(0, -1).reverse()
+      for (const l of order) {
+        layers[l].forEach(v => { const nb = down ? v.up.map(s => s.from) : v.down.map(s => s.to); v.b = nb.length ? nb.reduce((t, u) => t + u.i, 0) / nb.length : v.i })
+        layers[l].sort((a, b) => a.b - b.b || a.i - b.i)
+        layers[l].forEach((v, i) => { v.i = i })
+      }
+      const c = crossings()
+      if (c < bestC) { bestC = c; best = layers.map(ly => ly.slice()) }
+    }
+    best.forEach((ly, l) => { layers[l] = ly })
+    index()
+
+    // the first plan that fits the width: across, with boxes narrower step by step, then down, then the narrowest
+    const dirs = o.dir === 'down' || o.dir === 'right' ? [o.dir] : ['right', 'down']
+    const wide = clamp(int(o.nodeW, 18), 6, 60)
+    const tries = []
+    for (const dir of dirs) for (const nw of [wide, Math.min(wide, 14)]) tries.push([dir, nw])
+    for (const dir of dirs) tries.push([dir, Math.min(wide, 10)])
+    let plan = null, narrowest = null
+    for (const [dir, nw] of tries) {
+      const p = graphPlan(dir, nw)
+      if (!narrowest || p.w < narrowest.w) narrowest = p
+      if (p.w <= W) { plan = p; break }
+    }
+    if (!plan) { plan = graphPlan(narrowest.dir, narrowest.nw); warn(ctx, `k.graph needs ${plan.w} columns and has ${W}; it is cut at the right`) }
+    return graphDraw(plan)
+
+    // the boxes' sizes and places and the edges' tracks, for one direction and one box width. Positions are in the
+    // layout's terms: m along the layers (x when right, y when down), c across them
+    function graphPlan(dir, nw) {
+      const R = dir === 'right'
+      V.forEach(v => {
+        if (!isBox(v)) { v.cw = 1; v.mw = 0; return }
+        const n = v.node
+        v.lines = wrapWords(clean(String(n.raw.label != null ? n.raw.label : n.id)).replace(/\n/g, ' '), nw, 2)
+        v.extra = []
+        if (n.raw.note != null && String(n.raw.note).trim()) v.extra.push(cut(clean(String(n.raw.note)).replace(/\n/g, ' '), nw))
+        if (n.loops.length) v.extra.push(cut('↻' + (n.loops.some(Boolean) ? ' ' + n.loops.filter(Boolean).join(', ') : ''), nw))
+        let bw = Math.max(1, ...v.lines.concat(v.extra).map(s => k.len(s))) + 4
+        let bh = 2 + v.lines.length + v.extra.length
+        // a row (right) or two columns (down) on the side for each edge that leaves or enters there
+        if (R) bh = Math.max(bh, 2 + v.down.length, 2 + v.up.length)
+        else bw = Math.max(bw, 1 + 2 * v.down.length + 1, 1 + 2 * v.up.length + 1)
+        v.bw = bw; v.bh = bh
+        v.cw = R ? bh : bw
+        v.mw = R ? bw : bh
+      })
+      const gapC = R ? 1 : 2
+      const mid = v => v.c + v.cw / 2
+      layers.forEach(ly => { let c = 0; ly.forEach(v => { v.c = c; c += v.cw + gapC }) })
+      // across: each vertex pulled toward the middle of its neighbors, in order and apart, sweeping down and up
+      for (let it = 0; it < 4; it++) {
+        const down = it % 2 === 0
+        const order = down ? layers.map((_, l) => l).slice(1) : layers.map((_, l) => l).slice(0, -1).reverse()
+        for (const l of order) {
+          const ly = layers[l]
+          const want = ly.map(v => { const nb = down ? v.up.map(s => s.from) : v.down.map(s => s.to); return (nb.length ? nb.reduce((t, u) => t + mid(u), 0) / nb.length : mid(v)) - v.cw / 2 })
+          const pos = want.slice()
+          for (let i = 1; i < ly.length; i++) pos[i] = Math.max(pos[i], pos[i - 1] + ly[i - 1].cw + gapC)
+          const shift = ly.reduce((t, v, i) => t + want[i] - pos[i], 0) / ly.length
+          ly.forEach((v, i) => { v.c = pos[i] + shift })
+          for (let i = 1; i < ly.length; i++) ly[i].c = Math.max(ly[i].c, ly[i - 1].c + ly[i - 1].cw + gapC)
+        }
+      }
+      const minC = Math.min(...V.map(v => v.c))
+      V.forEach(v => { v.c = Math.round(v.c - minC) })
+      layers.forEach(ly => { for (let i = 1; i < ly.length; i++) ly[i].c = Math.max(ly[i].c, ly[i - 1].c + ly[i - 1].cw + gapC) })
+      // ports: where each segment leaves a vertex (pc) and enters the next (qc), ordered by where the other end sits
+      V.forEach(v => {
+        v.down.sort((a, b) => mid(a.to) - mid(b.to))
+        v.up.sort((a, b) => mid(a.from) - mid(b.from))
+        if (!isBox(v)) { v.down.forEach(s => { s.pc = v.c }); v.up.forEach(s => { s.qc = v.c }); return }
+        const room = v.cw - 2
+        const at = (n, i) => (R ? Math.floor((room - n) / 2) + i : Math.round((i + 1) * (room + 1) / (n + 1)) - 1)
+        v.down.forEach((s, i) => { s.pc = v.c + 1 + clamp(at(v.down.length, i), 0, room - 1) })
+        v.up.forEach((s, i) => { s.qc = v.c + 1 + clamp(at(v.up.length, i), 0, room - 1) })
+      })
+      // each gap between layers: a stub out (right: as long as the labels written on it), the tracks where edges turn
+      // across (edges that overlap get their own), and two cells in (a line and the arrow)
+      const labelled = s => s.edge.segs[0] === s && !!s.edge.label
+      const gaps = byLayer.slice(0, L - 1).map(ss => {
+        const tracks = []
+        ss.filter(s => s.pc !== s.qc).sort((a, b) => Math.min(a.pc, a.qc) - Math.min(b.pc, b.qc)).forEach(s => {
+          const lo = Math.min(s.pc, s.qc), hi = Math.max(s.pc, s.qc)
+          let t = tracks.findIndex(tr => tr.every(x => x.hi < lo || x.lo > hi || (x.s.from === s.from && x.s.pc === s.pc) || (x.s.to === s.to && x.s.qc === s.qc)))
+          if (t < 0) { t = tracks.length; tracks.push([]) }
+          tracks[t].push({ lo, hi, s })
+          s.track = t
+        })
+        const labelW = Math.max(0, ...ss.filter(labelled).map(s => k.len(cut(s.edge.label, 16))))
+        return { out: R ? (labelW ? labelW + 3 : 2) : 1, tracks: tracks.length, into: R ? 2 : 1 }
+      })
+      const start = []
+      let m = 0
+      for (let l = 0; l < L; l++) {
+        start.push(m)
+        layers[l].size = Math.max(1, ...layers[l].map(v => v.mw))
+        m += layers[l].size + (l + 1 < L ? gaps[l].out + gaps[l].tracks + gaps[l].into : 0)
+      }
+      V.forEach(v => {
+        const s0 = start[v.layer], size = layers[v.layer].size
+        if (isBox(v)) { v.m = s0 + Math.floor((size - v.mw) / 2); v.enter = v.m; v.exit = v.m + v.mw - 1 }
+        else { v.m = s0; v.enter = s0; v.exit = s0 + size - 1 }
+      })
+      byLayer.slice(0, L - 1).forEach((ss, l) => ss.forEach(s => { s.tm = start[l] + layers[l].size + gaps[l].out + (s.track || 0) }))
+      const cross = Math.max(...V.map(v => v.c + v.cw))
+      return { dir, nw, R, w: R ? m : cross, h: R ? cross : m }
+    }
+
+    function graphDraw(P) {
+      const R = P.R
+      const xy = (mm, cc) => (R ? [mm, cc] : [cc, mm])
+      const key = (x, y) => y * 10000 + x
+      // line cells: the arms each edge gives them (the glyph follows from the arms), its tone and weight
+      const cells = new Map()
+      const A = R ? { pm: G_ARM.E, mm: G_ARM.W, pc: G_ARM.S, mc: G_ARM.N } : { pm: G_ARM.S, mm: G_ARM.N, pc: G_ARM.E, mc: G_ARM.W }
+      const styleOf = e => ({ tone: e.raw.tone ? T(e.raw.tone) : 'dim', heavy: maxWeight > 0 && isFinite(e.weight) && e.weight >= maxWeight / 2, dash: !!e.raw.dash })
+      const arm = (mm, cc, bits, st) => {
+        const [x, y] = xy(mm, cc)
+        let c = cells.get(key(x, y))
+        if (!c) { c = { x, y, arms: 0, tone: st.tone }; cells.set(key(x, y), c) }
+        c.arms |= bits; c.tone = st.tone
+        if (st.heavy) c.heavy = true
+        if (st.dash) c.dash = true
+      }
+      const along = (m0, m1, cc, st) => { for (let mm = m0; mm <= m1; mm++) arm(mm, cc, (mm > m0 ? A.mm : 0) | (mm < m1 ? A.pm : 0), st) }
+      const across = (mm, c0, c1, st) => { const lo = Math.min(c0, c1), hi = Math.max(c0, c1); for (let cc = lo; cc <= hi; cc++) arm(mm, cc, (cc > lo ? A.mc : 0) | (cc < hi ? A.pc : 0), st) }
+      const marks = []   // [x, y, glyph, tone]: arrows, and the joins on a box's border
+      const labels = []
+      G.edges.forEach(e => {
+        const st = styleOf(e)
+        e.segs.forEach((s, si) => {
+          const m0 = s.from.exit + 1, m1 = s.to.enter - 1
+          const arrowIn = isBox(s.to) && !e.rev, arrowOut = isBox(s.from) && e.rev && si === 0
+          const a = m0 + (arrowOut ? 1 : 0), b = m1 - (arrowIn ? 1 : 0)
+          if (s.pc === s.qc) along(a, b, s.pc, st)
+          else {
+            along(a, s.tm, s.pc, st); across(s.tm, s.pc, s.qc, st); along(s.tm, b, s.qc, st)
+            arm(s.tm, s.pc, A.mm, st); arm(s.tm, s.qc, A.pm, st)
+          }
+          // the line touches what it leaves and what it enters
+          arm(a, s.pc, A.mm, st); arm(b, s.qc, A.pm, st)
+          if (!isBox(s.to)) along(s.to.enter, s.to.exit, s.to.c, st)
+          if (isBox(s.from) && !arrowOut) marks.push([...xy(s.from.exit, s.pc), R ? '├' : '┬', s.from])
+          if (arrowOut) marks.push([...xy(m0, s.pc), R ? '◀' : '▲', st.tone])
+          if (arrowIn) marks.push([...xy(m1, s.qc), R ? '▶' : '▼', st.tone])
+          if (isBox(s.to) && e.rev) marks.push([...xy(s.to.enter, s.qc), R ? '┤' : '┴', s.to])
+          if (si === 0 && e.label) labels.push({ e, s, st })
+        })
+      })
+      const boxes = V.filter(isBox).map(v => { const [x, y] = xy(v.m, v.c); return { v, x, y, w: v.bw, h: v.bh } })
+      const taken = new Set()
+      boxes.forEach(b => { for (let j = 0; j < b.h; j++) for (let i = 0; i < b.w; i++) { cells.delete(key(b.x + i, b.y + j)); taken.add(key(b.x + i, b.y + j)) } })
+      marks.forEach(m => taken.add(key(m[0], m[1])))
+      const c = k.canvas(P.w, P.h)
+      // the edges' labels: right, written on the stub where the edge leaves; down, beside it; else left out of the
+      // drawing (the edge's part still names it)
+      const placed = new Map()
+      labels.forEach(({ e, s, st }) => {
+        const text = cut(e.label, 16), n = k.len(text)
+        const spots = R ? [[s.from.exit + 3, s.pc]] : [[s.pc + 2, s.from.exit + 1], [s.pc - 1 - n, s.from.exit + 1]]
+        for (const [x0, y0] of spots) {
+          if (x0 < 0 || x0 + n > P.w) continue
+          let free = true
+          for (let i = -1; i <= n; i++) {
+            const kk = key(x0 + i, y0), cl = cells.get(kk)
+            if (taken.has(kk) || (cl && !(R && cl.arms === (G_ARM.E | G_ARM.W)))) free = false
+          }
+          if (!free) continue
+          for (let i = -1; i <= n; i++) { cells.delete(key(x0 + i, y0)); taken.add(key(x0 + i, y0)) }
+          placed.set(e, { x0, y0, n, text, tone: e.raw.tone ? T(e.raw.tone) : 'ink' })
+          break
+        }
+      })
+      cells.forEach(cl => {
+        const set = cl.dash && G_GLYPH.dash[cl.arms] ? G_GLYPH.dash : cl.heavy ? G_GLYPH.heavy : G_GLYPH.light
+        const g = set[cl.arms] || G_GLYPH.light[cl.arms]
+        if (g) c.put(cl.x, cl.y, g, cl.tone)
+      })
+      placed.forEach(p => c.text(p.x0, p.y0, k.escape(p.text), { tone: p.tone }))
+      const toneOfBox = v => (v.node.raw.tone ? T(v.node.raw.tone) : 'dim')
+      boxes.forEach(b => {
+        const v = b.v, n = v.node
+        c.box(b.x, b.y, b.w, b.h, { tone: toneOfBox(v) })
+        const top = b.y + 1 + Math.max(0, Math.floor((b.h - 2 - v.lines.length - v.extra.length) / 2))
+        const left = s => b.x + 2 + Math.floor((b.w - 4 - k.len(s)) / 2)
+        v.lines.forEach((s, i) => c.text(left(s), top + i, k.escape(s), { bold: !!n.raw.bold }))
+        v.extra.forEach((s, i) => c.text(left(s), top + v.lines.length + i, k.escape(s), { tone: 'dim' }))
+      })
+      marks.forEach(([x, y, g, t]) => c.put(x, y, g, typeof t === 'string' ? t : toneOfBox(t)))
+      // parts: each node and each edge that names what it stands for
+      const partOf = (raw, label, fallbackId, x, y, w, h) => {
+        const meta = Object.assign({}, isObj(raw.meta) ? raw.meta : {}, { label })
+        for (const f of ['ref', 'refs', 'cite', 'examples', 'row', 'note']) if (raw[f] != null && meta[f] == null) meta[f] = raw[f]
+        const from = lineageOf(ctx, raw)
+        if (from && meta.ref == null && meta.refs == null) meta.ref = from
+        if (meta.ref == null && meta.refs == null && !meta.cite && !meta.examples && meta.row == null) return
+        const id = raw.part != null ? String(raw.part) : fallbackId
+        c.region(ID_RE.test(id) ? id : mslug(id, 60), x, y, w, h, meta)
+      }
+      boxes.forEach(b => partOf(b.v.node.raw, clean(String(b.v.node.raw.label != null ? b.v.node.raw.label : b.v.node.id)), b.v.node.id, b.x, b.y, b.w, b.h))
+      G.edges.forEach(e => {
+        const p = placed.get(e)
+        const last = e.segs[e.segs.length - 1]
+        const [x, y] = p ? [p.x0, p.y0] : xy(last.to.enter - 1, last.qc)
+        const name = n => clean(String(n.raw.label != null ? n.raw.label : n.id))
+        partOf(e.raw, `${name(e.a)} → ${name(e.b)}${e.label ? ': ' + e.label : ''}`, e.raw.id != null ? String(e.raw.id) : `${e.a.id}-to-${e.b.id}`, x, y, p ? p.n : 1, 1)
+      })
+      return c
+    }
+
+    function wrapWords(s, width, most) {
+      const lines = []
+      let cur = ''
+      s.split(/\s+/).filter(Boolean).forEach(wd => {
+        if (!cur) cur = wd
+        else if (k.len(cur + ' ' + wd) <= width) cur += ' ' + wd
+        else { lines.push(cur); cur = wd }
+      })
+      if (cur) lines.push(cur)
+      if (!lines.length) return ['']
+      const out = lines.slice(0, most)
+      if (lines.length > most) out[most - 1] = out[most - 1] + ' ' + lines.slice(most).join(' ')
+      return out.map(l => cut(l, width))
+    }
+    function cut(s, width) {
+      if (k.len(s) <= width) return s
+      let out = ''
+      for (const ch of Array.from(s)) { if (k.len(out + ch) > width - 1) break; out += ch }
+      return out + '…'
+    }
   }
 
   // ---------------------------------------------------------------- run
