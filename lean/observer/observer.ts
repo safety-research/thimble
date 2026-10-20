@@ -481,7 +481,7 @@ async function look($: Engine, t: Look, again: Again | null = null): Promise<voi
         .replace('{{ROW}}', inRow.length ? inRow.map(v => `${v.key} ${v.name}`).join(', ') : 'v visualize, s squeeze')
         .replace('{{GLOSSED}}', bullets(glossed.slice(-GLOSSED_KEEP)))
         .replace('{{GLOSS_RULE}}', glossRule)
-        .replace('{{OBJECTS}}', digests.length ? digests.join('\n\n') : 'No objects yet.')
+        .replace('{{OBJECTS}}', digests.length ? digests.join('\n\n') : 'No cards yet.')
         .replace('{{COVERAGE}}', coverage)
         .replace('{{SEEN}}', bullets(seen.slice(-KEEP)))
         .replace('{{KNOWN}}', bullets(known))
@@ -515,7 +515,7 @@ async function look($: Engine, t: Look, again: Again | null = null): Promise<voi
         LINES: String(answer.split('\n').length),
         ANSWER: cut(answer, 16000),
         SHOWN: squeezed ? `\nThe person reads it squeezed (${squeezed.split('\n').length} lines); this is what shows:\n${cut(squeezed, 6000)}\n` : '',
-        OBJECTS: digests.length ? digests.join('\n\n') : 'No objects yet.',
+        OBJECTS: digests.length ? digests.join('\n\n') : 'No cards yet.',
         COVERAGE: coverage,
         EARLIER: bullets(t.earlier.slice(-6).map(x => cut(x, 300))),
       }

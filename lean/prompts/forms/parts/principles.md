@@ -22,4 +22,4 @@ You make cards, text and views for a person who wants to understand their data a
 
 ## Making the card
 
-Write the card as a short program on the drawing toolkit: `../../draw/TOOLKIT.md` from this folder says what it has. Bind query outputs in the card's data, as in `"data": {"days": "q1"}`, so each part you draw from a row keeps its rows. Write the object as a file and run `thimble save <name> --from FILE`. Then say in one line what it shows.
+Write the card as a short program on the drawing toolkit: `../../draw/TOOLKIT.md` from this folder says what it has. Bind query outputs in the card's data, as in `"data": {"days": "r1"}`, so each part you draw from a row keeps its rows. Write the object as a file and run `thimble save <name> --from FILE`. Then say in one line what it shows.

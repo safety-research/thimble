@@ -261,7 +261,7 @@ export const LABEL = 12
 /** How a claim's sources read when the fork gave no Based on: each source as a person reads its ref. */
 const sourcesWords = c => (c.sources || []).slice(0, 3).map(x => {
   const r = String(x.ref || '')
-  const q = /^(q\d+)(?:#(.*))?$/.exec(r)
+  const q = /^([qr]\d+)(?:#(.*))?$/.exec(r)
   if (q) { let w = q[2] || ''; try { w = decodeURIComponent(w) } catch { /* as written */ } return [q[1], w.replace(/&/g, ' ').replace('@', ' · ')].filter(Boolean).join(' · ') }
   const [path, loc] = r.split('#')
   const line = /^L(\d+)/.exec(loc || '')

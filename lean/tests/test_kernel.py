@@ -6,6 +6,7 @@ import copy
 import csv
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -203,7 +204,7 @@ def test_a_new_version_keeps_the_old_and_rerun_binds_new_results(root: Path) -> 
     with open(root / "runs.csv", "a") as f:
         f.write("d,1\n")
     obj, renamed = O.update(st, "runs", {}, rerun=True)
-    assert obj["version"] == 2 and renamed == {q["id"]: f"q{int(q['id'][1:]) + 1}"}
+    assert obj["version"] == 2 and renamed == {q["id"]: f"r{int(q['id'][1:]) + 1}"}
     assert (root / "thimble" / "objects" / ".versions" / "01-runs" / "v1.json").is_file()
     assert obj["data"]["by"][1]["n"] == 3
     assert obj["lineage"]["problems"] and "holds 3" in obj["lineage"]["problems"][0]  # the text still says 2
@@ -238,13 +239,98 @@ def test_the_command_runs_a_query_from_a_heredoc(root: Path) -> None:
     lean = Path(__file__).resolve().parents[1] / "bin" / "thimble"
     # the root is pinned: a thimble/ store in a folder above the test's (as /tmp can hold) must not take it
     env = {**os.environ, "THIMBLE_PYTHON": sys.executable, "THIMBLE_ROOT": str(root)}
-    out = subprocess.run([str(lean), "q", "runs by result"], input='tally(load("runs.csv"), "passed")', text=True,
+    out = subprocess.run([str(lean), "run", "runs by result"], input='tally(load("runs.csv"), "passed")', text=True,
                          capture_output=True, cwd=root, env=env, timeout=120)
     assert out.returncode == 0, out.stderr
-    assert "q1 · runs by result" in out.stdout and "Each output row keeps its source rows." in out.stdout
-    assert "[1](q1#passed=0@n)" in out.stdout
-    res = subprocess.run([str(lean), "resolve", "q1#passed=1@n"], text=True, capture_output=True, cwd=root, env=env, timeout=60)
+    assert "r1 · runs by result" in out.stdout and "Each output row keeps its source rows." in out.stdout
+    assert "[1](r1#passed=0@n)" in out.stdout
+    res = subprocess.run([str(lean), "resolve", "r1#passed=1@n"], text=True, capture_output=True, cwd=root, env=env, timeout=60)
     assert "2 source rows: runs.csv#row=1,3" in res.stdout
+
+
+# ------------------------------------------------------------------ run, and the ids from before it was named run
+
+
+def _thimble(root: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
+    lean = Path(__file__).resolve().parents[1] / "bin" / "thimble"
+    env = {**os.environ, "THIMBLE_PYTHON": sys.executable, "THIMBLE_ROOT": str(root)}
+    return subprocess.run([str(lean), *args], input=stdin, text=True, capture_output=True, cwd=root, env=env, timeout=120)
+
+
+def test_run_makes_r_ids_and_q_is_an_unlisted_alias_that_goes_on_with_them(root: Path) -> None:
+    code = 'tally(load("runs.csv"), "passed")'
+    first = _thimble(root, "run", "runs by result", stdin=code)
+    assert first.returncode == 0, first.stderr
+    assert first.stdout.startswith("r1 · runs by result") and (root / "thimble" / "queries" / "r1.json").is_file()
+    for n, alias in ((2, "q"), (3, "query")):
+        out = _thimble(root, alias, "runs again", stdin=code)
+        assert out.returncode == 0, out.stderr
+        assert out.stdout.startswith(f"r{n} · runs again") and f"[1](r{n}#passed=0@n)" in out.stdout
+    again = _thimble(root, "run", "--rerun", "r1")
+    assert again.stdout.startswith("r4 ran r1 again: its output is the same"), again.stdout
+    # the help and the usage name run, never the aliases
+    for args in ((), ("--help",), ("no-such-command",)):
+        out = _thimble(root, *args)
+        text = out.stdout + out.stderr
+        assert "thimble run " in text or ",run," in text, text
+        assert not re.search(r"thimble q |[,{'](q|query)[,}']|, (q|query),", text), text
+
+
+def test_new_ids_go_on_from_the_highest_id_old_or_new(root: Path) -> None:
+    st = Store(root)
+    d = st.sub("queries")
+    for n in range(1, 6):
+        (d / f"q{n}.json").write_text("{}")
+    qid, path = Q.next_id(st)
+    assert (qid, path.name) == ("r6", "r6.json")
+    (d / "q8.json").write_text("{}")
+    assert Q.next_id(st)[0] == "r9"
+
+
+def test_both_id_forms_read_as_query_refs() -> None:
+    for qid in ("r3", "q3"):
+        assert R.parse(f"{qid}#day=2026-06-16@n") == {"kind": "query", "query": qid, "keys": {"day": "2026-06-16"}, "col": "n"}
+        assert R.links(f"[202]({qid}#outcome=won (clean ep)@median)") == [("202", f"{qid}#outcome=won (clean ep)@median")]
+    assert R.parse("r1/runs.jsonl#L3")["kind"] != "query"  # a folder named like an id is still a path
+
+
+def test_a_folder_with_queries_from_before_the_rename_still_reads_them(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    st = Store(root)
+    new_id = Q.next_id
+
+    def old_id(s: Store) -> tuple[str, Path]:  # the id the kernel gave a query before it was named run
+        p = s.sub("queries") / "q1.json"
+        p.write_text('{"running": true}\n')
+        return "q1", p
+
+    monkeypatch.setattr(Q, "next_id", old_id)
+    old = Q.run(st, "runs by result", 'tally(load("runs.csv"), "passed")')
+    monkeypatch.setattr(Q, "next_id", new_id)
+    assert old["id"] == "q1" and not old["error"]
+    # its refs resolve, use() reads it, and a new query goes on from its number
+    r = LIN.resolve(st, "q1#passed=1@n")
+    assert r["count"] == 2 and r["rows"] == ["runs.csv#row=1,3"]
+    used = Q.run(st, "the old one, used", 'use("q1")')
+    assert used["id"] == "r2" and not used["error"] and used["uses"] == [{"name": "q1", "query": "q1"}]
+    # an object that binds it still saves, and its citation holds
+    obj = O.save(st, "old", {"title": "Old", "data": {"by": "q1"}, "text": "[2](q1#passed=1@n) passed"})
+    assert all(x["_ref"].startswith("q1#") and x["_rows"] for x in obj["data"]["by"])
+    assert not obj["lineage"]["problems"] and all(not c.get("problem") for c in obj["lineage"]["cites"])
+    # --rerun runs it again under a new id
+    out = _thimble(root, "run", "--rerun", "q1")
+    assert out.returncode == 0 and out.stdout.startswith("r3 ran q1 again: its output is the same"), out.stdout
+    # an object saved again with its queries run again binds the new id, in its data and its text
+    again, renamed = O.update(st, "old", {}, rerun=True)
+    assert renamed == {"q1": "r4"} and again["source"]["data"]["by"] == "r4" and "(r4#passed=1@n)" in again["text"]
+
+
+def test_a_changed_input_says_how_to_run_the_query_again(root: Path) -> None:
+    st = Store(root)
+    q = Q.run(st, "runs by result", 'tally(load("runs.csv"), "passed")')
+    with open(root / "runs.csv", "a") as f:
+        f.write("d,1\n")
+    r = LIN.resolve(st, f"{q['id']}#passed=1@n")
+    assert f"runs.csv changed since {q['id']} ran; `thimble run --rerun {q['id']}` runs it again" in r["notes"]
 
 
 def test_a_query_prints_little_beyond_what_claude_asked_for(root: Path) -> None:

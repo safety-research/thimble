@@ -37,7 +37,7 @@ export function viewLines(view, o = {}) {
 export function rowsLines(rows, w) {
   const lines = []
   const head = `${rows.count ? rows.count.toLocaleString('en-US') + ' row' + (rows.count === 1 ? '' : 's') : 'rows'} · ${rows.label}`
-  const files = [...new Set(rows.refs.map(x => x.split('#')[0]).filter(x => !/^q\d+$|^obj:/.test(x)).map(x => x.replace(/^.*\//, '')))]
+  const files = [...new Set(rows.refs.map(x => x.split('#')[0]).filter(x => !/^[qr]\d+$|^obj:/.test(x)).map(x => x.replace(/^.*\//, '')))]
   lines.push([{ s: '┌ ', tone: 'rule' }, { s: cut(head, w - 4 - (files.length ? len(files[0]) + 3 : 0)), tone: 'ink', b: true },
     ...(files.length ? [{ s: ' · ' + cut(files.join(', '), Math.max(8, w - 6 - len(head))), tone: 'dim' }] : [])])
   if (!rows.records.length) lines.push([{ s: '│ ', tone: 'rule' }, { s: cut(rows.note || 'no rows', w - 2), tone: 'dim' }])

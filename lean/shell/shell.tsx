@@ -200,7 +200,7 @@ export function prepared($: Engine, ref: ObjRef, w: number, state?: Record<strin
       object = await loadObject($, ref)
     } catch (err) {
       // a file over the 4 MiB one read takes, or one that is not JSON: Claude hears it at once, so the turn fixes it
-      return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `its file could not be read (${String((err as Error)?.message || err).slice(0, 160)}); an object over 4 MiB cannot be drawn, so bind query outputs (q3) in its data rather than writing rows out` }
+      return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `its file could not be read (${String((err as Error)?.message || err).slice(0, 160)}); an object over 4 MiB cannot be drawn, so bind query outputs (r3) in its data rather than writing rows out` }
     }
     if (!object) return { object: null, drawing: null, grid: null, verbs: [], problems: [], error: `no object ${ref.id} in ${ref.root}/thimble/objects` }
     const dir = $.plugin.root.replace(/\/+$/, '')
@@ -696,7 +696,7 @@ export async function ask($: Engine, request: string, verb: string, on: string):
 // ------------------------------------------------------------------------------------------------ the card after the answer
 
 /** Whether `thimble` ran a data command or a save (what a card after the answer could draw from). */
-const LEAN_WORK = /(^|[\s;&|(])thimble\s+(q|rows|resolve|sources|save)\b/
+const LEAN_WORK = /(^|[\s;&|(])thimble\s+(run|q|rows|resolve|sources|save)\b/
 
 /** The card after the answer while one is being made (else null): the observer's look waits for it, so its pass reads
  *  the card. */
@@ -754,7 +754,7 @@ async function forkCard($: Engine, o: { row: string; version: { text: string; id
       const ids: Record<string, string> = {}
       const problems: string[] = []
       for (const q of reply.queries) {
-        const run = await leanRun($, root, ['q', q.label], q.code)
+        const run = await leanRun($, root, ['run', q.label], q.code)
         const id = run.ok ? queryIdOf(run.out) : null
         if (id) ids[q.name] = id
         else problems.push(`the query ${q.name} ("${q.label}") did not run: ${cut(run.out.split('\n').filter(Boolean).slice(-3).join(' '), 400)}`)
@@ -796,7 +796,7 @@ async function forkCard($: Engine, o: { row: string; version: { text: string; id
     await $.state.set(LAST, ref)
     const cur = await recordNow($, o.row)
     if (cur && !cur.objects.includes(ref.id)) await saveRecord($, { ...cur, objects: [...cur.objects, ref.id] })
-    const data = Object.values((p.object?.data ?? {}) as Record<string, unknown>).filter(v => typeof v === 'string' && /^q\d+/.test(v))
+    const data = Object.values((p.object?.data ?? {}) as Record<string, unknown>).filter(v => typeof v === 'string' && /^[qr]\d+(?:[#@]|$)/.test(v))
     const lead = o.via === 'v' ? 'The person pressed v under your last answer, and thimble drew the card' : 'After your last answer, thimble drew the card'
     await noteForClaude($, `${lead} ${refText(ref)} under it ("${p.object?.title || ref.id}"), written by a fork of this conversation${data.length ? ` from ${[...new Set(data)].join(', ')}` : ''}. It is in thimble/objects/${ref.id}.json.${made.problems.length ? ` What did not hold: ${cut(made.problems.join(' '), 400)}` : ''}`)
     outcome.drawn = true
@@ -2648,10 +2648,10 @@ async function turnSel($: Engine, knob: string | null, dir: number): Promise<voi
  *  parts that rest on no rows). A program that failed is Claude's to fix now, in the same turn: a new version under
  *  the same name takes the failed one's place under the reply, so the person sees no second object and no new row. */
 function drawnNote(p: Prepared, ref: ObjRef): string {
-  if (p.error || !p.grid) return `The person cannot see ${refText(ref)}: ${p.error || 'it drew nothing'}. Fix it and save it again under the same name; the new version takes its place.`
+  if (p.error || !p.grid) return `The person cannot see the card ${refText(ref)}: ${p.error || 'it drew nothing'}. Fix it and save it again under the same name; the new version takes its place.`
   const d = p.drawing
   const parts = selectable(p.grid)
-  const lines = [`${refText(ref)} is drawn for the person under your reply: ${p.grid.h} rows by ${p.grid.w} columns, ${parts.length} part${parts.length === 1 ? '' : 's'} they can select.`]
+  const lines = [`The card ${refText(ref)} is drawn for the person under your reply: ${p.grid.h} rows by ${p.grid.w} columns, ${parts.length} part${parts.length === 1 ? '' : 's'} they can select.`]
   if (d.error) lines.push(`Its program failed: ${d.error.name}: ${d.error.message}${d.error.line ? ` (line ${d.error.line})` : ''}. They see the error in its place. Fix the program and save it again under the same name now; the new version takes its place under your reply.`)
   if (p.check?.line) lines.push(p.check.line)
   for (const w of (d.warnings || []).slice(0, 5)) lines.push(`Warning: ${w}`)
@@ -3286,7 +3286,7 @@ export const registerShell: Register = (on, options) => {
         const label = sel.region ? String(meta?.label || sel.region) : ''
         const knobs = stateKey(sel.state) ? ` Its knobs are at ${Object.entries(sel.state || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')}.` : ''
         context.push([
-          `The person asked this with an object open in the detail view: ${p.object?.id}@${p.object?.version} "${p.object?.title || ''}" (${sel.root}/thimble/objects/${sel.id}.json).${knobs}`,
+          `The person asked this with a card open in the detail view: ${p.object?.id}@${p.object?.version} "${p.object?.title || ''}" (${sel.root}/thimble/objects/${sel.id}.json).${knobs}`,
           sel.region ? `They had selected its part ${sel.region} ("${label}"). "This", "here" or "it" may mean that part.` : 'No part of it was selected.',
           refs.length ? `${sel.region ? 'That part' : 'Its words'} rest${sel.region ? 's' : ''} on ${refs.slice(0, 3).join(', ')}; \`thimble resolve <ref>\` opens the rows, \`thimble list ${sel.id}\` the object's lineage.` : `\`thimble list ${sel.id}\` shows the object's lineage.`,
         ].join('\n'))

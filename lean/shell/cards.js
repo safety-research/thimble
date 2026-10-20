@@ -40,7 +40,7 @@ export const SECTION_KEYS = { rows: 'r', code: 'c', raw: 'c' }
 export function cardKind(ref) {
   const r = String(ref || '')
   if (seriesRef(r)) return 'series'
-  if (/^q\d+(?:#|$)/.test(r)) return 'query'
+  if (/^[qr]\d+(?:#|$)/.test(r)) return 'query'
   if (r.startsWith('obj:')) return 'object'
   const path = r.split('#')[0]
   if (CODE.test(path) && /#L\d+(?:-L?\d+)?$/.test(r)) return 'code'
@@ -91,7 +91,7 @@ function filesOf(resolved, query) {
 /** The query's output column, the cited row and its key's words, read from the query's record. */
 function columnOf(query, ref) {
   const table = Array.isArray(query?.table) ? query.table : []
-  const m = /^q\d+(?:#(.*?))?(?:@([^@]+))?$/.exec(String(ref))
+  const m = /^[qr]\d+(?:#(.*?))?(?:@([^@]+))?$/.exec(String(ref))
   const frag = m?.[1] || ''
   const keys = Array.isArray(query?.keys) ? query.keys : []
   let col = m?.[2] || null
@@ -233,7 +233,7 @@ export function placeOf(ref) {
  *  object's value) or no root to place it in. */
 export function fileLink(ref, root) {
   const r = String(ref || '')
-  if (!r || /^(q\d+(?:[#@]|$)|obj:)/.test(r) || /^[a-z][a-z0-9+.-]*:\/\//i.test(r)) return null
+  if (!r || /^([qr]\d+(?:[#@]|$)|obj:)/.test(r) || /^[a-z][a-z0-9+.-]*:\/\//i.test(r)) return null
   const [path, frag = ''] = r.split(/#(.*)/s)
   if (!path || (!path.startsWith('/') && !root)) return null
   const abs = path.startsWith('/') ? path : `${String(root).replace(/\/+$/, '')}/${path}`
@@ -316,7 +316,7 @@ function behindLine(r, files) {
 const cellText = v => short(typeof v === 'number' ? fmtN(v) : v == null || v === '' ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v), 28)
 
 /**
- * A citation's card. `resolved` is `thimble resolve <ref> --json`; `query` the query's record (thimble/queries/q<n>.json)
+ * A citation's card. `resolved` is `thimble resolve <ref> --json`; `query` the query's record (thimble/queries/r<n>.json)
  * for a query ref; `object` the object's record for a value of a card; `lines` the file's lines around the cited ones
  * for a code ref the kernel gave no span for ({n, text}); `room` the card's rows.
  */
@@ -410,7 +410,7 @@ export async function citeCard({ ref, label, root, room = 9 }, io) {
   const series = seriesRef(ref)
   const resolved = await io.resolve(series ? series.query : ref, 6, series ? undefined : label)
   let query = null
-  const q = /^(q\d+)(?:[#@]|$)/.exec(typeof resolved?.narrowed === 'string' && resolved.narrowed ? resolved.narrowed : ref)
+  const q = /^([qr]\d+)(?:[#@]|$)/.exec(typeof resolved?.narrowed === 'string' && resolved.narrowed ? resolved.narrowed : ref)
   if (q) {
     try { query = JSON.parse(String(await io.read(`${root}/thimble/queries/${q[1]}.json`))) } catch { query = null }
   }

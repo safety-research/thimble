@@ -8,7 +8,7 @@
 //
 // Why Claude in the main conversation and not a quiet model call:
 //   - every mark must lead to real rows, and a view often needs a grain the reply never computed (per day and wiki,
-//     per step); Claude can run `thimble q`, which keeps the rows behind each value, and a tool-less call cannot;
+//     per step); Claude can run `thimble run`, which keeps the rows behind each value, and a tool-less call cannot;
 //   - follow-ups ("only links", "split by wiki") need the model in the loop: Claude changes the program and saves a
 //     new version, so no follow-up is a scripted phrase;
 //   - the queries and the save are Bash calls, so Manual mode stays manual and the person sees what ran;
@@ -120,7 +120,7 @@ export function request(ctx, existing) {
   const name = obj ? `explore-${bare(obj.id)}` : 'explore-<a short name>'
   return [
     `The person pressed x (Explore) on ${what}. Make it a view they can explore: read ${skill} first.`,
-    `Reuse the queries you already ran; run a new \`thimble q\` only where a mark needs rows you have not kept.`,
+    `Reuse the runs you already made; use \`thimble run\` again only where a mark needs rows you have not kept.`,
     `Save it with \`thimble save ${name} --from FILE\`, with "verb": "explore"${obj ? ` and "of": "${obj.id}"` : ''} in the JSON.`,
     `Check that it draws, as the person will see it, with \`${ctx.check || 'thimble verb explore --text'} ${name}\`.`,
     `Then say in one line what the person can turn or open. Do not repeat the answer.`,
@@ -258,7 +258,7 @@ export function refsOf(drawing, meta) {
   const cite = meta.cite && drawing.cites && drawing.cites[meta.cite]
   if (cite) {
     add(cite.ref)
-    if (typeof cite.query === 'string' && /^q\d+(#|$)/.test(cite.query)) add(cite.query)
+    if (typeof cite.query === 'string' && /^[qr]\d+(#|$)/.test(cite.query)) add(cite.query)
     add((cite.rows || []).filter(x => typeof x === 'string'))
   }
   return out
@@ -266,7 +266,7 @@ export function refsOf(drawing, meta) {
 
 // a source row, a row set, a query value or an object value (kernel/refs.py)
 function looksLikeRef(s) {
-  return /^q\d+(#.*)?$/.test(s) || /^obj:[A-Za-z0-9_.-]+(#\/.*)?$/.test(s) || /^[^#\s][^#\n]*#\S+$/.test(s)
+  return /^[qr]\d+(#.*)?$/.test(s) || /^obj:[A-Za-z0-9_.-]+(#\/.*)?$/.test(s) || /^[^#\s][^#\n]*#\S+$/.test(s)
 }
 
 /** How many rows a row set names (`f.jsonl#L4-9,12`, `x.csv#row=1-3`, `x.db#t/1-4`, `x.json#/a/1-3`); null for others. */

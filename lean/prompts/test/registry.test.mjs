@@ -28,7 +28,7 @@ test('a spec reads as feature:version pairs; aliases name their feature; a word 
 
 test('the index has every feature with its default, the versions on disk, and a skill in place as `skill`', () => {
   const idx = indexOf({ observer: ['v1.md', 'v2.md', 'mine.md', 'notes.txt', '.draft.md'] })
-  assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['attention-v1', 'mine', 'v1', 'v2', 'v2-low'])
+  assert.deepEqual(Object.keys(idx.observer.versions).sort(), ['attention-v1', 'mine', 'v1', 'v2', 'v2-low', 'v3', 'v3-low'])
   assert.equal(idx.observer.versions.mine.file, 'prompts/observer/mine.md')
   assert.equal(idx.thimble.versions.skill.file, 'skills/thimble/SKILL.md')
   // a feature that is off by default has no version named off
@@ -38,7 +38,7 @@ test('the index has every feature with its default, the versions on disk, and a 
 test('the active version: the default, then the setting, then THIMBLE_PROMPTS; a missing version keeps the one before with one line', () => {
   const idx = indexOf({ forms: ['v1.md', 'v2.md', 'principles.md'] })
   const d = choose(idx)
-  assert.equal(d.active.forms.version, 'runtime')
+  assert.equal(d.active.forms.version, 'v3')
   assert.equal(d.active.forms.file, null)
   assert.equal(d.active.forms.parts.length, 2)
   assert.equal(d.active.forms.source, 'default')
@@ -52,7 +52,7 @@ test('the active version: the default, then the setting, then THIMBLE_PROMPTS; a
   const m = choose(idx, { setting: 'forms:v1', env: 'forms:v9,nothing:v1' })
   assert.equal(m.active.forms.version, 'v1')
   assert.equal(m.problems.length, 2)
-  assert.match(m.problems[0], /^THIMBLE_PROMPTS: no version forms:v9, so forms stays at v1; its versions are runtime, v1, v2, principles, few, many, rotate, sketches, principles-v2, sketches-v2$/)
+  assert.match(m.problems[0], /^THIMBLE_PROMPTS: no version forms:v9, so forms stays at v1; its versions are runtime, v3, v1, v2, principles, few, many, rotate, sketches, principles-v2, sketches-v2$/)
   assert.match(m.problems[1], /no prompt feature "nothing"/)
 })
 
@@ -83,7 +83,7 @@ test('a feature that is off by default (the card after the answer) is off until 
 
 test('the spec of the versions in use names only those that are not the defaults', () => {
   const idx = indexOf({ forms: ['principles.md'] })
-  const c = choose(idx, { env: 'forms:principles,observer:v2-low,lens-claims:off' })
+  const c = choose(idx, { env: 'forms:principles,observer:v3-low,lens-claims:off' })
   assert.equal(specOf(c.active, idx), 'lens-claims:off,forms:principles')
   assert.equal(idOf('forms', 'principles'), 'forms:principles')
 })
@@ -129,20 +129,25 @@ test('a version made of parts reads each section where it stands, and can leave 
   const parts = [{ file: 'skills/x/SKILL.md', section: 'Principles' }, { file: 'prompts/f/v.md', section: 'Worked examples' }]
   assert.equal(partsText(parts, f => files[f]), '## Principles\n\np one\n\n### deeper\n\nd\n\n## Worked examples\n\nw\n')
   assert.equal(partsText(parts, f => files[f], p => p.file.endsWith('SKILL.md')), '## Worked examples\n\nw\n')
-  // the default card guidance: the thimble skill's card section where it stands, then the worked forms
+  // the default card guidance: the thimble skill's card section where it stands, then the card guidance with its
+  // worked examples; with the skill loaded, the skill's section is left out
   const t = textOf('cards', ROOT, {})
-  assert.equal(t.id, 'forms:runtime')
-  assert.match(t.text, /^## What the person sees\n/)
-  assert.match(t.text, /\n## Worked examples\n/)
-  assert.doesNotMatch(t.text, /## Example: a count/)
+  assert.equal(t.id, 'forms:v3')
+  assert.match(t.text, /^## Cards\n/)
+  assert.match(t.text, /\n## Making a card\n[\s\S]*\n### Worked examples\n/)
+  assert.doesNotMatch(t.text, /## Example\n/)
+  const loaded = textOf('cards', ROOT, { THIMBLE_SKILL_LOADED: '1' })
+  assert.match(loaded.text, /^## Making a card\n/)
+  assert.doesNotMatch(loaded.text, /## Cards\n/)
 })
 
 test("today's texts are the v1 of their features, byte for byte", () => {
   // the hashes of observer.md, question.md, squeeze's prompt.md and FORMS.md as they stood before the registry (with the
-  // command's name, thimble, in place of lean), and the thread prompt's opening
+  // command's name, thimble, in place of lean, and `thimble run` with r1, r2, ... in place of `thimble q` with q1, q2, ...),
+  // and the thread prompt's opening
   const want = {
-    'observer/v1.md': 'd1c4306d52072675', 'question/v1.md': '84409e8c32d8fc4a', 'squeeze/v1.md': '0fad5d2275653f10',
-    'forms/v1.md': 'fd333b0a2458b08c',
+    'observer/v1.md': '289ca81d490ef224', 'question/v1.md': '84409e8c32d8fc4a', 'squeeze/v1.md': '571cc21c206dd909',
+    'forms/v1.md': '7c84d1a94721d3d6',
   }
   for (const [f, h] of Object.entries(want)) assert.equal(sha(readFileSync(join(ROOT, 'prompts', f), 'utf8')), h, f)
   assert.match(readFileSync(join(ROOT, 'prompts/thread/v1.md'), 'utf8'), /^You answer one person's questions about one part of a card/)
@@ -162,20 +167,20 @@ test('every version file on disk is in the index, every default exists, and ever
   }
   const { active, problems } = activeNow(ROOT, {})
   assert.deepEqual(problems, [])
-  assert.equal(active.observer.version, 'v2-low')
-  assert.ok(listing(idx, active).some(l => l.startsWith('observer') && l.includes('[v2-low]')))
+  assert.equal(active.observer.version, 'v3-low')
+  assert.ok(listing(idx, active).some(l => l.startsWith('observer') && l.includes('[v3-low]')))
 })
 
 test('textOf reads the active text; a skill in place is its body', () => {
   const t = textOf('cards', ROOT, { THIMBLE_PROMPTS: 'forms:principles' })
   assert.equal(t.id, 'forms:principles')
-  assert.match(t.text, /^## What the person sees\n[\s\S]*\n## What makes a great output\n/)
+  assert.match(t.text, /^## Cards\n[\s\S]*\n## What makes a great output\n/)
   assert.doesNotMatch(t.text, /## Worked examples|## Sketches/)
   assert.equal(t.chosen, null)
   const lean = textOf('thimble', ROOT, {})
   assert.equal(lean.id, 'thimble:skill')
   assert.doesNotMatch(lean.text, /^---/)
-  assert.match(lean.text, /^\n# Where each value comes from/)
+  assert.match(lean.text, /^\n# thimble\n/)
 })
 
 test('`thimble guide cards` prints the card guidance with its folder, and notes the read in the session events', () => {
@@ -190,9 +195,9 @@ test('`thimble guide cards` prints the card guidance with its folder, and notes 
   // a version that does not exist: the default, with one line on stderr
   const m = spawnSync(process.execPath, [NODE, 'guide', 'cards'], { encoding: 'utf8', env: { PATH: process.env.PATH, THIMBLE_HOME: home, THIMBLE_PROMPTS: 'forms:v9' } })
   assert.equal(m.status, 0)
-  assert.match(m.stdout, /^\(forms:runtime ·/)
+  assert.match(m.stdout, /^\(forms:v3 ·/)
   assert.equal(m.stderr.trim().split('\n').length, 1)
-  assert.match(m.stderr, /no version forms:v9, so forms stays at runtime/)
+  assert.match(m.stderr, /no version forms:v9, so forms stays at v3/)
 })
 
 test('the card ablation: five versions with the same principles, which differ only in their examples', () => {

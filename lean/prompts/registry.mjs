@@ -13,27 +13,32 @@
 /** The principles every variant of the card ablation shares: the thimble skill's card section (the card runtime's
  *  principles, read where it stands) and the principles of a great output. A part may keep only some of a file's ###
  *  subsections: `only` names them by the start of their headings, `pick: n` takes n of them, chosen by the session. */
-const ABLATION = [{ file: 'skills/thimble/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/parts/principles.md' }]
+const ABLATION = [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/parts/principles.md' }]
 /** The same, with the principles' second version: parts are labelled with what they stand for, each part is drawn from
  *  its row (a stacked bar's parts too), and when interaction earns its place (a part that stands for many things; a
  *  case the person asks to see). */
-const ABLATION_V2 = [{ file: 'skills/thimble/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/parts/principles-v2.md' }]
+const ABLATION_V2 = [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/parts/principles-v2.md' }]
 
 /** @type {Record<string, Feature>} */
 export const FEATURES = {
   observer: {
     about: "the post-turn pass: its frame, which holds the shared principles and composes the enabled lenses",
     reads: 'observer/observer.ts, after each turn of work',
-    default: 'v2-low',
+    default: 'v3-low',
     versions: {
       v1: { about: 'one prompt in a fork of the whole session, as before lenses', mode: 'fork' },
       v2: { about: 'the frame for the lenses: one call over the new turn and a digest of the state', mode: 'lenses' },
       'attention-v1': { about: "v2 with the draft principles of when something is worth the person's attention", mode: 'lenses' },
       'v2-low': { about: 'v2 at low effort: the same frame, with less thinking before the reply', file: 'prompts/observer/v2.md', mode: 'lenses', effort: 'low' },
+      v3: { about: "v2 with thimble's purpose in the 0.9 preamble's words, and cards for objects", mode: 'lenses' },
+      'v3-low': { about: 'v3 at low effort, as v2-low is v2', file: 'prompts/observer/v3.md', mode: 'lenses', effort: 'low' },
     },
   },
   'observer-turn': { about: "the pass's message: the new turn, its objects and the digest of the state", reads: 'observer/observer.ts', default: 'v1' },
-  question: { about: "the question step: the answer against the person's literal question, and a stated decision", reads: 'observer/observer.ts', default: 'v1' },
+  question: {
+    about: "the question step: the answer against the person's literal question, and a stated decision", reads: 'observer/observer.ts', default: 'v2',
+    versions: { v1: { about: 'as before' }, v2: { about: "v1 with thimble's purpose in the 0.9 preamble's words, and cards for objects" } },
+  },
   'lens-notes': { about: 'lens: notes to Claude', reads: 'the pass', default: 'v1', optional: true },
   'lens-line': { about: 'lens: the rare line above the prompt', reads: 'the pass', default: 'v1', optional: true },
   'lens-actions': {
@@ -42,22 +47,26 @@ export const FEATURES = {
   },
   'lens-squeeze': { about: "lens: where the answer stands on squeeze's chips", reads: 'the pass', default: 'v1', optional: true },
   'lens-explain': {
-    about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v2', optional: true,
-    versions: { v1: { about: "observer:v1's words on glosses" }, v2: { about: 'marks on terms of art and coined names a claim turns on' } },
+    about: 'lens: explain marks on terms that would stop the reader', reads: 'the pass', default: 'v3', optional: true,
+    versions: { v1: { about: "observer:v1's words on glosses" }, v2: { about: 'marks on terms of art and coined names a claim turns on' }, v3: { about: "v2, opened with the 0.9 rule for terms (explain a term the person has not used the first time) as its reason" } },
   },
   'lens-claims': {
     about: "lens: the turn's claims, with what each means", reads: 'the pass', default: 'v2', optional: true,
     versions: { v1: { about: 'every part of each claim from the pass' }, v2: { about: "v1, terse: the quote names the claim, \"based on\" comes from the cited rows, the digest holds the claims that bear on the turn, a turn with no claims gives none" } },
   },
   squeeze: {
-    about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v5',
-    versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" }, v4: { about: 'v3, with the corrections in the original named in the request and put back when a rewrite leaves one out: a correction may be shortened, never dropped', keep: true }, v5: { about: 'v4, with the terms of the explain marks named in the request and kept in their words where the text keeps what they name', keep: true, terms: true } },
+    about: "squeeze's rewrite along its chips", reads: 'verbs/squeeze (term.ts, run.mjs)', default: 'v6',
+    versions: { v1: { about: 'prompt.md as before' }, v2: { about: 'v1, keeping corrections, caveats and the words the person asked for' }, v3: { about: "v2, and a correction of Claude's own earlier answer kept at every level" }, v4: { about: 'v3, with the corrections in the original named in the request and put back when a rewrite leaves one out: a correction may be shortened, never dropped', keep: true }, v5: { about: 'v4, with the terms of the explain marks named in the request and kept in their words where the text keeps what they name', keep: true, terms: true }, v6: { about: "v5 with thimble's purpose and the 0.9 Communicating words (answer directly, literal words, explain a term the first time)", keep: true, terms: true } },
   },
   forms: {
     versions: {
       runtime: {
-        about: "the card runtime's principles (the thimble skill's card section, read where it stands) and the worked forms (forms:v2's examples)",
-        parts: [{ file: 'skills/thimble/SKILL.md', section: 'What the person sees' }, { file: 'prompts/forms/v2.md', section: 'Worked examples' }],
+        about: "the thimble skill's card section (read where it stands) and the worked forms (forms:v2's examples)",
+        parts: [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/v2.md', section: 'Worked examples' }],
+      },
+      v3: {
+        about: "the 0.9 card guidance adapted to cards that are programs (question, content and takeaway; the four takeaway failures; several cards), with its worked takeaways and three worked programs: the thimble skill's card section (read where it stands) and forms/v3.md's 'Making a card'",
+        parts: [{ file: 'skills/thimble/SKILL.md', section: 'Cards' }, { file: 'prompts/forms/v3.md', section: 'Making a card' }],
       },
       v1: { about: 'FORMS.md as v read it: the card forms, for another view' },
       v2: { about: 'v1 for any card: the one Claude adds and the one v asks for' },
@@ -72,7 +81,7 @@ export const FEATURES = {
       'sketches-v2': { about: 'e with the principles v2', parts: [...ABLATION_V2, { file: 'prompts/forms/parts/sketches.md' }] },
     },
     about: 'the card guidance: what makes a card good',
-    reads: 'beside the toolkit when Claude reads it before a card, and `thimble guide cards` (v asks for it)', default: 'runtime',
+    reads: 'beside the toolkit when Claude reads it before a card, and `thimble guide cards` (v asks for it)', default: 'v3',
     base: 'verbs/visualize',
   },
   card: {
@@ -83,8 +92,14 @@ export const FEATURES = {
       v2: { about: "v1, and v's card from a fork too: a press of v asks the fork for the card, not main, so main never reads the card guidance unless the person asks for a card in words" },
     },
   },
-  thread: { about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v1' },
-  labels: { about: "the classifier a --prompt label's records are read with: one call per batch of up to 50 records", reads: 'verbs/label/run.mjs, for each call of a --prompt label', default: 'v1' },
+  thread: {
+    about: "a side thread's instructions", reads: 'shell/thread.ts', default: 'v2',
+    versions: { v1: { about: 'as before' }, v2: { about: "v1 with thimble's purpose and the 0.9 words on answering and citing" } },
+  },
+  labels: {
+    about: "the classifier a --prompt label's records are read with: one call per batch of up to 50 records", reads: 'verbs/label/run.mjs, for each call of a --prompt label', default: 'v2',
+    versions: { v1: { about: 'as coh-labels wrote it, from the 0.9 classifier' }, v2: { about: "v1 with thimble's purpose and the 0.9 classifier's words where they still fit" } },
+  },
   thimble: { about: 'the thimble skill', reads: 'the skill, when Claude loads it', default: 'skill', skill: 'thimble', versions: { skill: { file: 'skills/thimble/SKILL.md', about: 'as SKILL.md says now' } } },
   claims: { about: 'the corpus orientation (a subagent reads it)', reads: 'verbs/claims/run.mjs, /verb claims orient', default: 'skill', skill: 'claims', versions: { skill: { file: 'verbs/claims/SKILL.md' } } },
   map: { about: 'the map skill', reads: 'the skill', default: 'skill', skill: 'map', versions: { skill: { file: 'verbs/map/SKILL.md' } } },

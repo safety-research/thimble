@@ -34,8 +34,8 @@ export function request(ctx) {
   if (has.length) lines.push(`It has the card${has.length > 1 ? 's' : ''} ${has.join(', ')} already: make a different view, not a copy.`)
   const others = proposals.filter(p => p !== choice)
   if (others.length) lines.push(`${choice ? 'Also proposed' : 'Proposed'} for it: ${others.join('; ')}.`)
-  lines.push('Run `thimble guide cards` first, unless you read it earlier in this session: the card guidance. Reuse the queries you ran, and run a new `thimble q` only for values you have not kept, so each part keeps its ref.')
-  lines.push('Save it with `thimble save <name> --from FILE`. Then say in one line what it shows. Do not repeat the answer.')
+  lines.push('Run `thimble guide cards` first, unless you read the card guidance earlier in this session. Reuse the runs you made, and use `thimble run` again only for values you have not kept, so each part keeps its ref.')
+  lines.push('Save it with `thimble save <name> --from FILE`. Then say in one line what it shows; the person has read the answer, so do not repeat it.')
   return lines.join(' ')
 }
 

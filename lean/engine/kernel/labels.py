@@ -17,7 +17,7 @@ record's value is (`checks`), which a later count and use() read in its place. E
 of a value opens its records like any citation.
 
 The counts are a query (count_query): `label_rows(name)` gives the label's records with their value, and tally() keeps
-each value's records exactly, so `[38](q12#apology=yes@n)` cites them. A later query reads the label with
+each value's records exactly, so `[38](r12#apology=yes@n)` cites them. A later query reads the label with
 use("apology"): each record's `_ref` and value (with `confidence`, `reason`, `by`, `checked`), live, so a check the
 person made since is in it. The label's card (save_card) draws the counts; its examples are records of each value
 chosen at random, the unchecked first, so the person checks a sample before trusting the counts.

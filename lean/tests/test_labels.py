@@ -59,11 +59,11 @@ def feed(tmp: Path) -> list[dict]:
 def test_a_regex_label_gives_each_record_a_value_and_its_counts_are_citations(root: Path):
     r = run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "yes        2  q1#sorry=yes@n" in r.stdout
-    assert "no         4  q1#sorry=no@n" in r.stdout
-    assert "Cite a count as [2](q1#sorry=yes@n)" in r.stdout
+    assert "yes        2  r1#sorry=yes@n" in r.stdout
+    assert "no         4  r1#sorry=no@n" in r.stdout
+    assert "Cite a count as [2](r1#sorry=yes@n)" in r.stdout
     st = Store(root)
-    res = LIN.resolve(st, "q1#sorry=yes@n", n=5)
+    res = LIN.resolve(st, "r1#sorry=yes@n", n=5)
     assert res["count"] == 2
     assert [x["ref"] for x in res["records"]] == ["chat/room.jsonl#L1", "chat/room.jsonl#L3"]
     # the label read every record: coverage counts the file as computed
@@ -74,7 +74,7 @@ def test_a_regex_label_gives_each_record_a_value_and_its_counts_are_citations(ro
     lab = LB.load(st, "sorry")
     obj = O.load(st, lab["card"])
     assert obj["label"] == "sorry" and obj["title"] == "sorry: 2 of 6 records are yes"
-    assert obj["text"] == "[2](q1#sorry=yes@n) of 6 records are yes."
+    assert obj["text"] == "[2](r1#sorry=yes@n) of 6 records are yes."
     assert {s["ref"] for s in obj["data"]["samples"]["yes"]} == {"chat/room.jsonl#L1", "chat/room.jsonl#L3"}
     assert [e["kind"] for e in feed(root)] == ["save"]
 
@@ -87,7 +87,7 @@ def test_use_gives_a_label_to_a_later_query_with_its_rows(root: Path):
               'tally(df[df.sorry == "yes"], "agent")\n')
     assert q["error"] is None, q["stdout"]
     assert q["lineage"] == "exact"
-    assert q["uses"] == [{"name": "sorry", "query": "q1", "label": "sorry", "rev": LB.load(st, "sorry")["rev"]}]
+    assert q["uses"] == [{"name": "sorry", "query": "r1", "label": "sorry", "rev": LB.load(st, "sorry")["rev"]}]
     assert q["table"] == [{"agent": "wren", "n": 2}]
     # `thimble rows --label` reads the records with a value, each with its value
     r = run(root, "rows", "chat/*.jsonl", "--label", "sorry=yes")
@@ -171,7 +171,7 @@ def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: P
     s = LB.status(LB.load(st, "sorry"))
     assert s["counts"] == {"yes": 3, "no": 3} and s["checked"] == 2 and s["agree"] == 1 and s["disagree"] == 1
     out = run(root, "label", "sorry").stdout
-    assert "yes        3  q2#sorry=yes@n" in out and "the person checked 2: 1 agree, 1 disagree" in out
+    assert "yes        3  r2#sorry=yes@n" in out and "the person checked 2: 1 agree, 1 disagree" in out
     # each record's labels, as the detail view reads them, the check included
     of = json.loads(run(root, "label", "--of", "chat/room.jsonl#L5", "chat/room.jsonl#L2").stdout)
     assert of["chat/room.jsonl#L5"]["sorry"] == {"value": "yes", "by": "person", "values": ["yes", "no"], "checked": True, "was": "no"}

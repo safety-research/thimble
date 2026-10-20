@@ -17,7 +17,7 @@ function world(on: Any, env: Record<string, string> = {}) {
   on('session.cwd', () => ({ value: '/data' }))
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: String(e.path).endsWith('/prompts/thimble') ? [{ name: 'v1.md', kind: 'file', size: 1, mtimeMs: 0, isLink: false }] : [] }))
   on('fs.exists', () => ({ value: false }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/skills/thimble/SKILL.md') ? '---\nname: thimble\ndescription: x\n---\n\nLEAN BODY: cite what you show.\n\n## What the person sees\n\nTHE CARD SECTION\n\n## Example: one\n\nx\n' : promptStub(e.path) ?? '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/skills/thimble/SKILL.md') ? '---\nname: thimble\ndescription: x\n---\n\nLEAN BODY: cite what you show.\n\n## Cards\n\nTHE CARD SECTION\n\n## Example: one\n\nx\n' : promptStub(e.path) ?? '' }))
   // the engine's own expansion: the text as the skill computed it
   on('skill.prompt', (_$: unknown, e: { text: string }) => ({ text: e.text }))
   // a Read answered as core does: the file's text, as the model reads it
@@ -72,7 +72,7 @@ test('the first read of the toolkit in a session carries the card guidance as co
   expect(r1.context.length).toBe(1)
   expect(r1.context[0]).toContain('The card guidance (forms:principles), which thimble adds when you read the toolkit before a card.')
   expect(r1.context[0]).toContain(`Paths in it are relative to ${root}/verbs/visualize.`)
-  expect(r1.context[0]).toContain('## What the person sees\n\nTHE CARD SECTION')
+  expect(r1.context[0]).toContain('## Cards\n\nTHE CARD SECTION')
   expect(r1.context[0]).toContain('## What makes a great output\n\nTHE PRINCIPLES')
   expect(r1.context[0]).not.toContain('POOL')
   const r2 = await $.tool.call({ tool: 'Read', file_path: `${root}/draw/TOOLKIT.md` } as never) as Any
@@ -87,12 +87,23 @@ test("a toolkit read with sed in Bash carries the card guidance too: the thimble
   world(on)
   const r = await $.tool.call({ tool: 'Bash', command: 'sed -n 1,80p /x/../plugin/draw/TOOLKIT.md' } as never) as Any
   expect(r.context.length).toBe(1)
-  expect(r.context[0]).toContain('The card guidance (forms:runtime)')
-  expect(r.context[0]).toContain('## What the person sees\n\nTHE CARD SECTION')
-  expect(r.context[0]).toContain('## Worked examples\n\nTHE WORKED FORMS')
+  expect(r.context[0]).toContain('The card guidance (forms:v3)')
+  expect(r.context[0]).toContain('## Cards\n\nTHE CARD SECTION')
+  expect(r.context[0]).toContain('## Making a card\n\nTHE WORKED FORMS')
   expect(r.context[0]).not.toContain('OLD PRINCIPLES')
   const again = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
   expect(again.context ?? []).toEqual([])
+})
+
+test('a loaded thimble skill is named to the session\'s commands, so `thimble guide cards` leaves its card section out; a compaction clears it', async ($, on) => {
+  world(on)
+  const sets: [string, string | undefined][] = []
+  on('env.set', (_$: unknown, e: { name: string; value?: string }) => { if (e.name === 'THIMBLE_SKILL_LOADED') sets.push([e.name, e.value]); return { value: {} } })
+  on('session.compact', (_$: unknown, e: { messages: unknown[] }) => ({ messages: e.messages }))
+  await load($, 'thimble', 'LEAN BODY as the file says')
+  expect(sets.at(-1)).toEqual(['THIMBLE_SKILL_LOADED', '1'])
+  await $.session.compact({ messages: [{ role: 'user', text: 'the summary', toolUses: [] }] } as never)
+  expect(sets.at(-1)).toEqual(['THIMBLE_SKILL_LOADED', ''])
 })
 
 test('with the thimble skill loaded, its card section is in the conversation already: only the worked forms come', async ($, on) => {
@@ -109,7 +120,7 @@ test("the first data command of a session carries the card guidance, once; a sav
   expect(save.context ?? []).toEqual([])
   const plain = await $.tool.call({ tool: 'Bash', command: 'ls -la' } as never) as Any
   expect(plain.context ?? []).toEqual([])
-  const q = await $.tool.call({ tool: 'Bash', command: "cd /data && thimble q \"saves per day\" <<'PY'\ntally(df, 'day')\nPY" } as never) as Any
+  const q = await $.tool.call({ tool: 'Bash', command: "cd /data && thimble run \"saves per day\" <<'PY'\ntally(df, 'day')\nPY" } as never) as Any
   expect(q.context.length).toBe(1)
   expect(q.context[0]).toContain('which thimble adds once per session with your first data command')
   expect(q.context[0]).toContain('THE WORKED FORMS')
@@ -119,7 +130,15 @@ test("the first data command of a session carries the card guidance, once; a sav
   }
   await w.clock.advance(100)
   const lines = w.events.filter(e => e.kind === 'prompt')
-  expect(lines.map(e => [e.prompt, e.via])).toEqual([['forms:runtime', 'thimble q']])
+  expect(lines.map(e => [e.prompt, e.via])).toEqual([['forms:v3', 'thimble run']])
+})
+
+test('thimble q, the name run had before, is still a data command', async ($, on) => {
+  const w = world(on)
+  const q = await $.tool.call({ tool: 'Bash', command: 'thimble q "x" --code "1"' } as never) as Any
+  expect(q.context.length).toBe(1)
+  await w.clock.advance(100)
+  expect(w.events.filter(e => e.kind === 'prompt').map(e => e.via)).toEqual(['thimble q'])
 })
 
 test('the card after the answer: the thimble skill comes with its card parts replaced, a data command brings no guidance, and a toolkit read still does', async ($, on) => {
@@ -132,7 +151,7 @@ test('the card after the answer: the thimble skill comes with its card parts rep
   expect(lean).not.toContain('THE CARD SECTION')
   expect(lean).not.toContain('worth more than one reply')
   expect(lean).toContain('## Example: one')
-  const q = await $.tool.call({ tool: 'Bash', command: "thimble q \"saves per day\" <<'PY'\ntally(df, 'day')\nPY" } as never) as Any
+  const q = await $.tool.call({ tool: 'Bash', command: "thimble run \"saves per day\" <<'PY'\ntally(df, 'day')\nPY" } as never) as Any
   expect(q.context ?? []).toEqual([])
   const root = new URL('..', import.meta.url).pathname.replace(/\/+$/, '')
   const read = await $.tool.call({ tool: 'Read', file_path: `${root}/draw/TOOLKIT.md` } as never) as Any
@@ -142,7 +161,7 @@ test('the card after the answer: the thimble skill comes with its card parts rep
   expect(read.context[0]).toContain('THE CARD SECTION')
   await w.clock.advance(100)
   const lines = w.events.filter(e => e.kind === 'prompt')
-  expect(lines.map(e => [e.prompt, e.via, e.card ?? null])).toEqual([['thimble:skill', 'skill thimble', 'card:v1'], ['forms:runtime', 'Read of draw/TOOLKIT.md', null]])
+  expect(lines.map(e => [e.prompt, e.via, e.card ?? null])).toEqual([['thimble:skill', 'skill thimble', 'card:v1'], ['forms:v3', 'Read of draw/TOOLKIT.md', null]])
 })
 
 test('thimble sources, rows or resolve first: the guidance comes with whichever runs first', async ($, on) => {
@@ -176,7 +195,7 @@ test('after `thimble guide cards` printed the guidance, no toolkit read or save 
   expect(save.context ?? []).toEqual([])
   const read = await $.tool.call({ tool: 'Bash', command: 'cat lean/draw/TOOLKIT.md' } as never) as Any
   expect(read.context ?? []).toEqual([])
-  const q = await $.tool.call({ tool: 'Bash', command: 'thimble q "x" --code "1"' } as never) as Any
+  const q = await $.tool.call({ tool: 'Bash', command: 'thimble run "x" --code "1"' } as never) as Any
   expect(q.context ?? []).toEqual([])
   await w.clock.advance(100)
   expect(w.events.filter(e => e.kind === 'prompt')).toEqual([])

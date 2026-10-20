@@ -101,6 +101,7 @@ test('a sparkline reads its series from 0, never touches the row above, and bins
   assert.deepEqual(seriesRef('q4@n'), { query: 'q4', col: 'n' })
   assert.deepEqual(seriesRef('q4#n'), { query: 'q4', col: 'n' })
   assert.equal(seriesRef('q4#day=2026-06-18@n'), null)
+  assert.deepEqual(seriesRef('r4@n'), { query: 'r4', col: 'n' })
 })
 
 test('the tray is a stack: a nested card goes over the one under it, back returns, and back from the first closes', () => {
@@ -275,6 +276,7 @@ test('a citation whose key holds spaces and brackets is one mark, and its card o
   const marks = linkMarks(text)
   assert.deepEqual(marks.map(m => [m.ref, m.label]), [['q11#outcome=won (clean ep)@median', '110'], ['q11', '4 failed']])
   assert.equal(text.slice(marks[0].end), ' calls; all runs [4 failed](q11).')
+  assert.deepEqual(linkMarks('a median of [110](r11#outcome=won (clean ep)@median) calls').map(m => m.ref), ['r11#outcome=won (clean ep)@median'])
   // the kernel narrowed the whole-query cite to the row holding its value: the card's hot row is that row
   const query = { id: 'q11', about: 'runs by outcome', keys: ['outcome'], table: [{ outcome: 'won (clean ep)', n: 3, median: 110 }, { outcome: 'failed/adversarial', n: 4, median: 165 }, { outcome: 'contested', n: 1, median: 190 }] }
   const resolved = { ref: 'q11#outcome=failed/adversarial@n', narrowed: 'q11#outcome=failed/adversarial@n', wrote: 'q11', count: 4, rows: ['runs.jsonl#L6-9'], records: [], chain: [] }

@@ -1,6 +1,6 @@
 ---
 name: trace
-description: Use when the person asks where a number, a quote or a line came from, or where it went - the query, label and rows behind a value, the answers and objects that use a row, or which agents read a note and which copied it. `thimble trace` gives the facts in both directions; you decide how deep to go and draw it for this case.
+description: Use when the person asks where a number, a quote or a line came from, or where it went - the query, label and rows behind a value, the answers and cards that use a row, or which agents read a note and which copied it. `thimble trace` gives the facts in both directions; you decide how deep to go and draw it for this case.
 ---
 
 # Trace: where it came from and where it went
@@ -8,14 +8,14 @@ description: Use when the person asks where a number, a quote or a line came fro
 The person presses t on a value, a quote or a line, or asks "where does this number come from?" or "how far did this
 spread?". A short path shows at once. When they want more (t again, or a question), you draw the full trace.
 
-`thimble trace REF` gives the facts. REF is a value (`obj:01-uses#/purposes/1/n`, `q2#purpose=message%20to%20agents@n`),
+`thimble trace REF` gives the facts. REF is a value (`obj:01-uses#/purposes/1/n`, `r2#purpose=message%20to%20agents@n`),
 a row (`revisions.jsonl#L4410`) or a block of a transcript (`agents/agent-05.jsonl#L565.b0`). `--text "words"` follows
 those words through the transcripts beside it, or through `--in GLOB`. `--json` gives everything.
 
 - **Back:** a value's query and its code, the label queries it builds on, its source rows, and the files not behind
   it. For a line an agent wrote: the passages it shares with what that agent read before, when and in what it read
   them, and the agent that wrote them first.
-- **Forward:** the queries, objects and answers that use it. For words in transcripts: who wrote them first, who
+- **Forward:** the queries, cards and answers that use it. For words in transcripts: who wrote them first, who
   read them, who wrote them after reading them, who read them and held out, and who never read them.
 
 ## Principles
@@ -45,7 +45,7 @@ opens the same step.
 ## Example: a number back to its rows and forward to the answers (a wiki dataset)
 
 The person asked what the wiki is used for, then pressed t twice on "1,543 messages to agents". `thimble trace` says:
-the value is bound from q2, which tallies the label "edit-purpose" kept by q1, a rule in code over all 14,591 rows of
+the value is bound from r2, which tallies the label "edit-purpose" kept by r1, a rule in code over all 14,591 rows of
 revisions.jsonl; 3 other files are not behind it; one answer cites it. One row per step reads best here.
 
 ```js

@@ -6,7 +6,7 @@ const rows = data.runs.map(r => {
   const c = k.canvas(W, 1)
   for (let x = 0; x < W; x++) c.put(x, 0, '▆', tone[r.buckets[Math.floor(x / W * r.buckets.length)]])
   const share = r.buckets.filter(b => b === 'rerun').length / r.buckets.length
-  return k.region('run-' + r.id, { label: `${r.id}: ${r.outcome}, ${Math.round(share * 100)}% reruns`, ref: `q7#run=${r.id}@steps`,
+  return k.region('run-' + r.id, { label: `${r.id}: ${r.outcome}, ${Math.round(share * 100)}% reruns`, ref: `r7#run=${r.id}@steps`,
     examples: data.examples[r.id] && k.examples('ex-' + r.id, { label: `${r.id}'s key steps`, records: data.examples[r.id] }) },
     k.beside(k.text(`**${r.id}**`, { w: 4 }), c, k.text(r.outcome, { w: 8, tone: r.outcome === 'fixed' ? 'good' : 'bad' }), { gap: 1 }))
 })

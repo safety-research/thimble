@@ -47,10 +47,10 @@ test('numbers in the words that cite nothing are named; cited ones, years and da
 
 test('the digest says how many rows stand behind each cited value, how sure the lineage is, what was not read, and the verbs', () => {
   const d = digest(OBJECT, { verbs: VERBS, isNew: true, drawn: 'Refunds by region\nWest ▆▆▆▆ 412\n\n12 regions' })
-  assert.match(d, /Object 02-orders-by-region v2 "Refunds by region" \(saved since the last look\)/)
+  assert.match(d, /Card 02-orders-by-region v2 "Refunds by region" \(saved since the last look\)/)
   assert.match(d, /"412 refunds" = 412 \(q3#region=West@n\): rests on 412 rows of orders.csv/)
   assert.match(d, /numbers in its words that cite nothing: 31%/)
-  assert.match(d, /query q3 "refunds per region": orders.csv \(18,204 rows read\); rows found by key, but their number does not equal the count column/)
+  assert.match(d, /run q3 "refunds per region": orders.csv \(18,204 rows read\); rows found by key, but their number does not equal the count column/)
   assert.match(d, /not read returns.csv, notes.txt/)
   assert.match(d, /Claude declared: read: ten refund rows by hand/)
   assert.match(d, /t trace: where it came from · where these numbers come from/)

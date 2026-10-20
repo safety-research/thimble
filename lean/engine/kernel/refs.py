@@ -22,13 +22,15 @@ line 44 and block 0 of lines 45 to 50.
 
 Query values:
 
-    q<n>                          the query and its whole output
-    q<n>#row=<i>                  row i (1-based) of its output table
-    q<n>#<col>=<value>[&...]      the output row whose key columns hold these values
-    ...@<col>                     one cell of that row, such as q3#day=2026-06-16@n (q3@n: the column n)
+    r<n>                          the query and its whole output
+    r<n>#row=<i>                  row i (1-based) of its output table
+    r<n>#<col>=<value>[&...]      the output row whose key columns hold these values
+    ...@<col>                     one cell of that row, such as r3#day=2026-06-16@n (r3@n: the column n)
+
+q<n>, the ids before the rename, still resolve.
 
 A key value with a space, a bracket or other punctuation is written as its slug, so a ref stays one Markdown link:
-"won (clean ep)" is `q11#run_result=won-clean-ep`. A value is found as written, percent-encoded, or by its slug.
+"won (clean ep)" is `r11#run_result=won-clean-ep`. A value is found as written, percent-encoded, or by its slug.
 
 Object values:
 
@@ -44,7 +46,8 @@ from urllib.parse import quote, unquote
 DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 _NUMS = r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*"
 _FP = r"[^#\s](?:[^#\n]*[^#\s])?"  # a path may hold spaces inside it, never at its ends, never a `#`
-_QUERY = re.compile(r"^(q\d+)(?:#(.*)|(@.*))?$")
+QUERY_ID = r"[qr]\d+"  # a query's id: r<n>, or q<n> from before the rename
+_QUERY = re.compile(r"^(" + QUERY_ID + r")(?:#(.*)|(@.*))?$")
 _OBJ = re.compile(r"^obj:([A-Za-z0-9_.-]+)(?:#(/.*)?)?$")
 _LINES = re.compile(r"^L(\d+)(?:-L?(\d+))?$")
 _LINESET = re.compile(r"^L(" + _NUMS + r")$")
@@ -499,7 +502,7 @@ def value_slug(s: Any) -> str:
 
 def link_spans(text: str):
     """(label, target, start, end) of each `[label](target)`. A target may hold balanced brackets, and a query ref
-    (q3#...) may hold spaces up to its closing bracket, so `[202](q11#run_result=won (clean ep)@median)` is one link."""
+    (r3#...) may hold spaces up to its closing bracket, so `[202](r11#run_result=won (clean ep)@median)` is one link."""
     s = text or ""
     i = 0
     while True:
@@ -526,7 +529,7 @@ def link_spans(text: str):
             i = a + 1
             continue
         target = s[b + 2:j].strip()
-        if target and (not re.search(r"\s", target) or re.match(r"^q\d+#", target)):
+        if target and (not re.search(r"\s", target) or re.match(r"^" + QUERY_ID + "#", target)):
             yield label, target, a, j + 1
         i = j + 1
 

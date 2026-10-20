@@ -512,7 +512,7 @@ test('an object whose file cannot be read is not drawn in silence: Claude reads 
   on('tool.call', saving(w.files))
   await $.turn.start({ turnId: 't1', text: 'when?' } as never)
   const saved = await $.tool.call({ tool: 'Bash', command: 'thimble save saves' } as never)
-  expect(String((saved as { context?: string[] }).context)).toContain('The person cannot see 01-saves')
+  expect(String((saved as { context?: string[] }).context)).toContain('The person cannot see the card 01-saves')
   expect(String((saved as { context?: string[] }).context)).toContain('could not be read')
 })
 

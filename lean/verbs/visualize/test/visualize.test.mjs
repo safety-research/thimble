@@ -16,6 +16,7 @@ import { request, run } from '../run.mjs'
 const DIR = fileURLToPath(new URL('..', import.meta.url))
 const GUIDANCE = fileURLToPath(new URL('../../../prompts/forms/', import.meta.url))
 const FORMS = ['bars', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
+const V3 = ['bars', 'unfold', 'strips']
 
 test('v asks Claude for another view of the answer, with the proposal the person picked first and the card forms to read', async () => {
   const message = { text: '[840](q3#n) of the 2,143 steps were **reruns**; the cause was a shared fixture.', objects: ['r17-trail@1'],
@@ -25,7 +26,7 @@ test('v asks Claude for another view of the answer, with the proposal the person
   assert.match(ask, /another view of it: a card in the form that shows what it says, as "failures by test order"/)
   assert.match(ask, /It has the card r17-trail already: make a different view, not a copy\./)
   assert.match(ask, /Also proposed for it: trail of the run\./)
-  assert.match(ask, /Run `thimble guide cards` first, unless you read it earlier in this session: the card guidance\./)
+  assert.match(ask, /Run `thimble guide cards` first, unless you read the card guidance earlier in this session\./)
   assert.match(ask, /thimble save <name> --from FILE/)
   // no proposals and no card: the plain request
   const plain = request({ message: { text: 'Done.' }, verb: { dir: '/v' } })
@@ -53,6 +54,8 @@ for (const name of FORMS) {
   test(`the ${name} form draws as the card guidance shows it, under a reply and in the detail, its parts selectable`, () => {
     const program = readFileSync(join(DIR, 'forms', `${name}.program.js`), 'utf8').trimEnd()
     for (const v of ['v1.md', 'v2.md']) assert.ok(readFileSync(join(GUIDANCE, v), 'utf8').includes(program), `forms:${v} holds ${name}.program.js as it is`)
+    // forms:v3 shows three of the forms, without their opening comment lines
+    if (V3.includes(name)) assert.ok(readFileSync(join(GUIDANCE, 'v3.md'), 'utf8').includes(program.replace(/^(\/\/[^\n]*\n)+/, '')), `forms:v3.md holds ${name}.program.js`)
     const data = JSON.parse(readFileSync(join(DIR, 'forms', `${name}.data.json`), 'utf8'))
     for (const [w, mode] of [[96, 'inline'], [98, 'detail'], [60, 'inline']]) {
       const d = runProgram({ id: name, v: 1, program, data }, { w, h: mode === 'detail' ? 30 : 24, mode })

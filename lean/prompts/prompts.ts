@@ -4,12 +4,13 @@
 // in use in the session's events, and says in one line when a named version does not exist (it keeps the default).
 //
 // The card guidance (feature `forms`) comes once per session as context beside the result of Claude's first data
-// command (`thimble q`, `rows`, `resolve` or `sources`, whichever comes first): Claude queries before it draws, so the
+// command (`thimble run`, `rows`, `resolve` or `sources`, whichever comes first): Claude queries before it draws, so the
 // guidance is there before the first card, and a session that never queries never reads it. A read of the drawing
 // toolkit (draw/TOOLKIT.md) before any data command brings it too. The person never sees it. The default version,
 // `runtime`, is the thimble skill's card section (the card runtime's principles) and the worked forms: when the thimble
 // skill is loaded, its section is in the conversation already, so only the worked forms come. v's request asks for
-// the guidance with `thimble guide cards` when it was not read yet. The session's events name the version given, the
+// the guidance with `thimble guide cards` when it was not read yet; once the skill is loaded, THIMBLE_SKILL_LOADED tells
+// that command to leave the skill's section out too. The session's events name the version given, the
 // command it came with and when (a hook on turn.start would also see the observer's forks, so the step is read from
 // the time).
 //
@@ -46,8 +47,14 @@ const R = {
   resolving: null as Promise<void> | null,
 }
 
-/** Claude's first data command of a session brings the card guidance: `thimble q`, `rows`, `resolve` or `sources`. */
-const LEAN_DATA = /(^|[\s;&|(])thimble\s+(q|rows|resolve|sources)\b/
+/** Claude's first data command of a session brings the card guidance: `thimble run`, `rows`, `resolve` or `sources`. */
+const LEAN_DATA = /(^|[\s;&|(])thimble\s+(run|q|rows|resolve|sources)\b/
+
+/** Whether the thimble skill is in the conversation, for the session's commands: `thimble guide cards` then leaves out
+ *  the skill's card section, which Claude already has (prompts/node.mjs). */
+async function markSkill($: Engine, loaded: boolean): Promise<void> {
+  try { await $.env.set('THIMBLE_SKILL_LOADED', loaded ? '1' : '') } catch { /* the guide then prints the section again */ }
+}
 
 /** The plugin's Prompts setting (register's options). */
 export function setPromptSetting(v: unknown): void {
@@ -71,6 +78,7 @@ async function resolve($: Engine): Promise<void> {
   R.problems = c.problems
   R.texts.clear()
   try { await $.env.set('THIMBLE_PROMPTS', specOf(R.active, R.idx)) } catch { /* the children read the defaults */ }
+  await markSkill($, false)
   const active = Object.fromEntries(Object.entries(R.active).map(([n, a]) => [n, a.version]))
   await record($, { kind: 'prompts', active, changed: specOf(R.active, R.idx) || null, problems: R.problems })
   if (R.problems.length) $.ui.toast(`thimble prompts: ${R.problems[0]}${R.problems.length > 1 ? ` (and ${R.problems.length - 1} more: thimble prompts)` : ''}`)
@@ -190,6 +198,7 @@ export function registerPrompts(on: Any, options: Any): void {
     const r = await next(e)
     R.leanLoaded = false
     R.cardsGiven = false
+    await markSkill($, false)
     return r
   }).catch(($: Engine, e: Any, next: Any) => next(e))
 
@@ -254,6 +263,7 @@ export function registerPrompts(on: Any, options: Any): void {
       const card = name === 'thimble' || !R.leanLoaded ? await cardAfter($) : null
       if (name === 'thimble') {
         R.leanLoaded = true
+        await markSkill($, true)
         if (card) text = withBody(text, skillWithCards(bodyOf(text.replace(/^Base directory for this skill:[^\n]*\n+/, '')), card.text))
       } else if (!R.leanLoaded) {
         // a verb's skill loaded before the thimble skill: the thimble skill's text first, so citing and saving still hold
@@ -261,6 +271,7 @@ export function registerPrompts(on: Any, options: Any): void {
         const leanText = card ? skillWithCards(lean.text, card.text) : lean.text
         text = `${leanText.trim()}\n\n(The thimble skill's base folder: ${rootOf($)}/skills/thimble.)\n\n---\n\nThe ${name} skill, which builds on the thimble skill above:\n\n${text}`
         R.leanLoaded = true
+        await markSkill($, true)
         leanFirst = true
       }
       await record($, { kind: 'prompt', feature: feature ?? name, prompt: id, via: `skill ${name}`, ...(leanFirst ? { with_lean: true } : {}), ...(card ? { card: card.id } : {}) })

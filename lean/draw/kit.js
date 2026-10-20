@@ -720,7 +720,7 @@
 
   // ---------------------------------------------------------------- lineage: rows of the card's data
   // The kernel binds each row of a query's output into the card's data with `_ref` (its own ref, such as
-  // q3#day=2026-06-18) and `_rows` (its source rows). Every such row is indexed here, so a part drawn from one (the row
+  // r3#day=2026-06-18) and `_rows` (its source rows). Every such row is indexed here, so a part drawn from one (the row
   // itself, a spread of it, or {row}) opens its rows with no ref written, and a part drawn from none is matched to the
   // row whose words and numbers it shows. A row with `_rows` and no `_ref` (an older card) gets the pointer ref
   // obj:<id>#/<path> when the host names the card.
@@ -755,7 +755,7 @@
     const add = r => { if (typeof r === 'string' && r && out.indexOf(r) < 0 && out.length < 200) out.push(r) }
     const walk = (v, depth) => {
       if (v == null || depth > 3 || out.length >= 200) return
-      if (typeof v === 'string') { if (/^(q\d+|obj:)/.test(v) || v.indexOf('#') > 0) add(v); return }
+      if (typeof v === 'string') { if (/^([qr]\d+(?:[#@]|$)|obj:)/.test(v) || v.indexOf('#') > 0) add(v); return }
       if (Array.isArray(v)) { v.forEach(y => walk(y, depth + 1)); return }
       if (!isObj(v)) return
       const r = lineageOf(ctx, v)
@@ -765,7 +765,7 @@
     walk(x, 0)
     return out
   }
-  // a ref as a region id: q3#day=2026-06-18 -> day-2026-06-18, obj:x#/days/3 -> days-3
+  // a ref as a region id: r3#day=2026-06-18 -> day-2026-06-18, obj:x#/days/3 -> days-3
   function refSlug(ref) {
     if (typeof ref !== 'string') return ''
     const frag = ref.split('#').slice(1).join('#').replace(/@.*$/, '')
@@ -796,7 +796,7 @@
 
   // A part with no rows of its own is matched to the rows of the card's data whose words it shows (its id, its label,
   // its text) and, to tell them apart, whose numbers it shows. One row wins: its ref. Several rows of one query that
-  // share the words win together: the ref of the column value they share (q3#outcome=won-clean-ep). A tie between
+  // share the words win together: the ref of the column value they share (r3#outcome=won-clean-ep). A tie between
   // unrelated rows, or no words in common, matches nothing: a guess never picks between two rows.
   function matchRegions(ctx, regions, rootNode) {
     const rows = ctx.rowList || []
@@ -887,7 +887,7 @@
       // several rows share the words: one query's rows with the same value in one column are one group
       const q = rows[top[0]].ref.split('#')[0]
       const f = field.get(top[0])
-      if (top.length <= 500 && /^q\d+$/.test(q) && top.every(i => rows[i].ref.split('#')[0] === q && field.get(i) && field.get(i)[0] === f[0] && field.get(i)[1] === f[1])) {
+      if (top.length <= 500 && /^[qr]\d+$/.test(q) && top.every(i => rows[i].ref.split('#')[0] === q && field.get(i) && field.get(i)[0] === f[0] && field.get(i)[1] === f[1])) {
         m.ref = `${q}#${refValue(f[0])}=${refValue(rows[top[0]].obj[f[0]])}`
         m.lineage = 'matched'
       }

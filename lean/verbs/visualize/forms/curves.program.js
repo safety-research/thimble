@@ -13,10 +13,10 @@ const dv = data.runs.filter(r => r.diverged)
 return k.stack(
   k.beside(k.dial('scale'), k.region('gap', { label: `max gap at ×${s}`, cite: 'gap' }, k.text(gap == null ? '{dim:no overlap}' : `max gap **${gap.toFixed(1)}** pts`, { tone: gap != null && gap < 2 ? 'good' : 'warn' })), { gap: 4 }),
   k.plot([
-    { id: 'b32', name: 'batch 32', points: b32.map(r => [r.lr, r.acc]), meta: { ref: 'q4#batch=32@acc' } },
-    { id: 'b256', name: `batch 256, lr ÷ ${s}`, points: b256.map(r => [r.lr, r.acc]), meta: { ref: 'q4#batch=256@acc' } },
+    { id: 'b32', name: 'batch 32', points: b32.map(r => [r.lr, r.acc]), meta: { ref: 'r4#batch=32@acc' } },
+    { id: 'b256', name: `batch 256, lr ÷ ${s}`, points: b256.map(r => [r.lr, r.acc]), meta: { ref: 'r4#batch=256@acc' } },
   ], { h: k.mode === 'detail' ? 14 : 7, x: { label: 'learning rate', log: true }, y: { label: 'val acc', min: 0, max: 100 } }),
-  k.region('diverged', { label: 'diverged runs', ref: 'q4#diverged@n',
+  k.region('diverged', { label: 'diverged runs', ref: 'r4#diverged@n',
     examples: k.examples('ex-diverged', { label: 'runs that diverged (loss NaN)', records: dv.map(r => ({ run: r.run, lr: r.lr, val_acc: r.acc })) }) },
     k.text(`{bad:✗} batch 32 diverges at lr ${dv.map(r => r.lr).join(' and ')}: accuracy falls to 10`)),
 )

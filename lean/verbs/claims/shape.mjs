@@ -66,7 +66,7 @@ export function check(file) {
   clusters.forEach((c, i) => {
     if (!c || c.id == null || String(c.id).trim() === '') { problems.push(`cluster ${i + 1} has no id`); return }
     if (cids.has(String(c.id))) problems.push(`cluster id "${c.id}" is used twice`)
-    if (/^q\d+(#.*)?$/.test(String(c.id))) problems.push(`cluster id "${c.id}" reads as a query ref when it is checked; name it in words`)
+    if (/^[qr]\d+(#.*)?$/.test(String(c.id))) problems.push(`cluster id "${c.id}" reads as a query ref when it is checked; name it in words`)
     cids.add(String(c.id))
     if (!c.name) warnings.push(`cluster "${c.id}" has no name; its id is shown`)
   })
@@ -80,7 +80,7 @@ export function check(file) {
     if (c.id == null || String(c.id).trim() === '') problems.push(`${at} has no id`)
     else if (ids.has(String(c.id))) problems.push(`${at}: the id is used twice`)
     else ids.add(String(c.id))
-    if (/^q\d+(#.*)?$/.test(String(c.id ?? ''))) problems.push(`${at}: an id of the form q<n> reads as a query ref when it is checked; name it in words`)
+    if (/^[qr]\d+(#.*)?$/.test(String(c.id ?? ''))) problems.push(`${at}: an id of the form r<n> or q<n> reads as a query ref when it is checked; name it in words`)
     if (!c.name || typeof c.name !== 'string') problems.push(`${at} has no name`)
     else if (c.name.length > 120) warnings.push(`${at}: its name is ${c.name.length} characters; a name of under 80 reads in one row (put the rest in note)`)
     if (!kindOf(c.kind)) problems.push(`${at}: kind "${c.kind}" is not one of fact, finding, judgment call, event, claim`)

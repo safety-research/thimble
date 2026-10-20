@@ -7,7 +7,7 @@
 //
 // ---------------------------------------------------------------------------------------------- who writes the map
 // Claude, in the main conversation, guided by SKILL.md: it decides the threads, stations and links, computes them with
-// `thimble q` and saves the map with `thimble save`. A map is a short spec in the object's data; the drawing is code (k.map in
+// `thimble run` and saves the map with `thimble save`. A map is a short spec in the object's data; the drawing is code (k.map in
 // the drawing toolkit), so no model draws cells. Why main and not a quiet $.model.complete call:
 //   - lineage: a station is a claim about many rows ("12 runs reran the test with no change"). Main counts it in code
 //     over every run, so the count covers all of them and each station keeps its rows. A quiet call would see only
@@ -16,7 +16,7 @@
 //     would have to read transcripts on the verb's behalf, past the asks.
 //   - cost: main has usually read the work already to answer; the spec is a few hundred tokens of JSON. A quiet call
 //     would read the same transcripts again.
-//   - clutter: the price is one `thimble q` row and one `thimble save` row in the chat. The skill asks for no more, and the
+//   - clutter: the price is one `thimble run` row and one `thimble save` row in the chat. The skill asks for no more, and the
 //     person sees the map under the reply, not its spec.
 // So pressing m on something that is not a map yet asks Claude to map it (`ask`, a prompt the person sees as sent by
 // thimble). Everything else the verb does is code, with no model:

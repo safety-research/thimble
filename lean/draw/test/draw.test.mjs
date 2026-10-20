@@ -120,13 +120,10 @@ test('the toolkit doc\'s programs run', () => {
   const md = readFileSync(DRAW + 'TOOLKIT.md', 'utf8')
   const blocks = [...md.matchAll(/```js\n([\s\S]*?)```/g)].map(m => m[1])
   const rows = [{ day: '06-16', messages: 3 }]
+  // the toolkit doc keeps one program, its opening example; the worked programs are in the card guidance
+  // (prompts/forms/), whose forms the visualize tests draw
   const DATA = [
     { days: [{ day: '06-16', messages: 1546 }, { day: '06-17', messages: 870 }] },
-    { days: [{ day: '06-16', messages: 1546, saves: 3148, rows, samples: [{ text: 'hello', user: 'a', page: 'p' }] }] },
-    { configs: [{ name: 'SGD', runs: [{ run: 'sgd-1', acc: [10, 50, 90], final: 90, rows }, { run: 'sgd-2', acc: [10, 60, 97], final: 97, rows }] }] },
-    { runs: 9, flows: [
-      { first: true, theory: 'fixture', theoryRuns: 9, runs: 6, tone: 'good', from: 'fixture', to: 'fixed', lastOfOutcome: true, outcome: 'fixed' },
-      { first: false, theory: 'fixture', theoryRuns: 9, runs: 3, tone: 'bad', from: 'fixture', to: 'masked', lastOfOutcome: true, outcome: 'masked' }] },
   ]
   assert.equal(blocks.length, DATA.length)
   blocks.forEach((program, i) => {

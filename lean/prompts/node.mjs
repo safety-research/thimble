@@ -28,7 +28,9 @@ export function activeNow(root = ROOT, env = process.env) {
 }
 
 /** The active text of a feature: {feature, version, id, text, file, problems, chosen?}. A skill's in-place version is its
- *  body; `chosen` names the examples a version that picks them chose for this session (THIMBLE_SESSION). */
+ *  body; `chosen` names the examples a version that picks them chose for this session (THIMBLE_SESSION). A part read from
+ *  the thimble skill is left out while THIMBLE_SKILL_LOADED is 1: the hooks set it once Claude has loaded the skill, so
+ *  its text is in the conversation already. */
 export function textOf(feature, root = ROOT, env = process.env) {
   const name = ALIASES[feature] || feature
   const { idx, active, problems } = activeNow(root, env)
@@ -37,7 +39,8 @@ export function textOf(feature, root = ROOT, env = process.env) {
   if (a.off) return { feature: name, version: a.version, id: idOf(name, a.version), text: '', file: null, problems }
   if (a.parts) {
     // a part that picks some of a file's examples picks them by the session, as the hooks do
-    const c = partsChoice(a.parts, f => readFileSync(join(root, f), 'utf8'), undefined, env.THIMBLE_SESSION || '')
+    const loaded = env.THIMBLE_SKILL_LOADED === '1'
+    const c = partsChoice(a.parts, f => readFileSync(join(root, f), 'utf8'), p => loaded && p.file === 'skills/thimble/SKILL.md', env.THIMBLE_SESSION || '')
     return { feature: name, version: a.version, id: idOf(name, a.version), text: c.text, file: null, problems, chosen: c.chosen }
   }
   const raw = readFileSync(join(root, a.file), 'utf8')

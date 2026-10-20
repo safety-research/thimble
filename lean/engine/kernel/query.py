@@ -1,7 +1,7 @@
 """Queries: Python that Claude runs over the sources like a notebook cell, kept with its code, inputs and output, and
 with the source rows behind each row of its output.
 
-    thimble q "what it answers" <<'PY'
+    thimble run "what it answers" <<'PY'
     ...
     PY
 
@@ -19,7 +19,7 @@ from thimble-lite's query kernel and extended):
                                 built on it names the version it used. use(name) of a label made with `thimble label`
                                 gives each record's `_ref` and value (a column named as the label), with
                                 `confidence`, `reason`, `by` and `checked`: merge it on `_ref`, then tally by it
-    use("q3")                   an earlier query's output, as the table it showed, with `_refs` (each row's source
+    use("r3")                   an earlier query's output, as the table it showed, with `_refs` (each row's source
                                 rows) when it kept them: build on it without running it again
     pd, np, re, json, Counter, ROOT
 
@@ -67,7 +67,7 @@ from .store import Store, pack_record, pickle_path, prune_cache, read_pickle, th
 CUT = 12000  # characters of a query's printed output Claude reads
 SHOW = 3000  # characters of the result (the last expression) shown when it is a long table; the query keeps it all
 TABLE_MAX = 5000  # rows of an output table kept
-RESULT_BYTES = 50_000_000  # a result table up to this size in memory is kept whole for use("q3")
+RESULT_BYTES = 50_000_000  # a result table up to this size in memory is kept whole for use("r3")
 SUMMARY_MAX = 40  # a dict of up to this many values reads as a summary: each value rests on the rows the query read
 
 
@@ -76,16 +76,20 @@ def slug(name: str) -> str:
 
 
 def next_id(st: Store) -> tuple[str, Path]:
-    """A new query id, claimed by creating its file, so two queries run at once never share one."""
+    """A new query id, r<n>, claimed by creating its file, so two queries run at once never share one. Its number goes on
+    from the highest of the ids before it, r<n> and q<n> (the ids before the rename) alike."""
     d = st.sub("queries")
-    n = max([int(p.stem[1:]) for p in d.glob("q*.json") if p.stem[1:].isdigit()], default=0) + 1
+    n = max([int(p.stem[1:]) for p in [*d.glob("q*.json"), *d.glob("r*.json")] if p.stem[1:].isdigit()], default=0) + 1
     while True:
-        p = d / f"q{n}.json"
+        p = d / f"r{n}.json"
+        if (d / f"q{n}.json").exists():
+            n += 1
+            continue
         try:
             fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
             os.write(fd, b'{"running": true}\n')
             os.close(fd)
-            return f"q{n}", p
+            return f"r{n}", p
         except FileExistsError:
             n += 1
 
@@ -102,7 +106,7 @@ def get(st: Store, qid: str) -> dict[str, Any] | None:
         # it has no rows and how to get them back
         out = {k: v for k, v in q.items() if k != "packed"}
         out["unreadable"] = (f"{qid}'s record keeps its rows packed, and they did not read ({type(e).__name__}): "
-                             f"`thimble q --rerun {qid}` runs it again and keeps them")
+                             f"`thimble run --rerun {qid}` runs it again and keeps them")
         return out
 
 
@@ -344,7 +348,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
 
     def use(name: str) -> Any:
         reg = st.read_json(kept_f) or {}
-        if name not in reg and re.fullmatch(r"q\d+", name):
+        if name not in reg and re.fullmatch(R.QUERY_ID, name):
             return used_output(name)
         if name not in reg:
             from . import labels as LB
@@ -363,7 +367,7 @@ def make_namespace(st: Store, info: dict[str, Any]) -> dict[str, Any]:
         info["uses"].append({"name": name, "query": reg[name]})
         f = pickle_path(st.dir / "kept", slug(name))
         if f is None:
-            raise KeyError(f"{name!r} was kept by {reg[name]}, but its file is gone from thimble/kept: `thimble q --rerun {reg[name]}` keeps it again")
+            raise KeyError(f"{name!r} was kept by {reg[name]}, but its file is gone from thimble/kept: `thimble run --rerun {reg[name]}` keeps it again")
         obj = read_pickle(f)
         if isinstance(obj, pd.DataFrame) and "_ref" in obj.columns:
             info["frames"].append(obj)
@@ -1752,7 +1756,7 @@ def record_refs(q: dict[str, Any], n: int) -> list[list[str]]:
 
 def keep_result(st: Store, qid: str, last: Any, lin: dict[str, Any]) -> None:
     """A table result kept whole (thimble/results/<qid>.pkl.gz), shaped as the output table it showed, with each row's
-    source rows as `_refs`, so use("q3") gives a later query exactly what this one showed."""
+    source rows as `_refs`, so use("r3") gives a later query exactly what this one showed."""
     try:
         import pandas as pd
     except ImportError:
@@ -1812,7 +1816,7 @@ def run(st: Store, about: str, code: str, rerun_of: str | None = None) -> dict[s
     for k in ("why_rows", "read", "via", "cells", "loop", "cells_by", "lineage_error"):
         if r.get(k):
             q[k] = r[k]
-    # a long row lineage is written packed; the record in hand, which `thimble q --json` prints, stays whole
+    # a long row lineage is written packed; the record in hand, which `thimble run --json` prints, stays whole
     st.write_json(path, pack_record(q))
     if r["kept"]:
         reg = st.read_json(st.dir / "kept.json") or {}
@@ -2015,10 +2019,10 @@ def _slug_same(a: Any, b: str) -> bool:
 
 
 def row_refs(q: dict[str, Any]) -> list[str]:
-    """The ref of each output row, as a citation names it: by its key columns (`q3#day=2026-06-18`, a value with
-    punctuation as its slug), or by its place (`q3#row=4`) when its keys do not tell it from another row."""
+    """The ref of each output row, as a citation names it: by its key columns (`r3#day=2026-06-18`, a value with
+    punctuation as its slug), or by its place (`r3#row=4`) when its keys do not tell it from another row."""
     table = q.get("table") or []
-    qid = q.get("id") or "q0"
+    qid = q.get("id") or "r0"
     if not table:
         return []
     keys = [k for k in q.get("keys") or [] if not str(k).startswith("_")]

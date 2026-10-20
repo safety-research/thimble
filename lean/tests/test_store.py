@@ -153,15 +153,15 @@ def test_every_ref_resolves_to_the_same_rows_from_a_packed_record_as_from_a_whol
     for a, b in zip(got["packed"], got["whole"]):
         assert a["rows"] == b["rows"] and a.get("cells") == b.get("cells") and a.get("read") == b.get("read")
         assert a["stdout"] == b["stdout"]
-    disk = json.loads((root / "thimble" / "queries" / "q1.json").read_text())
+    disk = json.loads((root / "thimble" / "queries" / "r1.json").read_text())
     assert "packed" in disk and "rows" not in disk
     for q in got["whole"]:
         _unpack_on_disk(sts["whole"], q["id"])
-    assert "rows" in json.loads((other / "thimble" / "queries" / "q1.json").read_text())
+    assert "rows" in json.loads((other / "thimble" / "queries" / "r1.json").read_text())
 
     for name, st in sts.items():
-        O.save(st, "per-run", {"title": "Tool calls", "data": {"calls": "q1", "bash": "q1#run=run0&tool=Bash@n"},
-                               "text": "Bash leads in [run0](q1#run=run0&tool=Bash@n); [a call](run1/agent-02.jsonl#L5.b1)."})
+        O.save(st, "per-run", {"title": "Tool calls", "data": {"calls": "r1", "bash": "r1#run=run0&tool=Bash@n"},
+                               "text": "Bash leads in [run0](r1#run=run0&tool=Bash@n); [a call](run1/agent-02.jsonl#L5.b1)."})
     refs = [r for q in got["packed"] for r in _every_ref(sts["packed"], q)]
     refs += ["obj:01-per-run", "obj:01-per-run#/calls/0", "obj:01-per-run#/calls/3/n", "obj:01-per-run#/bash"]
     a, b = _resolved(sts["packed"], refs), _resolved(sts["whole"], refs)
@@ -170,7 +170,7 @@ def test_every_ref_resolves_to_the_same_rows_from_a_packed_record_as_from_a_whol
         assert a[ref] == b[ref], ref
     assert sum(1 for r in a.values() if r["count"]) > 20
     # trace: what uses a block the tally rests on
-    one = Q.get(sts["packed"], "q1")["rows"][0][0]
+    one = Q.get(sts["packed"], "r1")["rows"][0][0]
     untimed = lambda u: {k: [{a: b for a, b in e.items() if a != "t"} for e in v] if isinstance(v, list) else v for k, v in u.items()}  # noqa: E731
     used = untimed(T.uses(sts["packed"], one, answers=False))
     assert used == untimed(T.uses(sts["whole"], one, answers=False)) and len(used["queries"]) >= 2
@@ -222,7 +222,7 @@ def test_kept_values_are_compressed_and_an_old_plain_one_still_reads(root: Path)
     Q.run(st, "keep again", 'keep("calls", use("calls"))')
     assert gz.exists() and not plain.exists()
     gone = Q.run(st, "gone", 'import os\nos.remove("thimble/kept/calls.pkl.gz")\nuse("calls")')
-    assert gone["error"] and "thimble q --rerun" in gone["error"]
+    assert gone["error"] and "thimble run --rerun" in gone["error"]
 
 
 def test_a_packed_lineage_that_does_not_read_says_why_and_how_to_fix_it(root: Path) -> None:
@@ -235,7 +235,7 @@ def test_a_packed_lineage_that_does_not_read_says_why_and_how_to_fix_it(root: Pa
     got = Q.get(st, q["id"])
     assert got["table"] == q["table"] and got.get("rows") is None
     r = LIN.resolve(st, Q.row_refs(q)[0])
-    assert "thimble q --rerun" in r["why"]
+    assert "thimble run --rerun" in r["why"]
 
 
 # ------------------------------------------------------------------ the cache
@@ -318,9 +318,9 @@ def test_a_load_marks_its_frames_read_and_a_query_that_adds_frames_prunes(root: 
 
 def _object(st: Store) -> dict:
     Q.run(st, "tool calls per run and tool", CALLS)
-    return O.save(st, "per-run", {"title": "Tool calls", "data": {"calls": "q1", "bash": "q1#run=run0&tool=Bash@n"},
-                                  "text": "Bash leads in [run0](q1#run=run0&tool=Bash@n), as [this call](run1/agent-02.jsonl#L5.b1) "
-                                          "and [the Edit calls of run1](q1#run=run1&tool=Edit) show."})
+    return O.save(st, "per-run", {"title": "Tool calls", "data": {"calls": "r1", "bash": "r1#run=run0&tool=Bash@n"},
+                                  "text": "Bash leads in [run0](r1#run=run0&tool=Bash@n), as [this call](run1/agent-02.jsonl#L5.b1) "
+                                          "and [the Edit calls of run1](r1#run=run1&tool=Edit) show."})
 
 
 def test_an_object_keeps_its_lineage_rows_packed_and_reads_back_the_same(root: Path) -> None:
@@ -341,7 +341,7 @@ def test_an_object_keeps_its_lineage_rows_packed_and_reads_back_the_same(root: P
         if "rows" in w:
             assert c["rows_files"] == list(dict.fromkeys(x.split("#")[0] for x in w["rows"]))
     # a version keeps the packed file, and reads back whole
-    O.save(st, obj["id"], {"title": "Tool calls, again", "data": {"calls": "q1"}})
+    O.save(st, obj["id"], {"title": "Tool calls, again", "data": {"calls": "r1"}})
     v1 = O.read(st, st.dir / "objects" / ".versions" / obj["id"] / "v1.json")
     assert v1["lineage"] == back["lineage"]
 
