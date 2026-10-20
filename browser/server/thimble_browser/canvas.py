@@ -92,6 +92,11 @@ def to_canvas_links(text: str) -> str:
     return MD_LINK.sub(sub, text or "")
 
 
+def own_id(text: str, cid: str) -> str:
+    """`text` with the card's own citations, written `card:<id>` before the card had its id, naming it."""
+    return text.replace("card:card:<id>", f"card:{cid}").replace("card:<id>", f"card:{cid}")
+
+
 def _dir(ws: str) -> Path:
     d = home.workspace_dir(ws) / "notebooks"
     d.mkdir(parents=True, exist_ok=True)
@@ -218,7 +223,7 @@ def new_card(ws: str, args: dict[str, Any], *, by: str = "main", chat: str | Non
     # a card cites itself as card:<id> before it has an id (the add_card tool says so): its own id goes in
     for k in ("takeaway", "text"):
         if isinstance(cell.get(k), str):
-            cell[k] = cell[k].replace("card:card:<id>", f"card:{cell['id']}").replace("card:<id>", f"card:{cell['id']}")
+            cell[k] = own_id(cell[k], cell["id"])
     if isinstance(cell.get("payload"), dict) and isinstance(cell["payload"].get("text"), str):
         cell["payload"]["text"] = cell["text"]
     with _lock:
@@ -239,7 +244,8 @@ def update_card(ws: str, card: str, args: dict[str, Any], *, by: str = "main") -
         if args.get("question"):
             cell["title"] = str(args["question"])
         if "takeaway" in args and args["takeaway"] is not None:
-            cell["takeaway"] = to_canvas_links(str(args["takeaway"]))
+            # a card cites itself as card:<id> (the card tools say so): its own id goes in, as when it was added
+            cell["takeaway"] = own_id(to_canvas_links(str(args["takeaway"])), cell["id"])
             cell["takeaway_author"] = by
         if "code" in args and args["code"] is not None and cell["kind"] in CODE_KINDS:
             cell["code"] = str(args["code"])
@@ -254,7 +260,7 @@ def update_card(ws: str, card: str, args: dict[str, Any], *, by: str = "main") -
                 raise ValueError("a program card needs `program`: the body of (k, data) => node that draws its data")
             cell["kind"] = args["kind"]
         if "text" in args and cell["kind"] == "note":
-            text = to_canvas_links(str(args["text"] or ""))
+            text = own_id(to_canvas_links(str(args["text"] or "")), cell["id"])
             cell["payload"], cell["text"] = {"text": text}, text
         if "refs" in args and cell["kind"] == "example":
             cell["payload"] = {"refs": args["refs"]}

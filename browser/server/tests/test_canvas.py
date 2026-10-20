@@ -38,3 +38,12 @@ def test_the_report_reads_as_sections_of_cited_sentences(folder):
               {"id": "b", "type": "paragraph", "text": "Edited by hand [[runs/a.jsonl#L2]]."}]
     again = report.from_blocks(ws, "Most runs merged", blocks)
     assert again["sections"][0]["paragraphs"][0]["sentences"][0]["refs"] == ["runs/a.jsonl#L2"]
+
+
+def test_an_edit_of_a_takeaway_names_the_card_where_it_cites_itself(folder):
+    from thimble_browser import canvas, home
+    ws = home.open_folder(folder)
+    cell = canvas.new_card(ws, {"question": "Q?", "kind": "note", "text": "t", "takeaway": "[1](card:<id>#a/b)"})
+    assert f"card:{cell['id']}#a/b" in cell["takeaway"]
+    got = canvas.update_card(ws, cell["id"], {"takeaway": "Now [2](card:<id>#a/c) of them."})
+    assert f"card:{cell['id']}#a/c" in got["takeaway"] and "<id>" not in got["takeaway"]
