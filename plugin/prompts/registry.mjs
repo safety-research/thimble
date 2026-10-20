@@ -31,10 +31,6 @@ export const FEATURES = {
       v3: { about: "for the fork: the messages to read named by their first words, the cards' lineage, coverage, each lens's digest and rules, and the reply's skeleton" },
     },
   },
-  'lens-notes': {
-    about: 'lens: notes to Claude', reads: 'the pass', default: 'v2', optional: true,
-    versions: { v2: { about: 'written clean in the 0.9 style: two principles and one example, good and bad' } },
-  },
   'lens-actions': {
     about: 'lens: the actions it lights (v with named proposals)', reads: 'the pass', default: 'v5', optional: true,
     versions: {

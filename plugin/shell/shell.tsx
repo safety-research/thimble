@@ -616,8 +616,8 @@ async function startTurn($: Engine, rows: string[], t: { text: string; typed: bo
   const notes = [...(((await $.state.get(NOTES)).value ?? []) as string[])]
   await $.state.set(NOTES, [])
   // the observer hears of the turn (its own prompt.submit hook may never see this plugin's prompt): its notes come back
-  const heard = await ownTurn($, t).catch(() => null)
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, ...rows, ...(heard ? [heard] : [])].join('\n\n') }] } })
+  await ownTurn($, t).catch(() => undefined)
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: [...notes, ...rows].join('\n\n') }] } })
   await $.prompt.submit({ text: t.text, asUser: true })
 }
 

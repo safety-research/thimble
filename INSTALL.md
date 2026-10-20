@@ -112,9 +112,9 @@ The browser workbench:
 
 - **The plugin's features.** Cards (`v`), Squeeze and catch-up (`s`), Explainers, Important details, Claims (`c`),
   and Labels and coverage on the bar can each be turned on or off: click `thimble` at the left of the bar or run
-  `/thimble-settings`. The panel shows the bar as the features leave it. Notes to Claude is experimental and off by
-  default. The features that read Claude's replies share one model call per reply, by a side agent that reads each
-  reply with the whole session; with all of them off, it makes none.
+  `/thimble-settings`. The panel shows the bar as the features leave it. The features that read Claude's replies
+  share one model call per reply, by a side agent that reads each reply with the whole session; with all of them off,
+  it makes none.
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
   command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
 - **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).

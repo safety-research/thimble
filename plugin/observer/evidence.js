@@ -10,7 +10,7 @@
 //   slim(object)               -> the object with only what digest reads: no data, no program, row sets as counts
 //   bareNumbers(text)          -> the numbers in an object's words that cite nothing
 //   digest(object, o)          -> the object's lineage in plain lines, as the person sees it, with its verb candidates
-//   parseAnswer(text)          -> {notes, verbs, glosses, claims, clusters} from the pass's reply, or null
+//   parseAnswer(text)          -> {verbs, glosses, claims, clusters, heads} from the pass's reply, or null
 
 const fmt = n => (typeof n === 'number' ? n.toLocaleString('en-US') : String(n))
 // the statuses of `thimble coverage` that count as seen (some lines in Claude's context; `read` is a snapshot's from
@@ -258,14 +258,10 @@ export function jsonIn(text) {
   }
 }
 
-/** The pass's reply, read leniently: notes, lit verbs, glosses and claims. */
+/** The pass's reply, read leniently: lit verbs, glosses, claims and a heads-up. */
 export function parseAnswer(text) {
   const d = jsonIn(text)
   if (!d || typeof d !== 'object') return null
-  const notes = (Array.isArray(d.notes) ? d.notes : [])
-    .map(n => (typeof n === 'string' ? { note: n } : n))
-    .filter(n => n && typeof n.note === 'string' && n.note.trim())
-    .map(n => ({ note: n.note.trim(), ...(typeof n.rests_on === 'string' && n.rests_on.trim() ? { rests_on: n.rests_on.trim() } : {}) }))
   // the message row: the verbs it lights and its glosses, read as given (shell/message.js verbsOf and glossesOf check them)
   const verbs = d.verbs && typeof d.verbs === 'object' && !Array.isArray(d.verbs) ? d.verbs : {}
   const glosses = Array.isArray(d.glosses) ? d.glosses : []
@@ -274,13 +270,6 @@ export function parseAnswer(text) {
   const clusters = Array.isArray(d.clusters) ? d.clusters : []
   // the one heads-up, if any, read as given (shell/message.js headsOf checks it)
   const heads = d.heads && typeof d.heads === 'object' && !Array.isArray(d.heads) ? d.heads : null
-  return { notes, verbs, glosses, claims, clusters, heads }
+  return { verbs, glosses, claims, clusters, heads }
 }
 
-const norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
-
-/** Whether a line says the same as one in the list (the same words, or nearly). */
-export function isRepeat(line, list) {
-  const a = norm(line)
-  return (list || []).some(x => norm(x) === a)
-}

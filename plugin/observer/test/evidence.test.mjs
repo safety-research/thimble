@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { bareNumbers, declaredText, digest, fewInputs, isRepeat, parseAnswer, rowCount, rowsIn, slim } from '../evidence.js'
+import { bareNumbers, declaredText, digest, fewInputs, parseAnswer, rowCount, rowsIn, slim } from '../evidence.js'
 
 const OBJECT = {
   id: '02-orders-by-region', version: 2, session: 's-1', title: 'Refunds by region', question: 'Which region had the most refunds in March?',
@@ -72,17 +72,11 @@ test('the digest says how many rows stand behind each cited value, how sure the 
   assert.match(d, /as the analyst sees it under the reply:\n    Refunds by region\n    West ▆▆▆▆ 412\n    12 regions/)
 })
 
-test("the pass's answer is read leniently: its notes, and nothing of the parts no lens gives", () => {
-  const a = parseAnswer('Here: {"notes": [{"note": "412 counts all months.", "rests_on": "groupby"}, {"note": " "}], "line": {"line": "x", "decision": "send it"}, "settled": true, "hints": {"orders-by-region": [{"verb": "trace", "phrase": "trace the 412 to its rows"}, {"verb": "stress"}, {"verb": "t"}, "explore", {"verb": "squeeze"}, {"verb": "x"}]}}')
-  assert.equal(a.notes.length, 1)
-  assert.equal('line' in a, false)
-  assert.equal('hints' in a, false)
+test("the pass's answer is read leniently: its lenses' parts, and nothing of the parts no lens gives", () => {
+  const a = parseAnswer('Here: {"notes": [{"note": "412 counts all months."}], "verbs": {"v": {"note": "1 view"}}, "glosses": [{"term": "p95"}], "line": {"line": "x", "decision": "send it"}, "settled": true, "hints": {"orders-by-region": [{"verb": "trace"}]}}')
+  assert.deepEqual(Object.keys(a).sort(), ['claims', 'clusters', 'glosses', 'heads', 'verbs'])
+  assert.deepEqual(a.glosses, [{ term: 'p95' }])
   assert.equal(parseAnswer('no json'), null)
-})
-
-test('a repeat is the same line in other spacing or case', () => {
-  assert.equal(isRepeat('Before you send: 3 of 9 never re-ran.', ['before you send 3 of 9 never re-ran']), true)
-  assert.equal(isRepeat('Before you send: 4 of 9 never re-ran.', ['before you send 3 of 9 never re-ran']), false)
 })
 
 test('a slimmed object keeps what the digest reads and drops its data, program and row sets; many inputs read as patterns', () => {

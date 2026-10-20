@@ -8,7 +8,6 @@ const STUBS: Record<string, string> = {
   'observer/v6': 'FRAME\n{{LENSES}}',
   'observer-turn/v2': 'TURN {{QUESTION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
   'observer-turn/v3': 'NOW {{MESSAGES}} | {{ROW}} | {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}}\n{{DIGEST}}\n{{RULES}}\nREPLY {{SKELETON}}',
-  'lens-notes/v2': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
   'lens-actions/v4': 'LENS actions',
   'lens-actions/v5': 'LENS actions',
   'lens-squeeze/v2': 'LENS squeeze',

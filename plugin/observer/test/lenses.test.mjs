@@ -9,13 +9,13 @@ import test from 'node:test'
 
 import { ROOT, textOf } from '../../prompts/node.mjs'
 import { composeSystem, composeTurn, sectionsOf, sharesOf, skeletonOf } from '../compose.mjs'
-import { isRepeat, parseAnswer } from '../evidence.js'
+import { parseAnswer } from '../evidence.js'
 import { LENSES } from '../lenses/index.mjs'
 import { callOf, stepsOf, turnMessages } from '../turn.mjs'
 
 const byName = Object.fromEntries(LENSES.map(l => [l.name, l]))
 const FRAG = 'LENS one\n\nits principles\n\n<!-- digest -->\nKnown: {{THINGS}}\n\n<!-- when open -->\nNo line now.\n<!-- when backoff -->\nNothing now.'
-const ST = { notesGiven: ['a note given'], glossed: ['p95'] }
+const ST = { glossed: ['p95'], headsGiven: ['March is half a month'] }
 
 test("a fragment's sections: its instructions, its digest's template, its rules by name", () => {
   const s = sectionsOf(FRAG)
@@ -26,13 +26,13 @@ test("a fragment's sections: its instructions, its digest's template, its rules 
 })
 
 test("the system prompt: the frame with each enabled lens's instructions in order, the skeleton's keys once", () => {
-  const parts = [byName.notes, byName.actions, byName.squeeze, byName.explain].map(lens => ({ lens, text: `## ${lens.name}\nwords\n<!-- digest -->\nDIGEST ${lens.name}` }))
+  const parts = [byName.actions, byName.squeeze, byName.explain, byName.heads].map(lens => ({ lens, text: `## ${lens.name}\nwords\n<!-- digest -->\nDIGEST ${lens.name}` }))
   const sys = composeSystem('FRAME\n{{LENSES}}\nREPLY {{SKELETON}}', parts)
-  assert.equal(sys.text, 'FRAME\n## notes\nwords\n\n## actions\nwords\n\n## squeeze\nwords\n\n## explain\nwords\nREPLY {"notes": [], "verbs": {}, "glosses": []}')
+  assert.equal(sys.text, 'FRAME\n## actions\nwords\n\n## squeeze\nwords\n\n## explain\nwords\n\n## heads\nwords\nREPLY {"verbs": {}, "glosses": [], "heads": null}')
   assert.doesNotMatch(sys.text, /DIGEST/)
-  assert.equal(sys.chars.notes, '## notes\nwords'.length + 2)
+  assert.equal(sys.chars.explain, '## explain\nwords'.length + 2)
   assert.equal(sys.shared + Object.values(sys.chars).reduce((a, b) => a + b, 0), sys.text.length)
-  assert.equal(skeletonOf(LENSES), '{"notes": [], "verbs": {}, "glosses": [], "heads": null, "claims": []}')
+  assert.equal(skeletonOf(LENSES), '{"verbs": {}, "glosses": [], "heads": null, "claims": []}')
 })
 
 test("the message: the turn's values, each lens's digest, and a rule only when its condition holds", () => {
@@ -49,40 +49,40 @@ test('the real fragments compose: every lens of the registry has instructions, a
   const frame = textOf('observer', ROOT, {}).text
   const parts = LENSES.map(lens => ({ lens, text: textOf(lens.feature, ROOT, {}).text }))
   const sys = composeSystem(frame, parts)
-  for (const h of ['## Notes to Claude', '## The actions that light', "## Where the answer stands on squeeze's chips", '## Explainers', '## Heads-ups', '## The claims of this turn']) assert.ok(sys.text.includes(h), h)
+  for (const h of ['## The actions that light', "## Where the answer stands on squeeze's chips", '## Explainers', '## Heads-ups', '## The claims of this turn']) assert.ok(sys.text.includes(h), h)
   assert.doesNotMatch(sys.text, /\{\{[A-Z_]+\}\}/)
   assert.doesNotMatch(sys.text, /<!--/)
   // the fork's template (observer-turn:v3, the default): the messages to read, the evidence, the digests, the skeleton
   const turn = composeTurn(textOf('observer-turn', ROOT, {}).text, { MESSAGES: 'Read this message of Claude\'s', ROW: 'v visualize', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', SKELETON: skeletonOf(LENSES) }, parts, ST)
   assert.doesNotMatch(turn.text, /\{\{[A-Z_]+\}\}/)
-  assert.match(turn.text, /Notes Claude already has:\n- a note given/)
+  assert.doesNotMatch(turn.text, /notes/i)
   assert.match(turn.text, /Terms that already have an explainer in this session:\n- p95/)
-  assert.match(turn.text, /\{"notes": \[\], "verbs": \{\}, "glosses": \[\], "heads": null, "claims": \[\]\}\s*$/)
+  assert.match(turn.text, /\{"verbs": \{\}, "glosses": \[\], "heads": null, "claims": \[\]\}\s*$/)
   // the earlier pass's template (observer-turn:v2) still composes
   const old = composeTurn(textOf('observer-turn', ROOT, { THIMBLE_PROMPTS: 'observer-turn:v2' }).text, { QUESTION: 'q', ROW: 'v visualize', STEPS: '(none)', LINES: '1', ANSWER: 'a', SHOWN: '', OBJECTS: 'No objects yet.', COVERAGE: 'c', EARLIER: '(none)' }, parts, ST)
   assert.doesNotMatch(old.text, /\{\{[A-Z_]+\}\}/)
 })
 
 test("each lens's share of the pass: its characters in and out, the frame and the turn as the shared part", () => {
-  const parts = [byName.notes, byName.explain].map(lens => ({ lens, text: `${lens.name} words\n<!-- digest -->\nD` }))
+  const parts = [byName.heads, byName.explain].map(lens => ({ lens, text: `${lens.name} words\n<!-- digest -->\nD` }))
   const system = composeSystem('F {{LENSES}} {{SKELETON}}', parts)
   const turn = composeTurn('T {{DIGEST}}', {}, parts, ST)
-  const raw = { notes: [{ note: 'n' }], glosses: [{ term: 'p95' }] }
+  const raw = { heads: { term: 't', bullets: ['b'] }, glosses: [{ term: 'p95' }] }
   const text = JSON.stringify(raw)
   const s = sharesOf({ system, turn, lenses: parts.map(x => x.lens), raw, rawText: text })
-  assert.equal(s.lenses.notes.out, JSON.stringify(raw.notes).length)
+  assert.equal(s.lenses.heads.out, JSON.stringify(raw.heads).length)
   assert.equal(s.lenses.explain.out, JSON.stringify(raw.glosses).length)
-  assert.equal(s.lenses.notes.in, system.chars.notes + turn.chars.notes)
+  assert.equal(s.lenses.heads.in, system.chars.heads + turn.chars.heads)
   assert.equal(s.shared_in, system.shared + turn.shared)
   assert.ok(s.shared_out >= 0)
 })
 
 /** A context as the observer hands it to a merge: what it holds, and what the merges did to it. */
 function ctxOf(o = {}) {
-  const did = { notes: [], logged: {} }
+  const did = { logged: {} }
   const ctx = {
-    moved: false, isRepeat, verbs: {}, glosses: null,
-    note: n => did.notes.push(n), log: (k, v) => { did.logged[k] = v }, ...o,
+    moved: false, verbs: {}, glosses: null,
+    log: (k, v) => { did.logged[k] = v }, ...o,
   }
   return { ctx, did }
 }
@@ -92,8 +92,7 @@ const merge = async (name, reply, o) => {
   await lens.merge(lens.read(parseAnswer(JSON.stringify(reply))), ctx)
   return { ctx, did }
 }
-test('the notes, actions, squeeze and explain lenses each put their part where it goes', async () => {
-  assert.deepEqual((await merge('notes', { notes: [{ note: 'one', rests_on: 'x' }, { note: 'two' }, { note: 'three' }] })).did.notes.map(n => n.note), ['one', 'two'])
+test('the actions, squeeze and explain lenses each put their part where it goes', async () => {
   const a = await merge('actions', { verbs: { v: { note: '2 views ready', proposals: ['overwrites per day, June 18 marked', 'b', 'c'] }, s: { at: { interpret: 'report' } } } })
   assert.deepEqual(a.ctx.verbs, { v: { lit: true, note: '2 views ready', proposals: ['overwrites per day, June 18 marked', 'b'] } })
   const s = await merge('squeeze', { verbs: { s: { at: { interpret: 'report', familiarity: 'fluent' } } } })
@@ -108,12 +107,12 @@ test('the notes, actions, squeeze and explain lenses each put their part where i
   assert.deepEqual((await merge('actions', { verbs: { v: { proposals: [] } } })).ctx.verbs, {})
 })
 
-test('the explain lens has no rule of its own, and its digest and the notes lens\'s fill every placeholder', () => {
+test('the explain lens has no rule of its own, and its digest and the heads-up lens\'s fill every placeholder', () => {
   assert.deepEqual(byName.explain.when({}), [])
   const explain = readFileSync(new URL('../../prompts/lens-explain/v6.md', import.meta.url), 'utf8')
   assert.deepEqual(sectionsOf(explain).when, {})
-  for (const name of ['notes', 'explain']) {
-    const frag = readFileSync(new URL(`../../prompts/lens-${name}/${name === "notes" ? "v2" : "v6"}.md`, import.meta.url), 'utf8')
+  for (const [name, v] of [['heads', 'v2'], ['explain', 'v6']]) {
+    const frag = readFileSync(new URL(`../../prompts/lens-${name}/${v}.md`, import.meta.url), 'utf8')
     const d = sectionsOf(frag).digest
     assert.ok(d, `lens-${name} has a digest`)
     const keys = [...d.matchAll(/\{\{([A-Z_]+)\}\}/g)].map(m => m[1])

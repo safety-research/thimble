@@ -2,8 +2,8 @@
 // the kernel's watching hook (kernel.ts: which files Claude's own calls
 // read, for `thimble coverage`), the shell (../shell/shell.tsx: objects drawn under replies, the detail view, verb
 // hints, the browser handoff), Claims (../claims/term.ts: the session's claims, the Claims pane at the right, the
-// folder's map), the observer (../observer/observer.ts: one quiet look after each turn of work, notes
-// to Claude, a rare line above the prompt, and the ranking of each object's hint row), the prompt registry
+// folder's map), the observer (../observer/observer.ts: one quiet look after each of Claude's messages, for the
+// explainers, the important details, v's proposals, squeeze's levels and the claims), the prompt registry
 // (../prompts/prompts.ts: which version of each text a model reads) and the telemetry (../telemetry/telemetry.ts:
 // each model call and each turn in the session's events, with the time thimble's hooks took inside each main turn)
 // register side by side, with path.ts, which puts the plugin's bin/ first on the PATH of the session's commands. The

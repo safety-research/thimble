@@ -15,7 +15,7 @@
 /** The features, in the order the settings panel lists them. `key`: the userConfig field; `title`: its name in the
  *  panel; `label`: its name in Claude Code's own lists, when it differs; `does`: one line on what the person gets;
  *  `costs`: what it costs, in words; `lenses`: the observer's lenses it needs; `bar`: what it puts on the bar;
- *  `group`: a heading over it in the panel (only the experimental ones have one); `surfaces`: the surfaces that honor
+ *  `group`: a heading over it in the panel, when it has one; `surfaces`: the surfaces that honor
  *  it. The manifest's field has the label (else the title) as its title, and `does` and `costs` as its description
  *  (a test checks). */
 export const SWITCHES = [
@@ -48,11 +48,6 @@ export const SWITCHES = [
     key: 'counts', title: 'Labels and coverage on the bar', default: true, lenses: [], bar: ['cov', 'labels'], surfaces: ['terminal'],
     does: 'The bar shows how much of the data Claude read (r) and how many labels there are (l).',
     costs: 'No model call: thimble counts the files after each turn.',
-  },
-  {
-    key: 'notes', title: 'Notes to Claude', label: 'Notes to Claude (experimental)', group: 'Experimental', default: false, lenses: ['notes'], surfaces: ['terminal'],
-    does: 'Claude gets up to two notes on its last answer with your next prompt. You do not see them.',
-    costs: 'A small part of the call after each reply.',
   },
 ]
 
