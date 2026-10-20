@@ -215,7 +215,9 @@ export function renderSvg(drawing, opts = {}) {
     let s = memo.get(n)
     if (s) return s
     s = baseSizes(n)
-    if (n.w != null) s = { min: n.w * cw, nat: n.w * cw, grow: 0, fixed: n.w * cw }
+    // a fixed width, except that a one-line text that is not a right-aligned value may cut itself with … to keep its
+    // row inside the width, so the numbers beside it stay whole (as term.js)
+    if (n.w != null) s = n.t === 'text' && n.wrap === false && n.align !== 'right' ? { min: Math.min(n.w, 6) * cw, nat: n.w * cw, grow: 0 } : { min: n.w * cw, nat: n.w * cw, grow: 0, fixed: n.w * cw }
     if (n.grow != null) s = Object.assign({}, s, { grow: n.grow })
     if (n.minW != null) s = Object.assign({}, s, { min: Math.min(n.minW * cw, s.nat) })
     s.min = Math.min(s.min, s.nat)

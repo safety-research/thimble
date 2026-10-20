@@ -220,7 +220,9 @@ function sizesOf(n, memo) {
   let s = memo.get(n)
   if (s) return s
   s = baseSizes(n, memo)
-  if (n.w != null) s = { min: n.w, nat: n.w, grow: 0, fixed: n.w }
+  // a fixed width, except that a one-line text that is not a right-aligned value may cut itself with … to keep its
+  // row inside the width, so the numbers beside it stay whole
+  if (n.w != null) s = n.t === 'text' && n.wrap === false && n.align !== 'right' ? { min: Math.min(n.w, 6), nat: n.w, grow: 0 } : { min: n.w, nat: n.w, grow: 0, fixed: n.w }
   if (n.grow != null) s = Object.assign({}, s, { grow: n.grow })
   if (n.minW != null) s = Object.assign({}, s, { min: Math.min(n.minW, s.nat) })
   s.nat = Math.min(MAX_NAT, s.nat)

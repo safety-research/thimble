@@ -19,6 +19,8 @@ export interface Rendered {
   h: number
   regions: DrawnRegion[]
   warnings: string[]
+  /** what was cut to fit: a text, a title */
+  cut: { k: string; s: string }[]
   error?: Drawing['error']
 }
 export type Measure = (s: string, o?: { size?: number; bold?: boolean; mono?: boolean }) => number

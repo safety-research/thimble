@@ -30,6 +30,8 @@ export type SideTab = 'labels' | 'checks'
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 /** the found items a detail lists before "N more" */
 const FOUND_SHOWN = 6
+/** the records a label's "N more" adds at each click */
+const FOUND_PAGE = 50
 
 /** The labels the sidebar lists: every label but a trial run on a few records. */
 export const listedLabels = (concepts: ReadonlyMap<string, Concept>): Concept[] => [...concepts.values()].filter((k) => !k.trial)
@@ -425,7 +427,7 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
       <h4 className="lside-label">Show in</h4>
       {labelShowIn(k)}
       <h4 className="lside-label">
-        Found <span className="lside-n">{rows?.total ?? ''}</span>
+        Found <span className="lside-n">{rows?.total.toLocaleString('en-US') ?? ''}</span>
       </h4>
       <div className="lside-founds">
         {rows && !rows.rows.length && <p className="lside-none">No record has a value yet.</p>}
@@ -443,7 +445,20 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
             </button>
           )
         })}
-        {rows && rows.total > rows.rows.length && <span className="lside-more">{rows.total - rows.rows.length} more</span>}
+        {rows && rows.total > rows.rows.length && (
+          <button
+            type="button"
+            className="lside-more"
+            onClick={() =>
+              void labelApi
+                .rows(ws, k.id, { offset: rows.rows.length, limit: FOUND_PAGE })
+                .then((got) => setRows((cur) => (cur ? { rows: [...cur.rows, ...got.rows], total: got.total } : got)))
+                .catch(fail)
+            }
+          >
+            {(rows.total - rows.rows.length).toLocaleString('en-US')} more
+          </button>
+        )}
       </div>
       {ask && <LabelAsk ws={ws} ask={ask} onAnswered={() => setAsked(null)} />}
       <footer className="lside-foot">

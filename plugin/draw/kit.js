@@ -432,8 +432,11 @@
         const max = num(o.max) > 0 ? num(o.max) : Math.max.apply(null, vals.filter(isFinite).concat([0])) || 1
         const texts = items.map((it, i) => it.text != null ? String(it.text) : isFinite(vals[i]) ? fmt(vals[i], o.fmt) : (it.missing || 'unseen'))
         const width = o.w != null ? int(o.w, W) : W - 4
-        const labelW = o.labelW != null ? int(o.labelW, 12) : Math.min(Math.max(1, ...items.map(it => k.len(it.label == null ? '' : it.label))), Math.max(6, Math.floor(width * 0.4)))
         const valW = Math.max(1, ...texts.map(t => k.len(t)))
+        // the label column gives way first: at most what leaves the value whole and the bar a third of the row, so a
+        // card drawn again in a narrow place (an answer in the chat) cuts its labels, never its numbers
+        const labelAsked = o.labelW != null ? int(o.labelW, 12) : Math.min(Math.max(1, ...items.map(it => k.len(it.label == null ? '' : it.label))), Math.max(6, Math.floor(width * 0.4)))
+        const labelW = Math.max(1, Math.min(labelAsked, width - valW - 2 - Math.max(4, Math.floor(width / 3))))
         // a note that only says the row's value again (a total beside the total) is not drawn a second time
         const bare = t => String(t).replace(/[,\s]/g, '')
         const noteOf = (it, i) => it.note == null || bare(plain(inline(it.note, {}, ctx))) === bare(texts[i]) ? null : it.note

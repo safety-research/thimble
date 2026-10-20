@@ -199,11 +199,53 @@ export function revealMark(m: Pick<Mark, 'id' | 'surface' | 'where'>): void {
       if (Date.now() - t0 < 4000) window.setTimeout(find, 120)
       return
     }
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    el.classList.remove('mark-flash')
-    void el.offsetWidth
-    el.classList.add('mark-flash')
-    window.setTimeout(() => el.classList.remove('mark-flash'), 1800)
+    keepInView(el)
   }
   window.setTimeout(find, 60)
+}
+
+/** Where an element sits in what it scrolls with: its top plus every scroll above it. A scroll leaves it alone; a
+ * layout that moves the element changes it. */
+function placeOf(el: HTMLElement): number {
+  let y = el.getBoundingClientRect().top + window.scrollY
+  for (let a = el.parentElement; a; a = a.parentElement) y += a.scrollTop
+  return y
+}
+
+const LET_GO = ['wheel', 'touchstart', 'keydown', 'pointerdown'] as const
+
+/** Bring an element to the middle of its place, and keep it there while the place lays out (a tab that just opened
+ * draws its figures after its text, which pushes the words below them down); flash it once it stays put. It lets go
+ * after a few seconds, or as soon as the person scrolls, clicks or types. */
+export function keepInView(el: HTMLElement): void {
+  const t0 = performance.now()
+  let at = placeOf(el)
+  let still = t0
+  let flashed = false
+  let done = false
+  const stop = () => {
+    done = true
+    for (const t of LET_GO) window.removeEventListener(t, stop, true)
+  }
+  for (const t of LET_GO) window.addEventListener(t, stop, { capture: true, passive: true })
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  const tick = () => {
+    if (done || !el.isConnected) return stop()
+    const now = performance.now()
+    const y = placeOf(el)
+    if (Math.abs(y - at) > 1) {
+      at = y
+      still = now
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    } else if (!flashed && now - still > 250) {
+      flashed = true
+      el.classList.remove('mark-flash')
+      void el.offsetWidth
+      el.classList.add('mark-flash')
+      window.setTimeout(() => el.classList.remove('mark-flash'), 1800)
+    }
+    if (now - t0 > 5000 || (flashed && now - t0 > 2500)) return stop()
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
 }
