@@ -29,7 +29,7 @@ import { knobOf, pageKnob, turn as turnKnob } from '../draw/handoff.js'
 import { PAGES_DEFAULT } from './carddetail.js'
 import { gridText, regionAt, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
-import { cardFrame, frameWidth } from './cardframe.js'
+import { bodyRows, cardFrame, frameWidth, moreRow, moreText } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink, healMd } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
 import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withObserver } from './message.js'
@@ -2380,8 +2380,9 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   if (p.error || !p.grid) return Text({ color: 'error', children: `× ${refText(ref)} cannot be drawn: ${p.error || 'no drawing'}` })
   const fullscreen = e.viewport?.isFullscreen !== false
   const said = ((await $.state.get({ ...SAID, id: ref.id })).value ?? null) as Said | null
-  // calm: under a reply an object takes at most about half a screen; the rest waits in the detail view
-  const rows = Math.min(p.grid.h, inlineRows(e.viewport?.rows ?? 48))
+  // under a reply a card is drawn whole when it fits on the screen; a taller one is cut, and says how much is below
+  const { rows, more } = bodyRows(p.grid.h, e.viewport?.rows ?? 48)
+  const openAll = fullscreen ? () => openDetail($, ref, null) : undefined
   // a click on a part its program answers is the program's (k.on('press:<id>')), here as in the detail; on any other
   // part it opens the detail view on it, and on a link to a cite or to examples the detail opens on its rows or its
   // examples; on a knob's dial (or a link to a knob) it turns the knob here, a step back on its left half and a step
@@ -2404,12 +2405,12 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const pages = pk ? pagesRow(els, pk, focus === 'focus', fullscreen ? () => openDetail($, ref, null, { pages: PAGES_DEFAULT }) : null) : null
   const o = p.object || {}
   const fw = frameWidth(outer, p.grid.w, o.title)
-  const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: Math.min(rows, p.grid.h), color: ring })
+  const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: rows, more, onMore: openAll, color: ring })
   // the labels its data came through, beside it (labeluse.ts)
   const used = await labelsRow($, els, labelKey, [ref.id], ref.root, { grid: p.grid, card: ref.id })
   return Box({
     key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, width: framed ? Math.max(p.grid.w, 40) : fw,
-    children: [body, ...(used ? [used] : []), ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
+    children: [body, ...(framed && more ? [moreRow(els, moreText(more), openAll)] : []), ...(used ? [used] : []), ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
   })
 }
 
@@ -2551,8 +2552,6 @@ async function inlineCardAct($: Engine, ref: ObjRef, event: Record<string, unkno
   }
 }
 
-/** The rows a card takes under a reply: about half a screen, the rest in its detail view. */
-const inlineRows = (screen: number) => Math.max(12, Math.min(30, Math.floor(screen * 0.55)))
 const FOCUS = { dark: '#9a93ff', light: '#4f46e5' }
 
 /** A knob of a card under a reply turned one step where the card is drawn (a click on its dial's half, or , and . while

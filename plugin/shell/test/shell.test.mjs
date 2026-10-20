@@ -8,6 +8,8 @@ import { test } from 'node:test'
 
 import { isRef, objectRefs, recordRefs, regionRefs, rowByName } from '../object.js'
 import { prep } from '../node/prep.mjs'
+import { bodyRows, frameLines } from '../cardframe.js'
+import { gridText, renderTerm } from '../../draw/term.js'
 
 const OBJ = {
   id: '01-saves', version: 1, title: 'Saves',
@@ -55,4 +57,29 @@ test('every state key the plugin keeps is named in its types contract', () => {
   walk(here)
   assert.ok(used.size > 20)
   assert.deepEqual([...used].filter(k => !declared.has(k)), [])
+})
+
+test('a diagram under a reply is drawn whole when it fits on the screen; a taller drawing says how many rows are below', async () => {
+  // three groups, each split in two: a tree as tall as the one a 46-row screen once cut at its foot
+  const groups = [['north', 210, 130], ['south', 190, 90], ['west', 480, 120]]
+  const object = { id: '02-tree', title: 'How did the 880 visitors split?', data: { groups }, program: `
+    const nodes = [{ id: 'all', label: '880 visitors' }], edges = []
+    for (const [g, n, stayed] of data.groups) {
+      nodes.push({ id: g, label: g + ': ' + n, note: 'a region' })
+      edges.push({ from: 'all', to: g })
+      for (const [o, m] of [['stayed', stayed], ['left', n - stayed]]) { nodes.push({ id: g + '-' + o, label: o + ': ' + m, note: 'of ' + g }); edges.push({ from: g, to: g + '-' + o }) }
+    }
+    return k.graph({ nodes, edges }, { dir: 'right' })` }
+  const { drawing } = await prep({ object, w: 116 })
+  const lines = gridText(renderTerm(drawing, { w: 116 })).split('\n')
+  assert.ok(lines.length > 25, `the tree is ${lines.length} rows`)
+  const fit = bodyRows(lines.length, 46)
+  assert.deepEqual(fit, { rows: lines.length, more: 0 })
+  const framed = frameLines({ w: 120, title: object.title, text: '' }, lines.slice(0, fit.rows))
+  assert.match(framed.join('\n'), /left: 360/)
+  // a drawing taller than the screen keeps its last row for the line that says what is below
+  const tall = bodyRows(80, 46)
+  assert.deepEqual(tall, { rows: 31, more: 49 })
+  const cut = frameLines({ w: 60, title: 'A long list', text: '', more: tall.more }, Array.from({ length: tall.rows }, (_, i) => `row ${i}`))
+  assert.match(cut.at(-2), /↓ 49 more rows · open the card to see all/)
 })
