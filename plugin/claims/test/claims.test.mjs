@@ -405,8 +405,14 @@ test('the pane: its thread\'s conversation is the panel\'s, under it; with no cl
   const folder = emptyStore('s')
   mergeFolder(folder, MAP, { card: '07-folder-claims', v: 1 })
   const f = draw(pane.data({ claims: folder, threads: [] }))
-  assert.match(f.text, /^3 claims\n/)
-  assert.ok(f.text.includes('belt slips (folder)'))
+  assert.match(f.text, /^3 claims\n\nthe whole folder's map · 3 claims\n/)
+  assert.match(f.text, /the whole folder's map · 3 claims\nbelt slips/)
+  assert.ok(!f.text.includes('(folder)'))
+  // beside the session's own claims, the folder's map stands under its own line
+  const both = turn1().store
+  mergeFolder(both, MAP, { card: '07-folder-claims', v: 1 })
+  const b = draw(pane.data({ claims: both, threads: [] })).text
+  assert.ok(b.indexOf('testing for bias') < b.indexOf("the whole folder's map · 3 claims") && b.indexOf("the whole folder's map") < b.indexOf('belt slips'), b)
   // a claim of the folder's map: its evidence is its quote, and a press on it opens its first evidence row
   const st = { claim: folder.claims.find(c => c.text === 'The belt skips a slot').id }
   assert.match(draw(pane.data({ claims: folder, threads: [] }), { state: st }).text, /● The belt skips a slot\. · from the folder's map\n {2}“The belt skips a slot” t1\.jsonl:2/)

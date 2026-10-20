@@ -9,7 +9,8 @@
 //                   claims linked to the one selected are drawn bold on a tinted ground (amber: the correction; red: a
 //                   contradiction, from the folder's map; gray: supports, the same topic or the same rows). No line is
 //                   drawn, so the graph stays readable with a hundred claims or more. The dots keep their places while
-//                   the ring walks them.
+//                   the ring walks them. The folder's map, once asked for, stands under the session's clusters, after
+//                   one line that says it is the whole folder's.
 //   the claim       under the graph, the claim selected: its sentence (a press opens where it was said, over the pane, as
 //                   a citation opens), then its evidence (the rows each citation names, with their numbers, the values
 //                   it cites marked; a press opens the citation over the pane), then the claim that corrects it or that
@@ -96,16 +97,18 @@ export function split(total, weights, min) {
 // airiest spacing that fits the rectangle first
 const SPACINGS = [[4, 2], [3, 2], [2, 2], [3, 1], [2, 1]]
 
-/** How a cluster of n dots fits a rectangle whose dots may use iw × ih cells: {sx, sy, per} (per: dots in a row, the
- *  rows as even as they can be), and whether it fits at all. */
-export function gridOf(n, iw, ih) {
-  for (const [sx, sy] of SPACINGS) {
+/** How a cluster of n dots fits a rectangle whose dots may use iw × ih cells, at the airiest spacing from `from` on
+ *  that fits: {sx, sy, per, level, fits} (per: dots in a row, the rows as even as they can be; level: the spacing's
+ *  place in SPACINGS). */
+export function gridOf(n, iw, ih, from = 0) {
+  for (let level = from; level < SPACINGS.length; level++) {
+    const [sx, sy] = SPACINGS[level]
     const most = Math.max(1, Math.floor((iw - 1) / sx) + 1)
     const rows = Math.ceil(n / most)
-    if ((rows - 1) * sy + 1 <= ih) return { sx, sy, per: Math.ceil(n / rows), fits: true }
+    if ((rows - 1) * sy + 1 <= ih) return { sx, sy, per: Math.ceil(n / rows), level, fits: true }
   }
   const [sx, sy] = SPACINGS[SPACINGS.length - 1]
-  return { sx, sy, per: Math.max(1, Math.floor((iw - 1) / sx) + 1), fits: false }
+  return { sx, sy, per: Math.max(1, Math.floor((iw - 1) / sx) + 1), level: SPACINGS.length - 1, fits: false }
 }
 
 /**
@@ -144,7 +147,7 @@ export function slotsOf(groups, W, H) {
         // clusters is wider than the gap between two dots of one; its dots want the airy spacing, and must fit the dense
         // one
         const airy = gridOf(g.nodes.length, sl.w - 5, sl.h - 1)
-        cost += Math.log(sl.w / Math.max(1, sl.h) / 5) ** 2 + (airy.fits ? (airy.sy === 1 ? 1 : 0) + (airy.sx < 3 ? 0.5 : 0) : 20) + (Array.from(g.name).length > sl.w - 2 ? 1 : 0)
+        cost += Math.log(sl.w / Math.max(1, sl.h) / 5) ** 2 + (airy.fits ? (airy.sy === 1 ? 1 : 0) + (airy.sx < 3 ? 0.5 : 0) : 20) + (Array.from(g.name).length > sl.w - 2 ? 3 : 0)
         x += ws[gi]
       })
       y += hs[ri]
@@ -170,8 +173,10 @@ export function layout(nodes, clusters, { w, h }) {
   const slots = slotsOf(groups, W, H)
   const pos = new Map()
   let fits = true
+  // one spacing for every cluster, the airiest that fits them all, so the graph reads as one grid
+  const level = Math.max(0, ...slots.map(sl => gridOf(sl.g.nodes.length, sl.w - 5, sl.h - 1).level))
   for (const sl of slots) {
-    const g = gridOf(sl.g.nodes.length, sl.w - 5, sl.h - 1)
+    const g = gridOf(sl.g.nodes.length, sl.w - 5, sl.h - 1, level)
     fits = fits && g.fits
     sl.g.nodes.forEach((nd, i) => pos.set(nd.id, { x: sl.x + (i % g.per) * g.sx, y: sl.y + 1 + Math.floor(i / g.per) * g.sy }))
   }
@@ -202,7 +207,7 @@ const colOf = ref => (/@([^@#/]*)$/.exec(String(ref)) || [])[1] || null
 export function evidenceOf(c) {
   const out = []
   for (const s of c.sources || []) {
-    const hit = out.find(g => !s.quote && !g[0].quote && rowsOf(g[0].ref) === rowsOf(s.ref))
+    const hit = out.find(g => !quoted(s) && !quoted(g[0]) && rowsOf(g[0].ref) === rowsOf(s.ref))
     if (hit) hit.push(s)
     else out.push([s])
   }
@@ -212,6 +217,9 @@ export function evidenceOf(c) {
 const fmtVal = v => (typeof v === 'number' ? (Number.isInteger(v) ? v.toLocaleString('en-US') : String(+v.toPrecision(4))) : v == null ? '' : String(v))
 /** The query a ref cites a value of (`r2` of `r2#group=male@n`), or null for a row of a file. */
 const queryOf = ref => (/^([qr]\d+)(?:#|$)/.exec(String(ref)) || [])[1] || null
+/** Whether a piece of evidence is read as its quote (the folder's map quotes a row of a file); a value a query computed
+ *  is read through the kernel, as a citation in an answer is. */
+const quoted = s => !!s.quote && !queryOf(s.ref)
 const pad = (s, n, right) => { const t = cut(s, n); const sp = ' '.repeat(Math.max(0, n - Array.from(t).length)); return right ? sp + t : t + sp }
 
 /** A query's row a citation names, from the kernel's resolve: {about, row, more} (more: the other rows it names), or
@@ -231,7 +239,7 @@ export function evidenceWords(k, cites, got) {
   const e = k.escape
   const s0 = cites[0]
   const labels = cites.map(s => s.label || s.ref).join(', ')
-  if (s0.quote) return `{cite:“${e(one(s0.quote))}”} {dim:${e(shortRef(s0.ref))}}`
+  if (quoted(s0)) return `{cite:“${e(one(s0.quote))}”} {dim:${e(shortRef(s0.ref))}}`
   if (!got) return `{cite:${e(labels)}} {dim:reading its rows…}`
   const words = chainWords(got)
   if (words.error) return `{cite:${e(labels)}} {bad:does not resolve:} {dim:${e(words.notes[0] || '')}}`
@@ -252,13 +260,13 @@ export function evidenceWords(k, cites, got) {
 export function evidenceRows(k, evidence) {
   const e = k.escape
   const out = []
-  const gots = evidence.map(g => (g[0].quote ? null : k.want({ rows: [g[0].ref] })))
+  const gots = evidence.map(g => (quoted(g[0]) ? null : k.want({ rows: [g[0].ref] })))
   const part = (j, node) => k.region(`ev-${j + 1}`, { label: `evidence: ${evidence[j].map(s => s.label).join(', ')}`, ref: evidence[j][0].ref }, node)
   const done = new Set()
   evidence.forEach((g, i) => {
     if (done.has(i)) return
-    const q = g[0].quote ? null : queryOf(g[0].ref)
-    const same = q ? evidence.map((_, j) => j).filter(j => !done.has(j) && !evidence[j][0].quote && queryOf(evidence[j][0].ref) === q) : []
+    const q = quoted(g[0]) ? null : queryOf(g[0].ref)
+    const same = q ? evidence.map((_, j) => j).filter(j => !done.has(j) && !quoted(evidence[j][0]) && queryOf(evidence[j][0].ref) === q) : []
     const rows = same.map(j => queryRow(gots[j]))
     if (!same.length || !rows.every(Boolean)) {
       done.add(i)
@@ -289,7 +297,7 @@ export function evidenceRows(k, evidence) {
 
 /** How many rows a claim's evidence takes: one a row, and one more for each query's table. */
 export function evidenceHeight(evidence) {
-  const qs = new Set(evidence.filter(g => !g[0].quote).map(g => queryOf(g[0].ref)).filter(Boolean))
+  const qs = new Set(evidence.filter(g => !quoted(g[0])).map(g => queryOf(g[0].ref)).filter(Boolean))
   return Math.max(1, evidence.length + qs.size)
 }
 
@@ -423,19 +431,7 @@ export function program(k, data) {
   const all = k.h || 40
   const H = Math.max(12, all - 4 - (data.talk ? Math.floor(all * 0.4) : 0))
   const tallest = Math.max(...claims.map(rowsFor))
-  const named = groups.map(g => ({ id: g.id, name: g.folder ? `${g.name} (folder)` : g.name }))
-  const order = claims.slice().sort((p, q) => (p.folder ? 1 : 0) - (q.folder ? 1 : 0) || (p.turn ?? 0) - (q.turn ?? 0) || num(p) - num(q))
-  const nodes = order.map(c => ({ id: c.id, cluster: c.cluster }))
   const room = Math.max(6, H - head.length - 1 - Math.max(tallest, panel.length))
-  // as many rows as the room has; a graph that does not fit even its dense spacing there takes more rows, and the side
-  // panel shows the rows around the dot selected
-  let lay = trim(layout(nodes, named, { w: W, h: room }))
-  for (let h = room + 4; !lay.fits && h <= room + 200; h += 4) lay = trim(layout(nodes, named, { w: W, h }))
-  const c = k.canvas(W, lay.h)
-  for (const nm of lay.names) {
-    const gg = groups.find(x => String(x.id) === nm.id)
-    c.text(nm.x, nm.y, `{${toneOf(gg ? gg.i : 0)}:${k.escape(nm.name)}}`)
-  }
   // the claims linked to the one selected stand out, bold on a tinted ground: amber for the correction, red for a
   // contradiction, gray for any other link (support, the same topic, the same rows). No line is drawn: in rows of dots
   // a line runs through the dots between its ends, and a hundred claims would hide under them
@@ -447,13 +443,64 @@ export function program(k, data) {
     // a correction outranks any other link between the same two claims
     if (!near.has(id) || e.kind === 'corrects') near.set(id, edgeTone(e))
   }
+  // the session's clusters, then the folder's map under its own line, each laid out in its share of the rows
+  const mine = groups.filter(g => !g.folder)
+  const theirs = groups.filter(g => g.folder)
+  const inGroups = gs => { const ids = new Set(gs.map(g => String(g.id))); return claims.filter(c => ids.has(String(c.cluster)) || (gs === mine && !groups.some(g => String(g.id) === String(c.cluster)))) }
+  const parts = [[mine, inGroups(mine)], [theirs, inGroups(theirs)]].filter(([gs, cs]) => gs.length && cs.length)
+  // each graph gets the rows it needs to fit with every cluster's name whole, and the session's graph the rows left
+  // over; with too few rows for that, each gets its share by its claims
+  const leads = parts.map(([gs], pi) => (pi ? 1 : 0) + (gs === theirs ? 1 : 0))
+  const needs = parts.map(([gs, cs]) => needOf(cs, gs, W, room, num))
+  const free = room - leads.reduce((a, b) => a + b, 0)
+  const sum = needs.reduce((a, b) => a + b, 0)
+  const rows = sum <= free ? needs.map((n, i) => (i ? n : n + free - sum)) : parts.map(([, cs]) => Math.max(4, Math.round((free * cs.length) / claims.length)))
+  const graph = []
+  parts.forEach(([gs, cs], pi) => {
+    if (pi) graph.push(k.text(' '))
+    if (gs === theirs) graph.push(k.text(`{dim:the whole folder's map · ${cs.length} claim${cs.length === 1 ? '' : 's'}}`, { wrap: false }))
+    graph.push(graphOf(k, { claims: cs, groups: gs, W, h: rows[pi], claim, near, tone, num }).canvas)
+  })
+  return k.stack(...head, k.text(' '), ...graph, ...panel)
+}
+
+/** The laid-out graph of these claims and clusters in h rows (trimmed), and whether it fits with every name whole. */
+function layOf(claims, groups, W, h, num) {
+  const order = claims.slice().sort((p, q) => (p.turn ?? 0) - (q.turn ?? 0) || num(p) - num(q))
+  const named = groups.map(g => ({ id: g.id, name: g.name }))
+  const lay = trim(layout(order.map(c => ({ id: c.id, cluster: c.cluster })), named, { w: W, h }))
+  const whole = lay.names.every(nm => !nm.name.endsWith('…') || named.some(g => String(g.id) === nm.id && g.name.endsWith('…')))
+  return { lay, ok: lay.fits && whole }
+}
+
+/** The fewest rows a graph needs to fit with every cluster's name whole (its trimmed height), or `most` when no number of
+ *  rows up to it does. */
+function needOf(claims, groups, W, most, num) {
+  for (let h = 4; h <= most; h += 2) {
+    const { lay, ok } = layOf(claims, groups, W, h, num)
+    if (ok) return lay.h
+  }
+  return most
+}
+
+/** One graph of clusters: their names, and their claims as dots in rows in the order said, the selected claim's links
+ *  tinted. As many rows as `h`; a graph that does not fit even its dense spacing there takes more rows, and the side
+ *  panel shows the rows around the dot selected. */
+function graphOf(k, { claims, groups, W, h, claim, near, tone, num }) {
+  let lay = layOf(claims, groups, W, h, num).lay
+  for (let hh = h + 4; !lay.fits && hh <= h + 200; hh += 4) lay = layOf(claims, groups, W, hh, num).lay
+  const c = k.canvas(W, lay.h)
+  for (const nm of lay.names) {
+    const gg = groups.find(x => String(x.id) === nm.id)
+    c.text(nm.x, nm.y, `{${toneOf(gg ? gg.i : 0)}:${k.escape(nm.name)}}`)
+  }
   for (const x of claims) {
     const p = lay.pos.get(x.id)
     if (!p) continue
     c.dot(p.x, p.y, tone(x), { glyph: dotOf(x), bold: x.id === claim.id || near.has(x.id), part: nodeRegion(x.id), meta: { label: `claim: ${x.text}`, ref: (x.sources || []).map(s => s.ref).slice(0, 6) } })
     if (near.has(x.id)) c.bg(p.x - 1, p.y, 3, 1, `${near.get(x.id)}-faint`)
   }
-  return k.stack(...head, k.text(' '), c, ...panel)
+  return { canvas: c, h: lay.h }
 }
 
 /** The head: how many claims the session holds, then the folder's action (a press), or that Claude is reading it. */

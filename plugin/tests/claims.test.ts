@@ -331,6 +331,7 @@ test("/claims folder asks Claude, as a turn, to map the folder's claims with a s
   expect(store.folderAsked).toBeUndefined()
   const t = textOf(await $.ui.render(PANE))
   expect(t).not.toContain("add the whole folder's claims")
-  expect(t).toContain('belt slips (folder)')
+  expect(t).toContain("the whole folder's map · 2 claims")
+  expect(t).toContain('belt slips')
   expect(w.toasts.at(-1)).toContain("The folder's map is in Claims: 2 claims in 2 clusters")
 })
