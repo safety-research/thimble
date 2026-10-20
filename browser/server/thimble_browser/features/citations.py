@@ -35,8 +35,17 @@ def resolve(ws: str, folder: Any, ref: str, value: str | None = None) -> dict[st
     return got
 
 
+def bare_ref(ref: str) -> str:
+    """A ref without the brackets it may be passed in, `[card:<id>]` or `(card:<id>)`. The brackets a ref holds itself
+    stay, balanced as in `card:<id>#revisions/(no name)`."""
+    ref = ref.strip().lstrip("[(")
+    while ref[-1:] in (")", "]") and ref.count(ref[-1]) > ref.count("(" if ref[-1] == ")" else "["):
+        ref = ref[:-1]
+    return ref
+
+
 async def read_ref(t: Any, args: dict[str, Any]) -> Result:
-    ref = str(args.get("ref") or "").strip().strip("[]()")
+    ref = bare_ref(str(args.get("ref") or ""))
     for prefix, reader in tools.REFS.items():
         if ref.startswith(prefix):
             return reader(t, ref)

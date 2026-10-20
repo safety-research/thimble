@@ -43,6 +43,7 @@ def test_kept_repointed_contradicted_and_quiet():
 def test_a_ref_with_brackets_reads_whole():
     """A row named "(no name)" is cited whole: the canvas writes one token for it, and the pass finds its value there."""
     from thimble_browser.canvas import to_canvas_links
+    from thimble_browser.features.citations import bare_ref
     CARDS["cccccc"] = {"id": "cccccc", "outputs": table([["wren", 77], ["(no name)", 899]])}
     try:
         ref = "card:cccccc#n/(no name)"
@@ -50,6 +51,7 @@ def test_a_ref_with_brackets_reads_whole():
         assert to_canvas_links(text) == f"[[899|{ref}]] edits had no name"
         r, c = one(text)
         assert c["ref"] == ref and c["how"] == H.KEPT and r["text"] == text
+        assert bare_ref(f"[{ref}]") == bare_ref(ref) == ref
     finally:
         del CARDS["cccccc"]
 
