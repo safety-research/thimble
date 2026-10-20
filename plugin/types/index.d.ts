@@ -124,6 +124,9 @@ declare module 'claude-code' {
       facts: StateFamily<unknown>
       /** a side thread (shell/thread.ts), by its key: its scope, its agent, its questions and turns */
       thread: StateFamily<unknown>
+      /** the detail's ask line drawn again (shell/detail.tsx): a count the pane and the bar read, so a letter of a
+       *  question redraws them alone */
+      askline: number
       /** how far this session's change feed ($THIMBLE_HOME/lean/events/<session>.jsonl) has been read */
       events: { file: string; n: number; bytes?: number }
       /** what takes the keys, newest last (the shell's focus stack): the bar says the keys of the top one */
