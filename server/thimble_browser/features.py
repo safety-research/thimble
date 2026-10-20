@@ -11,6 +11,7 @@ from types import ModuleType
 
 NAMES: list[str] = [
     "settings_api",
+    "comments",
 ]
 
 

@@ -809,6 +809,21 @@ button.settings-ext-name:hover .settings-ext-caret {
 .shell-toast-text code {
   font: var(--type-mono-sm);
 }
+/* a toast's one button (Toasts `action`), such as Reopen: accent text, no frame */
+.shell-toast-action {
+  flex: none;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: none;
+  color: var(--accent);
+  font: var(--type-ui-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.shell-toast-action:hover {
+  background: var(--surface-hover);
+}
 
 /* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches -------- */
 .theme-pop {

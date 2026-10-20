@@ -208,6 +208,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   const concepts = useConcepts(ws)
   const checks = useChecks(ws)
   const notes = useCanvasComments(ws)
+  // the card the analyst is writing a comment beside (its Comment button), or null
+  const [commentOn, setCommentOn] = useState<string | null>(null)
   const vp = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1010,6 +1012,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
         setDetail(id)
         setHistoryOf((h) => ({ cell: id, seq: (h?.seq ?? 0) + 1 }))
         return
+      case 'comment':
+        track('ui-click', { target: `cell:${id}`, detail: { action: 'comment' } })
+        setCommentOn(id)
+        return
       case 'ask':
         if (el) bus.emit('askAbout', { el })
         return
@@ -1533,7 +1539,23 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                       />
                     )
                   })}
-                  <CommentLayer ws={ws} board={board} lay={lay} comments={shownNotes} look={checks.look} cardEl={cardEl} onResolve={notes.resolve} titleOf={titleOf} onExtent={setNoteBox} />
+                  <CommentLayer
+                    ws={ws}
+                    board={board}
+                    lay={lay}
+                    comments={shownNotes}
+                    look={checks.look}
+                    cardEl={cardEl}
+                    onResolve={notes.resolve}
+                    titleOf={titleOf}
+                    onExtent={setNoteBox}
+                    draft={commentOn && lay.rects.has(commentOn) ? commentOn : null}
+                    onDraft={async (card, text) => {
+                      await notes.add(card, text)
+                      setCommentOn(null)
+                    }}
+                    onDraftCancel={() => setCommentOn(null)}
+                  />
                   {drag?.ins && <div className="board-ins" style={{ left: drag.ins.bar.x, top: drag.ins.bar.y, width: drag.ins.bar.w, height: drag.ins.bar.h }} />}
                   {tag && drag && (
                     <div className="board-tag" style={{ left: drag.x + 8, top: drag.y - 30 }}>

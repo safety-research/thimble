@@ -10,17 +10,37 @@ Markdown form: `# ` the title, `## ` a section, a blank line between paragraphs,
 """
 from __future__ import annotations
 
+import logging
 import re
-from typing import Any
+from typing import Any, Callable
 
 from . import home
 from .canvas import to_canvas_links
 from .hub import hub
 
 DOC = "report"
+log = logging.getLogger("thimble_browser.report")
 SENTENCE_END = re.compile(r"(?<=[.!?])[\"”’)]?\s+(?=[A-Z0-9\"“(\[])")
 FIGURE = re.compile(r"^!\[([^\]]*)\]\((?:card|cell):([A-Za-z0-9_-]+)\)\s*$")
 TOKEN = re.compile(r"\[\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+?)\]\]")
+# what feature modules add to the document the page reads (on_serve): fn(ws, doc), such as its comments
+SERVE: list[Callable[[str, dict[str, Any]], None]] = []
+
+
+def on_serve(fn: Callable[[str, dict[str, Any]], None]) -> None:
+    """Have `fn(ws, doc)` add to each document writeup() serves, once however often it is registered."""
+    if fn not in SERVE:
+        SERVE.append(fn)
+
+
+# what feature modules hear of each save (on_save): fn(ws, before, after, by), the Markdown before (None for none) and
+# after, such as the undo history; a hook's failure never stops the save
+SAVED: list[Callable[[str, str | None, str, str], None]] = []
+
+
+def on_save(fn: Callable[[str, str | None, str, str], None]) -> None:
+    if fn not in SAVED:
+        SAVED.append(fn)
 
 
 def _path(ws: str, ext: str) -> Any:
@@ -53,7 +73,8 @@ def types(ws: str) -> dict[str, Any]:
     doc = writeup(ws) if md is not None else None
     return {DOC: {"exists": md is not None, "renderer": "document", "name": "Report", "frame": False,
                   "generation": st.get("generation"), "generated_at": st.get("generated_at"),
-                  "title": doc["title"] if doc else None, "open_comments": 0,
+                  "title": doc["title"] if doc else None,
+                  "open_comments": sum(1 for cm in (doc or {}).get("comments") or [] if cm.get("status", "open") == "open"),
                   **({"status": "generating"} if st.get("status") == "generating" else {})}}
 
 
@@ -155,12 +176,21 @@ def writeup(ws: str) -> dict[str, Any] | None:
         return None
     st = _state(ws)
     doc = parse(md)
-    return {"id": DOC, **doc, "generation": st.get("generation"), "generated_at": st.get("generated_at"),
-            "frame": False, "comments": []}
+    out = {"id": DOC, **doc, "generation": st.get("generation"), "generated_at": st.get("generated_at"),
+           "frame": False, "comments": []}
+    for fn in SERVE:
+        fn(ws, out)
+    return out
 
 
 def save(ws: str, md: str, *, by: str) -> dict[str, Any]:
+    before = markdown(ws)
     _path(ws, "md").write_text(md.strip() + "\n", encoding="utf-8")
+    for fn in SAVED:
+        try:
+            fn(ws, before, md.strip() + "\n", by)
+        except Exception:  # noqa: BLE001
+            log.exception("a hook on the report's save failed")
     st = _state(ws)
     gen = int(st.get("generation") or 0) + (0 if by == "analyst" else 1)
     home.write_json(_path(ws, "state.json"), {**st, "generation": gen, "generated_at": home.now(), "by": by})

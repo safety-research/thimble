@@ -1,5 +1,5 @@
-// Comment routes with no client in lib/api.ts: the analyst's comment on a passage, resolving a comment (Done), the
-// comments on the cards, and export.
+// Comment routes with no client in lib/api.ts: the analyst's comment on a passage or a card, resolving a comment (Done)
+// and opening it again, the comments on the cards, and export.
 import { claimKey, describeDetail, signInNeeded } from '../lib/api'
 import { apiBase } from '../lib/browserKey'
 import type { AnyDoc, CanvasComment, WriteupComment } from '../lib/types'
@@ -28,6 +28,8 @@ export const commentsApi = {
   add: (ws: string, slug: string, sentenceId: string, text: string) => call<WriteupComment>(`${inv(ws, slug)}/comments`, { method: 'POST', body: JSON.stringify({ sentence_id: sentenceId, text }) }),
   /** `POST …/comments/{id}/dismiss`: the comment resolved (Done); answers the document. */
   resolve: (ws: string, slug: string, id: string) => call<AnyDoc>(`${inv(ws, slug)}/comments/${encodeURIComponent(id)}/dismiss`, { method: 'POST' }),
+  /** `POST …/comments/{id}/reopen`: a resolved comment open again; answers the document. */
+  reopen: (ws: string, slug: string, id: string) => call<AnyDoc>(`${inv(ws, slug)}/comments/${encodeURIComponent(id)}/reopen`, { method: 'POST' }),
   /** `GET …/export`: the document as plain markdown, and a page's html. */
   exportDoc: (ws: string, slug: string) => call<{ markdown: string; html?: string; title?: string }>(`${inv(ws, slug)}/export`),
 }
@@ -39,4 +41,8 @@ export const canvasCommentsApi = {
   list: (ws: string) => call<{ comments: CanvasComment[] }>(canvas(ws)).then((r) => r.comments ?? []),
   /** `POST /canvas/comments/{id}/resolve`: Done, which hides the comment; answers the open comments. */
   resolve: (ws: string, id: string) => call<{ comments: CanvasComment[] }>(`${canvas(ws)}/${encodeURIComponent(id)}/resolve`, { method: 'POST' }).then((r) => r.comments ?? []),
+  /** `POST /canvas/comments/{id}/reopen`: a resolved comment open again; answers the open comments. */
+  reopen: (ws: string, id: string) => call<{ comments: CanvasComment[] }>(`${canvas(ws)}/${encodeURIComponent(id)}/reopen`, { method: 'POST' }).then((r) => r.comments ?? []),
+  /** `POST /canvas/comments`: the analyst's comment beside a card; answers it with the open comments. */
+  add: (ws: string, card: string, text: string) => call<{ comment: CanvasComment; comments: CanvasComment[] }>(canvas(ws), { method: 'POST', body: JSON.stringify({ card, text }) }),
 }
