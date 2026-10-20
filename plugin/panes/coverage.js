@@ -15,11 +15,16 @@
 //   overview   the sentence and the legend; then the files grouped by wildcard pattern (`runs/*.jsonl`, the `*` lit,
 //              so it is clear which files a row stands for), or by file type, each group with its files, its rows and
 //              its bar
-//   a group    its files, each with what happened to it: the lines seen, what a label's model read, what was computed
-//              over, or why none of its lines entered a context
+//   a group    its files, one line each: its name, then what happened to it in its own unit (`read 3 of 14,591
+//              records (0.02%)`, `read 2 of 12 pages (16%)`, an image `seen`), what a label's model read, what was
+//              computed over, or `none`; never which rows (the kernel's words, `said`, which `thimble coverage` prints too)
 //   a file     a strip of the whole file with the lines seen lit, the seen ranges, and the file's own lines around the
 //              one selected (seen lines marked ▌, those a search showed in its color); a press on a range opens its
-//              lines as a citation, over this pane (esc comes back)
+//              lines as a citation, over this pane (esc comes back). A PDF has a strip of its pages, and an image or
+//              any other whole file only its words.
+//
+// Each file is counted in its own unit (kernel/lineage.py UNITS): records of a JSONL or JSON file, rows of a table,
+// lines of text, pages of a PDF, and an image or any other file as one whole file.
 //
 //   state: {by: 'pattern' | 'type', group: the group open, file: the file open, at: the part selected, range: the range}
 //   presses: a group opens its files, a file its lines, a range its lines as a citation; `by pattern` and `by type`
@@ -33,7 +38,7 @@ import { subjectBlock } from './subject.js'
 
 const STATUS = ['seen', 'model', 'searched', 'computed', 'named', 'not read']
 // each status as the pane says it, and its tone
-const SAID = { seen: 'read', model: 'computed', searched: 'searched', computed: 'computed', named: 'counted', 'not read': 'not touched' }
+const SAID = { seen: 'read', model: 'computed', searched: 'searched', computed: 'computed', named: 'counted', 'not read': 'none' }
 const TONE = { seen: 'accent', model: 'dim', searched: 'dim', computed: 'dim', named: 'dim', 'not read': 'unseen' }
 // the three parts of a group's bar and the legend's words for them: read into Claude's context, only counted or
 // computed over (a label's model too), not touched
@@ -47,7 +52,11 @@ const LINES = 400 // characters of one line of a file shown
 // the rows the side panel takes under a pane: its input bar, and its thread's conversation when it has one (up to
 // two fifths of the panel), so a list that fits shows whole above them, the overview in view
 const chromeOf = (k, chat) => 5 + (chat ? Math.floor(k.h * 0.4) : 0)
-const n = x => (typeof x === 'number' ? x.toLocaleString('en-US') : String(x))
+const n = x => (typeof x === 'number' ? Math.round(x).toLocaleString('en-US') : String(x))
+// a unit's word for one of it (kernel/lineage.py ONE)
+const ONE = { records: 'record', rows: 'row', lines: 'line', pages: 'page', file: 'file' }
+/** A file's unit: the kernel's, else by its type as earlier kernels counted it. */
+const unitOf = f => f.unit || (/^(jsonl|transcript)$/.test(f.type) ? 'records' : 'lines')
 const cut = (s, k) => (Array.from(String(s)).length <= k ? String(s) : Array.from(String(s)).slice(0, Math.max(0, k - 1)).join('') + '…')
 const pad = (s, k, right = false) => { const t = cut(s, k); const sp = ' '.repeat(Math.max(0, k - Array.from(t).length)); return right ? sp + t : t + sp }
 
@@ -60,6 +69,26 @@ export function pct(part) {
   if (p < 0.1) return `${(Math.floor(p * 100) / 100).toFixed(2)}%`
   if (p < 1) return `${(Math.floor(p * 10) / 10).toFixed(1)}%`
   return `${Math.min(99, Math.round(p))}%`
+}
+
+/** Part of a total in a unit, as `thimble coverage` says it (kernel/lineage.py amount): `3 of 14,591 records (0.02%)`;
+ *  whole files have no share (`1 of 2 files`, or `other files` beside other units). */
+export function amount(unit, part, total, other = false) {
+  if (unit === 'file') return `${n(part)} of ${n(total)} ${other ? 'other ' : ''}${total === 1 ? 'file' : 'files'}`
+  return `${n(part)} of ${n(total)} ${total === 1 ? ONE[unit] || unit : unit} (${pct(total ? part / total : 0)})`
+}
+
+/** Each unit's part, joined (kernel/lineage.py amounts): `7 of 42,205 records (0.01%) and 2 of 12 pages (16%)`. */
+export function amounts(units, key = 'seen') {
+  const list = units || []
+  const bits = list.filter(u => key === 'seen' || u[key]).map(u => amount(u.unit, u[key] || 0, u.units || 0, list.length > 1))
+  return bits.length <= 1 ? bits[0] || '' : `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}`
+}
+
+/** A set of files' size in its unit, for a group's row: `14,591 records`, `12 pages`, `3 files`. */
+export function sizeOf(units) {
+  const list = units || []
+  return list.map(u => `${n(u.units)} ${u.unit === 'file' ? (u.units === 1 ? 'file' : 'files') : u.units === 1 ? ONE[u.unit] : u.unit}`).join(', ')
 }
 
 /** A group's rows in the four shades, apart: seen, read by a label's model, computed over, untouched. */
@@ -160,14 +189,17 @@ export default {
   /** What a question asked under the pane is about, beyond the part selected (side.ts paneSubject). */
   thread(_args, _state, data) {
     const t = (data && data.total) || {}
-    return { about: `what this session did with the folder's files, by \`thimble coverage\`: ${sentence(t, data && data.session)} ${n(t.computed_rows || 0)} more rows were only computed over, and ${n(t.model_rows || 0)} read by a label's model, none of them in Claude's context. A file is read (seen) when some of its lines entered Claude's context; computed over when a query or a rule label went over its rows and none of them did; searched when a shell search went over it; counted when it was only named, listed or counted; not touched otherwise` }
+    const computed = t.units ? amounts(t.units, 'computed') : t.computed_rows ? `${n(t.computed_rows)} rows` : ''
+    const model = t.units ? amounts(t.units, 'model') : t.model_rows ? `${n(t.model_rows)} rows` : ''
+    const more = [computed && `only computed over: ${computed}`, model && `read by a label's model: ${model}`].filter(Boolean)
+    return { about: `what this session did with the folder's files, by \`thimble coverage\`: ${sentence(t, data && data.session)}${more.length ? ` ${more.join('; ')}; none of it in Claude's context.` : ''} Each file is counted in its own unit: records, rows, lines, pages, or a whole file (an image). A file is read when some of it entered Claude's context; computed over when a query or a rule label went over its rows and none of them did; searched when a shell search went over it; counted when it was only named, listed or counted; none otherwise` }
   },
   data(stores, _args, size) {
     const s = stores.coverage || {}
     const cov = s.cov
     if (!cov) return { loading: s.error ? null : 'reading what this session saw…', error: s.error || null, w: size.w, h: size.h }
-    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || '', group: f.pattern || f.group || f.path, rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, seen_lines: f.seen_lines ?? f.read_lines ?? 0, computed: f.computed || 0, model: f.model || 0, labels: f.labels || [], shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [] }))
-    const groups = (key, list) => list.map(g => ({ key: g[key], files: g.files, rows: g.rows, touched: g.touched ?? 0, seenFiles: g.seen_files ?? 0, ...partsOf(g), by: g.by_status || {} }))
+    const files = (cov.files || []).map(f => ({ path: f.path, type: f.type || '', kind: f.kind || '', unit: f.unit || null, units: f.units ?? null, seen_units: f.seen_units ?? null, said: f.said || null, pages: f.pages || [], group: f.pattern || f.group || f.path, rows: f.rows || 0, lines: f.lines || 0, status: f.status, share: f.share || 0, seen_lines: f.seen_lines ?? f.read_lines ?? 0, computed: f.computed || 0, model: f.model || 0, labels: f.labels || [], shown: f.shown || 0, hits: f.hits || 0, by: f.by || [], searched_by: f.searched_by || [], queries: f.queries || [], ranges: f.ranges || [], hit_lines: f.hit_lines || [] }))
+    const groups = (key, list) => list.map(g => ({ key: g[key], files: g.files, rows: g.rows, units: g.units || null, touched: g.touched ?? 0, seenFiles: g.seen_files ?? 0, ...partsOf(g), by: g.by_status || {} }))
       .sort((a, b) => (rank(a.by) - rank(b.by)) || (b.rows - a.rows) || String(a.key).localeCompare(String(b.key)))
     return {
       total: cov.total || {}, session: cov.session, files, mix: typeMix(cov.types), chat: !!s.chat,
@@ -225,23 +257,28 @@ export function program(k, data) {
   const head = level === 'top' ? overview(k, data) : []
   if (level === 'top') {
     const rows = Math.max(3, k.h - head.length - 3 - chromeOf(k, data.chat))
-    return k.stack(...head, k.text(' '), toggles(k, by), listOf(k, items, idx, rows, (it, on) => groupRow(k, it.g, by, W, on, it.id), header(k, by === 'type' ? 'type' : 'pattern', W)))
+    const sw = sizeW(groupList)
+    return k.stack(...head, k.text(' '), toggles(k, by), listOf(k, items, idx, rows, (it, on) => groupRow(k, it.g, by, W, sw, on, it.id), header(k, by === 'type' ? 'type' : 'pattern', W, sw)))
   }
   if (level === 'group') {
-    const share = group.rows ? group.seen / group.rows : 0
     const title = subjectBlock(k, {
       title: by === 'type' ? `${k.escape(group.key)} files` : String(group.key).split('*').map(x => k.escape(x)).join('{accent:\\*}'),
-      line: `Claude read ${n(Math.round(group.seen))} of their ${n(group.rows)} rows (${pct(share)}), from ${n(group.seenFiles)} of ${n(group.files)} file${group.files === 1 ? '' : 's'}.`,
+      line: k.escape(groupLine(group)),
     })
     const rows = Math.max(3, k.h - 4 - chromeOf(k, data.chat))
     const pw = pathW(items.map(x => x.f), group, by, W)
     return k.stack(title, k.text(' '), listOf(k, items, idx, rows, (it, on) => fileRow(k, it.f, group, by, W, pw, on, it.id), fileHeader(k, pw)))
   }
-  // ---- one file
-  const unit = /^(jsonl|transcript)$/.test(file.type) ? 'rows' : 'lines'
-  const total = file.lines || file.rows
-  const title = subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${n(total)} ${unit} ·} {${TONE[file.status]}:${SAID[file.status]}}` })
-  const out = [title, k.text(`{dim:${k.escape(fileWords(file, unit))}}`, { wrap: false }), strip(k, file, W), k.text(' ')]
+  // ---- one file, in its own unit: an image or another whole file has only its words, a PDF a strip of its pages
+  const unit = unitOf(file)
+  if (unit === 'file') {
+    const what = file.kind && file.kind !== 'file' ? file.kind : file.type
+    return k.stack(subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${k.escape(what)}}` }), k.text(wordsMarkup(k, file), { wrap: false }))
+  }
+  const total = unit === 'pages' ? file.units || file.rows : file.lines || file.rows
+  const title = subjectBlock(k, { title: k.escape(file.path), line: `{dim:file · ${n(total)} ${total === 1 ? ONE[unit] : unit} ·} {${TONE[file.status]}:${SAID[file.status]}}` })
+  if (unit === 'pages') return k.stack(title, k.text(`{dim:${k.escape(fileWords(file))}}`, { wrap: false }), strip(k, { ...file, lines: total, ranges: file.pages, hit_lines: [] }, W))
+  const out = [title, k.text(`{dim:${k.escape(fileWords(file))}}`, { wrap: false }), strip(k, file, W), k.text(' ')]
   if (!ranges.length && file.status === 'model') {
     out.push(k.text(`{dim:A label's model read ${n(file.model)} of its rows (${k.escape(file.labels.join(', ') || 'a label')}); none of its lines entered Claude's context.}`))
     return k.stack(out)
@@ -255,7 +292,7 @@ export function program(k, data) {
     return k.stack(out)
   }
   const shown = Math.min(ranges.length, 4)
-  out.push(listOf(k, items, idx, shown, (it, on) => rangeRow(k, it.r, on, it.id, unit, file), null))
+  out.push(listOf(k, items, idx, shown, (it, on) => rangeRow(k, it.r, on, it.id, 'lines', file), null))
   out.push(k.text(' '))
   const r = ranges[Math.max(0, idx)] || ranges[0]
   const room = Math.max(3, k.h - out.length - 1 - chromeOf(k, data.chat))
@@ -276,12 +313,25 @@ export function rangesOf(f) {
   })
 }
 
-/** What Claude read, in one plain sentence: its rows of all the folder's rows, and in how many of its files. */
+/** What Claude read, in one plain sentence, each file in its own unit: `Claude read 7 of the folder's 42,205 records
+ *  (0.01%), from 3 of its 4 files.`; with several units, each one's part after the files; whole files alone, saw. */
 export function sentence(t, session) {
   const who = session === null ? "Claude's sessions" : 'Claude'
-  const rows = t.seen_rows ?? t.read_rows ?? 0
   const files = t.seen_files ?? t.read_files ?? 0
-  return `${who} read ${n(rows)} of the folder's ${n(t.rows || 0)} rows (${pct(t.seen_share ?? t.read_share ?? 0)}), from ${n(files)} of its ${n(t.files || 0)} files.`
+  const units = t.units
+  if (!units) return `${who} read ${n(t.seen_rows ?? t.read_rows ?? 0)} of the folder's ${n(t.rows || 0)} rows (${pct(t.seen_share ?? t.read_share ?? 0)}), from ${n(files)} of its ${n(t.files || 0)} files.`
+  if (units.length === 1 && units[0].unit === 'file') return `${who} saw ${n(files)} of the folder's ${n(t.files || 0)} file${t.files === 1 ? '' : 's'}.`
+  if (units.length === 1) return `${who} read ${amount(units[0].unit, units[0].seen, units[0].units).replace(' of ', " of the folder's ")}, from ${n(files)} of its ${n(t.files || 0)} files.`
+  return `${who} read from ${n(files)} of the folder's ${n(t.files || 0)} files: ${amounts(units)}.`
+}
+
+/** A group's line under its name: what Claude read of its files, in their unit. */
+export function groupLine(g) {
+  const units = g.units
+  const of = `${n(g.seenFiles)} of ${n(g.files)} file${g.files === 1 ? '' : 's'}`
+  if (!units) return `Claude read ${n(Math.round(g.seen))} of their ${n(g.rows)} rows (${pct(g.rows ? g.seen / g.rows : 0)}), from ${of}.`
+  if (units.length === 1 && units[0].unit === 'file') return `Claude saw ${of}.`
+  return `Claude read ${amounts(units)}, from ${of}.`
 }
 
 /** The legend of the groups' bars, always in view: each part's color and what it means. */
@@ -303,27 +353,31 @@ function toggles(k, by) {
 // a group's row: its name, its files, its rows, its bar in three parts and the share read
 const BAR = 24
 
-function nameW(W) {
-  return Math.max(16, W - 3 - 6 - 15 - (BAR + 2) - 10)
+function nameW(W, sw = 14) {
+  return Math.max(16, W - 3 - 6 - (sw + 1) - (BAR + 2) - 10)
 }
 
-function header(k, what, W) {
+/** The size column: as wide as the groups' longest size (`14,591 records`), so no one unit sets it. */
+const sizeW = groups => Math.min(18, Math.max(4, ...groups.map(g => Array.from(sizeText(g)).length)))
+const sizeText = g => (g.units ? sizeOf(g.units) : `${n(g.rows)} rows`)
+
+function header(k, what, W, sw) {
   // laid out as a row is, so its words stand over their columns
-  return k.beside(k.text(`{dim:  ${pad(what, nameW(W))} ${pad('files', 5, true)} ${pad('rows', 14, true)}  }`, { wrap: false }), k.text(' '.repeat(BAR), { wrap: false, w: BAR }), k.text(`{dim: ${pad('read', 5, true)}}`, { wrap: false }))
+  return k.beside(k.text(`{dim:  ${pad(what, nameW(W, sw))} ${pad('files', 5, true)} ${pad('size', sw, true)}  }`, { wrap: false }), k.text(' '.repeat(BAR), { wrap: false, w: BAR }), k.text(`{dim: ${pad('read', 5, true)}}`, { wrap: false }))
 }
 
-function groupRow(k, g, by, W, on, id) {
-  const nw = nameW(W)
+function groupRow(k, g, by, W, sw, on, id) {
+  const nw = nameW(W, sw)
   const name = by === 'type' ? (on ? `**${k.escape(cut(g.key, nw))}**` : k.escape(cut(g.key, nw))) : patternText(k, cut(g.key, nw), on)
   const len = Array.from(cut(g.key, nw)).length
   const share = g.rows ? g.seen / g.rows : 0
   const counted = (g.model || 0) + (g.computed || 0)
-  const left = `${on ? '{accent:**▸**} ' : '  '}${name}${' '.repeat(Math.max(0, nw - len))} ${pad(n(g.files), 5, true)} ${pad(`${n(g.rows)} rows`, 14, true)}  `
+  const left = `${on ? '{accent:**▸**} ' : '  '}${name}${' '.repeat(Math.max(0, nw - len))} ${pad(n(g.files), 5, true)} ${pad(sizeText(g), sw, true)}  `
   // its rows in the legend's three parts: a bar as a card draws one, so a selected row keeps its colors and its height
   const bar = k.bar([{ value: g.seen, tone: 'accent' }, { value: counted, tone: 'dim' }, { value: g.untouched, tone: 'dim-faint' }], { max: Math.max(1, g.rows), w: BAR })
   const row = k.beside(k.text(left, { wrap: false }), bar, k.text(` ${pad(pct(share), 5, true)}`, { wrap: false }))
   // a pattern's group carries its pattern, which `thimble rows` reads, so a question about it names its files
-  return k.region(id, { label: `${g.key}: ${n(g.files)} files, ${n(g.rows)} rows; Claude read ${pct(share)} of them`, ...(by === 'pattern' ? { ref: g.key } : {}) }, row)
+  return k.region(id, { label: `${g.key}: ${n(g.files)} files, ${sizeText(g)}; Claude read ${pct(share)} of them`, ...(by === 'pattern' ? { ref: g.key } : {}) }, row)
 }
 
 /** A file as its group's list names it: by its name alone when the group's pattern names its folder (the header says
@@ -339,37 +393,41 @@ const leftCut = (s, k) => (Array.from(s).length <= k ? s : '…' + Array.from(s)
 const pathW = (files, group, by, W) => Math.max(10, Math.min(Math.floor(W * 0.45), Math.max(4, ...files.map(f => Array.from(nameIn(f, group, by)).length))))
 
 function fileHeader(k, pw) {
-  return k.text(`{dim:  ${pad('', 12)}${pad('file', pw)}  ${pad('rows', 8, true)}  what Claude did with it}`, { wrap: false })
+  return k.text(`{dim:  ${pad('file', pw)}  what Claude did with it}`, { wrap: false })
 }
 
-/** What happened to a file, in a few words, as the kernel's coverage text says it. */
-export function fileWords(f, unit = 'lines') {
-  const total = f.lines || f.rows
-  const what = [...(f.queries || []), ...(f.labels || [])].slice(0, 3)
-  const computed = f.computed ? `computed over ${f.computed >= f.rows ? 'all' : n(f.computed) + ' of'} ${n(f.rows)} rows${what.length ? ` (${what.join(', ')})` : ''}` : ''
+/** What happened to a file, in its own unit and never which rows: the kernel's words (`said`, as `thimble coverage`
+ *  prints them), such as `read 3 of 14,591 records (0.02%)`, `seen` (an image) or `none`. */
+export function fileWords(f) {
+  if (f.said) return f.said
   if (f.status === 'seen') {
-    const r = (f.ranges || []).slice(0, 3).map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(', ')
-    const more = (f.ranges || []).length > 3 ? ` and ${(f.ranges || []).length - 3} more` : ''
-    const seen = f.seen_lines || f.shown
-    return `read ${n(seen)} of ${n(total)} ${unit} (${pct(seen / Math.max(1, total))})${r ? `: ${unit} ${r}${more}` : ''}${computed ? `; ${computed}` : ''}`
+    const unit = unitOf(f)
+    return `read ${amount(unit, f.seen_units ?? f.seen_lines ?? 0, f.units ?? (f.lines || f.rows))}`
   }
-  if (f.status === 'model') return `a label's model read ${n(f.model)} of ${n(f.rows)} rows${f.labels.length ? ` (${f.labels.join(', ')})` : ''}; Claude read none`
-  if (f.status === 'searched') return `searched${f.searched_by.length ? ` by ${f.searched_by.join(', ')}` : ''}; which lines it showed is not known`
-  if (f.status === 'computed') return `${computed}; Claude read none of them`
-  if (f.status === 'named') return `only named, listed or counted${f.by.length ? ` (${f.by.slice(0, 4).join(', ')})` : ''}; Claude read none of its lines`
-  return 'not touched'
+  return f.status === 'not read' ? 'none' : SAID[f.status] || ''
+}
+
+/** A file's words as the list shows them: its first word in the tone of what happened (read, none, computed…), the
+ *  rest dim, cut to `w` characters. */
+function wordsMarkup(k, f, w = 400) {
+  const words = cut(fileWords(f), w)
+  const at = words.search(/[ ;]/)
+  const head = at < 0 ? words : words.slice(0, at)
+  return `{${TONE[f.status]}:${k.escape(head)}}{dim:${k.escape(at < 0 ? '' : words.slice(at))}}`
 }
 
 function fileRow(k, f, group, by, W, pw, on, id) {
   const shown = leftCut(nameIn(f, group, by), pw)
   const name = k.escape(shown)
-  const words = fileWords(f, /^(jsonl|transcript)$/.test(f.type) ? 'rows' : 'lines')
-  const line = `${on ? '{accent:**▸**} ' : '  '}{${TONE[f.status]}:${pad(SAID[f.status], 12)}}${on ? `**${name}**` : name}${' '.repeat(Math.max(0, pw - Array.from(shown).length))}  ${pad(n(f.rows), 8, true)}  {dim:${k.escape(cut(words, Math.max(10, W - pw - 24)))}}`
+  const words = fileWords(f)
+  const line = `${on ? '{accent:**▸**} ' : '  '}${on ? `**${name}**` : name}${' '.repeat(Math.max(0, pw - Array.from(shown).length))}  ${wordsMarkup(k, f, Math.max(10, W - pw - 6))}`
   return k.region(id, { label: `${f.path}: ${words}`, ref: fileRef(f) }, k.text(line, { wrap: false }))
 }
 
-/** A file as a ref: the lines that entered Claude's context, else the file. */
+/** A file as a ref: the lines that entered Claude's context, else the file (a PDF's pages and a whole file are the
+ *  file). */
 export function fileRef(f) {
+  if (f.unit === 'pages' || f.unit === 'file') return f.path
   if ((f.ranges || []).length) return `${f.path}#L${f.ranges.slice(0, 40).map(([a, b]) => (a === b ? `${a}` : `${a}-${b}`)).join(',')}`
   if ((f.hit_lines || []).length) return `${f.path}#L${f.hit_lines.slice(0, 60).join(',')}`
   return f.path

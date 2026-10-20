@@ -66,7 +66,7 @@ def test_a_regex_label_gives_each_record_a_value_and_its_counts_are_citations(ro
     cov = LIN.coverage(st)
     f = next(x for x in cov["files"] if x["path"] == "chat/room.jsonl")
     assert f["status"] == "computed" and f["computed"] == 6 and not f["seen"] and cov["total"]["seen_rows"] == 0
-    assert "Computed over by a query or a rule label, none of them seen: 6 rows (100%)." in LIN.coverage_text(cov)
+    assert "Computed over by a query or a rule label, none of it read: 6 of 6 records (100%)." in LIN.coverage_text(cov)
     res = LIN.resolve(st, "r1#sorry=yes@n", n=5)
     assert res["count"] == 2
     assert [x["ref"] for x in res["records"]] == ["chat/room.jsonl#L1", "chat/room.jsonl#L3"]

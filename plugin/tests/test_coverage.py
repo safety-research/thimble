@@ -77,20 +77,22 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
     assert t["seen_share"] == pytest.approx(72 / 363) and t["read_share"] == t["seen_share"]
     text = LIN.coverage_text(cov)
     assert "Every source file" not in text and "touched." not in text
-    assert ("Seen: 72 of 363 rows (20%) entered Claude's context, from 5 of 13 source files; 13 were touched in some way. "
-            "Not seen: 8 files (213 rows): 7 only named, listed or counted (runs.csv, src/f.py, src/g.py, src/h.py and 3 "
-            "more); 1 searched, which lines a search showed is not known (src/e.py).") in text
-    assert "runs.csv  only named, listed or counted (wc); none of its lines seen" in text
+    assert ("Read: 0 of 3 rows (0%) and 72 of 360 lines (20%) entered Claude's context, from 5 of 13 files; 13 were "
+            "touched in some way. Not read: 8 files (3 rows and 210 lines): 7 only named, listed or counted (runs.csv, "
+            "src/f.py, src/g.py, src/h.py and 3 more); 1 searched, which lines a search showed is not known (src/e.py).") in text
+    assert "  src/c.py  read 5 of 30 lines (17%)\n" in text
+    assert "runs.csv  only named, listed or counted (wc); Claude read none of it" in text
     assert "src/g.py  only named, listed or counted (find, ls, wc)" in text
     assert "src/h.py  only named, listed or counted (cat > a file, find, ls, wc)" in text
-    assert "src/e.py  searched: a search went over it; which lines it showed is not known (grep)" in text
+    assert "src/e.py  searched by grep; which lines it showed is not known" in text
 
 
 def test_reading_every_file_says_so_and_how_much(code: Path, tmp_path: Path) -> None:
     saw(tmp_path, code, [bash("head -3 src/*.py runs.csv", 60)])
     cov = LIN.coverage(Store(code))
     assert all(o["status"] == "seen" for o in cov["files"])
-    assert LIN.coverage_sentence(cov) == "Seen all 13 source files, at least in part: 38 of 363 rows (11%) entered Claude's context."
+    assert LIN.coverage_sentence(cov) == ("Read all 13 files, at least in part: 2 of 3 rows (67%) and 36 of 360 lines (10%) "
+                                          "entered Claude's context.")
 
 
 def test_rows_a_query_or_a_script_printed_by_their_refs_are_seen(code: Path, tmp_path: Path) -> None:
@@ -113,3 +115,47 @@ def test_rows_a_query_or_a_script_printed_by_their_refs_are_seen(code: Path, tmp
     assert by["runs.csv"]["status"] == "seen" and by["runs.csv"]["shown"] == 1
     assert by["src/a.py"]["status"] == "not read"
     assert LIN.printed_refs("a.jsonl#L3, b.csv#row=2. c.jsonl#L4… (d.jsonl#L5)") == ["a.jsonl#L3", "b.csv#row=2", "d.jsonl#L5"]
+
+
+def test_each_file_is_counted_in_its_own_unit_and_no_rows_are_listed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A folder that mixes kinds: records of a JSONL file, rows of a table, lines of Markdown, pages of a PDF, and an
+    image as one whole file. An image viewed with Read is seen; a PDF read by pages counts those pages."""
+    d = tmp_path / "mixed"
+    d.mkdir()
+    (d / "trials.jsonl").write_text("".join(json.dumps({"trial": i, "team": "otters"}) + "\n" for i in range(1, 201)))
+    (d / "scores.csv").write_text("team,score\n" + "".join(f"t{i},{i}\n" for i in range(40)))
+    (d / "notes.md").write_text("# Notes\n\nA line.\n\n## More\n\nAnother line.\n")
+    (d / "chart.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(64))
+    (d / "song.mp3").write_bytes(bytes(32))
+    (d / "report.pdf").write_bytes(b"%PDF-1.4\n" + b"".join(b"%d 0 obj << /Type /Page /Parent 1 0 R >> endobj\n" % i for i in range(2, 7))
+                                   + b"1 0 obj << /Type /Pages /Count 5 >> endobj\n%%EOF\n")
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("THIMBLE_SESSION", "s-cov")
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+    saw(tmp_path, d, [
+        {"tool": "Read", "file": str(d / "chart.png"), "from": None, "to": None},
+        {"tool": "Read", "file": str(d / "report.pdf"), "from": None, "to": None, "pages": "2-3"},
+        {"tool": "Read", "file": str(d / "trials.jsonl"), "from": 10, "to": 12},
+        bash("head -5 scores.csv", 5),
+        # a search over the folder goes over the text files, not the image or the PDF
+        {"tool": "Grep", "path": str(d), "mode": "files_with_matches", "files": []},
+    ])
+    cov = LIN.coverage(Store(d))
+    by = {o["path"]: o for o in cov["files"]}
+    assert set(by) == {"trials.jsonl", "scores.csv", "notes.md", "chart.png", "song.mp3", "report.pdf"}
+    got = {f: (o["unit"], o["units"], o["seen_units"], o["status"]) for f, o in by.items()}
+    assert got == {"trials.jsonl": ("records", 200, 3, "seen"), "scores.csv": ("rows", 40, 4, "seen"),
+                   "notes.md": ("lines", 7, 0, "named"), "chart.png": ("file", 1, 1, "seen"),
+                   "song.mp3": ("file", 1, 0, "not read"), "report.pdf": ("pages", 5, 2, "seen")}
+    assert by["report.pdf"]["pages"] == [[2, 3]]
+    said = {f: o["said"] for f, o in by.items()}
+    assert said["trials.jsonl"] == "read 3 of 200 records (2%)"
+    assert said["report.pdf"] == "read 2 of 5 pages (40%)"
+    assert said["chart.png"] == "seen" and said["song.mp3"] == "none"
+    text = LIN.coverage_text(cov)
+    assert text.startswith("Coverage of this session · 6 files: 200 records, 40 rows, 7 lines, 5 pages and 2 other files\n")
+    assert "  chart.png  seen\n" in text and "  song.mp3  none\n" in text
+    assert ("Read: 3 of 200 records (2%), 4 of 40 rows (10%), 0 of 7 lines (0%), 2 of 5 pages (40%) and 1 of 2 other "
+            "files entered Claude's context, from 4 of 6 files") in text
+    # never which rows: no line or row numbers in the text
+    assert "10" not in text.replace("(10%)", "")
