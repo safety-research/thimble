@@ -409,13 +409,6 @@ export function callTarget(name: string, input: unknown, n: number, ws = ''): st
   }
 }
 
-/** What a citation's hover adds under a cited call's name: the command behind a shell call, which the chip names by what
- * it did; undefined for a call of another kind. Pure. */
-export function callDetail(name: string, input: unknown, ws = ''): string | undefined {
-  if (toolDisplayName(name) !== 'Bash') return undefined
-  const inp = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
-  return oneLine(underCorpus(str(inp.command), ws), 240) || undefined
-}
 
 /** The SDK's Read paths are absolute; show them relative to the corpus root. */
 export function corpusRelative(p: string): string {
@@ -972,10 +965,6 @@ export interface Made {
   labelCards: { name: string; group: string; id: string }[]
 }
 
-/** Every card a log left on the canvas: the cards it made or edited and its labels' cards. Pure. */
-export function madeCards(made: Made): number {
-  return made.cells.length + made.labelCards.length
-}
 
 /** The group names a call gives the orientation's deck: `Orientation`, and the alias `Final` (backend
  * orientation.DECK_ALIASES). */
@@ -1084,23 +1073,7 @@ export function madeBy(rows: readonly Row[]): Made {
   return out
 }
 
-/** How long a run took, for a card's meta: 45s, 6 min, 1 h 20 min; '' without both ends. Pure. */
-export function durationText(start: string | null | undefined, end: string | null | undefined): string {
-  if (!start || !end) return ''
-  const s = Math.round((Date.parse(end) - Date.parse(start)) / 1000)
-  if (!Number.isFinite(s) || s < 0) return ''
-  if (s < 60) return `${s}s`
-  const min = Math.round(s / 60)
-  return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`
-}
 
-/** `3 views, 17 cards and a draft report`: the counts that are not zero, joined the way a sentence lists them. Pure. */
-export function reviewList(counts: { views: number; cells: number; labels: number; report: boolean }): string {
-  const n = (k: number, one: string, many: string) => (k > 0 ? `${k} ${k === 1 ? one : many}` : '')
-  const parts = [n(counts.views, 'view', 'views'), n(counts.cells, 'card', 'cards'), n(counts.labels, 'label', 'labels'), counts.report ? 'a draft report' : ''].filter(Boolean)
-  if (parts.length <= 1) return parts.join('')
-  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
-}
 
 /** Where a thread branched from main: the number of main's records up to the thread's creation (the first record
  * stamped later, a text record belonging with the stamped record before it). Pure. */

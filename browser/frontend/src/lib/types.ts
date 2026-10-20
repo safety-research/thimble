@@ -687,11 +687,11 @@ export interface ViewOpen {
 
 /** The efforts Claude Code takes, lowest first (cc_settings.EFFORTS): every effort menu of thimble's agents offers
  * these. Main's composer adds Ultracode (MainEffort). */
-export type OrientEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type AgentEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** Main's effort menu in the composer: Claude Code's levels, then Ultracode, which runs main at xhigh with workflows
  * (cc_settings.EFFORTS and ultracode). thimble's agents run at a level, never Ultracode. */
-export type MainEffort = OrientEffort | 'ultracode'
+export type MainEffort = AgentEffort | 'ultracode'
 
 /** A permission request waiting for the analyst. Main's are relayed by its PermissionRequest hook (events._hold), and
  * so are those of thimble's subagents and their descendants, which the terminal answers (`terminal`); a code ticket's

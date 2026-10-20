@@ -58,21 +58,3 @@ export function Divider({ text }: { text: string }) {
   )
 }
 
-/** A dev ticket's shot of its target: the phase and what was shot over the picture, which opens full size. */
-export function ShotCard({ ticket, name, phase, note }: { ticket: string; name: string; phase: string; note?: string }) {
-  const src = api.ticketShotUrl(ticket, name)
-  const word = phase === 'after' ? 'After' : phase === 'before' ? 'Before' : phase
-  return (
-    <figure className="chat-msg chat-shot" data-phase={phase}>
-      <div className="chat-shot-frame">
-        <div className="chat-shot-head">
-          <span className="chat-shot-phase">{word}</span>
-          {note && <span className="chat-shot-note">· {note}</span>}
-        </div>
-        <a className="chat-shot-img" href={src} target="_blank" rel="noreferrer">
-          <img src={src} alt={`${word} the change`} loading="lazy" />
-        </a>
-      </div>
-    </figure>
-  )
-}
