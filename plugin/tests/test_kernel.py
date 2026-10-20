@@ -190,7 +190,7 @@ def test_coverage_merges_queries_rows_and_what_the_hook_saw(root: Path, tmp_path
     # computed over and counted files are not seen
     assert cov["total"]["not_seen_files"] == 4 and cov["total"]["seen_files"] == 3 and cov["total"]["touched_files"] == 5
     assert cov["total"]["computed_rows"] == 3
-    assert "Not seen: 4 files" in LIN.coverage_text(cov)
+    assert "Not read: 4 files" in LIN.coverage_text(cov)
 
 
 # ------------------------------------------------------------------ the command

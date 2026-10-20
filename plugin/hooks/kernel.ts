@@ -3,7 +3,8 @@
 // it did not. It never answers, allows or refuses a call, never shows anything, and starts no process. What it keeps:
 // one JSON line per call in $THIMBLE_HOME/lean/seen/<session>.jsonl (default ~/.thimble), never the file's content:
 //
-//   Read  {tool, file, from, to}        the first and last line the result showed (none for a picture or a PDF)
+//   Read  {tool, file, from, to, pages?}  the first and last line the result showed (none for a picture or a PDF), and
+//                                       the pages it asked for of a PDF (`1-5`)
 //   Grep  {tool, path, glob, mode, files, lines}  the search's scope, its output mode, the files it matched, and the
 //                                       lines it showed
 //   Bash  {tool, command, out_lines, refs}  the command, how many lines its output had as Claude read it, and the
@@ -139,7 +140,8 @@ export const register: Register = on => {
       const agent = typeof input.agentId === 'string' ? { agent: input.agentId } : {}
       if (tool === 'Read' && !r.isError) {
         const range = readRange(resultText(r))
-        await keep($, { tool, file: input.file_path, ...(range ?? { from: null, to: null }), ...agent })
+        const pages = typeof input.pages === 'string' && input.pages ? { pages: input.pages } : {}
+        await keep($, { tool, file: input.file_path, ...(range ?? { from: null, to: null }), ...pages, ...agent })
       } else if (tool === 'Grep' && !r.isError) {
         const hits = grepHits(resultText(r))
         await keep($, { tool, path: input.path ?? null, glob: input.glob ?? input.type ?? null, mode: input.output_mode ?? 'files_with_matches', ...hits, ...agent })

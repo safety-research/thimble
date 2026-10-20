@@ -10,6 +10,9 @@
     diff        .diff .patch                          one hunk                          <path>#L<a>-<b>
     text        code, logs, config, .txt              one line                          <path>#L<n>
 
+Coverage also counts the files that have no rows, each in its own unit: a PDF by its pages, and an image, a sound, a
+video or any other file as one whole file (`file_kind`, `list_files`).
+
 A ref stays the same when the analysis runs again on the same file. Each row also has a content hash (`row_hash`), so a
 citation can tell when its row changed or moved. Files under the thimble/ record folder, version control and
 dependency folders are never sources.
@@ -44,6 +47,12 @@ TEXT_EXT = {".txt", ".log", ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx",
             ".h", ".cpp", ".hpp", ".r", ".jl", ".lua", ".pl", ".php", ".swift", ".kt", ".scala", ".xml", ".srt",
             ".vtt", ".tex", ".bib", ".ipynb", ".env.example"}
 TEXT_MAX_BYTES = 64 * 1024 * 1024
+# the files that are no source, as coverage names them: a PDF is counted by its pages, the others as whole files
+MEDIA_KIND = {".pdf": "pdf",
+              **{e: "image" for e in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".svg", ".ico", ".heic")},
+              **{e: "audio" for e in (".mp3", ".wav", ".m4a", ".flac", ".ogg", ".aac", ".opus")},
+              **{e: "video" for e in (".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")}}
+PDF_MAX_BYTES = 256 * 1024 * 1024
 
 
 @dataclass
@@ -76,6 +85,53 @@ def list_sources(root: Path) -> list[str]:
             if kind_of(p) and not p.is_symlink():
                 out.append(os.path.relpath(p, root))
     return sorted(out)
+
+
+def file_kind(path: Path) -> str:
+    """A file's kind for coverage: its source kind, else pdf, image, audio or video by its extension, else file."""
+    return kind_of(path) or MEDIA_KIND.get(path.suffix.lower(), "file")
+
+
+def list_files(root: Path) -> list[str]:
+    """Every file under root that coverage counts, relative, sorted: the sources, and the other files that are not
+    hidden (a PDF, an image, a binary), under the same folders list_sources walks."""
+    out = []
+    for d, dirs, files in os.walk(root):
+        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS and not x.startswith("."))
+        for f in files:
+            p = Path(d) / f
+            if p.is_symlink() or (f.startswith(".") and not kind_of(p)):
+                continue
+            out.append(os.path.relpath(p, root))
+    return sorted(out)
+
+
+_PDF_PAGE = re.compile(rb"/Type\s*/Page(?![a-zA-Z])")
+
+
+def count_pages(p: Path) -> int:
+    """A PDF's pages: its page objects, also those packed in compressed object streams. At least 1."""
+    import zlib
+
+    try:
+        if p.stat().st_size > PDF_MAX_BYTES:
+            return 1
+        data = p.read_bytes()
+    except OSError:
+        return 1
+    n = len(_PDF_PAGE.findall(data))
+    at = data.find(b"/ObjStm")
+    while at >= 0:
+        a = data.find(b"stream", at)
+        b = data.find(b"endstream", a + 6) if a >= 0 else -1
+        if b < 0:
+            break
+        try:
+            n += len(_PDF_PAGE.findall(zlib.decompressobj().decompress(data[a + 6:b].lstrip(b"\r\n"))))
+        except zlib.error:
+            pass
+        at = data.find(b"/ObjStm", b)
+    return max(1, n)
 
 
 def fingerprint(p: Path) -> dict[str, Any]:
@@ -328,8 +384,11 @@ def _count_sqlite(p: Path) -> int:
 
 
 def count_rows(root: Path, rel: str) -> int:
+    """A file's rows; for a file that is no source, its units as coverage counts them: a PDF's pages, else 1."""
     p = root / rel
     kind = kind_of(p)
+    if kind is None:
+        return count_pages(p) if file_kind(p) == "pdf" else 1
     try:
         if kind in ("jsonl", "text"):
             return count_lines(p)
@@ -369,7 +428,8 @@ def _count_many(root: Path, rels: list[str], sizes: dict[str, int]) -> dict[str,
 
 
 def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, dict[str, Any]]:
-    """{path: {rows, lines, kind}} for each file, cached by size and mtime."""
+    """{path: {rows, lines, kind}} for each file, cached by size and mtime. A file that is no source has its kind
+    (pdf, image, audio, video, file), its pages or 1 as rows, and no lines."""
     cache: dict[str, Any] = {}
     if cache_file:
         try:
@@ -396,7 +456,7 @@ def counts(root: Path, rels: list[str], cache_file: Path | None) -> dict[str, di
         if c and c.get("key") == key:
             out[rel] = c
             continue
-        kind = kind_of_file(root, rel)
+        kind = kind_of_file(root, rel) or file_kind(p)
         rows = fresh[rel] if rel in fresh else count_rows(root, rel)
         lines = rows if kind in ("jsonl", "transcript", "text") else (count_lines(p) if kind in ("markdown", "diff", "csv", "json") and st.st_size < 256 * 1024 * 1024 else 0)
         c = {"key": key, "kind": kind, "rows": rows, "lines": lines, "size": st.st_size}
