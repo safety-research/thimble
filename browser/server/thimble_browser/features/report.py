@@ -1,7 +1,8 @@
 """The report, and the other documents the person makes with New: each a document the analyst owns from the start.
 They type notes and headings into it and place cards in it; Claude, the chat agent, writes or revises it when they ask,
 in the Report tab ("Write", with instructions) or in the chat, and keeps their notes and the cards they placed. Each
-block Claude writes or changes is marked as Claude's until the analyst edits it (report.attribute).
+block Claude writes or changes is marked as Claude's until the analyst edits it (report.attribute). While a write or an
+edit streams in, the page shows the document as it will be, as far as the call came (report.draft).
 
 It owns the documents' routes (report.py keeps them, exports.py their exports), the tools read_document,
 write_document and edit_document, the `Report` part of the chat agent's prompt (prompts/report.md) and, on the page,
@@ -23,6 +24,7 @@ the Report tab and the documents' figures.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from fastapi import Body, HTTPException
@@ -124,6 +126,52 @@ async def edit_document(t: Any, args: dict[str, Any]) -> Result:
     return _saved(t, report.save(t.ws, md, by=t.maker(), slug=slug), what)
 
 
+# ---- the write as it streams in
+
+# a citation or figure still streaming in at the end of a draft, which would show as raw Markdown until it closes
+_OPEN_LINK = re.compile(r"!?\[\[?[^\]\n]*(\]\([^)\n]*|\|[^\]\n]*)?$")
+
+
+def draft_of(md: str, name: str, args: dict[str, Any]) -> str | None:
+    """What the document will be once the call `name` streaming in with `args` so far is saved, as far as it came, less
+    a link not yet closed at its end; None while that cannot be told yet. Pure."""
+    args = {k: _OPEN_LINK.sub("", v) if k == list(args)[-1] and isinstance(v, str) else v for k, v in args.items()}
+    if name == "write_document":
+        text = str(args.get("text") or "").lstrip()
+        return report.attribute(md, text, "claude") if text.startswith("# ") else None
+    keys = list(args)
+    # old_text is whole only once new_text has begun after it
+    if "old_text" not in keys or "new_text" not in keys or keys.index("old_text") > keys.index("new_text"):
+        return None
+    old, new = str(args["old_text"]), str(args["new_text"])
+    if not old or md.count(old) != 1:
+        return None
+    return report.attribute(md, md.replace(old, new, 1).strip(), "claude")
+
+
+_drafting: dict[tuple[str, str], str] = {}  # (workspace, chat): the document its write streams into
+
+
+def _on_input(name: str) -> Any:
+    def follow(session: Any, args: dict[str, Any] | None) -> None:
+        key = (session.ws, session.chat)
+        if args is None:
+            slug = _drafting.pop(key, None)
+            if slug:
+                report.draft(session.ws, slug, None)
+            return
+        slug = str(args.get("doc") or report.DOC)
+        if not report.exists(session.ws, slug):
+            return
+        md = draft_of(report.markdown(session.ws, slug) or "", name, args)
+        if md is not None:
+            if _drafting.get(key, slug) != slug:
+                report.draft(session.ws, _drafting[key], None)
+            _drafting[key] = slug
+            report.draft(session.ws, slug, md)
+    return follow
+
+
 # ---- after the chat agent's turn
 
 def _after_turn(session: Any, answer: str, result: str | None) -> None:
@@ -163,6 +211,8 @@ def register(ctx: Any) -> None:
     app = ctx.app
     exports.register(ctx)
     agent.AFTER_TURN.append(_after_turn)
+    for name in ("write_document", "edit_document"):
+        agent.ON_INPUT[name] = _on_input(name)
 
     def doc_of(c: str, slug: str) -> str:
         ws = ctx.ws_of(c)

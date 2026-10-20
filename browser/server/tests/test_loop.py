@@ -125,3 +125,46 @@ async def test_a_refusal_is_a_row_not_a_crash(ws, monkeypatch):
     await s.task
     errs = [r for r in chats.records(ws, "main") if r["type"] == "error"]
     assert errs and "declined" in errs[0]["message"]
+
+
+async def test_a_report_write_shows_in_the_report_as_it_streams_in(ws, monkeypatch):
+    import json
+
+    from thimble_browser import report, tools
+    from thimble_browser.features import report as report_feature
+    monkeypatch.setitem(tools.EXTRA, "write_document", report_feature.write_document)
+    monkeypatch.setitem(agent.ON_INPUT, "write_document", report_feature._on_input("write_document"))
+    monkeypatch.setattr(agent, "NOTIFY_S", 0)
+    text_out = "# Runs\n\nTwo runs merged. One failed on a flaky test."
+    body = json.dumps({"text": text_out})
+    seen = []
+
+    class Streaming(FakeStream):
+        async def _events(self):
+            b = self.reply.content[0]
+            if b.type != "tool_use":
+                yield NS(type="text", text=b.text)
+                return
+            yield NS(type="content_block_start", index=0, content_block=b)
+            for i in range(0, len(body), 12):
+                yield NS(type="content_block_delta", index=0, delta=NS(type="input_json_delta",
+                                                                       partial_json=body[i:i + 12]))
+                doc = report.writeup(ws)
+                seen.append((doc.get("drafting"), " ".join(s["text"] for sec in doc["sections"]
+                                                           for p in sec["paragraphs"] for s in p["sentences"])))
+            yield NS(type="content_block_stop", content_block=b)
+
+    client = FakeClient([
+        NS(content=[call("t1", "write_document", {"text": text_out})], stop_reason="tool_use", usage=usage(),
+           stop_details=None),
+        NS(content=[text("Written.")], stop_reason="end_turn", usage=usage(), stop_details=None),
+    ])
+    client.beta.messages.stream = lambda **req: (client.requests.append(req), Streaming(client.replies.pop(0), 0))[1]
+    s = await run_turn(ws, client, monkeypatch)
+    await s.task
+    drafts = [t for d, t in seen if d]
+    # the report grew while the call streamed in, then the saved report took the draft's place
+    assert len(drafts) >= 3 and all(a != b and b.startswith(a[:-1]) for a, b in zip(drafts, drafts[1:]))
+    assert drafts[-1].startswith("Two runs merged. One failed")
+    final = report.writeup(ws)
+    assert not final.get("drafting") and "flaky test" in report.markdown(ws)

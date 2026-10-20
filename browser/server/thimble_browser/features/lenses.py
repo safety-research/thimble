@@ -297,13 +297,14 @@ def found(ws: str, lid: str) -> list[dict[str, Any]]:
     return sorted(out, key=lambda m: str(m.get("ts") or ""), reverse=True)
 
 
-# the heads-up lens's reply (the terminal's lens-heads): null, or one heads-up, with the text's place added
-HEADS = {"anyOf": [{"type": "null"}, {"type": "object", "additionalProperties": False,
-                                      "required": ["where", "term", "title", "bullets", "todo"],
-                                      "properties": {"where": {"type": "string"}, "term": {"type": "string"},
-                                                     "title": {"type": "string"},
-                                                     "bullets": {"type": "array", "items": {"type": "string"}},
-                                                     "todo": {"type": "string"}}}]}
+# the heads-up lens's reply: the terminal's lens-heads reads one answer and gives at most one heads-up; here it reads
+# each text the turn wrote (the answer, the report), so it gives at most one heads-up for each, with the text's place
+HEADS = {"type": "array", "items": {"type": "object", "additionalProperties": False,
+                                    "required": ["where", "term", "title", "bullets", "todo"],
+                                    "properties": {"where": {"type": "string"}, "term": {"type": "string"},
+                                                   "title": {"type": "string"},
+                                                   "bullets": {"type": "array", "items": {"type": "string"}},
+                                                   "todo": {"type": "string"}}}}
 
 
 def _schema(active: list[dict[str, Any]]) -> dict[str, Any]:
@@ -319,12 +320,10 @@ def _items(got: dict[str, Any], key: str) -> list[dict[str, Any]]:
     """A lens's marks in the reply as one shape: a heads-up's points are its body and what to do its `here`."""
     if key != "heads":
         return [it for it in got.get(key) or [] if isinstance(it, dict)]
-    h = got.get("heads")
-    if not isinstance(h, dict):
-        return []
-    points = [str(b) for b in h.get("bullets") or [] if b]
+    heads = got.get("heads")
     return [{"where": h.get("where") or "answer", "term": h.get("term"), "title": h.get("title"),
-             "body": "\n".join(f"- {b}" for b in points), "here": h.get("todo") or ""}]
+             "body": "\n".join(f"- {b}" for b in h.get("bullets") or [] if b), "here": h.get("todo") or ""}
+            for h in (heads if isinstance(heads, list) else [heads]) if isinstance(h, dict)]
 
 
 def _texts(ws: str, chat: str | None, answer: str | None, cards: list[str], with_report: bool) -> dict[str, str]:

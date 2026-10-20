@@ -79,6 +79,23 @@ AGENTS: dict[str, AgentDef] = {
 AFTER_TURN: list[Callable[["Session", str, str | None], None]] = []
 
 
+# tools whose input the page follows while it streams in, such as the report's writes: fn(session, args) with the
+# input so far (its last string as far as it came), at most every NOTIFY_S, then fn(session, None) once the call has
+# run or will not run. A feature adds its own; it must be quick and must not raise.
+ON_INPUT: dict[str, Callable[["Session", dict[str, Any] | None], None]] = {}
+
+
+def partial_input(buf: str) -> dict[str, Any] | None:
+    """A tool input still streaming in, parsed with its last string cut where the stream stands; None until it parses."""
+    from jiter import from_json  # noqa: PLC0415 — the SDK's own partial JSON reader
+
+    try:
+        got = from_json(buf.encode("utf-8"), partial_mode="trailing-strings")
+    except ValueError:
+        return None
+    return got if isinstance(got, dict) else None
+
+
 def role_of(meta: dict[str, Any]) -> str:
     """The agent a chat runs: its meta's `role` when it names one of AGENTS (a view's builder), else main (main and its
     threads)."""
@@ -208,6 +225,7 @@ class Session:
         self.cards: list[str] = []
         self._last_notify = 0.0
         self._pending_notify: asyncio.TimerHandle | None = None
+        self._following: set[str] = set()  # the ON_INPUT tools that heard input in this request
         self.meta = meta
         self.tools = Tools(ws, chat, folder, read_roots=[folder, *self.defn.extra_roots], unsandboxed=unsandboxed,
                            on_card=self.cards.append, view=meta.get("view"))
@@ -277,12 +295,25 @@ class Session:
         """One request, streamed into the log; the final message."""
         client = llm.client()
         n = count_calls(messages)
+        loop = asyncio.get_running_loop()
+        inputs: dict[int, list[Any]] = {}  # a followed tool call's index: [name, JSON so far, when it was last told]
         async with client.beta.messages.stream(**self.request(messages)) as stream:
             async for ev in stream:
                 t = ev.type
                 if t == "text":
                     if ev.text:
                         self._append({"type": "text", "delta": ev.text})
+                elif t == "content_block_start" and getattr(ev.content_block, "type", "") == "tool_use" \
+                        and ev.content_block.name in ON_INPUT:
+                    inputs[ev.index] = [ev.content_block.name, "", 0.0]
+                elif t == "content_block_delta" and ev.index in inputs \
+                        and getattr(ev.delta, "type", "") == "input_json_delta":
+                    row = inputs[ev.index]
+                    row[1] += ev.delta.partial_json
+                    if loop.time() - row[2] >= NOTIFY_S and (args := partial_input(row[1])) is not None:
+                        row[2] = loop.time()
+                        self._following.add(row[0])
+                        ON_INPUT[row[0]](self, args)
                 elif t == "content_block_stop" and getattr(ev.content_block, "type", "") == "tool_use":
                     b = ev.content_block
                     n += 1
@@ -300,6 +331,7 @@ class Session:
         try:
             retries = 0
             while True:
+                self._unfollow()
                 try:
                     final = await self._stream_once(messages, usage)
                 except ValueError as e:  # a tool input that streamed in as JSON the SDK could not read
@@ -349,6 +381,7 @@ class Session:
                     save_messages(self.ws, self.chat, messages)
                     continue
                 results = await asyncio.gather(*(self.tools.call(b.name, b.input) for b in calls))
+                self._unfollow()
                 blocks = []
                 for b, r in zip(calls, results):
                     rec: dict[str, Any] = {"type": "tool_result", "id": b.id, "summary": r.text[:4000],
@@ -369,6 +402,7 @@ class Session:
                 messages.append({"role": "user", "content": blocks})
                 save_messages(self.ws, self.chat, messages)
         except asyncio.CancelledError:
+            self._unfollow()
             self._close_open_calls(messages)
             result = "stopped"
             self._append({"type": "done", "result": "stopped", "usage": usage.record(), "model": self._model()})
@@ -381,6 +415,7 @@ class Session:
             self._close_open_calls(messages)
             self._append({"type": "error", "kind": "api", "message": llm.failure(e, fast=self.fast())})
             result = "failed"
+        self._unfollow()
         self._append({"type": "done", "result": result, "cells": list(dict.fromkeys(self.cards)),
                       "usage": usage.record(), "model": self._model()})
         self.running = False
@@ -393,6 +428,15 @@ class Session:
                     fn(self, text_out, result)
                 except Exception:  # noqa: BLE001 — a feature's follow-up never fails the turn
                     log.exception("an after-turn hook failed")
+
+    def _unfollow(self) -> None:
+        """Tell each ON_INPUT tool that heard input that its call has run, or will not."""
+        for name in self._following:
+            try:
+                ON_INPUT[name](self, None)
+            except Exception:  # noqa: BLE001 — following an input never fails the turn
+                log.exception("closing the input of %s failed", name)
+        self._following.clear()
 
     def _model(self) -> str:
         return settings.read()["model"]

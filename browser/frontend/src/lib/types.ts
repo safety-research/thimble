@@ -1068,6 +1068,8 @@ export interface Writeup {
   what_changed?: string[]
   frame?: boolean
   partial?: boolean
+  /** Claude's write as it streams in, not saved yet: shown, not editable */
+  drafting?: boolean
   sections_done?: number
   sections_total?: number
   /** the analyst's lock on the title */
