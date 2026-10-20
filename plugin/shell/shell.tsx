@@ -46,8 +46,8 @@ import { featureOn, switchesFrom } from '../settings/features.mjs'
 import { heldValues, openSettings, settingsAction, settingsStore } from '../settings/term'
 
 
-import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, markChanged as sqChanged, setLevels as sqSetLevels, sLit, tellSettled, wantLevels as sqWant } from '../squeeze/term'
-import { SCALE, catchUpStands, isCatchUp, ownWords, revealCut, setWords, withOwn } from '../squeeze/chips.mjs'
+import { busyGlyph, catchUp as sqCatchUp, dismissCatchUp as sqDismiss, revealedOf, seeView, setLevels as sqSetLevels, sLit, tellSettled, wantLevels as sqWant } from '../squeeze/term'
+import { SCALE, cardNotesFor, catchUpStands, isCatchUp, ownWords, revealCut, setWords, withOwn } from '../squeeze/chips.mjs'
 import { barText, fitBar, hostKeys, keyEvent, keysOf } from '../panes/host.js'
 import { keyAnswered, type KeyEdit, keySlot, keyTake, type KeyTurn, resetKeys } from './keys'
 import { act, paneDrawing, paneEl, paneFire, paneNow, paneRun, paneTakes, paneTry, patchPaneState, setTheme } from './panes'
@@ -280,6 +280,26 @@ async function setUnder($: Engine, at: string, list: Placed[]): Promise<void> {
     // the drawing holds for this session; only a resume would miss it
   }
   $.clock.after(0, () => { void recount($) })
+}
+
+/** The cards drawn under a row, each at the version drawn now (a ref with no version is the card's newest, read now),
+ *  so a later version of one never takes its place by itself. For squeeze, which may change an answer's cards. */
+export async function cardsUnder($: Engine, row: string): Promise<Placed[]> {
+  const list = ((await $.state.get({ ...UNDER, id: row })).value ?? []) as Placed[]
+  const out: Placed[] = []
+  for (const r of list) {
+    if (r.v != null) { out.push(r); continue }
+    const o = await loadObject($, r).catch(() => null)
+    out.push(o && Number.isInteger(Number(o.version)) ? { ...r, v: Number(o.version) } : r)
+  }
+  return out
+}
+
+/** The cards under a row set to `list` (a squeeze's version of them), when they differ from what is drawn. */
+export async function setCardsUnder($: Engine, row: string, list: Placed[]): Promise<void> {
+  const cur = ((await $.state.get({ ...UNDER, id: row })).value ?? []) as Placed[]
+  const key = (l: Placed[]) => JSON.stringify(l.map(x => [x.id, x.v ?? null, x.root]))
+  if (key(cur) !== key(list)) await setUnder($, row, list)
 }
 
 /** The newest version shown of each object (by folder and id): a save of an older one, read from the feed later, is
@@ -902,28 +922,13 @@ async function keyRows($: Engine): Promise<string[]> {
   return out
 }
 
-/** s with replies piled up (or the scope chip moved to all of them, `all`, even after they were caught up on): one
- *  catch-up of every message since the person's last prompt, in their place, with the chips open on it while its first
- *  version is written. The one let go of the same messages comes back as it was, with no call; one of other messages
- *  goes. The keys act on it. Returns its row. */
-async function catchUpNow($: Engine, all = false): Promise<string | null> {
-  const since = all ? await sinceLastPrompt($) : null
-  const pile = all ? (since!.replies.length >= 2 ? { n: since!.replies.length, ...since! } : null) : await pileUp($)
+/** s with replies piled up: one catch-up of every message since the person's last prompt, in their place, with the
+ *  chips open on it while its first version is written. An earlier catch-up of some of them goes. The keys act on it.
+ *  Returns its row. */
+async function catchUpNow($: Engine): Promise<string | null> {
+  const pile = await pileUp($)
   if (!pile) return null
   const host = pile.replies[pile.replies.length - 1]!
-  const was = (await recordNow($, host))?.caughtUp
-  const before = was ? await recordNow($, was) : null
-  if (before && isCatchUp(before) && before.catchup!.rows.join() === pile.rows.join() && typeof before.shown === 'string') {
-    await saveRecord($, { ...before, catchup: { ...before.catchup!, dismissed: false } } as MsgRecord)
-    for (const r of pile.rows) { if (r === host) continue; const rec = await recordNow($, r); if (rec && rec.inCatchUp !== was) await saveRecord($, { ...rec, inCatchUp: was } as MsgRecord) }
-    // Claude hears of it again once the person settles on it
-    await sqChanged($, was)
-    await setTray($, null)
-    await setCardFocus($, null)
-    await $.state.set(SELROW, null)
-    await setPick($, { row: was!, verb: 's' })
-    return was!
-  }
   for (const r of pile.replies) {
     const old = (await recordNow($, r))?.caughtUp
     if (old) await sqDismiss($, old, { quiet: true })
@@ -2195,8 +2200,9 @@ function asideRowEl(els: Any, line: { text: string; error: boolean }, key: strin
 
 /** One object inline: a card in its frame (its question in bold, a blank row, the drawing, its takeaway when it has
  *  one), or one red line saying why it cannot be drawn. The card the keys act on (`1` opens it) has its frame in the
- *  keys' color. A program that draws its own frame keeps it, with no second one around it. */
-async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string, focus: 'focus' | 'rest' | boolean | null = null): Promise<Any> {
+ *  keys' color. A program that draws its own frame keeps it, with no second one around it. `squeezed`: what a squeeze
+ *  of its answer did to it (edited, added), said in one dim line under it. */
+async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string, focus: 'focus' | 'rest' | boolean | null = null, squeezed: string | null = null): Promise<Any> {
   const els = $.ui.resolve(e)
   const { Box, Text } = els as Any
   const outer = Math.max(44, Math.min(124, (e.viewport?.columns ?? 100) - 4))
@@ -2232,8 +2238,21 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: Math.min(rows, p.grid.h), color: ring })
   return Box({
     key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, width: framed ? Math.max(p.grid.w, 40) : fw,
-    children: [body, ...(pages ? [pages] : []), ...(run ? [run] : [])],
+    children: [body, ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
   })
+}
+
+type CardNotes = { marks: Record<string, string>; left: string[] }
+
+/** The notes of two squeezes over the same cards (a reply's own, and the catch-up's in its place), as one. */
+function mergeNotes(a: CardNotes, b: CardNotes | null): CardNotes {
+  return b ? { marks: { ...a.marks, ...b.marks }, left: [...a.left, ...b.left] } : a
+}
+
+/** One dim line where a squeeze left cards out of its version: which, by their titles. */
+function leftOutEl(els: Any, titles: string[], key: string): Any {
+  const { Box, Text } = els
+  return Box({ key, marginLeft: 2, marginTop: 1, children: [Text({ dimColor: true, wrap: 'truncate-end', children: `left out by squeeze: ${titles.map(t => `"${cut(t, 48)}"`).join(', ')}` })] })
 }
 
 /** The row under a card with pages: how many there are and how to read them, `9 chapters · 1 read all` (the key only
@@ -2269,7 +2288,7 @@ async function catchUpParts($: Engine, e: Any, at: string, cols: number): Promis
   const tray = (await $.state.get(TRAY)).value as Tray | null
   const base = trayBase(tray) as TrayFrame | null
   const replies = Number(cu.catchup!.replies) || 0
-  const head = `catch-up of ${replies} replies, in their place`
+  const head = `catch-up of the ${replies} replies since your last message, in their place`
   // its first version on its way, or why it failed: one line on the reply, which stays as written under it
   const why = sqUi?.error || ((cu.squeeze ?? {}) as Any).error || null
   const written = typeof cu.shown === 'string'
@@ -2281,16 +2300,19 @@ async function catchUpParts($: Engine, e: Any, at: string, cols: number): Promis
   })()
   const main = written ? catchUpEl(els, { rec: shown, key: `cu-${row}`, cols, first: false, theme, head, note: null, focus: base && base.row === row ? base.i ?? null : null, onMark: (i: number) => openMark($, row, i, cu), dim: !!busy }) : null
   const tail: Any[] = []
-  if (open === 's') tail.push(Box({ key: `sq-${row}`, marginLeft: 2, marginTop: 1, children: [await chipsEl($, e, row, Math.max(30, cols - 2))] }))
-  else if (open) tail.push(Box({ key: `vl-${row}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
+  if (open && open !== 's') tail.push(Box({ key: `vl-${row}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
   const aside = asideLine(await asideOn($, row))
   if (aside) tail.push(asideRowEl(els, aside, `as-${row}`))
   const list = ((await $.state.get({ ...UNDER, id: row })).value ?? []) as ObjRef[]
+  const sqNotes = cardNotesFor(cu, row) as CardNotes
   if (list.length) {
     const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
     const rest = !tray && !pick && !cf && (await actingRow($)) === row
-    tail.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${row}-${i}`, row, cf && cf.row === row && cf.id === ref.id && cf.root === ref.root ? 'focus' : rest && i === list.length - 1 ? 'rest' : null)))))
+    tail.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${row}-${i}`, row, cf && cf.row === row && cf.id === ref.id && cf.root === ref.root ? 'focus' : rest && i === list.length - 1 ? 'rest' : null, sqNotes.marks[ref.id] ?? null)))))
   }
+  if (sqNotes.left.length) tail.push(leftOutEl(els, sqNotes.left, `lo-${row}`))
+  // the chips last, under the whole catch-up and its cards
+  if (open === 's') tail.push(Box({ key: `sq-${row}`, marginLeft: 2, marginTop: 1, children: [await chipsEl($, e, row, Math.max(30, cols - 2))] }))
   return { main, note, tail }
 }
 
@@ -2445,8 +2467,6 @@ export async function paneStore($: Engine, kind: string, arg: string): Promise<u
     case 'sqz': return arg ? ((await $.state.get({ ...SQZ, id: arg })).value ?? null) : null
     // whether a pane drawn by heldEl holds the keyboard now (a click gave it them), by its id
     case 'held': return !!arg && (await $.state.get(HELD)).value === arg
-    // the replies since the person's last prompt, for the scope chip under the newest of them (two or more)
-    case 'pile': return arg ? await pileAt($, arg) : null
     // the card the detail shows: its object, versions and drawing at the detail's room (detail.tsx)
     case 'card': return arg ? cardStore($, arg) : null
     // the session's side threads: the tray shows a mark's
@@ -2498,31 +2518,6 @@ export async function paneWant($: Engine, _name: string, _args: Record<string, u
   return { error: 'the terminal cannot read that' }
 }
 
-/** The replies since the person's last prompt as the scope chip under `row` reads them: {n} when `row` is the newest
- *  of two or more, else null. */
-async function pileAt($: Engine, row: string): Promise<{ n: number } | null> {
-  const since = await sinceLastPrompt($)
-  return since.replies.length >= 2 && since.replies[since.replies.length - 1] === row ? { n: since.replies.length } : null
-}
-
-/** The scope chip moved: to all the replies since the person's last prompt, written as one in their place (a
- *  catch-up), or back to this reply alone (the catch-up let go, the replies shown as written). The chips stay open on
- *  what shows, the scope chip picked. */
-async function scopeTo($: Engine, row: string, all: boolean): Promise<void> {
-  const rec = await recordNow($, row)
-  if (all && !isCatchUp(rec)) {
-    const cu = await catchUpNow($, true)
-    if (cu) await patchPaneState($, 'chips', { row: cu }, { focus: 'scope' })
-    return
-  }
-  if (!all && rec && isCatchUp(rec)) {
-    const host = rec.catchup!.host
-    await dismissNow($, row)
-    await patchPaneState($, 'chips', { row: host }, { focus: 'scope' })
-    await setPick($, { row: host, verb: 's' })
-  }
-}
-
 /** A chip of the person's own on a message, from the words they typed after + (or `/squeeze <words>`): added to its
  *  record at as written, picked, and kept for the session so + offers it again. */
 async function addOwn($: Engine, row: string, typed: string): Promise<string | null> {
@@ -2549,7 +2544,6 @@ async function askOwn($: Engine): Promise<void> {
 async function chipsAction($: Engine, row: string, a: Record<string, unknown>): Promise<string | boolean | void> {
   const name = String(a.do || '')
   if (!row || !(await recordNow($, row))) return '× That message is not in this session, so the chips cannot change it. Press s under a message here.'
-  if (name === 'scope') { await scopeTo($, row, a.all === true); return }
   if (name === 'own' && typeof a.words === 'string') { await addOwn($, row, a.words); return }
   if (name === 'ownask') { await askOwn($); return }
   if (name === 'squeeze') {
@@ -2568,9 +2562,10 @@ async function chipsAction($: Engine, row: string, a: Record<string, unknown>): 
     await setPick($, null)
     return
   }
-  // revert on a catch-up: the replies as written in their places, the chips open on the newest, as the scope chip does
+  // revert on a catch-up: the replies as written in their places, with their cards; the chips close with it, and the
+  // keys go back to the newest reply
   if (name === 'dismiss') {
-    await scopeTo($, row, false)
+    if (isCatchUp(await recordNow($, row))) await dismissNow($, row)
     return
   }
   if (name === 'say') return typeof a.text === 'string' ? a.text : undefined
@@ -2986,23 +2981,27 @@ export const registerShell: Register = (on, options) => {
           ? messageEl(els, { rec: shownNow, key: `msg-${at}`, cols, first: !!e.props.isFirstOfReply, theme, focus: base && base.row === at ? base.i ?? null : null, onMark: (i: number) => openMark($, at, i, rec), dim: !!busy || !!caught, lead: busy ?? (picked ? '▸' : null), leadColor: busy ? null : FOCUS[theme] })
           : await next(e))
       }
-      if (open === 's') {
-        // the chips under the message (panes/chips.js, the browser draws the same program); their keys are in the
-        // bar
-        // (keyed, so the chips keep their place, and the keyboard a click gave them, when a line is drawn above the
-        // message while a rewrite runs)
-        parts.push(Box({ key: `sq-${at}`, marginLeft: 2, marginTop: 1, children: [await chipsEl($, e, at, Math.max(30, cols - 2))] }))
-      } else if (open) {
+      if (open && open !== 's') {
         // v's proposals (panes/proposals.js, the browser draws the same program); their keys are in the bar
         parts.push(Box({ key: `vl-${at}`, marginLeft: 2, marginTop: 1, children: [await paneEl($, e, 'proposals', { row: at, verb: open }, { w: Math.max(30, cols - 2), h: 3 })] }))
       }
       if (aside) parts.push(asideRowEl(els, aside, `as-${at}`))
+      // what a squeeze did to these cards: its own, or that of the catch-up standing in this reply's place
+      const over = caught ? await catchUpUnder($, at) : folded && catchUpStands(folded) ? folded : null
+      const sqNotes = mergeNotes(cardNotesFor(rec, at), over ? cardNotesFor(over, at) : null)
       if (list.length) {
         // the card with the focus (] reached it) has its frame in the keys' color; at rest the newest card under the
         // message the keys act on (the one 1 opens) has it faint
         const cf = (await $.state.get(CARDFOCUS)).value as (ObjRef & { row: string }) | null
         const rest = !tray && !pick && !cf && (await actingRow($)) === at
-        parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at, cf && cf.row === at && cf.id === ref.id && cf.root === ref.root ? 'focus' : rest && i === list.length - 1 ? 'rest' : null)))))
+        parts.push(...(await Promise.all(list.map((ref, i) => inlineEl($, e, ref, `row-${at}-${i}`, at, cf && cf.row === at && cf.id === ref.id && cf.root === ref.root ? 'focus' : rest && i === list.length - 1 ? 'rest' : null, sqNotes.marks[ref.id] ?? null)))))
+      }
+      if (sqNotes.left.length) parts.push(leftOutEl(els, sqNotes.left, `lo-${at}`))
+      if (open === 's') {
+        // the chips under the whole answer, after its last card: they change its text and its cards (panes/chips.js);
+        // their keys are in the bar. (Keyed, so the chips keep their place, and the keyboard a click gave them, when
+        // a line is drawn above the message while a rewrite runs)
+        parts.push(Box({ key: `sq-${at}`, marginLeft: 2, marginTop: 1, children: [await chipsEl($, e, at, Math.max(30, cols - 2))] }))
       }
       if (caught) parts.push(...caught.tail)
       if (!parts.length) return Box({ key: `folded-${at}`, flexDirection: 'column', children: [] })

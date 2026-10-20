@@ -12,18 +12,27 @@
 // `shown` holds the result and its marks are placed again on it, citations kept; a state seen before comes back from
 // the record with no call. While a call runs the old text dims and its first glyph turns; when the new text is there
 // it writes itself in from the top at a model's pace, and nothing else is drawn for it.
+//
+// The chips belong to the whole answer, so with the squeeze switch for cards on (and a prompt version that knows
+// cards), the request also shows the cards under the original and the query outputs they and the text draw on. A
+// change of a card the reply asks for is saved through the kernel as the person's (`thimble save`): an edit is a new
+// version of the same card, marked as an edit the analyst asked for; an add is a new card under the answer; a drop
+// leaves one out of this version. A change that does not save or draw is left out, and the hint line says why. Each
+// version keeps its cards, so a version seen before and the original (0) come back with theirs (showCards).
 import type { EngineInterface } from 'claude-code'
 
-import type { MsgRecord, SqzUi, Tray } from '../types'
+import type { MsgRecord, ObjRef, SqzUi, Tray } from '../types'
 import { promptText as registryText } from '../prompts/prompts'
 import { newRecord, remark as remarkAny } from '../shell/message.js'
 import { modelWhy } from '../shell/why.js'
 import { tracked } from '../telemetry/telemetry'
 import { FEATURES } from '../prompts/registry.mjs'
+import { featureOn } from '../settings/features.mjs'
 import { lookPending } from '../observer/observer'
-import { answerRow, closeTray, questionBefore, recordNow, saveRecord, tellMain } from '../shell/shell'
+import { answerRow, cardsUnder, closeTray, leanEnv, loadObject, prepared, questionBefore, recordNow, rootHere, saveRecord, setCardsUnder, tellMain } from '../shell/shell'
+import { noteEdit } from '../shell/runtime'
 import { sessionKey } from '../hooks/conversation'
-import { ARRIVE, SCALE, applyRewrite, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, readReply, setWords, settledNote, shownKey, rebaseAt, request, restore, revealStep, rowsOf, termsOf, unplacedMoves } from './chips.mjs'
+import { ARRIVE, SCALE, applyRewrite, cardListsAt, cardSpec, cardsAfter, cardsKnown, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, queryIdsOf, readReply, setWords, settledNote, shownKey, rebaseAt, request, restore, revealStep, rowsOf, termsOf, toolkitOf, unplacedMoves, withLater } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -218,13 +227,16 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     const keep: string[] = keeps ? mustKeep(rec.text) : []
     // a version that keeps the terms of the explain marks (squeeze:v5): the terms are named in the request
     const terms: string[] = (FEATURES.squeeze.versions as Any)?.[sp.version]?.terms ? termsOf(rec) : []
+    // the answer's cards and the outputs they draw on, for a version that may change them (squeeze:v8, and the switch)
+    const answer = featureOn('squeezeCards') && (FEATURES.squeeze.versions as Any)?.[sp.version]?.cards ? await answerCards($, rec).catch(() => null) : null
+    const toolkit = answer ? toolkitOf((await registryText($, 'forms').catch(() => ({ text: '' }))).text) : ''
     const req = request(probe, {
-      system: sp.text, question, keep, terms,
+      system: sp.text, toolkit, question, keep, terms, cards: answer?.cards ?? [], outputs: answer?.outputs ?? [],
       model: String(cfg.model || DEFAULTS.model), effort: String(cfg.effort || DEFAULTS.effort),
       maxTokens: Number(cfg.maxTokens || DEFAULTS.maxTokens), timeoutMs: Number(cfg.timeoutMs || DEFAULTS.timeoutMs),
     })
     const t0 = await $.clock.now()
-    const r = await tracked($, { feature: 'squeeze', prompt: sp.id, model: req.model, extra: { row, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(',') } }, () => $.model.complete(req as Any))
+    const r = await tracked($, { feature: 'squeeze', prompt: sp.id, model: req.model, extra: { row, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), ...(answer ? { cards: answer.cards.length } : {}) } }, () => $.model.complete(req as Any))
     const ms = (await $.clock.now()) - t0
     if (!r.isAnswered) {
       const why = modelWhy(r)
@@ -244,17 +256,22 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     const whole = dropOrphanHeads(back.text)
     whole.dropped.unshift(...bare.dropped)
     const checked = checkRewrite(rec.text, whole.text)
+    // the cards this version changes, saved as the person's; one that does not save or draw is left out, said why
+    const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, setWords(probe) || 'as written') : null
+    const cardProblems = answer ? [...reply.cardProblems, ...(changed?.problems ?? [])] : []
+    const cards = answer && changed?.done.length ? cardsAfter(answer.orig, row, changed.done) : null
     // the record as it is now (the observer may have written its verbs and glosses meanwhile)
     const fresh = (await recordNow($, row)) || rec
     const fs = ((fresh as Any).squeeze ?? {}) as Any
     const next = applyRewrite({ ...fresh, squeeze: { ...fs, own: fs.own ?? s.own } } as MsgRecord, {
       text: checked.text, at: want.at,
-      made: { ms, model: req.model, usage: (r as Any).usage, at: new Date(t0).toISOString(), prompt: sp.id }, problems: checked.problems,
+      made: { ms, model: req.model, usage: (r as Any).usage, at: new Date(t0).toISOString(), prompt: sp.id }, problems: [...checked.problems, ...cardProblems],
+      cards, origCards: answer ? answer.orig : null,
     }, remark) as MsgRecord
     ticker.stop()
     await setUi($, row, { running: null })
     await settled($, row, next)
-    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}), ...(isCatchUp(rec) ? { catchup: rec.catchup!.replies } : {}) })
+    await log($, { row, ok: true, ms, model: req.model, prompt: sp.id, usage: (r as Any).usage, key: Object.entries(want.at).map(([k, v]) => `${k}=${v}`).join(','), problems: checked.problems, rows: rowsOf(checked.text, view.cols), of: rowsOf(rec.text, view.cols), ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}), ...(terms.length ? { terms: terms.length } : {}), ...(isCatchUp(rec) ? { catchup: rec.catchup!.replies } : {}), ...(answer ? { cards: answer.cards.length, outputs: answer.outputs.length, asked: reply.cards.map(c => `${c.op} ${c.id}`), did: (cards?.did ?? []).map(d => `${d.did} ${d.id}`), card_problems: cardProblems } : {}) })
   } finally {
     ticker.stop()
   }
@@ -265,6 +282,7 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
 async function settled($: Engine, row: string, rec: MsgRecord): Promise<void> {
   const before = await recordNow($, row)
   await saveRecord($, rec)
+  await showCards($, rec)
   await closeTrayOn($, row)
   await markChanged($, row)
   const was = before ? (typeof before.shown === 'string' ? before.shown : before.text) : ''
@@ -348,6 +366,117 @@ export async function tellSettled($: Engine, row: string | null = null): Promise
   await $.state.set(SQZTOLD, told)
 }
 
+// ------------------------------------------------------------------------------------------------ the cards
+
+type CardIn = { id: string; title: string; text: string; data: unknown; program: string; ref: ObjRef; source: Any }
+type Answer = { orig: Record<string, ObjRef[]>; cards: CardIn[]; outputs: { id: string; about: string; text: string }[]; root: string }
+
+/** At most this many query outputs go with a request, each cut to this many characters. */
+const MAX_OUTPUTS = 6
+const OUTPUT_CHARS = 2400
+
+/**
+ * The cards of an answer as its original has them, by row (the message's own row; a catch-up's replies and its own
+ * row), each at the version it had, and the query outputs they bind and the text cites, as Claude read them when it ran
+ * each one. Null when the answer has neither: then the request shows no cards.
+ */
+async function answerCards($: Engine, rec: MsgRecord): Promise<Answer | null> {
+  const s = ((rec as Any).squeeze ?? {}) as Any
+  const rows = isCatchUp(rec) ? [...rec.catchup!.rows, rec.row] : [rec.row]
+  const orig: Record<string, ObjRef[]> = {}
+  if (s.orig?.cards && typeof s.orig.cards === 'object') Object.assign(orig, s.orig.cards)
+  else for (const r of rows) { const l = await cardsUnder($, r); if (l.length) orig[r] = l }
+  const cards: CardIn[] = []
+  const binds: string[] = []
+  for (const ref of Object.values(orig).flat()) {
+    const o = await loadObject($, ref).catch(() => null)
+    if (!o || o.label) continue
+    const src = (o.source && typeof o.source === 'object' ? o.source : {}) as Any
+    cards.push({ id: String(o.id), title: String(o.title ?? src.title ?? ''), text: String(src.text ?? o.text ?? ''), data: src.data ?? {}, program: String(src.program ?? o.program ?? ''), ref, source: src })
+    for (const b of (o.lineage?.bindings ?? []) as Any[]) if (typeof b?.ref === 'string') binds.push(b.ref)
+  }
+  const root = Object.values(orig).flat()[0]?.root ?? (await rootHere($))
+  if (!root) return null
+  const outputs: Answer['outputs'] = []
+  for (const id of queryIdsOf([rec.text, ...cards.map(c => c.text)], binds).slice(0, MAX_OUTPUTS)) {
+    try {
+      const q = JSON.parse(String(await $.fs.read(`${root}/thimble/queries/${id}.json`)))
+      const out = String(q?.stdout ?? '').replace(/^\s*\n|\s+$/g, '')
+      if (out) outputs.push({ id, about: String(q.about ?? ''), text: out.length > OUTPUT_CHARS ? `${out.slice(0, OUTPUT_CHARS)}\n(cut here; the output has more)` : out })
+    } catch {
+      // a query the kernel no longer has: its cards still show
+    }
+  }
+  if (!cards.length && !outputs.length) return null
+  return { orig, cards, outputs, root }
+}
+
+/** A name for a new card that no card of the folder has yet: the reply's name as the kernel spells it, with -2, -3
+ *  after it when taken. */
+async function freshName($: Engine, root: string, name: string): Promise<string> {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'card'
+  const have = new Set(((await $.fs.list(`${root}/thimble/objects`).catch(() => [])) as { name: string }[]).map(x => x.name.replace(/\.json$/, '').replace(/^\d+-/, '')))
+  let out = slug
+  for (let i = 2; have.has(out); i++) out = `${slug}-${i}`
+  return out
+}
+
+/**
+ * The card changes of a reply, made as the person's: each edit saved as a new version of its card (the original's
+ * spec with the new parts laid over it), and marked as a change the analyst asked for (its detail says "edited"); each
+ * add saved as a new card; each drop only noted. A save that fails, or a card that does not draw after it, is left out
+ * with a problem that says why. Returns what held, in order, and the problems.
+ */
+async function applyCards($: Engine, answer: Answer, changes: Any[], levels: string): Promise<{ done: Any[]; problems: string[] }> {
+  const done: Any[] = []
+  const problems: string[] = []
+  const bin = `${$.plugin.root.replace(/\/+$/, '')}/bin/thimble`
+  for (const c of changes) {
+    const card = answer.cards.find(x => x.id === c.id) ?? null
+    if (c.op !== 'add' && !card) { problems.push(`the reply named a card ${String(c.id).slice(0, 40)} that is not under this answer`); continue }
+    if (c.op === 'drop') { done.push({ op: 'drop', id: card!.id, title: card!.title }); continue }
+    const spec = cardSpec(c, card?.source ?? {})
+    const name = c.op === 'edit' ? card!.id : await freshName($, answer.root, String(c.id))
+    const what = c.op === 'edit' ? `the change to "${card!.title}"` : `the new card "${String(spec.title || c.id).slice(0, 50)}"`
+    let saved: { id: string; v: number } | null = null
+    let out = ''
+    try {
+      // the spec in a file of thimble's own (the kernel reads stdin only when something waits on it)
+      const home = (await $.env.get('THIMBLE_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble`
+      const file = `${home.replace(/\/+$/, '')}/lean/squeeze-cards/${name}.json`
+      await $.fs.write(file, JSON.stringify(spec, null, 1))
+      const r = await $.process.run([bin, 'save', name, '--from', file, '--change', `squeeze: ${levels}`], { cwd: answer.root, env: await leanEnv($, answer.root), timeoutMs: 90000 })
+      out = String(r.stdout || '')
+      const m = /^saved (\S+) v(\d+):/m.exec(out)
+      if (r.exitCode === 0 && m) saved = { id: m[1]!, v: Number(m[2]) }
+      else out = (out + String(r.stderr || '')).trim()
+    } catch (err) {
+      out = String((err as Error)?.message || err)
+    }
+    if (!saved) { problems.push(`${what} could not be saved (${out.split('\n')[0]!.slice(0, 120) || 'no answer from thimble'}), so ${c.op === 'edit' ? 'the card stays as it was' : 'it was left out'}`); continue }
+    const ref = { id: saved.id, v: saved.v, root: answer.root }
+    const p = await prepared($, ref, 96).catch(err => ({ error: String((err as Error)?.message || err) }) as Any)
+    const broke = p.error || !p.grid ? String(p.error || 'no drawing') : p.drawing?.error ? `${p.drawing.error.name}: ${p.drawing.error.message}` : null
+    if (broke) { problems.push(`${what} did not draw (${broke.slice(0, 120)}), so ${c.op === 'edit' ? 'the card stays as it was' : 'it was left out'}`); continue }
+    for (const m of out.matchAll(/^\s+problem: (.+)$/gm)) problems.push(`card ${saved.id}: ${m[1]!.slice(0, 160)}`)
+    if (c.op === 'edit') await noteEdit($, answer.root, saved.id, saved.v)
+    done.push({ op: c.op, id: c.op === 'edit' ? card!.id : saved.id, ref, title: c.op === 'edit' ? card!.title : String(spec.title || saved.id) })
+  }
+  return { done, problems }
+}
+
+/** The cards a record's version shows, drawn under their rows: the version's when it changed one, else the
+ *  original's, with any card drawn there since that the squeeze never touched kept after them. Nothing for a record
+ *  no rewrite ever changed a card of. */
+export async function showCards($: Engine, rec: MsgRecord): Promise<void> {
+  const want = cardListsAt(rec) as Record<string, ObjRef[]> | null
+  if (!want) return
+  const s = ((rec as Any).squeeze ?? {}) as Any
+  const rows = new Set<string>([...Object.keys(s.orig?.cards ?? {}), ...Object.values((s.cards ?? {}) as Record<string, Any>).flatMap(v => Object.keys(v?.rows ?? {}))])
+  const known = cardsKnown(rec) as ObjRef[]
+  for (const r of rows) await setCardsUnder($, r, withLater(await cardsUnder($, r), want[r] ?? [], known) as ObjRef[])
+}
+
 /** One line per call in $THIMBLE_HOME/lean/squeeze.jsonl: its time, its tokens, what it wrote. */
 async function log($: Engine, row: Record<string, unknown>): Promise<void> {
   try {
@@ -400,7 +529,10 @@ export async function dismissCatchUp($: Engine, row: string, o: { undo?: boolean
   const rec = await recordNow($, row)
   if (!rec || !isCatchUp(rec)) return
   const read = typeof rec.shown === 'string' && !o.undo
-  await saveRecord($, { ...rec, catchup: { ...rec.catchup!, dismissed: true } } as MsgRecord)
+  const gone = { ...rec, catchup: { ...rec.catchup!, dismissed: true } } as MsgRecord
+  await saveRecord($, gone)
+  // the cards back as the replies had them
+  await showCards($, gone)
   if (!read) {
     const host = await recordNow($, rec.catchup!.host)
     if (host && host.caughtUp === row) {

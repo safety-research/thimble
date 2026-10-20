@@ -1,15 +1,15 @@
 // chips.js: the squeeze chips under a message, a program on the card runtime (draw/kit.js) over the message's record
 // (thimble/messages/<session>/<row>.json), drawn under the message; which chip is picked is the program's state.
 //
-// One row of chips: each its digit, its name, its dots and its level (`1 Length ○●○○○ short`); at the level where the
-// original stands a chip reads `as written`. The picked chip has a fill. Then, when two or more of Claude's replies
-// came since the person's last prompt, the scope chip (`4 Messages ●○ this reply`): moved to `all 3`, the chips write
-// those replies as one message in their place (a catch-up), and moved back the replies show again. Then the chips the
-// person typed (`5 for my manager ●○○○ as written`), and `+`, which adds one: typed in the chips while they hold the
-// keys, else in the prompt as `/squeeze <words>` (the host fills it). What a chip change does, the rewrite in place, is
-// the host's: the program asks for it with k.do('squeeze', {at}) (k.do('scope', {all}), k.do('own', {words}),
-// k.do('ownask')), and the record then holds the new text and the levels (and, while the call runs, where they go:
-// record.squeeze.want). Nothing is written under the chips: the bar says their keys.
+// One row of chips, drawn under the whole answer, after its last card: each its digit, its name, its dots and its level
+// (`1 Length ○●○○○ short`); at the level where the original stands a chip reads `as written`. The picked chip has a
+// fill. Then the chips the person typed (`4 for my manager ●○○○ as written`), and `+`, which adds one: typed in the
+// chips while they hold the keys, else in the prompt as `/squeeze <words>` (the host fills it). On a catch-up (every
+// reply since the person's last message, written as one) the chips work as on any answer, and 0 brings the replies
+// back. What a chip change does, the rewrite in place, is the host's: the program asks for it with k.do('squeeze',
+// {at}) (k.do('dismiss'), k.do('own', {words}), k.do('ownask')), and the record then holds the new text and the levels
+// (and, while the call runs, where they go: record.squeeze.want). Nothing is written under the chips: the bar says
+// their keys.
 //
 //   state: {focus: chip id, edge: chip id when the last step met the end of its scale, typing: what is typed after +}
 //   keys: [ ] shorter / longer (the picked chip's two ways, in its words) · 1–N chip (each chip drawn after its digit:
@@ -29,7 +29,7 @@ const WAYS = { length: 'shorter / longer', interpret: 'facts / meaning', familia
 export default {
   name: 'chips',
   title: 'Squeeze',
-  reads: args => [`record:${args.row}`, `sqz:${args.row}`, `held:chips-${args.row}`, `pile:${args.row}`],
+  reads: args => [`record:${args.row}`, `sqz:${args.row}`, `held:chips-${args.row}`],
   stateKey: args => `chips-${String(args.row || '').replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 64)}`,
   data(stores, args) {
     const rec = stores[`record:${args.row}`] || null
@@ -39,11 +39,8 @@ export default {
     // (the levels as Length's scale reads them now: a record from before the scale is read as atOf says)
     const lean = { text: rec.text, shown: rec.shown ?? null, verbs: rec.verbs ? { s: rec.verbs.s || null } : {}, squeeze: { at: atOf(rec), scale: SCALE, own: Array.isArray(s.own) ? s.own : [], want: s.want || null, running: !!s.running, error: s.error || null, problems: s.problems || [] } }
     const catchup = isCatchUp(rec) ? { replies: Number(rec.catchup.replies) || 0 } : null
-    // the replies since the person's last prompt, when two or more: the scope chip (all of them, on a catch-up)
-    const pile = stores[`pile:${args.row}`] || null
-    const scope = catchup ? { n: catchup.replies, all: true } : pile && pile.n >= 2 ? { n: pile.n, all: false } : null
     return {
-      row: args.row, rec: lean, catchup, scope,
+      row: args.row, rec: lean, catchup,
       // the chips hold the keyboard (a click gave it them): tab and the arrows reach them
       keys: !!stores[`held:chips-${args.row}`],
       // the terminal's own: a call running, a call that failed
@@ -61,9 +58,8 @@ export function program(k, data) {
   // where the chips go: a change on its way shows at once
   const at = rec.squeeze.want && !same(rec.squeeze.want, rec.squeeze.at) ? rec.squeeze.want : rec.squeeze.at
   const chips = chipsOf({ ...rec, squeeze: { ...rec.squeeze, at } })
-  const scope = data.scope ? { id: 'scope', kind: 'scope', name: 'Messages', levels: ['this reply', `all ${data.scope.n}`], level: data.scope.all ? 1 : 0, level0: 0 } : null
-  // the row in order: the fixed three, the scope chip, the person's own (the scope chip is the fourth, as its digit says)
-  const row = [...chips.filter(c => c.kind !== 'own'), ...(scope ? [scope] : []), ...chips.filter(c => c.kind === 'own')]
+  // the row in order: the fixed three, then the person's own
+  const row = [...chips.filter(c => c.kind !== 'own'), ...chips.filter(c => c.kind === 'own')]
   const focus = row.some(c => c.id === st.focus) ? st.focus : row[0].id
   const orig = isOriginal(chips)
   const pending = !!rec.squeeze.want && !same(rec.squeeze.want, rec.squeeze.at)
@@ -72,18 +68,12 @@ export function program(k, data) {
 
   // ---- what the person does
   // a catch-up never stands at its original (the replies it stands in for): a level that would bring it there is not
-  // set (0 or the scope chip shows the replies again)
+  // set (0 shows the replies again)
   const toOriginal = to => !!data.catchup && isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at: to } }))
   // a step names the key the bar names for it ([ or ], whichever key made it), so a rewrite that fails says which key
   // tries again; a step past the end of the scale says so, since nothing else would change. On a catch-up a step that
-  // would land on the original goes on past it. The scope chip asks the host for all the replies, or this one
+  // would land on the original goes on past it
   const step = (id, dir) => {
-    if (id === 'scope') {
-      const all = dir > 0
-      if (!scope || all === data.scope.all) return { focus: id, edge: id }
-      k.do('scope', { row: data.row, all })
-      return { focus: id, edge: null }
-    }
     let to = stepAt({ ...rec, squeeze: { ...rec.squeeze, at } }, id, dir)
     if (to && toOriginal(to)) to = stepAt({ ...rec, squeeze: { ...rec.squeeze, at: to } }, id, dir)
     if (!to) return { focus: id, edge: id }
@@ -109,7 +99,7 @@ export function program(k, data) {
   } else {
     // [ and ] say which way they move the picked chip, in its words: `[ ] shorter / longer`; with the keyboard in the
     // chips, ← and → do (and tab and shift+tab move between the chips)
-    const ways = WAYS[focus] || (focus === 'scope' ? 'this reply / all' : focus.startsWith('x-') ? 'less / more' : 'change')
+    const ways = WAYS[focus] || (focus.startsWith('x-') ? 'less / more' : 'change')
     k.on('[', () => step(focus, -1), held ? undefined : ways)
     k.on(']', () => step(focus, 1), held ? undefined : ways)
     const at0 = row.findIndex(c => c.id === focus)
@@ -139,7 +129,6 @@ export function program(k, data) {
     const dot = /^lvl-(.+)-(\d+)$/.exec(r)
     if (dot) {
       const lv = Number(dot[2])
-      if (dot[1] === 'scope') { if (scope && lv !== scope.level) k.do('scope', { row: data.row, all: lv === 1 }); return { focus: 'scope', edge: null, typing: null } }
       const c = chips.find(x => x.id === dot[1])
       if (c && lv !== c.level && !toOriginal({ ...at, [c.id]: lv })) k.do('squeeze', { row: data.row, at: { ...at, [c.id]: lv } })
       return { focus: dot[1], edge: null, typing: null }
@@ -149,7 +138,6 @@ export function program(k, data) {
     if (!c) return null
     if (c.id !== focus) return { focus: c.id, edge: null, typing: null }
     // a press on the picked chip steps it up, and from its last level back to its first
-    if (c.id === 'scope') { k.do('scope', { row: data.row, all: !data.scope.all }); return { focus: c.id, edge: null } }
     const to = stepAt({ ...rec, squeeze: { ...rec.squeeze, at } }, c.id, 1) || { ...at, [c.id]: 0 }
     if (!toOriginal(to)) k.do('squeeze', { row: data.row, at: to })
     return { focus: c.id, edge: null, typing: null }
@@ -164,7 +152,6 @@ export function program(k, data) {
   else if (pending || data.running) k.status('s ● rewriting…', 'warn')
   else if (edge) k.status(`${edge.name} goes no further than ${edge.levels[edge.level]}`, 'warn')
   else if (problem && typeof rec.shown === 'string') k.status(`! ${problem}`, 'warn')
-  else if (data.catchup) k.status(`s ● catch-up of ${data.catchup.replies} replies`, 'warn')
 
   // ---- the row of chips, wrapped to the width
   const W = Math.max(30, k.w)
@@ -174,7 +161,7 @@ export function program(k, data) {
     const bg = picked ? 'warn-faint' : null
     // at the level where the original stands a chip reads `as written`; Interpretation and Background say it only
     // while picked (`balanced, as written`), so the row keeps its width
-    const word = c.kind === 'scope' ? c.levels[c.level] : c.kind === 'fixed' && c.id !== 'length' && !picked && c.level === c.level0 ? c.levels[c.level] : levelWords(c)
+    const word = c.kind === 'fixed' && c.id !== 'length' && !picked && c.level === c.level0 ? c.levels[c.level] : levelWords(c)
     // the chip's digit first, the key that picks it
     const parts = [[' ', 'dim'], [`${items.length + 1}`, picked ? 'warn' : 'dim'], [' ', 'dim'], [c.name, picked ? 'warn' : 'dim', picked], [' ', 'dim'], ['dots'], [' ', 'dim'], [word, 'ink', picked], [' ', 'dim']]
     const width = parts.reduce((n, p) => n + (p[0] === 'dots' ? c.levels.length : k.len(p[0])), 0)

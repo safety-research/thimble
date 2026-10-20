@@ -100,28 +100,24 @@ test('chips: a change on its way shows at once from the record (squeeze.want), a
   assert.equal(d.status.text, 's ● rewriting…')
 })
 
-test('chips: two or more replies since the last prompt add the scope chip; all of them asks the host for one message in their place, and on that catch-up 0 or the scope chip brings the replies back', () => {
-  const pile = (rec, n) => PANES.chips.data({ 'record:r1': rec, 'sqz:r1': null, 'pile:r1': n ? { n } : null }, { row: 'r1' })
-  // one reply: no scope chip
-  assert.doesNotMatch(gridText(renderTerm(run(PANES.chips, pile(REC, 0)), { w: 140 })), /Messages/)
-  // three: the fourth chip, this reply; ] (or a press on its second dot) asks for all three
-  const three = run(PANES.chips, pile(REC, 3), { w: 140 })
-  assert.match(gridText(renderTerm(three, { w: 140 })), /3 Background ○○●○ working\s+4 Messages ●○ this reply\s+\+/)
-  assert.deepEqual(act(PANES.chips, pile(REC, 3), { focus: 'scope' }, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', all: true, do: 'scope' }])
-  assert.deepEqual(act(PANES.chips, pile(REC, 3), {}, { type: 'press', region: 'lvl-scope-1' }, 'browser').d.effects, [{ row: 'r1', all: true, do: 'scope' }])
-  assert.equal(barText([run(PANES.chips, pile(REC, 3), { state: { focus: 'scope' } })]), '[ ] this reply / all · 1–4 chip · s done · + your own')
-  // the catch-up: the scope chip at all 3; [ on it, or 0, lets it go and the replies show again
+test('chips: a catch-up has the same chips as any answer and no scope chip; Length makes it shorter or longer, 0 brings the replies back, and once written the bar names no catch-up', () => {
+  // a reply with others before it since the last prompt: the same three chips, nothing about how many replies
+  const one = chipsData(REC)
+  assert.doesNotMatch(gridText(renderTerm(run(PANES.chips, one, { w: 140 }), { w: 140 })), /Messages|this reply|all \d/)
   const CU = { ...REC, shown: 'Mostly [6,543 saves](q1#day=2026-06-18@n).', catchup: { host: 'r0', rows: ['r0'], replies: 3, question: 'when?', prompt: 'p0' }, squeeze: { at: { length: 1 } } }
   const data = chipsData(CU)
   const d0 = run(PANES.chips, data)
-  assert.match(gridText(renderTerm(run(PANES.chips, data, { w: 140 }), { w: 140 })), /4 Messages ○● all 3/)
-  assert.equal(barText([d0]), '[ ] shorter / longer · 1–4 chip · 0 revert · s done · + your own')
-  assert.equal(d0.status.text, 's ● catch-up of 3 replies')
-  assert.deepEqual(act(PANES.chips, data, { focus: 'scope' }, keyEvent('['), 'terminal').d.effects, [{ row: 'r1', all: false, do: 'scope' }])
+  const drawn = gridText(renderTerm(run(PANES.chips, data, { w: 140 }), { w: 140 }))
+  assert.match(drawn, /1 Length ○●○○○ short\s+2 Interpretation ○●○ some meaning\s+3 Background ○○●○ working\s+\+/)
+  assert.doesNotMatch(drawn, /Messages|this reply/)
+  assert.equal(barText([d0]), '[ ] shorter / longer · 1–3 chip · 0 revert · s done · + your own')
+  // written, it is an answer like any other: no line that reads as the offer to catch up
+  assert.ok(!d0.status)
   assert.deepEqual(act(PANES.chips, data, {}, keyEvent('0'), 'terminal').d.effects, [{ row: 'r1', do: 'dismiss' }])
   // from short, a step up would be its original (the replies as written): it goes on to longer; a press on the
   // original's dot does nothing
   assert.deepEqual(act(PANES.chips, data, {}, keyEvent(']'), 'terminal').d.effects, [{ row: 'r1', at: { length: 3 }, key: ']', do: 'squeeze' }])
+  assert.deepEqual(act(PANES.chips, data, {}, keyEvent('['), 'terminal').d.effects, [{ row: 'r1', at: { length: 0 }, key: '[', do: 'squeeze' }])
   assert.deepEqual(act(PANES.chips, data, {}, { type: 'press', region: 'lvl-length-2' }, 'browser').d.effects || [], [])
   // with another chip moved, as written is a rewrite like any other
   const moved = chipsData({ ...CU, squeeze: { at: { length: 1, familiarity: 1 } } })

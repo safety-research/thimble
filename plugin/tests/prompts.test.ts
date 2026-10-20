@@ -84,7 +84,7 @@ test('a compaction may drop the guide: the next data command brings it again', a
 test('a version that does not exist: the default is read, and one line says so', async ($, on) => {
   const w = world(on, { THIMBLE_PROMPTS: 'squeeze:v99' })
   expect((await bash($, 'thimble sources')).context.length).toBe(1)
-  expect(w.toasts.some(t => t.includes('no version squeeze:v99, so squeeze stays at v7'))).toBe(true)
+  expect(w.toasts.some(t => t.includes('no version squeeze:v99, so squeeze stays at v8'))).toBe(true)
 })
 
 test("a conversation's first message carries one thimble block: thimble is on here, so the skill comes for a question about these files", async ($, on) => {

@@ -145,7 +145,7 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(call.system).toBe('THE PROMPT')
   expect(call.prompt).toContain('The analyst asked: when did the agents edit most?')
   expect(call.prompt).toContain(TEXT)
-  expect(call.prompt).toContain('- Length: short, at most 11 words (levels one line · short · as written · longer · much longer; the original is at "as written", 18 words)')
+  expect(call.prompt).toContain('- Length: short, about a quarter of the original, about 5 words (levels one line · short · as written · longer · much longer; the original is at "as written", 18 words)')
   expect(call.prompt).toContain('- Interpretation: as the original')
   expect(call.prompt).toContain('- Background: as the original (levels new · learning · working · expert)')
   const rec = record(w)

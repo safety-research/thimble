@@ -16,11 +16,18 @@
 // chip counts in every rewrite: one $.model.complete call writes the message at all the chips' levels at once, and each
 // version written is kept, so a state seen before comes back with no call.
 //
-// A catch-up is a message of its own that the chips write of several of Claude's messages: those since the person's
-// last prompt, when replies piled up (shell/shell.tsx). Its record is a message's record with `catchup` set; its text
-// (the original) is the messages as written, one after another (catchUpText); the request names them as several
-// messages to write as one (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves, which
-// stay in the transcript above it, so it never shows its original: 0 dismisses it.
+// A catch-up is a message of its own that the chips write of several of Claude's messages: all of them since the
+// person's last prompt, when replies piled up (shell/shell.tsx). Its record is a message's record with `catchup` set;
+// its text (the original) is the messages as written, one after another (catchUpText); the request names them as
+// several messages to write as one (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies
+// themselves, which stay in the transcript above it, so it never shows its original: 0 dismisses it, and the replies
+// show again.
+//
+// The chips belong to the whole answer: its text and the cards drawn under it. With the squeeze switch for cards on,
+// the request shows the original's cards and the query outputs they and the text draw on (cardsBlock), and a reply
+// may edit a card (a new version of it, same id), add one, or leave one out (readCards). The term.ts side saves those
+// through the kernel; here the record keeps which cards each version shows, so a version seen before, and the
+// original, come back with their cards (cardListsAt).
 //
 // The record keeps it (CONTRACT 1, beside `shown`):
 //   squeeze: {
@@ -30,7 +37,10 @@
 //                                     had one line · short · medium · full), Background's four levels (records before
 //                                     scale 3 had five): levelsAt reads them
 //     versions: {key: text}           every version written, by its levels, so a state seen before comes back at once
-//     orig:     {marks}               the original's marks, so a sparkline's values outlive a version that dropped it
+//     cards:    {key: {rows, did}}    the cards of each version that changed one: rows {row: [{id, v, root}]} as
+//                                     drawn, did [{id, did: 'edited' | 'added' | 'left out', title, v}]
+//     orig:     {marks, cards}        the original's marks, so a sparkline's values outlive a version that dropped it,
+//                                     and its cards {row: [{id, v, root}]}, each at the version it had
 //     auto:     true                  it arrived squeezed (a long message, in sessions before arrival squeezes ended)
 //     problems: ['...']              what a rewrite said that the original does not (a number, a ref): shown, not hidden
 //     made:     [{key, ms, model, usage}]   each call, for its time and cost
@@ -249,16 +259,16 @@ export function wordsOf(text) {
   return String(text || '').replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, '$1').split(/\s+/).filter(w => /[\p{L}\p{N}]/u.test(w)).length
 }
 
-/** What a level of Length means for this message, in words: the model keeps a number better than a level's name. A
- *  correction the request lists does not count against it (`keep`: how many there are). Longer and much longer are
- *  about one and a half and two and a half times the original: room to explain, never to add. */
+/** What a level of Length means for this message: a target the model aims for, set by the original's length (the
+ *  model keeps a number better than a level's name). One line is what its name says, the main point in one sentence.
+ *  Short is about a quarter of the original; longer and much longer are about one and a half and two and a half times
+ *  it: room to explain, never to add. A correction the request lists does not count against it (`keep`: how many). */
 export function lengthTarget(level, words, keep = 0) {
-  if (level === 0) return keep ? `one sentence, at most 35 words, then each correction listed below in a few words` : 'one sentence, at most 35 words'
-  // a quarter of the original, but never longer than most of a short message, and short stays short
+  if (level === 0) return keep ? 'one sentence with its main point, then each correction listed below in a few words' : 'one sentence with its main point'
   const round = n => (n >= 40 ? Math.round(n / 5) * 5 : Math.max(1, Math.round(n)))
-  if (level === 1) return `at most ${round(Math.min(120, Math.max(Math.min(30, words * 0.6), words * 0.25)))} words`
-  if (level === 3) return `about ${round(Math.max(words * 1.5, words + 60))} words`
-  if (level === 4) return `about ${round(Math.max(words * 2.5, words + 150))} words`
+  if (level === 1) return `about a quarter of the original, about ${round(words / 4)} words`
+  if (level === 3) return `about one and a half times the original, about ${round(words * 1.5)} words`
+  if (level === 4) return `about two and a half times the original, about ${round(words * 2.5)} words`
   return `about ${words} words, as the original`
 }
 
@@ -283,12 +293,14 @@ export const isCatchUp = rec => !!(rec && rec.catchup && typeof rec.catchup === 
 export const catchUpStands = rec => isCatchUp(rec) && !rec.catchup.dismissed
 
 /**
- * The $.model.complete request that writes the message at its chips' levels. `system` is prompt.md's text.
- * The fixed text goes first and is marked for the prompt cache: prompt.md, then the question and the original, so a
- * second change of the same message reads them from the cache.
+ * The $.model.complete request that writes the message at its chips' levels. `system` is prompt.md's text, and
+ * `toolkit` the card guide's toolkit, sent only with cards. The fixed text goes first and is marked for the prompt
+ * cache: prompt.md, then the question, the original and its cards, so a second change of the same message reads them
+ * from the cache.
  */
-/** @param {any} rec @param {{system?: string, question?: string, chips?: any[], keep?: string[], terms?: string[], model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
-export function request(rec, { system, question = '', chips = chipsOf(rec), keep = [], terms = [], model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
+/** @param {any} rec @param {{system?: string, toolkit?: string, question?: string, chips?: any[], keep?: string[], terms?: string[], cards?: any[], outputs?: any[], model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
+export function request(rec, { system, toolkit = '', question = '', chips = chipsOf(rec), keep = [], terms = [], cards = [], outputs = [], model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
+  const drawn = cardsBlock(cards, outputs)
   const head = [
     question ? `The analyst asked: ${question.trim().slice(0, 2000)}` : 'The analyst\'s question is not known.',
     '',
@@ -296,6 +308,7 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), keep
     '<original>',
     String(rec?.text ?? ''),
     '</original>',
+    ...(drawn ? ['', drawn] : []),
   ].join('\n')
   const words = wordsOf(rec?.text)
   const lines = chips.map(c => chipLine(c, words, keep.length)).filter(Boolean)
@@ -306,17 +319,206 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), keep
   const tail = ['', 'The chips, each at the level to write now:', ...lines, ...kept, ...named, '', 'Write the message at these levels.']
   return {
     model, effort, maxTokens, timeoutMs,
-    system: [{ text: String(system || ''), cache: true }],
+    system: [{ text: String(system || ''), cache: true }, ...(drawn && toolkit ? [{ text: String(toolkit), cache: true }] : [])],
     prompt: [{ text: head, cache: true }, { text: tail.join('\n') }],
   }
 }
 
-/** The reply: the text in <text> tags, or the whole reply when it gave none (a code fence around it dropped). */
+/** The reply: the text in <text> tags, or the whole reply when it gave none (a code fence around it dropped, and any
+ *  card blocks), and the card changes it asks for (readCards). */
 export function readReply(raw) {
   const s = String(raw || '')
   const t = /<text>\s*\n?([\s\S]*?)\n?\s*<\/text>/i.exec(s)
-  const text = (t ? t[1] : s).replace(/^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i, '$1').trim()
-  return { text }
+  const text = (t ? t[1] : s.replace(CARD_BLOCK, '')).replace(/^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i, '$1').trim()
+  return { text, ...readCards(s) }
+}
+
+// ------------------------------------------------------------------------------------------------ the cards
+
+/** A card change in a reply: `<card edit="ID">…</card>`, `<card add="name">…</card>` or `<card drop="ID"/>`. */
+const CARD_BLOCK = /<card\s+(edit|add|drop)\s*=\s*"([^"]{1,80})"\s*(?:\/>|>([\s\S]*?)<\/card>)/gi
+const FIELD = name => new RegExp(`<${name}>\\s*\\n?([\\s\\S]*?)\\n?\\s*</${name}>`, 'i')
+
+/**
+ * The card changes a reply asks for, in order: {op: 'edit' | 'add' | 'drop', id, title?, takeaway?, data?, program?},
+ * each part only when given. A part that does not read (data that is no JSON object) is a problem, and its change is
+ * left out. Returns {cards, cardProblems}.
+ */
+export function readCards(raw) {
+  const cards = []
+  const cardProblems = []
+  for (const m of String(raw || '').matchAll(CARD_BLOCK)) {
+    const op = m[1].toLowerCase()
+    const id = m[2].trim()
+    const body = m[3] || ''
+    const c = { op, id }
+    for (const [k, tag] of [['title', 'title'], ['takeaway', 'takeaway'], ['program', 'program']]) {
+      const f = FIELD(tag).exec(body)
+      if (f) c[k] = k === 'program' ? f[1].replace(/^\s*```(?:js|javascript)?\s*\n([\s\S]*?)\n```\s*$/i, '$1') : f[1].replace(/\s+/g, ' ').trim()
+    }
+    const d = FIELD('data').exec(body)
+    if (d) {
+      try {
+        const v = JSON.parse(d[1])
+        if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('not an object')
+        c.data = v
+      } catch {
+        cardProblems.push(`the change to card ${id} gave data that is no JSON object, so the card stays as it was`)
+        continue
+      }
+    }
+    if (op === 'add' && (!c.program || !c.data)) {
+      cardProblems.push(`the new card ${id} came without ${!c.program ? 'a program' : 'its data'}, so it was not added`)
+      continue
+    }
+    if (op === 'edit' && !['title', 'takeaway', 'program', 'data'].some(k => k in c)) continue
+    cards.push(c)
+  }
+  return { cards, cardProblems }
+}
+
+/** A card as the request shows it: its id, its question as title, its takeaway, its data bindings and its program. */
+function cardLines(c) {
+  return [
+    `<card id="${c.id}">`,
+    `<title>${String(c.title || '').trim()}</title>`,
+    `<takeaway>${String(c.text || '').trim()}</takeaway>`,
+    `<data>${JSON.stringify(c.data ?? {})}</data>`,
+    '<program>',
+    String(c.program || '').trim(),
+    '</program>',
+    '</card>',
+  ]
+}
+
+/**
+ * The block of the request that shows the cards drawn under the original, in order, and the query outputs that they and
+ * the original cite, as Claude read them when it ran each query: what a card may bind and draw. '' with neither.
+ * `cards`: [{id, title, text, data, program}]; `outputs`: [{id, about, text}].
+ */
+export function cardsBlock(cards = [], outputs = []) {
+  const out = []
+  if (cards.length) out.push('The cards drawn under the original, in order:', ...cards.flatMap(cardLines))
+  if (outputs.length) {
+    if (out.length) out.push('')
+    out.push('The query outputs that these cards and the original draw on. A card binds one by its id in its data, as {"rows": "r2"}, and gets its rows:')
+    for (const o of outputs) out.push(`<output id="${o.id}" about="${String(o.about || '').replace(/"/g, "'")}">`, String(o.text || '').replace(/\s+$/, ''), '</output>')
+  }
+  return out.join('\n')
+}
+
+/** The card guide's toolkit, which a card's program is written with: its section from "## The toolkit" to the next
+ *  heading of that level, or the whole guide when it has none. */
+export function toolkitOf(guide) {
+  const s = String(guide || '')
+  const m = /^## The toolkit[^\n]*$/m.exec(s)
+  if (!m) return s.trim()
+  const rest = s.slice(m.index + m[0].length)
+  const next = /^## /m.exec(rest)
+  return (m[0] + (next ? rest.slice(0, next.index) : rest)).trim()
+}
+
+/** The query ids a card's data binds and a text cites (`r2#...`, `r4@n`, `q3`), in order, each once. */
+export function queryIdsOf(texts = [], bindings = []) {
+  const ids = []
+  const add = id => { if (/^[qr]\d+$/.test(id) && !ids.includes(id)) ids.push(id) }
+  for (const b of bindings) if (typeof b === 'string') add(b.split(/[#@]/)[0])
+  for (const t of texts) for (const m of String(t || '').matchAll(/\]\(([qr]\d+)(?:[#@)])/g)) add(m[1])
+  return ids
+}
+
+/** The spec a card change saves: an edit lays its parts over the original card's spec (its data bindings merged), an
+ *  add is its own. The takeaway is the card's `text`. */
+export function cardSpec(change, source = {}) {
+  const base = change.op === 'add' ? {} : { ...(source || {}) }
+  const spec = { ...base }
+  if (change.title != null) spec.title = change.title
+  if (change.takeaway != null) spec.text = change.takeaway
+  if (change.program != null) spec.program = change.program
+  if (change.data != null) spec.data = change.op === 'add' ? change.data : { ...((base.data && typeof base.data === 'object' && !Array.isArray(base.data)) ? base.data : {}), ...change.data }
+  return spec
+}
+
+const sameRef = (a, b) => a.id === b.id && (a.root ?? null) === (b.root ?? null)
+
+/**
+ * The cards of a version, by row, from the original's (`orig`: {row: [ref]}) and the changes that held (`done`:
+ * [{op, id, ref, title}], each edit and add with the ref it saved): an edit takes its card's place, an add goes after
+ * the last card of the answer (`row`), a drop leaves its card out. Returns {rows, did}.
+ */
+export function cardsAfter(orig, row, done) {
+  const rows = Object.fromEntries(Object.entries(orig || {}).map(([r, l]) => [r, [...(l || [])]]))
+  if (!rows[row]) rows[row] = []
+  const did = []
+  for (const d of done || []) {
+    if (d.op === 'add') { rows[row].push(d.ref); did.push({ id: d.ref.id, did: 'added', title: d.title || d.ref.id, v: d.ref.v }); continue }
+    for (const [r, l] of Object.entries(rows)) {
+      const i = l.findIndex(x => x.id === d.id)
+      if (i < 0) continue
+      if (d.op === 'edit') { l[i] = { ...l[i], ...d.ref }; did.push({ id: d.id, did: 'edited', title: d.title || d.id, v: d.ref.v }) }
+      else { l.splice(i, 1); did.push({ id: d.id, did: 'left out', title: d.title || d.id }) }
+      rows[r] = l
+      break
+    }
+  }
+  return { rows, did }
+}
+
+/** The key of the version a record shows now: its levels' key, or `orig` at the original (a catch-up let go too). */
+function versionKey(rec) {
+  if (!rec || typeof rec.shown !== 'string') return 'orig'
+  if (isCatchUp(rec) && rec.catchup.dismissed) return 'orig'
+  return keyOf(chipsOf(rec))
+}
+
+/** The cards a record's version shows, by row: that version's when it changed a card, else the original's. Null when
+ *  no rewrite of it ever touched its cards (the cards under it are then as they are). */
+export function cardListsAt(rec) {
+  const s = sq(rec)
+  const orig = s.orig && s.orig.cards
+  if (!orig || !s.cards || !Object.keys(s.cards).length) return null
+  const v = s.cards[versionKey(rec)]
+  return { ...orig, ...((v && v.rows) || {}) }
+}
+
+/** What the version shown now did to the cards: [{id, did, title}], [] at the original or with no change. */
+export function cardsDid(rec) {
+  const s = sq(rec)
+  const v = s.cards && s.cards[versionKey(rec)]
+  return (v && Array.isArray(v.did)) ? v.did : []
+}
+
+/** What the version shown now did to the cards under one row, for the notes drawn there: `marks` {id: 'edited' |
+ *  'added'} for the cards drawn, and `left` the titles of the row's cards it left out. */
+export function cardNotesFor(rec, row) {
+  const did = cardsDid(rec)
+  const out = { marks: {}, left: [] }
+  if (!did.length) return out
+  const s = sq(rec)
+  const orig = (s.orig && s.orig.cards && s.orig.cards[row]) || []
+  const now = (cardListsAt(rec) || {})[row] || []
+  for (const d of did) {
+    if (d.did === 'left out') { if (orig.some(x => x.id === d.id)) out.left.push(d.title) }
+    else if (now.some(x => x.id === d.id)) out.marks[d.id] = d.did
+  }
+  return out
+}
+
+/** Every card any version of the record drew or the original had: the cards the squeeze answers for. */
+export function cardsKnown(rec) {
+  const s = sq(rec)
+  const out = []
+  const add = l => { for (const x of l || []) if (x && x.id && !out.some(y => sameRef(x, y))) out.push(x) }
+  for (const l of Object.values((s.orig && s.orig.cards) || {})) add(l)
+  for (const v of Object.values(s.cards || {})) for (const l of Object.values((v && v.rows) || {})) add(l)
+  return out
+}
+
+/** A row's cards as a version wants them, with the cards drawn there since that the squeeze never touched (a card v
+ *  made later) kept after them. */
+export function withLater(current, want, known) {
+  const later = (current || []).filter(x => !known.some(y => sameRef(x, y)))
+  return [...(want || []), ...later]
 }
 
 /** The terms of a record's explain marks (its glosses), for the rewrite to keep in their words: at most `max`. */
@@ -549,14 +751,22 @@ export function revealStep(total, tickMs = 50) {
  * `remark` (shell/message.js) places the marks again; it is passed in so this file needs no import. `made` is the
  * call's {ms, model, usage}.
  */
-/** @param {any} rec @param {{text: string, at: Record<string, number>, made?: any, problems?: string[]}} change @param {(r: any) => any} remark */
-export function applyRewrite(rec, { text, at, made = null, problems = [] }, remark) {
+/** @param {any} rec @param {{text: string, at: Record<string, number>, made?: any, problems?: string[], cards?: {rows: Record<string, any[]>, did: any[]} | null, origCards?: Record<string, any[]> | null}} change @param {(r: any) => any} remark */
+export function applyRewrite(rec, { text, at, made = null, problems = [], cards = null, origCards = null }, remark) {
   const s0 = sq(rec)
-  const s = { ...s0, at: { ...at }, scale: SCALE, versions: scaledVersions(s0), orig: s0.orig || { marks: (rec.shown == null ? rec.marks : []) || [] } }
+  const orig = s0.orig || { marks: (rec.shown == null ? rec.marks : []) || [] }
+  // the original's cards, kept from the first rewrite that was shown them
+  const s = { ...s0, at: { ...at }, scale: SCALE, versions: scaledVersions(s0), orig: origCards && !orig.cards ? { ...orig, cards: origCards } : orig }
   const probe = { ...rec, squeeze: s }
   const chips = chipsOf(probe)
   const key = keyOf(chips)
   s.versions[key] = text
+  // the cards of this version, when it changed one; a version that changed none shows the original's
+  const kept = { ...(s0.cards || {}) }
+  if (cards && Array.isArray(cards.did) && cards.did.length) kept[key] = cards
+  else delete kept[key]
+  if (Object.keys(kept).length) s.cards = kept
+  else delete s.cards
   s.problems = problems
   if (made) s.made = [...(s0.made || []), { key, ...made }].slice(-20)
   const prev = [...(rec.marks || []), ...((s.orig && s.orig.marks) || [])]
@@ -621,15 +831,19 @@ export function shownKey(rec) {
 export function settledNote(rec, told = 'orig') {
   if (!rec || shownKey(rec) === told) return ''
   const set = chipsOf(rec).filter(c => c.level !== c.level0).map(c => `${c.name}: ${c.levels[c.level]}`).join(', ')
+  // the cards under it, when this version changed them, and back as they were when an earlier one had
+  const did = cardsDid(rec)
+  const cards = did.length ? `\n\nIts cards changed with it: ${did.map(d => `"${d.title}" (${d.id}) ${d.did}${d.did === 'edited' ? `, now version ${d.v}` : ''}`).join('; ')}.` : ''
+  const asWere = sq(rec).cards ? ', with its cards as they were' : ''
   if (isCatchUp(rec)) {
     const n = Number(rec.catchup.replies) || 0
     const of = n === 1 ? 'reply' : `${n} replies`
-    if (rec.catchup.dismissed || typeof rec.shown !== 'string') return told === 'orig' ? '' : `The analyst went back to reading your ${of} since their last prompt as you wrote them.`
+    if (rec.catchup.dismissed || typeof rec.shown !== 'string') return told === 'orig' ? '' : `The analyst went back to reading your ${of} since their last prompt as you wrote them${asWere}.`
     const named = String(rec.text || '').split('\n\n---\n\n').map(t => `"${firstWordsOf(t)}"`).join('; ')
-    return `The analyst caught up on your ${of} since their last prompt. In place of those messages (${named}), they now read one message that the squeeze chips wrote of them${set ? ` (${set})` : ''}:\n\n${rec.shown.slice(0, 12000)}\n\n(What you wrote is unchanged, and the analyst can go back to it.)`
+    return `The analyst caught up on your ${of} since their last prompt. In place of those messages (${named}), they now read one message that the squeeze chips wrote of them${set ? ` (${set})` : ''}:\n\n${rec.shown.slice(0, 12000)}${cards}\n\n(What you wrote is unchanged, and the analyst can go back to it.)`
   }
   const when = clockOf(rec.at)
   const which = `Your message${when ? ` from ${when}` : ''} ("${firstWordsOf(rec.text)}")`
-  if (typeof rec.shown !== 'string') return told === 'orig' ? '' : `${which} reads again, for the analyst, as you wrote it.`
-  return `${which} now reads, for the analyst, as:\n\n${rec.shown.slice(0, 12000)}\n\n(The squeeze chips wrote this version of yours${set ? ` (${set})` : ''}. What you wrote is unchanged, and the analyst can go back to it.)`
+  if (typeof rec.shown !== 'string') return told === 'orig' ? '' : `${which} reads again, for the analyst, as you wrote it${asWere}.`
+  return `${which} now reads, for the analyst, as:\n\n${rec.shown.slice(0, 12000)}${cards}\n\n(The squeeze chips wrote this version of yours${set ? ` (${set})` : ''}. What you wrote is unchanged, and the analyst can go back to it.)`
 }
