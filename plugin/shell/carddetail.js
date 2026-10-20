@@ -2,17 +2,17 @@
 // browser page (browser/card/card.js) both use it, so the two say the same thing.
 //
 // The detail has one pattern for every card ("overview first, zoom and filter, details on demand"): a header (title,
-// takeaway, v1 · v2), the card enlarged with its parts, and a bar under it that starts empty and fills on demand with
+// takeaway, "edited"), the card enlarged with its parts, and a bar under it that starts empty and fills on demand with
 // the examples of the selected part, labelled with what they are examples of, and their "from" line. The card's
 // thread is the chat beside it, and the program is behind `p`.
 //
 //   partsOf(grid)                 the parts a person selects, in reading order: [{id, label, rects, knob?}]
 //   stepPart(parts, at, dir)      the part after `at` (dir 1) or before it (dir -1), wrapping
-//   versionsOf(object, seen)      [{v, at, change, seen?, drafts?}] from the latest object's history, with which ones the
-//                                 person saw (runtime.ts readSeen)
-//   shownVersions(versions, v)    the versions the header lists: those seen, and the one shown
+//   versionsOf(object)            [{v, at, change}] from the latest object's history (the lineage's)
+//   editsOf(object, edits)        [{v, n}]: the card as first made and after each change the analyst asked for, which
+//                                 h steps back through (runtime.ts readEdits)
 //   PAGES_DEFAULT                 how a card with pages opens: 'all' (every page, one after another) or 'one'
-//   stepVersion(versions, v)      the version `h` goes to: the one before, and from v1 the latest
+//   stepVersion(versions, v)      the version `h` goes to: the one before, and from the first the latest
 //   keyOf(key, ctx)               what a key does in the detail, or null; keys act only while the composer is empty
 //   exampleSet(drawing, meta)     the examples the program attached to a part, or null
 //   recordWords(rec, o)           a record as the person reads it: {words, meta}, never a dump of field: value
@@ -61,29 +61,26 @@ export function stepPart(parts, at, dir = 1) {
 
 // ---------------------------------------------------------------------------------------------- versions
 
-/** Every version, oldest first. With `seen` (the versions the person could see; null when no record was kept), each
- *  says whether it was seen, and a seen one how many unseen drafts came just before it. The latest always counts. */
-export function versionsOf(object, seen = null) {
+/** Every version the kernel keeps, oldest first (the lineage's; the detail lists none of them by number). */
+export function versionsOf(object) {
   const h = Array.isArray(object?.history) ? object.history : []
   const out = h.filter(x => x && x.v != null).map(x => ({ v: Number(x.v), at: x.at || null, change: x.change || null }))
   if (!out.length && object?.version != null) out.push({ v: Number(object.version), at: object.updated || null, change: null })
-  out.sort((a, b) => a.v - b.v)
-  if (Array.isArray(seen)) {
-    const was = new Set(seen.map(Number))
-    const last = out.length ? out[out.length - 1].v : null
-    let drafts = 0
-    for (const x of out) {
-      x.seen = was.has(x.v) || x.v === last
-      if (!x.seen) drafts++
-      else { if (drafts) x.drafts = drafts; drafts = 0 }
-    }
-  }
-  return out
+  return out.sort((a, b) => a.v - b.v)
 }
 
-/** The versions the header lists: those the person saw (all, when no record says), and the one shown now. */
-export function shownVersions(versions, v) {
-  return (versions || []).filter(x => x.seen !== false || x.v === v)
+/**
+ * The card as `h` steps back through it: as first made, then after each change the analyst asked for (`edits`, the
+ * first version each such change saved: runtime.ts readEdits), oldest first; the last is the card now. Each stands at
+ * the last version before the next change, so a fix, a label's reads or a draft folds into the change it followed.
+ * `n` is 0 for the card as first made, else the change's number. Empty when the analyst asked for no change.
+ */
+export function editsOf(object, edits) {
+  const latest = Number(object?.version)
+  if (!(latest > 1)) return []
+  const starts = [...new Set((edits || []).map(Number).filter(v => Number.isInteger(v) && v > 1 && v <= latest))].sort((a, b) => a - b)
+  if (!starts.length) return []
+  return [{ v: starts[0] - 1, n: 0 }, ...starts.map((s, i) => ({ v: i + 1 < starts.length ? starts[i + 1] - 1 : latest, n: i + 1 }))]
 }
 
 /** `h` steps back one version; from the first it goes to the latest again (B4: v2 → v1 → v2). */

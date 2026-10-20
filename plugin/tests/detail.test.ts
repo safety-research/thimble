@@ -1,5 +1,5 @@
 // The card detail (shell/detail.tsx) and the side threads (shell/thread.ts): one pattern for every card (header with
-// v1 · v2, the card with its part marked, the claim with [ ] n of m, the "from" line, the examples' words), keys that
+// "edited", the card with its part marked, the claim with [ ] n of m, the "from" line, the examples' words), keys that
 // act only while the composer is empty (and give their letter back when they began a word), a question typed while the
 // detail is open goes to the card's side thread and never to main, the thread's reports never enter main, a question
 // after a part change names the new part, and the thread's turns come from its agent's transcript.
@@ -42,6 +42,8 @@ function world(on: any, prep: (input: Any) => Any = () => DRAWING, open: Any = {
   const files: Record<string, string> = {
     [`${ROOT}/thimble/objects/01-saves.json`]: JSON.stringify(OBJECT),
     [`${ROOT}/thimble/objects/.versions/01-saves/v1.json`]: JSON.stringify(V1),
+    // v2 is a change the analyst asked for ("split by label"): the header says edited, and h steps back to v1
+    [`${ROOT}/thimble/objects/.edits/01-saves.json`]: JSON.stringify({ edits: [2] }),
   }
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files || e.path === `${ROOT}/thimble/objects` }))
   on('fs.list', () => ({ value: [] }))
@@ -134,7 +136,7 @@ async function pane($: any, clock: { settle: () => Promise<void> }): Promise<str
   return textOf(await $.ui.render(PANE))
 }
 
-test('overview first: the card enlarged under its title, takeaway and v1 · v2; the bar under it starts empty, and e fills it with examples labelled with what they are examples of', async ($, on) => {
+test('overview first: the card enlarged under its title, takeaway and "edited"; the bar under it starts empty, and e fills it with examples labelled with what they are examples of', async ($, on) => {
   const w = world(on)
   const clock = mock.clock(on)
   await $.command.run({ command: 'card', args: '01-saves day-2026-06-18' } as never)
@@ -143,9 +145,10 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   expect(w.opened.at(-1)).toMatchObject({ id: 'object', focus: true, closeOnEscape: true })
   const t = await pane($, clock)
   expect(t).toContain('Saves per day')
-  // the card's id shows here only, in the header, beside its versions
+  // the card's id shows here only, in the header, beside "edited" once the analyst asked for a change
   expect(t).toContain('card:01-saves')
-  expect(t).toContain('v1 · v2')
+  expect(t).toContain('edited')
+  expect(t).not.toContain('v1 · v2')
   expect(t).toContain('June 18 had 6,543 saves.')
   // the selected part is marked beside the card (the page above it is the detail's program, panes/detail.js)
   expect(t).toContain('▸')
@@ -157,7 +160,7 @@ test('overview first: the card enlarged under its title, takeaway and v1 · v2; 
   // the empty bar is whitespace: no frame, no words; its keys are in the hint line
   expect(t).not.toContain('details')
   expect(t).not.toContain('esc back')
-  expect(await hintOf($)).toContain('↑↓ part · ↵ details · e examples · p program · h versions · type to ask about Jun 18 · esc back')
+  expect(await hintOf($)).toContain('↑↓ part · ↵ details · e examples · p program · h earlier version · type to ask about Jun 18 · esc back')
   // ↵ on the selected part (the ring's press) fills the bar with its details: where it comes from, and its examples one key away
   const ui = await $.ui.mount({ plugin: 'thimble', ...(PANE as Any) } as never)
   await clock.settle()

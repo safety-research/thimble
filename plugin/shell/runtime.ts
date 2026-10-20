@@ -112,36 +112,38 @@ export async function writeCardState($: Engine, root: string, id: string, st: { 
   }
 }
 
-// ---------------------------------------------------------------- the versions the person saw
-// A card saved several times in one turn (Claude fixing it before its reply was done) was seen once, at the version
-// drawn under the finished reply. thimble/objects/.seen/<id>.json lists the versions the person could see: the one a
-// turn of main's left under its reply, a label's new version drawn in place, the latest the detail drew. The detail's
-// header lists those; the others are drafts, still a key away (carddetail.js versionsOf).
+// ---------------------------------------------------------------- the changes the analyst asked for
+// Claude saves a card again for many reasons: the save reported a problem and Claude fixed it, a label's reads landed,
+// the analyst's checks were counted, a draft was written over. The kernel keeps every version (lineage), but only a
+// change the analyst asked for is an edit the detail shows: a version a turn of main's saved when the analyst typed
+// that turn's prompt, the card was there before the turn, and the version the turn began from drew without problems
+// (shell.tsx noteEdits); and the same for a side thread, which only the analyst's question starts.
+// thimble/objects/.edits/<id>.json keeps {edits: [the first version each such change saved]}. The detail's header says
+// "edited", and h steps back through the card as it stood after each change, and as first made (carddetail.js editsOf).
 
-export const seenFile = (root: string, id: string) => `${root.replace(/\/+$/, '')}/thimble/objects/.seen/${id}.json`
+export const editsFile = (root: string, id: string) => `${root.replace(/\/+$/, '')}/thimble/objects/.edits/${id}.json`
 
-/** The versions of a card the person could see, oldest first; null for a card with no record (one saved before the
- *  record was kept), whose versions all count. */
-export async function readSeen($: Engine, root: string, id: string): Promise<number[] | null> {
-  if (!ID.test(id)) return null
+/** The first version of each change the analyst asked for, oldest first; none for a card never changed so. */
+export async function readEdits($: Engine, root: string, id: string): Promise<number[]> {
+  if (!ID.test(id)) return []
   try {
-    const f = seenFile(root, id)
-    if (!(await $.fs.exists(f))) return null
+    const f = editsFile(root, id)
+    if (!(await $.fs.exists(f))) return []
     const v = JSON.parse(String(await $.fs.read(f)))
-    return Array.isArray(v?.seen) ? v.seen.map(Number).filter((x: number) => Number.isInteger(x)) : null
+    return Array.isArray(v?.edits) ? v.edits.map(Number).filter((x: number) => Number.isInteger(x) && x > 1) : []
   } catch {
-    return null
+    return []
   }
 }
 
-/** Version `v` of a card was where the person could see it. */
-export async function noteSeen($: Engine, root: string, id: string, v: number | null | undefined): Promise<void> {
-  if (!ID.test(id) || v == null || !Number.isInteger(Number(v))) return
-  const was = (await readSeen($, root, id)) ?? []
+/** Version `v` of a card began a change the analyst asked for. */
+export async function noteEdit($: Engine, root: string, id: string, v: number | null | undefined): Promise<void> {
+  if (!ID.test(id) || v == null || !Number.isInteger(Number(v)) || Number(v) < 2) return
+  const was = await readEdits($, root, id)
   if (was.includes(Number(v))) return
   try {
-    await $.fs.write(seenFile(root, id), JSON.stringify({ seen: [...was, Number(v)].sort((a, b) => a - b), at: new Date().toISOString() }, null, 1))
+    await $.fs.write(editsFile(root, id), JSON.stringify({ edits: [...was, Number(v)].sort((a, b) => a - b), at: new Date().toISOString() }, null, 1))
   } catch {
-    // the header lists every version then, as before
+    // the header says nothing of the change then
   }
 }

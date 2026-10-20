@@ -101,7 +101,7 @@ test('detail: one page on both surfaces; the part selected and the bar are its s
   assert.deepEqual(ring.state, click.state)
   // a click on the part already selected opens its details (the ring resting on it does not)
   assert.equal(act(PANES.detail, data, click.state, { type: 'press', region: 'day-2026-06-18' }, 'browser').state.bar, 'details')
-  assert.equal(barText([run(PANES.detail, data)]), '↑↓ part · ↵ details · e examples · p program · h versions · esc back')
+  assert.equal(barText([run(PANES.detail, data)]), '↑↓ part · ↵ details · e examples · p program · h earlier version · esc back')
   // the browser has no o: it is the browser
 })
 

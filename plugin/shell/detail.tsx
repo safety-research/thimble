@@ -8,7 +8,7 @@
 // terminal's host for both:
 //
 //   card       the card detail is a program on the card runtime (panes/detail.js), the same one the browser draws for
-//              a card's detail: a header (the title, the card's id, v1 · v2), the takeaway, the card enlarged with its
+//              a card's detail: a header (the title, the card's id, "edited"), the takeaway, the card enlarged with its
 //              parts, and a bar under it that starts empty and fills on demand with the selected part's details and
 //              examples; the program behind p. Its state (the part selected, what the bar shows) is kept in
 //              thimble/panes/<session>/detail-<id>.json, so the browser opens the card where the terminal left it. The
@@ -41,12 +41,12 @@ import type { Sel } from '../types'
 import { renderTerm } from '../draw/term.js'
 import { barText, hostKeys } from '../panes/host.js'
 import { paintRegions, regionOfKey } from './cells'
-import { askMerge, beganWord, examplesView, PAGES_DEFAULT, partsOf, versionsOf } from './carddetail.js'
+import { askMerge, beganWord, editsOf, examplesView, PAGES_DEFAULT, partsOf } from './carddetail.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
 import { citeLabels, currentTheme, keysMoved, loadObject, openDetail, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadCount, threadFor, threadOf } from './thread'
-import { cardEvent, cardKey, noteSeen, ownState, pressTaken, readCardState, readSeen, writeCardState } from './runtime'
+import { cardEvent, cardKey, ownState, pressTaken, readCardState, readEdits, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
 import { type KeyEdit, type KeyTurn } from './keys'
 import { paneFire, paneNow, paneRun, paneState, paneTakes, patchPaneState, setPaneState } from './panes'
@@ -367,17 +367,12 @@ export async function cardStore($: Engine, id: string): Promise<Any> {
   const p = fresh ?? (lastCard && lastCard.key === `${sel.root}|${sel.id}|${sel.v ?? ''}` ? lastCard.p : null)
   const object = p?.object ?? latest
   if (!object) return null
-  // the latest version drawn here is one the person saw; the header lists those, and the rest are drafts (h)
+  // the card as first made and after each change the analyst asked for, which h steps back through; never the versions
+  // saved for any other reason (runtime.ts readEdits)
   const v = sel.v ?? latest?.version ?? null
-  let seen = await readSeen($, sel.root, sel.id)
-  // (a card with no record, saved before records were kept, lists every version, as before)
-  if (seen && fresh?.drawing && !fresh.error && v != null && v === latest?.version && !seen.includes(Number(v))) {
-    await noteSeen($, sel.root, sel.id, v)
-    seen = [...seen, Number(v)]
-  }
   return {
     object, drawing: p ? (p.error ? { error: { name: 'Error', message: p.error } } : p.drawing) : null,
-    versions: versionsOf(latest, seen), v, state: ownState(sel.state), labelGen: await labelGen($),
+    versions: editsOf(latest, await readEdits($, sel.root, sel.id)), v, state: ownState(sel.state), labelGen: await labelGen($),
   }
 }
 

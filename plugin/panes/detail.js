@@ -1,6 +1,6 @@
 // detail.js: the card detail, a program on the card runtime (draw/kit.js) over the card Claude saved: its object, its
 // versions and its drawing (run by the host in the card's own sandbox, at the detail's width, with the card's state).
-// "Overview first, zoom and filter, details on demand": a header (the title, the card's id, v1 · v2), the takeaway with
+// "Overview first, zoom and filter, details on demand": a header (the title, the card's id, "edited"), the takeaway with
 // its citations, the card enlarged with its parts, and a bar under it that starts empty and fills on demand with the
 // selected part's details (its claim and where it comes from) and its examples, labelled with what they are examples
 // of. The program the card is behind p. The card's thread is the host's: in the terminal the side panel draws it under
@@ -10,7 +10,7 @@
 //   state: {region: the selected part, bar: null | 'details' | 'examples', ex: the example shown, prog: the program,
 //          pages: 'all' | 'one' (a card with pages: every page at once, or one at a time)}
 //   keys: ↑↓ part · ↵ details · e examples · [ ] flip · + − zoom · f filter · , . turn · a all at once / one at a time ·
-//         p program · h versions · 0 clear · esc back
+//         p program · h earlier version · 0 clear · esc back
 //
 // Pages: a card with a page knob (kit.js) is shown with every page at once, one after another, each under its own
 // heading, when the person chose so (a) or PAGES_DEFAULT says (carddetail.js); the host draws it so (shell/detail.tsx).
@@ -27,7 +27,7 @@
 // beside the value the label gave, counts in its place, and the examples step on to the next record.
 //
 // The card's own keys and presses (its program's k.on) come before these: the host routes them to the card first.
-import { barAfter, cycleKnob, examplesView, exampleSet, fromLine, linkRuns, namedKnob, partOfLink, programLines, shownVersions, stepVersion } from '../shell/carddetail.js'
+import { barAfter, cycleKnob, examplesView, exampleSet, fromLine, linkRuns, namedKnob, partOfLink, programLines, stepVersion } from '../shell/carddetail.js'
 import { pageId, pageOf, turn as turnKnob } from '../draw/handoff.js'
 import { chainWords, regionRefs } from '../shell/object.js'
 import { renderTerm } from '../draw/term.js'
@@ -210,9 +210,11 @@ export function program(k, data) {
   // a: every page at once, or one at a time (the place kept: the part selected, on its page)
   if (pk) k.on('a', () => ({ pages: all ? 'one' : 'all' }), all ? `${pageOne(pk)} by ${pageOne(pk)}` : `all ${pagesOf(pk)}`)
   k.on('p', () => ({ prog: !prog }), prog ? 'closes the program' : 'program')
+  // the card as first made and after each change the analyst asked for (carddetail.js editsOf): h steps back through
+  // them, and from the first to the card now
   const versions = data.versions || []
-  // h steps back through every version, drafts included (named so while the header lists only the one shown)
-  if (versions.length > 1) k.on('h', () => { k.do('version', { v: stepVersion(versions, data.v) }); return { ex: 0 } }, shownVersions(versions, data.v).length > 1 ? 'versions' : 'drafts')
+  const at = versions.findIndex(x => x.v === data.v)
+  if (versions.length > 1) k.on('h', () => { k.do('version', { v: stepVersion(versions, data.v) }); return { ex: 0 } }, at === 0 ? 'newest version' : 'earlier version')
   // esc closes what was opened last (the program over the card, else the bar with all it shows), then the detail
   k.on('esc', () => {
     if (prog) return { prog: false }
@@ -225,18 +227,14 @@ export function program(k, data) {
 
   // ---- the header: the title, the card's id and its versions
   const W = Math.max(30, k.w)
-  // each version the person saw a part of the header (the one shown too): a press shows it. Versions saved before the
-  // person saw the card (Claude fixing it within one turn) are drafts: not listed, h steps to them
-  const listed = shownVersions(versions, data.v)
-  const vs = listed.length > 1 ? listed.flatMap((x, i) => [
-    ...(i ? [k.text('{dim: · }', { wrap: false })] : []),
-    k.region(`ver-${x.v}`, { label: `v${x.v}${x.change ? ': ' + x.change : ''}${x.seen === false ? ' (a draft)' : ''}${x.drafts ? ` (${x.drafts} draft${x.drafts === 1 ? '' : 's'} before it)` : ''}` },
-      k.text(x.v === data.v ? `{accent:**v${x.v}${x.seen === false ? ' draft' : ''}**}` : `{dim:v${x.v}}`, { wrap: false })),
-  ]) : []
+  // no version numbers: a card the analyst asked to change says "edited", quietly; stepped back with h, where it stands
+  const latestV = versions.length ? versions[versions.length - 1].v : null
+  const older = versions.length > 1 && data.v != null && latestV != null && data.v < latestV
+  const where = !versions.length ? '' : !older ? '{dim:edited}' : at === 0 ? '{accent:as first made}' : at > 0 ? `{accent:after change ${versions[at].n}}` : '{accent:an earlier version}'
   const head = k.beside(
     k.text(`**${k.escape(data.title)}**`, { grow: 1, wrap: false }),
     k.text(`{dim:card:${k.escape(cut(data.id, 30))}}`, { wrap: false }),
-    vs.length ? k.beside(vs, { gap: 0 }) : false,
+    where ? k.text(where, { wrap: false }) : false,
     { gap: 2 },
   )
   // the takeaway: its citations of a part select that part (and the selected part's are bold)
