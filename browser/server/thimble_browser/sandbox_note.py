@@ -9,4 +9,4 @@ def line(unsandboxed: bool) -> str:
     if unsandboxed:
         return f"  ! no sandbox ({st.why}): card code runs with your access (--no-sandbox)"
     return (f"  ! no sandbox ({st.why}), so cards with code will not run. {st.fix}\n"
-            "    scripts/thimble-browser --check-sandbox tests the sandbox.")
+            "    thimble-browser --check-sandbox tests the sandbox.")

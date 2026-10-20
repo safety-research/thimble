@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# thimble browser from a checkout: builds the page the first time, then starts the server on a folder of files.
+# thimble-browser: starts the browser workbench of this checkout on a folder of files. scripts/install.sh, at the top
+# of the repository, installs what it needs and puts a launcher for it on PATH. Here it builds the page again when its
+# sources are newer than the build, and installs the sandbox runtime again when its lock file changed (after a pull).
 #
-#   scripts/thimble-browser [FOLDER] [--port N] [--no-open]
-#   scripts/thimble-browser --check-sandbox     tests the sandbox card code runs in (no sign-in needed), and exits
+#   thimble-browser [FOLDER] [--port N] [--no-open] [--wif FILE]
+#   thimble-browser --check-sandbox     tests the sandbox card code runs in (no sign-in needed), and exits
 #
-# Needs uv (https://docs.astral.sh/uv/), Node 22.12+, and credentials for the Claude API (see the README). The sandbox
-# also needs bubblewrap on Linux (apt install bubblewrap); on macOS it uses the system's sandbox-exec.
+# Needs uv, Node 22.12 or later, and credentials for the Claude API (browser/README.md). The sandbox also needs
+# bubblewrap on Linux; on macOS it uses the system's sandbox-exec.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

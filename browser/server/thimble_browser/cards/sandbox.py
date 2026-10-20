@@ -8,8 +8,9 @@ It does not see the person's home folder, thimble browser's own folder (the work
 included) or the server's environment: its environment is child_env's few variables. It is stopped when its time is up.
 
 The sandbox is Anthropic's sandbox runtime (srt, npm @anthropic-ai/sandbox-runtime), pinned in server/sandbox and
-installed there by scripts/thimble-browser. srt confines a process with Seatbelt (sandbox-exec) on macOS and with
-bubblewrap on Linux. server/sandbox/run.mjs runs one command in it, with the rules rules() makes:
+installed there by scripts/install.sh and by the thimble-browser launcher. srt confines a process with Seatbelt
+(sandbox-exec) on macOS and with bubblewrap on Linux. server/sandbox/run.mjs runs one command in it, with the rules
+rules() makes:
 
 - Linux: everything is hidden (each top folder is an empty, writable folder that is gone when the run ends, /tmp among
   them), then the system's libraries, the Python, the folder and the run's folder are shown again. bwrap.sh adds a
@@ -94,11 +95,11 @@ def node_version(exe: str) -> tuple[int, ...] | None:
 def _install_node(macos: bool) -> str:
     want = ".".join(map(str, NODE_MIN))
     how = "brew install node" if macos else "from your system's packages or nodejs.org"
-    return f"Install Node {want} or later ({how}), then run scripts/thimble-browser again."
+    return f"Install Node {want} or later ({how}), then run thimble-browser again."
 
 
-INSTALL_SRT = ("Run scripts/thimble-browser again, which installs it, or run "
-               "`npm ci --ignore-scripts --prefix server/sandbox` yourself.")
+INSTALL_SRT = ("Run thimble-browser again, which installs it, or run scripts/install.sh again in thimble's "
+               "repository.")
 
 
 @functools.cache
@@ -128,7 +129,7 @@ def status() -> Status:
                       "thimble browser again.")
     failed = _probe(node)
     if failed:
-        fix = "The message says what failed; the README's Sandbox section says what the sandbox needs."
+        fix = "The message says what failed; browser/README.md's Sandbox section says what the sandbox needs."
         if linux and _read("/proc/sys/kernel/apparmor_restrict_unprivileged_userns") == "1":
             fix = ("This Linux keeps bubblewrap from making its namespaces (AppArmor). Allow it with `sudo sysctl -w "
                    "kernel.apparmor_restrict_unprivileged_userns=0`, or give bwrap an AppArmor profile that allows "

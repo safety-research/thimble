@@ -1,6 +1,6 @@
 [project]
 name = "thimble-browser"
-version = "0.1.0"
+version = "0.10.0"
 license = "Apache-2.0"
 description = "thimble browser: a workspace in a web page for making sense of a folder of files with Claude"
 requires-python = ">=3.11"
