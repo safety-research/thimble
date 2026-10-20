@@ -418,6 +418,20 @@ export function toolkitOf(guide) {
   return (m[0] + (next ? rest.slice(0, next.index) : rest)).trim()
 }
 
+/** What a card shows the analyst, as text a rewrite is held to: its data's values (the rows its program draws), with
+ *  the keys that only lead to source rows left out. At most `max` characters. */
+export function drawnOf(o, max = 20000) {
+  try {
+    return JSON.stringify(o && o.data != null ? o.data : {}, (k, v) => (k.startsWith('_') ? undefined : v)).slice(0, max)
+  } catch {
+    return ''
+  }
+}
+
+/** The answer a rewrite is held to (checkRewrite): the message as written and, when the request showed its cards,
+ *  each card's title, takeaway and the values it draws, since the analyst read those too. */
+export const answerText = (text, cards = []) => [String(text || ''), ...cards.map(c => `${c.title || ''}\n${c.text || ''}\n${c.drawn || ''}`)].join('\n')
+
 /** The query ids a card's data binds and a text cites (`r2#...`, `r4@n`, `q3`), in order, each once. */
 export function queryIdsOf(texts = [], bindings = []) {
   const ids = []

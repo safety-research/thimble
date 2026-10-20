@@ -29,10 +29,10 @@ import { tracked } from '../telemetry/telemetry'
 import { FEATURES } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 import { lookPending } from '../observer/observer'
-import { answerRow, cardsUnder, closeTray, leanEnv, loadObject, prepared, questionBefore, recordNow, rootHere, saveRecord, setCardsUnder, tellMain } from '../shell/shell'
+import { answerRow, cardsUnder, closeTray, drawnTextOf, leanEnv, loadObject, prepared, questionBefore, recordNow, rootHere, saveRecord, setCardsUnder, tellMain } from '../shell/shell'
 import { noteEdit } from '../shell/runtime'
 import { sessionKey } from '../hooks/conversation'
-import { ARRIVE, SCALE, applyRewrite, cardListsAt, cardSpec, cardsAfter, cardsKnown, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, queryIdsOf, readReply, setWords, settledNote, shownKey, rebaseAt, request, restore, revealStep, rowsOf, termsOf, toolkitOf, unplacedMoves, withLater } from './chips.mjs'
+import { ARRIVE, SCALE, answerText, applyRewrite, cardListsAt, cardSpec, cardsAfter, cardsKnown, catchUpText, checkRewrite, chipsOf, drawnOf, dropOrphanHeads, fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, queryIdsOf, readReply, setWords, settledNote, shownKey, rebaseAt, request, restore, revealStep, rowsOf, termsOf, toolkitOf, unplacedMoves, withLater } from './chips.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -255,7 +255,8 @@ async function once($: Engine, row: string, want: Want): Promise<void> {
     const back = keeps ? keepCorrections(bare.text, keep, rec.text) : { text: bare.text, back: [] }
     const whole = dropOrphanHeads(back.text)
     whole.dropped.unshift(...bare.dropped)
-    const checked = checkRewrite(rec.text, whole.text)
+    // held to the whole answer it was shown: the message, and its cards' words and values when the request had them
+    const checked = checkRewrite(answerText(rec.text, answer?.cards ?? []), whole.text)
     // the cards this version changes, saved as the person's; one that does not save or draw is left out, said why
     const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, setWords(probe) || 'as written') : null
     const cardProblems = answer ? [...reply.cardProblems, ...(changed?.problems ?? [])] : []
@@ -368,7 +369,7 @@ export async function tellSettled($: Engine, row: string | null = null): Promise
 
 // ------------------------------------------------------------------------------------------------ the cards
 
-type CardIn = { id: string; title: string; text: string; data: unknown; program: string; ref: ObjRef; source: Any }
+type CardIn = { id: string; title: string; text: string; data: unknown; program: string; drawn: string; ref: ObjRef; source: Any }
 type Answer = { orig: Record<string, ObjRef[]>; cards: CardIn[]; outputs: { id: string; about: string; text: string }[]; root: string }
 
 /** At most this many query outputs go with a request, each cut to this many characters. */
@@ -392,7 +393,7 @@ async function answerCards($: Engine, rec: MsgRecord): Promise<Answer | null> {
     const o = await loadObject($, ref).catch(() => null)
     if (!o || o.label) continue
     const src = (o.source && typeof o.source === 'object' ? o.source : {}) as Any
-    cards.push({ id: String(o.id), title: String(o.title ?? src.title ?? ''), text: String(src.text ?? o.text ?? ''), data: src.data ?? {}, program: String(src.program ?? o.program ?? ''), ref, source: src })
+    cards.push({ id: String(o.id), title: String(o.title ?? src.title ?? ''), text: String(src.text ?? o.text ?? ''), data: src.data ?? {}, program: String(src.program ?? o.program ?? ''), drawn: `${drawnOf(o)}\n${await drawnTextOf($, ref).catch(() => '')}`, ref, source: src })
     for (const b of (o.lineage?.bindings ?? []) as Any[]) if (typeof b?.ref === 'string') binds.push(b.ref)
   }
   const root = Object.values(orig).flat()[0]?.root ?? (await rootHere($))

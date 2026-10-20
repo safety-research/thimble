@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { newRecord, remark, verbsOf, withObserver } from '../../shell/message.js'
-import { ARRIVE, CATCHUP_HEAD, CHIPS, applyRewrite, atOf, cardListsAt, cardNotesFor, cardSpec, cardsAfter, cardsBlock, cardsDid, cardsKnown, queryIdsOf, toolkitOf, withLater, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, glyph, isCatchUp, isHeading, isLong, isOriginal, keepCorrections, keyOf, levelWords, mustKeep, ownWords, readReply, setWords, settledNote, shownKey, withOwn, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, termsOf, unplacedMoves } from '../chips.mjs'
+import { ARRIVE, CATCHUP_HEAD, CHIPS, answerText, applyRewrite, atOf, cardListsAt, drawnOf, cardNotesFor, cardSpec, cardsAfter, cardsBlock, cardsDid, cardsKnown, queryIdsOf, toolkitOf, withLater, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads, fromVersions, glyph, isCatchUp, isHeading, isLong, isOriginal, keepCorrections, keyOf, levelWords, mustKeep, ownWords, readReply, setWords, settledNote, shownKey, withOwn, rebaseAt, request, restore, revealCut, revealStep, rowsOf, stepAt, termsOf, unplacedMoves } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -244,6 +244,12 @@ test("a squeeze's cards: the request shows the original's cards and the outputs 
   // Claude hears what the version did to the cards, and that they came back
   assert.match(settledNote(back), /Its cards changed with it: "Saves per day" \(01-saves\) edited, now version 2; "New" \(03-new\) added\./)
   assert.match(settledNote(orig2, shownKey(back)), /as you wrote it, with its cards as they were\.$/)
+  // a rewrite is held to the whole answer it was shown: a value a card draws, or a ref its takeaway cites, is no addition
+  const drawnCard = { title: 'Saves per day', text: 'June 18 had [6,543](q1#day=2026-06-18@n).', drawn: drawnOf({ data: { days: [{ day: '06-17', n: 4210, _ref: 'q1#day=06-17', _rows: ['x#row=1'] }] } }) }
+  assert.equal(drawnCard.drawn, '{"days":[{"day":"06-17","n":4210}]}')
+  const longerText = 'June 17 had 4,210 saves and June 18 had [6,543](q1#day=2026-06-18@n).'
+  assert.deepEqual(checkRewrite('Most saves came on June 18.', longerText).problems.length, 2)
+  assert.deepEqual(checkRewrite(answerText('Most saves came on June 18.', [drawnCard]), longerText).problems, [])
   // a record no rewrite touched the cards of: nothing to place
   assert.equal(cardListsAt(applyRewrite({ ...record(), squeeze: {} }, { text: 'S.', at: { length: 1 } }, remark)), null)
 })
