@@ -2,10 +2,13 @@
 //
 //   - widths are whole cells; `beside` shares them by flex.js; text wraps at spaces and is cut with … only when a
 //     line has no room at all;
-//   - a bar is whole ▆ cells (▏ for a value under one cell; stacked parts round cumulatively), so bars on
-//     neighboring rows keep a gap between them; the number beside it carries the precision;
+//   - a bar is whole ▆ cells (▏ for a value under one cell; stacked parts round cumulatively), every part the same
+//     height, so bars on neighboring rows keep a gap between them and only a part's width varies; the number beside
+//     it carries the precision, and k.bars names the parts' colors in a key above the rows;
 //   - a spark is one cell per value (averaged when there are more values than cells), on eight levels ▁..█;
-//   - a plot is half-block pixels, two per cell down, with an axis of ┤ └ ┴ and the end values;
+//   - a plot's lines are braille dots, two across and four down per cell, so a line stays thin; where two series
+//     share a cell it takes the color of the one listed first; a dot is four braille dots. The axis is ┤ └ ┴ with
+//     round values, and the y label and the legend share the top row;
 //   - a table is padded columns, numbers right-aligned, the widest text column shrinking first;
 //   - unseen data is ▒ (a medium shade), never blank, so a gap reads as a gap;
 //   - a canvas is replayed as the program placed it.
@@ -165,6 +168,30 @@ class Grid {
     let err = dx + dy, guard = 8000
     for (;;) {
       this.px(x0, y0, tone)
+      if ((x0 === x1 && y0 === y1) || !guard--) break
+      const e2 = 2 * err
+      if (e2 >= dy) { err += dy; x0 += sx }
+      if (e2 <= dx) { err += dx; y0 += sy }
+    }
+  }
+  // braille dots: x in half cells across, y in quarter cells down. The dots of a cell add up; its tone is the last
+  // one drawn
+  dot4(x2, y4, tone) {
+    if (this.dry) return
+    const x = Math.floor(x2 / 2), y = Math.floor(y4 / 4)
+    if (!this.in(x, y)) { this.clipped = true; return }
+    const dx = x2 - 2 * x, dy = y4 - 4 * y
+    const bit = dy < 3 ? (dx === 0 ? 1 << dy : 1 << (dy + 3)) : (dx === 0 ? 0x40 : 0x80)
+    const old = this.rows[y][x]
+    const mask = (old.br || 0) | bit
+    this.rows[y][x] = { ch: String.fromCharCode(0x2800 + mask), tone, br: mask, px: true }
+  }
+  line4(x0, y0, x1, y1, tone) {
+    x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1)
+    const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1
+    let err = dx + dy, guard = 8000
+    for (;;) {
+      this.dot4(x0, y0, tone)
       if ((x0 === x1 && y0 === y1) || !guard--) break
       const e2 = 2 * err
       if (e2 >= dy) { err += dy; x0 += sx }
@@ -437,33 +464,17 @@ function linkRects(line, x, y, cx) {
 }
 
 // ---------------------------------------------------------------- marks drawn with cells
-/** A bar part's words in place: its label and value, else its label, when they fit with a cell on each side. */
-/** The words a stacked bar's part shows in place: its label with its value, else its label, else none. They fit the
- *  part's cells with one blank at each side (a wide character takes two), so they never run into the next part. */
-export function inPlace(label, value, cells) {
-  const l = String(label).trim()
-  const v = isFinite(value) ? (Math.abs(value) >= 1000 ? Math.round(value).toLocaleString('en-US') : String(Math.round(value * 100) / 100)) : ''
-  for (const s of [v ? `${l} ${v}` : l, l]) if (s && len(s) + 2 <= cells) return s
-  return ''
-}
-
 function drawBar(g, x, y, w, value, max, tone, parts, track) {
   if (!isFinite(value) || tone === 'unseen') { g.fill(x, y, w, 1, '▒', 'unseen'); return }
   const m = max > 0 ? max : 1
   if (parts) {
+    // every part is the same glyph, so the parts of one bar have one height and differ only in width; their names
+    // are in the key k.bars draws above the rows
     let cum = 0, from = 0
     for (const p of parts) {
       cum += p.value
       const to = Math.round(clamp(cum / m, 0, 1) * w)
-      // a part with a label is labelled in place when it has room (its words on its own color), so the card needs
-      // no legend: `fixture 11`, else `fixture`, else the bar alone
-      const words = p.label != null && p.tone !== 'unseen' ? inPlace(p.label, p.value, to - from) : ''
-      if (words) {
-        g.fill(x + from, y, to - from, 1, ' ', 'paper', { bg: p.tone })
-        // each character at the cell after the last one's (a wide one takes two), inside the part's own cells
-        let cx = x + from + 1
-        for (const c of words) { if (cx + cwOf(c) > x + to - 1) break; cx += g.put(cx, y, c, 'paper', { bg: p.tone }) }
-      } else g.fill(x + from, y, to - from, 1, p.tone === 'unseen' ? '▒' : BAR, p.tone)
+      g.fill(x + from, y, to - from, 1, p.tone === 'unseen' ? '▒' : BAR, p.tone)
       from = to
     }
     if (from === 0 && value > 0) g.put(x, y, '▏', parts[0] ? parts[0].tone : tone)
@@ -498,7 +509,18 @@ function drawSpark(g, x, y, w, values, mn, mx, tone, tones) {
   })
 }
 
-// ---------------------------------------------------------------- plot: half-block pixels with an axis
+// ---------------------------------------------------------------- plot: braille lines with an axis
+/** Round values for an axis from lo to hi: about `n` steps of 1, 2 or 5 times a power of ten. */
+export function niceTicks(lo, hi, n) {
+  const span = hi - lo
+  if (!(span > 0)) return { step: 1, ticks: [lo] }
+  const raw = span / Math.max(1, n), p = Math.pow(10, Math.floor(Math.log10(raw)))
+  const step = [1, 2, 2.5, 5, 10].map(q => q * p).find(q => q >= raw * 0.999) || 10 * p
+  const ticks = []
+  for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + step * 1e-9; v += step) ticks.push(+v.toPrecision(12))
+  return { step, ticks }
+}
+
 function paintPlot(n, g, x, y, w, cx, mark) {
   const h = n.h
   const S = n.series
@@ -513,23 +535,35 @@ function paintPlot(n, g, x, y, w, cx, mark) {
   let xmax = okX(xs.max) ? xs.max : xv.length ? Math.max(...xv) : 1
   if (xmax === xmin) xmax = xlog ? xmin * 10 : xmin + 1
   const yv = all.map(p => p[1]).filter(v => v !== null && isFinite(v))
-  const ymin = isFinite(ys.min) ? ys.min : yv.length ? Math.min(...yv) : 0
+  let ymin = isFinite(ys.min) ? ys.min : yv.length ? Math.min(...yv) : 0
   let ymax = isFinite(ys.max) ? ys.max : yv.length ? Math.max(...yv) : 1
   if (ymax === ymin) ymax = ymin + 1
-  const legend = n.legend !== false && (S.length > 1 || S.some(s => s.name)) ? 1 : 0
-  const yl = [fmtTick(ymax), fmtTick(ymin)]
-  const yw = Math.max(len(yl[0]), len(yl[1]))
+  // the legend: one entry per named series, on the top row beside the y label when it fits there, else under the axis
+  const legend = n.legend !== false && (S.length > 1 || S.some(s => s.name))
+  const entries = legend ? S.map(s => ({ s, w: 2 + len(s.name || '') })) : []
+  const legendW = entries.reduce((t, e) => t + e.w, 0) + Math.max(0, entries.length - 1) * 3
+  const ylab = ys.label || ''
+  const top = ylab || legend ? 1 : 0
+  const legendTop = legend && (ylab ? len(ylab) + 3 : 0) + legendW <= w
+  const bottom = legend && !legendTop ? 1 : 0
+  const ph = Math.max(1, h - 2 - top - bottom)
+  // round values on y, inside the data's own range (or the one the program set)
+  const yticks = niceTicks(ymin, ymax, clamp(Math.floor(ph / 2), 2, 4)).ticks.filter(t => t >= ymin - 1e-9 && t <= ymax + 1e-9)
+  const ylabels = yticks.map(fmtTick)
+  const yw = Math.max(1, ...ylabels.map(len))
   const ox = yw + 1
-  const oy = ys.label ? 1 : 0
-  const ph = Math.max(1, h - 2 - legend - oy)
   const pw = Math.max(2, w - ox)
-  const PH = ph * 2
+  const oy = top
+  // braille: two dots across and four down per cell
   const col = v => Math.round((tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * (pw - 1))
-  const row = v => Math.round((ymax - clamp(v, ymin, ymax)) / ((ymax - ymin) || 1) * (PH - 1))
+  const col2 = v => Math.round((tx(v) - tx(xmin)) / ((tx(xmax) - tx(xmin)) || 1) * (pw * 2 - 1))
+  const row4 = v => Math.round((ymax - clamp(v, ymin, ymax)) / ((ymax - ymin) || 1) * (ph * 4 - 1))
   if (!g.dry) {
-    if (ys.label) g.str(x, y, ys.label.slice(0, w), 'dim')
+    if (ylab) g.str(x, y, ylab.slice(0, w), 'dim')
+    const tickRow = new Map()
+    yticks.forEach((t, i) => { const r = Math.floor(row4(t) / 4); if (!tickRow.has(r)) tickRow.set(r, ylabels[i]) })
     for (let r = 0; r < ph; r++) {
-      const lab = r === 0 ? yl[0] : r === ph - 1 ? yl[1] : ''
+      const lab = tickRow.get(r)
       if (lab) g.str(x + yw - len(lab), y + oy + r, lab, 'dim')
       g.put(x + yw, y + oy + r, lab ? '┤' : '│', 'rule')
     }
@@ -558,31 +592,35 @@ function paintPlot(n, g, x, y, w, cx, mark) {
       lastEnd = start + len(s) - 1
     })
     if (xs.label && w - len(xs.label) > lastEnd + 2) g.str(x + w - len(xs.label), ay + 1, xs.label, 'dim')
-    // later series first, so the first series is on top
+    // later series first, so the first series is on top: a cell two series share takes its color
     g.withClip(x + ox, y + oy, x + ox + pw, y + oy + ph, () => {
       S.slice().reverse().forEach(s => {
         const P = s.pts.filter(p => okX(p[0])).sort((a, b) => a[0] - b[0])
+        const lone = P.filter(p => p[1] !== null).length === 1
         let prev = null
         for (const p of P) {
           if (p[1] === null) { prev = null; continue }
-          const cxp = x + ox + col(p[0]), cyp = (y + oy) * 2 + row(p[1])
-          if (prev && !n.dots) g.pline(prev[0], prev[1], cxp, cyp, s.tone)
-          else g.px(cxp, cyp, s.tone)
-          prev = [cxp, cyp]
+          const X = (x + ox) * 2 + col2(p[0]), Y = (y + oy) * 4 + row4(p[1])
+          // a dot is four braille dots, both across its cell and two down from its own quarter row
+          if (n.dots || lone) { const X0 = X - (X % 2), Y0 = Math.min(Y, (y + oy + ph) * 4 - 2); [0, 1].forEach(i => [0, 1].forEach(j => g.dot4(X0 + i, Y0 + j, s.tone))) }
+          else if (prev) g.line4(prev[0], prev[1], X, Y, s.tone)
+          else g.dot4(X, Y, s.tone)
+          prev = [X, Y]
         }
       })
     })
   }
   // legend, one entry per series; a series with an id is a region (its legend entry and the plot area)
-  let lx = x + ox
-  const ly = y + h - 1
+  const ly = legendTop ? y : y + h - 1
+  let lx = legendTop ? x + w - legendW : x + ox
   S.forEach(s => {
     if (s.region) mark({ k: 'region', id: s.region })
     mark({ k: 'series', name: s.name, n: s.pts.length })
-    if (!legend) { if (s.region && !g.dry) addRect(cx, s.region, s.meta, { x: x + ox, y: y + oy, w: pw, h: ph }); return }
+    const area = () => { if (s.region && !g.dry) addRect(cx, s.region, s.meta, { x: x + ox, y: y + oy, w: pw, h: ph }) }
+    if (!legend) { area(); return }
     const name = s.name || ''
-    if (lx + 2 + len(name) > x + w) { if (s.region && !g.dry) addRect(cx, s.region, s.meta, { x: x + ox, y: y + oy, w: pw, h: ph }); return }
-    if (!g.dry) { g.put(lx, ly, '▀', s.tone); g.str(lx + 2, ly, name, s.region ? 'accent' : 'ink') }
+    if (lx + 2 + len(name) > x + w) { area(); return }
+    if (!g.dry) { g.put(lx, ly, '━', s.tone); g.str(lx + 2, ly, name, s.tone) }
     if (s.region && !g.dry) addRect(cx, s.region, s.meta, { x: lx, y: ly, w: 2 + len(name), h: 1 })
     lx += 2 + len(name) + 3
   })

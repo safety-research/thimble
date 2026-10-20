@@ -25,7 +25,7 @@ const STUBS: Record<string, string> = {
 
 /** The stub text of a registry path (`…/prompts/<feature>/<version>.md`), or undefined for any other path. */
 export function promptStub(path: string): string | undefined {
-  // the card guide (forms:v5 reads it whole)
+  // the card guide (forms:v6 reads it whole)
   if (/\/skills\/thimble\/cards\.md$/.test(path)) return '# The card guide\n\n## What makes a good card\n\nTHE WORKED FORMS'
   const m = /\/prompts\/([^/]+)\/([^/]+)\.md$/.exec(path)
   if (!m) return undefined

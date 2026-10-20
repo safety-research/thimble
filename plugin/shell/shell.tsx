@@ -29,6 +29,7 @@ import { knobOf, pageKnob, turn as turnKnob } from '../draw/handoff.js'
 import { PAGES_DEFAULT } from './carddetail.js'
 import { gridText, regionAt, renderTerm } from '../draw/term.js'
 import { paintRegions, selectable } from './cells'
+import { cardFrame, frameWidth } from './cardframe.js'
 import { citeCard, drawnCard, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
 import { newRecord, recordFor, seriesRef, shownOf, withObserver } from './message.js'
@@ -2134,12 +2135,15 @@ function asideRowEl(els: Any, line: { text: string; error: boolean }, key: strin
   return els.Box({ key, marginTop: 1, marginLeft: 2, children: [els.Text({ wrap: 'truncate-end', ...(line.error ? { color: 'error' } : { dimColor: true }), children: line.text })] })
 }
 
-/** One object inline: its cells, or one red line saying why it cannot be drawn. The card the keys act on (`1` opens
- *  it) has its frame in the keys' color. */
+/** One object inline: a card in its frame (its question in bold, a blank row, the drawing, its takeaway when it has
+ *  one), or one red line saying why it cannot be drawn. The card the keys act on (`1` opens it) has its frame in the
+ *  keys' color. A program that draws its own frame keeps it, with no second one around it. */
 async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string, focus: 'focus' | 'rest' | boolean | null = null): Promise<Any> {
   const els = $.ui.resolve(e)
   const { Box, Text } = els as Any
-  const cols = Math.max(40, Math.min(120, (e.viewport?.columns ?? 100) - 4))
+  const outer = Math.max(44, Math.min(124, (e.viewport?.columns ?? 100) - 4))
+  // the drawing has the frame's inside: a border and a space on each side
+  const cols = outer - 4
   inlineCols = cols
   // the card as the person left it, here or in the browser: its state (a flip, a zoom) and the part selected
   const kept = await cardStateNow($, ref.root, ref.id)
@@ -2165,12 +2169,12 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   // a card with pages: how many, and the key that opens them to read (`9 chapters · 1 read all`)
   const pk = pageKnob(p.drawing)
   const pages = pk ? pagesRow(els, pk, focus === 'focus', fullscreen ? () => openDetail($, ref, null, { pages: PAGES_DEFAULT }) : null) : null
-  const body = ring && !framed
-    ? Box({ flexDirection: 'row', children: [Box({ flexDirection: 'column', width: 2, flexShrink: 0, children: Array.from({ length: Math.min(rows, p.grid.h) }, (_, i) => Text({ key: `bar${i}`, color: ring, children: '▎' })) }), cells] })
-    : cells
+  const o = p.object || {}
+  const fw = frameWidth(outer, p.grid.w, o.title)
+  const body = framed ? cells : cardFrame(els, { key: `${key}-${ref.id}-frame`, w: fw, title: o.title || '', text: o.text || '', body: cells, bodyH: Math.min(rows, p.grid.h), color: ring })
   return Box({
-    key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: ring && !framed ? 0 : 2, width: Math.max(p.grid.w, 40) + (ring && !framed ? 2 : 0),
-    children: [body, ...(pages ? [Box({ marginLeft: ring && !framed ? 2 : 0, children: [pages] })] : []), ...(run ? [run] : [])],
+    key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, width: framed ? Math.max(p.grid.w, 40) : fw,
+    children: [body, ...(pages ? [pages] : []), ...(run ? [run] : [])],
   })
 }
 
@@ -2240,8 +2244,9 @@ function rewritingEl(els: Any, o: { glyph: string; levels?: string; text?: strin
   return Text({ key: o.key, wrap: 'truncate-end', children: [Text({ color: o.error ? 'error' : keyColor('s', o.theme), children: `${o.glyph} ` }), Text({ ...(o.error ? { color: 'error' } : { color: keyColor('s', o.theme) }), children: words })] })
 }
 
-/** The width cards under a reply were drawn at last: the bar reads a focused card's keys from the same drawing. */
-let inlineCols = 96
+/** The width cards under a reply were drawn at last: the bar reads a focused card's keys from the same drawing, and a
+ *  save draws its card at it. Before any card, the inside of a card's frame in a terminal 100 columns wide. */
+let inlineCols = 92
 const keptState = (kept: { state?: Record<string, unknown> } | null) => (kept?.state && Object.keys(kept.state).length ? kept.state : undefined)
 
 /** A card under a reply, drawn as it stands now (with its kept state), for the bar's keys; null while it draws. */
@@ -2710,7 +2715,7 @@ export const registerShell: Register = (on, options) => {
         // a new version of an object that could not be drawn takes its place where it was: a fix, not a new object
         const where = (await $.state.get({ ...WHERE, id })).value as string | undefined
         const before = where ? (((await $.state.get({ ...UNDER, id: where })).value ?? []) as ObjRef[]).find(x => x.id === id && x.root === root) : undefined
-        const prev = before ? await prepared($, before, 96) : null
+        const prev = before ? await prepared($, before, inlineCols) : null
         const broken = !!prev && (!!prev.error || !prev.grid || !!prev.drawing?.error)
         if (broken && !(turn && turn.unplaced.some(x => x.id === id))) await place($, where!, ref)
         else if (turn) {
@@ -2719,7 +2724,7 @@ export const registerShell: Register = (on, options) => {
         }
         await $.state.set(LAST, ref)
         // drawn as under the reply, and its interactions tried once, as the person would, so a failing one is fixed now
-        const p = await prepared($, ref, 96, null, 'inline', 24, true)
+        const p = await prepared($, ref, inlineCols, null, 'inline', 24, true)
         if (p.error || !p.grid || p.drawing?.error || (p.check?.failed ?? 0) > 0) brokenAt.add(`${root}|${id}|${ref.v}`)
         notes.push(drawnNote(p, ref))
         if (p.check) void recordEvent($, { kind: 'check', id, v: p.object?.version ?? null, tried: p.check.tried, total: p.check.total, failed: p.check.failed, cut: p.check.cut, ms: p.check.ms, chars: p.check.line ? p.check.line.length : 0 })

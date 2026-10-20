@@ -1,0 +1,63 @@
+{
+ "run": "17",
+ "steps": "rrreerrrreorrrooerrrrrrrrrrrrereeorrrerrorrrroreereerrrrrrreeteeerteteeeteeerreeereeetrrfrrrrrrrrreerrererrreerrerrrerrrrerererrrrrrerereeerrefefefeeffrefefeefefeefeefefefefefeefefefeefefeefefeefefefrefrefeefeeffeefeefefrefeefrefefrefeeffefeeffefefefefefefeefeeffeefrefrefefrefefeeffeefrefrefefefefrefeefefefeeffeefrefefeefefeeffefefefeefefeefeefefeeffrefefefefeefeeffefeefeefeeffrefeeffefeeffefefefefeeffefefeeffrefeeffeefefrefefeeffefrefrefefefeeffefefeefrefefeefefefefefefeeffrefeeffefefefefeefrefefefefeeffeefrefeefeefeefrefefrefrefeeffefeefefrefeerreerererrrrrrererereeeeeereeererrreereettoteeetetttetttotttoteotote",
+ "median": 205,
+ "kinds": [
+  {
+   "key": "r",
+   "label": "read",
+   "tone": "c4"
+  },
+  {
+   "key": "e",
+   "label": "edit",
+   "tone": "c1"
+  },
+  {
+   "key": "t",
+   "label": "tests pass",
+   "tone": "good"
+  },
+  {
+   "key": "f",
+   "label": "tests fail",
+   "tone": "bad"
+  },
+  {
+   "key": "o",
+   "label": "other",
+   "tone": "dim"
+  }
+ ],
+ "notes": [
+  {
+   "id": "fail-88",
+   "at": 88,
+   "text": "the merge test fails",
+   "quote": "AssertionError: 3 != 4",
+   "ref": "runs/17.jsonl#L412"
+  },
+  {
+   "id": "loop",
+   "at": 140,
+   "to": 550,
+   "text": "re-runs test_merge 63 times, editing parser.py in between",
+   "ref": "runs/17.jsonl#L690-2710"
+  },
+  {
+   "id": "conftest-571",
+   "at": 571,
+   "text": "opens conftest.py for the first time",
+   "quote": "random.seed(time.time())",
+   "ref": "runs/17.jsonl#L2804",
+   "below": true
+  },
+  {
+   "id": "fix-590",
+   "at": 590,
+   "text": "pins the seed; every test passes",
+   "ref": "runs/17.jsonl#L2911",
+   "below": true
+  }
+ ]
+}

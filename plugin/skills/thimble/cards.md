@@ -63,9 +63,9 @@ return k.frame(k.stack(
 `false` (left out). `k.size(part, { w, grow })`, `k.space(w, h)` and `k.rule()` place them.
 
 **Values.** A value given as a number stays a number: the browser draws it exactly, and the terminal rounds it to cells.
-`k.bar(value, { max, tone })`, or `k.bar([{ value, tone, label }, ...], { max })` for stacked parts, each `label` drawn
-inside its part when it fits. `k.bars(items, { max, labelW })` draws rows of label, bar, value and note, an item being
-`{ id, label, value | parts, tone, note, meta }`. `k.spark(values, { min, max, tone, w })` is a one-line trend.
+`k.bar(value, { max, tone })`, or `k.bar([{ value, tone, label }, ...], { max })` for stacked parts, whose labels
+`k.bars` names in a key above its rows. `k.bars(items, { max, labelW })` draws rows of label, bar, value and note, an
+item being `{ id, label, value | parts, tone, note, meta }`. `k.spark(values, { min, max, tone, w })` is a one-line trend.
 `k.plot(series, { h, x: { label, log, min, max }, y: {...}, dots, brush })` takes numbers, `[x, y]` pairs, or
 `{ id, name, values | points, tone, meta }`. `k.table(rows, { cols, max, id, cite, examples })` takes `cols` as keys or
 `{ key, label, align, fmt, tone, w }`. `k.unseen({ label, w, h })` draws what you did not read, hatched. `k.legend(items)`
@@ -92,6 +92,11 @@ card never gets them; `thimble save` names a key a card cannot get.
 as a line of its stations, many as lanes that split and merge, and stations with no threads as boxes. Under a reply it
 draws its short form, and in the detail its full form. Each station, lane and group opens its records.
 
+**A diagram.** `k.graph({ nodes, edges }, { dir })` draws boxes joined by arrows and places them itself: you say what
+connects to what, never where it goes. A node is `{ id, label, note, tone, ref }` and an edge `{ from, to, label, tone,
+weight, dash, ref }`; a cycle, a long edge and an edge from a node to itself all draw. It lies across the card when it
+fits, else down it. Each node and edge with a ref opens its records.
+
 **The canvas.** `const c = k.canvas(w, h)` draws a shape no helper has, in cells (x across, y down), and sits in a stack
 or a frame like any part. `c.text(x, y, str, { tone, bold, align, max })`, `c.put(x, y, ch, tone)`, `c.fill(x, y, w, h,
 ch, tone)`, `c.bg(x, y, w, h, tone)`, `c.hline` and `c.vline(x, y, len, ch, tone)` (`─` a line, `━` heavy, `╌` dashed),
@@ -112,65 +117,139 @@ run the saved card with an event: `node ../../draw/cli.mjs thimble/objects/<id>.
 
 ## Worked programs
 
-Examples to adapt, not templates: each shows another form on another kind of data. Each program's data is in `forms/<name>.data.json` beside this file.
+Each program below answers a different kind of question about a different kind of material, in a form made for that
+question. Bars and lines answer how much and how it changed. Many questions ask something else: how parts connect, what
+happened in what order and why, where things sit, or how two versions differ. For those, a picture of the connections,
+the sequence, the places or the differences shows the answer that a count of them hides. Start from the question, and
+when no form here fits it, compose a new one from the toolkit. Each program's data is in `forms/<name>.data.json`
+beside this file.
 
-Counts by group, split by a label (edits to a wiki per day, by what each edit was for). Each day is a part that opens its records and real edits, and each piece is named where it stands.
-
-```js
-const P = [['ask', 'c1'], ['instruct', 'c3'], ['share', 'c2'], ['test', 'c5']]
-const items = data.days.map(d => ({
-  id: 'day-' + d.day, label: d.day.slice(5), parts: P.map(([p, tone]) => ({ value: d[p], tone, label: p })),
-  meta: { ref: `r1#day=${d.day}@n`,
-    examples: k.examples('ex-' + d.day, { label: `saves to other agents on ${d.day}`, records: d.examples, total: d.n, fmt: '“{text}”\n{user} · {purpose}' }) },
-}))
-return k.stack(
-  k.text(`**${k.fmt(data.total)}** saves to other agents`),
-  k.bars(items),
-)
+```
+Analyst   Why do some users get logged out after a few minutes?
+Takeaway  Every request passes is_expired() in server/auth.py, which reads the timeout as seconds, but config/app.yaml
+          gives it in minutes, so a 30-minute session ends after 30 seconds.
 ```
 
-A trend and the moment that changed it (p95 latency of a service per hour, two regions, a deploy). The deploy sits on the axis where it landed, and each line opens its rows.
+The question is about how parts of the code connect, so the card draws the path a request takes, with the step that
+goes wrong in red and the two lines that show why under it. Each box and each line opens its code.
 
 ```js
-const d = data.deploy
+const quote = q => k.region(q.id, { label: q.where, ref: q.ref }, k.frame(k.text(k.escape(q.code)), { title: q.where, tone: q.tone }))
 return k.stack(
-  k.text(`eu-west's p95 rose from **${data.before} ms** to **${data.after} ms** after ${d.version} went out, and us-east stayed flat`),
-  k.plot(data.regions.map((r, i) => ({ id: 'region-' + r.name, name: r.name, tone: i ? 'c3' : 'c1', points: r.hours.map(h => [h.hour, h.p95]), meta: { label: `${r.name}, p95 per hour`, ref: `r2#region=${r.name}@p95` } })),
-    { h: k.mode === 'detail' ? 14 : 8, x: { label: 'hours from Jun 17 00:00', min: 0, max: 72, ticks: [0, 24, { at: d.hour, label: `▲ ${d.version}` }, 72] }, y: { label: 'p95 ms', min: 0 } }),
-  k.region('deploy', { label: `${d.version} deployed ${d.label}`, ref: d.ref }, k.text(`{warn:▲} ${d.version} deployed ${d.label}`)),
-)
-```
-
-Real records, quoted (support tickets). The passage of each record that makes the point, with what the analyst needs to place it; each opens the record.
-
-```js
-return k.stack(
-  k.text(`**${k.fmt(data.n)}** of the ${k.fmt(data.total)} March refund tickets name the X200 charger. Three of them:`),
-  ...data.tickets.map(t => k.region('ticket-' + t.id, { label: `ticket ${t.id}, ${t.date}`, ref: t.ref },
-    k.beside(k.text('{c1:▎}', { w: 1 }), k.stack(k.text(`“${k.escape(t.quote)}”`, { wrap: true }), k.text(`{dim:${t.id} · ${t.date} · ${t.outcome}}`)), { gap: 1 }))),
+  k.text('Every request passes **is_expired()**, which reads the timeout as seconds; the config gives it in minutes'),
+  k.graph(data),
+  k.stack(...data.quotes.map(quote)),
   { gap: 1 })
 ```
 
-One long run as its stations in order (an agent's transcript), each as wide as its share of the steps and each opening its lines. The data is the map's spec: the thread, its moves, and stations named after reading the run.
-
-```js
-return k.frame(k.map(data), { title: data.title })
+```
+Analyst   Why did run 17 take three times as many steps as the other runs?
+Takeaway  It spent 410 of its 620 steps re-running one test: it took a failure caused by the test fixture's random seed
+          for a bug in its own parser, and opened conftest.py only at step 571.
 ```
 
-A table kept small (a training sweep): six rows, four columns, the best row marked, each row opening its run.
+The question is about one run, so the card draws that run whole, one cell per stretch of steps, and numbers the moments
+that explain it. Each note quotes the transcript and opens the lines it quotes.
 
 ```js
-const best = data.runs.reduce((a, b) => (b.acc > a.acc ? b : a))
+const W = Math.max(40, Math.min(k.w, 110)), n = data.steps.length
+const x = s => Math.min(W - 1, Math.floor(s / n * W))
+const tone = Object.fromEntries(data.kinds.map(d => [d.key, d.tone]))
+const c = k.canvas(W, 3)
+// the run, one cell per stretch of steps: red where a test failed, else what it did most
+for (let i = 0; i < W; i++) {
+  const bin = data.steps.slice(Math.floor(i * n / W), Math.floor((i + 1) * n / W))
+  const most = [...new Set(bin)].sort((a, b) => bin.split(b).length - bin.split(a).length)[0]
+  c.put(i, 1, '▆', tone[bin.includes('f') ? 'f' : most])
+}
+// each note's number over the step it marks, or over the stretch it spans
+data.notes.forEach((m, i) => {
+  if (m.to) { c.hline(x(m.at), 0, x(m.to) - x(m.at), '─', 'dim'); c.put(x(m.to), 0, '┤', 'dim') }
+  c.text(x(m.at), 0, `**${i + 1}**`, { tone: 'accent' })
+})
+c.text(0, 2, '{dim:step 0}'); c.text(W - 1, 2, `{dim:${n}}`, { align: 'right' })
+const spans = data.notes.map(m => `${m.at}${m.to ? '–' + m.to : ''}`)
 return k.stack(
-  k.text(`The best run, **${best.run}**, reached ${best.acc}% with Adam at learning rate ${best.lr}`),
-  k.table(data.runs.map(r => ({ ...r, note: r === best ? 'best' : r.acc < 75 ? 'diverged' : '' })), {
-    cols: [{ key: 'run' }, { key: 'lr', label: 'learning rate', fmt: v => String(v) }, { key: 'batch' },
-      { key: 'acc', label: 'val acc %', fmt: v => v.toFixed(1) }, { key: 'note', label: '', tone: v => (v === 'best' ? 'good' : 'bad') }],
-    id: r => 'run-' + r.run }),
-)
+  k.text(`Run ${data.run} took **${n}** steps, three times the median of ${data.median}; 410 of them went to one test`),
+  k.stack(c, k.legend(data.kinds)),
+  k.stack(...data.notes.map((m, i) => k.region(m.id, { label: `step ${spans[i]}: ${m.text}`, ref: m.ref },
+    k.beside(k.text(`{accent:**${i + 1}**}`, { w: 2 }), k.text(`{dim:${spans[i]}}`, { w: Math.max(...spans.map(s => s.length)) }),
+      k.text(k.escape(m.text) + (m.quote ? `  {dim:“${k.escape(m.quote)}”}` : ''), { wrap: true }), { gap: 1 })))),
+  { gap: 1 })
 ```
 
-A knob that changes the answer (CI jobs that hung): the count rests on a threshold, so the threshold is a knob, and the strips and the count follow it.
+```
+Analyst   Which learning rates and batch sizes make training diverge?
+Takeaway  All four runs at learning rate 3e-3 diverged, and so did batch 32 at 1e-3; the lowest final loss, 0.569, was
+          at 1e-3 with batch 256.
+```
+
+The answer depends on two settings at once, so the card lays the runs out as a grid of the two, each cell the run's own
+loss curve on one shared scale, so the eye compares the cells.
+
+```js
+const lrs = [...new Set(data.runs.map(r => r.lr))], batches = [...new Set(data.runs.map(r => r.batch))]
+const W = Math.max(10, Math.min(24, Math.floor((k.w - 12) / batches.length) - 2))
+const best = data.runs.filter(r => !r.diverged).reduce((a, b) => (b.final < a.final ? b : a))
+const cell = r => {
+  const tone = r.diverged ? 'bad' : r === best ? 'good' : 'c1'
+  const words = r.diverged ? `{bad:diverged, epoch ${r.diverged}}` : `{${r === best ? 'good' : 'dim'}:final loss ${r.final}}`
+  return k.region('run-' + r.id, { label: `lr ${r.lr}, batch ${r.batch}: ${r.diverged ? 'diverged at epoch ' + r.diverged : 'final loss ' + r.final}`, ref: r.ref },
+    k.stack(k.spark(r.loss, { w: W, min: 0, max: data.max, tone }), k.text(words, { w: W })))
+}
+return k.stack(
+  k.text(`Every run at learning rate 3e-3 diverged; the lowest final loss, **${best.final}**, was at ${best.lr} with batch ${best.batch}`),
+  k.beside(k.text('{dim:lr  batch}', { w: 10 }), ...batches.map(b => k.text(`{dim:${b}}`, { w: W })), { gap: 2 }),
+  ...lrs.map(lr => k.beside(k.text(lr, { w: 10 }), ...batches.map(b => cell(data.runs.find(r => r.lr === lr && r.batch === b))), { gap: 2 })),
+  k.text(`{dim:each cell: training loss over ${data.epochs} epochs, on one scale from 0 to ${data.max}}`))
+```
+
+```
+Analyst   What changed in the data policy between the March and June drafts?
+Takeaway  June drops the 30-day deletion rule, adds a section on training models, and moves consent to the front; 8 of
+          the 12 March sections are unchanged.
+```
+
+The question compares two versions of one document, so the card sets them side by side, with each section that stayed
+on one row, and draws what moved, what was removed and what is new.
+
+```js
+const tone = Object.fromEntries(data.kinds.map(d => [d.key, d.tone]))
+const longest = Math.max(...data.rows.flatMap(r => [r.old, r.new]).filter(Boolean).map(s => k.len(s.title))) + 4
+const tw = Math.max(16, Math.min(longest, Math.floor((k.w - 16) / 2))), gx = tw + 1, gw = 14, bx = gx + gw + 1
+const c = k.canvas(bx + tw, data.rows.length + 1)
+c.text(0, 0, `**${data.old}**`); c.text(bx, 0, `**${data.new}**`)
+const section = (s, x, y, change, name) => {
+  c.text(x, y, `{dim:${s.n}} ${k.escape(s.title)}`, { tone: change === 'removed' || change === 'added' ? tone[change] : 'ink', max: tw })
+  c.region(`${name.toLowerCase()}-${s.n}`, x, y, tw, 1, { label: `${name} §${s.n} ${s.title} (${change})`, ref: s.ref })
+}
+data.rows.forEach((r, i) => {
+  const y = i + 1
+  if (r.old) section(r.old, 0, y, r.change, data.old)
+  if (r.new) section(r.new, bx, y, r.change, data.new)
+  if (r.old && r.new) c.hline(gx, y, gw, r.change === 'reworded' ? '╌' : '─', tone[r.change])
+  if (r.change === 'removed') c.text(gx + 1, y, '✕ removed', { tone: 'bad' })
+  if (r.change === 'added') c.text(gx + gw - 6, y, 'new +', { tone: 'good' })
+})
+data.moves.forEach(m => {
+  const y0 = m.from + 1, y1 = m.to + 1, lx = gx + Math.floor(gw / 2), t = tone.moved
+  for (let y = Math.min(y0, y1) + 1; y < Math.max(y0, y1); y++) c.put(lx, y, '┼', t)
+  c.hline(gx, y0, lx - gx, '─', t); c.hline(lx + 1, y1, gx + gw - lx - 1, '─', t)
+  c.put(lx, y0, y1 > y0 ? '╮' : '╯', t); c.put(lx, y1, y1 > y0 ? '╰' : '╭', t)
+})
+const same = data.rows.filter(r => r.change === 'same').length, total = data.rows.filter(r => r.old).length
+return k.stack(
+  k.text(`${data.new} drops the 30-day deletion rule, adds a section on training models, and moves consent to the front; ${same} of the ${total} ${data.old} sections are unchanged`, { wrap: true }),
+  c, k.legend(data.kinds), { gap: 1 })
+```
+
+```
+Analyst   How many of last night's CI jobs hung?
+Takeaway  5 of the 7 jobs went quiet for 5 minutes or more; with 10 minutes as the limit, 3 did.
+```
+
+The count rests on what "hung" means, so that limit is a knob, and the strips and the count follow it as the analyst
+turns it.
 
 ```js
 const t = k.knob('quiet', { values: [2, 5, 10, 20], at: 5, label: 'hung after', fmt: v => `${v} min quiet` })

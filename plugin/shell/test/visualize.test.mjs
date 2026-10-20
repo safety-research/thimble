@@ -1,6 +1,6 @@
 // Visualize (v): the request it sends Claude (another view, the proposals, the card guide read only now), and the card
 // guide's worked programs (skills/thimble/forms), which must draw as the guide shows them, under a reply and in the
-// detail.
+// detail, with the forms earlier guides showed (draw/test/forms).
 //   node --test shell/test/visualize.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -13,11 +13,15 @@ import { runProgram } from '../../draw/sandbox-node.mjs'
 import { gridText, renderTerm } from '../../draw/term.js'
 import { viewRequest } from '../visualize.js'
 
-const FORMS_DIR = fileURLToPath(new URL('../../skills/thimble/forms/', import.meta.url))
+const GUIDE_DIR = fileURLToPath(new URL('../../skills/thimble/forms/', import.meta.url))
+const OLD_DIR = fileURLToPath(new URL('../../draw/test/forms/', import.meta.url))
 const GUIDE = fileURLToPath(new URL('../../skills/thimble/cards.md', import.meta.url))
-const FORMS = ['bars', 'trend', 'records', 'map', 'table', 'knob', 'guide', 'timeline', 'weeks', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
-// the forms the card guide shows, without their opening comment lines
-const V3 = ['bars', 'trend', 'records', 'map', 'table', 'knob', 'timeline']
+// the forms the card guide shows (the guide holds each program, without its opening comment lines), and the forms
+// earlier guides showed, which the toolkit must still draw
+const SHOWN = ['flow', 'anatomy', 'grid', 'versions', 'knob', 'timeline']
+const OLD = ['bars', 'trend', 'records', 'map', 'table', 'guide', 'weeks', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
+const FORMS = [...SHOWN, ...OLD]
+const dirOf = name => (SHOWN.includes(name) ? GUIDE_DIR : OLD_DIR)
 
 test('v asks Claude for another view of the answer, with the proposal the person picked first and the card guide to read', () => {
   const message = { text: '[840](q3#n) of the 2,143 steps were **reruns**; the cause was a shared fixture.', objects: ['r17-trail@1'],
@@ -43,9 +47,9 @@ test('v on a catch-up names it as the catch-up the squeeze chips wrote of its re
 
 for (const name of FORMS) {
   test(`the ${name} form draws as the card guidance shows it, under a reply and in the detail, its parts selectable`, () => {
-    const program = readFileSync(join(FORMS_DIR, `${name}.program.js`), 'utf8').trimEnd()
-    if (V3.includes(name)) assert.ok(readFileSync(GUIDE, 'utf8').includes(program.replace(/^(\/\/[^\n]*\n)+/, '')), `the card guide holds ${name}.program.js`)
-    const data = JSON.parse(readFileSync(join(FORMS_DIR, `${name}.data.json`), 'utf8'))
+    const program = readFileSync(join(dirOf(name), `${name}.program.js`), 'utf8').trimEnd()
+    if (SHOWN.includes(name)) assert.ok(readFileSync(GUIDE, 'utf8').includes(program.replace(/^(\/\/[^\n]*\n)+/, '')), `the card guide holds ${name}.program.js`)
+    const data = JSON.parse(readFileSync(join(dirOf(name), `${name}.data.json`), 'utf8'))
     for (const [w, mode] of [[96, 'inline'], [98, 'detail'], [60, 'inline']]) {
       const d = runProgram({ id: name, v: 1, program, data }, { w, h: mode === 'detail' ? 30 : 24, mode })
       assert.equal(d.error, undefined, `${name} at ${w} ${mode}: ${JSON.stringify(d.error)}`)
@@ -58,7 +62,7 @@ for (const name of FORMS) {
 }
 
 test('a knob inside a card changes its words: the curves meet at ×8, and the number unfolds another way', () => {
-  const load = n => ({ id: n, v: 1, program: readFileSync(join(FORMS_DIR, `${n}.program.js`), 'utf8'), data: JSON.parse(readFileSync(join(FORMS_DIR, `${n}.data.json`), 'utf8')) })
+  const load = n => ({ id: n, v: 1, program: readFileSync(join(dirOf(n), `${n}.program.js`), 'utf8'), data: JSON.parse(readFileSync(join(dirOf(n), `${n}.data.json`), 'utf8')) })
   const text = d => gridText(renderTerm(d, { w: 96 }))
   assert.match(text(runProgram(load('curves'), { w: 96 })), /◂ ×8 ▸ +max gap 1\.0 pts/)
   assert.match(text(runProgram(load('curves'), { w: 96, state: { scale: 1 } })), /◂ ×1 ▸ +max gap 26\.6 pts/)

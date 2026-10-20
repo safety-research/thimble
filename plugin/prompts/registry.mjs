@@ -93,11 +93,12 @@ export const FEATURES = {
   },
   forms: {
     about: 'the card guide: what makes a good card, the toolkit, and worked examples',
-    reads: 'beside the result of the first data command of a session (prompts.ts); v asks Claude to read it', default: 'v5',
+    reads: 'beside the result of the first data command of a session (prompts.ts); v asks Claude to read it', default: 'v6',
     versions: {
       v3: { about: 'the card guide in the 0.9 words, with its four takeaway failures and four programs (kept as prompts/forms/v3.md)' },
       v4: { about: "the 0.9 principles in fewer words, one takeaway example, guides as pages, seven worked programs and one sequence of cards (kept as prompts/forms/v4.md)" },
-      v5: { about: "skills/thimble/cards.md: v4 without its list of forms, its pages and the links in a card's words; six worked programs", file: 'skills/thimble/cards.md' },
+      v5: { about: "v4 without its list of forms, its pages and the links in a card's words; six worked programs (kept as prompts/forms/v5.md)" },
+      v6: { about: "skills/thimble/cards.md: v5 with k.graph in the toolkit, and five worked programs that each answer another kind of question with a form made for it (a code path as a diagram, one run's anatomy, a grid of small multiples, two versions side by side, a threshold as a knob), opened by why a picture can beat a chart", file: 'skills/thimble/cards.md' },
     },
   },
   thread: {

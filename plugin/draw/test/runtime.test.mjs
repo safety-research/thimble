@@ -62,29 +62,67 @@ test('a stacked bar\'s part drawn from a row is a part by itself: it opens that 
   assert.deepEqual(plain.regions, [])
 })
 
-test('a stacked bar\'s label stays inside its own part, and a total beside the total is drawn once', async () => {
+test('every part of a stacked bar has one height, k.bars names the parts once in a key above, and a total beside the total is drawn once', async () => {
   // a narrow part whose label is wide characters, a part labelled with a number, and a note that repeats the total
   const parts = [{ value: 9, label: '数据集', tone: 'c1' }, { value: 30, label: 'names 11–50', tone: 'c2' }, { value: 61, label: '1,119 other names', tone: 'c4' }]
   const program = `return k.bars([{ id: 'answers', label: 'answers', parts: data.parts, note: k.fmt(100) }, { id: 'proxy', label: 'proxy', parts: data.parts.slice(1), note: 'two kinds' }])`
   for (const w of [40, 60, 90, 120, 150]) {
     const d = runProgram({ program, data: { parts } }, { w, h: 12 })
     assert.equal(d.error, undefined, d.error && d.error.message)
-    // the terminal: the cells on a part's fill hold that part's words only, whole, and nothing on a fill strays
     const g = renderTerm(d, { w })
-    for (const row of g.rows.slice(0, 2)) {
-      for (const p of parts) {
-        const on = row.filter(c => c.bg === p.tone)
-        const words = on.map(c => c.ch).join('').trim()
-        const value = p.value.toLocaleString('en-US')
-        assert.ok(!words || words === p.label || words === `${p.label} ${value}`, `${w}: "${words}" on the part ${p.label}`)
-      }
-      assert.ok(row.every(c => c.tone !== 'paper' || c.bg || c.cont), `${w}: words off their part's fill`)
+    const text = gridText(g).split('\n')
+    // the key: each part's name once, in the rows above the bars (it wraps when the card is narrow)
+    const first = text.findIndex(l => l.includes('▆'))
+    const key = text.slice(0, first).map(l => l.trim()).join(' ')
+    for (const p of parts) assert.equal(key.split(p.label).length - 1, 1, `${w}: ${key}`)
+    // the bars: every cell of a part is the same glyph, on no fill
+    for (const row of g.rows.slice(first, first + 2)) {
+      const on = row.filter(c => parts.some(p => p.tone === c.tone))
+      assert.ok(on.length > 0, `${w}: a bar is drawn`)
+      assert.ok(on.every(c => c.ch === '▆' && !c.bg), `${w}: ${on.map(c => c.ch).join('')}`)
     }
     // a total beside the same total is drawn once; another note is kept
-    const text = gridText(g)
-    assert.equal(text.split('\n')[0].split('100').length - 1, 1, `${w}: ${text}`)
-    if (w >= 90) assert.ok(text.includes('two kinds'), text)
+    assert.equal(text[first].split('100').length - 1, 1, `${w}: ${text.join('\n')}`)
+    if (w >= 90) assert.ok(text[first + 1].includes('two kinds'), text.join('\n'))
   }
+})
+
+test('a stacked bar keeps one height whatever its parts are: wide or narrow, labelled, unlabelled, or with a note beside', () => {
+  // lived and died per class, as a Titanic card draws them: one part wide enough for its label, one too narrow for it,
+  // one with no label, a sliver under one cell, and a row with a note beside the bar; and a lone k.bar outside k.bars
+  const program = `return k.stack(
+    k.bars([
+      { id: 'first', label: '1st', parts: [{ value: 136, label: 'lived', tone: 'c1' }, { value: 80, label: 'died', tone: 'dim' }], note: '216 aboard' },
+      { id: 'second', label: '2nd', parts: [{ value: 87, label: 'lived', tone: 'c1' }, { value: 97, tone: 'dim' }] },
+      { id: 'third', label: '3rd', parts: [{ value: 3, label: 'lived', tone: 'c1' }, { value: 372, label: 'died', tone: 'dim' }, { value: 1, label: 'unknown', tone: 'c4' }] },
+    ]),
+    k.bar([{ value: 40, label: 'lived', tone: 'c1' }, { value: 60, tone: 'dim' }], { max: 100 }))`
+  for (const w of [50, 80, 120]) {
+    const d = runProgram({ program, data: {} }, { w, h: 12 })
+    assert.equal(d.error, undefined, d.error && d.error.message)
+    const g = renderTerm(d, { w })
+    const text = gridText(g).split('\n')
+    const first = text.findIndex(l => l.includes('▆'))
+    for (let y = first; y < g.h; y++) {
+      const cells = g.rows[y].filter(c => c.tone === 'c1' || c.tone === 'dim' || c.tone === 'c4')
+      const bar = cells.filter(c => c.ch !== ' ' && !/[0-9a-z]/i.test(c.ch))
+      // every cell of a part is the bar glyph or, for a part under one cell, the sliver; none sits on a fill
+      assert.ok(bar.every(c => (c.ch === '▆' || c.ch === '▏') && !c.bg), `${w}, row ${y}: ${bar.map(c => c.ch).join('')}`)
+      assert.ok(g.rows[y].every(c => !c.bg), `${w}, row ${y}: no part fills its whole cell`)
+    }
+    // the parts' names are in the key above, each once
+    for (const name of ['lived', 'died', 'unknown']) assert.equal(text.slice(0, first).join(' ').split(name).length - 1, 1, `${w}: ${text.slice(0, first).join(' ')}`)
+  }
+})
+
+test('the key k.bars adds is left out where the program names the parts in a legend of its own', () => {
+  const rows = `[{ id: 'a', label: 'a', parts: [{ value: 3, label: 'added', tone: 'c2' }, { value: 5, label: 'deleted', tone: 'c4' }] }]`
+  const count = program => gridText(renderTerm(runProgram({ program, data: {} }, { w: 60, h: 12 }), { w: 60 })).split('deleted').length - 1
+  assert.equal(count(`return k.bars(${rows})`), 1)
+  assert.equal(count(`return k.stack(k.bars(${rows}), k.legend([{ label: 'added', tone: 'c2' }, { label: 'deleted', tone: 'c4' }]))`), 1)
+  assert.equal(count(`return k.stack(k.text('{c2:■} added  {c4:■} deleted'), k.bars(${rows}))`), 1)
+  // words that only mention the parts are no legend: the key stays
+  assert.equal(count(`return k.stack(k.text('more deleted than added'), k.bars(${rows}))`), 2)
 })
 
 test('a part the program drew from values alone is matched to the rows whose words it shows', () => {
