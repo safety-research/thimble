@@ -13,7 +13,7 @@ Installs thimble's two products. It checks Node, Python and uv first, and says w
     Without the claude command, it prints the two commands to run.
   The browser workbench, from this checkout: the server (uv sync), the page (npm ci, then a build), the sandbox
     runtime (npm ci in browser/server/sandbox), and a thimble-browser launcher in ~/.local/bin. It says how much
-    disk space this takes, about 400 MB.
+    disk space this takes, about 600 MB.
 Running it again is safe, and updates both.
 
   --no-browser   install the terminal plugin only
@@ -43,6 +43,12 @@ done
 [ "$plugin" = 1 ] || [ "$web" = 1 ] || { echo "install.sh: --no-browser and --no-plugin leave nothing to install" >&2; exit 2; }
 
 say() { printf '%s\n' "$*"; }
+# quietly CMD...: runs CMD, and shows what it printed only when it fails
+quietly() {
+  local log
+  log="$(mktemp)"
+  if "$@" >"$log" 2>&1; then rm -f "$log"; else cat "$log" >&2; rm -f "$log"; return 1; fi
+}
 step() { printf '\n== %s\n' "$*"; }
 
 # ver_ge HAVE WANT: whether the version HAVE is WANT or later, comparing up to three dotted numbers
@@ -143,13 +149,14 @@ fi
 if [ "$web" = 1 ]; then
   step "The browser workbench"
   say "The server's Python packages (uv sync)..."
-  uv sync --project "$browser/server" --locked --quiet
+  export NPM_CONFIG_UPDATE_NOTIFIER=false
+  quietly uv sync --project "$browser/server" --locked
   say "The page (npm ci, then a build)..."
-  npm --prefix "$browser/frontend" ci --no-audit --no-fund --loglevel=error >/dev/null
-  npm --prefix "$browser/frontend" run build >/dev/null
+  quietly npm --prefix "$browser/frontend" ci --no-audit --no-fund
+  quietly npm --prefix "$browser/frontend" run build
   say "The sandbox runtime (npm ci in browser/server/sandbox)..."
   sb="$browser/server/sandbox"
-  npm --prefix "$sb" ci --ignore-scripts --no-audit --no-fund --loglevel=error >/dev/null
+  quietly npm --prefix "$sb" ci --ignore-scripts --no-audit --no-fund
   cp "$sb/package-lock.json" "$sb/node_modules/.thimble-lock.json"  # the launcher installs it again when this differs
 
   mkdir -p "$bin_dir"

@@ -1,8 +1,15 @@
-# The checks every push and pull request runs, which can also be run by hand from the Actions tab. Each step is one step
-# of scripts/check.sh, the command a contributor runs locally, so CI and a local run check the same things.
+# The checks every push and pull request runs, which can also be run by hand from the Actions tab. Each job after the
+# scan runs steps of scripts/check.sh, the command a contributor runs locally, so CI and a local run check the same
+# things:
+#
+#   scan            scripts/scan.sh over the new commits, with its generic patterns (CI has no private lists)
+#   plugin          the terminal plugin: its validation, hooks tests, Node tests and Python tests
+#   parity          the browser's shared prompts still apply to the plugin's texts (browser/prompts/shared.json)
+#   browser-server  the browser workbench's server tests, with bubblewrap and the sandbox runtime
+#   browser-page    the browser workbench's page: type check, unit tests and build
 #
 # Claude Code comes from npm (@anthropic-ai/claude-code), pinned to a version the plugin was tested with. Its
-# `claude plugin validate` and `claude plugin test` need no login, so all four steps run here.
+# `claude plugin validate` and `claude plugin test` need no login.
 name: checks
 
 on:
@@ -18,7 +25,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false  # the steps after it run a pull request's code, which needs no token
+          fetch-depth: 0  # the scan reads the history of the pushed commits
+
+      - name: Scan the new commits for private paths and secrets
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            scripts/scan.sh --generic "$BASE..$HEAD_SHA"
+          else  # a new branch, a force push or a manual run: the commits no other branch has
+            scripts/scan.sh --generic "$HEAD_SHA" --not --exclude="origin/$GITHUB_REF_NAME" --remotes=origin
+          fi
+
+  plugin:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -26,7 +53,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false  # the steps after it run a pull request's code, which needs no token
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -54,3 +81,62 @@ jobs:
 
       - name: Python tests
         run: scripts/check.sh python
+
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22  # the test also reads the plugin's prompt registry with Node
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Shared prompts
+        run: scripts/check.sh parity
+
+  browser-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - name: Install bubblewrap, and let it make its namespaces (the runner's AppArmor keeps it from them)
+        run: |
+          sudo apt-get install -y bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Sandbox check (installs the sandbox runtime pinned in browser/server/sandbox, fails when it does not work)
+        run: browser/scripts/thimble-browser --check-sandbox
+
+      - name: Server tests
+        run: scripts/check.sh server
+
+  browser-page:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: browser/frontend/package-lock.json
+
+      - name: Type check, unit tests and build (after npm ci)
+        run: scripts/check.sh page

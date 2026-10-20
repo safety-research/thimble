@@ -147,7 +147,7 @@ def test_status_says_what_a_mac_or_a_linux_needs(fresh_status, monkeypatch, tmp_
     monkeypatch.setattr(sandbox, "node_version", lambda exe: (24, 1))
     monkeypatch.setattr(sandbox, "PACKAGE", tmp_path / "missing")
     st = sandbox.status()
-    assert "not installed" in st.why and "npm ci --ignore-scripts --prefix server/sandbox" in st.fix
+    assert "not installed" in st.why and "scripts/install.sh" in st.fix
     sandbox.status.cache_clear()
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(sandbox, "installed", sandbox.pinned)
