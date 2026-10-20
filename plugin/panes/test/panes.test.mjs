@@ -235,9 +235,9 @@ test('the bar is always one line: it drops the counts but coverage first, then s
   assert.equal(narrow.cut, true)
   assert.ok(!barLine(narrow).includes('\n'))
   // the side panel's thread names the bar: a long name is cut to its start before coverage goes
-  const thread = { label: 'thimble:main/02-agent-editors-by-wiki', left: [{ key: 'esc', words: 'close' }], counts: [{ id: 'cov', text: 'r seen 0.1% ████████' }] }
-  assert.equal(barLine(fitBar(thread, 80)), 'thimble:main/02-agent-editors-by-wiki  esc close   r seen 0.1% ████████')
-  assert.equal(barLine(fitBar(thread, 50)), 'thimble:main/02…  esc close   r seen 0.1% ████████')
+  const thread = { label: 'thimble:main/02-agent-editors-by-wiki', left: [{ key: 'esc', words: 'close' }], counts: [{ id: 'cov', text: 'r coverage 0.1% ████████' }] }
+  assert.equal(barLine(fitBar(thread, 80)), 'thimble:main/02-agent-editors-by-wiki  esc close   r coverage 0.1% ████████')
+  assert.equal(barLine(fitBar(thread, 54)), 'thimble:main/02…  esc close   r coverage 0.1% ████████')
 })
 
 test('a status in the bar is cut at its end, never to its first word, and the keys keep their words longest', async () => {

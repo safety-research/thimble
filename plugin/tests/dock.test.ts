@@ -124,7 +124,7 @@ test('the bar names the coverage with a small bar of its file types and the labe
   const clock = mock.clock(on)
   await turn($, on, clock)
   const bar = await $.ui.render(HINT)
-  expect(textOf(bar)).toContain('r seen 17% ████████ · l 2 labels')
+  expect(textOf(bar)).toContain('r coverage 17% ████████ · l 2 labels')
   // the small bar: the jsonl type's read part bright, the rest pale
   const cells: string[] = []
   walk(bar, x => { if (x.type === 'Text' && /^█+$/.test(textOf(x))) cells.push(String(x.props?.color)) })
@@ -146,8 +146,8 @@ test('the bar names the coverage with a small bar of its file types and the labe
   const held = textOf(await $.ui.render(HINT))
   expect(held).toContain('esc close')
   expect(held).not.toContain('g by type')
-  expect(held).toContain('seen 17%')
-  expect(held).not.toContain('r seen')
+  expect(held).toContain('coverage 17%')
+  expect(held).not.toContain('r coverage')
   expect(held).not.toContain('l 2 labels')
   // g is no key: it begins a question; by type is a press
   expect(await key($, clock, 'g')).toEqual({ text: '', cursor: 0 })
@@ -299,8 +299,8 @@ test("the bar's coverage shows from the session's start, at 0% once the folder h
   on('tool.call', () => ({ result: 'one\ntwo\n' }))
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
   await clock.settle()
-  // nothing read yet: the folder has rows, so the bar says so, seen 0%
-  expect(textOf(await $.ui.render(HINT))).toContain('r seen 0%')
+  // nothing read yet: the folder has rows, so the bar says so, coverage 0%
+  expect(textOf(await $.ui.render(HINT))).toContain('r coverage 0%')
   // a call while Claude works: the coverage is counted again a moment after it, before the turn ends
   const before = w.runs.filter(r => r.includes('coverage')).length
   cov.now = COVERAGE
@@ -308,7 +308,7 @@ test("the bar's coverage shows from the session's start, at 0% once the folder h
   await clock.advance(1600)
   await clock.settle()
   expect(w.runs.filter(r => r.includes('coverage')).length).toBeGreaterThan(before)
-  expect(textOf(await $.ui.render(HINT))).toContain('seen 17%')
+  expect(textOf(await $.ui.render(HINT))).toContain('coverage 17%')
 })
 
 test("the ring starts on the pane's selected part: a move the person did not make, onto another part, lands on the selected one", async ($, on) => {

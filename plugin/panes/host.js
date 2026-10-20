@@ -182,7 +182,7 @@ export function hostKeys(mode, surface = 'terminal') {
 }
 
 // ---------------------------------------------------------------- the one bar, in the room it has
-// The bar is one line: `thimble  v visualize · s squeeze · c 9 claims      t 2 threads · r seen 34%`. With
+// The bar is one line: `thimble  v visualize · s squeeze · c 9 claims      t 2 threads · r coverage 34%`. With
 // less room it gives up, in this order: the counts other than coverage, then each key's words beyond their first word
 // (`visualize`, `squeeze`, `cite`), then coverage, then the label, then the end of the line (an ellipsis). It never
 // wraps. Coverage stays longest: it is what the session has seen of the folder, which no key shows.

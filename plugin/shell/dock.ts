@@ -1,13 +1,13 @@
 // dock.ts: Coverage (what Claude read of the folder, panes/coverage.js) and the label viewer (panes/labels.js), which
 // open in the side panel (side.ts openSide) as threads: the pane at the top, its thread's conversation under it, the
 // input bar at the bottom, so "why was events.jsonl not read?" is asked from Coverage itself. The bar's right side names
-// them: `seen 12%` (the share of the folder's rows that entered Claude's context) with a small bar of the folder's file
-// types, and `2 labels` once the folder has labels; a click
+// them: `r coverage 12%` (the share of the folder's rows that entered Claude's context) with a small bar of the
+// folder's file types, and `l 2 labels` once the folder has labels; a click
 // on either, or its key (r, l) from the empty prompt, opens its pane, and the same again closes it. This module is what
 // the side panel does not do for them:
 //
 //   data   the coverage (`thimble coverage --json`, this session's, read again on open, after each turn, and a moment
-//          after each of Claude's tool calls while it works, so the bar's `seen` follows the work) and the labels
+//          after each of Claude's tool calls while it works, so the bar's coverage follows the work) and the labels
 //          (`thimble label --json`), held here; what a program wants on demand: a file's lines around a read range,
 //          and a page of a label's records (`thimble label NAME --records …`)
 //   acts   a label value the person checks in the label panel is their check (labels.ts check), as in the card detail;
@@ -256,14 +256,14 @@ export function restPane(k: string, named: { cov: boolean; labels: boolean }): D
 type Count = { id: string; text: string; bare?: boolean; bright: boolean }
 type Counts = { cov: number; labels?: number; mix?: { tone: string; seen: boolean; n: number }[] }
 
-/** The bar's counts of the two panes, as fitBar measures them: `r seen 12% ████████` and `l 2 labels`. The coverage
- *  is one word and one number, the share of the folder's rows that entered Claude's context ("seen", the kernel's word:
- *  "read" was what a query or a rule computed over too); what was only computed over, and the files touched, are the
- *  pane's to say. */
+/** The bar's counts of the two panes, as fitBar measures them: `r coverage 12% ████████` and `l 2 labels`. The
+ *  coverage is its name and one number, the share of the folder's rows that entered Claude's context (what the kernel
+ *  calls seen: what a query or a rule only computed over is not in it); what was only computed over, and the files
+ *  touched, are the pane's to say. */
 export function dockCounts(c: Counts, percent: (x: number) => string): [string, number, string][] {
   const mix = (c.mix || []).reduce((s, x) => s + x.n, 0)
   return [
-    ['cov', c.cov, `${DOCK_KEY.coverage} seen ${percent(c.cov)}${mix ? ` ${'█'.repeat(mix)}` : ''}`],
+    ['cov', c.cov, `${DOCK_KEY.coverage} coverage ${percent(c.cov)}${mix ? ` ${'█'.repeat(mix)}` : ''}`],
     ['labels', c.labels ?? 0, `${DOCK_KEY.labels} ${c.labels === 1 ? '1 label' : `${(c.labels ?? 0).toLocaleString('en-US')} labels`}`],
   ]
 }
@@ -310,8 +310,8 @@ function coverSoon($: Engine, now: number): void {
 }
 
 export function registerDock(on: Parameters<Register>[0]): void {
-  // what Claude reads while it works counts at once: the bar's `seen` follows each call that can read the folder (a Read,
-  // a search, a command), not only the end of the turn
+  // what Claude reads while it works counts at once: the bar's coverage follows each call that can read the folder (a
+  // Read, a search, a command), not only the end of the turn
   on('tool.call', { tool: /^(Read|Grep|Glob|Bash)$/ }, async ($, e, next) => {
     const r = await next(e)
     try { coverSoon($, Number(await $.clock.now())) } catch { /* the turn's end counts it */ }

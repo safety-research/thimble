@@ -199,19 +199,19 @@ test("the preview is the session's own bar: what the observer lit, and the count
   // a folder thimble has read, so the bar counts what Claude saw of it
   w.files[`${ROOT}/thimble/queries`] = ''
   await turn($, w, 't1', 'when did they edit most?', 'June 18 had the most saves.')
-  expect(textOf(await $.ui.render(HINT))).toContain('seen 12%')
+  expect(textOf(await $.ui.render(HINT))).toContain('coverage 12%')
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   await w.clock.settle()
   const ui = await $.ui.mount(PANE)
   await w.clock.settle()
   expect(textOf(await ui.drawn())).toContain('thimble  v ● saves by day · s squeeze · c claims')
-  expect(textOf(await ui.drawn())).toContain('seen 12%')
+  expect(textOf(await ui.drawn())).toContain('coverage 12%')
   const row = buttons(await ui.drawn()).find((b: Any) => String(b.props.key).endsWith('|s-counts'))
   await ui.press({ key: row.props.key })
   await w.clock.settle()
   const t = textOf(await ui.drawn())
   expect(t).toContain('○ off  Labels and coverage on the bar')
-  expect(t).not.toContain('seen 12%')
+  expect(t).not.toContain('coverage 12%')
   await ui.unmount()
 })
 

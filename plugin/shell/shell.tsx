@@ -1379,7 +1379,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
 //
 // One bar above the prompt, where thimble 0.9 puts its line; the area under the prompt stays Claude Code's own.
 //
-//   thimble  v visualize · s squeeze · c 11 claims                                          t 2 threads · r seen 12% ▆▆▃▁
+//   thimble  v visualize · s squeeze · c 11 claims                                     t 2 threads · r coverage 12% ▆▆▃▁
 //
 // At its left, what the keys do now, in words as Claude Code says its own keys: at rest the verbs of the message the
 // keys act on (a lit one with its note in place of its name; c with how many claims the session holds, bright for a
@@ -1734,7 +1734,7 @@ async function barEl($: Engine, elsIn: Any, w: number, o: { on?: (key: string) =
   const items: [string, number, string, string?][] = c ? [
     // t: the list of them in the side panel
     ['threads', c.threads, c.threads === 1 ? '1 thread' : `${fmtN(c.threads)} threads`, 't'],
-    // coverage and the labels open their panes in the side panel (dock.ts): `r seen 12% ▆▆▃▁`, `l 2 labels` (their
+    // coverage and the labels open their panes in the side panel (dock.ts): `r coverage 12% ▆▆▃▁`, `l 2 labels` (their
     // key in their words)
     ...dockCounts(c, percent),
   ] : []
