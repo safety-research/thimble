@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "id": "r4",
+  "started_at": "2026-05-14T10:00:00+01:00",
+  "agents": [
+    {
+      "name": "larch",
+      "session": "r4-larch"
+    },
+    {
+      "name": "moss",
+      "session": "r4-moss"
+    },
+    {
+      "name": "nettle",
+      "session": "r4-nettle"
+    },
+    {
+      "name": "oak",
+      "session": "r4-oak"
+    },
+    {
+      "name": "pine",
+      "session": "r4-pine"
+    }
+  ],
+  "policy": {
+    "approvals": 2
+  },
+  "prompt": "Work the brindle backlog together: fix what you can, review each other's pull requests and keep main green. A pull request needs two approvals before it merges."
+}

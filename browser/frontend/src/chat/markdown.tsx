@@ -1,0 +1,353 @@
+// Assistant markdown: react-markdown with remark-gfm, the `[[value|ref]]` tokens turned into chips. The tokens are
+// hidden from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns
+// the markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta
+// re-parses only the tail.
+import { Fragment, createContext, memo, useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
+import Markdown, { type Components, type ExtraProps, type Options } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import type { Element, Properties, Root, Text } from 'hast'
+import { MarkdownCode } from '../components/Code'
+import { MdImage } from '../components/MdImage'
+import { GlyphCites, RefChip } from '../components/RefChip'
+import { rehypeNumericCells } from '../lib/markdownCells'
+import { splitValueRef } from '../lib/refs'
+
+export interface ChipCtx {
+  workspace: string
+  /** the refs the link pass named as not resolving */
+  broken: ReadonlySet<string>
+  /** the failure per broken ref */
+  why?: ReadonlyMap<string, string>
+  /** the chips carry `data-anchor` (chat prose, where a ⌘-click may start a thread from a chip) */
+  anchor?: boolean
+}
+
+export const ChipContext = createContext<ChipCtx>({ workspace: '', broken: new Set() })
+
+const BRACKET_SRC = String.raw`\[\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+?)\]\]`
+/** a bare `card:<id>` (or `cell:<id>`) or `concept:<id>` typed into prose renders as the same chip */
+export const BARE_SRC = String.raw`(?<![\w[|:])((?:card|cell):[A-Za-z0-9_-]{6,}(?:@\d+|@out\d+#L\d+(?:-\d+)?|#[^\s/]+\/[^\s,;)]*[^\s,;.)])?|(?:concept|group):[A-Za-z0-9_-]{6,})`
+const TOKEN_RE = new RegExp(`${BRACKET_SRC}|${BARE_SRC}`, 'g')
+
+const PH_OPEN = ''
+const PH_CLOSE = ''
+const BRACKET_RE = new RegExp(BRACKET_SRC, 'g')
+const PH_SRC = String.raw`([0-9a-f]*)`
+const PH_RE = new RegExp(PH_SRC, 'g')
+const utf8 = new TextEncoder()
+const utf8d = new TextDecoder()
+const toHex = (s: string) => Array.from(utf8.encode(s), (b) => b.toString(16).padStart(2, '0')).join('')
+const fromHex = (h: string) => (h ? utf8d.decode(new Uint8Array((h.match(/../g) ?? []).map((x) => parseInt(x, 16)))) : '')
+
+/** A Markdown link whose target is a ref rather than a web page, as Claude writes a citation in thimble browser and in
+ * the terminal plugin alike: `[31](card:<id>#outcome/merged)`, `["quote"](runs/x.jsonl#L4)`, `[↗](<ref>)`. A ref may
+ * hold spaces (a column's name), written as they are or as %20. */
+const CITE_LINK_RE = /(?<!!)\[([^\[\]\n]*)\]\(([^()\n]+?)\)/g
+const WEB_TARGET = /^(?:[a-z][a-z0-9+.-]*:\/\/|mailto:|#|\/)/i
+
+/** `text` with each citation written as a Markdown link turned into the `[[value|ref]]` token the chips read; a link to
+ * a web page stays a link. Pure. */
+export function citeLinks(text: string): string {
+  if (!text.includes('](')) return text
+  return text.replace(CITE_LINK_RE, (whole, words: string, target: string) => {
+    if (WEB_TARGET.test(target.trim())) return whole
+    const ref = target.trim().replace(/%20/g, ' ')
+    const shown = words.trim()
+    return !shown || shown === '↗' ? `[[${ref}]]` : `[[${shown}|${ref}]]`
+  })
+}
+
+/** `text` with every `[[…]]` token replaced by a private-use marker the markdown parser leaves alone. */
+export function protectTokens(text: string): string {
+  return text.includes('[[') ? text.replace(BRACKET_RE, (_m, inner: string) => PH_OPEN + toHex(inner) + PH_CLOSE) : text
+}
+const restoreTokens = (text: string) => text.replace(PH_RE, (_m, hex: string) => `[[${fromHex(hex)}]]`)
+const SPLIT_RE = new RegExp(`${PH_SRC}|${BRACKET_SRC}|${BARE_SRC}`, 'g')
+function tokenOfSplit(m: RegExpMatchArray): { ref: string; value?: string } {
+  if (m[1] != null) return splitValueRef(fromHex(m[1]).trim())
+  if (m[2] != null) return splitValueRef(m[2].trim())
+  return { ref: m[3] }
+}
+const mayHaveToken = (value: string) => value.includes(PH_OPEN) || value.includes('[[') || value.includes('card:') || value.includes('cell:') || value.includes('concept:') || value.includes('group:')
+
+function splitText(value: string): (Element | Text)[] {
+  const out: (Element | Text)[] = []
+  let last = 0
+  for (const m of value.matchAll(SPLIT_RE)) {
+    const at = m.index ?? 0
+    const { value: display, ref } = tokenOfSplit(m)
+    if (at > last) {
+      const before = value.slice(last, at)
+      // the space before a bare citation hides with it while the links are off (refchip.css): "see [[ref]]." reads "see."
+      const gap = display == null ? /\s+$/.exec(before) : null
+      if (gap) {
+        if (gap.index > 0) out.push({ type: 'text', value: before.slice(0, gap.index) })
+        out.push({ type: 'element', tagName: 'span', properties: { className: ['refchip-gap'] }, children: [{ type: 'text', value: gap[0] }] })
+      } else out.push({ type: 'text', value: before })
+    }
+    const props: Properties = { dataRef: ref }
+    if (display != null) props.dataValue = display
+    out.push({ type: 'element', tagName: 'span', properties: props, children: [] })
+    last = at + m[0].length
+  }
+  if (last < value.length) out.push({ type: 'text', value: value.slice(last) })
+  return out
+}
+
+function restore(node: Root | Element): void {
+  for (const child of node.children) {
+    if (child.type === 'text') {
+      if (child.value.includes(PH_OPEN)) child.value = restoreTokens(child.value)
+    } else if (child.type === 'element') restore(child)
+  }
+}
+
+function walk(node: Root | Element): void {
+  if (node.type === 'element' && node.tagName === 'pre') {
+    restore(node)
+    return
+  }
+  let changed = false
+  const next: (typeof node.children)[number][] = []
+  for (const child of node.children) {
+    if (child.type === 'text' && mayHaveToken(child.value)) {
+      const parts = splitText(child.value)
+      if (parts.length !== 1 || parts[0].type !== 'text') changed = true
+      next.push(...parts)
+    } else {
+      if (child.type === 'element') walk(child)
+      next.push(child)
+    }
+  }
+  if (changed) node.children = next as typeof node.children
+}
+
+/** rehype plugin: `[[ref]]` markers in text nodes become `<span data-ref>` elements. */
+export function rehypeRefChips() {
+  return (tree: Root) => {
+    walk(tree)
+  }
+}
+
+/** An explain mark as the reply carries it (chat/model Gloss). */
+export interface GlossMarkData {
+  term: string
+  body: string
+  here?: string
+}
+const GlossContext = createContext<readonly GlossMarkData[]>([])
+
+/** rehype plugin: the first place each term of `terms` stands in the text (outside code and chips) becomes a
+ * `<span data-gloss=i>` that renders as an explain mark. */
+export function rehypeGlosses(terms: readonly string[]) {
+  return (tree: Root) => {
+    const left = new Set(terms.map((_, i) => i))
+    const visit = (node: Root | Element): void => {
+      if (!left.size) return
+      if (node.type === 'element' && (node.tagName === 'code' || node.tagName === 'pre' || node.properties?.dataRef != null)) return
+      const next: (typeof node.children)[number][] = []
+      let changed = false
+      for (const child of node.children) {
+        if (child.type !== 'text' || !left.size) {
+          if (child.type === 'element') visit(child)
+          next.push(child)
+          continue
+        }
+        let rest = child.value
+        for (;;) {
+          let best: { i: number; at: number } | null = null
+          for (const i of left) {
+            const at = rest.indexOf(terms[i])
+            if (at >= 0 && (!best || at < best.at)) best = { i, at }
+          }
+          if (!best) break
+          changed = true
+          left.delete(best.i)
+          if (best.at > 0) next.push({ type: 'text', value: rest.slice(0, best.at) })
+          next.push({ type: 'element', tagName: 'span', properties: { dataGloss: String(best.i) }, children: [{ type: 'text', value: terms[best.i] }] })
+          rest = rest.slice(best.at + terms[best.i].length)
+        }
+        if (rest) next.push({ type: 'text', value: rest })
+      }
+      if (changed) node.children = next as typeof node.children
+    }
+    visit(tree)
+  }
+}
+
+/** An explain mark: the words with a teal fill; a click opens what they mean, in place. */
+function GlossMark({ gloss, children }: { gloss: GlossMarkData; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  // a press outside the mark, or Escape, closes it
+  useEffect(() => {
+    if (!open) return
+    const down = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false)
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('pointerdown', down, true)
+    document.addEventListener('keydown', key)
+    return () => {
+      document.removeEventListener('pointerdown', down, true)
+      document.removeEventListener('keydown', key)
+    }
+  }, [open])
+  // the card opens under the words and stays inside the text's column: shifted left when it would pass its right edge
+  const place = (card: HTMLSpanElement | null) => {
+    if (!card) return
+    const column = card.closest('.chat-text, .chat-msg') ?? document.body
+    const over = card.getBoundingClientRect().right - column.getBoundingClientRect().right
+    if (over > 0) card.style.left = `${-over}px`
+  }
+  return (
+    <span ref={box} className={`gloss${open ? ' gloss-open' : ''}`}>
+      <button type="button" className="gloss-term" aria-expanded={open} onClick={() => setOpen((o) => !o)} title="What this means">
+        {children}
+      </button>
+      {open && (
+        <span className="gloss-card" role="note" ref={place}>
+          <span className="gloss-body">{gloss.body}</span>
+          {gloss.here && (
+            <span className="gloss-here">
+              <ChatMarkdown text={gloss.here} />
+            </span>
+          )}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
+  const ctx = useContext(ChipContext)
+  const glosses = useContext(GlossContext)
+  const glossAt = (props as Record<string, unknown>)['data-gloss']
+  if (typeof glossAt === 'string' && glosses[Number(glossAt)]) return <GlossMark gloss={glosses[Number(glossAt)]}>{props.children}</GlossMark>
+  const ref = (props as Record<string, unknown>)['data-ref']
+  const value = (props as Record<string, unknown>)['data-value']
+  if (typeof ref === 'string') {
+    const broken = ctx.broken.has(ref)
+    return <RefChip ref={ref} value={typeof value === 'string' ? value : undefined} broken={broken} brokenWhy={broken ? ctx.why?.get(ref) : undefined} anchor={ctx.anchor} workspace={ctx.workspace} cite />
+  }
+  const { node: _node, ...rest } = props
+  return <span {...rest} />
+}
+
+function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
+  const { node: _node, ...rest } = props
+  return <a {...rest} target="_blank" rel="noreferrer" />
+}
+
+// a fenced block in the language it names takes the syntax colours code has everywhere (components/Code.tsx); an image
+// loads only from the machine (components/MdImage)
+const components: Components = { span: MdSpan, a: MdLink, code: MarkdownCode, img: MdImage }
+// a single ~ is no strikethrough: page and file names hold it (`dse~Agent`, live check L21); ~~two~~ still is
+const remarkPlugins: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
+const rehypePlugins = [rehypeRefChips, rehypeNumericCells]
+
+const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
+  const glosses = useContext(GlossContext)
+  const plugins = useMemo(() => (glosses.length ? [...rehypePlugins, () => rehypeGlosses(glosses.map((g) => g.term))] : rehypePlugins), [glosses])
+  return (
+    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={components}>
+      {protectTokens(citeLinks(text))}
+    </Markdown>
+  )
+})
+
+/** Assistant markdown with chips. `streaming`: the text is still growing and renders per completed block. A bare
+ * citation in it is its target's glyph alone, its name in the hover, as in a card (components/RefChip GlyphCites). */
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, glosses }: { text: string; streaming?: boolean; glosses?: readonly GlossMarkData[] }) {
+  const [chunked, setChunked] = useState(!!streaming)
+  if (streaming && !chunked) setChunked(true)
+  if (glosses?.length && !streaming) {
+    // the explain marks come after the reply is whole: one block, so each term is marked once
+    return (
+      <GlossContext.Provider value={glosses}>
+        <GlyphCites.Provider value={true}>
+          <MarkdownBlock text={text} />
+        </GlyphCites.Provider>
+      </GlossContext.Provider>
+    )
+  }
+  if (!chunked && !streaming) {
+    return (
+      <GlyphCites.Provider value={true}>
+        <MarkdownBlock text={text} />
+      </GlyphCites.Provider>
+    )
+  }
+  const chunks = splitMarkdownBlocks(text)
+  return (
+    <GlyphCites.Provider value={true}>
+      {chunks.map((chunk, i) => (
+        <Fragment key={i}>
+          {i > 0 && '\n'}
+          <MarkdownBlock text={chunk} />
+        </Fragment>
+      ))}
+    </GlyphCites.Provider>
+  )
+})
+
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})/
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})\s*$/
+const LIST_ITEM = /^ {0,3}(?:[-+*]|\d{1,9}[.)])(?: |$)/
+const INDENTED = /^(?: {4}|\t)/
+const BLANK = /^\s*$/
+const NO_SPLIT = /^ {0,3}\[[^\]]*\]:|<(?:script|pre|style|textarea)\b|<!--|<\?|<!\[CDATA\[|<![A-Za-z]/im
+
+/** Cut `text` at blank lines where block structure cannot cross the cut, so each chunk parses as it would whole. */
+export function splitMarkdownBlocks(text: string): string[] {
+  if (NO_SPLIT.test(text)) return [text]
+  const lines = text.split('\n')
+  const chunks: string[] = []
+  let start = 0
+  let offset = 0
+  let fence: { ch: string; n: number } | null = null
+  let hasList = false
+  let hasContent = false
+  let afterBlank = false
+  for (const line of lines) {
+    if (fence) {
+      const m = FENCE_CLOSE.exec(line)
+      if (m && m[1][0] === fence.ch && m[1].length >= fence.n) fence = null
+      afterBlank = false
+    } else if (BLANK.test(line)) {
+      afterBlank = true
+    } else {
+      if (afterBlank && hasContent && !INDENTED.test(line) && !(hasList && (LIST_ITEM.test(line) || /^\s/.test(line)))) {
+        chunks.push(text.slice(start, offset))
+        start = offset
+        hasList = false
+        hasContent = false
+      }
+      const f = FENCE_OPEN.exec(line)
+      if (f) fence = { ch: f[1][0], n: f[1].length }
+      else if (LIST_ITEM.test(line) || INDENTED.test(line)) hasList = true
+      hasContent = true
+      afterBlank = false
+    }
+    offset += line.length + 1
+  }
+  chunks.push(text.slice(start))
+  return chunks
+}
+
+/** Plain text as typed, with only the `[[ref]]` tokens turned into chips. `cite`: the text is the model's prose (an
+ * aside), so a bare ref is a citation, its target's glyph alone as in a reply (ChatMarkdown). */
+export function RefText({ text, workspace, cite = false }: { text: string; workspace: string; cite?: boolean }): ReactNode {
+  const ctx = useContext(ChipContext)
+  const parts: (string | { ref: string; value?: string })[] = []
+  let last = 0
+  for (const m of text.matchAll(TOKEN_RE)) {
+    const at = m.index ?? 0
+    if (at > last) parts.push(text.slice(last, at))
+    parts.push(m[1] != null ? splitValueRef(m[1].trim()) : { ref: m[2] })
+    last = at + m[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  const shown = parts.map((p, i) =>
+    typeof p === 'string' ? <Fragment key={i}>{p}</Fragment> : <RefChip key={i} ref={p.ref} value={p.value} compact anchor={ctx.anchor} workspace={workspace} cite={cite} />,
+  )
+  return cite ? <GlyphCites.Provider value={true}>{shown}</GlyphCites.Provider> : <>{shown}</>
+}

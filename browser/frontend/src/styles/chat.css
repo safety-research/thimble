@@ -1,0 +1,2021 @@
+/* the chat column, directly on the window paper. At the top the thread tree; the transcript shows the analyst's
+   messages as accent tiles, replies as plain text and work as tonal tool-call cards. The composer is glass floating
+   over the transcript, with the task strip behind its top edge. */
+.chat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  container-type: inline-size;
+  background: transparent;
+  /* nothing clips here: the thread tree's card and the composer sit on the column's edges, and their ring and float
+     shadow draw on the window around it. The list scrolls and clips its own rows. */
+}
+
+/* -------- the head: the thread tree, and the column's collapse at its first row's end -------- */
+.chat-head {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-head-collapse.btn {
+  width: 20px;
+  height: 20px;
+  color: var(--text-tertiary);
+}
+/* -------- the list: the transcript, with the composer's height kept clear at its foot; it reaches 2px past the
+   column on either side so a row's flash ring is not cut -------- */
+.chat-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 -2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 2px calc(var(--composer-h, 88px) + 24px);
+  scrollbar-width: none;
+}
+.chat-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+}
+.chat-list::-webkit-scrollbar {
+  display: none;
+}
+.chat-empty {
+  display: flex;
+  justify-content: center;
+  margin: auto;
+  max-width: 340px;
+  padding: 24px;
+  text-align: center;
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+}
+.chat-msg {
+  flex: none;
+  max-width: 100%;
+  min-width: 0;
+}
+/* the reply: plain text in the primary ink. Each agent message is its own row opening with a 6px dot level with its
+   first line, in the 10px slot a call line's glyph takes. Two messages in a row stand 28px apart with a hairline. */
+.chat-assistant {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 18px;
+}
+.chat-assistant::after {
+  content: '';
+  position: absolute;
+  top: calc((var(--text-sm) * 1.6 - 6px) / 2);
+  left: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+.chat-assistant + .chat-assistant {
+  margin-top: 16px;
+}
+.chat-assistant + .chat-assistant::before {
+  content: '';
+  position: absolute;
+  top: -14px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border-hairline);
+}
+.chat-nested {
+  padding: 4px 0;
+}
+/* under a finished reply: its model and the tokens its turn used (chat/usage.tsx), quiet until hovered */
+.chat-usage {
+  align-self: flex-start;
+  padding: 0 2px;
+  font: var(--type-mono-sm);
+  color: var(--text-tertiary);
+  cursor: default;
+}
+.chat-usage:hover,
+.chat-usage:focus-visible {
+  color: var(--text-secondary);
+}
+.chat-text {
+  min-width: 0;
+  padding: 0 2px;
+  font: var(--type-body);
+  font-family: var(--font-prose);
+  line-height: 1.6;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+}
+.chat-text strong,
+.chat-text b {
+  color: var(--text-primary);
+}
+.chat-text > :first-child {
+  margin-top: 0;
+}
+.chat-text > :last-child {
+  margin-bottom: 0;
+}
+/* the paragraphs and lists of a reply stand one line apart, a blank line as the terminal prints it */
+.chat-text p {
+  margin: 1lh 0;
+}
+.chat-text ul,
+.chat-text ol {
+  margin: 1lh 0 1lh 1.2em;
+  padding-left: 0;
+}
+.chat-text li {
+  margin: 2px 0;
+}
+/* h1 takes the shared step in base.css; h2 is the heading, h3 and h4 the subheading */
+.chat-text h2 {
+  margin: 16px 0 6px;
+  font: var(--type-heading);
+  color: var(--text-primary);
+}
+.chat-text h3,
+.chat-text h4 {
+  margin: 16px 0 6px;
+  font: var(--type-subheading);
+  color: var(--text-primary);
+}
+/* a code block is an inset: one paper step, never a tint; its text in the code's own ink, as code is everywhere
+   (the syntax colours come from styles/code.css) */
+.chat-text pre {
+  margin: 0.4em 0;
+  padding: 8px 10px;
+  background: var(--bg-inset);
+  border-radius: var(--radius-ui);
+  font: var(--type-mono-sm);
+  color: var(--code-text);
+  overflow-x: auto;
+  max-width: 100%;
+}
+/* inline code takes the shared rule in base.css */
+.chat-text blockquote {
+  margin: 0.4em 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+.chat-text hr {
+  margin: 0.8em 0;
+  border: 0;
+  border-top: 1px solid var(--border-hairline);
+}
+.chat-text table {
+  display: block;
+  max-width: 100%;
+  margin: 0.4em 0;
+  overflow-x: auto;
+}
+.chat-text img {
+  max-width: 100%;
+}
+/* the model's aside (a `say` chip) is body text, set exactly like a reply */
+/* an error line (a chat that failed to load, a task that failed to read): red text, no fill */
+.chat-error {
+  margin: 0;
+  padding: 4px 0;
+  color: var(--status-negative);
+  font: var(--type-body-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* the working mark: the spinner where the next row will land. It takes no room in the flow, so the list does not
+   move as a reply streams. */
+.chat-working-row {
+  position: relative;
+  top: 2px;
+  display: flex;
+  align-items: center;
+  height: 20px;
+  margin-top: -12px;
+  margin-bottom: -20px;
+  padding: 0 2px;
+}
+
+/* -------- notes: what an act left (the chip that goes there, the spinner while it is in flight) and a stopped or
+   failed reply (the ✕ mark and one word, the detail behind the chevron); quiet text, no frame -------- */
+.chat-row {
+  min-width: 0;
+}
+.chat-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 2px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.chat-note-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.chat-note-act {
+  cursor: pointer;
+  user-select: none;
+}
+.chat-note-act:hover {
+  color: var(--text-secondary);
+}
+.chat-note-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+/* the comment a thread is about, on its own line under the anchor's chip: its square and check's name start the text,
+   which wraps under them, three lines at most */
+.chat-anchor-comment {
+  flex-basis: 100%;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--text-secondary);
+}
+.chat-anchor-comment .wu-cm-sq {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.chat-anchor-comment-name {
+  margin-right: 6px;
+  font-weight: 500;
+}
+.chat-row-word {
+  color: inherit;
+}
+.chat-row-mark-stopped {
+  color: var(--text-tertiary);
+}
+.chat-row-caret {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.chat-row.open .chat-row-caret {
+  transform: rotate(90deg);
+}
+.chat-row-body {
+  flex-basis: 100%;
+  margin: 2px 0 0 4px;
+  padding: 2px 0 2px 10px;
+  border-left: 1px solid var(--border-hairline);
+  font: var(--type-body-sm);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* a tool-call card's parts the chat adds (the card is components/ToolCard): the cards it made as chips, and an open
+   single call's input fields and result */
+.chat-tool-name {
+  flex: none;
+}
+.chat-tool-cell {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.chat-tool-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-tool-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chat-tool-key {
+  font-size: var(--text-2xs);
+}
+.chat-tool-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+}
+.chat-tool-label {
+  margin: 6px 0 0;
+}
+.chat-tool-pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg-inset);
+  border-radius: var(--radius-ui);
+  font: var(--type-mono-sm);
+  color: var(--code-text);
+}
+.chat-tool-result {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+}
+.chat-tool-result-error {
+  color: var(--status-negative);
+}
+/* a call auto mode refused: the reason as given and where to approve it, in place of Claude Code's tool result */
+.chat-tool-refused {
+  color: var(--status-negative);
+}
+
+/* raw calls (Read, Grep, Glob, Bash): one line each, as Claude Code prints a tool line: the state's glyph, the tool at
+   500 and its target in the secondary ink, in mono, cut to the column. Open, the input and result in a tonal inset. */
+.chat-calls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 2px;
+}
+.chat-call {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.chat-call-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+/* the state's glyph in a 10px slot, so the tools' names line up whatever the state */
+.chat-call-state {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  color: var(--text-tertiary);
+  font: var(--type-mono-sm);
+}
+.chat-call-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.chat-call-chip {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  height: var(--h-chip);
+  margin: 0;
+  padding: 0 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-primary);
+  font: var(--type-mono-sm);
+  line-height: var(--h-chip);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+button.chat-call-chip {
+  cursor: pointer;
+}
+button.chat-call-chip:hover,
+.chat-call.open button.chat-call-chip {
+  background: var(--surface-hover);
+}
+/* what a call made, after its line, keeps its name readable: the call's target gives up its room first, and a chip
+   takes at most 60% of the chat column's width (the column is the container) */
+.chat-call-head > .chat-tool-cell,
+.chat-call-head > .view-chip,
+.chat-call-head > .chip {
+  flex: 0 0 auto;
+  max-width: 60cqi;
+}
+.chat-call-tool {
+  font-weight: 500;
+}
+.chat-call-target {
+  color: var(--text-secondary);
+}
+.chat-call-mark {
+  flex: none;
+}
+/* the call chip, shared by a folded run of calls, its failed count and a subagent: a filled tonal chip at the size of
+   .chip-sans, its words in mono at 11.5, with a chevron that turns while open */
+.chat-callchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  height: 22px;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: var(--surface-tonal);
+  color: var(--text-secondary);
+  font: 400 var(--text-mono) / 1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.chat-callchip:hover,
+.chat-callchip[aria-expanded='true'] {
+  background: var(--surface-tonal-hover);
+}
+.chat-callchip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.chat-callchip-caret {
+  flex: none;
+  margin-left: -1px;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.chat-callchip[aria-expanded='true'] .chat-callchip-caret {
+  transform: rotate(90deg);
+}
+/* two or more raw calls in a row: one call chip naming each tool and its count (Bash 2 · Grep 1), whose lines hang
+   under it when open; beside it the spinner while one runs, and a failed count that opens those calls alone */
+.chat-callrun {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+.chat-callrun-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.chat-callrun-head > * {
+  flex: none;
+  max-width: 100%;
+}
+/* one line of words that ends in … where the chat is too narrow for every tool's name, the chevron kept */
+.chat-callrun-tools {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-callrun-tool + .chat-callrun-tool,
+.chat-callrun-more {
+  margin-left: 6px;
+}
+.chat-callrun-tool > * + * {
+  margin-left: 4px;
+}
+.chat-callrun-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.chat-callrun-n,
+.chat-callrun-more {
+  color: var(--text-secondary);
+}
+.chat-callrun-sep {
+  color: var(--text-tertiary);
+}
+.chat-callrun-failed {
+  gap: 4px;
+  color: var(--status-negative);
+}
+.chat-callrun-failed .chat-callchip-caret {
+  color: inherit;
+  opacity: 0.75;
+}
+/* a subagent or workflow agent (AgentCard's AgentChip): a call chip with its name, key and steps, then its state and
+   the chips of what it made; open, its reads and steps hang under it. Agents in a row stand 4px apart. */
+.chat-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 2px;
+}
+.chat-agent + .chat-agent {
+  margin-top: -8px;
+}
+.chat-agent-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+}
+.chat-agent-head > .chat-callchip {
+  flex: 0 1 auto;
+}
+.chat-agent-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.chat-agent-target {
+  color: var(--text-secondary);
+}
+.chat-agent-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-tertiary);
+}
+.chat-agent-mark {
+  flex: none;
+}
+.chat-agent-made {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.chat-agent-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  margin-left: 5px;
+  padding: 2px 0 2px 9px;
+  border-left: 1px solid var(--border-subtle);
+}
+.chat-agent-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.chat-agent-body > .chat-task-report {
+  align-self: flex-start;
+}
+.chat-agent-steps {
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.chat-callrun-lines {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  margin-left: 5px;
+  padding-left: 7px;
+  border-left: 1px solid var(--border-subtle);
+}
+.chat-call-body {
+  min-width: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-ui);
+  background: var(--surface-tonal);
+  font: var(--type-ui-sm);
+  scrollbar-width: thin;
+}
+/* what a file read, a search or a command printed, in mono as a card's shell output is */
+.chat-call-body .chat-tool-result {
+  font: var(--type-mono-sm);
+  line-height: 1.6;
+}
+/* a call of the orientation open: its whole output from the store, one numbered line each, the number in the tertiary
+   ink in a gutter as a file's line numbers are, a cited line marked as a table's cited cell is */
+.chat-call.open .chat-call-body {
+  max-height: 360px;
+}
+.chat-call-out {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--type-mono-sm);
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.chat-call-fields + .chat-call-out,
+.chat-tool-fields + .chat-call-out {
+  margin-top: 6px;
+}
+/* a failed call opens on its error, its input under it */
+.chat-call-body > .chat-tool-label:first-child {
+  margin-top: 0;
+}
+.chat-call-out + .chat-tool-fields,
+.chat-call-more + .chat-tool-fields,
+.chat-tool-result + .chat-tool-fields {
+  margin-top: 10px;
+}
+.chat-call-line {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  border-radius: 2px;
+}
+.chat-call-ln {
+  flex: none;
+  min-width: 3ch;
+  text-align: right;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+.chat-call-lt {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-call-out-error .chat-call-lt {
+  color: var(--status-negative);
+}
+.chat-call-more {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-accent);
+  font: var(--type-ui-sm);
+  cursor: pointer;
+}
+.chat-call-more:hover {
+  text-decoration: underline;
+}
+.chat-call-none {
+  margin-top: 4px;
+  color: var(--text-tertiary);
+  font: var(--type-ui-sm);
+}
+.chat-call-loading {
+  display: flex;
+  padding: 2px 0;
+}
+
+/* the analyst's message stands in from the left, and its right edge is the column's, so it reads apart from the
+   agent's rows */
+.chat-user {
+  padding-left: 32px;
+}
+/* a message to the orientation on its way, or queued until the run going on ends: the analyst's tile, a step quieter,
+   with a line under it */
+.chat-pending,
+.chat-user[data-event='orient-follow-up'] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-pending .chat-message {
+  opacity: 0.7;
+}
+
+/* a session's card: an agent chat read live; a long run's steps scroll inside the card. What sits under the steps is
+   flush with the card's padding, separated from the steps by a hairline. */
+.chat-task-title {
+  min-width: 0;
+}
+.chat-task .toolcard-steps {
+  max-height: 264px;
+  margin-bottom: 8px;
+  padding-bottom: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.chat-task .toolcard-chips,
+.chat-task .toolcard-section {
+  padding-left: 10px;
+}
+.chat-task .toolcard-steps + :is(.toolcard-chips, .toolcard-section) {
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* a chip note: what an act left, as the accent chip that teleports there, with the spinner while its work is in
+   flight and a word once it settled */
+.chat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.chat-chip-link {
+  max-width: 100%;
+}
+.chat-chip-settled {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.chat-chip-settled-failed {
+  color: var(--status-negative);
+}
+/* the writer of the report pass of an orientation from before 0.8.0, after its document's chip on its card (AgentCard
+   madeSections): the spinner (or ✕), a quiet word and its thread's chip, until it has written */
+.chat-task-writer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.chat-task-writer-word {
+  color: var(--text-tertiary);
+  font: 400 11.5px / 1.4 var(--font-body);
+  white-space: nowrap;
+}
+
+/* a view proposal's chip (chat/ViewChip.tsx), the same in main's notes and on a tool or agent card: the view's tab,
+   then the build's state after it */
+.view-chip {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+/* a chip that names a view is that view's option in the views bar (files.css .files-views), a size smaller */
+.view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  box-sizing: border-box;
+  height: 22px;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: var(--chip-bg);
+  box-shadow: inset 0 0 0 1px var(--chip-edge);
+  color: var(--text-accent);
+  font: 400 var(--text-ui-sm) / 1 var(--font-body);
+  white-space: nowrap;
+  vertical-align: 1px;
+  transition: var(--transition-color);
+}
+button.view-tab {
+  cursor: pointer;
+}
+button.view-tab:hover {
+  background: var(--chip-bg-hover);
+  box-shadow: inset 0 0 0 1px var(--chip-edge-hover);
+}
+button.view-tab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.view-tab-ico {
+  flex: none;
+}
+.view-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: normal;
+}
+/* a label's row chip (chat/SurfaceChips.tsx LabelRowChip, in a view's list of its fields and labels) is its row in the
+   Labels pane, a size smaller: 22px, radius 6, the name in the body face at 12.5. A label's chip in the chat is a
+   view's chip (.view-tab) */
+.surface-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 22px;
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: none;
+  color: var(--text-primary);
+  font: 400 var(--text-ui-sm) / 1 var(--font-body);
+  white-space: nowrap;
+  vertical-align: 1px;
+  transition: var(--transition-color);
+}
+button.surface-chip {
+  cursor: pointer;
+}
+button.surface-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.surface-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* a label: its row in the Labels pane, no box until hovered: the colour's square (filled while on) or its glyph, and
+   the name, in ink while on */
+.label-row-chip {
+  gap: 7px;
+  padding: 0 8px 0 6px;
+  color: var(--text-secondary);
+}
+.label-row-chip.on {
+  color: var(--text-primary);
+}
+button.label-row-chip:hover {
+  background: var(--surface-hover);
+}
+.label-row-chip-box {
+  flex: none;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--c);
+  border-radius: 2.5px;
+}
+.label-row-chip.on .label-row-chip-box {
+  background: var(--c);
+}
+/* a multi-class label: the label glyph in the icon ink (files.css .files-label-tag), filled with a tint of the ink while on */
+.label-row-chip-tag {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.label-row-chip.on .label-row-chip-tag {
+  color: var(--text-secondary);
+  fill: rgba(var(--ink-rgb), 0.12);
+}
+.label-row-chip-over {
+  flex: none;
+  color: var(--c);
+}
+.view-chip-why {
+  display: inline-flex;
+}
+/* Retry after a failed build, and Open after a build the analyst asked for and has not opened (files/viewReady.ts) */
+.view-chip-retry.btn,
+.view-chip-open.btn {
+  flex: none;
+  height: 20px;
+  min-height: 0;
+  padding: 0 6px;
+}
+
+/* a dev ticket's state at the foot of its thread (chat/TicketStatus): the reason a failure gives, then its actions */
+.chat-ticket-status .chat-note-text {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.chat-ticket-status[data-status='failed'] .chat-ticket-why,
+.chat-ticket-status[data-status='needs manual merge'] .chat-ticket-why,
+.chat-ticket-status[data-status='rolled back'] .chat-ticket-why {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.chat-ticket-mark {
+  flex: none;
+}
+.chat-ticket-act.btn {
+  flex: none;
+  height: 20px;
+  min-height: 0;
+  padding: 0 6px;
+}
+
+/* a view build's thread (chat/ChatPanel ViewBuildView): the proposal and a change main asked for, each folded to its
+   first sentence and open on the whole text, and one status line for each run of the build's session */
+.chat-spec-lead,
+.chat-spec-full {
+  padding: 0 10px 6px 28px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+.chat-spec-lead {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-spec-full {
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-spec .toolcard-end {
+  margin-block: -3px;
+}
+.chat-build-status {
+  padding: 0 2px;
+  font: var(--type-body-sm);
+}
+.chat-build-status:not(.toolcard-step-running) {
+  color: var(--text-secondary);
+}
+
+/* the divider between the part of main a thread inherited and the thread's own conversation */
+.chat-divider {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--text-tertiary);
+  font: 400 11px / 1.4 var(--font-body);
+}
+.chat-divider::before,
+.chat-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(var(--ink-rgb), 0.14);
+}
+.chat-divider-text {
+  white-space: nowrap;
+}
+
+/* the orientation's end in main: one line of what it left for review, the counts in ink, then its card */
+.chat-landing {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chat-landing-line {
+  margin: 0;
+  line-height: 1.55;
+}
+.chat-landing-count {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+/* a dev ticket's shot: the picture on the cell's paper under a tinted bar that names the phase */
+.chat-shot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+.chat-shot-frame {
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+}
+.chat-shot-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px;
+  background: rgba(var(--ink-rgb), 0.04);
+  color: var(--text-tertiary);
+  font: 400 10.5px / 1 var(--font-body);
+}
+.chat-shot-phase {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.chat-shot-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-shot-img {
+  display: block;
+}
+.chat-shot-img img {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  margin: 0 auto;
+}
+
+/* a session's model line at a composer's foot (ModelLine): the model, the effort menu and fast mode's bolt, in the
+   composer's quiet ink */
+.model-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.model-line-model {
+  white-space: nowrap;
+  cursor: default;
+}
+.model-line-model:focus-visible {
+  outline: none;
+  color: var(--text-secondary);
+}
+.model-line-sep {
+  flex: none;
+}
+button.model-line-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-base) var(--ease-out);
+}
+button.model-line-part:hover,
+button.model-line-part[aria-expanded='true'] {
+  color: var(--text-secondary);
+}
+.btn.model-line-fast {
+  width: 20px;
+  height: 20px;
+  color: inherit;
+}
+/* -------- the task strip: glass on the pane's paper, riding 4px behind the composer's top edge while the thread works;
+   the spinner, what it does, how many of its steps are done, and a chevron that opens the steps -------- */
+.chat-strip {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: -4px;
+  padding-bottom: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: color-mix(in oklab, var(--bg-panel) 85%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: var(--glass-edge);
+  border-bottom: 0;
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.07);
+}
+.chat-strip-bar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.chat-strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 30px;
+  min-height: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.chat-strip-head:hover {
+  background: rgba(var(--ink-rgb), 0.03);
+}
+/* the spinner and the title at the left; the count, when there is one, and the chevron at the right edge */
+.chat-strip-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.chat-strip-meta {
+  flex: none;
+  color: var(--text-tertiary);
+  font: var(--type-mono-sm);
+}
+.chat-strip-caret {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.chat-strip:not(.open) .chat-strip-caret {
+  transform: rotate(180deg);
+}
+/* waiting for the analyst: a still dot in the warning colour where the spinner turns; the prompt is on the permission
+   card above the strip */
+.chat-strip-wait-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin: 0 1px;
+  border-radius: 50%;
+  background: var(--status-warning);
+}
+/* waiting to start again after Anthropic's API was at capacity: why and the time left, whole, under the bar, and Retry
+   now at its right edge */
+.chat-strip-retry-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 6px 29px;
+}
+.chat-strip-retry-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: var(--type-ui-sm);
+  color: var(--text-secondary);
+}
+.chat-strip-retry {
+  flex: none;
+}
+.chat-strip-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  margin: 0;
+  padding: 2px 12px 10px;
+  overflow: auto;
+  list-style: none;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  scrollbar-width: none;
+}
+.chat-strip-steps .toolcard-step-done {
+  color: var(--text-tertiary);
+}
+
+/* -------- the permission card (chat/PermissionCard): every request that waits for the analyst, pinned above the
+   composer, opaque and bold: a warning tint under a 1.5px warning edge, 12px clear of what is under it, which leaves
+   room for the edges of the cards behind it, so its buttons stay put as the stack shrinks. One request at a time with
+   `1 of 3` and arrows; the call's description, its input as code, why it asks, then Allow, Always allow and Deny in one
+   row. At most 45% of the window tall: the head and the buttons stay, and the body between them scrolls. -------- */
+.chat-perm {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 45vh;
+  margin-bottom: 12px;
+  padding: 9px 12px 10px;
+  overflow: hidden;
+  border: 1.5px solid var(--status-warning);
+  border-radius: var(--radius-card);
+  background: color-mix(in oklab, var(--status-warning) 16%, var(--surface-card));
+  box-shadow: var(--shadow-composer);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+/* several requests wait: the edges of the cards behind this one show below it */
+.chat-perm-stack {
+  overflow: visible;
+  box-shadow:
+    0 4px 0 -1px color-mix(in oklab, var(--status-warning) 10%, var(--surface-card)),
+    0 4px 0 0.5px var(--status-warning),
+    var(--shadow-composer);
+}
+.chat-perm-body {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.chat-perm-head,
+.chat-perm-acts,
+.chat-perm-body > * {
+  flex: none;
+}
+.chat-perm-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-width: 0;
+  color: var(--status-warning);
+  font-weight: 500;
+}
+.chat-perm-from {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+.chat-perm-from-word {
+  flex: none;
+}
+.chat-perm-ico {
+  flex: none;
+}
+.chat-perm-title {
+  min-width: 0;
+}
+.chat-perm-pager {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--text-secondary);
+  font: var(--type-mono-sm);
+}
+.chat-perm-count {
+  margin-right: 4px;
+}
+.chat-perm-page {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.chat-perm-page:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.chat-perm-page:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.chat-perm-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  font-weight: 500;
+}
+.chat-perm-type,
+.chat-perm-agent {
+  font-weight: 400;
+}
+.chat-perm-type {
+  color: var(--text-secondary);
+}
+.chat-perm-what {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.chat-perm-code {
+  max-height: 96px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: var(--radius-ui);
+  background: var(--bg-inset);
+  color: var(--code-text);
+  font: var(--type-mono-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-perm-cut {
+  margin: 0;
+  color: var(--status-warning);
+  font-size: var(--text-xs);
+}
+.chat-perm-field {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-secondary);
+}
+.chat-perm-key {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.chat-perm-value {
+  min-width: 0;
+  max-height: 72px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-perm-why {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+/* the later calls for the same site, or later searches, that wait on this request's answer */
+.chat-perm-also {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+.chat-perm-also-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  max-height: 72px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+/* the card takes focus after an answer, so Tab reaches the next request's buttons */
+.chat-perm:focus {
+  outline: none;
+}
+/* declined unanswered, with Dismiss, and an answer still on its way: a neutral edge */
+.chat-perm[data-expired],
+.chat-perm-sending {
+  border-color: var(--border-strong);
+  background: var(--surface-card);
+}
+.chat-perm-sending {
+  color: var(--text-secondary);
+}
+.chat-perm-sent {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.chat-perm[data-expired] .chat-perm-head {
+  color: var(--text-secondary);
+}
+.chat-perm-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* a long Always allow wraps onto more lines rather than end in an ellipsis: Claude Code's words begin "Allow, and don't
+   ask again for", so a cut label never said what it allows (live check 7.f); its tooltip says where it is kept */
+.tipped.chat-perm-always-tip {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.chat-perm-always.btn {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  min-height: var(--h-control);
+  padding-block: 3px;
+  white-space: normal;
+  text-align: left;
+}
+.chat-perm-always .btn-label {
+  overflow: visible;
+  overflow-wrap: break-word;
+}
+.chat-perm-deny.btn {
+  margin-left: auto;
+}
+
+/* -------- a view proposal (ProposalCard): one card above the composer in the accent, on the view chip's tint mixed
+   into the card's own surface (the foot floats over the rows) with the accent's edge: the head with its
+   sparkle, the view's name in bold and what it shows, the task, then Accept, Reject and a quiet Don't ask again; an
+   Accept that could not start the build says why under them -------- */
+.chat-offer {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 45vh;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  overflow-y: auto;
+  border: 1.5px solid var(--accent);
+  border-radius: var(--radius-card);
+  background: color-mix(in oklab, var(--accent) 9%, var(--surface-card));
+  box-shadow: var(--shadow-composer);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-offer-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-accent);
+  font: var(--type-ui-sm);
+  font-weight: 600;
+}
+.chat-offer-ico {
+  flex: none;
+  color: var(--text-accent);
+}
+.chat-offer-text,
+.chat-offer-files {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.chat-offer-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.chat-offer-desc {
+  color: var(--text-secondary);
+}
+.chat-offer-files {
+  color: var(--text-secondary);
+}
+.chat-offer-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: 2px;
+}
+/* Don't ask again: a quiet text button after Reject, at the row's end */
+.chat-offer-off {
+  margin-left: auto;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  cursor: pointer;
+}
+.chat-offer-off:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-offer-off:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-chip);
+}
+.chat-offer-refused {
+  margin: 0;
+  color: var(--status-negative);
+  overflow-wrap: anywhere;
+}
+
+/* -------- the composer: glass floating over the transcript -------- */
+.chat-foot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+}
+.chat-foot .chat-composer {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+}
+
+/* a wide chat keeps a reading measure */
+@container (min-width: 720px) {
+  .chat-flow > *,
+  .chat-foot > * {
+    width: 100%;
+    max-width: 72ch;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
+/* A session held where the browser cannot answer (session.py's alert): one quiet card above the composer, or on a
+   session's card, on the warning's soft wash with its edge */
+.chat-hold {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-card);
+  background: var(--status-warning-soft);
+  font: var(--type-body-sm);
+  color: var(--text-primary);
+}
+/* the rules the analyst's "don't ask again" added to a session, in mono, wrapping when long */
+.chat-hold-rule {
+  font: 400 var(--text-mono) / 1.35 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.chat-hold-rules,
+.chat-hold-restarted {
+  margin: 0;
+  padding: 0 2px;
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.chat-holds {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 6px;
+  border-radius: var(--radius-card);
+}
+/* an alert and the restarted line end in their × (Holds), which takes no height of its own */
+.chat-hold[data-kind='alert'],
+.chat-hold-restarted {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 6px;
+}
+.chat-hold-text,
+.chat-hold-restarted > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.chat-hold-x.btn {
+  flex: none;
+  margin: -4px -4px -4px 0;
+}
+/* above the composer the foot floats over the chat's rows, so the card's wash sits on the card's own surface, as the
+   permission card's does, and no row shows through its text (live check L3) */
+.chat-foot .chat-hold {
+  background: color-mix(in oklab, var(--status-warning) 12%, var(--surface-card));
+}
+/* a critique's prompts at the top of its own thread (a step that is a session of its own) */
+.chat-step-holds {
+  margin: 6px 0;
+}
+.toolcard-step-open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.toolcard-step-open:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* A failed Anthropic API request (chat/ApiError.tsx): one card on the negative's soft wash, the glyph and what happened,
+   the error's words behind a chevron, whether thimble retries, and Retry. A wait that ends by itself takes the
+   warning's colours instead. */
+.chat-apierr {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, var(--status-negative) 45%, transparent);
+  border-radius: var(--radius-card);
+  background: var(--status-negative-soft);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-apierr[data-waits] {
+  border-color: color-mix(in oklab, var(--status-warning) 45%, transparent);
+  background: var(--status-warning-soft);
+}
+.chat-apierr-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.chat-apierr-ico {
+  flex: none;
+  margin-top: 2px;
+  color: var(--status-negative);
+}
+.chat-apierr[data-waits] .chat-apierr-ico {
+  color: var(--status-warning);
+}
+.chat-apierr-what {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.chat-apierr-more {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-chip);
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+.chat-apierr-more:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.chat-apierr-more svg {
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.chat-apierr-more[aria-expanded='true'] svg {
+  transform: rotate(90deg);
+}
+.chat-apierr-detail {
+  margin: 0;
+  padding-left: 19px;
+  color: var(--text-secondary);
+  font: var(--type-mono-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-apierr-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-left: 19px;
+}
+.chat-apierr-retrying {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-secondary);
+}
+.chat-apierr-retry {
+  flex: none;
+}
+
+/* a workspace installed from a pre-cache (chat/Precached): the card at the top of the orientation's thread */
+.precached-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.precached-card .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.precached-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body);
+}
+.precached-note {
+  margin: 0;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+
+/* -------- thimble's agents as subagents of main -------- */
+/* the orientation's start before its thread exists: Starting…, in the transcript's quiet ink */
+.chat-starting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+/* -------- notices (chat/Notice.tsx): a failure of main or of one of thimble's agents with its fix. Above the composer,
+   the open ones stack under the view proposal's place, each one line on the warning's wash mixed into the card's own
+   surface (the foot floats over the rows), with the warning's edge: the glyph, the agent in bold, the failure and Open,
+   ×, and under the words its fix. In a chat's rows the same line without buttons, quiet once the notice is closed
+   -------- */
+.chat-notices {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 40vh;
+  margin-bottom: 12px;
+  overflow-y: auto;
+  border-radius: var(--radius-card);
+}
+.chat-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 6px 4px 6px 10px;
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-card);
+  background: var(--status-warning-soft);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-foot .chat-notice {
+  background: color-mix(in oklab, var(--status-warning) 12%, var(--surface-card));
+}
+.chat-notice-ico {
+  flex: none;
+  margin-top: 3px;
+  color: var(--status-warning);
+}
+/* the Manual-mode notice (backend notices `manual-mode`): the problem red of a failure for its edge, glyph and words, in
+   both themes (the tokens change with the theme) */
+.chat-notice[data-kind='manual-mode']:not([data-closed]) {
+  border-color: var(--status-negative);
+  background: var(--status-negative-soft);
+  color: var(--status-negative);
+}
+.chat-foot .chat-notice[data-kind='manual-mode']:not([data-closed]) {
+  background: color-mix(in oklab, var(--status-negative) 12%, var(--surface-card));
+}
+.chat-notice[data-kind='manual-mode']:not([data-closed]) .chat-notice-ico {
+  color: var(--status-negative);
+}
+.chat-notice-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.chat-notice-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* the agent, a tag in the warning's ink before the sentence (which names it again, so it reads alone) */
+.chat-notice-agent {
+  margin-right: 2px;
+  color: var(--status-warning);
+  font-weight: 600;
+}
+.chat-notice-text code {
+  font: var(--type-mono-sm);
+}
+.chat-notice-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.chat-notice-x.btn {
+  flex: none;
+}
+/* Open: a link after the words, to the chat the notice happened in */
+.chat-notice-open {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-accent);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chat-notice-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.chat-notice-open:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-chip);
+}
+/* in a chat's rows: no buttons, so the line keeps its own padding on the right */
+.chat-notice-row {
+  padding-right: 10px;
+}
+/* closed (a fix cleared it, or the analyst dismissed it): a quiet line of the chat's history */
+.chat-notice-row[data-closed] {
+  border-color: var(--border-subtle);
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.chat-notice-row[data-closed] .chat-notice-ico {
+  color: var(--text-tertiary);
+}
+/* a start that did not happen (chat/Refused): one card on the warning's soft wash, the agent named, why on one line,
+   the request in full behind a disclosure, and the kind's buttons */
+.chat-refused {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-card);
+  background: var(--status-warning-soft);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-refused-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--type-ui-sm);
+  font-weight: 600;
+}
+.chat-refused-ico {
+  flex: none;
+  color: var(--status-warning);
+}
+.chat-refused-why,
+.chat-refused-note,
+.chat-refused-line {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.chat-refused-note,
+.chat-refused-line {
+  color: var(--text-secondary);
+}
+.chat-refused-request summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.chat-refused-text {
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.chat-refused-prompt {
+  max-height: 160px;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  font: 400 var(--text-mono) / 1.4 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-refused-acts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+/* what a subagent's card says under its steps: the critic's wait, the terminal, why it stopped */
+.chat-sub-notes {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.chat-sub-notes p {
+  margin: 0;
+  font: var(--type-body-sm);
+  color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+.chat-sub-paused {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary) !important;
+}
+.chat-sub-stopped {
+  flex-basis: 100%;
+  color: var(--text-secondary) !important;
+}
+/* in place of the composer: an orientation an earlier session or version ran, which takes no message here */
+.chat-continue {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.1);
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.chat-continue-ico {
+  flex: none;
+  margin-top: 2px;
+}
+/* a request of one of thimble's agents, which the terminal answers: no buttons, the line says where */
+.chat-perm-terminal .chat-perm-why {
+  color: var(--text-primary);
+}
+/* a follow-up that was not passed on: the reason, Send again, and the message */
+.chat-not-passed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.chat-not-passed-text {
+  margin: 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  overflow-wrap: anywhere;
+}
+.chat-by {
+  margin-bottom: 2px;
+}
+/* a view chip's state word (queued with the pool, building, repair n of 2, stopped, didn't start) and its Build menu */
+.view-chip-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.view-chip-word {
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  white-space: nowrap;
+}
+/* in the spinner's place while Claude Code asks the builder in the terminal (ViewChip), and on a card's note line */
+.view-chip-wait,
+.chat-sub-wait-dot {
+  width: 8px;
+  height: 8px;
+}
+button.view-chip-values {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+button.view-chip-values:hover,
+button.view-chip-values[aria-expanded='true'] {
+  color: var(--text-secondary);
+}
+
+/* explain marks (chat/markdown GlossMark): a term with a teal fill; a click opens what it means under the line */
+.gloss-term {
+  font: inherit;
+  color: inherit;
+  padding: 0 2px;
+  margin: 0 -1px;
+  border: none;
+  border-bottom: 1px dotted var(--viz-teal-3);
+  border-radius: var(--radius-chip);
+  background: color-mix(in srgb, var(--viz-teal-1) 75%, transparent);
+  cursor: help;
+}
+.gloss-open .gloss-term { background: var(--viz-teal-1); }
+.gloss { position: relative; }
+.gloss-card {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  display: block;
+  width: min(300px, 70vw);
+  padding: 8px 10px;
+  border: 1px solid var(--viz-teal-2);
+  border-left: 3px solid var(--viz-teal-3);
+  background: var(--surface-card);
+  border-radius: var(--radius-card);
+  box-shadow: 0 6px 20px rgba(var(--ink-rgb), 0.12);
+  font-size: 0.92em;
+  line-height: 1.45;
+}
+.gloss-body { display: block; }
+.gloss-here { display: block; margin-top: 4px; color: var(--text-secondary); }
+.gloss-here p { margin: 0; }

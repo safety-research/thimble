@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# thimble browser from a checkout: builds the page the first time, then starts the server on a folder of files.
+#
+#   scripts/thimble-browser [FOLDER] [--port N] [--no-open]
+#   scripts/thimble-browser --check-sandbox     tests the sandbox card code runs in (no sign-in needed), and exits
+#
+# Needs uv (https://docs.astral.sh/uv/), Node 22.12+, and credentials for the Claude API (see the README). The sandbox
+# also needs bubblewrap on Linux (apt install bubblewrap); on macOS it uses the system's sandbox-exec.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# The sandbox card code runs in: Anthropic's sandbox runtime, pinned in server/sandbox, installed once and again when
+# its lock file changes. Without it the server still starts, and cards with code say why they do not run.
+sb="$root/server/sandbox"
+if ! cmp -s "$sb/package-lock.json" "$sb/node_modules/.thimble-lock.json" 2>/dev/null; then
+  if command -v npm >/dev/null 2>&1; then
+    echo "thimble browser: installing the sandbox runtime..."
+    if npm --prefix "$sb" ci --ignore-scripts --no-audit --no-fund --loglevel=error >/dev/null; then
+      cp "$sb/package-lock.json" "$sb/node_modules/.thimble-lock.json"
+    else
+      echo "thimble browser: the sandbox runtime did not install, so cards with code will not run" >&2
+    fi
+  else
+    echo "thimble browser: npm is missing, so the sandbox runtime is not installed and cards with code will not run" >&2
+  fi
+fi
+for arg in "$@"; do
+  [ "$arg" != "--check-sandbox" ] || exec uv run --quiet --project "$root/server" thimble-browser --check-sandbox
+done
+
+# the page is built the first time, and again when its sources are newer than the build (after a pull, say)
+if [ ! -f "$root/frontend/dist/index.html" ] || [ -n "$(find "$root/frontend/src" "$root/frontend/index.html" \
+     "$root/frontend/package-lock.json" -newer "$root/frontend/dist/index.html" -print -quit 2>/dev/null)" ]; then
+  echo "thimble browser: building the page..."
+  [ -d "$root/frontend/node_modules" ] || npm --prefix "$root/frontend" ci --no-audit --no-fund
+  npm --prefix "$root/frontend" run build >/dev/null
+fi
+exec uv run --quiet --project "$root/server" thimble-browser "$@"

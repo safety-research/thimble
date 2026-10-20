@@ -1,0 +1,12 @@
+{
+  "name": "thimble-browser-sandbox",
+  "private": true,
+  "description": "The sandbox card code and view readers run in: Anthropic's sandbox runtime, pinned",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.79"
+  }
+}

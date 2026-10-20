@@ -1,0 +1,632 @@
+/* thimble tokens. Three papers (Warm, the default; Neutral; Dark) set as `data-paper` on <html> by lib/theme.ts, and
+   one of seven accents set as `data-accent`. Layering is recessed: the window is lighter than the pane and the cell is
+   the lightest thing on screen. Every text colour reads at WCAG AA (4.5:1) or more on its grounds, per paper. */
+
+/* -------- paper: Warm, the default. --paper-2 window · --paper-1 pane · --paper-0 inset · --white cell -------- */
+:root {
+  color-scheme: light;
+  --paper-0: #fbfaf7;
+  --paper-1: #f5f3ee;
+  --paper-2: #faf9f6;
+  --paper-3: #ddd9d0;
+  --white: #fffdf8;
+  /* ink: text, secondary, tertiary and meta, placeholder; then disabled text and faint lines. The text is pure black;
+     tints and hairlines use the warm ink in --ink-rgb. */
+  --ink-900: #000000;
+  --ink-700: #4a4844;
+  --ink-500: #64625b;
+  --ink-400: #726f69;
+  --ink-300: #c6c2b9;
+  --ink-200: #ddd9d0;
+  --ink-rgb: 27, 26, 24;
+  /* status: green and red for supports / contradicts and pass / fail; the flag for not checked */
+  --status-positive: #0b7c5f;
+  --status-negative: #c93a28;
+  --status-warning: #9a6512;
+  /* a cell's ring: none on Warm, where the paper steps carry it; a hairline on Neutral and Dark */
+  --ring-card: 0 0 0 1px transparent;
+  /* the float: one soft drop shadow, the same on the pane, the composer and every popover */
+  --shadow-float: 0 10px 28px -18px rgba(var(--ink-rgb), 0.28);
+  /* the glass's inner top highlight, the same on every paper */
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  /* data: the ink ramp, darkest first */
+  --viz-ink-1: #1b1a18;
+  --viz-ink-2: #6b675f;
+  --viz-ink-3: #a19d94;
+  --viz-ink-4: #cfcbc2;
+  /* the chart palette (lib/vizTheme): seven color families, each in five steps from faint (near the paper) to strong,
+     the third the family's series color, which reads at 3:1 or more on every ground. Neutral takes Warm's; Dark has its
+     own steps of the same hues. No red, which reads as an error */
+  --viz-violet-1: #eeeffe; --viz-violet-2: #9d9cff; --viz-violet-3: #5e4bd6; --viz-violet-4: #4228aa; --viz-violet-5: #280f72;
+  --viz-teal-1: #dbf7f3; --viz-teal-2: #73c4ba; --viz-teal-3: #018d82; --viz-teal-4: #065e56; --viz-teal-5: #01332f;
+  --viz-orange-1: #ffece3; --viz-orange-2: #ffa479; --viz-orange-3: #e26101; --viz-orange-4: #923d03; --viz-orange-5: #4a1b01;
+  --viz-green-1: #e7f5e1; --viz-green-2: #82af6b; --viz-green-3: #306602; --viz-green-4: #224c02; --viz-green-5: #163401;
+  --viz-blue-1: #e6f2ff; --viz-blue-2: #6eb2fc; --viz-blue-3: #0471c8; --viz-blue-4: #004d8c; --viz-blue-5: #002c54;
+  --viz-pink-1: #ffeaf0; --viz-pink-2: #fd86b5; --viz-pink-3: #c8367b; --viz-pink-4: #920153; --viz-pink-5: #53012d;
+  --viz-gold-1: #f7f0da; --viz-gold-2: #d0b870; --viz-gold-3: #a08319; --viz-gold-4: #695403; --viz-gold-5: #362a02;
+}
+
+:root[data-paper='neutral'] {
+  color-scheme: light;
+  --paper-0: #ffffff;
+  --paper-1: #f5f5f6;
+  --paper-2: #ffffff;
+  --paper-3: #e3e3e6;
+  --white: #ffffff;
+  --ink-900: #000000;
+  --ink-700: #47474c;
+  --ink-500: #636368;
+  --ink-400: #707074;
+  --ink-300: #c8c8cc;
+  --ink-200: #e3e3e6;
+  --ink-rgb: 24, 24, 27;
+  --status-positive: #0b7c5f;
+  --status-negative: #c93a28;
+  --status-warning: #9a6512;
+  --ring-card: 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  --shadow-float: 0 10px 28px -18px rgba(var(--ink-rgb), 0.28);
+  --viz-ink-1: #18181b;
+  --viz-ink-2: #636369;
+  --viz-ink-3: #9d9da3;
+  --viz-ink-4: #cdcdd1;
+}
+
+/* Dark: the same steps inverted, with more contrast in the text; the accent keeps its hex as a fill and is lightened
+   when it is text */
+:root[data-paper='dark'] {
+  color-scheme: dark;
+  --paper-0: #2f2f35;
+  --paper-1: #1c1c20;
+  --paper-2: #0b0b0d;
+  --paper-3: #3b3b42;
+  --white: #25252a;
+  /* the text is the near-white that matches Warm's and Neutral's black */
+  --ink-900: #fdfcfa;
+  --ink-700: #e2dfd8;
+  --ink-500: #b8b5ad;
+  --ink-400: #9b9891;
+  --ink-300: #5c5a55;
+  --ink-200: #3b3b42;
+  --ink-rgb: 248, 246, 242;
+  --status-positive: #4fd1a5;
+  --status-negative: #ff8a7a;
+  --status-warning: #e0b04a;
+  --ring-card: 0 0 0 1px rgba(var(--ink-rgb), 0.08);
+  --shadow-float: 0 10px 28px -14px rgba(0, 0, 0, 0.6);
+  --viz-ink-1: #f8f6f2;
+  --viz-ink-2: #b8b5ad;
+  --viz-ink-3: #85827a;
+  --viz-ink-4: #4d4b47;
+  /* the chart palette stepped for Dark: faint (near the paper) to strong as on the light papers, so here dark to light */
+  --viz-violet-1: #2d2d46; --viz-violet-2: #5955a5; --viz-violet-3: #8b86f9; --viz-violet-4: #b5b7fe; --viz-violet-5: #e4e6fe;
+  --viz-teal-1: #173635; --viz-teal-2: #027e7b; --viz-teal-3: #2ecac6; --viz-teal-4: #71e2de; --viz-teal-5: #bef4f1;
+  --viz-orange-1: #43291b; --viz-orange-2: #9f4c11; --viz-orange-3: #f57d2d; --viz-orange-4: #ffb084; --viz-orange-5: #ffe1d1;
+  --viz-green-1: #25361f; --viz-green-2: #4e8537; --viz-green-3: #8ad969; --viz-green-4: #a8eb8d; --viz-green-5: #d4f7c6;
+  --viz-blue-1: #203245; --viz-blue-2: #33679f; --viz-blue-3: #58a3f3; --viz-blue-4: #96c7ff; --viz-blue-5: #d9eafe;
+  --viz-pink-1: #422732; --viz-pink-2: #9e456e; --viz-pink-3: #f575af; --viz-pink-4: #feaacc; --viz-pink-5: #ffdeea;
+  --viz-gold-1: #3b2e14; --viz-gold-2: #95710c; --viz-gold-3: #f3be3c; --viz-gold-4: #ffd67e; --viz-gold-5: #fff0d0;
+  /* the label colors (below) stepped for Dark, each place the same hue as on the light papers. A dark hue cannot keep
+     3:1 here, so brown (7) and chestnut (11) are a muted khaki and a light tan, apart from orange, and navy (8) is a
+     pale periwinkle, apart from sky (4); gold (5) and teal (6) are lighter than orange and green, so the first five
+     colors new values take (blue, orange, green, gold, teal) stay 15 or more apart in OKLab */
+  --label-1: #2275e8;
+  --label-2: #da7306;
+  --label-3: #17a973;
+  --label-4: #0c9edc;
+  --label-5: #beb222;
+  --label-6: #5fcfca;
+  --label-7: #9b7239;
+  --label-8: #9ebdff;
+  --label-9: #50c14d;
+  --label-10: #0985b4;
+  --label-11: #f6b896;
+  --label-12: #0bb8d6;
+  /* the hues only the analyst picks, as on the light papers: red, purple and pink, each a strong and a light step */
+  --label-13: #ef5b51;
+  --label-14: #f7a39c;
+  --label-15: #a585f5;
+  --label-16: #cdb9ff;
+  --label-17: #ec6aa8;
+  --label-18: #f6b0d2;
+}
+
+/* -------- the accent: one of seven, iris by default. --accent is the fill, --accent-on the text on it (white or ink,
+   whichever reads at 4.5:1), --accent-ink the accent as text on a light paper (darkened where the fill would read
+   under 4.5:1). --find-mix and --find-mix-strong are the accent's share in the find's tints on a light paper
+   (--find-bg below), --find-mix-dark and --find-mix-dark-strong on Dark: a light accent such as yellow takes more on a
+   light paper and less on Dark, so that on every accent a match stands as far from the cell, and the current match as
+   far from a match, as on iris. -------- */
+:root,
+:root[data-accent='iris'] {
+  --accent: #5135ff;
+  --accent-on: #ffffff;
+  --accent-ink: #5135ff;
+  --find-mix: 20%;
+  --find-mix-strong: 32%;
+  --find-mix-dark: 32%;
+  --find-mix-dark-strong: 50%;
+}
+:root[data-accent='pink'] {
+  --accent: #d6336c;
+  --accent-on: #ffffff;
+  --accent-ink: #b4295a;
+  --find-mix: 26%;
+  --find-mix-strong: 40%;
+  --find-mix-dark: 32%;
+  --find-mix-dark-strong: 50%;
+}
+:root[data-accent='orange'] {
+  --accent: #e0590c;
+  --accent-on: #1b1a18;
+  --accent-ink: #ac4207;
+  --find-mix: 28%;
+  --find-mix-strong: 44%;
+  --find-mix-dark: 30%;
+  --find-mix-dark-strong: 46%;
+}
+:root[data-accent='yellow'] {
+  --accent: #f2b705;
+  --accent-on: #1b1a18;
+  --accent-ink: #886300;
+  --find-mix: 40%;
+  --find-mix-strong: 68%;
+  --find-mix-dark: 20%;
+  --find-mix-dark-strong: 32%;
+}
+:root[data-accent='lime'] {
+  --accent: #74b816;
+  --accent-on: #1b1a18;
+  --accent-ink: #46730b;
+  --find-mix: 34%;
+  --find-mix-strong: 52%;
+  --find-mix-dark: 22%;
+  --find-mix-dark-strong: 36%;
+}
+:root[data-accent='blue'] {
+  --accent: #1876d1;
+  --accent-on: #ffffff;
+  --accent-ink: #1365b4;
+  --find-mix: 26%;
+  --find-mix-strong: 40%;
+  --find-mix-dark: 36%;
+  --find-mix-dark-strong: 56%;
+}
+:root[data-accent='graphite'] {
+  --accent: #3d3b37;
+  --accent-on: #ffffff;
+  --accent-ink: #3d3b37;
+  --find-mix: 20%;
+  --find-mix-strong: 32%;
+  --find-mix-dark: 26%;
+  --find-mix-dark-strong: 42%;
+}
+
+/* -------- the chart series and ramps for each accent (lib/vizTheme). The families keep one order, violet, teal, orange,
+   green, blue, pink, gold, and the accent rotates it: series one is the accent's family (blue for graphite, so a chart
+   is never black and white) and the rest follow in order. On every paper and accent, neighbors stay apart, and so do
+   the first three pairwise, under protan, deutan and tritan vision (tests/public/viz-palette.test.ts). The sequential
+   ramp is the accent's family; the diverging ramp runs from a family far from it, through a gray, to the accent's
+   family. -------- */
+:root,
+:root[data-accent='iris'] {
+  --viz-1: var(--viz-violet-3);
+  --viz-2: var(--viz-teal-3);
+  --viz-3: var(--viz-orange-3);
+  --viz-4: var(--viz-green-3);
+  --viz-5: var(--viz-blue-3);
+  --viz-6: var(--viz-pink-3);
+  --viz-7: var(--viz-gold-3);
+  --viz-seq-1: var(--viz-violet-1);
+  --viz-seq-2: var(--viz-violet-2);
+  --viz-seq-3: var(--viz-violet-3);
+  --viz-seq-4: var(--viz-violet-4);
+  --viz-seq-5: var(--viz-violet-5);
+  --viz-div-1: var(--viz-orange-4);
+  --viz-div-2: var(--viz-orange-2);
+}
+:root[data-accent='pink'] {
+  --viz-1: var(--viz-pink-3);
+  --viz-2: var(--viz-gold-3);
+  --viz-3: var(--viz-violet-3);
+  --viz-4: var(--viz-teal-3);
+  --viz-5: var(--viz-orange-3);
+  --viz-6: var(--viz-green-3);
+  --viz-7: var(--viz-blue-3);
+  --viz-seq-1: var(--viz-pink-1);
+  --viz-seq-2: var(--viz-pink-2);
+  --viz-seq-3: var(--viz-pink-3);
+  --viz-seq-4: var(--viz-pink-4);
+  --viz-seq-5: var(--viz-pink-5);
+  --viz-div-1: var(--viz-green-4);
+  --viz-div-2: var(--viz-green-2);
+}
+:root[data-accent='orange'] {
+  --viz-1: var(--viz-orange-3);
+  --viz-2: var(--viz-green-3);
+  --viz-3: var(--viz-blue-3);
+  --viz-4: var(--viz-pink-3);
+  --viz-5: var(--viz-gold-3);
+  --viz-6: var(--viz-violet-3);
+  --viz-7: var(--viz-teal-3);
+  --viz-seq-1: var(--viz-orange-1);
+  --viz-seq-2: var(--viz-orange-2);
+  --viz-seq-3: var(--viz-orange-3);
+  --viz-seq-4: var(--viz-orange-4);
+  --viz-seq-5: var(--viz-orange-5);
+  --viz-div-1: var(--viz-blue-4);
+  --viz-div-2: var(--viz-blue-2);
+}
+:root[data-accent='yellow'] {
+  --viz-1: var(--viz-gold-3);
+  --viz-2: var(--viz-violet-3);
+  --viz-3: var(--viz-teal-3);
+  --viz-4: var(--viz-orange-3);
+  --viz-5: var(--viz-green-3);
+  --viz-6: var(--viz-blue-3);
+  --viz-7: var(--viz-pink-3);
+  --viz-seq-1: var(--viz-gold-1);
+  --viz-seq-2: var(--viz-gold-2);
+  --viz-seq-3: var(--viz-gold-3);
+  --viz-seq-4: var(--viz-gold-4);
+  --viz-seq-5: var(--viz-gold-5);
+  --viz-div-1: var(--viz-blue-4);
+  --viz-div-2: var(--viz-blue-2);
+}
+:root[data-accent='lime'] {
+  --viz-1: var(--viz-green-3);
+  --viz-2: var(--viz-blue-3);
+  --viz-3: var(--viz-pink-3);
+  --viz-4: var(--viz-gold-3);
+  --viz-5: var(--viz-violet-3);
+  --viz-6: var(--viz-teal-3);
+  --viz-7: var(--viz-orange-3);
+  --viz-seq-1: var(--viz-green-1);
+  --viz-seq-2: var(--viz-green-2);
+  --viz-seq-3: var(--viz-green-3);
+  --viz-seq-4: var(--viz-green-4);
+  --viz-seq-5: var(--viz-green-5);
+  --viz-div-1: var(--viz-pink-4);
+  --viz-div-2: var(--viz-pink-2);
+}
+:root[data-accent='blue'] {
+  --viz-1: var(--viz-blue-3);
+  --viz-2: var(--viz-pink-3);
+  --viz-3: var(--viz-gold-3);
+  --viz-4: var(--viz-violet-3);
+  --viz-5: var(--viz-teal-3);
+  --viz-6: var(--viz-orange-3);
+  --viz-7: var(--viz-green-3);
+  --viz-seq-1: var(--viz-blue-1);
+  --viz-seq-2: var(--viz-blue-2);
+  --viz-seq-3: var(--viz-blue-3);
+  --viz-seq-4: var(--viz-blue-4);
+  --viz-seq-5: var(--viz-blue-5);
+  --viz-div-1: var(--viz-orange-4);
+  --viz-div-2: var(--viz-orange-2);
+}
+:root[data-accent='graphite'] {
+  --viz-1: var(--viz-blue-3);
+  --viz-2: var(--viz-pink-3);
+  --viz-3: var(--viz-gold-3);
+  --viz-4: var(--viz-violet-3);
+  --viz-5: var(--viz-teal-3);
+  --viz-6: var(--viz-orange-3);
+  --viz-7: var(--viz-green-3);
+  --viz-seq-1: var(--viz-blue-1);
+  --viz-seq-2: var(--viz-blue-2);
+  --viz-seq-3: var(--viz-blue-3);
+  --viz-seq-4: var(--viz-blue-4);
+  --viz-seq-5: var(--viz-blue-5);
+  --viz-div-1: var(--viz-orange-4);
+  --viz-div-2: var(--viz-orange-2);
+}
+
+/* -------- the semantic tokens every surface uses; they follow the paper and the accent above -------- */
+:root {
+  /* surfaces: window, pane, inset, cell. Recessed: the window is lighter than the pane, the cell lightest of all */
+  --bg-page: var(--paper-2);
+  --bg-panel: var(--paper-1);
+  --bg-sunken: var(--paper-0);
+  --bg-inset: var(--paper-0);
+  --bg-sub: var(--paper-1);
+  --surface-card: var(--white);
+  --surface-hover: rgba(var(--ink-rgb), 0.05);
+  --surface-pressed: rgba(var(--ink-rgb), 0.08);
+  /* a selected row (the current thread, the open file): an ink step, never a colour */
+  --surface-selected: rgba(var(--ink-rgb), 0.07);
+  /* tonal fill: the tool-call card and the canvas controls, a step of ink instead of a white card */
+  --surface-tonal: rgba(var(--ink-rgb), 0.04);
+  --surface-tonal-hover: rgba(var(--ink-rgb), 0.06);
+  --surface-inverse: var(--ink-900);
+  /* the raised style: the one selected look of every segmented control, views bar and type bar */
+  --raised-bg: var(--surface-card);
+  --raised-ring: 0 0 0 1px rgba(var(--ink-rgb), 0.12);
+  --track-bg: rgba(var(--ink-rgb), 0.06);
+
+  /* glass: the composer and what rides with it, the canvas's controls and the status strips, at 62% of the cell with
+     a blur. Never used for what floats over content (the overlay below). */
+  --glass-bg: color-mix(in oklab, var(--surface-card) 62%, transparent);
+  --glass-blur: blur(18px) saturate(1.2);
+  --glass-blur-strong: blur(20px) saturate(1.3);
+  --glass-edge: 1px solid color-mix(in oklab, var(--surface-card) 80%, transparent);
+  --glass-edge-strong: 1px solid color-mix(in oklab, var(--surface-card) 85%, transparent);
+  --glass-ring: 0 0 0 1px rgba(var(--ink-rgb), 0.07);
+  /* the overlay: what floats over content and goes away (popovers, menus, tooltips, toasts, previews) is opaque, the
+     cell's paper with no blur, so the text under it never reads through. */
+  --overlay-bg: var(--surface-card);
+  --overlay-edge: 1px solid var(--surface-card);
+  --overlay-ring: 0 0 0 1px rgba(var(--ink-rgb), 0.09);
+  /* the scrim: the grey laid over the whole window under a card that blocks the page (no session attached) */
+  --scrim: rgba(var(--ink-rgb), 0.5);
+  /* the float as each part wears it: the pane with its faint ring, the composer, a popover */
+  --shadow-pane: 0 0 0 1px rgba(var(--ink-rgb), 0.05), var(--shadow-float);
+  --shadow-composer: var(--glass-ring), var(--shadow-float);
+  --shadow-popover: var(--overlay-ring), var(--shadow-float);
+
+  /* text */
+  --text-primary: var(--ink-900);
+  --text-secondary: var(--ink-700);
+  --text-tertiary: var(--ink-500);
+  --text-placeholder: var(--ink-400);
+  --text-disabled: var(--ink-300);
+  --text-on-accent: var(--accent-on);
+  --text-on-inverse: var(--paper-2);
+  --text-accent: var(--accent-ink);
+  --text-link: var(--text-accent);
+
+  /* code: the reader's syntax colours (styles/code.css), each an Okabe–Ito hue mixed toward the text ink until it reads
+     at 6:1 or more on every ground. */
+  --code-text: var(--ink-900);
+  --code-comment: var(--ink-500);
+  --code-keyword: color-mix(in oklab, #cc79a7 56%, var(--ink-900));
+  --code-string: color-mix(in oklab, #009e73 60%, var(--ink-900));
+  --code-number: color-mix(in oklab, #d55e00 65%, var(--ink-900));
+  --code-function: color-mix(in oklab, #e69f00 47%, var(--ink-900));
+  --code-type: color-mix(in oklab, #56b4e9 48%, var(--ink-900));
+  --code-property: color-mix(in oklab, #0072b2 80%, var(--ink-900));
+  --code-added: var(--status-positive);
+  --code-removed: var(--status-negative);
+
+  /* lines: rows .07–.08, dividers .12, controls .22, the takeaway rule 2px ink */
+  --border-hairline: rgba(var(--ink-rgb), 0.08);
+  --border-subtle: rgba(var(--ink-rgb), 0.12);
+  --border-strong: rgba(var(--ink-rgb), 0.22);
+  --rule-ink: 2px solid var(--ink-900);
+
+  /* the accent's derived fills */
+  --accent-hover: color-mix(in oklab, var(--accent) 88%, black);
+  --accent-pressed: color-mix(in oklab, var(--accent) 78%, black);
+  --accent-soft: color-mix(in oklab, var(--accent) 14%, transparent);
+  --accent-wash: color-mix(in oklab, var(--accent) 22%, transparent);
+  /* the word under the ⌘ pointer */
+  --accent-tint: color-mix(in oklab, var(--accent) 20%, transparent);
+  /* the accent chip, for what the agent made (a card, a group, a label, a thread, a document, a view): the accent's
+     edge at 28%, a 6% tint over the cell, the accent as text */
+  --chip-edge: color-mix(in oklab, var(--accent) 28%, transparent);
+  --chip-bg: color-mix(in oklab, var(--accent) 6%, var(--surface-card));
+  --chip-edge-hover: color-mix(in oklab, var(--accent) 45%, transparent);
+  --chip-bg-hover: color-mix(in oklab, var(--accent) 11%, var(--surface-card));
+  /* the evidence chip, for the data (a file, a record, a table's cell, printed lines): a hairline on the cell and the
+     secondary text, the primary on hover */
+  --chip-evidence-edge: rgba(var(--ink-rgb), 0.18);
+  --chip-evidence-edge-hover: rgba(var(--ink-rgb), 0.3);
+  --chip-evidence-bg: var(--surface-card);
+  --chip-evidence-text: var(--text-secondary);
+  --chip-evidence-text-hover: var(--text-primary);
+  --ai-mark: var(--accent);
+
+  --status-positive-soft: color-mix(in oklab, var(--status-positive) 12%, transparent);
+  --status-warning-soft: color-mix(in oklab, var(--status-warning) 12%, transparent);
+  --status-negative-soft: color-mix(in oklab, var(--status-negative) 12%, transparent);
+  --status-info: var(--ink-700);
+  --status-info-soft: var(--paper-1);
+  --status-neutral: var(--ink-500);
+  --status-neutral-soft: var(--paper-1);
+  /* the highlight of the evidence, in ink on every accent: a span inside a longer text (.hl in base.css) and a stronger
+     wash, such as a quote's words (a cited table cell or output line is the accent's wash, refchip.css) */
+  --hl-bg: rgba(var(--ink-rgb), 0.08);
+  --hl-bg-strong: rgba(var(--ink-rgb), 0.18);
+  --hl-edge: rgba(var(--ink-rgb), 0.4);
+  --hl-unverified: var(--status-warning-soft);
+  --hl-unverified-ink: var(--status-warning);
+  /* the find's matches (Files' find, the view kit's search): every match on a tint of the accent and the current one on
+     a stronger tint (the accent's --find-mix above), on which the text and the secondary text read at 4.5:1 or more on
+     every paper and accent. Their ticks on a strip are the accent as text (--text-accent), in a lane of their own
+     beside Color by's */
+  --find-bg: color-mix(in oklab, var(--accent) var(--find-mix), transparent);
+  --find-bg-strong: color-mix(in oklab, var(--accent) var(--find-mix-strong), transparent);
+
+  /* data: the chart's color roles (lib/vizTheme), past the series and ramps the accent sets above. Series one is a step
+     of the accent's family, not the accent's hex, and the interface's own uses of the accent (a selection, the find's
+     matches, focus, the agents' chips) are rings, washes behind text and text, never a filled mark in a plot, so data
+     and the interface stay apart. A label's colors (below) keep their meaning: no series takes one of their hexes */
+  --viz-div-3: var(--viz-ink-4);
+  --viz-div-4: var(--viz-seq-2);
+  --viz-div-5: var(--viz-seq-4);
+  --viz-other: var(--viz-ink-3);
+  --viz-highlight: var(--viz-1);
+  /* a label's colors by place, and the color of "no match". A label's value stores its color as a place, so
+     --label-N is always the same hue: 1 blue, 2 orange, 3 green, 4 sky, 5 gold, 6 teal, 7 brown, 8 navy, 9 grass,
+     10 cerulean, 11 chestnut, 12 cyan (show_label's color names, concepts.COLOUR_NAMES). No red and no purple, and
+     twelve so that a label with more than eight values still gets a distinct color for each. New values take the
+     places in another order, blue, orange, green, gold, teal, brown, sky, then 8 to 12 (backend/app/label_order.json),
+     so the first five are five hues with no second blue among them, each pair 15 or more apart in OKLab (8 under protan
+     and deutan vision): gold (5) is a darker olive and green (3) a deeper green, so gold stands apart from both orange
+     and green. Each reads at 3:1 or more on every paper, and Dark has its own steps of the same hues. */
+  --label-1: #025ac3;
+  --label-2: #d0750a;
+  --label-3: #06572a;
+  --label-4: #1392d4;
+  --label-5: #7d6702;
+  --label-6: #009c85;
+  --label-7: #844500;
+  --label-8: #013c77;
+  --label-9: #2aa02b;
+  --label-10: #025a7c;
+  --label-11: #622b01;
+  --label-12: #0389a0;
+  /* the hues a value takes only when the analyst picks it (the picker, around the color wheel, or show_label as the
+     analyst asks): 13 red and 14 a dark red, 15 purple and 16 a dark purple, 17 pink and 18 a dark pink. New values
+     never take them, so red stays the problem's and purple the agents' unless the analyst chooses otherwise; each reads
+     at 3:1 or more on every paper */
+  --label-13: #d0342c;
+  --label-14: #8a1c1c;
+  --label-15: #7b4fd6;
+  --label-16: #4c2a91;
+  --label-17: #d23f8b;
+  --label-18: #8d1d5c;
+  --label-none: #a09c93;
+  /* a multi-class label as a whole: the plain ink */
+  --label-multi: var(--text-secondary);
+  --viz-1-soft: color-mix(in oklab, var(--viz-1) 16%, transparent);
+  --viz-grid: rgba(var(--ink-rgb), 0.08);
+  --viz-axis: rgba(var(--ink-rgb), 0.28);
+  --viz-label: var(--ink-500);
+  --viz-annotation: var(--viz-ink-2);
+  /* the chart's faces and sizes: axis and legend labels in mono, titles and text marks in the body face, all at 11 px;
+     a chart's own title at 13 px; a line 1.5 px (backend/app/matplotlibrc holds the same in points); a bar's end, away
+     from its baseline, round at 2 px (a stacked bar's whole stack) */
+  --viz-font: var(--font-body);
+  --viz-font-label: var(--font-mono);
+  --viz-size: var(--text-2xs);
+  --viz-size-title: var(--text-sm);
+  --viz-line: 1.5px;
+  --viz-bar-radius: 2px;
+
+  /* type: Hanken Grotesk for text, Geist Mono for anything the data named (a file, a thread, a label, a key, a time).
+     400 and 500; 600 only for the report's H1 and H2. Numbers tabular everywhere. */
+  --font-body: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-body);
+  --font-mono: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-prose: var(--font-body);
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-ui-sm: 12.5px;
+  --text-sm: 13px;
+  --text-md: 13.5px;
+  --text-lg: 14px;
+  --text-xl: 16px;
+  --text-2xl: 22px;
+  --text-3xl: 28px;
+  --text-mono: 11.5px;
+  --text-mono-sm: 11px;
+  --text-eyebrow: 11px;
+  --leading-normal: 1.45;
+  --tracking-title: -0.01em;
+  --tracking-report-h1: -0.02em;
+  --tracking-label: 0.08em;
+  /* the report's own scale */
+  --type-report-h1: 600 var(--text-3xl) / 1.2 var(--font-body);
+  --type-report-h2: 600 18px / 1.3 var(--font-body);
+  --type-report-body: 400 15px / 1.7 var(--font-body);
+  /* the UI's scale */
+  --type-title: 500 var(--text-2xl) / 1.25 var(--font-body);
+  --type-heading: 500 var(--text-xl) / 1.3 var(--font-body);
+  --type-subheading: 500 var(--text-lg) / 1.4 var(--font-body);
+  --type-question: 500 var(--text-lg) / 1.35 var(--font-body);
+  --type-message: 400 var(--text-sm) / 1.45 var(--font-body);
+  --type-body-lg: 400 var(--text-lg) / 1.55 var(--font-body);
+  --type-body: 400 var(--text-sm) / 1.45 var(--font-body);
+  --type-body-sm: 400 var(--text-xs) / 1.45 var(--font-body);
+  --type-ui-sm: 400 var(--text-ui-sm) / 1.45 var(--font-body);
+  --type-caption: 400 var(--text-xs) / 1.4 var(--font-body);
+  --type-label: 400 var(--text-eyebrow) / 1.2 var(--font-body);
+  --type-mono: 400 var(--text-mono) / 1.5 var(--font-mono);
+  --type-mono-sm: 400 var(--text-mono-sm) / 1.5 var(--font-mono);
+  --sans: var(--font-body);
+  --mono: var(--font-mono);
+  --display: var(--font-body);
+
+  /* shape: pane 12 · cell, card and popover 8 · button and input 6 · chip and key 4 · highlight 3. No pills except the
+     switch. */
+  --radius-pane: 12px;
+  --radius-card: 8px;
+  --radius-ui: 6px;
+  --radius-seg: 5px;
+  --radius-chip: 4px;
+  --radius-hl: 3px;
+  --radius-pill: 999px;
+  --track-pad: 2px;
+
+  /* rings in place of elevation steps */
+  --shadow-1: 0 0 0 1px rgba(var(--ink-rgb), 0.07);
+  --shadow-2: 0 0 0 1px rgba(var(--ink-rgb), 0.09);
+  --shadow-3: 0 0 0 1px rgba(var(--ink-rgb), 0.09);
+  --focus-paper: 0 0 0 1px var(--border-strong);
+  --glow-accent: 0 0 0 1px var(--accent), 0 0 18px -6px color-mix(in oklab, var(--accent) 45%, transparent);
+  /* the ⌘ pointer's box: the accent's glow around its accent edge */
+  --glow-box: 0 0 16px color-mix(in oklab, var(--accent) 30%, transparent);
+  --glow-negative: 0 0 0 1px var(--status-negative);
+
+  /* motion: 140 hover, press, a chevron turning · 220 fade, dim, a dot, the box opening · 340 an unstack, the focus
+     list · 900 the spinner, the only loop */
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-panel: 340ms;
+  --dur-slow: 340ms;
+  --dur-spin: 900ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --transition-color: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+  --t-hover: var(--dur-fast) var(--ease-out);
+  --t-fade: var(--dur-base) var(--ease-out);
+
+  /* the tool's fixed dimensions: the reference frame is 1280 × 800 */
+  --h-topbar: 40px;
+  --h-band: 36px;
+  --h-chip: 20px;
+  --h-control: 24px;
+  --control-sm: 28px;
+  --h-row: 28px;
+  --gutter: 12px;
+  /* a card's default width on the canvas (matches canvas/layout.ts CARD_W) and the report's text column, so an
+     embedded card is as wide as on the canvas */
+  --w-card: 720px;
+  --z-sticky: 10;
+  --z-menu: 50;
+  --z-modal: 950;
+  --z-toast: 1000;
+  --z-popover: 1100;
+  --z-scrim: 1200;
+}
+
+/* Dark's accent as text: the accent mixed toward white, whichever accent is chosen (graphite further, since at 60% it
+   stays under 4.5:1 on a chip) */
+:root[data-paper='dark'] {
+  --text-accent: color-mix(in oklab, var(--accent) 60%, white);
+  --accent-hover: color-mix(in oklab, var(--accent) 86%, white);
+  --accent-pressed: color-mix(in oklab, var(--accent) 76%, white);
+  --text-on-inverse: var(--paper-2);
+  /* Dark's ink is light, so its scrim darkens with black instead */
+  --scrim: rgba(0, 0, 0, 0.6);
+  /* a light ink over a dark cell needs more of it to read as the same step */
+  --hl-bg: rgba(var(--ink-rgb), 0.14);
+  --hl-bg-strong: rgba(var(--ink-rgb), 0.26);
+  --hl-edge: rgba(var(--ink-rgb), 0.5);
+  /* the find's tints in the accent's shares for Dark: more for a dark accent such as iris, so it shows on a dark cell,
+     less for a light one such as yellow, which takes contrast from the light text */
+  --find-bg: color-mix(in oklab, var(--accent) var(--find-mix-dark), transparent);
+  --find-bg-strong: color-mix(in oklab, var(--accent) var(--find-mix-dark-strong), transparent);
+  /* the code colours lightened toward Dark's text ink */
+  --code-keyword: color-mix(in oklab, #cc79a7 70%, var(--ink-900));
+  --code-string: color-mix(in oklab, #009e73 64%, var(--ink-900));
+  --code-number: color-mix(in oklab, #d55e00 59%, var(--ink-900));
+  --code-function: color-mix(in oklab, #e69f00 95%, var(--ink-900));
+  --code-type: color-mix(in oklab, #56b4e9 93%, var(--ink-900));
+  --code-property: color-mix(in oklab, #0072b2 49%, var(--ink-900));
+}
+:root[data-paper='dark'][data-accent='graphite'] {
+  --text-accent: color-mix(in oklab, var(--accent) 45%, white);
+  /* graphite's fill is too near Dark's cell to tint it, so the find's tints take its text color */
+  --find-bg: color-mix(in oklab, var(--text-accent) var(--find-mix-dark), transparent);
+  --find-bg-strong: color-mix(in oklab, var(--text-accent) var(--find-mix-dark-strong), transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-panel: 0ms;
+    --dur-slow: 0ms;
+  }
+}

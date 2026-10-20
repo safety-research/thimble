@@ -1,0 +1,81 @@
+/* Syntax colours: the token roles files/highlight.ts gives highlighted code (`.tok-<role>`), each from its --code-*
+   token, so code reads the same on every paper. */
+.tok-keyword {
+  color: var(--code-keyword);
+}
+.tok-string {
+  color: var(--code-string);
+}
+.tok-number {
+  color: var(--code-number);
+}
+.tok-function,
+.tok-meta {
+  color: var(--code-function);
+}
+.tok-type {
+  color: var(--code-type);
+}
+.tok-property {
+  color: var(--code-property);
+}
+.tok-comment {
+  color: var(--code-comment);
+}
+.tok-heading {
+  color: var(--code-property);
+  font-weight: 500;
+}
+.tok-emphasis {
+  font-style: italic;
+}
+.tok-strong {
+  font-weight: 500;
+}
+.tok-link {
+  color: var(--code-property);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--code-property) 40%, transparent);
+}
+.tok-added {
+  color: var(--code-added);
+}
+.tok-removed {
+  color: var(--code-removed);
+}
+
+/* CodeArea (components/Code.tsx): a field whose text is coloured as it is typed. A coloured copy sits under a
+   transparent field that draws the edge, caret and selection; both wrap alike and keep the scrollbar's gutter, so a
+   long text breaks at the same width in each. */
+.code-area {
+  position: relative;
+  align-self: stretch;
+  min-width: 0;
+}
+.code-area-under {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.code-area > .field {
+  scrollbar-gutter: stable;
+}
+.code-area > .code-area-under.field {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  margin: 0;
+  overflow: hidden;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--code-text);
+  pointer-events: none;
+}
+.code-area > .code-area-field.field {
+  position: relative;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--code-text);
+}
+.code-area > .code-area-field.field::selection {
+  color: transparent;
+}

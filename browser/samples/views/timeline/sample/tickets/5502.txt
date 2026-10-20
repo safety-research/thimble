@@ -1,0 +1,15 @@
+Ticket: 5502
+Subject: Lost umbrella
+Requester: A. Lindqvist <a.lindqvist@example.net>
+
+From: A. Lindqvist <a.lindqvist@example.net>
+Date: Sat, 16 May 2026 06:28:51 +0100
+Status: open
+
+Left a blue umbrella on the 18:40 from Skell yesterday. Is there a lost property desk?
+
+From: Mateo <mateo@marrowby-ferries.example>
+Date: Sat, 16 May 2026 07:51:30 +0100
+Status: closed
+
+Lost property is at the Marrowby terminal office, and the umbrella is there.

@@ -11,3 +11,7 @@ plugin/.claude-plugin/types/
 .claude/worktrees/
 .DS_Store
 *.log
+# the browser workbench: the page's build, and what the install script and its tests write
+browser/frontend/dist/
+browser/frontend/*.tsbuildinfo
+browser/frontend/test-results/

@@ -1,0 +1,15 @@
+Ticket: 5550
+Subject: Wrong date on boarding pass
+Requester: S. Quinn <s.quinn@example.net>
+
+From: S. Quinn <s.quinn@example.net>
+Date: Mon, 18 May 2026 21:10:00 +0100
+Status: open
+
+My boarding pass shows the wrong date.
+
+From: Mateo <mateo@marrowby-ferries.example>
+Date: Mon, 18 May 2026 21:31:30 +0100
+Status: closed
+
+Sent a new pass with the right date.

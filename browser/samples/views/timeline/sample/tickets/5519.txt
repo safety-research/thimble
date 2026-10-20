@@ -1,0 +1,21 @@
+Ticket: 5519
+Subject: Double charge on car booking
+Requester: D. Kowalczyk <d.kowalczyk@example.net>
+
+From: D. Kowalczyk <d.kowalczyk@example.net>
+Date: Sat, 16 May 2026 09:33:10 +0100
+Status: open
+
+Double charge again: two payments of 52.00 for a car booking.
+
+From: Mateo <mateo@marrowby-ferries.example>
+Date: Sat, 16 May 2026 09:50:05 +0100
+Status: pending
+
+Refund of the duplicate charge is queued.
+
+From: Mateo <mateo@marrowby-ferries.example>
+Date: Sat, 16 May 2026 12:16:02 +0100
+Status: closed
+
+Refund sent.

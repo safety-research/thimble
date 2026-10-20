@@ -1,0 +1,26 @@
+/* the working mark: an accent ring open on one side, sized by the component. It turns once every --dur-spin, linear,
+   the only thing in the UI that loops. */
+.spinner {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  width: var(--spinner-size, 10px);
+  height: var(--spinner-size, 10px);
+  border: var(--spinner-stroke, 1.5px) solid var(--accent);
+  border-right-color: transparent;
+  border-radius: 50%;
+  vertical-align: -0.15em;
+  animation: spinner-turn var(--dur-spin) linear infinite;
+}
+@keyframes spinner-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-color: var(--accent);
+    border-right-color: transparent;
+  }
+}

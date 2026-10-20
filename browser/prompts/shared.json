@@ -1,0 +1,139 @@
+{
+  "about": "The parts of the terminal plugin's texts that thimble browser uses (server/thimble_browser/prompts.py). Each part is a file under prompts/terminal/, a section of it and, when given, some of its bullets (counted from 1). `replace` and `drop` are the only changes, exact strings; tests/test_prompt_parity.py fails when the terminal's text no longer holds one of them.",
+  "parts": {
+    "communicating": {
+      "file": "terminal/SKILL.md",
+      "section": "Communicating",
+      "heading": "Communicating",
+      "replace": [
+        [
+          "[290](r2#product=X200@n)",
+          "[290](card:<id>#product/X200)"
+        ],
+        [
+          "[↗](r1)",
+          "[↗](card:<id>)"
+        ]
+      ]
+    },
+    "citing": {
+      "file": "terminal/SKILL.md",
+      "section": "Computing and citing",
+      "heading": "Citing",
+      "bullets": [
+        2,
+        4
+      ],
+      "tail": true,
+      "replace": [
+        [
+          "never sees your shell output",
+          "never sees your tools' output"
+        ],
+        [
+          "(r3#outcome=approved@n)",
+          "(card:<id>#outcome/approved)"
+        ],
+        [
+          "run `thimble rows` on its ref before you use it",
+          "read its ref with `read_ref` before you use it"
+        ]
+      ],
+      "drop": [
+        "`thimble coverage` lists the files this session read or computed over, and those it only searched, only named or counted, or never touched: none of these were read."
+      ]
+    },
+    "explain": {
+      "file": "terminal/lens-explain/v3.md",
+      "replace": [
+        [
+          " (the squeezed text, when they read it squeezed)",
+          ""
+        ],
+        [
+          "; and an optional \"program\" of at most six lines on thimble's drawing toolkit, only when a tiny drawing says it better than words.",
+          ". thimble browser draws no \"program\", so give none."
+        ],
+        [
+          "[6 of 9 hosts](r2#over=800ms@hosts)",
+          "[6 of 9 hosts](card:<id>#over/800ms)"
+        ]
+      ],
+      "until": "<!-- digest -->"
+    },
+    "explain-digest": {
+      "file": "terminal/lens-explain/v3.md",
+      "after": "<!-- digest -->",
+      "until": "<!-- when backoff -->"
+    },
+    "labels": {
+      "file": "terminal/labels/v2.md",
+      "until": "{{RECORDS}}",
+      "replace": [
+        [
+          "Reply with one JSON array and nothing else, and return exactly one entry for each record:",
+          "Reply with one JSON object whose `records` array has exactly one entry for each record:"
+        ]
+      ]
+    },
+    "labels-guide": {
+      "file": "terminal/SKILL.md",
+      "section": "Labels",
+      "heading": "Labels",
+      "replace": [
+        [
+          "`thimble label NAME --in GLOB` defines it",
+          "`apply_label` defines it"
+        ],
+        [
+          "`--regex` matches the text, `--code` is a Python function",
+          "a regex matches the text, code is a Python function"
+        ],
+        [
+          "and `--prompt` has a model judge",
+          "and a prompt has a model judge"
+        ],
+        [
+          "use `thimble label`.**",
+          "use `apply_label`.**"
+        ],
+        [
+          "(`--values`)",
+          "(`values`)"
+        ],
+        [
+          "with `--limit`, read them with `thimble rows GLOB --label NAME=VALUE`,",
+          "with `limit`, read them with `thimble.labels(\"NAME\", negatives=True)` in run_python,"
+        ],
+        [
+          "In a query, `use(\"NAME\")` gives each record's `_ref` and value.",
+          "In run_python and a card's code, `thimble.labels(\"NAME\", negatives=True)` gives each record's `ref` and its value as `effective`."
+        ],
+        [
+          "thimble rows \"tickets/*.jsonl\" -n 25, to see",
+          "reads 25 tickets, to see"
+        ],
+        [
+          "thimble label complaint --in \"tickets/*.jsonl\" --values broken,late,billing,other --limit 25",
+          "apply_label complaint, paths [\"tickets/*.jsonl\"], values broken, late, billing, other, limit 25,"
+        ],
+        [
+          "--prompt \"The main thing",
+          "a prompt \"The main thing"
+        ],
+        [
+          "the label again with the new definition and no --limit, then thimble label complaint --wait",
+          "apply_label again with the new definition and no limit"
+        ],
+        [
+          "[1,210](r4#complaint=broken@n)",
+          "[1,210](concept:<id>/broken)"
+        ],
+        [
+          "a query with cats =",
+          "run_python with cats ="
+        ]
+      ]
+    }
+  }
+}

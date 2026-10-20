@@ -1,0 +1,1195 @@
+/* the shell: the top bar, the chat column, the tabs over the panes, the seam, the settings popover and the toasts; and
+   the start page with the workspace switcher's list. */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-page);
+}
+/* -------- top bar: 40px on the window paper. The brand box at the left is as wide as the chat column, so the tabs
+   that follow sit over the pane 16px in from its left edge (--pane-x, set by Shell). The tools at the right are ghost
+   icon Buttons -------- */
+.shell-topbar {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--h-topbar);
+  padding: 0 16px 0 24px;
+}
+.shell-brand {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: calc(var(--pane-x, 332px) - 10px);
+  min-width: 120px;
+  padding-right: 20px;
+  height: var(--control-sm);
+  margin-top: 4px;
+  color: var(--text-primary);
+}
+.shell-mark {
+  flex: none;
+  color: inherit;
+}
+.shell-word {
+  flex: none;
+  font: 500 var(--text-lg) / 1 var(--font-body);
+}
+/* the corpus's folder, the button that opens the workspace switcher (TopBar WorkspaceSwitcher). A path too long for
+   the box is cut at its start, '…/data/my-corpus', so the corpus folder's name always shows: the path's box runs right
+   to left (TopBar sets dir="rtl") and the path inside it left to right */
+.shell-corpus-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 0;
+  height: var(--h-control);
+  margin-left: 0;
+  padding: 0 4px 0 6px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: transparent;
+  color: var(--text-tertiary);
+  font: 400 var(--text-xs) / 1 var(--font-mono);
+  cursor: pointer;
+  transition: var(--transition-color);
+}
+.shell-corpus-name:hover,
+.shell-corpus-name[aria-expanded='true'] {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+.shell-corpus-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: normal;
+}
+.shell-corpus-caret {
+  flex: none;
+  opacity: 0.7;
+}
+.shell[data-chat='closed'] .shell-corpus-name {
+  display: none;
+}
+.shell-tabs {
+  align-self: stretch;
+}
+.shell-spacer {
+  flex: 1;
+}
+.shell-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+/* the links toggle: the accent while citations show */
+.shell-links.on,
+.shell-links.on:hover {
+  color: var(--text-accent);
+}
+
+/* -------- body: the chat column sits directly on the window, the seam, then the panes -------- */
+.shell-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 0 12px 12px;
+}
+.shell-left {
+  flex: none;
+  min-width: 0;
+  height: 100%;
+}
+/* the collapsed chat: one column of the reopen button */
+.shell-strip {
+  flex: none;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 4px;
+}
+/* the folded chat's button and its dot at the top right corner (unread, or a prompt that waits) */
+.shell-strip-chat {
+  position: relative;
+  display: inline-flex;
+}
+.shell-strip-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  pointer-events: none;
+}
+.shell-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* the main area: the panes on the window's paper (shell/PaneArea), each placed by its rectangle (shell/panes.ts) */
+.shell-center {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.shell-panes {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+/* a pane: pane paper, radius 12, a faint ring and the float */
+.shell-panel {
+  position: absolute;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius-pane);
+  overflow: hidden;
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-pane);
+}
+.shell-panel[hidden] {
+  display: none;
+}
+.shell-panel-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* a pane's head, with more than one pane: the surface's name (menu and drag handle) at the left, × at the right */
+.pane-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--border-hairline);
+  cursor: grab;
+  user-select: none;
+}
+.pane-name-menu {
+  display: inline-flex;
+  min-width: 0;
+}
+.pane-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: transparent;
+  color: var(--text-secondary);
+  font: 400 var(--text-sm) / 1 var(--font-body);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.pane-name:hover,
+.pane-name[aria-expanded='true'] {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+.pane-head.is-focus .pane-name {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.pane-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: normal;
+}
+.pane-name-ico,
+.pane-name-caret {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.pane-head-spacer {
+  flex: 1;
+}
+/* Files' views in its pane head, after a hairline (files.css .files-views.is-compact); the room up to × */
+.pane-head-views {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  margin-right: 4px;
+  cursor: default;
+}
+.pane-head-views:not(:empty)::before {
+  content: '';
+  flex: none;
+  width: 1px;
+  height: 16px;
+  margin: 0 8px 0 4px;
+  background: var(--border-subtle);
+}
+.pane-close.btn {
+  color: var(--text-tertiary);
+}
+/* a pane with no surface: the surfaces no pane shows in its middle, each the chip that names a surface in the chat
+   (chat.css .view-tab), or the line saying every surface shows in another pane */
+.pane-pick {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  align-content: center;
+  gap: 8px;
+  padding: 16px;
+}
+.pane-pick-none {
+  color: var(--text-tertiary);
+  font: var(--type-body);
+}
+/* the 12px between two panes: a divider that drags, its hairline shown on hover and in the accent while it drags, as
+   the chat column's seam */
+.pane-divider {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+}
+.pane-divider.is-row {
+  cursor: col-resize;
+}
+.pane-divider.is-col {
+  cursor: row-resize;
+}
+.pane-divider::after {
+  content: '';
+  position: absolute;
+  background: var(--border-strong);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.pane-divider.is-row::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  margin-left: -0.5px;
+}
+.pane-divider.is-col::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  margin-top: -0.5px;
+}
+.pane-divider:hover::after {
+  opacity: 1;
+}
+.pane-divider.active::after {
+  opacity: 1;
+  background: var(--accent);
+}
+/* while a surface drags: the part of the pane under the pointer that a release gives it, in the accent as the canvas's
+   marquee, and the surface's name beside the pointer as the canvas's drag tag */
+.pane-drop {
+  position: absolute;
+  z-index: 20;
+  box-sizing: border-box;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pane);
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  pointer-events: none;
+  transition:
+    left var(--dur-fast) var(--ease-out),
+    top var(--dur-fast) var(--ease-out),
+    width var(--dur-fast) var(--ease-out),
+    height var(--dur-fast) var(--ease-out);
+}
+.pane-ghost {
+  position: fixed;
+  z-index: var(--z-popover);
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-seg);
+  background: var(--accent);
+  color: var(--accent-on);
+  font: 500 var(--text-mono) / 1 var(--font-body);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.shell-dragging,
+.shell-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+.shell-dragging iframe {
+  pointer-events: none;
+}
+/* a view on its own in a pane (files/ViewSurface) */
+.view-surface {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  background: var(--bg-panel);
+}
+
+/* the seam: a 12px grab strip between the chat column and the pane. Its hairline shows on hover and turns accent
+   while it drags; only its opacity animates. */
+.shell-resizer {
+  flex: none;
+  position: relative;
+  width: 12px;
+  cursor: col-resize;
+  z-index: 5;
+  touch-action: none;
+}
+.shell-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  margin-left: -0.5px;
+  background: var(--border-strong);
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.shell-resizer:hover::after {
+  opacity: 1;
+}
+.shell-resizer.active::after {
+  opacity: 1;
+  background: var(--accent);
+}
+.shell-resizing,
+.shell-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+.shell-resizing-row,
+.shell-resizing-row * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+.shell-resizing iframe,
+.shell-resizing-row iframe {
+  pointer-events: none;
+}
+
+/* -------- settings popover (shell/SettingsPopover, inside a glass Popover): one table, role · model · effort · fast,
+   caps headers, the names in the body face, rows on hairlines -------- */
+.settings-pop {
+  max-width: calc(100vw - 16px);
+}
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(480px, calc(100vw - 32px));
+  padding: 4px 6px;
+}
+.settings-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.settings-grid {
+  display: flex;
+  flex-direction: column;
+}
+.settings-row {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) 108px 40px;
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-row:last-child {
+  border-bottom: 0;
+}
+.settings-headrow {
+  min-height: 24px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.settings-role {
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+}
+.settings-model {
+  justify-self: start;
+  max-width: 100%;
+}
+.field.settings-model {
+  width: 100%;
+  font: var(--type-mono);
+}
+.settings-effort {
+  justify-self: start;
+}
+/* a cell that cannot be changed here (SettingsPopover's lockedWhy): dimmed as a menu's disabled item, still focusable,
+   its reason in the tooltip; no wash on hover, since a click does nothing */
+.settings-locked {
+  justify-self: start;
+  opacity: 0.4;
+  cursor: default;
+}
+.chip.settings-locked.chip-act:hover,
+.btn.settings-locked:hover {
+  border-color: transparent;
+  background: transparent;
+}
+/* fast mode's lightning bolt in the table (ModelLine's FastBolt; its accent while on is components.css .fast-bolt) */
+.settings-fast {
+  justify-self: start;
+}
+/* each agent's permission mode under the table (SettingsPopover's MODE_ROWS): its name, then the mode's menu */
+.settings-modes {
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-modes .settings-row {
+  grid-template-columns: 132px minmax(0, 1fr);
+}
+.settings-mode {
+  justify-self: start;
+}
+/* the Ask key choice (SettingsPopover's ASK_KEY_LABEL): ⌘-click or ⌥-click */
+.settings-ask-key {
+  justify-self: start;
+}
+/* labels' and the card check's cell where the others have their mode's menu (SettingsPopover's CALL_ROWS) */
+.chip.settings-mode-none {
+  color: var(--text-secondary);
+}
+/* under an agent's mode: who runs it and what it may do (SettingsPopover's agentLine) */
+.settings-agent-line {
+  grid-column: 2;
+  padding-bottom: 6px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+.settings-agent-main {
+  margin: 6px 6px 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+.settings-modes-warn {
+  margin: 6px 6px 0;
+  color: var(--status-warning);
+  font: var(--type-body-sm);
+}
+/* the Extensions section under the tables (ExtensionsSettings): a group under each heading, each row its name and one
+   line on the left and its switch at the right, every switch in one column; headings and hairlines as the tables' */
+.settings-switches {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-ext-group {
+  display: flex;
+  flex-direction: column;
+}
+.settings-ext-group + .settings-ext-group {
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-ext-head {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+  margin: 0;
+  padding: 0 6px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.settings-ext-group > .settings-ext-row,
+.settings-ext {
+  border-bottom: 1px solid var(--border-hairline);
+}
+.settings-ext-group > :last-child {
+  border-bottom: 0;
+}
+.settings-ext-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  align-items: center;
+  min-height: 30px;
+  padding: 6px;
+}
+.settings-ext-name {
+  display: inline-flex;
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  text-align: left;
+  white-space: nowrap;
+}
+button.settings-ext-name:hover,
+button.settings-ext-name:active {
+  background: none;
+  color: var(--text-primary);
+}
+.settings-ext-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-ext-version {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.settings-ext-caret {
+  flex: none;
+  color: var(--text-tertiary);
+  transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+button.settings-ext-name:hover .settings-ext-caret {
+  color: var(--text-secondary);
+}
+.settings-ext-name.open .settings-ext-caret {
+  transform: rotate(180deg);
+}
+.settings-ext-switch {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1;
+  align-items: center;
+}
+.settings-ext-line,
+.settings-ext-more,
+.settings-ext-ask {
+  grid-column: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+}
+/* the line under a name, cut to one line until its details open; a reason it shows in full */
+.settings-ext-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-ext-line.open,
+.settings-ext-line.wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* an extension's details: its description, then each fact beside its key in the tertiary ink, the keys in one column */
+.settings-ext-more {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.settings-ext-more p {
+  margin: 0;
+}
+.settings-ext-facts {
+  display: grid;
+  grid-template-columns: minmax(52px, max-content) minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+}
+.settings-ext-facts div {
+  display: contents;
+}
+.settings-ext-facts dt {
+  color: var(--text-tertiary);
+}
+.settings-ext-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+/* the question whether to run an extension's orientation now, under its line */
+.settings-ext-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+/* a view of the extension above it: its name set in under the extension's, its switch in the same column */
+.settings-ext-row-extension-view {
+  padding-top: 0;
+  padding-left: 20px;
+}
+.settings-error {
+  color: var(--status-negative);
+  font: var(--type-body-sm);
+}
+/* the popover scrolls as a whole when it is taller than the window; Save and Cancel stay in view at its bottom */
+.settings-foot {
+  position: sticky;
+  bottom: -4px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 0 -6px -4px;
+  padding: 6px 6px 8px;
+  background: var(--overlay-bg);
+  border-top: 1px solid var(--border-subtle);
+}
+.settings-foot .settings-tour,
+.settings-foot .settings-check {
+  margin-right: auto;
+  margin-left: -6px;
+}
+/* thimble browser's Claude table (shell/SettingsPopover): a name, then its control */
+.settings-claude .settings-row {
+  grid-template-columns: 84px minmax(0, 1fr);
+}
+.settings-source {
+  justify-self: start;
+}
+.field.settings-key,
+.field.settings-wif {
+  width: 100%;
+  font: var(--type-mono);
+}
+.settings-key-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+}
+.settings-check-ok {
+  color: var(--text-secondary);
+}
+.settings-check-failed {
+  color: var(--status-negative);
+}
+
+/* -------- Report a problem (shell/ProblemReport, inside a glass Popover): the form, then where the bundle is and where
+   to send it. While the tab is captured the dialog is transparent, so the picture shows the page. -------- */
+.problem-pop {
+  padding: 10px;
+  max-width: calc(100vw - 16px);
+}
+.problem-pop.is-capturing {
+  opacity: 0 !important;
+}
+.problem {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font: var(--type-ui-sm);
+  color: var(--text-primary);
+}
+.problem-label {
+  color: var(--text-secondary);
+}
+.problem-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.problem-note {
+  margin: -4px 0 0 21px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.problem-ready {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.problem-path {
+  padding: 6px 8px;
+  border-radius: var(--radius-ui);
+  background: var(--track-bg);
+  font: var(--type-mono-sm);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.problem-actions {
+  display: flex;
+  gap: 6px;
+}
+.problem-send {
+  margin: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.problem-send a {
+  color: var(--text-accent);
+}
+.problem-error {
+  color: var(--status-negative);
+  font: var(--type-body-sm);
+}
+.problem-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+/* Report a problem where something failed (ReportProblemButton): a small quiet button after the failure's own words or
+   controls; in a view chip, the bug alone at the chip's height */
+.chat-landing-report.btn {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.view-chip-report.btn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+}
+
+/* -------- toasts (shell/Toasts): glass at the bottom right with the float. A toast fades in with a small rise.
+   -------- */
+@keyframes shell-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.shell-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: min(420px, calc(100vw - 32px));
+}
+.shell-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: var(--radius-ui);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+  cursor: pointer;
+  animation: shell-toast-in var(--dur-base) var(--ease-out);
+}
+.shell-toast-error {
+  border-color: var(--status-negative);
+}
+.shell-toast-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.shell-toast-text code {
+  font: var(--type-mono-sm);
+}
+/* a toast's one button (Toasts `action`), such as Reopen: accent text, no frame */
+.shell-toast-action {
+  flex: none;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--radius-ui);
+  background: none;
+  color: var(--accent);
+  font: var(--type-ui-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+.shell-toast-action:hover {
+  background: var(--surface-hover);
+}
+
+/* -------- the theme popover (shell/ThemePopover): Paper as a segmented track, Accent as seven swatches -------- */
+.theme-pop {
+  padding: 10px;
+}
+.theme {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.theme-label {
+  color: var(--text-tertiary);
+  font: 400 var(--text-2xs) / var(--leading-normal) var(--font-body);
+}
+.theme-swatches {
+  display: flex;
+  gap: 6px;
+}
+.theme-swatch {
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-ui);
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) var(--ease-out);
+}
+.theme-swatch:hover {
+  box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--border-strong);
+}
+.theme-swatch.on,
+.theme-swatch.on:hover {
+  box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3.5px var(--ink-900);
+}
+
+/* -------- the server is not answering (shell/ServerDown): one opaque line centred under the top bar, with the
+   negative edge of an error toast -------- */
+.shell-down {
+  position: fixed;
+  top: calc(var(--h-topbar) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-toast);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: min(460px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--status-negative);
+  border-radius: var(--radius-ui);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-float);
+  color: var(--text-primary);
+  font: var(--type-ui-sm);
+}
+.shell-down code {
+  font-family: var(--font-mono);
+}
+/* the line's × (ServerDown, NewVersion), at its end */
+.shell-down-x.btn {
+  flex: none;
+  margin: -4px -6px -4px 0;
+}
+/* a newer build is served (shell/NewVersion): the same line with a hairline edge and a Reload button */
+.shell-newer {
+  align-items: center;
+  border-color: var(--border-strong);
+}
+/* no Claude Code session attached (shell/SessionGone): the shell in grayscale and inert under a scrim, with one card
+   centred on the window */
+.shell[data-session='gone'] {
+  filter: grayscale(1);
+}
+.shell-gone {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-scrim);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--scrim);
+  -webkit-backdrop-filter: grayscale(1);
+  backdrop-filter: grayscale(1);
+}
+/* the permission requests of the sessions that go on without main, under the reconnect card */
+.shell-gone-asks {
+  width: min(560px, 100%);
+}
+.shell-gone-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(560px, 100%);
+  box-sizing: border-box;
+  padding: 28px;
+  border-radius: var(--radius-card);
+}
+.shell-gone-title {
+  margin: 0 0 4px;
+  color: var(--text-primary);
+  font: var(--type-title);
+  letter-spacing: var(--tracking-title);
+}
+.shell-gone-text {
+  margin: 0;
+  color: var(--text-secondary);
+  font: var(--type-body-lg);
+}
+.shell-gone code {
+  font-family: var(--font-mono);
+}
+.shell-gone-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--radius-ui);
+  background: var(--track-bg);
+}
+.shell-gone-command code {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+  font: var(--type-mono);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* the model table's notes and switches: a row's note under its name, an agent's web switch, the refusal row's switch */
+.settings-row-noted {
+  padding-bottom: 4px;
+}
+/* the dev row's fast switch, for code tickets alone, after its note */
+.settings-ticket-fast {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+.settings-role-note {
+  grid-column: 1 / -1;
+  margin-top: -6px;
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.settings-row-off .settings-model,
+.settings-row-off .settings-effort {
+  opacity: 0.4;
+}
+.settings-web {
+  justify-self: start;
+  display: inline-flex;
+}
+.settings-next-start,
+.settings-main-mode,
+.settings-ignored {
+  color: var(--text-tertiary);
+}
+.settings-mode-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+.settings-card-wait {
+  color: var(--text-tertiary);
+  font: var(--type-body-sm);
+}
+.settings-fence-note {
+  color: var(--text-tertiary);
+}
+.shell-gone-agents {
+  color: var(--text-secondary);
+}
+
+/* the one line a browser that is not signed in sees in place of the app (SignIn), where the start page's title stands */
+.signin-line {
+  max-width: var(--w-card);
+  margin: 0 auto;
+  padding: 40px 16px;
+  font: var(--type-body);
+  color: var(--text-primary);
+}
+/* -------- the start page (StartPage): the page with no workspace in its URL. The top bar's brand, a title and the
+   workspaces in groups (WorkspaceList), in a column as wide as a card. The switcher (TopBar) draws the same list in a
+   popover, denser -------- */
+.start {
+  min-height: 100%;
+  background: var(--bg-page);
+}
+.start-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--h-topbar);
+  padding: 0 16px;
+}
+.start-main {
+  box-sizing: content-box;
+  max-width: var(--w-card);
+  margin: 0 auto;
+  padding: 40px 16px 64px;
+}
+.start-title {
+  margin: 0 0 24px;
+  font: var(--type-title);
+  letter-spacing: var(--tracking-title);
+  color: var(--text-primary);
+}
+/* a link's sign-in code that was used or expired (chat/Notice PageNoticeStrip), under the title */
+.start-notices {
+  margin: -12px 0 24px;
+}
+.start-missing,
+.start-empty {
+  margin: -12px 0 24px;
+  color: var(--text-tertiary);
+  font: var(--type-body);
+}
+.start-empty {
+  margin-top: 0;
+}
+.start-error {
+  margin: 0;
+  color: var(--status-negative);
+  font: var(--type-body);
+}
+.ws-list {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.ws-group-title {
+  margin: 0 0 8px;
+  padding: 0 12px;
+}
+/* the rows share their group's columns (subgrid), so each group's sentences line up */
+.ws-rows {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr) auto;
+  column-gap: 16px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  box-shadow: var(--ring-card), var(--shadow-1);
+}
+.ws-rows > li {
+  display: contents;
+}
+.ws-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  column-gap: 16px;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-radius: var(--radius-seg);
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: var(--transition-color);
+}
+.ws-rows li + li .ws-row {
+  box-shadow: 0 -1px 0 var(--border-hairline);
+}
+.ws-row:hover,
+.ws-row:focus-visible {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+.ws-row:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.ws-row.current {
+  background: var(--surface-selected);
+}
+.ws-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 var(--text-sm) / 1.3 var(--font-mono);
+}
+.ws-row-about {
+  min-width: 0;
+  color: var(--text-secondary);
+  font: var(--type-ui-sm);
+}
+.ws-row-end {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ws-here-slot {
+  display: inline-flex;
+  width: 14px;
+}
+.ws-here {
+  color: var(--text-accent);
+}
+/* the switcher: the same rows, denser, on the popover's paper */
+.ws-switcher {
+  padding: 8px 4px 4px;
+}
+.ws-list-compact {
+  gap: 10px;
+}
+.ws-list-compact .ws-group-title {
+  margin-bottom: 2px;
+  padding: 0 8px;
+}
+.ws-list-compact .ws-rows {
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;
+  column-gap: 12px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.ws-list-compact .ws-row {
+  column-gap: 12px;
+  min-height: var(--h-row);
+  padding: 4px 8px;
+}
+.ws-list-compact .ws-rows li + li .ws-row {
+  box-shadow: none;
+}
+.ws-list-compact .ws-row:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.ws-list-compact .ws-row-name {
+  font-size: var(--text-xs);
+}
+.ws-list-compact .ws-row-about {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.ws-switcher-wait {
+  margin: 8px;
+}
+.ws-switcher-error {
+  margin: 8px;
+  color: var(--status-negative);
+}
+/* a phone's width: the sentence goes under the name */
+@media (max-width: 560px) {
+  .ws-rows {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .ws-row {
+    row-gap: 2px;
+  }
+  .ws-row-about {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+}

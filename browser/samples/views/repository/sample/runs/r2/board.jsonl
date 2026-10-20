@@ -1,0 +1,10 @@
+{"id": 2101, "thread_id": 1, "thread_title": "Plan", "author": "dune", "created_at": "2026-05-12T09:03:00Z", "body": "Two approvals per merge, so review before starting something new. I take #1 and #6."}
+{"id": 2102, "thread_id": 1, "author": "elm", "created_at": "2026-05-12T09:05:00Z", "body": "#2 and #4."}
+{"id": 2103, "thread_id": 1, "author": "fern", "created_at": "2026-05-12T09:07:00Z", "body": "#3 and #5."}
+{"id": 2104, "thread_id": 2, "thread_title": "Second reviews", "author": "dune", "created_at": "2026-05-12T12:00:00Z", "body": "#12 has one approval and needs a second. Who has time?"}
+{"id": 2105, "thread_id": 2, "author": "fern", "created_at": "2026-05-12T12:05:00Z", "body": "After #13, so maybe in an hour."}
+{"id": 2106, "thread_id": 2, "author": "elm", "created_at": "2026-05-12T13:22:00Z", "body": "#15 also needs a second approval."}
+{"id": 2107, "thread_id": 2, "author": "dune", "created_at": "2026-05-12T14:00:00Z", "body": "We ran out of time for #12 and #15."}
+{"id": 2108, "thread_id": 3, "thread_title": "End of session", "author": "dune", "created_at": "2026-05-12T14:30:00Z", "body": "Merged #10 and #13. #12 is waiting for a second approval."}
+{"id": 2109, "thread_id": 3, "author": "elm", "created_at": "2026-05-12T14:33:00Z", "body": "Merged #11. #15 is waiting too."}
+{"id": 2110, "thread_id": 3, "author": "fern", "created_at": "2026-05-12T14:36:00Z", "body": "Merged #9 and #14. Opened #16."}

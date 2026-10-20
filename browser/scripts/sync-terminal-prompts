@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Copies the terminal plugin's texts that thimble browser shares (prompts/shared.json) into prompts/terminal/, from a
+# git ref of this repository (default origin/coh-prompts) or a checkout of the terminal plugin (--dir), and writes
+# prompts/terminal/SOURCE.json with where they came from. Then run the parity test:
+#
+#   scripts/sync-terminal-prompts [REF | --dir PATH]
+#   (cd server && uv run --extra dev pytest tests/test_prompt_parity.py)
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+files=("skills/thimble/SKILL.md:SKILL.md" "prompts/lens-explain/v3.md:lens-explain/v3.md" "prompts/labels/v2.md:labels/v2.md")
+mkdir -p "$root/prompts/terminal/lens-explain" "$root/prompts/terminal/labels"
+if [ "${1:-}" = "--dir" ]; then
+  src="$2"; from="dir"
+  for f in "${files[@]}"; do cp "$src/${f%%:*}" "$root/prompts/terminal/${f##*:}"; done
+  commit=""
+else
+  ref="${1:-origin/coh-prompts}"; from="$ref"
+  for f in "${files[@]}"; do git -C "$root" show "$ref:lean/${f%%:*}" > "$root/prompts/terminal/${f##*:}"; done
+  commit="$(git -C "$root" rev-parse "$ref")"
+fi
+python3 - "$root" "$from" "$commit" <<'PY'
+import hashlib, json, sys
+from pathlib import Path
+root, ref, commit = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+files = {"SKILL.md": "lean/skills/thimble/SKILL.md", "lens-explain/v3.md": "lean/prompts/lens-explain/v3.md",
+         "labels/v2.md": "lean/prompts/labels/v2.md"}
+out = {"about": "The terminal plugin's texts thimble browser shares, copied by scripts/sync-terminal-prompts. Do not edit them here.",
+       "ref": ref, "commit": commit, "files": {}}
+for local, source in files.items():
+    data = (root / "prompts/terminal" / local).read_bytes()
+    out["files"][local] = {"source": source, "sha256": hashlib.sha256(data).hexdigest()}
+(root / "prompts/terminal/SOURCE.json").write_text(json.dumps(out, indent=2) + "\n")
+print(f"copied {len(files)} files from {ref} {commit[:10]}")
+PY

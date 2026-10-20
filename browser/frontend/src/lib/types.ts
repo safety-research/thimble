@@ -1,0 +1,2315 @@
+// Every shape the frontend shares with the backend. Field names are the wire's.
+
+// ---- chats and records ----
+
+export type ChatKind = 'main' | 'thread' | 'agent'
+export type AgentRole = 'orient' | 'propose' | 'writer' | 'check' | 'labels' | 'dev'
+export type AgentStatus = 'running' | 'done' | 'failed' | 'stopped'
+
+/** `chats/<id>.meta.json`; the list route adds `n_messages`, `last_ts`, `running`. */
+export interface ChatMeta {
+  id: string
+  kind: ChatKind
+  role: string
+  title: string
+  created_at: string
+  parent: string | null
+  anchor: string | null
+  anchor_text: string | null
+  model: string | null
+  effort: string | null
+  group: string | null
+  status?: AgentStatus
+  result?: string | null
+  ts_end?: string | null
+  n_messages?: number
+  last_ts?: string | null
+  running?: boolean
+  /** the analyst's name for a chat that is no thread, which the thread tree shows in place of the one it derives */
+  name?: string | null
+  /** a writer's document (write_session.start) */
+  doc?: string | null
+  /** a writer that answered the report pass of an orientation from before 0.8.0: the orientation's chat and its run
+     * then; null on every writer since (backend write_session.NO_REPORT_PASS); absent on an older writer's chat */
+  orient?: string | null
+  orient_run?: number | null
+  /** a thread that a comment's reply field opened: the comment, which its anchor line names beside its passage or step
+   * (backend comments.thread_comment) */
+  anchor_comment?: ThreadComment | null
+}
+
+/** The comment a thread is about (backend comments.thread_comment): its check's id, name and label palette place
+ * (null for the analyst's own and Claude's notes, named You and Claude) and its statement. */
+export interface ThreadComment {
+  id: string
+  check: string | null
+  name: string
+  colour: number | null
+  text: string
+}
+
+export type ChipKind = 'say' | 'filter' | 'label' | 'ticket' | 'artifact' | 'view' | 'thread'
+
+/** One line of `chats/<id>.jsonl`; its index in the log is its id. */
+export type ChatRecord =
+  | { type: 'user'; ts?: string; text: string; by?: RecordBy | 'main' | 'extension'; tray?: boolean; event?: string; run?: number; extension?: string }
+  | { type: 'text'; delta: string; parent_tool_use_id?: string; reply?: boolean; by?: RecordBy; api_error?: string; refusal?: boolean }
+  | { type: 'tool_use'; ts?: string; id: string; name: string; input: unknown; parent_tool_use_id?: string; n?: number }
+  | { type: 'tool_result'; ts?: string; id: string; summary: string; is_error?: boolean; not_run?: boolean; cell_id?: string; label_card?: string; notebook?: string; parent_tool_use_id?: string }
+  | { type: 'refs'; ts?: string; resolved: string[]; broken: string[]; why?: Record<string, string>; links?: unknown[]; unlinked?: unknown[] }
+  | { type: 'done'; ts?: string; session_id?: string | null; cells?: string[]; result?: string | null; usage?: TurnUsage; model?: string }
+  | { type: 'error'; ts?: string; message: string; kind?: string; detail?: string }
+  | { type: 'glosses'; ts?: string; glosses: { term: string; body: string; here?: string }[] }
+  | { type: 'chip'; ts?: string; kind: ChipKind | string; text: string; ref?: string; [k: string]: unknown }
+  | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
+  | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
+  | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
+
+/** A turn's token use, summed over its requests (backend agent.Usage), on its `done` record. */
+export interface TurnUsage {
+  input_tokens: number
+  output_tokens: number
+  cache_read_input_tokens: number
+  cache_creation_input_tokens: number
+  requests: number
+}
+
+/** What a notice's button does (backend notices.py): look for a view proposal again (`proposals-retry`), turn view
+ * proposals off (`proposals-off`), open Settings (`settings`), build the failed view `slug` again (`view-retry`), or
+ * sign out the browser whose id is `slug` (`sign-out`, a sign-in notice's). */
+export interface NoticeAction {
+  label: string
+  do: 'proposals-retry' | 'proposals-off' | 'settings' | 'view-retry' | 'sign-out' | (string & {})
+  slug?: string
+}
+
+/** A failure the analyst should know of, with an easy fix (backend notices.post), as `GET /ws/{c}/notices` lists the
+ * open ones and the stream's `notice` event sends a new one: one line naming the agent it happened to (`agent`, such as
+ * "Orientation" or "View build: Agent Network"), its fix as buttons (`action`, one or several), and the chat the agent
+ * writes in (`chat`, its thread, or main), where the notice is also a row. A later notice with the same `key` replaces
+ * it, and a fix that worked clears it (the event's `cleared`). */
+export interface Notice {
+  id: string
+  key?: string | null
+  kind?: string
+  text: string
+  agent?: string | null
+  chat?: string | null
+  action?: NoticeAction | NoticeAction[] | null
+  ts?: string
+}
+
+export interface ChatDetail {
+  meta: ChatMeta
+  events: ChatRecord[]
+}
+
+/** One call of an orientation as its store keeps it (backend calls.py, `workspaces/<c>/calls/<chat>.jsonl`): its number
+ * in the orientation's one sequence, the chat whose log holds its record (the orientation's, or a step's), the tool, its
+ * input, and its whole output as text, null while it runs (`output` read the same). */
+export interface StoredCall {
+  n: number
+  id: string
+  chat?: string
+  name: string
+  input: unknown
+  result?: string | null
+  output?: string | null
+  is_error?: boolean
+}
+
+/** The index of an orientation's calls: each call's number by its tool_use id. A bare list reads the same. */
+export type CallIndex = { calls: { n: number; id: string; name?: string }[] } | { n: number; id: string; name?: string }[]
+
+export interface NewThreadBody {
+  anchor?: string | null
+  anchor_text?: string | null
+  title?: string | null
+  /** the part of the browser the element is in (its `data-panel`) */
+  surface?: string | null
+  /** the element's kind: its component class, else its tag */
+  element?: string | null
+  /** its CSS selector */
+  selector?: string | null
+  /** a PNG of the element captured at the click, as a data URL */
+  image?: string | null
+  /** the chat the analyst was reading when they asked, which the new thread hangs under */
+  parent?: string | null
+  /** the first question: sent as the thread's first event in the same request, which makes nothing when no session
+   * listens */
+  text?: string | null
+  /** the id of the comment whose reply field opened the thread, which its anchor line then names */
+  comment?: string | null
+}
+
+export interface ChatPatch {
+  title?: string
+  model?: string
+  effort?: string
+  /** the name the thread tree shows: a thread's title, another chat's `name` */
+  name?: string
+}
+
+// ---- the workspace stream ----
+
+export type WsEvent = { ts?: string; seq?: number } & (
+  | { type: 'chat'; chat: string; deleted?: boolean }
+  | { type: 'cell'; notebook: string; cell: string; kind: 'ran' | 'note' | 'verified' | string }
+  | { type: 'orient'; status: 'started' | 'done' | 'failed' | 'stopped' | 'refused' | string; kind?: string; reason?: string; [k: string]: unknown }
+  | { type: 'report'; slug: string; status: 'generating' | 'generated' | 'failed' | 'refused' | 'verified' | 'figures' | 'rewritten' | string; span?: string; run?: string; refused?: Refusal }
+  | { type: 'view'; slug: string; status: 'queued' | 'building' | 'built' | 'failed' | 'deleted' | string; path?: string; chat?: string; version?: string }
+  | { type: 'ticket'; id: string; n: number; status: string }
+  | { type: 'concepts'; concept: string; what: 'defined' | 'applied' | 'deleted' | string; rows?: boolean }
+  | { type: 'filter'; scope: FilterScope; concept?: string; value?: string }
+  | { type: 'check'; id: string; doc: string; status: CheckRunStatus | string; run?: string; chat?: string }
+  | { type: 'checks'; id: string }
+  | { type: 'job'; status: string }
+  | { type: 'server'; status: string }
+  | { type: string; [k: string]: unknown }
+)
+
+// ---- canvas: groups and cells ----
+
+/** how a group lays out its children: a column, a row, two columns; a loose group draws no frame (backend notebook.GROUP_KINDS) */
+export type GroupKind = 'sequence' | 'split' | 'grid' | 'loose'
+
+export interface Group {
+  id: string
+  title: string
+  parent: string | null
+  kind: GroupKind
+  anchor: string | null
+  chat: string | null
+  role: string
+  n_cells?: number
+  ts?: string
+  /** the session thimble ran beside main whose own group this is, such as `writer:report` (backend tools.SESSION_GROUP_KEY) */
+  session?: string
+}
+
+export type CellKind = 'plot' | 'table' | 'code' | 'example' | 'note' | 'diagram' | 'timeline' | 'label' | 'custom' | 'plan'
+
+export type MimeBundle = Record<string, any> & { _stream?: 'stdout' | 'stderr'; _out?: number; truncated?: OutputTruncation }
+
+export interface OutputTruncation {
+  total_lines: number
+  kept_head: number
+  kept_tail: number
+  path: string
+}
+
+export type CellPayload =
+  | { refs: string[] }
+  | { text: string }
+  | { concept: string }
+  | { html: string }
+  | { dataset: unknown }
+  | Record<string, unknown>
+
+export type CellStatus = 'idle' | 'running' | 'ok' | 'error'
+
+export interface Cell {
+  id: string
+  notebook: string
+  kind: CellKind | 'md' | string
+  /** the question */
+  title: string
+  /** its short name, made from the question and unique in the workspace (backend notebook.slug_of): what shows where an
+   * id would */
+  slug?: string | null
+  takeaway?: string
+  takeaway_author?: string
+  /** the takeaway was written before the card's last run changed its outputs (backend notebook.TAKEAWAY_STALE) */
+  takeaway_stale?: boolean
+  created_by: string
+  created_at_event?: number | null
+  created_ts?: string
+  ts: string
+  labels?: string[]
+  /** the revision of each label in `labels` as the card's last run read it (backend concepts.py, Revisions); a card
+     * whose label has a later revision is stale (canvas/concepts staleLabels). Absent is taken as current. */
+  label_revs?: Record<string, number> | null
+  /** the labels thimble is running the card again for, since they changed after its last run; set while that run
+   * lasts */
+  regenerating_for?: string[] | null
+  verification?: unknown
+  code?: string
+  outputs?: MimeBundle[]
+  status?: CellStatus
+  exec_count?: number | null
+  /** the last run's wall time in seconds */
+  duration_s?: number | null
+  payload?: CellPayload
+  /** a note's text, mirrored from its payload */
+  text?: string
+  /** the analyst's lock: no model may change or delete the card */
+  locked?: boolean
+  /** the latest card check (lib/cardCheck) */
+  check?: unknown
+  /** the changes checks made to the card, oldest first (lib/cardCheck) */
+  fixes?: unknown[]
+}
+
+/** A plan card's step status (backend notebook.PLAN_STATUSES). */
+export type PlanStatus = 'not started' | 'running' | 'done' | 'needs you'
+
+/** One step of a plan card's payload (backend notebook.plan_step_of): its id never changes, `makes` names what it makes,
+ * `details` what it shows under it on request, `runs` the Agent calls that do it, `time` a time the agent gave,
+ * `started`/`ended` thimble's stamps. */
+export interface PlanStep {
+  id: string
+  text: string
+  makes: string[]
+  status: PlanStatus
+  note: string
+  details: string
+  runs: string[]
+  time: string
+  started: string | null
+  ended: string | null
+}
+
+/** The live row of one run of a plan's step (backend plans.plan_runs): the subagent chat of that name, its state, its
+ * latest event and how long it has run. */
+export interface PlanRun {
+  step: number
+  name: string
+  chat: string | null
+  state: string
+  latest: string
+  elapsed: string
+}
+
+export interface CanvasResponse {
+  groups: Group[]
+  cells: Cell[]
+  /** the ids of the cards the route leaves out: a legacy orientation Scratch (backend notebook.canvas) */
+  hidden?: string[]
+}
+
+export interface NewCellBody {
+  kind: CellKind
+  title: string
+  code?: string
+  payload?: CellPayload
+  after?: string
+}
+
+export interface CellPatch {
+  code?: string
+  title?: string
+  takeaway?: string
+  payload?: CellPayload
+  locked?: boolean
+}
+
+export interface CellName {
+  id: string
+  notebook: string
+  title: string
+  slug?: string | null
+  exec_count?: number | null
+  ts?: string | null
+  status?: string | null
+}
+
+// ---- labels and filters ----
+
+export type ConceptKind = 'prompt' | 'regex' | 'code'
+export type ConceptUnit = 'record' | 'cell' | 'span' | 'agent' | 'run'
+export type FilterScope = 'files' | 'canvas' | 'report'
+
+/** What a label over files marks in the reader: the texts that carry the value, the record, or the file. */
+export type LabelMarks = 'span' | 'record' | 'file'
+
+/** One value of a label as the Files pane draws it: its colour (1..12 a --label-N, 0 the grey of "no match") and whether
+ * the reader highlights it. */
+export interface LabelClass {
+  name: string
+  color: number
+  highlight: boolean
+}
+
+export interface Concept {
+  id: string
+  name: string
+  description: string
+  unit: ConceptUnit
+  kind: ConceptKind
+  spec: string
+  labels: string[]
+  created_by: string
+  ts: string
+  version?: number
+  counts?: Record<string, number>
+  n_labeled?: number
+  /** the records the analyst gave a value by hand that the label's run labelled too */
+  n_reviewed?: number
+  /** every record the analyst gave a value by hand */
+  n_marked?: number
+  /** a label over files: what it marks; null for a label of cards or report sentences */
+  marks?: LabelMarks | null
+  /** what it applies to: comma-separated globs */
+  glob?: string
+  /** the prompt kind's classifier model; '' for the labels role's */
+  model?: string
+  /** the values in order, each with its colour and highlight */
+  classes?: LabelClass[]
+  /** on in Files */
+  shown?: boolean
+  /** a trial: apply_label ran it on a few units with `limit` (backend concepts.py, Trials); no label until it runs on everything */
+  trial?: boolean
+  /** GET /concepts carries these too: the last kept run (the Files pane's outcome line) and the live run record */
+  last_run?: ConceptApplication | null
+  run?: ConceptRun | null
+  /** how many times what a card reads from the label has changed (backend concepts.py, Revisions), and the last of
+   * those changes in words */
+  rev?: number
+  changes?: LabelChange[]
+}
+
+/** One change to a label that a card counting by it did not see (backend concepts.note_change): a redefinition, a run
+ * that ended, or a run of corrected values, one entry over the revisions `first` to `rev`. */
+export interface LabelChange {
+  what: 'redefined' | 'corrected' | 'ran'
+  first: number
+  rev: number
+  text: string
+  ts: string
+}
+
+/** `GET /ws/{c}/labels/presence`: per label over files, the values it left on each file. */
+export interface LabelPresence {
+  concept_id: string
+  paths: Record<string, Record<string, number>>
+}
+
+/** `GET /ws/{c}/labels/ruler?path=`: where on one file each label's values fall, the file's lines cut into `bins`: per
+ * value the bins that hold it, and in `counts`, in the same order, how many of its records each holds. */
+export interface LabelRuler {
+  path: string
+  total: number
+  bins: number
+  labels: { concept_id: string; bins: Record<string, number[]>; counts?: Record<string, number[]> }[]
+}
+
+/** `PUT /concepts/{id}`: what the Files pane's edit card changes. */
+/** A label the labels model defined from the analyst's description (backend concepts.draft_of): what it labels, its
+ * scope, its classifier and its values, the positive first. Nothing is stored until the row creates it. */
+export interface LabelDraft {
+  name: string
+  over: 'files' | 'cards' | 'sentences'
+  marks: LabelMarks | null
+  glob: string
+  kind: ConceptKind
+  text: string
+  values: string[]
+}
+
+export interface ConceptPatch {
+  name?: string
+  description?: string
+  kind?: ConceptKind
+  spec?: string
+  labels?: string[]
+  marks?: LabelMarks
+  glob?: string
+  model?: string
+  classes?: { name: string; color?: number | null; highlight?: boolean }[]
+  shown?: boolean
+}
+export type Label = Concept
+
+export interface LabelRow {
+  ref: string
+  label: string | null
+  confidence: number | null
+  rationale?: string | null
+  source: string | null
+  ts?: string
+  analyst?: string | null
+  /** the texts of the record a span label marks */
+  spans?: string[]
+  /** the line a record whose ref names none starts on (a CSV row, a JSON document's record) */
+  line?: number
+}
+
+export interface LabelRowsResponse {
+  rows: LabelRow[]
+  total: number
+}
+
+/** `GET /ws/{c}/labels?path=`: one entry per concept with rows on the file. */
+export interface LabelsForPath {
+  concept_id: string
+  name: string
+  labels: string[]
+  unit: ConceptUnit
+  rows: LabelRow[]
+}
+
+export interface FilterEntry {
+  concept: string
+  value: string
+}
+/** The card parts of the canvas's filter, each present only while set (backend concepts.py, the filters section). */
+export interface CardFilterParts {
+  kinds?: string[]
+  /** group ids */
+  groups?: string[]
+  /** who made the cards, as their top row names them (layout.ts cellThread) */
+  makers?: string[]
+  /** what the card check found (lib/cardCheck.ts CheckFilterState) */
+  checks?: string[]
+  starred?: boolean
+  locked?: boolean
+  /** words, each of which starts a word of a kept card's question or takeaway */
+  text?: string
+}
+/** The canvas's filter: a label value, the card parts, or both. */
+export type CanvasFilterEntry = Partial<FilterEntry> & CardFilterParts
+export interface Filters {
+  files?: FilterEntry
+  report?: FilterEntry
+  canvas?: CanvasFilterEntry
+}
+
+// ---- views and proposals ----
+
+/** A view ticket's build: `dropped` is a view proposal the analyst rejected, or the proposal of an orientation from
+ * before 0.8.0 left out when the analyst stopped it, shown nowhere (backend views.drop); `suggested` a view proposal
+ * that waits for the analyst's Accept or Reject (backend views.offer), or a 0.7.x orientation's viewer for a file type,
+ * which no card shows (backend views.open_offer). */
+export type ProposalStatus = 'queued' | 'building' | 'built' | 'failed' | 'dropped' | 'suggested'
+
+/** A view ticket (the propose_view tool): what the analyst sees in the view, what they do with it, the files it reads,
+ * and the state of the dev agent's build, whose agent chat is `chat`. The backend reads a 0.7.0 ticket's `why` as its
+ * `description` (views._normalize_proposal). */
+export interface Proposal {
+  slug: string
+  name: string
+  description: string
+  /** what the analyst does with the view; empty for a viewer for a file type and a 0.7.0 ticket */
+  task: string
+  claims: string[]
+  /** the layout a viewer for a file type or a 0.7.0 ticket gave; empty for propose_view's tickets */
+  arrangement: string
+  proposed_by: string
+  /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
+  asked?: boolean
+  /** the proposal of an orientation from before 0.8.0 whose view has not passed its checks yet: its card shows the
+   * build, the views bar not */
+  held?: boolean
+  /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
+  off?: boolean
+  status: ProposalStatus
+  ts: string
+  error?: string
+  /** the request of a change to the built view that failed, which Retry makes again (backend views.end_revision) */
+  failed_change?: string
+  /** a change to a built view is being made (backend views.revise); the view stays open at the version it last passed */
+  revision?: boolean
+  chat?: string | null
+  attempts?: number
+  /** the review of the built view's pictures (backend view_review) */
+  review?: ViewReview
+  /** the builder's agent id, a subagent of main (`thimble:view-builder`), while one builds or built it last */
+  agent_id?: string | null
+  /** the builder's gate attempts so far (finish_view), of MAX_ATTEMPTS */
+  attempt?: number
+  /** the repairs of a proposal the analyst did not ask for so far: a fresh builder after a build that failed for good, of
+   * VIEW_REPAIRS (dev.py build_ended); while one builds, its number. Absent or 0 for the first build */
+  repairs?: number
+  /** why a build stopped before its end: `quit` when the analyst's Claude Code session ended (Retry starts it again) */
+  stopped_by?: StoppedBy | null
+  /** a build's start that did not happen, with its kind and the pending request Start it starts again */
+  refused?: Refusal | null
+  /** the build's exact model and effort (its Build menu, else Settings' dev row), as the backend keeps them
+   * (dev.start_build's `values`) */
+  values?: { model?: string; effort?: string } | null
+  model?: string | null
+  effort?: string | null
+  /** a view proposal thimble made to the analyst (backend views.offer): when, after what (`main`, `thread:<id>`,
+   * `orientation`, or `file` for a viewer proposed when a file was opened) and why. An open
+   * proposal is `suggested` with this; a `suggested` row without it is from an older version and never shows */
+  offered?: ProposalOffer | null
+  /** how the analyst answered the view proposal: Accept or Reject */
+  answer?: 'accepted' | 'rejected' | null
+  answered_at?: string | null
+}
+
+/** When and why thimble proposed the view (Proposal.offered). */
+export interface ProposalOffer {
+  at: string
+  after: string
+  why?: string
+}
+
+/** The review of a built view's pictures: running, done (with what it revised and what problems are left), failed
+ * or stopped, with a note that says why; `undo` once the analyst put the view back as it was built. */
+export interface ViewReview {
+  /** `queued`: its start waits for a free subagent, Claude Code's limit reached */
+  state: 'running' | 'queued' | 'done' | 'failed' | 'stopped'
+  round?: number
+  ts?: string
+  revised?: string[]
+  left?: string[]
+  note?: string
+  undo?: boolean
+  /** the pictures the review took */
+  shots?: number
+  /** the reviewer's agent id, a subagent of main (`thimble:view-reviewer`) */
+  agent_id?: string | null
+}
+
+/** `GET /ws/{c}/views/suggestions?path=`: whether a viewer may be proposed for the type of a file opened in the File
+ * browser, why not, the workspace's answer for the type and its proposal (backend views.suggestion_for). */
+export interface ViewSuggestion {
+  path: string
+  suffix: string
+  eligible: boolean
+  reason: string
+  answer: 'suggested' | 'none' | 'dismissed' | null
+  proposal: Proposal | null
+}
+
+/** One form a view adds to the citation grammar: a fragment of a file it claims, or view:<slug>/<key>. */
+export interface ViewForm {
+  form: string
+  means: string
+}
+
+/** `GET /ws/{c}/views[?path=]`: a viewer written for this corpus (backend views.py). */
+export interface View {
+  slug: string
+  /** written for this corpus, or a file-type viewer thimble ships (plugin/viewers) */
+  origin: 'workspace' | 'builtin'
+  name: string
+  /** what it shows, in a sentence */
+  description: string
+  claims: string[]
+  accepts: ViewForm[]
+  /** its own citable units, cited as view:<slug>/<key> */
+  units: ViewForm[]
+  /** the fields its reader made rather than read, as view.json lists them */
+  derived?: ViewDerived[]
+  libs: string[]
+  built: string
+  /** the digest of its files when it last passed its checks: a page loaded at it keeps it until reloaded */
+  version?: string
+  /** reader.py, view.html and claims are all there */
+  ok: boolean
+  /** the forms as written in a citation */
+  forms: ViewForm[]
+  /** the first file it claims, which Raw shows for a view opened on its own */
+  first_file?: string | null
+  /** the files it claims, the first 500 of them, and how many there are */
+  files?: string[]
+  n_files?: number
+  /** its claims are globs and the corpus has not been walked yet: no files are known (the list read again shortly) */
+  files_pending?: boolean
+  /** "file" for a file viewer; what one unit of a corpus view is otherwise, as view.json gives it */
+  unit?: string | Record<string, string> | null
+  /** a file viewer, a mode of the File browser for the files it claims rather than a view in the views bar: its unit is
+   * "file", or with no unit every claim is one extension's glob (backend views.file_type_viewer) */
+  /** its page draws label controls of its own (elements with data-label) */
+  label_controls?: boolean
+  file_type?: boolean
+}
+
+/** A diagram card's dataset (canvas/DataViz.tsx). */
+export interface GraphDataset {
+  nodes: ({ id: string; label?: string; size?: number } & Record<string, unknown>)[]
+  edges: ({ source: string; target: string; weight?: number } & Record<string, unknown>)[]
+}
+/** A timeline card's dataset (canvas/DataViz.tsx). */
+export interface TimelineDataset {
+  events: ({ time: string | number; label: string; lane?: string; end?: string | number } & Record<string, unknown>)[]
+}
+
+/** `GET /ws/{c}/views/{slug}/problems`: the lines of its files a view's reader could not read, the first few of them. */
+export interface ViewProblems {
+  /** null for one file's when the reader did not list them all, so the file's count is not known */
+  count: number | null
+  examples: { ref: string; why: string }[]
+}
+
+/** A field a view's reader made rather than read as the files hold it, `kind` "inferred" for a value the files do not
+ * state (a join, an estimate, a classification), shown as computed, `key` the key the reader's records hold it under
+ * where that differs, `record` the kind of record that holds it ('' or absent when the view names none). */
+export interface ViewDerived {
+  record?: string
+  field: string
+  from: string
+  how: string
+  kind?: 'inferred' | ''
+  key?: string
+}
+
+/** `GET /ws/{c}/views/{slug}/shown`: of the files a view claims, those it does not show whole, the first 500 of them,
+ * each with why its reader hides it ('' when it gives no why) and how many of its bytes were read, with `claimed`
+ * false for a file of a folder beside the claimed ones; what the claims expect and the corpus lacks; the records its
+ * reader could not place; and the fields its reader derived, by kind of record, the inferred ones first in each. */
+export interface ViewShown {
+  files: number
+  not_shown: { count: number; unexplained: number; files: { path: string; size: number; read: number; why: string; claimed?: boolean }[] }
+  missing?: { path: string; why: string }[]
+  unplaced?: ViewProblems
+  derived: ViewDerived[]
+  errors: string[]
+}
+
+/** What a view's page gets as `open` (`GET /ws/{c}/views/{slug}/resolve?ref=`). */
+/** A view opened from a card of a card type (Open as view): the card, its question and the arguments of its call, which
+ * choose the view's records. */
+export interface ViewQuery {
+  card: string
+  title: string
+  args: Record<string, unknown>
+}
+
+export interface ViewOpen {
+  ref: string | null
+  path?: string
+  /** `path` is a file the analyst opened the view on (Open in), not the first file thimble opens a view on */
+  picked?: boolean
+  fragment?: string
+  key?: string | null
+  target?: unknown
+  label?: string
+  excerpt?: string
+  refs?: string[]
+  error?: string
+  /** in a view: the card it is drawn from, or null for none */
+  query?: ViewQuery | null
+}
+
+// ---- orientation ----
+
+/** The efforts Claude Code takes, lowest first (cc_settings.EFFORTS): every effort menu of thimble's agents offers
+ * these. Main's composer adds Ultracode (MainEffort). */
+export type OrientEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** Main's effort menu in the composer: Claude Code's levels, then Ultracode, which runs main at xhigh with workflows
+ * (cc_settings.EFFORTS and ultracode). thimble's agents run at a level, never Ultracode. */
+export type MainEffort = OrientEffort | 'ultracode'
+
+/** A permission request waiting for the analyst. Main's are relayed by its PermissionRequest hook (events._hold), and
+ * so are those of thimble's subagents and their descendants, which the terminal answers (`terminal`); a code ticket's
+ * session asks through its chat's meta (agent_session.ask). `what` is what the call would do, `input` its arguments as
+ * text. */
+export interface PermissionRequest {
+  id: string
+  tool: string
+  what: string
+  input?: string
+  since?: string
+  /** the subagent or workflow agent that asked, absent for the session itself (backend agent_session.ask) */
+  agent_id?: string | null
+  /** its agent type (general-purpose, Explore), and the title and chat of its step once the session's follower has
+   * made one */
+  agent_type?: string | null
+  agent_title?: string
+  agent_chat?: string
+  /** a Bash request's command, whole, which the card shows as code rather than the input's JSON */
+  command?: string
+  /** what Claude Code's own "don't ask again" would add (`Bash(npm test *)`, `all edits`), when the request suggests
+   * it: the card's third choice (backend agent_session, don't ask again). A code ticket's adds it for the session; main's
+   * keeps it where Claude Code would, which `always_tip` says (backend events._main_offer). */
+  always?: string
+  /** on main's meta: the button of `always`, in the words of Claude Code's own permission dialog for it (backend
+   * permission_updates.main_words) */
+  always_label?: string
+  /** on main's meta: the tooltip of `always`, the whole of Claude Code's words for it and where Claude Code keeps it
+   * (backend permission_updates.main_words) */
+  always_tip?: string
+  /** on main's meta: the thread or subagent chat whose agent asked, when the hook said which (backend events._hold) */
+  chat?: string | null
+  /** on main's meta: a request of one of thimble's subagents, which Claude Code asks in the terminal at once (it shows
+   * no dialog while a hook holds a background subagent's request, U6b); the card shows it without buttons */
+  terminal?: boolean
+  /** why auto mode refused the call, when the request is one it refused and the analyst may allow (a code ticket's) */
+  refused?: string
+  /** how many times thimble sent the call back to auto mode after its classifier gave no verdict, before asking */
+  rechecked?: number
+  /** how long a request auto mode could not judge waits unanswered before it is declined, in seconds */
+  deny_after_s?: number
+  /** when nobody answered it in time and it was declined: it stays on the card until dismissed (a code ticket's) */
+  expired?: string
+  /** the seconds it waits before it is declined unanswered (a code ticket's `cardWait`); absent for main's and its
+   * subagents', which Claude Code asks in the terminal */
+  wait_s?: number
+  /** the mode of the session that asks (a code ticket's) */
+  mode?: string
+  /** the later calls for the same site, or later searches, that wait on this request's answer, each listed whole */
+  also?: string[]
+  /** a web call's "don't ask again", kept for the workspace: its site, or `web search` */
+  keep?: string
+  /** the length of the command or input when the card shows only its start (backend PERMISSION_INPUT_CHARS); such a
+   * request offers no "don't ask again" */
+  cut?: number
+  /** why thimble itself asks, which the card says in place of the mode's reason (backend dev.CODE_WHY) */
+  why?: string
+  /** why thimble sends one of its server jobs' calls to the analyst whatever the permission mode (backend userconf
+   * ask_cause): `config` an edit of thimble's config, `data` an edit of the corpus, `commands` a command; `web` and
+   * `installs` as earlier versions sent them */
+  asked_by?: 'config' | 'data' | 'web' | 'installs' | 'commands'
+}
+
+/** A session held where the browser cannot answer: the model-switch dialog after a safety stop (session.py). */
+export interface SessionAlert {
+  kind: string
+  text: string
+  since?: string
+  reason?: string
+  until?: string
+  attempt?: number
+}
+
+/** The kinds of a start or a follow-up that did not happen (backend subagents: run.json `refused.kind`). */
+export type RefusalKind = 'auto-mode' | 'no-call' | 'limit' | 'not-launched' | 'hook' | 'earlier-session' | 'no-module' | 'error' | (string & {})
+
+/** A start that did not happen (run.json `refused`, a document's `report {status: refused}`, a proposal's): Claude
+ * Code's or thimble's reason, as given, its kind, when, the pending request it was (Start it and Try again start it
+ * again), and `expired` for a click the module did not answer in time. */
+export interface Refusal {
+  reason: string
+  kind: RefusalKind
+  at?: string
+  request?: string | null
+  expired?: boolean
+}
+
+/** What a click start answers (Write, Accept, Start it, Try again; subagents.Answer): the agent id when it started,
+ * else the refusal's kind and reason; `request` is the pending request either way, `program` an extension's program
+ * that runs it instead. */
+export interface StartAnswer {
+  agentId?: string
+  /** the started agent's chat, which the browser opens (its thread, on its first steps) */
+  chat?: string
+  request?: string
+  kind?: RefusalKind
+  reason?: string
+  expired?: boolean
+  program?: string
+}
+
+/** A pending request as the refused card shows it before Start it (`GET /ws/{c}/subagents/requests/{id}`): its role,
+ * the exact call (the text the agent gets), its values and its state. */
+export interface SubagentRequest {
+  id: string
+  kind?: 'start' | 'message' | 'stop' | string
+  route?: 'click' | 'follow-on' | 'typed' | string
+  role?: string | null
+  key?: string | null
+  input?: { subagent_type?: string; description?: string; prompt?: string; to?: string; message?: string } | null
+  values?: RunValues | null
+  state?: string | null
+  reason?: string | null
+  refused_kind?: string | null
+}
+
+/** A run's exact model and effort; `effort` is '' for a model Claude Code runs with no effort. */
+export interface RunValues {
+  model?: string
+  effort?: string
+}
+
+/** The orientation's record (`GET /ws/{c}/orientation`, orient/run.json): its status, the request, the run's exact
+ * model and effort, who started it, the pending request, and for a start that did not happen its refusal. {} before
+ * any orientation was asked for. */
+export interface OrientRun {
+  status?: 'requested' | 'starting' | 'running' | 'done' | 'failed' | 'stopped' | 'refused' | (string & {})
+  query?: string | null
+  model?: string | null
+  effort?: string | null
+  route?: 'subagent' | 'program' | (string & {}) | null
+  started_by?: 'click' | 'typed' | (string & {}) | null
+  agent_id?: string | null
+  request?: string | null
+  refused?: Refusal | null
+  requested?: string | null
+  started?: string | null
+  ended?: string | null
+  chats?: { orient?: string }
+}
+
+/** Why a run of one of thimble's agents stopped (subagents.STOPPED_*): the analyst's Stop, main's quit, a refusal, or
+ * Esc in its agent view (`user`), after which Claude Code resumes it no more. */
+export type StoppedBy = 'analyst' | 'quit' | 'refused' | 'user' | (string & {})
+
+/** The code tickets' permission mode, the one agent with a mode of its own (backend modes.AGENTS): `manual` sends each
+ * request to the card, `auto` runs in Claude Code's auto mode, `bypass` grants every request. */
+export type OrientPermissions = 'manual' | 'auto' | 'bypass'
+
+/** The agents with a permission mode of their own: only the code tickets' dev agent; every other agent runs in your
+ * Claude Code session's mode (backend modes.AGENTS). */
+export type ModeAgent = 'dev'
+
+// ---- documents ----
+
+export type WriteupTag = 'crucial' | 'judgment' | 'unverified' | 'fact' | 'caveat'
+
+export interface WriteupRevision {
+  text: string
+  ts?: string
+  by?: 'analyst' | 'rewrite' | string
+  comment?: string
+  instruction?: string
+}
+
+export interface HealChange {
+  value: string
+  ref: string
+  state: 'linked' | 'quiet' | 'contradicted' | string
+  how?: string
+  to?: string
+  tier?: number
+  derivation?: string
+  source?: string
+  was?: string
+  corrected?: boolean
+  why?: string
+}
+
+export interface WriteupSentence {
+  id: string
+  text: string
+  refs: string[]
+  tags: WriteupTag[]
+  tag_notes?: Partial<Record<WriteupTag, string>>
+  history?: (WriteupRevision | string)[]
+  edited_by?: 'analyst'
+  healed?: HealChange[]
+  bullet?: '-' | '1.' | null
+  /** a frame's bullet the analyst put there */
+  pinned?: boolean
+  by?: string
+  rewritten_at?: string
+  /** a slide's quote of a record, and who said it (backend slides.py) */
+  quote?: boolean
+  speaker?: string
+}
+
+export interface WriteupParagraph {
+  id: string
+  sentences: WriteupSentence[]
+  pinned?: boolean
+  by?: string
+  rewritten_at?: string
+  /** the analyst's lock on the paragraph (a list is one paragraph): no model may change it */
+  locked?: boolean
+  /** a story's block of a kind other than text or a list; a divider has no sentences */
+  kind?: StoryBlockKind
+  /** a story quote's speaker */
+  speaker?: string
+}
+
+export interface WriteupFigure {
+  id: string
+  cell: string | null
+  caption: string
+  after_paragraph?: string | null
+  make?: string
+  kind?: 'timeline' | 'comparison' | 'distribution' | 'trend' | null
+  status?: 'pending' | 'made' | 'fell_back' | string
+  note?: string
+  pinned?: boolean
+  /** the analyst's lock on the figure */
+  locked?: boolean
+  /** a story's step on its figure (backend story.step_of): the rows, events or nodes its beat highlights, or a number
+   * or phrase it calls out over the figure */
+  highlight?: string[]
+  callout?: string
+  /** in a story, the section's card (`main`) or a picture of a card among the blocks (`image`); a card among the
+   * blocks has none */
+  role?: 'main' | 'image'
+}
+
+export interface WriteupSection {
+  id: string
+  heading: string
+  /** 3 or deeper for a subheading; absent for a heading */
+  level?: number
+  paragraphs: WriteupParagraph[]
+  figures?: WriteupFigure[]
+  /** the analyst's lock on the section's heading (the section's own block), not on the blocks under it */
+  locked?: boolean
+  /** a frame unit pinned into a written document (report_types._pinned), and who pinned it */
+  pinned?: boolean
+  by?: string
+  history?: (WriteupRevision | string)[]
+  edited_by?: 'analyst'
+  rewriting?: boolean
+  /** in a story, where the section's card stands (right when unset) */
+  card?: StoryCardSide
+}
+
+export interface WriteupReply {
+  text: string
+  proposal: string | null
+  ts: string
+  model_used?: string | null
+}
+
+export type WriteupCommentStatus = 'open' | 'incorporated' | 'dismissed'
+
+export interface WriteupComment {
+  id: string
+  sentence_id: string
+  /** a check's comment on a whole paragraph, kept on its first sentence (backend checks.tool_add_comment) */
+  paragraph?: boolean | null
+  text: string
+  /** `check` for a report check's comment (add_comment in a check's session), `claude` for main's note (add_comment
+   * from main, backend comments.py), the analyst's or the terminal's else */
+  author: 'analyst' | 'check' | 'claude' | 'terminal' | string
+  ts: string
+  reply: WriteupReply | null
+  status: WriteupCommentStatus
+  tag?: string | null
+  quote?: string | null
+  /** the check whose run left it, and that run (a check's comment only) */
+  check?: string | null
+  run?: string | null
+  evidence?: string | null
+  generation?: number | null
+  section?: string | null
+  proposal?: string | null
+  /** what supports the statement `text`, shown on request: markdown whose citations show as chips (backend
+   * canvas_comments.note_of; a comment stored before it is read as its first sentence and the rest) */
+  details?: string | null
+  /** why it is resolved: the analyst's Done, or superseded by a later run of its check (`known`, in a comment resolved
+   * before 0.7.0, is resolved as any other) */
+  resolution?: 'done' | 'superseded' | string | null
+}
+
+/** A comment beside a card or a step of a plan card (`GET /ws/{c}/canvas/comments`, backend canvas_comments.py): a
+ * check's run over the cards left it (`check`), or main did (author `claude`). `ref` is `card:<id>`, or
+ * `card:<id>#step-<n>` with `n` the step's place. Only open comments on cards that are there are served. */
+export interface CanvasComment {
+  id: string
+  card: string
+  /** the step's stable id; null for a comment on the card */
+  step: string | null
+  n: number | null
+  ref: string
+  check: string | null
+  run: string | null
+  author: 'check' | 'claude' | string
+  /** the statement, shown first */
+  text: string
+  /** what supports it, shown on request: markdown whose citations show as chips */
+  details: string
+  evidence?: string | null
+  ts: string
+  status: 'open' | 'dismissed' | string
+}
+
+/** A written document, or (`frame: true`) the frame of pinned figures and bullets before any write. */
+export interface Writeup {
+  id?: string
+  title: string
+  generated_at?: string
+  model?: string
+  sections: WriteupSection[]
+  comments?: WriteupComment[]
+  generation?: number
+  source?: string | null
+  what_changed?: string[]
+  frame?: boolean
+  partial?: boolean
+  sections_done?: number
+  sections_total?: number
+  /** the analyst's lock on the title */
+  title_locked?: boolean
+  /** the locked blocks a model's save changed and the server put back, this generation's (report_types.hold_locks) */
+  lock_reverts?: LockRevert[]
+}
+
+/** One generation of a document in its history (backend versions.history), newest first. */
+export interface DocVersion {
+  n: number
+  /** when it was written (ISO); empty when its record is gone */
+  ts: string
+  /** who saved it: `first` for the first generation, the save's author (`terminal`, `analyst`, `chat:<id>`) otherwise;
+   * `analyst` for the analyst's own version before the first write and for a Restore */
+  source: string
+  /** what the analyst asked for, when the write was asked for with words */
+  instructions: string | null
+  /** what changed from the generation before: the writer's closing "What changed" lines, else a section-level diff */
+  summary: string[]
+  summary_from: 'writer' | 'diff' | null
+  run: string | null
+  current: boolean
+  /** whether its text is kept, so it can be opened */
+  available: boolean
+  words: number | null
+  /** the writer's chat it was saved in, if any */
+  writer: string | null
+  /** the earlier saves of the writer run that wrote it, oldest first (its last save is the generation itself); or, where
+     * the workspace has no per-run saves, the older generations one writer's chat saved, each with its `generation` */
+  revisions: DocRevision[]
+  /** the draft (generation `n`, or its save `rev`) a Restore made current again as this generation */
+  restored?: { n: number; rev: number | null } | null
+}
+
+export interface DocRevision {
+  /** from 1, oldest first: `GET …/versions/{n}/revisions/{i}` */
+  i: number
+  ts: string
+  words: number | null
+  available: boolean
+  generation: number | null
+}
+
+export interface DocHistory {
+  slug: string
+  generation: number
+  versions: DocVersion[]
+}
+
+/** A locked block a model's save changed, deleted, split or moved, which the server put back as the analyst left it. */
+export interface LockRevert {
+  /** the block's ref: `report:<slug>#p<id>` for a paragraph, `#<id>` for a heading or a figure, `#title` */
+  ref: string
+  /** the block's text as it stands (cut), for the note's tooltip */
+  text: string
+  generation: number
+  tool: 'write_document' | 'edit_document'
+  by?: string
+  ts?: string
+}
+
+export type DocumentType = 'report' | 'story' | 'slides' | string
+
+/** How a check's run on one document went (backend checks.py). */
+export type CheckRunStatus = 'running' | 'done' | 'failed' | 'stopped'
+
+/** One run of a check on one document: its session's chat, the passages it covered and the fingerprints it has seen
+ * (the cache: a passage whose fingerprint is seen is not checked again), how many comments it left, its last line. */
+export interface CheckRun {
+  run: string
+  status: CheckRunStatus | string
+  chat: string
+  started: string
+  ended?: string | null
+  covered: string[]
+  seen: string[]
+  comments: number
+  summary: string
+  /** `writer` while the run is queued until the document's writer ends; `queued` while it waits for one of the
+   * MAX_SESSIONS slots (backend checks.py) */
+  waiting?: string | null
+  /** the passages that changed since the run checked them (checks.to_cover after the analyst's own edits): the row
+   * says so, with Run, and nothing runs by itself (Q8) */
+  stale?: number | null
+  /** the run's agent, a subagent of main (`thimble:check`) */
+  agent_id?: string | null
+  /** a run's start that did not happen */
+  refused?: Refusal | null
+}
+
+/** A report check (`GET /ws/{c}/checks`): a prompt a session reads a written document against, commenting on its
+ * passages. `colour` is an index into the label palette (1..12); `shown` is whether its comments show, kept on the
+ * server so main can turn on a check it made; `runs` is the latest run per document slug. */
+export interface Check {
+  id: string
+  name: string
+  prompt: string
+  colour: number
+  shown: boolean
+  builtin: boolean
+  created_by: string
+  ts: string
+  version: number
+  runs: Record<string, CheckRun>
+  /** what it comments on: the documents, the cards (its runs on them are `runs['@canvas']`) or both */
+  covers?: CheckCover[]
+}
+
+/** What a check comments on (backend checks.COVERS). */
+export type CheckCover = 'documents' | 'cards'
+
+/** `PATCH /ws/{c}/checks/{id}`: what the sidebar changes. */
+export interface CheckPatch {
+  shown?: boolean
+  name?: string
+  prompt?: string
+  colour?: number
+  covers?: CheckCover[]
+}
+
+/** `GET /ws/{c}/card-checks` (backend card_check.status_route): whether the card check runs, whether it starts by
+ * itself on a new card (`auto`, thimble's config `agents.cardCheck.auto`), and the checks running now, each with its
+ * phase. */
+export interface CardCheckStatus {
+  enabled: boolean
+  auto: boolean
+  render: boolean
+  /** why no card can be drawn here (no Chromium, the harness off); empty while the harness runs or starts */
+  render_why: string
+  concurrency: number
+  running: { card: string; author: string; check: string; effort: string; phase: string; for_s: number }[]
+  timings: Record<string, unknown>[]
+}
+
+
+// ---- tickets ----
+
+/** backend dev.STATUSES */
+export type TicketStatus =
+  | 'queued'
+  | 'running'
+  | 'applied'
+  | 'applied, restart pending'
+  | 'failed'
+  | 'needs manual merge'
+  | 'reverted'
+  | 'rolled back'
+  | 'stopped'
+  | 'dismissed'
+  | (string & {})
+
+export interface Ticket {
+  id: string
+  n: number
+  workspace: string
+  title: string
+  body: string
+  target?: unknown
+  status: TicketStatus
+  chat?: string | null
+  ts?: string
+  error?: string | null
+  /** main's ticket that waits for the analyst's Start while another ticket runs (backend dev.start_typed) */
+  held?: boolean | null
+  /** the id of its agent, a `thimble:dev-ticket` subagent of the analyst's Claude Code session, once it started */
+  agent_id?: string | null
+}
+
+export interface NewTicketBody {
+  workspace: string
+  title: string
+  body: string
+  target?: unknown
+  /** where it was filed: `ui` for the browser's File a code ticket (backend dev.SOURCES) */
+  source?: 'ui'
+}
+
+/** The ticket runner's state (`GET /dev/status`): `tickets` is '' where code tickets run here (a development install),
+ * else why they do not (backend dev.ticket_problem). */
+export interface DevStatus {
+  running: boolean
+  tickets: string
+  queued: number
+}
+
+// ---- settings ----
+
+/** Every role that runs a model, as the settings popover lists them (backend config.MODEL_ROLES), main first, whose
+ * model, effort and fast mode are its session's and the composer chip's: the agents (each runs exactly the model and
+ * effort of its row), then the classifiers, then the row a refused classifier call runs again on. */
+export const ROLES = ['main', 'orient', 'subagents', 'critic', 'writer', 'dev', 'checks', 'labels', 'verify', 'suggest', 'refusal'] as const
+export type Role = (typeof ROLES)[number]
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export type Effort = (typeof EFFORTS)[number]
+
+export interface ModelConf {
+  model: string
+  /** '' for a model Claude Code runs with no effort (Haiku) */
+  effort: Effort | string
+  /** fast mode: the classifiers' rows only (labels, verify, suggest); the agents have none */
+  fast: boolean
+  /** the role whose model this one takes while the analyst has picked none (the orientation's subagents: `orient`) */
+  follows?: string
+  /** the refusal row: no second call when a classifier's model refuses */
+  off?: boolean
+}
+
+/** `GET /ws/{c}/settings` layers the effective `models` and the code tickets' permission mode in from thimble's
+ * config; a PUT merges what it is given. */
+export interface Settings {
+  models: Record<string, ModelConf>
+  /** the code tickets' permission mode, when the analyst set one; else their Claude Code session's */
+  permission_modes?: Partial<Record<ModeAgent, OrientPermissions>>
+  /** the modes the analyst's Claude Code settings turn off */
+  disabled_modes?: OrientPermissions[]
+  /** why thimble's config cannot be used, '' when it can (backend userconf.problem) */
+  config_error?: string
+  /** the keys thimble's config files hold that this build reads and ignores, each as its key path (userconf.ignored) */
+  config_ignored?: string[]
+  /** who runs each agent and what it may do (backend ledger.agent_rows): `main` carries thimble's rules for main and
+   * its agents, its subagents; orient, writer, critic and checks name who runs them and their own `web`; `dev`, labels
+   * and cardCheck keep fences of their own */
+  agents?: Partial<Record<AgentRowKey, AgentRow>> & { main?: MainFence }
+  /** who runs each of thimble's seven tasks (backend ledger.task_rows) */
+  tasks?: TaskRow[]
+  /** the minutes a code ticket's permission request waits before it is declined (thimble's config `cardWait`) */
+  card_wait?: number
+  /** View proposals: whether thimble proposes views after a turn and viewers for file types (thimble's config
+   * `views.propose`) */
+  propose_views?: boolean
+  /** the key held with a click to ask in the browser (thimble's config `askKey`, lib/platform): "meta" (⌘, Ctrl off a
+   * Mac) or "alt" (⌥, Alt) */
+  ask_key?: 'meta' | 'alt'
+  [k: string]: unknown
+}
+
+/** The agent rows of the settings: thimble's subagents, the code tickets' dev agent and the two classifiers. */
+export type AgentRowKey = 'orient' | 'writer' | 'critic' | 'checks' | 'dev' | CallAgent
+
+/** thimble's rules for main and its agents (backend ledger.agent_rows `main`): the extensions adding to main's prompt,
+ * its web tools and edits of the corpus. */
+export interface MainFence {
+  additions: string[]
+  web?: 'ask' | 'off' | 'allow'
+  data?: 'ask' | 'allow' | 'off'
+  config?: string
+}
+
+/** One of thimble's tasks in the settings (backend tasks.public): thimble's own or an extension's prompt, Agent SDK
+ * program or command, the extensions adding to its prompt, and those that all replace it. */
+export interface TaskRow {
+  task: string
+  way: AgentRow['way']
+  extension: string
+  additions: string[]
+  conflict: string[]
+}
+
+/** The agents of thimble's config that are one model call each, unless an extension's program runs their tasks (backend
+ * userconf.CALLS). */
+export type CallAgent = 'labels' | 'cardCheck'
+
+/** One agent's row in the settings (backend ledger.agent_rows): thimble's own agent or an extension's (its prompt in
+ * place of thimble's, an Agent SDK program or a command), the extensions adding to its prompt, two that both replace
+ * it, and its consent settings from thimble's config. */
+export interface AgentRow {
+  way: 'thimble' | 'prompt' | 'sdk' | 'command'
+  /** labels and cardCheck only: the tasks whose programs run under its settings (backend tasks.TASKS) */
+  tasks?: string[]
+  extension: string
+  additions: string[]
+  conflict: string[]
+  /** the fence keys of an agent with a fence of its own (dev, labels, cardCheck); a subagent of main has main's */
+  sandbox?: 'on' | 'off'
+  sandbox_runs?: boolean
+  network?: 'on' | 'off'
+  /** a subagent of main: `off` keeps it off WebFetch and WebSearch, anything else is main's rule */
+  web: 'ask' | 'off' | 'allow'
+  data?: 'ask' | 'allow' | 'off'
+  config: string
+}
+
+/** `PUT /ws/{c}/settings`: `models` merges per role and within a role, so a role's patch names only what changes;
+ * `permission_modes` merges per agent, null putting an agent back on the session's mode; `web` sets a subagent's web
+ * off, or back on main's rule with null. */
+/** How thimble browser signs in to Claude (backend settings.py): Workload Identity Federation configured in a file, or an
+ * API key the analyst pasted; {} before either is chosen. */
+export interface Credentials {
+  source?: 'wif' | 'key'
+  /** the Workload Identity Federation config file's path */
+  file?: string
+}
+
+/** `GET /ws/{c}/settings` in thimble browser (backend settings_api.view): the sign-in, the one model and effort every
+ * agent runs on, explainers, and the choices the popover offers. The API key itself is never sent: `has_api_key` says
+ * whether one is saved. `models` holds the 0.8 page's role rows, each the one model and effort. */
+export interface BrowserSettings extends Settings {
+  credentials: Credentials
+  /** the sign-in in words, never an id or a key: "Workload Identity Federation from /path/wif.toml (...)" */
+  signed_in: string
+  /** the Workload Identity Federation config: its path, and where its identity token comes from or why it cannot be
+   * used; never its IDs. null when the sign-in is not WIF */
+  wif?: { file: string; token: string | null; error: string | null } | null
+  has_api_key: boolean
+  model: string
+  effort: string
+  explain: boolean
+  choices: { models: string[]; efforts: string[] }
+}
+
+export interface SettingsPatch {
+  models?: Record<string, Partial<ModelConf>>
+  permission_modes?: Partial<Record<ModeAgent, OrientPermissions | null>>
+  web?: Partial<Record<'orient' | 'writer' | 'critic' | 'checks', 'off' | null>>
+  /** View proposals: false turns them off, null puts back the default (on) */
+  propose_views?: boolean | null
+  /** the ask key: "alt", or null to put back the default ("meta") */
+  ask_key?: 'meta' | 'alt' | null
+  [k: string]: unknown
+}
+
+/** One view an extension gives, as this workspace finds it (backend extensions.public): whether it shows here, the
+ * check's reason, where its switch stands (switched here, else as the check says), and whether that switch can change
+ * anything (`locked`: the extension does not run here, or no file here matches the view's claims). */
+export interface ExtensionViewRow {
+  slug: string
+  name: string
+  shown: boolean
+  note: string
+  on: boolean
+  locked: boolean
+}
+
+/** One extension added to thimble, as this workspace finds it (backend extensions.public): whether it runs here and
+ * why not, this workspace's switch, whether it cannot run here whatever that switch says (`locked`), what it gives,
+ * the settings it runs under, its orientation instructions and the offer to run them, and its views. */
+export interface ExtensionRow {
+  name: string
+  version: string
+  /** what it is, from its extension.json */
+  description?: string
+  /** one thimble ships, whose version is thimble's */
+  builtin?: boolean
+  active: boolean
+  why: string
+  /** the line Settings shows: why it does not run, unless this workspace's switch turned it off */
+  note: string
+  on: boolean
+  locked: boolean
+  views: ExtensionViewRow[]
+  /** what it gives, each in a few words */
+  parts?: string[]
+  /** the settings of the agents it changes or adds, in words */
+  consent?: string
+  /** whether its code runs in a sandbox; null for one with no code */
+  sandboxed?: boolean | null
+  /** whether Run now can run its orientation here once it is on: its instructions, or its own orientation program */
+  orients?: boolean
+  /** whether Settings offers to run its orientation now: it came on after an orientation ran here */
+  offer?: boolean
+  /** an extension thimble ships that is not added: turning its switch on adds it */
+  addable?: boolean
+  /** for one not added: the extensions thimble ships that adding it adds with it */
+  needs?: string[]
+}
+
+/** One view built for this workspace, in its local extension (backend views.local_extension). */
+export interface LocalViewRow {
+  slug: string
+  name: string
+  /** what it shows, from its view.json */
+  description?: string
+  /** a file viewer, which opens in the File browser */
+  file_viewer: boolean
+  /** its switch in Settings: off, it leaves the views bar and the File browser */
+  on: boolean
+}
+
+/** The workspace's local extension: the views built for this workspace, which no other workspace shows. */
+export interface LocalExtension {
+  name: string
+  views: LocalViewRow[]
+}
+
+/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, whether an
+ * orientation ran here, and the workspace's local extension. */
+export interface Extensions {
+  extensions: ExtensionRow[]
+  conflicts: string[]
+  orientation_ran?: boolean
+  local?: LocalExtension | null
+}
+
+// ---- the corpus (backend corpus.py) ----
+
+export interface Manifest {
+  name?: string
+  run_id?: string
+  [k: string]: unknown
+}
+
+export interface CorpusInfo {
+  name: string
+  manifest: Manifest
+  /** the folder the corpus was opened from */
+  path?: string
+  /** the same folder as the analyst named it, through a symlink, which the dashboard shows in place of `path` */
+  shown?: string
+}
+
+/** One row of `GET /workspaces` (backend start_page.py): a workspace as the start page and the top bar's switcher list
+ * it. `demo`: a dataset `thimble demo` downloaded, with its one-sentence blurb, `ready` when its pre-cached orientation
+ * is installed; `example`: a worked example `thimble demo --examples` opened, with the view it shows; `folder`: any
+ * other folder. */
+export interface WorkspaceRow {
+  name: string
+  kind: 'demo' | 'example' | 'folder'
+  /** what the page shows for it: a demo's dataset name, an example's workspace name, a folder's own name */
+  label?: string
+  /** the folder's own name */
+  folder: string
+  /** the folder as the analyst opened it */
+  path: string
+  dataset?: string
+  title?: string
+  blurb?: string
+  ready?: boolean
+  /** the view the row opens the workspace on: a demo dataset's pre-cache's main view, an example's view */
+  view?: { slug: string; name: string } | null
+  /** the names the workspace was renamed from (`thimble demo` renames a demo workspace demo-<dataset>) */
+  renamed_from?: string[]
+}
+
+export type SourceKind = 'agent' | 'board' | 'events' | 'forge' | 'prompt' | 'text' | 'dir'
+
+export interface SourceInfo {
+  path: string
+  kind: SourceKind
+  size_bytes: number
+  title: string
+  hidden?: boolean
+}
+
+export interface Block {
+  kind: 'text' | 'tool_use' | 'tool_result' | 'thinking' | 'event' | 'raw'
+  text: string
+}
+
+/** One key of `GET /corpora/{c}/source/keys`: its commonest values with their counts, most frequent first, how many
+ * values and records the rest hold, how many records have none, and per bin of the file's lines the rank of its most
+ * frequent value (-1 for none). */
+export interface SourceKey {
+  key: string
+  values: { value: string; n: number }[]
+  more: { values: number; n: number }
+  none: number
+  at: number[]
+}
+
+/** `GET /corpora/{c}/source/keys?path=`: the keys of a file's records that name a kind or a who, over the whole file
+ * (backend source_keys.py), and each bin's bytes. */
+export interface SourceKeys {
+  path: string
+  total: number
+  bins: number
+  partial: boolean
+  bytes: number[]
+  keys: SourceKey[]
+}
+
+/** One record of a file as the server pages it. `meta.fields`, in a file that reads as a transcript, holds the fields
+ * of the record's turn it does not keep as its own keys (backend transcripts.turn_fields), which Color by reads. */
+export interface SourceRecord {
+  line: number
+  record: any
+  blocks: Block[]
+  meta: Record<string, any>
+}
+
+/** The server's sniff of a file that reads as a transcript (backend transcripts.sniff): its format, how sure it is
+ * (0.95 makes Transcript the first mode, 0.5 only offers it), and where a message keeps who speaks, the words and the
+ * time (dotted keys into a record, or a CSV's columns); for whole conversations, `keys.list` is the key of their list of
+ * messages and `pair` the keys of a prompt and its response. `lines`: JSON lines in a file the server pages as text. */
+export interface TranscriptHint {
+  format: 'stream' | 'messages' | 'conversations' | 'json' | 'csv' | 'text'
+  score: number
+  /** where a message keeps who speaks, its words and its time: dotted keys into a record (`message.author`), and for
+   * who speaks, alternatives the first of which a record holds counts (`speakerName|agentName`) */
+  keys?: { speaker: string; text: string; time?: string; list?: string }
+  pair?: [string, string]
+  lines?: boolean
+  /** the records interleave spoken turns with tool records ({tool_name, tool_call, tool_result}): the view shows each
+   * message as one line, a tool call and its result as blocks, terminal output cleaned */
+  tools?: boolean
+  /** a stream whose records each nest a Claude Code stream record under this key */
+  wrap?: string
+  style?: string
+  /** who may start a turn in a text chat log, when the style alone would take any heading or `Word:` line */
+  speakers?: string[]
+  delimiter?: string
+}
+
+/** A text chat log's line that starts a turn (`meta.turn`): who speaks, when, and the UTF-16 offset of the words. */
+export interface ChatTurn {
+  speaker: string
+  time?: string
+  at: number
+}
+
+/** One turn of a whole-file JSON transcript (`GET /corpora/{c}/source/turns`), with the line it stands on. */
+export interface SourceTurn {
+  i: number
+  /** its own number, which its row shows: its step's (an ATIF step's `step_id`), else its place in its conversation */
+  n?: number
+  line: number
+  /** the record of its JSON document it is, by pointer (`<path>#/steps/3`), and the line that record starts on, where
+   * labels mark it; absent for a turn that shares its record with others */
+  ref?: string
+  rec_line?: number
+  /** the last line it covers, for a turn of a whole JSON document: the line before the next turn's record (or words),
+   * the last turn's record's last line */
+  end?: number
+  speaker: string
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'other'
+  text: string
+  time?: string
+  group?: number
+  /** the turn's whole length when its text was cut */
+  cut?: number
+  /** the fields its record keeps about it (backend transcripts.turn_fields: its role or source, the model, the tools it
+   * calls, its metadata), which Color by and Filter by offer */
+  fields?: Record<string, string | number | boolean>
+  /** what its record holds beyond its words, with its words, in order (backend transcripts.turn_blocks): its reasoning,
+   * its tool calls (`<name>\n<arguments>`) and their results; each block's whole length when it was cut */
+  blocks?: (Block & { cut?: number })[]
+}
+
+export interface SourceTurns {
+  path: string
+  total: number
+  start: number
+  turns: SourceTurn[]
+  /** the conversations the page's turns belong to, by index, each with its title and first turn */
+  groups: Record<string, { title: string; first: number }>
+  /** how many conversations the file holds */
+  n_groups: number
+  /** the turn holding the words a cited span quotes, and those words as its text holds them */
+  cited?: { i: number; quote: string }
+}
+
+export interface SourcePage {
+  path: string
+  kind: SourceKind
+  total_lines: number
+  /** `total_lines` is an estimate: the file is big and its line index is still being built (GET /source/lines) */
+  total_estimated?: boolean
+  start: number
+  records: SourceRecord[]
+  /** the file reads as a transcript */
+  transcript?: TranscriptHint
+  /** the first page of a file whose records carry a time: the key that holds it (backend source_events.time_hint) */
+  time?: TimeHint
+  /** the file is binary, judged from its first bytes: no records, and its size */
+  binary?: boolean
+  size_bytes?: number
+}
+
+/** The key that holds the time of a file's records, which offers the Timeline mode (backend source_events.time_hint). */
+export interface TimeHint {
+  key: string
+}
+
+/** `GET /corpora/{c}/source/events?path=`: a file's records with a time, in time order, for the Timeline mode (backend
+ * source_events.py): each one's ref, the line it starts on, its time in seconds since 1970, the start of its words and
+ * its values of `keys` in their order; `untimed` records have no time, and `partial` says more records with a time
+ * follow the `total` placed. */
+export interface SourceEvents {
+  path: string
+  time: string | null
+  total: number
+  untimed: number
+  partial: boolean
+  keys: Omit<SourceKey, 'at'>[]
+  events: { ref: string; line: number; t: number; text: string; v: (string | null)[] }[]
+}
+
+/** `GET /corpora/{c}/source/lines`: a file's line count; while a big file's line index is being built, an estimate and
+ * the share of the file indexed so far. */
+export interface SourceLines {
+  path: string
+  total_lines: number
+  estimated: boolean
+  indexed: number
+}
+
+/** `GET /corpora/{c}/source/find`: the lines of a file that hold the text, the first 5,000 of them listed; `complete`
+ * is false when the search stopped at its time limit, after line `scanned`. */
+export interface SourceFind {
+  path: string
+  q: string
+  lines: number[]
+  /** how many times each listed line matches */
+  counts?: number[]
+  /** how many lines matched */
+  total: number
+  /** how many times they matched in all */
+  matches?: number
+  complete: boolean
+  scanned: number
+  total_lines: number
+  binary?: boolean
+}
+
+/** `GET /corpora/{c}/sources/find`: the files the name search found, best first, and how many matched. */
+export interface FileFind {
+  q: string
+  files: SourceInfo[]
+  total: number
+}
+
+/** One line of `GET /corpora/{c}/sources/grep` for a file that holds the words: its count and its first lines, each the
+ * part of the line around its match with the match's place in it (backend corpus.grep_files). */
+export interface GrepFile {
+  path: string
+  total: number
+  /** false when the search stopped inside this file, so its count is a floor */
+  complete: boolean
+  matches: { line: number; text: string; hit: [number, number] }[]
+}
+
+/** A line of that stream while it reads: how many of the files it has read. */
+export interface GrepProgress {
+  progress: true
+  scanned: number
+  of: number
+}
+
+/** The closing line of that stream: how many files matched and how many lines, and how far the search read. */
+export interface GrepDone {
+  done: true
+  files: number
+  hits: number
+  scanned: number
+  of: number
+  complete: boolean
+}
+
+export interface ResolvedRef {
+  ref: string
+  kind: 'record' | 'range' | 'block' | 'span' | 'row' | 'table' | 'cell' | string
+  path?: string
+  line?: number
+  record?: any
+  blocks?: Block[]
+  excerpt: string
+  meta?: Record<string, any>
+  /** a view ref: the short label its reader gives, and the file refs it stands for */
+  label?: string
+  refs?: string[]
+  /** a file ref a view resolved: that view, and the reader's label for the place */
+  view?: { slug: string; name: string; label: string; key?: string | null }
+}
+
+// --- the canvas's layout ---
+
+/** A point on the canvas plane, in plane pixels at 1x. */
+export interface Pos {
+  x: number
+  y: number
+}
+
+/**
+ * Where a group's frame sits (`canvas/layout.ts`): `pos` on the board for a root, inside its parent's frame for a nested
+ * group; null for the default placement, in the parent's flow after `order` of the parent's cards (null: after all).
+ */
+export interface Group {
+  pos?: Pos | null
+  order?: number | null
+}
+
+/**
+ * A card's place and size on the board: `pos` inside its group's frame (on the board for a loose card), null for its
+ * place in the group's flow; `width` 220 to 1200 and `height` 100 up, null for defaults; `starred` by the analyst.
+ */
+export interface Cell {
+  width?: number | null
+  height?: number | null
+  pos?: Pos | null
+  starred?: boolean
+  /** the corpus files the last run read, and how many more it read than are listed */
+  reads?: string[]
+  reads_more?: number
+  /** who changed its question, code, payload or takeaway, and when, oldest first (backend notebook.stamp_edit) */
+  edited?: CellEdit[]
+}
+
+/** One edit of a card: who made it and when, the fields it changed, and `id`, by which the card as it was before it
+ * opens (CardVersion); an edit made before thimble kept what edits replaced has no id. */
+export interface CellEdit {
+  by: string
+  ts: string
+  id?: string
+  fields?: string[]
+}
+
+/** A card as it stood before one of its edits, to read (backend notebook.card_version_route): its question, code,
+ * payload, takeaway and outputs as stored then. */
+export interface CardVersion {
+  card: string
+  /** the edit it stood before */
+  before: string
+  by: string
+  ts: string
+  fields: string[]
+  version: Pick<Cell, 'id' | 'notebook' | 'kind' | 'title' | 'code' | 'payload' | 'takeaway' | 'outputs' | 'status' | 'text'>
+}
+
+export interface CellPatch {
+  width?: number
+  height?: number
+  starred?: boolean
+  pos?: Pos | null
+}
+
+/** `PUT /ws/{c}/notebooks/{nb}`: the fields a group takes. */
+export interface GroupPatch {
+  title?: string
+  parent?: string | null
+  kind?: GroupKind
+  pos?: Pos | null
+  order?: number | null
+}
+
+/** `POST /ws/{c}/cells/move`: the cards in order into `group` (null for the loose group), `after` a card of it (null
+ * first, left out last), or one card free at `pos`. */
+export interface CellMoveBody {
+  cells: string[]
+  group: string | null
+  after?: string | null
+  pos?: Pos | null
+}
+
+// --- the report editor ---
+
+/** One block of the report editor's save (`PUT …/types/{slug}/blocks`): `id` is the unit's id, or the editor's for a new block. */
+export interface ReportBlock {
+  id: string
+  type: 'heading' | 'paragraph' | 'bullet' | 'figure'
+  /** the heading, the paragraph's sentences joined, or the bullet item, with `[[…]]` citations */
+  text?: string
+  level?: number
+  /** a figure's `card:<id>` (or legacy `cell:<id>`), '' before one is picked */
+  cell?: string
+  caption?: string
+  /** a bullet's list marker: `-` (default) or `1.` */
+  marker?: '-' | '1.'
+  children?: ReportBlock[]
+}
+
+export interface ReportBlocksBody {
+  title: string
+  blocks: ReportBlock[]
+  /** the saving tab's token, echoed in the `report edited` event */
+  client?: string
+}
+
+/** A figure placed before every paragraph of its section (the reconciler's `lead`). */
+export interface WriteupFigure {
+  lead?: boolean
+}
+
+// ---- label cards: the details drawer (canvas/LabelDetails.tsx) ----
+
+/** One kept run summary on a concept (`applications[]`, `last_run`). */
+export interface ConceptApplication {
+  ts: string
+  paths: string[]
+  total: number | null
+  matched_total?: number | null
+  labeled: number
+  failed: number
+  status: 'done' | 'error' | string
+  message?: string | null
+  created_by?: string
+  version?: number
+  /** how many of the analyst's values the run carried as examples (every prompt run carries them) */
+  examples?: number
+  /** the units the run gave the first value (may be absent) */
+  matches?: number
+  /** the whole files or runs a prompt label's run read only in part; absent when it read every one whole */
+  cut?: ReadCut | null
+}
+
+/** The whole files or runs a prompt label's run read only in part, since they were longer than its model's context
+ * holds (backend concepts.read_cut): how many, of how many, the JSON documents among them read whole with their long
+ * parts shortened, the median tokens it sent of each, the first of them, and the line that says it. */
+export interface ReadCut {
+  n: number
+  of?: number | null
+  short?: number
+  tokens: number
+  refs: string[]
+  line: string
+}
+
+/** The live run record GET /concepts/{id} carries as `run` while and after an apply on this server. */
+export interface ConceptRun {
+  run_id?: string | null
+  status: 'running' | 'done' | 'error' | string
+  done?: number
+  total?: number | null
+  labeled?: number
+  failed?: number
+  message?: string | null
+  examples?: number
+  /** when the run began, the `ts` of the application it records */
+  started?: string | null
+  /** the units given the first value so far */
+  matches?: number
+  /** the files the run covers and the ones indexed so far, while `total` is not known yet */
+  files_total?: number | null
+  files_indexed?: number
+  /** the whole files or runs it read only in part, once its classifier calls end */
+  cut?: ReadCut | null
+  [k: string]: unknown
+}
+
+/** GET /concepts/{id}: the concept card with its kept runs, calibration and the live run. */
+export interface ConceptDetail extends Concept {
+  n_reviewed?: number
+  est_precision?: number | null
+  /** the agreement with the analyst's values the classifier was not given as examples; `taught`, how many it was */
+  calibration?: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null>; taught?: number }
+  applications?: ConceptApplication[]
+  last_run?: ConceptApplication | null
+  run?: ConceptRun | null
+}
+
+/** GET /concepts/{id}/coverage?offset=: how many corpus files the label's rows cover, with a page of each group (file
+ * units; a cell or span unit has none). */
+export interface CoverageFile {
+  path: string
+  covered: boolean
+  rows: number
+}
+export interface ConceptCoverage {
+  unit: ConceptUnit | string
+  /** the files the Files tree lists */
+  n_files: number
+  /** the files the label has rows on, and its rows over them */
+  n_covered: number
+  rows: number
+  /** the first covered files, by path */
+  files: CoverageFile[]
+  /** a page of the files with no rows, by path, from `offset` */
+  not_covered: string[]
+  n_not_covered: number
+  offset: number
+}
+
+/** POST /concepts/{id}/apply */
+export interface ApplyBody {
+  paths?: string[]
+  limit?: number | null
+  comment?: boolean
+  wait?: boolean
+}
+
+/** POST /concepts/{id}/labels: the analyst's verdict on one unit. */
+export interface VerdictResult {
+  row: LabelRow
+  calibration: { n: number; agreed: number; disagreed: number; est_precision: Record<string, number | null>; taught?: number }
+}
+
+// --- documents: the Report tab's switcher, the story, the deck and the page (report/) ---
+
+/** One type's entry in `GET …/investigations/main/types`: whether its document exists and what it is. */
+export interface TypeState {
+  exists: boolean
+  renderer: 'document' | 'slides' | 'story' | 'custom' | string
+  /** the type's name, as the switcher shows it */
+  name: string
+  /** a custom type that is a page (one html document) */
+  page?: boolean
+  frame?: boolean
+  generation?: number | null
+  generated_at?: string | null
+  title?: string | null
+  open_comments?: number
+  status?: 'generating' | string
+}
+
+export type TypesState = Record<string, TypeState>
+
+/** Where a story section's card stands (backend story.SIDES): at the right, at the left, across the page under the
+ * section's text, or not shown. */
+export type StoryCardSide = 'right' | 'left' | 'full' | 'none'
+/** A story paragraph's kind (backend story.BLOCK_KINDS); a paragraph without one is text, or a list when its sentences
+ * carry a bullet. */
+export type StoryBlockKind = 'headline' | 'quote' | 'callout' | 'divider'
+
+/** A story (backend story.py): sections of blocks beside their card, each a section in the report's shape whose
+ * `card` says where its card stands, its paragraphs the text blocks and its figures the section's card (role `main`)
+ * and the cards among the blocks. The frame before a write has the same shape. */
+export interface StoryDoc {
+  id?: string
+  type?: string
+  renderer: 'story'
+  title: string
+  sections: WriteupSection[]
+  comments?: WriteupComment[]
+  generation?: number
+  generated_at?: string
+  model?: string
+  frame?: boolean
+  title_locked?: boolean
+  lock_reverts?: LockRevert[]
+}
+
+/** `PUT …/types/{slug}/story`: the story editor's whole story (backend story.apply_story). A block's `text` is its
+ * sentences as typed, a bullets block one item per line. */
+export interface StoryBody {
+  title: string
+  client?: string
+  sections: {
+    id: string
+    heading: string
+    card: StoryCardSide
+    main: { id: string; cell: string; caption: string } | null
+    blocks: { id: string; type: string; text?: string; speaker?: string; cell?: string; caption?: string }[]
+  }[]
+}
+
+/** A deck's slide: a heading, its layout, its lines as sentences (a quote marked `quote`), up to four figures (or a
+ * single `figure`), its format (figure side and share, card slots, a grid), speaker notes. */
+export interface DeckSlide {
+  id: string
+  heading: string
+  layout?: 'title' | 'text' | 'figure' | 'card' | 'figures' | 'quote' | string
+  sentences: WriteupSentence[]
+  figure?: { id: string; cell: string; caption: string } | null
+  figures?: { id: string; cell: string; caption: string; pinned?: boolean }[]
+  format?: { side?: 'left' | 'right'; width?: number; slots?: number; grid?: boolean }
+  notes?: string
+  pinned?: boolean
+}
+
+export interface DeckDoc {
+  id?: string
+  type?: string
+  renderer: 'slides'
+  title: string
+  slides: DeckSlide[]
+  comments?: WriteupComment[]
+  generation?: number
+  generated_at?: string
+  model?: string
+  /** a deck not written yet: its frame (GET …/frame), which the deck's editor lays out */
+  frame?: boolean
+}
+
+/** `PUT …/types/{slug}/deck`: the deck editor's whole deck (backend report_types.apply_deck). */
+export interface DeckBody {
+  title: string
+  client?: string
+  slides: {
+    id: string
+    heading: string
+    layout: string
+    format: { side?: 'left' | 'right'; width?: number; slots?: number; grid?: boolean } | null
+    lines: { id: string; text: string }[]
+    bullets: boolean
+    quote: { id: string; text: string; speaker: string } | null
+    figures: { id: string; cell: string; caption: string }[]
+    notes: string
+  }[]
+}
+
+/** A page: one html document and the claims it makes as sentences. */
+export interface PageDoc {
+  id?: string
+  type?: string
+  renderer: 'custom'
+  title: string
+  html?: string
+  html_edited_by?: string
+  html_edited_at?: string
+  claims?: WriteupSentence[]
+  comments?: WriteupComment[]
+  generation?: number
+  generated_at?: string
+  model?: string
+}
+
+/** A video's line (backend video.py): what the voice says, one or two cited sentences, and the seconds of silence
+ * after it. */
+export interface VideoLine {
+  id: string
+  sentences: WriteupSentence[]
+  pause_after?: number
+}
+
+/** When each line starts and ends in the film, in seconds, the lines in script order (backend video.timing). */
+export interface VideoTiming {
+  duration: number
+  lines: { id: string; start: number; end: number }[]
+}
+
+/** A video: its narration as lines and its film, one html page drawn at 1280×720 from `window.seek(t)`. */
+export interface VideoDoc {
+  id?: string
+  type?: string
+  renderer: 'video'
+  title: string
+  lines: VideoLine[]
+  film?: string
+  timing?: VideoTiming
+  comments?: WriteupComment[]
+  generation?: number
+  generated_at?: string
+  model?: string
+}
+
+/** Any stored document the Report tab shows. */
+export type AnyDoc = Writeup | StoryDoc | DeckDoc | PageDoc | VideoDoc
+
+/** A preset + New offers (`GET /report-types/presets`, backend prompts/types/<id>.md). */
+export interface DocPreset {
+  id: string
+  name: string
+  description: string
+  renderer: string
+}
+
+/** `POST /report-types/new`: a preset's document by its id, a page (`page`), or one of the analyst's own
+ * (`document`) from a name and a brief; the server numbers a name a type has already. */
+export interface NewDocBody {
+  kind: string
+  name?: string
+  brief?: string
+}
+
+export interface ReportType {
+  slug: string
+  name: string
+  description: string
+  renderer: string
+  builtin: boolean
+  page?: boolean
+  /** the preset the type was made from */
+  preset?: string
+}
+
+/** A row of `GET /concepts/{id}/rows?text=1`: the unit's own words travel with it, or for a row with spans the words
+ * around the first span, which is `match` (the words that earned the unit its value). */
+export interface LabelRowText extends LabelRow {
+  text?: string
+  match?: string
+}
+
+// ---- the chat: the mirror of the analyst's session ----
+
+/** Which Manual-mode notice shows (Attached.manual). */
+export type ManualHint = 'switch' | 'org' | 'settings'
+
+/** The Claude Code session mirrored as main while `/thimble` has it attached. */
+export interface Attached {
+  session: string
+  cwd: string
+  since: string
+  /** the model the session's replies came from, as the mirror last read it */
+  model?: string
+  /** the effort they ran at, as the mirror last read it */
+  effort?: string
+  /** what the composer's chip chose for main's next launch, while this session runs */
+  effort_choice?: MainEffort
+  /** the effort the analyst's own Claude Code settings choose (cc_settings.analyst_effort), where main's effort menu opens */
+  settings_effort?: MainEffort
+  /** whether the session's last reply ran in fast mode, as the mirror read it */
+  fast?: boolean
+  /** the permission mode Claude Code last reported to the session's hooks (default, acceptEdits, auto, plan,
+   * bypassPermissions, dontAsk), which the dev agent's program follows until the analyst sets its row, Bypass as Manual
+   * (backend modes.py) */
+  permission_mode?: string
+  /** while that mode is Claude Code's Manual mode (backend modes.manual_hint), which Manual-mode notice shows (backend
+   * notices `manual-mode`): `switch` how to switch to auto mode, `org` or `settings` that the organization's or the
+   * analyst's Claude Code settings turn auto mode off */
+  manual?: ManualHint
+  /** main's terminal said once that the session runs in Manual mode (backend session.note_mode) */
+  manual_told?: boolean
+  /** what the composer's fast-mode switch chose for main's next launch, while this session runs */
+  fast_choice?: boolean
+  /** the session that was main until this one took its place while it runs on in another terminal */
+  after?: string
+  /** whether this session's shell commands run in Claude Code's sandbox, as /thimble saw it; information only */
+  sandbox?: boolean
+}
+/** Main's last session once none is attached: the folder it ran in is where `thimble --continue` resumes it. */
+export interface SessionEnded {
+  session: string
+  cwd: string
+  at: string
+}
+export interface ChatMeta {
+  /** a thread: the fork of main that answers it, once main forked it (backend threads.fork_started); `ended` once it
+   * cannot be reached, and the next question forks anew */
+  fork?: { agent_id?: string | null; ended?: string | null } | null
+  /** main only: the Claude Code session that is main, null or absent when none is attached */
+  attached?: Attached | null
+  /** main only: the session that was main last, while none is attached */
+  ended?: SessionEnded | null
+  /** main only: the orientation's status from orient/run.json (requested, starting, running, done, failed, stopped or
+   * refused), null before any orientation was asked for */
+  orientation?: string | null
+  /** a dev ticket's agent chat: the ticket it runs (dev.py) */
+  ticket?: string | null
+  /** a view ticket's agent chat: the slug of the proposal it builds (dev.run_view) */
+  view?: string | null
+  /** a view's agent chat that reviews it (view_review), not one that builds it */
+  review?: boolean | null
+  /** a view ticket's agent chat: the analyst asked for the view, so it is their dev thread; the builds of views nobody
+   * asked for, such as an orientation's from before 0.8.0, are not listed (dev._view_chat, chat/threads.ts) */
+  asked?: boolean | null
+  /** main, or a code ticket's session: a dialog holds the session where the browser cannot answer it */
+  alert?: SessionAlert | null
+  /** main: the permission requests waiting, its own and its subagents' (thimble's agents among them, `terminal`); a
+   * code ticket's session: its own */
+  permissions?: PermissionRequest[]
+  /** a code ticket's session: what the analyst's "don't ask again" answers added for the rest of it */
+  session_rules?: { text: string }[]
+  /** the agent a session or a program runs as: thimble's own as `thimble:<role>`, an extension's program's as
+   * `<extension>:<role or task>` (backend harness.start) */
+  agent_type?: string | null
+  /** a writer: the document it writes (write_session.py) */
+  doc?: string | null
+  /** one of thimble's agents: what it was asked, for its card, when its first message is longer (a writer's task) */
+  brief?: string | null
+  /** the orientation: each follow-up, its run's number, state and times, and once it ends what it changed, counted from
+   * its undo steps (backend orientation.run_finished) */
+  followups?: FollowUpRecord[]
+  /** one of thimble's agents: its run's number, 0 for its start, then one per follow-up */
+  run?: number
+  /** the orientation, in a workspace `thimble demo` installed from a pre-cache: it ran in advance, and its session was
+   * kept only from a full export (backend precached.py, demo.install) */
+  precached?: PrecachedMark | null
+  // ---- one of thimble's agents, a subagent of main (backend subagents.ensure_chat) ----
+  /** `subagent` for a chat of one of thimble's agents run as a subagent of the analyst's Claude Code session */
+  route?: 'subagent' | (string & {}) | null
+  /** its agent id in Claude Code */
+  agent_id?: string | null
+  /** the run's exact model and effort */
+  values?: RunValues | null
+  /** what each run actually ran on, read from its transcript, by run number */
+  ran?: Record<string, RunValues> | null
+  /** main's session the agent runs in, and every session its records are under (after /clear or /resume) */
+  session?: string | null
+  sessions?: string[]
+  /** who started it: a click in the browser (through thimble's plugin), or main's Agent call */
+  started_by?: 'click' | 'typed' | (string & {}) | null
+  /** the pending request it took up (Try again and Start it start it anew) */
+  request?: string | null
+  /** why it stopped: the analyst's Stop, main's quit, a refusal */
+  stopped_by?: StoppedBy | null
+  /** where a follow-up can continue it: `here` (after `thimble --continue`), an earlier Claude Code session, or an
+   * earlier version of thimble; nowhere after Esc in its agent view (`stopped-by-user`) */
+  continue?: 'here' | 'earlier-session' | 'earlier-version' | 'stopped-by-user' | (string & {}) | null
+  /** a job waiting in its queue (a view build, a report check) */
+  waiting?: 'queued' | (string & {}) | null
+  /** the orientation while it waits for its critic's report */
+  paused?: 'critique' | (string & {}) | null
+  /** the latest run began with a message the analyst typed in Claude Code's agent tray */
+  typed_in_tray?: boolean | null
+  // ---- main only (module_bridge) ----
+  /** thimble's hooks module holds the long poll for main (module_bridge.live) */
+  module?: boolean | null
+  /** why it does not (module_bridge.why_not), '' while it does */
+  module_why?: string | null
+}
+
+/** What `thimble demo` installed a workspace from (backend demo.install): the dataset, when its orientation ran and on
+ * what model, the folder of the files it ran on, the orientation's chat, and whether its session came with it. */
+export interface PrecachedMark {
+  dataset?: string | null
+  created?: string | null
+  /** when the orientation ended (or started) */
+  ran?: string | null
+  installed?: string | null
+  folder?: string | null
+  orientation?: string | null
+  model?: string | null
+  /** `full` for a full export, `outputs-only` for the outputs alone (what demos/ holds) */
+  format?: string | null
+  /** whether the orientation's Claude Code session came with it, so a message in its thread continues it */
+  kept?: boolean | null
+  /** what the pre-cache holds (its manifest's counts), which the orientation's card names */
+  counts?: { cards?: number; labels?: number; views?: number; documents?: number } | null
+}
+
+/** A follow-up of the orientation as its chat's meta keeps it. */
+export interface FollowUpRecord {
+  run: number
+  status?: string
+  started?: string | null
+  ended?: string | null
+  messages?: { text: string; by?: string }[]
+  added?: number
+  revised?: number
+  deleted?: number
+  views?: number
+}
+
+/** Where the analyst's line was typed: the terminal of the Claude Code session, or the browser's composer. */
+export type RecordBy = 'terminal' | 'browser'
+
+// ---- scale: the tree fetches one folder at a time; the rows route pages by cursor ----
+
+/** A subfolder in `GET /corpora/{c}/sources?path=&depth=1`: the files under it at any depth and its direct subfolders
+ * (where the server knows them already), the tree's run mark. */
+export interface FolderEntry {
+  path: string
+  name: string
+  n_files?: number
+  n_folders?: number
+  is_run: boolean
+  hidden?: boolean
+}
+
+/** One folder's own entries (`path` '' is the corpus root): its files as SourceInfo and its subfolders, and the files
+ * under it at any depth where the server knows them already. */
+export interface FolderListing {
+  path: string
+  files: SourceInfo[]
+  folders: FolderEntry[]
+  n_files?: number
+  /** the folder's modification time when it was read, which `GET /sources/stamps` compares (backend folder_stamp) */
+  stamp?: string
+}
+
+/** `GET /concepts/{id}/rows` with `next`, the rowid cursor for the page after this one (null at the end). */
+export interface LabelRowsPage extends LabelRowsResponse {
+  next: number | null
+}
+
+// ---- undo and redo (backend undo.py) ----
+
+/** `GET /ws/{c}/undo`: what an undo would revert and a redo repeat, each a label such as `delete card runs-one-end`. */
+export interface UndoLabels {
+  undo: string | null
+  redo: string | null
+  /** `<orientation chat>/<run>` while the step an undo would revert belongs to a follow-up of the orientation, whose
+   * steps one undo reverts together (backend undo.py) */
+  undo_run?: string | null
+  /** why a session that still runs holds the undo (a writer changed the passage since), which Undo's tooltip says */
+  held?: string | null
+}
+
+// ---- the problem report (backend feedback.py) ----
+
+/** `POST /ws/{c}/feedback`: what the Report a problem dialog sends. */
+export interface ProblemReportBody {
+  description: string
+  /** a data URL of the tab, when the browser captured it */
+  screenshot?: string | null
+  /** the reporter asked for a screenshot, so the bundle says when there is none */
+  screenshot_asked?: boolean
+  /** the server log's tail and the workspace's chats and event stream */
+  logs: boolean
+  user_agent: string
+  /** the tab's recent console errors and failed requests (lib/problemLog), sent with the logs */
+  browser?: import('./problemLog').ProblemEntry[]
+  /** the chats the failure concerns, which the bundle takes first */
+  focus?: string[]
+}
+
+/** Where the bundle was written and how to send it. */
+export interface ProblemReport {
+  path: string
+  name: string
+  bytes: number
+  /** the zip's size in words, such as `184 KB` */
+  size: string
+  files: string[]
+  /** the server's machine can show the zip in its file manager (POST /feedback/reveal) */
+  can_reveal: boolean
+  /** a screenshot was asked for and not captured */
+  screenshot_missing?: boolean
+  /** the maintainer's GitHub handle, which `instructions` names for private logs, and their profile's URL */
+  contact: string
+  contact_url: string
+  /** the sentence that says to attach the zip to an issue only if it may be public, naming `contact` */
+  instructions: string
+  /** the new-issue page, prefilled with the description, the versions and the doctor's summary, none of the logs */
+  issue_url: string
+}
