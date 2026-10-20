@@ -1,7 +1,7 @@
-// Claims as pure functions (claims/store.js, atlas.js, lens.mjs, estimate.mjs): the lens's claims parsed with what
-// each leaves open, each placed by its words with the citations near it, a restatement counted (×N), a correction
-// linked both ways, clusters named, renamed and split, the folder's map merged and merged again, what a claim bears
-// on, the links between clusters as arcs, the pane drawn on the card runtime, and the folder's estimate.
+// Claims as pure functions (claims/store.js, graph.js, lens.mjs, estimate.mjs): the lens's claims parsed, each placed
+// by its words with the citations near it, a restatement counted (×N), a correction linked both ways, clusters named,
+// renamed and split, the folder's map merged and merged again, the graph's edges and layout, the pane drawn on the
+// card runtime (the graph, the claim selected, where it came from), and the folder's estimate.
 //   node --test plugin/claims/test/
 import '../../test-home.mjs'
 import '../../draw/kit.js'
@@ -15,10 +15,10 @@ import { keysOf } from '../../panes/host.js'
 import { parseAnswer } from '../../observer/evidence.js'
 import { ROOT, textOf } from '../../prompts/node.mjs'
 import { composeSystem, composeTurn, sectionsOf } from '../../observer/compose.mjs'
-import pane, { arcRows } from '../atlas.js'
+import pane, { layout, messageRows } from '../graph.js'
 import lens from '../lens.mjs'
 import { cost, estimate, looksLikeTranscript, runsOf } from '../estimate.mjs'
-import { applyTurn, claimless, clusterFor, clusterLinks, emptyStore, findQuote, grownClusters, isFolderCard, laneLinks, likeness, locate, mergeFolder, meaningOf, nearLines, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, related, sentenceAt, shortRef, sourcesNear, viewOf } from '../store.js'
+import { applyTurn, claimless, clusterFor, edgesOf, emptyStore, findQuote, grownClusters, isFolderCard, likeness, locate, mergeFolder, nearLines, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, sentenceAt, shortRef, sourcesNear, viewOf } from '../store.js'
 
 const DK = globalThis.DrawKit
 
@@ -27,10 +27,10 @@ const Q1 = 'was there any bias in the edits? who drove it?'
 const A1 = 'Yes. **The tilt is one editor.** Kestrel made [41%](q4#user=Kestrel@share) of June\'s edits, and [212 of them](q7#user=Kestrel@n) were reverts.\n\n- June 18 had [6,543 saves](q1#day=2026-06-18@n), the busiest day.\n- Bots made [4%](q5#bot=yes@share) of edits.'
 const PLACES1 = [{ row: 'u1', by: 'person', turn: 1, text: Q1 }, { row: 'r1', by: 'claude', turn: 1, text: 'Let me count the edits per user.' }, { row: 'r2', by: 'claude', turn: 1, text: A1 }]
 const OUT1 = { claims: [
-  { quote: 'The tilt is one editor', claim: 'The tilt in the edits is one editor', kind: 'judgment', cluster: 'testing for bias', unstated: 'Of all June edits, or of the reverts?' },
-  { quote: "Kestrel made 41% of June's edits", kind: 'finding', cluster: 'finding who edited', precisely: "41% of the 517 edits saved in June were Kestrel's" },
-  { quote: 'June 18 had 6,543 saves', kind: 'event', cluster: 'the June 18 burst' },
-  { quote: 'Bots made 4% of edits', kind: 'finding', cluster: 'ruling out bots' },
+  { quote: 'The tilt is one editor', claim: 'The tilt in the edits is one editor', cluster: 'testing for bias' },
+  { quote: "Kestrel made 41% of June's edits", cluster: 'finding who edited' },
+  { quote: 'June 18 had 6,543 saves', cluster: 'the June 18 burst' },
+  { quote: 'Bots made 4% of edits', cluster: 'ruling out bots' },
 ] }
 
 function turn1() {
@@ -43,20 +43,21 @@ function turn1() {
 
 test("the lens's claims are read as given: a quote names a claim that gives no words of its own; a same, a correction, who said it", () => {
   const got = parseClaims([
-    { quote: 'June 18 had 6,543 saves', kind: 'Event', cluster: 'k1' },
+    { quote: 'June 18 had 6,543 saves', cluster: 'k1' },
     { same: 'c2', quote: 'the edits were biased', by: 'analyst' },
-    { claim: 'A correction', quote: 'it is two editors', kind: 'judgement call', revises: 'c1', by: 'Person' },
+    { claim: 'A correction', quote: 'it is two editors', revises: 'c1', by: 'Person' },
     { claim: 'no quote' },
     'not an object',
   ])
-  assert.deepEqual(got.map(x => [x.text, x.by, x.kind, x.same, x.revises]), [
-    ['June 18 had 6,543 saves', 'claude', 'event', null, null],
-    ['', 'person', 'claim', 'c2', null],
-    ['A correction', 'person', 'judgment', null, 'c1'],
+  assert.deepEqual(got.map(x => [x.text, x.by, x.same, x.revises]), [
+    ['June 18 had 6,543 saves', 'claude', null, null],
+    ['', 'person', 'c2', null],
+    ['A correction', 'person', null, 'c1'],
   ])
+  // one kind: a statement, with no parts beside its words
+  assert.deepEqual(Object.keys(got[0]).sort(), ['at', 'by', 'cluster', 'quote', 'revises', 'same', 'text'])
   const a = parseAnswer('{"notes": [], "claims": [{"claim": "x", "quote": "y"}], "clusters": [{"id": "k1", "name": "z"}]}')
   assert.deepEqual(lens.read(a), { claims: [{ claim: 'x', quote: 'y' }], clusters: [{ id: 'k1', name: 'z' }] })
-  assert.deepEqual(meaningOf({ precisely: 'x '.repeat(200), judgment: 'none', unstated: '' }), { precisely: 'x '.repeat(120).trim() })
 })
 
 test("the lens's text composes: its principles in the system prompt, its digest of the claims so far and its quiet rule in the message", () => {
@@ -95,7 +96,7 @@ test('a quote is found in the words as read, and its sources are the citations i
 
 // ------------------------------------------------------------------------------------------------ a turn
 
-test('a turn adds its claims with where each was said, its sources, its kind and a cluster; c lights only for one that reads two ways', () => {
+test('a turn adds its claims with where each was said, its sources and a cluster; c lights only for a correction', () => {
   const { store, res } = turn1()
   assert.deepEqual(res.added, ['c1', 'c2', 'c3', 'c4'])
   assert.deepEqual(store.clusters.map(c => c.name), ['testing for bias', 'finding who edited', 'the June 18 burst', 'ruling out bots'])
@@ -103,7 +104,8 @@ test('a turn adds its claims with where each was said, its sources, its kind and
   assert.equal(c2.text, "Kestrel made 41% of June's edits")
   assert.deepEqual(c2.said.map(p => [p.row, p.by, p.turn]), [['r2', 'claude', 1]])
   assert.deepEqual(c2.sources.map(s => s.label), ['41%', '212 of them'])
-  assert.equal(noteFor(res), '1 claim reads two ways')
+  assert.equal(noteFor(res), '')
+  assert.ok(!('kind' in c2) && !('precisely' in c2))
   assert.equal(noteFor({ added: ['c1', 'c2'] }), '')
   assert.equal(noteFor({ added: ['c5'], revised: ['c1'] }), '1 claim corrected')
   const r = applyTurn(store, { places: PLACES1, out: { claims: [{ claim: 'Made up', quote: 'words nobody wrote down' }] }, turn: 1 })
@@ -116,7 +118,7 @@ test('a claim said again adds its place (×N); a correction is linked both ways,
   const A2 = 'Fix one thing: it is two editors, not one. June 18 was the busiest day, with [6,543 saves](q1#day=2026-06-18@n).'
   const res = applyTurn(store, { places: [{ row: 'u2', by: 'person', turn: 2, text: "I'll say the tilt is one editor." }, { row: 'r3', by: 'claude', turn: 2, text: A2 }], turn: 2, out: { claims: [
     { same: 'c1', quote: 'the tilt is one editor', by: 'analyst' },
-    { quote: 'it is two editors, not one', claim: 'The tilt is two editors, not one', kind: 'finding', revises: 'c1' },
+    { quote: 'it is two editors, not one', claim: 'The tilt is two editors, not one', revises: 'c1' },
     { same: 'c3', quote: 'June 18 was the busiest day' },
   ] } })
   assert.deepEqual(res.added, ['c5'])
@@ -131,8 +133,8 @@ test('a claim said again adds its place (×N); a correction is linked both ways,
   assert.equal(noteFor(res), '1 claim corrected')
   assert.match(promptLines(store).claims, /- c1 · k1 · The tilt in the edits is one editor \(corrected by c5, ×2\)/)
   const same = applyTurn(store, { places: [{ row: 'u4', by: 'person', turn: 4, text: 'bots drove it' }, { row: 'r6', by: 'claude', turn: 4, text: 'Bots made only [4%](q5#bot=yes@share) of the edits.' }], turn: 4, out: { claims: [
-    { quote: 'bots drove it', claim: 'Bots drove the bias', by: 'analyst', kind: 'claim', cluster: 'k4' },
-    { quote: 'Bots made only 4% of the edits', kind: 'finding', cluster: 'k4', revises: '#1' },
+    { quote: 'bots drove it', claim: 'Bots drove the bias', by: 'analyst', cluster: 'k4' },
+    { quote: 'Bots made only 4% of the edits', cluster: 'k4', revises: '#1' },
   ] } })
   assert.deepEqual(same.revised, ['c6'])
   assert.ok(likeness("Kestrel made 41% of June's edits", 'Kestrel made 41% of the edits in June') >= 0.8)
@@ -143,7 +145,7 @@ test('clusters: named by id or by name, a new name makes one; a grown one is off
   assert.equal(clusterFor(store, 'Finding Who Edited'), 'k2')
   assert.equal(clusterFor(store, 'new: checking the reverts', 2), 'k5')
   assert.equal(clusterFor(store, ''), null)
-  const many = Array.from({ length: 6 }, (_, i) => ({ claim: `Kestrel reverted page ${i + 1} twice in June`, quote: `page ${i + 1} reverted twice`, kind: 'event', cluster: 'k2' }))
+  const many = Array.from({ length: 6 }, (_, i) => ({ claim: `Kestrel reverted page ${i + 1} twice in June`, quote: `page ${i + 1} reverted twice`, cluster: 'k2' }))
   const text = Array.from({ length: 6 }, (_, i) => `On page ${i + 1} reverted twice.`).join(' ')
   applyTurn(store, { places: [{ row: 'r5', by: 'claude', turn: 2, text }], out: { claims: many }, turn: 2 })
   const grown = grownClusters(store)
@@ -152,7 +154,7 @@ test('clusters: named by id or by name, a new name makes one; a grown one is off
   assert.deepEqual(res.clusters.map(x => x.renamed || x.split), ['k2', 'k2'])
   assert.equal(store.claims.filter(c => c.cluster === 'k6').length, 6)
   // a split named as a cluster this same turn's claims made: one cluster of that name, holding both
-  const r3 = applyTurn(store, { places: [{ row: 'r9', by: 'claude', turn: 3, text: 'Wren reverted page 9 twice.' }], turn: 3, out: { claims: [{ quote: 'Wren reverted page 9 twice', kind: 'event', cluster: "Wren's edits" }], clusters: [{ split: 'k6', name: "Wren's edits", claims: ['c5', 'c6'] }] } })
+  const r3 = applyTurn(store, { places: [{ row: 'r9', by: 'claude', turn: 3, text: 'Wren reverted page 9 twice.' }], turn: 3, out: { claims: [{ quote: 'Wren reverted page 9 twice', cluster: "Wren's edits" }], clusters: [{ split: 'k6', name: "Wren's edits", claims: ['c5', 'c6'] }] } })
   assert.equal(r3.added.length, 1)
   assert.equal(store.clusters.filter(c => c.name === "Wren's edits").length, 1)
   assert.equal(store.claims.filter(c => c.cluster === store.clusters.find(k => k.name === "Wren's edits").id).length, 3)
@@ -176,30 +178,26 @@ const MAP = {
   scope: { unit: 'trials', n: 3, what: 'every trial counted' },
   clusters: [{ id: 'belt', name: 'belt slips', lead: 'belt-skips' }, { id: 'scale', name: 'scale theory' }],
   claims: [
-    { id: 'belt-skips', name: 'The belt skips a slot', kind: 'finding', cluster: 'belt', n: 2, of: 3, evidence: [{ ref: 'trials/t1.jsonl#L2', quote: 'The belt skips a slot' }] },
-    { id: 'pinned', name: 'Pinned the belt', kind: 'judgment call', cluster: 'belt', evidence: [{ ref: 'trials/t3.jsonl#L2' }] },
-    { id: 'scale-off', name: 'The scale is off', kind: 'claim', cluster: 'scale', evidence: [{ ref: 'trials/t2.jsonl#L2', quote: 'the scale is off' }] },
+    { id: 'belt-skips', name: 'The belt skips a slot', cluster: 'belt', n: 2, of: 3, evidence: [{ ref: 'trials/t1.jsonl#L2', quote: 'The belt skips a slot' }] },
+    { id: 'pinned', name: 'Pinned the belt', cluster: 'belt', evidence: [{ ref: 'trials/t3.jsonl#L2' }] },
+    { id: 'scale-off', name: 'The scale is off', cluster: 'scale', evidence: [{ ref: 'trials/t2.jsonl#L2', quote: 'the scale is off' }] },
   ],
-  relations: [{ from: 'belt-skips', to: 'scale-off', type: 'contradicts' }, { from: 'pinned', to: 'belt-skips', type: 'supports' }],
 }
 
 test("the folder's map joins the session's claims, marked as the folder's; saved again it changes in place", () => {
   assert.ok(isFolderCard('07-folder-claims') && isFolderCard('folder-claims') && !isFolderCard('07-folder-claims-2'))
   const store = emptyStore('s1')
-  applyTurn(store, { places: [{ row: 'r1', by: 'claude', turn: 1, text: 'In trial 1, the belt skips a slot.' }], out: { claims: [{ quote: 'the belt skips a slot', kind: 'finding', cluster: 'the belt' }] }, turn: 1 })
+  applyTurn(store, { places: [{ row: 'r1', by: 'claude', turn: 1, text: 'In trial 1, the belt skips a slot.' }], out: { claims: [{ quote: 'the belt skips a slot', cluster: 'the belt' }] }, turn: 1 })
   const res = mergeFolder(store, MAP, { card: '07-folder-claims', v: 1, at: 'T' })
   assert.equal(res.added.length, 2)
   assert.deepEqual(res.restated, ['c1'])
   assert.deepEqual(store.claims[0].said.map(p => p.by), ['claude', 'folder'])
   const pinned = store.claims.find(c => c.text === 'Pinned the belt')
-  assert.deepEqual([pinned.by, pinned.kind, store.clusters.find(k => k.id === pinned.cluster).name], ['folder', 'judgment', 'belt slips'])
+  assert.deepEqual([pinned.by, store.clusters.find(k => k.id === pinned.cluster).name], ['folder', 'belt slips'])
   assert.deepEqual(store.folder, { card: '07-folder-claims', v: 1, at: 'T', claims: 3, clusters: 2, scope: { unit: 'trials', n: 3, what: 'every trial counted' } })
-  // the map's relations: what each claim bears on, with why
-  const v = viewOf(store)
-  assert.deepEqual(related(v.flat, 'c1').map(r => [r.id, r.why]), [['c3', 'contradicts'], [pinned.id, 'supported by']])
-  assert.deepEqual(v.groups.map(g => g.name), ['the belt', 'belt slips', 'scale theory'])
+  assert.deepEqual(viewOf(store).groups.map(g => g.name), ['the belt', 'belt slips', 'scale theory'])
   // saved again with a claim fixed and one gone: changed in place, the gone one goes (the session's own stays)
-  const v2 = { ...MAP, claims: [{ ...MAP.claims[0], name: 'The belt skips one slot in 3' }, MAP.claims[2]], relations: [] }
+  const v2 = { ...MAP, claims: [{ ...MAP.claims[0], name: 'The belt skips one slot in 3' }, MAP.claims[2]] }
   const again = mergeFolder(store, v2, { card: '07-folder-claims', v: 2, at: 'T2' })
   assert.deepEqual(again.dropped, [pinned.id])
   assert.equal(store.claims.find(c => c.id === 'c1').text, 'The belt skips one slot in 3')
@@ -207,27 +205,44 @@ test("the folder's map joins the session's claims, marked as the folder's; saved
   assert.equal(store.folder.v, 2)
 })
 
-test('what a claim bears on, and the links between clusters as arcs in lanes at the map\'s left', () => {
+// ------------------------------------------------------------------------------------------------ the graph
+
+/** Turn 1, then turn 2: a correction of c1, a claim that cites a row c2 cites, and c3 said again. */
+function turn2() {
   const { store } = turn1()
-  applyTurn(store, { places: [{ row: 'r3', by: 'claude', turn: 2, text: 'Fix one thing: it is two editors. Kestrel and Wren made [63%](q8#user=top2@share) of it; Kestrel alone [41%](q4#user=Kestrel@share).' }], turn: 2, out: { claims: [
-    { quote: 'it is two editors', claim: 'The tilt is two editors', kind: 'finding', revises: 'c1' },
-    { quote: 'Kestrel and Wren made 63% of it', claim: 'Kestrel and Wren made 63% of the tilt', kind: 'finding', cluster: 'k2' },
+  const A2 = 'Fix one thing: it is two editors, not one. Kestrel and Wren made [63%](q8#user=top2@share) of it; Kestrel alone [41%](q4#user=Kestrel@share). June 18 was the busiest day.'
+  applyTurn(store, { places: [{ row: 'r3', by: 'claude', turn: 2, text: A2 }], turn: 2, out: { claims: [
+    { quote: 'it is two editors, not one', claim: 'The tilt is two editors, not one', revises: 'c1' },
+    { quote: 'Kestrel and Wren made 63% of it', claim: 'Kestrel and Wren made 63% of the tilt', cluster: 'k2' },
+    { same: 'c3', quote: 'June 18 was the busiest day' },
   ] } })
-  const v = viewOf(store)
-  assert.deepEqual(related(v.flat, 'c6').map(r => [r.id, r.why]), [['c2', 'same evidence'], ['c5', 'said beside it']])
-  assert.deepEqual(related(v.flat, 'c5').map(r => r.why), ['corrects', 'said beside it'])
-  // c2 and c6 cite the same row, in one cluster: no link; a correction across clusters is one
-  store.claims.find(c => c.id === 'c6').cluster = 'k3'
-  const links = clusterLinks(viewOf(store))
-  assert.deepEqual(links.map(l => [l.a, l.b, l.n]), [['k2', 'k3', 1]])
-  const rows = { k1: 0, k2: 1, k3: 2, k4: 3 }
-  const lanes = laneLinks([{ a: 'k1', b: 'k4' }, { a: 'k2', b: 'k3' }, { a: 'k1', b: 'k2', corrects: true }], id => rows[id])
-  // two links that meet at a row never share a lane
-  assert.equal(lanes.lanes, 3)
-  const arcs = arcRows(4, lanes.links, lanes.lanes + 1, l => l.a === 'k1')
-  assert.deepEqual(arcs.map(r => r.replace(/\{[a-z-]+:(.)\}/g, '$1')), ['╭─┬─', '│╭┴─', '│╰──', '╰───'])
-  // the selected cluster's links are bright, a correction in amber; the rest dim
-  assert.match(arcs[1], /^\{accent:│\}\{dim:╭\}\{warn:┴\}/)
+  return { store, A2 }
+}
+
+test("the graph's edges: a correction, and claims that cite the same rows (a star to the first that cites them), one per pair", () => {
+  const { store } = turn2()
+  assert.deepEqual(edgesOf(viewOf(store).flat), [{ a: 'c5', b: 'c1', kind: 'corrects' }, { a: 'c6', b: 'c2', kind: 'rows', ref: 'q4#user=Kestrel@share' }])
+  const flat = [{ id: 'a', sources: [{ ref: 'x' }, { ref: 'y' }] }, { id: 'b', sources: [{ ref: 'x' }, { ref: 'y' }] }, { id: 'c', sources: [{ ref: 'x' }] }, { id: 'd', revises: 'a', sources: [{ ref: 'x' }] }]
+  assert.deepEqual(edgesOf(flat).map(e => `${e.a}-${e.b} ${e.kind}`), ['d-a corrects', 'b-a rows', 'c-a rows'])
+})
+
+test('the layout: each cluster an island, no two dots touching, each name clear of the dots, the same every time', () => {
+  const nodes = Array.from({ length: 24 }, (_, i) => ({ id: `c${i + 1}`, cluster: `k${(i % 4) + 1}` }))
+  const clusters = [1, 2, 3, 4].map(i => ({ id: `k${i}`, name: `cluster number ${i}` }))
+  const edges = [{ a: 'c1', b: 'c5', kind: 'rows' }, { a: 'c2', b: 'c3', kind: 'corrects' }]
+  const lay = layout(nodes, clusters, edges, { w: 80, h: 24 })
+  const ps = [...lay.pos.values()]
+  assert.equal(ps.length, 24)
+  for (const p of ps) assert.ok(p.x >= 1 && p.x <= 78 && p.y >= 1 && p.y <= 23, JSON.stringify(p))
+  for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) assert.ok(ps[i].y !== ps[j].y || Math.abs(ps[i].x - ps[j].x) >= 2, `${JSON.stringify(ps[i])} ${JSON.stringify(ps[j])}`)
+  assert.equal(lay.names.length, 4)
+  for (const n of lay.names) assert.ok(!ps.some(p => p.y === n.y && p.x >= n.x && p.x < n.x + n.name.length), n.name)
+  // a cluster's claims are nearer each other than the claims of another
+  const mid = k => { const m = nodes.filter(n => n.cluster === k).map(n => lay.pos.get(n.id)); return [m.reduce((s, p) => s + p.x, 0) / m.length, m.reduce((s, p) => s + p.y, 0) / m.length] }
+  const d = (a, b) => Math.hypot(a[0] - b[0], (a[1] - b[1]) * 2)
+  const p1 = lay.pos.get('c1')
+  assert.ok(d([p1.x, p1.y], mid('k1')) < d([p1.x, p1.y], mid('k2')))
+  assert.deepEqual([...layout(nodes, clusters, edges, { w: 80, h: 24 }).pos], [...lay.pos])
 })
 
 // ------------------------------------------------------------------------------------------------ the pane
@@ -238,55 +253,78 @@ const draw = (data, o = {}) => {
   return { d, text: gridText(renderTerm(d, { w: 90 })) }
 }
 
-test('the pane: the head, the map of clusters with their dots and lead claims, the selected cluster and its claim', () => {
-  const { store } = turn1()
+test('the pane: the head, the graph with a dot per claim and each cluster named, and the newest claim under it', () => {
+  const { store } = turn2()
   const data = pane.data({ claims: { ...store, offer: { what: '3 trials', minutes: 4 } }, threads: [] })
   const { d, text } = draw(data)
-  assert.match(text, /^Claims {2}4 claims · 4 clusters · to turn 1/)
-  assert.match(text, /● finding 2 {3}● judgment call 1 {3}● event 1/)
+  assert.match(text, /^Claims {2}6 claims · 4 clusters · to turn 2/)
   assert.match(text, /map the claims of the whole folder · 3 trials · about 4 min/)
-  for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst', 'ruling out bots']) assert.ok(text.includes(name), name)
-  // at rest: the newest claim's cluster, its lead claim selected with what it leaves open
-  assert.match(text, /▸testing for bias/)
-  assert.equal(d.selected, 'c-c1')
-  assert.match(text, /not stated {2}Of all June edits, or of the reverts\?/)
-  assert.match(text, /“The tilt is one editor\.”/)
-  // its keys, as the bar names them: no key hint in the pane itself
+  for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst', 'ruling out bots']) assert.ok(text.includes(name.replace(/ /g, ' ')), name)
+  // a dot per claim, each a part of its own: hollow once corrected, heavier when said again
+  assert.deepEqual(d.regions.filter(r => /^n-/.test(r.id)).map(r => r.id).sort(), ['n-c1', 'n-c2', 'n-c3', 'n-c4', 'n-c5', 'n-c6'])
+  assert.equal((text.match(/○/g) || []).length, 2)
+  assert.ok(text.includes('◉'))
+  // at rest: the newest claim selected, its words, where it came from and its evidence under the graph
+  assert.equal(d.selected, 'n-c6')
+  assert.match(text, /● Kestrel and Wren made 63% of the tilt\n {2}finding who edited · turn 2\n {2}from “Kestrel and Wren made 63% of it; Kestrel alone 41%\.”/)
+  assert.match(text, /1 63% +reading its rows…/)
+  // no kinds: no fact, finding, judgment or event anywhere
+  assert.ok(!/judgment|\bfact\b|\bevent\b/.test(text))
   // its keys, as the side panel's bar names them (esc is the panel's own: back, then close)
-  assert.deepEqual(keysOf(d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open'])
-  assert.ok(!/esc|↵/.test(text))
+  assert.deepEqual(keysOf(d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open', '1 2 evidence'])
 })
 
-test('the pane: the ring on a cluster or a claim selects it; a claim shows its evidence, read through the kernel, and what it bears on', () => {
-  const { store } = turn1()
+test('the pane: the ring on a dot selects its claim; ↵ on it opens where it came from; a correction goes to the other claim', () => {
+  const { store } = turn2()
   const data = pane.data({ claims: store, threads: [] })
   const run = (state, event, got) => DK.run(pane.program, data, { w: 90, h: 44, mode: 'pane', state, event, got })
-  let st = run({}, { type: 'focus', region: 'cl-k2' }).state
-  assert.deepEqual(st, { cluster: 'k2', claim: 'c2', part: 'cl-k2' })
-  // the row selected is what the panel's thread asks about: here the cluster
-  assert.equal(run(st).selected, 'cl-k2')
-  const want = run(st).wants.map(w => w.request.rows[0])
-  assert.deepEqual(want, ['q4#user=Kestrel@share', 'q7#user=Kestrel@n'])
+  const st = run({}, { type: 'focus', region: 'n-c2' }).state
+  assert.deepEqual(st, { claim: 'c2', part: 'n-c2' })
+  // the dot selected is what the panel's thread asks about, with the claim's citations as its refs
+  const sel = run(st)
+  assert.equal(sel.selected, 'n-c2')
+  assert.deepEqual(sel.regions.find(r => r.id === 'n-c2').meta.ref, ['q4#user=Kestrel@share', 'q7#user=Kestrel@n'])
+  assert.match(pane.thread({}, st, data).about, /the claim selected is "Kestrel made 41% of June's edits" \(turn 1, said as "Kestrel made 41% of June's edits, and 212 of them were reverts\."\)/)
+  assert.deepEqual(sel.wants.map(w => w.request.rows[0]), ['q4#user=Kestrel@share', 'q7#user=Kestrel@n'])
   const got = { [JSON.stringify({ rows: ['q4#user=Kestrel@share'] })]: { chain: [{ step: 'query', id: 'q4', about: 'share by user' }], rows: ['revisions.jsonl#L28'], count: 517, records: [{ ref: 'revisions.jsonl#L28', text: 'Kestrel saved Lexicon' }] } }
-  const { d, text } = draw(data, { state: st, got })
-  assert.match(text, /1 41% +q4 · share by user ← 517 source rows in revisions\.jsonl/)
-  assert.match(text, /“Kestrel saved Lexicon”/)
-  assert.match(text, /2 212 of them +reading its rows…/)
-  assert.match(text, /precisely {3}41% of the 517 edits saved in June were Kestrel's/)
+  assert.match(draw(data, { state: st, got }).text, /1 41% +q4 · share by user ← 517 source rows in revisions\.jsonl/)
+  // a press on the dot selected (↵) opens where it came from; on another dot it selects that one
+  assert.deepEqual(run(st, { type: 'press', region: 'n-c2' }).effects, [{ id: 'c2', row: 'r2', do: 'source' }])
+  assert.deepEqual(run(st, { type: 'press', region: 'n-c4' }).state, { claim: 'c4', part: 'n-c4' })
+  assert.deepEqual(run(st, { type: 'press', region: 'said' }).effects, [{ id: 'c2', row: 'r2', do: 'source' }])
   // the digits open the evidence as a citation opens (over the pane, in the side panel)
-  assert.deepEqual(keysOf(d).map(k => `${k.key} ${k.words}`), ['↑↓ move', '↵ open', '1 2 evidence'])
-  const opened = run(st, { type: 'key', key: '2' })
-  assert.deepEqual(opened.effects, [{ mark: { kind: 'cite', ref: 'q7#user=Kestrel@n', label: '212 of them' }, do: 'open' }])
-  // the ring on an evidence row selects that row, the claim kept: a question there is about that evidence
+  assert.deepEqual(run(st, { type: 'key', key: '2' }).effects, [{ mark: { kind: 'cite', ref: 'q7#user=Kestrel@n', label: '212 of them' }, do: 'open' }])
+  // the ring on an evidence row selects that row, the claim kept
   const ev = run(st, { type: 'focus', region: 'ev-1' })
-  assert.deepEqual(ev.state, { cluster: 'k2', claim: 'c2', part: 'ev-1' })
-  assert.equal(run(ev.state).selected, 'ev-1')
-  assert.deepEqual(run(ev.state).regions.find(r => r.id === 'ev-1').meta.ref, 'q4#user=Kestrel@share')
-  // ↵ on a cluster goes into it: its lead claim selected
-  assert.deepEqual(run(st, { type: 'press', region: 'cl-k3' }).state, { cluster: 'k3', claim: 'c3', part: 'c-c3' })
-  // a press on the claim's sentence shows the message; the pane takes no esc (the panel's own)
-  assert.deepEqual(run(st, { type: 'press', region: 'said' }).effects, [{ row: 'r2', do: 'said' }])
+  assert.deepEqual(ev.state, { claim: 'c2', part: 'ev-1' })
+  assert.equal(run(ev.state).regions.find(r => r.id === 'ev-1').meta.ref, 'q4#user=Kestrel@share')
+  // a corrected claim names the claim that corrects it, and a press goes there
+  const old = draw(data, { state: { claim: 'c1' } }).text
+  assert.match(old, /○ The tilt in the edits is one editor/)
+  assert.match(old, /corrected in turn 2 by The tilt is two editors, not one/)
+  assert.deepEqual(run({ claim: 'c1' }, { type: 'press', region: 'fix-c5' }).state, { claim: 'c5', part: 'n-c5' })
+  // the pane takes no esc (the panel's own)
   assert.ok(!(run(st, { type: 'key', key: 'esc' }).effects || []).length)
+})
+
+test('where it came from: the message as the person reads it, the claim\'s words marked, and where it was said again', () => {
+  const { store } = turn2()
+  const data = pane.data({ claims: store, 'record:r2': { text: A1 } }, { source: 'c3', row: 'r2' })
+  assert.equal(pane.titleOf({ source: 'c3' }), 'Where it came from')
+  assert.deepEqual(pane.reads({ source: 'c3', row: 'r2' }), ['claims', 'record:r2'])
+  const d = DK.run(pane.program, data, { w: 70, h: 30, mode: 'pane', state: {} })
+  assert.equal(d.error, undefined)
+  const text = gridText(renderTerm(d, { w: 70 }))
+  assert.match(text, /^Where it came from {2}turn 1 · Claude's message\n\nYes\. The tilt is one editor\./)
+  assert.match(text, /\n\n• June 18 had 6,543 saves, the busiest day\.\n• Bots made 4% of edits\./)
+  assert.match(text, /said again once\nturn 2 {2}“June 18 was the busiest day\.”/)
+  assert.equal(d.selected, 'quote')
+  assert.match(pane.thread({ source: 'c3' }, {}, data).about, /where the claim "June 18 had 6,543 saves" was said \(turn 1\)/)
+  // the marked words: the quote's, also where the offsets no longer hold them
+  const m = messageRows(A1, { quote: 'June 18 had 6,543 saves', start: 0, end: 3 }, 60)
+  const marked = m.rows[m.at].filter(x => x.on).map(x => x.s).join('')
+  assert.match(marked, /^June 18 had 6,543 saves,?$/)
+  assert.equal(messageRows(A1, { quote: 'nothing like it' }, 60), null)
 })
 
 test('the pane: its thread\'s conversation is the panel\'s, under it; with no claims it says how they come; the folder being mapped says so', () => {
@@ -299,39 +337,30 @@ test('the pane: its thread\'s conversation is the panel\'s, under it; with no cl
   assert.match(draw(pane.data({ claims: { ...store, folderAsked: 'T' }, threads: [] })).text, /Claude is mapping the folder's claims/)
   const folder = emptyStore('s')
   mergeFolder(folder, MAP, { card: '07-folder-claims', v: 1 })
-  const f = draw(pane.data({ claims: folder, threads: [] })).text
-  assert.match(f, /the folder's map: 3 claims in 2 clusters, from 3 trials/)
-  assert.match(f, /belt slips folder/)
-  // the map's contradiction joins its two clusters with an arc
-  assert.match(f, /╭─.*belt slips/)
-  assert.match(f, /╰─.*scale theory/)
+  const f = draw(pane.data({ claims: folder, threads: [] }))
+  assert.match(f.text, /the folder's map: 3 claims in 2 clusters, from 3 trials/)
+  assert.ok(f.text.includes('belt slips (folder)'))
+  // a claim of the folder's map came from its first evidence row: that opens as a citation does
+  const st = { claim: folder.claims.find(c => c.text === 'The belt skips a slot').id }
+  const pr = DK.run(pane.program, pane.data({ claims: folder, threads: [] }), { w: 90, h: 44, mode: 'pane', state: st, event: { type: 'press', region: 'said' } })
+  assert.deepEqual(pr.effects, [{ mark: { kind: 'cite', ref: 'trials/t1.jsonl#L2', label: 'The belt skips a slot' }, do: 'open' }])
 })
 
-test('the pane is never taller than its rows: the cluster\'s claims are a window around the selected one, the panel cut at its end', () => {
-  const store = emptyStore('s')
-  const text = Array.from({ length: 30 }, (_, i) => `Page ${i + 1} was edited ${i + 2} times.`).join(' ')
-  applyTurn(store, { places: [{ row: 'r1', by: 'claude', turn: 1, text }], turn: 1, out: { claims: Array.from({ length: 30 }, (_, i) => ({ quote: `Page ${i + 1} was edited ${i + 2} times`, kind: 'finding', cluster: 'the pages', precisely: 'x' })) } })
-  const data = pane.data({ claims: store, threads: [] })
-  for (const claim of ['c1', 'c15', 'c30']) {
-    const { d, text: t } = draw(data, { h: 24, state: { claim } })
-    assert.ok(t.split('\n').length <= 24, `${claim}: ${t.split('\n').length} rows`)
-    assert.equal(d.selected, `c-${claim}`)
-    assert.ok(t.includes(`Page ${claim.slice(1)} was edited`), claim)
-  }
-  const mid = draw(data, { h: 24, state: { claim: 'c15' } }).text
-  assert.match(mid, /↑ \d+ more/)
-  assert.match(mid, /↓ \d+ more/)
-  // many clusters and a conversation under the pane: the map is a window, and the selected claim keeps its rows
+test('the pane is never taller than its rows: the graph takes the rows the claim under it leaves', () => {
   const many = emptyStore('s')
-  const t2 = Array.from({ length: 24 }, (_, i) => `Wiki ${i + 1} had [${i + 10} saves](q${i + 1}#n).`).join(' ')
-  applyTurn(many, { places: [{ row: 'r1', by: 'claude', turn: 1, text: t2 }], turn: 1, out: { claims: Array.from({ length: 24 }, (_, i) => ({ quote: `Wiki ${i + 1} had ${i + 10} saves`, kind: 'finding', cluster: `wiki group ${Math.floor(i / 2) + 1}` })) } })
+  const t2 = Array.from({ length: 40 }, (_, i) => `Wiki ${i + 1} had [${i + 10} saves](q${i % 7}#n).`).join(' ')
+  applyTurn(many, { places: [{ row: 'r1', by: 'claude', turn: 1, text: t2 }], turn: 1, out: { claims: Array.from({ length: 40 }, (_, i) => ({ quote: `Wiki ${i + 1} had ${i + 10} saves`, cluster: `wiki group ${(i % 8) + 1}` })) } })
+  for (const claim of ['c1', 'c20', 'c40']) {
+    const { d, text: t } = draw(pane.data({ claims: many, threads: [] }), { h: 24, state: { claim } })
+    assert.ok(t.split('\n').length <= 24, `${claim}: ${t.split('\n').length} rows`)
+    assert.equal(d.selected, `n-${claim}`)
+    assert.equal(d.regions.filter(r => /^n-/.test(r.id)).length, 40)
+  }
+  // a conversation under the pane: about two fifths of the rows are its, and the input bar's
   const talk = pane.data({ claims: many, threads: [{ key: 'pane-claims-claims', turns: [{ role: 'person', text: 'q' }] }] })
   const { d: dm, text: tm } = draw(talk, { h: 44, state: { claim: 'c13' } })
   assert.ok(tm.split('\n').length <= 44 - 4 - 17, `${tm.split('\n').length} rows`)
-  assert.equal(dm.selected, 'c-c13')
-  assert.match(tm, /evidence/)
-  assert.match(tm, /▸wiki group 7/)
-  assert.match(tm, /more/)
+  assert.equal(dm.selected, 'n-c13')
 })
 
 // ------------------------------------------------------------------------------------------------ the folder's estimate

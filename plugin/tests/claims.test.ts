@@ -1,11 +1,11 @@
-// Claims in a session (claims/: store.js, lens.mjs, atlas.js on shell/panes.ts, term.ts): the observer's one look
+// Claims in a session (claims/: store.js, lens.mjs, graph.js on shell/panes.ts, term.ts): the observer's one look
 // after a turn of work gives the turn's claims, each placed in the message that said it with the citations near it, in
-// the session's store (thimble/claims/<session>.json); the bar counts them, and c lights only when a new claim reads
-// two ways or one was corrected. c opens the Claims pane in the side panel: the map of clusters, the selected
-// cluster's claims and the selected claim open under its row with its evidence rows (read through the kernel) and what
-// it bears on; the ring selects what it lands on; a digit opens a piece of evidence over the pane, as a citation opens;
-// a question in the panel's input bar goes to the panel's thread, about the row selected, and never to main; /claims
-// folder asks Claude for the folder's map, and its save brings the folder's claims in.
+// the session's store (thimble/claims/<session>.json); the bar counts them, and c lights only when a claim was
+// corrected. c opens the Claims pane in the side panel: the claims as a graph in clusters, and the selected claim under
+// it with where it came from and its evidence rows (read through the kernel); the ring selects the dot it lands on; ↵
+// on it opens where it came from over the pane, and a digit a piece of evidence, as a citation opens; a question in the
+// panel's input bar goes to the panel's thread, about the claim selected, and never to main; /claims folder asks
+// Claude for the folder's map, and its save brings the folder's claims in.
 // `claude plugin test plugin`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -23,15 +23,15 @@ const R2 = '2b2b2b2b-aaaa-bbbb-cccc-000000000002'
 const Q1 = 'was there any bias in the edits over time? who drove it?'
 const A1 = 'Yes. The tilt is one editor. Kestrel made [41%](q4#user=Kestrel@share) of June\'s edits, and [212 of them](q7#user=Kestrel@n) were reverts. June 18 had [6,543 saves](q1#day=2026-06-18@n), the busiest day.'
 const FORK1 = { notes: [], verbs: {}, glosses: [], claims: [
-  { quote: 'The tilt is one editor', claim: 'The tilt in the edits is one editor', kind: 'judgment', cluster: 'testing for bias', judgment: "'tilt' is a reading: no side was measured", unstated: 'Most of all June edits, or of the reverts?' },
-  { quote: "Kestrel made 41% of June's edits", claim: "Kestrel made 41% of June's edits, 212 of them reverts", kind: 'finding', cluster: 'finding who edited', precisely: "41% of the 517 edits saved in June were Kestrel's; 212 of those were reverts" },
-  { quote: 'June 18 had 6,543 saves', kind: 'event', cluster: 'the June 18 burst' },
+  { quote: 'The tilt is one editor', claim: 'The tilt in the edits is one editor', cluster: 'testing for bias' },
+  { quote: "Kestrel made 41% of June's edits", claim: "Kestrel made 41% of June's edits, 212 of them reverts", cluster: 'finding who edited' },
+  { quote: 'June 18 had 6,543 saves', cluster: 'the June 18 burst' },
 ] }
 const Q2 = "I'm going to tell my manager the tilt is one editor. Anything to fix?"
 const A2 = 'Fix one thing: it is two editors, not one. Kestrel and Wren made [63%](q8#user=top2@share) of the tilt. The June 18 burst, [6,543 saves](q1#day=2026-06-18@n), stands.'
 const FORK2 = { notes: [], verbs: {}, glosses: [], claims: [
   { same: 'c1', quote: 'the tilt is one editor', by: 'analyst' },
-  { quote: 'it is two editors, not one', claim: 'The tilt is two editors, Kestrel and Wren, not one', kind: 'finding', revises: 'c1' },
+  { quote: 'it is two editors, not one', claim: 'The tilt is two editors, Kestrel and Wren, not one', revises: 'c1' },
   { same: 'c3', quote: 'The June 18 burst, 6,543 saves, stands' },
 ] }
 const MAP = {
@@ -40,10 +40,9 @@ const MAP = {
     scope: { unit: 'trials', n: 3, what: 'every trial counted' },
     clusters: [{ id: 'belt', name: 'belt slips' }, { id: 'scale', name: 'scale theory' }],
     claims: [
-      { id: 'belt-skips', name: 'The belt skips a slot', kind: 'finding', cluster: 'belt', evidence: [{ ref: 'trials/t1.jsonl#L2', quote: 'The belt skips a slot' }] },
-      { id: 'scale-off', name: 'The scale is off', kind: 'claim', cluster: 'scale', evidence: [{ ref: 'trials/t2.jsonl#L2', quote: 'the scale is off' }] },
+      { id: 'belt-skips', name: 'The belt skips a slot', cluster: 'belt', evidence: [{ ref: 'trials/t1.jsonl#L2', quote: 'The belt skips a slot' }] },
+      { id: 'scale-off', name: 'The scale is off', cluster: 'scale', evidence: [{ ref: 'trials/t2.jsonl#L2', quote: 'the scale is off' }] },
     ],
-    relations: [{ from: 'belt-skips', to: 'scale-off', type: 'contradicts' }],
   },
 }
 
@@ -170,7 +169,7 @@ async function twoTurns($: Any, on: Any) {
   return w
 }
 
-test('after a turn of work its claims are in the store, each where it was said with the citations near it; the bar counts them; c lights only for one that reads two ways', async ($, on) => {
+test('after a turn of work its claims are in the store, each where it was said with the citations near it; the bar counts them; c does not light without a correction', async ($, on) => {
   const w = world(on, [FORK1])
   await turn($, w, { id: 't1', user: U1, prompt: Q1, row: R1, answer: A1 })
   expect(w.prompts.length).toBe(1)
@@ -183,15 +182,12 @@ test('after a turn of work its claims are in the store, each where it was said w
   expect(c2.said[0].turn).toBe(1)
   expect(c2.sources.map((s: Any) => s.label)).toEqual(['41%', '212 of them'])
   expect(store.clusters.map((k: Any) => k.name)).toEqual(['testing for bias', 'finding who edited', 'the June 18 burst'])
-  // c lights in the bar with what the new claims leave open (c1 does not say what its "most" is out of); the count
-  // stands at the bar's right
+  // no claim was corrected, so c does not light: the bar only counts the claims
   const bar = await hint($)
-  expect(bar).toContain('c ● 1 claim reads two ways')
+  expect(bar).not.toContain('c ●')
   expect(bar).toContain('3 claims')
-  // the count's key is the lit c at the left, so the bar names it once
-  expect(bar).not.toContain('c 3 claims')
   const rec = JSON.parse(w.files[`${ROOT}/thimble/messages/s-1/${R1.slice(0, 24)}.json`]!)
-  expect(rec.verbs.c).toEqual({ lit: true, note: '1 claim reads two ways', claims: ['c1', 'c2', 'c3'] })
+  expect(rec.verbs?.c?.lit).toBeFalsy()
   const log = JSON.parse(w.files['/home/t/.thimble/lean/observer/s-1.json']!).log.find((r: Any) => r.kind === 'look')
   expect(log.claims.added).toEqual(['c1', 'c2', 'c3'])
 })
@@ -210,17 +206,18 @@ test('a later turn: a claim said again counts ×N, a correction is linked both w
   expect(bar).toContain('4 claims')
 })
 
-test('c opens the Claims pane in the side panel: the map of clusters, the selected cluster and its claim; the bar names its keys and where a question goes', async ($, on) => {
+test('c opens the Claims pane in the side panel: the graph of claims in clusters and the newest claim under it; the bar names its keys and where a question goes', async ($, on) => {
   const w = await twoTurns($, on)
   await press($, w.clock, key('c'))
   await w.clock.settle()
   expect(w.opened.some(x => x.id === 'object' && x.title === 'Claims' && x.focus === true)).toBe(true)
   const t = textOf(await $.ui.render(PANE))
   expect(t).toContain('Claims  4 claims · 3 clusters · to turn 2')
-  for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst']) expect(t).toContain(name)
-  // the newest claim's cluster is selected, with its lead: the correction, beside the claim it corrected
-  expect(t).toContain('▸testing for bias')
+  for (const name of ['testing for bias', 'finding who edited', 'the June 18 burst']) expect(t).toContain(name.replace(/ /g, '\u00a0'))
+  // a dot per claim, the corrected one hollow; the newest claim selected under the graph, beside the claim it corrected
+  expect(t).toContain('○')
   expect(t).toContain('The tilt is two editors, Kestrel and Wren, not one')
+  expect(t).not.toMatch(/judgment|finding ·|precisely/)
   expect(t).toMatch(/corrects\s+The tilt in the edits is one editor/)
   // no key hints in the pane: they are in the bar, with what a typed question is about
   expect(t).not.toContain('esc')
@@ -230,18 +227,17 @@ test('c opens the Claims pane in the side panel: the map of clusters, the select
   expect(bar).toContain('type to ask about claim: The tilt is two editors')
 })
 
-test('the ring on a cluster selects it and its lead; a claim shows its evidence read through the kernel; a digit opens it over the pane', async ($, on) => {
+test('the ring on a dot selects its claim, with its evidence read through the kernel; a digit opens a piece over the pane, ↵ where it came from', async ($, on) => {
   const w = await twoTurns($, on)
   await press($, w.clock, key('c'))
   await w.clock.settle()
-  await ringOn($, w, 'cl-k2')
+  await ringOn($, w, 'n-c2')
   await w.clock.advance(100)
   await w.clock.settle()
   const t = textOf(await $.ui.render(PANE))
   expect(t).toContain("Kestrel made 41% of June's edits, 212 of them reverts")
-  expect(t).toContain("precisely   41% of the 517 edits saved in June were Kestrel's")
+  expect(t).toContain("from “Kestrel made 41% of June's edits, and 212 of them were reverts.”")
   expect(t).toContain('q4 · share by user ← 4 source rows in revisions.jsonl')
-  expect(t).toContain('“Kestrel saved Lexicon”')
   expect(w.runs.some(a => a.includes('resolve') && a.includes('q4#user=Kestrel@share'))).toBe(true)
   expect(await hint($)).toContain('1 2 evidence')
   // 2 opens the second piece of evidence as a citation opens: over the pane, in the side panel
@@ -250,12 +246,27 @@ test('the ring on a cluster selects it and its lead; a claim shows its evidence 
   expect(w.opened.some(x => x.id === 'object' && x.title === 'Cite · 212 of them')).toBe(true)
 })
 
+test('↵ on the selected dot opens where its claim came from over the pane: the message, its words marked; esc goes back', async ($, on) => {
+  const w = await twoTurns($, on)
+  await press($, w.clock, key('c'))
+  await w.clock.settle()
+  await ringOn($, w, 'n-c3')
+  const ui = await $.ui.mount({ ...(PANE as Any) } as never)
+  await ui.press({ key: await rowKey($, 'n-c3') })
+  await w.clock.settle()
+  expect(w.opened.some(x => x.id === 'object' && x.title === 'Where it came from')).toBe(true)
+  const t = textOf(await $.ui.render(PANE))
+  expect(t).toContain("Where it came from  turn 1 · Claude's message")
+  expect(t).toContain('June 18 had 6,543 saves, the busiest day.')
+  expect(t).toContain('said again once')
+  await ui.unmount()
+})
+
 test("a question in the panel's input bar goes to the Claims pane's thread, about the row selected, never to main", async ($, on) => {
   const w = await twoTurns($, on)
   await press($, w.clock, key('c'))
   await w.clock.settle()
-  await ringOn($, w, 'cl-k2')
-  await ringOn($, w, 'c-c2')
+  await ringOn($, w, 'n-c2')
   // a letter starts the question in the input bar, never in the prompt
   expect((await press($, w.clock, key('i'))).text).toBe('')
   expect(JSON.stringify(await $.ui.render(PANE))).toContain('"value":"i"')
@@ -266,8 +277,8 @@ test("a question in the panel's input bar goes to the Claims pane's thread, abou
   expect(w.submitted.length).toBe(before)
   expect(w.spawns.length).toBe(1)
   expect(w.spawns[0].prompt).toContain('is 41% of all June edits or of the relay edits?')
-  expect(w.spawns[0].prompt).toContain('About: the part "claim: Kestrel made 41% of June\'s edits, 212 of them reverts" (c-c2) of the panel "Claims"')
-  expect(w.spawns[0].prompt).toContain('the claim open in it is "Kestrel made 41% of June\'s edits, 212 of them reverts" (finding, turn 1')
+  expect(w.spawns[0].prompt).toContain('About: the part "claim: Kestrel made 41% of June\'s edits, 212 of them reverts" (n-c2) of the panel "Claims"')
+  expect(w.spawns[0].prompt).toContain('the claim selected is "Kestrel made 41% of June\'s edits, 212 of them reverts" (turn 1, said as')
   expect(w.spawns[0].prompt).toContain('q4#user=Kestrel@share')
   // the question shows in the panel's conversation, under the pane
   expect(textOf(await $.ui.render(PANE))).toContain('❯ is 41% of all June edits or of the relay edits?')
@@ -299,7 +310,7 @@ test("/claims folder asks Claude, as a turn, to map the folder's claims with a s
   const request = w.appended.find(x => x.includes('thimble save folder-claims'))!
   expect(request).toContain('Hand the reading to one subagent with the Agent tool')
   expect(request).toContain(`--from ${ROOT}/thimble/claims/folder.json --program`)
-  expect(request).toMatch(/First read \S+\/prompts\/claims-folder\/v1\.md and follow it/)
+  expect(request).toMatch(/First read \S+\/prompts\/claims-folder\/v2\.md and follow it/)
   expect(w.submitted.at(-1)!.text).toBe('claims of the whole folder (3 trials, about 4 min)')
   expect(textOf(await $.ui.render(PANE))).toContain("Claude is mapping the folder's claims")
   // the subagent saves the map: the feed names the save, and the shell reads it after its Bash call
@@ -312,6 +323,6 @@ test("/claims folder asks Claude, as a turn, to map the folder's claims with a s
   expect(store.folderAsked).toBeUndefined()
   const t = textOf(await $.ui.render(PANE))
   expect(t).toContain("the folder's map: 2 claims in 2 clusters, from 3 trials")
-  expect(t).toContain('belt slips folder')
+  expect(t).toContain('belt\u00a0slips\u00a0(folder)')
   expect(w.toasts.at(-1)).toContain("The folder's map is in Claims: 2 claims in 2 clusters")
 })

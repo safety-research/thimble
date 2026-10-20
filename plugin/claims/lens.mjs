@@ -1,6 +1,6 @@
-// The claims lens of the observer's pass: the turn's claims with what each leaves open (precisely, unstated,
-// judgment, based on), each claim said again by its id, each correction with the id it revises, and the renames of
-// grown clusters. Its fragment is the registry's lens-claims; its digest is the claims so far that bear on the turn
+// The claims lens of the observer's pass: the turn's statements, each placed by a quote and given a cluster, each
+// statement said again by its id, each correction with the id it revises, and the renames and splits of grown
+// clusters. Its fragment is the registry's lens-claims; its digest is the claims so far that bear on the turn
 // and the clusters; its merge hands the claims to the observer, which places them in the session's store
 // (claims/term.ts, store.js applyTurn), where the turn's messages are known.
 import { claimless, grownLines, nearLines } from './store.js'

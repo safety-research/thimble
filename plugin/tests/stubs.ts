@@ -9,7 +9,7 @@ const STUBS: Record<string, string> = {
   'lens-actions/v4': 'LENS actions',
   'lens-squeeze/v2': 'LENS squeeze',
   'lens-explain/v3': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
-  'lens-claims/v3': 'LENS claims\n<!-- digest -->\nCLAIMS {{NEAR}}{{LEFT_OUT}} | CLUSTERS {{CLUSTERS}}{{GROWN}}\n<!-- when quiet -->\nGive no claims this time.',
+  'lens-claims/v4': 'LENS claims\n<!-- digest -->\nCLAIMS {{NEAR}}{{LEFT_OUT}} | CLUSTERS {{CLUSTERS}}{{GROWN}}\n<!-- when quiet -->\nGive no claims this time.',
   'lens-explain/v4': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive one explain mark at most this time.',
   'squeeze/v6': 'THE PROMPT',
   'thread/v2': 'THE THREAD PROMPT',
