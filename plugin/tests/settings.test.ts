@@ -102,15 +102,17 @@ async function turn($: Any, w: Any, id: string, prompt: string, answer: string) 
   await w.clock.settle()
 }
 
-test('a lens turned off has no section in the prompt and no key in the reply, and what reads it hides: no c, no claims count, no v lit', { options: { claims: false, visualize: false } }, async ($, on) => {
-  const w = world(on, { claims: false, visualize: false })
+test('a lens turned off has no section in the prompt and no key in the reply, and what reads it hides: no c, no claims count, no v lit', { options: { claims: false, visualize: false, details: false } }, async ($, on) => {
+  const w = world(on, { claims: false, visualize: false, details: false })
   await turn($, w, 't1', 'when did they edit most?', 'June 18 had the most saves.')
   expect(w.forks.length).toBe(1)
   const p = w.forks[0]!
   expect(p).toContain('LENS notes')
   expect(p).not.toContain('LENS claims')
   expect(p).not.toContain('LENS actions')
-  expect(p).toContain('REPLY {"notes": [], "verbs": {}, "glosses": [], "heads": null}')
+  // important details off: no heads-up section, and no heads-up in the reply
+  expect(p).not.toContain('LENS heads')
+  expect(p).toContain('REPLY {"notes": [], "verbs": {}, "glosses": []}')
   expect(p).toContain('| v visualize, s squeeze |')
   const bar = textOf(await $.ui.render(HINT))
   expect(bar).toContain('thimble  v visualize · s squeeze')

@@ -20,6 +20,10 @@ test('every lens of the observer has its switch, and a lens is on only while the
   assert.equal(featureOn('claims'), false)
   assert.equal(lensOn(LENSES.find(l => l.name === 'claims')), false)
   assert.equal(lensOn(LENSES.find(l => l.name === 'notes')), true)
+  // the important-details switch turns the heads-up lens off
+  setOptions({ details: false })
+  assert.equal(switchOfLens(LENSES.find(l => l.name === 'heads')).key, 'details')
+  assert.equal(lensOn(LENSES.find(l => l.name === 'heads')), false)
   setOptions({ observer: false, notes: true })
   assert.equal(featureOn('notes'), false)
   assert.equal(lensOn(LENSES.find(l => l.name === 'notes')), false)

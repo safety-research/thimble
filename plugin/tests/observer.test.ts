@@ -202,12 +202,13 @@ test('after a turn that saved an object: one look reads its lineage; its note re
   expect(JSON.parse(w.files[OBS]!).log.find((r: { kind: string }) => r.kind === 'look').verbs_lit).toEqual(['v'])
 })
 
-test('a short turn with no tool gets no look', async ($, on) => {
+test('a short answer of a turn with no tool is read too: one look, as every answer of Claude\'s', async ($, on) => {
   const w = world(on)
   const clock = w.clock
   await turn($, w, clock, { id: 't1', prompt: 'thanks', answer: 'You are welcome.', tools: 0 })
+  await clock.settle()
   expect(w.questions.length).toBe(0)
-  expect(w.forks.length).toBe(0)
+  expect(w.forks.length).toBe(1)
 })
 
 test('a look that ends while a new turn runs: its note waits for Claude\'s next prompt, and its verbs light the answer it looked at', async ($, on) => {

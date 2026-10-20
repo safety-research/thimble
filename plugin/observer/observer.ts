@@ -80,7 +80,6 @@ type Part = { lens: Any; text: string; id: string }
 
 const LAST = { plugin: 'thimble', key: 'last' } as const
 
-const LONG_ANSWER = 800 // characters: an answer of a turn that ran no tool and saved nothing is looked at from this long
 const LONG_REPLY = 600 // characters: words Claude wrote before it went on working are a reply worth a look from this long
 const CONTEXT_OBJECTS = 4 // cards the pass reads: every new one, then the latest older ones up to this many
 const STEPS_BUDGET = 24000 // the earlier pass (lenses mode): characters of the turn's words and tool calls it reads
@@ -430,12 +429,10 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
     // 1. the cards, their lineage, and what the session read
     const root = await rootNow($)
     const objs = root ? await objectsNow($, root, S.since) : []
-    const fresh = objs.filter(x => x.isNew)
     row.objects = objs.map(x => `${x.ref.id}@${x.ref.v}${x.isNew ? ' new' : ''}`)
-    // an answer of a turn that did no work (no tool, a short answer, nothing saved) needs no look
-    const msgs = batch.filter(m => m.kind === 'reply' || m.tools > 0 || m.text.length >= LONG_ANSWER || fresh.length > 0)
-    if (!msgs.length) { row.skip = 'no work'; return }
-    if (msgs.length < batch.length) row.skipped_messages = batch.length - msgs.length
+    // every message queued is read, a short answer of a turn with no tool too: the lenses say when there is nothing
+    // to give (the claims lens's quiet rule, an empty reply)
+    const msgs = batch
     const evidence = await evidenceNow($, root, objs)
 
     // 2. the state each lens needs, the lenses enabled, one pass
@@ -539,7 +536,7 @@ async function look($: Engine, batch: Msg[]): Promise<void> {
       const heads = m === headsAt ? headsOf(ctx.heads, textOf(m)) : {}
       // a message older than the newest keeps its verbs (the keys act on the newest)
       const verbs = isNewest ? { ...(ctx.verbs as Record<string, unknown>) } : { ...((rec.verbs ?? {}) as Record<string, unknown>) }
-      // c is lit by thimble, not the pass: when a new claim of the answer reads two ways, or one was corrected
+      // c is lit by thimble, not the pass: only when a claim was corrected (claims/store.js noteFor)
       const lit = claimsLit as { row: string; note: string; claims: string[] } | null
       if (isNewest && lit && lit.row === m.row) verbs.c = { lit: true, note: lit.note, claims: lit.claims }
       const next = await applyObserver($, m.row, { verbs, glosses: { ...glosses, ...heads } })

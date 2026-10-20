@@ -37,7 +37,7 @@ export const SWITCHES = [
     costs: 'A small part of each look.',
   },
   {
-    key: 'details', title: 'Important details', label: 'Observer: important details', lens: 'details', under: 'observer', group: 'Observer', default: true, surfaces: ['terminal'],
+    key: 'details', title: 'Important details', label: 'Observer: important details', lens: 'heads', under: 'observer', group: 'Observer', default: true, surfaces: ['terminal'],
     does: 'Marks the details of an answer that are easy to miss and change what it means.',
     costs: 'A small part of each look.',
   },
