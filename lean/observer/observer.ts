@@ -417,7 +417,7 @@ async function look($: Engine, t: Look, again: Again | null = null): Promise<voi
     row.why = [substantial ? 'work' : '', stated ? 'decision' : '', drift ? 'drift' : ''].filter(Boolean).join(', ')
     const digests: string[] = []
     for (const x of objs) {
-      const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(err => `(the person cannot see it: it does not draw: ${cut(String((err as Error)?.message || err), 160)})`) : ''
+      const drawn = x.isNew ? await drawnTextOf($, x.ref).catch(err => `(the analyst cannot see it: it does not draw: ${cut(String((err as Error)?.message || err), 160)})`) : ''
       digests.push(digest(x.object, { isNew: x.isNew, drawn }))
     }
     const coverage = root ? await coverageNow($, root) : '(no thimble/ folder: nothing was read through thimble)'
@@ -441,8 +441,8 @@ async function look($: Engine, t: Look, again: Again | null = null): Promise<voi
     const st = { seen, known, notesGiven: S.notesGiven, open, skips, glossed, glossSkip, store, grown, turnText }
     const qText = !t.typed
       ? t.verb
-        ? `(no comparison this turn: the person pressed the verb ${t.verb}, and thimble sent the prompt below for them)`
-        : '(no comparison this turn: the person did not type the prompt below)'
+        ? `(no comparison this turn: the analyst pressed the verb ${t.verb}, and thimble sent the prompt below for them)`
+        : '(no comparison this turn: the analyst did not type the prompt below)'
       : q.out
         ? drift
           ? `A part is missing or replaced: ${drift}`
@@ -469,9 +469,9 @@ async function look($: Engine, t: Look, again: Again | null = null): Promise<voi
       const lineRule = open
         ? '\nA line is open above the prompt now. Give no new line this time: notes only, and say whether the open line is settled.\n'
         : skips > 0
-          ? '\nThe person typed past the last lines without a look. Give no line this time: notes only.\n'
+          ? '\nThe analyst typed past the last lines without a look. Give no line this time: notes only.\n'
           : ''
-      const glossRule = glossSkip > 0 ? '\nThe person has not opened the last glosses. Give no glosses this time.\n' : ''
+      const glossRule = glossSkip > 0 ? '\nThe analyst has not opened the last glosses. Give no glosses this time.\n' : ''
       const prompt = frame.text
         .replace('{{QUESTION_STEP}}', qText)
         .replace('{{QUESTION}}', cut(t.question, 4000) || '(none)')
@@ -514,7 +514,7 @@ async function look($: Engine, t: Look, again: Again | null = null): Promise<voi
         STEPS: stepsOf(msgs, { answer, budget: STEPS_BUDGET }),
         LINES: String(answer.split('\n').length),
         ANSWER: cut(answer, 16000),
-        SHOWN: squeezed ? `\nThe person reads it squeezed (${squeezed.split('\n').length} lines); this is what shows:\n${cut(squeezed, 6000)}\n` : '',
+        SHOWN: squeezed ? `\nThe analyst reads it squeezed (${squeezed.split('\n').length} lines); this is what shows:\n${cut(squeezed, 6000)}\n` : '',
         OBJECTS: digests.length ? digests.join('\n\n') : 'No cards yet.',
         COVERAGE: coverage,
         EARLIER: bullets(t.earlier.slice(-6).map(x => cut(x, 300))),
@@ -835,8 +835,8 @@ let carrying: Note[] = []
 function notesText(pending: Note[]): string | null {
   if (!pending.length) return null
   return [
-    'Notes from a side agent that read your last answer, the objects you saved and their lineage. The person does not see these notes.',
-    'Act on them in this reply: if a note shows an error in what you told the person, correct it plainly; otherwise check it or keep it in mind. Do not mention the side agent or the notes.',
+    'Notes from a side agent that read your last answer, the cards you saved and their lineage. The analyst does not see these notes.',
+    'Act on them in this reply: if a note shows an error in what you told the analyst, correct it plainly; otherwise check it or keep it in mind. Do not mention the side agent or the notes.',
     ...pending.map(n => `- ${n.note}${n.rests_on ? ` (It rests on: "${cut(n.rests_on, 300)}")` : ''}`),
   ].join('\n')
 }

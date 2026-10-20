@@ -114,7 +114,7 @@ export function digest(object, o = {}) {
   const L = []
   L.push(`Card ${object.id} v${object.version ?? '?'} "${cut(object.title || '', 80)}"${o.isNew ? ' (saved since the last look)' : ''}`)
   if (object.question) L.push(`  asked: ${cut(object.question, 200)}`)
-  if (object.verb) L.push(`  made by the verb ${object.verb}, which the person pressed`)
+  if (object.verb) L.push(`  made by the verb ${object.verb}, which the analyst pressed`)
   if (object.text) L.push(`  its words: ${cut(object.text, 700)}`)
   const bare = bareNumbers(object.text)
   if (bare.length) L.push(`  numbers in its words that cite nothing: ${bare.slice(0, 12).join(', ')}`)
@@ -130,16 +130,16 @@ export function digest(object, o = {}) {
     L.push(`  records it quotes or cites in its data: ${otherCites.length}${bad.length ? `, ${bad.length} with a problem: ${bad.slice(0, 3).map(c => cut(c.problem, 100)).join('; ')}` : ', each found in its row'}`)
   }
   const binds = lin.bindings || []
-  if (binds.length) L.push(`  data bound to runs: ${binds.slice(0, 8).map(b => `${b.at || '/'} ← ${b.ref}${b.lineage && b.lineage !== 'exact' ? ` (${b.lineage})` : ''}`).join('; ')}`)
+  if (binds.length) L.push(`  data bound to queries: ${binds.slice(0, 8).map(b => `${b.at || '/'} ← ${b.ref}${b.lineage && b.lineage !== 'exact' ? ` (${b.lineage})` : ''}`).join('; ')}`)
   const qs = Object.values(lin.queries || {})
   for (const q of qs.slice(0, 8)) {
     const inputs = fewInputs(q.inputs).map(x => `${x.path}${x.rows_read != null ? ` (${fmt(x.rows_read)} rows read)` : ''}`).join(', ')
     const uses = (q.uses || []).map(u => (typeof u === 'string' ? u : `${u.name || u.label || u.query}${u.version != null ? ' v' + u.version : ''}${u.query ? ' from ' + u.query : ''}`)).filter(Boolean)
-    const kept = Array.isArray(q.kept) && q.kept.length ? `; keeps ${q.kept.join(', ')} for later runs` : ''
+    const kept = Array.isArray(q.kept) && q.kept.length ? `; keeps ${q.kept.join(', ')} for later queries` : ''
     const mode = MODES[q.lineage] ? `; ${MODES[q.lineage]}` : ''
-    L.push(`  run ${q.id} "${cut(q.about || '', 90)}": ${inputs || 'no source files'}${uses.length ? `; uses ${uses.join(', ')}` : ''}${kept}${mode}${q.rerun_of ? `; a rerun of ${q.rerun_of}` : ''}`)
+    L.push(`  query ${q.id} "${cut(q.about || '', 90)}": ${inputs || 'no source files'}${uses.length ? `; uses ${uses.join(', ')}` : ''}${kept}${mode}${q.rerun_of ? `; a rerun of ${q.rerun_of}` : ''}`)
   }
-  if (qs.length > 8) L.push(`  … and ${qs.length - 8} more runs`)
+  if (qs.length > 8) L.push(`  … and ${qs.length - 8} more queries`)
   const rows = lin.rows || {}
   const rf = Object.entries(rows)
   if (rf.length) L.push(`  source rows behind its values: ${rf.slice(0, 6).map(([f, r]) => `${f} ${fmt(r.count)}`).join(', ')}`)
@@ -171,7 +171,7 @@ export function digest(object, o = {}) {
   if (typeof o.drawn === 'string' && o.drawn.trim()) {
     const lines = o.drawn.split('\n').filter(l => l.trim())
     const shown = lines.slice(0, 30).map(l => `    ${cut(l, 130)}`)
-    L.push(`  as the person sees it under the reply:\n${shown.join('\n')}${lines.length > 30 ? `\n    … ${lines.length - 30} more lines` : ''}`)
+    L.push(`  as the analyst sees it under the reply:\n${shown.join('\n')}${lines.length > 30 ? `\n    … ${lines.length - 30} more lines` : ''}`)
   }
   const verbs = Array.isArray(o.verbs) ? o.verbs : []
   if (verbs.length) {

@@ -663,7 +663,7 @@ export async function showVersion($: Engine, ref: ObjRef): Promise<void> {
 /** What Claude reads of a verb the person ran, with their next prompt. */
 function ranNote(r: Ran): string {
   const said = r.error ? ` It failed: ${r.error}` : r.text ? ` It said: ${cut(r.text, 1200)}` : ''
-  return `The person ran the verb ${r.verb} on ${r.on}.${r.saved ? ` It shows them ${refText(r.saved)}.` : ''}${said}${r.note ? ' ' + r.note : ''}`
+  return `The analyst ran the verb ${r.verb} on ${r.on}.${r.saved ? ` It shows them ${refText(r.saved)}.` : ''}${said}${r.note ? ' ' + r.note : ''}`
 }
 
 /** Words for Claude alone, given with the next prompt (prompt.submit's context): no row of the transcript. */
@@ -797,7 +797,7 @@ async function forkCard($: Engine, o: { row: string; version: { text: string; id
     const cur = await recordNow($, o.row)
     if (cur && !cur.objects.includes(ref.id)) await saveRecord($, { ...cur, objects: [...cur.objects, ref.id] })
     const data = Object.values((p.object?.data ?? {}) as Record<string, unknown>).filter(v => typeof v === 'string' && /^[qr]\d+(?:[#@]|$)/.test(v))
-    const lead = o.via === 'v' ? 'The person pressed v under your last answer, and thimble drew the card' : 'After your last answer, thimble drew the card'
+    const lead = o.via === 'v' ? 'The analyst pressed v under your last answer, and thimble drew the card' : 'After your last answer, thimble drew the card'
     await noteForClaude($, `${lead} ${refText(ref)} under it ("${p.object?.title || ref.id}"), written by a fork of this conversation${data.length ? ` from ${[...new Set(data)].join(', ')}` : ''}. It is in thimble/objects/${ref.id}.json.${made.problems.length ? ` What did not hold: ${cut(made.problems.join(' '), 400)}` : ''}`)
     outcome.drawn = true
     outcome.object = refText(ref)
@@ -1018,7 +1018,7 @@ type WebScope = { row?: string; object?: string; v?: number; region?: string; la
 
 /** What Claude reads beside a question asked in the browser: what it was asked about, and where its rows are. */
 export async function webContext($: Engine, root: string, scope: WebScope): Promise<string> {
-  const lines = ['The person asked this in the browser page of this session, not in the terminal.']
+  const lines = ['The analyst asked this in the browser page of this session, not in the terminal.']
   if (scope.object && ID.test(scope.object)) {
     const ref = await withVersion($, { id: scope.object, v: scope.v ?? null, root })
     const p = await prepared($, ref, 96)
@@ -1701,7 +1701,7 @@ async function runOnMessage($: Engine, word: string, key: string, rec: MsgRecord
       void ask($, String(out.ask), word, choice || on)
     }
     else if (out.text && !out.saved) $.ui.toast(cut(String(out.text).split('\n')[0] || '', 200))
-    if (!out.ask && !out.error) await noteForClaude($, `The person ran the verb ${word} on ${on}.${out.saved ? ` It shows them ${out.saved.id}.` : ''}${out.text ? ` It said: ${cut(String(out.text), 600)}` : ''}${out.note ? ' ' + out.note : ''}`)
+    if (!out.ask && !out.error) await noteForClaude($, `The analyst ran the verb ${word} on ${on}.${out.saved ? ` It shows them ${out.saved.id}.` : ''}${out.text ? ` It said: ${cut(String(out.text), 600)}` : ''}${out.note ? ' ' + out.note : ''}`)
     else if (out.note) await noteForClaude($, String(out.note))
   } catch (err) {
     failed($, `${word} did not run`, err, `Press ${key} under the message again, or ask Claude`)
@@ -1919,11 +1919,11 @@ async function claimScope($: Engine): Promise<{ context: string; label: string; 
   const c = store.claims.find((x: Any) => x.id === id)
   if (!c) return null
   const first = (c.said || [])[0]
-  const where = first ? (first.by === 'orientation' ? 'from the corpus orientation' : `said in turn ${first.turn ?? '?'} by ${first.by === 'person' ? 'the person' : 'you'}: "${first.quote}"`) : ''
+  const where = first ? (first.by === 'orientation' ? 'from the corpus orientation' : `said in turn ${first.turn ?? '?'} by ${first.by === 'person' ? 'the analyst' : 'you'}: "${first.quote}"`) : ''
   const refs = (c.sources || []).map((x: Any) => x.ref).slice(0, 4)
   return {
     label: `claim: ${c.text}`, scope: { claim: c.id, ...(first?.row ? { row: first.row } : {}) },
-    context: `The person asked this with the ring on a claim of this session in the Claims pane: ${c.id} "${c.text}"${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}, ${where}.${refs.length ? ` It rests on ${refs.join(', ')}; \`thimble resolve <ref>\` shows the rows.` : ''} "This" or "it" may mean that claim.`,
+    context: `The analyst asked this with the ring on a claim of this session in the Claims pane: ${c.id} "${c.text}"${c.revised_by ? ` (since revised by ${c.revised_by})` : ''}, ${where}.${refs.length ? ` It rests on ${refs.join(', ')}; \`thimble resolve <ref>\` shows the rows.` : ''} "This" or "it" may mean that claim.`,
   }
 }
 
@@ -1935,7 +1935,7 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
   if (frame.row == null) {
     return {
       label: frame.label || frame.ref!, scope: { mark: { kind: 'cite', ref: frame.ref, label: frame.label } }, refs: [frame.ref!],
-      context: `The person asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`thimble resolve ${frame.ref}\` shows its rows.`,
+      context: `The analyst asked this with a citation open in the tray: ${frame.label || ''} (${frame.ref}). "This" may mean that value. \`thimble resolve ${frame.ref}\` shows its rows.`,
     }
   }
   const rec = await recordNow($, frame.row)
@@ -1946,13 +1946,13 @@ async function trayScope($: Engine): Promise<{ context: string; label: string; s
     const g = rec.glosses?.[m.gloss!] ?? { term: '' }
     return {
       label: g.term, scope: { row: rec.row, mark: { kind: 'gloss', term: g.term } }, refs: (g.refs || []).slice(0, 3),
-      context: `The person asked this with a gloss of your reply open in the tray: the term "${g.term}" in your reply that begins "${begins}". The gloss said: ${g.body || g.title || ''}${g.here ? ' ' + g.here : ''} "This" or "it" may mean that term.`,
+      context: `The analyst asked this with an explainer of your reply open in the tray: the term "${g.term}" in your reply that begins "${begins}". The explainer said: ${g.body || g.title || ''}${g.here ? ' ' + g.here : ''} "This" or "it" may mean that term.`,
     }
   }
   const label = m.kind === 'spark' ? `the sparkline of ${m.ref}` : String(m.label)
   return {
     label, scope: { row: rec.row, mark: { kind: m.kind, ref: m.ref, label } }, refs: [seriesRef(m.ref!)?.query ?? m.ref!],
-    context: `The person asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`thimble resolve ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
+    context: `The analyst asked this with a ${m.kind === 'spark' ? 'sparkline' : 'citation'} of your reply open in the tray: ${label} (${m.ref}), in your reply that begins "${begins}". "This" may mean that value. \`thimble resolve ${seriesRef(m.ref!)?.query ?? m.ref}\` shows its rows.`,
   }
 }
 
@@ -2651,15 +2651,15 @@ async function turnSel($: Engine, knob: string | null, dir: number): Promise<voi
  *  parts that rest on no rows). A program that failed is Claude's to fix now, in the same turn: a new version under
  *  the same name takes the failed one's place under the reply, so the person sees no second object and no new row. */
 function drawnNote(p: Prepared, ref: ObjRef): string {
-  if (p.error || !p.grid) return `The person cannot see the card ${refText(ref)}: ${p.error || 'it drew nothing'}. Fix it and save it again under the same name; the new version takes its place.`
+  if (p.error || !p.grid) return `The analyst cannot see the card ${refText(ref)}: ${p.error || 'it drew nothing'}. Fix it and save it again under the same name; the new version takes its place.`
   const d = p.drawing
   const parts = selectable(p.grid)
-  const lines = [`The card ${refText(ref)} is drawn for the person under your reply: ${p.grid.h} rows by ${p.grid.w} columns, ${parts.length} part${parts.length === 1 ? '' : 's'} they can select.`]
+  const lines = [`The card ${refText(ref)} is drawn for the analyst under your reply: ${p.grid.h} rows by ${p.grid.w} columns, ${parts.length} part${parts.length === 1 ? '' : 's'} they can select.`]
   if (d.error) lines.push(`Its program failed: ${d.error.name}: ${d.error.message}${d.error.line ? ` (line ${d.error.line})` : ''}. They see the error in its place. Fix the program and save it again under the same name now; the new version takes its place under your reply.`)
   if (p.check?.line) lines.push(p.check.line)
   for (const w of (d.warnings || []).slice(0, 5)) lines.push(`Warning: ${w}`)
   const empty = Object.entries(d.examples || {}).filter(([, x]: [string, Any]) => !x?.records?.length).map(([id]) => id)
-  if (empty.length) lines.push(`${empty.length} example set${empty.length === 1 ? ' has' : 's have'} no records, so the person sees none for ${empty.length === 1 ? 'it' : 'them'}: ${empty.slice(0, 4).join(', ')}${empty.length > 4 ? ', …' : ''}.`)
+  if (empty.length) lines.push(`${empty.length} example set${empty.length === 1 ? ' has' : 's have'} no records, so the analyst sees none for ${empty.length === 1 ? 'it' : 'them'}: ${empty.slice(0, 4).join(', ')}${empty.length > 4 ? ', …' : ''}.`)
   const bare = parts.filter((r: Any) => !regionRefs(p.object, d, r.id).refs.length && !recordRefs(d, r.id).length)
   if (bare.length) lines.push(`${bare.length} of ${parts.length} parts name no ref and match no data row, so selecting one shows no source rows: ${bare.slice(0, 4).map((r: Any) => r.id).join(', ')}${bare.length > 4 ? ', …' : ''}.`)
   return lines.join('\n')
@@ -3281,7 +3281,7 @@ export const registerShell: Register = (on, options) => {
         await closeTray($)
       } else if (sel && open && sel.cite) {
         pendingAsk = { text: e.text, about: { id: sel.cite, v: null, region: null, label: citeLabels.get(sel.cite) || sel.cite } }
-        context.push(`The person asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`thimble resolve ${sel.cite}\` shows its rows.`)
+        context.push(`The analyst asked this with a citation of yours open in the detail view: ${citeLabels.get(sel.cite) || ''} (${sel.cite}). "This" may mean that value. \`thimble resolve ${sel.cite}\` shows its rows.`)
       } else if (sel && open && (e.origin as { kind?: string } | undefined)?.kind !== 'plugin') {
         const p = await prepared($, sel, 96, sel.state)
         const meta = sel.region ? regionMeta(p.drawing, sel.region) : null
@@ -3289,7 +3289,7 @@ export const registerShell: Register = (on, options) => {
         const label = sel.region ? String(meta?.label || sel.region) : ''
         const knobs = stateKey(sel.state) ? ` Its knobs are at ${Object.entries(sel.state || {}).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(', ')}.` : ''
         context.push([
-          `The person asked this with a card open in the detail view: ${p.object?.id}@${p.object?.version} "${p.object?.title || ''}" (${sel.root}/thimble/objects/${sel.id}.json).${knobs}`,
+          `The analyst asked this with a card open in the detail view: ${p.object?.id}@${p.object?.version} "${p.object?.title || ''}" (${sel.root}/thimble/objects/${sel.id}.json).${knobs}`,
           sel.region ? `They had selected its part ${sel.region} ("${label}"). "This", "here" or "it" may mean that part.` : 'No part of it was selected.',
           refs.length ? `${sel.region ? 'That part' : 'Its words'} rest${sel.region ? 's' : ''} on ${refs.slice(0, 3).join(', ')}; \`thimble resolve <ref>\` opens the rows, \`thimble list ${sel.id}\` the object's lineage.` : `\`thimble list ${sel.id}\` shows the object's lineage.`,
         ].join('\n'))

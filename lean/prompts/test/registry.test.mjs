@@ -40,7 +40,7 @@ test('the active version: the default, then the setting, then THIMBLE_PROMPTS; a
   const d = choose(idx)
   assert.equal(d.active.forms.version, 'v3')
   assert.equal(d.active.forms.file, null)
-  assert.equal(d.active.forms.parts.length, 2)
+  assert.equal(d.active.forms.parts.length, 1)
   assert.equal(d.active.forms.source, 'default')
   assert.deepEqual(d.problems, [])
   const s = choose(idx, { setting: 'forms:v1' })
@@ -129,16 +129,11 @@ test('a version made of parts reads each section where it stands, and can leave 
   const parts = [{ file: 'skills/x/SKILL.md', section: 'Principles' }, { file: 'prompts/f/v.md', section: 'Worked examples' }]
   assert.equal(partsText(parts, f => files[f]), '## Principles\n\np one\n\n### deeper\n\nd\n\n## Worked examples\n\nw\n')
   assert.equal(partsText(parts, f => files[f], p => p.file.endsWith('SKILL.md')), '## Worked examples\n\nw\n')
-  // the default card guidance: the thimble skill's card section where it stands, then the card guidance with its
-  // worked examples; with the skill loaded, the skill's section is left out
+  // the default card guidance: the card guide, skills/thimble/cards.md, whole
   const t = textOf('cards', ROOT, {})
   assert.equal(t.id, 'forms:v3')
-  assert.match(t.text, /^## Cards\n/)
-  assert.match(t.text, /\n## Making a card\n[\s\S]*\n### Worked examples\n/)
-  assert.doesNotMatch(t.text, /## Example\n/)
-  const loaded = textOf('cards', ROOT, { THIMBLE_SKILL_LOADED: '1' })
-  assert.match(loaded.text, /^## Making a card\n/)
-  assert.doesNotMatch(loaded.text, /## Cards\n/)
+  assert.match(t.text, /^# The card guide\n[\s\S]*\n## What makes a good card\n[\s\S]*\n## The toolkit\n[\s\S]*\n## Examples\n/)
+  assert.equal(textOf('cards', ROOT, { THIMBLE_SKILL_LOADED: '1' }).text, t.text)
 })
 
 test("today's texts are the v1 of their features, byte for byte", () => {

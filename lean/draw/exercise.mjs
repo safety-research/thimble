@@ -145,5 +145,5 @@ export function exerciseLine(r) {
   const same = r.failed.filter(x => x.error.message === f.error.message).length - 1
   const rest = [same ? `${same} more fail${same === 1 ? 's' : ''} the same way` : '', other ? `${other.what} fails with ${other.error.name}: ${String(other.error.message).slice(0, 100)}` : ''].filter(Boolean).join('; ')
   const cut = r.cut ? ` Only ${r.tried} of ${r.total} were tried in time.` : ''
-  return `Tried as the person would, ${f.what} fails: ${err}${again}${rest ? `; ${rest}` : ''}.${cut} Fix the program or the data it binds and save it again under the same name now, before the person tries it.`
+  return `Tried as the analyst would, ${f.what} fails: ${err}${again}${rest ? `; ${rest}` : ''}.${cut} Fix the program or the data it binds and save it again under the same name now, before the analyst tries it.`
 }

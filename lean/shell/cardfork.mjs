@@ -7,8 +7,11 @@
 // serve the thimble skill with its card parts replaced (main does not draw the card itself).
 import { fill, sectionOf } from '../prompts/registry.mjs'
 
+// a section by its heading; a heading that names the analyst is found under its earlier words too ("the person")
+const sectionNamed = (raw, heading) => sectionOf(raw, heading) || sectionOf(raw, heading.replace('the analyst', 'the person'))
+
 const body = (raw, heading) => {
-  const s = sectionOf(raw, heading)
+  const s = sectionNamed(raw, heading)
   return s ? s.replace(/^#{1,6}[^\n]*\n+/, '').trim() : ''
 }
 
@@ -23,10 +26,10 @@ export function requestText(raw, { question = '', answer = '', cards = [], guida
   })
 }
 
-/** v's card from the fork (a version with the section "The view the person asked for"), or '' for a version without
+/** v's card from the fork (a version with the section "The view the analyst asked for"), or '' for a version without
  *  it, where v asks main as before. */
 export function viewText(raw, { what = '', choice = '', has = [], proposals = [], answer = '', guidance = '', toolkit = '' } = {}) {
-  const text = body(raw, 'The view the person asked for')
+  const text = body(raw, 'The view the analyst asked for')
   if (!text) return ''
   return fill(text, {
     WHAT: what,
@@ -106,7 +109,7 @@ export function bindQueries(object, ids) {
 
 /**
  * What does not hold after a save, in lines for the fix round (empty: nothing to fix). From `thimble save`'s output: its
- * problem lines and citations that do not hold. From the drawing (the shell's note on what the person sees): a program
+ * problem lines and citations that do not hold. From the drawing (the shell's note on what the analyst sees): a program
  * that failed, an object that cannot be drawn, an interaction that failed when tried. Warnings alone ask for no fix.
  */
 export function problemsOf(saveOut, drawn) {
@@ -119,31 +122,31 @@ export function problemsOf(saveOut, drawn) {
   }
   for (const line of String(drawn ?? '').split('\n')) {
     const t = line.trim()
-    if (/^(The person cannot see|Its program failed|Tried as the person would)/.test(t)) out.push(t)
+    if (/^(The analyst cannot see|Its program failed|Tried as the analyst would)/.test(t)) out.push(t)
   }
   return [...new Set(out)]
 }
 
 /**
  * The thimble skill as main reads it while the card comes after the answer: its card section ("Cards") replaced by the
- * version's "Saving" and "What the person sees" sections (an older skill: its principle on saving and its "What the
- * person sees"). A part the skill no longer has is added at its end, so main always reads that the card comes after
- * the answer.
+ * version's "Saving" and "What the analyst sees" sections (an older skill: its principle on saving and its "What the
+ * analyst sees", or "the person" in either). A part the skill no longer has is added at its end, so main always reads
+ * that the card comes after the answer.
  */
 export function skillWithCards(skill, raw) {
   let s = String(skill ?? '')
   const saving = body(raw, 'Saving')
-  const sees = sectionOf(raw, 'What the person sees')
+  const sees = sectionNamed(raw, 'What the analyst sees')
   const cards = sectionOf(s, 'Cards')
   if (cards && (saving || sees)) {
     const seesBody = sees.replace(/^#+[^\n]*\n+/, '')
     return s.replace(cards, ['## Cards', saving, seesBody].filter(Boolean).join('\n\n'))
   }
-  const start = s.indexOf('**Save what the person will keep as an object.**')
+  const start = ['analyst', 'person'].map(w => s.indexOf(`**Save what the ${w} will keep as an object.**`)).find(i => i >= 0) ?? -1
   const stop = start >= 0 ? s.indexOf('`thimble save`.', start) : -1
   if (saving && start >= 0 && stop > start) s = s.slice(0, start) + saving + s.slice(stop + '`thimble save`.'.length)
   else if (saving) s = `${s.trimEnd()}\n\n${saving}\n`
-  const old = sectionOf(s, 'What the person sees')
+  const old = sectionNamed(s, 'What the analyst sees')
   if (sees && old) s = s.replace(old, sees)
   else if (sees) s = `${s.trimEnd()}\n\n${sees}\n`
   return s

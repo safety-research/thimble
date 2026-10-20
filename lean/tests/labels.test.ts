@@ -75,7 +75,7 @@ function world(on: Any, verb: Verb = () => ({ verb: 'label', text: 'ok' })) {
       const i = e.argv.indexOf('--check')
       const ref = e.argv[i + 1]!
       const was = labelOf[ref]?.apology?.value ?? null
-      labelOf[ref] = { apology: { ...labelOf[ref]?.apology, value: e.argv[i + 2], by: 'person', checked: true, was } }
+      labelOf[ref] = { apology: { ...labelOf[ref]?.apology, value: e.argv[i + 2], by: 'analyst', checked: true, was } }
       return ok({ ref, was, now: e.argv[i + 2] })
     }
     if (at >= 0) {
@@ -267,7 +267,7 @@ test("the detail of a label's card: each example shows its labels; a number key 
   await $.prompt.submit({ text: 'so?', origin: { kind: 'composer' } } as never)
   expect(w.runs.some(r => r.slice(-3).join(' ') === 'label apology --json')).toBe(true)
   const note = w.submitted.at(-1)!.context.join('\n')
-  expect(note).toContain('The person checked 2 records of the label apology: they agree with 1 and changed 1: chat/room.jsonl#L3 (the label said yes, the person says no)')
+  expect(note).toContain('The analyst checked 2 records of the label apology: they agree with 1 and changed 1: chat/room.jsonl#L3 (the label said yes, the analyst says no)')
   expect(note).toContain('its counts are now query q9')
 })
 

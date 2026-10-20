@@ -118,13 +118,13 @@ test('a stretch is two ends the person types: it stands at the original, its fir
   assert.match(tail, /- Length: short, at most \d+ words \(levels one line · short · medium · full; the original is at full, \d+ words\)/)
   assert.match(tail, /- Familiarity: new to the field /)
   assert.match(tail, /- Report ↔ Interpret: as the original/)
-  assert.match(tail, /- A stretch the person made, from "engineer" to "manager": 2 of 3 steps toward "manager" \(the original stands at "engineer", step 0\)/)
+  assert.match(tail, /- A stretch the analyst made, from "engineer" to "manager": 2 of 3 steps toward "manager" \(the original stands at "engineer", step 0\)/)
   const end = request({ ...rec, squeeze: { ...rec.squeeze, at: { [x.id]: 3 } } }, { system: PROMPT })
   assert.match(end.prompt[1].text, /3 of 3, all the way to "manager"/)
   // the fixed text is first and marked for the cache: the prompt, then the question and the original
   assert.equal(req.system[0].cache, true)
   assert.equal(req.prompt[0].cache, true)
-  assert.match(req.prompt[0].text, /The person asked: Why does it fail\?/)
+  assert.match(req.prompt[0].text, /The analyst asked: Why does it fail\?/)
   assert.ok(req.prompt[0].text.includes(TEXT))
   // a version with the stretch is kept by its levels; a fourth stretch pushes the oldest out
   const after = applyRewrite(rec, { text: '**Status:** fixed.', at: rec.squeeze.at }, remark)
@@ -239,7 +239,7 @@ test('run.mjs: the same rewrite from words, through ctx.model, for /verb and too
   const r = await run({ message: rec, args: 'length=one line', model, verb: { model: 'sonnet' } })
   assert.equal(asked.length, 1)
   // the terms of its explain marks are named, to keep in their words
-  assert.match(asked[0].prompt[1].text, /Terms the person can open an explanation of\. Where your text keeps what a term names, use the term in these words:\n- fixture\n- coupon test/)
+  assert.match(asked[0].prompt[1].text, /Terms the analyst can open an explainer of\. Where your text keeps what a term names, use the term in these words:\n- fixture\n- coupon test/)
   assert.equal(r.message.shown, 'Fixed: [1 run in 9](q2#test=checkout@fail_rate).')
   assert.equal(r.message.marks[0].ref, 'q2#test=checkout@fail_rate')
   const back = await run({ message: r.message, args: 'original', model })
@@ -332,7 +332,7 @@ test('the request names the terms of the explain marks, to keep in their words; 
   assert.deepEqual(termsOf(record()), ['fixture', 'coupon test'])
   assert.deepEqual(termsOf({ glosses: { a: { term: '  rebase\n loop ' }, b: { term: 'rebase loop' }, c: {} } }), ['rebase loop'])
   const q = request(record(), { system: 'S', terms: termsOf(record()) })
-  assert.match(q.prompt[1].text, /Terms the person can open an explanation of\. Where your text keeps what a term names, use the term in these words:\n- fixture\n- coupon test\n/)
+  assert.match(q.prompt[1].text, /Terms the analyst can open an explainer of\. Where your text keeps what a term names, use the term in these words:\n- fixture\n- coupon test\n/)
   assert.doesNotMatch(request(record(), { system: 'S' }).prompt[1].text, /Terms the person can open/)
 })
 
@@ -358,15 +358,15 @@ test('a catch-up is several messages written as one: its original is them in ord
   const req = request(cu, { system: 'P', question: cu.catchup.question, keep })
   const head = req.prompt[0].text
   // one header line differs from a single message's request; the rest is the same request
-  assert.equal(head, `The person asked: What does labels.jsonl say about the empty label?\n\n${CATCHUP_HEAD}\n<original>\n${text}\n</original>`)
-  assert.equal(CATCHUP_HEAD, "Claude's messages since the person's last prompt, in the order it wrote them, as written (the original). Write them as one message:")
+  assert.equal(head, `The analyst asked: What does labels.jsonl say about the empty label?\n\n${CATCHUP_HEAD}\n<original>\n${text}\n</original>`)
+  assert.equal(CATCHUP_HEAD, "Claude's messages since the analyst's last prompt, in the order it wrote them, as written (the original). Write them as one message:")
   assert.match(req.prompt[1].text, /- Length: short, at most \d+ words/)
   assert.match(req.prompt[1].text, /Corrections in the original\. Each stays at every level/)
   assert.equal(request(record(), { system: 'P' }).prompt[0].text.split('\n')[2], "Claude's message, as written (the original):")
   // nothing for Claude until a version shows; then the version, as the person reads it
   assert.equal(noteFor(cu), '')
   const shown = applyRewrite(cu, { text: 'The empty label: [741 IPs](q4#label=@ips). The reader counted 3,104 lines; it does not start at the first write.', at: { length: ARRIVE } }, remark)
-  assert.equal(noteFor(shown), 'The person caught up on your 2 replies since their last prompt by reading them rewritten as one message by the squeeze chips (Length: short); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\nThe empty label: [741 IPs](q4#label=@ips). The reader counted 3,104 lines; it does not start at the first write.')
+  assert.equal(noteFor(shown), 'The analyst caught up on your 2 replies since their last prompt by reading them rewritten as one message by the squeeze chips (Length: short); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\nThe empty label: [741 IPs](q4#label=@ips). The reader counted 3,104 lines; it does not start at the first write.')
   // its citations are placed on the version, as any message's
   assert.deepEqual(shown.marks.filter(m => m.kind === 'cite').map(m => m.ref), ['q4#label=@ips'])
 })

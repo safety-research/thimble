@@ -407,7 +407,9 @@ export function parseClaims(list) {
   for (const [i, x] of (Array.isArray(list) ? list : []).entries()) {
     if (!x || typeof x !== 'object') continue
     const quote = str(x.quote, 400)
-    const by = String(x.by || '').toLowerCase().startsWith('person') || String(x.by || '').toLowerCase() === 'you' ? 'person' : 'claude'
+    // the lens may name the user "analyst" or "person" (its earlier versions); the store keeps 'person' either way
+    const who = String(x.by || '').toLowerCase()
+    const by = who.startsWith('person') || who.startsWith('analyst') || who === 'you' ? 'person' : 'claude'
     const same = str(String(x.same ?? ''), 20)
     // a new claim with no "claim" of its own is named by the words that said it (lens-claims v2 gives "claim" only when
     // the quote does not say the claim by itself)
@@ -530,7 +532,7 @@ export const tagOf = kind => (['fact', 'finding', 'event'].includes(kindOf(kind)
 export function promptLines(store, max = 120) {
   const claims = store.claims.slice(-max)
   const lines = claims.map(c => {
-    const flags = [c.by === 'person' ? 'the person' : c.by === 'orientation' ? 'orientation' : '', c.revised_by ? `revised by ${c.revised_by}` : '', c.said.length > 1 ? `×${c.said.length}` : ''].filter(Boolean)
+    const flags = [c.by === 'person' ? 'the analyst' : c.by === 'orientation' ? 'orientation' : '', c.revised_by ? `revised by ${c.revised_by}` : '', c.said.length > 1 ? `×${c.said.length}` : ''].filter(Boolean)
     return `- ${c.id} · ${c.cluster || '-'} · ${c.text}${flags.length ? ` (${flags.join(', ')})` : ''}`
   })
   const clusters = store.clusters.filter(k => sizeOf(store, k.id)).map(k => `- ${k.id} · ${k.name} · ${sizeOf(store, k.id)} claim${sizeOf(store, k.id) === 1 ? '' : 's'}${k.from === 'orientation' ? ' (orientation)' : ''}`)

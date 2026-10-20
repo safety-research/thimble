@@ -62,7 +62,7 @@ test('a value: the short path names its query, the label it builds on, its rows,
   const text = show(out.object)
   for (const s of ['3 · message', 'q2 · saves per kind', 'uses "kind", kept by q1', '3 of 8 rows · saves.jsonl', 'not behind it: pages.jsonl', 'answer, turn 1', 't full trace'])
     assert.ok(text.includes(s), `missing "${s}" in\n${text}`)
-  assert.match(out.note, /The person traced obj:uses#\/kinds\/1\/n/)
+  assert.match(out.note, /The analyst traced obj:uses#\/kinds\/1\/n/)
   const drawing = runProgram(out.object, { w: 100 })
   assert.equal(drawing.error, undefined)
   const refs = Object.fromEntries(drawing.regions.map(r => [r.id, r.meta.ref]))

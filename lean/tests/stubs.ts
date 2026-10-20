@@ -7,17 +7,23 @@ const STUBS: Record<string, string> = {
   'observer/attention-v1': 'FRAME ATTENTION\n{{LENSES}}\nREPLY {{SKELETON}}',
   'observer/v3': 'FRAME\n{{LENSES}}\nREPLY {{SKELETON}}',
   'observer-turn/v1': 'TURN {{QUESTION_STEP}} | {{QUESTION}} | {{DECISION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
+  'observer-turn/v2': 'TURN {{QUESTION_STEP}} | {{QUESTION}} | {{DECISION}} | {{ROW}} | STEPS {{STEPS}} | {{ANSWER}} {{SHOWN}} | {{OBJECTS}} | {{COVERAGE}} | EARLIER {{EARLIER}}\n{{DIGEST}}\n{{RULES}}',
   'question/v1': 'QUESTION {{QUESTION}} {{ANSWER}}',
   'question/v2': 'QUESTION {{QUESTION}} {{ANSWER}}',
   'lens-notes/v1': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
+  'lens-notes/v2': 'LENS notes\n<!-- digest -->\n| {{NOTES}}',
   'lens-line/v1': 'LENS line\n<!-- digest -->\n| {{SEEN}} | {{KNOWN}} | {{OPEN}}\n<!-- when open -->\nA line is open above the prompt now. Give no new line this time.\n<!-- when backoff -->\nGive no line this time: backoff.',
+  'lens-line/v2': 'LENS line\n<!-- digest -->\n| {{SEEN}} | {{KNOWN}} | {{OPEN}}\n<!-- when open -->\nA line is open above the prompt now. Give no new line this time.\n<!-- when backoff -->\nGive no line this time: backoff.',
   'lens-actions/v2': 'LENS actions',
   'lens-actions/v3': 'LENS actions',
+  'lens-actions/v4': 'LENS actions',
   'lens-squeeze/v1': 'LENS squeeze',
+  'lens-squeeze/v2': 'LENS squeeze',
   'lens-explain/v2': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
   'lens-explain/v3': 'LENS explain\n<!-- digest -->\n| {{GLOSSED}}\n<!-- when backoff -->\nGive no explain marks this time.',
   'lens-claims/v1': 'LENS claims\n<!-- digest -->\nCLAIMS {{CLAIMS}} | CLUSTERS {{CLUSTERS}} {{GROWN}}',
   'lens-claims/v2': 'LENS claims\n<!-- digest -->\nCLAIMS {{NEAR}}{{LEFT_OUT}} | CLUSTERS {{CLUSTERS}} {{GROWN}}\n<!-- when quiet -->\nNO CLAIMS THIS TURN',
+  'lens-claims/v3': 'LENS claims\n<!-- digest -->\nCLAIMS {{NEAR}}{{LEFT_OUT}} | CLUSTERS {{CLUSTERS}} {{GROWN}}\n<!-- when quiet -->\nNO CLAIMS THIS TURN',
   'squeeze/v3': 'THE PROMPT',
   'squeeze/v4': 'THE PROMPT',
   'squeeze/v5': 'THE PROMPT',
@@ -35,6 +41,8 @@ export function promptStub(path: string): string | undefined {
   // the card ablation's shared parts: the principles, and a pool of three examples
   const part = /\/prompts\/forms\/parts\/([^/]+)\.md$/.exec(path)
   if (part) return part[1] === 'principles' ? '## What makes a great output\n\nTHE PRINCIPLES' : `## Worked examples\n\nPOOL ${part[1]}\n\n### Alpha\n\nA\n\n### Beta\n\nB\n\n### Gamma\n\nC\n\n### Delta\n\nD\n`
+  // the card guide (forms:v3 reads it whole)
+  if (/\/skills\/thimble\/cards\.md$/.test(path)) return '# The card guide\n\n## What makes a good card\n\nTHE WORKED FORMS'
   const m = /\/prompts\/([^/]+)\/([^/]+)\.md$/.exec(path)
   if (!m) return undefined
   return STUBS[`${m[1]}/${m[2]}`] ?? `PROMPT ${m[1]}:${m[2]}`

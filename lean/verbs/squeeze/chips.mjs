@@ -234,7 +234,7 @@ function chipLine(c, words = 0, keep = 0) {
   if (c.id === 'length' && words) return `- ${c.name}: ${c.levels[c.level]}, ${lengthTarget(c.level, words, keep)} (levels ${levels}; the original is at full, ${words} words)`
   if (c.kind === 'stretch') {
     const where = c.level === 0 ? `0 of ${STRETCH_STEPS}, as the original` : c.level === STRETCH_STEPS ? `${STRETCH_STEPS} of ${STRETCH_STEPS}, all the way to "${c.to}"` : `${c.level} of ${STRETCH_STEPS} steps toward "${c.to}"`
-    return `- A stretch the person made, from "${c.from}" to "${c.to}": ${where} (the original stands at "${c.from}", step 0)`
+    return `- A stretch the analyst made, from "${c.from}" to "${c.to}": ${where} (the original stands at "${c.from}", step 0)`
   }
   // where nobody has said where the original stands, a chip the person left alone keeps the original as it is
   if (!c.known && c.level === c.level0) return `- ${c.name}: as the original (levels ${levels})`
@@ -242,7 +242,7 @@ function chipLine(c, words = 0, keep = 0) {
 }
 
 /** The line that heads the original in a catch-up's request: several messages, written as one. */
-export const CATCHUP_HEAD = "Claude's messages since the person's last prompt, in the order it wrote them, as written (the original). Write them as one message:"
+export const CATCHUP_HEAD = "Claude's messages since the analyst's last prompt, in the order it wrote them, as written (the original). Write them as one message:"
 
 /** A catch-up's original: Claude's messages, in order, one after another. */
 export const catchUpText = texts => (texts || []).map(t => String(t || '').trim()).filter(Boolean).join('\n\n---\n\n')
@@ -259,7 +259,7 @@ export const catchUpStands = rec => isCatchUp(rec) && !rec.catchup.dismissed
 /** @param {any} rec @param {{system?: string, question?: string, chips?: any[], keep?: string[], terms?: string[], model?: string, effort?: string, maxTokens?: number, timeoutMs?: number}} [opts] */
 export function request(rec, { system, question = '', chips = chipsOf(rec), keep = [], terms = [], model = 'sonnet', effort = 'low', maxTokens = 4000, timeoutMs = 90000 } = {}) {
   const head = [
-    question ? `The person asked: ${question.trim().slice(0, 2000)}` : 'The person\'s question is not known.',
+    question ? `The analyst asked: ${question.trim().slice(0, 2000)}` : 'The analyst\'s question is not known.',
     '',
     isCatchUp(rec) ? CATCHUP_HEAD : 'Claude\'s message, as written (the original):',
     '<original>',
@@ -271,7 +271,7 @@ export function request(rec, { system, question = '', chips = chipsOf(rec), keep
   // the corrections in the original stay at every level, shortened if need be (mustKeep); the length does not count them
   const kept = keep.length ? ['', 'Corrections in the original. Each stays at every level, in as few words as it needs, next to what it corrects:', ...keep.map(k => `- ${k}`)] : []
   // the terms the person can open an explanation of (explain marks): kept in their own words where the text keeps them
-  const named = terms.length ? ['', 'Terms the person can open an explanation of. Where your text keeps what a term names, use the term in these words:', ...terms.map(t => `- ${t}`)] : []
+  const named = terms.length ? ['', 'Terms the analyst can open an explainer of. Where your text keeps what a term names, use the term in these words:', ...terms.map(t => `- ${t}`)] : []
   const tail = ['', 'The chips, each at the level to write now:', ...lines, ...kept, ...named, '', 'Write the message at these levels.']
   return {
     model, effort, maxTokens, timeoutMs,
@@ -576,8 +576,8 @@ export function noteFor(rec) {
   if (isCatchUp(rec)) {
     if (typeof rec.shown !== 'string' || !rec.shown.trim()) return ''
     const n = Number(rec.catchup.replies) || 0
-    return `The person caught up on your ${n === 1 ? 'reply' : `${n} replies`} since their last prompt by reading them rewritten as one message by the squeeze chips (${set}); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\n${rec.shown.slice(0, 8000)}`
+    return `The analyst caught up on your ${n === 1 ? 'reply' : `${n} replies`} since their last prompt by reading them rewritten as one message by the squeeze chips (${set}); what you wrote is unchanged, and they can read it. "This" may mean the catch-up they read:\n${rec.shown.slice(0, 8000)}`
   }
-  if (isOriginal(chips)) return 'The person restored your last reply as you wrote it.'
-  return `The person reads your last reply rewritten by the squeeze chips (${set}); what you wrote is unchanged, and they can restore it. "This" may mean the version they read:\n${String(rec.shown || '').slice(0, 1500)}`
+  if (isOriginal(chips)) return 'The analyst restored your last reply as you wrote it.'
+  return `The analyst reads your last reply rewritten by the squeeze chips (${set}); what you wrote is unchanged, and they can restore it. "This" may mean the version they read:\n${String(rec.shown || '').slice(0, 1500)}`
 }
