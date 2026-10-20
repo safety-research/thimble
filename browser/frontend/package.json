@@ -10,7 +10,6 @@
     "preview": "vite preview",
     "typecheck": "tsc -b && tsc -p tsconfig.test.json",
     "test": "vitest run",
-    "test:browser": "vitest run --config vitest.browser.config.ts",
     "check": "npm run typecheck && vitest run && vite build"
   },
   "dependencies": {

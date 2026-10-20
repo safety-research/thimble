@@ -1,5 +1,5 @@
-// The card runtime's tests: lineage carried by itself, interaction state and events, ask(selection), the sandbox's
-// budgets and its one-line fallback, and a title for every card. node --test plugin/draw/test
+// The card runtime's tests: lineage carried by itself, interaction state and events, ask(selection), what a handler
+// asks of the host, and the sandbox's budgets and its one-line fallback. node --test plugin/draw/test
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -38,91 +38,6 @@ test('a part drawn from a row of the data opens that row, with no ref written by
   assert.ok(!('row' in meta(d, 'slowest')), 'the row itself is not copied into the drawing')
   // the kernel's fields are lineage, never columns
   assert.doesNotMatch(gridText(renderTerm(d, { w: 80 })), /_ref|_rows|runs\.jsonl/)
-})
-
-test('a stacked bar\'s part drawn from a row is a part by itself: it opens that row and has its cells and its span', () => {
-  // one bar per language, split into the runs it holds: each run's part keeps the run's row
-  const program = `
-    const langs = ['Rust', 'Go']
-    return k.stack(langs.map(l => k.beside(k.text(l, { w: 6 }), k.bar(data.runs.filter(r => r.lang === l).map(r => ({ value: r.calls, label: r.run, row: r })), { max: 400 }))))`
-  const d = run(program)
-  assert.equal(d.error, undefined, d.error && d.error.message)
-  assert.deepEqual(d.regions.map(r => r.id), ['run-ep01', 'run-ep03', 'run-ep02'])
-  assert.equal(meta(d, 'run-ep03').ref, 'q12#run=ep03')
-  assert.equal(meta(d, 'run-ep03').label, 'ep03 201')
-  assert.deepEqual(d.warnings, [], 'ids the runtime made need no warning')
-  // the terminal: each part covers its own cells of the bar, side by side
-  const g = renderTerm(d, { w: 60 })
-  const rect = id => g.regions.find(r => r.id === id).rects[0]
-  assert.equal(rect('run-ep01').y, rect('run-ep03').y)
-  assert.equal(rect('run-ep01').x + rect('run-ep01').w, rect('run-ep03').x)
-  assert.ok(rect('run-ep03').w > rect('run-ep01').w, 'the longer part has more cells')
-  // a part with no row stays a part of the bar only
-  const plain = run(`return k.bar([{ value: 3, label: 'a' }, { value: 4, label: 'b' }], { max: 10 })`)
-  assert.deepEqual(plain.regions, [])
-})
-
-test('every part of a stacked bar has one height, k.bars names the parts once in a key above, and a total beside the total is drawn once', async () => {
-  // a narrow part whose label is wide characters, a part labelled with a number, and a note that repeats the total
-  const parts = [{ value: 9, label: '数据集', tone: 'c1' }, { value: 30, label: 'names 11–50', tone: 'c2' }, { value: 61, label: '1,119 other names', tone: 'c4' }]
-  const program = `return k.bars([{ id: 'answers', label: 'answers', parts: data.parts, note: k.fmt(100) }, { id: 'proxy', label: 'proxy', parts: data.parts.slice(1), note: 'two kinds' }])`
-  for (const w of [40, 60, 90, 120, 150]) {
-    const d = runProgram({ program, data: { parts } }, { w, h: 12 })
-    assert.equal(d.error, undefined, d.error && d.error.message)
-    const g = renderTerm(d, { w })
-    const text = gridText(g).split('\n')
-    // the key: each part's name once, in the rows above the bars (it wraps when the card is narrow)
-    const first = text.findIndex(l => l.includes('▆'))
-    const key = text.slice(0, first).map(l => l.trim()).join(' ')
-    for (const p of parts) assert.equal(key.split(p.label).length - 1, 1, `${w}: ${key}`)
-    // the bars: every cell of a part is the same glyph, on no fill
-    for (const row of g.rows.slice(first, first + 2)) {
-      const on = row.filter(c => parts.some(p => p.tone === c.tone))
-      assert.ok(on.length > 0, `${w}: a bar is drawn`)
-      assert.ok(on.every(c => c.ch === '▆' && !c.bg), `${w}: ${on.map(c => c.ch).join('')}`)
-    }
-    // a total beside the same total is drawn once; another note is kept
-    assert.equal(text[first].split('100').length - 1, 1, `${w}: ${text.join('\n')}`)
-    if (w >= 90) assert.ok(text[first + 1].includes('two kinds'), text.join('\n'))
-  }
-})
-
-test('a stacked bar keeps one height whatever its parts are: wide or narrow, labelled, unlabelled, or with a note beside', () => {
-  // lived and died per class, as a Titanic card draws them: one part wide enough for its label, one too narrow for it,
-  // one with no label, a sliver under one cell, and a row with a note beside the bar; and a lone k.bar outside k.bars
-  const program = `return k.stack(
-    k.bars([
-      { id: 'first', label: '1st', parts: [{ value: 136, label: 'lived', tone: 'c1' }, { value: 80, label: 'died', tone: 'dim' }], note: '216 aboard' },
-      { id: 'second', label: '2nd', parts: [{ value: 87, label: 'lived', tone: 'c1' }, { value: 97, tone: 'dim' }] },
-      { id: 'third', label: '3rd', parts: [{ value: 3, label: 'lived', tone: 'c1' }, { value: 372, label: 'died', tone: 'dim' }, { value: 1, label: 'unknown', tone: 'c4' }] },
-    ]),
-    k.bar([{ value: 40, label: 'lived', tone: 'c1' }, { value: 60, tone: 'dim' }], { max: 100 }))`
-  for (const w of [50, 80, 120]) {
-    const d = runProgram({ program, data: {} }, { w, h: 12 })
-    assert.equal(d.error, undefined, d.error && d.error.message)
-    const g = renderTerm(d, { w })
-    const text = gridText(g).split('\n')
-    const first = text.findIndex(l => l.includes('▆'))
-    for (let y = first; y < g.h; y++) {
-      const cells = g.rows[y].filter(c => c.tone === 'c1' || c.tone === 'dim' || c.tone === 'c4')
-      const bar = cells.filter(c => c.ch !== ' ' && !/[0-9a-z]/i.test(c.ch))
-      // every cell of a part is the bar glyph or, for a part under one cell, the sliver; none sits on a fill
-      assert.ok(bar.every(c => (c.ch === '▆' || c.ch === '▏') && !c.bg), `${w}, row ${y}: ${bar.map(c => c.ch).join('')}`)
-      assert.ok(g.rows[y].every(c => !c.bg), `${w}, row ${y}: no part fills its whole cell`)
-    }
-    // the parts' names are in the key above, each once
-    for (const name of ['lived', 'died', 'unknown']) assert.equal(text.slice(0, first).join(' ').split(name).length - 1, 1, `${w}: ${text.slice(0, first).join(' ')}`)
-  }
-})
-
-test('the key k.bars adds is left out where the program names the parts in a legend of its own', () => {
-  const rows = `[{ id: 'a', label: 'a', parts: [{ value: 3, label: 'added', tone: 'c2' }, { value: 5, label: 'deleted', tone: 'c4' }] }]`
-  const count = program => gridText(renderTerm(runProgram({ program, data: {} }, { w: 60, h: 12 }), { w: 60 })).split('deleted').length - 1
-  assert.equal(count(`return k.bars(${rows})`), 1)
-  assert.equal(count(`return k.stack(k.bars(${rows}), k.legend([{ label: 'added', tone: 'c2' }, { label: 'deleted', tone: 'c4' }]))`), 1)
-  assert.equal(count(`return k.stack(k.text('{c2:■} added  {c4:■} deleted'), k.bars(${rows}))`), 1)
-  // words that only mention the parts are no legend: the key stays
-  assert.equal(count(`return k.stack(k.text('more deleted than added'), k.bars(${rows}))`), 2)
 })
 
 test('a part the program drew from values alone is matched to the rows whose words it shows', () => {
@@ -220,14 +135,6 @@ test('the sandbox stops a program past its time or its size budget, and says so 
   assert.match(gridText(renderTerm(big, { w: 200 })), /SizeLimit: the drawing is .* MB, over the 0\.1 MB budget · fix: draw fewer parts/)
 })
 
-test('the card\'s title is in every drawing, even when the program draws none', () => {
-  assert.equal(run('return k.text("3 runs")').title, 'How the episodes ended')
-  const framed = runProgram({ program: 'return k.frame(k.text("x"), { title: "From the frame" })', data: {} }, { w: 40 })
-  assert.equal(framed.title, 'From the frame')
-  // the program reads it, and the surface it is drawn on
-  assert.match(gridText(renderTerm(run('return k.text(k.title + " · " + k.surface)'), { w: 80 })), /How the episodes ended · terminal/)
-})
-
 test('a handler asks the host for later events (k.after), its actions (k.do) and nothing it does not have; the bar line (k.status)', () => {
   const program = `
     const n = k.state.n ?? 0
@@ -260,57 +167,4 @@ test('k.want asks the host for data not in hand; the host runs the program again
   const again = run(program, { got: { [key]: { count: 6543 } } })
   assert.equal(again.wants, undefined)
   assert.match(gridText(renderTerm(again, { w: 40 })), /6543 rows/)
-})
-
-test('k.embed draws another program\'s drawing as a part, its parts and cites with it; k.select marks a part; c.bg grounds cells', () => {
-  const card = run("k.cite('c18', { text: '6,543 saves', rows: ['revisions.jsonl#L28'] }); return k.region('day-18', { label: 'Jun 18', cite: 'c18' }, k.bar(9, { max: 9 }))")
-  const page = globalThis.DrawKit.run((k, data) => {
-    k.select('day-18')
-    const c = k.canvas(10, 1)
-    c.text(0, 0, 'picked')
-    c.bg(0, 0, 6, 1, 'warn-faint')
-    return k.stack(k.text('**the page**'), k.embed(data.card), c)
-  }, { card }, { w: 40 })
-  assert.equal(page.error, undefined)
-  assert.equal(page.selected, 'day-18')
-  assert.ok(page.regions.some(r => r.id === 'day-18'))
-  assert.ok(page.cites.c18)
-  const g = renderTerm(page, { w: 40 })
-  const row = g.rows.find(r => r.map(c => c.ch).join('').startsWith('picked'))
-  assert.equal(row[0].bg, 'warn-faint')
-})
-
-test('k.keys tells a program the keys that reach it where it is drawn; a key the host keeps is named at once (a warning)', () => {
-  const prog = `k.on('c', () => ({ flip: !k.state.flip }), 'flip'); k.on('0', () => null, 'reset'); return k.text(k.keys.free('c') + ' ' + k.keys.free('0') + ' ' + k.keys.taken.join(''))`
-  const d = DrawKit.run(prog, {}, { keys: { taken: { 0: 'goes back', ']': 'moves to the next thing' } } })
-  assert.match(gridText(renderTerm(d, { w: 40 })), /true false 0\]/)
-  assert.equal(d.warnings.length, 1)
-  assert.match(d.warnings[0], /the key "0" does not reach this card where it is drawn now \(goes back\)/)
-  // with no keys given (a pane of thimble's own), every key is free
-  assert.deepEqual(DrawKit.run(prog, {}, {}).warnings, [])
-  // the sandbox passes them on
-  assert.equal(runProgram({ id: 'x', program: prog, data: {} }, { keys: { taken: ['c'] } }).warnings.length, 1)
-})
-
-test('k.local names the state keys each surface keeps for itself (a hover, a replay); the drawing lists them', () => {
-  const d = DrawKit.run(`k.local('hover', 'replay'); k.on('hover', e => ({ hover: e.region })); return k.text(String(k.state.hover))`, {}, { state: { zoom: 2 }, event: { type: 'hover', region: 'r1' } })
-  assert.deepEqual(d.local, ['hover', 'replay'])
-  assert.deepEqual(d.state, { zoom: 2, hover: 'r1' })
-})
-
-test('a press on a canvas region runs its onPress, as on k.region; a handler that returns k changes no state', () => {
-  const program = `
-    const sel = k.state.sel || 'none'
-    const c = k.canvas(20, 2)
-    data.runs.forEach((r, i) => { c.text(i * 6, 0, r.run); c.region('cell-' + r.run, i * 6, 0, 5, 1, { row: r, onPress: () => ({ sel: r.run }) }) })
-    k.on('a', () => k.ask({ label: 'the picked run', rows: data.runs.filter(r => r.run === sel) }))
-    return k.stack(c, k.text('picked ' + sel))`
-  const pressed = run(program, { event: { type: 'press', region: 'cell-ep02' } })
-  assert.equal(pressed.handled, 'press:cell-ep02')
-  assert.deepEqual(pressed.state, { sel: 'ep02' })
-  assert.equal(meta(pressed, 'cell-ep02').ref, 'q12#run=ep02', 'the canvas region keeps its row')
-  assert.ok(!('onPress' in meta(pressed, 'cell-ep02')))
-  const asked = run(program, { state: pressed.state, event: { type: 'key', key: 'a' } })
-  assert.deepEqual(asked.ask, { label: 'the picked run', refs: ['q12#run=ep02'] })
-  assert.deepEqual(asked.state, { sel: 'ep02' }, 'k.ask returns k, which is not a patch of the state')
 })

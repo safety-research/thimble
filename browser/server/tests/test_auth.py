@@ -1,4 +1,4 @@
-"""Only the browser signed in with the printed link reaches the API (auth.py)."""
+"""Only the browser signed in with the printed link reaches the API (auth.py), and the server listens on 127.0.0.1 only."""
 from fastapi.testclient import TestClient
 
 from thimble_browser.app import build
@@ -46,3 +46,13 @@ def test_changes_need_the_pages_own_origin():
     assert bad.status_code == 403
     ok = c.post(f"/b/{key}/api/ui/signout", headers={"cookie": cookie, "origin": OWN})
     assert ok.status_code == 200
+
+
+def test_the_server_listens_on_127_0_0_1_only_and_prints_a_link_with_a_code(folder, monkeypatch, capsys):
+    from thimble_browser import __main__ as launch
+
+    seen = {}
+    monkeypatch.setattr(launch.uvicorn, "run", lambda app, **kw: seen.update(kw))
+    assert launch.main([str(folder), "--no-open", "--port", str(PORT)]) == 0
+    assert seen["host"] == "127.0.0.1"
+    assert f"open http://127.0.0.1:{seen['port']}/?ws=" in capsys.readouterr().out

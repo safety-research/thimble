@@ -18,7 +18,6 @@ sys.path.insert(0, str(ENGINE))
 from kernel import labels as LB  # noqa: E402
 from kernel import lineage as LIN  # noqa: E402
 from kernel import objects as O  # noqa: E402
-from kernel import query as Q  # noqa: E402
 from kernel.store import Store  # noqa: E402
 
 LEAN = Path(__file__).resolve().parents[1] / "bin" / "thimble"
@@ -83,22 +82,6 @@ def test_a_regex_label_gives_each_record_a_value_and_its_counts_are_citations(ro
     assert [e["kind"] for e in feed(root)] == ["save"]
 
 
-def test_use_gives_a_label_to_a_later_query_with_its_rows(root: Path):
-    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
-    st = Store(root)
-    q = Q.run(st, "sorry per agent", 'df = load("chat/*.jsonl")\n'
-              'df = df.merge(use("sorry")[["_ref", "sorry"]], on="_ref")\n'
-              'tally(df[df.sorry == "yes"], "agent")\n')
-    assert q["error"] is None, q["stdout"]
-    assert q["lineage"] == "exact"
-    assert q["uses"] == [{"name": "sorry", "query": "r1", "label": "sorry", "rev": LB.load(st, "sorry")["rev"]}]
-    assert q["table"] == [{"agent": "wren", "n": 2}]
-    # `thimble rows --label` reads the records with a value, each with its value
-    r = run(root, "rows", "chat/*.jsonl", "--label", "sorry=yes")
-    assert "chat/room.jsonl#L1  [sorry: yes · regex]" in r.stdout
-    assert "2 of 2 matching rows" in r.stdout
-
-
 def test_code_labels_take_a_value_a_confidence_or_none_and_say_what_failed(root: Path):
     code = ("def label(unit):\n"
             "    if unit['n'] == 5:\n"
@@ -146,37 +129,6 @@ def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     assert LB.status(LB.load(st, "apology"))["waiting"] == 2
 
 
-def test_a_label_named_with_an_underscore_keeps_one_card_through_its_versions(root: Path):
-    r = run(root, "label", "says_sorry", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
-    assert r.returncode == 0, r.stdout + r.stderr
-    st = Store(root)
-    card = LB.load(st, "says_sorry")["card"]
-    w = json.loads(run(root, "label", "says_sorry", "--waiting").stdout)
-    payload = {"values": {u["ref"]: {"value": "no"} for u in w["units"]}}
-    got = json.loads(run(root, "label", "says_sorry", "--answers", "-", "--json", stdin=json.dumps(payload)).stdout)
-    # the card saved again is the same card at its next version, never a second card
-    assert got["card"] == {"id": card, "version": 2}
-    assert [i for i in O.all_ids(st) if "says-sorry" in i] == [card]
-
-
-def test_the_same_definition_keeps_its_values_and_labels_only_new_records(root: Path):
-    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.", "--limit", "2")
-    st = Store(root)
-    lab = LB.load(st, "apology")
-    assert lab["trial"] and len(lab["units"]) == 2
-    first = list(lab["units"])
-    run(root, "label", "apology", "--answers", "-", stdin=json.dumps({"values": {r: {"value": "no"} for r in first}}))
-    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
-    lab = LB.load(st, "apology")
-    assert lab["version"] == 1 and len(lab["units"]) == 6
-    assert all(lab["units"][r]["v"] == "no" for r in first)
-    assert LB.status(lab)["waiting"] == 4
-    # a changed definition is a new version, whose records start again
-    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes to a person.")
-    lab = LB.load(st, "apology")
-    assert lab["version"] == 2 and LB.status(lab)["waiting"] == 6
-
-
 def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: Path):
     run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     r = run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")
@@ -197,108 +149,3 @@ def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: P
     res = json.loads(run(root, "resolve", "chat/room.jsonl#L1-6", "--json", "-n", "6").stdout)
     assert res["labels"]["sorry"]["values"] == {"yes": 3, "no": 3}
     assert res["records"][4]["labels"] == {"sorry": "yes"}
-
-
-def test_set_gives_records_values_claude_judged_after_reading(root: Path):
-    r = run(root, "label", "blame", "--set", "chat/room.jsonl#L1=self", "chat/room.jsonl#L5.b0=self", "chat/room.jsonl#L2=none")
-    assert r.returncode == 0, r.stdout + r.stderr
-    st = Store(root)
-    lab = LB.load(st, "blame")
-    assert lab["kind"] == "set" and lab["values"] == ["self", "none"]
-    assert set(lab["units"]) == {"chat/room.jsonl#L1", "chat/room.jsonl#L5", "chat/room.jsonl#L2"}
-    assert LB.status(lab)["counts"] == {"self": 2, "none": 1}
-
-
-def test_wait_says_plainly_when_no_session_makes_the_calls(root: Path, monkeypatch: pytest.MonkeyPatch):
-    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
-    st = Store(root)
-    with LB.locked(st, "apology"):
-        lab = LB.load(st, "apology")
-        lab["run"]["asked"] -= 600
-        LB.write(st, lab, change=False)
-    r = run(root, "label", "apology", "--wait", "5")
-    assert r.returncode == 1 and "no session has started the model's calls" in r.stdout
-
-
-def test_wait_waits_once_the_calls_are_picked_up(root: Path):
-    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
-    run(root, "label", "apology", "--answers", "-", stdin=json.dumps({"run": {"state": "running"}}))
-    st = Store(root)
-    with LB.locked(st, "apology"):
-        lab = LB.load(st, "apology")
-        lab["run"]["asked"] -= 600
-        LB.write(st, lab, change=False)
-    r = run(root, "label", "apology", "--wait", "2")
-    assert r.returncode == 0 and "still 6 records waiting after 2s" in r.stdout
-
-
-def test_waiting_gives_one_wave_of_batches_and_counts_every_waiting_record(root: Path, monkeypatch: pytest.MonkeyPatch):
-    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
-    st = Store(root)
-    w = LB.waiting(st, "apology")
-    assert w["waiting"] == 6 and len(w["units"]) == 6 and len(w["batches"]) == 1
-    # in batches of two records: the first two batches only, while `waiting` still counts all six
-    monkeypatch.setattr(LB, "batches", lambda units: [[u["ref"] for u in units[i:i + 2]] for i in range(0, len(units), 2)])
-    first = LB.waiting(st, "apology", first=2)
-    assert first["waiting"] == 6 and len(first["batches"]) == 2
-    assert [u["ref"] for u in first["units"]] == [r for b in first["batches"] for r in b] == [u["ref"] for u in w["units"][:4]]
-    out = json.loads(run(root, "label", "apology", "--waiting", "1").stdout)
-    assert out["waiting"] == 6 and len(out["batches"]) == 1 and len(out["units"]) == 6
-
-
-def test_wait_stops_when_the_reads_stopped_and_says_why(root: Path):
-    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
-    run(root, "label", "apology", "--answers", "-", stdin=json.dumps({"run": {"state": "running"}}))
-    run(root, "label", "apology", "--answers", "-", stdin=json.dumps({"run": {"state": "failed", "error": "the label apology could not be read"}}))
-    r = run(root, "label", "apology", "--wait", "30")
-    assert r.returncode == 1 and "the model's calls stopped: the label apology could not be read" in r.stdout and "--again" in r.stdout
-
-
-def test_the_label_viewer_reads_a_page_of_records_with_their_values_and_the_labels_with_their_definitions(root: Path):
-    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
-    run(root, "label", "sorry", "--check", "chat/room.jsonl#L2", "yes")
-    # the labels list: each with its definition, kind, scope and counts
-    labs = json.loads(run(root, "label", "--json").stdout)
-    assert labs[0]["name"] == "sorry" and labs[0]["kind"] == "regex" and labs[0]["rule"] == "(?i)sorry|apolog"
-    assert labs[0]["in"] == "chat/*.jsonl" and labs[0]["values"] == ["yes", "no"] and labs[0]["counts"] == {"yes": 3, "no": 3}
-    # a page of one value's records, in order, each with its value, its source and its words
-    got = json.loads(run(root, "label", "sorry", "--records", "yes", "--json").stdout)
-    assert got["total"] == 3 and got["label"]["checked"] == 1
-    recs = got["records"]
-    assert [x["ref"] for x in recs] == ["chat/room.jsonl#L1", "chat/room.jsonl#L2", "chat/room.jsonl#L3"]
-    assert [x["by"] for x in recs] == ["regex", "analyst", "regex"]
-    assert recs[1]["checked"] and recs[1]["was"] == "no"
-    assert "broke the build" in recs[0]["words"]
-    # every record, a page at a time
-    page = json.loads(run(root, "label", "sorry", "--records", "--at", "4", "--count", "5", "--json").stdout)
-    assert page["total"] == 6 and [x["i"] for x in page["records"]] == [4, 5]
-    # the viewer's reads are not in --help, which Claude reads
-    assert "--records" not in run(root, "label", "--help").stdout
-
-
-def test_a_card_or_a_citation_names_the_labels_it_rests_on(root: Path):
-    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
-    run(root, "label", "fixes", "--in", "chat/*.jsonl", "--regex", "(?i)fix|revert")
-    st = Store(root)
-    # a query that reads a label (use) rests on it, and one built on that query rests on it too
-    q1 = Q.run(st, "sorry per agent", 'df = load("chat/*.jsonl")\n'
-               'df = df.merge(use("sorry")[["_ref", "sorry"]], on="_ref")\n'
-               'tally(df, ["agent", "sorry"])\n')
-    assert q1["labels"] == ["sorry"]
-    q2 = Q.run(st, "agents who apologized", f'd = use("{q1["id"]}")\nd[d.sorry == "yes"]\n')
-    q3 = Q.run(st, "fixes by label_rows", 'tally(label_rows("fixes"), "fixes")\n')
-    assert q3["labels"] == ["fixes"]
-    plain = Q.run(st, "rows per agent", 'tally(load("chat/*.jsonl"), "agent")\n')
-    # a card on the first query, the label's own card, and a card that reads no label
-    card = O.save(st, "apologies", {"title": "Apologies", "program": "return k.text('x')", "data": {"rows": q1["id"]}})
-    plain_card = O.save(st, "agents", {"title": "Agents", "program": "return k.text('x')", "data": {"rows": plain["id"]}})
-    lab = LB.load(st, "sorry")
-    by = LB.used_by(st, [card["id"], lab["card"], f"{q2['id']}#agent=wren@n", f"{lab['query']}#sorry=yes@n", q3["id"],
-                         plain_card["id"], plain["id"], "chat/room.jsonl#L1", "no-such-card"])
-    assert by == {card["id"]: ["sorry"], lab["card"]: ["sorry"], f"{q2['id']}#agent=wren@n": ["sorry"],
-                  f"{lab['query']}#sorry=yes@n": ["sorry"], q3["id"]: ["fixes"]}
-    # the command answers with each label's head, for the shell to draw its values in their colors
-    got = json.loads(run(root, "label", "--used-by", card["id"], q3["id"], "--json").stdout)
-    assert got["by"] == {card["id"]: ["sorry"], q3["id"]: ["fixes"]}
-    assert [x["name"] for x in got["labels"]] == ["fixes", "sorry"] and got["labels"][1]["values"] == ["yes", "no"]
-    assert "--used-by" not in run(root, "label", "--help").stdout

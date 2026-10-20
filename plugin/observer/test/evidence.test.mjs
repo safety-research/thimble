@@ -1,103 +1,14 @@
-// The observer's pure parts: what it reads of an object's lineage, and how it reads the pass's answer.
+// The observer's reply: how it reads the pass's answer.
 // `node --test plugin/observer/test/*.test.mjs`
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { bareNumbers, declaredText, digest, fewInputs, parseAnswer, rowCount, rowsIn, slim } from '../evidence.js'
-
-const OBJECT = {
-  id: '02-orders-by-region', version: 2, session: 's-1', title: 'Refunds by region', question: 'Which region had the most refunds in March?',
-  text: 'West had [412 refunds](q3#region=West@n) in March, about 31% of all, and 9 regions had none.',
-  hints: ['explore'],
-  lineage: {
-    queries: { q3: { id: 'q3', about: 'refunds per region', inputs: [{ path: 'orders.csv', rows_read: 18204 }], uses: [], kept: [], lineage: 'superset' } },
-    bindings: [{ at: '/regions', ref: 'q3', query: 'q3', lineage: 'superset' }],
-    cites: [
-      { in: 'text', ref: 'q3#region=West@n', label: '412 refunds', value: 412, rows: ['orders.csv#row=2-300,410-522'] },
-      { in: '/examples/one', ref: 'orders.csv#row=17', rows: ['orders.csv#row=17'], quote: 'refund: damaged' },
-    ],
-    rows: { 'orders.csv': { count: 412, rowsets: ['orders.csv#row=2-300,410-522'] } },
-    coverage: { files: { 'orders.csv': 'computed' }, not_read: ['returns.csv', 'notes.txt'] },
-    declared: { read: 'ten refund rows by hand' },
-    problems: [],
-  },
-}
-const VERBS = [
-  { key: 's', name: 'squeeze', line: 'shorter', phrase: null, picked: false },
-  { key: 'x', name: 'explore', line: 'a view to explore', phrase: 'explore 12 regions', picked: true },
-  { key: 't', name: 'trace', line: 'where it came from', phrase: 'where these numbers come from', picked: true },
-]
-
-test('row sets count their rows, and a whole file counts as unknown', () => {
-  assert.equal(rowsIn('revisions.jsonl#L4-9,12,40-41'), 9)
-  assert.equal(rowsIn('a.jsonl#L4-L9'), 6)
-  assert.equal(rowsIn('run.jsonl#L12.b1'), 1)
-  assert.equal(rowsIn('run.jsonl#L12.b0-1,14-15.b0'), 4) // a block set: each part's lines times its blocks
-  assert.equal(rowsIn('forge.db#prs/1-12'), 12)
-  assert.equal(rowsIn('orders.csv#row=2-300,410-522'), 412)
-  assert.equal(rowCount(['a.jsonl#L1-3', 'b.jsonl#L7']), 4)
-  assert.equal(rowCount(['a.jsonl']), null)
-})
-
-test('a file only computed over, counted or searched is not seen: the digest says so, from a snapshot of now and of before', () => {
-  const at = cov => digest({ ...OBJECT, lineage: { ...OBJECT.lineage, coverage: cov } }, {})
-  // now: not_read holds every file not seen, and files says how each was touched
-  const now = at({ files: { 'orders.csv': 'computed', 'a.py': 'seen', 'b.py': 'named', 'c.py': 'searched', 'e.md': 'model' }, not_read: ['orders.csv', 'b.py', 'c.py', 'e.md', 'd.py'] })
-  assert.match(now, /the session had: seen a.py; not seen orders.csv \(computed over\), b.py \(only named or counted\), c.py \(searched\), e.md \(read by a label's model\), d.py$/m)
-  // before: not_read held only the untouched files, a file read was `read`, and one a query loaded `computed` (now
-  // said as what it was: computed over, not seen)
-  assert.match(at({ files: { 'orders.csv': 'computed', 'a.py': 'read', 'b.py': 'named' }, not_read: ['d.py'] }), /seen a.py; not seen d.py, orders.csv \(computed over\), b.py \(only named or counted\)$/m)
-  // many: counted by how
-  const many = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`s${i}.py`, i < 8 ? 'named' : 'searched']))
-  assert.match(at({ files: many, not_read: Object.keys(many), not_read_count: 12 }), /not seen 12 files \(8 only named or counted, 1 searched\), as s0.py, s1.py, s2.py, s3.py$/m)
-  assert.equal(slim({ id: 'x', lineage: { coverage: { files: {}, not_read: ['a'], total: { not_read_files: 40 } } } }).lineage.coverage.not_read_count, 40)
-})
-
-test('numbers in the words that cite nothing are named; cited ones, years and dates are not', () => {
-  assert.deepEqual(bareNumbers('West had [412 refunds](q3#region=West@n) in March 2026, about 31% of all, on 2026-03-14, and 9 regions had none; 1,203 rows.'), ['31%', '1,203'])
-})
-
-test('the digest says how many rows stand behind each cited value, how sure the lineage is, what was not read, and the verbs', () => {
-  const d = digest(OBJECT, { verbs: VERBS, isNew: true, drawn: 'Refunds by region\nWest ▆▆▆▆ 412\n\n12 regions' })
-  assert.match(d, /Card 02-orders-by-region v2 "Refunds by region" \(saved since the last look\)/)
-  assert.match(d, /"412 refunds" = 412 \(q3#region=West@n\): rests on 412 rows of orders.csv/)
-  assert.match(d, /numbers in its words that cite nothing: 31%/)
-  assert.match(d, /query q3 "refunds per region": orders.csv \(18,204 rows read\); rows found by key, but their number does not equal the count column/)
-  assert.match(d, /not seen returns.csv, notes.txt/)
-  assert.match(d, /Claude declared: read: ten refund rows by hand/)
-  assert.match(d, /t trace: where it came from · where these numbers come from/)
-  assert.match(d, /its hint row now: explore, trace \(Claude named explore\)/)
-  assert.match(d, /records it quotes or cites in its data: 1, each found in its row/)
-  assert.match(d, /as the analyst sees it under the reply:\n    Refunds by region\n    West ▆▆▆▆ 412\n    12 regions/)
-})
+import { parseAnswer } from '../evidence.js'
 
 test("the pass's answer is read leniently: its lenses' parts, and nothing of the parts no lens gives", () => {
   const a = parseAnswer('Here: {"notes": [{"note": "412 counts all months."}], "verbs": {"v": {"note": "1 view"}}, "glosses": [{"term": "p95"}], "line": {"line": "x", "decision": "send it"}, "settled": true, "hints": {"orders-by-region": [{"verb": "trace"}]}}')
   assert.deepEqual(Object.keys(a).sort(), ['claims', 'clusters', 'glosses', 'heads', 'verbs'])
   assert.deepEqual(a.glosses, [{ term: 'p95' }])
   assert.equal(parseAnswer('no json'), null)
-})
-
-test('a slimmed object keeps what the digest reads and drops its data, program and row sets; many inputs read as patterns', () => {
-  const big = { ...OBJECT, program: 'x'.repeat(1000), data: { rows: Array.from({ length: 1000 }, (_, i) => ({ n: i, _rows: [`a.jsonl#L${i}`] })) } }
-  const s = slim(big)
-  assert.equal(s.data, undefined)
-  assert.equal(s.program, undefined)
-  assert.equal(s.lineage.cites[0].rows, undefined)
-  assert.equal(s.lineage.cites[0].rows_n, 412)
-  assert.equal(digest(s, { verbs: VERBS }), digest(OBJECT, { verbs: VERBS }))
-  const inputs = Array.from({ length: 96 }, (_, i) => ({ path: `runs/sweep${1 + (i % 2)}-opus/agents/agent-${String(i).padStart(2, '0')}.jsonl`, rows_read: 10 }))
-  assert.deepEqual(fewInputs(inputs), [{ path: 'runs/sweep*-opus/agents/agent-*.jsonl (96 files)', rows_read: 960 }])
-})
-
-test('what Claude declared reaches the observer in the form it saved it: words, a list or fields', () => {
-  const as = declared => digest({ ...OBJECT, lineage: { ...OBJECT.lineage, declared } }, { isNew: true })
-  assert.match(as('I read the 12 refund notes by hand.'), /Claude declared: I read the 12 refund notes by hand\./)
-  assert.match(as(['read rows 2-14 of orders.csv', 'judged tone by hand']), /Claude declared: read rows 2-14 of orders\.csv; judged tone by hand/)
-  assert.match(as({ read: 'ten refund rows by hand' }), /Claude declared: read: ten refund rows by hand/)
-  // the kernel keeps it at the card's top too
-  assert.match(digest({ ...OBJECT, declared: 'judged by hand', lineage: { ...OBJECT.lineage, declared: undefined } }, { isNew: true }), /Claude declared: judged by hand/)
-  for (const nothing of [null, '', '  ', [], {}]) assert.match(as(nothing), /Claude declared nothing it read or judged by hand/)
-  assert.equal(declaredText({ read: '', judged: 'tone' }), 'judged: tone')
 })

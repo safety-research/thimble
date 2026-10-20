@@ -15,5 +15,5 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["node"]
   },
-  "include": ["tests/public", "src/**/*.d.ts", "vitest.config.ts", "vitest.browser.config.ts"]
+  "include": ["tests/public", "src/**/*.d.ts", "vitest.config.ts"]
 }

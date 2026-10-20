@@ -1,0 +1,56 @@
+[
+ {
+  "type": "user",
+  "text": "How did the runs end?",
+  "by": "browser",
+  "ts": "2026-10-20T22:45:23.377Z"
+ },
+ {
+  "type": "text",
+  "delta": "I will put the outcomes on a card.",
+  "ts": "2026-10-20T22:45:23.405Z"
+ },
+ {
+  "type": "tool_use",
+  "id": "toolu_d2cc6cd5f673",
+  "name": "add_card",
+  "input": {
+   "kind": "note",
+   "question": "How did the runs end?",
+   "text": "One merged, one failed [↗](results.csv#row=1).",
+   "takeaway": "[1](results.csv#row=1) of 2 runs merged."
+  },
+  "n": 1,
+  "ts": "2026-10-20T22:45:23.405Z"
+ },
+ {
+  "type": "tool_result",
+  "id": "toolu_d2cc6cd5f673",
+  "summary": "card:a5712736 (note) How did the runs end?\ntakeaway: [[1|results.csv#row=1]] of 2 runs merged.\nOne merged, one failed [[results.csv#row=1]].",
+  "is_error": false,
+  "cell_id": "a5712736",
+  "notebook": "main",
+  "ts": "2026-10-20T22:45:23.420Z"
+ },
+ {
+  "type": "text",
+  "delta": "One of the two runs merged [1](card:a5712736).",
+  "ts": "2026-10-20T22:45:23.429Z"
+ },
+ {
+  "type": "done",
+  "result": null,
+  "cells": [
+   "a5712736"
+  ],
+  "usage": {
+   "input_tokens": 20,
+   "output_tokens": 10,
+   "cache_read_input_tokens": 0,
+   "cache_creation_input_tokens": 0,
+   "requests": 2
+  },
+  "model": "claude-opus-5-5",
+  "ts": "2026-10-20T22:45:23.430Z"
+ }
+]

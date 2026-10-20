@@ -2,12 +2,15 @@
 // The chat drawn by its real components under jsdom (src/chat/Rows.tsx): a session's records render as rows, the
 // analyst's message, the reply's markdown with its citations as chips, a tool-call card with the card it made, and a
 // stopped turn. Rendering logs no React error.
+// The browser's smoke test, page half: smoke.json holds the records the server leaves when a question gets an answer
+// with a card (browser/server/tests/test_smoke.py checks that it still leaves records of that form).
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { foldRecords } from '../../src/chat/model.ts'
 import { ThreadsContext } from '../../src/chat/Notes.tsx'
 import { Rows } from '../../src/chat/Rows.tsx'
 import type { ChatRecord } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
+import SMOKE from './smoke.json'
 
 const P = 'mcp__plugin_thimble_thimble__'
 let errors: string[] = []
@@ -61,6 +64,17 @@ describe('chat rows', () => {
     expect(tool).not.toBeNull()
     expect(tool?.querySelector('.toolcard-chips .refchip[data-ref="card:abcd1234"]')?.classList.contains('chip-tone-accent')).toBe(true)
     expect(el.querySelector('.chat-stopped')).not.toBeNull()
+    expect(errors).toEqual([])
+  })
+
+  test('smoke: a question to the server gets an answer that cites the card it made', async () => {
+    const el = await rows(SMOKE as unknown as ChatRecord[])
+    const card = (SMOKE.find((r) => r.type === 'tool_result') as { cell_id: string }).cell_id
+    expect(el.querySelector('.chat-user .chat-message')?.textContent).toMatch(/How did the runs end\?/)
+    const answer = [...el.querySelectorAll('.chat-text')].map((t) => t.textContent).join(' ')
+    expect(answer).toMatch(/One of the two runs merged/)
+    expect(el.querySelector(`.chat-text .refchip[data-ref="card:${card}"]`)).not.toBeNull()
+    expect(el.querySelector(`.chat-tool.toolcard[data-tool="add_card"] .refchip[data-ref="card:${card}"]`)).not.toBeNull()
     expect(errors).toEqual([])
   })
 })
