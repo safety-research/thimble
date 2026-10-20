@@ -44,12 +44,12 @@ import { paintRegions, regionOfKey } from './cells'
 import { askMerge, beganWord, editsOf, examplesView, PAGES_DEFAULT, partsOf } from './carddetail.js'
 import { allKnob, ownPart, pageAt, pageId, pageKnob, pageOf } from '../draw/handoff.js'
 import { chainWords, objectRefs, regionMeta, regionRefs } from './object.js'
-import { citeLabels, currentTheme, escTop, keysMoved, loadObject, openDetail, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
+import { barPreviewEl, citeLabels, currentTheme, escTop, keysMoved, loadObject, openDetail, paneWhere, popFocus, prepared, preparedNow, pushFocus, select } from './shell'
 import { askThread, noteSelection, restoreThreads, sendToMain, setThreadWindow, threadCount, threadFor, threadOf } from './thread'
 import { cardEvent, cardKey, ownState, pressTaken, readCardState, readEdits, writeCardState } from './runtime'
 import type { CardAsk } from './runtime'
 import { type KeyEdit, type KeyTurn } from './keys'
-import { paneFire, paneNow, paneRun, paneState, paneTakes, patchPaneState, setPaneState } from './panes'
+import { paneFire, paneNow, paneOf, paneRun, paneState, paneTakes, patchPaneState, setPaneState } from './panes'
 import type { Scope } from './thread'
 import { aboutOf, nameOf } from './threads.js'
 import { check as checkLabel, checksDone, labelGen } from './labels'
@@ -736,7 +736,9 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   if (subject) await $.state.get({ ...THREAD, id: subject.key })
   const conv = subject ? await convOf($, els, thread, subject.name, C - 1, null) : []
   const T = convRows(conv, R)
-  const rows0 = Math.max(4, R - (subject ? ENTRY_ROWS : 0) - T)
+  // over the program, what its module asks the host to draw: the bar as the settings leave it (`above: 'bar'`)
+  const above = paneOf(view.pane).above === 'bar' ? await barPreviewEl($, els, C - 1) : null
+  const rows0 = Math.max(4, R - (subject ? ENTRY_ROWS : 0) - T - (above ? ABOVE_ROWS : 0))
   const grid = renderTerm(d, { w: C - 1 })
   const region = typeof d?.selected === 'string' ? d.selected : null
   if (region !== win.region) { win.region = region; win.by = 0; win.follow = 'part' }
@@ -763,7 +765,7 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
   }
   paneDrawn = { name: view.pane, args: view.args, selected: region, buttons, first, order: [...tops].sort((a, b) => a[1] - b[1]).map(([id]) => id) }
   const onPress = (id: string, dir?: number) => { void paneFire($, view.pane, view.args, { type: 'press', region: id, ...(dir ? { dir } : {}) }) }
-  const kids: Any[] = [paintRegions(grid, els, { theme, selected: region, key: 'side', from, rows, onPress, painted: true })]
+  const kids: Any[] = [...(above ? [above, els.Text({ key: 'above-gap', children: ' ' })] : []), paintRegions(grid, els, { theme, selected: region, key: 'side', from, rows, onPress, painted: true })]
   kids.push(...convEls(els, conv, T))
   if (subject) kids.push(...entryEls($, els, subject.label, C))
   // the ring follows the selection, as on a card
@@ -777,6 +779,16 @@ async function panePane($: Engine, e: Any, els: Any, view: PaneView, C: number, 
     $.clock.after(0, () => { void focusPart($).finally(() => { refocus = false }) })
   }
   return Box({ flexDirection: 'column', width: C, children: kids })
+}
+
+/** The rows the bar's preview takes over a pane (shell.tsx barPreviewEl): its title, its frame, and a blank row. */
+const ABOVE_ROWS = 5
+
+/** Whether the pane the panel shows leaves the bar its own keys (its module's `keepBar`, as the settings panel's):
+ *  the pane says its keys itself, and a key typed while it is shown does what it does at rest. */
+function keepsBar(view: SideView | null): boolean {
+  if (view?.kind !== 'pane') return false
+  try { return !!paneOf(view.pane).keepBar } catch { return false }
 }
 
 /** A question typed in the input bar: the thread of what the panel shows is asked about the part selected, and the
@@ -824,6 +836,8 @@ export async function detailKeys($: Engine): Promise<string | null> {
   if (!isOpen) return null
   await $.state.get(ASKLINE)
   const view = await sideNow($)
+  // a pane that says its keys itself leaves the bar its own (the settings panel: the person sees the bar change)
+  if (keepsBar(view)) return null
   if (view?.kind === 'pane') {
     const subject = paneSubject(view)
     const it = view.pane === 'mark' ? 'the citation' : view.pane === 'threads' ? 'the list' : 'the panel'
@@ -904,8 +918,10 @@ async function citeView($: Engine, els: Any, sel: Sel, C: number): Promise<Any> 
  *  then the panel's own (t, m). A letter that is no key starts a question in the input bar (it never types into the
  *  prompt), and a letter typed straight after a key that acted gives the key's letter back there (it began a word).
  *  Letters that arrive before the input bar has the keys join the question. It types while the panel is closed. */
-export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn> {
+export async function detailKey($: Engine, e: KeyEdit): Promise<KeyTurn | null> {
   if (!isOpen) return { box: null }
+  // a pane that leaves the bar its keys: a key typed meanwhile does what the bar says it does (none: the shell's own)
+  if (keepsBar(await sideNow($))) return null
   // a paste (or keys typed faster than the terminal sends them one by one) with no key: a question too
   const paste = !e.key && !!e.inputText
   // a question begun, and the prompt still showing letters it took: when the terminal is busy, the prompt takes the

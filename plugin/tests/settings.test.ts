@@ -1,8 +1,10 @@
-// thimble's switches (settings/: features.mjs, term.ts; panes/settings.js): each feature is a field of the plugin's
-// userConfig, so Claude Code lists it in /config and hands it to register(on, options). A lens turned off has no
-// section in the observer's prompt and no key in its reply, and what reads it hides (c and the claims count, v lit);
-// the observer turned off looks at nothing. /thimble-settings, or a click on `thimble` at the bar's left, opens the
-// settings panel in the side panel, where ↵ or a click turns a switch on or off through Claude Code.
+// thimble's features (settings/: features.mjs, term.ts; panes/settings.js): each feature is a field of the plugin's
+// userConfig, which Claude Code keeps and hands to register(on, options). A feature turned off has no lens in the
+// observer's prompt and no key in its reply, and what it puts on the bar is gone (v with Cards, s with Squeeze, c and
+// the claims count with Claims); with every feature that reads answers off, the observer looks at nothing.
+// /thimble-settings, or a click on `thimble` at the bar's left, opens the settings panel in the side panel: a flat
+// list of the features with the bar as they leave it over it, where ↵ or a click turns one on or off through Claude
+// Code.
 // `claude plugin test plugin`. The model's calls and the Node children are answered here.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -102,41 +104,50 @@ async function turn($: Any, w: Any, id: string, prompt: string, answer: string) 
   await w.clock.settle()
 }
 
-test('a lens turned off has no section in the prompt and no key in the reply, and what reads it hides: no c, no claims count, no v lit', { options: { claims: false, visualize: false, details: false } }, async ($, on) => {
-  const w = world(on, { claims: false, visualize: false, details: false })
+const OFF_ALL = { cards: false, squeeze: false, explain: false, details: false, claims: false, notes: false }
+
+test('a feature turned off has no lens in the prompt and no key in the reply, and what it puts on the bar is gone: no v, no c, no claims count', { options: { claims: false, cards: false, details: false } }, async ($, on) => {
+  const w = world(on, { claims: false, cards: false, details: false })
   await turn($, w, 't1', 'when did they edit most?', 'June 18 had the most saves.')
   expect(w.forks.length).toBe(1)
   const p = w.forks[0]!
-  expect(p).toContain('LENS notes')
+  // Notes to Claude is experimental and off by default
+  expect(p).not.toContain('LENS notes')
   expect(p).not.toContain('LENS claims')
   expect(p).not.toContain('LENS actions')
   // important details off: no heads-up section, and no heads-up in the reply
   expect(p).not.toContain('LENS heads')
-  expect(p).toContain('REPLY {"notes": [], "verbs": {}, "glosses": []}')
-  expect(p).toContain('| v visualize, s squeeze |')
+  expect(p).toContain('LENS squeeze')
+  expect(p).toContain('LENS explain')
+  expect(p).toContain('REPLY {"verbs": {}, "glosses": []}')
+  // the row the observer is told of names only the keys that are there
+  expect(p).toContain('| s squeeze |')
   const bar = textOf(await $.ui.render(HINT))
-  expect(bar).toContain('thimble  v visualize · s squeeze')
+  expect(bar).toContain('thimble  s squeeze')
+  expect(bar).not.toContain('visualize')
   expect(bar).not.toContain('claims')
   expect(bar).not.toContain('●')
 })
 
-test('the observer turned off looks at nothing and gives Claude no notes', { options: { observer: false } }, async ($, on) => {
-  const w = world(on, { observer: false })
+test('with every feature that reads answers off, the observer looks at nothing and gives Claude no notes', { options: OFF_ALL }, async ($, on) => {
+  const w = world(on, OFF_ALL)
   await turn($, w, 't1', 'when did they edit most?', 'June 18 had the most saves.')
   await w.clock.advance(3000)
   await w.clock.settle()
   expect(w.forks.length).toBe(0)
   await $.prompt.submit({ text: 'next', origin: { kind: 'composer' } } as never)
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('6,543')
+  // the bar names no key of a feature that is off: the label alone, and no letter is taken
+  expect(textOf(await $.ui.render(HINT))).not.toMatch(/visualize|squeeze|claims/)
 })
 
-test('the bar\'s counts hide with their switches: coverage, and the labels', { options: { coverage: false } }, async ($, on) => {
-  const w = world(on, { coverage: false })
+test("Labels and coverage on the bar: the bar's two counts hide together", { options: { counts: false } }, async ($, on) => {
+  const w = world(on, { counts: false })
   await turn($, w, 't1', 'when did they edit most?', 'June 18 had the most saves.')
   expect(textOf(await $.ui.render(HINT))).not.toContain('seen')
 })
 
-test('/thimble-settings opens the settings panel: each switch with whether it is on, what it does and what it costs; a press turns one off through Claude Code', async ($, on) => {
+test('/thimble-settings opens the settings panel: a flat list of the features, Notes to Claude under Experimental and off, the bar as they leave it on top; a press turns one off through Claude Code, and the preview loses its key at once', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true } as never)
   expect(await $.command.run({ command: 'thimble-settings', args: '' } as never)).toEqual({})
@@ -146,15 +157,63 @@ test('/thimble-settings opens the settings panel: each switch with whether it is
   await w.clock.settle()
   const t = textOf(await ui.drawn())
   for (const s of SWITCHES) expect(t).toContain(s.title)
-  expect(t).toContain('● on')
-  expect(t).toContain('Observer')
-  expect(t).toContain('The bar')
-  // a press on the Claims row turns it off, through Claude Code's own change of the setting
-  const row = buttons(await ui.drawn()).find((b: Any) => String(b.props.key).endsWith('|s-claims'))
-  expect(row).toBeDefined()
+  expect(t).toContain('● on   Cards')
+  expect(t).toContain('○ off  Notes to Claude')
+  expect(t.indexOf('Experimental')).toBeLessThan(t.indexOf('Notes to Claude'))
+  expect(t.indexOf('Labels and coverage on the bar')).toBeLessThan(t.indexOf('Experimental'))
+  // no parent and no sub-settings: no Observer heading, no /config
+  expect(t).not.toContain('Observer')
+  expect(t).not.toContain('/config')
+  // the preview: the bar as it is at rest, with these features
+  expect(t).toContain('The bar, with these features')
+  expect(t).toContain('thimble  v visualize · s squeeze · c claims')
+  // the bar keeps its own keys while the panel is open, so it changes in front of the person too
+  expect(textOf(await $.ui.render(HINT))).toContain('thimble  v visualize · s squeeze · c claims')
+  const pressRow = async (key: string) => {
+    const row = buttons(await ui.drawn()).find((b: Any) => String(b.props.key).endsWith(`|s-${key}`))
+    expect(row).toBeDefined()
+    await ui.press({ key: row.props.key })
+    await w.clock.settle()
+  }
+  // Cards off: v leaves the preview at once, through Claude Code's own change of the setting
+  await pressRow('cards')
+  expect(w.sets).toEqual([{ key: 'thimble.cards', value: false }])
+  let now = textOf(await ui.drawn())
+  expect(now).toContain('○ off  Cards')
+  expect(now).toContain('thimble  s squeeze · c claims')
+  // the real bar too, at once, before Claude Code loads the plugin again with the new value
+  expect(textOf(await $.ui.render(HINT))).toContain('thimble  s squeeze · c claims')
+  // Claims off: c leaves it too
+  await pressRow('claims')
+  now = textOf(await ui.drawn())
+  expect(now).toContain('thimble  s squeeze')
+  expect(now).not.toContain('c claims')
+  // both on again
+  await pressRow('cards')
+  await pressRow('claims')
+  expect(w.sets.map(x => `${x.key}=${x.value}`)).toEqual(['thimble.cards=false', 'thimble.claims=false', 'thimble.cards=true', 'thimble.claims=true'])
+  expect(textOf(await ui.drawn())).toContain('thimble  v visualize · s squeeze · c claims')
+  await ui.unmount()
+})
+
+test("the preview is the session's own bar: what the observer lit, and the counts, which go with their feature", async ($, on) => {
+  const w = world(on)
+  // a folder thimble has read, so the bar counts what Claude saw of it
+  w.files[`${ROOT}/thimble/queries`] = ''
+  await turn($, w, 't1', 'when did they edit most?', 'June 18 had the most saves.')
+  expect(textOf(await $.ui.render(HINT))).toContain('seen 12%')
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  await w.clock.settle()
+  const ui = await $.ui.mount(PANE)
+  await w.clock.settle()
+  expect(textOf(await ui.drawn())).toContain('thimble  v ● saves by day · s squeeze · c claims')
+  expect(textOf(await ui.drawn())).toContain('seen 12%')
+  const row = buttons(await ui.drawn()).find((b: Any) => String(b.props.key).endsWith('|s-counts'))
   await ui.press({ key: row.props.key })
   await w.clock.settle()
-  expect(w.sets).toEqual([{ key: 'thimble.claims', value: false }])
+  const t = textOf(await ui.drawn())
+  expect(t).toContain('○ off  Labels and coverage on the bar')
+  expect(t).not.toContain('seen 12%')
   await ui.unmount()
 })
 

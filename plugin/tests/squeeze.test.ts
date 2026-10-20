@@ -184,11 +184,13 @@ test('a chip change rewrites the message in place with one call; the citations a
   expect(w.submitted.at(-1)!.context.join('\n')).not.toContain('squeeze chips')
 })
 
-test('the new text writes itself in from the top: the old text dims while the call runs, then the new one grows from its first words until it is whole', { options: { observer: false } }, async ($, on) => {
+test('the new text writes itself in from the top: the old text dims while the call runs, then the new one grows from its first words until it is whole', async ($, on) => {
   const NEW = 'June 18 had the most saves: [6,543](q1#day=2026-06-18@n). ' + 'The agents saved again and again that day, page after page, until the evening run ended. '.repeat(4)
   const w = world(on, [`<text>${NEW}</text>`])
   const clock = mock.clock(on)
   await answered($, on, clock)
+  // the look after the turn ends first (it answers nothing here), so the original's level stays not yet known
+  await clock.advance(200)
   await press($, clock, edit('s'))
   await press($, clock, edit('3'))
   await press($, clock, edit(']'))
@@ -274,10 +276,12 @@ test('a key the bar named a moment ago is taken, never typed, when what it named
   expect(await press($, clock, edit('0'))).toEqual({ text: '0', cursor: 1 })
 })
 
-test('a rewrite that cites a ref the original never cited shows it as plain words, and the hint line says so', { options: { observer: false } }, async ($, on) => {
+test('a rewrite that cites a ref the original never cited shows it as plain words, and the hint line says so', async ($, on) => {
   const w = world(on, ['<text>June 18 had [6,543 saves](q1#day=2026-06-18@n), [12% more](q9#x@n).</text>'])
   const clock = mock.clock(on)
   await answered($, on, clock)
+  // the look after the turn ends first (it answers nothing here), so the original's level stays not yet known
+  await clock.advance(200)
   await press($, clock, edit('s'))
   await press($, clock, edit('3'))
   await press($, clock, edit('['))
