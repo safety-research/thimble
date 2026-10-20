@@ -1,5 +1,8 @@
 """A label run in the chat: the analyst's go-ahead before a model reads many records, and a row that shows the run.
 
+The label editor's Run asks the same way (api.py, POST /concepts/{id}/apply): an ask with no chat, whose line and
+choices the editor shows, answered through the same route.
+
 A prompt label over many units costs time and money, so apply_label (chat.py) does not start it on its own: it writes a
 `label_run` record into the chat with the size of the run (estimate()) and three choices, Run all, Run on a sample (of
 SAMPLE units chosen at random) and Cancel, and answers Claude at once. The analyst's choice (POST
@@ -136,6 +139,8 @@ def _record(ws: str, ask: dict[str, Any], state: str, text: str, **extra: Any) -
            "text": text, **extra}
     if state == "asked":
         rec.update(units=ask["units"], sample=min(SAMPLE, ask["units"]))
+    if not ask.get("chat"):  # the label editor's ask: the editor shows it, and no chat has a row of it
+        return
     try:
         chats.append(ws, ask["chat"], rec)
     except (KeyError, OSError):
@@ -155,9 +160,10 @@ def pending(ws: str, cid: str) -> dict[str, Any] | None:
     return None
 
 
-def ask(ws: str, chat: str, concept: dict[str, Any], *, paths: list[str], est: dict[str, Any],
+def ask(ws: str, chat: str | None, concept: dict[str, Any], *, paths: list[str], est: dict[str, Any],
         where: str) -> dict[str, Any]:
-    """Ask the analyst before a big run: the `asked` row, with the run's size and its three choices."""
+    """Ask the analyst before a big run: the `asked` row, with the run's size and its three choices; with no `chat`, the
+    label editor's ask, which only the editor shows."""
     a = {"id": "r" + secrets.token_hex(4), "chat": chat, "concept": concept["id"], "name": concept["name"],
          "version": concept["version"], "paths": list(paths), "units": est["units"], "estimate": est, "where": where,
          "asked": home.now()}
@@ -210,10 +216,23 @@ def _ended(ws: str, cid: str, rec: dict[str, Any]) -> None:
     _tell(ws, a["chat"], f"The run of the label {concept['name']} ended. {words}")
 
 
-def _tell(ws: str, chat: str, text: str) -> None:
+def _tell(ws: str, chat: str | None, text: str) -> None:
+    if not chat:  # the analyst ran it from the label editor: no chat's agent waits to hear of it
+        return
     from .. import agent  # noqa: PLC0415 — agent imports the features
 
     agent.tell(ws, chat, text)
+
+
+def where_of(unit: str, paths: list[str]) -> str:
+    """The files a run reads, as its line names them: " of runs/*.jsonl", or nothing for every file."""
+    return f" of {', '.join(paths)}" if unit in store.FILE_UNITS and paths and paths not in (["**/*"], ["*"]) else ""
+
+
+def shown(a: dict[str, Any]) -> dict[str, Any]:
+    """An ask as the label editor shows it (the same fields as the chat's `asked` row)."""
+    return {"id": a["id"], "concept": a["concept"], "name": a["name"], "state": a.get("state"), "text": a.get("text"),
+            "units": a["units"], "sample": min(SAMPLE, a["units"])}
 
 
 run.ON_END.append(_ended)
@@ -247,8 +266,9 @@ async def answer(ws: str, folder: Path, rid: str, choice: str) -> dict[str, Any]
         found = random.sample(found, SAMPLE)
         limit = SAMPLE
     try:
-        rec = await run.start(ws, folder, concept, paths=a["paths"], limit=limit, created_by=f"chat:{a['chat']}",
-                              found=found, follow={"id": rid, "chat": a["chat"]})
+        rec = await run.start(ws, folder, concept, paths=a["paths"], limit=limit,
+                              created_by=f"chat:{a['chat']}" if a.get("chat") else "user", found=found,
+                              follow={"id": rid, "chat": a.get("chat")})
     except store.LabelError as e:
         _record(ws, a, "failed", f"The label {concept['name']} did not start: {e}.")
         raise

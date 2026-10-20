@@ -89,7 +89,7 @@ async def apply_label(t: tools.Tools, args: dict[str, Any]) -> Result:
     if args.get("show") and unit in store.FILE_UNITS:
         store.show(ws, cid, True)
     unchanged = how == "same" and not run.running(ws, cid) and define.covered(concept, paths, limit)
-    where = f" of {', '.join(paths)}" if unit in store.FILE_UNITS and paths != ["**/*"] else ""
+    where = asks.where_of(unit, paths)
     if (waiting := asks.pending(ws, cid)) is not None:
         return _ok(f"The label {concept['name']} [↗](concept:{cid}) still waits for the analyst's choice in the chat: "
                    f"{waiting['text']} Answer from what you have.", extra={"label_card": card["id"]},

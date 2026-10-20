@@ -22,7 +22,8 @@ import { bus } from '../lib/bus'
 import { lensApi, lensColors, loadLenses, revealMark, SURFACES, SURFACE_WORDS, useLenses, type FoundMark, type Lens, type Surface } from '../lib/marks'
 import { teleport } from '../lib/teleport'
 import { hhmm } from '../lib/time'
-import type { Concept, LabelRowText } from '../lib/types'
+import type { Concept, LabelAskShown, LabelRowText } from '../lib/types'
+import { LabelAsk } from '../chat/LabelRun'
 
 export type SideTab = 'labels' | 'checks'
 
@@ -378,6 +379,8 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
   useEffect(() => setQuestion(k.description), [k.description])
   const [rows, setRows] = useState<{ rows: LabelRowText[]; total: number } | null>(null)
   const [running, setRunning] = useState(false)
+  const [asked, setAsked] = useState<LabelAskShown | null>(null)
+  const ask = asked ?? k.ask ?? null
   const edit = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     let alive = true
@@ -442,6 +445,7 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
         })}
         {rows && rows.total > rows.rows.length && <span className="lside-more">{rows.total - rows.rows.length} more</span>}
       </div>
+      {ask && <LabelAsk ws={ws} ask={ask} onAnswered={() => setAsked(null)} />}
       <footer className="lside-foot">
         <Button
           variant="primary"
@@ -451,6 +455,7 @@ function LabelDetail({ ws, label: k, onGone }: { ws: string; label: Concept; onG
             setRunning(true)
             labelApi
               .apply(ws, k.id, {})
+              .then((r) => r.status === 'asked' && r.ask && setAsked(r.ask))
               .catch(fail)
               .finally(() => setRunning(false))
           }}

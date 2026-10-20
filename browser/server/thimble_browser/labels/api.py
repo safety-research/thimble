@@ -12,7 +12,7 @@ from fastapi import Body, HTTPException
 from fastapi.responses import JSONResponse
 
 from .. import canvas, corpus, llm, prompts
-from . import chat, run, store, units as units_mod
+from . import asks, chat, run, store, units as units_mod
 
 ROWS_LIMIT = 200
 ROWS_MAX = 2_000
@@ -37,7 +37,8 @@ def detail(ws: str, k: dict[str, Any]) -> dict[str, Any]:
     return {**{x: v for x, v in k.items() if x != "label_stats"}, **store.stats(ws, k["id"]),
             "est_precision": cal["agreed"] / cal["n"] if cal.get("n") else None,
             "last_run": k["applications"][-1] if k["applications"] else None,
-            "run": {x: v for x, v in (run.record(ws, k["id"]) or {}).items() if x != "usage"} or None}
+            "run": {x: v for x, v in (run.record(ws, k["id"]) or {}).items() if x != "usage"} or None,
+            "ask": asks.shown(a) if (a := asks.pending(ws, k["id"])) is not None else None}
 
 
 def parse_spans(lines: str | None) -> list[tuple[int, int]] | None:
@@ -198,9 +199,27 @@ def register_routes(ctx: Any) -> None:
         paths = store.globs(body.get("paths")) or (store.globs(k["glob"]) if k["unit"] in store.FILE_UNITS else [])
         if k["unit"] in store.FILE_UNITS and not paths:
             raise HTTPException(400, "the label applies to no files: give it a glob, such as runs/*.jsonl or * for every file")
+        found = None
+        if k["kind"] == "prompt" and not body.get("limit") and not run.running(ws, cid):
+            # a model reading many records asks first, as in the chat (asks.py): the editor shows the line and the
+            # choices, and the analyst's choice goes to POST /label-runs/{id}
+            if (waiting := asks.pending(ws, cid)) is not None:
+                return {"status": "asked", "ask": asks.shown(waiting)}
+            try:
+                found = await asyncio.to_thread(run.scope_units, ws, folder_of(c), k,
+                                                paths if k["unit"] in store.FILE_UNITS else [], None)
+            except store.LabelError as e:
+                raise HTTPException(400, str(e)) from None
+            est = asks.estimate(k, found)
+            if asks.needs_asking(est):
+                if not store.label_cards(ws, cid):
+                    await asyncio.to_thread(store.label_card, ws, k, group="", by="analyst")
+                a = asks.ask(ws, None, k, paths=paths if k["unit"] in store.FILE_UNITS else [], est=est,
+                             where=asks.where_of(k["unit"], paths))
+                return {"status": "asked", "ask": asks.shown(a)}
         try:
             rec = await run.start(ws, folder_of(c), k, paths=paths, limit=body.get("limit") or None,
-                                  created_by=str(body.get("created_by") or "user"))
+                                  created_by=str(body.get("created_by") or "user"), found=found or None)
         except store.LabelError as e:
             raise HTTPException(409 if "running" in str(e) else 400, str(e)) from None
         if not store.label_cards(ws, cid):

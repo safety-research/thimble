@@ -2,14 +2,15 @@
 // reads many records it is the run's size in one line, "Read 14,591 records of revisions.jsonl with Claude: about 860
 // calls, about 6 min, about $25.", and the analyst's three choices: Run all, Run on a sample, Cancel. While the run goes
 // it says how far it is ("2,340 done · 1 min 20 s"), read again on each `concepts` event of its label, with Stop.
-// Once it ended, the counts it found, or the failure in one line with its fix. The label's chip opens it.
+// Once it ended, the counts it found, or the failure in one line with its fix. The label's chip opens it. The label
+// editor's Run asks with the same line and choices (LabelAsk, AskChoices).
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import type { LabelRunLive } from '../lib/types'
+import type { LabelAskShown, LabelRunLive } from '../lib/types'
 import type { LabelRunRow as LabelRunRowT } from './model'
 import { LabelChip, openLabel } from './SurfaceChips'
 
@@ -60,17 +61,57 @@ function useLive(ws: string, item: LabelRunRowT): LabelRunLive | null {
   return running ? live : null
 }
 
-export function LabelRunRow({ item, ws }: { item: LabelRunRowT; ws: string }) {
-  const [busy, setBusy] = useState<string | null>(null)
-  const live = useLive(ws, item)
-  const choose = (choice: 'all' | 'sample' | 'cancel') => {
+/** An ask's choices, shared by the chat's row and the label editor: Run all, Run on a sample (when the sample is fewer
+ * than all), Cancel. Each goes to POST /label-runs/{id}; `onAnswered` hears the choice once the server took it. */
+export function AskChoices({ ws, id, name, units, sample, onAnswered }: { ws: string; id: string; name: string; units?: number; sample?: number; onAnswered?: (choice: AskChoice) => void }) {
+  const [busy, setBusy] = useState<AskChoice | null>(null)
+  const choose = (choice: AskChoice) => {
     if (busy) return
     setBusy(choice)
     api
-      .answerLabelRun(ws, item.id, choice)
-      .catch((e: Error) => bus.emit('toast', { text: `The label ${item.name} did not start: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' }))
+      .answerLabelRun(ws, id, choice)
+      .then(() => onAnswered?.(choice))
+      .catch((e: Error) => bus.emit('toast', { text: `The label ${name} did not start: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' }))
       .finally(() => setBusy(null))
   }
+  return (
+    <span className="chat-labelrun-acts">
+      <Button variant="primary" size="sm" busy={busy === 'all'} disabled={!!busy && busy !== 'all'} onClick={() => choose('all')}>
+        Run all
+      </Button>
+      {(units ?? 0) > (sample ?? 0) && (
+        <Button variant="secondary" size="sm" busy={busy === 'sample'} disabled={!!busy && busy !== 'sample'} onClick={() => choose('sample')}>
+          {`Run on a sample of ${(sample ?? 0).toLocaleString()}`}
+        </Button>
+      )}
+      <Button variant="ghost" size="sm" busy={busy === 'cancel'} disabled={!!busy && busy !== 'cancel'} onClick={() => choose('cancel')}>
+        Cancel
+      </Button>
+    </span>
+  )
+}
+
+export type AskChoice = 'all' | 'sample' | 'cancel'
+
+/** The label editor's ask (backend POST /concepts/{id}/apply answering `asked`): the run's size in one line and the
+ * same choices as the chat's row. */
+export function LabelAsk({ ws, ask, onAnswered }: { ws: string; ask: LabelAskShown; onAnswered: (choice: AskChoice) => void }) {
+  return (
+    <div className="chat-labelrun label-ask" data-state="asked" data-run={ask.id} role="group" aria-label={`run ${ask.name}?`}>
+      <span className="chat-labelrun-glyph">
+        <Icon name="label" size={13} />
+      </span>
+      <div className="chat-labelrun-body">
+        <span className="chat-labelrun-text">{ask.text}</span>
+        <AskChoices ws={ws} id={ask.id} name={ask.name} units={ask.units} sample={ask.sample} onAnswered={onAnswered} />
+      </div>
+    </div>
+  )
+}
+
+export function LabelRunRow({ item, ws }: { item: LabelRunRowT; ws: string }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const live = useLive(ws, item)
   const stop = () => {
     if (busy) return
     setBusy('stop')
@@ -101,21 +142,7 @@ export function LabelRunRow({ item, ws }: { item: LabelRunRowT; ws: string }) {
           {progress && <span className="chat-labelrun-progress">{` · ${progress}`}</span>}{' '}
           <LabelChip name={item.name} onClick={(e) => (e.stopPropagation(), openLabel(ws, item.name))} />
         </span>
-        {state === 'asked' && (
-          <span className="chat-labelrun-acts">
-            <Button variant="primary" size="sm" busy={busy === 'all'} disabled={!!busy && busy !== 'all'} onClick={() => choose('all')}>
-              Run all
-            </Button>
-            {(item.units ?? 0) > (item.sample ?? 0) && (
-              <Button variant="secondary" size="sm" busy={busy === 'sample'} disabled={!!busy && busy !== 'sample'} onClick={() => choose('sample')}>
-                {`Run on a sample of ${(item.sample ?? 0).toLocaleString()}`}
-              </Button>
-            )}
-            <Button variant="ghost" size="sm" busy={busy === 'cancel'} disabled={!!busy && busy !== 'cancel'} onClick={() => choose('cancel')}>
-              Cancel
-            </Button>
-          </span>
-        )}
+        {state === 'asked' && <AskChoices ws={ws} id={item.id} name={item.name} units={item.units} sample={item.sample} />}
         {state === 'running' && (
           <span className="chat-labelrun-acts">
             <Button variant="ghost" size="sm" busy={busy === 'stop'} onClick={stop}>
