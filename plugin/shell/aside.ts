@@ -165,10 +165,11 @@ export async function markTold($: Engine, row: string): Promise<void> {
   await patch($, row, a => ({ ...a, told: true }))
 }
 
-/** The key was pressed again on the message: a line left by a failed aside goes. */
-export async function clearAside($: Engine, row: string): Promise<void> {
+/** The key was pressed again on the message: a line left by a failed aside goes, and so does a running one whose agent
+ *  is gone (`gone`: it ended unheard, as when the session was resumed). */
+export async function clearAside($: Engine, row: string, gone = false): Promise<void> {
   const a = await asideOn($, row)
-  if (a && a.status !== 'running') await $.state.set({ ...ASIDE, id: row }, null)
+  if (a && (a.status !== 'running' || gone)) await $.state.set({ ...ASIDE, id: row }, null)
 }
 
 /** The progress line under the message, as words and a tone, or null with nothing to say. */

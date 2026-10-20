@@ -1091,8 +1091,11 @@ async function pressRowVerb($: Engine, row: string, key: string): Promise<void> 
   if (key === 'c') { await setPick($, null); await openClaims($); return }
   if (key === 'v') {
     // v while its card is being made under this message: the line under it says how far it is
-    if ((await asideOn($, row))?.status === 'running') { $.ui.toast('v is still making a view of this answer: its line under the answer says how far it is.'); return }
-    await clearAside($, row)
+    // (one whose agent is gone, ended unheard, no longer holds the message)
+    const was = await asideOn($, row)
+    const alive = was?.status === 'running' && ((await $.agent.list().catch(() => [])) as Any[]).some(x => x?.id === was.agentId && !/^(completed|failed|killed|stopped)$/.test(String(x?.status || '')))
+    if (alive) { $.ui.toast('v is still making a view of this answer: its line under the answer says how far it is.'); return }
+    await clearAside($, row, true)
   }
   if (key === 'v' && rec && !(v?.lit && Array.isArray(v.proposals) && v.proposals.length)) {
     await setPick($, null)
@@ -1848,7 +1851,7 @@ function runningRow(els: Any, said: Said | null) {
   return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…${said.text ? ` ${said.text}` : ''}` }) : null
 }
 
-/** The messages whose card landing the shell has looked at (whether to say so in the bar). */
+/** The key agents whose card landing the shell has looked at (whether to say so in the bar), as `<row>|<agent>`. */
 const told = new Set<string>()
 /** Whether the transcript is drawn fullscreen (it says which rows are on screen, and draws only those). */
 let fullscreenSeen = false
@@ -1872,6 +1875,9 @@ async function cardLanded($: Engine, row: string, off: boolean): Promise<void> {
 /** A click on the bar's `card ready under …`: the card in view, and the note gone. */
 async function goToCard($: Engine, row: string, id: string): Promise<void> {
   await $.state.set(CARDNOTE, null)
+  // the message by its row in the transcript (drawn or not), its end in view, where the card is; then the card itself
+  const uuid = (await recordNow($, row))?.uuid
+  if (uuid) await quietly($.ui.scroll({ to: { requestId: uuid }, block: 'end' }))
   await quietly($.ui.scroll({ to: { key: `card-${row}-${id}` }, block: 'nearest' }))
 }
 
@@ -2496,7 +2502,8 @@ export const registerShell: Register = (on, options) => {
       if (row && e.agentId) {
         // a message off screen is not drawn, so it never looks at where its card landed: unless it did within a moment,
         // the bar says the card is there
-        $.clock.after(600, () => { if (!told.has(row) && fullscreenSeen) { told.add(row); void cardLanded($, row, true).catch(() => undefined) } })
+        const once = `${row}|${e.agentId}`
+        $.clock.after(600, () => { if (!told.has(once) && fullscreenSeen) { told.add(once); void cardLanded($, row, true).catch(() => undefined) } })
         for (const ref of await newSaves($)) {
           if (await asideMade($, e.agentId, ref.id, !turn)) { await place($, row, ref); await asideSaved($, row, ref); await $.state.set(LAST, ref) }
           else if (turn) { turn.unplaced = [...turn.unplaced.filter(x => !(x.id === ref.id && x.root === ref.root)), ref]; turn.saves = [...(turn.saves ?? []), ref] }
@@ -2596,9 +2603,12 @@ export const registerShell: Register = (on, options) => {
       const made = await asideOn($, at)
       const aside = asideLine(made)
       // v's card just landed under this message: when the message is off screen, the bar says so for a few seconds
-      if (made?.status === 'done' && !made.told && !told.has(at)) {
-        told.add(at)
-        const off = e.props.onScreen === null
+      if (made?.status === 'done' && !made.told && !told.has(`${at}|${made.agentId}`)) {
+        told.add(`${at}|${made.agentId}`)
+        // the fullscreen transcript says null for a row off screen and where the viewport's edges cut a row; a row it
+        // says nothing of is inside the screen when it is the newest, and taken as above it otherwise
+        const os = e.props.onScreen
+        const off = os === null || (os === undefined && fullscreenSeen && (await messageRows($)).at(-1) !== at)
         $.clock.after(0, () => { void cardLanded($, at, off).catch(() => undefined) })
       }
       if (!picked && !rec.marks.length && !open && !list.length && rec.shown == null && !busy && n == null && !caught.length && !aside) return next(e)
