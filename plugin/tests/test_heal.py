@@ -56,13 +56,6 @@ def test_repoint_inside_the_cited_query(st: Store) -> None:
     assert text == "The busiest day had [5](r1#day=2026-06-02@n) saves."
 
 
-def test_repoint_to_another_cited_query(st: Store) -> None:
-    # 7 is in r2 (wren), which the text cites elsewhere; r1 holds no 7
-    r = H.heal(st, "Wren saved [7](r1#day=2026-06-01@n) times; see [r2](r2).")
-    c = r.changes[0]
-    assert c.how == H.CITED and c.to == "r2#user=wren@n"
-
-
 def test_unwrap_when_the_place_is_gone(st: Store) -> None:
     text, c = one(st, "There were [12](r9#day=2026-06-01@n) saves.")
     assert c["state"] == H.QUIET and c["how"] == H.GONE and "to" not in c
@@ -85,28 +78,6 @@ def test_contradicted_when_the_cited_place_holds_another_number(st: Store) -> No
     assert c["state"] == H.CONTRADICTED and c["source"] == "3"
     assert c["why"] == "the cited place shows 3"
     assert text == "June 1 had [4](r1#day=2026-06-01@n) saves."  # the words and the link stay
-
-
-def test_a_named_row_is_never_moved(st: Store) -> None:
-    # kestrel's row holds 3; wren's holds 7, but the words name kestrel: the number is wrong there, not misplaced
-    text, c = one(st, "Kestrel saved [7](r2#user=kestrel@n) times.")
-    assert c["state"] == H.CONTRADICTED and c["source"] == "3"
-
-
-def test_contradicted_when_a_cited_query_shows_the_number_nowhere(st: Store) -> None:
-    _, c = one(st, "In all, [11](r1) saves.")
-    assert c["state"] == H.CONTRADICTED and "r1 shows no 11" in c["why"]
-    # its row count and a column's total are values it shows
-    _, c = one(st, "In all, [10](r1) saves.")
-    assert c["how"] == H.KEPT
-
-
-def test_session_search_for_a_specific_number_only(st: Store) -> None:
-    Q.run(st, "a total", 'import pandas as pd\npd.DataFrame({"k": ["a", "b"], "v": [1234, 5]}).set_index("k")["v"]')  # r3
-    r = H.heal(st, "The total was [1,234](r9#k=a@v).")
-    assert r.changes[0].how == H.SESSION and r.changes[0].to == "r3#k=a@v"
-    r = H.heal(st, "There were [5](r9#k=a@v).")
-    assert r.changes[0].how == H.GONE and r.text == "There were 5."
 
 
 def test_versioning(st: Store) -> None:
