@@ -6,8 +6,9 @@
 //   Read  {tool, file, from, to}        the first and last line the result showed (none for a picture or a PDF)
 //   Grep  {tool, path, glob, mode, files, lines}  the search's scope, its output mode, the files it matched, and the
 //                                       lines it showed
-//   Bash  {tool, command, out_lines}    the command and how many lines its output had as Claude read it (the
-//                                       `thimble` command keeps its own record)
+//   Bash  {tool, command, out_lines, refs}  the command, how many lines its output had as Claude read it, and the
+//                                       row refs the output named (`revisions.jsonl#L4111`), a row's identity and not
+//                                       its content (the `thimble` command keeps its own record)
 //
 // It also sets THIMBLE_SESSION for the session's commands, so `thimble` files its records under the same session.
 import type { EngineInterface, Register } from 'claude-code'
@@ -20,6 +21,7 @@ type Engine = EngineInterface
 const PART_MAX = 3_500_000 // characters of one seen file ($.fs.write takes up to 4 MiB)
 const LINES_MAX = 400 // line numbers kept of one file's Grep hits
 const FILES_MAX = 500
+const REFS_MAX = 2000 // row refs kept of one Bash output
 
 const S = { session: '', file: '', part: 1, rows: [] as string[], size: 0, loaded: false, home: '' }
 
@@ -52,6 +54,20 @@ export function grepHits(text: string): { files: string[]; lines: Record<string,
     }
   }
   return { files, lines }
+}
+
+/** The row refs a command's output names, once each, in order: a path, `#` and the row's place in its file
+ *  (`revisions.jsonl#L4111`, `runs.csv#row=3`, `forge.db#prs/12`). Coverage counts those of source rows as seen
+ *  (engine/kernel/lineage.py printed_refs reads a query's output the same way). A ref cut short (`…`) names no row. */
+export function rowRefs(text: string): string[] {
+  const out = new Set<string>()
+  for (const m of text.matchAll(/[^\s'"`()[\]<>{}|#=:,]+#[^\s'"`()[\]<>{}|#]+/g)) {
+    const t = m[0]
+    if (t.endsWith('…') || t.endsWith('...')) continue
+    out.add(t.replace(/[.,;:]+$/, ''))
+    if (out.size >= REFS_MAX) break
+  }
+  return [...out]
 }
 
 const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 120) || 'none'
@@ -131,7 +147,8 @@ export const register: Register = on => {
         // a file the command printed counts as read for no more lines than reached Claude (a long output is cut)
         const res = r.result as { stdout?: unknown; stderr?: unknown } | undefined
         const out = resultText(r) || (res && typeof res === 'object' ? [res.stdout, res.stderr].filter(x => typeof x === 'string' && x).join('\n') : '')
-        await keep($, { tool, command: String(input.command ?? '').slice(0, 2000), out_lines: out ? out.replace(/\n+$/, '').split('\n').length : 0, ...agent })
+        const refs = out ? rowRefs(out) : []
+        await keep($, { tool, command: String(input.command ?? '').slice(0, 2000), out_lines: out ? out.replace(/\n+$/, '').split('\n').length : 0, ...(refs.length ? { refs } : {}), ...agent })
       }
     } catch {
       // never let watching change a call's result

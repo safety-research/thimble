@@ -790,14 +790,40 @@ def type_of(path: str) -> str:
     return Path(path).suffix.lower().lstrip(".") or "no extension"
 
 
-def _printed_rows(st: Store, qid: str) -> list[str]:
-    """The source rows a query printed whole: its output rows that each stand for one source row (a listing of rows, not
-    a count), as many as pandas prints of its table. An aggregate's rows stand for many rows, whose text never showed."""
+# a source row's ref as a tool's output names it: a path, `#`, and the row's place in its file (revisions.jsonl#L4111,
+# runs.csv#row=3, forge.db#prs/12, run.json#/messages/3)
+REF_IN_TEXT = re.compile(r"[^\s'\"`()\[\]<>{}|#=:,]+#[^\s'\"`()\[\]<>{}|#]+")
+PRINTED_REFS_MAX = 2000
+
+
+def printed_refs(text: str, cap: int = PRINTED_REFS_MAX) -> list[str]:
+    """The row refs a tool's output names, once each, in order (hooks/kernel.ts keeps the same of a Bash output). A ref
+    cut short by its printer (`…`, `...`) names no row."""
+    out: dict[str, None] = {}
+    for m in REF_IN_TEXT.finditer(text or ""):
+        t = m.group(0)
+        if t.endswith(("…", "...")):
+            continue
+        out.setdefault(t.rstrip(".,;:"), None)
+        if len(out) >= cap:
+            break
+    return list(out)
+
+
+def _query_printed(st: Store, qid: str) -> dict[str, Any] | None:
     try:
         q = Q.get(st, qid)
     except Exception:  # noqa: BLE001 — a query that does not read shows no rows
-        return []
+        return None
     if not q or q.get("error") or not str(q.get("stdout") or "").strip():
+        return None
+    return q
+
+
+def _printed_rows(q: dict[str, Any] | None) -> list[str]:
+    """The source rows a query printed whole: its output rows that each stand for one source row (a listing of rows, not
+    a count), as many as pandas prints of its table. An aggregate's rows stand for many rows, whose text never showed."""
+    if not q:
         return []
     rows = q.get("rows") or []
     idx = range(len(rows)) if len(rows) <= PRINTED_ALL else [*range(PRINTED_ENDS), *range(len(rows) - PRINTED_ENDS, len(rows))]
@@ -838,6 +864,29 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             else:
                 per[f]["shown"].add(ref)
 
+    def seen_named(refs: list[str], cwd: str | None = None) -> None:
+        """Rows a tool's output named by their refs: each ref of one row of a source file reached Claude's context with
+        the output (a section of a Markdown file is one row, though it spans lines). Paths are the root's, or the
+        command's folder's."""
+        for t in refs:
+            path, _, frag = str(t).partition("#")
+            if not frag:
+                continue
+            f = path if path in per else st.rel(str(Path(cwd) / path) if cwd and not Path(path).is_absolute() else path)
+            if f not in per:
+                continue
+            ref = f"{f}#{frag}"
+            try:
+                p = R.parse(ref)
+                n = R.size(p)
+            except Exception:  # noqa: BLE001 — words after a `#` that name no row
+                continue
+            nums = p.get("nums") or []
+            section = (p.get("kind") == "lines" and bool(nums) and cnt.get(f, {}).get("kind") in ("markdown", "diff")
+                       and nums == list(range(nums[0], nums[-1] + 1)))
+            if p.get("kind") != "file" and (n == 1 or section):
+                seen_ref(ref)
+
     label_names: set[str] = set()
     for r in st.ledger(session):
         k = r.get("kind")
@@ -849,9 +898,13 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
                     if not n:
                         per[f]["named"] = True
                         per[f]["by"].add("thimble")
-            # rows of its output printed whole entered Claude's context
-            for ref in _printed_rows(st, str(r.get("id") or "")):
+            # rows of its output printed whole entered Claude's context, and so did each row its printed output names
+            # by its ref (a script that prints `r._ref` beside a row's fields), as far as the output Claude read goes
+            q = _query_printed(st, str(r.get("id") or ""))
+            for ref in _printed_rows(q):
                 seen_ref(ref)
+            if q:
+                seen_named(printed_refs(str(q.get("stdout") or "")[: Q.CUT]))
         elif k in ("rows", "resolve"):
             for ref in r.get("shown") or []:
                 f = ref.split("#")[0]
@@ -923,6 +976,8 @@ def coverage(st: Store, session: str | None = "") -> dict[str, Any]:
             cmd = str(s.get("command") or "")
             if re.match(r"^\s*thimble(\s|$)", cmd):
                 continue
+            # rows its output named by their refs (a script that printed rows with their refs)
+            seen_named(s.get("refs") or [], s.get("cwd"))
             # what reached Claude is at most the lines the command printed (a long output is cut)
             left = s.get("out_lines")
             for f, how, span, prog in SH.shows(cmd, files, root, s.get("cwd"), lambda f: cnt.get(f, {}).get("lines") or 0):

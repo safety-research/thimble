@@ -38,7 +38,7 @@ test('a Read, a Grep and a Bash call are kept under the session; the results rea
   on('tool.call', (_$, e) => {
     if (String(e.tool) === 'Read') return { result: '     3\tone\n     4\ttwo\n' }
     if (String(e.tool) === 'Grep') return { result: '/data/a.jsonl:9:hit' }
-    return { result: 'one\ntwo\nthree\n' }
+    return { result: 'events.jsonl#L2 one\ntwo\nthree\n' }
   })
   await $.session.start({ cwd: '/data', surface: 'terminal', isInteractive: true } as never)
   const read = await $.tool.call({ tool: 'Read', file_path: '/data/a.jsonl', offset: 3, limit: 2 } as never)
@@ -51,8 +51,9 @@ test('a Read, a Grep and a Bash call are kept under the session; the results rea
   expect(rows.map(r => r.tool)).toEqual(['Read', 'Grep', 'Bash'])
   expect(rows[0]).toMatchObject({ file: '/data/a.jsonl', from: 3, to: 4 })
   expect(rows[1]).toMatchObject({ path: '/data', mode: 'content', files: ['/data/a.jsonl'], lines: { '/data/a.jsonl': [9] } })
-  // the lines the command printed, so coverage counts a file it printed as read for no more lines than reached Claude
-  expect(rows[2]).toMatchObject({ command: 'head -3 events.jsonl', out_lines: 3 })
+  // the lines the command printed, so coverage counts a file it printed as read for no more lines than reached Claude,
+  // and the rows its output named by their refs
+  expect(rows[2]).toMatchObject({ command: 'head -3 events.jsonl', out_lines: 3, refs: ['events.jsonl#L2'] })
   expect(String(rows[0].cwd)).toBe('/data')
   expect(kept![0]).toBe('/th/lean/seen/s-1.jsonl')
   expect(env.THIMBLE_SESSION).toBe('s-1')

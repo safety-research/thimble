@@ -91,3 +91,25 @@ def test_reading_every_file_says_so_and_how_much(code: Path, tmp_path: Path) -> 
     cov = LIN.coverage(Store(code))
     assert all(o["status"] == "seen" for o in cov["files"])
     assert LIN.coverage_sentence(cov) == "Seen all 13 source files, at least in part: 38 of 363 rows (11%) entered Claude's context."
+
+
+def test_rows_a_query_or_a_script_printed_by_their_refs_are_seen(code: Path, tmp_path: Path) -> None:
+    # a query that printed two rows beside their refs, and a script whose output named a third and a csv row; refs cut
+    # short, of no source file, or of a whole range name no row that reached Claude
+    (code / "notes.jsonl").write_text("".join(json.dumps({"i": i, "text": f"note {i}"}) + "\n" for i in range(20)))
+    th = code / "thimble"
+    (th / "queries").mkdir(parents=True)
+    (th / "queries" / "r1.json").write_text(json.dumps({
+        "id": "r1", "about": "sample notes", "error": None, "rows": None,
+        "stdout": "notes.jsonl#L4 note 3 | first\nnotes.jsonl#L12, note 11\nnotes.jsonl#L1... cut\nother.jsonl#L2 x\n"}))
+    (th / "ledger.jsonl").write_text(json.dumps({"session": "s-cov", "kind": "query", "id": "r1",
+                                                "loaded": {"notes.jsonl": 20}}) + "\n")
+    saw(tmp_path, code, [{**bash("python3 sample.py", 3),
+                          "refs": ["notes.jsonl#L7", "runs.csv#row=2", "notes.jsonl#L1-20", "src/a.py#intro"]}])
+    cov = LIN.coverage(Store(code))
+    by = {o["path"]: o for o in cov["files"]}
+    assert by["notes.jsonl"]["status"] == "seen"
+    assert by["notes.jsonl"]["ranges"] == [[4, 4], [7, 7], [12, 12]]
+    assert by["runs.csv"]["status"] == "seen" and by["runs.csv"]["shown"] == 1
+    assert by["src/a.py"]["status"] == "not read"
+    assert LIN.printed_refs("a.jsonl#L3, b.csv#row=2. c.jsonl#L4… (d.jsonl#L5)") == ["a.jsonl#L3", "b.csv#row=2", "d.jsonl#L5"]
