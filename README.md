@@ -67,7 +67,7 @@ that work at that moment, so you do not need to learn them first.
 | `{` `}` | Pick an earlier or a later reply. |
 | `esc` or `0` | Close. Claude Code keeps `esc` at the prompt, so it closes the side panel and what opens over it; `0` closes the rest. |
 
-A citation opens in a tray above the prompt: `r` shows its rows, `c` the code behind it, and `↵` opens it in the
+A citation opens in a tray above the prompt: `r` shows its rows, `c` the code behind it, and `a` opens it in the
 side panel, its whole source with a side thread that the main conversation does not see.
 
 A card opens in a side panel beside the chat, and so do a label, Coverage and the thread list. The panel works with

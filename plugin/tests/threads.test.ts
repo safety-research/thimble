@@ -241,8 +241,8 @@ test("a citation's thread: a in the tray opens the citation in the side panel wi
   const clock = mock.clock(on)
   await markedTurn($, clock)
   await press($, clock, edit(']'))
-  // one way to open a citation in the side panel: ↵ open (a does the same, unnamed)
-  expect(await hintOf($)).toContain('↵ open')
+  // one way to open a citation in the side panel: a open (↵ does the same where Claude Code hands it on)
+  expect(await hintOf($)).toContain('a open')
   expect(await hintOf($)).not.toContain('expand')
   // a acts once a letter after it could no longer make it the start of a word
   expect(await press($, clock, edit('a'))).toEqual({ text: '', cursor: 0 })
@@ -349,7 +349,7 @@ test('a terminal too narrow for the panel: 1 in the tray leaves the tray as it w
   await press($, clock, edit('1'))
   expect(w.toasts.at(-1)).toBe('The side panel needs 144 columns when a key opens it (120 now). Type /threads to open it here, or widen the terminal.')
   // the keys are the chat's again, and the tray still shows the citation
-  expect(await hintOf($)).toContain('↵ open')
+  expect(await hintOf($)).toContain('a open')
   expect(await press($, clock, edit('w'))).toEqual({ text: 'w', cursor: 1 })
   const n = w.opened.length
   await $.command.run({ command: 'threads', args: '' } as never)
