@@ -2351,17 +2351,34 @@
       // each gap between layers: a stub out (right: as long as the labels written on it), the tracks where edges turn
       // across (edges that overlap get their own), and two cells in (a line and the arrow)
       const labelled = s => s.edge.segs[0] === s && !!s.edge.label
+      // tracks: an edge that turns gets a column (right) or row (down) of the gap to turn in. Their order across the gap
+      // keeps crossings few: an edge left of another crosses it where it enters on a row the other spans, or the other
+      // leaves on a row it spans, and where a row is an end of both, the two would run together, which costs most
+      const span = s => [Math.min(s.pc, s.qc), Math.max(s.pc, s.qc)]
+      const shares = (a, b) => a.from === b.from && a.pc === b.pc
+      const hit = (row, s) => { const [lo, hi] = span(s); return row < lo || row > hi ? 0 : row === lo || row === hi ? 10 : 1 }
+      const cost = (a, b) => (shares(a, b) ? 0 : hit(a.qc, b) + hit(b.pc, a))
+      const meets = (a, b) => !shares(a, b) && span(a)[0] <= span(b)[1] && span(b)[0] <= span(a)[1]
       const gaps = byLayer.slice(0, L - 1).map(ss => {
-        const tracks = []
-        ss.filter(s => s.pc !== s.qc).sort((a, b) => Math.min(a.pc, a.qc) - Math.min(b.pc, b.qc)).forEach(s => {
-          const lo = Math.min(s.pc, s.qc), hi = Math.max(s.pc, s.qc)
-          let t = tracks.findIndex(tr => tr.every(x => x.hi < lo || x.lo > hi || (x.s.from === s.from && x.s.pc === s.pc) || (x.s.to === s.to && x.s.qc === s.qc)))
-          if (t < 0) { t = tracks.length; tracks.push([]) }
-          tracks[t].push({ lo, hi, s })
-          s.track = t
+        const order = []
+        ss.filter(s => s.pc !== s.qc).sort((a, b) => span(a)[0] - span(b)[0]).forEach(s => {
+          let best = 0, bestCost = Infinity
+          for (let i = 0; i <= order.length; i++) {
+            let c = 0
+            order.forEach((o, j) => { c += j < i ? cost(o, s) : cost(s, o) })
+            if (c < bestCost) { bestCost = c; best = i }
+          }
+          order.splice(best, 0, s)
+          ctx.ops += order.length
+        })
+        // each takes the first track past every edge before it that it meets; edges that never meet share a track
+        let tracks = 0
+        order.forEach((s, i) => {
+          s.track = order.slice(0, i).reduce((t, o) => (meets(o, s) ? Math.max(t, o.track + 1) : t), 0)
+          tracks = Math.max(tracks, s.track + 1)
         })
         const labelW = Math.max(0, ...ss.filter(labelled).map(s => k.len(cut(s.edge.label, 16))))
-        return { out: R ? (labelW ? labelW + 3 : 2) : 1, tracks: tracks.length, into: R ? 2 : 1 }
+        return { out: R ? (labelW ? labelW + 3 : 2) : 1, tracks, into: R ? 2 : 1 }
       })
       const start = []
       let m = 0
