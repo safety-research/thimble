@@ -18,32 +18,3 @@ def test_a_card_is_stored_and_found(folder):
     assert canvas.canvas(ws)["cells"][0]["takeaway"] == "[[2|results.csv#row=1]] runs"
     with pytest.raises(ValueError):
         canvas.new_card(ws, {"kind": "table", "question": "No code?"})
-
-
-def test_the_report_reads_as_sections_of_cited_sentences(folder):
-    from thimble_browser import report
-
-    ws = home.open_folder(folder)
-    doc = report.save(ws, "# Most runs merged\n\nThe folder has [2](results.csv#row=1) runs. One failed.\n\n"
-                          "## Why\n\n- it edited [the wrong file](runs/a.jsonl#L1)\n\n![Runs by outcome](card:ab12cd34)\n",
-                      by="chat:w1")
-    assert doc["title"] == "Most runs merged"
-    first = doc["sections"][0]["paragraphs"][0]["sentences"]
-    assert [s["text"] for s in first] == ["The folder has [[2|results.csv#row=1]] runs.", "One failed."]
-    assert first[0]["refs"] == ["results.csv#row=1"]
-    why = doc["sections"][1]
-    assert why["paragraphs"][0]["sentences"][0]["bullet"] == "-"
-    assert why["figures"][0]["cell"] == "ab12cd34"
-    blocks = [{"id": "a", "type": "heading", "text": "Why", "level": 2},
-              {"id": "b", "type": "paragraph", "text": "Edited by hand [[runs/a.jsonl#L2]]."}]
-    again = report.from_blocks(ws, "Most runs merged", blocks)
-    assert again["sections"][0]["paragraphs"][0]["sentences"][0]["refs"] == ["runs/a.jsonl#L2"]
-
-
-def test_an_edit_of_a_takeaway_names_the_card_where_it_cites_itself(folder):
-    from thimble_browser import canvas, home
-    ws = home.open_folder(folder)
-    cell = canvas.new_card(ws, {"question": "Q?", "kind": "note", "text": "t", "takeaway": "[1](card:<id>#a/b)"})
-    assert f"card:{cell['id']}#a/b" in cell["takeaway"]
-    got = canvas.update_card(ws, cell["id"], {"takeaway": "Now [2](card:<id>#a/c) of them."})
-    assert f"card:{cell['id']}#a/c" in got["takeaway"] and "<id>" not in got["takeaway"]

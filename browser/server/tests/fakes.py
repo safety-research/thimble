@@ -82,10 +82,6 @@ class ScriptedClient:
         return SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text=text)])
 
 
-def system_of(req: dict[str, Any]) -> str:
-    return "".join(b["text"] for b in req["system"])
-
-
 def turns(req: dict[str, Any]) -> int:
     """How many replies the agent gave before this request."""
     return sum(1 for m in req["messages"] if m["role"] == "assistant")

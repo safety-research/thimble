@@ -38,8 +38,7 @@ scripts/check.sh page       # the page's type check, unit tests and build (brows
 
 The tests run on small made-up data and fake every model call. They cover what must not break; a test does not pin
 wording or layout. The server's sandbox tests need the sandbox runtime that `scripts/install.sh` installs, and skip
-without it. The page's tests in a real browser, `npm run test:browser` in `browser/frontend`, need Playwright's
-Chromium and are not part of CI.
+without it.
 
 ## Layout
 

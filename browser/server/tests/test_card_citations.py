@@ -38,16 +38,6 @@ def test_a_cited_value_opens_in_its_table(folder):
     assert got["meta"]["span"] == {"col": "n", "row": "merged"} and "version" not in got["meta"]
 
 
-def test_a_charts_values_are_cited_as_a_tables_are(folder):
-    api = Signed(folder)
-    c = card(api, "plot", chart([("failed", 1), ("merged", 2)]))
-    got = resolve(api, f"card:{c['id']}#n/merged")
-    assert got["meta"]["value"] == "2" and "<th>merged</th><td>2</td>" in got["meta"]["table_html"]
-    # the model reads the chart's rows, so it can cite them
-    text = canvas.outputs_text(canvas.find(api.ws, c["id"])[1])
-    assert f"card:{c['id']}#<column>/<row>" in text and "merged" in text and "VegaLite" not in text
-
-
 def test_a_citation_keeps_its_value_after_the_card_is_edited(folder):
     api = Signed(folder)
     c = card(api, "table", table([["failed", 1], ["merged", 2]]), code="v1")

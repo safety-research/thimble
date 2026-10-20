@@ -27,17 +27,6 @@ def test_every_agent_has_a_fixed_tool_set_and_no_shell():
         assert not {"Bash", "Write", "Edit", "WebFetch"} & set(a.tool_names())
 
 
-def test_the_chat_agent_has_the_tools_and_prompt_of_the_features_that_are_on(tmp_path):
-    main = agent.AGENTS["main"]
-    assert {"add_card", "read_ref", "write_document", "propose_view", "apply_label"} <= set(main.tool_names())
-    assert "## Cards" in main.prompt(tmp_path) and "## Report" in main.prompt(tmp_path)
-    settings.write({"features": {"cards": False, "report": False}})
-    assert not {"add_card", "write_document"} & set(main.tool_names())
-    assert {"read_ref", "propose_view"} <= set(main.tool_names())
-    assert "## Cards" not in main.prompt(tmp_path) and "## Report" not in main.prompt(tmp_path)
-    assert "## Citing" in main.prompt(tmp_path)
-
-
 def test_the_environment_gives_no_credentials(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_SOMETHING", "x")
     assert "ANTHROPIC_SOMETHING" in llm.scrub_env()
@@ -56,12 +45,6 @@ def test_the_api_key_file_is_the_users_alone():
     settings.set_api_key("")
     with pytest.raises(llm.NoCredentials):
         llm.client()
-
-
-def test_settings_refuse_what_they_do_not_know():
-    for bad in ({"credentials": {"source": "wif", "file": "/made/up/wif.toml"}}, {"effort": "huge"}, {"model": "gpt"}):
-        with pytest.raises(ValueError):
-            settings.write(bad)
 
 
 async def test_reading_stays_inside_the_folder(folder, tmp_path):

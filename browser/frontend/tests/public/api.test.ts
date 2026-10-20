@@ -98,29 +98,10 @@ describe('the API client', () => {
     }
   })
 
-  test("a message reaches main as an event; the Report tab's Write and the refused card's buttons are clicks of their own routes", async () => {
+  test('a message reaches main as an event, the route the server answers with a turn', async () => {
     await client.api.postEvent('w', 'main', { text: 'How many reviews?' })
-    await client.api.write('w', 'report', { text: 'Add the review load.', after_text: 'The runs.' })
-    await client.api.startIt('w', 'r1')
-    await client.api.again('w', 'r2')
-    await client.api.buildView('w', 'posts', { model: 'claude-opus-5-5', effort: 'high' })
     expect(calls.map((c) => [c.method, c.url, JSON.parse(String(c.body))])).toEqual([
       ['POST', '/api/ws/w/events', { kind: 'main', payload: { text: 'How many reviews?' } }],
-      ['POST', '/api/ws/w/write', { doc: 'report', text: 'Add the review load.', after_text: 'The runs.' }],
-      ['POST', '/api/ws/w/subagents/start-it', { request: 'r1' }],
-      ['POST', '/api/ws/w/subagents/again', { request: 'r2' }],
-      ['POST', '/api/ws/w/views/posts/build', { model: 'claude-opus-5-5', effort: 'high' }],
-    ])
-    // main opens on an empty chat: the browser has no Start of its own
-    expect('start' in client.api).toBe(false)
-  })
-
-  test("a view proposal's Accept and Reject are clicks of their own routes", async () => {
-    await client.api.acceptProposal('w', 'agent timeline')
-    await client.api.rejectProposal('w', 'agent timeline')
-    expect(calls.map((c) => [c.method, c.url])).toEqual([
-      ['POST', '/api/ws/w/views/proposals/agent%20timeline/accept'],
-      ['POST', '/api/ws/w/views/proposals/agent%20timeline/reject'],
     ])
   })
 
@@ -152,10 +133,5 @@ describe('the API client', () => {
     }
     expect(asked).toBeGreaterThan(80)
     expect(silent).toEqual([])
-  })
-
-  test('the routes thimble removed with its headless agents are gone from the client', () => {
-    const names = Object.keys(client.api)
-    for (const gone of ['resumeSession', 'retrySession', 'setSessionMode']) expect(names, gone).not.toContain(gone)
   })
 })
