@@ -149,3 +149,43 @@ def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: P
     res = json.loads(run(root, "resolve", "chat/room.jsonl#L1-6", "--json", "-n", "6").stdout)
     assert res["labels"]["sorry"]["values"] == {"yes": 3, "no": 3}
     assert res["records"][4]["labels"] == {"sorry": "yes"}
+
+
+def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Path):
+    with open(root / "chat" / "big.jsonl", "w") as f:
+        for i in range(420):
+            f.write(json.dumps({"agent": "wren", "text": f"message {i}", "n": i}) + "\n")
+    st = Store(root)
+    # a trial never asks
+    r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.", "--limit", "25")
+    assert r.returncode == 0 and "Not started" not in r.stdout and feed(root)[-1]["kind"] == "label"
+    # all 420: more than a sample, so it waits for the person's choice, and no session starts the reads
+    r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "Not started" in r.stdout and "asked first" in r.stdout
+    ev = feed(root)[-1]
+    assert ev["kind"] == "label_ask" and ev["units"] == 420 and ev["sample"] == 300
+    assert ev["text"] == "Read 420 records of chat/big.jsonl with Claude" and ev["meta"] == "9 model calls"
+    assert "the analyst's choice" in run(root, "label", "spam").stdout
+    # Claude cannot answer for the person: a made-up ask id is refused and the label still waits
+    r = run(root, "label", "spam", "--answer", "all", "--ask", "a000")
+    assert r.returncode == 1 and LB.load(st, "spam")["run"]["state"] == "ask"
+    # the person's key: a sample of 300 of the 420 that wait; the reads are asked for in the feed
+    got = json.loads(run(root, "label", "spam", "--answer", "sample", "--ask", ev["ask"]).stdout)
+    assert got["reads"] == 300 and got["waiting"] == 300 and got["card"]["id"] == LB.load(st, "spam")["card"]
+    assert "a random sample of 300" in run(root, "label", "spam").stdout
+    # the same label again asks again for the rest (a sample is no yes for all); this time the person runs all
+    run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
+    ev = feed(root)[-1]
+    assert ev["kind"] == "label_ask"
+    got = json.loads(run(root, "label", "spam", "--answer", "all", "--ask", ev["ask"]).stdout)
+    assert got["choice"] == "all" and got["reads"] == got["waiting"] == 420
+    # they said yes to this exact label and scope: asking again starts the reads at once
+    r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
+    assert "Not started" not in r.stdout and feed(root)[-1]["kind"] == "label"
+    # a changed definition is a new label: it asks again, and cancel reads nothing
+    run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam or an ad.")
+    ev = feed(root)[-1]
+    got = json.loads(run(root, "label", "spam", "--answer", "cancel", "--ask", ev["ask"]).stdout)
+    assert got["reads"] == 0 and got["waiting"] == 0
+    assert "chose not to run it over its 420 records" in run(root, "label", "spam").stdout

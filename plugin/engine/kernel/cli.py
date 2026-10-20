@@ -39,6 +39,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import estimate as EST
 from . import labels as LB
 from . import lineage as LIN
 from . import objects as O
@@ -620,6 +621,9 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
     --where EXPR        only records for which this Python expression is true (r is the record, text its raw text)
     --within L=V        only records the label L gave the value V
     --limit N           a trial: N records at random; the same label without --limit then labels the rest
+
+A --prompt label over more than 300 records does not start at once: the analyst is asked first, in the terminal, to
+run all, run on a random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks.
     --reason            the model also gives a one-line reason per record
 
 The same definition again keeps the values it has and labels only records it has not seen. The counts are a query,
@@ -636,6 +640,12 @@ def _parse_within(s: str | None) -> tuple[str, str] | None:
         raise LB.LabelError("--within takes LABEL=VALUE, such as --within apology=yes")
     k, v = s.split("=", 1)
     return k.strip(), v.strip()
+
+
+def _where_of(lab: dict[str, Any]) -> str:
+    """The files a label reads, as its ask names them: " of revisions.jsonl", or nothing for every file."""
+    g = str(lab.get("in") or "")
+    return f" of {g}" if g and g not in ("*", "**/*") else ""
 
 
 def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
@@ -657,8 +667,15 @@ def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
         n = s["counts"].get(v, 0)
         cite = f"  {LB._cite_value(qid, lab['name'], v)}" if qid and n else ""
         out.append(f"  {v:<{w}}  {n:>7,}{cite}")
-    if s["waiting"]:
-        out.append(f"  {s['waiting']:,} records wait for the model")
+    run = lab.get("run") or {}
+    if run.get("state") == "ask":
+        out.append(f"  {s['waiting']:,} records wait for the analyst's choice: the model reads all of them "
+                   f"({EST.calls_line((run.get('ask') or {}).get('calls') or 0)}), a random sample of {EST.SAMPLE}, or none")
+    elif s["waiting"]:
+        out.append(f"  {s['waiting']:,} records wait for the model"
+                   + (f" (the analyst chose a random sample of {EST.SAMPLE})" if run.get("chose") == "sample" else ""))
+    if run.get("state") == "cancelled":
+        out.append(f"  the analyst chose not to run it over its {run.get('units') or 0:,} records")
     if s["failed"]:
         why = next((u.get("err") for u in (lab.get("units") or {}).values() if u.get("v") is None and u.get("err")), "")
         out.append(f"  {s['failed']:,} records have no value" + (f" ({why})" if why else "")
@@ -751,6 +768,14 @@ def _label(st: Store, a: argparse.Namespace) -> int:
     if a.waiting is not None:
         out_json(LB.waiting(st, name, first=a.waiting or None))
         return 0
+    if a.answer:
+        # the person's choice for a big label's ask (the terminal's ask runs this, as the person)
+        r = LB.answer_ask(st, name, a.ask or "", a.answer, EST.SAMPLE, a.seed)
+        lab, _, obj = _recount(st, name)
+        card = obj or ({"id": lab["card"], "version": None} if lab.get("card") else None)
+        # the key that ran this starts the model's reads itself (shell/labels.ts answerAsk), so the feed has no line
+        out_json({"name": name, "choice": r["choice"], "reads": r["reads"], "of": r["of"], "card": card, **LB.status(lab)})
+        return 0
     if a.answers:
         raw = Path(a.answers).read_text() if a.answers != "-" else stdin_text(5.0)
         try:
@@ -835,7 +860,18 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                       _parse_within(a.within), a.limit, a.reason, a.seed)
         lab, q, obj = _recount(st, name)
         s = LB.status(lab)
-        if kind == "prompt" and s["waiting"] and obj:
+        # a big prompt label asks the person first (estimate.py), unless it is a trial or they said yes to this exact
+        # label and scope; the person's key answers with --answer, as the person
+        ask = None
+        if kind == "prompt" and not a.limit and EST.needs_asking(s["waiting"]) and not LB.approved(lab):
+            calls = len(LB.batches(LB.waiting(st, name)["units"]))
+            ask = LB.hold_for_ask(st, name, calls)
+            lab = LB.load(st, name) or lab
+            card = obj or ({"id": lab["card"], "version": None} if lab.get("card") else None)
+            st.emit({"kind": "label_ask", "name": name, "ask": ask["id"], "units": ask["units"], "calls": ask["calls"],
+                     "sample": min(EST.SAMPLE, ask["units"]), "text": f"Read {ask['units']:,} records{_where_of(lab)} with Claude",
+                     "meta": EST.calls_line(ask["calls"]), **({"object": card["id"], "version": card["version"]} if card else {})})
+        elif kind == "prompt" and s["waiting"] and obj:
             st.emit({"kind": "label", "name": name, "object": obj["id"], "version": obj["version"]})
         if a.json:
             out_json({"name": name, **s, "query": lab.get("query"), "card": lab.get("card"), "added": r["added"], "errors": r["errors"]})
@@ -846,7 +882,13 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             print(line)
         for e in r["errors"]:
             print(f"  error: {e}")
-        if s["waiting"]:
+        if ask:
+            print(f"  Not started: the model would read {ask['units']:,} records in {EST.calls_line(ask['calls'])}, so the "
+                  f"analyst is asked first, in the terminal: run all, run on a random sample of {EST.SAMPLE}, or cancel. "
+                  f"Their choice reaches you with their next message, and `thimble label {name}` shows it (then the "
+                  f"counts, once the reads end). Answer now from what you have, and say that the label waits for their "
+                  f"choice. A trial (--limit N) never asks.")
+        elif s["waiting"]:
             calls = len(LB.batches(LB.waiting(st, name)["units"]))
             print(f"  The model reads them in {calls} call{'s' if calls != 1 else ''} of up to {LB.BATCH_ITEMS} records, "
                   f"which run beside the session through its own model; the analyst sees the card fill in. "
@@ -866,7 +908,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                 return 1
             s = LB.status(lab)
             run = lab.get("run") or {}
-            if not s["waiting"]:
+            if not s["waiting"] or run.get("state") == "cancelled":
                 break
             if time.time() - t0 > a.wait:
                 print(f"{name}: still {s['waiting']:,} records waiting after {a.wait:.0f}s; the calls go on beside the session")
@@ -979,6 +1021,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--waiting", nargs="?", type=int, const=0, metavar="BATCHES",
                    help="the records that wait for the model, with their text, as JSON (those of the first BATCHES calls)")
     p.add_argument("--of", nargs="+", metavar="REF", help="the labels of these records, as JSON")
+    # the person's answer to a big label's ask, which their key in the terminal runs (never Claude's to pass)
+    p.add_argument("--answer", choices=("all", "sample", "cancel"), help=argparse.SUPPRESS)
+    p.add_argument("--ask", help=argparse.SUPPRESS)
     # the shell's read: the labels each card or citation rests on (labels.used_by), as JSON
     p.add_argument("--used-by", dest="used_by", nargs="+", metavar="REF", help=argparse.SUPPRESS)
     p.add_argument("--delete", action="store_true")

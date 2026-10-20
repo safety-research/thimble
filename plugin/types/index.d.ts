@@ -172,6 +172,8 @@ declare module 'claude-code' {
       panever: StateFamily<number>
       /** how many checks of label values the person has made (shell/labels.ts): the examples read their labels again */
       labelgen: number
+      /** a big label's ask that waits for the person's choice (shell/labels.ts): the run's sentence, its model calls, its card */
+      labelask: { root: string; name: string; ask: string; card: string | null; text: string; meta: string; units: number; sample: number } | null
       /** the labels of a set of records, by folder, generation and refs (`thimble label --of`) */
       labelsof: StateFamily<unknown>
       /** the labels a card or an answer rests on, by its key (shell/labeluse.ts) */

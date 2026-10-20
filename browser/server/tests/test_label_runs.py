@@ -4,6 +4,7 @@ reaches the agent with the next message; and a run's calls go many at once, slow
 import asyncio
 import copy
 import json
+import re
 import time
 from types import SimpleNamespace as NS
 
@@ -108,7 +109,9 @@ async def test_a_big_model_label_asks_first_and_the_turn_goes_on(big, folder, mo
     assert not run.running(ws, k["id"]) and store.stats(ws, k["id"])["n_labeled"] == 0
     (asked,) = label_runs(ws)
     assert asked["state"] == "asked" and asked["units"] == 2000 and asked["sample"] == asks.SAMPLE
-    assert asked["text"].startswith("Read 2,000 records of edits.jsonl with Claude: about ") and " calls, about " in asked["text"]
+    # the sentence says only what is certain; the line under the choices, the exact number of model calls
+    assert asked["text"] == "Read 2,000 records of edits.jsonl with Claude."
+    assert re.fullmatch(r"[\d,]+ model calls", asked["meta"])
     result = client.requests[1]["messages"][-1]["content"][0]["content"]
     assert "It has not run." in result and "waits for their choice" in result
     assert chats.records(ws, "main")[-1]["type"] == "done"
@@ -171,7 +174,7 @@ def test_the_label_editors_run_asks_first_with_the_same_ask(big, folder, monkeyp
         got = c.post(f"{base}/concepts/{cid}/apply", json={}).json()
         assert got["status"] == "asked" and not run.running(big, cid)
         ask = got["ask"]
-        assert ask["text"].startswith("Read 2,000 records of edits.jsonl with Claude: about ")
+        assert ask["text"] == "Read 2,000 records of edits.jsonl with Claude." and ask["meta"].endswith(" model calls")
         assert ask["units"] == 2000 and ask["sample"] == asks.SAMPLE
         assert c.post(f"{base}/concepts/{cid}/apply", json={}).json()["ask"]["id"] == ask["id"]  # one ask, not two
         assert c.get(f"{base}/concepts/{cid}").json()["ask"]["id"] == ask["id"]  # the editor shows it when it opens

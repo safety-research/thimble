@@ -57,7 +57,8 @@ import { hex as toneHex, mix, termColor } from '../draw/palette.js'
 import { noteConversation, sessionKey } from '../hooks/conversation'
 import { claimCount, claimsAction, claimsPaneStore, foldInSaves, openClaims } from '../claims/term'
 
-import { checksDone, checksPending, labelFromFeed, labelsOf } from './labels'
+import { answerAsk, askFromFeed, checksDone, checksPending, labelAskNow, labelFromFeed, labelsOf } from './labels'
+import type { LabelAsk } from './labels'
 import { cardLegend, cardsLabels, labelsRow } from './labeluse'
 import { howMade } from '../panes/labels.js'
 import { countLabels, DOCK_KEY, dockAction, dockCountEl, dockCounts, dockStore, dockWant, noteCoverage, openLabel, registerDock, resetDock, restPane, toggleDock } from './dock'
@@ -135,6 +136,9 @@ let trayKeyed: { key: string; at: number } | null = null
 // moment for a letter after it: one typed at once makes it the start of a word, and it does nothing
 let trayWait: { key: string; at: number; cancelled: boolean } | null = null
 const TRAY_WAIT = new Set(['a', 'o', 'h'])
+// a big label's ask (labels.ts): its keys, and the one pressed last, waiting a moment for a letter after it
+const ASK_KEYS: Record<string, 'all' | 'sample' | 'cancel'> = { '1': 'all', '2': 'sample', '0': 'cancel' }
+let askWait: { key: string; cancelled: boolean } | null = null
 // the row the next turn's cards are drawn under, when v asked about a catch-up: under the catch-up,
 // not under the turn's own last words
 let placeNext: string | null = null
@@ -370,6 +374,8 @@ async function newSaves($: Engine): Promise<ObjRef[]> {
       const ev = JSON.parse(line)
       // a --prompt label's records, for the model to read beside the session
       if (ev?.kind === 'label' && Number(ev.t) >= since) { labelFromFeed($, ev); continue }
+      // a big --prompt label's ask: the person's choice before the model reads its records
+      if (ev?.kind === 'label_ask' && Number(ev.t) >= since) { await askFromFeed($, ev); continue }
       if (ev?.kind !== 'save' || typeof ev.object !== 'string' || !ID.test(ev.object) || typeof ev.root !== 'string' || !(Number(ev.t) >= since)) continue
       const ref = { id: ev.object, v: Number(ev.version) || null, root: String(ev.root).replace(/\/+$/, '') }
       out.push(ref)
@@ -404,6 +410,7 @@ async function labelsInFeed($: Engine): Promise<void> {
     try {
       const ev = JSON.parse(line)
       if (ev?.kind === 'label' && Number(ev.t) >= LOADED - 2) labelFromFeed($, ev)
+      if (ev?.kind === 'label_ask' && Number(ev.t) >= LOADED - 2) await askFromFeed($, ev)
     } catch {
       // a line that does not parse is skipped
     }
@@ -1766,6 +1773,11 @@ function passagesOf($: Engine, row: string): { has: (p: { text: string; label: s
  *  that never pushed itself (a reload while it was open) comes after, in the shell's own order. Null at rest. */
 async function focusKeys($: Engine): Promise<FocusWords | null> {
   const stack = ((await $.state.get(FSTACK)).value ?? []) as FocusKind[]
+  // a big label's ask, while no surface is open: its keys, as its row under the card names them
+  if (!stack.length && !(await $.state.get(PICK)).value && !(await $.state.get(TRAY)).value) {
+    const la = await labelAskNow($)
+    if (la) return { keys: askKeys(la) }
+  }
   for (const kind of [...stack].reverse()) {
     const w = await focusWords($, kind)
     if (w) return w
@@ -2136,6 +2148,11 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
   if (pendingV && opened && opened.key === 'v' && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
     return { box: { text: `v${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { if (pendingV) { pendingV.cancelled = true; pendingV = null } } }
   }
+  // and straight after an ask's key (1 2 0), while it waits to run: the key began a word, and nothing runs
+  if (askWait && opened && opened.key === askWait.key && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
+    const w = askWait
+    return { box: { text: `${w.key}${e.inputText}`, cursor: 1 + e.inputText.length }, work: () => { w.cancelled = true; if (askWait === w) askWait = null } }
+  }
   // and straight after t, while t waits to list the threads
   if (pendingT && opened && ['t', DOCK_KEY.coverage, DOCK_KEY.labels].includes(opened.key) && now - opened.at < WORD_MS && /^\p{L}$/u.test(k)) {
     const was = opened.key
@@ -2181,6 +2198,17 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
     const args = { row: pick.row, verb: pick.verb }
     if (await paneTakes($, 'proposals', args, ev)) return { box: consume, work: () => paneFire($, 'proposals', args, ev) }
     if (/^[0-9]$/.test(k)) return { box: null }
+  }
+  // a big label's ask waits (labels.ts): 1 runs all, 2 a sample, 0 cancels, once WORD_MS has passed with no letter after
+  // the key (a letter makes it the start of a word, and nothing runs)
+  const la = !pick && !tray ? await labelAskNow($) : null
+  if (la && ASK_KEYS[k] && !(k === '2' && la.units <= la.sample)) {
+    const wait = { key: k, cancelled: false }
+    return { box: consume, work: () => {
+      askWait = wait
+      keyOpened = { key: k, at: now }
+      $.clock.after(WORD_MS, () => { if (wait.cancelled || askWait !== wait) return; askWait = null; void answerAsk($, ASK_KEYS[k]!).catch(err => $.ui.toast(`× The label ${la.name} did not start: ${String((err as Error)?.message || err).slice(0, 200)}`)) })
+    } }
   }
   // a card with the focus: its own keys win over the verbs (the bar names them); a (or 1, or o) asks about it in its
   // detail, ] [ step on, 0 and ⌫ give the keys back; a key it does not take gives the keys back and types
@@ -2273,6 +2301,25 @@ async function emptyPromptKey($: Engine, k: string, e: KeyEdit, now: number): Pr
  *  its frame. */
 function runningRow(els: Any, said: Said | null) {
   return said?.running ? els.Text({ dimColor: true, children: `${said.verb}…${said.text ? ` ${said.text}` : ''}` }) : null
+}
+
+/** An ask's keys, as the bar and its row say them. */
+function askKeys(a: LabelAsk): string {
+  return [`1 run all`, ...(a.units > a.sample ? [`2 run on a sample of ${a.sample.toLocaleString('en-US')}`] : []), '0 cancel'].join(' · ')
+}
+
+/** A big label's ask under its card: what the run reads (certain), the three choices, each a press, and under them the
+ *  one exact number, its model calls, dim. */
+function askRows(els: Any, $: Engine, a: LabelAsk): Any {
+  const { Box, Text, Button } = els
+  const color = FOCUS[theme]
+  const choice = (key: string, words: string, c: 'all' | 'sample' | 'cancel') =>
+    Box({ key: `ask-${c}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: words, onPress: () => { void answerAsk($, c) }, children: [Text({ key: 'k', color, bold: true, children: key }), Text({ key: 'w', children: ` ${words}` })] })] })
+  return Box({ key: 'label-ask', flexDirection: 'column', marginTop: 1, children: [
+    Text({ key: 'ask-text', children: `${a.text}?` }),
+    Box({ key: 'ask-keys', flexDirection: 'row', children: [choice('1', 'run all', 'all'), ...(a.units > a.sample ? [choice('2', `run on a sample of ${a.sample.toLocaleString('en-US')}`, 'sample')] : []), choice('0', 'cancel', 'cancel')] }),
+    ...(a.meta ? [Text({ key: 'ask-meta', dimColor: true, children: a.meta })] : []),
+  ] })
 }
 
 /** The key agents whose card landing the shell has looked at (whether to say so in the bar), as `<row>|<agent>`. */
@@ -2434,6 +2481,8 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const spotOf = (id: string) => spots.find(x => legendRegion(x) === id)
   const onPress = fullscreen ? (id: string, dir?: number) => (spotOf(id) ? openLabel($, spotOf(id)!.name, spotOf(id)!.value) : dir ? inlineTurn($, ref, id, dir) : pressTaken(p.drawing, id) ? inlineCardAct($, ref, { type: 'press', region: id }) : openDetail($, ref, knobOf(p.drawing, id) ? null : id, { bar: linkBar(id) })) : undefined
   const run = runningRow(els, said)
+  const la = await labelAskNow($)
+  const askEl = la && la.card === ref.id && la.root === ref.root ? askRows(els, $, la) : null
   const selected = kept?.region && (p.drawing?.regions || []).some((r: Any) => r.id === kept.region) ? kept.region : null
   // the card the keys act on: its own frame in the keys' color, or, for a card with no frame, a bar down its left side
   const ring = focus === 'rest' ? mix(FOCUS[theme], theme === 'light' ? '#ffffff' : '#1e1e1e', 0.45) : focus ? FOCUS[theme] : null
@@ -2449,7 +2498,7 @@ async function inlineEl($: Engine, e: Any, ref: ObjRef, key: string, at: string,
   const used = await labelsRow($, els, labelKey, [ref.id], ref.root, { grid: p.grid, card: ref.id })
   return Box({
     key: `card-${at}-${ref.id}`, flexDirection: 'column', marginTop: 1, marginLeft: 2, width: framed ? Math.max(p.grid.w, 40) : fw,
-    children: [body, ...(framed && more ? [moreRow(els, moreText(more), openAll)] : []), ...(used ? [used] : []), ...(pages ? [pages] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
+    children: [body, ...(framed && more ? [moreRow(els, moreText(more), openAll)] : []), ...(used ? [used] : []), ...(pages ? [pages] : []), ...(askEl ? [askEl] : []), ...(run ? [run] : []), ...(squeezed ? [Text({ key: 'sq-did', dimColor: true, children: `${squeezed} by squeeze` })] : [])],
   })
 }
 
