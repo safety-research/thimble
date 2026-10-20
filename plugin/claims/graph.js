@@ -385,7 +385,14 @@ export function program(k, data) {
   // about two fifths of the rest
   const all = k.h || 40
   const H = Math.max(12, all - 4 - (data.talk ? Math.floor(all * 0.4) : 0))
-  const legend = k.text(`{dim:○ corrected  ◉ said again} {warn:╌} {dim:correction} {ink:─} {dim:same rows} {accent:─} {dim:related} {bad:─} {dim:contradicts}${W >= 104 ? '{dim:  · earlier left, later right}' : ''}`, { wrap: false })
+  // the key names only what the graph shows
+  const has = (kind, how) => (data.edges || []).some(e => e.kind === kind && (!how || (how === 'contradicts') === (e.how === 'contradicts')))
+  const keyParts = [
+    claims.some(x => x.revised_by) ? '{dim:○ corrected}' : '', claims.some(x => (x.n || 1) >= 2) ? '{dim:◉ said again}' : '',
+    has('corrects') ? '{warn:╌} {dim:correction}' : '', has('relates', 'other') ? '{accent:─} {dim:related}' : '', has('relates', 'contradicts') ? '{bad:─} {dim:contradicts}' : '',
+    has('rows') ? '{ink:─} {dim:same rows}' : '', '{dim:earlier left, later right}',
+  ].filter(Boolean)
+  const legend = k.text(keyParts.join('{dim: · }'), { wrap: false })
   // as tall as the graph needs (about two rows a claim, and room for each cluster's name), at most the rows left
   const need = 4 + Math.ceil(claims.length * 0.8) + 2 * groups.length
   // the rows under the graph are those of the tallest claim's, so the graph keeps its size and its dots their places

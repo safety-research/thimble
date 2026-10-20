@@ -221,15 +221,17 @@ export function findQuote(md, quote) {
 
 const numbersIn = t => new Set((String(t || '').match(/\d[\d,.]*/g) || []).map(x => x.replace(/[,.]+$/, '').replace(/,/g, '')))
 
-/** The citations in or near [start, end): those in its sentence; with none there, those of its block (a paragraph, a
- *  list item, a table row) whose words hold a number the claim states (`text`), so a sentence with no citation of its
- *  own borrows only one that shows the same value. At most four, each {ref, label}. */
+/** The citations in or near [start, end): those in its own words, else those in its sentence (a sentence can hold
+ *  several claims, each with its citations); with none there, those of its block (a paragraph, a list item, a table
+ *  row) whose words hold a number the claim states (`text`), so a sentence with no citation of its own borrows only one
+ *  that shows the same value. At most four, each {ref, label}. */
 export function sourcesNear(md, start, end, text = '') {
   const s = String(md || '')
   const marks = linkMarks(s)
   if (!marks.length) return []
   const sent = sentenceAt(s, start, end)
-  let got = marks.filter(m => m.start >= sent.start && m.end <= Math.max(sent.end, end))
+  const own = marks.filter(m => m.start < end && m.end > start)
+  let got = own.length ? own : marks.filter(m => m.start >= sent.start && m.end <= Math.max(sent.end, end))
   const want = numbersIn(text)
   if (!got.length && want.size) {
     const b = blocks(s).find(x => start >= x.start && start <= x.end)

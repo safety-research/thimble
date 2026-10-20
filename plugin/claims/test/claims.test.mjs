@@ -91,7 +91,15 @@ test('a quote is found in the words as read, and its sources are the citations i
   const text = 'One. Two has [3.5 s](q1#a@b) here. Three.'
   const s = sentenceAt(text, 6, 9)
   assert.equal(text.slice(s.start, s.end), 'Two has [3.5 s](q1#a@b) here.')
-  assert.deepEqual(sourcesNear(A1, hit.start, hit.end), [{ ref: 'q4#user=Kestrel@share', label: '41%' }, { ref: 'q7#user=Kestrel@n', label: '212 of them' }])
+  // the citations in the claim's own words; with none there, those of its sentence
+  assert.deepEqual(sourcesNear(A1, hit.start, hit.end), [{ ref: 'q4#user=Kestrel@share', label: '41%' }])
+  const tilt = findQuote(A1, 'The tilt is one editor')
+  assert.deepEqual(sourcesNear(A1, tilt.start, tilt.end), [])
+  const both = findQuote(A1, "Kestrel made 41% of June's edits, and 212 of them were reverts")
+  assert.deepEqual(sourcesNear(A1, both.start, both.end).map(x => x.label), ['41%', '212 of them'])
+  const s2 = 'Most runs failed: [31 of 40](q2#ended=fail@n).'
+  const most = findQuote(s2, 'Most runs failed')
+  assert.deepEqual(sourcesNear(s2, most.start, most.end).map(x => x.label), ['31 of 40'])
   assert.equal(shortRef('runs/r1/agents/a.jsonl#L12-L14'), 'a.jsonl:12-14')
   assert.equal(locate('any bias in the edits', PLACES1, 'person').place.row, 'u1')
   assert.equal(locate('Bots made 4% of edits', PLACES1).place.sentence, 'Bots made 4% of edits.')
@@ -106,7 +114,7 @@ test('a turn adds its claims with where each was said, its sources and a cluster
   const c2 = store.claims[1]
   assert.equal(c2.text, "Kestrel made 41% of June's edits")
   assert.deepEqual(c2.said.map(p => [p.row, p.by, p.turn]), [['r2', 'claude', 1]])
-  assert.deepEqual(c2.sources.map(s => s.label), ['41%', '212 of them'])
+  assert.deepEqual(c2.sources.map(s => s.label), ['41%'])
   assert.equal(noteFor(res), '')
   assert.ok(!('kind' in c2) && !('precisely' in c2))
   assert.equal(noteFor({ added: ['c1', 'c2'] }), '')
@@ -221,10 +229,10 @@ test("the folder's map joins the session's claims, marked as the folder's; saved
 /** Turn 1, then turn 2: a correction of c1, a claim that cites a row c2 cites, and c3 said again. */
 function turn2() {
   const { store } = turn1()
-  const A2 = 'Fix one thing: it is two editors, not one. Kestrel and Wren made [63%](q8#user=top2@share) of it; Kestrel alone [41%](q4#user=Kestrel@share). June 18 was the busiest day.'
+  const A2 = "Fix one thing: it is two editors, not one. Kestrel and Wren made [63%](q8#user=top2@share) of it, Kestrel's [41%](q4#user=Kestrel@share) the larger part. June 18 was the busiest day."
   applyTurn(store, { places: [{ row: 'r3', by: 'claude', turn: 2, text: A2 }], turn: 2, out: { claims: [
     { quote: 'it is two editors, not one', claim: 'The tilt is two editors, not one', revises: 'c1' },
-    { quote: 'Kestrel and Wren made 63% of it', claim: 'Kestrel and Wren made 63% of the tilt', cluster: 'k2', links: [{ to: '#1', how: 'supports' }, { to: 'c9', how: 'supports' }] },
+    { quote: "Kestrel and Wren made 63% of it, Kestrel's 41% the larger part", claim: 'Kestrel and Wren made 63% of the tilt', cluster: 'k2', links: [{ to: '#1', how: 'supports' }, { to: 'c9', how: 'supports' }] },
     { same: 'c3', quote: 'June 18 was the busiest day', links: [{ to: 'c4', how: 'same topic' }] },
   ] } })
   return { store, A2 }
@@ -280,7 +288,7 @@ test('the pane: the head, the graph with a dot per claim and each cluster named,
   assert.ok(text.includes('◉'))
   // at rest: the newest claim selected, its words, where it came from and its evidence under the graph
   assert.equal(d.selected, 'n-c6')
-  assert.match(text, /● Kestrel and Wren made 63% of the tilt\n {2}finding who edited · turn 2\n {2}from “Kestrel and Wren made 63% of it; Kestrel alone 41%\.”/)
+  assert.match(text, /● Kestrel and Wren made 63% of the tilt\n {2}finding who edited · turn 2\n {2}from “Kestrel and Wren made 63% of it, Kestrel's 41% the larger part\.”/)
   assert.match(text, /1 63% +reading its rows…/)
   // no kinds: no fact, finding, judgment or event anywhere
   assert.ok(!/judgment|\bfact\b|\bevent\b/.test(text))
@@ -297,9 +305,9 @@ test('the pane: the ring on a dot selects its claim; ↵ on it opens where it ca
   // the dot selected is what the panel's thread asks about, with the claim's citations as its refs
   const sel = run(st)
   assert.equal(sel.selected, 'n-c2')
-  assert.deepEqual(sel.regions.find(r => r.id === 'n-c2').meta.ref, ['q4#user=Kestrel@share', 'q7#user=Kestrel@n'])
+  assert.deepEqual(sel.regions.find(r => r.id === 'n-c2').meta.ref, ['q4#user=Kestrel@share'])
   assert.match(pane.thread({}, st, data).about, /the claim selected is "Kestrel made 41% of June's edits" \(turn 1, said as "Kestrel made 41% of June's edits, and 212 of them were reverts\."\)/)
-  assert.deepEqual(sel.wants.map(w => w.request.rows[0]), ['q4#user=Kestrel@share', 'q7#user=Kestrel@n'])
+  assert.deepEqual(sel.wants.map(w => w.request.rows[0]), ['q4#user=Kestrel@share'])
   const got = { [JSON.stringify({ rows: ['q4#user=Kestrel@share'] })]: { chain: [{ step: 'query', id: 'q4', about: 'share by user' }], rows: ['revisions.jsonl#L28'], count: 517, records: [{ ref: 'revisions.jsonl#L28', text: 'Kestrel saved Lexicon' }] } }
   assert.match(draw(data, { state: st, got }).text, /1 41% +q4 · share by user ← 517 source rows in revisions\.jsonl/)
   // a press on the dot selected (↵) opens where it came from; on another dot it selects that one
@@ -307,7 +315,7 @@ test('the pane: the ring on a dot selects its claim; ↵ on it opens where it ca
   assert.deepEqual(run(st, { type: 'press', region: 'n-c4' }).state, { claim: 'c4', part: 'n-c4' })
   assert.deepEqual(run(st, { type: 'press', region: 'said' }).effects, [{ id: 'c2', row: 'r2', do: 'source' }])
   // the digits open the evidence as a citation opens (over the pane, in the side panel)
-  assert.deepEqual(run(st, { type: 'key', key: '2' }).effects, [{ mark: { kind: 'cite', ref: 'q7#user=Kestrel@n', label: '212 of them' }, do: 'open' }])
+  assert.deepEqual(run(st, { type: 'key', key: '1' }).effects, [{ mark: { kind: 'cite', ref: 'q4#user=Kestrel@share', label: '41%' }, do: 'open' }])
   // the ring on an evidence row selects that row, the claim kept
   const ev = run(st, { type: 'focus', region: 'ev-1' })
   assert.deepEqual(ev.state, { claim: 'c2', part: 'ev-1' })

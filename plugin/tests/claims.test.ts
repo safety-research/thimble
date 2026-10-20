@@ -24,7 +24,7 @@ const Q1 = 'was there any bias in the edits over time? who drove it?'
 const A1 = 'Yes. The tilt is one editor. Kestrel made [41%](q4#user=Kestrel@share) of June\'s edits, and [212 of them](q7#user=Kestrel@n) were reverts. June 18 had [6,543 saves](q1#day=2026-06-18@n), the busiest day.'
 const FORK1 = { notes: [], verbs: {}, glosses: [], claims: [
   { quote: 'The tilt is one editor', claim: 'The tilt in the edits is one editor', cluster: 'testing for bias' },
-  { quote: "Kestrel made 41% of June's edits", claim: "Kestrel made 41% of June's edits, 212 of them reverts", cluster: 'finding who edited' },
+  { quote: "Kestrel made 41% of June's edits, and 212 of them were reverts", claim: "Kestrel made 41% of June's edits, 212 of them reverts", cluster: 'finding who edited' },
   { quote: 'June 18 had 6,543 saves', cluster: 'the June 18 burst' },
 ] }
 const Q2 = "I'm going to tell my manager the tilt is one editor. Anything to fix?"
