@@ -107,8 +107,8 @@ test('the card guide\'s opening program runs', () => {
 
 // the card guide's worked programs (skills/thimble/forms), which the guide holds word for word, and the forms earlier
 // guides showed (draw/test/forms), which cards saved then still use
-const GUIDE_FORMS = ['flow', 'anatomy', 'grid', 'versions', 'knob', 'timeline']
-const OLD_FORMS = ['bars', 'trend', 'records', 'map', 'table', 'guide', 'weeks', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
+const GUIDE_FORMS = ['flow', 'grid', 'timeline']
+const OLD_FORMS = ['anatomy', 'versions', 'knob', 'bars', 'trend', 'records', 'map', 'table', 'guide', 'weeks', 'trail', 'curves', 'diffmap', 'strips', 'unfold']
 
 test('every form of the card guide, and of earlier guides, draws under a reply and in the detail with parts to select', () => {
   const guide = readFileSync(DRAW + '../skills/thimble/cards.md', 'utf8')

@@ -19,7 +19,7 @@ add_card  question  How did the runs end?
           takeaway  Most runs merged: [13](card:<id>#merged) of the 24.
 ```
 
-### What makes a good card
+### Choosing the form
 
 {{shared:cards-good}}
 
@@ -28,7 +28,3 @@ add_card  question  How did the runs end?
 {{shared:cards-toolkit}}
 
 **When something goes wrong.** add_card and edit_card run the code and then the program, and the result says what to fix: the code's error, or the program's error with the line and the fix, and the program's warnings. It also lists the parts you can cite. Fix the card with edit_card on the same card.
-
-### A sequence of cards
-
-{{shared:cards-sequence}}

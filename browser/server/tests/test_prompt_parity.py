@@ -66,7 +66,7 @@ def test_main_prompt_holds_the_shared_parts_whole(tmp_path):
     from thimble_browser import agent
 
     text = agent.AGENTS["main"].prompt(tmp_path)
-    for part in ("communicating", "citing", "labels-guide", "cards-good", "cards-toolkit", "cards-sequence"):
+    for part in ("communicating", "citing", "labels-guide", "cards-good", "cards-toolkit"):
         assert prompts.shared(part) in text
 
 
