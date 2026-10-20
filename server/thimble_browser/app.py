@@ -240,7 +240,7 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
     def attached(c: str) -> dict[str, Any]:
         choice = home.read_json(home.workspace_dir(c) / "session.json", {}) or {}
         return {"session": "thimble-browser", "cwd": str(folder_of(c)), "since": started,
-                "model": settings.read()["model"],
+                "model": settings.read()["model"], "settings_effort": settings.read()["effort"],
                 **({"effort_choice": choice["effort"]} if choice.get("effort") else {})}
 
     @app.put("/api/ws/{c}/session/effort")
