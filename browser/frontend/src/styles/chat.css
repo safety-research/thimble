@@ -207,6 +207,59 @@
   margin-bottom: -20px;
   padding: 0 2px;
 }
+.chat-working-time {
+  margin-left: 8px;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* a label run in the chat (LabelRun.tsx): its state's glyph, its one line with the label's chip, and its choices or
+   Stop under the words */
+.chat-labelrun {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+}
+.chat-labelrun[data-state='asked'] {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--border-subtle));
+}
+.chat-labelrun-glyph {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 18px;
+  color: var(--text-secondary);
+}
+.chat-labelrun-warn {
+  color: var(--status-warning);
+}
+.chat-labelrun-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.chat-labelrun-text {
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.chat-labelrun-progress {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.chat-labelrun-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 
 /* -------- notes: what an act left (the chip that goes there, the spinner while it is in flight) and a stopped or
    failed reply (the ✕ mark and one word, the detail behind the chevron); quiet text, no frame -------- */

@@ -409,7 +409,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               </div>
             )}
             {chat.error && <div className="chat-error">{chat.error}</div>}
-            {!chat.loading && !chat.error && kind === 'main' && <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.streaming} retry={mainRetry} />}
+            {!chat.loading && !chat.error && kind === 'main' && <Rows rows={withBranches(mainRows, main.records, branches)} ws={ws} chat="main" streaming={main.running} retry={mainRetry} />}
             {!chat.loading && !chat.error && kind === 'thread' && curMeta && <ThreadView ws={ws} meta={curMeta} chat={chat} main={main} branches={branches} />}
             {!chat.loading && !chat.error && kind === 'dev' && <BuildView ws={ws} chat={chat} name={build?.name ?? curMeta?.title ?? 'the view'} />}
           </div>
@@ -465,7 +465,7 @@ export function ThreadView({ ws, meta, chat, main, branches }: { ws: string; met
           }
         />
       )}
-      <Rows rows={chat.rows} ws={ws} chat={meta.id} streaming={chat.streaming} retry={ask ? threadRetry(chat.rows, chat.running, () => chat.send(ask)) : undefined} />
+      <Rows rows={chat.rows} ws={ws} chat={meta.id} streaming={chat.running} retry={ask ? threadRetry(chat.rows, chat.running, () => chat.send(ask)) : undefined} />
     </>
   )
 }

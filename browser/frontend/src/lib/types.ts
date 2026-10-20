@@ -65,6 +65,39 @@ export type ChatRecord =
   | { type: 'agent'; ts?: string; chat: string; role: string; title: string; run?: number; tool_use_id?: string; view?: string }
   | { type: 'shot'; ts?: string; phase: string; ticket: string; name: string; note?: string }
   | { type: 'notice'; ts?: string; id?: string; key?: string | null; kind?: string; text?: string; agent?: string | null; action?: NoticeAction | NoticeAction[] | null; dismissed?: boolean; cleared?: boolean }
+  | ({ type: 'label_run'; ts?: string } & LabelRunState)
+
+/** A label run in the chat that started it (backend labels/asks.py): the analyst's go-ahead before a model reads many
+ * records (`asked`, with the run's size in `text`), then the run while it goes and how it ended. Each record of one run
+ * (`id`) is its row's new state. */
+export interface LabelRunState {
+  id: string
+  concept: string
+  name: string
+  state: 'asked' | 'answering' | 'running' | 'done' | 'failed' | 'stopped' | 'cancelled' | (string & {})
+  /** the one line the row shows */
+  text: string
+  /** an ask's units, and how many "Run on a sample" reads */
+  units?: number
+  sample?: number
+  total?: number
+  done?: number
+  failed?: number
+  choice?: string
+}
+
+/** `GET /label-runs/{id}`: the row's live state while its run goes (status, done of total, calls at once, seconds). */
+export interface LabelRunLive {
+  id: string
+  state?: string
+  text?: string
+  status?: string
+  done?: number
+  total?: number
+  failed?: number
+  pace?: number | null
+  seconds?: number
+}
 
 /** A turn's token use, summed over its requests (backend agent.Usage), on its `done` record. */
 export interface TurnUsage {

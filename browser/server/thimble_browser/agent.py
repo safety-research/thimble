@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -83,6 +84,36 @@ def role_of(meta: dict[str, Any]) -> str:
     threads)."""
     r = meta.get("agent") or meta.get("role")
     return r if r in AGENTS else "main"
+
+
+# ---- what the agent hears with the analyst's next message
+
+NOTES_HEAD = "(What happened since your last turn, which the analyst saw in the chat:)"
+_notes_lock = threading.Lock()
+
+
+def _notes_path(ws: str, chat: str) -> Path:
+    return home.workspace_dir(ws) / "chats" / f"{chat}.notes.json"
+
+
+def tell(ws: str, chat: str, text: str) -> None:
+    """Something the chat's agent hears at the start of its next turn, before the analyst's message, such as how a
+    label run it started ended (labels/asks.py). Kept on disk until that turn."""
+    with _notes_lock:
+        p = _notes_path(ws, chat)
+        notes = home.read_json(p, [])
+        home.write_json(p, [*(notes if isinstance(notes, list) else []), text])
+
+
+def take_notes(ws: str, chat: str) -> list[str]:
+    with _notes_lock:
+        p = _notes_path(ws, chat)
+        notes = home.read_json(p, [])
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    return [str(n) for n in notes] if isinstance(notes, list) else []
 
 
 # ---- the conversation on disk
@@ -233,7 +264,9 @@ class Session:
                                           **(record or {})})
         messages = load_messages(self.ws, self.chat)
         self._close_open_calls(messages)  # a turn a server that stopped left open
-        messages.append({"role": "user", "content": text})
+        notes = take_notes(self.ws, self.chat)
+        messages.append({"role": "user", "content": text if not notes else [
+            {"type": "text", "text": "\n".join([NOTES_HEAD, *notes])}, {"type": "text", "text": text}]})
         save_messages(self.ws, self.chat, messages)
         self.running = True
         self.started_at = home.now()
@@ -285,7 +318,11 @@ class Session:
                 except anthropic.APIStatusError as e:
                     if e.status_code in (429, 529) and retries < STREAM_RETRIES:
                         retries += 1
-                        await asyncio.sleep(5 * 2 ** retries)
+                        wait = 5 * 2 ** retries
+                        busy = "rate limit was reached" if e.status_code == 429 else "API is overloaded"
+                        self._append({"type": "notice", "kind": "retry", "text": f"Claude's {busy} ({e.status_code});"
+                                      f" it starts that step again in {wait} s."})
+                        await asyncio.sleep(wait)
                         continue
                     raise
                 retries = 0

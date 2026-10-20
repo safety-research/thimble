@@ -221,6 +221,7 @@ async def test_stopping_a_run_keeps_what_it_labeled(runs, monkeypatch):
         return json.dumps({"records": [{"i": i, "value": "yes", "confidence": 1} for i in range(1, n + 1)]})
 
     monkeypatch.setattr(run, "_call", slow_call)
+    monkeypatch.setattr(run, "CONCURRENCY", 10)
     await run.start(ws, runs, k, paths=["many.jsonl"])
     await asyncio.sleep(0.5)
     assert await run.cancel(ws, k["id"])
