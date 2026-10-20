@@ -62,28 +62,28 @@ test('a stacked bar\'s part drawn from a row is a part by itself: it opens that 
   assert.deepEqual(plain.regions, [])
 })
 
-test('a stacked bar\'s label stays inside its own part, and a total beside the total is drawn once', async () => {
+test('every part of a stacked bar has one height, k.bars names the parts once in a key above, and a total beside the total is drawn once', async () => {
   // a narrow part whose label is wide characters, a part labelled with a number, and a note that repeats the total
   const parts = [{ value: 9, label: '数据集', tone: 'c1' }, { value: 30, label: 'names 11–50', tone: 'c2' }, { value: 61, label: '1,119 other names', tone: 'c4' }]
   const program = `return k.bars([{ id: 'answers', label: 'answers', parts: data.parts, note: k.fmt(100) }, { id: 'proxy', label: 'proxy', parts: data.parts.slice(1), note: 'two kinds' }])`
   for (const w of [40, 60, 90, 120, 150]) {
     const d = runProgram({ program, data: { parts } }, { w, h: 12 })
     assert.equal(d.error, undefined, d.error && d.error.message)
-    // the terminal: the cells on a part's fill hold that part's words only, whole, and nothing on a fill strays
     const g = renderTerm(d, { w })
-    for (const row of g.rows.slice(0, 2)) {
-      for (const p of parts) {
-        const on = row.filter(c => c.bg === p.tone)
-        const words = on.map(c => c.ch).join('').trim()
-        const value = p.value.toLocaleString('en-US')
-        assert.ok(!words || words === p.label || words === `${p.label} ${value}`, `${w}: "${words}" on the part ${p.label}`)
-      }
-      assert.ok(row.every(c => c.tone !== 'paper' || c.bg || c.cont), `${w}: words off their part's fill`)
+    const text = gridText(g).split('\n')
+    // the key: each part's name once, in the rows above the bars (it wraps when the card is narrow)
+    const first = text.findIndex(l => l.includes('▆'))
+    const key = text.slice(0, first).map(l => l.trim()).join(' ')
+    for (const p of parts) assert.equal(key.split(p.label).length - 1, 1, `${w}: ${key}`)
+    // the bars: every cell of a part is the same glyph, on no fill
+    for (const row of g.rows.slice(first, first + 2)) {
+      const on = row.filter(c => parts.some(p => p.tone === c.tone))
+      assert.ok(on.length > 0, `${w}: a bar is drawn`)
+      assert.ok(on.every(c => c.ch === '▆' && !c.bg), `${w}: ${on.map(c => c.ch).join('')}`)
     }
     // a total beside the same total is drawn once; another note is kept
-    const text = gridText(g)
-    assert.equal(text.split('\n')[0].split('100').length - 1, 1, `${w}: ${text}`)
-    if (w >= 90) assert.ok(text.includes('two kinds'), text)
+    assert.equal(text[first].split('100').length - 1, 1, `${w}: ${text.join('\n')}`)
+    if (w >= 90) assert.ok(text[first + 1].includes('two kinds'), text.join('\n'))
   }
 })
 

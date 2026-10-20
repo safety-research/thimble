@@ -373,7 +373,8 @@
       rule(o) { o = o || {}; return sizing(node('rule', { tone: T(o.tone || 'dim') }), o) },
 
       // ---------------- values
-      // a bar: one value against a max, or stacked parts [{value, tone, label}]; it grows to the width it is given
+      // a bar: one value against a max, or stacked parts [{value, tone, label}]; it grows to the width it is given. A
+      // part's label names it when it is selected; k.bars also names each color in a key above its rows
       bar(value, o) {
         if (isObj(value) && !Array.isArray(value)) { o = value; value = o.parts || o.value }
         o = o || {}
@@ -439,7 +440,15 @@
           if (from && meta.ref == null && !lineageOf(ctx, meta)) meta.ref = from
           return k.region(id != null ? id : (slug(it.label) || refSlug(from)), Object.assign({}, meta, { label: it.regionLabel || `${it.label == null ? '' : it.label} ${texts[i]}`.trim(), cite: it.cite != null ? it.cite : meta.cite, examples: it.examples != null ? it.examples : meta.examples }), row)
         })
-        return k.stack(rows, { gap: o.gap ? 1 : 0 })
+        // the parts' names, once for all rows: a key above them, each name in its part's color
+        const key = []
+        items.forEach(it => { if (Array.isArray(it.parts)) it.parts.forEach((p, pi) => {
+          if (!isObj(p) || p.label == null || String(p.label).trim() === '' || key.some(e => e.label === String(p.label))) return
+          const t = T(p.tone || CATS[pi % 6])
+          if (t !== 'unseen') key.push({ label: String(p.label), tone: t })
+        }) })
+        const list = k.stack(rows, { gap: o.gap ? 1 : 0 })
+        return key.length && o.key !== false ? k.stack(k.legend(key), list) : list
       },
       // ■ label   ■ label : one text
       legend(items, o) {
@@ -494,7 +503,7 @@
           if (Array.isArray(a.ticks)) r.ticks = a.ticks.map(t => isObj(t) ? { at: num(t.at), label: t.label != null ? String(t.label) : undefined } : { at: num(t) }).filter(t => isFinite(t.at))
           return r
         }
-        const n = node('plot', { series: S, h: clamp(int(o.h, 8), 3, 60), x: axis(o.x), y: axis(o.y) })
+        const n = node('plot', { series: S, h: clamp(int(o.h, 10), 3, 60), x: axis(o.x), y: axis(o.y) })
         if (o.dots) n.dots = true
         if (o.legend === false) n.legend = false
         // brush: in the browser, a drag across the plot's x axis is an event {type: 'brush', id, from, to} in x's units
