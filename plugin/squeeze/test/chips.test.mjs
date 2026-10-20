@@ -21,16 +21,16 @@ test('a rewrite is held to the original: a ref it never cited is kept for the he
   assert.equal(out.problems.length, 1)
   assert.match(out.problems[0], /"12" is not in the original/)
   assert.deepEqual(checkRewrite(TEXT, 'It failed about [1 in 9](q2#test=checkout@fail_rate); now it [passed 200 times](q3#test=checkout@passes).').problems, [])
-  // a kept ref whose words state another number of the text: the words stay, the link goes
-  const moved = checkRewrite(TEXT, 'The fix held [200 times](tests/conftest.py#L14); it [passed 200 times](q3#test=checkout@passes).')
-  assert.equal(moved.text, 'The fix held 200 times; it [passed 200 times](q3#test=checkout@passes).')
-  assert.match(moved.problems[0], /"200 times" was linked to the source of "tests\/conftest.py:14"/)
-  // the cited value with a date or a total beside it is kept; a total alone in place of the value is not
+})
+
+test('a cited ref whose words now state another number keeps its link, for the healing pass to re-point or mark', () => {
+  // the original cites 13,403 there; the healing pass finds 14,591 in its place's row, or marks the citation ×
   const orig = 'Most saves came on [6,543](q1#day=18@n) days, [13,403 of 14,591](q10#wiki=dse@n) on one wiki.'
-  assert.deepEqual(checkRewrite(orig, 'Peak: [6,543 on Jun 18](q1#day=18@n); [13,403 saves](q10#wiki=dse@n).').problems, [])
   const total = checkRewrite(orig, 'Of [14,591 edits](q10#wiki=dse@n), most came on one day.')
-  assert.equal(total.text, 'Of 14,591 edits, most came on one day.')
-  assert.match(total.problems[0], /"14,591 edits" was linked to the source of "13,403 of 14,591"/)
+  assert.equal(total.text, 'Of [14,591 edits](q10#wiki=dse@n), most came on one day.')
+  assert.deepEqual(total.problems, [])
+  const moved = checkRewrite(TEXT, 'The fix held [200 times](tests/conftest.py#L14); it [passed 200 times](q3#test=checkout@passes).')
+  assert.equal(moved.text, 'The fix held [200 times](tests/conftest.py#L14); it [passed 200 times](q3#test=checkout@passes).')
 })
 
 test('readReply takes the text from its tags, or the whole reply when it gave none, and the card changes after it', () => {
@@ -66,9 +66,6 @@ test('a ref with brackets in a key value stays one link through the check, a new
   const out = checkRewrite(orig, text)
   assert.equal(out.text, text)
   assert.deepEqual(out.problems, [])
-  // one cited at a value its place does not hold loses its link whole: its words, never part of its ref
-  const moved = checkRewrite(orig, 'Girls: [37](r4#age=child%20(0-12)&group=a@kept) in all.')
-  assert.equal(moved.text, 'Girls: 37 in all.')
   // the text writing in never stops inside such a link
   const links = ['[21](', '[19]('].map(w => [text.indexOf(w), text.indexOf('@kept)', text.indexOf(w)) + 6])
   for (let n = 8; n < text.length; n += 5) {
