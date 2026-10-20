@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { citeCard, citeWords, drawnCard, drawsHyperlinks, explainerCard, fileLink, linksIn, placeOf, sourceCard } from '../cards.js'
 import { askedRow, engagedText, openedRow } from '../engaged.js'
-import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, inline, lineOf, linkMarks, marksIn, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, verbsOf, withObserver, wrapRuns } from '../message.js'
+import { anchorTerm, blocks, findInLink, findTerm, glossesOf, headsOf, healInput, healedRecord, inline, lineOf, linkMarks, marksIn, needsHeal, newRecord, plainWords, placeMarks, recordFor, remark, runsText, seriesRef, shownOf, sparkChars, stemOf, tableOf, textKey, verbsOf, withObserver, wrapRuns } from '../message.js'
 import { back, base, open, order, push, step, top } from '../tray.js'
 import { citeRef } from '../object.js'
 import { runProgram } from '../../draw/sandbox-node.mjs'
@@ -479,4 +479,26 @@ test('a citation\'s words keep what a code span holds: underscores and stars ins
   assert.equal(plainWords('**bold** and _it_ and `a_b*c` and a_b and "*"'), 'bold and it and a_b*c and a_b and "*"')
   assert.equal(lineOf('# The `add_csv` step\n> reads [the file](a.py#L2)'), 'The add_csv step reads the file')
   assert.equal(citeWords('`snake_case`', 'a.py#L3'), 'snake_case')
+})
+
+test('the healing pass in a drawing: a spinner while it runs, a re-pointed citation opens its new place, an unwrapped one is grey, a contradicted one has a red ×', () => {
+  const text = 'Busiest: [5](r1#day=a@n). Gone: [12](r9@n). Wrong: [4](r1#day=b@n).'
+  const rec = { ...newRecord({ row: 'x', session: 's', text }) }
+  assert.equal(needsHeal(rec), true)
+  const checking = healedRecord(rec, { checking: true })
+  const runs = inline(text, 0, text.length, checking.marks)
+  assert.equal(runs.filter(r => r.tag === 'checking').length, 3)
+  assert.equal(healInput(rec), text)
+  const healed = { ...rec, heal: { key: textKey(text), changes: [
+    { label: '5', ref: 'r1#day=a@n', state: 'linked', how: 'cell', to: 'r1#day=c@n' },
+    { label: '12', ref: 'r9@n', state: 'quiet', how: 'gone', why: 'the cited place is gone (no query r9)' },
+    { label: '4', ref: 'r1#day=b@n', state: 'contradicted', how: 'contradicted', to: 'r1#day=b@n', why: 'the cited place shows 3' },
+  ] } }
+  assert.equal(needsHeal(healed), false)
+  const m = healedRecord(healed).marks
+  assert.deepEqual([m[0].ref, m[0].wrote, m[1].heal, m[2].heal, m[2].why], ['r1#day=c@n', 'r1#day=a@n', 'quiet', 'bad', 'the cited place shows 3'])
+  const drawn = inline(text, 0, text.length, m)
+  assert.deepEqual(drawn.filter(r => r.tag).map(r => r.s), [' ×'])
+  // a squeeze's new text is a new key: its own pass, the old result left alone
+  assert.equal(needsHeal({ ...healed, shown: 'Busiest: [5](r1#day=a@n).' }), true)
 })

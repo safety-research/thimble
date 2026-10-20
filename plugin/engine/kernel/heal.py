@@ -484,7 +484,10 @@ class _Pass:
         for label, target, start, end in R.link_spans(text):
             if target.startswith(("http://", "https://", "mailto:")) or not label.strip():
                 continue
-            c = self.one(label, target, start, end)
+            try:
+                c = self.one(label, target, start, end)
+            except Exception:  # noqa: BLE001 — a place the pass cannot read leaves the citation as written
+                c = Change(label, target, LINKED, KEPT, to=target)
             changes.append(c)
             out.append(text[pos:start])
             out.append(label if c.to is None else text[start:end] if c.to == target else f"[{label}]({c.to})")

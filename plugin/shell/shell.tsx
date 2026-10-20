@@ -32,7 +32,7 @@ import { paintRegions, selectable } from './cells'
 import { cardFrame, frameWidth } from './cardframe.js'
 import { citeCard, drawnCard, drawsHyperlinks, explainerCard, fileLink } from './cards.js'
 import { cardStore, detailAction, detailIsOpen, detailKey, detailKeys, detailPane, detailTyped, markOpen, noteViewport, openDetailPane, registerDetail } from './detail'
-import { lineOf, newRecord, recordFor, remark, seriesRef, shownOf, withObserver } from './message.js'
+import { healInput, healedRecord, lineOf, needsHeal, newRecord, recordFor, remark, seriesRef, shownOf, textKey, withObserver } from './message.js'
 import { fromFacts, isRef, objectRefs, recordRefs, refsKey, regionMeta, regionRefs } from './object.js'
 import { askThread, noteThreadSaves, registerThreads, restoreThreads, threadCount, threadList } from './thread'
 import { openMark as openMarkSide, openSide, openThread, openThreads, paneSubject, setSide, sideNow } from './side'
@@ -89,6 +89,8 @@ const PICK = { plugin: 'thimble', key: 'pick' } as const
 const SELROW = { plugin: 'thimble', key: 'selrow' } as const
 const ANSWER = { plugin: 'thimble', key: 'answer' } as const
 const ANSWERS = { plugin: 'thimble', key: 'answers' } as const
+/** A tick the healing pass sets when a pass has run long enough to show its spinner, so the drawings read it again. */
+const HEALTICK = { plugin: 'thimble', key: 'healtick' } as const
 const CARDFOCUS = { plugin: 'thimble', key: 'cardfocus' } as const
 const SQZ = { plugin: 'thimble', key: 'sqz' } as const
 // the pane drawn as a Client that holds the keyboard now (a click gave it them), by its id (heldEl), or none
@@ -820,6 +822,84 @@ async function drawnRecord($: Engine, at: string, text: string): Promise<MsgReco
   return recordFor(kept, { row: at, session: await sessionKey($), text }) as MsgRecord
 }
 
+// ------------------------------------------------------------------------------------------------ healing citations
+//
+// After a text with citations settles, the kernel's healing pass (`thimble heal`, engine/kernel/heal.py) checks each
+// citation against its place, in the background, with no model call. Its result is kept in the record as
+// `heal: {key, of, changes}`, for the text it read (message.js textKey), so a drawing reads it (healedRecord) and the
+// pass never runs twice over one text; a squeeze's new text is a new key. While it runs, each citation shows a small
+// spinner. Claude hears only of the values it stated that the cited place contradicts, as one row it alone reads.
+
+/** The passes running now, by `row|key`, with when each began; and the texts a pass has read in this load (one that
+ *  could not keep its result is not read again). A pass shows its spinner only after SPIN_AFTER ms, so a quick one
+ *  changes nothing but what it fixes. */
+const healing = new Map<string, number>()
+const healRead = new Set<string>()
+const SPIN_AFTER = 400
+/** The contradicted values Claude was told of, and those that wait for the turn to end. */
+const healTold = new Set<string>()
+let healTell: { row: string; changes: Any[] }[] = []
+
+/** Whether a pass runs for this record now: one starts (after this drawing) when its shown text has settled, has
+ *  citations, and no pass has healed it; a folder with no thimble/ has nothing to check them against. */
+async function healNow($: Engine, rec: MsgRecord, settled: boolean): Promise<boolean> {
+  if (!needsHeal(rec)) return false
+  const key = textKey(shownOf(rec))
+  const id = `${rec.row}|${key}`
+  await $.state.get(HEALTICK)
+  const began = healing.get(id)
+  if (began !== undefined) return (await $.clock.now()) - began >= SPIN_AFTER
+  if (!settled || healRead.has(id) || !(await rootHere($))) return false
+  healRead.add(id)
+  healing.set(id, await $.clock.now())
+  $.clock.after(0, () => { void runHeal($, rec.row, key).catch(err => failed($, 'The citations were not checked', err, 'Open the citation to see its place')).finally(() => healing.delete(id)) })
+  $.clock.after(SPIN_AFTER, () => { if (healing.has(id)) void $.state.set(HEALTICK, id) })
+  return false
+}
+
+/** One pass over a record's shown text, its result kept in the record (a text that changed meanwhile waits for its own
+ *  pass). */
+async function runHeal($: Engine, row: string, key: string): Promise<void> {
+  const root = await rootHere($)
+  const rec = await recordNow($, row)
+  if (!root || !rec || textKey(shownOf(rec)) !== key) return
+  const dir = $.plugin.root.replace(/\/+$/, '')
+  const env = { ...(await leanEnv($, root)), THIMBLE_SESSION: await sessionKey($) }
+  const r = await $.process.run([`${dir}/bin/thimble`, 'heal'], { cwd: root, env, stdin: healInput(rec), timeoutMs: 60000 })
+  let out: Any = null
+  try { out = JSON.parse(r.stdout) } catch { out = null }
+  const now = await recordNow($, row)
+  if (!now || textKey(shownOf(now)) !== key) return
+  if (!out || !Array.isArray(out.changes)) {
+    // kept as checked, so it does not run again at each drawing; the person hears why once
+    await saveRecord($, { ...now, heal: { key, changes: [], error: true } } as MsgRecord)
+    failed($, 'The citations were not checked', (r.stderr || r.stdout || `exit ${r.exitCode}`).trim(), 'Open a citation to see its place')
+    return
+  }
+  await saveRecord($, { ...now, heal: { key, of: out.of, version: out.version, changes: out.changes } } as MsgRecord)
+  const bad = out.changes.filter((c: Any) => c && c.state === 'contradicted' && !healTold.has(`${row}|${c.label}|${c.ref}`))
+  if (bad.length) {
+    healTell.push({ row, changes: bad })
+    if (!turn) await tellHealed($)
+  }
+}
+
+/** Claude hears of the values it stated that the cited place contradicts: one short row it alone reads, after the turn. */
+async function tellHealed($: Engine): Promise<void> {
+  const wait = healTell
+  healTell = []
+  const lines: string[] = []
+  for (const { row, changes } of wait) {
+    for (const c of changes) {
+      const id = `${row}|${c.label}|${c.ref}`
+      if (healTold.has(id)) continue
+      healTold.add(id)
+      lines.push(`- "${String(c.label).trim()}" cites ${c.ref}, but ${c.why || 'the cited place shows another value'}.`)
+    }
+  }
+  if (lines.length) await tellMain($, `thimble checked the citations in your replies. The person sees these marked × because the place they cite contradicts the value:\n${lines.join('\n')}`)
+}
+
 /** The keys of the row: v and s, and c, which opens the Claims pane in the side panel. */
 const ROW_KEYS = [{ key: 'v', name: 'visualize' }, { key: 's', name: 'squeeze' }, { key: 'c', name: 'claims' }]
 /** The feature each key of the row belongs to (settings/features.mjs): v to Cards, s to Squeeze, c to Claims. */
@@ -1038,6 +1118,8 @@ async function openMark($: Engine, row: string, i: number, drawn?: MsgRecord): P
     const rows = ((await $.state.get(MSGROWS)).value ?? []) as string[]
     if (!rows.includes(row)) await $.state.set(MSGROWS, [...rows, row])
   }
+  // its citations as the healing pass left them: a re-pointed one opens its new place, a wrong one says why
+  if (rec) rec = healedRecord(rec) as MsgRecord
   const m = rec?.marks?.[i]
   if (!m) return
   // a resumed session's side threads, read back once (outside any drawing), so the panel knows a mark's thread
@@ -1111,7 +1193,7 @@ async function stepSide($: Engine, frame: TrayFrame | null, dir: number): Promis
   if (!next) return
   if (next.card) { await openDetail($, next.card, null, { side: 'keep' }); return }
   const rec = await recordNow($, next.row)
-  const f = rec ? (trayFrameOf(rec, next.i!) as TrayFrame | null) : null
+  const f = rec ? (trayFrameOf(healedRecord(rec), next.i!) as TrayFrame | null) : null
   if (!f) return
   await openMarkSide($, f, { keep: true })
   await tellOpened($, f, rec!.text).catch(() => undefined)
@@ -2328,7 +2410,8 @@ async function catchUpParts($: Engine, e: Any, at: string, cols: number): Promis
   const written = typeof cu.shown === 'string'
   const secs = Math.max(0, Math.round(((await $.clock.now()) - (sqUi?.asked ?? sqUi?.running?.since ?? (await $.clock.now()))) / 1000))
   const note = written ? null : why ? rewritingEl(els, { glyph: '×', text: why, error: true, key: `cu-note-${row}`, theme }) : rewritingEl(els, { glyph: busy ?? '◌', text: `writing one message of these ${replies} replies… ${secs}s`, key: `cu-note-${row}`, theme })
-  const shown = n == null || !written ? cu : (() => {
+  // its citations healed as an answer's are, once its text is written whole
+  const shown = n == null || !written ? (written ? healedRecord(cu, { checking: await healNow($, cu, !busy) }) as MsgRecord : cu) : (() => {
     const part = revealCut(cu.shown, n) as string
     return { ...cu, shown: part, marks: cu.marks.filter(m => m.end <= part.length) } as MsgRecord
   })()
@@ -2939,6 +3022,8 @@ export const registerShell: Register = (on, options) => {
         const rec = await recordNow($, row)
         if (rec && !rec.final) await saveRecord($, { ...rec, final: true })
         await $.state.set(ANSWER, row)
+        // contradicted values a pass found during the turn: Claude hears of them once it ends
+        if (healTell.length) $.clock.after(0, () => { void tellHealed($).catch(() => undefined) })
         const answers = await answerRows($)
         if (!answers.includes(row)) await $.state.set(ANSWERS, [...answers, row])
         // the bar: what this turn read, saved and cited
@@ -2969,13 +3054,17 @@ export const registerShell: Register = (on, options) => {
       }
       const drawnRec = await drawnRecord($, at, e.props.text)
       const rec: MsgRecord = drawnRec.uuid ? drawnRec : { ...drawnRec, uuid: e.requestId }
+      // its citations as the healing pass left them; a pass starts once the text settles (the turn's newest row
+      // still streams), and each citation shows a small spinner while it runs
+      const settled = !!rec.final || !turn || !turn.lastRow || rowKey(turn.lastRow) !== at
+      const healed = healedRecord(rec, { checking: await healNow($, rec, settled) }) as MsgRecord
       // the screen a long message is measured against (Squeeze), a rewrite of this message running, and its new text
       seeView(e.viewport?.columns ?? 100, e.viewport?.rows ?? 48)
       const sqUi = ((await $.state.get({ ...SQZ, id: at })).value ?? null) as SqzUi | null
       const busy = busyGlyph(sqUi)
       // a new version writing itself in from the top: the first `n` characters, cut where the markdown reads whole
       const n = revealedOf(sqUi)
-      const shownNow = n == null ? rec : (() => {
+      const shownNow = n == null ? healed : (() => {
         const part = revealCut(shownOf(rec), n) as string
         return { ...rec, shown: part, marks: rec.marks.filter(m => m.end <= part.length) } as MsgRecord
       })()
