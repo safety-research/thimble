@@ -19,14 +19,14 @@ type Any = any
 type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; within?: number }
 export type Theme = 'dark' | 'light'
 
-/** The marks' colors, per theme: a citation's indigo; an explained term as a highlighter pen marks it, dark text on a
+/** The marks' colors, per theme: a citation's purple, a mid tone that reads on a dark and a light background; an explained term as a highlighter pen marks it, dark text on a
  *  light teal, and an important detail the same on a light orange, so both read in a light and a dark terminal; the
  *  focused one a deeper shade of its own. `gloss` and `heads` are their frames' colors in the tray. */
 export function markColors(theme: Theme) {
   const pen = { glossInk: '#10201e', glossBg: '#9fe0d5', focusGloss: '#4fc3b2', headsInk: '#2a1600', headsBg: '#ffcf94', focusHeads: '#f5a142' }
   return theme === 'light'
-    ? { cite: '#4f46e5', gloss: '#1f8a85', heads: '#c2610f', paper: '#ffffff', ...pen, glossBg: '#c4eee6', headsBg: '#ffe0b8' }
-    : { cite: '#a29bff', gloss: '#62d2c6', heads: '#f2a24b', paper: '#1e1e1e', ...pen }
+    ? { cite: '#8b3fd9', gloss: '#1f8a85', heads: '#c2610f', paper: '#ffffff', ...pen, glossBg: '#c4eee6', headsBg: '#ffe0b8' }
+    : { cite: '#b36bff', gloss: '#62d2c6', heads: '#f2a24b', paper: '#1e1e1e', ...pen }
 }
 
 /** A key's color in the bar: v's, s's and c's own, else the bar's blue. */
@@ -67,12 +67,14 @@ function runText(els: Any, r: Run, dim = false, ink: string | null = null) {
   return els.Text(p)
 }
 
-/** A mark's run as a press: the citation underlined in indigo, the gloss on its teal fill (underlined too when it
- *  stands inside a citation's words), the sparkline in place; the focused one inverse. */
+/** A mark's run as a press: the citation underlined in purple, the gloss on its teal fill, the sparkline in place; the
+ *  focused one inverse. A gloss on words inside a citation's words keeps its fill, underlined, and a click on it opens
+ *  the citation (the words are the citation's); the citation's card in the tray offers the gloss. */
 function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const m = o.rec.marks[r.mark as number]
   const c = markColors(o.theme)
-  const on = o.focus === r.mark
+  const inCite = m.kind === 'gloss' && r.within !== undefined && o.rec.marks[r.within]?.kind === 'cite'
+  const on = o.focus === r.mark || (inCite && o.focus === r.within)
   const p: Any = { children: r.s }
   if (r.b) p.bold = true
   if (m.kind === 'cite') {
@@ -86,12 +88,13 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
     p.color = on ? 'text' : 'inactive'
     if (on) p.backgroundColor = 'selectionBg'
   }
-  const label = m.kind === 'gloss' ? `${o.rec.glosses?.[m.gloss as string]?.kind === 'heads' ? 'heads up' : 'explain'} ${r.s}` : m.kind === 'spark' ? `cite sparkline ${m.ref}` : `cite ${m.label}`
+  const label = inCite ? `cite ${o.rec.marks[r.within as number].label}` : m.kind === 'gloss' ? `${o.rec.glosses?.[m.gloss as string]?.kind === 'heads' ? 'heads up' : 'explain'} ${r.s}` : m.kind === 'spark' ? `cite sparkline ${m.ref}` : `cite ${m.label}`
   // the first run of a mark has a key of its own, `mk-<row>-<i>`, so the keys can scroll it into view
   const seen = (o as MessageOpts & { seen?: Set<number> }).seen
   const own = seen && !seen.has(r.mark as number) ? `mk-${o.rec.row}-${r.mark}` : key
   seen?.add(r.mark as number)
-  return els.Button({ key: own, plain: true, label, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
+  const opens = inCite ? (r.within as number) : (r.mark as number)
+  return els.Button({ key: own, plain: true, label, children: [els.Text(p)], onPress: () => o.onMark(opens) })
 }
 
 /** One laid-out line: its runs, each mark a press. */
@@ -272,7 +275,7 @@ export type TrayOpts = {
   onLink: (id: string) => unknown
 }
 
-/** The tray: one card in a frame of `body` rows, its title on the top border; a cite's frame indigo, an explain's
+/** The tray: one card in a frame of `body` rows, its title on the top border; a cite's frame purple, an explain's
  *  teal. One frame: the card inside it has none of its own, and its keys are in the hint line. */
 export function trayEl(els: Any, o: TrayOpts): Any {
   const { Box, Text } = els

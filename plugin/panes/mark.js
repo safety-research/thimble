@@ -12,7 +12,8 @@
 //         {kind: 'cite', ref, label} for a citation inside a card or a thread's answer
 //   state: {open: the section shown in place of the card}
 //   wants: {card: {kind, ref, label, gloss}, w, h}: the card's parts drawn by the host (cards.js drawnCard)
-//   presses: a citation inside the card opens it, over this one in the panel. A citation shows its whole source here,
+//   presses: a citation inside the card opens it, over this one in the panel; a part of the card (the picture an
+//            explainer draws, or its parts) is selected, and the thread's questions are about it. A citation shows its whole source here,
 //            as many rows as the panel has: the panel is the one place a citation opens to read (the tray's ↵ and its
 //            a both open it here)
 //   actions: each section of the card (`act:<id>`: Rows, Code), shown above the actions and hidden again (`:on` is the
@@ -21,7 +22,7 @@
 //            when it lands)
 //   asks of the host: open {mark: frame} (a citation inside the card, opened over this one), expand {frame}
 import { threadKey } from '../shell/threads.js'
-import { cardBody, cardRequest, scopeOf } from './tray.js'
+import { cardBody, cardRequest, partOf, scopeOf } from './tray.js'
 import { subjectBlock } from './subject.js'
 
 /** The rows the card may take in the panel. */
@@ -46,11 +47,14 @@ export default {
   },
   /** What its side thread is about: the mark (one thread per mark, the tray's own), its ref, in words, and what an
    *  explainer or an important detail said, as the person reads it. */
-  thread(args) {
+  thread(args, state) {
     const f = frameOf(args)
     if (!f) return null
-    const refs = f.ref ? [f.ref] : (f.gloss && Array.isArray(f.gloss.refs) ? f.gloss.refs.slice(0, 3) : [])
-    return { scope: scopeOf(f), label: String(f.label || f.ref || 'this mark'), refs, ...(f.kind === 'gloss' && f.gloss ? { about: saidOf(f.gloss) } : {}) }
+    const own = f.ref ? [f.ref] : (f.gloss && Array.isArray(f.gloss.refs) ? f.gloss.refs.slice(0, 3) : [])
+    // a part of the card selected (a click on it, here or in the tray): the question is about that part
+    const part = state && state.part && typeof state.part === 'object' ? state.part : null
+    const label = String(f.label || f.ref || 'this mark')
+    return { scope: scopeOf(f), label: part ? `${label} · ${part.label}`.slice(0, 80) : label, refs: part && part.refs && part.refs.length ? part.refs : own, ...(f.kind === 'gloss' && f.gloss ? { about: saidOf(f.gloss) } : {}) }
   },
   program,
 }
@@ -84,11 +88,14 @@ export function program(k, data) {
   if (open) k.on('esc', () => ({ open: null }), 'the citation')
   k.on('press', e => {
     const l = links.find(x => x.id === e.region)
-    if (l) openLink(l)
-    return null
+    if (l) { openLink(l); return null }
+    // a part of the card (the picture an explainer draws, or its parts): selected, the questions about it
+    const part = partOf(card, e.region)
+    return part ? { part } : null
   })
   // the card always; what a section opened, under the conversation (`side:opened`)
-  const parts = cardBody(k, card, top, null)
+  const part = st.part && typeof st.part === 'object' ? st.part : null
+  const parts = cardBody(k, card, part ? { ...top, part: part.id } : top, null)
   if (st.expanding && !(top.gloss && top.gloss.expanded)) parts.push(k.text('{dim:writing a longer explanation…}'))
   const opened = open ? [...(open.problem ? [k.text(`{dim:${k.escape(String(open.problem))}}`)] : []), ...(open.drawings || []).map(d => k.embed(d))] : []
   const kind = heads ? 'heads up' : top.kind === 'gloss' ? 'explainer' : top.kind === 'spark' ? 'series' : 'citation'

@@ -348,6 +348,45 @@ test('tray: a citation opens on its most readable form; each section the card na
   assert.equal(marked.selected, 'day-06-18')
 })
 
+test('tray: a gloss on a citation\'s words rides on the citation\'s frame, offered by h and a press; a click on a part of a card, the picture an explainer draws among them, opens the card in the side panel on that part, where a click selects the part', async () => {
+  const { frameOf } = await import('../tray.js')
+  const rec = { row: 'r1', marks: [{ kind: 'cite', start: 0, end: 30, ref: 'q3#n', label: 'A reverted B' }, { kind: 'gloss', start: 1, end: 13, gloss: 'h1' }], glosses: { h1: { kind: 'heads', term: 'A reverted B', title: 'Only the last editor counts', bullets: ['One revert undoes many saves.'] } } }
+  const f0 = frameOf(rec, 0)
+  assert.equal(f0.inner.length, 1)
+  assert.equal(f0.inner[0].gloss.title, 'Only the last editor counts')
+  const data = PANES.tray.data({ threads: [] })
+  const d = run(PANES.tray, data, { state: { stack: [f0] }, w: 70 })
+  const got = { [d.wants[0].key]: { drawings: [DK.run('return k.text("Jun 18 **6,543**")', {}, { w: 60 })], links: [] } }
+  const full = run(PANES.tray, data, { state: { stack: [f0] }, w: 70, got })
+  assert.match(gridText(renderTerm(full, { w: 70 })), /▲ heads up Only the last editor counts/)
+  assert.equal(barText([full]), 'a open · 0 close · ] next · h heads up')
+  // h, or a press on its line, opens the heads-up over the citation; back returns to the citation
+  const byKey = act(PANES.tray, data, { stack: [f0] }, keyEvent('h'), 'terminal', { got, w: 70 })
+  assert.equal(byKey.state.stack.at(-1).gloss.kind, 'heads')
+  assert.deepEqual(act(PANES.tray, data, { stack: [f0] }, { type: 'press', region: 'inner' }, 'terminal', { got, w: 70 }).state.stack, byKey.state.stack)
+  // an explainer with a picture: the picture is a press as a whole, its parts too, each opening the side panel on it
+  const g = { row: 'r1', i: 1, kind: 'gloss', label: 'lineage', gloss: { term: 'lineage', body: 'how a value is made' } }
+  const pic = { ...DK.run('return k.region("step-0", { label: "source rows", ref: "q1" }, k.text("source rows"))', {}, { w: 60 }), pic: true }
+  const words = DK.run('return k.text("how a value is made")', {}, { w: 60 })
+  const dg = run(PANES.tray, data, { state: { stack: [g] }, w: 70 })
+  const gotG = { [dg.wants[0].key]: { drawings: [words, pic], links: [] } }
+  const drawn = renderTerm(run(PANES.tray, data, { state: { stack: [g] }, w: 70, got: gotG }), { w: 70 })
+  assert.ok(drawn.regions.some(r => r.id === 'pic-1'))
+  assert.deepEqual(act(PANES.tray, data, { stack: [g] }, { type: 'press', region: 'step-0' }, 'terminal', { got: gotG, w: 70 }).d.effects, [{ do: 'thread', frame: { ...g, open: null }, part: { id: 'step-0', label: 'source rows', refs: ['q1'] } }])
+  assert.deepEqual(act(PANES.tray, data, { stack: [g] }, { type: 'press', region: 'pic-1' }, 'terminal', { got: gotG, w: 70 }).d.effects[0].part, { id: 'pic-1', label: 'the picture', refs: [] })
+  // in the side panel a click on a part selects it, and the thread's questions are about it
+  const args = { frame: g }
+  const md = PANES.mark.data({}, args)
+  const m0 = run(PANES.mark, md, { state: {}, w: 70 })
+  const gotM = { [m0.wants[0].key]: { drawings: [words, pic], links: [] } }
+  const sel = act(PANES.mark, md, {}, { type: 'press', region: 'step-0' }, 'terminal', { got: gotM, w: 70 })
+  assert.deepEqual(sel.state.part, { id: 'step-0', label: 'source rows', refs: ['q1'] })
+  assert.equal(run(PANES.mark, md, { state: sel.state, w: 70, got: gotM }).selected, 'step-0')
+  const th = PANES.mark.thread(args, sel.state)
+  assert.equal(th.label, 'lineage · source rows')
+  assert.deepEqual(th.refs, ['q1'])
+})
+
 test('proposals: v\'s line is a program on the message\'s record: 1–9 pick (the host runs the verb), 0 closes', async () => {
   const data = PANES.proposals.data({ 'record:r1': { verbs: { v: { lit: true, proposals: ['saves per day around June 18', 'who edited most'] } } } }, { row: 'r1', verb: 'v' })
   const d = run(PANES.proposals, data, { w: 90 })
