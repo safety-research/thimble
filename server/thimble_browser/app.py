@@ -224,7 +224,24 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
     # ---- chats (chats.py, agent.py)
 
     def attached(c: str) -> dict[str, Any]:
-        return {"session": "thimble-browser", "cwd": str(folder_of(c)), "since": started}
+        choice = home.read_json(home.workspace_dir(c) / "session.json", {}) or {}
+        return {"session": "thimble-browser", "cwd": str(folder_of(c)), "since": started,
+                **({"effort_choice": choice["effort"]} if choice.get("effort") else {})}
+
+    @app.put("/api/ws/{c}/session/effort")
+    async def session_effort(c: str, body: dict = Body(...)) -> dict[str, Any]:
+        effort = str(body.get("effort") or "")
+        if effort not in ("low", "medium", "high", "xhigh", "max", "ultracode"):
+            raise HTTPException(400, f"no effort {effort!r}")
+        p = home.workspace_dir(ws_of(c)) / "session.json"
+        home.write_json(p, {**(home.read_json(p, {}) or {}), "effort": effort})
+        await sessions.restart_idle(c)
+        hub.publish(c, {"type": "chat", "chat": "main"})
+        return {"effort": effort, "choice": effort}
+
+    @app.put("/api/ws/{c}/session/fast")
+    def session_fast(c: str) -> dict[str, Any]:
+        raise HTTPException(409, "thimble browser has no fast mode yet")
 
     def with_state(c: str, m: dict[str, Any]) -> dict[str, Any]:
         m = {**m, "running": m["id"] in sessions.running(c)}
@@ -474,6 +491,7 @@ def build(port: int, *, unsandboxed: bool = False) -> tuple[Any, Auth, Sessions]
     for route in empty_list:
         app.add_api_route(f"/api/ws/{{c}}/{route}", lambda c: [], methods=["GET"])
     for route, value in {"orientation": {}, "undo": {"undo": None, "redo": None}, "filters": {},
+                         "report-types/presets": [],
                          "canvas/comments": {"comments": []},
                          "settings": {"models": {}}}.items():
         app.add_api_route(f"/api/ws/{{c}}/{route}", (lambda v: (lambda c: v))(value), methods=["GET"])

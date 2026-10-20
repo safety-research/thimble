@@ -30,7 +30,6 @@ its window for a new link. To try it on a made-up folder of agent runs: `scripts
 - Citations: a click opens the file at the cited lines, or the card at the cited value.
 - Explain marks: after each answer, terms you may not know get a teal mark that opens what they mean.
 - The report: Write drafts it from the chat and the cards, with figures and citations, and you edit it in place.
-
 - Generative views: ask for a view in the chat, and a builder writes one (a reader and a page on thimble's view kit) that
   appears in the Files tab when it passes its checks. Its reader runs in the sandbox, its page in a frame with no network.
 

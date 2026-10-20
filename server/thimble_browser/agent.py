@@ -129,8 +129,14 @@ class Session:
             resume=meta.get("session_id") or meta.get("fork_of") or None,
             fork_session=bool(not meta.get("session_id") and meta.get("fork_of")),
             extra_args={"safe-mode": None},
+            effort=self.effort(),
             stderr=lambda line: log.debug("claude: %s", line),
         )
+
+    def effort(self) -> Any:
+        """The effort the analyst chose for this workspace's chats (the composer's chip), or Claude Code's default."""
+        e = (home.read_json(home.workspace_dir(self.ws) / "session.json", {}) or {}).get("effort")
+        return {"ultracode": "xhigh"}.get(e, e) or None
 
     # ---- the log
 
@@ -374,6 +380,13 @@ class Sessions:
 
     def running(self, ws: str) -> set[str]:
         return {c for (w, c), s in self._s.items() if w == ws and s.running}
+
+    async def restart_idle(self, ws: str) -> None:
+        """Close the idle sessions of `ws`, so their next message starts them again with the new settings, where they
+        left off (the chat's session id)."""
+        for (w, _), s in list(self._s.items()):
+            if w == ws and not s.running:
+                await s.close()
 
     async def close_all(self) -> None:
         for s in list(self._s.values()):
