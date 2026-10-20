@@ -102,6 +102,13 @@ thread. A card gets its keys while it has the focus, and the bar shows each with
 `c flip · , . year`, so the card draws no key hints. Claude Code keeps ← and → in the terminal, and `0` goes back, so a
 card never gets them; `thimble save` names a key a card cannot get.
 
+**A guide is one card with pages.** When the analyst asks to be taught something in steps (an introduction, a tour, a
+textbook), make one card whose page knob holds the chapters, as in `k.knob('chapter', { values: [1, 2, 3], label:
+'chapter', fmt: v => `${v} of 3`, pages: true })`, and draw each page from the knob's value alone. Under your reply
+the card shows one page, and the analyst reads all the pages one after another in the detail view. The dial and the
+bar turn the pages, so give them no keys of your own, and write no hints such as "Press n for the next chapter" or
+"Select a step to see its code" in the card or in your reply.
+
 **A map of work.** `k.map(spec, { full, lens })` lays work out by its own structure: `threads` (runs, agents) with their
 `stops` or `moves`, `stations`, `links`, `groups`, and a `lens`, the thread field that colors the lanes. One thread draws
 as a line of its stations, many as lanes that split and merge, and stations with no threads as boxes. Under a reply it
