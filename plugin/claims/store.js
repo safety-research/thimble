@@ -501,27 +501,6 @@ export function promptLines(store, max = 120) {
   }
 }
 
-/**
- * The claims so far that bear on this turn, as the lens reads them: every claim while the store is small; once it is
- * long, the claims that share at least two words with the turn's words (a number counts twice) and the latest few, so
- * the digest stays about the same size as a session grows. Returns {claims, clusters, left}.
- */
-export function nearLines(store, text, { all = 24, latest = 8, max = 40 } = {}) {
-  const list = store.claims
-  if (list.length <= all) return { ...promptLines(store, max + all), left: 0 }
-  const turn = new Set(wordsOf(text))
-  const score = c => {
-    let n = 0
-    for (const w of new Set(wordsOf(c.text))) if (turn.has(w)) n += /\d/.test(w) ? 2 : 1
-    return n
-  }
-  const recent = new Set(list.slice(-latest).map(c => c.id))
-  const near = list.map(c => ({ c, n: score(c) })).filter(x => recent.has(x.c.id) || x.n >= 2)
-  const keep = new Set(near.sort((a, b) => b.n - a.n).slice(0, max).map(x => x.c.id))
-  const sub = { ...store, claims: list.filter(c => keep.has(c.id)) }
-  return { claims: promptLines(sub, max).claims, clusters: promptLines(store).clusters, left: list.length - sub.claims.length }
-}
-
 const CLAIMY = /\d|\]\(|\b(all|every|most|none|never|always|only|no one|nobody|more|less|fewer|than|because|caused?|due to|led to|drove|drives|so that|therefore|biased?|typical|usually|rarely|often|increase[ds]?|decrease[ds]?|rose|fell|grew|dropped|same|different|wrong|right|true|false|correct)\b/i
 
 /** Whether a turn's words state nothing that could be true or false: no number, no citation, no cause, no comparison

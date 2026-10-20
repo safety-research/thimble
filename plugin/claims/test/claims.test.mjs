@@ -18,7 +18,7 @@ import { composeSystem, composeTurn, sectionsOf } from '../../observer/compose.m
 import pane, { layout, messageRows } from '../graph.js'
 import lens from '../lens.mjs'
 import { cost, estimate, looksLikeTranscript, runsOf } from '../estimate.mjs'
-import { applyTurn, claimless, clusterFor, edgesOf, emptyStore, findQuote, grownClusters, isFolderCard, likeness, locate, mergeFolder, nearLines, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, sentenceAt, shortRef, sourcesNear, viewOf } from '../store.js'
+import { applyTurn, claimless, clusterFor, edgesOf, emptyStore, findQuote, grownClusters, isFolderCard, likeness, locate, mergeFolder, noteFor, noteGap, parseClaims, plainOf, promptLines, readStore, sentenceAt, shortRef, sourcesNear, viewOf } from '../store.js'
 
 const DK = globalThis.DrawKit
 
@@ -64,7 +64,7 @@ test("the lens's text composes: its principles in the system prompt, its digest 
   const t = textOf('lens-claims', ROOT, {}).text
   const s = sectionsOf(t)
   assert.match(s.body, /^## The claims of this turn/)
-  assert.ok(s.digest.includes('{{NEAR}}') && s.when.quiet)
+  assert.ok(s.digest.includes('{{CLAIMS}}') && s.when.quiet)
   const { store } = turn1()
   const st = { store, grown: [], turnText: 'and the bots?' }
   const sys = composeSystem('F {{LENSES}} {{SKELETON}}', [{ lens, text: t }])
@@ -163,13 +163,18 @@ test('clusters: named by id or by name, a new name makes one; a grown one is off
   assert.deepEqual(readStore('not json', 's2').claims, [])
 })
 
-test('the claims so far that bear on a turn: all of a small store; of a long one, those that share words, and the latest', () => {
+test("the lens's digest holds every claim so far, one line each, with who said it, its correction and how often it was said", () => {
   const { store } = turn1()
-  assert.equal(nearLines(store, 'anything').left, 0)
-  for (let i = 0; i < 30; i++) store.claims.push({ id: `x${i}`, text: `Page ${i} was moved twice`, said: [], sources: [], cluster: null })
-  const near = nearLines(store, "Kestrel's 41% share of edits")
-  assert.ok(near.left > 0)
-  assert.match(near.claims, /c2 · k2 · Kestrel made 41%/)
+  for (let i = 0; i < 60; i++) store.claims.push({ id: `x${i}`, text: `Page ${i} was moved twice`, said: [], sources: [], cluster: null })
+  store.claims[0].revised_by = 'x1'
+  store.claims[1].said.push({ by: 'person' })
+  const d = lens.digest({ store, grown: [], turnText: 'anything' })
+  assert.equal(d.CLAIMS.split('\n').length, 64)
+  assert.match(d.CLAIMS, /^- c1 · k1 · The tilt in the edits is one editor \(corrected by x1\)$/m)
+  assert.match(d.CLAIMS, /^- c2 · k2 · Kestrel made 41% of June's edits \(×2\)$/m)
+  assert.match(d.CLAIMS, /^- x59 · - · Page 59 was moved twice$/m)
+  assert.match(d.CLUSTERS, /^- k1 · testing for bias · 1 claim$/m)
+  assert.deepEqual(lens.digest({}), { CLAIMS: '(none yet)', CLUSTERS: '(none yet)', GROWN: '' })
 })
 
 // ------------------------------------------------------------------------------------------------ the folder's map
